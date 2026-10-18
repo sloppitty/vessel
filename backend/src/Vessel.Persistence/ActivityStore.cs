@@ -26,6 +26,7 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         var snapshots = await db.Snapshots.Where(s => ids.Contains(s.AccountId)).Include(s => s.Positions).AsNoTracking().ToListAsync(ct);
         var funding = await db.FundingPayments.Where(p => ids.Contains(p.AccountId)).AsNoTracking().ToListAsync(ct);
         var fundingStates = await db.FundingStates.Where(s => ids.Contains(s.AccountId)).AsNoTracking().ToListAsync(ct);
+        var leverage = await db.LeverageObservations.Where(o => ids.Contains(o.AccountId)).AsNoTracking().ToListAsync(ct);
         var links = await db.LinkedOrders(db.OrderLinks.Where(l => ids.Contains(l.AccountId) && l.State == OrderLinkState.Linked))
             .Select(x => new { x.Order.AccountId, x.Order.ContractId, x.Order.ExternalOrderId, x.Link.PlayId }).AsNoTracking().ToListAsync(ct);
         // A fill belongs to the linked order with its account, contract and external ID.
@@ -33,6 +34,6 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         var playIds = fills.Where(f => byOrder.ContainsKey(OrderKey.Of(f)))
             .ToDictionary(f => f.Id, f => byOrder[OrderKey.Of(f)]);
         await transaction.CommitAsync(ct);
-        return new(accounts, fills, snapshots, playIds) { FundingPayments = funding, FundingStates = fundingStates };
+        return new(accounts, fills, snapshots, playIds) { FundingPayments = funding, FundingStates = fundingStates, LeverageObservations = leverage };
     }
 }

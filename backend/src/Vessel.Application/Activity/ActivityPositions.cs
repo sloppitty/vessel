@@ -53,6 +53,8 @@ internal sealed class ActivityPositions
 
     public ActivityContractKey Key(ImportedFill fill) => Key(fill.AccountId, fill.ContractId, fill.VenueContractId);
     public ActivityContractKey Key(FundingPayment payment) => Key(payment.AccountId, payment.ContractId, payment.VenueContractId);
+    public ActivityContractKey Key(LeverageObservation observation) => Key(observation.AccountId, observation.ContractId, observation.VenueContractId);
+    public ActivityContractKey Key(Guid accountId, AccountPosition position) => Key(accountId, position.ContractId, position.VenueContractId);
 
     private ActivityContractKey Key(Guid accountId, string contractId, string? nativeId) => nativeId is not null
         ? new(accountId, nativeId, true)

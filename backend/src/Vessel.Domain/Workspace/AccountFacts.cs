@@ -98,6 +98,30 @@ public sealed class ImportedFill : IOwned
     /// <summary>The venue's order ID. A fill belongs to the order with the same account, contract and external ID.</summary>
     public string ExternalOrderId { get; set; } = null!;
     public string TransactionHash { get; set; } = null!;
+    /// <summary>
+    /// The position leverage the venue reported on this execution, when it reports one as a whole number (RISEx).
+    /// Null when the venue does not report it; never derived from margin or notional.
+    /// </summary>
+    public int? Leverage { get; set; }
+}
+
+/// <summary>
+/// A venue-reported position leverage seen by a refresh, kept after the latest snapshot replaces it so a closed
+/// position's leverage is not lost. Recorded only when a position appears or its quantity, entry price or leverage
+/// changes. An observation, never a correction of fills or snapshots.
+/// </summary>
+public sealed class LeverageObservation : IOwned
+{
+    public Guid Id { get; set; }
+    public Guid OwnerId { get; set; }
+    public Guid AccountId { get; set; }
+    public string ContractId { get; set; } = null!;
+    public string? VenueContractId { get; set; }
+    /// <summary>The snapshot's observation time (when Vessel read the venue), not an execution time.</summary>
+    public DateTimeOffset ObservedAtUtc { get; set; }
+    public decimal SignedQuantity { get; set; }
+    public decimal EntryPrice { get; set; }
+    public int Leverage { get; set; }
 }
 
 // The latest known state of a venue order that could belong to a Play. A fact, not trading intent.

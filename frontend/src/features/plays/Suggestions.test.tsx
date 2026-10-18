@@ -214,6 +214,30 @@ describe('record and risk', () => {
     expect(record).toHaveTextContent('50% exposure · Half size after 3 losses in a row.')
   })
 
+  it('labels a record that starts from closed Activity positions and explains it in a tip', async () => {
+    const user = userEvent.setup()
+    const sizing: SizingDocument = { ...sizingFixture, record: { ...sizingFixture.record, source: 'activity', closedPlays: 3, decidedPlays: 3,
+      wins: 2, losses: 1, battingAverage: '0.6667', winLossRatio: '2', averageGainPercent: '4', averageLossPercent: '2', breakEvenRewardRisk: '0.5',
+      recent: [{ playId: null, operationId: '12345678-1234-1234-1234-123456789abc:long', accountId: accountFixture.id, title: 'BTC Long',
+        instrument: 'BTC', closedAtUtc: '2026-10-12T10:00:00Z', netResultUsd: '4', returnPercent: '4', riskUsd: null, rMultiple: null,
+        outcome: 'win', feesComplete: true }] } }
+    render(<Workspace initial={plan()} sizing={sizing} />)
+    await openPanel(user)
+    const source = screen.getByTestId('record-source')
+    expect(source).toHaveTextContent('From Activity')
+    expect(source).toHaveTextContent('Based on 3 closed positions from Activity — no closed plays yet.')
+    const tip = within(source).getByRole('button', { name: 'About the Activity record' })
+    expect(tip).toHaveAccessibleDescription(/no R multiple.*not advice/)
+    expect(screen.getByTestId('track-record')).toHaveTextContent('2 of last 3 positions')
+  })
+
+  it('does not label a record from closed plays as Activity', async () => {
+    const user = userEvent.setup()
+    render(<Workspace initial={plan()} sizing={{ ...sizingFixture, record: { ...sizingFixture.record, source: 'plays' } }} />)
+    await openPanel(user)
+    expect(screen.queryByTestId('record-source')).not.toBeInTheDocument()
+  })
+
   it('edits the risk in place, warns above 2.5% and refuses values outside 0.1 to 5%', async () => {
     const user = userEvent.setup()
     const onRiskChange = vi.fn<(risk: string) => Promise<void>>().mockResolvedValue()

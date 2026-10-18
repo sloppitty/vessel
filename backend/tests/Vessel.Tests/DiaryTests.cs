@@ -401,7 +401,10 @@ public sealed class DiaryPostgresTests
         Assert.Equal(("10", "10", "retrospective", "imported"), (report.Plays[0].Net, report.Plays[0].ReturnPercent,
             report.Plays[0].Origin, report.Plays[0].ExecutionSource));
         Assert.Null(report.Plays[0].RMultiple); Assert.Equal(0, report.Metrics.RiskCount);
-        Assert.Equal(0, (await client.GetFromJsonAsync<SizingDto>("/api/sizing"))!.Record.ClosedPlays);
+        // The retrospective Play stays outside the Play record; its round trip is only the Activity fallback's position.
+        var sizing = (await client.GetFromJsonAsync<SizingDto>("/api/sizing"))!.Record;
+        Assert.Equal(("activity", 1), (sizing.Source, sizing.ClosedPlays));
+        Assert.Null(Assert.Single(sizing.Recent).PlayId);
         await using var verify = database.Context(owner);
         Assert.Equal(2, await verify.OrderLinks.CountAsync()); Assert.Equal(2, await verify.Fills.CountAsync());
         Assert.Equal(100, (await verify.Fills.SingleAsync(f => f.Id == entry.Id)).Price);

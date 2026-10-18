@@ -19,7 +19,9 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
         "Execution net preserves the existing fee-adjusted reported P&L, not a claim of funding-free P&L. " +
         "Combined total adds funding only with verified coverage and a funding-exclusive execution P&L basis; funding-inclusive P&L is never charged twice. " +
         "Unverified inclusion or missing funding is not zero. Open-operation funding is only through the latest retained refresh. " +
-        "Play Review and sizing remain execution-only.";
+        "Play Review and sizing remain execution-only. " +
+        "Leverage is the venue-reported position leverage observed during an operation, on its executions or in refresh snapshots; " +
+        "a range means it changed. It is never inferred, and older or unobserved operations show it as unknown.";
 
     /// <summary>
     /// Aggregates every retained fill of the scoped enabled accounts, then filters, orders and pages the operations.
@@ -73,7 +75,8 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
         };
     }
 
-    // Changes when any scoped operation's identity, fill count, last execution, open quantity or Play association changes.
+    // Changes when any scoped operation's identity, fill count, last execution, open quantity, Play association, funding or
+    // observed leverage changes.
     private static string Version(IEnumerable<ActivityOperationDto> operations, ActivityFacts facts)
     {
         var text = new StringBuilder();
@@ -82,7 +85,8 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
                 .Append(o.LastOccurredAtUtc.UtcTicks).Append('|').Append(o.OpenQuantity ?? "?").Append('|')
                 .Append(o.PlayAssociation).Append('|').Append(o.PlayId?.ToString("N")).Append('|')
                 .Append(o.FundingNetUsd).Append('|').Append(o.FundingPaymentCount).Append('|').Append(o.FundingStatus).Append('|')
-                .Append(o.FundingAsOfUtc?.UtcTicks).Append('|').Append(o.FundingPnlBasis).Append('|').Append(o.TotalResultUsd).Append('\n');
+                .Append(o.FundingAsOfUtc?.UtcTicks).Append('|').Append(o.FundingPnlBasis).Append('|').Append(o.TotalResultUsd).Append('|')
+                .Append(o.Leverage).Append('|').Append(o.LeverageMin).Append('|').Append(o.LeverageMax).Append('\n');
         foreach (var p in facts.FundingPayments.OrderBy(p => p.Id))
             text.Append(p.Id.ToString("N")).Append('|').Append(p.OccurredAtUtc.UtcTicks).Append('|')
                 .Append(Vessel.Domain.Numerics.ExactDecimal.Format(p.Amount)).Append('|').Append(p.Asset).Append('|')
@@ -104,7 +108,9 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
             (accountIds == null || accountIds.Contains(a.Id))).ToDictionary(a => a.Id);
         var fills = facts.Fills.Where(f => accounts.ContainsKey(f.AccountId)).ToList();
         var positions = new ActivityPositions(fills, facts.Snapshots, facts.FundingPayments.Where(p => accounts.ContainsKey(p.AccountId)).ToList());
-        var operations = OperationAggregator.AggregateSummaries(fills, facts.FillPlayIds, positions).ToList();
+        var operations = OperationLeverage.Apply(OperationAggregator.AggregateSummaries(fills, facts.FillPlayIds, positions),
+            facts with { LeverageObservations = facts.LeverageObservations.Where(o => accounts.ContainsKey(o.AccountId)).ToList() },
+            positions, time.GetUtcNow());
         var lastByContract = new Dictionary<ActivityContractKey, int>();
         for (var i = 0; i < operations.Count; i++)
         {

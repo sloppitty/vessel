@@ -12,12 +12,28 @@ public sealed record SizingSettingsDto(string RiskPercent);
 
 public sealed record ExposureDto(string Level, string Multiplier, string Reason, int LossStreak, int WinsSinceStepDown);
 
-public sealed record PlayOutcomeDto(Guid PlayId, string Title, string? Instrument, DateTimeOffset ClosedAtUtc, string NetResultUsd,
-    string ReturnPercent, string? RiskUsd, string? RMultiple, string Outcome, bool FeesComplete);
+/// <summary>
+/// One scored outcome. A Play outcome carries its <paramref name="PlayId"/>; an Activity fallback outcome carries the
+/// operation and account instead and has no Play, plan, risk or R multiple.
+/// </summary>
+public sealed record PlayOutcomeDto(Guid? PlayId, string Title, string? Instrument, DateTimeOffset ClosedAtUtc, string NetResultUsd,
+    string ReturnPercent, string? RiskUsd, string? RMultiple, string Outcome, bool FeesComplete)
+{
+    public string? OperationId { get; init; }
+    public Guid? AccountId { get; init; }
+}
 
 public sealed record TrackRecordDto(int ClosedPlays, int DecidedPlays, int Window, int Wins, int Losses, int Scratches,
     string? BattingAverage, string? AverageGainPercent, string? AverageLossPercent, string? WinLossRatio, string? BreakEvenRewardRisk,
-    string? AverageWinR, string? AverageLossR, IReadOnlyList<PlayOutcomeDto> Recent);
+    string? AverageWinR, string? AverageLossR, IReadOnlyList<PlayOutcomeDto> Recent)
+{
+    /// <summary>
+    /// <see cref="SizingService.SourcePlays"/> when closed Plays have a win or loss, <see cref="SizingService.SourceActivity"/>
+    /// when the record falls back to closed Activity operations, <see cref="SizingService.SourceNone"/> when neither has one.
+    /// The counts above describe the source's outcomes.
+    /// </summary>
+    public string Source { get; init; } = SizingService.SourcePlays;
+}
 
 public sealed record SizingLimitsDto(string EffectiveRiskPercent, string MaxStopPercent, string MinRewardRisk, string MaxStopSource,
     string MinRewardRiskSource);

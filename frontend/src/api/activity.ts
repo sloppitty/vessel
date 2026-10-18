@@ -42,6 +42,13 @@ export interface ActivityOperation {
   fundingPnlBasis: 'included' | 'excluded' | 'unknown'
   fundingAsOfUtc: string | null
   fundingPaymentCount: number
+  /**
+   * The latest venue-reported position leverage observed during the operation (its executions or refresh snapshots),
+   * whole numbers only. Min and max differ when it changed. All null when none was observed; never inferred.
+   */
+  leverage: number | null
+  leverageMin: number | null
+  leverageMax: number | null
   pnlBasis: 'gross' | 'net-of-fee' | 'mixed'
   playId: string | null
   playAssociation: 'linked' | 'unassigned' | 'mixed'
@@ -173,6 +180,12 @@ export function activityFillsPath(accountId: string, operationId: string): strin
   return `/api/activity/fills?${new URLSearchParams({ accountId, operationId })}`
 }
 
+const isLeverage = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 1000
+/** All three null, or a latest leverage within its observed range. */
+const validLeverage = (op: Record<string, unknown>) => op.leverage === null
+  ? op.leverageMin === null && op.leverageMax === null
+  : isLeverage(op.leverage) && isLeverage(op.leverageMin) && isLeverage(op.leverageMax) && op.leverageMin <= op.leverage && op.leverage <= op.leverageMax
+
 const isCoverage = (c: unknown): c is ActivityCoverage => isRecord(c) && isGuid(c.accountId) &&
   isNullOr(c.contractId, x => isFilledText(x, 128)) && isFilledText(c.notice, 2000)
 
@@ -189,7 +202,7 @@ export function isActivityOperation(op: unknown): op is ActivityOperation {
     !isNullOr(op.totalResultUsd, x => isPlainDecimal(x, decimalLength)) || !isNullOr(op.fundingNetUsd, x => isPlainDecimal(x, decimalLength)) ||
     !['complete', 'partial', 'unavailable'].includes(String(op.fundingStatus)) ||
     !['included', 'excluded', 'unknown'].includes(String(op.fundingPnlBasis)) ||
-    !isNullOr(op.fundingAsOfUtc, isIsoTimestamp) || !isCount(op.fundingPaymentCount) ||
+    !isNullOr(op.fundingAsOfUtc, isIsoTimestamp) || !isCount(op.fundingPaymentCount) || !validLeverage(op) ||
     op.totalResultUsd !== null && (op.fundingPnlBasis === 'unknown' || op.fundingStatus !== 'complete') ||
     !['gross', 'net-of-fee', 'mixed'].includes(String(op.pnlBasis)) || !isNullOr(op.playId, isGuid) ||
     !['linked', 'unassigned', 'mixed'].includes(String(op.playAssociation)) || !isListOf(op.coverage, n => isFilledText(n, 2000), 100) ||

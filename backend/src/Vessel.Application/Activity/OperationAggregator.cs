@@ -93,7 +93,7 @@ public static class OperationAggregator
                     var crosses = reducing && !after.Units.IsZero && after.Units.Sign != position.Units.Sign;
                     if (crosses)
                     {
-                        current.Add(fill, "exit", position.Abs(), true, fillPlayIds);
+                        current.Add(fill, "exit", position.Abs(), true, fillPlayIds, split: true);
                         current.ClosedAt = fill.OccurredAtUtc;
                         result.Add(current.Build(default));
                         current = new Builder(fill, signed.Units.Sign) { Peak = after.Abs(), UnknownBoundaries = ambiguous || fill.Price <= 0 };
@@ -101,7 +101,7 @@ public static class OperationAggregator
                         if (peakAmbiguous) { current.UnknownPeak = true; current.Note(PeakNotice); }
                         if (fill.Price <= 0) current.Note("Nonpositive price makes weighted prices unavailable.");
                         if (!valid) current.Note($"Position effect '{fill.PositionEffect}' contradicts snapshot-anchored quantities in this operation; boundaries use side and quantity.");
-                        current.Add(fill, "entry", after.Abs(), false, fillPlayIds);
+                        current.Add(fill, "entry", after.Abs(), false, fillPlayIds, split: true);
                     }
                     else
                     {
@@ -242,11 +242,15 @@ public static class OperationAggregator
         private readonly HashSet<string> bases = [];
         private readonly Dictionary<string, ExactAmount> fees = new(StringComparer.Ordinal);
         private readonly HashSet<Guid> plays = [];
+        private readonly List<(DateTimeOffset, int)> leverages = [];
         private bool unassigned, unsupportedGrossFee, unsupportedNetFee;
         private ExactAmount entered, exited, pnl, grossFees, netFees;
         private BigInteger entryNotional, exitNotional;
-        public void Add(ImportedFill fill, string role, ExactAmount quantity, bool monetary, IReadOnlyDictionary<Guid, Guid>? links)
+        public void Add(ImportedFill fill, string role, ExactAmount quantity, bool monetary, IReadOnlyDictionary<Guid, Guid>? links,
+            bool split = false)
         {
+            // A flip's reported leverage cannot be assigned to either side of the split.
+            if (fill.Leverage is { } leverage && !split) leverages.Add((fill.OccurredAtUtc, leverage));
             Guid? play = links?.TryGetValue(fill.Id, out var linked) == true ? linked : null;
             if (play is { } id) plays.Add(id); else unassigned = true;
             var fee = monetary ? ExactAmount.From(fill.Fee) : default;
@@ -285,7 +289,11 @@ public static class OperationAggregator
                     .Select(f => new OperationFeeDto(f.Key, f.Value.ToString())).ToList(), unsupportedGrossFee ? null : (pnl - grossFees).ToString(),
                 bases.Count == 1 ? bases.Single() : "mixed", association == "linked" ? plays.Single() : null, association, Coverage, new AllocationRows(parts))
             {
-                GrossClosedPnlUsd = unsupportedNetFee ? null : (pnl + netFees).ToString()
+                GrossClosedPnlUsd = unsupportedNetFee ? null : (pnl + netFees).ToString(),
+                FirstOccurredAtUtc = parts[0].Fill.OccurredAtUtc,
+                FillLeverages = leverages,
+                EntryNotional = UnknownBoundaries || MissingEntries || entered.Units.IsZero ? null
+                    : ExactAmount.Parse(ExactAmount.Average(entryNotional, ExactAmount.From(1m))!)
             };
         }
     }

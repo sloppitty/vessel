@@ -75,6 +75,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         await db.Orders.Where(o => o.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.FundingPayments.Where(p => p.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.FundingStates.Where(s => s.AccountId == account.Id).ExecuteDeleteAsync(ct);
+        await db.LeverageObservations.Where(o => o.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.Snapshots.Where(s => s.AccountId == account.Id).ExecuteDeleteAsync(ct);
         // Event identities whose subject is this account go with it; their receipts cascade. A removed
         // sequence is a permanent hole that subscribers count as settled.
@@ -98,6 +99,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 AccountSnapshot s => s.OwnerId == account.OwnerId && s.AccountId == account.Id,
                 AccountPosition p => p.OwnerId == account.OwnerId && p.AccountId == account.Id,
                 FundingPayment p => p.OwnerId == account.OwnerId && p.AccountId == account.Id,
+                LeverageObservation o => o.OwnerId == account.OwnerId && o.AccountId == account.Id,
                 AccountFundingState s => s.OwnerId == account.OwnerId && s.AccountId == account.Id,
                 Vessel.Domain.Credentials.AccountCredential c => c.OwnerId == account.OwnerId && c.AccountId == account.Id,
                 _ => false
@@ -138,6 +140,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         var wallet = observation.StablecoinWallet;
         var replaceWallet = wallet is not null &&
             (snapshot?.StablecoinsObservedAtUtc is null || wallet.ObservedAtUtc > snapshot.StablecoinsObservedAtUtc);
+        // Leverage would be lost with the replaced positions; keep an observation when a position appears or changes.
+        if (replacePerps) await RecordLeverageAsync(account, observation, snapshot?.Positions ?? [], ct);
         if (snapshot is null)
         {
             snapshot = new AccountSnapshot { OwnerId = account.OwnerId, AccountId = account.Id };
@@ -225,7 +229,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 PnlBasis = f.PnlBasis,
                 OccurredAtUtc = f.OccurredAtUtc.ToUniversalTime(),
                 ExternalOrderId = f.OrderId,
-                TransactionHash = f.TransactionHash
+                TransactionHash = f.TransactionHash,
+                Leverage = f.Leverage
             });
         }
         // RawJson intentionally never crosses into journal persistence or logs.
@@ -233,4 +238,42 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         await unitOfWork.SaveChangesAsync(ct);
         return true;
     }, ct);
+
+    /// <summary>
+    /// Appends one observation per reported leverage whose position is new to the replaced snapshot, or whose signed
+    /// quantity, entry price or leverage differs from the latest retained observation of that account and native
+    /// contract. Unchanged positions add nothing, so the table grows with position changes, not refreshes.
+    /// </summary>
+    private async Task RecordLeverageAsync(Account account, VenueSnapshot observation, IReadOnlyCollection<AccountPosition> replaced,
+        CancellationToken ct)
+    {
+        var reported = observation.Positions.Where(p => p.Leverage is not null).ToList();
+        if (reported.Count == 0) return;
+        var contracts = reported.Select(p => p.ContractId).Distinct().ToArray();
+        var latest = await db.LeverageObservations.Where(o => o.AccountId == account.Id && contracts.Contains(o.ContractId))
+            .GroupBy(o => new { o.ContractId, o.VenueContractId })
+            .Select(g => g.OrderByDescending(o => o.ObservedAtUtc).ThenByDescending(o => o.Id).First())
+            .AsNoTracking().ToListAsync(ct);
+        var observedAt = observation.ObservedAtUtc.ToUniversalTime();
+        foreach (var position in reported)
+        {
+            var previous = latest.SingleOrDefault(o => o.ContractId == position.ContractId && o.VenueContractId == position.VenueContractId);
+            var continued = replaced.Any(p => p.ContractId == position.ContractId && p.VenueContractId == position.VenueContractId &&
+                p.SignedQuantity == position.SignedQuantity && p.EntryPrice == position.EntryPrice);
+            if (continued && previous is not null && previous.Leverage == position.Leverage && previous.SignedQuantity == position.SignedQuantity &&
+                previous.EntryPrice == position.EntryPrice || previous is not null && previous.ObservedAtUtc >= observedAt) continue;
+            db.LeverageObservations.Add(new LeverageObservation
+            {
+                Id = Guid.NewGuid(),
+                OwnerId = account.OwnerId,
+                AccountId = account.Id,
+                ContractId = position.ContractId,
+                VenueContractId = position.VenueContractId,
+                ObservedAtUtc = observedAt,
+                SignedQuantity = position.SignedQuantity,
+                EntryPrice = position.EntryPrice,
+                Leverage = position.Leverage!.Value
+            });
+        }
+    }
 }

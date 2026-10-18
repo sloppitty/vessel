@@ -51,3 +51,7 @@ Migration `NormalizedExecutionFacts` adds `PositionEffect`, `FeeBasis` and `PnlB
 ## Nominal stablecoin fee tokens (October 14, 2026)
 
 `FeeToken` is still stored exactly as the venue reports it. Fee deduction checks it against the single Application list `NominalStablecoins` (USDC, USDG, USDT, USDT0, USDE, USDe and USDH; ordinal match, so `usdg` is not listed). Listed tokens count one-for-one in USD, without FX or depeg valuation; all other tokens leave gross-basis results unknown. Manual executions use the same list for their fee currency, and the frontend `features/plays/stablecoins.ts` mirrors it (a backend test checks they match).
+
+## Reported fill leverage (October 18, 2026)
+
+`VenueFill.Leverage` and `ImportedFill.Leverage` are an optional fact: the position leverage the venue reports on an execution, whole numbers 1–1000, null otherwise. Only RISEx reports it today; `VenueFactChecks` rejects other values. It is display evidence for Activity operations ([observed leverage](activity-operations.md#observed-leverage-october-18-2026)), never used by matching, lifecycle, Review or sizing.
