@@ -523,7 +523,7 @@ internal static class Persisted
     /// <summary>Owner-scoped tables a snapshot must cover: imported facts, funding, monitor rows, events and notifications.</summary>
     internal static readonly string[] Required =
     [
-        "portfolios", "accounts", "account_snapshots", "account_positions", "account_stablecoins", "imported_orders", "imported_fills",
+        "activity_facts_revisions", "portfolios", "accounts", "account_snapshots", "account_positions", "account_stablecoins", "imported_orders", "imported_fills",
         "funding_payments", "account_funding_states", "plays", "play_order_links", "play_status_changes", "monitor_accounts",
         "monitor_exit_watches", "play_discrepancies", "events", "event_cursors", "event_dedup", "event_fills", "event_baselines",
         "event_receipts", "notifications", "notification_deliveries", "notification_sources", "notification_cursors"

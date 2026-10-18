@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
@@ -69,7 +70,8 @@ public sealed class UnitOfWork(VesselDbContext db, IEnumerable<IUnitOfWorkPartic
             if (db.Database.CurrentTransaction is not null)
                 throw new InvalidOperationException("The unit of work must own the database transaction.");
             cancellationToken.ThrowIfCancellationRequested();
-            transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            // Facts revisions share a row per owner; stricter writer snapshots can fail on unrelated fact writes.
+            transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
             var result = await operation();
             RequireAwaited(root);
             await SaveChangesAsync(cancellationToken);
