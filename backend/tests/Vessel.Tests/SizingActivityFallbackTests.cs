@@ -136,6 +136,24 @@ public sealed class SizingActivityFallbackTests
         Assert.Equal((SizingService.SourceNone, 0), (result.Record.Source, result.Record.ClosedPlays));
     }
 
+    [Fact]
+    public async Task An_entry_notional_beyond_28_places_is_left_out_rather_than_rounded()
+    {
+        // 1e-14 × 1.5e-14 = 1.5e-28 exactly; rounded to 28 places it would be 2e-28 and score 50% instead of 66.67%.
+        fills.Add(Fill(0, "buy", "open", 0.000000000000015m, quantity: 0.00000000000001m));
+        fills.Add(Fill(10, "sell", "close", 0.00000000000002m, 0.0000000000000000000000000001m, quantity: 0.00000000000001m));
+        var result = await Service().GetAsync(default);
+        Assert.Equal((SizingService.SourceNone, 0), (result.Record.Source, result.Record.ClosedPlays));
+
+        // The same tiny scale is scored when the exact product is representable: 1e-28 over 2e-28 is 50%.
+        fills.Clear();
+        fills.Add(Fill(0, "buy", "open", 0.00000000000002m, quantity: 0.00000000000001m));
+        fills.Add(Fill(10, "sell", "close", 0.00000000000003m, 0.0000000000000000000000000001m, quantity: 0.00000000000001m));
+        result = await Service().GetAsync(default);
+        Assert.Equal((SizingService.SourceActivity, 1), (result.Record.Source, result.Record.Wins));
+        Assert.Equal("50", Assert.Single(result.Record.Recent).ReturnPercent);
+    }
+
     private ImportedOrder Order(string id, string side, decimal size, string contract = "BTC", string status = "filled") => new()
     {
         Id = Guid.NewGuid(), OwnerId = owner, AccountId = accountId, ContractId = contract, ExternalOrderId = id, Side = side, OrderType = "limit",

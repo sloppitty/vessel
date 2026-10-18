@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
 using Vessel.Application.Workspace;
@@ -69,6 +70,19 @@ public static class PlayOutcomeCalculator
         var result = decimal.Parse(value.ToString(), CultureInfo.InvariantCulture);
         if (ExactAmount.From(result) != value) throw new OverflowException();
         return result;
+    }
+
+    private static readonly BigInteger ProductScale = BigInteger.Pow(10, 28);
+
+    /// <summary>
+    /// The exact decimal of a 56-place product of two amounts' units (quantity × price). A nonzero remainder beyond 28
+    /// places or a value outside decimal range throws <see cref="OverflowException"/>; nothing is rounded.
+    /// </summary>
+    internal static decimal ToDecimal(BigInteger product)
+    {
+        var units = BigInteger.DivRem(product, ProductScale, out var remainder);
+        if (!remainder.IsZero) throw new OverflowException();
+        return ToDecimal(new ExactAmount(units));
     }
 
     /// <summary>

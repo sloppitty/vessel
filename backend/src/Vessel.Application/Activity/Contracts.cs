@@ -1,3 +1,4 @@
+using System.Numerics;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Numerics;
@@ -51,8 +52,11 @@ public sealed record ActivityOperationDto(string Id, Guid AccountId, string Cont
     internal DateTimeOffset FirstOccurredAtUtc { get; init; }
     // Leverage reported on this operation's executions, excluding split flip allocations.
     internal IReadOnlyList<(DateTimeOffset At, int Leverage)> FillLeverages { get; init; } = [];
-    // The exact entry notional (entered quantity × fill price), for the sizing fallback's return.
-    internal ExactAmount? EntryNotional { get; init; }
+    // The exact entry notional, Σ allocated entry quantity × fill price as 10^-56 units (never rounded), for the sizing
+    // fallback's return.
+    internal BigInteger? ExactEntryNotional { get; init; }
+    // The imported executions behind the allocations, read lazily (order keys for sizing) without building row DTOs.
+    internal IEnumerable<ImportedFill> SourceFills { get; init; } = [];
     // Internal partition identity, never the canonical display key or a serialized API field.
     internal ActivityContractKey ContractKey { get; init; }
 }

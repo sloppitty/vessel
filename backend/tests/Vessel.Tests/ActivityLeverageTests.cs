@@ -172,6 +172,28 @@ public sealed class ActivityLeverageTests
     }
 
     [Fact]
+    public async Task Id_less_observations_follow_one_native_market_and_stay_unknown_beside_several()
+    {
+        // ID-less legacy fills, empty snapshot: one observed native market maps consistently with ID-less observations.
+        var op = Assert.Single(await Operations([Fill(0), Fill(60, "sell", "close")], [Observed(10, 1, 6, "7"), Observed(20, 1, 9)], Snapshot(90)));
+        Assert.Equal((9, 6, 9), (op.Leverage, op.LeverageMin, op.LeverageMax));
+        // Several observed native markets: an ID-less observation could belong to either, so nothing is placed.
+        op = Assert.Single(await Operations([Fill(0), Fill(60, "sell", "close")],
+            [Observed(10, 1, 6, "7"), Observed(20, 1, 8, "8"), Observed(30, 1, 9)], Snapshot(90)));
+        Assert.Equal(((int?)null, (int?)null, (int?)null), (op.Leverage, op.LeverageMin, op.LeverageMax));
+        Assert.Equal("closed", op.Status); // Fill grouping is unchanged.
+        // Native fills of market 7 with another observed market: ID-less observations stay out, native ones still count.
+        op = Assert.Single(await Operations([Fill(0, native: "7"), Fill(60, "sell", "close", native: "7")],
+            [Observed(10, 1, 5, "7"), Observed(20, 1, 8, "8"), Observed(30, 1, 9)], Snapshot(90)));
+        Assert.Equal((5, 5, 5), (op.Leverage, op.LeverageMin, op.LeverageMax));
+        // An ID-less latest-snapshot position is an ID-less source too.
+        op = Assert.Single(await Operations([Fill(0)], [Observed(10, 1, 6, "7"), Observed(20, 1, 8, "8")], Snapshot(30, Position(1, 9))));
+        Assert.Equal(("open", (int?)null, (int?)null), (op.Status, op.Leverage, op.LeverageMin));
+        op = Assert.Single(await Operations([Fill(0)], [Observed(10, 1, 6, "7")], Snapshot(30, Position(1, 9))));
+        Assert.Equal((9, 6, 9), (op.Leverage, op.LeverageMin, op.LeverageMax));
+    }
+
+    [Fact]
     public async Task Many_operations_each_read_only_their_own_interval()
     {
         var fills = new List<ImportedFill>();

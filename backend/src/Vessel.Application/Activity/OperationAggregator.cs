@@ -292,8 +292,9 @@ public static class OperationAggregator
                 GrossClosedPnlUsd = unsupportedNetFee ? null : (pnl + netFees).ToString(),
                 FirstOccurredAtUtc = parts[0].Fill.OccurredAtUtc,
                 FillLeverages = leverages,
-                EntryNotional = UnknownBoundaries || MissingEntries || entered.Units.IsZero ? null
-                    : ExactAmount.Parse(ExactAmount.Average(entryNotional, ExactAmount.From(1m))!)
+                // The unrounded 56-place product; the API's weighted averages above keep their documented rounding.
+                ExactEntryNotional = UnknownBoundaries || MissingEntries || entered.Units.IsZero ? null : entryNotional,
+                SourceFills = parts.Select(p => p.Fill)
             };
         }
     }

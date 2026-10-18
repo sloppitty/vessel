@@ -70,8 +70,8 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
     {
         var summaries = await activity.ReadSummariesAsync(null, ct);
         var candidates = summaries.Operations.Where(Candidate)
-            .Select(o => (Operation: o, Orders: o.Fills.Select(f => new OrderKey(f.Fill.AccountId, f.Fill.ContractId, f.Fill.OrderId))
-                .Where(k => !string.IsNullOrWhiteSpace(k.ExternalOrderId)).ToHashSet())).ToList();
+            .Select(o => (Operation: o, Orders: o.SourceFills.Where(f => !string.IsNullOrWhiteSpace(f.ExternalOrderId))
+                .Select(OrderKey.Of).ToHashSet())).ToList();
         var keys = candidates.SelectMany(c => c.Orders).ToHashSet();
         HashSet<OrderKey> incomplete = [];
         if (keys.Count > 0)
@@ -85,7 +85,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
 
     private static bool Candidate(ActivityOperationDto operation) =>
         operation is { Status: "closed", Direction: not null, OpenedAtUtc: not null, ClosedAtUtc: not null, NetResultUsd: not null,
-            EntryNotional: { } notional } && notional.Units.Sign > 0 &&
+            ExactEntryNotional: { Sign: > 0 } } &&
         !operation.Coverage.Contains(ActivityPositions.AmbiguousIdentityNotice) && Guid.TryParse(operation.Id.AsSpan(0, Math.Min(36, operation.Id.Length)), out _);
 
     internal sealed record Scored(PlayOutcome Outcome, PlayOutcomeDto Row);
@@ -100,7 +100,8 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
     /// Closed, complete operations with a known net result and entry notional, scored like a Play: return is the net
     /// result over the exact entry notional, unlevered. Ambiguous native identities are left out. Planned risk is unknown.
     /// Values the Play calculator would refuse (outside decimal range or exact precision, including the return) are
-    /// unknown and left out, never clamped.
+    /// unknown and left out, never clamped. The notional is the unrounded quantity × price product, so one with more
+    /// than 28 decimal places is not representable and left out too, never rounded first.
     /// </summary>
     internal static List<Scored> ActivityOutcomes(IEnumerable<ActivityOperationDto> operations)
     {
@@ -110,7 +111,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
             try
             {
                 var outcome = new PlayOutcome(Guid.Parse(operation.Id.AsSpan(0, 36)), operation.ClosedAtUtc!.Value,
-                    PlayOutcomeCalculator.ToDecimal(ExactAmount.Parse(operation.NetResultUsd!)), PlayOutcomeCalculator.ToDecimal(operation.EntryNotional!.Value),
+                    PlayOutcomeCalculator.ToDecimal(ExactAmount.Parse(operation.NetResultUsd!)), PlayOutcomeCalculator.ToDecimal(operation.ExactEntryNotional!.Value),
                     null, true);
                 // The record and its row read the return, so an unusable one is excluded here, like the Play calculator does.
                 var row = Row(null, $"{operation.ContractId} {(operation.Direction == "long" ? "Long" : "Short")}", operation.ContractId, outcome) with

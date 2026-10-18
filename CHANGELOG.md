@@ -12,8 +12,8 @@
   never inferred.
 - Sizing suggestions start from closed Activity positions while no closed Play
   has a win or loss, labelled "From Activity"; R multiples stay unknown, and
-  positions with known missing executions or an out-of-range return are left
-  out.
+  positions with known missing executions, an out-of-range return or an entry
+  notional beyond exact decimal precision are left out.
 
 ## 0.3.0 - October 18, 2026
 

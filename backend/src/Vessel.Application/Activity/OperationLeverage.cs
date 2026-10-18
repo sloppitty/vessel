@@ -19,13 +19,16 @@ internal static class OperationLeverage
         // Native identities that only observations carry, per canonical contract. Observations are not grouping evidence.
         var observedNative = facts.LeverageObservations.Where(o => o.VenueContractId is not null)
             .GroupBy(o => (o.AccountId, o.ContractId))
-            .ToDictionary(g => g.Key, g => g.Select(o => o.VenueContractId!).Distinct(StringComparer.Ordinal).Count());
+            .ToDictionary(g => g.Key, g => g.Select(o => o.VenueContractId!).ToHashSet(StringComparer.Ordinal));
         // Sorted once per partition; each operation then reads only its own interval.
         var observed = facts.LeverageObservations
-            .Select(o => (Key: Key(o, positions, observedNative), Item: new Observed(o.ObservedAtUtc, Math.Sign(o.SignedQuantity), o.Leverage)))
+            .Select(o => (Key: Key(o.AccountId, o.ContractId, o.VenueContractId, positions, observedNative),
+                Item: new Observed(o.ObservedAtUtc, Math.Sign(o.SignedQuantity), o.Leverage)))
             .Concat(positions.Snapshots.Values.SelectMany(s => s.Positions.Where(p => p.Leverage is not null)
-                .Select(p => (Key: positions.Key(s.AccountId, p), Item: new Observed(s.ObservedAtUtc, Math.Sign(p.SignedQuantity), p.Leverage!.Value)))))
-            .GroupBy(o => o.Key)
+                .Select(p => (Key: Key(s.AccountId, p.ContractId, p.VenueContractId, positions, observedNative),
+                    Item: new Observed(s.ObservedAtUtc, Math.Sign(p.SignedQuantity), p.Leverage!.Value)))))
+            .Where(o => o.Key is not null)
+            .GroupBy(o => o.Key!.Value)
             .ToDictionary(g => g.Key, g => g.Select(o => o.Item).OrderBy(o => o.At).ToArray());
         return operations.Select(operation =>
         {
@@ -44,14 +47,24 @@ internal static class OperationLeverage
     }
 
     /// <summary>
-    /// The shared resolver's partition for an observation. When fills, snapshot and funding carry no native identity for
-    /// the canonical contract (ID-less legacy fills), operations use the canonical partition; an observation of the one
-    /// native market observed for it belongs there too. Several observed native markets stay apart, so they place nothing.
+    /// The shared resolver's partition for an observation or snapshot position, or null when it cannot be placed. When
+    /// fills, snapshot and funding carry no native identity for the canonical contract (ID-less legacy fills), operations
+    /// use the canonical partition; an observation of the one native market observed for it belongs there too. Several
+    /// native markets (observed, or from fills, snapshot or funding) stay apart, so they place nothing, and neither does an
+    /// ID-less source, which could belong to any of them. Fill grouping never changes.
     /// </summary>
-    private static ActivityContractKey Key(LeverageObservation o, ActivityPositions positions, Dictionary<(Guid, string), int> observedNative) =>
-        o.VenueContractId is not null && !positions.HasNativeIdentity(o.AccountId, o.ContractId) && observedNative[(o.AccountId, o.ContractId)] == 1
-            ? new(o.AccountId, o.ContractId, false)
-            : positions.Key(o);
+    private static ActivityContractKey? Key(Guid accountId, string contractId, string? native, ActivityPositions positions,
+        Dictionary<(Guid, string), HashSet<string>> observedNative)
+    {
+        var observedIds = observedNative.GetValueOrDefault((accountId, contractId));
+        if (native is null)
+            return positions.NativeIds(accountId, contractId).Concat(observedIds ?? []).Distinct(StringComparer.Ordinal).Count() > 1
+                ? null
+                : positions.Key(accountId, contractId, null);
+        return !positions.HasNativeIdentity(accountId, contractId) && observedIds is { Count: 1 }
+            ? new(accountId, contractId, false)
+            : positions.Key(accountId, contractId, native);
+    }
 
     private static int LowerBound(Observed[] sorted, DateTimeOffset from)
     {

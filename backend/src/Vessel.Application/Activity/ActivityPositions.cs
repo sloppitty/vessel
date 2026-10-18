@@ -56,7 +56,7 @@ internal sealed class ActivityPositions
     public ActivityContractKey Key(LeverageObservation observation) => Key(observation.AccountId, observation.ContractId, observation.VenueContractId);
     public ActivityContractKey Key(Guid accountId, AccountPosition position) => Key(accountId, position.ContractId, position.VenueContractId);
 
-    private ActivityContractKey Key(Guid accountId, string contractId, string? nativeId) => nativeId is not null
+    public ActivityContractKey Key(Guid accountId, string contractId, string? nativeId) => nativeId is not null
         ? new(accountId, nativeId, true)
         : nativeCandidates.GetValueOrDefault((accountId, contractId)) is { Length: 1 } candidates
             ? candidates[0]
@@ -64,6 +64,10 @@ internal sealed class ActivityPositions
 
     /// <summary>Whether fills, the latest snapshot or funding carry a native identity for this canonical contract.</summary>
     public bool HasNativeIdentity(Guid accountId, string contractId) => nativeCandidates.ContainsKey((accountId, contractId));
+
+    /// <summary>The native identities fills, the latest snapshot or funding carry for this canonical contract.</summary>
+    public IEnumerable<string> NativeIds(Guid accountId, string contractId) =>
+        nativeCandidates.GetValueOrDefault((accountId, contractId))?.Select(k => k.Identity) ?? [];
 
     // Only a resolved contract absent from a coherent snapshot is flat; ambiguous identities stay unknown.
     public ExactAmount? Quantity(ActivityContractKey key) => quantities.TryGetValue(key, out var quantity) ? quantity : default(ExactAmount);
