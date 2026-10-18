@@ -18,9 +18,9 @@
 ### Fixed
 
 - A Play's entry notional is now the exact sum of its entry fills' quantity ×
-  price. A tiny fill whose product needs more than 28 decimal places is
-  excluded from Review and sizing as beyond exact precision, instead of being
-  rounded into a different return.
+  price, summed before any conversion. A Play whose summed entry notional needs
+  more than 28 decimal places is excluded from Review and sizing as beyond exact
+  precision, instead of being rounded into a different return.
 
 ## 0.3.0 - October 18, 2026
 

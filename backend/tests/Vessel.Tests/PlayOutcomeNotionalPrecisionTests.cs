@@ -17,8 +17,11 @@ public sealed class PlayOutcomeNotionalPrecisionTests
     private readonly ReviewFixture review = new();
     private readonly MemorySizingStore sizing = new();
 
-    /// <summary>A closed long: one entry and one exit of <paramref name="quantity"/>, with a plan stop at <paramref name="stop"/> under a 100 entry.</summary>
-    private ClosedPlayFacts Closed(decimal quantity, decimal price, decimal net, string? stop = "50")
+    /// <summary>
+    /// A closed long: <paramref name="entries"/> entries and one exit of <paramref name="quantity"/>, with a plan stop
+    /// at <paramref name="stop"/> under a 100 entry.
+    /// </summary>
+    private ClosedPlayFacts Closed(decimal quantity, decimal price, decimal net, string? stop = "50", int entries = 1)
     {
         var account = review.Accounts.FirstOrDefault() ?? review.Account();
         var at = ReviewClock.Now.AddHours(-1);
@@ -40,7 +43,8 @@ public sealed class PlayOutcomeNotionalPrecisionTests
             OccurredAtUtc = opening ? at.AddDays(-1) : at,
         };
         var facts = new ClosedPlayFacts(play, [revision],
-            [new LinkedFill(OrderLinkRole.Entry, Fill(true)), new LinkedFill(OrderLinkRole.Exit, Fill(false))]);
+            [.. Enumerable.Range(0, entries).Select(_ => new LinkedFill(OrderLinkRole.Entry, Fill(true))),
+                new LinkedFill(OrderLinkRole.Exit, Fill(false))]);
         review.Closed.Add(facts);
         sizing.Closed.Add(facts);
         return facts;
@@ -66,6 +70,16 @@ public sealed class PlayOutcomeNotionalPrecisionTests
         Assert.Null(problem);
         Assert.Equal((2 * Unit, Unit, Unit), (outcome.EntryNotional, outcome.NetResult, outcome.PlannedRisk));
         Assert.Equal((50m, 1m), (outcome.ReturnPercent, outcome.RMultiple));
+    }
+
+    [Fact]
+    public void Inexact_entry_products_whose_sum_is_exact_still_score()
+    {
+        // Each 1e-14 × 1.5e-14 product (1.5e-28) is beyond precision, but their sum is exactly 3e-28.
+        var outcome = PlayOutcomeCalculator.Outcome(Closed(Tiny, 1.5m * Tiny, Unit, entries: 2), out var problem)!;
+
+        Assert.Null(problem);
+        Assert.Equal(3 * Unit, outcome.EntryNotional);
     }
 
     [Fact]
