@@ -88,6 +88,32 @@ public sealed class LeverageObservationPostgresTests
     }
 
     [PostgresFact]
+    public async Task A_position_closed_and_reopened_identically_between_refreshes_keeps_its_leverage()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        await using (var db = database.Context(owner))
+        {
+            var account = await AddAccountAsync(db, owner);
+            VenueFill a = Fill("a", 0, "buy", "open"), b = Fill("b", 10, "sell", "close"), c = Fill("c", 15, "buy", "open");
+            await SaveAsync(db, account.Id, Read(5, [Position(1, 3)], a));
+            // A closed and B opened with the same quantity, entry and leverage: only the new executions show the boundary.
+            await SaveAsync(db, account.Id, Read(20, [Position(1, 3)], a, b, c));
+            await SaveAsync(db, account.Id, Read(21, [Position(1, 3)], a, b, c)); // idle: the same executions again add nothing
+            await SaveAsync(db, account.Id, Read(30, [], a, b, c, Fill("d", 25, "sell", "close")));
+            Assert.Equal([5, 20], (await db.LeverageObservations.OrderBy(o => o.ObservedAtUtc).ToListAsync())
+                .Select(o => (int)(o.ObservedAtUtc - Start).TotalMinutes));
+        }
+        await using (var db = database.Context(owner))
+        {
+            Assert.Empty(await db.Positions.ToListAsync());
+            var ops = (await ActivityTestSupport.Activity(db).PageAsync()).Operations.OrderBy(o => o.OpenedAtUtc).ToList();
+            Assert.Equal(2, ops.Count);
+            Assert.All(ops, op => Assert.Equal(("closed", 3, 3, 3), (op.Status, op.Leverage, op.LeverageMin, op.LeverageMax)));
+        }
+    }
+
+    [PostgresFact]
     public async Task Disabled_accounts_hide_observations_and_deletion_removes_them()
     {
         await using var database = await CoreDatabase.CreateAsync();

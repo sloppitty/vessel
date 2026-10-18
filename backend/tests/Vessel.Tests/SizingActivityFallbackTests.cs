@@ -90,6 +90,60 @@ public sealed class SizingActivityFallbackTests
     }
 
     [Fact]
+    public async Task Operations_with_known_missing_executions_are_left_out()
+    {
+        // Balanced retained fills look closed, but both orders filled size 2 and only one execution of each is retained.
+        RoundTrip(0, 10);
+        store.Orders.AddRange([Order("0", "buy", 2), Order("10", "sell", 2)]);
+        var result = await Service().GetAsync(default);
+        Assert.Equal((SizingService.SourceNone, 0), (result.Record.Source, result.Record.ClosedPlays));
+
+        // A fully retained order, an order on another contract with the same venue ID and an unfilled one prove nothing missing.
+        store.Orders.Clear();
+        store.Orders.AddRange([Order("0", "buy", 1), Order("10", "sell", 2, contract: "ETH"), Order("10", "sell", 2, status: "canceled")]);
+        result = await Service().GetAsync(default);
+        Assert.Equal((SizingService.SourceActivity, 1, 1), (result.Record.Source, result.Record.ClosedPlays, result.Record.Wins));
+    }
+
+    [Fact]
+    public async Task Executions_of_the_order_outside_the_operation_count_toward_its_size()
+    {
+        // Order 10 (size 2) closes the long and later opens the short; both executions are retained, so nothing is missing.
+        fills.Add(Fill(0, "buy", "open", 100));
+        fills.Add(Fill(10, "sell", "close", 110, 10));
+        var reopen = Fill(20, "sell", "open", 110);
+        reopen.ExternalOrderId = "10";
+        fills.Add(reopen);
+        fills.Add(Fill(30, "buy", "close", 100, 10));
+        store.Orders.Add(Order("10", "sell", 2));
+        var result = await Service().GetAsync(default);
+        Assert.Equal((SizingService.SourceActivity, 2), (result.Record.Source, result.Record.Wins));
+    }
+
+    [Fact]
+    public async Task A_return_outside_decimal_range_is_left_out_without_failing_the_record()
+    {
+        // Net 1e18 over a 1e-16 notional fits decimal, the return percent does not.
+        fills.Add(Fill(0, "buy", "open", 0.00000001m, quantity: 0.00000001m));
+        fills.Add(Fill(10, "sell", "close", 0.00000002m, 1_000_000_000_000_000_000m, quantity: 0.00000001m));
+        RoundTrip(100, 5);
+        var result = await Service().GetAsync(default);
+        Assert.Equal((SizingService.SourceActivity, 1, 1), (result.Record.Source, result.Record.ClosedPlays, result.Record.Wins));
+        Assert.Equal("5", Assert.Single(result.Record.Recent).ReturnPercent);
+
+        fills.RemoveRange(2, 2);
+        result = await Service().GetAsync(default);
+        Assert.Equal((SizingService.SourceNone, 0), (result.Record.Source, result.Record.ClosedPlays));
+    }
+
+    private ImportedOrder Order(string id, string side, decimal size, string contract = "BTC", string status = "filled") => new()
+    {
+        Id = Guid.NewGuid(), OwnerId = owner, AccountId = accountId, ContractId = contract, ExternalOrderId = id, Side = side, OrderType = "limit",
+        LimitPrice = 100, OriginalSize = size, RemainingSize = 0, PlacedAtUtc = Start, Status = status, VenueStatus = status,
+        StatusAtUtc = Start, ObservedAtUtc = Start
+    };
+
+    [Fact]
     public async Task Disabled_accounts_do_not_contribute()
     {
         var disabled = new Account(Guid.NewGuid(), owner, "risex", "Disabled");

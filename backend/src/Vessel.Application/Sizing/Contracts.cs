@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
@@ -87,6 +88,11 @@ public interface ISizingStore
     Task<SizingSettings?> SettingsAsync(CancellationToken ct);
     /// <summary>Closed Plays on enabled accounts with their revisions, linked fills and incompletely retained orders.</summary>
     Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct);
+    /// <summary>
+    /// The owner's retained venue orders with these keys (any account state), for the Activity fallback's missing-execution
+    /// check. Matching uses the shared <see cref="OrderKey"/> rule, never the external ID alone.
+    /// </summary>
+    Task<List<ImportedOrder>> OrdersAsync(IReadOnlyCollection<OrderKey> orders, CancellationToken ct);
     void Add(SizingSettings settings);
 
     /// <summary>

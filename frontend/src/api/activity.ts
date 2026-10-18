@@ -44,7 +44,8 @@ export interface ActivityOperation {
   fundingPaymentCount: number
   /**
    * The latest venue-reported position leverage observed during the operation (its executions or refresh snapshots),
-   * whole numbers only. Min and max differ when it changed. All null when none was observed; never inferred.
+   * whole numbers only. Min and max differ when it changed. All null when none was observed. Only `leverage` is null,
+   * with the range kept, when the latest observation time reported conflicting values. Never inferred.
    */
   leverage: number | null
   leverageMin: number | null
@@ -181,10 +182,11 @@ export function activityFillsPath(accountId: string, operationId: string): strin
 }
 
 const isLeverage = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 1000
-/** All three null, or a latest leverage within its observed range. */
-const validLeverage = (op: Record<string, unknown>) => op.leverage === null
-  ? op.leverageMin === null && op.leverageMax === null
-  : isLeverage(op.leverage) && isLeverage(op.leverageMin) && isLeverage(op.leverageMax) && op.leverageMin <= op.leverage && op.leverage <= op.leverageMax
+/** All three null; or an observed range with the latest inside it, or unknown when the latest time reported conflicting (so different) values. */
+const validLeverage = (op: Record<string, unknown>) => op.leverageMin === null && op.leverageMax === null
+  ? op.leverage === null
+  : isLeverage(op.leverageMin) && isLeverage(op.leverageMax) && op.leverageMin <= op.leverageMax &&
+    (op.leverage === null ? op.leverageMin < op.leverageMax : isLeverage(op.leverage) && op.leverageMin <= op.leverage && op.leverage <= op.leverageMax)
 
 const isCoverage = (c: unknown): c is ActivityCoverage => isRecord(c) && isGuid(c.accountId) &&
   isNullOr(c.contractId, x => isFilledText(x, 128)) && isFilledText(c.notice, 2000)

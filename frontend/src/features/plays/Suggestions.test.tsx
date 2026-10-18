@@ -225,7 +225,7 @@ describe('record and risk', () => {
     await openPanel(user)
     const source = screen.getByTestId('record-source')
     expect(source).toHaveTextContent('From Activity')
-    expect(source).toHaveTextContent('Based on 3 closed positions from Activity — no closed plays yet.')
+    expect(source).toHaveTextContent('Based on 3 closed positions from Activity — no closed play with a win or loss yet.')
     const tip = within(source).getByRole('button', { name: 'About the Activity record' })
     expect(tip).toHaveAccessibleDescription(/no R multiple.*not advice/)
     expect(screen.getByTestId('track-record')).toHaveTextContent('2 of last 3 positions')

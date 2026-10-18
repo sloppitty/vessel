@@ -62,6 +62,9 @@ internal sealed class ActivityPositions
             ? candidates[0]
             : new(accountId, contractId, false);
 
+    /// <summary>Whether fills, the latest snapshot or funding carry a native identity for this canonical contract.</summary>
+    public bool HasNativeIdentity(Guid accountId, string contractId) => nativeCandidates.ContainsKey((accountId, contractId));
+
     // Only a resolved contract absent from a coherent snapshot is flat; ambiguous identities stay unknown.
     public ExactAmount? Quantity(ActivityContractKey key) => quantities.TryGetValue(key, out var quantity) ? quantity : default(ExactAmount);
 }

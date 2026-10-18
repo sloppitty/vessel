@@ -56,9 +56,37 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
         var plays = PlayOutcomes(await store.ClosedPlaysAsync(ct));
         if (plays.Any(x => x.Outcome.Kind != PlayOutcomeKind.Scratch) || activity is null) return ToDto(risk, plays, SourcePlays);
         // Only with no decided Play outcome; the two sources are never mixed.
-        var operations = ActivityOutcomes((await activity.ReadSummariesAsync(null, ct)).Operations);
+        var operations = await ActivityRecordAsync(activity, ct);
         return operations.Any(x => x.Outcome.Kind != PlayOutcomeKind.Scratch) ? ToDto(risk, operations, SourceActivity) : ToDto(risk, plays, SourceNone);
     }
+
+    /// <summary>
+    /// Fallback outcomes from closed operations. Balanced retained fills cannot prove completeness: an operation with an
+    /// execution of a filled fixed-size order whose retained executions (in or outside the operation) fall short of its
+    /// size is left out, by the same <see cref="OrderKey"/> and <see cref="ExecutionIntegrity"/> rules Play sizing uses.
+    /// Fills without a retained order record cannot prove a missing execution.
+    /// </summary>
+    private async Task<List<Scored>> ActivityRecordAsync(ActivityService activity, CancellationToken ct)
+    {
+        var summaries = await activity.ReadSummariesAsync(null, ct);
+        var candidates = summaries.Operations.Where(Candidate)
+            .Select(o => (Operation: o, Orders: o.Fills.Select(f => new OrderKey(f.Fill.AccountId, f.Fill.ContractId, f.Fill.OrderId))
+                .Where(k => !string.IsNullOrWhiteSpace(k.ExternalOrderId)).ToHashSet())).ToList();
+        var keys = candidates.SelectMany(c => c.Orders).ToHashSet();
+        HashSet<OrderKey> incomplete = [];
+        if (keys.Count > 0)
+        {
+            var retained = summaries.Facts.Fills.ToLookup(OrderKey.Of);
+            incomplete = (await store.OrdersAsync(keys, ct)).Where(o => keys.Contains(OrderKey.Of(o)) &&
+                ExecutionIntegrity.MissingExecutions(o, retained[OrderKey.Of(o)])).Select(OrderKey.Of).ToHashSet();
+        }
+        return ActivityOutcomes(candidates.Where(c => !c.Orders.Overlaps(incomplete)).Select(c => c.Operation));
+    }
+
+    private static bool Candidate(ActivityOperationDto operation) =>
+        operation is { Status: "closed", Direction: not null, OpenedAtUtc: not null, ClosedAtUtc: not null, NetResultUsd: not null,
+            EntryNotional: { } notional } && notional.Units.Sign > 0 &&
+        !operation.Coverage.Contains(ActivityPositions.AmbiguousIdentityNotice) && Guid.TryParse(operation.Id.AsSpan(0, Math.Min(36, operation.Id.Length)), out _);
 
     internal sealed record Scored(PlayOutcome Outcome, PlayOutcomeDto Row);
 
@@ -71,31 +99,30 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
     /// <summary>
     /// Closed, complete operations with a known net result and entry notional, scored like a Play: return is the net
     /// result over the exact entry notional, unlevered. Ambiguous native identities are left out. Planned risk is unknown.
+    /// Values the Play calculator would refuse (outside decimal range or exact precision, including the return) are
+    /// unknown and left out, never clamped.
     /// </summary>
     internal static List<Scored> ActivityOutcomes(IEnumerable<ActivityOperationDto> operations)
     {
         var result = new List<Scored>();
-        foreach (var operation in operations)
+        foreach (var operation in operations.Where(Candidate))
         {
-            if (operation is not { Status: "closed", Direction: not null, OpenedAtUtc: not null, ClosedAtUtc: { } closedAt, NetResultUsd: { } net,
-                    EntryNotional: { } notional } || notional.Units.Sign <= 0 ||
-                operation.Coverage.Contains(ActivityPositions.AmbiguousIdentityNotice) || !Guid.TryParse(operation.Id.AsSpan(0, 36), out var id))
-                continue;
-            decimal netResult, entryNotional;
             try
             {
-                netResult = ExactAmount.Parse(net).ToDecimal(1);
-                entryNotional = notional.ToDecimal(1);
+                var outcome = new PlayOutcome(Guid.Parse(operation.Id.AsSpan(0, 36)), operation.ClosedAtUtc!.Value,
+                    PlayOutcomeCalculator.ToDecimal(ExactAmount.Parse(operation.NetResultUsd!)), PlayOutcomeCalculator.ToDecimal(operation.EntryNotional!.Value),
+                    null, true);
+                // The record and its row read the return, so an unusable one is excluded here, like the Play calculator does.
+                var row = Row(null, $"{operation.ContractId} {(operation.Direction == "long" ? "Long" : "Short")}", operation.ContractId, outcome) with
+                {
+                    OperationId = operation.Id, AccountId = operation.AccountId
+                };
+                result.Add(new(outcome, row));
             }
             catch (OverflowException)
             {
-                continue; // Outside decimal range: unknown, never clamped.
+                continue;
             }
-            var outcome = new PlayOutcome(id, closedAt, netResult, entryNotional, null, true);
-            result.Add(new(outcome, Row(null, $"{operation.ContractId} {(operation.Direction == "long" ? "Long" : "Short")}", operation.ContractId, outcome) with
-            {
-                OperationId = operation.Id, AccountId = operation.AccountId
-            }));
         }
         return result;
     }

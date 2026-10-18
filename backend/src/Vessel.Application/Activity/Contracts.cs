@@ -40,7 +40,8 @@ public sealed record ActivityOperationDto(string Id, Guid AccountId, string Cont
     public int FundingPaymentCount { get; init; }
     /// <summary>
     /// The latest venue-reported position leverage observed during the operation, with the lowest and highest when it
-    /// changed. Null when no observation falls inside the operation; never inferred from margin, notional or a plan.
+    /// changed. All three are null when no observation falls inside the operation. Only the latest is null, with the range
+    /// kept, when the latest observation time reports conflicting values. Never inferred from margin, notional or a plan.
     /// </summary>
     public int? Leverage { get; init; }
     public int? LeverageMin { get; init; }

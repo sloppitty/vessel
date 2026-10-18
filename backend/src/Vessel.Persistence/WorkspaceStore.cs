@@ -140,8 +140,14 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         var wallet = observation.StablecoinWallet;
         var replaceWallet = wallet is not null &&
             (snapshot?.StablecoinsObservedAtUtc is null || wallet.ObservedAtUtc > snapshot.StablecoinsObservedAtUtc);
-        // Leverage would be lost with the replaced positions; keep an observation when a position appears or changes.
-        if (replacePerps) await RecordLeverageAsync(account, observation, snapshot?.Positions ?? [], ct);
+        var incomingSourceIds = result.Fills.Select(f => f.SourceFillId).Distinct().ToArray();
+        var existing = (await db.Fills.Where(f => f.AccountId == account.Id && incomingSourceIds.Contains(f.SourceFillId))
+            .Select(f => new { f.ContractId, f.SourceFillId }).ToListAsync(ct))
+            .Select(f => (f.ContractId, f.SourceFillId)).ToHashSet();
+        var newFills = result.Fills.Where(f => existing.Add((f.ContractId, f.SourceFillId))).ToList();
+        // Leverage would be lost with the replaced positions; keep an observation when a position appears or changes,
+        // or when new executions show it may have closed and reopened identically since the last refresh.
+        if (replacePerps) await RecordLeverageAsync(account, observation, snapshot?.Positions ?? [], newFills, ct);
         if (snapshot is null)
         {
             snapshot = new AccountSnapshot { OwnerId = account.OwnerId, AccountId = account.Id };
@@ -202,13 +208,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 Available = balance.Available
             }).ToList();
         }
-        var incomingSourceIds = result.Fills.Select(f => f.SourceFillId).Distinct().ToArray();
-        var existing = (await db.Fills.Where(f => f.AccountId == account.Id && incomingSourceIds.Contains(f.SourceFillId))
-            .Select(f => new { f.ContractId, f.SourceFillId }).ToListAsync(ct))
-            .Select(f => (f.ContractId, f.SourceFillId)).ToHashSet();
-        foreach (var f in result.Fills)
+        foreach (var f in newFills)
         {
-            if (!existing.Add((f.ContractId, f.SourceFillId))) continue;
             db.Fills.Add(new ImportedFill
             {
                 Id = Guid.NewGuid(),
@@ -240,12 +241,15 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
     }, ct);
 
     /// <summary>
-    /// Appends one observation per reported leverage whose position is new to the replaced snapshot, or whose signed
+    /// Appends one observation per reported leverage whose position is new to the replaced snapshot, whose signed
     /// quantity, entry price or leverage differs from the latest retained observation of that account and native
-    /// contract. Unchanged positions add nothing, so the table grows with position changes, not refreshes.
+    /// contract, or whose market received newly imported executions in this refresh. A position can close and reopen
+    /// identically between refreshes; its new executions are the only trace of that boundary, so they always add an
+    /// observation of the reopened position. A fill without a native identity matches every native market of its
+    /// canonical contract. Idle refreshes add nothing, so the table grows with position changes and executions, not refreshes.
     /// </summary>
     private async Task RecordLeverageAsync(Account account, VenueSnapshot observation, IReadOnlyCollection<AccountPosition> replaced,
-        CancellationToken ct)
+        IReadOnlyCollection<VenueFill> newFills, CancellationToken ct)
     {
         var reported = observation.Positions.Where(p => p.Leverage is not null).ToList();
         if (reported.Count == 0) return;
@@ -260,7 +264,9 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
             var previous = latest.SingleOrDefault(o => o.ContractId == position.ContractId && o.VenueContractId == position.VenueContractId);
             var continued = replaced.Any(p => p.ContractId == position.ContractId && p.VenueContractId == position.VenueContractId &&
                 p.SignedQuantity == position.SignedQuantity && p.EntryPrice == position.EntryPrice);
-            if (continued && previous is not null && previous.Leverage == position.Leverage && previous.SignedQuantity == position.SignedQuantity &&
+            var executed = newFills.Any(f => f.ContractId == position.ContractId &&
+                (f.VenueContractId is null || position.VenueContractId is null || f.VenueContractId == position.VenueContractId));
+            if (continued && !executed && previous is not null && previous.Leverage == position.Leverage && previous.SignedQuantity == position.SignedQuantity &&
                 previous.EntryPrice == position.EntryPrice || previous is not null && previous.ObservedAtUtc >= observedAt) continue;
             db.LeverageObservations.Add(new LeverageObservation
             {

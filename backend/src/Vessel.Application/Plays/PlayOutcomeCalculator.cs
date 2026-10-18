@@ -63,7 +63,8 @@ public static class PlayOutcomeCalculator
         return new PlayOutcome(facts.Play.Id, closedAt, net, notional, risk, feesComplete);
     }
 
-    private static decimal ToDecimal(ExactAmount value)
+    /// <summary>The exact decimal of a sum; outside decimal range or precision it throws <see cref="OverflowException"/>.</summary>
+    internal static decimal ToDecimal(ExactAmount value)
     {
         var result = decimal.Parse(value.ToString(), CultureInfo.InvariantCulture);
         if (ExactAmount.From(result) != value) throw new OverflowException();

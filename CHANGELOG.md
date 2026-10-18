@@ -6,10 +6,14 @@
 
 - Activity operations show the venue-reported leverage observed while they were
   open or closed: from RISEx fills that report it and from retained refresh
-  observations (new `LeverageObservations` migration). Unobserved leverage is
-  shown as unknown, never inferred.
+  observations (new `LeverageObservations` migration), including a position
+  that closed and reopened identically between refreshes. Unobserved leverage,
+  and the latest value when its observations conflict, is shown as unknown,
+  never inferred.
 - Sizing suggestions start from closed Activity positions while no closed Play
-  has a win or loss, labelled "From Activity"; R multiples stay unknown.
+  has a win or loss, labelled "From Activity"; R multiples stay unknown, and
+  positions with known missing executions or an out-of-range return are left
+  out.
 
 ## 0.3.0 - October 18, 2026
 

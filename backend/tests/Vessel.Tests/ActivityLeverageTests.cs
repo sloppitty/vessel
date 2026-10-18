@@ -142,6 +142,60 @@ public sealed class ActivityLeverageTests
     }
 
     [Fact]
+    public async Task Conflicting_values_at_the_latest_time_leave_the_latest_unknown_and_keep_the_range()
+    {
+        var op = Assert.Single(await Operations([Fill(0), Fill(60, "sell", "close")], [Observed(10, 1, 4), Observed(30, 1, 10), Observed(30, 1, 5)]));
+        Assert.Equal(((int?)null, 4, 10), (op.Leverage, op.LeverageMin, op.LeverageMax));
+        // Agreeing values at the latest time are no conflict, and an earlier tie never hides a later value.
+        op = Assert.Single(await Operations([Fill(0), Fill(60, "sell", "close")], [Observed(10, 1, 4), Observed(10, 1, 9), Observed(30, 1, 5), Observed(30, 1, 5)]));
+        Assert.Equal((5, 4, 9), (op.Leverage, op.LeverageMin, op.LeverageMax));
+        // A fill's reported leverage at the same time as a differing observation is a conflict too.
+        op = Assert.Single(await Operations([Fill(0), Fill(60, "sell", "close", leverage: 7)], [Observed(60, 1, 3)]));
+        Assert.Equal(((int?)null, 3, 7), (op.Leverage, op.LeverageMin, op.LeverageMax));
+    }
+
+    [Fact]
+    public async Task A_uniquely_identified_observation_reaches_operations_of_id_less_legacy_fills()
+    {
+        // Legacy fills carry no native ID and the latest snapshot is empty, so the operation uses the canonical partition.
+        var op = Assert.Single(await Operations([Fill(0), Fill(60, "sell", "close")], [Observed(10, 1, 6, "7"), Observed(20, 1, 6, "7")], Snapshot(90)));
+        Assert.Equal((6, 6, 6), (op.Leverage, op.LeverageMin, op.LeverageMax));
+        Assert.Equal("closed", op.Status);
+        // Two observed native markets for the canonical contract cannot be told apart: nothing is placed.
+        op = Assert.Single(await Operations([Fill(0), Fill(60, "sell", "close")], [Observed(10, 1, 6, "7"), Observed(20, 1, 8, "8")], Snapshot(90)));
+        Assert.Null(op.Leverage); Assert.Null(op.LeverageMin);
+        // Observations never change how fills group: native fills keep their own partition and the observation follows the resolver.
+        var ops = await Operations([Fill(0, native: "7"), Fill(10, "sell", "close", native: "7"), Fill(20), Fill(30, "sell", "close")],
+            [Observed(5, 1, 6, "7"), Observed(25, 1, 9, "7")], Snapshot(90));
+        Assert.Equal(2, ops.Count);
+        Assert.Equal([6, 9], ops.OrderBy(o => o.OpenedAtUtc).Select(o => o.Leverage));
+    }
+
+    [Fact]
+    public async Task Many_operations_each_read_only_their_own_interval()
+    {
+        var fills = new List<ImportedFill>();
+        var observed = new List<LeverageObservation>();
+        for (var i = 0; i < 2_000; i++)
+        {
+            fills.Add(Fill(i * 10)); fills.Add(Fill(i * 10 + 5, "sell", "close"));
+            observed.Add(Observed(i * 10 + 2, 1, i % 50 + 1));
+            observed.Add(Observed(i * 10 + 7, 1, 99)); // between operations
+        }
+        var account = new Account(AccountId, Owner, "manual", "Fixture");
+        var workspace = new MemoryWorkspaceStore(Owner);
+        workspace.Accounts.Add(account);
+        var service = new ActivityService(new Store(new ActivityFacts([account], fills, [], new Dictionary<Guid, Guid>()) { LeverageObservations = observed }),
+            workspace, new Clock(Now));
+        var ops = new List<ActivityOperationSummaryDto>();
+        for (var page = 1; page <= 20; page++)
+            ops.AddRange((await service.PageAsync(new(Page: page.ToString(), PageSize: "100"), default)).Operations);
+        ops = ops.OrderBy(o => o.OpenedAtUtc).ToList();
+        Assert.Equal(2_000, ops.Count);
+        Assert.All(ops.Select((o, i) => (o, i)), x => Assert.Equal((x.i % 50 + 1, x.i % 50 + 1), (x.o.Leverage!.Value, x.o.LeverageMax!.Value)));
+    }
+
+    [Fact]
     public async Task Version_changes_when_observed_leverage_changes()
     {
         var fills = new[] { Fill(0) };
