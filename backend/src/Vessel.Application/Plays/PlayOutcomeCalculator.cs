@@ -38,7 +38,7 @@ public static class PlayOutcomeCalculator
         }
         catch (OverflowException)
         {
-            problem = "Executed result, return percent or initial-risk R exceeds the supported decimal range or exact precision.";
+            problem = "Executed result, entry notional, return percent or initial-risk R exceeds the supported decimal range or exact precision.";
             return null;
         }
     }
@@ -47,7 +47,8 @@ public static class PlayOutcomeCalculator
     {
         var entries = facts.Fills.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill).ToList();
         if (entries.Count == 0) return null;
-        var notional = ToDecimal(entries.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Quantity * f.Price)));
+        // Sum the exact 56-place products; decimal multiplication would round each one to 28 places before this guard.
+        var notional = ToDecimal(entries.Aggregate(BigInteger.Zero, (sum, f) => sum + ExactAmount.Product(f.Quantity, f.Price)));
         if (notional <= 0) return null;
         var fills = facts.Fills.Select(f => f.Fill).ToList();
         // A net-of-fee closed PnL already has its fee taken off; only gross PnL needs the fee subtracted.
