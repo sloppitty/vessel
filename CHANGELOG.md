@@ -15,6 +15,13 @@
   positions with known missing executions, an out-of-range return or an entry
   notional beyond exact decimal precision are left out.
 
+### Fixed
+
+- A Play's entry notional is now the exact sum of its entry fills' quantity ×
+  price, summed before any conversion. A Play whose summed entry notional needs
+  more than 28 decimal places is excluded from Review and sizing as beyond exact
+  precision, instead of being rounded into a different return.
+
 ## 0.3.0 - October 18, 2026
 
 Release notes: [docs/releases/v0.3.0.md](docs/releases/v0.3.0.md).

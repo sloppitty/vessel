@@ -28,6 +28,8 @@ public readonly record struct ExactAmount(BigInteger Units) : IComparable<ExactA
     public static ExactAmount operator -(ExactAmount a, ExactAmount b) => new(a.Units - b.Units);
     public static ExactAmount operator -(ExactAmount a) => new(-a.Units);
     public ExactAmount Abs() => new(BigInteger.Abs(Units));
+    /// <summary>The exact 56-place product of two decimals' units, such as quantity × price; decimal multiplication would round it.</summary>
+    public static BigInteger Product(decimal a, decimal b) => ExactDecimal.Units(a) * ExactDecimal.Units(b);
     public int CompareTo(ExactAmount other) => Units.CompareTo(other.Units);
     public static bool operator <(ExactAmount a, ExactAmount b) => a.Units < b.Units;
     public static bool operator <=(ExactAmount a, ExactAmount b) => a.Units <= b.Units;
