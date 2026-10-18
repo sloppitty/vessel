@@ -33,9 +33,9 @@ concurrency:
 jobs:
   source:
     name: Release source
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@v5
+      - uses: useblacksmith/checkout@v1
         with:
           fetch-depth: 0
       - name: Require an annotated tag on main
@@ -71,13 +71,13 @@ jobs:
   verify:
     name: Release verification (${{ matrix.storage }})
     needs: source
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 60
     strategy:
       matrix:
         storage: [s3, local]
     steps:
-      - uses: actions/checkout@v5
+      - uses: useblacksmith/checkout@v1
       - name: Isolated images, transport, restore
         run: python3 scripts/verify-release.py --storage "${{ matrix.storage }}"
 
@@ -85,14 +85,14 @@ jobs:
     name: Publish rehearsal (local registry)
     needs: source
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     services:
       registry:
         image: registry:2
         ports:
           - 5000:5000
     steps:
-      - uses: actions/checkout@v5
+      - uses: useblacksmith/checkout@v1
       - name: Publish, then publish again as a re-run
         run: |
           python3 scripts/release.py publish --image localhost:5000/vessel --revision "$GITHUB_SHA"
@@ -102,7 +102,7 @@ jobs:
     name: Publish images
     needs: [source, checks, verify]
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment:
       name: docker-hub
       url: https://hub.docker.com/r/skorcius/vessel/tags
@@ -110,7 +110,7 @@ jobs:
       group: docker-hub-publish
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v5
+      - uses: useblacksmith/checkout@v1
       - name: Log in to Docker Hub
         env:
           DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME || 'skorcius' }}
@@ -130,11 +130,11 @@ jobs:
   github-release:
     name: GitHub Release
     needs: publish
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: useblacksmith/checkout@v1
       - name: Create or update the release from its notes
         env:
           GH_TOKEN: ${{ github.token }}
