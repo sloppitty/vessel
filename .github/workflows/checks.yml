@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   foundation:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     services:
       postgres:
         image: postgres:18-alpine
@@ -45,7 +45,7 @@ jobs:
       Vessel_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=vessel_tests;Username=vessel;Password=vessel-ci-only
       Vessel_TEST_EVENT_RABBIT: amqp://vessel_ci:vessel-events-ci-only@127.0.0.1:5672
     steps:
-      - uses: actions/checkout@v5
+      - uses: useblacksmith/checkout@v1
       - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
