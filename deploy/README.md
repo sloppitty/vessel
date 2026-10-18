@@ -1360,6 +1360,10 @@ failure categories, not raw dependency details.
 - `/health/live` only proves the API process responds.
 - `/health/ready` returns 200 when PostgreSQL is reachable and there are no pending
   migrations. A 503 reveals no database details. It does not verify venue or object-store access.
+  Right after start it answers 503 `warming-up` while a read-only warm-up prepares the
+  sign-in and first-page reads, for at most `Vessel__Startup__Warmup__Timeout`
+  (default `00:00:30`); a failed or slow warm-up never stops the API.
+  `Vessel__Startup__Warmup__Enabled=false` turns it off.
 - If API does not start, check the generated token length, owner GUID, migration
   exit status, database health and optional key-file mode/readability.
 - If Lighter reports insecure transport, check HTTPS and trusted proxy addresses.

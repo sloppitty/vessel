@@ -31,7 +31,7 @@ public sealed class IdentityService(IdentityTransaction transactions, IdentitySe
         var outcome = await transactions.RunAsync<(VerificationResult? Result, ProblemException? Error)>(async db =>
         {
             var now = clock.GetUtcNow();
-            var challenge = await db.Challenges.SingleOrDefaultAsync(x => x.Id == request.ChallengeId, ct);
+            var challenge = await FindChallengeAsync(db, request.ChallengeId, ct);
             if (challenge is null || challenge.ConsumedAt is not null)
                 return (Result: (VerificationResult?)null, Error: IdentityErrors.Error(400, "challenge-invalid"));
             challenge.ConsumedAt = now;
@@ -43,7 +43,7 @@ public sealed class IdentityService(IdentityTransaction transactions, IdentitySe
                 if (challenge.ExpiresAt.AddSeconds(30) < now || challenge.IssuedAt.AddSeconds(-30) > now)
                     throw IdentityErrors.Error(400, "challenge-expired");
                 signatures.Verify(challenge.Message, challenge.Address, request.Signature);
-                var wallet = await db.Wallets.SingleOrDefaultAsync(x => x.Address == challenge.Address, ct);
+                var wallet = await FindWalletAsync(db, challenge.Address, ct);
                 if (wallet is not null)
                 {
                     var user = await IdentityTransaction.LockUserAsync(db, wallet.UserId, ct);
@@ -128,6 +128,13 @@ public sealed class IdentityService(IdentityTransaction transactions, IdentitySe
             return true;
         }, ct);
     }
+
+    // Shared with IdentityWarmup, which runs these exact tracked shapes once with values that match nothing.
+    internal static Task<AuthChallenge?> FindChallengeAsync(IdentityDbContext db, Guid id, CancellationToken ct) =>
+        db.Challenges.SingleOrDefaultAsync(x => x.Id == id, ct);
+
+    internal static Task<UserWallet?> FindWalletAsync(IdentityDbContext db, string address, CancellationToken ct) =>
+        db.Wallets.SingleOrDefaultAsync(x => x.Address == address, ct);
 
     internal static async Task AddChallengeAsync(IdentityDbContext db, AuthChallenge challenge, DateTimeOffset now, CancellationToken ct)
     {
