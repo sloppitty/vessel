@@ -37,8 +37,9 @@ public sealed class StartupWarmup : BackgroundService
         // Development hosts and tests restart often and are not behind the readiness gate: opt in there.
         enabled = configuration.GetValue("Vessel:Startup:Warmup:Enabled", !environment.IsDevelopment());
         timeout = configuration.GetValue("Vessel:Startup:Warmup:Timeout", TimeSpan.FromSeconds(30));
-        if (timeout < TimeSpan.FromSeconds(1) || timeout > TimeSpan.FromMinutes(10))
-            throw new InvalidOperationException("Vessel:Startup:Warmup:Timeout must be between 00:00:01 and 00:10:00.");
+        // The image healthcheck (10 s start period, six 10 s retries) must outlast the gate, or Compose gives up on web.
+        if (timeout < TimeSpan.FromSeconds(1) || timeout > TimeSpan.FromSeconds(60))
+            throw new InvalidOperationException("Vessel:Startup:Warmup:Timeout must be between 00:00:01 and 00:01:00.");
         if (!enabled) completion.SetResult(new(true, false, [], []));
     }
 

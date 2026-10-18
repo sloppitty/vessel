@@ -115,10 +115,12 @@ public sealed class StartupWarmupTests
         Assert.True((await warmup.Completion).Skipped);
     }
 
-    [Fact]
-    public void An_out_of_range_timeout_refuses_to_start()
+    [Theory]
+    [InlineData("00:00:00.5")]
+    [InlineData("00:01:01")]
+    public void An_out_of_range_timeout_refuses_to_start(string timeout)
     {
-        using var factory = new CoreApiFactory(Guid.NewGuid(), settings: new() { ["Vessel:Startup:Warmup:Timeout"] = "00:00:00.5" });
+        using var factory = new CoreApiFactory(Guid.NewGuid(), settings: new() { ["Vessel:Startup:Warmup:Timeout"] = timeout });
         var error = Assert.ThrowsAny<Exception>(() => factory.Services);
         Assert.Contains("Vessel:Startup:Warmup:Timeout", error.ToString(), StringComparison.Ordinal);
     }
