@@ -50,6 +50,8 @@ public static class DependencyInjection
         services.AddScoped<Vessel.Application.Ownership.IUnitOfWork>(sp => sp.GetRequiredService<UnitOfWork>());
         services.AddScoped<Vessel.Application.Workspace.IWorkspaceStore, WorkspaceStore>();
         services.AddScoped<Vessel.Application.Activity.IActivityStore, ActivityStore>();
+        services.AddSingleton<ActivitySummaryCache>();
+        services.AddScoped<Vessel.Application.Activity.IActivitySummaryReader, CachedActivitySummaryReader>();
         services.AddScoped<Vessel.Application.Credentials.IAccountCredentialStore, AccountCredentialStore>();
         services.AddScoped<Vessel.Application.Evidence.IEvidenceMetadataStore, EvidenceStore>();
         services.AddScoped<Vessel.Application.Plays.IPlayStore, PlayStore>();

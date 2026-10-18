@@ -10,6 +10,11 @@ public sealed record ActivityFacts(IReadOnlyList<Account> Accounts, IReadOnlyLis
     public IReadOnlyList<FundingPayment> FundingPayments { get; init; } = [];
     public IReadOnlyList<AccountFundingState> FundingStates { get; init; } = [];
 }
+public interface IActivitySummaryReader
+{
+    Task<ActivitySummaries> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null);
+}
+
 public interface IActivityStore
 {
     // All retained facts, not the overview's most recent 100; owner-scoped and enabled accounts only.

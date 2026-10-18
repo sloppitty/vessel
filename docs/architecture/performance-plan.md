@@ -217,3 +217,141 @@ Rough sizing for the archive discussion. Assumptions: one row per candle with ex
 | 50 instruments, 1h only | ~60 MB | ~5–10 MB |
 
 Disk space is not the constraint; history availability is. Hyperliquid's REST API returns only the latest 5,000 candles per interval: about 3.5 days of 1m, 17 days of 5m, 52 days of 15m, 208 days of 1h, 2.3 years of 4h and 13.7 years of 1d. Deep 1m history therefore has to be **collected going forward** by an always-on job (the existing shared WebSocket or bounded polling), while coarser intervals can be backfilled to the venue horizon once. Lighter and RISEx have their own limits. Older history from other sources would need separate research.
+
+## 2026-10-18 — activity aggregation per facts revision (F1)
+
+Overview Summary, Activity and operation expansion now share the existing exact
+aggregation through an Application-owned `IActivitySummaryReader`, implemented
+in Persistence. The arithmetic, native identity rules, funding attribution,
+coverage, ordering and decimal strings are unchanged. The Activity version hash
+is calculated once alongside the aggregate, in its original display order.
+Filtering, paging, facets, rolling windows and response timestamps remain at the
+request boundary; the cached aggregation and funding code read no clock.
+
+Each read opens a fresh, explicitly assigned owner scope/DbContext and a
+RepeatableRead transaction, then reads `activity_facts_revisions` inside that
+snapshot. The cache key is **owner + revision + optional detail account + sorted
+account set**, distinguishing unrestricted and empty sets. The winning cache
+miss retains that independent scope through facts loading, aggregation and
+transaction completion; other callers dispose their probe snapshots. Concurrent
+callers of the same key share one computation. Individual request cancellation
+only removes that waiter; the last departing waiter cancels and detaches the
+flight so a new caller can retry. Failed/cancelled/abandoned work is never cached.
+A write committed between a revision read and facts loading cannot mismatch the
+key and facts: both reads use that same PostgreSQL snapshot.
+
+The per-process LRU admits at most 64 entries and 128 MiB of conservative retained
+graph charges (row/object/list/allocation overhead plus variable string lengths).
+An oversized result is shared in flight but not retained. Old revisions compete
+in this same bound rather than accumulating indefinitely. This is memory
+accounting, not a claim about exact managed-heap/RSS usage; active requests still
+need their own working memory. Owners always have separate keys and assigned
+query filters. Authorization is performed normally on every HTTP request and is
+never cached; HTTP responses retain `no-store`.
+
+### Input and writer audit
+
+`ActivityStore.ReadAsync` reads enabled accounts, all their retained fills,
+snapshots with positions, funding payments/states, and linked-order identities.
+`LinkedOrders` joins **play_order_links → imported_orders**, not Plays; fill/Play
+associations are derived from the account/contract/external-order composite key.
+The downstream positions, aggregator and funding code read only those facts and
+the process's immutable venue capabilities. No linked-fill table, Play plan,
+review, event, notification or credential is read. Portfolio labels/icons and
+workspace balances are still queried outside the aggregate cache.
+
+Migration `20261018130000_ActivityFactsRevision` covers INSERT, UPDATE and DELETE
+on `accounts`, `imported_fills`, `imported_orders`, `play_order_links`,
+`funding_payments`, `account_funding_states`, `account_snapshots`,
+`account_positions` and (conservatively) `account_stablecoins`. Whole-row account
+updates cover enabled status, deletion, portfolio moves, names, source/venue,
+history notices and sync state. This includes API imports/refreshes, execution
+link/unlink flows, account management/bulk membership and separate monitor worker
+connections; database triggers cannot be omitted by an EF bulk write. Existing
+account owners initialize at revision 1; absent owners read revision 0, and their
+first input write inserts revision 1. Deleting the last account retains the
+revision row. Rollbacks/savepoint rollbacks do not advance the committed revision.
+No xid, append-log maximum, count or wall clock is used as a detector.
+
+Statement transition tables gather both old/new owners into transaction-local
+settings. An INITIALLY DEFERRED constraint trigger takes revision row locks only
+at commit, once per transaction, in sorted owner order (including multi-owner
+offline DML). Existing account/FK/advisory locks have already been acquired;
+revision updates acquire no account/sync/link lock afterward. The other
+transactions reaching these locks are likewise completing and cannot request
+an earlier account lock. Current foreign keys are not deferred and there are no
+other application deferred triggers. Tests exercise a linking transaction that
+has written its link and waits on an account held by sync: sync can commit and
+release it; neither write has held a revision lock prematurely. Another test
+commits an older xid after a newer one and requires both increments. Keep this
+lock-order invariant if adding deferred triggers; application code must not
+force these constraint triggers immediate. Ordinary app writes never do so.
+Administrative TRUNCATE, disabled triggers, direct edits to the revision table or
+a live database restore are outside application DML; stop processes for such
+operations, as the existing restore runbook requires.
+
+Apply the migration explicitly with the journal bundle/EF workflow before
+starting the new hosts. Nothing migrates at startup, changes the owner's database
+in tests, alters an `IUnitOfWork` write boundary or adds infrastructure dependencies
+to Domain/Application. The new counter table is migration-managed infrastructure,
+like the server-state tables; its only runtime read explicitly filters the owner.
+
+### Verification
+
+Focused tests compare serialized cached/missed/uncached Activity and Summary
+responses at a fixed clock across all/portfolio/unassigned/account scopes,
+filters, pages, periods and grouping. They also cover separate-connection writes
+to every fact table, link dismissal/confirmation/removal, account rename/move/
+disable/enable/delete, real refresh unit-of-work imports/funding/snapshots,
+owner isolation, snapshot consistency, migration backfill, rollback, failure,
+cancellation, single-flight and LRU/oversized-entry eviction. The isolation
+harness now explicitly requires the revision table and still fingerprints it;
+its reversible-write self-test checks restored facts then rebases the legitimately
+advanced revision.
+
+### 50,000-fill Release benchmark
+
+Replayed the investigation's existing `seed.sql` and `bench.py` in throwaway
+PostgreSQL 18/RabbitMQ containers, with the unchanged `e38658d` source and this
+branch both running `dotnet run --project src/Vessel.Api -c Release --no-build
+--no-launch-profile` in `mcr.microsoft.com/dotnet/sdk:10.0.302`, Production/Token
+mode, each API limited to two CPUs. Seed parameters were `rts=625`, `plays=300`,
+`events=5000`, `notes=3000`: 10 accounts, 50,000 fills, 20,000 funding payments,
+300 Plays and 420 links from the available harness (the old report listed 374).
+Both versions read the same database; only the explicit revision migration was
+added after capturing the original responses.
+
+The shared host became busy during measurement, so the final comparison
+**interleaves** baseline → committed no-op account UPDATE → cache miss → cache
+hit for every round. The no-op still advances the revision; its SQL time is
+outside the measured request waterfall. These are 30 measured rounds after
+12 warm-up rounds, with extra baseline JIT warm-up, replaying the original
+system → event head → Overview → four parallel page reads, alongside the
+monitor/notification/SSE branches. No frontend scheduling change is included.
+
+| Populated Overview (ms) | p50 | p95 |
+| --- | ---: | ---: |
+| Original full aggregation on every request | 810.4 | 932.7 |
+| Revision miss after a committed write; one shared computation | 650.0 | 752.0 |
+| Same revision, cache hit | 41.0 | 56.4 |
+
+The warm hit is about 20× faster. Absolute timings reflect this shared host,
+not the older report's quieter run. Five large baseline payloads (Activity
+pages 1/7, a filtered page and both Summary groupings over all history) are
+identical after removing only request-generated `asOfUtc`; fixed-clock tests
+also compare serialized responses without normalization. Size accounting caches
+its fixed type/property metadata so misses do not repeatedly allocate reflection
+metadata for every retained fill. All benchmark containers are discarded; no
+owner database or live venue is used.
+
+Final validation in the pinned SDK container, from `backend/`, with disposable
+`Vessel_TEST_POSTGRES` and `Vessel_TEST_EVENT_RABBIT` enabled:
+
+- `dotnet build Vessel.slnx -c Release --no-restore`: passes, zero warnings/errors.
+- `dotnet test Vessel.slnx -c Release --no-build --logger 'trx;LogFileName=f1-final.trx'`:
+  **3,355 passed, 0 failed, 5 skipped, 3,360 total** (4 m 44 s), including all ten
+  new cache/revision tests. Conditional skips are the three live venue checks
+  and two external S3 checks; no skipped check is counted as a pass.
+- The benchmark wrapper (`paired.py`, using the supplied `bench.py`) and raw
+  results are retained locally under the ignored
+  `backend/tests/Vessel.Tests/TestResults/activity-cache-benchmark/` directory.

@@ -312,6 +312,7 @@ public abstract class WorkspaceIsolationCases(IsolationHost api)
         string[] paths = [$"/api/accounts/{account}", $"/api/accounts/{account}/snapshot", $"/api/accounts/{account}/fills"];
         var responses = await Isolated.State(a, paths);
         var state = await Snapshot.Of(a, paths);
+        var originalRows = await Persisted.Of(a.Journal!, a.Id);
         await state.Unchanged();
         foreach (var (table, change, undo) in new[]
         {
@@ -325,6 +326,11 @@ public abstract class WorkspaceIsolationCases(IsolationHost api)
             Assert.Equal(responses, await Isolated.State(a, paths));
             await Assert.ThrowsAnyAsync<Xunit.Sdk.XunitException>(state.Unchanged);
             Assert.Equal(1, await Update(a, table, undo));
+            // Undo restores facts but deliberately advances the monotonic cache revision. The isolation
+            // harness still fingerprints that row; only this self-test rebases after checking restored facts.
+            Assert.Equal(originalRows.Where(r => !r.StartsWith("activity_facts_revisions ", StringComparison.Ordinal)),
+                (await Persisted.Of(a.Journal!, a.Id)).Where(r => !r.StartsWith("activity_facts_revisions ", StringComparison.Ordinal)));
+            state = await Snapshot.Of(a, paths);
             await state.Unchanged();
         }
     }

@@ -34,6 +34,8 @@ public sealed class OwnerScopeArchitectureTests
         // To add an entry, review the statement's scope, then copy its path|hash from this assertion's message.
         string[] reviewed =
         [
+            // Revision-only read: exact assigned owner parameter inside a repeatable-read snapshot; absent means revision zero.
+            "Vessel.Persistence/CachedActivitySummaryReader.cs|404194565bdca94c05578fa57d66abe1700797d0437acb7c314b332ed84cd0be",
             "Vessel.Api/EvidenceCopyCommand.cs|c9b34ee7f02a2f083c971b5bcfd2b6dfb239af4970d91d8e56dc616d55a3d9c4",
             // Offline evidence copy: read-only transaction mode for its metadata read; touches no rows.
             "Vessel.Api/EvidenceCopyCommand.cs|6c20e5345ee8028f61cc0541aeb60699e5cffa99c8f79ff7f8c62b0a8dad1837",
