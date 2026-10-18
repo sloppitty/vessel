@@ -4,7 +4,7 @@ import type { SizingDocument } from '@/api/sizing'
 import { ExternalLink, PencilLine, RefreshCw } from 'lucide-react'
 import { statusLabels, type PlayStatus } from '@/api/plays'
 import { useVenues } from '@/api/venues'
-import { VenueBadge } from '@/components/venues/VenueBadge'
+import { AccountSelect } from '@/components/accounts/AccountSelect'
 import { Input } from '@/components/ui/input'
 import { InfoTip } from '@/components/ui/info-tip'
 import type { DraftEvidence, PlayDraft } from './draft'
@@ -25,6 +25,7 @@ import { isNominalUsdQuote } from './stablecoins'
 import { defaultPlayTitle } from './default-title'
 import './plays-workspace.css'
 import { NativeSelect } from '@/components/ui/native-select'
+import { pickerAccounts } from '@/features/workspace/account-picker-options'
 
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, revision = null,
   lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, onRiskChange, retrospective = false }: {
@@ -68,6 +69,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const effectiveFilter = filterExists && (!account || matchesFilter(account, portfolioFilter)) ? portfolioFilter : ''
   if (portfolioFilter !== effectiveFilter) setPortfolioFilter(effectiveFilter)
   const filteredAccounts = enabledAccounts.filter(account => matchesFilter(account, effectiveFilter))
+  const accountChoices = pickerAccounts(filteredAccounts, portfolios)
 
   // A reload can disable or delete the chosen account. Clear it like an account change so a
   // venue contract is never shown as a manual label. Loading keeps the last known list.
@@ -176,15 +178,12 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         {enabledAccounts.some(account => account.portfolioId === null) && <option value="unassigned">Unassigned accounts</option>}
       </NativeSelect></label>
       <div className="plays-account-field">
-        {/* The venue sits beside the label so the select keeps its full width for long account names. */}
-        <div className="plays-field-heading plays-account-heading"><label htmlFor={`${fieldId}-account`}>Account</label>
-          {account && <VenueBadge venueId={account.venueId} size="xs" className="plays-account-venue" />}</div>
+        <div className="plays-field-heading plays-account-heading"><span id={`${fieldId}-account-label`} className="plays-field-label">Account</span></div>
         <div className="plays-select-row">
-          <NativeSelect density="bare" id={`${fieldId}-account`} value={lockInstrument ? draft.accountId : accountId} disabled={lockInstrument || (loading && !accounts.length)} onChange={event => chooseAccount(event.target.value)}>
-            <option value="">{!loading && !enabledAccounts.length ? 'No enabled accounts' : 'Choose an account'}</option>
-            {lockInstrument && !account && <option value={draft.accountId}>Unavailable or disabled account</option>}
-            {filteredAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {venues.name(account.venueId)}</option>)}
-          </NativeSelect>{onReload && <button type="button" className="plays-reload-accounts" aria-label="Reload accounts" title="Reload accounts"
+          <AccountSelect density="bare" id={`${fieldId}-account`} labelledBy={`${fieldId}-account-label`} value={lockInstrument ? draft.accountId : accountId}
+            accounts={accountChoices} onChange={chooseAccount} disabled={lockInstrument || (loading && !accounts.length)}
+            placeholder={!loading && !enabledAccounts.length ? 'No enabled accounts' : 'Choose an account'}
+            missingLabel={lockInstrument ? 'Unavailable or disabled account' : undefined} />{onReload && <button type="button" className="plays-reload-accounts" aria-label="Reload accounts" title="Reload accounts"
             onClick={onReload} disabled={loading} aria-busy={loading}>
             <RefreshCw size={13} className={loading ? 'is-spinning' : ''} aria-hidden="true" /></button>}
         </div>

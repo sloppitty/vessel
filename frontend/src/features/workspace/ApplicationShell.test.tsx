@@ -13,6 +13,7 @@ import { retrospectiveFixture, retrospectiveSavedFixture } from '@/test/retrospe
 import { discoveryFixture, indexAccount, indexVenue } from '@/test/account-access-fixture'
 import { discrepancyFixture, eventCursor, eventFrame, monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
 import type { MonitorEventPage, MonitorStreamEvent } from '@/api/monitor'
+import { chooseInPicker } from '@/test/account-picker'
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
@@ -414,7 +415,7 @@ describe('Main application shell', () => {
     expect(client.updateAccount).toHaveBeenLastCalledWith(accountFixture.id, expect.objectContaining({ expectedRevision: 3, isEnabled: true }))
     await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
     await userEvent.click(screen.getByRole('button', { name: 'New play' }))
-    await userEvent.selectOptions(await screen.findByLabelText('Account'), accountFixture.id)
+    await chooseInPicker('Account', accountFixture.name)
     expect(screen.getByTestId('capital-context')).toHaveTextContent('Second balance$1,250.12')
   })
   it('resets a portfolio filter whose portfolio disappeared on reload', async () => {
@@ -704,7 +705,7 @@ describe('Main application shell', () => {
     await screen.findByText(/No saved plays yet/)
     expect(screen.queryByText('BTC reclaim at support')).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'New play' }))
-    await screen.findByRole('option', { name: 'No enabled accounts' })
+    await screen.findByRole('button', { name: 'Account No enabled accounts' })
     expect(screen.getByRole('heading', { level: 1, name: 'Plays' })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('')
     expect(within(screen.getByRole('region', { name: 'Play draft workspace' })).getByText('Draft', { selector: '.badge' })).toBeInTheDocument()

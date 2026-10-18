@@ -11,6 +11,7 @@ import { createDraft, type PlayDraft } from './draft'
 import { VenuesProvider } from '@/api/venues'
 import type { PlayStatus } from '@/api/plays'
 import { systemFixture } from '@/test/system-fixture'
+import { accountPicker, chooseInPicker } from '@/test/account-picker'
 
 function Workspace({ disabled = false, status = 'draft', retrospective = false }: { disabled?: boolean; status?: PlayStatus; retrospective?: boolean }) {
   const [draft, setDraft] = useState(createDraft)
@@ -47,22 +48,25 @@ describe('Play draft workspace', () => {
     </VenuesProvider>)
     await waitFor(() => expect(screen.getByRole('link', { name: /Open 1000PEPE/ })).toHaveAttribute('href', 'https://trade.example/kPEPE'))
   })
-  it('shows the chosen account venue beside the label, leaving the select its full row', async () => {
+  it('chooses the account in the shared account picker, whose trigger shows its logo and venue', async () => {
     const rh = { ...accountFixture, name: 'Robinhood perps', venueId: 'lighter-rh', sourceId: '7', address: null }
     render(<AccountWorkspace accounts={[rh]} api={catalogueApi} />)
-    const select = screen.getByRole('combobox', { name: 'Account' })
-    expect(screen.getByRole('option', { name: 'Robinhood perps · Lighter · Robinhood' })).toBeInTheDocument()
-    await userEvent.selectOptions(select, rh.id)
-    const heading = screen.getByText('Account', { selector: 'label' }).parentElement!
-    expect(heading.querySelector('.venue-badge')).toHaveTextContent('Lighter · Robinhood')
-    expect(heading.querySelector('[data-logo="lighter-rh"]')).not.toBeNull()
-    expect(select.parentElement!.querySelector('.venue-badge')).toBeNull()
+    expect(accountPicker('Account')).toHaveAccessibleName('Account Choose an account')
+    await userEvent.click(accountPicker('Account'))
+    // No aggregate choices such as All accounts: only accounts, named with venue, source and portfolio.
+    expect(within(screen.getByRole('listbox', { name: 'Account' })).getAllByRole('option')).toHaveLength(1)
+    await userEvent.click(screen.getByRole('option', { name: /^Robinhood perps, Lighter · Robinhood, #7, Swing trading/ }))
+    const trigger = accountPicker('Account')
+    expect(trigger).toHaveAttribute('data-value', rh.id)
+    expect(trigger).toHaveAccessibleName('Account Robinhood perps, Lighter · Robinhood')
+    expect(trigger.querySelector('.venue-tag')).toHaveTextContent('Lighter · Robinhood')
+    expect(trigger.querySelector('[data-logo="lighter-rh"]')).not.toBeNull()
   })
   it('clears venue context when a reload disables or removes the chosen account', async () => {
     const venue = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}` }
     const onDraft = vi.fn<(draft: PlayDraft) => void>()
     const view = render(<ReloadedWorkspace accounts={[venue]} onDraft={onDraft} />)
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
+    await chooseInPicker('Account', venue.name)
     await pickInstrument(userEvent, 'BTC')
     expect(onDraft.mock.lastCall?.[0]).toMatchObject({ accountId: venue.id, instrument: 'BTC', instrumentSource: 'venue' })
     view.rerender(<ReloadedWorkspace accounts={[{ ...venue, isEnabled: false }]} onDraft={onDraft} />)
@@ -70,7 +74,7 @@ describe('Play draft workspace', () => {
     expect(screen.getByRole('textbox', { name: 'Perpetual instrument' })).toHaveValue('')
     expect(screen.getByRole('button', { name: 'About manual instruments' })).toHaveAccessibleDescription('Manual label, not venue-validated.')
     view.rerender(<ReloadedWorkspace accounts={[]} onDraft={onDraft} />)
-    expect(screen.getByRole('combobox', { name: 'Account' })).toHaveValue('')
+    expect(accountPicker('Account')).toHaveAttribute('data-value', '')
   })
 
 
@@ -106,7 +110,7 @@ describe('Play draft workspace', () => {
   it('uses a real enabled account without assuming its value is an available budget', async () => {
     render(<Workspace />)
     expect(within(screen.getByTestId('capital-context')).queryByText('$1,250.12')).not.toBeInTheDocument()
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
+    await chooseInPicker('Account', accountFixture.name)
     const capital = within(screen.getByTestId('capital-context'))
     expect(capital.getAllByText('$1,250.12').length).toBeGreaterThan(0)
     // The account has no available wallet amount, so its value is not used as a budget.
@@ -116,29 +120,31 @@ describe('Play draft workspace', () => {
   it('never offers disabled accounts, and allows outlining a draft without accounts', () => {
     render(<Workspace disabled />)
     expect(screen.queryByRole('option', { name: /Main account/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'No enabled accounts' })).toBeInTheDocument()
+    expect(accountPicker('Account')).toHaveAccessibleName('Account No enabled accounts')
+    expect(accountPicker('Account')).toBeDisabled()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toBeEnabled()
   })
 
   it('does not claim accounts are empty while the account context is still loading', () => {
     render(<PlayWorkspace accounts={[]} portfolios={[]} api={createWorkspaceApi('test-only')} draft={createDraft()} onChange={vi.fn()} loading />)
-    expect(screen.queryByRole('option', { name: 'No enabled accounts' })).not.toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: 'Account' })).toBeDisabled()
+    expect(accountPicker('Account')).toHaveAccessibleName('Account Choose an account')
+    expect(accountPicker('Account')).toBeDisabled()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toBeEnabled()
   })
 
   it('clears an account-specific budget override when the account selection changes', async () => {
     const draft = { ...createDraft(), accountId: accountFixture.id, budgetOverride: '50' }
     const onChange = vi.fn()
-    render(<PlayWorkspace accounts={[accountFixture]} portfolios={[portfolioFixture]} api={createWorkspaceApi('test-only')} draft={draft} onChange={onChange} />)
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), '')
-    expect(onChange).toHaveBeenCalledWith({ ...draft, accountId: '', instrument: '', instrumentSource: 'manual', budgetOverride: null })
+    const second = { ...accountFixture, id: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', name: 'Second wallet' }
+    render(<PlayWorkspace accounts={[accountFixture, second]} portfolios={[portfolioFixture]} api={createWorkspaceApi('test-only')} draft={draft} onChange={onChange} />)
+    await chooseInPicker('Account', second.name)
+    expect(onChange).toHaveBeenCalledWith({ ...draft, accountId: second.id, instrument: '', instrumentSource: 'manual', budgetOverride: null })
   })
 
   it('does not display a selected account balance after that account becomes disabled', () => {
     const draft = { ...createDraft(), accountId: accountFixture.id }
     render(<PlayWorkspace accounts={[{ ...accountFixture, isEnabled: false }]} portfolios={[portfolioFixture]} api={createWorkspaceApi('test-only')} draft={draft} onChange={vi.fn()} />)
-    expect(screen.getByRole('combobox', { name: 'Account' })).toHaveValue('')
+    expect(accountPicker('Account')).toHaveAttribute('data-value', '')
     expect(within(screen.getByTestId('capital-context')).queryByText('$1,250.12')).not.toBeInTheDocument()
   })
 
@@ -146,7 +152,7 @@ describe('Play draft workspace', () => {
     render(<Workspace />)
     await userEvent.click(screen.getByRole('button', { name: 'Set budget' }))
     await userEvent.type(screen.getByRole('textbox', { name: 'Budget $' }), '70')
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
+    await chooseInPicker('Account', accountFixture.name)
     expect(screen.queryByRole('button', { name: 'Save budget' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
   })
@@ -174,13 +180,13 @@ describe('Play draft workspace', () => {
     const instruments = vi.fn().mockResolvedValue(instrumentCatalogFixture)
     const api = { ...createWorkspaceApi('test-only'), instruments }
     render(<AccountWorkspace accounts={[first, second]} api={api} />)
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), first.id)
+    await chooseInPicker('Account', first.name)
     await pickInstrument(userEvent, 'BTC')
     await userEvent.click(screen.getByRole('button', { name: 'Set budget' }))
     await userEvent.type(screen.getByRole('textbox', { name: 'Budget $' }), '70')
     await userEvent.click(screen.getByRole('button', { name: 'Save budget' }))
     expect(screen.getByRole('group', { name: 'Budget' })).toHaveTextContent('$70.00manual')
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), second.id)
+    await chooseInPicker('Account', second.name)
     expect(screen.getByRole('combobox', { name: 'Perpetual instrument' })).toHaveValue('')
     expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Perpetual instrument' })).toBeEnabled())
@@ -191,7 +197,7 @@ describe('Play draft workspace', () => {
     const wallet = { ...accountFixture, venueId: 'hyperliquid' }
     const user = userEvent.setup()
     render(<AccountWorkspace accounts={[wallet]} api={{ ...createWorkspaceApi('test-only'), ...catalogueApi }} />)
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), wallet.id)
+    await chooseInPicker('Account', wallet.name, user)
     await pickInstrument(user, 'BTC')
     await user.click(screen.getByRole('button', { name: '25×' }))
     expect(screen.getByRole('spinbutton', { name: 'Leverage (×)' })).toHaveValue(25)
@@ -205,25 +211,26 @@ describe('Play draft workspace', () => {
     const unassigned = { ...accountFixture, id: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', name: 'Unassigned broker', portfolioId: null }
     const api = createWorkspaceApi('test-only')
     render(<AccountWorkspace accounts={[accountFixture, unassigned]} api={api} />)
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
+    await chooseInPicker('Account', accountFixture.name)
     await userEvent.type(screen.getByRole('textbox', { name: 'Perpetual instrument' }), 'Manual contract')
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Portfolio' }), 'unassigned')
-    expect(screen.getByRole('combobox', { name: 'Account' })).toHaveValue('')
+    expect(accountPicker('Account')).toHaveAttribute('data-value', '')
     expect(screen.getByRole('textbox', { name: 'Perpetual instrument' })).toHaveValue('')
-    expect(screen.queryByRole('option', { name: 'Main account · Manual' })).not.toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'Unassigned broker · Manual' })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: 'Default portfolio' })).not.toBeInTheDocument()
+    await userEvent.click(accountPicker('Account'))
+    expect(screen.queryByRole('option', { name: /^Main account,/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /^Unassigned broker, .*, Unassigned$/ })).toBeInTheDocument()
   })
 
   it('keeps the draft and shows All accounts if a metadata reload moves its account out of the selected portfolio', async () => {
     const api = createWorkspaceApi('test-only')
     const view = render(<AccountWorkspace accounts={[accountFixture]} api={api} />)
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Portfolio' }), portfolioFixture.id)
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
+    await chooseInPicker('Account', accountFixture.name)
     await userEvent.type(screen.getByRole('textbox', { name: 'Perpetual instrument' }), 'Manual contract')
     view.rerender(<AccountWorkspace accounts={[{ ...accountFixture, portfolioId: null }]} api={api} />)
     expect(screen.getByRole('combobox', { name: 'Portfolio' })).toHaveValue('')
-    expect(screen.getByRole('combobox', { name: 'Account' })).toHaveValue(accountFixture.id)
+    expect(accountPicker('Account')).toHaveAttribute('data-value', accountFixture.id)
     expect(screen.getByRole('textbox', { name: 'Perpetual instrument' })).toHaveValue('Manual contract')
   })
 
@@ -237,7 +244,7 @@ describe('Play draft workspace', () => {
         onChange={next => { onDraft(next); setDraft(next) }} />
     }
     render(<CaptureWorkspace />)
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
+    await chooseInPicker('Account', venue.name)
     await pickInstrument(userEvent, 'BTC')
     await screen.findByText(/Updated/)
     // The jsdom renderer stub cannot draw, so the capture reports a failure without touching the draft.
