@@ -1,4 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
+  <!-- The image publishes ReadyToRun for linux-x64; the RID graph lets the locked restore cover that publish. -->
+  <PropertyGroup><RuntimeIdentifiers>linux-x64</RuntimeIdentifiers></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Vessel.Application/Vessel.Application.csproj" />
     <ProjectReference Include="../Vessel.Persistence/Vessel.Persistence.csproj" />
