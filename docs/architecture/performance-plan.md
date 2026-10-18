@@ -217,3 +217,25 @@ Rough sizing for the archive discussion. Assumptions: one row per candle with ex
 | 50 instruments, 1h only | ~60 MB | ~5–10 MB |
 
 Disk space is not the constraint; history availability is. Hyperliquid's REST API returns only the latest 5,000 candles per interval: about 3.5 days of 1m, 17 days of 5m, 52 days of 15m, 208 days of 1h, 2.3 years of 4h and 13.7 years of 1d. Deep 1m history therefore has to be **collected going forward** by an always-on job (the existing shared WebSocket or bounded polling), while coarser intervals can be backfilled to the venue horizon once. Lighter and RISEx have their own limits. Older history from other sources would need separate research.
+
+## API cold start and cookie authentication (October 18, 2026)
+
+The owner reported a slow first load and slow "message to sign" after an API start. Three behaviour-preserving changes, from the sign-in and post-sign-in load investigations:
+
+- **ReadyToRun image.** `backend/Dockerfile` publishes the API and worker for `linux-x64` with `PublishReadyToRun`, framework-dependent, with the default tiered compilation and dynamic PGO, no trimming or AOT. The two executables list `linux-x64` in `RuntimeIdentifiers`, so the locked restore covers the RID graph (their lock files only gain an empty `net10.0/linux-x64` target); libraries stay RID-agnostic and the migration bundles are unchanged. The image grows by about 160 MB uncompressed (`/app` 202 → 360 MB).
+- **Read-only warm-up before readiness** (`StartupWarmup`, `IdentityWarmup`). After Kestrel listens, a background pass builds both EF models, runs the cookie-session, challenge-by-ID and wallet-by-address lookups and recovers a fixed public EOA vector (Wallet mode), then runs the Overview, event head, notifications, monitor, Plays and Activity reads once for a fresh random owner with no rows. `/health/ready` answers 503 `{"status":"unavailable","reason":"warming-up"}` until it finishes or `Vessel:Startup:Warmup:Timeout` (default 30 s, 1 s–10 min) passes; the timeout is enforced with `WaitAsync`, so a database call that ignores cancellation (a stalled handshake) cannot hold readiness. Then every existing readiness check applies unchanged. Gating readiness is deliberate: Compose starts web only once the API is healthy, so the first user no longer pays first-use costs, and the bound keeps a broken warm-up from blocking a deployment. Invariants: no writes (a test runs it against `default_transaction_read_only=on` and requires every step to succeed), no challenge or session is issued or consumed, nothing is cached (every request still authenticates against the database), logs carry step names and exception types only, failures never stop the host. Enabled by default outside Development (`Vessel:Startup:Warmup:Enabled`). The worker has no request path and does not warm up. The challenge path is mostly its write transaction and is not warmed.
+- **One read per cookie-authenticated request** (`SessionStore`). Session, user and wallet come from one `LEFT JOIN` statement instead of three SELECTs, with the same refusal codes in the same order. The conditional idle-refresh UPDATE is skipped when the row just read shows no refresh is due: `LastSeenAt` only moves forward, so the UPDATE could not have matched. When due, it keeps its revocation and expiry predicates, so a concurrent revoke still wins. The common request is one statement instead of four.
+
+`/api/system` stays registry-based: several tests replace `IVenueRegistry`, so a descriptor-only path would split its source of truth for a sub-millisecond gain.
+
+Measured with the packaged images in Wallet mode against throwaway PostgreSQL 18 and RabbitMQ on one workstation (direct Kestrel, no TLS/nginx; 5 cold starts per row, cold p50 in ms; warm is p50 of 30 after 20 untimed):
+
+| Request | Before, first after readiness | After (R2R only) | After (R2R + warm-up) | Before, first request at all | After, first request at all | Warm before → after |
+|---|---:|---:|---:|---:|---:|---:|
+| `GET /api/auth/session` | 157 | 48 | 32 | 713 | 186 | 2.54 → 1.73 |
+| `POST /api/auth/challenge` | 241 | 90 | 92 | 777 | 253 | 9.1 → 9.5 |
+| `POST /api/auth/verify` | 397 | 233 | 174 | 981 | 336 | 10.3 → 10.3 |
+| `GET /api/system` | 94 | 51 | 16 | 704 | 192 | 1.64 → 1.45 |
+| `GET /api/overview` (empty journal) | 200 | 128 | 61 | 1,036 | 328 | 3.65 → 3.26 |
+
+Launch to first 200 from readiness (polled every 50 ms): before 2.21 s p50, R2R only 1.30 s, R2R + warm-up 1.55 s (the warm-up itself took 0.74 s in Wallet mode). "First request at all" skips readiness and races the warm-up, the worst case for a direct caller. These are cold-start gains; warm latency is unchanged except the one-statement session read.
