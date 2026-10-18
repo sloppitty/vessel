@@ -1,10 +1,13 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Vessel.Application.Activity;
+using Vessel.Application.MarketData;
 using Vessel.Application.Overview;
 using Vessel.Application.Ownership;
+using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
@@ -44,7 +47,7 @@ public sealed class ActivityCachePostgresTests
             return await new ActivityStore(db).ReadAsync(accountId, ct, accountIds);
         }
     }
-    private static ServiceProvider Provider(CoreDatabase database, Reads reads)
+    private static ServiceProvider Provider(CoreDatabase database, Reads reads, bool verifyReleased = false)
     {
         var services = new ServiceCollection();
         services.AddVesselPersistence(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -52,12 +55,46 @@ public sealed class ActivityCachePostgresTests
         services.AddScoped<IJournalOwnerContext, AssignedOwnerContext>();
         services.AddSingleton(reads);
         services.AddScoped<IActivityStore, CountingStore>();
+        if (verifyReleased) services.AddScoped<IVenueRegistry, ReleasedConnectionRegistry>();
         return services.BuildServiceProvider();
     }
     private static async Task<ActivitySummaries> Read(ServiceProvider provider, Guid owner, Guid? account = null, IReadOnlySet<Guid>? ids = null)
     {
         await using var scope = provider.GetRequiredService<IOwnerScopeFactory>().Create(owner);
         return await scope.Services.GetRequiredService<IActivitySummaryReader>().ReadAsync(account, default, ids);
+    }
+
+    private sealed class ReleasedConnectionRegistry(VesselDbContext db) : IVenueRegistry
+    {
+        public IReadOnlyList<VenueDescriptor> Descriptors => [];
+        public VenueDescriptor? Descriptor(string id) => null;
+        public IPerpetualVenueReader? Reader(string id) => null;
+        public IVenueFundingReader? Funding(string id)
+        {
+            Assert.Null(db.Database.CurrentTransaction);
+            Assert.Equal(System.Data.ConnectionState.Closed, db.Database.GetDbConnection().State);
+            Assert.Empty(db.ChangeTracker.Entries());
+            return null;
+        }
+        public IVenueOrderReader? Orders(string id) => null;
+        public ICandleReader? Candles(string id) => null;
+        public IMarketContextReader? MarketContext(string id) => null;
+        public IMarketStream? Stream(string id) => null;
+        public IVenueAccountDiscovery? Discovery(string id) => null;
+        public IVenueCredentialVerifier? CredentialVerifier(string id) => null;
+    }
+
+    [PostgresFact]
+    public async Task Producer_releases_snapshot_and_connection_before_aggregation_and_still_hits_the_cache()
+    {
+        await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture");
+        await using (var db = database.Context(owner))
+        { db.Accounts.Add(account); db.Fills.Add(Fill(account, 0)); await db.SaveChangesAsync(); }
+        var reads = new Reads(); await using var provider = Provider(database, reads, verifyReleased: true);
+        var result = await Read(provider, owner);
+        Assert.Single(result.Facts.Fills);
+        Assert.Same(result, await Read(provider, owner)); Assert.Equal(1, reads.Count);
     }
 
     [PostgresFact]
@@ -210,6 +247,80 @@ public sealed class ActivityCachePostgresTests
             await newDb.Database.ExecuteSqlInterpolatedAsync($"UPDATE accounts SET \"Name\" = 'new' WHERE \"OwnerId\" = {owner} AND \"Id\" = {second.Id}");
         Assert.Equal(initial + 3, await Revision(observer, owner));
         await oldTx.CommitAsync(); Assert.Equal(initial + 4, await Revision(observer, owner));
+    }
+
+    [PostgresFact]
+    public async Task Immediate_constraints_bump_later_owners_once_and_savepoint_rollback_restores_the_sets()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var first = Guid.NewGuid(); var second = Guid.NewGuid(); var rolledBack = Guid.NewGuid();
+        var accounts = new[] { first, second, rolledBack }.Select(o => new Account(Guid.NewGuid(), o, "manual", "Fixture")).ToArray();
+        foreach (var account in accounts)
+        {
+            await using var db = database.Context(account.OwnerId);
+            db.Accounts.Add(account); await db.SaveChangesAsync();
+        }
+        await using var writer = database.Context(first);
+        await using var tx = await writer.Database.BeginTransactionAsync();
+        async Task Insert(Account account, int n)
+        {
+            await using var db = new VesselDbContext(new DbContextOptionsBuilder<VesselDbContext>()
+                .UseNpgsql(writer.Database.GetDbConnection()).Options, new CoreOwner(account.OwnerId));
+            await db.Database.UseTransactionAsync(tx.GetDbTransaction());
+            db.Fills.Add(Fill(account, n)); await db.SaveChangesAsync();
+        }
+        await Insert(accounts[0], 0);
+        await writer.Database.ExecuteSqlRawAsync("SET CONSTRAINTS ALL IMMEDIATE");
+        Assert.Equal(2, await Revision(writer, first));
+        await tx.CreateSavepointAsync("owner_rollback");
+        await Insert(accounts[2], 0);
+        await tx.RollbackToSavepointAsync("owner_rollback");
+        await Insert(accounts[1], 0);
+        await Insert(accounts[0], 1); await Insert(accounts[1], 1);
+        await tx.CommitAsync();
+        await using var observer = database.Context(first);
+        Assert.Equal(2, await Revision(observer, first)); Assert.Equal(2, await Revision(observer, second));
+        Assert.Equal(1, await Revision(observer, rolledBack));
+    }
+
+    [PostgresFact]
+    public async Task Trigger_functions_keep_the_migration_schema_when_the_writer_changes_search_path()
+    {
+        await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture");
+        await using var writer = database.Context(owner);
+        writer.Accounts.Add(account); await writer.SaveChangesAsync();
+        var schema = new Npgsql.NpgsqlConnectionStringBuilder(database.ConnectionString).SearchPath;
+        await using var tx = await writer.Database.BeginTransactionAsync();
+        await writer.Database.ExecuteSqlRawAsync("SET LOCAL search_path = pg_catalog");
+        await using (var command = writer.Database.GetDbConnection().CreateCommand())
+        {
+            command.Transaction = tx.GetDbTransaction();
+            // Schema comes only from CoreDatabase's generated identifier, never from user input.
+            command.CommandText = $"UPDATE \"{schema}\".accounts SET \"Name\" = 'changed'";
+            await command.ExecuteNonQueryAsync();
+        }
+        await tx.CommitAsync();
+        await using var observer = database.Context(owner);
+        Assert.Equal(2, await Revision(observer, owner));
+        Assert.Equal("changed", (await observer.Accounts.SingleAsync()).Name);
+    }
+
+    [PostgresFact]
+    public async Task Unit_of_work_pins_fact_writes_to_read_committed_even_with_a_stricter_session_default()
+    {
+        await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
+        await using var writer = database.Context(owner);
+        await writer.Database.OpenConnectionAsync();
+        await writer.Database.ExecuteSqlRawAsync("SET default_transaction_isolation = 'serializable'");
+        await new UnitOfWork(writer).ExecuteAsync(() =>
+        {
+            Assert.Equal(System.Data.IsolationLevel.ReadCommitted, writer.Database.CurrentTransaction!.GetDbTransaction().IsolationLevel);
+            writer.Accounts.Add(new(Guid.NewGuid(), owner, "manual", "Fixture"));
+            return Task.FromResult(true);
+        }, default);
+        await using var observer = database.Context(owner);
+        Assert.Equal(1, await Revision(observer, owner));
     }
 
     [PostgresFact]

@@ -17,35 +17,55 @@ public sealed class ActivityFactsRevision : Migration
             INSERT INTO activity_facts_revisions (owner_id, revision) SELECT DISTINCT "OwnerId", 1 FROM accounts;
 
             -- Statement transition tables collect all owners before any deferred revision lock is taken.
-            CREATE FUNCTION activity_facts_collect() RETURNS trigger LANGUAGE plpgsql AS $$
-            DECLARE owners text;
+            CREATE FUNCTION activity_facts_collect() RETURNS trigger LANGUAGE plpgsql SET search_path FROM CURRENT AS $$
+            DECLARE
+                recorded text := coalesce(current_setting('vessel.activity_owners', true), '');
+                owners text;
             BEGIN
+                -- Only aggregate missing owners; repeated single-row statements avoid unnest/set_config entirely.
                 IF TG_OP = 'INSERT' THEN
-                    SELECT string_agg(DISTINCT "OwnerId"::text, ',') INTO owners FROM activity_new;
+                    SELECT string_agg(DISTINCT "OwnerId"::text, ',') INTO owners FROM activity_new
+                    WHERE strpos(',' || recorded || ',', ',' || "OwnerId"::text || ',') = 0;
                 ELSIF TG_OP = 'DELETE' THEN
-                    SELECT string_agg(DISTINCT "OwnerId"::text, ',') INTO owners FROM activity_old;
+                    SELECT string_agg(DISTINCT "OwnerId"::text, ',') INTO owners FROM activity_old
+                    WHERE strpos(',' || recorded || ',', ',' || "OwnerId"::text || ',') = 0;
                 ELSE
                     SELECT string_agg(DISTINCT "OwnerId"::text, ',') INTO owners FROM
-                        (SELECT "OwnerId" FROM activity_old UNION SELECT "OwnerId" FROM activity_new) affected;
+                        (SELECT "OwnerId" FROM activity_old UNION SELECT "OwnerId" FROM activity_new) affected
+                    WHERE strpos(',' || recorded || ',', ',' || "OwnerId"::text || ',') = 0;
                 END IF;
-                IF owners IS NOT NULL THEN
-                    SELECT string_agg(DISTINCT value, ',') INTO owners FROM unnest(string_to_array(concat_ws(',',
-                        nullif(current_setting('vessel.activity_owners', true), ''), owners), ',')) value;
-                    PERFORM set_config('vessel.activity_owners', owners, true);
-                END IF;
+                IF owners IS NULL THEN RETURN NULL; END IF;
+                PERFORM set_config('vessel.activity_owners', concat_ws(',', nullif(recorded, ''), owners), true);
                 RETURN NULL;
             END $$;
 
-            CREATE FUNCTION activity_facts_bump() RETURNS trigger LANGUAGE plpgsql AS $$
-            DECLARE owner uuid;
+            CREATE FUNCTION activity_facts_bump() RETURNS trigger LANGUAGE plpgsql SET search_path FROM CURRENT AS $$
+            DECLARE
+                owner uuid;
+                owners text := nullif(current_setting('vessel.activity_owners', true), '');
+                bumped text := coalesce(current_setting('vessel.activity_bumped_owners', true), '');
             BEGIN
-                IF current_setting('vessel.activity_bumped', true) = 'true' THEN RETURN NULL; END IF;
-                PERFORM set_config('vessel.activity_bumped', 'true', true);
-                -- Sorted even for offline transactions that touch several owners.
-                FOR owner IN SELECT DISTINCT unnest(string_to_array(current_setting('vessel.activity_owners'), ','))::uuid ORDER BY 1 LOOP
+                -- Immediate constraint events can run before the statement transition-table collector.
+                IF TG_OP <> 'INSERT' THEN
+                    IF strpos(',' || coalesce(owners, '') || ',', ',' || OLD."OwnerId"::text || ',') = 0 THEN
+                        owners := concat_ws(',', owners, OLD."OwnerId"::text);
+                        PERFORM set_config('vessel.activity_owners', owners, true);
+                    END IF;
+                END IF;
+                IF TG_OP <> 'DELETE' THEN
+                    IF strpos(',' || coalesce(owners, '') || ',', ',' || NEW."OwnerId"::text || ',') = 0 THEN
+                        owners := concat_ws(',', owners, NEW."OwnerId"::text);
+                        PERFORM set_config('vessel.activity_owners', owners, true);
+                    END IF;
+                END IF;
+                IF owners IS NULL OR owners = bumped THEN RETURN NULL; END IF;
+                -- Sorted within each firing, including offline transactions that touch several owners.
+                FOR owner IN SELECT DISTINCT value::uuid FROM unnest(string_to_array(owners, ',')) value
+                    WHERE strpos(',' || bumped || ',', ',' || value || ',') = 0 ORDER BY 1 LOOP
                     INSERT INTO activity_facts_revisions (owner_id, revision) VALUES (owner, 1)
                     ON CONFLICT (owner_id) DO UPDATE SET revision = activity_facts_revisions.revision + 1;
                 END LOOP;
+                PERFORM set_config('vessel.activity_bumped_owners', owners, true);
                 RETURN NULL;
             END $$;
             """);

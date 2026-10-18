@@ -8,7 +8,7 @@ namespace Vessel.Persistence;
 public readonly record struct ActivitySummaryKey(Guid OwnerId, long Revision, Guid? AccountId, string Accounts);
 
 /// <summary>Process-local, size-bounded LRU. Failed and abandoned computations never enter the cache.</summary>
-public sealed class ActivitySummaryCache(long capacity = 128 * 1024 * 1024, int entryLimit = 64)
+public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int entryLimit = 64)
 {
     private readonly object gate = new();
     private readonly Dictionary<ActivitySummaryKey, Flight> flights = [];
@@ -55,13 +55,28 @@ public sealed class ActivitySummaryCache(long capacity = 128 * 1024 * 1024, int 
         }
         finally
         {
+            var cancel = false;
             lock (gate)
             {
                 if (flight is not null && --flight.Waiters == 0 && !flight.Completion.Task.IsCompleted)
                 {
                     // Remove before cancelling so a new caller cannot join an abandoned flight.
                     if (flights.GetValueOrDefault(key) == flight) flights.Remove(key);
-                    flight.Cancellation.Cancel();
+                    flight.CancellationPending = cancel = true;
+                }
+            }
+            if (cancel)
+            {
+                // Npgsql cancellation can synchronously contact PostgreSQL. Never hold the shared gate here.
+                try { flight!.Cancellation.Cancel(); }
+                catch (AggregateException) { } // A callback failure must not replace the waiter's cancellation.
+                finally
+                {
+                    lock (gate)
+                    {
+                        flight!.CancellationPending = false;
+                        if (flight.Finished) flight.Cancellation.Dispose();
+                    }
                 }
             }
         }
@@ -112,7 +127,14 @@ public sealed class ActivitySummaryCache(long capacity = 128 * 1024 * 1024, int 
                 _ = flight.Completion.Task.Exception;
             }
         }
-        finally { flight.Cancellation.Dispose(); }
+        finally
+        {
+            lock (gate)
+            {
+                flight.Finished = true;
+                if (!flight.CancellationPending) flight.Cancellation.Dispose();
+            }
+        }
     }
 
     private static long Charge(ActivitySummaryKey key, ActivitySummaries value)
@@ -138,6 +160,7 @@ public sealed class ActivitySummaryCache(long capacity = 128 * 1024 * 1024, int 
     private sealed class Flight
     {
         public int Waiters;
+        public bool CancellationPending, Finished;
         public CancellationTokenSource Cancellation { get; } = new();
         public TaskCompletionSource<ActivitySummaries> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }

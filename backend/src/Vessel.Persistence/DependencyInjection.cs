@@ -50,7 +50,9 @@ public static class DependencyInjection
         services.AddScoped<Vessel.Application.Ownership.IUnitOfWork>(sp => sp.GetRequiredService<UnitOfWork>());
         services.AddScoped<Vessel.Application.Workspace.IWorkspaceStore, WorkspaceStore>();
         services.AddScoped<Vessel.Application.Activity.IActivityStore, ActivityStore>();
-        services.AddSingleton<ActivitySummaryCache>();
+        var activityCacheBytes = config.GetValue<long?>("Vessel:Activity:CacheCapacityBytes") ?? 256L * 1024 * 1024;
+        if (activityCacheBytes < 0) throw new InvalidOperationException("Vessel:Activity:CacheCapacityBytes must be non-negative.");
+        services.AddSingleton(new ActivitySummaryCache(activityCacheBytes));
         services.AddScoped<Vessel.Application.Activity.IActivitySummaryReader, CachedActivitySummaryReader>();
         services.AddScoped<Vessel.Application.Credentials.IAccountCredentialStore, AccountCredentialStore>();
         services.AddScoped<Vessel.Application.Evidence.IEvidenceMetadataStore, EvidenceStore>();

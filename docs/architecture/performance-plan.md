@@ -232,15 +232,15 @@ Each read opens a fresh, explicitly assigned owner scope/DbContext and a
 RepeatableRead transaction, then reads `activity_facts_revisions` inside that
 snapshot. The cache key is **owner + revision + optional detail account + sorted
 account set**, distinguishing unrestricted and empty sets. The winning cache
-miss retains that independent scope through facts loading, aggregation and
-transaction completion; other callers dispose their probe snapshots. Concurrent
+miss materializes facts in that snapshot, commits and releases its transaction/
+connection, then aggregates while retaining its independent owner scope; other callers dispose their probe snapshots. Concurrent
 callers of the same key share one computation. Individual request cancellation
 only removes that waiter; the last departing waiter cancels and detaches the
 flight so a new caller can retry. Failed/cancelled/abandoned work is never cached.
 A write committed between a revision read and facts loading cannot mismatch the
 key and facts: both reads use that same PostgreSQL snapshot.
 
-The per-process LRU admits at most 64 entries and 128 MiB of conservative retained
+The per-process LRU admits at most 64 entries and (by default) 256 MiB of conservative retained
 graph charges (row/object/list/allocation overhead plus variable string lengths).
 An oversized result is shared in flight but not retained. Old revisions compete
 in this same bound rather than accumulating indefinitely. This is memory
@@ -355,3 +355,101 @@ Final validation in the pinned SDK container, from `backend/`, with disposable
 - The benchmark wrapper (`paired.py`, using the supplied `bench.py`) and raw
   results are retained locally under the ignored
   `backend/tests/Vessel.Tests/TestResults/activity-cache-benchmark/` directory.
+
+## 2026-10-18 — activity cache review corrections
+
+The unshipped `20261018130000_ActivityFactsRevision` migration is corrected in
+place. Its transaction-local bumped-owner set replaces the single boolean:
+`INSERT A; SET CONSTRAINTS ALL IMMEDIATE; INSERT B; COMMIT` now advances both
+owners exactly once. Immediate row events also collect their own old/new owners
+before the statement transition-table collector runs. Savepoint rollback restores
+both owner sets. Normal deferred firing still locks all pending owners in sorted
+UUID order at commit. Application writers must continue to leave constraints
+deferred: forcing early firing preserves invalidation, but takes revision locks
+before later account locks and cannot guarantee global lock ordering across
+separate firings. Both functions capture the migration's search path, so a
+writer changing its search path cannot redirect or break revision-table access.
+
+All writers of the nine facts tables must use **READ COMMITTED**, including
+operator SQL/import tools. A RepeatableRead/Serializable writer whose snapshot
+predates another same-owner commit can fail at commit with PostgreSQL `40001`
+on the shared revision row, even if its fact rows do not conflict. `UnitOfWork`
+now requests ReadCommitted explicitly rather than inheriting a server/session
+default; an integration test verifies a real fact write under a Serializable
+session default. The existing RepeatableRead stores are read-only; keep new
+facts writes inside the unit of work.
+
+The collector filters out already-recorded owners before aggregation and skips
+`set_config` entirely for repeated owners. Five interleaved trials of 50,000
+single-row INSERT statements in one transaction (PL/pgSQL loop, PostgreSQL 18,
+primary key and account FK, including COMMIT/deferred events) had median server
+times of **2,169 ms before / 1,300 ms after**; the FK-only control was **763 ms**.
+These are synthetic local timings, not an end-to-end refresh claim.
+
+Last-waiter cancellation detaches the flight under the gate, then invokes token
+callbacks outside it. Callback failures cannot replace caller cancellation or
+corrupt flight state, and disposal waits for cancellation callbacks to finish.
+A blocked, throwing callback test checks that unrelated hits and a replacement
+flight remain usable while that callback is still blocked.
+
+A producer commits/disposes its RepeatableRead transaction and releases its
+connection as soon as all AsNoTracking facts are materialized, before CPU
+aggregation. Revision and facts remain from one snapshot. An integration test
+checks the transaction, connection and tracker during aggregation; existing
+snapshot and serialized-equivalence tests continue to apply.
+
+`Vessel:Activity:CacheCapacityBytes` (`Vessel__Activity__CacheCapacityBytes` in the
+environment) configures the per-process retained-charge limit; default
+**268435456 bytes (256 MiB)**, zero disables retention while preserving
+single-flight, and negative values fail configuration. The 64-entry LRU limit
+remains. Oversized entries are shared only in flight; old revisions and distinct
+account scopes compete for the same capacity. This limits retained cache charge,
+not process RSS or working memory for active requests. Each API replica has its
+own cache.
+
+An isolated Release console probe loaded and aggregated the existing synthetic
+benchmark data, warmed EF/JIT first, disposed the context, then compared forced-GC
+managed-heap totals with/without a retained summary (three runs per size).
+At **50,000 fills + 20,000 funding rows**, steady deltas were **56.37–56.38 MB**
+(**53.8 MiB**) against **86.44 MB (82.4 MiB)** charged. At **100,000 + 40,000**,
+they were **112.69–112.70 MB (107.5 MiB)** against **172.78 MB (164.8 MiB)**
+charged. The first post-warm run had about 0.55 MB additional runtime retention;
+these deltas estimate retained managed memory, not an exact heap graph or RSS.
+The probe confirmed one computation for two consecutive reads at both sizes
+with the default cache. Keep the conservative charge (~1.53× these steady
+measurements): 256 MiB admits the measured 100k entry or two measured 50k keys,
+while long strings, more funding or different operation shapes can still require
+a larger configured budget. Lazy constituent DTOs were not materialized to
+measure or charge the summary.
+
+The 50k populated-Overview waterfall was rerun against pre-review `32c5ff0` and
+these corrections, with separate Production/Token SDK-container APIs limited to
+two CPUs and the same disposable PostgreSQL/RabbitMQ dataset. Each of 42
+interleaved rounds advances the revision with a committed no-op account UPDATE,
+then measures a miss and hit for each API; before/after order alternates and the
+first 12 rounds are warm-up. Across the remaining 30 rounds, miss p50/p95 was
+**399.3/463.1 ms before → 414.8/497.9 ms after**; hit p50/p95 was
+**22.2/34.2 ms → 22.3/32.0 ms**. No miss-latency improvement is claimed from this
+noisy shared-host run: the correction releases the transaction/connection sooner
+without reducing aggregation CPU. Five large Activity/Summary payloads were
+identical after normalizing only request-generated `asOfUtc`; fixed-clock tests
+still compare serialized responses directly. Benchmark scripts, raw samples and
+probe outputs are in the ignored
+`backend/tests/Vessel.Tests/TestResults/cache-review/` directory; the isolated
+probe and pre-review build source are under root `TestResults/cache-review/`.
+
+Final correction validation used `mcr.microsoft.com/dotnet/sdk:10.0.302`, from
+`backend/`, with only throwaway PostgreSQL 18 and RabbitMQ enabled through
+`Vessel_TEST_POSTGRES` / `Vessel_TEST_EVENT_RABBIT`:
+
+- `dotnet build Vessel.slnx -c Release --no-restore`: zero warnings/errors.
+- `dotnet test tests/Vessel.Tests -c Release --no-build --filter 'FullyQualifiedName~ActivityCache|FullyQualifiedName~ActivitySummaryCache' --logger 'trx;LogFileName=cache-review-focused.trx'`:
+  **16 passed, 0 failed, 0 skipped** (13 s), including the exact INSERT/early
+  constraint reproduction and blocked-callback regression.
+- `dotnet test Vessel.slnx -c Release --no-build --logger 'trx;LogFileName=cache-review-full-final.trx'`:
+  **3,361 passed, 0 failed, 5 skipped, 3,366 total** (4 m 31 s). The skips are
+  three live venue checks and two external S3 checks; they are not passes.
+
+All benchmark/test API, PostgreSQL and RabbitMQ containers were removed. No
+owner database, live migration, deployment or publication was involved. Remote
+PostgreSQL cancel latency and the browser/nginx abort path were not measured.

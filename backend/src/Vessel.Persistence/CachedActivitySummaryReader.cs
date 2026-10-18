@@ -31,10 +31,13 @@ public sealed class CachedActivitySummaryReader(IJournalOwnerContext owner, IOwn
                 await using (scope)
                 {
                     var facts = await scope.Services.GetRequiredService<IActivityStore>().ReadAsync(accountId, token, ids);
+                    var transaction = db.Database.CurrentTransaction!;
+                    await transaction.CommitAsync(token);
+                    await transaction.DisposeAsync();
+                    await db.Database.CloseConnectionAsync();
                     token.ThrowIfCancellationRequested();
                     var result = ActivityService.Aggregate(facts, accountId, ids, scope.Services.GetService<IVenueRegistry>());
                     token.ThrowIfCancellationRequested();
-                    await db.Database.CurrentTransaction!.CommitAsync(token);
                     return result;
                 }
             }, () => { transferred = true; return scope.DisposeAsync(); }, ct);
