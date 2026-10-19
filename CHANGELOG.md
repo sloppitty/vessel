@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 0.3.2 - October 19, 2026
+
+Release notes: [docs/releases/v0.3.2.md](docs/releases/v0.3.2.md).
+
+### Fixed
+
+- The Review account selector keeps its shared border, field background and
+  typography instead of inheriting the page button reset.
+
+### Changed
+
+- GitHub Actions runs checks and publication only for release tags; branch
+  pushes and pull requests use local checks without starting CI runners.
+
+### Upgrade
+
+- No new database migrations or configuration changes from v0.3.1. Use matching
+  v0.3.2 API and web images; earlier upgrade requirements still apply.
+
 ## 0.3.1 - October 19, 2026
 
 Release notes: [docs/releases/v0.3.1.md](docs/releases/v0.3.1.md).
