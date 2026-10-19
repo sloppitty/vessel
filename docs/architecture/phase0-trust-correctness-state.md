@@ -86,6 +86,18 @@ October 19, 2026, branch `t3/phase0-result-basis` (stacked on 0.2):
 
   The broker-gated contract fixture test passed.
 
+- A Sol (Codex, GPT-6.1-Sol) review found no defect in 0.2 and three in 0.3,
+  fixed in a third commit:
+  - tiny Play-local results displayed as "$0";
+  - a fee-only loss turned unknown near decimal precision, so
+    `GrossResult` is now exact;
+  - the formula wording reversed shorts.
+
+  The new tests failed before the fix. `scripts/check.sh` then passed:
+  - Backend: 3,477 passed, 5 skipped, 0 failed.
+  - Frontend: 2,482 tests, build OK.
+  - Release build: 0 warnings.
+
 ## 0.4 Monitor truth and visibility
 
 Not started.
