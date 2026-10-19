@@ -78,8 +78,9 @@ public static partial class PlayDocuments
             if (exit is null) throw Invalid($"{(kind == "stop" ? "Stops" : "Targets")} must not be null.");
             var (id, unit, label) = (Id(exit.Id), Unit(exit.Unit), $"{entryName} {kind} {index + 1}");
             var valueKey = LevelKey(kind, entryId, id, $"{unit} value");
-            if (unit == "percent" && !(kept.TryGetValue(valueKey, out var text) && text == exit.Value) &&
-                decimal.TryParse(exit.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var percent) && percent < 0)
+            // The grammar decides first: only a minus sign before an otherwise valid, non-zero plain decimal (-5, not -1e30
+            // or -0) gets the sign reason. The browser words both refusals the same way.
+            if (unit == "percent" && !(kept.TryGetValue(valueKey, out var text) && text == exit.Value) && IsNegativePlanText(exit.Value))
                 throw Invalid(kind == "stop" ? $"{label}: use a price for a stop beyond the entry; a percentage cannot be negative."
                     : $"{label}: a percentage cannot be negative; use a price instead.");
             return new PlanExit(id, unit, Number(exit.Value, valueKey, label), Number(exit.Share, LevelKey(kind, entryId, id, "share"), $"{label} share"));
@@ -89,6 +90,9 @@ public static partial class PlayDocuments
             plan.BudgetOverride is null ? null : Number(plan.BudgetOverride, "budget", "Budget"), entries,
             new PlanNotes(Note(plan.Notes.Thesis), Note(plan.Notes.Invalidation), Note(plan.Notes.Strategy), Note(plan.Notes.Evidence)));
     }
+
+    private static bool IsNegativePlanText(string? value) =>
+        value is ['-', .. var rest] && rest.Length > 0 && ExactDecimal.IsPlanText(rest) && rest.Any(c => c is >= '1' and <= '9');
 
     // Keys of the number fields a stored plan holds, for the unchanged-text rule. Plan IDs never contain spaces.
     private static string EntryKey(string entryId, string field) => $"entry {entryId} {field}";

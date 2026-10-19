@@ -12,7 +12,7 @@ import {
 } from './sizing'
 import { Equal, Expand, Plus, Trash2 } from 'lucide-react'
 import { NativeSelect } from '@/components/ui/native-select'
-import { planNumber } from './numbers'
+import { planInputType, planNumber } from './numbers'
 import { planTextMarks, sizeState, useStoredPlanText } from './stored-plan-text'
 
 const leveragePresets = [1, 5, 10, 25, 50]
@@ -149,7 +149,7 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
         <div className="whole-size-input">
           <label htmlFor={`${prefix}-size`}>
             <span>{draft.sizingMode === 'margin' ? 'Margin' : 'Quantity'}</span>
-            <Input id={`${prefix}-size`} type="number" min={0} step="any" value={draft.size} placeholder="0"
+            <Input id={`${prefix}-size`} {...planInputType(draft.size)} min={0} step="any" value={draft.size} placeholder="0"
               aria-invalid={overBudget || sizeMarks?.invalid ? true : undefined} aria-describedby={overBudget ? `${prefix}-over-budget` : undefined}
               data-warning={sizeMarks?.warning || undefined} data-suggested={marks?.size || undefined}
               title={sizeMarks?.title ?? (marks?.size ? markTitle : undefined)}

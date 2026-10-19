@@ -1,16 +1,20 @@
 import type { DraftEntry, DraftExit, PlayDraft } from './draft'
 import { levelName } from './execution'
 import { exitsOf, formatDraggedPrice, levelPrice, type ExitKind } from './levels'
-import { positivePlanNumber as positive } from './numbers'
+import { positivePlanNumber as positive, serverPositivePlanNumber as storedPositive } from './numbers'
 
 type Direction = PlayDraft['direction']
 
 /** Long targets and short stops sit above the entry. */
 const belongsAbove = (kind: ExitKind, direction: Direction) => (kind === 'target') === (direction === 'long')
 
-/** A stop or target in price units on the wrong side of its entry, or at it. Percent levels are always placed on the right side. */
+/**
+ * A stop or target in price units on the wrong side of its entry, or at it. Percent levels are always placed on the right
+ * side. Prices are read as the server's side check reads them, so stored text such as 1e2 counts; pass the entry price
+ * read the same way (`serverPositivePlanNumber`).
+ */
 export function wrongSide(entryPrice: number | null, exit: DraftExit, kind: ExitKind, direction: Direction) {
-  const price = exit.unit === 'price' ? positive(exit.value) : null
+  const price = exit.unit === 'price' ? storedPositive(exit.value) : null
   if (entryPrice === null || price === null) return false
   return belongsAbove(kind, direction) ? price <= entryPrice : price >= entryPrice
 }
@@ -25,11 +29,11 @@ export interface PlanIssue {
 /** Stops and targets that contradict the direction. A plan with issues cannot be saved. */
 export function planIssues(entries: readonly DraftEntry[], direction: Direction): PlanIssue[] {
   return entries.flatMap(entry => {
-    const entryPrice = positive(entry.price)
+    const entryPrice = storedPositive(entry.price)
     return (['stop', 'target'] as const).flatMap(kind => exitsOf(entry, kind)
       .filter(exit => wrongSide(entryPrice, exit, kind, direction))
       .map(exit => {
-        const side = positive(exit.value) === entryPrice ? 'at' : belongsAbove(kind, direction) ? 'below' : 'above'
+        const side = storedPositive(exit.value) === entryPrice ? 'at' : belongsAbove(kind, direction) ? 'below' : 'above'
         return {
           entryId: entry.id, kind, levelId: exit.id,
           message: `${levelName(entries, { role: kind, entryId: entry.id, levelId: exit.id })} is ${side} the entry price; a ${direction} ${kind} goes ${belongsAbove(kind, direction) ? 'above' : 'below'} it.`,

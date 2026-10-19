@@ -17,6 +17,17 @@ describe('plan checks', () => {
     expect(planIssues([entry('', '105', '90')], 'long')).toEqual([])
   })
 
+  it('reads stored entry and level text as the server\'s side check does', () => {
+    // A stored 1e2 entry is 100 to the server, which refuses a long stop at 105; the browser says so before saving.
+    expect(planIssues([entry('1e2', '105', '110')], 'long').map(issue => issue.message))
+      .toEqual(['Entry 1 stop is above the entry price; a long stop goes below it.'])
+    expect(planIssues([entry('+100', '95', '100.')], 'long').map(issue => issue.message))
+      .toEqual(['Entry 1 target 1 is at the entry price; a long target goes above it.'])
+    expect(planIssues([entry('1e2', '95', '110')], 'long')).toEqual([])
+    // Text the server cannot read at all stays unpriced.
+    expect(planIssues([entry('1,5', '105', '90')], 'long')).toEqual([])
+  })
+
   it('offers only the corrections that clear every issue', () => {
     const reversed = entry('100', '105', '90')
     const fixes = planFixes({ direction: 'long', entries: [reversed] })

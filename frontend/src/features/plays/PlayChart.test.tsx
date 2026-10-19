@@ -11,6 +11,7 @@ import type { ChartAdapterFactory, ChartCallbacks, ChartCandle, PriceOverlay } f
 import { accountFixture, candleSeriesFixture, idleMarketStream, marketContextFixture } from '@/test/workspace-fixture'
 import { createEntry, createExit, type DraftEntry } from './draft'
 import { ChartPanel } from './PlayChart'
+import { plainDecimalRule } from './numbers'
 
 function fakeAdapter() {
   const state = {
@@ -739,6 +740,10 @@ describe('Chart panel level editing', () => {
     const price = screen.getByRole('textbox', { name: 'Price' })
     await userEvent.clear(price)
     await userEvent.type(price, '-5{Enter}')
+    expect(screen.getByRole('alert')).toHaveTextContent(`Entry 1 price: ${plainDecimalRule}`)
+    expect(shown()[0]!.price).toBe('100')
+    await userEvent.clear(price)
+    await userEvent.type(price, '0{Enter}')
     expect(screen.getByRole('alert')).toHaveTextContent('Enter a price above zero.')
     expect(shown()[0]!.price).toBe('100')
     await userEvent.keyboard('{Escape}')

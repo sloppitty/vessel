@@ -1,5 +1,5 @@
 {
-  "description": "Plan number text on write (phase 0, 0.5a): blank, or an unsigned plain decimal ^[0-9]+(\\.[0-9]+)?$ of at most 64 characters that a C# decimal holds exactly. Checked by backend PlayDocumentTests and frontend numbers.test.ts; keep both runtimes passing on this one list.",
+  "description": "Plan number text on write (phase 0, 0.5a): blank, or an unsigned plain decimal ^[0-9]+(\\.[0-9]+)?$ of at most 64 characters that a C# decimal holds exactly. Every rejected text is refused with the field name and the plain-decimal reason, except that a stop or target in % whose text is in negativePercent (a minus sign before a valid, non-zero plain decimal) gets the negative-percentage reason. Checked by backend PlayDocumentTests and frontend numbers.test.ts; keep both runtimes passing on this one list.",
   "accepted": [
     "",
     "0",
@@ -62,6 +62,17 @@
     "79228162514264337593543950336",
     "7922816251426433759354395033.6",
     "12345678901234567890123456789.1",
-    "1.000000000000000000000000000000000000000000000000000000000000000"
+    "1.000000000000000000000000000000000000000000000000000000000000000",
+    "-0.5",
+    "-100",
+    "-1e1",
+    "-1e30",
+    "-1e-30"
+  ],
+  "negativePercent": [
+    "-1",
+    "-5",
+    "-0.5",
+    "-100"
   ]
 }

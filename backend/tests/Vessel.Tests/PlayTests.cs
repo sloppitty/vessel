@@ -42,6 +42,8 @@ internal static class PlanNumberFixture
     private static readonly JsonElement Root = Load();
     public static IReadOnlyList<string> Accepted => List("accepted");
     public static IReadOnlyList<string> Rejected => List("rejected");
+    /// <summary>Refused texts that a stop or target in % refuses with the negative-percentage reason.</summary>
+    public static IReadOnlyList<string> NegativePercent => List("negativePercent");
 
     private static JsonElement Load()
     {
@@ -254,7 +256,7 @@ public sealed class PlayDocumentTests
     {
         var failures = new List<string>();
         foreach (var text in PlanNumberFixture.Accepted)
-            foreach (var (field, plan, read) in PlanNumberFields(text))
+            foreach (var (field, plan, read, _) in PlanNumberFields(text))
             {
                 try
                 {
@@ -262,13 +264,16 @@ public sealed class PlayDocumentTests
                 }
                 catch (ProblemException e) { failures.Add($"{field} refused accepted {Show(text)}: {e.Message}"); }
             }
+        // A refusal names the field and gives the plain-decimal reason; only a negative plain decimal in a % field gets the sign reason.
         foreach (var text in PlanNumberFixture.Rejected)
-            foreach (var (field, plan, _) in PlanNumberFields(text))
+            foreach (var (field, plan, _, refusal) in PlanNumberFields(text))
             {
                 try { PlayDocuments.Normalize(plan); failures.Add($"{field} accepted rejected {Show(text)}"); }
-                catch (ProblemException e) when (e.StatusCode == 400) { }
+                catch (ProblemException e) when (e.StatusCode == 400 && e.Message == refusal) { }
+                catch (ProblemException e) { failures.Add($"{field} refused {Show(text)} with {e.StatusCode} {Show(e.Message)}, not {Show(refusal)}"); }
             }
         Assert.Empty(failures);
+        Assert.All(PlanNumberFixture.NegativePercent, text => Assert.Contains(text, PlanNumberFixture.Rejected));
     }
 
     /// <summary>
@@ -306,6 +311,9 @@ public sealed class PlayDocumentTests
             Assert.Throws<ProblemException>(() => PlayDocuments.Normalize(Percent("-5", "10"))).Message);
         Assert.Equal("Entry 1 target 1: a percentage cannot be negative; use a price instead.",
             Assert.Throws<ProblemException>(() => PlayDocuments.Normalize(Percent("5", "-10"))).Message);
+        // The grammar decides first, as in the browser: a minus sign before an exponent or zero gets the plain-decimal reason.
+        foreach (var text in new[] { "-1e30", "-1e-30", "-1e1", "-0" })
+            Assert.Equal($"Entry 1 stop 1: {PlainDecimalRule}", Assert.Throws<ProblemException>(() => PlayDocuments.Normalize(Percent(text, "10"))).Message);
         var breakEven = PlayDocuments.Normalize(Percent("0", "10"));
         Assert.Equal("0", breakEven.Entries[0].Stops[0].Value);
         Assert.Equal(100m, ExecutionMatcher.Levels(breakEven).Single(l => l.Role == OrderLinkRole.Stop).Price);
@@ -317,23 +325,37 @@ public sealed class PlayDocumentTests
     private static string Show(string text) => JsonSerializer.Serialize(text);
 
     /// <summary>One plan per number field, holding <paramref name="text"/> there; unpriced entries and percent levels keep the side check out of the way.</summary>
-    private static IEnumerable<(string Field, PlayPlanDocument Plan, Func<PlayPlanDocument, string?> Read)> PlanNumberFields(string text)
+    /// <summary>
+    /// One plan per number field, holding <paramref name="text"/> there, with the message a refusal of it must carry.
+    /// Unpriced entries and percent levels keep the side check out of the way.
+    /// </summary>
+    private static IEnumerable<(string Field, PlayPlanDocument Plan, Func<PlayPlanDocument, string?> Read, string Refusal)> PlanNumberFields(string text)
     {
         var plan = TestPlays.Plan();
         var entry = plan.Entries[0];
         PlayPlanDocument With(PlanEntry changed) => plan with { Entries = [changed] };
         PlanExit Exit(string id, string unit, string value, string share) => new(id, unit, value, share);
-        yield return ("size", plan with { Size = text }, p => p.Size);
-        yield return ("budget", plan with { BudgetOverride = text }, p => p.BudgetOverride);
-        yield return ("entry share", With(entry with { Share = text }), p => p.Entries[0].Share);
+        string Plain(string field) => $"{field}: {PlainDecimalRule}";
+        string Percent(string field, string kind) => !PlanNumberFixture.NegativePercent.Contains(text) ? Plain(field) : kind == "stop"
+            ? $"{field}: use a price for a stop beyond the entry; a percentage cannot be negative."
+            : $"{field}: a percentage cannot be negative; use a price instead.";
+        yield return ("size", plan with { Size = text }, p => p.Size, Plain("Size"));
+        yield return ("budget", plan with { BudgetOverride = text }, p => p.BudgetOverride, Plain("Budget"));
+        yield return ("entry share", With(entry with { Share = text }), p => p.Entries[0].Share, Plain("Entry 1 share"));
         yield return ("entry price", With(entry with { Price = text, Stops = [Exit("stop-1", "percent", "5", "100")],
-            Targets = [Exit("target-1", "percent", "10", "100")] }), p => p.Entries[0].Price);
-        yield return ("stop price", With(entry with { Price = "", Stops = [Exit("stop-1", "price", text, "100")] }), p => p.Entries[0].Stops[0].Value);
-        yield return ("stop percent", With(entry with { Stops = [Exit("stop-1", "percent", text, "100")] }), p => p.Entries[0].Stops[0].Value);
-        yield return ("stop share", With(entry with { Stops = [Exit("stop-1", "price", "95", text)] }), p => p.Entries[0].Stops[0].Share);
-        yield return ("target price", With(entry with { Price = "", Targets = [Exit("target-1", "price", text, "100")] }), p => p.Entries[0].Targets[0].Value);
-        yield return ("target percent", With(entry with { Targets = [Exit("target-1", "percent", text, "100")] }), p => p.Entries[0].Targets[0].Value);
-        yield return ("target share", With(entry with { Targets = [Exit("target-1", "price", "110", text)] }), p => p.Entries[0].Targets[0].Share);
+            Targets = [Exit("target-1", "percent", "10", "100")] }), p => p.Entries[0].Price, Plain("Entry 1 price"));
+        yield return ("stop price", With(entry with { Price = "", Stops = [Exit("stop-1", "price", text, "100")] }),
+            p => p.Entries[0].Stops[0].Value, Plain("Entry 1 stop 1"));
+        yield return ("stop percent", With(entry with { Stops = [Exit("stop-1", "percent", text, "100")] }),
+            p => p.Entries[0].Stops[0].Value, Percent("Entry 1 stop 1", "stop"));
+        yield return ("stop share", With(entry with { Stops = [Exit("stop-1", "price", "95", text)] }),
+            p => p.Entries[0].Stops[0].Share, Plain("Entry 1 stop 1 share"));
+        yield return ("target price", With(entry with { Price = "", Targets = [Exit("target-1", "price", text, "100")] }),
+            p => p.Entries[0].Targets[0].Value, Plain("Entry 1 target 1"));
+        yield return ("target percent", With(entry with { Targets = [Exit("target-1", "percent", text, "100")] }),
+            p => p.Entries[0].Targets[0].Value, Percent("Entry 1 target 1", "target"));
+        yield return ("target share", With(entry with { Targets = [Exit("target-1", "price", "110", text)] }),
+            p => p.Entries[0].Targets[0].Share, Plain("Entry 1 target 1 share"));
     }
 
     [Fact]
