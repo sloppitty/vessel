@@ -1,5 +1,5 @@
 import type { BrokerAccount } from '@/api/workspace'
-import { availableSourceLabels } from '@/lib/format'
+import { asOf, availableSourceLabels } from '@/lib/format'
 import type { DraftEntry, DraftExit, PlayDraft } from './draft'
 import { averageEntryPrice, exitsOf, levelPrice, type ExitKind } from './levels'
 import { planShare, positivePlanNumber as positive } from './numbers'
@@ -111,17 +111,27 @@ export interface AvailableBalance {
   value: string
   /** Null only from an older server that did not name it. */
   source: AvailableSource | null
+  /** When the snapshot it comes from was read: the account's last successful refresh. */
+  asOfUtc?: string | null
+  /** The account's latest refresh failed, so the figure is from an earlier snapshot. */
+  refreshFailed?: boolean
 }
 
 /**
  * What an enabled account reports as available: the server's one normalized figure (wallet funds for
  * unified wallet accounts, otherwise the venue's available margin or else its withdrawable amount),
  * never the separate stablecoin wallet ledger of a standard account. Null when it is not reported.
+ * No age limit is assumed; the figure carries its snapshot time and whether the last refresh failed.
  */
 export function availableOf(account: BrokerAccount | null | undefined): AvailableBalance | null {
   if (!account || account.isEnabled === false || account.availableBalanceUsd == null) return null
-  return { value: account.availableBalanceUsd, source: account.availableBalanceSource ?? null }
+  return { value: account.availableBalanceUsd, source: account.availableBalanceSource ?? null,
+    asOfUtc: account.lastSyncedAtUtc, refreshFailed: account.syncStatus === 'error' }
 }
+
+/** "reported margin · as of 14:02", with "last refresh failed" when the latest refresh did not succeed. */
+export const availableLabel = (available: AvailableBalance) => [available.source ? availableSourceLabels[available.source] : 'available',
+  available.asOfUtc ? asOf(available.asOfUtc) : null, available.refreshFailed ? 'last refresh failed' : null].filter(Boolean).join(' · ')
 
 export interface PlayBudget {
   /** Exact decimal string. */

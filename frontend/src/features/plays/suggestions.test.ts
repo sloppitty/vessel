@@ -3,6 +3,7 @@ import type { SizingDocument } from '@/api/sizing'
 import { sizingFixture } from '@/test/workspace-fixture'
 import { createEntry, createExit, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
 import { rewardToRisk, type SizeUnits } from './sizing'
+import { positionRiskSummary } from './position-risk-summary'
 import { lossPerUnit, planSuggestions, riskSize, roundPrice, suggestLeverage, suggestMaxStop, suggestMinTarget, suggestSize, suggestionCount } from './suggestions'
 
 type Level = [value: string, share?: string, unit?: DraftExit['unit']]
@@ -264,6 +265,17 @@ describe('stop coverage gate', () => {
   it('names stops on the wrong side and incomplete entry shares', () => {
     expect(planSuggestions(inputs([stopEntry([['105']])])).stopCoverage).toBe('A stop sits on the wrong side of its entry')
     expect(planSuggestions(inputs([stopEntry([['95']], '60')])).stopCoverage).toBe('Entry shares total 60%, not 100%')
+  })
+
+  // Review of 0.1: like the summary, a blank leverage is unknown, not 1×.
+  it('treats a blank leverage as unknown, as the summary does', () => {
+    const blank = { ...inputs([stopEntry([['10', '100', 'percent']])]), leverage: 1 }
+    blank.draft = { ...blank.draft, leverage: '' }
+    const plan = planSuggestions(blank)
+    expect(plan.size).toBeNull()
+    expect(plan.stopCoverage).toBe('The leverage is not set')
+    expect(riskSize(blank.draft, 1, 10_000, sizing(), units(5))).toBeNull()
+    expect(positionRiskSummary({ ...blank.draft, size: '1' }).stops.coverage.status).not.toBe('complete')
   })
 
   it('keeps only a liquidation leverage line, against the priced stops', () => {

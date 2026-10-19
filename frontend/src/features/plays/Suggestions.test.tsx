@@ -415,3 +415,47 @@ describe('sizing truth', () => {
     expect(onRetry).toHaveBeenCalledOnce()
   })
 })
+
+// Review of 0.1: Accept stays off from a failed reload until a read succeeds, and a manual zero budget is not "set one".
+describe('sizing truth review', () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>(yes => { resolve = yes })
+    return { promise, resolve }
+  }
+  function Live({ sizingApi, generation }: { sizingApi: WorkspaceApi; generation: number }) {
+    const { sizing, status, retry, updateRisk } = useSizing(sizingApi, generation)
+    return <Workspace initial={plan({}, exit('80'), exit('105'))} sizing={sizing} sizingStatus={status} onRetry={retry} onRiskChange={updateRisk} />
+  }
+  const accepts = () => within(panel()).queryAllByRole('button', { name: /^Accept/ })
+
+  it('offers no Accept or field marks after Retry on a stale record until the read resolves', async () => {
+    const user = userEvent.setup()
+    const retried = deferred<SizingDocument>()
+    const sizingApi = { sizing: vi.fn().mockResolvedValueOnce(sizingFixture).mockRejectedValueOnce(new ApiError('unavailable', 'Down.'))
+      .mockImplementationOnce(() => retried.promise) } as unknown as WorkspaceApi
+    const view = render(<Live sizingApi={sizingApi} generation={0} />)
+    await screen.findByTestId('suggestions-panel')
+    await openPanel(user)
+    await waitFor(() => expect(accepts().length).toBeGreaterThan(0))
+    view.rerender(<Live sizingApi={sizingApi} generation={1} />)
+    await waitFor(() => expect(within(panel()).getByText(/The sizing record could not be reloaded/)).toBeInTheDocument())
+    expect(accepts()).toHaveLength(0)
+    await user.click(within(panel()).getByRole('button', { name: /^Retry/ }))
+    expect(sizingApi.sizing).toHaveBeenCalledTimes(3)
+    expect(accepts()).toHaveLength(0)
+    expect(field('Entry 1 planned stop price (quote units)')).not.toHaveAttribute('data-suggested')
+    retried.resolve(sizingFixture)
+    await waitFor(() => expect(accepts().length).toBeGreaterThan(0))
+    expect(field('Entry 1 planned stop price (quote units)')).toHaveAttribute('data-suggested', 'true')
+  })
+
+  it('says a manual zero budget is zero without asking for a manual budget', async () => {
+    const user = userEvent.setup()
+    render(<Workspace initial={plan({ budgetOverride: '0' })} />)
+    await openPanel(user)
+    const size = screen.getByTestId('size-suggestion')
+    expect(size).toHaveTextContent('and the manual budget is 0 quote units.')
+    expect(size).not.toHaveTextContent('Set a manual budget')
+  })
+})

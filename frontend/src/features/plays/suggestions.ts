@@ -82,13 +82,18 @@ export interface RiskSize {
   margin: number
 }
 
+/** The draft as the coverage rule reads it: its own leverage text when it has one, so a blank leverage stays unknown. */
+const coverageDraft = (draft: SizedDraft & Partial<Pick<PlayDraft, 'leverage'>>, leverage: number) =>
+  ({ entries: draft.entries, direction: draft.direction, leverage: draft.leverage ?? String(leverage) })
+
 /**
  * The risk-based size: balance × effective risk % ÷ loss per unit. Null without a balance, or unless
  * priced stops cover the whole position (`stopCoverageGap`): a part without a priced stop has no
  * bounded loss, so averaging the priced stops would understate the risk.
  */
-export function riskSize(draft: SizedDraft, leverage: number, balance: number | null, sizing: SizingDocument, units: SizeUnits): RiskSize | null {
-  if (stopCoverageGap({ entries: draft.entries, direction: draft.direction, leverage: String(leverage) }) !== null) return null
+export function riskSize(draft: SizedDraft & Partial<Pick<PlayDraft, 'leverage'>>, leverage: number, balance: number | null, sizing: SizingDocument,
+  units: SizeUnits): RiskSize | null {
+  if (stopCoverageGap(coverageDraft(draft, leverage)) !== null) return null
   const effectiveRiskPercent = amount(sizing.limits.effectiveRiskPercent)
   const perUnit = lossPerUnit(draft.entries, draft.direction, leverage)
   const average = averageEntryPrice(draft.entries, 1)
@@ -113,7 +118,7 @@ export interface SizeSuggestion extends RiskSize {
  * The size line: the risk-based size, hidden while the entered size is within 2% of it. Above the
  * budget it reports the budget instead of offering the size, and the leverage line suggests a fix.
  */
-export function suggestSize(draft: SizedDraft, leverage: number, balance: number | null, sizing: SizingDocument, units: SizeUnits, budget: number | null): SizeSuggestion | null {
+export function suggestSize(draft: SizedDraft & Partial<Pick<PlayDraft, 'leverage'>>, leverage: number, balance: number | null, sizing: SizingDocument, units: SizeUnits, budget: number | null): SizeSuggestion | null {
   const sized = riskSize(draft, leverage, balance, sizing, units)
   if (!sized) return null
   const target = Number(sized.value)
@@ -287,7 +292,7 @@ export function planSuggestions({ draft, leverage, maxLeverage, maintenanceMargi
   // suggestions. Stops and targets are still suggested for the entries that have not filled.
   const filled = filledEntries === 'all' || filledEntries.size > 0
   const entryFilled = (id: string) => filledEntries === 'all' || filledEntries.has(id)
-  const stopCoverage = stopCoverageGap({ entries: draft.entries, direction: draft.direction, leverage: String(leverage) })
+  const stopCoverage = stopCoverageGap(coverageDraft(draft, leverage))
   const size = filled ? null : suggestSize(draft, leverage, balance, sizing, units, budget)
   const risked = filled ? null : riskSize(draft, leverage, balance, sizing, units)
   const stops: PlanSuggestions['stops'] = []

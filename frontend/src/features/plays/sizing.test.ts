@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createEntry, type DraftEntry, type DraftExit } from './draft'
 import type { BrokerAccount } from '@/api/workspace'
 import { accountFixture } from '@/test/workspace-fixture'
-import { availableOf, estimatedLiquidation, exitEstimate, marginOverBudget, overBudgetMessage, playBudget, positionSize, rewardToRisk, sizeForBudget } from './sizing'
+import { availableLabel, availableOf, estimatedLiquidation, exitEstimate, marginOverBudget, overBudgetMessage, playBudget, positionSize, rewardToRisk, sizeForBudget } from './sizing'
 
 const entry = (price: string, share = '100'): DraftEntry => ({ ...createEntry(0), price, share })
 
@@ -115,11 +115,26 @@ describe('margin budget', () => {
     // A standard Hyperliquid account with $3.12 of spot dust and $4,906.67 withdrawable from perps.
     const standard: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', availableStablecoinNominalUsd: '3.12',
       availableBalanceUsd: '4906.67', availableBalanceSource: 'withdrawable' }
-    expect(availableOf(standard)).toEqual({ value: '4906.67', source: 'withdrawable' })
-    expect(availableOf({ ...standard, availableBalanceUsd: '0', availableBalanceSource: 'wallet' })).toEqual({ value: '0', source: 'wallet' })
+    expect(availableOf(standard)).toEqual({ value: '4906.67', source: 'withdrawable', asOfUtc: null, refreshFailed: false })
+    expect(availableOf({ ...standard, availableBalanceUsd: '0', availableBalanceSource: 'wallet' })).toMatchObject({ value: '0', source: 'wallet' })
     expect(availableOf({ ...standard, availableBalanceUsd: null, availableBalanceSource: null })).toBeNull()
     expect(availableOf({ ...standard, isEnabled: false })).toBeNull()
     expect(availableOf(undefined)).toBeNull()
+  })
+
+  // Review of 0.1: no age limit is invented; the figure says when it was read and whether the last refresh failed.
+  it('labels the available balance with its source, snapshot time and a failed refresh', () => {
+    const at = new Date()
+    at.setHours(14, 2, 0, 0)
+    const account: BrokerAccount = { ...accountFixture, venueId: 'lighter-rh', availableBalanceUsd: '25', availableBalanceSource: 'margin',
+      lastSyncedAtUtc: at.toISOString(), syncStatus: 'error', lastSyncError: 'Lighter is unavailable.' }
+    expect(availableOf(account)).toEqual({ value: '25', source: 'margin', asOfUtc: at.toISOString(), refreshFailed: true })
+    expect(availableLabel(availableOf(account)!)).toBe('reported margin · as of 14:02 · last refresh failed')
+    expect(availableLabel({ value: '25', source: 'withdrawable' })).toBe('reported withdrawal')
+    const earlier = new Date(at)
+    earlier.setDate(earlier.getDate() - 1)
+    expect(availableLabel({ value: '25', source: 'wallet', asOfUtc: earlier.toISOString() }))
+      .toBe(`wallet · as of ${earlier.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} 14:02`)
   })
 
   it('names the budget and its source in the quote unit of the instrument', () => {

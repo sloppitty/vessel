@@ -173,6 +173,8 @@ export function stopCoverageGap(draft: Pick<PlayDraft, 'entries' | 'direction' |
   const coverage = summary.stops.coverage
   if (coverage.status === 'complete') return null
   if (coverage.status === 'invalid' || summary.entryAllocation.status === 'invalid') return 'Entry or stop shares are not valid or exceed 100%'
+  // As in the summary, a blank leverage is unknown rather than 1×.
+  if (draft.leverage.trim() === '') return 'The leverage is not set'
   const lever = decimal(draft.leverage)
   if (lever === null || !Number.isInteger(lever) || lever < 1) return 'The leverage is not a whole number'
   const entries = summary.entryAllocation

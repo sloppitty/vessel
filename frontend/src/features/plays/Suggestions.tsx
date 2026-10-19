@@ -129,8 +129,10 @@ export function SuggestionsPanel({ plan, sizing, status = 'ready', onRetry, draf
               {plan.size.overBudget > 0
                 ? <>Risking {formatMoney(plan.size.risk, units)} ({riskRule}) needs more margin than the {budget} at {leverage}×.
                   {plan.leverage?.reason === 'budget' ? ' Raise the leverage below, or tighten the stops.' : ' Tighten the stops or raise the budget.'}</>
-                : <>Risking {formatMoney(plan.size.risk, units)} ({riskRule}) needs this margin at {leverage}×, and the budget{plan.budgetSource ? ` (${plan.budgetSource})` : ''} is
-                  {' '}{formatMoney(plan.size.overBudget, units)}. Set a manual budget to size this play.</>}
+                : plan.budgetSource === 'manual'
+                  ? <>Risking {formatMoney(plan.size.risk, units)} ({riskRule}) needs this margin at {leverage}×, and the manual budget is {formatMoney(plan.size.overBudget, units)}.</>
+                  : <>Risking {formatMoney(plan.size.risk, units)} ({riskRule}) needs this margin at {leverage}×, and the budget{plan.budgetSource ? ` (${plan.budgetSource})` : ''} is
+                    {' '}{formatMoney(plan.size.overBudget, units)}. Set a manual budget to size this play.</>}
             </SuggestionRow>)}
           {plan.stops.map(stop => <SuggestionRow key={stop.levelId} testId="max-stop-suggestion" title={`${stop.entryName} · ${stop.label}`}
             label={`Accept suggested ${stop.entryName} ${stop.label}`} current={stop.current} value={level(stop.unit, stop.value, stop.price)}

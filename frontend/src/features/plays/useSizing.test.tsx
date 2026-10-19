@@ -57,9 +57,65 @@ describe('sizing document reads', () => {
     await waitFor(() => expect(result.current.status).toBe('failed'))
     expect(result.current.sizing).toBeNull()
     act(() => result.current.retry())
-    expect(result.current.status).toBe('loading')
+    // Still failed while the retry reads: only a successful read makes the record current.
+    expect(result.current.status).toBe('failed')
     await waitFor(() => expect(result.current.status).toBe('ready'))
     expect(result.current.sizing).toEqual(sizingFixture)
+  })
+
+  // Review of 0.1: a retry or reload after a failure must not make the old record current before it succeeds.
+  it('keeps a stale record stale while Retry or a new generation reads, until a read succeeds', async () => {
+    const retried = deferred<SizingDocument>()
+    const reloaded = deferred<SizingDocument>()
+    const updated: SizingDocument = { ...sizingFixture, settings: { riskPercent: '2' } }
+    const sizing = vi.fn().mockResolvedValueOnce(sizingFixture).mockRejectedValueOnce(new ApiError('unavailable', 'Down.'))
+      .mockImplementationOnce(() => retried.promise).mockImplementationOnce(() => reloaded.promise)
+    const api = { sizing } as unknown as WorkspaceApi
+    const view = renderHook(({ generation }) => useSizing(api, generation), { initialProps: { generation: 0 } })
+    await waitFor(() => expect(view.result.current.status).toBe('ready'))
+    view.rerender({ generation: 1 })
+    await waitFor(() => expect(view.result.current.status).toBe('stale'))
+    act(() => view.result.current.retry())
+    await act(async () => {})
+    expect(sizing).toHaveBeenCalledTimes(3)
+    expect(view.result.current.status).toBe('stale')
+    view.rerender({ generation: 2 })
+    await act(async () => {})
+    expect(view.result.current.status).toBe('stale')
+    await act(async () => { retried.resolve(updated) })
+    expect(view.result.current.status).toBe('stale')
+    await act(async () => { reloaded.resolve(updated) })
+    expect(view.result.current).toMatchObject({ status: 'ready', sizing: updated })
+  })
+
+  it('ignores a read that started before an accepted risk change', async () => {
+    const reading = deferred<SizingDocument>()
+    const changed: SizingDocument = { ...sizingFixture, settings: { riskPercent: '1.5' } }
+    const api = { sizing: vi.fn().mockResolvedValueOnce(sizingFixture).mockImplementationOnce(() => reading.promise),
+      updateSizingSettings: vi.fn().mockResolvedValue(changed) } as unknown as WorkspaceApi
+    const view = renderHook(({ generation }) => useSizing(api, generation), { initialProps: { generation: 0 } })
+    await waitFor(() => expect(view.result.current.status).toBe('ready'))
+    view.rerender({ generation: 1 })
+    await act(async () => { await view.result.current.updateRisk('1.5') })
+    expect(view.result.current).toMatchObject({ status: 'ready', sizing: changed })
+    // The older read resolves with the old risk afterwards and is ignored.
+    await act(async () => { reading.resolve(sizingFixture) })
+    expect(view.result.current).toMatchObject({ status: 'ready', sizing: changed })
+  })
+
+  it('settles on the new API when a risk change for the replaced one finishes late', async () => {
+    const saving = deferred<SizingDocument>()
+    const first = { sizing: vi.fn().mockResolvedValue(sizingFixture), updateSizingSettings: vi.fn(() => saving.promise) } as unknown as WorkspaceApi
+    const replacement: SizingDocument = { ...sizingFixture, settings: { riskPercent: '0.5' } }
+    const second = { sizing: vi.fn().mockResolvedValue(replacement) } as unknown as WorkspaceApi
+    const view = renderHook(({ api }) => useSizing(api), { initialProps: { api: first } })
+    await waitFor(() => expect(view.result.current.status).toBe('ready'))
+    let change!: Promise<void>
+    act(() => { change = view.result.current.updateRisk('1.5') })
+    view.rerender({ api: second })
+    await waitFor(() => expect(view.result.current).toMatchObject({ status: 'ready', sizing: replacement }))
+    await act(async () => { saving.resolve({ ...sizingFixture, settings: { riskPercent: '1.5' } }); await change })
+    expect(view.result.current).toMatchObject({ status: 'ready', sizing: replacement })
   })
 
   it('does not treat an aborted read as a failure', async () => {

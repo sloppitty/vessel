@@ -9,17 +9,20 @@ import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { AvailableBudget, CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
 import { journalReviewVisible } from './journal'
 import { createDraft, type PlayDraft } from './draft'
-import type { AvailableBalance } from './sizing'
+import { availableOf, type AvailableBalance } from './sizing'
 
-function BudgetHarness({ initial = createDraft(), accounts = [], portfolios = [], onChange = vi.fn() }: {
+function BudgetHarness({ initial = createDraft(), accounts = [], portfolios = [], onChange = vi.fn(), available = false }: {
   initial?: PlayDraft
   accounts?: BrokerAccount[]
   portfolios?: Portfolio[]
   onChange?: (draft: PlayDraft) => void
+  /** Pass the chosen account's available balance to the budget, as the workspace does. */
+  available?: boolean
 }) {
   const [draft, setDraft] = useState(initial)
   return <><CapitalContext accounts={accounts} portfolios={portfolios} draft={draft} />
-    <AvailableBudget key={draft.accountId} draft={draft} onChange={next => { setDraft(next); onChange(next) }} /></>
+    <AvailableBudget key={draft.accountId} draft={draft} onChange={next => { setDraft(next); onChange(next) }}
+      available={available ? availableOf(accounts.find(account => account.id === draft.accountId)) : null} /></>
 }
 
 describe('Capital context', () => {
@@ -46,15 +49,38 @@ describe('Capital context', () => {
   it('shows the portfolio balance, wallet total and available amount of a unified account without perps equity', () => {
     const account: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', accountValueUsd: '0',
       availableStablecoinNominalUsd: '150', totalStablecoinNominalUsd: '151.77', balanceUsd: '151.77',
-      stablecoinScope: 'hypercore-spot-stablecoins', accountMode: 'unifiedAccount' }
+      availableBalanceUsd: '150', availableBalanceSource: 'wallet', stablecoinScope: 'hypercore-spot-stablecoins', accountMode: 'unifiedAccount' }
     const portfolio: Portfolio = { ...portfolioFixture, totalValueUsd: '0', balanceUsd: '1151.77', balanceCoverage: 'complete' }
     render(<BudgetHarness initial={{ ...createDraft(), accountId: account.id }} accounts={[account]} portfolios={[portfolio]} />)
     expect(metric(`${portfolio.name} balance`)).toHaveTextContent('$1,151.77')
     expect(metric(`${portfolio.name} balance`)).toHaveAttribute('title', expect.stringContaining('coverage complete'))
     expect(metric('Wallet total')).toHaveTextContent('$151.77')
     expect(metric('Wallet total')).toHaveAttribute('title', 'hypercore-spot-stablecoins · unifiedAccount. Nominal 1 token = 1 USD.')
-    expect(metric('Available')).toHaveTextContent('$150.00')
+    expect(metric('Available')).toHaveTextContent('$150.00wallet')
     expect(within(screen.getByTestId('capital-context')).queryByText('Perps equity')).toBeNull()
+  })
+
+  // Review of 0.1: one available figure per account, the same normalized one the budget uses.
+  it('shows the normalized available balance of a standard account, not its spot stablecoins, beside the same budget', () => {
+    const account: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', portfolioId: null, accountValueUsd: '5000', balanceUsd: '5003.12',
+      availableStablecoinNominalUsd: '3.12', totalStablecoinNominalUsd: '3.12', accountMode: 'default',
+      availableBalanceUsd: '4906.67', availableBalanceSource: 'withdrawable' }
+    render(<BudgetHarness initial={{ ...createDraft(), accountId: account.id }} accounts={[account]} available />)
+    expect(metric('Available')).toHaveTextContent('$4,906.67reported withdrawal')
+    expect(metric('Available')).not.toHaveTextContent('$3.12')
+    // The spot stablecoins stay a separate, explicitly labelled ledger.
+    expect(metric('Wallet total')).toHaveTextContent('$3.12')
+    expect(screen.getByRole('group', { name: 'Budget' })).toHaveTextContent('Budget$4,906.67reported withdrawal')
+  })
+
+  it('shows a margin venue its reported available margin, and no available figure for manual accounts', () => {
+    const lighter: BrokerAccount = { ...accountFixture, venueId: 'lighter-rh', portfolioId: null, balanceUsd: '100',
+      availableBalanceUsd: '40', availableBalanceSource: 'margin' }
+    const { unmount } = render(<BudgetHarness initial={{ ...createDraft(), accountId: lighter.id }} accounts={[lighter]} />)
+    expect(metric('Available')).toHaveTextContent('$40.00reported margin')
+    unmount()
+    render(<BudgetHarness initial={{ ...createDraft(), accountId: accountFixture.id }} accounts={[accountFixture]} portfolios={[portfolioFixture]} />)
+    expect(within(screen.getByTestId('capital-context')).queryByText('Available')).toBeNull()
   })
 
   it('shows perps equity beside the wallet for a standard account', () => {
@@ -129,6 +155,13 @@ describe('Budget', () => {
     render(<Budget available={{ value: '0', source: 'wallet' }} />)
     expect(budget()).toHaveTextContent('Budget$0.00wallet')
     expect(screen.queryByRole('button', { name: 'Set budget' })).toBeNull()
+  })
+
+  it('says when the available budget was read and that the last refresh failed', () => {
+    const at = new Date()
+    at.setHours(14, 2, 0, 0)
+    render(<Budget available={{ value: '25', source: 'margin', asOfUtc: at.toISOString(), refreshFailed: true }} />)
+    expect(budget()).toHaveTextContent('Budget$25.00reported margin · as of 14:02 · last refresh failed')
   })
 
   it.each([

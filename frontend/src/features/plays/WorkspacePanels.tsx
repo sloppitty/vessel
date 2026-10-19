@@ -16,7 +16,7 @@ import { JournalStateContext, useJournalStore } from './journal-state'
 import { PositionRiskSummary } from './PositionRiskSummary'
 import type { RiskReference } from './position-risk-summary'
 import { averageEntryPrice, formatDraggedPrice, leverageOf } from './levels'
-import { budgetSourceLabel, defaultSizeUnits, formatMoney, formatQuantity, playBudget, positionSize, type AvailableBalance, type SizeUnits } from './sizing'
+import { availableLabel, availableOf, budgetSourceLabel, defaultSizeUnits, formatMoney, formatQuantity, playBudget, positionSize, type AvailableBalance, type SizeUnits } from './sizing'
 import './plays-workspace.css'
 import { NativeSelect } from '@/components/ui/native-select'
 
@@ -70,7 +70,8 @@ export function AvailableBudget({ draft, onChange, available = null }: {
     <Button type="button" variant="ghost" size="sm" className="set-budget" onClick={edit}><Plus size={13} aria-hidden="true" />Set budget</Button>
   </div>
 
-  const source = budgetSourceLabel(current)
+  // The available balance names its source and snapshot time, and says when the latest refresh failed.
+  const source = current.source === 'manual' || !available ? budgetSourceLabel(current) : availableLabel(available)
   return <div className="available-budget" role="group" aria-label="Budget">
     <span className="budget-label">Budget</span>
     <strong title={current.value}>{displayMoney(current.value)}</strong>
@@ -104,8 +105,10 @@ export function CapitalContext({ accounts, portfolios, draft, retrospective = fa
   const coverage = portfolio?.balanceCoverage ?? portfolio?.valueCoverage
   // Each ratio names the balance it divides by: the portfolio's, or an unassigned account's own.
   const reference = portfolio ? `${portfolio.name} balance` : account ? `${account.name} balance` : 'balance'
-  const metric = (label: string, value: string | null | undefined, title?: string) =>
-    <div title={title}><dt>{label}</dt><dd data-placeholder={value == null}>{displayMoney(value)}</dd></div>
+  const metric = (label: string, value: string | null | undefined, title?: string, note?: string) =>
+    <div title={title}><dt>{label}</dt><dd data-placeholder={value == null}>{displayMoney(value)}</dd>{note && <small>{note}</small>}</div>
+  // One available figure per account: the server's normalized balance with its source, the same one the budget uses.
+  const available = availableOf(account)
   return <section className="panel capital-context" aria-label="Capital context" data-testid="capital-context">
     <div className="capital-values">
       <h2 className="capital-title sr-only">Capital context</h2>
@@ -114,7 +117,8 @@ export function CapitalContext({ accounts, portfolios, draft, retrospective = fa
           `Nominal USD${coverage ? `; coverage ${coverage}` : ''}. Perps equity plus supported stablecoins, or the wallet alone in unified accounts.`)}
         {wallet && metric('Wallet total', account.totalStablecoinNominalUsd,
           `${account.stablecoinScope ?? 'Supported stablecoin wallet'}${account.accountMode ? ` · ${account.accountMode}` : ''}. Nominal 1 token = 1 USD.`)}
-        {wallet && metric('Available', account.availableStablecoinNominalUsd, 'Wallet total minus amounts held by open orders.')}
+        {account && venues.can(account.venueId, 'sync') && metric('Available', available?.value, 'Nominal USD the venue reports as available: wallet funds of unified accounts, otherwise available margin or else the withdrawable amount.',
+          available ? availableLabel(available) : undefined)}
         {wallet && !unified && metric('Perps equity', account.accountValueUsd, 'Perpetual account value at the venue.')}
         {!wallet && account && metric('Account value', account.accountValueUsd)}
         {!retrospective && <><div title={`Committed margin as a share of the ${reference}`}><dt>Margin / {reference}</dt><dd data-placeholder={share(sized.margin) === '—'}>{share(sized.margin)}</dd></div>
