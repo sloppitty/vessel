@@ -74,6 +74,13 @@ describe('manual executions', () => {
     await user.click(screen.getByText(/Execution audit history/))
     expect(screen.getByText(/Recorded · Initial record/)).toBeInTheDocument()
   })
+  it('labels the net ledger result as the Play-local result on the manual ledger basis', async () => {
+    const { api } = client(ledger('closed', [record]))
+    render(<Harness api={api} initial={ledger('closed', [record]).play} />)
+    const tip = await screen.findByRole('button', { name: 'About the Play-local result' })
+    expect(tip.closest('dt')).toHaveTextContent(/^Net realized USD/)
+    expect(tip).toHaveAccessibleDescription(/Play-local result on the manual ledger basis/)
+  })
   it('keeps failed and stale submissions intact and retries the same request identity and version', async () => {
     const { api, methods } = client()
     methods.addManualExecution.mockRejectedValueOnce(new ApiError('http', 'The Play changed.', 409))

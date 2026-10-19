@@ -60,6 +60,17 @@ export interface SizingRecord {
   averageWinR: string | null
   averageLossR: string | null
   recent: RecordedPlay[]
+  /**
+   * Decided results in the window whose Play-local result differs in sign from the scored venue result, and those with no
+   * Play-local result. Null for the Activity fallback (positions are not Plays). These four are absent from servers before
+   * October 19, 2026.
+   */
+  localSignChanges?: number | null
+  localUnknown?: number | null
+  /** Losses in the window whose scored result before fees is zero or better. Win, loss and scratch are unchanged. */
+  feeOnlyLosses?: number
+  /** Losses in the window whose scored result before fees is unknown; not counted as fee-only. */
+  unknownGrossLosses?: number
 }
 export interface SizingLimits {
   effectiveRiskPercent: string
@@ -90,7 +101,9 @@ const record = (v: unknown): v is SizingRecord => isRecord(v) && ['plays', 'acti
   ['closedPlays', 'decidedPlays', 'window', 'wins', 'losses', 'scratches'].every(k => isCount(v[k])) &&
   ['battingAverage', 'averageGainPercent', 'averageLossPercent', 'winLossRatio', 'breakEvenRewardRisk', 'averageWinR', 'averageLossR']
     .every(k => isNullOr(v[k], isPlainDecimal)) &&
-  Array.isArray(v.recent) && v.recent.length <= 100 && v.recent.every(recorded)
+  Array.isArray(v.recent) && v.recent.length <= 100 && v.recent.every(recorded) &&
+  ['localSignChanges', 'localUnknown'].every(k => v[k] === undefined || isNullOr(v[k], x => isCount(x) && x <= (v.decidedPlays as number))) &&
+  ['feeOnlyLosses', 'unknownGrossLosses'].every(k => v[k] === undefined || isCount(v[k]) && (v[k] as number) <= (v.losses as number))
 
 export const isSizingDocument = (v: unknown): v is SizingDocument => isRecord(v) &&
   isRecord(v.settings) && isPlainDecimal(v.settings.riskPercent) &&

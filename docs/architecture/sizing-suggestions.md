@@ -40,7 +40,7 @@ Entry notional  = Σ entry fill quantity × fill price
 Return          = net result ÷ entry notional × 100          (unlevered price-move equivalent)
 Stop distance   = Σ_entries share × Σ_stops stopShare × |entry − stop|  ÷  Σ_entries share × entry
 Planned risk    = entry notional × stop distance
-R multiple      = net result ÷ planned risk
+R multiple      = net result ÷ planned risk        (Estimated R, planned-stop model)
 ```
 
 Stop distance uses the plan revision in force at the first entry fill (the latest revision created at or before it, else revision 1, else the current plan), with percent stops resolved at that plan's leverage. Stop shares are normalized within each entry, so they need not total 100%. Entries or stops without a price are skipped; with none left, planned risk and R are null. Fees in another token are left out and the outcome says so (`feesComplete: false`).
@@ -88,7 +88,8 @@ Stop distance is the price move from entry, not the return on margin.
     "battingAverage": null, "averageGainPercent": null, "averageLossPercent": null,
     "winLossRatio": null, "breakEvenRewardRisk": null, "averageWinR": null, "averageLossR": null,
     "recent": [{ "playId": "…", "title": "…", "instrument": "BTC", "closedAtUtc": "…", "detectedAtUtc": "…|null", "netResultUsd": "…",
-                 "returnPercent": "…", "riskUsd": null, "rMultiple": null, "outcome": "win|loss|scratch", "feesComplete": true }]
+                 "returnPercent": "…", "riskUsd": null, "rMultiple": null, "outcome": "win|loss|scratch", "feesComplete": true }],
+    "localSignChanges": 0, "localUnknown": 0, "feeOnlyLosses": 0, "unknownGrossLosses": 0
   },
   "limits": { "effectiveRiskPercent": "1.25", "maxStopPercent": "10", "minRewardRisk": "2",
               "maxStopSource": "default|averageGain", "minRewardRiskSource": "default|battingAverage" },
@@ -150,3 +151,34 @@ Phase 0 item 0.2 ([contract](phase0-trust-correctness-contract.md#02-exit-time-o
 - **Recovery wins** stay consecutive (owner decision 7): the ladder code is unchanged. Only wording changes: this document says "two consecutive winning plays" and the Suggestions "How these are worked out" list says "two wins in a row".
 
 Thresholds, the 20-decided window, win/loss/scratch rules and the pooled ladder are unchanged. On upgrade, historical last-20 membership, limits and ladder levels can change because outcomes move from their detection time to their exit. On synthetic data, a W, L, L, L sequence found by one refresh was Full in 977 and Half in 1,023 of 2,000 random Play-ID sets before the change, and Half in all 2,000 after it.
+
+## Result bases (October 19, 2026)
+
+Phase 0 item 0.3 ([contract](phase0-trust-correctness-contract.md#03-result-basis-receipt)).
+The record, ladder, limits, window and win/loss/scratch rules keep scoring the
+venue result above (owner decisions 1 and 8). The record now reports how its
+window looks under the Play-local basis described in
+[Review's result bases](portfolio-review.md#result-bases-october-19-2026):
+each Play's own fills, exits minus entries, less every trading fee.
+
+- **Counts.** Over the decided results of the window (the latest 20 by close
+  time, chosen as the record chooses them), `record.localSignChanges` counts
+  results whose Play-local result differs in sign (negative, zero, positive)
+  from the scored venue result, and `record.localUnknown` those with no
+  Play-local result. Both are null for the Activity fallback: positions are
+  not Plays. `record.feeOnlyLosses` counts window losses whose scored result
+  before trading fees is zero or better (`PlayOutcome.GrossResult`: Σ venue
+  closed P&L plus listed stablecoin fees already inside net-of-fee P&L; for the
+  fallback, the operation's before-fee P&L), and `record.unknownGrossLosses`
+  the losses where that figure is unknown. All four are init fields, so the
+  positional records the fallback builds are unchanged.
+- **Suggestions.** The record column adds one short line when a count is above
+  zero, e.g. "1 of the last 11 changes sign under the Play-local basis. 2 have
+  no Play-local figure. 1 loss came from fees alone.", with an InfoTip. The
+  sign and unknown parts are omitted for the Activity fallback.
+- **R.** Sizing's API `rMultiple`, `averageWinR` and `averageLossR` are the
+  estimated R (planned-stop model): net result ÷ (entry notional × stop
+  distance) from the plan in force at the first entry, with the fallbacks
+  above for partial plans. Review's figure has the same name but a stricter
+  plan rule. Neither is actual risk, and sizing's R is not shown in the
+  browser.

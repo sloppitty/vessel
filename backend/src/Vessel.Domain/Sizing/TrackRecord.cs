@@ -16,6 +16,15 @@ public sealed record PlayOutcome(Guid PlayId, DateTimeOffset ClosedAtUtc, decima
     public decimal ReturnPercent => EntryNotional > 0 ? NetResult / EntryNotional * 100 : 0;
     public decimal? RMultiple => PlannedRisk is > 0 and var risk ? NetResult / risk : null;
     public PlayOutcomeKind Kind => NetResult switch { > 0 => PlayOutcomeKind.Win, < 0 => PlayOutcomeKind.Loss, _ => PlayOutcomeKind.Scratch };
+
+    /// <summary>
+    /// The scored result before trading fees, on the same basis as <see cref="NetResult"/>; null when unknown. It never
+    /// changes win, loss or scratch.
+    /// </summary>
+    public decimal? GrossResult { get; init; }
+
+    /// <summary>A loss made by fees alone: zero or better before fees, below zero after them. Unknown gross is not one.</summary>
+    public bool FeeOnlyLoss => GrossResult >= 0 && NetResult < 0;
 }
 
 /// <summary>

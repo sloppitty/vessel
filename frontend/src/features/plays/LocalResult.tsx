@@ -1,0 +1,19 @@
+import type { PlayLocalResult } from '@/api/local-result'
+import { InfoTip } from '@/components/ui/info-tip'
+
+/** What the Play-local result is, for its tips. Kept short; the docs carry the gates. */
+export const localResultNote = 'This play’s own fills: exits minus entries, less every trading fee. No funding. Shown beside the venue result, never scored.'
+
+/** A known Play-local amount, formatted by the caller, or Unknown opening its reason. */
+export function LocalResultValue({ local, format }: { local: PlayLocalResult; format: (value: string) => string }) {
+  return local.netUsd === null
+    ? <InfoTip className="value-tag" trigger="Unknown" label="Play-local result">{local.reason}</InfoTip>
+    : <>{format(local.netUsd)}</>
+}
+
+/** The flag where the venue and Play-local results differ in sign; a warning pill named by its text. */
+export function SignDiffersFlag() {
+  return <InfoTip className="workspace-badge warning-badge coverage-badge sign-differs" trigger="Sign differs by basis">
+    The venue result and this play’s own fills disagree on win, loss or scratch. Review and sizing still score the venue result.
+  </InfoTip>
+}

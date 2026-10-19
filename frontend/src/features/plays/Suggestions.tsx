@@ -1,6 +1,6 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react'
 import { Check, ChevronDown, Lightbulb, X } from 'lucide-react'
-import { riskPercentRange, type SizingDocument } from '@/api/sizing'
+import { riskPercentRange, type SizingDocument, type SizingRecord } from '@/api/sizing'
 import { Button } from '@/components/ui/button'
 import { InfoTip } from '@/components/ui/info-tip'
 import { Input } from '@/components/ui/input'
@@ -139,12 +139,28 @@ function emptyReason(plan: PlanSuggestions) {
   return null
 }
 
+/**
+ * What the result bases say about the window's decided results: sign changes under the Play-local basis and results
+ * without one (Play records only; positions are not Plays), and losses made by fees alone. Zero and absent counts say nothing.
+ */
+function recordBasisNotes(record: SizingRecord, decided: number) {
+  const notes: string[] = []
+  const changes = record.localSignChanges ?? 0, unknown = record.localUnknown ?? 0
+  const feeOnly = record.feeOnlyLosses ?? 0, unknownGross = record.unknownGrossLosses ?? 0
+  if (record.source === 'plays' && changes > 0) notes.push(`${changes} of the last ${decided} ${changes === 1 ? 'changes' : 'change'} sign under the Play-local basis.`)
+  if (record.source === 'plays' && unknown > 0) notes.push(`${unknown} ${unknown === 1 ? 'has' : 'have'} no Play-local figure.`)
+  if (feeOnly > 0) notes.push(`${feeOnly} ${feeOnly === 1 ? 'loss came' : 'losses came'} from fees alone.`)
+  if (unknownGross > 0) notes.push(`${unknownGross} ${unknownGross === 1 ? 'loss has' : 'losses have'} no before-fee figure.`)
+  return notes
+}
+
 /** The record and rules behind the suggestions, with the risk per trade editable in place. */
 function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRiskChange: (riskPercent: string) => Promise<void> }) {
   const { record, exposure, limits } = sizing
   const decided = Math.min(record.decidedPlays, record.window)
   const activity = record.source === 'activity'
   const positions = record.closedPlays === 1 ? 'position' : 'positions'
+  const basisNotes = recordBasisNotes(record, decided)
   return <div className="sizing-suggestions-record" data-testid="track-record">
     <h3>Your record</h3>
     {activity && <p className="record-source-note" data-testid="record-source">
@@ -161,6 +177,8 @@ function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRisk
         <div><dt>Win/loss ratio</dt><dd>{decimal(record.winLossRatio) ?? '—'}<small>avg +{decimal(record.averageGainPercent) ?? '—'}% / −{decimal(record.averageLossPercent) ?? '—'}%</small></dd></div>
         <div><dt>Break-even R:R</dt><dd>{record.breakEvenRewardRisk === null ? '—' : formatRewardToRisk(Number(record.breakEvenRewardRisk))}<small>at this win rate</small></dd></div>
       </dl>}
+    {basisNotes.length > 0 && <p className="record-basis" data-testid="record-basis">{basisNotes.join(' ')}
+      <InfoTip label="About result bases">The record scores the venue result. The Play-local basis uses each play’s own fills: exits minus entries, less every fee. Fee-only losses were zero or better before fees and still count as losses.</InfoTip></p>}
     <p className="record-exposure" data-reduced={exposure.level !== 'full' || undefined}>
       <strong>{exposure.level === 'full' ? 'Full size' : exposureLabels[exposure.level]}</strong> · {exposure.reason}
     </p>

@@ -114,6 +114,62 @@ describe('Production portfolio review', () => {
   })
 })
 
+describe('Review result bases', () => {
+  const local = { netUsd: '-2', basis: 'executions' as const, reason: null, signDiffers: true }
+  const reason = 'A fill\'s fee is unverified or not in a listed USD stablecoin.'
+  const report: ReviewDocument = {
+    ...reviewFixture,
+    metrics: { ...reviewFixture.metrics, signDiffers: 1, localUnknown: 1, feeOnlyLosses: 1, unknownGrossLosses: 0 },
+    plays: [
+      { ...reviewFixture.plays[0]!, net: '3', executionSource: 'imported', local },
+      { ...reviewFixture.plays[0]!, id: '22222222-3333-4444-5555-777777777777', title: 'ETH fade', net: '-1.1', executionSource: 'imported',
+        local: { netUsd: null, basis: 'executions', reason, signDiffers: false } },
+      { ...reviewFixture.plays[0]!, id: '22222222-3333-4444-5555-888888888888', title: 'Paper trade', net: '5.8', executionSource: 'manual',
+        local: { netUsd: '5.8', basis: 'manual-ledger', reason: null, signDiffers: false } },
+    ],
+  }
+
+  it('names the R estimate with its denominator and counts sign differences and fee-only losses', async () => {
+    setup(vi.fn().mockResolvedValue(report))
+    const card = (await screen.findByRole('heading', { name: 'Average outcome' })).closest('section')!
+    expect(within(card).queryByText('Avg. realized R')).not.toBeInTheDocument()
+    expect(within(card).getByText('Estimated R (planned-stop model)')).toBeVisible()
+    expect(within(card).getByText('2 of 3 with a complete initial stop')).toBeVisible()
+    expect(within(card).getByRole('button', { name: 'About estimated R' })).toHaveAccessibleDescription(/entry notional × share-weighted stop distance/)
+    const value = (term: string) => within(card).getByText(term).closest('div')!.querySelector('dd')
+    expect(value('Sign differs by basis')).toHaveTextContent(/^1 of 31 unknown$/)
+    expect(value('Fee-only losses')).toHaveTextContent(/^1 of 1 loss$/)
+    expect(within(card).getByRole('button', { name: 'About result bases' })).toHaveAccessibleDescription(/own fills/)
+  })
+
+  it('shows each Play-local result beside the venue result, with the flag and unknown reasons', async () => {
+    const { user } = setup(vi.fn().mockResolvedValue(report))
+    await user.click(await screen.findByRole('button', { name: `${report.metrics.count} Plays` }))
+    const dialog = await screen.findByRole('dialog')
+    const table = await within(dialog).findByRole('table', { name: 'Contributing closed Plays' })
+    expect(within(table).getByRole('columnheader', { name: /Play-local/ })).toBeInTheDocument()
+    const rows = within(table).getAllByRole('row').slice(1)
+    expect(rows[0]).toHaveTextContent('+$3Venue result')
+    expect(rows[0]).toHaveTextContent('-$2')
+    expect(within(rows[0]!).getByRole('button', { name: 'Sign differs by basis' })).toHaveAccessibleDescription(/still score the venue result/)
+    const unknown = within(rows[1]!).getByRole('button', { name: 'Unknown Play-local result' })
+    expect(unknown).toHaveTextContent('Unknown')
+    expect(unknown).toHaveAccessibleDescription(reason)
+    expect(within(rows[1]!).queryByRole('button', { name: 'Sign differs by basis' })).not.toBeInTheDocument()
+    expect(rows[2]).toHaveTextContent('Manual ledger')
+    expect(within(rows[2]!).queryByRole('button', { name: 'Sign differs by basis' })).not.toBeInTheDocument()
+  })
+
+  it('omits the result-basis figures for reports from servers before them', async () => {
+    const { user } = setup()
+    await user.click(await screen.findByRole('button', { name: `${reviewFixture.metrics.count} Plays` }))
+    expect(screen.queryByText('Sign differs by basis')).not.toBeInTheDocument()
+    expect(screen.queryByText('Fee-only losses')).not.toBeInTheDocument()
+    const table = await within(await screen.findByRole('dialog')).findByRole('table', { name: 'Contributing closed Plays' })
+    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('Not reported')
+  })
+})
+
 describe('Review venue names', () => {
   it('shows venue descriptor names instead of raw venue IDs in breakdowns and the Play list', async () => {
     const api = { ...createWorkspaceApi('test'), review: vi.fn().mockResolvedValue(reviewFixture) }

@@ -4,6 +4,7 @@ using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
+using Vessel.Application.Venues;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Sizing;
 using Vessel.Domain.Plays;
@@ -15,7 +16,7 @@ namespace Vessel.Application.Sizing;
 /// sizing suggestions use. Outcomes come only from linked venue fills; nothing is inferred from prices.
 /// </summary>
 public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner, TimeProvider time, IUnitOfWork unitOfWork,
-    ActivityService? activity = null)
+    ActivityService? activity = null, IVenueRegistry? venues = null)
 {
     public const string SourcePlays = "plays", SourceActivity = "activity", SourceNone = "none";
     private const string Notice = "Results come from each closed play's linked fills: venue closed PnL less fees paid in listed USD stablecoins. " +
@@ -53,7 +54,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
 
     private async Task<SizingDto> BuildAsync(decimal risk, CancellationToken ct)
     {
-        var plays = PlayOutcomes(await store.ClosedPlaysAsync(ct));
+        var plays = PlayOutcomes(await store.ClosedPlaysAsync(ct), venues);
         if (plays.Any(x => x.Outcome.Kind != PlayOutcomeKind.Scratch) || activity is null) return ToDto(risk, plays, SourcePlays);
         // Only with no decided Play outcome; the two sources are never mixed.
         var operations = await ActivityRecordAsync(activity, ct);
@@ -88,9 +89,13 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
             ExactEntryNotional: { Sign: > 0 } } &&
         !operation.Coverage.Contains(ActivityPositions.AmbiguousIdentityNotice) && Guid.TryParse(operation.Id.AsSpan(0, Math.Min(36, operation.Id.Length)), out _);
 
-    internal sealed record Scored(PlayOutcome Outcome, PlayOutcomeDto Row);
+    /// <summary>A scored outcome and its row; a Play outcome also has its Play-local result, never scored.</summary>
+    internal sealed record Scored(PlayOutcome Outcome, PlayOutcomeDto Row)
+    {
+        public PlayLocalResult? Local { get; init; }
+    }
 
-    private static List<Scored> PlayOutcomes(List<ClosedPlayFacts> closed) =>
+    private static List<Scored> PlayOutcomes(List<ClosedPlayFacts> closed, IVenueRegistry? venues) =>
         // A closed record whose linked fills are known incomplete, contradictory or out of order is not a decided outcome.
         // A venue-linked outcome closes at its latest valid exit; the detection time stays beside it for audit.
         closed.Where(f => f.Play.Origin != PlayOrigin.Retrospective && f.ManualFeesComplete)
@@ -98,7 +103,10 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
             .Select(x => new Scored(x.Outcome!, Row(x.Facts.Play.Id, x.Facts.Play.Title, x.Facts.Play.ContractId, x.Outcome!) with
             {
                 DetectedAtUtc = PlayOutcomeCalculator.DetectedAt(x.Facts)
-            })).ToList();
+            })
+            {
+                Local = PlayLocalResult.From(x.Facts, venues?.Descriptor(x.Facts.Play.VenueId)?.QuoteAsset)
+            }).ToList();
 
     /// <summary>
     /// Closed, complete operations with a known net result and entry notional, scored like a Play: return is the net
@@ -116,7 +124,11 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
             {
                 var outcome = new PlayOutcome(Guid.Parse(operation.Id.AsSpan(0, 36)), operation.ClosedAtUtc!.Value,
                     PlayOutcomeCalculator.ToDecimal(ExactAmount.Parse(operation.NetResultUsd!)), PlayOutcomeCalculator.ToDecimal(operation.ExactEntryNotional!.Value),
-                    null, true);
+                    null, true)
+                {
+                    // The operation's before-fee P&L (null when a net-of-fee fee is in an unlisted token); never excludes it.
+                    GrossResult = operation.GrossClosedPnlUsd is { } gross ? PlayOutcomeCalculator.Exact(ExactAmount.Parse(gross)) : null
+                };
                 // The record and its row read the return, so an unusable one is excluded here, like the Play calculator does.
                 var row = Row(null, $"{operation.ContractId} {(operation.Direction == "long" ? "Long" : "Short")}", operation.ContractId, outcome) with
                 {
@@ -147,6 +159,9 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
         var limits = SizingLimits.From(risk, record, exposure);
         var recent = outcomes.OrderByDescending(x => x.Outcome.ClosedAtUtc).ThenBy(x => x.Outcome.PlayId).Take(record.Window)
             .Select(x => x.Row).ToList();
+        // The decided results the record's window counts, chosen as TrackRecord chooses them.
+        var window = outcomes.Where(x => x.Outcome.Kind != PlayOutcomeKind.Scratch).OrderByDescending(x => x.Outcome.ClosedAtUtc)
+            .ThenBy(x => x.Outcome.PlayId).Take(record.Window).ToList();
         var activitySource = source == SourceActivity;
         var notice = activitySource ? ActivityNotice : Notice;
         var reason = exposure.Reason + (ties.Reason is { } tie ? " " + tie : "") + (activitySource ? ActivityReason : "");
@@ -157,7 +172,15 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
                 ExactDecimal.FormatEightPlaces(record.BattingAverage), ExactDecimal.FormatEightPlaces(record.AverageGainPercent),
                 ExactDecimal.FormatEightPlaces(record.AverageLossPercent), ExactDecimal.FormatEightPlaces(record.WinLossRatio),
                 ExactDecimal.FormatEightPlaces(record.BreakEvenRewardRisk), ExactDecimal.FormatEightPlaces(record.AverageWinR),
-                ExactDecimal.FormatEightPlaces(record.AverageLossR), recent) { Source = source },
+                ExactDecimal.FormatEightPlaces(record.AverageLossR), recent)
+            {
+                Source = source,
+                // Positions are not Plays: the Play-local counts are omitted for the Activity fallback, not zero.
+                LocalSignChanges = activitySource ? null : window.Count(x => x.Local?.SignDiffers(x.Outcome.NetResult) == true),
+                LocalUnknown = activitySource ? null : window.Count(x => x.Local?.Net is null),
+                FeeOnlyLosses = window.Count(x => x.Outcome.FeeOnlyLoss),
+                UnknownGrossLosses = window.Count(x => x.Outcome is { Kind: PlayOutcomeKind.Loss, GrossResult: null }),
+            },
             new SizingLimitsDto(ExactDecimal.FormatEightPlaces(limits.EffectiveRiskPercent), ExactDecimal.FormatEightPlaces(limits.MaxStopPercent),
                 ExactDecimal.FormatEightPlaces(limits.MinRewardRisk), Source(limits.MaxStopSource), Source(limits.MinRewardRiskSource)),
             record is { AverageGainPercent: not null, AverageLossPercent: > 0, WinLossRatio: null } ? notice + RatioNotice : notice);

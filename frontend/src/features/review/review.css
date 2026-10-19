@@ -265,3 +265,6 @@
 }
 @media(prefers-reduced-motion: reduce) { .portfolio-review * { transition: none !important; } }
 .pr-th-tip { display: inline-flex; align-items: center; gap: 3px; }
+/* Result bases (October 19, 2026): the basis under each result and the sign-differs flag beside the Play-local one. */
+.pr-play-list td small { display: block; margin-top: 3px; font-size: var(--text-2xs); color: var(--pr-muted); }
+.pr-play-list td span.workspace-badge.sign-differs { margin: 4px 0 0 6px; }

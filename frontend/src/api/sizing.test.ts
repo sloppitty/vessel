@@ -28,4 +28,17 @@ describe('sizing document', () => {
   it.each(['not a time', 7, ''])('rejects a detection time of %s', detectedAtUtc => {
     expect(isSizingDocument(document({}, { detectedAtUtc }))).toBe(false)
   })
+
+  it('accepts the Play-local and fee-only counts, null counts for the Activity fallback, and earlier documents', () => {
+    const counts = (fields: Record<string, unknown>) => {
+      const base = document({}, {}) as SizingDocument
+      return { ...base, record: { ...base.record, losses: 1, decidedPlays: 2, ...fields } }
+    }
+    expect(isSizingDocument(counts({ localSignChanges: 1, localUnknown: 0, feeOnlyLosses: 1, unknownGrossLosses: 0 }))).toBe(true)
+    expect(isSizingDocument(counts({ source: 'activity', localSignChanges: null, localUnknown: null, feeOnlyLosses: 0, unknownGrossLosses: 0 }))).toBe(true)
+    expect(isSizingDocument(counts({ localSignChanges: 3 }))).toBe(false)
+    expect(isSizingDocument(counts({ feeOnlyLosses: 2 }))).toBe(false)
+    expect(isSizingDocument(counts({ feeOnlyLosses: null }))).toBe(false)
+    expect(isSizingDocument(counts({ localUnknown: -1 }))).toBe(false)
+  })
 })

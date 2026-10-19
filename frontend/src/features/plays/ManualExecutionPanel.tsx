@@ -132,7 +132,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
         <div><dt>Exited quantity</dt><dd>{ledger.totals.exitedQuantity}</dd></div>
         <div><dt>Open quantity</dt><dd>{ledger.totals.openQuantity}</dd></div>
         <div><dt>Gross realized USD</dt><dd>{ledger.totals.grossResultUsd ?? 'Unavailable'}</dd></div>
-        <div><dt>Net realized USD</dt><dd>{ledger.totals.netResultUsd ?? 'Unavailable — costs incomplete'}</dd></div>
+        <div><dt>Net realized USD<InfoTip label="About the Play-local result">The Play-local result on the manual ledger basis: average-cost exits minus entries, less listed stablecoin fees. Review and sizing score this same figure.</InfoTip></dt><dd>{ledger.totals.netResultUsd ?? 'Unavailable — costs incomplete'}</dd></div>
       </dl>
       {(!ledger.totals.feesComplete || ledger.notice) && <p className="muted">{ledger.totals.feesComplete ? '' : 'Unknown fees are not zero. '}{ledger.notice}</p>}
       <ol className="manual-records" aria-label="Manual executions">

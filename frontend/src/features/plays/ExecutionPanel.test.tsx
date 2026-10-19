@@ -50,6 +50,31 @@ describe('execution panel', () => {
     render(<ExecutionPanel execution={net} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
     expect(screen.getByText('Venue closed PnL · after fees').parentElement).toHaveAttribute('title', expect.stringMatching(/fees already taken off/))
   })
+  it('shows the scored venue net beside the Play-local result and flags a sign difference', () => {
+    const closed: PlayExecution = { ...execution, status: 'closed', totals: { ...execution.totals, enteredQuantity: '1', exitedQuantity: '1', openQuantity: '0',
+      closedPnlUsd: '3', venueNetUsd: '2.9', local: { netUsd: '-2.1', basis: 'executions', reason: null, signDiffers: true } } }
+    const props = { error: null, busy: false, entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn() }
+    const view = render(<ExecutionPanel execution={closed} {...props} />)
+    const value = (term: string) => screen.getByText(term).closest('div')!.querySelector('dd')
+    expect(value('Venue net')).toHaveTextContent(/^2\.9 USD$/)
+    expect(screen.getByRole('button', { name: 'About venue net' })).toHaveAccessibleDescription(/Review and sizing score/)
+    expect(value('Play-local result')).toHaveTextContent(/^-2\.1 USD/)
+    expect(screen.getByRole('button', { name: 'About the Play-local result' })).toHaveAccessibleDescription(/exits minus entries, less every trading fee/)
+    expect(screen.getByRole('button', { name: 'Sign differs by basis' })).toBeInTheDocument()
+
+    const reason = 'The play is not closed.'
+    view.rerender(<ExecutionPanel execution={{ ...execution, totals: { ...execution.totals, venueNetUsd: null,
+      local: { netUsd: null, basis: 'executions', reason, signDiffers: false } } }} {...props} />)
+    expect(screen.getByRole('button', { name: 'Unknown Play-local result' })).toHaveAccessibleDescription(reason)
+    expect(screen.getByRole('button', { name: 'Unknown venue net' })).toHaveAccessibleDescription(/listed stablecoins/)
+    expect(screen.queryByRole('button', { name: 'Sign differs by basis' })).not.toBeInTheDocument()
+
+    // Servers before October 19, 2026 send neither figure.
+    view.rerender(<ExecutionPanel execution={execution} {...props} />)
+    expect(screen.queryByText('Venue net')).not.toBeInTheDocument()
+    expect(screen.queryByText('Play-local result')).not.toBeInTheDocument()
+  })
+
   it('shows linked fills, asks about ambiguous orders and links others by hand', async () => {
     const onLink = vi.fn()
     const onUnlink = vi.fn()

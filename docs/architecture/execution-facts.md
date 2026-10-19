@@ -31,7 +31,7 @@ Matching, lifecycle and sizing used to read Hyperliquid's encoding directly: `"B
 - **Matcher:** plan levels carry `buy`/`sell`; a long entry buys and its exits sell. Retained fills must not contradict the assigned role. Entry links reject close/flip effects, and exit links reject open/flip effects. Owner linking uses the same compatibility rule.
 - **Lifecycle:** unknown effect does not assert a contradiction, but a known flip cannot settle a Play without split attribution. Compatible exits must equal entries in valid chronology, with no known missing fixed-size filled-order executions or resting entry order, before closure. Review retains its stricter requirement for explicit open/close effects.
 - **Sizing:** a Play's net result is the sum of closed PnL minus the listed nominal stablecoin fees of `gross` fills only. `net-of-fee` fills already include their fee, and a fee paid in another token on such a fill does not make the result incomplete.
-- **Execution totals** report `closedPnlBasis`: `gross`, `net-of-fee` or `mixed`. The panel labels net-of-fee totals "after fees".
+- **Execution totals** report `closedPnlBasis`: `gross`, `net-of-fee` or `mixed`. The panel labels net-of-fee totals "after fees". Since October 19 they also carry the scored `venueNetUsd` and the Play-local result `local` (see below).
 
 ## Persistence
 
@@ -55,3 +55,24 @@ Migration `NormalizedExecutionFacts` adds `PositionEffect`, `FeeBasis` and `PnlB
 ## Reported fill leverage (October 18, 2026)
 
 `VenueFill.Leverage` and `ImportedFill.Leverage` are an optional fact: the position leverage the venue reports on an execution, whole numbers 1–1000, null otherwise. Only RISEx reports it today; `VenueFactChecks` rejects other values. It is display evidence for Activity operations ([observed leverage](activity-operations.md#observed-leverage-october-18-2026)), never used by matching, lifecycle, Review or sizing.
+
+## Derived results beside the facts (October 19, 2026)
+
+Phase 0 item 0.3 ([contract](phase0-trust-correctness-contract.md#03-result-basis-receipt)).
+Two derived results now sit beside the facts; neither changes a fact.
+
+- **Venue net** (`PlayOutcomeCalculator.VenueNet`), the scored basis: Σ
+  closed PnL less listed nominal stablecoin fees of `gross` fills only. The
+  execution totals expose it as `venueNetUsd`, null when a fee basis is
+  missing or a gross-basis fee is in another token. `PlayOutcomeCalculator.VenueGross`
+  is the same basis before trading fees (closed PnL plus the listed fees
+  already inside `net-of-fee` PnL; unknown for an unlisted one) and feeds the
+  fee-only-loss counts.
+- **Play-local result** (`PlayLocalResult`): the Play's own fills, exits minus
+  entries at exact quantity × price, less the fee of every linked fill whatever
+  its `PnlBasis`, so each fee is charged once. It needs verified fees: a
+  `FeeBasis`, a non-blank token, and a listed stablecoin or a zero fee. The
+  totals expose it as `local` with `netUsd`, `basis`, `reason` and
+  `signDiffers`. The Execution panel shows "Venue net" and "Play-local result"
+  with a "Sign differs by basis" pill. Gates and reasons are in
+  [Review's result bases](portfolio-review.md#result-bases-october-19-2026).

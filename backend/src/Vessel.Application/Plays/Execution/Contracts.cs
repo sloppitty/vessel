@@ -34,7 +34,16 @@ public sealed record FeeTotalDto(string Token, string Amount);
 /// <paramref name="ClosedPnlBasis"/> is gross (fees separate), net-of-fee (fees already taken off) or mixed.
 /// </summary>
 public sealed record ExecutionTotalsDto(string EnteredQuantity, string ExitedQuantity, string OpenQuantity,
-    string ClosedPnlUsd, string ClosedPnlBasis, IReadOnlyList<FeeTotalDto> Fees);
+    string ClosedPnlUsd, string ClosedPnlBasis, IReadOnlyList<FeeTotalDto> Fees)
+{
+    /// <summary>
+    /// The venue result Review and sizing score, so far: venue closed PnL less listed stablecoin fees on gross-basis fills.
+    /// Null when a fee is unverified or in another token.
+    /// </summary>
+    public string? VenueNetUsd { get; init; }
+    /// <summary>The Play-local result beside it; known once the play is closed and its fills settle it.</summary>
+    public PlayLocalResultDto? Local { get; init; }
+}
 
 /// <summary><paramref name="Issues"/> say why linked fills cannot settle the play; their quantities stay out of the totals when they contradict it.</summary>
 public sealed record PlayExecutionDto(Guid PlayId, string Status, bool Tracked, string? Reason, DateTimeOffset? CheckedAtUtc,

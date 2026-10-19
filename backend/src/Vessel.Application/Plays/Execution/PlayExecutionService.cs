@@ -78,10 +78,19 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var exited = settlement.Exited;
         var open = entered - exited;
         var all = settlement.Counted.Select(f => f.Fill).ToList();
+        // The scored venue basis and the Play-local basis side by side. The local result reads the same facts sizing and
+        // Review read: every linked fill and the orders known to be missing executions.
+        var venueNet = PlayOutcomeCalculator.VenueNet(all);
+        var local = PlayLocalResult.From(new ClosedPlayFacts(play, [], settlement.All, settlement.Incomplete),
+            venues.Descriptor(play.VenueId)?.QuoteAsset);
         var totals = new ExecutionTotalsDto(entered.ToString(), exited.ToString(), open.Units.Sign > 0 ? open.ToString() : "0",
             all.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.ClosedPnlUsd)).ToString(), PnlBasis(all),
             all.GroupBy(f => f.FeeToken).OrderBy(g => g.Key).Select(g => new FeeTotalDto(g.Key,
-                g.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Fee)).ToString())).ToList());
+                g.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Fee)).ToString())).ToList())
+        {
+            VenueNetUsd = venueNet.FeesComplete ? venueNet.Net.ToString() : null,
+            Local = local.ToDto(venueNet.FeesComplete ? venueNet.Net : null),
+        };
         var entries = plan.Entries.Select(entry =>
         {
             var own = linked.Where(l => l.Role == OrderLinkRole.Entry && l.EntryId == entry.Id).ToList();
@@ -324,9 +333,14 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         }
     }
 
-    /// <summary>The linked fills that count for a Play, with the reasons they cannot settle it yet.</summary>
+    /// <summary>
+    /// The linked fills that count for a Play, with the reasons they cannot settle it yet. <see cref="All"/> keeps every
+    /// linked fill and <see cref="Incomplete"/> the orders known to be missing executions, as sizing and Review read them.
+    /// </summary>
     private sealed record Settlement(string EntrySide, List<LinkedFill> Counted, List<string> Problems)
     {
+        public List<LinkedFill> All { get; init; } = [];
+        public List<string> Incomplete { get; init; } = [];
         public ExactAmount Entered => ExecutionIntegrity.Quantity(Counted.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill));
         public ExactAmount Exited => ExecutionIntegrity.Quantity(Counted.Where(f => f.Role != OrderLinkRole.Entry).Select(f => f.Fill));
     }
@@ -338,7 +352,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var side = ExecutionIntegrity.EntrySide(plan);
         var all = linked.SelectMany(l => fills[l.ImportedOrderId].Select(f => new LinkedFill(l.Role, f))).ToList();
         var incomplete = linked.Where(l => orders.TryGetValue(l.ImportedOrderId, out var order) &&
-            ExecutionIntegrity.MissingExecutions(order, fills[l.ImportedOrderId])).Select(l => orders[l.ImportedOrderId].ExternalOrderId);
+            ExecutionIntegrity.MissingExecutions(order, fills[l.ImportedOrderId])).Select(l => orders[l.ImportedOrderId].ExternalOrderId).ToList();
         var problems = ExecutionIntegrity.Problems(side, all, incomplete);
         if (!retrospective)
         {
@@ -346,7 +360,10 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             problems.AddRange(linked.Where(l => l.Role != OrderLinkRole.Exit && !levels.Contains(l.LevelKey))
                 .Select(l => $"Order {External(orders, l)} references a plan entry or level that no longer exists; review its association."));
         }
-        return new(side, all.Where(f => !ExecutionIntegrity.Contradicts(f.Role, side, f.Fill)).ToList(), problems);
+        return new(side, all.Where(f => !ExecutionIntegrity.Contradicts(f.Role, side, f.Fill)).ToList(), problems)
+        {
+            All = all, Incomplete = incomplete
+        };
     }
 
     /// <summary>Each order's fills by its internal ID, through the shared <see cref="OrderKey"/> rule.</summary>

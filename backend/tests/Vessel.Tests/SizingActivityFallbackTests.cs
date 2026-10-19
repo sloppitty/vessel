@@ -70,6 +70,18 @@ public sealed class SizingActivityFallbackTests
     }
 
     [Fact]
+    public async Task Fallback_records_count_fee_only_losses_but_not_play_local_sign_changes()
+    {
+        // Phase 0 item 0.3: positions are not Plays, so the Play-local basis is omitted (null), not zero.
+        RoundTrip(0, 0, fee: 0.05m);  // flat before fees, -0.1 after: a fee-only loss
+        RoundTrip(100, -1, fee: 0.05m); // a loss before fees too
+        RoundTrip(200, 10);
+        var record = (await Service().GetAsync(default)).Record;
+        Assert.Equal((SizingService.SourceActivity, 2, 1), (record.Source, record.Losses, record.FeeOnlyLosses));
+        Assert.Equal(((int?)null, (int?)null, 0), (record.LocalSignChanges, record.LocalUnknown, record.UnknownGrossLosses));
+    }
+
+    [Fact]
     public async Task Net_of_fee_results_are_not_charged_their_fee_twice()
     {
         RoundTrip(0, 10, fee: 0.5m, basis: "net-of-fee"); // entry −0.5, exit 10 already net

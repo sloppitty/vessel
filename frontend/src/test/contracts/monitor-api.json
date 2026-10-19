@@ -72,7 +72,14 @@
       "openQuantity": "0",
       "closedPnlUsd": "0",
       "closedPnlBasis": "gross",
-      "fees": []
+      "fees": [],
+      "venueNetUsd": "0",
+      "local": {
+        "netUsd": null,
+        "basis": "executions",
+        "reason": "The play is not closed.",
+        "signDiffers": false
+      }
     },
     "entries": [
       {

@@ -4,6 +4,7 @@ using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
+using Vessel.Application.Venues;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
@@ -11,8 +12,11 @@ using Vessel.Domain.Workspace;
 
 namespace Vessel.Application.Review;
 
-/// <summary>Read-only reporting. Never assigns fills, mutates lifecycle or refreshes a venue.</summary>
-public sealed class ReviewService(IReviewStore store, TimeProvider time)
+/// <summary>
+/// Read-only reporting. Never assigns fills, mutates lifecycle or refreshes a venue. The venue registry supplies each
+/// venue's quote asset for the Play-local result; without it that result is unknown.
+/// </summary>
+public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueRegistry? venues = null)
 {
     public const int PageSize = 50;
     public static readonly string[] Periods = ["day", "week", "month", "year", "all"];
@@ -89,7 +93,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
                 accounts[e.Facts.Play.AccountId].Name, e.Facts.Play.VenueId, e.Facts.Play.ContractId!, e.ClosedAt,
                 ExactDecimal.Format(e.Result!.NetResult), ExactDecimal.Format(e.Result.ReturnPercent), ExactDecimal.Format(e.Result.RMultiple),
                 e.Facts.Play.HasReview, e.Facts.Play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned",
-                e.Facts.ManualSource ? "manual" : "imported")).ToList();
+                e.Facts.ManualSource ? "manual" : "imported") { Local = e.Local!.ToDto(e.Result.NetResult) }).ToList();
         return new ReviewDto(now, from ?? current.FirstOrDefault()?.ClosedAt, query.Period, "USD",
             options, Periods.Select(period => {
                 var selected = accepted.Where(e => InPeriod(e.ClosedAt, From(period, now), now)).ToList();
@@ -159,9 +163,13 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
         return DiaryService.BoundedReasons(reasons);
     }
 
-    private sealed record Evaluated(ClosedPlayFacts Facts, DateTimeOffset ClosedAt, PlayOutcome? Result, string? Exclusion);
+    /// <summary>One closed Play; an accepted one also has its Play-local result beside the scored venue result.</summary>
+    private sealed record Evaluated(ClosedPlayFacts Facts, DateTimeOffset ClosedAt, PlayOutcome? Result, string? Exclusion)
+    {
+        public PlayLocalResult? Local { get; init; }
+    }
 
-    private static Evaluated Evaluate(ClosedPlayFacts facts, DateTimeOffset now, bool incompleteOrders)
+    private Evaluated Evaluate(ClosedPlayFacts facts, DateTimeOffset now, bool incompleteOrders)
     {
         var fills = facts.Fills;
         var entries = fills.Where(f => f.Role == OrderLinkRole.Entry).ToList();
@@ -183,7 +191,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
         if (result is not null && !HasCompleteInitialRisk(facts, entries.Min(f => f.Fill.OccurredAtUtc), side))
             result = result with { PlannedRisk = null };
         return result is null ? incomplete : !result.FeesComplete ? incomplete with { Exclusion = "fees" }
-            : new Evaluated(facts, close, result, null);
+            : new Evaluated(facts, close, result, null) { Local = PlayLocalResult.From(facts, venues?.Descriptor(facts.Play.VenueId)?.QuoteAsset) };
     }
 
     private static bool HasCompleteInitialRisk(ClosedPlayFacts facts, DateTimeOffset entryAt, string side)
@@ -228,7 +236,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
             maxWins = Math.Max(maxWins, streak);
             maxLosses = Math.Max(maxLosses, -streak);
         }
-        return new(plays.Count, wins.Count, losses.Count, plays.Count - wins.Count - losses.Count,
+        return new ReviewMetricsDto(plays.Count, wins.Count, losses.Count, plays.Count - wins.Count - losses.Count,
             plays.Count == 0 ? null : ExactDecimal.Format(running),
             ExactDecimal.Format(Ratio(ExactAmount.From(wins.Count), ExactAmount.From(wins.Count + losses.Count))),
             ExactDecimal.Format(gain), ExactDecimal.Format(loss), ExactDecimal.Format(Ratio(gain, loss)),
@@ -237,7 +245,13 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
             ExactDecimal.Format(Ratio(running, ExactAmount.From(plays.Count))),
             ExactDecimal.Format(Average(risks.Select(o => o.RMultiple!.Value))), risks.Count,
             plays.Count(p => p.Facts.Play.HasReview), plays.Count == 0 ? null : ExactDecimal.Format(drawdown),
-            maxWins, maxLosses);
+            maxWins, maxLosses)
+        {
+            SignDiffers = plays.Count(p => p.Local!.SignDiffers(p.Result!.NetResult)),
+            LocalUnknown = plays.Count(p => p.Local!.Net is null),
+            FeeOnlyLosses = outcomes.Count(o => o.FeeOnlyLoss),
+            UnknownGrossLosses = losses.Count(o => o.GrossResult is null),
+        };
     }
 
     private static (List<ReviewPointDto> Points, int BucketDays) Series(List<Evaluated> plays, DateTimeOffset? from, DateTimeOffset now)
