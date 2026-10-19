@@ -12,11 +12,15 @@ import { overviewAccounts } from './overview-scope'
 import { OverviewSummary } from './OverviewSummary'
 import { OverviewPlays } from './OverviewPlays'
 import { OverviewAllocation } from './OverviewAllocation'
+import { OverviewIncidents } from './OverviewIncidents'
+import type { Incident } from '@/features/monitor/incidents'
 
-export function OverviewPage({ data, api, monitors = [], overviewQuery, setOverviewQuery, reloadKey, refreshAllAction, refreshing,
+export function OverviewPage({ data, api, monitors = [], incidents = [], overviewQuery, setOverviewQuery, reloadKey, refreshAllAction, refreshing,
   onAddAccount, onCreatePortfolio, onAccounts, onActivity, viewAccount, sync, manageAccount, browsePlays, viewPlay, reload }: {
   data: Overview; api: WorkspaceApi; overviewQuery: OverviewQuery
   monitors?: AccountMonitor[]
+  /** Open monitor incidents across every monitored account, from the shell's monitor summary. */
+  incidents?: readonly Incident[]
   setOverviewQuery: (query: OverviewQuery | ((previous: OverviewQuery) => OverviewQuery)) => void
   reloadKey: number; refreshAllAction: ReactNode; refreshing: string | null
   onAddAccount: () => void; onCreatePortfolio: () => void; onAccounts: () => void; onActivity: () => void
@@ -30,6 +34,9 @@ export function OverviewPage({ data, api, monitors = [], overviewQuery, setOverv
   return <>
     <OverviewScope scope={overviewQuery.scope} onScope={scope => setOverviewQuery(query => ({ ...query, scope }))}
       accounts={accounts} portfolios={portfolios} />
+    {/* Above the metric tiles and only while an incident is open; Allocation stays between the tiles and Summary. */}
+    <OverviewIncidents incidents={incidents} accounts={accounts} onOpenAccount={viewAccount}
+      onOpenPlay={id => { void viewPlay(id, new AbortController().signal) }} />
     <OverviewSummary api={api} query={overviewQuery} onQuery={setOverviewQuery} reloadGeneration={reloadKey}
       fallback={data} accountCount={scopedAccounts.length} workspaceNote={data.scopeNote}
       beforeSummary={<OverviewAllocation accounts={accounts} portfolios={portfolios} scope={overviewQuery.scope}

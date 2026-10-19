@@ -7,10 +7,12 @@ namespace Vessel.Application.Monitoring;
 
 /// <param name="Outcome"><c>unverifiable</c> when the subject stayed unobservable beyond the monitor lifetime; the
 /// record is neither resolved nor still checked. Null otherwise.</param>
+/// <param name="LastObservedAtUtc">Source time of the last decisive (fresh present or absent) observation; null when none
+/// is recorded.</param>
 public sealed record MonitorDiscrepancyDto(Guid Id, Guid AccountId, Guid? PlayId, string ContractId, string Kind,
     string Severity, string State, DateTimeOffset OpenedAtUtc, DateTimeOffset? ConfirmedAtUtc,
     DateTimeOffset? ResolvedAtUtc, DateTimeOffset? DismissedAtUtc, string? Note, JsonElement Details,
-    string? Outcome = null, DateTimeOffset? UnverifiableAtUtc = null);
+    string? Outcome = null, DateTimeOffset? UnverifiableAtUtc = null, DateTimeOffset? LastObservedAtUtc = null);
 public sealed record AccountMonitorDto(Guid AccountId, string State, DateTimeOffset? LastAttemptAtUtc,
     DateTimeOffset? LastSuccessAtUtc, DateTimeOffset? NextRunAtUtc, string ManualState, string? RunTrigger,
     DateTimeOffset? NextManualAllowedAtUtc, string? Error, bool WorkerOnline, IReadOnlyList<MonitorDiscrepancyDto> Discrepancies);

@@ -23,7 +23,7 @@ describe('monitor API contract fixture', () => {
   })
   it('records explicit nulls and the unverifiable outcomes', () => {
     expect(fixture.runCompletedEvent).toMatchObject({ subject: { playId: null, discrepancyId: null }, source: { orderIds: null, fillIds: null } })
-    expect(fixture.discrepancy).toMatchObject({ outcome: null, unverifiableAtUtc: null })
+    expect(fixture.discrepancy).toMatchObject({ outcome: null, unverifiableAtUtc: null, lastObservedAtUtc: expect.any(String) })
     expect(fixture.discrepancyUnverifiable).toMatchObject({ state: 'candidate', outcome: 'unverifiable' })
     expect(fixture.watchUnverifiable).toMatchObject({ state: 'unverifiable' })
   })

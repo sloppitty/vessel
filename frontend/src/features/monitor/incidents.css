@@ -1,0 +1,37 @@
+/*
+ * Monitor incidents. Tones are the existing signal tokens: critical is --negative, warning is --warning and a notice is
+ * secondary text. Every pair is one contrastChecks already enforces for all themes and generated palettes: filled marks
+ * write the page background on the tone ("<signal> on background", symmetric), outlined ones write the tone on the
+ * page or a panel. No surface is tinted, so no new pair is introduced.
+ */
+.incident-pill, .incident-count, .play-incidents, .monitor-attention, .overview-incidents { --tone: var(--warning); }
+:is(.incident-pill, .incident-count, .play-incidents, .monitor-attention, .overview-incidents)[data-tone="critical"] { --tone: var(--negative); }
+:is(.incident-pill, .incident-count, .play-incidents, .monitor-attention, .overview-incidents)[data-tone="info"] { --tone: var(--muted-foreground); }
+
+.incident-pill, .incident-count {
+  display: inline-flex; flex-shrink: 0; align-items: center; gap: 4px; border-radius: 999px;
+  background: var(--tone); color: var(--background); font-size: var(--text-2xs); font-weight: 700; line-height: 1;
+  white-space: nowrap; font-feature-settings: var(--figures);
+}
+.incident-pill { padding: 3px 8px 3px 6px; }
+.incident-pill > svg, .incident-count > svg { flex-shrink: 0; }
+.incident-count { height: 18px; padding: 0 6px 0 5px; }
+.shell-nav-item > .incident-count { margin-left: auto; }
+@media (min-width: 801px) {
+  .navigation-collapsed .shell-nav-item > .incident-count {
+    position: absolute; top: 3px; left: calc(50% + 2px); height: 16px; padding: 0 4px; box-shadow: 0 0 0 2px var(--sidebar);
+  }
+  .navigation-collapsed .shell-nav-item > .incident-count > svg { display: none; }
+}
+
+/* The Play header's way to the Execution tab: the tone on the page, outlined like the other header actions. */
+.play-incidents {
+  display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; border: 1px solid var(--tone); border-radius: var(--radius-control);
+  background: transparent; color: var(--tone); font: inherit; font-size: var(--text-xs); font-weight: 600; white-space: nowrap; cursor: pointer;
+  transition: background .16s var(--ease-out);
+}
+.plays-page .plays-heading-actions .play-incidents { height: 32px; padding: 6px 10px; }
+.play-incidents:hover:not(:disabled) { background: color-mix(in srgb, var(--tone) 12%, transparent); }
+.play-incidents:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.play-incidents:disabled { cursor: default; }
+.play-incidents > svg { flex-shrink: 0; }

@@ -181,6 +181,7 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
 
     private static MonitorDiscrepancyDto Dto(PlayDiscrepancy row) => new(row.Id, row.AccountId, row.PlayId, row.ContractId,
         row.Kind, row.Severity, row.State, row.OpenedAtUtc, row.ConfirmedAtUtc, row.ResolvedAtUtc, row.DismissedAtUtc,
-        row.Note, JsonSerializer.Deserialize<JsonElement>(row.Details), row.UnverifiableAtUtc is null ? null : "unverifiable", row.UnverifiableAtUtc);
+        row.Note, JsonSerializer.Deserialize<JsonElement>(row.Details), row.UnverifiableAtUtc is null ? null : "unverifiable", row.UnverifiableAtUtc,
+        row.LastObservedAtUtc == default ? null : row.LastObservedAtUtc);
     private static DateTimeOffset Earlier(DateTimeOffset? a, DateTimeOffset b) => a is { } value && value < b ? value : b;
 }

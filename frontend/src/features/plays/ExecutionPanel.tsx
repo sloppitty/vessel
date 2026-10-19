@@ -2,6 +2,7 @@ import type { LinkOrder, PlayExecution, PlaySummary } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { Link2, Link2Off } from 'lucide-react'
 import { MonitorDiscrepancies, MonitorPanel, MonitorWatches } from '@/features/monitor/MonitorPanel'
+import { levelKey } from '@/features/monitor/discrepancy-text'
 import type { AccountMonitor } from '@/api/monitor'
 import type { DraftEntry } from './draft'
 import { describeOrder, fillSummary, levelName, levelOptions, orderFitsRole } from './execution'
@@ -47,6 +48,9 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
   const options = levelOptions(entries, execution.status === 'open')
   const shownMonitor = monitor === undefined ? execution.monitor : monitor
   const { totals } = execution
+  // Monitor records and watches name this Play's levels ("Entry 1 stop") rather than only the order's role.
+  const recordLevel = (key: unknown) => { const level = levelKey(key); return level ? levelName(entries, level, origin) : null }
+  const watchLevel = (watch: { linkId: string }) => { const link = execution.links.find(item => item.id === watch.linkId); return link ? levelName(entries, link, origin) : null }
   return <div className="execution-panel">
     {!retrospective && (!execution.tracked || !shownMonitor) && <div className="execution-header">
       <p className="muted" title={execution.tracked ? 'Orders link automatically by price and side; Vessel asks only when several plays could own one.' : undefined}>
@@ -54,10 +58,11 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
           : execution.reason ?? 'Execution is not tracked for this play.'}</p>
     </div>}
     {error && <p className="error" role="alert">{error}</p>}
-    {shownMonitor && <MonitorPanel monitor={shownMonitor} busy={busy || monitorBusy} error={monitorError}
+    {/* The heading follows this Play's own records, the ones listed below it. */}
+    {shownMonitor && <MonitorPanel monitor={shownMonitor} discrepancies={execution.discrepancies} busy={busy || monitorBusy} error={monitorError}
       retryAtUtc={retryAtUtc} statusUnavailable={monitorUnavailable} onCheck={onCheck} onManageCredential={onManageCredential} />}
-    {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss} />}
-    <MonitorWatches watches={execution.watches} />
+    {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss} levelName={recordLevel} />}
+    <MonitorWatches watches={execution.watches} levelName={watchLevel} />
     <dl className="execution-totals">
       <div><dt>Entered</dt><dd>{totals.enteredQuantity}</dd></div>
       <div><dt>Exited</dt><dd>{totals.exitedQuantity}</dd></div>

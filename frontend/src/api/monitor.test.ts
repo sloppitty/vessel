@@ -45,6 +45,14 @@ describe('monitor contract', () => {
     delete older.outcome
     expect(isMonitorDiscrepancy(older)).toBe(false)
   })
+  it('requires the last observation time as a UTC timestamp or an explicit null', () => {
+    expect(isMonitorDiscrepancy({ ...discrepancyFixture, lastObservedAtUtc: null })).toBe(true)
+    expect(isMonitorDiscrepancy({ ...discrepancyFixture, lastObservedAtUtc: '2026-10-14T10:00:00.1234567+00:00' })).toBe(true)
+    expect(isMonitorDiscrepancy({ ...discrepancyFixture, lastObservedAtUtc: '2026-10-14 10:00' })).toBe(false)
+    const older: Record<string, unknown> = { ...discrepancyFixture }
+    delete older.lastObservedAtUtc
+    expect(isMonitorDiscrepancy(older)).toBe(false)
+  })
   it('validates watched orders and keeps a watching order open-ended', () => {
     const watch = { linkId: 'link-1', playId: savedPlayFixture.summary.id, orderId: 'exit-1', role: 'stop', state: 'unverifiable',
       startedAtUtc: '2026-10-14T10:00:00Z', endedAtUtc: '2026-10-21T10:00:00Z' }

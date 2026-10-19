@@ -60,6 +60,21 @@ public sealed class MonitorDiscrepancyTests
     }
 
     [Fact]
+    public async Task Read_records_carry_the_last_decisive_observation_time_in_the_api_json()
+    {
+        var f = new DiscrepancyFixture { Position = 0 };
+        await f.Confirm();
+        var observed = f.Clock.Now;
+        f.Advance(90); f.PositionsComplete = false;
+        // An incomplete read is not an observation: the time stays at the last fresh decision.
+        await f.Evaluate();
+        var row = Assert.Single(await f.Service.ReadAsync(f.Account.Id, null, default), x => x.Kind == "position.missing");
+        Assert.Equal(observed, row.LastObservedAtUtc);
+        var json = System.Text.Json.JsonSerializer.SerializeToElement(row, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        Assert.Equal(observed, json.GetProperty("lastObservedAtUtc").GetDateTimeOffset());
+    }
+
+    [Fact]
     public async Task Bounded_lifetime_history_does_not_disable_safe_current_comparisons()
     {
         var f = new DiscrepancyFixture { Position = 2, Truncated = true };

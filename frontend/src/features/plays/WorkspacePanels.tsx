@@ -130,7 +130,7 @@ const journalSections = [
   ['review', 'Review', 'What happened, and what did you learn?'],
 ] as const
 
-export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceRequest = 0, readOnly = false, execution,
+export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceRequest = 0, executionRequest = 0, readOnly = false, execution,
   structuredReview, onStructuredReviewChange, status = 'draft', retrospective = false }: {
   notes: PlayDraft['notes']
   onChange: (notes: PlayDraft['notes']) => void
@@ -138,6 +138,8 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   onEvidenceChange?: (update: (evidence: DraftEvidence[]) => DraftEvidence[]) => void
   /** Incremented to bring the Evidence tab forward, e.g. after a chart capture. */
   evidenceRequest?: number
+  /** Incremented to bring the Execution tab forward, e.g. from the header's incident indicator. */
+  executionRequest?: number
   /** Keeps the pre-trade notes fixed; the review stays editable. */
   readOnly?: boolean
   /** Linked venue orders and fills of a saved play, shown as an Execution tab before the review. */
@@ -154,12 +156,17 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   const [expanded, setExpanded] = useState(false)
   const expandButton = useRef<HTMLButtonElement>(null)
   const [shownRequest, setShownRequest] = useState(evidenceRequest)
+  const [shownExecution, setShownExecution] = useState(executionRequest)
   // While the owner is writing in the Review tab it stays, even if they clear the note to rewrite it.
   const [writingReview, setWritingReview] = useState(false)
   if (shownRequest !== evidenceRequest) {
     setShownRequest(evidenceRequest)
     setTab('evidence')
     setWritingReview(false)
+  }
+  if (shownExecution !== executionRequest) {
+    setShownExecution(executionRequest)
+    if (execution) { setTab('execution'); setWritingReview(false) }
   }
   const terminal = status === 'closed' || status === 'cancelled'
   const showReview = writingReview || journalReviewVisible({ status, retrospective, review: notes.review, structuredReview })

@@ -1,4 +1,5 @@
-import { monitorFixture } from '@/test/monitor-fixture'
+import { missingStopFixture, monitorFixture, shortStopFixture } from '@/test/monitor-fixture'
+import type { AccountMonitor } from '@/api/monitor'
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import { act, screen, waitFor, within } from '@testing-library/react'
 import { render } from '@/test/render'
@@ -108,11 +109,13 @@ function fakeServer() {
   return { api, plays, history, evidence, execution }
 }
 
-function Page({ api, accounts = [accountFixture], initial = createPlaysSession(), onControl, onManageAccount }: { api: WorkspaceApi; accounts?: BrokerAccount[];
-  initial?: PlaysSession; onControl?: (set: Dispatch<SetStateAction<PlaysSession>>) => void; onManageAccount?: (id: string) => void }) {
+function Page({ api, accounts = [accountFixture], initial = createPlaysSession(), onControl, onManageAccount, monitors }: { api: WorkspaceApi; accounts?: BrokerAccount[];
+  initial?: PlaysSession; onControl?: (set: Dispatch<SetStateAction<PlaysSession>>) => void; onManageAccount?: (id: string) => void
+  monitors?: AccountMonitor[] }) {
   const [session, setSession] = useState(initial)
   useEffect(() => { onControl?.(setSession) }, [onControl])
-  return <NotificationProvider><PlaysPage accounts={accounts} portfolios={[portfolioFixture]} api={api} session={session} onSession={setSession} onManageAccount={onManageAccount} /></NotificationProvider>
+  return <NotificationProvider><PlaysPage accounts={accounts} portfolios={[portfolioFixture]} api={api} session={session} onSession={setSession} onManageAccount={onManageAccount}
+    {...monitors ? { accountMonitors: monitors } : {}} /></NotificationProvider>
 }
 
 const client = (server: ReturnType<typeof fakeServer>, overrides: Partial<WorkspaceApi> = {}) =>
@@ -574,6 +577,47 @@ describe('monitor credential', () => {
     await user.click(await screen.findByRole('button', { name: 'Manage account credential' }))
     expect(manage).toHaveBeenCalledWith(venue.id)
     expect(screen.queryByRole('link', { name: 'Manage account credential' })).not.toBeInTheDocument()
+  })
+})
+
+describe('Play header incidents (Phase 0, 0.4a)', () => {
+  it('shows the open incidents in the Play header and brings the Execution tab forward, whose heading agrees', async () => {
+    const server = fakeServer()
+    const venue = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}` }
+    // The first Play this fake server saves.
+    const records = [{ ...missingStopFixture, playId: ids(1) }, { ...shortStopFixture, playId: ids(1), state: 'resolved' as const }]
+    const api = client(server, { instruments: () => Promise.resolve(instrumentCatalogFixture), candles: () => new Promise(() => {}),
+      marketContext: () => new Promise(() => {}),
+      playExecution: vi.fn((id: string) => Promise.resolve({ ...server.execution(server.plays.get(id)!), discrepancies: records })) })
+    const user = userEvent.setup()
+    render(<Page api={api} accounts={[venue]} monitors={[{ ...monitorFixture, discrepancies: records }]} />)
+    await user.click(await screen.findByRole('button', { name: 'New play' }))
+    await chooseInPicker('Account', venue.name, user)
+    await pickInstrument(user, 'BTC')
+    await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
+    await user.click(screen.getByRole('button', { name: 'Plan it' }))
+    const indicator = await screen.findByRole('button', { name: 'Needs attention · 1 critical' })
+    expect(screen.getByRole('tab', { name: 'Thesis' })).toHaveAttribute('aria-selected', 'true')
+    await user.click(indicator)
+    expect(screen.getByRole('tab', { name: 'Execution' })).toHaveAttribute('aria-selected', 'true')
+    const panel = await screen.findByRole('region', { name: 'Background monitor' })
+    expect(within(panel).getByText('Needs attention · 1 critical')).toBeInTheDocument()
+    expect(within(panel).queryByText('Monitored')).not.toBeInTheDocument()
+  })
+  it('shows no header indicator without an open incident', async () => {
+    const server = fakeServer()
+    const venue = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}` }
+    const api = client(server, { instruments: () => Promise.resolve(instrumentCatalogFixture), candles: () => new Promise(() => {}),
+      marketContext: () => new Promise(() => {}) })
+    const user = userEvent.setup()
+    render(<Page api={api} accounts={[venue]} monitors={[{ ...monitorFixture, discrepancies: [{ ...missingStopFixture, playId: ids(1), state: 'dismissed' }] }]} />)
+    await user.click(await screen.findByRole('button', { name: 'New play' }))
+    await chooseInPicker('Account', venue.name, user)
+    await pickInstrument(user, 'BTC')
+    await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
+    await user.click(screen.getByRole('button', { name: 'Plan it' }))
+    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Play draft workspace' })).getByText('Planned', { selector: '.badge' })).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /^Needs attention/ })).not.toBeInTheDocument()
   })
 })
 

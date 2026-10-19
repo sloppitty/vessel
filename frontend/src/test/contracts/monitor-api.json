@@ -207,7 +207,8 @@
       "playQuantity": "0.1"
     },
     "outcome": null,
-    "unverifiableAtUtc": null
+    "unverifiableAtUtc": null,
+    "lastObservedAtUtc": "2026-10-14T03:20:41.1234567+00:00"
   },
   "discrepancyUnverifiable": {
     "id": "00000000-0000-4000-8000-000000000009",
@@ -227,7 +228,8 @@
       "playQuantity": "0.1"
     },
     "outcome": "unverifiable",
-    "unverifiableAtUtc": "2026-10-14T03:20:41.1234567+00:00"
+    "unverifiableAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "lastObservedAtUtc": "2026-10-14T03:20:41.1234567+00:00"
   },
   "watchUnverifiable": {
     "linkId": "00000000-0000-4000-8000-000000000010",

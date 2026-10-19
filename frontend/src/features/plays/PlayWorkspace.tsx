@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import type { SizingDocument } from '@/api/sizing'
-import { ExternalLink, PencilLine, RefreshCw } from 'lucide-react'
+import { ExternalLink, PencilLine, RefreshCw, TriangleAlert } from 'lucide-react'
 import { statusLabels, type PlayStatus } from '@/api/plays'
 import { useVenues } from '@/api/venues'
 import { AccountSelect } from '@/components/accounts/AccountSelect'
@@ -26,9 +26,11 @@ import { defaultPlayTitle } from './default-title'
 import './plays-workspace.css'
 import { NativeSelect } from '@/components/ui/native-select'
 import { pickerAccounts } from '@/features/workspace/account-picker-options'
+import { incidentSummary, topTone, type IncidentCounts } from '@/features/monitor/incidents'
+import '@/features/monitor/incidents.css'
 
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, revision = null,
-  lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, onRiskChange, retrospective = false }: {
+  lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, onRiskChange, retrospective = false, incidents }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -49,6 +51,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   readOnly?: boolean
   /** Execution tab content for a saved play. */
   execution?: ReactNode
+  /** This Play's open monitor incidents, from the shell's monitor summary; shown in the header with a way to the Execution tab. */
+  incidents?: IncidentCounts | undefined
   retrospective?: boolean
   /** Risk settings and record for sizing suggestions, which only apply to editable plays. */
   sizing?: SizingDocument | null
@@ -127,7 +131,10 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const leftColumn = useRef<HTMLDivElement>(null)
   // Runs after the expanded chart closes, so the journal is in the page again.
   const showEvidence = () => requestAnimationFrame(() =>
-    leftColumn.current?.querySelector('[data-testid="journal-panel"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+    leftColumn.current?.querySelector('[data-testid="journal-panel"]')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }))
+  const [executionRequest, setExecutionRequest] = useState(0)
+  const incidentTone = incidents ? topTone(incidents) : null
+  const showExecution = () => { setExecutionRequest(current => current + 1); showEvidence() }
 
   // Suggestions sit in their own panel above the workspace; the fields only carry a marker.
   const leverage = leverageOf(draft.leverage)
@@ -160,6 +167,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           placeholder={readOnly ? 'Name this play' : defaultPlayTitle(draft)} disabled={readOnly} onChange={event => onChange({ ...draft, title: event.target.value })} />
       </div>
       <div className="plays-heading-actions">
+        {incidents && incidentTone && <button type="button" className="play-incidents" data-tone={incidentTone} disabled={!execution}
+          title={execution ? 'Show in the Execution tab' : undefined} onClick={showExecution}>
+          <TriangleAlert size={14} aria-hidden="true" />Needs attention · {incidentSummary(incidents)}</button>}
         {tradeUrl && <a className="plays-venue-link" href={tradeUrl} target="_blank" rel="noopener noreferrer"
           title="Place the planned orders on the venue. Vessel never sends orders.">
           <ExternalLink size={14} aria-hidden="true" />Open {instrumentName} on {venues.name(account!.venueId)}</a>}
@@ -234,7 +244,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           execution={execution} readOnly={readOnly} retrospective={retrospective} status={status}
           structuredReview={draft.structuredReview}
           onStructuredReviewChange={structuredReview => onChange({ ...draft, structuredReview })}
-          evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceRequest={evidenceRequest} />
+          evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceRequest={evidenceRequest} executionRequest={executionRequest} />
       </div>
       {retrospective ? <section className="panel retrospective-position" aria-label="No original plan"><h2>No original plan</h2></section>
         : readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>

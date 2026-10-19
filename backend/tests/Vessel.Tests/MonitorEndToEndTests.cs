@@ -245,11 +245,13 @@ public sealed class MonitorEndToEndTests
         var json = fixture.ApiJsonOptions();
         var discrepancy = JsonSerializer.SerializeToElement(new MonitorDiscrepancyDto(Guid.NewGuid(), fixture.AccountId, fixture.BtcPlay,
             "BTC", "position.excess", "warning", "open", fixture.Clock.GetUtcNow(), fixture.Clock.GetUtcNow(), null, null, null,
-            JsonSerializer.SerializeToElement(new { venueQuantity = "0.100000000000000001", playQuantity = "0.1" })), json);
+            JsonSerializer.SerializeToElement(new { venueQuantity = "0.100000000000000001", playQuantity = "0.1" }),
+            LastObservedAtUtc: fixture.Clock.GetUtcNow()), json);
         // Outcomes that need lifetimes to pass: a publicly unverifiable candidate and an unverifiable exit watch.
         var unverifiable = JsonSerializer.SerializeToElement(new MonitorDiscrepancyDto(Guid.NewGuid(), fixture.AccountId, fixture.BtcPlay,
             "BTC", "position.missing", "warning", "candidate", fixture.Clock.GetUtcNow(), null, null, null, null,
-            JsonSerializer.SerializeToElement(new { venueQuantity = "0", playQuantity = "0.1" }), "unverifiable", fixture.Clock.GetUtcNow()), json);
+            JsonSerializer.SerializeToElement(new { venueQuantity = "0", playQuantity = "0.1" }), "unverifiable", fixture.Clock.GetUtcNow(),
+            fixture.Clock.GetUtcNow().AddMinutes(-30)), json);
         var watch = JsonSerializer.SerializeToElement(new MonitorWatchDto(Guid.NewGuid(), fixture.BtcPlay, "exit-order", "stop", "unverifiable",
             fixture.Clock.GetUtcNow(), fixture.Clock.GetUtcNow()), json);
         var document = new JsonObject
