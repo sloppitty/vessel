@@ -62,4 +62,9 @@ October 19, 2026, branch `t3/phase0-journal-images`:
   - Release build: 0 warnings.
   - Backend: 3,436 passed, 5 skipped (live venue and S3).
   - Frontend: typecheck and lint clean, 2,463 tests, build OK.
+- An independent Sol (Codex, GPT-6.1-Sol) review found no actionable defect.
+  It checked metadata-only opening, Save with unloaded evidence, the
+  three-request limit, cancellation, stale responses, object-URL cleanup and
+  the error states, and its probes passed.
 - Still to do: a rendered browser check of the placeholder card and viewer.
+  The isolated e2e harness does not visit evidence.
