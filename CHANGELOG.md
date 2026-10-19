@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.3.1 - October 19, 2026
+
+Release notes: [docs/releases/v0.3.1.md](docs/releases/v0.3.1.md).
+
 ### Added
 
 - Activity operations show the venue-reported leverage observed while they were
@@ -21,6 +25,40 @@
   price, summed before any conversion. A Play whose summed entry notional needs
   more than 28 decimal places is excluded from Review and sizing as beyond exact
   precision, instead of being rounded into a different return.
+
+### Changed
+
+- Faster first requests through ReadyToRun API/worker images, a bounded read-only
+  API warm-up before readiness, and fewer cookie-authentication database reads.
+- Activity aggregation is reused within a bounded in-process, owner-scoped
+  cache keyed by a commit-ordered facts revision. Database writes invalidate
+  cached facts; authentication and authorization are checked on every request.
+- Play account selection uses the shared searchable account picker.
+- GitHub workflows use Blacksmith runners in the `sloppitty/vessel` fork.
+
+### Upgrade
+
+- Stop web, API and every worker on all hosts and back up both database schemas,
+  evidence and credential keys before upgrading. Use both v0.3.1 images and the
+  explicit one-shot `migrate` service before restarting hosts.
+- Journal migrations `20261018180202_LeverageObservations` and
+  `20261019100000_ActivityFactsRevision` retain reported leverage and install
+  Activity cache revision counters/invalidation triggers. No new identity
+  migration is required. Recreate disposable databases that applied the old
+  unshipped `20261018130000_ActivityFactsRevision`; never rename history rows.
+- Upgrading from v0.2.0 or earlier retains the v0.3.0 order-identity restriction:
+  databases containing imported orders, fills or Play order links cannot be
+  upgraded in place. Rollback requires the pre-upgrade backup and old images.
+
+### Known limits
+
+- Unreported leverage stays unknown; retained refresh observations do not
+  reconstruct earlier history. Activity sizing is a fallback, not a merged
+  record of Activity and Play outcomes.
+- API warm-up is bounded to 30 seconds by default (60 seconds maximum); a
+  timeout or failure does not prevent the existing readiness checks from running.
+- Wallet mode remains opt-in, with real-wallet acceptance pending and registration
+  kept `Closed`. Funding remains separate from execution net.
 
 ## 0.3.0 - October 18, 2026
 

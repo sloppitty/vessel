@@ -46,30 +46,61 @@ request (versions, a dated changelog section and `docs/releases/vX.Y.Z.md`),
 then push an annotated tag on `main`:
 
 ```sh
-git tag -a v0.3.0 -m "Vessel v0.3.0" origin/main
-git push origin v0.3.0
+git tag -a v0.3.1 -m "Vessel v0.3.1" origin/main
+git push origin v0.3.1
 ```
 
 The workflow checks that the tag, packaged versions and notes agree
-(`python3 scripts/release.py check --tag v0.3.0`), runs the foundation checks and
+(`python3 scripts/release.py check --tag v0.3.1`), runs the foundation checks and
 `scripts/verify-release.py` for S3 and local storage, then builds and pushes
-`skorcius/vessel:api-0.3.0` and `web-0.3.0`, moves `api-latest` and `web-latest`
+`skorcius/vessel:api-0.3.1` and `web-0.3.1`, moves `api-latest` and `web-latest`
 only after both are verified, and creates the GitHub Release from the notes. It
 never overwrites a version published from another commit. It needs the
 `DOCKERHUB_TOKEN` secret on the `docker-hub` environment; see the
 [`vessel-release` skill](../.agents/skills/vessel-release/SKILL.md). Pull requests
 that change packaging rehearse publication against a throwaway local registry.
 
+### Publishing from the organization fork
+
+The active release repository is `sloppitty/vessel`; the Docker Hub destination
+remains `skorcius/vessel`. A fork needs its own GitHub Actions configuration:
+
+- Enable Actions and the Release/Foundation checks workflows in the fork.
+- Grant the Blacksmith GitHub app access to the organization repository. Both
+  workflows use `blacksmith-4vcpu-ubuntu-2404` runners.
+- Create the `docker-hub` environment with a deployment policy allowing only
+  tags matching `v*` (no branch policy). Add its `DOCKERHUB_TOKEN` Actions secret
+  privately, with Docker Hub Read & Write access. Set `DOCKERHUB_USERNAME` to
+  `skorcius`, or leave it unset to use that default. Secrets from the parent
+  repository are not copied to the fork.
+- Keep workflow `contents: write` permission on the GitHub Release job; its
+  repository-scoped `GITHUB_TOKEN` creates the release without a separate PAT.
+
+To enter the Docker token privately from your own terminal:
+
+```sh
+gh secret set DOCKERHUB_TOKEN --repo sloppitty/vessel --env docker-hub
+```
+
+After merging the prepared release, push its annotated tag. If a tag was pushed
+before Actions was enabled, dispatch Release explicitly **from that tag**. Do
+not dispatch an older tag whose packaged version or release notes do not match.
+An existing tag is never moved without the owner's explicit direction, and a
+published versioned image from another revision is never overwritten. Confirm
+the Release run, both image digests and the GitHub Release before calling it
+published. The owner explicitly approved correcting the unprepared v0.3.1 tag;
+its replacement must point to the merged v0.3.1 release, not the release branch.
+
 Linux amd64 images can still be built locally from the repository root:
 
 ```sh
 REVISION=$(git rev-parse HEAD)
 docker build --platform linux/amd64 -f backend/Dockerfile \
-  --build-arg VERSION=0.3.0 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:api-0.3.0 .
+  --build-arg VERSION=0.3.1 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:api-0.3.1 .
 docker build --platform linux/amd64 -f frontend/Dockerfile \
-  --build-arg VERSION=0.3.0 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:web-0.3.0 .
+  --build-arg VERSION=0.3.1 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:web-0.3.1 .
 ```
 
 The `api-latest` and `web-latest` tags move with releases; deploy fixed versions
