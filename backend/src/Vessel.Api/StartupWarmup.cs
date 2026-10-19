@@ -53,7 +53,8 @@ public sealed class StartupWarmup : BackgroundService
         var (steps, failed) = (new List<string>(), new List<string>());
         StartupWarmupOutcome Outcome(bool timedOut) { lock (steps) return new(false, timedOut, [.. steps], [.. failed]); }
         var elapsed = Stopwatch.StartNew();
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var deadline = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        var cleanupTransferred = false;
         var ct = deadline.Token;
         async Task Step(string name, Func<Task> action)
         {
@@ -74,7 +75,9 @@ public sealed class StartupWarmup : BackgroundService
             await using (var scope = services.GetRequiredService<IOwnerScopeFactory>().Create(Guid.NewGuid()))
                 await JournalAsync(scope.Services, Step, ct);
         }
-        var work = RunAsync();
+        // Model construction and query compilation can block before their first await. Schedule them
+        // separately so the readiness deadline starts without waiting for that synchronous prefix.
+        var work = Task.Run(RunAsync, CancellationToken.None);
         try
         {
             // WaitAsync bounds readiness even when a database call ignores cancellation (a stalled handshake).
@@ -86,12 +89,14 @@ public sealed class StartupWarmup : BackgroundService
         }
         catch (Exception ex) when (ex is TimeoutException || stoppingToken.IsCancellationRequested)
         {
-            await deadline.CancelAsync();
-            _ = work.ContinueWith(task => task.Exception, TaskContinuationOptions.OnlyOnFaulted); // Observed, not logged.
             if (!stoppingToken.IsCancellationRequested)
                 logger.LogWarning(new EventId(1102, "StartupWarmupTimedOut"),
                     "Startup warm-up stopped after its {TimeoutSeconds} s timeout; readiness no longer waits for it.", timeout.TotalSeconds);
+            // Readiness must stop waiting before cancellation: a callback can block or throw independently
+            // of the read being cancelled. Keep the source alive until both the callbacks and work finish.
             completion.TrySetResult(Outcome(true));
+            cleanupTransferred = true;
+            _ = CancelAndDisposeAsync(work, deadline);
         }
         catch (Exception ex)
         {
@@ -101,6 +106,14 @@ public sealed class StartupWarmup : BackgroundService
                 "Startup warm-up step {Step} failed: ExceptionType={ExceptionType}", "warmup", ex.GetType().FullName);
             completion.TrySetResult(Outcome(false));
         }
+        finally { if (!cleanupTransferred) deadline.Dispose(); }
+    }
+
+    private static async Task CancelAndDisposeAsync(Task work, CancellationTokenSource deadline)
+    {
+        try { await Task.WhenAll(work, deadline.CancelAsync()); }
+        catch { } // Observe abandoned read/callback faults without failing the hosted service or logging details.
+        finally { deadline.Dispose(); }
     }
 
     // Each read below is the endpoint's own service call. The owner is new, so every query matches nothing.

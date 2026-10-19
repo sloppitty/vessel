@@ -3,10 +3,12 @@ using System.Net;
 using System.Net.Sockets;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Nethereum.Signer;
 using Npgsql;
 using Vessel.Api;
+using Vessel.Identity;
 using Vessel.Tests.Identity;
 
 namespace Vessel.Tests;
@@ -79,6 +81,76 @@ public sealed class StartupWarmupTests
         finally { listener.Stop(); }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Deadline_completes_before_slow_cancellation_callbacks_and_callback_failures_cannot_stop_the_host(bool callbackThrows)
+    {
+        using var contexts = new BlockingWarmupContexts(callbackThrows);
+        await using var factory = new CoreApiFactory(Guid.NewGuid(), settings: new()
+        {
+            ["Vessel:Startup:Warmup:Enabled"] = "true", ["Vessel:Startup:Warmup:Timeout"] = "00:00:01"
+        }, configure: services => services.Replace(
+            ServiceDescriptor.Singleton<IDbContextFactory<IdentityDbContext>>(contexts)));
+        using var client = factory.CreateClient();
+        var warmup = factory.Services.GetRequiredService<StartupWarmup>();
+        try
+        {
+            await contexts.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await contexts.CallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var outcome = await warmup.Completion.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.True(outcome.TimedOut);
+            Assert.False(contexts.CallbackFinished.Task.IsCompleted);
+            Assert.False(contexts.WorkFinished.Task.IsCompleted);
+            // The hosted service has finished successfully while cancellation cleanup is still blocked.
+            await warmup.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
+            var ready = await client.GetAsync("/health/ready");
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
+            Assert.Equal("""{"status":"unavailable"}""", await ready.Content.ReadAsStringAsync());
+            contexts.ReleaseCallback.Set();
+            await contexts.CallbackFinished.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(contexts.WorkFinished.Task.IsCompleted);
+            contexts.ReleaseWork.TrySetResult();
+            await contexts.WorkFinished.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
+        }
+        finally
+        {
+            contexts.ReleaseCallback.Set();
+            contexts.ReleaseWork.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task Deadline_also_bounds_work_that_blocks_before_its_first_await()
+    {
+        using var contexts = new BlockingWarmupContexts(callbackThrows: false, blockSynchronously: true);
+        await using var factory = new CoreApiFactory(Guid.NewGuid(), settings: new()
+        {
+            ["Vessel:Startup:Warmup:Enabled"] = "true", ["Vessel:Startup:Warmup:Timeout"] = "00:00:01"
+        }, configure: services => services.Replace(
+            ServiceDescriptor.Singleton<IDbContextFactory<IdentityDbContext>>(contexts)));
+        using var client = factory.CreateClient();
+        var warmup = factory.Services.GetRequiredService<StartupWarmup>();
+        try
+        {
+            await contexts.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var outcome = await warmup.Completion.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.True(outcome.TimedOut);
+            Assert.False(contexts.WorkFinished.Task.IsCompleted);
+            await warmup.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
+        }
+        finally
+        {
+            contexts.ReleaseCallback.Set();
+            contexts.ReleaseWork.TrySetResult();
+            contexts.ReleaseSynchronous.Set();
+        }
+        await contexts.WorkFinished.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
     [Fact]
     public async Task Production_warms_up_by_default_and_failures_neither_block_startup_nor_log_details()
     {
@@ -123,6 +195,50 @@ public sealed class StartupWarmupTests
         using var factory = new CoreApiFactory(Guid.NewGuid(), settings: new() { ["Vessel:Startup:Warmup:Timeout"] = timeout });
         var error = Assert.ThrowsAny<Exception>(() => factory.Services);
         Assert.Contains("Vessel:Startup:Warmup:Timeout", error.ToString(), StringComparison.Ordinal);
+    }
+
+    private sealed class BlockingWarmupContexts(bool callbackThrows, bool blockSynchronously = false)
+        : IDbContextFactory<IdentityDbContext>, IDisposable
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource CallbackStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource CallbackFinished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource WorkFinished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseWork { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ManualResetEventSlim ReleaseCallback { get; } = new();
+        public ManualResetEventSlim ReleaseSynchronous { get; } = new();
+
+        public IdentityDbContext CreateDbContext() => throw new NotSupportedException();
+
+        public async Task<IdentityDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            if (blockSynchronously && !ReleaseSynchronous.Wait(TimeSpan.FromSeconds(15)))
+                throw new TimeoutException("Fixture synchronous work was not released.");
+            using var registration = cancellationToken.Register(() =>
+            {
+                try
+                {
+                    CallbackStarted.TrySetResult();
+                    if (!ReleaseCallback.Wait(TimeSpan.FromSeconds(15))) throw new TimeoutException("Fixture callback was not released.");
+                    if (callbackThrows) throw new InvalidOperationException("Fixture cancellation callback failure.");
+                }
+                finally { CallbackFinished.TrySetResult(); }
+            });
+            try
+            {
+                await ReleaseWork.Task;
+                cancellationToken.ThrowIfCancellationRequested();
+                throw new InvalidOperationException("Fixture work must be cancelled.");
+            }
+            finally { WorkFinished.TrySetResult(); }
+        }
+
+        public void Dispose()
+        {
+            ReleaseCallback.Dispose();
+            ReleaseSynchronous.Dispose();
+        }
     }
 
     private sealed record LogEntry(EventId Id, string Message, Exception? Exception);

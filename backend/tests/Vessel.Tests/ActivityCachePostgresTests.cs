@@ -97,6 +97,68 @@ public sealed class ActivityCachePostgresTests
         Assert.Same(result, await Read(provider, owner)); Assert.Equal(1, reads.Count);
     }
 
+    [PostgresTheory]
+    [InlineData("price")]
+    [InlineData("result")]
+    [InlineData("fee")]
+    [InlineData("snapshot-coverage")]
+    [InlineData("history-coverage")]
+    [InlineData("funding-detail")]
+    public async Task Version_tracks_corrected_metrics_coverage_and_funding_details_without_new_executions(string change)
+    {
+        await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture");
+        await using (var db = database.Context(owner))
+        {
+            db.Accounts.Add(account); db.Fills.AddRange(Fill(account, 0), Fill(account, 1));
+            db.Snapshots.Add(new() { OwnerId = owner, AccountId = account.Id, ObservedAtUtc = At, ValueScope = "fixture" });
+            db.FundingPayments.Add(new() { Id = Guid.NewGuid(), OwnerId = owner, AccountId = account.Id, SourceId = "original",
+                ContractId = "BTC", Asset = "USDC", Amount = -0.01m, OccurredAtUtc = At.AddSeconds(30) });
+            await db.SaveChangesAsync();
+        }
+        var reads = new Reads(); await using var provider = Provider(database, reads);
+        var before = await Read(provider, owner);
+        Assert.Same(before, await Read(provider, owner));
+        var original = Assert.Single(before.Operations);
+        Assert.Contains(before.Coverage, c => c.Notice.Contains("predates retained fills", StringComparison.Ordinal));
+        await using (var writer = database.Context(owner))
+        {
+            switch (change)
+            {
+                case "price": (await writer.Fills.SingleAsync(f => f.Side == "buy")).Price = 101; break;
+                case "result": (await writer.Fills.SingleAsync(f => f.Side == "sell")).ClosedPnlUsd = 2; break;
+                case "fee": (await writer.Fills.SingleAsync(f => f.Side == "sell")).Fee = 0.02m; break;
+                case "snapshot-coverage": (await writer.Snapshots.SingleAsync()).ObservedAtUtc = At.AddMinutes(2); break;
+                case "history-coverage": (await writer.Accounts.SingleAsync()).RecordSync(At, "Updated retained history coverage."); break;
+                case "funding-detail": (await writer.FundingPayments.SingleAsync()).SourceId = "corrected"; break;
+            }
+            await writer.SaveChangesAsync();
+        }
+        var after = await Read(provider, owner);
+        var corrected = Assert.Single(after.Operations);
+        Assert.Equal(original.Id, corrected.Id);
+        Assert.Equal(original.FillCount, corrected.FillCount);
+        Assert.Equal(original.LastOccurredAtUtc, corrected.LastOccurredAtUtc);
+        Assert.NotEqual(before.Version, after.Version);
+        switch (change)
+        {
+            case "price": Assert.NotEqual(original.AverageEntryPrice, corrected.AverageEntryPrice); break;
+            case "result": Assert.NotEqual(original.NetResultUsd, corrected.NetResultUsd); break;
+            case "fee": Assert.NotEqual(original.StablecoinFeesNominalUsd, corrected.StablecoinFeesNominalUsd); break;
+            case "snapshot-coverage": Assert.DoesNotContain(after.Coverage, c => c.Notice.Contains("predates retained fills", StringComparison.Ordinal)); break;
+            case "history-coverage": Assert.Contains(after.Coverage, c => c.Notice == "Updated retained history coverage."); break;
+            case "funding-detail":
+                Assert.Equal(original.FundingNetUsd, corrected.FundingNetUsd);
+                Assert.Equal(original.FundingPaymentCount, corrected.FundingPaymentCount);
+                Assert.Equal("corrected", Assert.Single(after.Facts.FundingPayments).SourceId);
+                break;
+        }
+        await using var fresh = database.Context(owner);
+        Assert.Equal(Json(ActivityService.Aggregate(await new ActivityStore(fresh).ReadAsync(null, default))), Json(after));
+        Assert.Same(after, await Read(provider, owner));
+        Assert.Equal(2, reads.Count);
+    }
+
     [PostgresFact]
     public async Task Cached_and_uncached_activity_and_overview_are_byte_identical_across_scopes_filters_pages()
     {

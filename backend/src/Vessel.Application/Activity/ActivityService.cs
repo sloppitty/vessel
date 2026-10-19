@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Vessel.Application.Workspace;
 using Vessel.Application.Common;
 using Vessel.Application.Venues;
@@ -74,24 +75,25 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
         };
     }
 
-    // Changes when any scoped operation's identity, fill count, last execution, open quantity or Play association changes.
-    private static string Version(IEnumerable<ActivityOperationDto> operations, ActivityFacts facts)
+    // Include every displayed operation metric and coverage notice, plus retained funding details. Summary projection
+    // keeps constituent execution DTOs lazy; hash rows incrementally rather than buffering the complete payload.
+    private static string Version(IEnumerable<ActivityOperationDto> operations, ActivityFacts facts, IEnumerable<ActivityCoverageDto> coverage)
     {
-        var text = new StringBuilder();
-        foreach (var o in operations)
-            text.Append(o.AccountId.ToString("N")).Append('|').Append(o.Id).Append('|').Append(o.FillCount).Append('|')
-                .Append(o.LastOccurredAtUtc.UtcTicks).Append('|').Append(o.OpenQuantity ?? "?").Append('|')
-                .Append(o.PlayAssociation).Append('|').Append(o.PlayId?.ToString("N")).Append('|')
-                .Append(o.FundingNetUsd).Append('|').Append(o.FundingPaymentCount).Append('|').Append(o.FundingStatus).Append('|')
-                .Append(o.FundingAsOfUtc?.UtcTicks).Append('|').Append(o.FundingPnlBasis).Append('|').Append(o.TotalResultUsd).Append('\n');
-        foreach (var p in facts.FundingPayments.OrderBy(p => p.Id))
-            text.Append(p.Id.ToString("N")).Append('|').Append(p.OccurredAtUtc.UtcTicks).Append('|')
-                .Append(Vessel.Domain.Numerics.ExactDecimal.Format(p.Amount)).Append('|').Append(p.Asset).Append('|')
-                .Append(p.OccurredAtUnixNanoseconds).Append('\n');
-        foreach (var s in facts.FundingStates.OrderBy(s => s.AccountId))
-            text.Append(s.AccountId.ToString("N")).Append('|').Append(s.LastAttemptToUtc.UtcTicks).Append('|')
-                .Append(s.LastReadComplete).Append('|').Append(s.PnlBasis).Append('|').Append(s.Notice).Append('\n');
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())), 0, 16);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        void Append<T>(string section, IEnumerable<T> rows)
+        {
+            hash.AppendData(Encoding.UTF8.GetBytes(section));
+            foreach (var row in rows) hash.AppendData(JsonSerializer.SerializeToUtf8Bytes(row));
+        }
+        Append("operations", operations.Select(ActivityOperationSummaryDto.From));
+        Append("coverage", coverage.OrderBy(c => c.AccountId).ThenBy(c => c.ContractId, StringComparer.Ordinal)
+            .ThenBy(c => c.Notice, StringComparer.Ordinal));
+        Append("funding-payments", facts.FundingPayments.OrderBy(p => p.Id).Select(OperationFunding.ToDto));
+        Append("funding-states", facts.FundingStates.OrderBy(s => s.AccountId).Select(s => new
+        {
+            s.AccountId, s.LastAttemptToUtc, s.LastReadComplete, s.PnlBasis, s.Notice
+        }));
+        return Convert.ToHexStringLower(hash.GetHashAndReset(), 0, 16);
     }
 
     // Overview, Activity pages and the fills endpoint share these unbounded aggregate results; constituent DTOs
@@ -172,7 +174,7 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
             coverage.Add(new(group.Key, null, $"{group.Count()} retained funding settlements could not be attributed safely to an operation. They are not added to operation results."));
         var ordered = funding.Operations.OrderByDescending(o => o.LastOccurredAtUtc)
             .ThenBy(o => o.AccountId.ToString("D"), StringComparer.Ordinal).ThenBy(o => o.Id, StringComparer.Ordinal).ToList();
-        return new(funding.Operations, coverage, facts) { UnassignedFunding = funding.Unassigned, Version = Version(ordered, facts) };
+        return new(funding.Operations, coverage, facts) { UnassignedFunding = funding.Unassigned, Version = Version(ordered, facts, coverage) };
     }
 }
 
