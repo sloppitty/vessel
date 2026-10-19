@@ -1,6 +1,6 @@
 import { monitorFixture } from '@/test/monitor-fixture'
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,6 +12,7 @@ import { accountFixture, idleMarketStream, instrumentCatalogFixture, playCountsF
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { PlaysPage } from './PlaysPage'
 import { createDraft } from './draft'
+import { plainDecimalRule } from './numbers'
 import { createEvidence } from './evidence'
 import type { ImageMarkup } from '@/api/markup'
 import { createPlaysSession, describePlanChanges, draftFromSaved, planFromDraft, savedState, syncEvidence, type PlaysSession } from './saved'
@@ -315,6 +316,61 @@ describe('saved plays', () => {
     expect(screen.getByRole('spinbutton', { name: 'Entry 1 planned target 1 price (quote units)' })).toHaveValue(105)
     await user.click(screen.getByRole('button', { name: /^Save$/ }))
     await waitFor(() => expect(server.api.createPlay).toHaveBeenCalledOnce())
+  })
+
+  it('refuses to save plan numbers the server would refuse, and says why', async () => {
+    const server = fakeServer()
+    const user = userEvent.setup()
+    render(<Page api={client(server)} />)
+    await user.click(await screen.findByRole('button', { name: 'New play' }))
+    await chooseInPicker('Account', accountFixture.name, user)
+    const price = screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' })
+    fireEvent.change(price, { target: { value: '1e2' } })
+    expect(price).toHaveAttribute('aria-invalid', 'true')
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    expect(server.api.createPlay).not.toHaveBeenCalled()
+    expect(within(screen.getByRole('region', { name: 'Notifications' })).getByRole('alert'))
+      .toHaveTextContent(`Fix the plan first. Entry 1 price: ${plainDecimalRule}`)
+
+    await user.click(within(screen.getByRole('group', { name: 'Entry 1 stop units' })).getByRole('button', { name: '% return at leverage' }))
+    fireEvent.change(price, { target: { value: '100' } })
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Entry 1 planned stop return at 1× leverage (%)' }), { target: { value: '-5' } })
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    expect(server.api.createPlay).not.toHaveBeenCalled()
+    expect(within(screen.getByRole('region', { name: 'Notifications' })).getByRole('alert'))
+      .toHaveTextContent('Entry 1 stop 1: use a price for a stop beyond the entry; a percentage cannot be negative.')
+
+    // 0% is a break-even stop and saves.
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Entry 1 planned stop return at 1× leverage (%)' }), { target: { value: '0' } })
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    await waitFor(() => expect(server.api.createPlay).toHaveBeenCalledOnce())
+    expect(server.api.createPlay.mock.lastCall![0].plan.entries[0]).toMatchObject({ price: '100', stops: [{ unit: 'percent', value: '0' }] })
+  })
+
+  it('saves a stored plan whose numbers predate the plain-decimal rule without rewriting them', async () => {
+    const server = fakeServer()
+    const entry = { ...savedPlayFixture.plan.entries[0]!, price: '1e2', stops: [{ id: 'stop-1', unit: 'percent' as const, value: '-5', share: '100' }] }
+    const legacy: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, title: 'Older plan' },
+      plan: { ...savedPlayFixture.plan, size: '.5', entries: [entry] } }
+    server.plays.set(legacy.summary.id, legacy)
+    const user = userEvent.setup()
+    render(<Page api={client(server)} />)
+    await user.click(await screen.findByRole('tab', { name: /^Drafts/ }))
+    await user.click(await screen.findByRole('button', { name: 'Open Older plan' }))
+    const stop = await screen.findByRole('spinbutton', { name: 'Entry 1 planned stop return at 1× leverage (%)' })
+    // Kept text is flagged as a warning, not an error: it saves unchanged, but nothing here estimates from it.
+    expect(stop).toHaveAttribute('data-warning', 'true')
+    expect(stop).not.toHaveAttribute('aria-invalid')
+    expect(stop.getAttribute('title')).toMatch(/^Saved earlier as “-5”/)
+    await user.type(screen.getByRole('textbox', { name: 'Play title' }), ' again')
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    await waitFor(() => expect(server.api.updatePlay).toHaveBeenCalledOnce())
+    expect(server.api.updatePlay.mock.lastCall![1].plan).toEqual(legacy.plan)
+
+    // Another invalid value in a kept field is new text, and is refused.
+    fireEvent.change(stop, { target: { value: '-6' } })
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    expect(server.api.updatePlay).toHaveBeenCalledOnce()
   })
 
   it('keeps notes, marks and removals made while a save is pending, and saves them next', async () => {

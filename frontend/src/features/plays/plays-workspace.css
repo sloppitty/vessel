@@ -336,6 +336,7 @@
 .plays-page .whole-size-input { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 9px; align-items: end; }
 .plays-page .whole-size-input :is(input, select) { width: 100%; height: 39px; padding: 9px; font-size: 14px; font-variant-numeric: tabular-nums; }
 .plays-page .whole-size-input select { padding: 7px 5px; font-size: var(--text-2xs); }
+.plays-page .whole-size-input input[data-warning="true"] { border-color: var(--warning); }
 .plays-page .leverage-controls > label { display: flex; justify-content: space-between; color: var(--foreground); font-size: var(--text-xs); }
 .plays-page .leverage-input-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .plays-page .leverage-controls input[type="range"] { appearance: none; flex: 1; width: 100%; min-width: 0; height: 5px; padding: 0; border: 0; border-radius: 99px; background: linear-gradient(to right, var(--ring) 0 var(--range-progress), var(--border) var(--range-progress) 100%); cursor: pointer; }

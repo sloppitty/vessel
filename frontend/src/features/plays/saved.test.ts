@@ -98,6 +98,19 @@ describe('Default title when saving', () => {
     expect(fieldsToSave(draft, 'closed', day).title).toBe('')
   })
 
+  it('trims plan numbers before saving, but sends stored text back exactly as it was', () => {
+    const entry = { ...createEntry(0), price: ' 100\n', stops: [{ id: 's', unit: 'price' as const, value: '\t95', share: '100 ' }] }
+    const draft = { ...createDraft(), size: ' 250 ', budgetOverride: ' 300', entries: [entry] }
+    expect(fieldsToSave(draft, 'draft', day).plan).toMatchObject({ size: '250', budgetOverride: '300',
+      entries: [{ price: '100', share: '100', stops: [{ value: '95', share: '100' }] }] })
+    // An earlier server stored "1\n"; unchanged, it goes back as it was rather than becoming a plan change.
+    const stored = { ...savedPlayFixture, plan: { ...savedPlayFixture.plan, size: '1\n' } }
+    const loaded = draftFromSaved(stored, [])
+    const state = savedState(stored, loaded)
+    expect(fieldsToSave(loaded, 'draft', day, state.plan).plan.size).toBe('1\n')
+    expect(fieldsToSave({ ...loaded, size: '2\n' }, 'draft', day, state.plan).plan.size).toBe('2')
+  })
+
   it('does not make a blank, saved Play dirty until it is saved', () => {
     const blank = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, title: '' } }
     const draft = draftFromSaved(blank, [])

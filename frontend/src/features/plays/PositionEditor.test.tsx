@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createDraft, createEntry, type PlayDraft } from './draft'
 import { PositionEditor as Editor } from './PositionEditor'
 import { useLeverageChange } from './useLeverageChange'
+import { plainDecimalRule } from './numbers'
 
 function PositionEditor(props: Omit<ComponentProps<typeof Editor>, 'onLeverageChange'>) {
   const change = useLeverageChange(props.draft, props.onChange, props.units)
@@ -441,6 +442,37 @@ describe('local-draft position editor', () => {
     await user.clear(field('Entry 1 planned stop price (quote units)'))
     await user.type(field('Entry 1 planned stop price (quote units)'), '131')
     expect(field('Entry 1 planned stop price (quote units)')).toHaveAttribute('data-warning', 'true')
+  })
+
+  it('marks number fields the server would refuse instead of silently leaving them out of the estimates', async () => {
+    const { user } = renderEditor(1)
+    const price = field('Entry 1 planned entry price (quote units)')
+    fireEvent.change(price, { target: { value: '1e2' } })
+    expect(price).toHaveAttribute('aria-invalid', 'true')
+    expect(price).toHaveAttribute('title', `Entry 1 price: ${plainDecimalRule}`)
+    await user.clear(price)
+    await user.type(price, '100')
+    expect(price).not.toHaveAttribute('aria-invalid')
+
+    await user.click(unitButton('Entry 1 stop units', '% return at leverage'))
+    const stop = field('Entry 1 planned stop return at 1× leverage (%)')
+    fireEvent.change(stop, { target: { value: '-5' } })
+    expect(stop).toHaveAttribute('aria-invalid', 'true')
+    expect(stop).toHaveAttribute('title', 'Entry 1 stop 1: use a price for a stop beyond the entry; a percentage cannot be negative.')
+    fireEvent.change(stop, { target: { value: '0' } })
+    expect(stop).not.toHaveAttribute('aria-invalid')
+    // An exponent is not read as 10% anywhere: no price-move line, and the field says why.
+    fireEvent.change(stop, { target: { value: '1e1' } })
+    expect(stop).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.queryByText(/price move/)).toBeNull()
+
+    const margin = screen.getByRole('spinbutton', { name: /Whole-position margin/ })
+    fireEvent.change(margin, { target: { value: '1e2' } })
+    expect(margin).toHaveAttribute('aria-invalid', 'true')
+    expect(margin).toHaveAttribute('title', `Size: ${plainDecimalRule}`)
+    expect(screen.queryByTestId('size-readout')).toBeNull()
+    fireEvent.change(field('Entry 1 planned target 1 price (quote units)'), { target: { value: '.5' } })
+    expect(field('Entry 1 planned target 1 price (quote units)')).toHaveAttribute('aria-invalid', 'true')
   })
 
   it('holds the margin to the available amount and offers to use it', async () => {

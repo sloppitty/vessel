@@ -2,7 +2,7 @@ import type { ExposureLevel, SizingDocument } from '@/api/sizing'
 import type { DraftEntry, DraftExit, PlayDraft } from './draft'
 import { averageEntryPrice, levelPrice, stepDecimals } from './levels'
 import { wrongSide } from './planChecks'
-import { positivePlanNumber as positive } from './numbers'
+import { formatPlanNumber, positivePlanNumber as positive } from './numbers'
 import { averageDistance, estimatedLiquidation, positionSize, rewardToRisk, weightedLevels, type SizeUnits } from './sizing'
 import { stopCoverageGap } from './position-risk-summary'
 
@@ -23,7 +23,6 @@ const amount = (value: string | null | undefined) => {
   const number = value == null ? NaN : Number(value)
   return Number.isFinite(number) && number > 0 ? number : null
 }
-const trim = (text: string) => text.includes('.') ? text.replace(/\.?0+$/, '') : text
 /** Float noise allowance when comparing against a limit, so an accepted value does not suggest itself again. */
 const tolerance = 1e-9
 
@@ -34,17 +33,17 @@ const tolerance = 1e-9
 export function roundPrice(price: number, way: 'up' | 'down', step: number | null = null) {
   if (step !== null && step > 0) {
     const ticks = way === 'up' ? Math.ceil(price / step - tolerance) : Math.floor(price / step + tolerance)
-    return trim((ticks * step).toFixed(stepDecimals(step)))
+    return formatPlanNumber(ticks * step, stepDecimals(step))
   }
   const decimals = Math.min(8, Math.max(0, 4 - Math.floor(Math.log10(price))))
   const factor = 10 ** decimals
   const rounded = way === 'up' ? Math.ceil(price * factor - tolerance) / factor : Math.floor(price * factor + tolerance) / factor
-  return trim(rounded.toFixed(decimals))
+  return formatPlanNumber(rounded, decimals)
 }
 
 const roundDecimals = (value: number, decimals: number, way: 'up' | 'down') => {
   const factor = 10 ** decimals
-  return trim(((way === 'up' ? Math.ceil(value * factor - tolerance) : Math.floor(value * factor + tolerance)) / factor).toFixed(decimals))
+  return formatPlanNumber((way === 'up' ? Math.ceil(value * factor - tolerance) : Math.floor(value * factor + tolerance)) / factor, decimals)
 }
 
 /**

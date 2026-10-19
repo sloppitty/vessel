@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { createEntry, type DraftEntry, type DraftExit } from './draft'
 import type { BrokerAccount } from '@/api/workspace'
 import { accountFixture } from '@/test/workspace-fixture'
-import { availableLabel, availableOf, estimatedLiquidation, exitEstimate, marginOverBudget, overBudgetMessage, playBudget, positionSize, rewardToRisk, sizeForBudget } from './sizing'
+import { availableLabel, availableOf, convertSize, estimatedLiquidation, exitEstimate, marginOverBudget, overBudgetMessage, playBudget, positionSize, rewardToRisk,
+  sizeForBudget } from './sizing'
+import { isPlanText } from './numbers'
 
 const entry = (price: string, share = '100'): DraftEntry => ({ ...createEntry(0), price, share })
 
@@ -142,6 +144,25 @@ describe('margin budget', () => {
     expect(overBudgetMessage(over, { quote: 'USDC', base: 'SOL', quantityDecimals: 2 })).toBe('Margin 263 USDC is above the 100 USDC budget (reported withdrawal).')
     expect(overBudgetMessage(marginOverBudget({ ...draft, budgetOverride: '200' }, 10, null)!, { quote: 'USDG', base: 'SOL', quantityDecimals: 2 }))
       .toBe('Margin 263 USDG is above the 200 USDG budget (manual).')
+  })
+
+  it('reads a manual budget with the plan number rule; text the server would not store is no budget', () => {
+    expect(playBudget({ budgetOverride: '250' }, wallet('500'))).toEqual({ value: '250', amount: 250, source: 'manual' })
+    expect(playBudget({ budgetOverride: '1e2' }, wallet('500'))).toBeNull()
+  })
+})
+
+describe('size conversion text', () => {
+  const units = { quote: 'USDC', base: 'BTC', quantityDecimals: 8 }
+  it('never writes an exponent into the size field', () => {
+    // 0.0001 margin at 1,000 buys 1e-7; String(Number('0.00000010')) would print "1e-7".
+    const tiny = convertSize({ size: '0.0001', sizingMode: 'margin', entries: [entry('1000')] }, 1, units)
+    expect(tiny).toBe('0.0000001')
+    const budget = sizeForBudget({ sizingMode: 'quantity', entries: [entry('1')] }, 1, '0.0000005', units)
+    expect(budget).toBe('0.0000005')
+    const huge = convertSize({ size: '1000000000000000000000000', sizingMode: 'quantity', entries: [entry('1000')] }, 1, units)
+    expect(huge).toBe('1000000000000000000000000000')
+    for (const text of [tiny, budget ?? '', huge]) expect(isPlanText(text), text).toBe(true)
   })
 })
 

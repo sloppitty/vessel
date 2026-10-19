@@ -16,6 +16,7 @@ import { JournalStateContext, useJournalStore } from './journal-state'
 import { PositionRiskSummary } from './PositionRiskSummary'
 import type { RiskReference } from './position-risk-summary'
 import { averageEntryPrice, formatDraggedPrice, leverageOf } from './levels'
+import { isPlanText, planTextLength } from './numbers'
 import { availableLabel, availableOf, budgetSourceLabel, defaultSizeUnits, formatMoney, formatQuantity, playBudget, positionSize, type AvailableBalance, type SizeUnits } from './sizing'
 import './plays-workspace.css'
 import { NativeSelect } from '@/components/ui/native-select'
@@ -44,8 +45,8 @@ export function AvailableBudget({ draft, onChange, available = null }: {
   function saveBudget(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const text = budget.trim()
-    if (text && !/^\d+(\.\d+)?$/.test(text)) {
-      setError('Enter a non-negative USD amount, or leave it blank to use the available amount.')
+    if (text && !isPlanText(text)) {
+      setError(`Enter a non-negative USD amount such as 250 or 0.5, at most ${planTextLength} characters, or leave it blank to use the available amount.`)
       return
     }
     onChange({ ...draft, budgetOverride: text || null })
@@ -56,7 +57,7 @@ export function AvailableBudget({ draft, onChange, available = null }: {
 
   if (editing) return <form className="available-budget available-budget-editing" onSubmit={saveBudget} noValidate>
     <label htmlFor={`${id}-budget`}>Budget <small>$</small></label>
-    <Input id={`${id}-budget`} inputMode="decimal" autoFocus value={budget} maxLength={100} placeholder={available?.value ?? '0'}
+    <Input id={`${id}-budget`} inputMode="decimal" autoFocus value={budget} maxLength={planTextLength} placeholder={available?.value ?? '0'}
       aria-invalid={!!error} aria-describedby={error ? `${id}-budget-error` : undefined}
       onChange={(event) => { setBudget(event.target.value); setError('') }} />
     {error && <p id={`${id}-budget-error`} className="error" role="alert">{error}</p>}

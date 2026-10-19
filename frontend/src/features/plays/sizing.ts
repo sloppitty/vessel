@@ -2,7 +2,7 @@ import type { BrokerAccount } from '@/api/workspace'
 import { asOf, availableSourceLabels } from '@/lib/format'
 import type { DraftEntry, DraftExit, PlayDraft } from './draft'
 import { averageEntryPrice, exitsOf, levelPrice, type ExitKind } from './levels'
-import { planShare, positivePlanNumber as positive } from './numbers'
+import { formatPlanNumber, planNumber, planShare, positivePlanNumber as positive } from './numbers'
 
 /**
  * Whole-position size at a leverage, before fees. Margin sizing fixes the margin, so leverage changes
@@ -98,10 +98,9 @@ export function convertSize(draft: Pick<PlayDraft, 'size' | 'sizingMode' | 'entr
   const sized = positionSize(draft, leverage)
   if (draft.sizingMode === 'margin') {
     if (sized.quantity === null) return ''
-    const digits = units.quantityDecimals ?? 6
-    return String(Number(sized.quantity.toFixed(digits)))
+    return formatPlanNumber(sized.quantity, units.quantityDecimals ?? 6)
   }
-  return sized.margin === null ? '' : String(Number(sized.margin.toFixed(2)))
+  return sized.margin === null ? '' : formatPlanNumber(sized.margin, 2)
 }
 
 /** Where the account's available balance comes from: the server selects exactly one source per account. */
@@ -146,10 +145,14 @@ export const budgetSourceLabel = (budget: Pick<PlayBudget, 'source'>) =>
 
 /**
  * The play's budget: the manual amount when set, otherwise the account's available balance with its
- * source. A known zero is a budget of zero; only an unknown balance leaves the budget unknown (null).
+ * source. A known zero is a budget of zero; only an unknown balance leaves the budget unknown (null),
+ * and so does a manual amount that is not plan text (stored before the plain-decimal rule).
  */
 export function playBudget(draft: Pick<PlayDraft, 'budgetOverride'>, available: AvailableBalance | null | undefined): PlayBudget | null {
-  if (draft.budgetOverride !== null) return { value: draft.budgetOverride, amount: Number(draft.budgetOverride), source: 'manual' }
+  if (draft.budgetOverride !== null) {
+    const amount = planNumber(draft.budgetOverride)
+    return amount === null ? null : { value: draft.budgetOverride, amount, source: 'manual' }
+  }
   if (!available) return null
   return { value: available.value, amount: Number(available.value), source: available.source ?? 'available' }
 }
@@ -173,8 +176,9 @@ export function sizeForBudget(draft: Pick<PlayDraft, 'sizingMode' | 'entries'>, 
   if (draft.sizingMode === 'margin') return budget
   const averageEntry = averageEntryPrice(draft.entries, 1)
   if (averageEntry === null) return null
-  const factor = 10 ** (units.quantityDecimals ?? 6)
-  return String(Math.floor(Number(budget) * Math.max(1, leverage) / averageEntry * factor) / factor)
+  const decimals = units.quantityDecimals ?? 6
+  const factor = 10 ** decimals
+  return formatPlanNumber(Math.floor(Number(budget) * Math.max(1, leverage) / averageEntry * factor) / factor, decimals)
 }
 
 /**

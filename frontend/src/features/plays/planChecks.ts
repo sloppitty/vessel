@@ -29,7 +29,7 @@ export function planIssues(entries: readonly DraftEntry[], direction: Direction)
     return (['stop', 'target'] as const).flatMap(kind => exitsOf(entry, kind)
       .filter(exit => wrongSide(entryPrice, exit, kind, direction))
       .map(exit => {
-        const side = Number(exit.value) === entryPrice ? 'at' : belongsAbove(kind, direction) ? 'below' : 'above'
+        const side = positive(exit.value) === entryPrice ? 'at' : belongsAbove(kind, direction) ? 'below' : 'above'
         return {
           entryId: entry.id, kind, levelId: exit.id,
           message: `${levelName(entries, { role: kind, entryId: entry.id, levelId: exit.id })} is ${side} the entry price; a ${direction} ${kind} goes ${belongsAbove(kind, direction) ? 'above' : 'below'} it.`,

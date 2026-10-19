@@ -23,6 +23,7 @@ import { useMonitorRun } from '@/features/monitor/useMonitorRun'
 import { usePlayExecution } from './usePlayExecution'
 import { useSizing } from './useSizing'
 import { planIssues, planIssueSummary } from './planChecks'
+import { planNumberIssues, planNumberSummary, storedPlanText, StoredPlanTextContext, type StoredPlanText } from './stored-plan-text'
 import { availableOf, defaultSizeUnits, marginOverBudget, overBudgetMessage, type SizeUnits } from './sizing'
 import { leverageOf } from './levels'
 import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
@@ -204,19 +205,23 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const onUnits = useCallback((next: SizeUnits) => setUnits(current => current.quote === next.quote && current.base === next.base &&
     current.quantityDecimals === next.quantityDecimals ? current : next), [])
   const dirty = useMemo(() => saved ? isDirty(draft, saved) : hasDraftContent(draft), [draft, saved])
+  // Number text unchanged from the saved plan still saves, even where it predates the plain-decimal rule.
+  const storedText = useMemo(() => storedPlanText(saved?.plan), [saved?.plan])
   const changedPlan = useMemo(() => !!saved && planChanged(draft, saved), [draft, saved])
   const unsaved = dirty || hasManualDraft(session.manual)
   // A blocked save says why until the plan is fixed.
-  const fixed = !planProblem(draft, status)
+  const fixed = !planProblem(draft, status, storedText)
   useEffect(() => { if (fixed) dismiss('plan-blocked') }, [fixed, dismiss])
 
   /**
-   * Stops and targets on the wrong side of their entry, and a draft's margin above its budget, block
-   * saving and planning until they are fixed. Once orders may rest the venue counts their margin as
-   * used, so the budget is only held while the play is a draft.
+   * Plan numbers the server would refuse, stops and targets on the wrong side of their entry, and a
+   * draft's margin above its budget block saving and planning until they are fixed. Once orders may
+   * rest the venue counts their margin as used, so the budget is only held while the play is a draft.
    */
-  function planProblem(current: PlayDraft, currentStatus: PlayStatus) {
+  function planProblem(current: PlayDraft, currentStatus: PlayStatus, stored: StoredPlanText) {
     if (retrospective) return null
+    const numbers = planNumberIssues(current, stored)
+    if (numbers.length) return planNumberSummary(numbers)
     const issues = planIssues(current.entries, current.direction)
     if (issues.length) return planIssueSummary(issues)
     const account = accounts.find(item => item.id === current.accountId)
@@ -225,7 +230,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   }
 
   function planBlocked() {
-    const problem = planProblem(latest.current.draft, latest.current.saved?.summary.status ?? 'draft')
+    const { draft: current, saved: state } = latest.current
+    const problem = planProblem(current, state?.summary.status ?? 'draft', storedPlanText(state?.plan))
     if (problem) notify({ tone: 'error', key: 'plan-blocked', title: 'Not saved', message: `Fix the plan first. ${problem}` })
     return !!problem
   }
@@ -246,7 +252,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     if (planBlocked()) return null
     setError(null); setDialogError(null)
     try {
-      const fields = fieldsToSave(sent, before?.summary.status)
+      const fields = fieldsToSave(sent, before?.summary.status, new Date(), before?.plan ?? null)
       const play = before
         ? await api.updatePlay(before.summary.id, { ...fields, expectedVersion: before.summary.version, ...(reason ? { revisionReason: reason } : {}) })
         : await api.createPlay(fields)
@@ -449,6 +455,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
 
   return <>{requested}{conflict}{storedReadError && <p className="error" role="status">{storedReadError}</p>}
     <Button variant="ghost" size="sm" className="plays-back" onClick={() => update({ view: 'list' })}><ArrowLeft size={14} />All plays</Button>
+    <StoredPlanTextContext.Provider value={storedText}>
     <PlayWorkspace accounts={accounts} portfolios={portfolios} api={api} draft={draft} onChange={next => update({ draft: next })}
       {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} revision={revision} lockInstrument={locked}
       lockDirection={status === 'open' || filled} readOnly={readOnly} retrospective={retrospective}
@@ -465,6 +472,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         {...(onManageAccount && account ? { onManageCredential: () => onManageAccount(account.id) } : {})}
         onDismiss={tracking.dismiss} onCheck={() => { void monitorRun.check() }} onLink={request => { void tracking.link(request) }}
         onUnlink={linkId => { void tracking.unlink(linkId) }} /> : undefined} />
+    </StoredPlanTextContext.Provider>
     {dialog === 'revision' && saved && <RevisionDialog revision={saved.summary.planRevision} pending={saving} error={dialogError}
       onSave={reason => { void save(reason) }} onClose={() => setDialog(null)} />}
     {dialog === 'cancel' && <CancelDialog pending={busy === 'status'} error={dialogError}

@@ -265,7 +265,7 @@ Every write use case runs in one `IUnitOfWork.ExecuteAsync`, which owns the only
 
 ### Plays and plans
 
-- A Play starts as a Draft. `PlayDocuments.Normalize` validates the plan (direction, sizing mode, whole-number leverage, entries with stops and targets, notes) and keeps every number as the exact text the owner typed.
+- A Play starts as a Draft. `PlayDocuments.Normalize` validates the plan (direction, sizing mode, whole-number leverage, entries with stops and targets, notes) and keeps every number as the exact text the owner typed. New number text must be blank or an unsigned plain decimal of at most 64 characters that a decimal holds exactly (`ExactDecimal.IsPlanText`); text unchanged from the Play's stored plan, field by field, still saves, and a negative percentage is refused with a pointer to a price. Reads of stored plans stay tolerant (`NumberStyles.Float`). See the October 19 section of the [plays workspace contract](plays-workspace-contract.md).
 - Planning (`POST /status` with `planned`) records plan revision 1. Later plan changes need a reason and append a revision. The account and instrument are fixed once planned.
 - Entries with fills or linked orders cannot change price, share or direction (`RequireFilledEntriesKept`).
 - Only Drafts can be deleted. Closed and Cancelled Plays keep their plan; only the review can change, and every review change appends a review revision.

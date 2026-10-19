@@ -212,7 +212,7 @@ describe('whole-position planned money summary', () => {
     expect(summary(draft).stops.allocation.status).toBe('partial')
   })
 
-  it.each(['99.99999999999999', '99.9999999999999999999999999999'])(
+  it.each(['99.99999999999999', '99.99999999999999999999999999'])(
     'keeps entry shortfall %s partial without tolerance or rounding', share => {
       const draft = plan({ entries: [entry('100', share, [exit('90')], [exit('120')])] })
       const result = summary(draft)
@@ -231,7 +231,7 @@ describe('whole-position planned money summary', () => {
       expect(summary({ ...draft, sizingMode: 'margin' }).quantity).toBeNull()
     })
 
-  it.each(['99.99999999999999', '99.9999999999999999999999999999'])(
+  it.each(['99.99999999999999', '99.99999999999999999999999999'])(
     'keeps exit shortfall %s partial independently for stops and targets', share => {
       for (const kind of ['stops', 'targets'] as const) {
         const draft = plan({ entries: [entry('100', '100', [exit('90')], [exit('120')])] })
@@ -250,8 +250,8 @@ describe('whole-position planned money summary', () => {
 
   it.each([
     ['100.00000000000001'],
-    ['100.0000000000000000000000000001'],
-    ['99.9999999999999999999999999999', '0.0000000000000000000000000002'],
+    ['100.00000000000000000000000001'],
+    ['99.99999999999999999999999999', '0.00000000000000000000000002'],
   ])('rejects tiny overallocation in exact shares %j', (...shares) => {
     const draft = plan({ entries: shares.map(share => entry('100', share, [exit('90')], [exit('120')])) })
     const result = summary(draft)
@@ -274,7 +274,7 @@ describe('whole-position planned money summary', () => {
 
   it.each([
     ['33.3', '33.3', '33.4'],
-    ['99.9999999999999999999999999999', '0.0000000000000000000000000001'],
+    ['99.99999999999999999999999999', '0.00000000000000000000000001'],
     ['0.1', '0.2', '99.7'],
   ])('accepts exactly complete decimal splits %j', (...shares) => {
     const draft = plan({ entries: shares.map(share => entry('100', share,
@@ -293,8 +293,8 @@ describe('whole-position planned money summary', () => {
 
   it('does not offset a tiny per-entry exit overage against another entry shortfall', () => {
     const result = summary(plan({ entries: [
-      entry('100', '50', [exit('90', '100.0000000000000000000000000001')], [exit('120')]),
-      entry('100', '50', [exit('90', '99.9999999999999999999999999999')], [exit('120')]),
+      entry('100', '50', [exit('90', '100.00000000000000000000000001')], [exit('120')]),
+      entry('100', '50', [exit('90', '99.99999999999999999999999999')], [exit('120')]),
     ] }))
     expect(result.stops.allocation).toEqual({ percent: 100, status: 'invalid' })
     expect(result.stops.coverage.status).toBe('invalid')
@@ -303,9 +303,10 @@ describe('whole-position planned money summary', () => {
     expect(result.targets.totalAmount).toBe(200)
   })
 
-  it('keeps an exactly allocated tiny unpriced exit uncovered at the plan share length limit', () => {
-    const nearFull = `99.${'9'.repeat(61)}`
-    const tiny = `0.${'0'.repeat(60)}1`
+  it('keeps an exactly allocated tiny unpriced exit uncovered at the plan share precision limit', () => {
+    // The finest split plan text allows: 28 decimal places and a C# decimal coefficient.
+    const nearFull = `99.${'9'.repeat(26)}`
+    const tiny = `0.${'0'.repeat(25)}1`
     const draft = plan({ entries: [entry('100', '100', [exit('90', nearFull), exit('', tiny)], [exit('120')])] })
     const result = summary(draft)
     expect(result.stops.allocation.status).toBe('complete')

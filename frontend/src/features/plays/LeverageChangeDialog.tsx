@@ -3,9 +3,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import type { PlayDraft } from './draft'
 import { levelName } from './execution'
 import { formatDraggedPrice, levelPrice, percentLevels } from './levels'
+import { formatPlanNumber, planNumber, positivePlanNumber } from './numbers'
 import { sizeChange, type SizeUnits } from './sizing'
-
-const trim = (value: number) => String(Number(value.toFixed(4)))
 
 /**
  * Asks how percentage stops and targets follow a leverage change: a percentage is a return at the
@@ -35,11 +34,11 @@ export function LeverageChangeDialog({ draft, from, to, units, onKeepPrices, onK
         <thead><tr><th scope="col">Level</th><th scope="col">Now at {from}×</th><th scope="col">Keep prices</th><th scope="col">Keep %</th></tr></thead>
         <tbody>
           {levels.map(({ entry, kind, exit }) => {
-            const entryPrice = Number(entry.price) > 0 ? Number(entry.price) : null
+            const entryPrice = positivePlanNumber(entry.price)
             return <tr key={exit.id}>
               <th scope="row">{levelName(draft.entries, { role: kind, entryId: entry.id, levelId: exit.id })}</th>
               <td>{exit.value}% · {price(levelPrice(entryPrice, exit, kind, draft.direction, from))}</td>
-              <td>{trim(Number(exit.value) * to / from)}% · {price(levelPrice(entryPrice, exit, kind, draft.direction, from))}</td>
+              <td>{formatPlanNumber((planNumber(exit.value) ?? 0) * to / from, 4)}% · {price(levelPrice(entryPrice, exit, kind, draft.direction, from))}</td>
               <td>{exit.value}% · {price(levelPrice(entryPrice, exit, kind, draft.direction, to))}</td>
             </tr>
           })}

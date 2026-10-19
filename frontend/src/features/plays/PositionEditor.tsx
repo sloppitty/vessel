@@ -12,6 +12,8 @@ import {
 } from './sizing'
 import { Equal, Expand, Plus, Trash2 } from 'lucide-react'
 import { NativeSelect } from '@/components/ui/native-select'
+import { planNumber } from './numbers'
+import { planTextMarks, sizeState, useStoredPlanText } from './stored-plan-text'
 
 const leveragePresets = [1, 5, 10, 25, 50]
 /** Control range when the venue maximum is unknown, e.g. manual instruments. Saved plans accept up to 100×. */
@@ -27,9 +29,10 @@ export interface SuggestionMarks {
 const markTitle = 'A suggestion for this field is in Suggestions above the chart.'
 
 function allocatedShare(entries: DraftEntry[]) {
-  const shares = entries.map(entry => entry.share.trim()).filter(Boolean).map(Number)
-  if (!shares.length || shares.some(share => !Number.isFinite(share))) return null
-  return Number(shares.reduce((total, share) => total + share, 0).toFixed(2))
+  const shares = entries.filter(entry => entry.share.trim()).map(entry => planNumber(entry.share))
+  const known = shares.filter((share): share is number => share !== null)
+  if (!known.length || known.length < shares.length) return null
+  return Number(known.reduce((total, share) => total + share, 0).toFixed(2))
 }
 export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, maintenanceMargin = null, instrumentName = '', units = defaultSizeUnits, availableBudget = null, checkBudget = true,
   marks = null }: {
@@ -54,6 +57,7 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
   marks?: SuggestionMarks | null
 }) {
   const leverageLimit = maxLeverage ?? defaultMaxLeverage
+  const stored = useStoredPlanText()
   const leverage = leverageOf(draft.leverage)
   const presets = leveragePresets.filter(preset => preset < leverageLimit).concat(leverageLimit)
   const prefix = useId()
@@ -116,6 +120,7 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
   const overBudget = checkBudget ? marginOverBudget(draft, leverage, availableBudget) : null
   // A zero (or negative) budget has no size to offer.
   const budgetSize = overBudget && overBudget.budget.amount > 0 ? sizeForBudget(draft, leverage, overBudget.budget.value, units) : null
+  const sizeMarks = planTextMarks(sizeState(draft, stored), draft.size)
   // One entry takes the whole position, so its share and the split are fixed.
   const single = draft.entries.length === 1
 
@@ -145,8 +150,9 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
           <label htmlFor={`${prefix}-size`}>
             <span>{draft.sizingMode === 'margin' ? 'Margin' : 'Quantity'}</span>
             <Input id={`${prefix}-size`} type="number" min={0} step="any" value={draft.size} placeholder="0"
-              aria-invalid={overBudget ? true : undefined} aria-describedby={overBudget ? `${prefix}-over-budget` : undefined}
-              data-suggested={marks?.size || undefined} title={marks?.size ? markTitle : undefined}
+              aria-invalid={overBudget || sizeMarks?.invalid ? true : undefined} aria-describedby={overBudget ? `${prefix}-over-budget` : undefined}
+              data-warning={sizeMarks?.warning || undefined} data-suggested={marks?.size || undefined}
+              title={sizeMarks?.title ?? (marks?.size ? markTitle : undefined)}
             aria-label={draft.sizingMode === 'margin' ? `Whole-position margin (${units.quote})` : `Whole-position quantity (${units.base})`}
               onChange={event => onChange({ ...draft, size: event.target.value })} />
           </label>

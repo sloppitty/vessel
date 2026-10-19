@@ -690,6 +690,22 @@ describe('Chart panel level editing', () => {
     expect(shown()[0]!.targets).toEqual([])
   })
 
+  it('treats an entry price that is not plan text as unpriced, as its chart line does', async () => {
+    const { state, factory } = fakeAdapter()
+    const initial = two()
+    initial[0] = { ...initial[0]!, price: '1e2' }
+    render(<LevelHarness factory={factory} initial={initial} />)
+    await screen.findByText(/Updated/)
+    expect(state.overlays.some(o => o.label === 'E1')).toBe(false)
+    const plan = screen.getByRole('group', { name: 'Plan levels for Entry 1' })
+    expect(within(plan).getByRole('button', { name: 'Add a stop to Entry 1 on the chart' })).toBeDisabled()
+    // The entry tool prices Entry 1 instead of adding a third entry beside an invisible one.
+    await userEvent.click(within(plan).getByRole('button', { name: 'Add an entry on the chart' }))
+    expect(screen.getByText(/Click to set Entry 1 price/)).toBeInTheDocument()
+    act(() => state.callbacks!.onPricePick(101.234))
+    expect(shown().map(entry => entry.price)).toEqual(['101.23', '90'])
+  })
+
   it('adds a new entry with the entry tool once the selected entry has a price, and undoes it', async () => {
     const { state, factory } = fakeAdapter()
     const onSelect = vi.fn()

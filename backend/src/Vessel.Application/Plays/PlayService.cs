@@ -88,9 +88,10 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         var play = await Find(id, ct);
         RequireVersion(play, request.ExpectedVersion);
         if (request.Plan is null) throw new ProblemException(400, "A plan compatibility document is required.");
-        // Retrospectives keep an empty compatibility document, not a manufactured plan.
+        // Retrospectives keep an empty compatibility document, not a manufactured plan. Number text unchanged from
+        // the stored plan still saves, even where it predates the plain-decimal rule.
         var plan = play.Origin == PlayOrigin.Retrospective
-            ? PlayDocuments.Serialize(request.Plan) : PlayDocuments.Serialize(PlayDocuments.Normalize(request.Plan));
+            ? PlayDocuments.Serialize(request.Plan) : PlayDocuments.Serialize(PlayDocuments.Normalize(request.Plan, PlayDocuments.Read(play.Plan)));
         var drawings = PlayDocuments.NormalizeDrawings(request.Drawings);
         var now = time.GetUtcNow();
         if (request.AccountId != play.AccountId || request.Instrument != play.ContractId ||

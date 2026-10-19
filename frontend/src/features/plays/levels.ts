@@ -1,6 +1,6 @@
 import type { PriceOverlay } from '@/components/chart/types'
 import { createExit, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
-import { finitePlanNumber as unsigned, positiveFinitePlanNumber as positive } from './numbers'
+import { finitePlanNumber as unsigned, formatPlanNumber, positiveFinitePlanNumber as positive } from './numbers'
 
 export type ChartView = 'aggregate' | 'selected'
 export type ExitKind = 'stop' | 'target'
@@ -18,10 +18,11 @@ export function parseOverlayId(id: string): LevelRef | null {
   return null
 }
 
-/** The play's whole-number leverage, or 1 while it is blank or invalid. */
+/** The play's whole-number leverage, or 1 while it is blank or invalid. Digits only, as the server reads it. */
 export function leverageOf(leverage: string) {
-  const value = Number(leverage)
-  return Number.isInteger(value) && value >= 1 ? value : 1
+  const text = leverage.trim()
+  const value = /^[0-9]+$/.test(text) ? Number(text) : NaN
+  return Number.isSafeInteger(value) && value >= 1 ? value : 1
 }
 
 export const exitsOf = (entry: DraftEntry, kind: ExitKind) => kind === 'stop' ? entry.stops : entry.targets
@@ -105,8 +106,6 @@ export function planOverlays(entries: readonly DraftEntry[], selectedId: string,
   return overlays
 }
 
-const trim = (text: string) => text.includes('.') ? text.replace(/\.?0+$/, '') : text
-
 /** Decimal places of a tick such as 0.5 or 0.00001, at most twelve. */
 export function stepDecimals(step: number) {
   let places = 0
@@ -121,10 +120,10 @@ export function stepDecimals(step: number) {
 export function formatDraggedPrice(price: number, step?: number | null) {
   if (step != null && step > 0) {
     const places = stepDecimals(step)
-    return trim((Math.round(price / step) * step).toFixed(places))
+    return formatPlanNumber(Math.round(price / step) * step, places)
   }
   const decimals = Math.min(8, Math.max(0, 4 - Math.floor(Math.log10(price))))
-  return trim(price.toFixed(decimals))
+  return formatPlanNumber(price, decimals)
 }
 
 /** A chart drag chooses a fixed price, switching percentage stops and targets to price units. */
@@ -199,7 +198,7 @@ export function keepPercentLevelPrices(entries: readonly DraftEntry[], from: num
   const factor = Math.max(1, to) / Math.max(1, from)
   const rescale = (exit: DraftExit): DraftExit => {
     const percent = exit.unit === 'percent' ? unsigned(exit.value) : null
-    return percent === null ? exit : { ...exit, value: trim((percent * factor).toFixed(4)) }
+    return percent === null ? exit : { ...exit, value: formatPlanNumber(percent * factor, 4) }
   }
   return entries.map(entry => ({ ...entry, stops: entry.stops.map(rescale), targets: entry.targets.map(rescale) }))
 }

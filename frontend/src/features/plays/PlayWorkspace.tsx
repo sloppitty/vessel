@@ -13,6 +13,7 @@ import { DirectionToggle } from './DirectionToggle'
 import { InstrumentPicker } from './InstrumentPicker'
 import { pairLabel, useInstrumentCatalog } from './instruments'
 import { leverageOf } from './levels'
+import { positivePlanNumber } from './numbers'
 import { useLeverageChange } from './useLeverageChange'
 import { availableOf, budgetSourceLabel, defaultSizeUnits, estimatedLiquidation, playBudget, type SizeUnits } from './sizing'
 import { planSuggestions } from './suggestions'
@@ -104,7 +105,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   // The Summary's risk share divides by the same account balance the size suggestion uses; an explicit
   // manual budget is a labelled fallback. Without either the share stays unknown.
   const balanceText = account?.balanceUsd != null && Number(account.balanceUsd) > 0 ? account.balanceUsd : null
-  const riskAmount = balanceText ?? (draft.budgetOverride && Number(draft.budgetOverride) > 0 ? draft.budgetOverride : null)
+  const riskAmount = balanceText ?? (draft.budgetOverride && positivePlanNumber(draft.budgetOverride) !== null ? draft.budgetOverride : null)
   const riskName = balanceText ? `${account!.name} balance` : 'Explicit manual budget'
   // Listed stablecoins count as nominal USD at 1:1, with no FX or depeg valuation.
   const riskReference = riskAmount && isNominalUsdQuote(units.quote)

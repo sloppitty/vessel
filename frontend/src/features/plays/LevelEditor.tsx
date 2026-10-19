@@ -74,8 +74,10 @@ export function LevelEditor({ entries, entry, overlayId, anchor, direction, leve
     if (exit && share.trim() !== '' && planShare(share) === null) { setError('Share must be 0 to 100%.'); return }
     let next = entry
     if (priceEdited) {
-      next = ref?.kind === 'entry' ? { ...entry, price } : ref ? withExits(entry, ref.kind, exitsOf(entry, ref.kind).map(level =>
-        level.id === ref.levelId ? { ...level, unit: 'price', value: price } : level)) : entry
+      // The draft keeps the text as it will be saved, without surrounding whitespace.
+      const text = price.trim()
+      next = ref?.kind === 'entry' ? { ...entry, price: text } : ref ? withExits(entry, ref.kind, exitsOf(entry, ref.kind).map(level =>
+        level.id === ref.levelId ? { ...level, unit: 'price', value: text } : level)) : entry
     }
     if (exit && ref?.kind !== 'entry') next = setExitShare(next, ref!.kind, exit.id, share.trim())
     onApply(next, `Edit ${readable.toLowerCase()}`)

@@ -5,7 +5,9 @@ import { Input } from '@/components/ui/input'
 import { createExit, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
 import { exitsOf, formatDraggedPrice, levelPrice, priceMovePercent, type ExitKind } from './levels'
 import { wrongSide } from './planChecks'
+import { positivePlanNumber } from './numbers'
 import { defaultSizeUnits, estimatedLiquidation, exitEstimate, formatMoney, type SizeUnits } from './sizing'
+import { entryFieldState, exitFieldState, planTextMarks, useStoredPlanText } from './stored-plan-text'
 
 function LevelUnits({ value, label, onChange }: {
   value: DraftExit['unit']
@@ -47,7 +49,8 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
   const text = copy[kind]
   const set = (next: DraftExit[]) => onChange(kind === 'stop' ? { ...entry, stops: next } : { ...entry, targets: next })
   const update = (id: string, change: Partial<DraftExit>) => set(exits.map(exit => exit.id === id ? { ...exit, ...change } : exit))
-  const entryPrice = Number(entry.price) > 0 ? Number(entry.price) : null
+  const stored = useStoredPlanText()
+  const entryPrice = positivePlanNumber(entry.price)
   // Single stops keep the short "stop" names; numbering starts once there are several.
   const label = (index: number) => exits.length > 1 || kind === 'target' ? `${kind} ${index + 1}` : kind
 
@@ -61,25 +64,31 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
     {exits.map((exit, index) => {
       const estimate = exitEstimate(entry, exit, kind, direction, leverage, quantity)
       const resolved = exit.unit === 'percent' ? levelPrice(entryPrice, exit, kind, direction, leverage) : null
-      const move = estimate?.move ?? (exit.unit === 'percent' && Number(exit.value) > 0 ? priceMovePercent(Number(exit.value), leverage) : null)
+      const percentValue = exit.unit === 'percent' ? positivePlanNumber(exit.value) : null
+      const move = estimate?.move ?? (percentValue !== null ? priceMovePercent(percentValue, leverage) : null)
       const outcome = kind === 'stop' ? 'loss' : 'gain'
       const wrong = wrongSide(entryPrice, exit, kind, direction)
       const stopPrice = kind === 'stop' ? levelPrice(entryPrice, exit, kind, direction, leverage) : null
       const marked = suggested?.has(exit.id) ?? false
       const pastLiquidation = !wrong && stopPrice !== null && liquidation !== null && (direction === 'long' ? stopPrice <= liquidation : stopPrice >= liquidation)
+      // Text the server would refuse is an error with its reason; stored text from before the rule, a warning.
+      const valueMarks = planTextMarks(exitFieldState(entry, kind, index, exit, 'value', stored), exit.value)
+      const shareMarks = planTextMarks(exitFieldState(entry, kind, index, exit, 'share', stored), exit.share)
       return <div key={exit.id} className="exit-row" role="group" aria-label={`${entry.name} ${label(index)}`}>
         <LevelUnits label={`${entry.name} ${label(index)} units`} value={exit.unit}
           onChange={unit => update(exit.id, { unit, value: '' })} />
         <Input id={`${prefix}-${exit.id}-value`} type="number" step="any" min={0} className={kind === 'stop' ? 'exit-value-stop' : 'exit-value-target'}
           placeholder={exit.unit === 'price' ? '$' : kind === 'stop' ? 'Loss %' : 'Gain %'}
           aria-label={`${entry.name} planned ${label(index)} ${exit.unit === 'price' ? 'price (quote units)' : `return at ${leverage}× leverage (%)`}`}
-          aria-invalid={wrong || undefined} data-warning={pastLiquidation || undefined} data-suggested={marked || undefined}
-          title={wrong ? `A ${direction} ${kind} goes ${(kind === 'target') === (direction === 'long') ? 'above' : 'below'} the entry price`
+          aria-invalid={wrong || valueMarks?.invalid || undefined} data-warning={pastLiquidation || valueMarks?.warning || undefined}
+          data-suggested={marked || undefined}
+          title={valueMarks ? valueMarks.title : wrong ? `A ${direction} ${kind} goes ${(kind === 'target') === (direction === 'long') ? 'above' : 'below'} the entry price`
             : pastLiquidation ? `Past the estimated liquidation price of ${formatDraggedPrice(liquidation!)}; it would not trigger first`
             : marked ? 'A suggestion for this level is in Suggestions above the chart.' : undefined}
           value={exit.value} onChange={event => update(exit.id, { value: event.target.value })} />
         <Input id={`${prefix}-${exit.id}-share`} type="number" step="any" min={0} max={100} placeholder="Share %" className="exit-share"
           aria-label={`${entry.name} ${label(index)} share (%)`} value={exit.share}
+          aria-invalid={shareMarks?.invalid || undefined} data-warning={shareMarks?.warning || undefined} title={shareMarks?.title}
           onChange={event => update(exit.id, { share: event.target.value })} />
         <Button type="button" variant="ghost" size="icon-sm" className="remove-target" aria-label={`Remove ${entry.name} ${label(index)}`}
           onClick={() => set(exits.filter(current => current.id !== exit.id))}>
@@ -122,20 +131,25 @@ export function EntryForm({ entry, onChange, idPrefix, direction = 'long', lever
   const prefix = idPrefix ?? generatedId
   // With several entries this is the entry on its own; a single entry is the whole plan.
   const own = estimatedLiquidation([{ ...entry, share: '100' }], direction, leverage, maxLeverage, maintenanceMargin)
-  const entryPrice = Number(entry.price) > 0 ? Number(entry.price) : null
+  const entryPrice = positivePlanNumber(entry.price)
+  const stored = useStoredPlanText()
+  const shareMarks = shareLocked ? null : planTextMarks(entryFieldState(entry, 'share', stored), entry.share)
+  const priceMarks = planTextMarks(entryFieldState(entry, 'price', stored), entry.price)
 
   return <div className="entry-fields">
     <label htmlFor={`${prefix}-share`}>
       <span>Share %</span>
       <Input id={`${prefix}-share`} type="number" step="any" min={0} max={100}
         aria-label={`${entry.name} quantity share (%)`} value={shareLocked ? '100' : entry.share} disabled={shareLocked}
-        title={shareLocked ? 'A single entry takes the whole position. Add an entry to split it.' : undefined}
+        aria-invalid={shareMarks?.invalid || undefined} data-warning={shareMarks?.warning || undefined}
+        title={shareLocked ? 'A single entry takes the whole position. Add an entry to split it.' : shareMarks?.title}
         onChange={event => onChange({ ...entry, share: event.target.value })} />
     </label>
     <label htmlFor={`${prefix}-price`}>
       <span>Entry price</span>
       <Input id={`${prefix}-price`} type="number" step="any" min={0}
         aria-label={`${entry.name} planned entry price (quote units)`} value={entry.price}
+        aria-invalid={priceMarks?.invalid || undefined} data-warning={priceMarks?.warning || undefined} title={priceMarks?.title}
         onChange={event => onChange({ ...entry, price: event.target.value })} />
     </label>
     {own !== null && entryPrice !== null && <p className="entry-liquidation" data-testid="entry-liquidation"

@@ -34,7 +34,18 @@ public static partial class PlayDocuments
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    public static PlayPlanDocument Normalize(PlayPlanDocument? plan)
+    /// <summary>What a plan number must be on write; the field's name goes before it.</summary>
+    public const string PlainDecimalRule =
+        "use a plain decimal such as 100 or 0.5, with no sign, exponent or spaces, at most 64 characters and within decimal precision (28 decimal places).";
+
+    /// <summary>
+    /// Validates a plan for saving. Number fields must be plain decimals (<see cref="ExactDecimal.IsPlanText"/>), except
+    /// that a field whose text is unchanged from <paramref name="stored"/> (the Play's current plan) still saves, so an
+    /// earlier plan never becomes unsaveable and nothing stored is rewritten. Unchanged means the same field of the same
+    /// item: an entry's price or share by entry ID, a stop's or target's value (in the same unit) or share by entry and
+    /// level ID, and the plan's size or budget. A negative percentage is refused with a pointer to a price stop.
+    /// </summary>
+    public static PlayPlanDocument Normalize(PlayPlanDocument? plan, PlayPlanDocument? stored = null)
     {
         if (plan is null) throw Invalid("A plan is required.");
         if (plan.Direction is not ("long" or "short")) throw Invalid("Direction must be long or short.");
@@ -46,6 +57,10 @@ public static partial class PlayDocuments
         if (plan.Notes is null) throw Invalid("Plan notes are required.");
         var ids = new HashSet<string>(StringComparer.Ordinal);
         string Id(string? id) => id is not null && IdPattern().IsMatch(id) && ids.Add(id) ? id : throw Invalid("Plan items need unique IDs.");
+        var kept = StoredNumbers(stored);
+        string Number(string? value, string key, string label) =>
+            ExactDecimal.IsPlanText(value) || value is not null && kept.TryGetValue(key, out var text) && text == value
+                ? value : throw Invalid($"{label}: {PlainDecimalRule}");
         var entries = plan.Entries.Select(entry =>
         {
             if (entry is null || entry.Stops is null || entry.Targets is null) throw Invalid("Entries need stop and target lists.");
@@ -53,15 +68,53 @@ public static partial class PlayDocuments
             if (entry.Stops.Count > MaxStops) throw Invalid($"An entry has at most {MaxStops} stops.");
             if (entry.Name is null || entry.Name.Length is 0 or > 100 || entry.Name.Any(char.IsControl)) throw Invalid("Entry names need 1 to 100 characters.");
             if (entry.Color is null || !ColorPattern().IsMatch(entry.Color)) throw Invalid("Entry colours must be #rrggbb.");
-            return new PlanEntry(Id(entry.Id), entry.Name, entry.Color.ToLowerInvariant(), Number(entry.Share), Number(entry.Price),
-                Exits(entry.Stops, "Stops"), Exits(entry.Targets, "Targets"));
+            var id = Id(entry.Id);
+            return new PlanEntry(id, entry.Name, entry.Color.ToLowerInvariant(),
+                Number(entry.Share, EntryKey(id, "share"), $"{entry.Name} share"), Number(entry.Price, EntryKey(id, "price"), $"{entry.Name} price"),
+                Exits(entry.Stops, "stop", id, entry.Name), Exits(entry.Targets, "target", id, entry.Name));
         }).ToList();
-        List<PlanExit> Exits(IEnumerable<PlanExit> exits, string kind) => exits.Select(exit => exit is null ? throw Invalid($"{kind} must not be null.")
-            : new PlanExit(Id(exit.Id), Unit(exit.Unit), Number(exit.Value), Number(exit.Share))).ToList();
+        List<PlanExit> Exits(IReadOnlyList<PlanExit> exits, string kind, string entryId, string entryName) => exits.Select((exit, index) =>
+        {
+            if (exit is null) throw Invalid($"{(kind == "stop" ? "Stops" : "Targets")} must not be null.");
+            var (id, unit, label) = (Id(exit.Id), Unit(exit.Unit), $"{entryName} {kind} {index + 1}");
+            var valueKey = LevelKey(kind, entryId, id, $"{unit} value");
+            if (unit == "percent" && !(kept.TryGetValue(valueKey, out var text) && text == exit.Value) &&
+                decimal.TryParse(exit.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var percent) && percent < 0)
+                throw Invalid(kind == "stop" ? $"{label}: use a price for a stop beyond the entry; a percentage cannot be negative."
+                    : $"{label}: a percentage cannot be negative; use a price instead.");
+            return new PlanExit(id, unit, Number(exit.Value, valueKey, label), Number(exit.Share, LevelKey(kind, entryId, id, "share"), $"{label} share"));
+        }).ToList();
         foreach (var entry in entries) RequireSides(entry, plan.Direction);
-        return new PlayPlanDocument(plan.Direction, plan.SizingMode, Number(plan.Size), plan.Leverage,
-            plan.BudgetOverride is null ? null : Number(plan.BudgetOverride), entries,
+        return new PlayPlanDocument(plan.Direction, plan.SizingMode, Number(plan.Size, "size", "Size"), plan.Leverage,
+            plan.BudgetOverride is null ? null : Number(plan.BudgetOverride, "budget", "Budget"), entries,
             new PlanNotes(Note(plan.Notes.Thesis), Note(plan.Notes.Invalidation), Note(plan.Notes.Strategy), Note(plan.Notes.Evidence)));
+    }
+
+    // Keys of the number fields a stored plan holds, for the unchanged-text rule. Plan IDs never contain spaces.
+    private static string EntryKey(string entryId, string field) => $"entry {entryId} {field}";
+    private static string LevelKey(string kind, string entryId, string levelId, string field) => $"{kind} {entryId} {levelId} {field}";
+
+    private static Dictionary<string, string> StoredNumbers(PlayPlanDocument? stored)
+    {
+        var numbers = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (stored is null) return numbers;
+        void Keep(string key, string? text) { if (text is not null) numbers[key] = text; }
+        Keep("size", stored.Size);
+        Keep("budget", stored.BudgetOverride);
+        foreach (var entry in stored.Entries ?? [])
+        {
+            if (entry?.Id is not { } entryId) continue;
+            Keep(EntryKey(entryId, "share"), entry.Share);
+            Keep(EntryKey(entryId, "price"), entry.Price);
+            foreach (var (kind, exits) in new[] { ("stop", entry.Stops), ("target", entry.Targets) })
+                foreach (var exit in exits ?? [])
+                {
+                    if (exit?.Id is not { } levelId) continue;
+                    Keep(LevelKey(kind, entryId, levelId, $"{exit.Unit} value"), exit.Value);
+                    Keep(LevelKey(kind, entryId, levelId, "share"), exit.Share);
+                }
+        }
+        return numbers;
     }
 
     /// <summary>
@@ -118,9 +171,6 @@ public static partial class PlayDocuments
     }
 
     private static string Unit(string? unit) => unit is "price" or "percent" ? unit : throw Invalid("Level units are price or percent.");
-
-    private static string Number(string? value) => ExactDecimal.IsPlanText(value)
-        ? value : throw Invalid("Plan numbers must be blank or decimal text.");
 
     private static string Note(string? note) => note is not null && note.Length <= MaxNoteLength
         ? note : throw Invalid($"Notes are limited to {MaxNoteLength} characters.");

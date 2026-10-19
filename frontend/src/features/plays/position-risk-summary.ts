@@ -1,6 +1,6 @@
 import type { PlayDraft } from './draft'
 import { exitsOf, type ExitKind } from './levels'
-import { finitePlanNumber as decimal, planShare, positivePlanNumber } from './numbers'
+import { finitePlanNumber as decimal, planShare, planTextLength, positivePlanNumber } from './numbers'
 import { wrongSide } from './planChecks'
 import { defaultSizeUnits, exitEstimate, positionSize, type SizeUnits } from './sizing'
 
@@ -38,19 +38,19 @@ export interface PositionRisk {
 }
 
 const finite = (value: number) => Number.isFinite(value) ? value : null
-// Match the plan's 64-character share limit; reject longer drafts, never truncate.
-const shareDigits = 64
+// Plan text holds at most 64 characters, so 64 fraction digits keep every share exact; nothing is truncated.
+const shareDigits = planTextLength
 const shareScale = 10n ** BigInt(shareDigits)
 const fullShare = 100n * shareScale
 const exactShare = (value: string) => {
   const text = value.trim()
-  if (text.length > shareDigits || decimal(text) === null) return null
+  if (decimal(text) === null) return null
   const [whole = '', fraction = ''] = text.split('.')
   return BigInt(whole + fraction.padEnd(shareDigits, '0'))
 }
 const shareOf = (value: string) => {
   const share = exactShare(value)
-  return share !== null && share <= fullShare ? Number(value) : null
+  return share !== null && share <= fullShare ? decimal(value) : null
 }
 
 function coverage(percent: number | null, complete: boolean, invalid = false): RiskCoverage {

@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Npgsql;
 using Vessel.Application.Common;
 using Vessel.Application.Plays;
+using Vessel.Application.Plays.Execution;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Common;
 using Vessel.Domain.Evidence;
@@ -23,6 +24,32 @@ internal static class TestPlays
 
     public static Play Create(Account account, PerpetualInstrument? instrument) => new(Guid.NewGuid(), account, instrument,
         account.VenueId == "manual" ? InstrumentSource.Manual : InstrumentSource.Venue, PlayDocuments.Serialize(Plan()), DateTimeOffset.UnixEpoch);
+
+    /// <summary>
+    /// A plan an earlier server stored before plan numbers had to be plain decimals: an exponent entry price, a
+    /// leading-dot size and a negative percentage stop (which then resolved to no stop).
+    /// </summary>
+    public static PlayPlanDocument LegacyPlan() => Plan("1e2") with
+    {
+        Size = ".5",
+        Entries = [Plan("1e2").Entries[0] with { Stops = [new PlanExit("stop-1", "percent", "-5", "100")] }]
+    };
+}
+
+/// <summary>The plan number list shared with the browser: <c>frontend/src/test/contracts/plan-numbers.json</c>.</summary>
+internal static class PlanNumberFixture
+{
+    private static readonly JsonElement Root = Load();
+    public static IReadOnlyList<string> Accepted => List("accepted");
+    public static IReadOnlyList<string> Rejected => List("rejected");
+
+    private static JsonElement Load()
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(ContractFixtures.Path("plan-numbers.json")));
+        return document.RootElement.Clone();
+    }
+
+    private static List<string> List(string name) => Root.GetProperty(name).EnumerateArray().Select(item => item.GetString()!).ToList();
 }
 
 internal sealed class MemoryPlayStore(Guid owner) : IPlayStore
@@ -213,7 +240,100 @@ public sealed class PlayDocumentTests
     public void Planning_requires_a_priced_entry()
     {
         Assert.Equal(409, Assert.Throws<ProblemException>(() => PlayDocuments.RequirePlannable(TestPlays.Plan(""))).StatusCode);
+        // Reads stay tolerant: a stored plan from before the plain-decimal rule still plans.
         PlayDocuments.RequirePlannable(TestPlays.Plan("1e-5"));
+    }
+
+    /// <summary>
+    /// Plan text on write (phase 0, 0.5a), from the list the browser checks too
+    /// (<c>frontend/src/test/contracts/plan-numbers.json</c>, read by <c>numbers.test.ts</c>). Every number field
+    /// keeps accepted text exactly and refuses the rest with 400.
+    /// </summary>
+    [Fact]
+    public void Every_plan_number_field_follows_the_shared_fixture_list()
+    {
+        var failures = new List<string>();
+        foreach (var text in PlanNumberFixture.Accepted)
+            foreach (var (field, plan, read) in PlanNumberFields(text))
+            {
+                try
+                {
+                    if (read(PlayDocuments.Normalize(plan)) != text) failures.Add($"{field} changed accepted {Show(text)}");
+                }
+                catch (ProblemException e) { failures.Add($"{field} refused accepted {Show(text)}: {e.Message}"); }
+            }
+        foreach (var text in PlanNumberFixture.Rejected)
+            foreach (var (field, plan, _) in PlanNumberFields(text))
+            {
+                try { PlayDocuments.Normalize(plan); failures.Add($"{field} accepted rejected {Show(text)}"); }
+                catch (ProblemException e) when (e.StatusCode == 400) { }
+            }
+        Assert.Empty(failures);
+    }
+
+    /// <summary>
+    /// Review probe <c>verify-opus-dotnet/More4.cs</c> <c>Grammar</c>: the server saved these and the matcher read them
+    /// (<c>1e2</c> as 100, <c>.5</c> as 0.5), while the browser treated them as missing. Both now refuse them on write.
+    /// </summary>
+    [Theory]
+    [InlineData("1e2")]
+    [InlineData("100.")]
+    [InlineData(".5")]
+    [InlineData("+100")]
+    [InlineData("-1")]
+    [InlineData("1\n")]
+    public void Review_probe_grammar_text_is_refused_on_write(string text)
+    {
+        var plan = TestPlays.Plan(text, stop: "") with
+        {
+            Entries = [TestPlays.Plan(text, stop: "").Entries[0] with { Targets = [new PlanExit("target-1", "price", "", "100")] }]
+        };
+        var refused = Assert.Throws<ProblemException>(() => PlayDocuments.Normalize(plan));
+        Assert.Equal((400, $"Entry 1 price: {PlainDecimalRule}"), (refused.StatusCode, refused.Message));
+    }
+
+    [Fact]
+    public void Negative_percentages_point_to_a_price_and_zero_percent_is_break_even()
+    {
+        PlayPlanDocument Percent(string stop, string target) => TestPlays.Plan() with
+        {
+            Entries = [TestPlays.Plan().Entries[0] with
+            {
+                Stops = [new PlanExit("stop-1", "percent", stop, "100")], Targets = [new PlanExit("target-1", "percent", target, "100")]
+            }]
+        };
+        Assert.Equal("Entry 1 stop 1: use a price for a stop beyond the entry; a percentage cannot be negative.",
+            Assert.Throws<ProblemException>(() => PlayDocuments.Normalize(Percent("-5", "10"))).Message);
+        Assert.Equal("Entry 1 target 1: a percentage cannot be negative; use a price instead.",
+            Assert.Throws<ProblemException>(() => PlayDocuments.Normalize(Percent("5", "-10"))).Message);
+        var breakEven = PlayDocuments.Normalize(Percent("0", "10"));
+        Assert.Equal("0", breakEven.Entries[0].Stops[0].Value);
+        Assert.Equal(100m, ExecutionMatcher.Levels(breakEven).Single(l => l.Role == OrderLinkRole.Stop).Price);
+    }
+
+    internal const string PlainDecimalRule =
+        "use a plain decimal such as 100 or 0.5, with no sign, exponent or spaces, at most 64 characters and within decimal precision (28 decimal places).";
+
+    private static string Show(string text) => JsonSerializer.Serialize(text);
+
+    /// <summary>One plan per number field, holding <paramref name="text"/> there; unpriced entries and percent levels keep the side check out of the way.</summary>
+    private static IEnumerable<(string Field, PlayPlanDocument Plan, Func<PlayPlanDocument, string?> Read)> PlanNumberFields(string text)
+    {
+        var plan = TestPlays.Plan();
+        var entry = plan.Entries[0];
+        PlayPlanDocument With(PlanEntry changed) => plan with { Entries = [changed] };
+        PlanExit Exit(string id, string unit, string value, string share) => new(id, unit, value, share);
+        yield return ("size", plan with { Size = text }, p => p.Size);
+        yield return ("budget", plan with { BudgetOverride = text }, p => p.BudgetOverride);
+        yield return ("entry share", With(entry with { Share = text }), p => p.Entries[0].Share);
+        yield return ("entry price", With(entry with { Price = text, Stops = [Exit("stop-1", "percent", "5", "100")],
+            Targets = [Exit("target-1", "percent", "10", "100")] }), p => p.Entries[0].Price);
+        yield return ("stop price", With(entry with { Price = "", Stops = [Exit("stop-1", "price", text, "100")] }), p => p.Entries[0].Stops[0].Value);
+        yield return ("stop percent", With(entry with { Stops = [Exit("stop-1", "percent", text, "100")] }), p => p.Entries[0].Stops[0].Value);
+        yield return ("stop share", With(entry with { Stops = [Exit("stop-1", "price", "95", text)] }), p => p.Entries[0].Stops[0].Share);
+        yield return ("target price", With(entry with { Price = "", Targets = [Exit("target-1", "price", text, "100")] }), p => p.Entries[0].Targets[0].Value);
+        yield return ("target percent", With(entry with { Targets = [Exit("target-1", "percent", text, "100")] }), p => p.Entries[0].Targets[0].Value);
+        yield return ("target share", With(entry with { Targets = [Exit("target-1", "price", "110", text)] }), p => p.Entries[0].Targets[0].Share);
     }
 
     [Fact]
@@ -383,6 +503,51 @@ public sealed class PlayServiceTests
         Assert.Equal(("changed-mind", "Not my setup"), (history.StatusChanges.Single().Reason, history.StatusChanges.Single().Note));
     }
 
+    /// <summary>
+    /// Strict on write, tolerant on read: a stored field whose text is unchanged still saves, so no earlier plan becomes
+    /// unsaveable and nothing stored is rewritten. New or changed text must be a plain decimal.
+    /// </summary>
+    [Fact]
+    public async Task Stored_plan_text_saves_unchanged_while_new_text_must_be_a_plain_decimal()
+    {
+        var legacy = TestPlays.LegacyPlan();
+        var stored = PlayDocuments.Serialize(legacy);
+        var play = new Play(Guid.NewGuid(), venue, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue, stored, DateTimeOffset.UnixEpoch);
+        store.Plays.Add(play);
+        var dto = await service.GetAsync(play.Id, default);
+        Assert.Equal(("1e2", ".5", "-5"), (dto.Plan.Entries[0].Price, dto.Plan.Size, dto.Plan.Entries[0].Stops[0].Value));
+
+        dto = await service.UpdateAsync(play.Id, Update(dto) with { Title = "Renamed" }, default);
+        Assert.Equal(("Renamed", stored), (dto.Summary.Title, play.Plan));
+
+        // Other fields change around the stored text.
+        var retargeted = legacy with { Entries = [legacy.Entries[0] with { Targets = [new PlanExit("target-1", "price", "120", "100")] }] };
+        dto = await service.UpdateAsync(play.Id, Update(dto, retargeted), default);
+        Assert.Equal(PlayDocuments.Serialize(retargeted), play.Plan);
+
+        PlayPlanDocument Stop(string unit, string value) =>
+            retargeted with { Entries = [retargeted.Entries[0] with { Stops = [new PlanExit("stop-1", unit, value, "100")] }] };
+        foreach (var (plan, message) in new[]
+        {
+            // Another spelling of a stored value is new text.
+            (retargeted with { Entries = [retargeted.Entries[0] with { Price = "1E2" }] }, $"Entry 1 price: {PlayDocumentTests.PlainDecimalRule}"),
+            (retargeted with { BudgetOverride = "+100" }, $"Budget: {PlayDocumentTests.PlainDecimalRule}"),
+            (Stop("percent", "-6"), "Entry 1 stop 1: use a price for a stop beyond the entry; a percentage cannot be negative."),
+            // The same text in another unit is a different value.
+            (Stop("price", "-5"), $"Entry 1 stop 1: {PlayDocumentTests.PlainDecimalRule}"),
+        })
+        {
+            var refused = await Assert.ThrowsAsync<ProblemException>(() => service.UpdateAsync(play.Id, Update(dto, plan), default));
+            Assert.Equal((400, message), (refused.StatusCode, refused.Message));
+        }
+        Assert.Equal(PlayDocuments.Serialize(retargeted), play.Plan);
+        // The stored text belongs to that Play: a new Play cannot start with it.
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Create(plan: legacy))).StatusCode);
+        // A plain value replaces the stored text, and 0% is a break-even stop.
+        dto = await service.UpdateAsync(play.Id, Update(dto, Stop("percent", "0") with { Size = "0.5" }), default);
+        Assert.Equal(("0", "0.5"), (dto.Plan.Entries[0].Stops[0].Value, dto.Plan.Size));
+    }
+
     [Fact]
     public async Task Only_drafts_are_deleted_with_their_evidence_objects()
     {
@@ -454,6 +619,36 @@ public sealed class PlayPostgresTests
         await using var db2 = database.Context(owner);
         Assert.Equal("97", await db2.Database.SqlQueryRaw<string>(
             "SELECT \"Plan\"->'entries'->0->'stops'->0->>'value' AS \"Value\" FROM plays").SingleAsync());
+    }
+
+    [PostgresFact]
+    public async Task Plan_numbers_are_plain_decimals_on_write_and_stored_text_still_saves_through_the_api()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
+        var stored = PlayDocuments.Serialize(TestPlays.LegacyPlan());
+        var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue, stored, DateTimeOffset.UnixEpoch);
+        await using (var db = database.Context(owner)) { db.Accounts.Add(account); db.Plays.Add(play); await db.SaveChangesAsync(); }
+        await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
+        using var client = factory.AuthorizedClient();
+        async Task<string?> Detail(HttpResponseMessage response) => (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("detail").GetString();
+
+        var created = await client.PostAsJsonAsync("/api/plays", Body(account.Id, price: "1e2"));
+        Assert.Equal((HttpStatusCode.BadRequest, $"Entry 1 price: {PlayDocumentTests.PlainDecimalRule}"), (created.StatusCode, await Detail(created)));
+
+        var dto = (await client.GetFromJsonAsync<PlayDto>($"/api/plays/{play.Id}"))!;
+        Assert.Equal("1e2", dto.Plan.Entries[0].Price);
+        var renamed = await client.PutAsJsonAsync($"/api/plays/{play.Id}", new UpdatePlayRequest(dto.Summary.Version, account.Id,
+            "BTC", "venue", "Renamed", dto.Plan, dto.Drawings, "", null));
+        Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
+        dto = (await renamed.Content.ReadFromJsonAsync<PlayDto>())!;
+        var changed = await client.PutAsJsonAsync($"/api/plays/{play.Id}", new UpdatePlayRequest(dto.Summary.Version, account.Id,
+            "BTC", "venue", "Renamed", dto.Plan with { Size = ".25" }, dto.Drawings, "", null));
+        Assert.Equal((HttpStatusCode.BadRequest, $"Size: {PlayDocumentTests.PlainDecimalRule}"), (changed.StatusCode, await Detail(changed)));
+
+        await using var check = database.Context(owner);
+        Assert.Equal(stored, PlayDocuments.Serialize(PlayDocuments.Read((await check.Plays.SingleAsync()).Plan)));
     }
 
     [PostgresFact]
