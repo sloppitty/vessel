@@ -37,3 +37,8 @@
 .monitor-orders dd { display: grid; gap: 2px; font-weight: 450; }
 .monitor-discrepancies .monitor-next { color: var(--foreground); }
 @media (max-width: 600px) { .monitor-heading { flex-wrap: wrap; } }
+/* Stop coverage heads the panel when it is not plainly covered (Phase 0, 0.4c): unknown or uncovered warn, the rest stay neutral. */
+.monitor-coverage-heading { display: inline-flex; align-items: center; gap: 6px; color: var(--foreground); }
+.monitor-coverage-heading[data-tone="warning"] { color: var(--warning); }
+.monitor-coverage-heading > svg { flex-shrink: 0; }
+.monitor-panel .monitor-coverage { color: var(--muted-foreground); }

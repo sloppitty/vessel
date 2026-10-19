@@ -27,6 +27,7 @@ interface AccountMonitor {
   workerOnline: boolean
   discrepancies: MonitorDiscrepancy[] // at most 500 visible records, outstanding incidents first
   discrepanciesTruncated?: boolean    // October 19: more records exist than listed; always sent, optional for older producers
+  coverage?: MonitorCoverage[] // October 19; always sent by this API, optional for older producers (see Stop coverage)
 }
 ```
 
@@ -136,3 +137,40 @@ interface MonitorDiscrepancy {
 Render monitor state within the existing Execution area, exceptional account badges and an offline shell banner. Preserve component theme tokens and accessible controls. No toast/notification system or new layout is included.
 
 **Incidents (October 19, Phase 0 item 0.4a).** The browser derives one persistent incident count from `GET /api/monitor` with a shared helper (`frontend/src/features/monitor/incidents.ts`), never from notifications (preferences, read state and withdrawal make them incomplete). An incident is an `open` record, or an `unverifiable` record whose announcement has not been dismissed since (no `dismissedAtUtc` at or after `unverifiableAtUtc`); this is the same set the dismiss route accepts. An open record keeps its severity; an outstanding unverifiable record that is not open counts as a warning. Incidents map to Plays through `playId`, or `details.playIds` for instrument kinds (at most 50 are listed; the account still counts the rest). The count appears on the Plays navigation entry, on Plays list rows and in the Play header (which brings the Execution tab forward), and as a conditional row above the Overview metric tiles. The Execution tab and account monitor headings follow open incidents ("Needs attention · 1 critical") and never say "Monitored" beside one. Records show a human title per kind, a fact table (open quantity, stop quantity, uncovered quantity only when `details.stopCoverage` is `orders`, otherwise whole-position or unknown coverage, last observed) and one next action; the recorded JSON stays behind a "Recorded details" disclosure. Unknown values read "Unknown", never 0. The summary covers enabled sourced accounts with active work or an outstanding incident (at most 200) and at most 500 records per account. Each account lists its outstanding incidents (open, or unverifiable and not dismissed since) ahead of historical records, each group in the previous order (newest confirmation first), so history never pushes an incident past the cap; `discrepanciesTruncated` says the cap left records out, and the browser then notes "Older records not shown." under the records. Only when a truncated account lists nothing but incidents can more exist: the Plays entry, the Overview row and the account heading then show a lower bound ("500+ incidents"), and per-Play counts stay what is listed. An incident keeps its account listed after scheduling has nothing left to check (for example, the last Play closed, its watches ended and its record became unverifiable), until the owner dismisses it; it never makes the account eligible for checks. Disabled and foreign accounts stay out. The browser reads a record without `lastObservedAtUtc` (an older API) as unknown instead of rejecting the record, the summary or the Play's execution.
+
+## Stop coverage
+
+October 19, Phase 0 item 0.4c (review defects D-09, D-18 and the chart part of D-08). `AccountMonitor.coverage` lists the last stop-coverage outcome the monitor recorded for each currently Open Play of the account (at most 500), in the summary, the account monitor and the Play execution's `monitor` alike. It is an added optional field: this API always sends it (an empty array when nothing is recorded), and the browser guard accepts its absence from an older producer.
+
+```ts
+interface MonitorCoverage {
+  playId: string
+  contractId: string
+  // Projected at read time: 'stale' once checkedAtUtc is older than twice Vessel:Monitor:Interval (the account's own
+  // staleness rule), otherwise recordedState. 'stale' is never stored.
+  state: 'known' | 'shared' | 'unknown' | 'unsupported' | 'stale'
+  recordedState: 'known' | 'shared' | 'unknown' | 'unsupported'
+  covered: boolean | null // only for recordedState 'known'; null otherwise, never omitted
+  reason: string          // e.g. 'stop-orders', 'no-stop', 'opposing-plays', 'incomplete-book', 'current-book-not-read'
+  checkedAtUtc: string
+  stops: MonitorStopEvidence[]
+}
+interface MonitorStopEvidence {
+  entryId: string
+  levelId: string
+  // resting: a linked order rested in the current book at observedAtUtc; not-seen: a complete, fresh book had none;
+  // unknown: the book could not tell; not-read: the venue's order reader does not return the current book.
+  evidence: 'resting' | 'not-seen' | 'unknown' | 'not-read'
+  orderId: string | null
+  observedAtUtc: string | null // always set for resting
+}
+```
+
+States and reasons are listed in the [monitor plan](play-monitor-plan.md#stop-coverage). `unsupported` comes from the `currentOrderBook` venue capability ([venue registry](venue-registry.md#current-order-book-october-19-2026)), never a venue name. Coverage is a record, not a discrepancy, and never counts as an incident.
+
+The browser:
+- heads the monitor panel with open incidents first (0.4a), then with coverage that is not plainly covered, least certain first: "Stop not seen at the venue" (known, not covered), "Stop coverage unknown", "Stop coverage stale", "Current book not read", "Stop shared with other Plays". It says "Monitored" only when the run is live and every recorded Play in scope is known covered. The Execution tab scopes this to its own Play; account detail to the account;
+- adds one line per distinct outcome that is not plainly covered (the reason in words, with a count when several Plays share it), and, where the venue states `currentOrderBook: false`, "Missing, short and cancelled stop checks do not run here" even before a Play is open;
+- labels each planned stop of an Open, tracked Play on the chart with the evidence's words: "resting as of <time>" (confirmed only while the record is not stale), "not seen at the venue", "unknown" (no recorded check, a level the check did not record, or stale absence) or "not read" (not monitored, or no current book). A stop without a confirmed resting order is drawn with a hollow tag and a fainter, sparser line in its theme colour; positions and layout do not change. Drafts and plans without an Open position keep their plain tags.
+
+The contract fixture (`frontend/src/test/contracts/monitor-api.json`) records real coverage from the end-to-end flow (an Open ETH Play with a resting linked stop) plus serialized known and stale unsupported samples.

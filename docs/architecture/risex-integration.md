@@ -156,6 +156,8 @@ Tasks R1.1 to R1.7 are done, with these differences from the plan:
 - **Chart:** no live stream (`Stream` capability false). The live toggle is hidden and the chart refreshes on request, as the owner decided. Automatic updates from the public `trades` channel remain a later task.
 - **Tests:** `RisexAdapterTests` (fixtures with a synthetic address) and the opt-in `RisexLiveTests` (set `Vessel_TEST_RISEX_ADDRESS`).
 
+**October 19, 2026 (Phase 0 item 0.4c, review defect D-09).** The order reader never read `/v1/orders/open`, so every monitor check of a RISEx account reported an incomplete book: each run ended `degraded`, and a cancelled or missing stop could never be flagged. The owner chose to label this rather than build the read now. The RISEx descriptor states `CurrentOrderBook: false` ([venue registry](venue-registry.md#current-order-book-october-19-2026)): protection coverage is **unsupported: current book not read**, the missing, short and cancelled stop checks (and the other book-dependent checks) do not run and the UI says so, and the history-only read no longer degrades a run by itself. The planned `/v1/orders/open` read in R1.5 waits for its own slice, after its semantics and paging are verified against a real account (see the open question above on whether `orders/open` and `orders` can disagree).
+
 Still open (R1.8, with the owner's own account): the meaning of same-side fills with extra PnL, TP/SL trigger linking, the units of `maintenance_margin_factor` and `unsettled_usdc`, and isolated-margin positions.
 
 ### October 16, 2026 import catalogue correction

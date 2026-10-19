@@ -69,7 +69,7 @@ export function AccountDetail({ account, api, refreshing, busy = refreshing, onS
     {/* Account identity and source come first; monitor state precedes the balances. */}
     {monitorRun.monitor && <div>
       <MonitorPanel monitor={monitorRun.monitor} busy={monitorRun.busy} error={monitorRun.error} retryAtUtc={monitorRun.retryAtUtc} statusUnavailable={monitorRun.statusUnavailable}
-        onCheck={() => { void monitorRun.check() }} onManageCredential={onManage} />
+        currentBookRead={venues.readsCurrentBook(account.venueId)} onCheck={() => { void monitorRun.check() }} onManageCredential={onManage} />
       <MonitorDiscrepancies discrepancies={monitorRun.monitor.discrepancies} truncated={monitorRun.monitor.discrepanciesTruncated === true}
         busy={monitorRun.busy} onDismiss={dismissDiscrepancy} />
     </div>}

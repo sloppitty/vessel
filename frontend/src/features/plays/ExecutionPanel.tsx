@@ -22,7 +22,7 @@ const pnlBasisNote = {
   mixed: 'Some fills report closed PnL before fees and some after.',
 } as const
 
-export function ExecutionPanel({ execution, error, busy, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, onDismiss, onManageCredential }: {
+export function ExecutionPanel({ execution, error, busy, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, currentBookRead = true, onDismiss, onManageCredential }: {
   execution: PlayExecution | null
   error: string | null
   busy: boolean
@@ -33,6 +33,8 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
   monitorBusy?: boolean
   monitorError?: string | null
   monitorUnavailable?: boolean
+  /** False when the account's venue does not return the current order book (a venue capability). */
+  currentBookRead?: boolean
   retryAtUtc?: string | undefined
   onDismiss?: (id: string, note?: string) => Promise<void>
   onManageCredential?: (() => void) | undefined
@@ -58,8 +60,10 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
           : execution.reason ?? 'Execution is not tracked for this play.'}</p>
     </div>}
     {error && <p className="error" role="alert">{error}</p>}
-    {/* The heading follows this Play's own records, the ones listed below it. */}
-    {shownMonitor && <MonitorPanel monitor={shownMonitor} discrepancies={execution.discrepancies} busy={busy || monitorBusy} error={monitorError}
+    {/* The heading follows this Play's own records and stop coverage, the ones listed below it. */}
+    {shownMonitor && <MonitorPanel monitor={shownMonitor} discrepancies={execution.discrepancies}
+      coverage={(shownMonitor.coverage ?? []).filter(row => row.playId === execution.playId)} currentBookRead={currentBookRead}
+      busy={busy || monitorBusy} error={monitorError}
       retryAtUtc={retryAtUtc} statusUnavailable={monitorUnavailable} onCheck={onCheck} onManageCredential={onManageCredential} />}
     {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss} levelName={recordLevel} />}
     <MonitorWatches watches={execution.watches} levelName={watchLevel} />

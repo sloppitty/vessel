@@ -306,6 +306,36 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         }
     }
 
+    public async Task SaveCoverageAsync(Guid accountId, IReadOnlyList<MonitorCoverage> rows, CancellationToken ct)
+    {
+        unitOfWork.RequireActive();
+        if (rows.Any(x => x.AccountId != accountId || x.OwnerId != db.CurrentOwnerId))
+            throw new InvalidOperationException("Coverage rows must belong to the locked account and the current owner.");
+        var stored = await db.Set<MonitorCoverage>().Where(x => x.AccountId == accountId).ToDictionaryAsync(x => x.PlayId, ct);
+        foreach (var row in rows)
+        {
+            if (!stored.Remove(row.PlayId, out var current)) { db.Add(row); continue; }
+            current.ContractId = row.ContractId;
+            current.State = row.State;
+            current.Covered = row.Covered;
+            current.Reason = row.Reason;
+            current.CheckedAtUtc = row.CheckedAtUtc;
+            current.Stops = row.Stops;
+        }
+        // Plays the check no longer evaluated (closed, cancelled or moved) keep no stale outcome.
+        db.RemoveRange(stored.Values);
+    }
+
+    public async Task<IReadOnlyList<MonitorCoverage>> CoverageAsync(IReadOnlyCollection<Guid> accountIds, CancellationToken ct)
+    {
+        if (accountIds.Count == 0) return [];
+        var ids = accountIds.Distinct().ToArray();
+        var rows = await db.Set<MonitorCoverage>().AsNoTracking()
+            .Where(x => ids.Contains(x.AccountId) && db.Plays.Any(p => p.Id == x.PlayId && p.Status == PlayStatus.Open))
+            .OrderBy(x => x.AccountId).ThenBy(x => x.PlayId).ToListAsync(ct);
+        return rows.GroupBy(x => x.AccountId).SelectMany(x => x.Take(500)).ToArray();
+    }
+
     public async Task<IReadOnlyList<MonitorWatchDto>> WatchesAsync(Guid playId, DateTimeOffset now, CancellationToken ct)
     {
         var cutoff = now - settings.WatchLifetime;

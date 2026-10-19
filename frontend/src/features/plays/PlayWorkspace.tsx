@@ -12,7 +12,7 @@ import { captureFileName, createEvidence, evidenceLimits } from './evidence'
 import { DirectionToggle } from './DirectionToggle'
 import { InstrumentPicker } from './InstrumentPicker'
 import { pairLabel, useInstrumentCatalog } from './instruments'
-import { leverageOf } from './levels'
+import { leverageOf, type StopEvidenceOf } from './levels'
 import { useLeverageChange } from './useLeverageChange'
 import { defaultSizeUnits, estimatedLiquidation, playBudget, type SizeUnits } from './sizing'
 import { planSuggestions } from './suggestions'
@@ -30,7 +30,7 @@ import { incidentSummary, topTone, type IncidentCounts } from '@/features/monito
 import '@/features/monitor/incidents.css'
 
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, revision = null,
-  lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, onRiskChange, retrospective = false, incidents }: {
+  lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, onRiskChange, retrospective = false, incidents, stopEvidence }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -53,6 +53,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   execution?: ReactNode
   /** This Play's open monitor incidents, from the shell's monitor summary; shown in the header with a way to the Execution tab. */
   incidents?: IncidentCounts | undefined
+  /** Venue evidence for the planned stops of a saved, Open Play; the chart draws unconfirmed stops apart. */
+  stopEvidence?: StopEvidenceOf | undefined
   retrospective?: boolean
   /** Risk settings and record for sizing suggestions, which only apply to editable plays. */
   sizing?: SizingDocument | null
@@ -239,7 +241,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         onEntriesChange={entries => planChange({ ...draft, entries })}
         drawings={drawingKey ? draft.drawings[drawingKey] : undefined}
         onDrawingsChange={drawings => { if (drawingKey) planChange({ ...draft, drawings: { ...draft.drawings, [drawingKey]: drawings } }) }}
-        editable={!readOnly} onCapture={addCapture} onShowEvidence={showEvidence} />
+        editable={!readOnly} onCapture={addCapture} onShowEvidence={showEvidence} stopEvidence={retrospective ? undefined : stopEvidence} />
         <PlayJournal notes={draft.notes} onChange={notes => onChange({ ...draft, notes: readOnly ? { ...draft.notes, review: notes.review } : notes })}
           execution={execution} readOnly={readOnly} retrospective={retrospective} status={status}
           structuredReview={draft.structuredReview}

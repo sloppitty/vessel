@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from './workspace'
-import { isAccountMonitor, isMonitorDiscrepancy, isMonitorEvent, isMonitorSummary, isMonitorWatch, monitorFrame, type MonitorDiscrepancy } from './monitor'
+import { isAccountMonitor, isMonitorCoverage, isMonitorDiscrepancy, isMonitorEvent, isMonitorSummary, isMonitorWatch, monitorFrame, type MonitorDiscrepancy } from './monitor'
 import { isPlayExecution, type PlayExecution } from './plays'
 import { discrepancyFacts } from '@/features/monitor/discrepancy-text'
-import { discrepancyFixture, eventCursor, monitorEventFixture, monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
+import { coverageAs, coverageFixture, discrepancyFixture, eventCursor, monitorEventFixture, monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
 import { accountFixture, savedPlayFixture } from '@/test/workspace-fixture'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -70,6 +70,28 @@ describe('monitor contract', () => {
     expect(isPlayExecution({ ...executionFixture, monitor: { ...monitorFixture, discrepancies: [older] }, discrepancies: [older] })).toBe(true)
     // It reads as unknown, never as a time.
     expect(discrepancyFacts(older as unknown as MonitorDiscrepancy, String).find(fact => fact.label === 'Last observed')?.value).toBe('Unknown')
+  })
+  it('accepts recorded stop coverage, projected stale, and rejects coverage that contradicts itself (Phase 0, 0.4c)', () => {
+    expect(isAccountMonitor({ ...monitorFixture, coverage: [coverageFixture] })).toBe(true)
+    // An older API without coverage, and a monitor with no Open Plays.
+    expect(isAccountMonitor(monitorFixture)).toBe(true)
+    expect(isAccountMonitor({ ...monitorFixture, coverage: [] })).toBe(true)
+    expect(isAccountMonitor({ ...monitorFixture, coverage: null })).toBe(false)
+    expect(isAccountMonitor({ ...monitorFixture, coverage: [coverageFixture, coverageFixture] })).toBe(false)
+    for (const [state, reason] of [['shared', 'shared-whole-position-stop'], ['unknown', 'opposing-plays'], ['unsupported', 'current-book-not-read']] as const)
+      expect(isMonitorCoverage(coverageAs(state, reason))).toBe(true)
+    expect(isMonitorCoverage({ ...coverageFixture, state: 'stale' })).toBe(true)
+    // The projected state is either stale or the recorded one; only known coverage says whether it covers.
+    expect(isMonitorCoverage({ ...coverageFixture, state: 'shared' })).toBe(false)
+    expect(isMonitorCoverage({ ...coverageFixture, covered: null })).toBe(false)
+    expect(isMonitorCoverage({ ...coverageAs('shared', 'shared-whole-position-stop'), covered: true })).toBe(false)
+    expect(isMonitorCoverage({ ...coverageFixture, reason: '' })).toBe(false)
+    expect(isMonitorCoverage({ ...coverageFixture, checkedAtUtc: null })).toBe(false)
+    // A resting order is always dated; evidence words come from a fixed set.
+    const stop = coverageFixture.stops[0]!
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, observedAtUtc: null }] })).toBe(false)
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, evidence: 'seen' }] })).toBe(false)
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, evidence: 'not-seen', observedAtUtc: null, orderId: null }] })).toBe(true)
   })
   it('validates watched orders and keeps a watching order open-ended', () => {
     const watch = { linkId: 'link-1', playId: savedPlayFixture.summary.id, orderId: 'exit-1', role: 'stop', state: 'unverifiable',

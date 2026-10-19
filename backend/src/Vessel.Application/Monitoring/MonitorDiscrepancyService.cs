@@ -77,7 +77,8 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
             await Unobservable(row);
             if (row.HasWork) scan.Incomplete = true;
         }
-        return new(next, scan.Incomplete, scan.Incomplete ? "Some discrepancy checks lack fresh, complete or consistent evidence." : null);
+        return new(next, scan.Incomplete, scan.Incomplete ? "Some discrepancy checks lack fresh, complete or consistent evidence." : null,
+            scan.Coverage);
 
         async Task Unobservable(PlayDiscrepancy row)
         {

@@ -30,6 +30,11 @@ export interface PriceOverlay {
   draggable: boolean
   /** Venue tick for suppressing equivalent drag publications; absent uses five significant figures. */
   priceStep?: number | null
+  /**
+   * True when the level has no confirmed counterpart, e.g. a planned stop not seen resting at the venue: drawn with a
+   * hollow tag and a fainter line. False or absent draws it as usual.
+   */
+  unconfirmed?: boolean
 }
 
 export interface ChartCallbacks {

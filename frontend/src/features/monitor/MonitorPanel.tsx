@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import type { AccountMonitor, MonitorDiscrepancy, MonitorWatch } from '@/api/monitor'
+import type { AccountMonitor, MonitorCoverage, MonitorDiscrepancy, MonitorWatch } from '@/api/monitor'
 import { Button } from '@/components/ui/button'
 import { InfoTip } from '@/components/ui/info-tip'
-import { RefreshCw, TriangleAlert } from 'lucide-react'
+import { RefreshCw, ShieldQuestion, TriangleAlert } from 'lucide-react'
 import { countIncidents, incidentSummary, incidentTone, incidentsBeyondCap, incidentsOf, isIncident, topTone } from './incidents'
 import { discrepancyAction, discrepancyFacts, discrepancyOrders, discrepancyTitle, unverifiableAction } from './discrepancy-text'
+import { coverageHeading, coverageLines, coverageTone } from './coverage'
 import './monitor.css'
 
 const labels = { live: 'Monitored', stale: 'Monitor stale', degraded: 'Monitor degraded', 'credential-error': 'Monitor credential error', idle: 'Monitor idle' }
@@ -43,12 +44,17 @@ function CheckButton({ until, monitor, busy, blocked, onCheck }: {
 }
 
 /**
- * The heading follows open incidents before the run state, so a healthy run never reads "Monitored" beside an open
- * record. `discrepancies` are the records shown with it: the account's by default, a Play's in its Execution tab.
+ * The heading follows open incidents, then stop coverage, before the run state, so a healthy run never reads
+ * "Monitored" beside an open record, a structural unknown, shared or unsupported coverage. `discrepancies` and
+ * `coverage` are what the panel speaks for: the account's by default, a Play's own in its Execution tab.
+ * `currentBookRead: false` is the venue capability: its order reader does not return the current book.
  */
-export function MonitorPanel({ monitor, discrepancies, busy, error, retryAtUtc, statusUnavailable = false, onCheck, onManageCredential }: {
+export function MonitorPanel({ monitor, discrepancies, coverage = monitor.coverage ?? [], currentBookRead = true, busy, error, retryAtUtc,
+  statusUnavailable = false, onCheck, onManageCredential }: {
   monitor: AccountMonitor; busy: boolean; error: string | null; retryAtUtc?: string | undefined
   discrepancies?: readonly MonitorDiscrepancy[] | undefined
+  coverage?: readonly MonitorCoverage[]
+  currentBookRead?: boolean
   onCheck: () => void; onManageCredential?: (() => void) | undefined
   statusUnavailable?: boolean
 }) {
@@ -57,10 +63,15 @@ export function MonitorPanel({ monitor, discrepancies, busy, error, retryAtUtc, 
   const counts = discrepancies ? countIncidents(incidentsOf(discrepancies))
     : countIncidents(incidentsOf(monitor.discrepancies), incidentsBeyondCap([monitor]))
   const tone = topTone(counts)
+  // Other run states already name themselves ("Monitor degraded"); only a live run could claim "Monitored".
+  const coverageTitle = monitor.state === 'live' ? coverageHeading(coverage) ?? (currentBookRead ? null : 'Current book not read') : null
+  const lines = coverageLines(coverage, time, currentBookRead)
   return <section className="monitor-panel" aria-label="Background monitor">
     <div className="monitor-heading">
       <div>{tone ? <><strong className="monitor-attention" data-tone={tone}><TriangleAlert size={14} aria-hidden="true" />Needs attention · {incidentSummary(counts)}</strong>
         {monitor.state !== 'live' && monitor.state !== 'idle' && <span className="monitor-badge">{labels[monitor.state]}</span>}</>
+        : coverageTitle ? <strong className="monitor-coverage-heading" data-tone={coverageTone(coverage) ?? 'info'}>
+          <ShieldQuestion size={14} aria-hidden="true" />{coverageTitle}</strong>
         : <strong>{labels[monitor.state]}</strong>}
         {(monitor.lastSuccessAtUtc || monitor.nextRunAtUtc) && <p className="muted">
           {monitor.lastSuccessAtUtc && <>Last success {time(monitor.lastSuccessAtUtc)}</>}
@@ -71,6 +82,7 @@ export function MonitorPanel({ monitor, discrepancies, busy, error, retryAtUtc, 
       {/* A new cooldown remounts the button so its countdown starts from the current time. */}
       <CheckButton key={until} until={until} monitor={monitor} busy={busy} blocked={statusUnavailable} onCheck={onCheck} />
     </div>
+    {lines.map(line => <p key={line} className="monitor-coverage">{line}</p>)}
     {!monitor.workerOnline && <p className="monitor-warning">Worker offline. Scheduled checks and requested runs may be delayed.</p>}
     {monitor.state === 'stale' && <p className="monitor-warning">Fills may be missing. Last attempt {time(monitor.lastAttemptAtUtc)}.</p>}
     {monitor.state === 'degraded' && <p className="monitor-warning">Incomplete venue coverage.</p>}

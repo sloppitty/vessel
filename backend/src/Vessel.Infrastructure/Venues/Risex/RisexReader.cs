@@ -34,7 +34,10 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
     };
 
     public static readonly VenueDescriptor Descriptor = new(Id, "RISEx", "read-only", VenueSources.EvmAddress,
-        new VenueCapabilities(Sync: true, Instruments: true, Orders: true, Candles: true, MarketContext: true, Stream: false, StablecoinWallet: false),
+        // The order reader reads bounded order history and TP/SL records, not /v1/orders/open: no current book (owner
+        // decision, October 19, 2026). Protection coverage is labelled "current book not read" instead.
+        new VenueCapabilities(Sync: true, Instruments: true, Orders: true, Candles: true, MarketContext: true, Stream: false, StablecoinWallet: false,
+            CurrentOrderBook: false),
         QuoteAsset: QuoteAsset, TradeUrlTemplate: "https://www.rise.trade/trade/{instrument}",
         Intervals: [.. IntervalMs.Keys], PriceRule: PriceRules.TickSize,
         CandleNotice: "RISEx trade candles from the venue's chart data. Refresh to update; prices are trade candles, not fills.",

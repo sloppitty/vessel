@@ -496,6 +496,8 @@ Linked exits (stops, targets, exits) and entries of Closed or Cancelled Plays ar
 
   The gap is sticky. A Refresh never clears it, and no successful read alone does: a check clears it only when an adapter reports complete fill history (`FillHistoryComplete`), which none does today. Gaps stored before October 19, false ones included, stay until a recovery rule exists.
 - Incomplete positions, open orders or fill windows also degrade the run. Structurally unknown discrepancy coverage does not.
+- **Current book (October 19, Phase 0 item 0.4c).** On a venue whose descriptor lacks `CurrentOrderBook` (RISEx), the order read is history only, so `OpenOrdersComplete: false` no longer degrades the run by itself: the book-dependent per-Play checks do not run and protection coverage is recorded as unsupported, "current book not read". Every other reason above still degrades it.
+- **Stop coverage.** Each evaluated check replaces the account's `monitor_coverage` rows in its unit, under the account lock: one per Open Play, `known`, `shared`, `unknown` or `unsupported`, with the check time, a reason and per-level stop evidence. Reads project `stale` after twice the interval. Failed, superseded and refresh runs leave the rows as they are. See the [monitor plan](play-monitor-plan.md#stop-coverage).
 
 ### Housekeeping invariant
 
@@ -882,7 +884,8 @@ Recreate every other service that uses the same user too, for example additional
 |---|---|---|
 | `live` | Last check succeeded within twice the interval | None |
 | `idle` | Nothing to watch (no eligible Plays, watches or discrepancy work) | None |
-| `degraded` | Incomplete coverage: omitted executions, a fill-history gap, partial positions or orders, an order-read failure, or one or two consecutive failed checks | Read the monitor error; check venue status. Most causes clear on the next complete check; a fill-history gap stays until an adapter reports complete fill history, which none does today |
+| `degraded` | Incomplete coverage: omitted executions, a fill-history gap, partial positions or orders (on a venue that reads the current book), an order-read failure, or one or two consecutive failed checks | Read the monitor error; check venue status. Most causes clear on the next complete check; a fill-history gap stays until an adapter reports complete fill history, which none does today |
+| Stop coverage "Current book not read" (live) | The venue's order reader does not return the current book (RISEx); missing, short and cancelled stop checks do not run there | Not a fault. Check stops at the venue itself |
 | `stale` | Three or more consecutive failures, or no success for twice the interval | Check worker logs (types and IDs), venue reachability and `server_venue_deadlines` deadlines |
 | `credential-error` | Read-only token missing, refused or expired; scheduling stops | Save a valid token; discovery reschedules the account |
 | Worker offline (`workerOnline: false`) | Heartbeat older than `HeartbeatTimeout` | `docker compose ps worker`, `docker compose logs --tail=100 worker`; check database and broker reachability and provisioning |

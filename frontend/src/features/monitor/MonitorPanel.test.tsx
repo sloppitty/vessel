@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceApi } from '@/api/workspace'
 import type { AccountMonitor } from '@/api/monitor'
 import { ApiError } from '@/api/errors'
-import { discrepancyFixture, missingStopFixture, monitorFixture, shortStopFixture } from '@/test/monitor-fixture'
+import { coverageAs, coverageFixture, discrepancyFixture, missingStopFixture, monitorFixture, shortStopFixture } from '@/test/monitor-fixture'
 import { MonitorBadge, MonitorDiscrepancies, MonitorPanel, MonitorWatches } from './MonitorPanel'
 import { useMonitorRun } from './useMonitorRun'
 
@@ -423,5 +423,40 @@ describe('incident visibility (Phase 0, 0.4a)', () => {
     expect(within(third!).getByText('A linked order no longer matches its plan level')).toBeInTheDocument()
     expect(within(third!).getByText('Order 900000030 · at 61000, plan 60000')).toBeInTheDocument()
     expect(within(fourth!).getByText('Order 900000029 · Entry 1 stop · resting')).toBeInTheDocument()
+  })
+})
+
+describe('stop coverage (Phase 0, 0.4c)', () => {
+  const panel = () => screen.getByRole('region', { name: 'Background monitor' })
+  it.each([
+    // D-18: opposite Plays sharing one whole-position stop are a structural unknown, never "Monitored".
+    ['unknown', 'opposing-plays', 'Stop coverage unknown', /Opposite Plays net out/],
+    ['shared', 'shared-whole-position-stop', 'Stop shared with other Plays', /covers this position together with other Plays/],
+    // D-09: a venue whose order reader does not return the current book.
+    ['unsupported', 'current-book-not-read', 'Current book not read', /Missing, short and cancelled stop checks do not run here/],
+  ] as const)('never says Monitored beside %s coverage', (state, reason, heading, line) => {
+    render(<MonitorPanel monitor={{ ...monitorFixture, coverage: [coverageAs(state, reason)] }} busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).queryByText('Monitored')).not.toBeInTheDocument()
+    expect(within(panel()).getByText(heading)).toBeInTheDocument()
+    expect(within(panel()).getByText(line)).toBeInTheDocument()
+  })
+  it('keeps Monitored only when every recorded Play is covered, and projects a stale outcome as stale', () => {
+    const view = render(<MonitorPanel monitor={{ ...monitorFixture, coverage: [coverageFixture] }} busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).getByText('Monitored')).toBeInTheDocument()
+    view.rerender(<MonitorPanel monitor={{ ...monitorFixture, coverage: [{ ...coverageFixture, state: 'stale' }] }} busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).queryByText('Monitored')).not.toBeInTheDocument()
+    expect(within(panel()).getByText('Stop coverage stale')).toBeInTheDocument()
+    const uncovered = { ...coverageAs('known', 'no-stop', '00000000-0000-4000-8000-0000000000f1'), covered: false }
+    view.rerender(<MonitorPanel monitor={{ ...monitorFixture, coverage: [coverageFixture, uncovered] }} busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).getByText('Stop not seen at the venue')).toBeInTheDocument()
+    expect(within(panel()).getByText(/No resting stop was seen at the venue/)).toBeInTheDocument()
+    // The Execution tab scopes the heading to its own Play.
+    view.rerender(<MonitorPanel monitor={{ ...monitorFixture, coverage: [coverageAs('unknown', 'mechanics')] }} coverage={[coverageFixture]}
+      busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).getByText('Monitored')).toBeInTheDocument()
+  })
+  it('says the stop checks do not run on a venue without the current book, even before a Play is open', () => {
+    render(<MonitorPanel monitor={monitorFixture} currentBookRead={false} busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).getByText(/Missing, short and cancelled stop checks do not run here/)).toBeInTheDocument()
   })
 })

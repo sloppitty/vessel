@@ -1,4 +1,4 @@
-import { monitorFixture } from '@/test/monitor-fixture'
+import { coverageAs, coverageFixture, monitorFixture } from '@/test/monitor-fixture'
 import { screen, within } from '@testing-library/react'
 import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
@@ -31,6 +31,23 @@ const execution: PlayExecution = {
 }
 
 describe('execution panel', () => {
+  it('heads the monitor with this Play\'s own stop coverage, never Monitored beside an unknown (Phase 0, 0.4c)', () => {
+    const props = { error: null, busy: false, entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn() }
+    const monitor = { ...monitorFixture, coverage: [coverageAs('unknown', 'opposing-plays', execution.playId),
+      { ...coverageFixture, playId: '00000000-0000-4000-8000-0000000000f2' }] }
+    const view = render(<ExecutionPanel {...props} execution={{ ...execution, monitor }} />)
+    const panel = () => screen.getByRole('region', { name: 'Background monitor' })
+    expect(within(panel()).queryByText('Monitored')).not.toBeInTheDocument()
+    expect(within(panel()).getByText('Stop coverage unknown')).toBeInTheDocument()
+    // Another Play's coverage on the account does not speak for this one.
+    view.rerender(<ExecutionPanel {...props} execution={{ ...execution, monitor: { ...monitor, coverage: [monitor.coverage[1]!] } }} />)
+    expect(within(panel()).getByText('Monitored')).toBeInTheDocument()
+    // The venue capability: without a current book the stop checks do not run, which the panel says.
+    view.rerender(<ExecutionPanel {...props} execution={{ ...execution, monitor: monitorFixture }} currentBookRead={false} />)
+    expect(within(panel()).getByText('Current book not read')).toBeInTheDocument()
+    expect(within(panel()).getByText(/Missing, short and cancelled stop checks do not run here/)).toBeInTheDocument()
+  })
+
   it('shows the check timestamp only once, retaining the fallback and untracked reason', () => {
     const props = { execution, error: null, busy: false, entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn() }
     const view = render(<ExecutionPanel {...props} />)

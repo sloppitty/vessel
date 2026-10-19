@@ -91,6 +91,26 @@ describe('Chart panel', () => {
     expect(onSelect).toHaveBeenCalledWith(list[1]!.id)
   })
 
+  it('styles a planned stop without a confirmed resting order apart, labelled in the evidence\'s own words (Phase 0, 0.4c)', async () => {
+    const list = entries()
+    const candles = vi.fn().mockResolvedValue(candleSeriesFixture)
+    const { state, factory } = fakeAdapter()
+    const props = { entries: list, selectedId: list[0]!.id, instrument: 'BTC', onSelect: vi.fn(), createAdapter: factory,
+      source: { api: chartApi(candles), accountId: accountFixture.id } }
+    const view = render(<ChartPanel {...props} stopEvidence={(entryId, levelId) =>
+      entryId === list[0]!.id && levelId === 'stop-1' ? { text: 'not seen at the venue', confirmed: false } : null} />)
+    expect(await screen.findByText(/Updated .* UTC/)).toBeInTheDocument()
+    const stop = () => state.overlays.find(overlay => overlay.kind === 'stop')!
+    expect([stop().label, stop().unconfirmed]).toEqual(['E1 SL · not seen at the venue', true])
+    // Entries carry no venue claim of their own here.
+    expect(state.overlays.filter(overlay => overlay.kind === 'entry').map(o => [o.label, o.unconfirmed])).toEqual([['E1', undefined], ['E2', undefined]])
+    view.rerender(<ChartPanel {...props} stopEvidence={() => ({ text: 'resting as of 10:00', confirmed: true })} />)
+    expect([stop().label, stop().unconfirmed]).toEqual(['E1 SL · resting as of 10:00', false])
+    // Without evidence (a draft, or a Play that makes no venue claim) the plan keeps its plain tags.
+    view.rerender(<ChartPanel {...props} />)
+    expect([stop().label, stop().unconfirmed]).toEqual(['E1 SL', undefined])
+  })
+
   it('refreshes on request only for a venue without a live stream, offering its own intervals', async () => {
     const list = entries()
     const candles = vi.fn().mockResolvedValue(candleSeriesFixture)

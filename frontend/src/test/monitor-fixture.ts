@@ -1,4 +1,4 @@
-import type { AccountMonitor, MonitorDiscrepancy, MonitorEvent, MonitorSummary } from '@/api/monitor'
+import type { AccountMonitor, MonitorCoverage, MonitorDiscrepancy, MonitorEvent, MonitorSummary } from '@/api/monitor'
 import { accountFixture, savedPlayFixture } from './workspace-fixture'
 
 export const discrepancyFixture: MonitorDiscrepancy = {
@@ -22,6 +22,18 @@ export const shortStopFixture: MonitorDiscrepancy = {
     stopCoverage: 'orders', orders: [{ orderId: '900000029', role: 'Stop', level: 'stop|entry-1|stop-1', status: 'Open', resting: true,
       remainingQuantity: '0.5', wholePosition: false, price: '60000' }] },
 }
+/** The saved Play's stop coverage as a check recorded it: covered by its resting stop (Phase 0, 0.4c). */
+export const coverageFixture: MonitorCoverage = {
+  playId: savedPlayFixture.summary.id, contractId: 'BTC', state: 'known', recordedState: 'known', covered: true, reason: 'stop-orders',
+  checkedAtUtc: '2026-10-14T10:00:00Z',
+  stops: [{ entryId: 'entry-1', levelId: 'stop-1', evidence: 'resting', orderId: '900000029', observedAtUtc: '2026-10-14T10:00:00Z' }],
+}
+/** Coverage in another state, e.g. `coverageAs('unknown', 'opposing-plays')`; evidence follows the state. */
+export const coverageAs = (state: MonitorCoverage['recordedState'], reason: string, playId = savedPlayFixture.summary.id): MonitorCoverage => ({
+  ...coverageFixture, playId, state, recordedState: state, covered: state === 'known' ? coverageFixture.covered : null, reason,
+  stops: coverageFixture.stops.map(stop => state === 'unsupported' ? { ...stop, evidence: 'not-read', orderId: null, observedAtUtc: null }
+    : state === 'unknown' ? { ...stop, evidence: 'unknown', orderId: null, observedAtUtc: null } : stop),
+})
 export const monitorFixture: AccountMonitor = {
   accountId: accountFixture.id, state: 'live', lastAttemptAtUtc: '2026-10-14T10:00:00Z', lastSuccessAtUtc: '2026-10-14T10:00:00Z',
   nextRunAtUtc: '2026-10-14T10:10:00Z', manualState: 'idle', runTrigger: null, nextManualAllowedAtUtc: null, error: null, workerOnline: true, discrepancies: [],

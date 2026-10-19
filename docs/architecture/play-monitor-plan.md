@@ -270,7 +270,7 @@ Whole-position orders and coverage (October 15):
 - **Shared whole-position stop.** A resting whole-position stop (for example a Hyperliquid position SL) linked to an Open Play covers its sibling Open Plays only when it is on the same account and native contract, is an actual stop, and closes on the side compatible with their exposure. Then, when the venue position equals the expected total, `protection.missing` is false for the siblings. Otherwise their coverage is unknown, never a critical missing stop. One account-level order is never counted independently for several Plays.
 - **Opposing Plays.** When opposite Plays net out on a one-way account, per-Play protection is unknown unless the allocation of protection to each Play is demonstrable. Equality of the net position alone never establishes per-Play protection.
 - **Single Play.** With exactly one Open Play on the instrument and the venue position equal to its open quantity, a whole-position stop establishes its stop coverage, so `protection.short`, `protection.excess` and `protection.cancelled` are decidable for it.
-- **Unknown is not degraded.** Coverage that is structurally unknown (shared stops while the position differs, netted opposite Plays) is shown as unknown and does not degrade the monitor. Only missing or stale evidence (an incomplete or failed read, a history gap) does.
+- **Unknown is not degraded.** Coverage that is structurally unknown (shared stops while the position differs, netted opposite Plays) is shown as unknown and does not degrade the monitor. Only missing or stale evidence (an incomplete or failed read, a history gap) does. Since October 19 it is recorded as unknown [stop coverage](#stop-coverage) with its reason, so the UI no longer says "Monitored" beside it.
 - **Reduce-only orders** cannot flip a position. They do not count towards `protection.excess` when the Play is the only Open Play on the instrument; the check stays when siblings exist.
 - **One record per cause.** For the same orders, `protection.cancelled` supersedes `protection.missing` and `protection.short`: one record, not two or three.
 - **`level.drift` is decided per order.** It is raised if any priced linked order drifts; it is unknown only for unpriced orders.
@@ -308,6 +308,26 @@ One open record exists per account, kind and subject. When an open record's deta
 **Order mechanics.** `OrderMechanics` is the single venue-neutral classification (plain, stop, take-profit, unrecognized trigger) from the adapters' normalized order type and trigger facts, shared by the automatic matcher, manual link validation and the monitor. Only stop mechanics establish own or shared stop protection; a take-profit or plain limit linked as a stop never does, and an unrecognized trigger leaves coverage unknown. Manual linking refuses a take-profit order for a stop level, and the matcher no longer auto-matches a take-profit (for example a Lighter take-profit) to a stop level. `protection.orphaned` still considers every resting linked stop or target.
 
 **Evaluation loads only what it needs:** Open Plays, terminal Plays still under exit or entry-orphan watch, and fills on the relevant contracts and orders since the earliest open entry. There are no growth-based caps that disable every check once an account has a long history.
+
+### Stop coverage
+
+October 19, 2026 (Phase 0 item 0.4c; review defects D-09, D-18 and the chart part of D-08). Structural unknowns used to be invisible: the checks stayed silent, the run stayed live and the Execution tab said "Monitored" while, for example, opposite Plays shared one whole-position stop. Each evaluated check now records every Open Play's stop coverage in `monitor_coverage` (migration `20261019132931_MonitorCoverage`), one row per Play on its account and instrument, written in the check's unit of work under the account lock and owner scope through `IMonitorStore.SaveCoverageAsync`. The check replaces the account's rows; Plays it no longer evaluates lose theirs, and reads return only currently Open Plays. A check whose facts are too incomplete to name the Plays leaves the rows to go stale.
+
+| State | Meaning | Reasons |
+|---|---|---|
+| `known` | Decided: `covered` true or false | `stop-orders`, `whole-position-stop` (covered); `no-stop`, `short`, `cancelled` (not covered) |
+| `shared` | A whole-position stop covers this Play together with same-direction siblings, and the venue position equals their total | `shared-whole-position-stop` |
+| `unknown` | Missing evidence or a structural unknown | `history-gap`, `omitted-executions`, `quantity-unknown`, `orders-unavailable`, `incomplete-book`, `fills-after-read`, `mechanics`, `opposing-plays`, `position-unknown`, `position-mismatch`, `instrument-unknown` |
+| `unsupported` | The venue's order reader does not return the current book | `current-book-not-read` |
+| `stale` | Projected when read, never stored: the check is older than twice `Vessel:Monitor:Interval`, the account's own staleness rule | the recorded reason stays |
+
+The outcome follows the same evidence as the protection checks above, missing evidence first. Structural unknowns (opposing Plays, a shared stop the position cannot allocate) are `unknown`, never a missing stop, and never degrade the run.
+
+Each row also keeps evidence per planned stop level, from the check's own order read: `resting` (a linked order rested in the current book, with the observation time), `not-seen` (a complete, fresh book had none), `unknown`, or `not-read`. Only a current-book row counts as resting; historical `Open` statuses never do.
+
+**Venues without the current book.** The `CurrentOrderBook` venue capability ([venue registry](venue-registry.md#current-order-book-october-19-2026)) says whether the order reader returns the current open book. RISEx says it does not (owner decision, October 19: label it rather than build `/v1/orders/open` now). There, coverage is `unsupported`, the book-dependent per-Play kinds (`protection.missing`, `protection.cancelled`, `protection.short`, `protection.excess`, `protection.orphaned`, `entry.orphaned`, `level.drift`) do not run and are structural, and an incomplete order read alone no longer makes the run `degraded`. Position checks, `fill.unlinked`, watches and every other degradation reason still apply. The check uses the capability, never the venue name.
+
+**Display.** The API returns the rows on `AccountMonitor.coverage` ([API contract](play-monitor-api-contract.md#stop-coverage)). The monitor heading follows open incidents first, then coverage, so it never says "Monitored" beside unknown, stale, shared or unsupported coverage, or a known uncovered Play. The chart labels each planned stop of an Open, tracked Play with the evidence's words ("SL · resting as of 14:02", "not seen at the venue", "unknown", "not read") and draws a stop without a confirmed resting order hollow and fainter, with theme tokens and in the same place. Coverage is a record, not a discrepancy: it never opens one, changes a status or corrects anything.
 
 ## Event contract
 
@@ -490,7 +510,7 @@ A separate plan: [Notification Hub and in-app popups](notification-hub-plan.md) 
 |---|---|
 | `live` | The last run succeeded within twice the interval |
 | `stale` | No successful run for longer than twice the interval |
-| `degraded` | Missing or stale evidence: a partial or failed read, or a history gap. Structurally unknown coverage (for example shared whole-position stops) is shown as unknown on the discrepancy, not as a degraded monitor. |
+| `degraded` | Missing or stale evidence: a partial or failed read, or a history gap. Structurally unknown coverage (for example shared whole-position stops) is shown as unknown stop coverage, not as a degraded monitor. An incomplete order read on a venue without the current-book capability is not missing evidence either (October 19, [stop coverage](#stop-coverage)). |
 | `credential-error` | The token is missing, refused or expired |
 | `idle` | Nothing to watch |
 | `offline` | The worker heartbeat is missing (system-wide) |
@@ -503,7 +523,7 @@ A separate plan: [Notification Hub and in-app popups](notification-hub-plan.md) 
 - **Subscriptions** that are `lagging`, have a gap or hold `failed` receipts are reported with worker health and logged by name.
 
 The UI shows this inside existing areas; the approved layout does not change:
-- **Execution tab:** "Monitored · checked 4 min ago · next in about 6 min" with Check. The button shows "Checking…" while the run is pending or running, then a cooldown countdown before it can be used again. Stale: "Monitor stale since 14:02: fills may be missing". Credential error: a link to manage the token. Discrepancies are listed with Dismiss.
+- **Execution tab:** "Monitored · checked 4 min ago · next in about 6 min" with Check. Since October 19 the heading names open incidents first, then any stop coverage that is not plainly covered ("Stop coverage unknown", "Current book not read"), and says "Monitored" only otherwise. The button shows "Checking…" while the run is pending or running, then a cooldown countdown before it can be used again. Stale: "Monitor stale since 14:02: fills may be missing". Credential error: a link to manage the token. Discrepancies are listed with Dismiss.
 - **Account rows and detail:** a badge only when the state is not `live` or `idle`. Instrument-level discrepancies also appear on the account detail.
 - **Shell:** a banner when the worker is offline while Plays are tracked.
 

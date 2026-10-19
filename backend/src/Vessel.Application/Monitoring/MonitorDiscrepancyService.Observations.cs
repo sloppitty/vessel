@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Text.Json;
+using Vessel.Domain.Monitoring;
 using Vessel.Domain.Numerics;
 using Vessel.Application.Common;
 using Vessel.Application.Plays;
@@ -31,6 +32,8 @@ public sealed partial class MonitorDiscrepancyService
         public List<Finding> Findings { get; } = [];
         public bool Incomplete { get; set; }
         public DateTimeOffset? Next { get; set; }
+        /// <summary>Stop coverage of each evaluated Open Play; null while the facts cannot name them.</summary>
+        public List<MonitorCoverageOutcome>? Coverage { get; set; }
         public void Add(Finding finding) { Findings.Add(finding); Incomplete |= finding.Present is null && !finding.Structural; }
     }
     private sealed record PlayFacts(Play Play, PlayPlanDocument Plan, VenueInstrument Instrument,
@@ -50,6 +53,10 @@ public sealed partial class MonitorDiscrepancyService
         var gap = observation.HistoryGap || observation.Read.Sync.OmittedExecutions > 0;
         var scan = new Scan { Incomplete = gap || !facts.Complete };
         if (!facts.Complete) return scan;
+        scan.Coverage = [];
+        // Without a current book (the venue capability), no order is ever seen resting and absence proves nothing: the
+        // book-dependent checks do not run, which is undecidable by design rather than missing evidence.
+        var bookRead = observation.CurrentOrderBook;
         var sync = observation.Read.Sync;
         var orders = observation.Read.Orders;
         var snapshotAt = sync.Snapshot.ObservedAtUtc;
@@ -100,6 +107,8 @@ public sealed partial class MonitorDiscrepancyService
                 // A terminal Play's subject cannot be identified without its instrument: its records age as unobservable.
                 if (play.Status is PlayStatus.Closed or PlayStatus.Cancelled) continue;
                 foreach (var kind in PlayKinds) scan.Add(new(kind, "play:" + play.Id, play.Id, play.ContractId ?? "", "", Severity(kind), null, snapshotAt, [play.Id], new { }));
+                if (play.Status == PlayStatus.Open && play.ContractId is not null)
+                    scan.Coverage.Add(new(play.Id, play.ContractId, MonitorCoverageStates.Unknown, null, "instrument-unknown", []));
                 continue;
             }
             var instrument = instruments[0];
@@ -252,11 +261,13 @@ public sealed partial class MonitorDiscrepancyService
                 .Select(x => new { orderId = External(x.Link), role = x.Link.Role.ToString(), status = x.Order?.Status.ToString(), resting = Resting(x.Order),
                     remainingQuantity = x.Order is null ? null : ExactAmount.From(x.Order.RemainingSize).ToString(), wholePosition = x.Order?.IsPositionTpsl }).ToArray() };
             var protection = Identity([OrderLinkRole.Stop, OrderLinkRole.Target]);
+            // Every per-Play kind depends on the current book; without one it does not run (structural, never missing).
             void Add(string kind, bool? present, bool undecidable = false, object? data = null, object? identity = null) => scan.Add(new(kind, "play:" + play.Id, play.Id,
-                p.Instrument.ContractId, Native(p.Instrument), Severity(kind), present, at, [play.Id], data ?? details, identity ?? protection,
-                present is null && undecidable));
+                p.Instrument.ContractId, Native(p.Instrument), Severity(kind), bookRead ? present : null, at, [play.Id], data ?? details, identity ?? protection,
+                !bookRead || present is null && undecidable));
             var graceAt = p.FirstEntry + options.ProtectionGrace;
-            if (open && graceAt > at) scan.Next = Earlier(scan.Next, graceAt.Value);
+            // Without a current book a missing stop is never decided, so the grace deadline needs no confirmation run.
+            if (bookRead && open && graceAt > at) scan.Next = Earlier(scan.Next, graceAt.Value);
 
             var cancelled = scoped.Where(x => x.Link.Role == OrderLinkRole.Stop && x.Order?.Status == VenueOrderStatus.Canceled).ToArray();
             var filled = p.Fills.Select(x => OrderKey.Of(x.Fill)).ToHashSet();
@@ -305,6 +316,46 @@ public sealed partial class MonitorDiscrepancyService
             Add("level.drift", knownOrders && drift ? true : completeOrders && !undecided ? false : null, completeOrders && undecided,
                 // A partial close changes the quantities involved, so a dismissed drift re-arms.
                 new { coverage = details, levels = levelRows }, new { quantity = details.quantity, levels = levelRows });
+
+            if (!open) return;
+            // The recorded coverage outcome follows the same evidence as the checks above. Missing evidence comes first;
+            // then a structural unknown (opposing Plays, a shared stop the position cannot allocate) is unknown, never
+            // missing; a whole-position stop covering several same-direction Plays is shared.
+            var (state, covered, reason) =
+                !bookRead ? (MonitorCoverageStates.Unsupported, (bool?)null, "current-book-not-read") :
+                observation.HistoryGap ? (MonitorCoverageStates.Unknown, null, "history-gap") :
+                sync.OmittedExecutions > 0 ? (MonitorCoverageStates.Unknown, null, "omitted-executions") :
+                !p.Valid ? (MonitorCoverageStates.Unknown, null, "quantity-unknown") :
+                orders is null ? (MonitorCoverageStates.Unknown, null, "orders-unavailable") :
+                !completeOrders ? (MonitorCoverageStates.Unknown, null, "incomplete-book") :
+                !freshQuantity ? (MonitorCoverageStates.Unknown, null, "fills-after-read") :
+                !mechanicsKnown ? (MonitorCoverageStates.Unknown, null, "mechanics") :
+                cancelledPresent == true ? (MonitorCoverageStates.Known, false, "cancelled") :
+                ownWholeStop || siblingWholeStop ?
+                    established ? (MonitorCoverageStates.Known, true, "whole-position-stop") :
+                    position?.Opposing == true ? (MonitorCoverageStates.Unknown, null, "opposing-plays") :
+                    agrees is null ? (MonitorCoverageStates.Unknown, null, "position-unknown") :
+                    agrees == false ? (MonitorCoverageStates.Unknown, null, "position-mismatch") :
+                    (MonitorCoverageStates.Shared, null, "shared-whole-position-stop") :
+                stops.Length == 0 ? (MonitorCoverageStates.Known, false, "no-stop") :
+                Compare(stopQuantity, p.Quantity, p.Instrument) < 0 ? (MonitorCoverageStates.Known, false, "short") :
+                (MonitorCoverageStates.Known, true, "stop-orders");
+            // Each planned stop level in the evidence's own terms: its linked order rested in the current book, a complete
+            // fresh book had none, the book could not tell, or the venue's book is not read at all.
+            var stopEvidence = ExecutionMatcher.Levels(p.Plan).Where(x => x.Role == OrderLinkRole.Stop && x.EntryId is not null && x.LevelId is not null)
+                .Select(level =>
+                {
+                    var linked = scoped.Where(x => x.Link.Role == OrderLinkRole.Stop && x.Link.LevelKey == level.Key).ToArray();
+                    var restingLink = linked.FirstOrDefault(x => Resting(x.Order)).Link;
+                    return !bookRead ? new MonitorStopEvidenceDto(level.EntryId!, level.LevelId!, MonitorStopEvidence.NotRead, null, null) :
+                        knownOrders && restingLink is not null
+                            ? new MonitorStopEvidenceDto(level.EntryId!, level.LevelId!, MonitorStopEvidence.Resting, External(restingLink), at) :
+                        completeOrders
+                            ? new MonitorStopEvidenceDto(level.EntryId!, level.LevelId!, MonitorStopEvidence.NotSeen,
+                                linked.Length == 0 ? null : External(linked[0].Link), at)
+                            : new MonitorStopEvidenceDto(level.EntryId!, level.LevelId!, MonitorStopEvidence.Unknown, null, null);
+                }).ToArray();
+            scan.Coverage!.Add(new(play.Id, p.Instrument.ContractId, state, covered, reason, stopEvidence));
         }
     }
 

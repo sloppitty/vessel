@@ -25,7 +25,7 @@ import { useLiveMarket } from '@/features/market/useLiveMarket'
 import { describeMarket, useMarketContext } from '@/features/market/useMarketContext'
 import { addEntry, createNextEntry, removeEntry, type DraftEntry, type PlayDraft } from './draft'
 import { LevelEditor } from './LevelEditor'
-import { applyEntryEdit, applyLevelDrag, averageEntryPrice, formatDraggedPrice, levelTag, parseOverlayId, placeLevel, planOverlays, type ChartView, type ExitKind } from './levels'
+import { applyEntryEdit, applyLevelDrag, averageEntryPrice, formatDraggedPrice, levelTag, parseOverlayId, placeLevel, planOverlays, type ChartView, type ExitKind, type StopEvidenceOf } from './levels'
 
 export interface ChartSource {
   api: WorkspaceApi
@@ -66,6 +66,11 @@ interface ChartPanelProps {
   streamable?: boolean
   /** False for venues without market context: the header statistics are not requested. */
   marketContext?: boolean
+  /**
+   * Venue evidence for each planned stop of a saved, Open Play. A stop without a confirmed resting order is drawn apart
+   * and its tag says what the evidence says ("not seen at the venue", "resting as of 14:02"). Absent for drafts.
+   */
+  stopEvidence?: StopEvidenceOf | undefined
 }
 
 const noDrawings: readonly ChartDrawing[] = []
@@ -81,7 +86,7 @@ const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute:
 
 export function ChartPanel({ entries, selectedId, onSelect, instrument, instrumentName = instrument, venue = null, direction = 'long', leverage = 1, liquidation = null,
   editable = true, source = null, onEntriesChange, drawings = noDrawings, onDrawingsChange, onCapture, onShowEvidence, createAdapter,
-  intervals = candleIntervals, priceStep = null, streamable = true, marketContext = true }: ChartPanelProps) {
+  intervals = candleIntervals, priceStep = null, streamable = true, marketContext = true, stopEvidence }: ChartPanelProps) {
   const [view, setView] = useState<ChartView>('aggregate')
   const [planTool, setPlanTool] = useState<PlanTool | null>(null)
   const [preferences, setPreferences] = useChartPreferences()
@@ -182,9 +187,9 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   const expandButton = useRef<HTMLButtonElement>(null)
   const live = source !== null && instrument !== ''
   const overlays = useMemo(() => {
-    const plan = planOverlays(chartEntries, selectedId, view, direction, leverage).map(overlay => ({ ...overlay, priceStep, draggable: overlay.draggable && editable }))
+    const plan = planOverlays(chartEntries, selectedId, view, direction, leverage, stopEvidence).map(overlay => ({ ...overlay, priceStep, draggable: overlay.draggable && editable }))
     return liquidation === null ? plan : [...plan, liquidationOverlay(liquidation)]
-  }, [chartEntries, selectedId, view, direction, leverage, liquidation, priceStep, editable])
+  }, [chartEntries, selectedId, view, direction, leverage, liquidation, priceStep, editable, stopEvidence])
   // The HTML legend stays committed too, so a wrapping value cannot resize the canvas mid-drag.
   const average = view === 'aggregate' ? averageEntryPrice(entries) : null
   const several = entries.length > 1

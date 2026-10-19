@@ -254,6 +254,11 @@ public sealed class MonitorEndToEndTests
             fixture.Clock.GetUtcNow().AddMinutes(-30)), json);
         var watch = JsonSerializer.SerializeToElement(new MonitorWatchDto(Guid.NewGuid(), fixture.BtcPlay, "exit-order", "stop", "unverifiable",
             fixture.Clock.GetUtcNow(), fixture.Clock.GetUtcNow()), json);
+        // Stop coverage needs an Open Play: a known covered outcome with dated resting evidence, and a stale unsupported one.
+        var coverage = JsonSerializer.SerializeToElement(new MonitorCoverageDto(fixture.BtcPlay, "BTC", "known", "known", true, "stop-orders",
+            fixture.Clock.GetUtcNow(), [new("entry-1", "stop-1", "resting", "stop-order", fixture.Clock.GetUtcNow())]), json);
+        var coverageUnsupported = JsonSerializer.SerializeToElement(new MonitorCoverageDto(fixture.BtcPlay, "BTC", "stale", "unsupported", null,
+            "current-book-not-read", fixture.Clock.GetUtcNow().AddMinutes(-30), [new("entry-1", "stop-1", "not-read", null, null)]), json);
         var document = new JsonObject
         {
             ["runAccepted"] = JsonNode.Parse(accepted.GetRawText()),
@@ -266,6 +271,8 @@ public sealed class MonitorEndToEndTests
             ["discrepancy"] = JsonNode.Parse(discrepancy.GetRawText()),
             ["discrepancyUnverifiable"] = JsonNode.Parse(unverifiable.GetRawText()),
             ["watchUnverifiable"] = JsonNode.Parse(watch.GetRawText()),
+            ["coverage"] = JsonNode.Parse(coverage.GetRawText()),
+            ["coverageUnsupported"] = JsonNode.Parse(coverageUnsupported.GetRawText()),
         };
         var actual = ContractFixtures.Normalize(document.ToJsonString(new JsonSerializerOptions
             { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping })) + "\n";

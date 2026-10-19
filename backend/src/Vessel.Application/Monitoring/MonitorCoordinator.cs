@@ -21,9 +21,13 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         var online = IsOnline(heartbeat?.HeartbeatAtUtc);
         // One bounded read of rows and venue deadlines; no per-row account capture.
         var budgets = await store.VenueRetriesAsync(ct);
+        var rows = await store.SummaryAsync(EligibleVenues(), time.GetUtcNow(), ct);
+        // One bounded coverage read for every listed account.
+        var coverage = (await store.CoverageAsync(rows.Select(x => x.Row.AccountId).ToArray(), ct)).ToLookup(x => x.AccountId);
         var accounts = new List<AccountMonitorDto>();
-        foreach (var (row, venueId) in await store.SummaryAsync(EligibleVenues(), time.GetUtcNow(), ct))
-            accounts.Add(await ToDto(row, budgets.TryGetValue(venueId, out var deadline) ? deadline : null, online, ct));
+        foreach (var (row, venueId) in rows)
+            accounts.Add(await ToDto(row, budgets.TryGetValue(venueId, out var deadline) ? deadline : null, online,
+                coverage[row.AccountId], ct));
         return new(online, heartbeat?.HeartbeatAtUtc, accounts);
     }
 
@@ -32,7 +36,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         var capture = await store.CaptureAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
         var row = await store.FindAsync(id, ct) ?? new() { AccountId = id, OwnerId = owner.OwnerId };
         return await ToDto(row, await store.VenueRetryAtAsync(capture.Account.VenueId, ct),
-            IsOnline((await store.HeartbeatAsync(ct))?.HeartbeatAtUtc), ct);
+            IsOnline((await store.HeartbeatAsync(ct))?.HeartbeatAtUtc), await store.CoverageAsync([id], ct), ct);
     }
 
     public Task<IReadOnlyList<MonitorWatchDto>> WatchesAsync(Guid playId, CancellationToken ct) =>
@@ -415,8 +419,18 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 account.RecordOrderHistoryNotice(read.OrderError);
                 await workspace.SaveAsync(ct);
             }
+            // A venue whose order reader does not return the current book is labelled, not degraded: its book-dependent
+            // checks do not run, and its history-only order read is not missing evidence.
+            var currentBook = venues.Descriptor(account.VenueId)?.Capabilities.CurrentOrderBook == true;
             var evaluation = evaluator is null ? new MonitorEvaluationResult(null) : await evaluator.EvaluateAsync(
-                new(lease.RequestId, account, read, previousSuccess, previousFill, gap, lease.Trigger), ct);
+                new(lease.RequestId, account, read, previousSuccess, previousFill, gap, lease.Trigger, currentBook), ct);
+            if (evaluation.Coverage is { } coverage)
+                await store.SaveCoverageAsync(account.Id, coverage.Select(x => new MonitorCoverage
+                {
+                    PlayId = x.PlayId, OwnerId = owner.OwnerId, AccountId = account.Id, ContractId = x.ContractId, State = x.State,
+                    Covered = x.State == MonitorCoverageStates.Known ? x.Covered : null, Reason = x.Reason, CheckedAtUtc = now,
+                    Stops = JsonSerializer.Serialize(x.Stops, CoverageJson)
+                }).ToArray(), ct);
             row.LastObservationAtUtc = read.Sync.Snapshot.ObservedAtUtc;
             row.LastOrdersObservationAtUtc = read.Orders?.ObservedAtUtc ?? row.LastOrdersObservationAtUtc;
             AdvanceWatermark(row, read.Sync, previousFill);
@@ -424,7 +438,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             var omitted = read.Sync.OmittedExecutions > 0;
             var degraded = read.OrderError is not null || evaluation.Incomplete || gap || omitted || !read.Sync.PositionsComplete ||
                 !read.Sync.FillHistoryComplete && read.Sync.FillHistoryTruncated is null ||
-                read.Orders is { OpenOrdersComplete: false };
+                currentBook && read.Orders is { OpenOrdersComplete: false };
             row.Complete(now, options.ManualCooldown, options.NextDelay(0, Random.Shared.NextDouble()), true, degraded,
                 credentialError: read.CredentialError,
                 error: read.OrderError ?? (gap ? "The venue fill window may have a gap. Missing executions cannot be ruled out." :
@@ -642,13 +656,25 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     private bool EligibleVenue(string venue) => venues.Descriptor(venue) is { Capabilities.Sync: true, Capabilities.Orders: true };
     private bool IsOnline(DateTimeOffset? heartbeat) => heartbeat is { } at && at <= time.GetUtcNow() &&
         time.GetUtcNow() - at <= options.HeartbeatTimeout;
-    private async Task<AccountMonitorDto> ToDto(MonitorAccount row, DateTimeOffset? venueDeadline, bool online, CancellationToken ct)
+    private async Task<AccountMonitorDto> ToDto(MonitorAccount row, DateTimeOffset? venueDeadline, bool online,
+        IEnumerable<MonitorCoverage> coverage, CancellationToken ct)
     {
         var state = row.State == "live" && row.LastSuccessAtUtc < time.GetUtcNow() - options.Interval * 2 ? "stale" : row.State;
         var records = evaluator is null ? new MonitorDiscrepancyList([], false) : await evaluator.ReadListAsync(row.AccountId, null, ct);
         return new(row.AccountId, state, row.LastAttemptAtUtc, row.LastSuccessAtUtc,
             row.NextRunAtUtc is null ? null : Later(row.NextRunAtUtc, venueDeadline),
             row.ManualState, RunTrigger(row), Later(row.NextManualAllowedAtUtc, venueDeadline), row.Error, online,
-            records.Records, records.Truncated);
+            records.Records, records.Truncated, coverage.Where(x => x.AccountId == row.AccountId).Select(Coverage).ToArray());
     }
+
+    private static readonly JsonSerializerOptions CoverageJson = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// Stored coverage as read: <c>stale</c> is a projection, never stored, once the check is older than twice the
+    /// interval (the account's own staleness rule). The recorded state, reason and evidence stay visible.
+    /// </summary>
+    private MonitorCoverageDto Coverage(MonitorCoverage row) => new(row.PlayId, row.ContractId,
+        row.CheckedAtUtc < time.GetUtcNow() - options.Interval * 2 ? MonitorCoverageStates.Stale : row.State, row.State,
+        row.State == MonitorCoverageStates.Known ? row.Covered : null, row.Reason, row.CheckedAtUtc,
+        JsonSerializer.Deserialize<MonitorStopEvidenceDto[]>(row.Stops, CoverageJson) ?? []);
 }

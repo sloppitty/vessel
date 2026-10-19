@@ -39,6 +39,35 @@ export interface MonitorWatch {
   endedAtUtc: string | null
 }
 
+/**
+ * Evidence for one planned stop level from the last check's order read: `resting` (a linked order rested in the current
+ * book at `observedAtUtc`), `not-seen` (a complete, fresh book had none), `unknown`, or `not-read` (the venue's order
+ * reader does not return the current book).
+ */
+export interface MonitorStopEvidence {
+  entryId: string
+  levelId: string
+  evidence: 'resting' | 'not-seen' | 'unknown' | 'not-read'
+  orderId: string | null
+  observedAtUtc: string | null
+}
+
+/**
+ * The last stop-coverage outcome the monitor recorded for an Open Play. `state` is projected when read: `stale` once
+ * the check is older than twice the monitor interval, otherwise `recordedState`. `covered` is set only for `known`.
+ */
+export interface MonitorCoverage {
+  playId: string
+  contractId: string
+  state: 'known' | 'shared' | 'unknown' | 'unsupported' | 'stale'
+  recordedState: 'known' | 'shared' | 'unknown' | 'unsupported'
+  covered: boolean | null
+  /** A short server code such as `stop-orders`, `opposing-plays` or `current-book-not-read`. */
+  reason: string
+  checkedAtUtc: string
+  stops: MonitorStopEvidence[]
+}
+
 export interface AccountMonitor {
   accountId: string
   state: 'live' | 'stale' | 'degraded' | 'credential-error' | 'idle'
@@ -58,6 +87,8 @@ export interface AccountMonitor {
    * the incidents alone exceed the cap. Optional: an older API omits it, read as not truncated.
    */
   discrepanciesTruncated?: boolean
+  /** Stored stop coverage of the account's Open Plays. Optional: an older API omits it. */
+  coverage?: MonitorCoverage[]
 }
 
 export interface MonitorSummary {
@@ -119,6 +150,17 @@ export const isMonitorWatch = (v: unknown): v is MonitorWatch => object(v) && id
   ['entry', 'stop', 'target', 'exit'].includes(v.role as string) && ['watching', 'resolved', 'unverifiable'].includes(v.state as string) && date(v.startedAtUtc) &&
   (v.state === 'watching' ? v.endedAtUtc === null : nullableDate(v.endedAtUtc))
 
+const recordedStates = ['known', 'shared', 'unknown', 'unsupported']
+export const isMonitorStopEvidence = (v: unknown): v is MonitorStopEvidence => object(v) && id(v.entryId) && id(v.levelId) &&
+  ['resting', 'not-seen', 'unknown', 'not-read'].includes(v.evidence as string) && (v.orderId === null || id(v.orderId)) &&
+  // A resting order is always dated; evidence that saw nothing carries no time it could not know.
+  (v.evidence === 'resting' ? date(v.observedAtUtc) : nullableDate(v.observedAtUtc))
+export const isMonitorCoverage = (v: unknown): v is MonitorCoverage => object(v) && id(v.playId) && id(v.contractId) &&
+  recordedStates.includes(v.recordedState as string) && (v.state === 'stale' || v.state === v.recordedState) &&
+  (v.recordedState === 'known' ? typeof v.covered === 'boolean' : v.covered === null) &&
+  isFilledText(v.reason, 48) && date(v.checkedAtUtc) &&
+  Array.isArray(v.stops) && v.stops.length <= 200 && v.stops.every(isMonitorStopEvidence)
+
 export const isAccountMonitor = (v: unknown): v is AccountMonitor => object(v) && id(v.accountId) &&
   ['live', 'stale', 'degraded', 'credential-error', 'idle'].includes(v.state as string) &&
   nullableDate(v.lastAttemptAtUtc) && nullableDate(v.lastSuccessAtUtc) && nullableDate(v.nextRunAtUtc) &&
@@ -127,7 +169,9 @@ export const isAccountMonitor = (v: unknown): v is AccountMonitor => object(v) &
   nullableDate(v.nextManualAllowedAtUtc) &&
   (v.error === null || text(v.error, 2000)) && typeof v.workerOnline === 'boolean' &&
   Array.isArray(v.discrepancies) && v.discrepancies.every(d => isMonitorDiscrepancy(d) && d.accountId === v.accountId) &&
-  (v.discrepanciesTruncated === undefined || typeof v.discrepanciesTruncated === 'boolean')
+  (v.discrepanciesTruncated === undefined || typeof v.discrepanciesTruncated === 'boolean') &&
+  (v.coverage === undefined || Array.isArray(v.coverage) && v.coverage.length <= 500 && v.coverage.every(isMonitorCoverage) &&
+    new Set(v.coverage.map(c => c.playId)).size === v.coverage.length)
 
 export const isMonitorSummary = (v: unknown): v is MonitorSummary => object(v) && typeof v.workerOnline === 'boolean' &&
   nullableDate(v.heartbeatAtUtc) && Array.isArray(v.accounts) && v.accounts.length <= 200 && v.accounts.every(isAccountMonitor) &&

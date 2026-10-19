@@ -11,6 +11,11 @@ export class Venues {
   find(id: string) { return this.list.find(venue => venue.id === id) }
   name(id: string) { return this.find(id)?.name ?? id }
   can(id: string, capability: keyof VenueCapabilities) { return this.find(id)?.capabilities[capability] === true }
+  /**
+   * False only when the venue reads orders but says its order reader does not return the current open book: stop
+   * coverage there is "current book not read". An API that does not state the capability is taken at its word elsewhere.
+   */
+  readsCurrentBook(id: string) { const capabilities = this.find(id)?.capabilities; return !(capabilities?.orders && capabilities.currentOrderBook === false) }
   /** Quote asset of the venue's perpetuals, e.g. USDC. */
   quote(id: string) { return this.find(id)?.quoteAsset ?? null }
   isManual(id: string) { return id === manualVenueId }

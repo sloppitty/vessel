@@ -22,6 +22,7 @@ import { emptyManualDraft, hasManualDraft } from './manual'
 import { useMonitorRun } from '@/features/monitor/useMonitorRun'
 import { incidentsByPlay, monitorIncidents, type IncidentCounts } from '@/features/monitor/incidents'
 import { IncidentPill } from '@/features/monitor/IncidentBadge'
+import { stopEvidenceFor } from '@/features/monitor/coverage'
 import { usePlayExecution } from './usePlayExecution'
 import { useSizing } from './useSizing'
 import { planIssues, planIssueSummary } from './planChecks'
@@ -166,6 +167,10 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const playIncidents = useMemo(() => incidentsByPlay(monitorIncidents(accountMonitors)), [accountMonitors])
   const executionMonitor = visible && account?.isEnabled !== false ? tracking.execution?.monitor ?? null : null
   const monitorRun = useMonitorRun(api, executionMonitor ? accountMonitors.find(item => item.accountId === executionMonitor.accountId) ?? executionMonitor : null, monitorChanged)
+  // The chart labels this Play's planned stops with the venue evidence of the newest stored monitor read.
+  const trackedExecution = tracking.execution?.playId === saved?.summary.id ? tracking.execution : null
+  const stopEvidence = useMemo(() => stopEvidenceFor(trackedExecution && monitorRun.monitor?.accountId === trackedExecution.monitor?.accountId
+    ? { ...trackedExecution, monitor: monitorRun.monitor } : trackedExecution), [trackedExecution, monitorRun.monitor])
 
   // Linked fills move a play to Open or Closed on the server; take the new status and version.
   const venueStatus = tracking.execution?.playId === saved?.summary.id ? tracking.execution?.status : undefined
@@ -444,6 +449,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} revision={revision} lockInstrument={locked}
       lockDirection={status === 'open' || filled} readOnly={readOnly} retrospective={retrospective}
       sizing={sizing.sizing} onRiskChange={sizing.updateRisk} incidents={saved ? playIncidents.get(saved.summary.id) : undefined}
+      stopEvidence={manual ? undefined : stopEvidence}
       execution={manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
         enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}
         working={busy !== null}
@@ -452,6 +458,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         onStored={acceptStoredPlay} onBegin={() => latest.current.saved?.summary.id === saved?.summary.id ? beginWork('manual') : null} />
         : saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy}
         entries={draft.entries} direction={draft.direction} origin={saved.summary.origin} monitor={monitorRun.monitor} monitorBusy={monitorRun.busy} monitorError={monitorRun.error} retryAtUtc={monitorRun.retryAtUtc} monitorUnavailable={monitorRun.statusUnavailable}
+        currentBookRead={!account || venues.readsCurrentBook(account.venueId)}
         {...(onManageAccount && account ? { onManageCredential: () => onManageAccount(account.id) } : {})}
         onDismiss={tracking.dismiss} onCheck={() => { void monitorRun.check() }} onLink={request => { void tracking.link(request) }}
         onUnlink={linkId => { void tracking.unlink(linkId) }} /> : undefined} />
