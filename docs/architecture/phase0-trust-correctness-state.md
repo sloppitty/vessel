@@ -134,6 +134,22 @@ October 19, 2026, 0.5b managed stops, branch `t3/phase0-managed-stops`
   - Backend: 3,471 passed, 5 skipped (live venue and S3), 0 failed.
   - Frontend: typecheck and lint clean, 2,557 tests, build OK.
 
+- Two Sol (Codex, GPT-6.1-Sol) review rounds of the 0.1/0.5a/0.5b chain
+  found nothing in 0.1 or 0.5a. In 0.5b, round 1 found:
+  - **high:** switching an unfilled long to short slipped a wrong-side
+    stop through the unchanged-stop exemption. Direction is now part of
+    it on server and browser;
+  - three medium or low freshness and exactness defects: fills tied to
+    the saved status, stale ledger averages, and a rounded venue average.
+
+  Round 2 confirmed those fixes and found two more medium freshness
+  defects: a same-version ledger reread, and action errors clearing read
+  staleness. Every fix has tests that failed before it. `scripts/check.sh`
+  then passed:
+  - Backend: 3,472 passed, 5 skipped, 0 failed.
+  - Frontend: 2,564 tests, build OK.
+  - Release build: 0 warnings.
+
 ## 0.6 Journal opens without every image
 
 Not started.
