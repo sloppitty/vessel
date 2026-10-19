@@ -66,7 +66,35 @@ Not started.
 
 ## 0.5 Managed stops
 
-Not started.
+October 19, 2026, 0.5a plan-number grammar, branch
+`t3/phase0-plan-number-format` (stacked on 0.1):
+- Plan numbers are written as blank or an unsigned plain decimal, at most 64
+  characters and exact in a C# decimal. The rule covers size, budget, entry
+  share and price, and stop and target value and share. Anything else gets a
+  400 naming the field.
+- Unchanged stored text still saves, matched by field identity. Stored plans
+  and revisions are never rewritten, and reads stay tolerant.
+- Negative percentages are refused with a pointer to a price stop; `0 %` is
+  break-even.
+- The browser uses one parser and `formatPlanNumber`, so it never writes
+  exponent text. Kept legacy text stays visible with a warning. Side
+  pre-checks read stored text as the server does.
+- One fixture list (`frontend/src/test/contracts/plan-numbers.json`) feeds
+  both runtimes.
+- Tests that failed before the fix:
+  - the probe's `Grammar` cases;
+  - the API test (`1e2` returned 201);
+  - 43 characterization rows;
+  - 23 frontend tests;
+  - after review, 18 frontend and 2 backend tests.
+- An independent review fuzzed 200,050 strings with 0 disagreements and found
+  no legacy-bypass hole. Its low findings are fixed in the second commit.
+- `scripts/check.sh` passed with PostgreSQL 18 and RabbitMQ 4.3.6 in
+  disposable containers:
+  - Python: 78 OK. Prototype tests pass.
+  - Release build: 0 warnings.
+  - Backend: 3,446 passed, 5 skipped (live venue and S3), 0 failed.
+  - Frontend: typecheck and lint clean, 2,524 tests, build OK.
 
 ## 0.6 Journal opens without every image
 

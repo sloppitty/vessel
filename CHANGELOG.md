@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Plan numbers follow one grammar everywhere: the server refuses exponent,
+  signed and trailing-dot text on write, naming the field, while unchanged
+  stored text still saves; the browser never writes exponent text; a negative
+  percentage stop is refused instead of saving as no stop (D-03).
 - Sizing suggestions tell the truth about their inputs. A size is suggested
   only when every part of the position has a priced stop. Nothing offers
   Accept while the record is stale or failed. The budget is the account's
