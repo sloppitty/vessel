@@ -227,7 +227,7 @@ describe('record and risk', () => {
     expect(source).toHaveTextContent('From Activity')
     expect(source).toHaveTextContent('Based on 3 closed positions from Activity — no closed play with a win or loss yet.')
     const tip = within(source).getByRole('button', { name: 'About the Activity record' })
-    expect(tip).toHaveAccessibleDescription(/no R multiple.*not advice/)
+    expect(tip).toHaveAccessibleDescription(sizing.notice)
     expect(screen.getByTestId('track-record')).toHaveTextContent('2 of last 3 positions')
   })
 

@@ -243,10 +243,11 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
     /// <summary>
     /// Appends one observation per reported leverage whose position is new to the replaced snapshot, whose signed
     /// quantity, entry price or leverage differs from the latest retained observation of that account and native
-    /// contract, or whose market received newly imported executions in this refresh. A position can close and reopen
-    /// identically between refreshes; its new executions are the only trace of that boundary, so they always add an
-    /// observation of the reopened position. A fill without a native identity matches every native market of its
-    /// canonical contract. Idle refreshes add nothing, so the table grows with position changes and executions, not refreshes.
+    /// contract, or whose market received newly imported executions or has retained executions at or after its last
+    /// observation. A position can close and reopen identically between refreshes, and history can arrive before the
+    /// snapshot that observes the reopening. Preserve that later observation even when its executions are already
+    /// retained. A fill without a native identity matches every native market of its canonical contract. After any
+    /// equal-timestamp execution gets a later observation, idle refreshes add nothing.
     /// </summary>
     private async Task RecordLeverageAsync(Account account, VenueSnapshot observation, IReadOnlyCollection<AccountPosition> replaced,
         IReadOnlyCollection<VenueFill> newFills, CancellationToken ct)
@@ -259,13 +260,30 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
             .Select(g => g.OrderByDescending(o => o.ObservedAtUtc).ThenByDescending(o => o.Id).First())
             .AsNoTracking().ToListAsync(ct);
         var observedAt = observation.ObservedAtUtc.ToUniversalTime();
+        var previousByPartition = latest.ToDictionary(o => (o.ContractId, o.VenueContractId));
+        var relevant = latest.Where(o => o.ObservedAtUtc < observedAt && reported.Any(p =>
+            p.ContractId == o.ContractId && p.VenueContractId == o.VenueContractId)).ToList();
+        // History is read separately from the snapshot and may already include a close/reopen that the replaced
+        // snapshot predates. Keep only the latest execution time per partition, bounded to the observation interval;
+        // no execution before the previous observation or after this snapshot can prove that it saw the reopening.
+        var since = relevant.Count == 0 ? (DateTimeOffset?)null : relevant.Min(o => o.ObservedAtUtc);
+        var retainedExecutions = since is { } from
+            ? await db.Fills.Where(f => f.AccountId == account.Id && contracts.Contains(f.ContractId) &&
+                f.OccurredAtUtc >= from && f.OccurredAtUtc <= observedAt)
+                .GroupBy(f => new { f.ContractId, f.VenueContractId })
+                .Select(g => new { g.Key.ContractId, g.Key.VenueContractId, LastOccurredAtUtc = g.Max(f => f.OccurredAtUtc) })
+                .ToListAsync(ct)
+            : [];
         foreach (var position in reported)
         {
-            var previous = latest.SingleOrDefault(o => o.ContractId == position.ContractId && o.VenueContractId == position.VenueContractId);
+            var previous = previousByPartition.GetValueOrDefault((position.ContractId, position.VenueContractId));
             var continued = replaced.Any(p => p.ContractId == position.ContractId && p.VenueContractId == position.VenueContractId &&
                 p.SignedQuantity == position.SignedQuantity && p.EntryPrice == position.EntryPrice);
             var executed = newFills.Any(f => f.ContractId == position.ContractId &&
-                (f.VenueContractId is null || position.VenueContractId is null || f.VenueContractId == position.VenueContractId));
+                (f.VenueContractId is null || position.VenueContractId is null || f.VenueContractId == position.VenueContractId)) ||
+                previous is not null && retainedExecutions.Any(f => f.LastOccurredAtUtc >= previous.ObservedAtUtc &&
+                    f.ContractId == position.ContractId &&
+                    (f.VenueContractId is null || position.VenueContractId is null || f.VenueContractId == position.VenueContractId));
             if (continued && !executed && previous is not null && previous.Leverage == position.Leverage && previous.SignedQuantity == position.SignedQuantity &&
                 previous.EntryPrice == position.EntryPrice || previous is not null && previous.ObservedAtUtc >= observedAt) continue;
             db.LeverageObservations.Add(new LeverageObservation

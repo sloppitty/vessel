@@ -110,7 +110,7 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
         var positions = new ActivityPositions(fills, facts.Snapshots, facts.FundingPayments.Where(p => accounts.ContainsKey(p.AccountId)).ToList());
         var operations = OperationLeverage.Apply(OperationAggregator.AggregateSummaries(fills, facts.FillPlayIds, positions),
             facts with { LeverageObservations = facts.LeverageObservations.Where(o => accounts.ContainsKey(o.AccountId)).ToList() },
-            positions, time.GetUtcNow());
+            positions);
         var lastByContract = new Dictionary<ActivityContractKey, int>();
         for (var i = 0; i < operations.Count; i++)
         {

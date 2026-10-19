@@ -114,6 +114,67 @@ public sealed class LeverageObservationPostgresTests
     }
 
     [PostgresFact]
+    public async Task A_reopened_position_observed_after_its_fills_were_already_imported_keeps_its_leverage()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        await using (var db = database.Context(owner))
+        {
+            var account = await AddAccountAsync(db, owner);
+            VenueFill a = Fill("a", 0, "buy", "open"), b = Fill("b", 10, "sell", "close"), c = Fill("c", 15, "buy", "open");
+            await SaveAsync(db, account.Id, Read(5, [Position(1, 3)], a));
+            // The snapshot is read before the history. Its position is still A, while the executions already include B.
+            await SaveAsync(db, account.Id, Read(8, [Position(1, 3)], a, b, c));
+            await SaveAsync(db, account.Id, Read(9, [Position(1, 3)], a, b, c)); // future executions do not repeat an observation
+            // B is now observed with the same values, and all its executions have already been imported.
+            await SaveAsync(db, account.Id, Read(20, [Position(1, 3)], a, b, c));
+            await SaveAsync(db, account.Id, Read(21, [Position(1, 3)], a, b, c));
+            await SaveAsync(db, account.Id, Read(30, [], a, b, c, Fill("d", 25, "sell", "close")));
+            Assert.Equal([5, 8, 20], (await db.LeverageObservations.OrderBy(o => o.ObservedAtUtc).ToListAsync())
+                .Select(o => (int)(o.ObservedAtUtc - Start).TotalMinutes));
+        }
+        await using (var db = database.Context(owner))
+        {
+            Assert.Empty(await db.Positions.ToListAsync());
+            var ops = (await ActivityTestSupport.Activity(db).PageAsync()).Operations.OrderBy(o => o.OpenedAtUtc).ToList();
+            Assert.Equal(2, ops.Count);
+            Assert.All(ops, op => Assert.Equal(("closed", 3, 3, 3), (op.Status, op.Leverage, op.LeverageMin, op.LeverageMax)));
+        }
+    }
+
+    [PostgresFact]
+    public async Task A_retained_execution_tied_with_the_last_observation_records_one_more_observation()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        await using var db = database.Context(owner);
+        var account = await AddAccountAsync(db, owner);
+        var a = Fill("a", 5, "buy", "open");
+        await SaveAsync(db, account.Id, Read(5, [Position(1, 3)], a));
+        // Equal timestamps cannot prove whether the snapshot preceded the execution. Preserve the next observation too.
+        await SaveAsync(db, account.Id, Read(6, [Position(1, 3)], a));
+        await SaveAsync(db, account.Id, Read(7, [Position(1, 3)], a));
+        Assert.Equal([5, 6], (await db.LeverageObservations.OrderBy(o => o.ObservedAtUtc).ToListAsync())
+            .Select(o => (int)(o.ObservedAtUtc - Start).TotalMinutes));
+    }
+
+    [PostgresFact]
+    public async Task Retained_executions_on_another_native_market_do_not_repeat_a_position_observation()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        await using var db = database.Context(owner);
+        var account = await AddAccountAsync(db, owner);
+        var a = Fill("a", 0, "buy", "open") with { VenueContractId = "7" };
+        var other = Fill("b", 10, "buy", "open") with { VenueContractId = "8" };
+        await SaveAsync(db, account.Id, Read(5, [Position(1, 3, native: "7")], a));
+        // A stale snapshot still imports the other market's fill without advancing observations.
+        await SaveAsync(db, account.Id, Read(4, [Position(1, 3, native: "7")], a, other));
+        await SaveAsync(db, account.Id, Read(20, [Position(1, 3, native: "7")], a, other));
+        Assert.Equal(5, (Assert.Single(await db.LeverageObservations.ToListAsync()).ObservedAtUtc - Start).TotalMinutes);
+    }
+
+    [PostgresFact]
     public async Task Disabled_accounts_hide_observations_and_deletion_removes_them()
     {
         await using var database = await CoreDatabase.CreateAsync();

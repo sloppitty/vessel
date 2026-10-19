@@ -151,9 +151,7 @@ function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRisk
       <span className="record-source">From Activity</span>
       <span>Based on {record.closedPlays} closed {positions} from Activity — no closed play with a win or loss yet.</span>
       <InfoTip label="About the Activity record">
-        No closed play has a win or loss yet, so the record starts from closed positions in Activity on enabled accounts. Each result is the
-        reported closed P&amp;L less listed stablecoin fees over the entry notional. Positions are not Plays: there is no plan, so no R multiple,
-        and nothing is linked or created. Your first closed play with a win or loss replaces this record. Estimates, not advice.
+        {sizing.notice}
       </InfoTip>
     </p>}
     {record.decidedPlays === 0

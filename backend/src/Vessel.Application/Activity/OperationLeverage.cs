@@ -6,7 +6,7 @@ namespace Vessel.Application.Activity;
 /// Attributes venue-reported position leverage to operations. Sources are leverage the venue reported on the
 /// operation's own executions, retained refresh observations and the latest snapshot. An observation counts only on
 /// the operation's account and native-contract partition, with the operation's direction, observed between its opening
-/// (or first retained execution when opening entries are missing) and its close, or now while it is open. Leverage is
+/// (or first retained execution when opening entries are missing) and its close, or the latest retained observation while open. Leverage is
 /// never inferred from margin, notional, a plan or the venue maximum, and never averaged; unknown stays null.
 /// </summary>
 internal static class OperationLeverage
@@ -14,7 +14,7 @@ internal static class OperationLeverage
     private readonly record struct Observed(DateTimeOffset At, int Sign, int Leverage);
 
     public static List<ActivityOperationDto> Apply(IReadOnlyList<ActivityOperationDto> operations, ActivityFacts facts,
-        ActivityPositions positions, DateTimeOffset now)
+        ActivityPositions positions)
     {
         // Native identities that only observations carry, per canonical contract. Observations are not grouping evidence.
         var observedNative = facts.LeverageObservations.Where(o => o.VenueContractId is not null)
@@ -36,7 +36,7 @@ internal static class OperationLeverage
             if (operation.Direction is null || positions.Quantity(operation.ContractKey) is null) return operation;
             var sign = operation.Direction == "long" ? 1 : -1;
             var from = operation.OpenedAtUtc ?? operation.FirstOccurredAtUtc;
-            var to = operation.ClosedAtUtc ?? now;
+            var to = operation.ClosedAtUtc ?? DateTimeOffset.MaxValue;
             var range = new Range();
             if (observed.TryGetValue(operation.ContractKey, out var partition))
                 for (var i = LowerBound(partition, from); i < partition.Length && partition[i].At <= to; i++)

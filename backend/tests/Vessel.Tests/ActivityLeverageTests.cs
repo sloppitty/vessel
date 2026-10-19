@@ -92,6 +92,18 @@ public sealed class ActivityLeverageTests
     }
 
     [Fact]
+    public async Task Open_leverage_uses_retained_observations_independently_of_the_request_clock()
+    {
+        var observedAt = (int)(Now - Start).TotalMinutes + 1;
+        var op = Assert.Single(await Operations([Fill(0)], [Observed(observedAt, 1, 7)]));
+        Assert.Equal((7, 7, 7), (op.Leverage, op.LeverageMin, op.LeverageMax));
+
+        // Closed lifetimes still exclude observations after the exit.
+        op = Assert.Single(await Operations([Fill(0), Fill(10, "sell", "close")], [Observed(observedAt, 1, 7)]));
+        Assert.Null(op.Leverage);
+    }
+
+    [Fact]
     public async Task Native_contract_partitions_never_share_observations()
     {
         var ops = await Operations([Fill(0, native: "13"), Fill(10, "sell", "close", native: "13"), Fill(0, native: "14"), Fill(10, "sell", "close", native: "14")],
