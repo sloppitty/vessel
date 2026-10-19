@@ -1,10 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from './workspace'
-import { isAccountMonitor, isMonitorDiscrepancy, isMonitorEvent, isMonitorSummary, isMonitorWatch, monitorFrame } from './monitor'
+import { isAccountMonitor, isMonitorDiscrepancy, isMonitorEvent, isMonitorSummary, isMonitorWatch, monitorFrame, type MonitorDiscrepancy } from './monitor'
+import { isPlayExecution, type PlayExecution } from './plays'
+import { discrepancyFacts } from '@/features/monitor/discrepancy-text'
 import { discrepancyFixture, eventCursor, monitorEventFixture, monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
 import { accountFixture, savedPlayFixture } from '@/test/workspace-fixture'
 
 afterEach(() => vi.unstubAllGlobals())
+const executionFixture: PlayExecution = {
+  playId: savedPlayFixture.summary.id, status: 'open', tracked: true, reason: null, checkedAtUtc: null,
+  totals: { enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
+  entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: '', issues: [], monitor: monitorFixture, discrepancies: [], watches: [],
+}
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
 
 describe('monitor contract', () => {
@@ -45,13 +52,19 @@ describe('monitor contract', () => {
     delete older.outcome
     expect(isMonitorDiscrepancy(older)).toBe(false)
   })
-  it('requires the last observation time as a UTC timestamp or an explicit null', () => {
+  it('reads the last observation time as a UTC timestamp, an explicit null or, from an older server, omitted as unknown', () => {
     expect(isMonitorDiscrepancy({ ...discrepancyFixture, lastObservedAtUtc: null })).toBe(true)
     expect(isMonitorDiscrepancy({ ...discrepancyFixture, lastObservedAtUtc: '2026-10-14T10:00:00.1234567+00:00' })).toBe(true)
     expect(isMonitorDiscrepancy({ ...discrepancyFixture, lastObservedAtUtc: '2026-10-14 10:00' })).toBe(false)
     const older: Record<string, unknown> = { ...discrepancyFixture }
     delete older.lastObservedAtUtc
-    expect(isMonitorDiscrepancy(older)).toBe(false)
+    // An API from before the field existed: the record, its account monitor, the summary and the execution all stay readable.
+    expect(isMonitorDiscrepancy(older)).toBe(true)
+    expect(isAccountMonitor({ ...monitorFixture, discrepancies: [older] })).toBe(true)
+    expect(isMonitorSummary({ ...monitorSummaryFixture, accounts: [{ ...monitorFixture, discrepancies: [older] }] })).toBe(true)
+    expect(isPlayExecution({ ...executionFixture, monitor: { ...monitorFixture, discrepancies: [older] }, discrepancies: [older] })).toBe(true)
+    // It reads as unknown, never as a time.
+    expect(discrepancyFacts(older as unknown as MonitorDiscrepancy, String).find(fact => fact.label === 'Last observed')?.value).toBe('Unknown')
   })
   it('validates watched orders and keeps a watching order open-ended', () => {
     const watch = { linkId: 'link-1', playId: savedPlayFixture.summary.id, orderId: 'exit-1', role: 'stop', state: 'unverifiable',

@@ -12,7 +12,7 @@ All routes are authenticated and owner-scoped. Responses use `Cache-Control: no-
 interface MonitorSummary {
   workerOnline: boolean
   heartbeatAtUtc: string | null
-  accounts: AccountMonitor[] // bounded to 200, enabled accounts eligible for monitoring
+  accounts: AccountMonitor[] // bounded to 200: enabled accounts eligible for monitoring, or holding an outstanding incident
 }
 interface AccountMonitor {
   accountId: string
@@ -124,7 +124,8 @@ interface MonitorDiscrepancy {
   outcome: 'unverifiable' | null
   unverifiableAtUtc: string | null
   // Source time of the last decisive (fresh present or absent) observation of the subject; the unobservable lifetime
-  // counts from it. Incomplete or stale reads do not move it. Null only when none is recorded, never omitted.
+  // counts from it. Incomplete or stale reads do not move it. Null only when none is recorded, never omitted by this API.
+  // The browser reads its absence (an older API) as unknown rather than rejecting the record (October 19).
   lastObservedAtUtc: string | null
 }
 ```
@@ -133,4 +134,4 @@ interface MonitorDiscrepancy {
 
 Render monitor state within the existing Execution area, exceptional account badges and an offline shell banner. Preserve component theme tokens and accessible controls. No toast/notification system or new layout is included.
 
-**Incidents (October 19, Phase 0 item 0.4a).** The browser derives one persistent incident count from `GET /api/monitor` with a shared helper (`frontend/src/features/monitor/incidents.ts`), never from notifications (preferences, read state and withdrawal make them incomplete). An incident is an `open` record, or an `unverifiable` record whose announcement has not been dismissed since (no `dismissedAtUtc` at or after `unverifiableAtUtc`); this is the same set the dismiss route accepts. An open record keeps its severity; an outstanding unverifiable record that is not open counts as a warning. Incidents map to Plays through `playId`, or `details.playIds` for instrument kinds (at most 50 are listed; the account still counts the rest). The count appears on the Plays navigation entry, on Plays list rows and in the Play header (which brings the Execution tab forward), and as a conditional row above the Overview metric tiles. The Execution tab and account monitor headings follow open incidents ("Needs attention · 1 critical") and never say "Monitored" beside one. Records show a human title per kind, a fact table (open quantity, stop quantity, uncovered quantity only when `details.stopCoverage` is `orders`, otherwise whole-position or unknown coverage, last observed) and one next action; the recorded JSON stays behind a "Recorded details" disclosure. Unknown values read "Unknown", never 0. The summary covers enabled sourced accounts with active work (at most 200) and at most 500 records per account, so the count is bounded by the same limits.
+**Incidents (October 19, Phase 0 item 0.4a).** The browser derives one persistent incident count from `GET /api/monitor` with a shared helper (`frontend/src/features/monitor/incidents.ts`), never from notifications (preferences, read state and withdrawal make them incomplete). An incident is an `open` record, or an `unverifiable` record whose announcement has not been dismissed since (no `dismissedAtUtc` at or after `unverifiableAtUtc`); this is the same set the dismiss route accepts. An open record keeps its severity; an outstanding unverifiable record that is not open counts as a warning. Incidents map to Plays through `playId`, or `details.playIds` for instrument kinds (at most 50 are listed; the account still counts the rest). The count appears on the Plays navigation entry, on Plays list rows and in the Play header (which brings the Execution tab forward), and as a conditional row above the Overview metric tiles. The Execution tab and account monitor headings follow open incidents ("Needs attention · 1 critical") and never say "Monitored" beside one. Records show a human title per kind, a fact table (open quantity, stop quantity, uncovered quantity only when `details.stopCoverage` is `orders`, otherwise whole-position or unknown coverage, last observed) and one next action; the recorded JSON stays behind a "Recorded details" disclosure. Unknown values read "Unknown", never 0. The summary covers enabled sourced accounts with active work or an outstanding incident (at most 200) and at most 500 records per account, so the count is bounded by the same limits. An incident keeps its account listed after scheduling has nothing left to check (for example, the last Play closed, its watches ended and its record became unverifiable), until the owner dismisses it; it never makes the account eligible for checks. Disabled and foreign accounts stay out. The browser reads a record without `lastObservedAtUtc` (an older API) as unknown instead of rejecting the record, the summary or the Play's execution.

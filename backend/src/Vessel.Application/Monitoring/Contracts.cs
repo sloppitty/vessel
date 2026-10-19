@@ -77,7 +77,10 @@ public interface IMonitorRunLog
 public interface IMonitorStore
 {
     Task<MonitorCapture?> CaptureAsync(Guid accountId, CancellationToken ct);
-    /// <summary>Monitor rows of enabled, currently eligible accounts on the given venues, bounded, in one read.</summary>
+    /// <summary>
+    /// Monitor rows of enabled accounts on the given venues that are currently eligible, or still hold an outstanding
+    /// announcement (an open record, or an unverifiable one not dismissed since), bounded, in one read.
+    /// </summary>
     Task<IReadOnlyList<(MonitorAccount Row, string VenueId)>> SummaryAsync(IReadOnlyCollection<string> venueIds,
         DateTimeOffset now, CancellationToken ct);
     Task<MonitorAccount?> FindAsync(Guid accountId, CancellationToken ct);

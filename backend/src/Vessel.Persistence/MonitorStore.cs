@@ -41,7 +41,9 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
                           where a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) &&
                               (ActivePlays.Any(p => p.AccountId == a.Id) ||
                                Watching.Any(x => x.Link.AccountId == a.Id && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)) ||
-                               AwaitingDiscrepancies.Any(d => d.AccountId == a.Id))
+                               AwaitingDiscrepancies.Any(d => d.AccountId == a.Id) ||
+                               // Independent of scheduling: what the persistent incident indicators read stays listed.
+                               OutstandingAnnouncements.Any(d => d.AccountId == a.Id))
                           orderby m.AccountId
                           select new { Row = m, a.VenueId }).Take(200).ToListAsync(ct);
         return rows.Select(r => (r.Row, r.VenueId)).ToArray();
@@ -92,6 +94,15 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
             await Watching.AnyAsync(x => x.Link.AccountId == accountId && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff), ct) ||
             await AwaitsDiscrepancyAsync(accountId, ct);
     }
+
+    /// <summary>
+    /// Announced records still awaiting the owner, the browser's incidents: an open record, or one announced unverifiable and
+    /// not dismissed since. They keep their account in the summary after its scheduling work has ended; they never make it
+    /// eligible for checks.
+    /// </summary>
+    private IQueryable<PlayDiscrepancy> OutstandingAnnouncements => db.Set<PlayDiscrepancy>().Where(d => d.PublishedTransition != null &&
+        (d.State == DiscrepancyLifecycle.Open ||
+         d.UnverifiableAtUtc != null && (d.DismissedAtUtc == null || d.DismissedAtUtc < d.UnverifiableAtUtc)));
 
     /// <summary>Outstanding, still verifiable discrepancy work: a (re-)confirmation or an open warning.</summary>
     private IQueryable<PlayDiscrepancy> AwaitingDiscrepancies => db.Set<PlayDiscrepancy>().Where(d => d.UnverifiableAtUtc == null &&

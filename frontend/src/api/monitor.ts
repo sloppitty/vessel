@@ -20,8 +20,11 @@ export interface MonitorDiscrepancy {
   /** `unverifiable`: the subject stayed unobservable beyond the monitor lifetime. Neither resolved nor still checked. */
   outcome: 'unverifiable' | null
   unverifiableAtUtc: string | null
-  /** Source time of the last fresh decisive observation; incomplete reads do not move it. Null when none is recorded. */
-  lastObservedAtUtc: string | null
+  /**
+   * Source time of the last fresh decisive observation; incomplete reads do not move it. Null when none is recorded.
+   * Absent from an older API, which is accepted and shown as unknown, like null.
+   */
+  lastObservedAtUtc?: string | null
 }
 
 /** A terminal Play's linked exit or entry order, watched until the venue shows it is no longer resting. */
@@ -100,7 +103,9 @@ export const isMonitorDiscrepancy = (v: unknown): v is MonitorDiscrepancy => obj
   id(v.id) && id(v.accountId) && (v.playId === null || id(v.playId)) && id(v.contractId) && id(v.kind) &&
   severity(v.severity) && ['candidate', 'open', 'resolved', 'dismissed'].includes(v.state as string) &&
   date(v.openedAtUtc) && nullableDate(v.confirmedAtUtc) && nullableDate(v.resolvedAtUtc) && nullableDate(v.dismissedAtUtc) &&
-  (v.note === null || text(v.note, 2000)) && object(v.details) && nullableDate(v.lastObservedAtUtc) &&
+  (v.note === null || text(v.note, 2000)) && object(v.details) &&
+  // An older server omits it: unknown, never a reason to reject the record, its summary or the Play's execution.
+  (v.lastObservedAtUtc === undefined || nullableDate(v.lastObservedAtUtc)) &&
   // The outcome and its time come together; only an unverifiable record is visible as a candidate.
   (v.outcome === null ? v.unverifiableAtUtc === null && v.state !== 'candidate' : v.outcome === 'unverifiable' && date(v.unverifiableAtUtc))
 
