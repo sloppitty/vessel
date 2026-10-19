@@ -57,7 +57,12 @@ describe('execution panel', () => {
     const view = render(<ExecutionPanel execution={closed} {...props} />)
     const value = (term: string) => screen.getByText(term).closest('div')!.querySelector('dd')
     expect(value('Venue net')).toHaveTextContent(/^2\.9 USD$/)
-    expect(screen.getByRole('button', { name: 'About venue net' })).toHaveAccessibleDescription(/Review and sizing score/)
+    // Only what is true: a running figure while open, scored only once closed and settled, never for retrospective sizing.
+    const venueTip = screen.getByRole('button', { name: 'About venue net' })
+    expect(venueTip).toHaveAccessibleDescription(/so far while the play is open/)
+    expect(venueTip).toHaveAccessibleDescription(/closed play whose fills settle it/)
+    expect(venueTip).toHaveAccessibleDescription(/retrospective plays are not in sizing/)
+    expect(venueTip).not.toHaveAccessibleDescription(/score this result/)
     expect(value('Play-local result')).toHaveTextContent(/^-2\.1 USD/)
     expect(screen.getByRole('button', { name: 'About the Play-local result' })).toHaveAccessibleDescription(/exits minus entries, less every trading fee/)
     expect(screen.getByRole('button', { name: 'Sign differs by basis' })).toBeInTheDocument()

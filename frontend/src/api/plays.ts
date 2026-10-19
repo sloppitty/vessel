@@ -275,8 +275,9 @@ export interface PlayExecution {
     enteredQuantity: string; exitedQuantity: string; openQuantity: string; closedPnlUsd: string; closedPnlBasis: PnlBasis | 'mixed'
     fees: Array<{ token: string; amount: string }>
     /**
-     * The scored venue result so far: venue closed PnL less listed stablecoin fees on before-fee fills; null when a fee is
-     * unverified or in another token. With `local`, absent from servers before October 19, 2026.
+     * Venue closed PnL less listed stablecoin fees on before-fee fills, over the counted fills, so far while open. Review and
+     * sizing score this basis only once the play is closed and settled. Null when a fee is unverified or in another token.
+     * With `local`, absent from servers before October 19, 2026.
      */
     venueNetUsd?: string | null
     /** The Play-local result beside it, known once the play is closed and its fills settle it. */

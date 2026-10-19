@@ -63,8 +63,13 @@ Two derived results now sit beside the facts; neither changes a fact.
 
 - **Venue net** (`PlayOutcomeCalculator.VenueNet`), the scored basis: Σ
   closed PnL less listed nominal stablecoin fees of `gross` fills only. The
-  execution totals expose it as `venueNetUsd`, null when a fee basis is
-  missing or a gross-basis fee is in another token. `PlayOutcomeCalculator.VenueGross`
+  execution totals expose it as `venueNetUsd` over the fills they count
+  (contradicting fills are left out), so far while the Play is open; null when
+  a fee basis is missing or a gross-basis fee is in another token. Review and
+  sizing score this basis only for a closed Play whose fills settle it, each
+  with its own eligibility rules, and retrospective Plays are not in sizing.
+  Whether the venue's execution P&L includes funding is unverified
+  ([venue funding](venue-funding.md)). `PlayOutcomeCalculator.VenueGross`
   is the same basis before trading fees (closed PnL plus the listed fees
   already inside `net-of-fee` PnL; unknown for an unlisted one) and feeds the
   fee-only-loss counts.

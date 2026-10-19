@@ -247,6 +247,7 @@ describe('record and risk', () => {
     const basis = screen.getByTestId('record-basis')
     expect(basis).toHaveTextContent('1 of the last 11 changes sign under the Play-local basis. 2 have no Play-local figure. 1 loss came from fees alone.')
     expect(within(basis).getByRole('button', { name: 'About result bases' })).toHaveAccessibleDescription(/scores the venue result/)
+    expect(within(basis).getByRole('button', { name: 'About result bases' })).toHaveAccessibleDescription(/includes funding is unverified/)
     view.unmount()
 
     // The Activity fallback has no Play-local basis; its fee-only losses still show.

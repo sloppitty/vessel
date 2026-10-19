@@ -37,8 +37,10 @@ public sealed record ExecutionTotalsDto(string EnteredQuantity, string ExitedQua
     string ClosedPnlUsd, string ClosedPnlBasis, IReadOnlyList<FeeTotalDto> Fees)
 {
     /// <summary>
-    /// The venue result Review and sizing score, so far: venue closed PnL less listed stablecoin fees on gross-basis fills.
-    /// Null when a fee is unverified or in another token.
+    /// Venue closed PnL less listed stablecoin fees on gross-basis fills, over the fills counted here (contradicting fills
+    /// are left out), so far while the play is open. Review and sizing score this basis only for a closed play whose fills
+    /// settle it, each with its own eligibility rules; retrospective plays are not in sizing. Null when a fee is
+    /// unverified or in another token.
     /// </summary>
     public string? VenueNetUsd { get; init; }
     /// <summary>The Play-local result beside it; known once the play is closed and its fills settle it.</summary>

@@ -121,6 +121,20 @@ public sealed class PlayLocalResultTests
     }
 
     [Fact]
+    public void An_unjournaled_position_can_turn_a_winning_play_into_a_venue_loss()
+    {
+        // A long 1 at 120 opened outside Vessel; the Play buys 1 at 100 and sells 1 at 105. At the venue's average 110 the
+        // exit reports -5, so the Play scores a loss although its own fills gained 5.
+        var facts = Closed("long", (OrderLinkRole.Entry, Buy(0, 1, 100)), (OrderLinkRole.Target, Sell(10, 1, 105, pnl: -5)));
+        var venue = Venue(facts);
+        Assert.Equal((-5m, PlayOutcomeKind.Loss), (venue.NetResult, venue.Kind));
+        Assert.Equal("5", Local(facts).Net.ToString());
+        Assert.True(Local(facts).SignDiffers(venue.NetResult));
+        // A loss before fees too, so not a fee-only loss.
+        Assert.False(venue.FeeOnlyLoss);
+    }
+
+    [Fact]
     public void A_zero_result_against_a_nonzero_venue_result_differs_in_sign()
     {
         // Scratch is exactly zero; a zero beside a venue win would change the win/loss/scratch class.
@@ -329,6 +343,17 @@ public sealed class ResultBasisReviewTests
     }
 
     [Fact]
+    public async Task A_venue_loss_from_an_unjournaled_position_stays_a_loss_with_the_flag()
+    {
+        // Pre-existing long 1 at 120 outside Vessel: the Play's buy at 100 and sell at 105 report -5 at the average 110.
+        var play = Add("long", (OrderLinkRole.Entry, "buy", 1, 100, 0, 0, "USDC", Gross), (OrderLinkRole.Target, "sell", 1, 105, -5, 0, "USDC", Gross));
+        var report = await f.Service.GetAsync(new(), default);
+        var row = Assert.Single(report.Plays);
+        Assert.Equal((play.Play.Id, "-5", new PlayLocalResultDto("5", PlayLocalResult.Executions, null, true)), (row.Id, row.Net, row.Local));
+        Assert.Equal((1, 0, 1, 1, 0), (report.Metrics.Count, report.Metrics.Wins, report.Metrics.Losses, report.Metrics.SignDiffers, report.Metrics.FeeOnlyLosses));
+    }
+
+    [Fact]
     public async Task A_loss_before_fees_is_not_a_fee_only_loss()
     {
         Add("long", (OrderLinkRole.Entry, "buy", 1, 100, 0, 0.05m, "USDC", Gross), (OrderLinkRole.Exit, "sell", 1, 99, -1, 0.05m, "USDC", Gross));
@@ -500,5 +525,51 @@ public sealed class ResultBasisExecutionTests
         var closed = await Service.LinkAsync(play.Id, new("out", "exit"), default);
         Assert.Equal(("closed", null), (closed.Status, closed.Totals.VenueNetUsd));
         Assert.Null(closed.Totals.Local!.NetUsd);
+    }
+}
+
+/// <summary>
+/// Phase 0 item 0.3: unknown position effects pass <see cref="ExecutionIntegrity.Settled"/>, so sizing scores the Play and
+/// knows its Play-local result, while Review's stricter explicit open/close rule leaves it out as an incomplete execution.
+/// </summary>
+public sealed class ResultBasisUnknownEffectTests
+{
+    private readonly ReviewFixture review = new();
+    private readonly MemorySizingStore sizing = new();
+
+    [Fact]
+    public async Task Sizing_scores_and_compares_a_play_review_leaves_out_for_unknown_effects()
+    {
+        var account = review.Account();
+        var at = ReviewClock.Now.AddHours(-6);
+        var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
+            PlayDocuments.Serialize(TestPlays.Plan("110", "100")), at.AddDays(-1));
+        var revision = play.MarkPlanned(at.AddDays(-1)).Revision;
+        play.MarkOpen("Filled.", at);
+        play.MarkClosed("Exited.", ReviewClock.Now);
+        ImportedFill Fill(string side, decimal price, decimal pnl, int minute) => new()
+        {
+            Id = Guid.NewGuid(), OwnerId = review.Owner, AccountId = account.Id, ContractId = "BTC", SourceFillId = "f" + minute,
+            ExternalOrderId = "o" + minute, Side = side, Direction = "Liquidation or settlement", PositionEffect = ExecutionFacts.Unknown,
+            Price = price, Quantity = 1, ClosedPnlUsd = pnl, Fee = 0, FeeToken = "USDC", OccurredAtUtc = at.AddMinutes(minute), TransactionHash = "",
+        };
+        // The R3 Play B: entered at 110, exited at 108, reported +3 at the venue's average entry.
+        var facts = new ClosedPlayFacts(play, [revision], [new(OrderLinkRole.Entry, Fill("buy", 110, 0, 1)), new(OrderLinkRole.Stop, Fill("sell", 108, 3, 2))]);
+        Assert.True(ExecutionIntegrity.Settled(facts));
+        review.Closed.Add(facts);
+        sizing.Closed.Add(facts);
+
+        // Sizing: a venue win whose own fills lost 2.
+        var record = (await new SizingService(sizing, new CoreOwner(review.Owner), TimeProvider.System, TestUnitOfWork.None, null, TestVenues.With())
+            .GetAsync(default)).Record;
+        Assert.Equal((SizingService.SourcePlays, 1, 0), (record.Source, record.Wins, record.Losses));
+        Assert.Equal((1, 0), (record.LocalSignChanges, record.LocalUnknown));
+        Assert.Equal("-2", PlayLocalResult.From(facts, "USDC").Net.ToString());
+
+        // Review: not scored, counted as an incomplete execution, and so neither flagged nor counted.
+        var report = await review.Service.GetAsync(new(), default);
+        Assert.Empty(report.Plays);
+        Assert.Equal((0, 0, 0), (report.Metrics.Count, report.Metrics.SignDiffers, report.Metrics.LocalUnknown));
+        Assert.Equal((1, 1), (report.Coverage.ClosedCandidates, report.Coverage.IncompleteExecutions));
     }
 }

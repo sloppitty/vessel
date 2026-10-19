@@ -172,10 +172,16 @@ each Play's own fills, exits minus entries, less every trading fee.
   fallback, the operation's before-fee P&L), and `record.unknownGrossLosses`
   the losses where that figure is unknown. All four are init fields, so the
   positional records the fallback builds are unchanged.
-- **Suggestions.** The record column adds one short line when a count is above
-  zero, e.g. "1 of the last 11 changes sign under the Play-local basis. 2 have
-  no Play-local figure. 1 loss came from fees alone.", with an InfoTip. The
-  sign and unknown parts are omitted for the Activity fallback.
+- **Suggestions.** The record column adds one short line, e.g. "1 of the last
+  11 changes sign under the Play-local basis. 2 have no Play-local figure. 1
+  loss came from fees alone.", with an InfoTip. Each part appears only when its
+  count is above zero: a zero count adds nothing, and with every count zero (or
+  absent from an older server) there is no line at all, following the
+  helper-text reduction of the visual refresh. "None change sign" is never
+  stated. The sign and unknown parts are omitted for the Activity fallback.
+- **Funding.** Whether venue-reported P&L includes funding is unverified for
+  every venue ([venue funding](venue-funding.md)), so a sign change or a
+  fee-only loss can reflect funding; the InfoTip says so.
 - **R.** Sizing's API `rMultiple`, `averageWinR` and `averageLossR` are the
   estimated R (planned-stop model): net result ÷ (entry notional × stop
   distance) from the plan in force at the first entry, with the fallbacks

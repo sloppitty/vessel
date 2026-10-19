@@ -8,6 +8,7 @@ import type { PlayDraft } from './draft'
 import { formatDraggedPrice } from './levels'
 import { errorMessage } from '@/api/errors'
 import { formatMoney, formatQuantity, formatRewardToRisk, type SizeUnits } from './sizing'
+import { fundingNote } from './LocalResult'
 import { exposureLabels, suggestionCount, type PlanSuggestions } from './suggestions'
 
 const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
@@ -178,7 +179,7 @@ function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRisk
         <div><dt>Break-even R:R</dt><dd>{record.breakEvenRewardRisk === null ? '—' : formatRewardToRisk(Number(record.breakEvenRewardRisk))}<small>at this win rate</small></dd></div>
       </dl>}
     {basisNotes.length > 0 && <p className="record-basis" data-testid="record-basis">{basisNotes.join(' ')}
-      <InfoTip label="About result bases">The record scores the venue result. The Play-local basis uses each play’s own fills: exits minus entries, less every fee. Fee-only losses were zero or better before fees and still count as losses.</InfoTip></p>}
+      <InfoTip label="About result bases">The record scores the venue result. The Play-local basis uses each play’s own fills: exits minus entries, less every fee. Fee-only losses were zero or better before fees and still count as losses. {fundingNote}, so a sign change or a fee-only loss can reflect funding.</InfoTip></p>}
     <p className="record-exposure" data-reduced={exposure.level !== 'full' || undefined}>
       <strong>{exposure.level === 'full' ? 'Full size' : exposureLabels[exposure.level]}</strong> · {exposure.reason}
     </p>

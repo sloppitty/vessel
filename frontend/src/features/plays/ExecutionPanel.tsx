@@ -65,7 +65,7 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
       <div><dt>Still open</dt><dd>{totals.openQuantity}</dd></div>
       <div title={pnlBasisNote[totals.closedPnlBasis]}><dt>Venue closed PnL{totals.closedPnlBasis === 'net-of-fee' ? ' · after fees' : ''}</dt><dd>{totals.closedPnlUsd} USD</dd></div>
       <div><dt>Fees</dt><dd>{totals.fees.length ? totals.fees.map(fee => `${fee.amount} ${fee.token}`).join(' · ') : '0'}</dd></div>
-      {totals.venueNetUsd !== undefined && <div><dt>Venue net<InfoTip label="About venue net">Venue closed PnL less fees in listed stablecoins on before-fee fills. Review and sizing score this result.</InfoTip></dt>
+      {totals.venueNetUsd !== undefined && <div><dt>Venue net<InfoTip label="About venue net">Venue closed PnL less fees in listed stablecoins on before-fee fills, over the fills counted here, so far while the play is open. Review and sizing score the venue result of a closed play whose fills settle it, each with its own eligibility rules; retrospective plays are not in sizing.</InfoTip></dt>
         <dd>{totals.venueNetUsd === null ? <InfoTip className="value-tag" trigger="Unknown" label="venue net">A fee is unverified or in a token outside the listed stablecoins.</InfoTip> : `${totals.venueNetUsd} USD`}</dd></div>}
       {totals.local && <div><dt>Play-local result<InfoTip label="About the Play-local result">{localResultNote}</InfoTip></dt>
         <dd><LocalResultValue local={totals.local} format={value => `${value} USD`} />{totals.local.signDiffers && <SignDiffersFlag />}</dd></div>}

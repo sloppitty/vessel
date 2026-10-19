@@ -213,7 +213,9 @@ it.
   descriptor's `QuoteAsset` is on the `NominalStablecoins` list (every
   registered venue module reads linear perpetuals quoted and margined in that
   asset: Hyperliquid primary perpetuals and RISEx in USDC, Lighter in its
-  collateral USDC or USDG); and every fee is verified (`reported` or
+  collateral USDC or USDG; Review, sizing and the execution view read no
+  venue catalogue, so they use the descriptor's quote, which every current
+  catalogue instrument shares); and every fee is verified (`reported` or
   `standard-account-free` basis, a non-blank token, and that token listed or
   the fee a known zero). Otherwise it is null with a short reason, and a result
   needing more than 28 decimal places is unknown, never rounded. A manual
@@ -236,9 +238,14 @@ it.
   before-fee rule). A net-of-fee fee in an unlisted token leaves that figure
   unknown: such losses are counted in `metrics.unknownGrossLosses`, not as
   fee-only. They still count as losses.
+- **Funding.** Whether venue-reported P&L includes funding is unverified for
+  every venue ([venue funding](venue-funding.md)), so a sign difference or a
+  fee-only loss can reflect funding rather than the Play's own fills. The
+  Definitions and both metric tips say so in one sentence.
 - **R.** "Avg. realized R" is now "Estimated R (planned-stop model)", with "n of
-  N with a complete initial stop" and the formula in an InfoTip. The arithmetic
-  is unchanged.
+  N with a complete initial stop" and the formula in an InfoTip; the per-Play
+  column is "Est. R" with the same tip. The plan is the revision at or before
+  the first entry fill. The arithmetic is unchanged.
 
 The Average outcome card gains the sign-differs and fee-only-loss rows; nothing
 moves. Older servers omit the new fields and the browser omits the figures.

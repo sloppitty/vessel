@@ -135,11 +135,24 @@ describe('Review result bases', () => {
     expect(within(card).queryByText('Avg. realized R')).not.toBeInTheDocument()
     expect(within(card).getByText('Estimated R (planned-stop model)')).toBeVisible()
     expect(within(card).getByText('2 of 3 with a complete initial stop')).toBeVisible()
-    expect(within(card).getByRole('button', { name: 'About estimated R' })).toHaveAccessibleDescription(/entry notional × share-weighted stop distance/)
+    const estimate = within(card).getByRole('button', { name: 'About estimated R' })
+    expect(estimate).toHaveAccessibleDescription(/entry notional × share-weighted stop distance/)
+    expect(estimate).toHaveAccessibleDescription(/at or before the first entry fill/)
     const value = (term: string) => within(card).getByText(term).closest('div')!.querySelector('dd')
     expect(value('Sign differs by basis')).toHaveTextContent(/^1 of 31 unknown$/)
     expect(value('Fee-only losses')).toHaveTextContent(/^1 of 1 loss$/)
     expect(within(card).getByRole('button', { name: 'About result bases' })).toHaveAccessibleDescription(/own fills/)
+    // Funding inside venue-reported P&L is unverified, so both counts can reflect it.
+    expect(within(card).getByRole('button', { name: 'About result bases' })).toHaveAccessibleDescription(/includes funding is unverified/)
+    expect(within(card).getByRole('button', { name: 'About fee-only losses' })).toHaveAccessibleDescription(/includes funding is unverified/)
+  })
+
+  it('defines both bases, the unverified funding and the estimated R revision rule', async () => {
+    const { user } = setup(vi.fn().mockResolvedValue(report))
+    await user.click(await screen.findByRole('button', { name: 'Definitions' }))
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent(/Result bases.*Play-local result.*includes funding is unverified, so a sign difference or a fee-only loss can reflect funding/)
+    expect(dialog).toHaveTextContent(/Estimated R \(planned-stop model\).*plan revision at or before the first entry fill/)
   })
 
   it('shows each Play-local result beside the venue result, with the flag and unknown reasons', async () => {
@@ -148,10 +161,13 @@ describe('Review result bases', () => {
     const dialog = await screen.findByRole('dialog')
     const table = await within(dialog).findByRole('table', { name: 'Contributing closed Plays' })
     expect(within(table).getByRole('columnheader', { name: /Play-local/ })).toBeInTheDocument()
+    // The per-Play R column uses the same name as the metric, with the same tip.
+    const estimated = within(table).getByRole('columnheader', { name: /^Est\. R/ })
+    expect(within(estimated).getByRole('button', { name: 'About estimated R' })).toHaveAccessibleDescription(/planned-stop model/)
     const rows = within(table).getAllByRole('row').slice(1)
     expect(rows[0]).toHaveTextContent('+$3Venue result')
     expect(rows[0]).toHaveTextContent('-$2')
-    expect(within(rows[0]!).getByRole('button', { name: 'Sign differs by basis' })).toHaveAccessibleDescription(/still score the venue result/)
+    expect(within(rows[0]!).getByRole('button', { name: 'Sign differs by basis' })).toHaveAccessibleDescription(/still follow the venue result/)
     const unknown = within(rows[1]!).getByRole('button', { name: 'Unknown Play-local result' })
     expect(unknown).toHaveTextContent('Unknown')
     expect(unknown).toHaveAccessibleDescription(reason)
