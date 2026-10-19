@@ -3,8 +3,8 @@
 Vessel is a self-hosted trading diary. These examples use the
 API and web images in one Docker Hub repository:
 
-- `skorcius/vessel:api-0.3.1` and `skorcius/vessel:api-latest`
-- `skorcius/vessel:web-0.3.1` and `skorcius/vessel:web-latest`
+- `skorcius/vessel:api-0.3.2` and `skorcius/vessel:api-latest`
+- `skorcius/vessel:web-0.3.2` and `skorcius/vessel:web-latest`
 
 Use versioned tags for deployments. The `latest` tags move with each release.
 This release targets Linux amd64.
@@ -888,6 +888,14 @@ unchanged and compresses static assets only.
 
 ## Upgrade
 
+### From v0.3.1 to v0.3.2
+
+Read the [release notes](../docs/releases/v0.3.2.md). This patch restores the
+Review account selector styling and adds no database migrations or configuration
+changes. Back up the installation, set `VESSEL_VERSION=0.3.2` and recreate the
+services with matching API and web images, preserving existing overlays.
+Earlier versions must also follow the upgrade steps below.
+
 ### From v0.3.0 to v0.3.1
 
 Read the [release notes](../docs/releases/v0.3.1.md). Stop web, API and every
@@ -1411,11 +1419,11 @@ From the repository root, with no populated secret files in the build context:
 ```sh
 REVISION=$(git rev-parse HEAD)
 docker build --platform linux/amd64 -f backend/Dockerfile \
-  --build-arg VERSION=0.3.1 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:api-0.3.1 .
+  --build-arg VERSION=0.3.2 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:api-0.3.2 .
 docker build --platform linux/amd64 -f frontend/Dockerfile \
-  --build-arg VERSION=0.3.1 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:web-0.3.1 .
+  --build-arg VERSION=0.3.2 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:web-0.3.2 .
 ```
 
 The API build pins SDK `10.0.302` to match the repository's `global.json`. The
