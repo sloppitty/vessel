@@ -352,16 +352,28 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 await RunCompletedAsync(lease, row, "superseded", now, ct);
                 return false;
             }
+            // Fill continuity is judged against the newest fill known before this import. `current` was read under this
+            // lock and before the import below. A Refresh imports in its snapshot-only unit and records its continuity
+            // there; its second unit (snapshotApplied) already sees its own fills and never uses this boundary.
+            var boundary = ContinuityBoundary(row.NewestFillAtUtc, current?.NewestRetainedFillAtUtc);
             if (!snapshotApplied) await workspace.SaveRefreshAsync(account, read.Sync, ct);
             if (snapshotOnly)
             {
                 row.LastObservationAtUtc = read.Sync.Snapshot.ObservedAtUtc;
+                // Every import records its own continuity, in the unit that retains its fills. A Refresh can set a gap and
+                // advances the watermark, but never clears a gap; with unknown truncation it records nothing.
+                if (read.Sync.FillHistoryTruncated is not null)
+                {
+                    if (!read.Sync.FillHistoryComplete && ObservedGap(read.Sync, boundary)) row.HasHistoryGap = true;
+                    AdvanceWatermark(row, read.Sync, boundary);
+                }
                 return true;
             }
             if (refresh)
             {
-                // An owner refresh retains facts and fences older results, nothing more: no lifecycle
-                // reconciliation, and no change to check backoff, state, last success, gap evidence or due time.
+                // An owner refresh retains facts and fences older results, nothing more: no lifecycle reconciliation, and
+                // no change to check backoff, state, last success or due time. Its fill continuity (gap evidence and
+                // watermark) was recorded with its import, in the snapshot-only unit.
                 if (read.Orders is { } refreshed)
                 {
                     await executions.RetainAsync(account, refreshed, ct);
@@ -383,10 +395,9 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             }
             var oldState = row.State;
             var previousSuccess = row.LastSuccessAtUtc;
-            var previousFill = row.NewestFillAtUtc ?? captured.NewestRetainedFillAtUtc;
-            var observedGap = read.Sync.FillHistoryTruncated == true && previousFill is not null &&
-                (read.Sync.OldestRawFillAtUtc is null || read.Sync.OldestRawFillAtUtc > previousFill);
-            var gap = !read.Sync.FillHistoryComplete && (row.HasHistoryGap || observedGap);
+            var previousFill = boundary;
+            // Only a check clears a gap, and only when the adapter reports complete history.
+            var gap = !read.Sync.FillHistoryComplete && (row.HasHistoryGap || ObservedGap(read.Sync, previousFill));
             row.HasHistoryGap = gap;
             if (read.Orders is { } orders)
             {
@@ -408,8 +419,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 new(lease.RequestId, account, read, previousSuccess, previousFill, gap, lease.Trigger), ct);
             row.LastObservationAtUtc = read.Sync.Snapshot.ObservedAtUtc;
             row.LastOrdersObservationAtUtc = read.Orders?.ObservedAtUtc ?? row.LastOrdersObservationAtUtc;
-            var newest = read.Sync.Fills.Count == 0 ? previousFill : read.Sync.Fills.Max(f => f.OccurredAtUtc);
-            if (newest > row.NewestFillAtUtc || row.NewestFillAtUtc is null) row.NewestFillAtUtc = newest;
+            AdvanceWatermark(row, read.Sync, previousFill);
             row.CredentialRevision = captured.CredentialRevision;
             var omitted = read.Sync.OmittedExecutions > 0;
             var degraded = read.OrderError is not null || evaluation.Incomplete || gap || omitted || !read.Sync.PositionsComplete ||
@@ -440,6 +450,28 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                     JsonSerializer.SerializeToElement(new { expiresAtUtc = expires })), ct);
             return true;
         }, ct), ct);
+
+    /// <summary>
+    /// The newest fill known before an import: the continuity watermark or the newest retained fill, whichever is later.
+    /// Every import records its own continuity against it, so a gap behind fills a Refresh retained is already recorded.
+    /// </summary>
+    private static DateTimeOffset? ContinuityBoundary(DateTimeOffset? watermark, DateTimeOffset? retained) =>
+        watermark is null || retained > watermark ? retained : watermark;
+
+    /// <summary>
+    /// A capped read whose oldest raw fill is newer than the boundary, or unknown, may have skipped executions. A first
+    /// import, with no fill known before it, cannot be discontinuous.
+    /// </summary>
+    private static bool ObservedGap(PerpetualVenueReadResult read, DateTimeOffset? boundary) =>
+        read.FillHistoryTruncated == true && boundary is not null &&
+        (read.OldestRawFillAtUtc is null || read.OldestRawFillAtUtc > boundary);
+
+    /// <summary>Moves the continuity watermark to the newest fill the import read; it never moves back.</summary>
+    private static void AdvanceWatermark(MonitorAccount row, PerpetualVenueReadResult read, DateTimeOffset? boundary)
+    {
+        var newest = read.Fills.Count == 0 ? boundary : read.Fills.Max(f => f.OccurredAtUtc);
+        if (newest > row.NewestFillAtUtc || row.NewestFillAtUtc is null) row.NewestFillAtUtc = newest;
+    }
 
     private Task<bool> FailAsync(MonitorLease lease, MonitorCapture expected, bool credential, string error, CancellationToken ct,
         bool snapshotApplied = false, bool interrupted = false) =>
