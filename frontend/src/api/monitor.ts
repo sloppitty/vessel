@@ -51,7 +51,13 @@ export interface AccountMonitor {
   nextManualAllowedAtUtc: string | null
   error: string | null
   workerOnline: boolean
+  /** Visible records, outstanding incidents first; at most 500. */
   discrepancies: MonitorDiscrepancy[]
+  /**
+   * More records exist than `discrepancies` lists. Incidents are listed first, so only older records are left out, unless
+   * the incidents alone exceed the cap. Optional: an older API omits it, read as not truncated.
+   */
+  discrepanciesTruncated?: boolean
 }
 
 export interface MonitorSummary {
@@ -120,7 +126,8 @@ export const isAccountMonitor = (v: unknown): v is AccountMonitor => object(v) &
   (v.manualState === 'idle' ? v.runTrigger === null : ['owner', 'refresh', 'scheduled'].includes(v.runTrigger as string)) &&
   nullableDate(v.nextManualAllowedAtUtc) &&
   (v.error === null || text(v.error, 2000)) && typeof v.workerOnline === 'boolean' &&
-  Array.isArray(v.discrepancies) && v.discrepancies.every(d => isMonitorDiscrepancy(d) && d.accountId === v.accountId)
+  Array.isArray(v.discrepancies) && v.discrepancies.every(d => isMonitorDiscrepancy(d) && d.accountId === v.accountId) &&
+  (v.discrepanciesTruncated === undefined || typeof v.discrepanciesTruncated === 'boolean')
 
 export const isMonitorSummary = (v: unknown): v is MonitorSummary => object(v) && typeof v.workerOnline === 'boolean' &&
   nullableDate(v.heartbeatAtUtc) && Array.isArray(v.accounts) && v.accounts.length <= 200 && v.accounts.every(isAccountMonitor) &&

@@ -2,11 +2,33 @@ import { describe, expect, it } from 'vitest'
 import type { AccountMonitor, MonitorDiscrepancy } from '@/api/monitor'
 import { discrepancyFixture, missingStopFixture, monitorFixture, shortStopFixture } from '@/test/monitor-fixture'
 import {
-  countIncidents, incidentPlayIds, incidentSummary, incidentTone, incidentsByPlay, isIncident, monitorIncidents, topTone,
+  incidentsOf, countIncidents, incidentPlayIds, incidentSummary, incidentTone, incidentsBeyondCap, incidentsByPlay, isIncident, monitorIncidents, topTone,
 } from './incidents'
 
 const unverifiable = (fields: Partial<MonitorDiscrepancy> = {}): MonitorDiscrepancy =>
   ({ ...shortStopFixture, state: 'candidate', outcome: 'unverifiable', unverifiableAtUtc: '2026-10-21T10:00:00Z', ...fields })
+
+describe('monitor incidents beyond the record cap (review round 2)', () => {
+  const account = (discrepancies: MonitorDiscrepancy[], discrepanciesTruncated?: boolean): AccountMonitor =>
+    ({ ...monitorFixture, discrepancies, ...discrepanciesTruncated === undefined ? {} : { discrepanciesTruncated } })
+  it('knows further incidents can be missing only when a truncated account lists nothing but incidents', () => {
+    // The server lists incidents first: a historical record in the list means every incident made it.
+    expect(incidentsBeyondCap([account([missingStopFixture, { ...shortStopFixture, state: 'resolved' }], true)])).toBe(false)
+    expect(incidentsBeyondCap([account([missingStopFixture, unverifiable()], true)])).toBe(true)
+    // Not truncated, or an older server that does not say.
+    expect(incidentsBeyondCap([account([missingStopFixture, unverifiable()], false)])).toBe(false)
+    expect(incidentsBeyondCap([account([missingStopFixture, unverifiable()])])).toBe(false)
+    expect(incidentsBeyondCap([account([], true)])).toBe(false)
+  })
+  it('shows a lower bound, "2+ incidents", whose severities are not all known', () => {
+    const counts = countIncidents(incidentsOf([missingStopFixture, unverifiable()]), true)
+    expect(counts).toMatchObject({ total: 2, critical: 1, warning: 1, more: true })
+    expect(incidentSummary(counts)).toBe('2+ incidents')
+    expect(topTone(counts)).toBe('critical')
+    expect(countIncidents([], true).more).toBeUndefined()
+    expect(incidentSummary(countIncidents(incidentsOf([missingStopFixture])))).toBe('1 critical')
+  })
+})
 
 describe('monitor incidents', () => {
   it('counts open records and unverifiable records not dismissed since, never resolved or dismissed history', () => {

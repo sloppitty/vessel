@@ -12,7 +12,8 @@
       "nextManualAllowedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
       "error": null,
       "workerOnline": true,
-      "discrepancies": []
+      "discrepancies": [],
+      "discrepanciesTruncated": false
     }
   },
   "accountMonitorRunning": {
@@ -26,7 +27,8 @@
     "nextManualAllowedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
     "error": null,
     "workerOnline": true,
-    "discrepancies": []
+    "discrepancies": [],
+    "discrepanciesTruncated": false
   },
   "accountMonitorIdle": {
     "accountId": "00000000-0000-4000-8000-000000000002",
@@ -39,7 +41,8 @@
     "nextManualAllowedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
     "error": null,
     "workerOnline": true,
-    "discrepancies": []
+    "discrepancies": [],
+    "discrepanciesTruncated": false
   },
   "summary": {
     "workerOnline": true,
@@ -56,7 +59,8 @@
         "nextManualAllowedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
         "error": null,
         "workerOnline": true,
-        "discrepancies": []
+        "discrepancies": [],
+        "discrepanciesTruncated": false
       }
     ]
   },
@@ -149,7 +153,8 @@
       "nextManualAllowedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
       "error": null,
       "workerOnline": true,
-      "discrepancies": []
+      "discrepancies": [],
+      "discrepanciesTruncated": false
     },
     "discrepancies": [],
     "watches": []

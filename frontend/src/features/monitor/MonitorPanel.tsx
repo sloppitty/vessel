@@ -3,7 +3,7 @@ import type { AccountMonitor, MonitorDiscrepancy, MonitorWatch } from '@/api/mon
 import { Button } from '@/components/ui/button'
 import { InfoTip } from '@/components/ui/info-tip'
 import { RefreshCw, TriangleAlert } from 'lucide-react'
-import { countIncidents, incidentSummary, incidentTone, incidentsOf, isIncident, topTone } from './incidents'
+import { countIncidents, incidentSummary, incidentTone, incidentsBeyondCap, incidentsOf, isIncident, topTone } from './incidents'
 import { discrepancyAction, discrepancyFacts, discrepancyOrders, discrepancyTitle, unverifiableAction } from './discrepancy-text'
 import './monitor.css'
 
@@ -46,14 +46,16 @@ function CheckButton({ until, monitor, busy, blocked, onCheck }: {
  * The heading follows open incidents before the run state, so a healthy run never reads "Monitored" beside an open
  * record. `discrepancies` are the records shown with it: the account's by default, a Play's in its Execution tab.
  */
-export function MonitorPanel({ monitor, discrepancies = monitor.discrepancies, busy, error, retryAtUtc, statusUnavailable = false, onCheck, onManageCredential }: {
+export function MonitorPanel({ monitor, discrepancies, busy, error, retryAtUtc, statusUnavailable = false, onCheck, onManageCredential }: {
   monitor: AccountMonitor; busy: boolean; error: string | null; retryAtUtc?: string | undefined
-  discrepancies?: readonly MonitorDiscrepancy[]
+  discrepancies?: readonly MonitorDiscrepancy[] | undefined
   onCheck: () => void; onManageCredential?: (() => void) | undefined
   statusUnavailable?: boolean
 }) {
   const until = Math.max(Date.parse(monitor.nextManualAllowedAtUtc ?? '') || 0, Date.parse(retryAtUtc ?? '') || 0)
-  const counts = countIncidents(incidentsOf(discrepancies))
+  // The account's own records may be cut by the server's cap; a Play's list (the Execution tab) carries no such flag.
+  const counts = discrepancies ? countIncidents(incidentsOf(discrepancies))
+    : countIncidents(incidentsOf(monitor.discrepancies), incidentsBeyondCap([monitor]))
   const tone = topTone(counts)
   return <section className="monitor-panel" aria-label="Background monitor">
     <div className="monitor-heading">
@@ -82,9 +84,11 @@ export function MonitorPanel({ monitor, discrepancies = monitor.discrepancies, b
 }
 
 /** `levelName` names a plan level from its monitor key ("Entry 1 stop") where the Play is known. */
-export function MonitorDiscrepancies({ discrepancies, busy, onDismiss, levelName }: {
+/** `truncated`: the server's cap left older records out (incidents are listed first). */
+export function MonitorDiscrepancies({ discrepancies, busy, onDismiss, levelName, truncated = false }: {
   discrepancies: MonitorDiscrepancy[]; busy: boolean; onDismiss: (id: string, note?: string) => Promise<void>
   levelName?: ((key: unknown) => string | null) | undefined
+  truncated?: boolean
 }) {
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [pending, setPending] = useState<string | null>(null)
@@ -130,6 +134,7 @@ export function MonitorDiscrepancies({ discrepancies, busy, onDismiss, levelName
         </div>}
       </li>
     })}</ul>
+    {truncated && <p className="muted monitor-truncated">Older records not shown.</p>}
   </section>
 }
 

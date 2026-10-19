@@ -100,9 +100,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
     /// not dismissed since. They keep their account in the summary after its scheduling work has ended; they never make it
     /// eligible for checks.
     /// </summary>
-    private IQueryable<PlayDiscrepancy> OutstandingAnnouncements => db.Set<PlayDiscrepancy>().Where(d => d.PublishedTransition != null &&
-        (d.State == DiscrepancyLifecycle.Open ||
-         d.UnverifiableAtUtc != null && (d.DismissedAtUtc == null || d.DismissedAtUtc < d.UnverifiableAtUtc)));
+    private IQueryable<PlayDiscrepancy> OutstandingAnnouncements => db.Set<PlayDiscrepancy>().Where(PlayDiscrepancy.IsOutstanding);
 
     /// <summary>Outstanding, still verifiable discrepancy work: a (re-)confirmation or an open warning.</summary>
     private IQueryable<PlayDiscrepancy> AwaitingDiscrepancies => db.Set<PlayDiscrepancy>().Where(d => d.UnverifiableAtUtc == null &&

@@ -1131,6 +1131,18 @@ describe('monitor incidents in the shell (Phase 0, 0.4a)', () => {
     // The Play header points to the Execution tab with the same count.
     expect(await screen.findByRole('button', { name: 'Needs attention · 1 critical' })).toBeInTheDocument()
   })
+  it('counts incidents as a lower bound on the Plays entry and Overview when they alone fill the server\'s record cap', async () => {
+    const client = api({ overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [venueAccount] }),
+      monitor: vi.fn().mockResolvedValue({ ...monitorSummaryFixture, accounts: [{ ...monitorFixture, discrepanciesTruncated: true,
+        discrepancies: [missingStopFixture, shortStopFixture] }] }) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    const row = await screen.findByRole('region', { name: 'Monitor incidents' })
+    expect(row).toHaveTextContent('2+ incidents need attention')
+    expect(within(row).getByText('2+ incidents')).toBeInTheDocument()
+    const plays = screen.getByRole('link', { name: 'Plays' })
+    expect(within(plays).getByText('2+')).toBeInTheDocument()
+    expect(plays).toHaveAccessibleDescription('Needs attention: 2+ incidents')
+  })
   it('keeps the Overview row compact: the four most severe incidents, then how many more', async () => {
     const records = Array.from({ length: 6 }, (_, index) => ({ ...shortStopFixture, id: `w-${index}`, playId: `00000000-0000-4000-8000-00000000010${index}` }))
     const client = api({ overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [venueAccount] }),

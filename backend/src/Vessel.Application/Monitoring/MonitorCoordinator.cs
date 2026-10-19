@@ -613,9 +613,10 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     private async Task<AccountMonitorDto> ToDto(MonitorAccount row, DateTimeOffset? venueDeadline, bool online, CancellationToken ct)
     {
         var state = row.State == "live" && row.LastSuccessAtUtc < time.GetUtcNow() - options.Interval * 2 ? "stale" : row.State;
+        var records = evaluator is null ? new MonitorDiscrepancyList([], false) : await evaluator.ReadListAsync(row.AccountId, null, ct);
         return new(row.AccountId, state, row.LastAttemptAtUtc, row.LastSuccessAtUtc,
             row.NextRunAtUtc is null ? null : Later(row.NextRunAtUtc, venueDeadline),
             row.ManualState, RunTrigger(row), Later(row.NextManualAllowedAtUtc, venueDeadline), row.Error, online,
-            evaluator is null ? [] : await evaluator.ReadAsync(row.AccountId, null, ct));
+            records.Records, records.Truncated);
     }
 }

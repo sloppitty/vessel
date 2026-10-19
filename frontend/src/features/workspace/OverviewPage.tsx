@@ -13,7 +13,7 @@ import { OverviewSummary } from './OverviewSummary'
 import { OverviewPlays } from './OverviewPlays'
 import { OverviewAllocation } from './OverviewAllocation'
 import { OverviewIncidents } from './OverviewIncidents'
-import type { Incident } from '@/features/monitor/incidents'
+import { incidentsBeyondCap, type Incident } from '@/features/monitor/incidents'
 
 export function OverviewPage({ data, api, monitors = [], incidents = [], overviewQuery, setOverviewQuery, reloadKey, refreshAllAction, refreshing,
   onAddAccount, onCreatePortfolio, onAccounts, onActivity, viewAccount, sync, manageAccount, browsePlays, viewPlay, reload }: {
@@ -35,7 +35,7 @@ export function OverviewPage({ data, api, monitors = [], incidents = [], overvie
     <OverviewScope scope={overviewQuery.scope} onScope={scope => setOverviewQuery(query => ({ ...query, scope }))}
       accounts={accounts} portfolios={portfolios} />
     {/* Above the metric tiles and only while an incident is open; Allocation stays between the tiles and Summary. */}
-    <OverviewIncidents incidents={incidents} accounts={accounts} onOpenAccount={viewAccount}
+    <OverviewIncidents incidents={incidents} more={incidentsBeyondCap(monitors)} accounts={accounts} onOpenAccount={viewAccount}
       onOpenPlay={id => { void viewPlay(id, new AbortController().signal) }} />
     <OverviewSummary api={api} query={overviewQuery} onQuery={setOverviewQuery} reloadGeneration={reloadKey}
       fallback={data} accountCount={scopedAccounts.length} workspaceNote={data.scopeNote}

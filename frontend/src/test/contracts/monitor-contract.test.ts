@@ -30,7 +30,7 @@ describe('monitor API contract fixture', () => {
   it('records an accepted owner Check as pending with its trigger, and its completion event', () => {
     expect(fixture.runAccepted).toMatchObject({ monitor: { manualState: 'pending', runTrigger: 'owner' } })
     expect(fixture.accountMonitorRunning).toMatchObject({ manualState: 'running', runTrigger: 'owner' })
-    expect(fixture.accountMonitorIdle).toMatchObject({ manualState: 'idle', runTrigger: null })
+    expect(fixture.accountMonitorIdle).toMatchObject({ manualState: 'idle', runTrigger: null, discrepanciesTruncated: false })
     expect(fixture.runCompletedEvent).toMatchObject({ type: 'monitor.run-completed', severity: 'info',
       data: { trigger: 'manual', outcome: 'succeeded' } })
   })

@@ -328,6 +328,22 @@ const fact = (item: HTMLElement, label: string) => {
 }
 
 describe('incident visibility (Phase 0, 0.4a)', () => {
+  it('says when older records are not shown, and counts incidents as a lower bound when they alone fill the cap', () => {
+    const view = render(<MonitorDiscrepancies discrepancies={[missingStopFixture, { ...shortStopFixture, state: 'resolved' }]} truncated
+      busy={false} onDismiss={vi.fn()} />)
+    expect(screen.getByText('Older records not shown.')).toBeInTheDocument()
+    view.rerender(<MonitorDiscrepancies discrepancies={[missingStopFixture]} busy={false} onDismiss={vi.fn()} />)
+    expect(screen.queryByText('Older records not shown.')).not.toBeInTheDocument()
+    view.unmount()
+    // Every listed record is an incident and the server says the list was cut: further incidents may exist.
+    const panel = render(<MonitorPanel monitor={{ ...monitorFixture, discrepancies: [missingStopFixture, shortStopFixture], discrepanciesTruncated: true }}
+      busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(screen.getByRole('region', { name: 'Background monitor' })).getByText('Needs attention · 2+ incidents')).toBeInTheDocument()
+    // With history in the list, every incident was listed: exact counts.
+    panel.rerender(<MonitorPanel monitor={{ ...monitorFixture, discrepancies: [missingStopFixture, { ...shortStopFixture, state: 'resolved' }],
+      discrepanciesTruncated: true }} busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(screen.getByRole('region', { name: 'Background monitor' })).getByText('Needs attention · 1 critical')).toBeInTheDocument()
+  })
   it('heads the panel with its open incidents and never says Monitored beside an open critical record', () => {
     const view = render(<MonitorPanel monitor={{ ...monitorFixture, discrepancies: [missingStopFixture] }} busy={false} error={null} onCheck={vi.fn()} />)
     const panel = () => screen.getByRole('region', { name: 'Background monitor' })

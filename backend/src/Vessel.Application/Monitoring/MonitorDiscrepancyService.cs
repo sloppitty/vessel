@@ -103,12 +103,19 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
         }
     }
 
-    public async Task<IReadOnlyList<MonitorDiscrepancyDto>> ReadAsync(Guid accountId, Guid? playId, CancellationToken ct)
+    public async Task<IReadOnlyList<MonitorDiscrepancyDto>> ReadAsync(Guid accountId, Guid? playId, CancellationToken ct) =>
+        (await ReadListAsync(accountId, playId, ct)).Records;
+
+    public async Task<MonitorDiscrepancyList> ReadListAsync(Guid accountId, Guid? playId, CancellationToken ct)
     {
         await RequireSubject(accountId, playId, ct);
-        return (await store.RecordsAsync(accountId, ct)).Where(x => x.Visible &&
-            (playId is null || x.PlayId == playId || x.InvolvedPlayIds.Contains(playId.Value)))
-            .OrderByDescending(x => x.ConfirmedAtUtc).ThenBy(x => x.Id).Take(500).Select(Dto).ToArray();
+        var visible = (await store.RecordsAsync(accountId, ct)).Where(x => x.Visible &&
+            (playId is null || x.PlayId == playId || x.InvolvedPlayIds.Contains(playId.Value))).ToArray();
+        // Outstanding incidents first, so historical records can never push them past the cap; each group keeps the
+        // previous order (newest confirmation first, then ID).
+        var listed = visible.OrderByDescending(x => x.Outstanding).ThenByDescending(x => x.ConfirmedAtUtc).ThenBy(x => x.Id)
+            .Take(MonitorDiscrepancyList.MaxRecords).Select(Dto).ToArray();
+        return new(listed, visible.Length > listed.Length);
     }
 
     /// <summary>Owner/account and optional involved-Play membership are validated under the account fence.</summary>

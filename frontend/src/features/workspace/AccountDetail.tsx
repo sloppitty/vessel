@@ -70,7 +70,8 @@ export function AccountDetail({ account, api, refreshing, busy = refreshing, onS
     {monitorRun.monitor && <div>
       <MonitorPanel monitor={monitorRun.monitor} busy={monitorRun.busy} error={monitorRun.error} retryAtUtc={monitorRun.retryAtUtc} statusUnavailable={monitorRun.statusUnavailable}
         onCheck={() => { void monitorRun.check() }} onManageCredential={onManage} />
-      <MonitorDiscrepancies discrepancies={monitorRun.monitor.discrepancies} busy={monitorRun.busy} onDismiss={dismissDiscrepancy} />
+      <MonitorDiscrepancies discrepancies={monitorRun.monitor.discrepancies} truncated={monitorRun.monitor.discrepanciesTruncated === true}
+        busy={monitorRun.busy} onDismiss={dismissDiscrepancy} />
     </div>}
     <div className="workspace-stat-grid three">
       <div className="shell-panel metric"><span>{wallet ? 'Wallet stablecoins available' : synced ? 'Account value · reported' : 'Known manual value'}</span><strong>{money(wallet ? account.availableStablecoinNominalUsd ?? null : account.accountValueUsd)}</strong>

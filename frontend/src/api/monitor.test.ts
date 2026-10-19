@@ -29,6 +29,11 @@ describe('monitor contract', () => {
     expect(isAccountMonitor({ ...monitorFixture, nextManualAllowedAtUtc: '2026-10-14T10:00:00.1234567+00:00' })).toBe(true)
     expect(isAccountMonitor({ ...monitorFixture, manualState: 'unknown' })).toBe(false)
     expect(isMonitorSummary({ ...monitorSummaryFixture, accounts: [monitorFixture, monitorFixture] })).toBe(false)
+    // Truncation is an optional flag: an older server omits it.
+    expect(isAccountMonitor({ ...monitorFixture, discrepanciesTruncated: true })).toBe(true)
+    expect(isAccountMonitor({ ...monitorFixture, discrepanciesTruncated: false })).toBe(true)
+    expect(isAccountMonitor({ ...monitorFixture, discrepanciesTruncated: 'yes' })).toBe(false)
+    expect(isAccountMonitor({ ...monitorFixture, discrepanciesTruncated: null })).toBe(false)
   })
   it('requires every subject and source field as an explicit null rather than omitted', () => {
     const omitted: Record<string, unknown> = { ...monitorEventFixture.subject }

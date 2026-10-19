@@ -13,7 +13,8 @@ export interface Incident {
   /** The Plays it concerns: its own Play, or the Plays listed for an instrument-level record. */
   playIds: readonly string[]
 }
-export interface IncidentCounts { total: number; critical: number; warning: number; info: number }
+/** `more`: further incidents exist beyond the server's record cap, so `total` is a lower bound ("500+"). */
+export interface IncidentCounts { total: number; critical: number; warning: number; info: number; more?: boolean }
 
 const noIncidents: IncidentCounts = { total: 0, critical: 0, warning: 0, info: 0 }
 const toneRank: Record<IncidentTone, number> = { critical: 0, warning: 1, info: 2 }
@@ -59,11 +60,19 @@ export function monitorIncidents(accounts: readonly AccountMonitor[]): Incident[
   return incidentsOf(accounts.flatMap(account => account.discrepancies))
 }
 
-export function countIncidents(incidents: readonly Pick<Incident, 'tone'>[]): IncidentCounts {
-  const counts = { ...noIncidents }
+export function countIncidents(incidents: readonly Pick<Incident, 'tone'>[], more = false): IncidentCounts {
+  const counts: IncidentCounts = { ...noIncidents }
   for (const incident of incidents) { counts.total++; counts[incident.tone]++ }
+  if (more && counts.total > 0) counts.more = true
   return counts
 }
+
+/**
+ * The server lists an account's incidents ahead of older records and says when its cap cut the list. Only when every
+ * listed record of a truncated account is an incident can further incidents be missing.
+ */
+export const incidentsBeyondCap = (accounts: readonly AccountMonitor[]) => accounts.some(account =>
+  account.discrepanciesTruncated === true && account.discrepancies.length > 0 && account.discrepancies.every(isIncident))
 
 /** Counts per Play; Plays without an incident are absent. */
 export function incidentsByPlay(incidents: readonly Incident[]): ReadonlyMap<string, IncidentCounts> {
@@ -76,8 +85,9 @@ export function topTone(counts: IncidentCounts): IncidentTone | null {
   return counts.critical ? 'critical' : counts.warning ? 'warning' : counts.info ? 'info' : null
 }
 
-/** "1 critical · 2 warnings · 1 notice". */
+/** "1 critical · 2 warnings · 1 notice", or "500+ incidents" when the cap hides some, whose severities are unknown. */
 export function incidentSummary(counts: IncidentCounts): string {
+  if (counts.more) return `${counts.total}+ incidents`
   return [
     counts.critical ? `${counts.critical} critical` : '',
     counts.warning ? `${counts.warning} ${counts.warning === 1 ? 'warning' : 'warnings'}` : '',

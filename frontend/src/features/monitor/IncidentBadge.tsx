@@ -23,7 +23,7 @@ export function IncidentCount({ counts, id }: { counts: IncidentCounts; id: stri
   const tone = topTone(counts)
   if (!tone) return null
   return <>
-    <span className="incident-count" data-tone={tone} aria-hidden="true"><TriangleAlert size={11} />{counts.total > 99 ? '99+' : counts.total}</span>
+    <span className="incident-count" data-tone={tone} aria-hidden="true"><TriangleAlert size={11} />{counts.total > 99 ? '99+' : counts.more ? `${counts.total}+` : counts.total}</span>
     <span id={id} className="sr-only">{incidentDescription(counts)}</span>
   </>
 }

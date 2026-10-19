@@ -11,7 +11,7 @@ import { createPlaysSession, hasUnsavedPlayWork, startNewPlay, type PlaysSession
 import { initialPlaysList } from '@/features/plays/plays-list'
 import type { PlayView } from '@/api/plays'
 import { useMonitorEvents } from './useMonitorEvents'
-import { countIncidents, monitorIncidents } from '@/features/monitor/incidents'
+import { countIncidents, incidentsBeyondCap, monitorIncidents } from '@/features/monitor/incidents'
 import { IncidentCount } from '@/features/monitor/IncidentBadge'
 import { useInAppNotifications } from '@/features/notifications/useInAppNotifications'
 import { initialNotificationList } from '@/features/notifications/notification-list'
@@ -184,7 +184,7 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
   const monitor = useMonitorEvents(api, disconnectedApi !== api, reload, reloadKey, inApp.handlers)
   // The persistent incident count: stored monitor records only, never notifications. Shared by the Plays entry and Overview.
   const incidents = useMemo(() => monitorIncidents(monitor.summary?.accounts ?? []), [monitor.summary])
-  const incidentCounts = countIncidents(incidents)
+  const incidentCounts = countIncidents(incidents, incidentsBeyondCap(monitor.summary?.accounts ?? []))
   // Derived from the request generation so Reload shows progress and a repeated
   // failure visibly clears and returns, without a synchronous effect render.
   const loading = loaded === null || loaded.api !== api || loaded.key !== reloadKey
