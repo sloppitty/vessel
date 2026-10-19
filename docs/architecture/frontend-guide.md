@@ -325,6 +325,7 @@ existing cleanup, but cannot promise rollback of a request already sent.
 - **Unsaved work** is protected: opening another Play or starting a new one never replaces a dirty draft.
 - `useLeverageChange` owns one confirmation for the position controls and Suggestions. Controls keep showing the committed leverage while the dialog previews the pending value.
 - `useObjectUrl` acquires evidence image URLs in effects and releases them on Blob replacement or unmount. A thumbnail and viewer own separate URLs, so closing either cannot invalidate the other.
+- **Saved images** open as metadata. `useEvidenceImages` (owned by `PlaysPage`) then reads each original, three at a time, and keeps the Blobs outside the draft by server ID, so a late original is never an edit. Unavailable originals offer Retry, a 404 shows Missing from storage, and Save neither deletes nor uploads an image that has not loaded.
 
 ## The chart stack
 

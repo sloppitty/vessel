@@ -1,5 +1,5 @@
 import { useId, useRef, useState, type ChangeEvent } from 'react'
-import { Download, ImagePlus, PenLine, Trash2, Upload } from 'lucide-react'
+import { Download, ImageOff, ImagePlus, PenLine, RotateCw, Trash2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import type { DraftEvidence } from './draft'
@@ -8,23 +8,34 @@ import type { ImageMarkup } from '@/api/markup'
 import { flattenMarkup, hasMarks, markedFileName, markupDataUrl } from './markup'
 import { MarkupEditor } from './MarkupEditor'
 import { useObjectUrl } from './useObjectUrl'
+import { evidenceImage, type EvidenceImages, type EvidenceImageState } from './evidence-images'
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC', hour12: false })
 const describe = (item: DraftEvidence) => item.source === 'capture' ? `Chart capture${item.context ? ` · ${item.context}` : ''}` : item.name
 const itemLabel = (item: DraftEvidence, index: number) => `Image ${index + 1}: ${describe(item)}`
 
 /** The image with its marks layered on top; both share the same fit, so the marks stay aligned. */
-function MarkedImage({ item, marked, alt, fit }: { item: DraftEvidence; marked: boolean; alt: string; fit: 'cover' | 'contain' }) {
-  const url = useObjectUrl(item.image)
+function MarkedImage({ item, image, marked, alt, fit }: { item: DraftEvidence; image: Blob; marked: boolean; alt: string; fit: 'cover' | 'contain' }) {
+  const url = useObjectUrl(image)
   return <span className="marked-image" data-fit={fit}>
     <img src={url} alt={alt} />
     {marked && hasMarks(item.markup) && <img className="marked-image-overlay" src={markupDataUrl(item.markup)} alt="" data-testid="marks-overlay" />}
   </span>
 }
 
-function EvidenceMarkupEditor({ item, onChange, onDone }: { item: DraftEvidence; onChange: (markup: ImageMarkup | null) => void; onDone: () => void }) {
-  const url = useObjectUrl(item.image)
+function EvidenceMarkupEditor({ item, image, onChange, onDone }: { item: DraftEvidence; image: Blob; onChange: (markup: ImageMarkup | null) => void; onDone: () => void }) {
+  const url = useObjectUrl(image)
   return url ? <MarkupEditor imageUrl={url} alt={describe(item)} markup={item.markup} onChange={onChange} onDone={onDone} /> : null
+}
+
+const placeholderText = { loading: 'Loading image…', unavailable: 'Image unavailable', missing: 'Missing from storage' } as const
+
+/** Stands in for a saved original that has not loaded. The note, marks and Remove still work. */
+function Placeholder({ state, id }: { state: Exclude<EvidenceImageState, { status: 'loaded' }>; id?: string }) {
+  return <span className="evidence-placeholder" data-state={state.status}>
+    {state.status !== 'loading' && <ImageOff size={16} aria-hidden="true" />}
+    <span id={id}>{placeholderText[state.status]}</span>
+  </span>
 }
 
 function save(blob: Blob, name: string) {
@@ -36,11 +47,16 @@ function save(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-/** Chart captures and uploaded images with a note each. They stay in this browser until the Play is saved. */
-export function EvidencePanel({ evidence, onChange }: {
+/**
+ * Chart captures and uploaded images with a note each. They stay in this browser until the Play is saved. A saved
+ * Play's originals load on their own after it opens; until one has, it shows its state instead of the image.
+ */
+export function EvidencePanel({ evidence, onChange, images }: {
   evidence: DraftEvidence[]
   /** Receives an update of the current list; uploads finish asynchronously. */
   onChange: (update: (evidence: DraftEvidence[]) => DraftEvidence[]) => void
+  /** Saved originals of the open Play, by server ID. */
+  images?: EvidenceImages | undefined
 }) {
   const input = useRef<HTMLInputElement>(null)
   const [error, setError] = useState('')
@@ -50,14 +66,18 @@ export function EvidencePanel({ evidence, onChange }: {
   const [editing, setEditing] = useState(false)
   const id = useId()
   const viewed = evidence.find(item => item.id === viewing) ?? null
+  const viewedState = viewed && evidenceImage(viewed, images)
+  // The stored size is known before the original loads.
+  const viewedBytes = viewedState?.status === 'loaded' ? viewedState.image.size : viewed?.sizeBytes
   const full = evidence.length >= evidenceLimits.maxItems
 
   const setNote = (itemId: string, note: string) => onChange(current => current.map(item => item.id === itemId ? { ...item, note } : item))
   const setMarkup = (itemId: string, markup: ImageMarkup | null) => onChange(current => current.map(item => item.id === itemId ? { ...item, markup } : item))
   const open = (itemId: string) => { setViewing(itemId); setView('marked'); setEditing(false) }
-  async function download(item: DraftEvidence, marked: boolean) {
-    if (!marked || !hasMarks(item.markup)) { save(item.image, item.name); return }
-    const flattened = await flattenMarkup(item.image, item.markup).catch(() => null)
+  const retry = (item: DraftEvidence) => { if (item.serverId) images?.retry(item.serverId) }
+  async function download(item: DraftEvidence, image: Blob, marked: boolean) {
+    if (!marked || !hasMarks(item.markup)) { save(image, item.name); return }
+    const flattened = await flattenMarkup(image, item.markup).catch(() => null)
     if (flattened) save(flattened, markedFileName(item.name))
     else setError('The marked image could not be created. The original is unchanged.')
   }
@@ -103,57 +123,76 @@ export function EvidencePanel({ evidence, onChange }: {
     {evidence.length === 0
       ? <div className="evidence-empty"><ImagePlus size={18} aria-hidden="true" /><p>No images yet.</p></div>
       : <ul className="evidence-list" aria-label="Evidence images">
-        {evidence.map((item, index) => <li key={item.id} className="evidence-card">
-          <div className="evidence-frame">
-            <button type="button" className="evidence-thumb" aria-label={`Open ${itemLabel(item, index)}`} onClick={() => open(item.id)}>
-              <MarkedImage item={item} marked alt="" fit="cover" />
-            </button>
-            {hasMarks(item.markup) && <span className="evidence-marked">Marked</span>}
-            {confirming === item.id
-              ? <div className="evidence-confirm" role="group" aria-label={`Remove image ${index + 1}?`}>
-                <span>Remove this image?</span>
-                <div>
-                  <Button type="button" size="sm" variant="destructive" onClick={() => remove(item)}>Remove</Button>
-                  <Button type="button" size="sm" variant="ghost" autoFocus onClick={() => setConfirming(null)}>Cancel</Button>
+        {evidence.map((item, index) => {
+          const state = evidenceImage(item, images)
+          const loaded = state.status === 'loaded' ? state.image : null
+          const stateId = `${id}-state-${item.id}`
+          return <li key={item.id} className="evidence-card">
+            <div className="evidence-frame">
+              <button type="button" className="evidence-thumb" aria-label={`Open ${itemLabel(item, index)}`} onClick={() => open(item.id)}
+                aria-describedby={loaded ? undefined : stateId}>
+                {state.status === 'loaded' ? <MarkedImage item={item} image={state.image} marked alt="" fit="cover" /> : <Placeholder state={state} id={stateId} />}
+              </button>
+              {state.status === 'unavailable' && <Button type="button" size="sm" variant="outline" className="evidence-retry"
+                aria-label={`Retry image ${index + 1}`} title={state.message} onClick={() => retry(item)}><RotateCw size={13} aria-hidden="true" />Retry</Button>}
+              {hasMarks(item.markup) && <span className="evidence-marked">Marked</span>}
+              {confirming === item.id
+                ? <div className="evidence-confirm" role="group" aria-label={`Remove image ${index + 1}?`}>
+                  <span>Remove this image?</span>
+                  <div>
+                    <Button type="button" size="sm" variant="destructive" onClick={() => remove(item)}>Remove</Button>
+                    <Button type="button" size="sm" variant="ghost" autoFocus onClick={() => setConfirming(null)}>Cancel</Button>
+                  </div>
                 </div>
-              </div>
-              : <div className="evidence-actions">
-                <button type="button" className="evidence-action" aria-label={`Download image ${index + 1}`} title={hasMarks(item.markup) ? 'Download with marks' : 'Download'}
-                  onClick={() => void download(item, true)}><Download size={13} aria-hidden="true" /></button>
-                <button type="button" className="evidence-action" aria-label={`Remove image ${index + 1}`} title="Remove" onClick={() => setConfirming(item.id)}><Trash2 size={13} aria-hidden="true" /></button>
-              </div>}
-          </div>
-          <div className="evidence-meta">
-            <span className="evidence-kind" data-source={item.source}>{item.source === 'capture' ? 'Capture' : 'Upload'}</span>
-            <span className="evidence-name" title={describe(item)}>{item.source === 'capture' ? item.context || 'Chart' : item.name}</span>
-            <time dateTime={item.addedAt} title={`${timeFormat.format(new Date(item.addedAt))} UTC`}>{timeFormat.format(new Date(item.addedAt))}</time>
-          </div>
-          <small className="evidence-state">{!item.serverId ? 'Unsaved image' : !item.savedState || item.note !== item.savedState.note || JSON.stringify(item.markup) !== JSON.stringify(item.savedState.markup)
-            ? 'Image saved · note or marks unsaved' : 'Saved to this Play'}</small>
-          {noteField(item, index, 2)}
-        </li>)}
+                : <div className="evidence-actions">
+                  <button type="button" className="evidence-action" aria-label={`Download image ${index + 1}`} disabled={!loaded}
+                    title={!loaded ? 'Available once the original loads' : hasMarks(item.markup) ? 'Download with marks' : 'Download'}
+                    onClick={() => { if (loaded) void download(item, loaded, true) }}><Download size={13} aria-hidden="true" /></button>
+                  <button type="button" className="evidence-action" aria-label={`Remove image ${index + 1}`} title="Remove" onClick={() => setConfirming(item.id)}><Trash2 size={13} aria-hidden="true" /></button>
+                </div>}
+            </div>
+            <div className="evidence-meta">
+              <span className="evidence-kind" data-source={item.source}>{item.source === 'capture' ? 'Capture' : 'Upload'}</span>
+              <span className="evidence-name" title={describe(item)}>{item.source === 'capture' ? item.context || 'Chart' : item.name}</span>
+              <time dateTime={item.addedAt} title={`${timeFormat.format(new Date(item.addedAt))} UTC`}>{timeFormat.format(new Date(item.addedAt))}</time>
+            </div>
+            <small className="evidence-state">{!item.serverId ? 'Unsaved image' : !item.savedState || item.note !== item.savedState.note || JSON.stringify(item.markup) !== JSON.stringify(item.savedState.markup)
+              ? 'Image saved · note or marks unsaved' : 'Saved to this Play'}</small>
+            {noteField(item, index, 2)}
+          </li>
+        })}
       </ul>}
     <Dialog open={viewed !== null} onOpenChange={next => { if (!next) { setViewing(null); setEditing(false) } }}>
-      {viewed && <DialogContent className="plays-entry-dialog evidence-dialog"
+      {viewed && viewedState && <DialogContent className="plays-entry-dialog evidence-dialog"
         onEscapeKeyDown={event => { if (editing) event.preventDefault() }}>
         <DialogTitle>{describe(viewed)}</DialogTitle>
-        <DialogDescription>{viewed.source === 'capture' ? 'Captured' : 'Added'} {timeFormat.format(new Date(viewed.addedAt))} UTC · {formatBytes(viewed.image.size)}{viewed.serverId ? '' : ' · unsaved'}</DialogDescription>
-        {editing
-          ? <EvidenceMarkupEditor item={viewed}
+        <DialogDescription>{viewed.source === 'capture' ? 'Captured' : 'Added'} {timeFormat.format(new Date(viewed.addedAt))} UTC{viewedBytes === undefined ? '' : ` · ${formatBytes(viewedBytes)}`}{viewed.serverId ? '' : ' · unsaved'}</DialogDescription>
+        {editing && viewedState.status === 'loaded'
+          ? <EvidenceMarkupEditor item={viewed} image={viewedState.image}
             onChange={markup => setMarkup(viewed.id, markup)} onDone={() => { setEditing(false); setView('marked') }} />
           : <>
             <div className="evidence-view-bar">
-              {hasMarks(viewed.markup)
+              {hasMarks(viewed.markup) && viewedState.status === 'loaded'
                 ? <div className="evidence-view-toggle" role="group" aria-label="Image version">
                   <button type="button" aria-pressed={view === 'marked'} onClick={() => setView('marked')}>Marked</button>
                   <button type="button" aria-pressed={view === 'original'} onClick={() => setView('original')}>Original</button>
                 </div>
-                : null}
-              <Button type="button" size="sm" variant="outline" onClick={() => setEditing(true)}><PenLine size={13} aria-hidden="true" />{hasMarks(viewed.markup) ? 'Edit marks' : 'Mark up'}</Button>
-              <Button type="button" size="sm" variant="ghost" onClick={() => void download(viewed, view === 'marked')}>
+                : viewedState.status === 'loaded' ? null : <small className="evidence-view-note">Download and markup need the original.</small>}
+              <Button type="button" size="sm" variant="outline" disabled={viewedState.status !== 'loaded'} onClick={() => setEditing(true)}>
+                <PenLine size={13} aria-hidden="true" />{hasMarks(viewed.markup) ? 'Edit marks' : 'Mark up'}</Button>
+              <Button type="button" size="sm" variant="ghost" disabled={viewedState.status !== 'loaded'}
+                onClick={() => { if (viewedState.status === 'loaded') void download(viewed, viewedState.image, view === 'marked') }}>
                 <Download size={13} aria-hidden="true" />{view === 'marked' && hasMarks(viewed.markup) ? 'Download marked' : 'Download original'}</Button>
             </div>
-            <div className="evidence-dialog-image"><MarkedImage item={viewed} marked={view === 'marked'} alt={`${describe(viewed)}${view === 'marked' && hasMarks(viewed.markup) ? ', with marks' : ''}`} fit="contain" /></div>
+            <div className="evidence-dialog-image">{viewedState.status === 'loaded'
+              ? <MarkedImage item={viewed} image={viewedState.image} marked={view === 'marked'} alt={`${describe(viewed)}${view === 'marked' && hasMarks(viewed.markup) ? ', with marks' : ''}`} fit="contain" />
+              : <div className="evidence-dialog-placeholder"><Placeholder state={viewedState} />
+                {viewedState.status === 'unavailable' && <>
+                  <small>{viewedState.message}</small>
+                  <Button type="button" size="sm" variant="outline" aria-label={`Retry image ${evidence.indexOf(viewed) + 1}`}
+                    onClick={() => retry(viewed)}><RotateCw size={13} aria-hidden="true" />Retry</Button>
+                </>}
+              </div>}</div>
           </>}
         {noteField(viewed, evidence.indexOf(viewed), 3)}
       </DialogContent>}

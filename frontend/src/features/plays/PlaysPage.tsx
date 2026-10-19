@@ -21,6 +21,7 @@ import { ManualExecutionPanel } from './ManualExecutionPanel'
 import { emptyManualDraft, hasManualDraft } from './manual'
 import { useMonitorRun } from '@/features/monitor/useMonitorRun'
 import { usePlayExecution } from './usePlayExecution'
+import { useEvidenceImages } from './evidence-images'
 import { useSizing } from './useSizing'
 import { planIssues, planIssueSummary } from './planChecks'
 import { formatMoney, marginOverBudget } from './sizing'
@@ -150,6 +151,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const [dialogError, setDialogError] = useState<string | null>(null)
 
   const { draft, saved } = session
+  // Saved originals load after the Play opens, outside the draft, and stay while the session holds it.
+  const evidenceImages = useEvidenceImages(api, draft.evidence)
   const venues = useVenues()
   const account = accounts.find(item => item.id === (saved?.summary.accountId ?? draft.accountId))
   const manual = !!account && venues.can(account.venueId, 'manualExecutions')
@@ -438,7 +441,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     <PlayWorkspace accounts={accounts} portfolios={portfolios} api={api} draft={draft} onChange={next => update({ draft: next })}
       {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} revision={revision} lockInstrument={locked}
       lockDirection={status === 'open' || filled} readOnly={readOnly} retrospective={retrospective}
-      sizing={sizing.sizing} onRiskChange={sizing.updateRisk}
+      sizing={sizing.sizing} onRiskChange={sizing.updateRisk} evidenceImages={evidenceImages}
       execution={manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
         enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}
         working={busy !== null}

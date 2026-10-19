@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { money } from '@/lib/format'
 import type { DraftEvidence, PlayDraft } from './draft'
 import { EvidencePanel } from './EvidencePanel'
+import type { EvidenceImages } from './evidence-images'
 import { journalReviewVisible } from './journal'
 import { JournalStateContext, useJournalStore } from './journal-state'
 import { PositionRiskSummary } from './PositionRiskSummary'
@@ -130,12 +131,14 @@ const journalSections = [
   ['review', 'Review', 'What happened, and what did you learn?'],
 ] as const
 
-export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceRequest = 0, readOnly = false, execution,
+export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceImages, evidenceRequest = 0, readOnly = false, execution,
   structuredReview, onStructuredReviewChange, status = 'draft', retrospective = false }: {
   notes: PlayDraft['notes']
   onChange: (notes: PlayDraft['notes']) => void
   evidence?: DraftEvidence[]
   onEvidenceChange?: (update: (evidence: DraftEvidence[]) => DraftEvidence[]) => void
+  /** Saved originals of the open Play, which load after it opens. */
+  evidenceImages?: EvidenceImages | undefined
   /** Incremented to bring the Evidence tab forward, e.g. after a chart capture. */
   evidenceRequest?: number
   /** Keeps the pre-trade notes fixed; the review stays editable. */
@@ -198,7 +201,7 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
         onFocus: () => setWritingReview(true),
         onBlur: (event: FocusEvent<HTMLDivElement>) => { if (!event.currentTarget.contains(event.relatedTarget)) setWritingReview(false) },
       } : {}}>
-      {key === 'evidence' && onEvidenceChange && <EvidencePanel evidence={evidence} onChange={onEvidenceChange} />}
+      {key === 'evidence' && onEvidenceChange && <EvidencePanel evidence={evidence} onChange={onEvidenceChange} images={evidenceImages} />}
       <label className="sr-only" htmlFor={`${id}-${key}`}>{label}</label>
       <textarea id={`${id}-${key}`} className="journal-note" value={notes[key]} placeholder={help} readOnly={readOnly && key !== 'review'}
         onChange={(event) => onChange({ ...notes, [key]: event.target.value })} />
