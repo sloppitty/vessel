@@ -185,6 +185,24 @@ public sealed class SizingActivityFallbackTests
     }
 
     [Fact]
+    public async Task Positions_closing_at_the_same_time_are_disclosed_like_plays()
+    {
+        // Two accounts close at the same fill time; a third result closes later. Their order is not known, only disclosed.
+        var other = new Account(Guid.NewGuid(), owner, "risex", "Other");
+        accounts.Add(other);
+        RoundTrip(0, 10);
+        RoundTrip(0, -4, account: other.Id);
+        RoundTrip(100, -4);
+        var result = await Service().GetAsync(default);
+        Assert.Equal((SizingService.SourceActivity, 3), (result.Record.Source, result.Record.DecidedPlays));
+        Assert.Equal("Full size: no losing streak. 2 results share an exit time; their order is not known." +
+            " Counted from closed Activity positions until a play closes with a win or loss.", result.Exposure.Reason);
+        Assert.Equal(2, result.Exposure.TiedOutcomes);
+        // An operation was never detected by a check; its close is the closing fill.
+        Assert.All(result.Record.Recent, r => Assert.Null(r.DetectedAtUtc));
+    }
+
+    [Fact]
     public async Task One_decided_closed_play_replaces_the_fallback_without_mixing_sources()
     {
         RoundTrip(0, -4); RoundTrip(100, -4); RoundTrip(200, -4);

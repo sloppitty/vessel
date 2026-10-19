@@ -92,9 +92,13 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
 
     private static List<Scored> PlayOutcomes(List<ClosedPlayFacts> closed) =>
         // A closed record whose linked fills are known incomplete, contradictory or out of order is not a decided outcome.
+        // A venue-linked outcome closes at its latest valid exit; the detection time stays beside it for audit.
         closed.Where(f => f.Play.Origin != PlayOrigin.Retrospective && f.ManualFeesComplete)
-            .Where(ExecutionIntegrity.Settled).Select(facts => (facts.Play, Outcome: PlayOutcomeCalculator.Outcome(facts))).Where(x => x.Outcome is not null)
-            .Select(x => new Scored(x.Outcome!, Row(x.Play.Id, x.Play.Title, x.Play.ContractId, x.Outcome!))).ToList();
+            .Where(ExecutionIntegrity.Settled).Select(facts => (Facts: facts, Outcome: PlayOutcomeCalculator.Outcome(facts))).Where(x => x.Outcome is not null)
+            .Select(x => new Scored(x.Outcome!, Row(x.Facts.Play.Id, x.Facts.Play.Title, x.Facts.Play.ContractId, x.Outcome!) with
+            {
+                DetectedAtUtc = PlayOutcomeCalculator.DetectedAt(x.Facts)
+            })).ToList();
 
     /// <summary>
     /// Closed, complete operations with a known net result and entry notional, scored like a Play: return is the net
@@ -138,14 +142,17 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
         var record = TrackRecord.From(outcomes.Select(x => x.Outcome).ToList());
         // The ladder walks every decided outcome of the chosen source, fallback operations included: they are real results.
         var exposure = Exposure.From(outcomes.Select(x => x.Outcome));
+        // Outcomes sharing a close time keep the Play-ID order; the reason discloses them rather than inventing an order.
+        var ties = CloseTimeTies.From(outcomes.Select(x => x.Outcome));
         var limits = SizingLimits.From(risk, record, exposure);
         var recent = outcomes.OrderByDescending(x => x.Outcome.ClosedAtUtc).ThenBy(x => x.Outcome.PlayId).Take(record.Window)
             .Select(x => x.Row).ToList();
         var activitySource = source == SourceActivity;
         var notice = activitySource ? ActivityNotice : Notice;
+        var reason = exposure.Reason + (ties.Reason is { } tie ? " " + tie : "") + (activitySource ? ActivityReason : "");
         return new SizingDto(new SizingSettingsDto(ExactDecimal.FormatEightPlaces(risk)),
             new ExposureDto(Name(exposure.Level), ExactDecimal.FormatEightPlaces(exposure.Multiplier),
-                activitySource ? exposure.Reason + ActivityReason : exposure.Reason, exposure.LossStreak, exposure.WinsSinceStepDown),
+                reason, exposure.LossStreak, exposure.WinsSinceStepDown) { TiedOutcomes = ties.Outcomes },
             new TrackRecordDto(record.ClosedPlays, record.DecidedPlays, record.Window, record.Wins, record.Losses, record.Scratches,
                 ExactDecimal.FormatEightPlaces(record.BattingAverage), ExactDecimal.FormatEightPlaces(record.AverageGainPercent),
                 ExactDecimal.FormatEightPlaces(record.AverageLossPercent), ExactDecimal.FormatEightPlaces(record.WinLossRatio),

@@ -11,17 +11,27 @@ public sealed record UpdateSizingSettingsRequest([property: JsonRequired] string
 
 public sealed record SizingSettingsDto(string RiskPercent);
 
-public sealed record ExposureDto(string Level, string Multiplier, string Reason, int LossStreak, int WinsSinceStepDown);
+public sealed record ExposureDto(string Level, string Multiplier, string Reason, int LossStreak, int WinsSinceStepDown)
+{
+    /// <summary>
+    /// Decided outcomes the ladder walks that share an exact close time with another; they keep the Play-ID order, which is
+    /// not a known economic order. When above zero the reason says so.
+    /// </summary>
+    public int TiedOutcomes { get; init; }
+}
 
 /// <summary>
 /// One scored outcome. A Play outcome carries its <paramref name="PlayId"/>; an Activity fallback outcome carries the
-/// operation and account instead and has no Play, plan, risk or R multiple.
+/// operation and account instead and has no Play, plan, risk or R multiple. <paramref name="ClosedAtUtc"/> is the latest
+/// valid linked exit for a venue-linked Play, the owner-entered exit for a manual ledger, the closing fill for an operation.
 /// </summary>
 public sealed record PlayOutcomeDto(Guid? PlayId, string Title, string? Instrument, DateTimeOffset ClosedAtUtc, string NetResultUsd,
     string ReturnPercent, string? RiskUsd, string? RMultiple, string Outcome, bool FeesComplete)
 {
     public string? OperationId { get; init; }
     public Guid? AccountId { get; init; }
+    /// <summary>Audit only: when a check or refresh detected a venue-linked Play's close. Null for manual ledgers and operations.</summary>
+    public DateTimeOffset? DetectedAtUtc { get; init; }
 }
 
 public sealed record TrackRecordDto(int ClosedPlays, int DecidedPlays, int Window, int Wins, int Losses, int Scratches,

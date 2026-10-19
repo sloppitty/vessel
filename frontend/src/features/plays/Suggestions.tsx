@@ -176,8 +176,8 @@ function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRisk
         <li><strong>Size</strong>: risk a fixed share of the account balance per play (Minervini: about 1.25%, never above 2.5%). Position = amount at risk ÷ loss per unit at the stops.</li>
         <li><strong>Stops</strong>: never more than 10% from the entry; once you have five wins, no more than half your average gain.</li>
         <li><strong>Targets</strong>: at least 2:1, or the break-even R:R of your win rate once you have ten wins and losses, whichever is higher.</li>
-        <li><strong>Exposure</strong>: size halves after three losses in a row and halves again after two more. It steps back up after two wins with a positive result since stepping down. Minervini gives no fixed counts; these are Vessel's.</li>
-        <li><strong>Record</strong>: your last {record.window} closed plays with wins or losses, all enabled accounts, from linked fills: venue closed PnL less fees.
+        <li><strong>Exposure</strong>: size halves after three losses in a row and halves again after two more. It steps back up after two wins in a row with a positive result since stepping down. Minervini gives no fixed counts; these are Vessel's.</li>
+        <li><strong>Record</strong>: your last {record.window} closed plays with wins or losses by exit time, all enabled accounts, from linked fills: venue closed PnL less fees.
           Until a play has a win or loss, closed positions from Activity stand in, scored the same way without R multiples.</li>
       </ul>
       <p>Mechanical estimates before fees, funding and slippage, not advice.</p>

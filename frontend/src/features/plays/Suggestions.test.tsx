@@ -238,6 +238,16 @@ describe('record and risk', () => {
     expect(screen.queryByTestId('record-source')).not.toBeInTheDocument()
   })
 
+  it('reads the exit-time tie disclosure as part of the exposure reason', async () => {
+    const user = userEvent.setup()
+    const reason = 'Half size after 3 losses in a row. 2 results share an exit time; their order is not known.'
+    render(<Workspace initial={plan()} sizing={{ ...reduced, exposure: { ...reduced.exposure, reason, tiedOutcomes: 2 } }} />)
+    await openPanel(user)
+    const record = screen.getByTestId('track-record')
+    expect(record).toHaveTextContent(`50% exposure · ${reason}`)
+    expect(record).toHaveTextContent('It steps back up after two wins in a row with a positive result since stepping down.')
+  })
+
   it('edits the risk in place, warns above 2.5% and refuses values outside 0.1 to 5%', async () => {
     const user = userEvent.setup()
     const onRiskChange = vi.fn<(risk: string) => Promise<void>>().mockResolvedValue()

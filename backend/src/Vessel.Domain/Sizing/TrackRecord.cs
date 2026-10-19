@@ -82,13 +82,32 @@ public sealed record TrackRecord(int ClosedPlays, int DecidedPlays, int Window, 
     }
 }
 
+/// <summary>
+/// Decided outcomes that share an exact close time with another decided outcome, and how many distinct times they share.
+/// The record and the ladder keep the stable Play-ID order for them: no economic order is invented, the tie is disclosed.
+/// </summary>
+public sealed record CloseTimeTies(int Outcomes, int Times)
+{
+    public static CloseTimeTies From(IEnumerable<PlayOutcome> outcomes)
+    {
+        var shared = outcomes.Where(o => o.Kind != PlayOutcomeKind.Scratch).GroupBy(o => o.ClosedAtUtc)
+            .Select(g => g.Count()).Where(count => count > 1).ToList();
+        return new(shared.Sum(), shared.Count);
+    }
+
+    /// <summary>The sentence the exposure reason ends with, or null without a tie.</summary>
+    public string? Reason => Outcomes == 0 ? null : Times == 1
+        ? $"{Outcomes} results share an exit time; their order is not known."
+        : $"{Outcomes} results share {Times} exit times; their order is not known.";
+}
+
 public enum ExposureLevel { Full, Half, Quarter }
 
 /// <summary>
 /// Progressive exposure: smaller size after a losing streak, back up only once trades work again. Minervini
 /// gives no fixed counts; these are the owner's: three consecutive losses step down to half, two more to a
-/// quarter, and two wins at a reduced level with a positive net result since stepping down step back up one level.
-/// Scratches are ignored.
+/// quarter, and two consecutive wins at a reduced level with a positive net result since stepping down step back up
+/// one level (a loss resets the win count). Scratches are ignored. Outcomes sharing a close time walk in Play-ID order.
 /// </summary>
 public sealed record Exposure(ExposureLevel Level, int LossStreak, int WinsSinceStepDown, string Reason)
 {

@@ -15,7 +15,7 @@ public static class PlayOutcomeCalculator
 {
     /// <summary>
     /// Net result and planned risk of one closed Play. Risk uses the plan in force at the first entry fill;
-    /// a Play without entry fills or a close time has no outcome.
+    /// a Play without entry fills or a close time has no outcome. It closes at <see cref="CloseTime"/>.
     /// </summary>
     public static PlayOutcome? Outcome(ClosedPlayFacts facts) => Outcome(facts, out _);
 
@@ -24,7 +24,7 @@ public static class PlayOutcomeCalculator
     {
         problem = null;
         if (projectedClose is null && facts.Play.Status != PlayStatus.Closed ||
-            (projectedClose ?? facts.Play.EndedAtUtc) is not { } closedAt) return null;
+            (projectedClose ?? CloseTime(facts)) is not { } closedAt) return null;
         try
         {
             var result = Calculate(facts, closedAt);
@@ -42,6 +42,18 @@ public static class PlayOutcomeCalculator
             return null;
         }
     }
+
+    /// <summary>
+    /// When a closed Play's outcome closes. A venue-detected close (<see cref="Play.MarkClosed"/>) keeps the detection time in
+    /// <see cref="Play.EndedAtUtc"/>; its outcome closes at the latest valid linked exit (<see cref="PlayExitTime.LatestValidExit"/>),
+    /// or at detection when the fills cannot settle it. Manual ledgers and retrospective Plays already store their real exit.
+    /// </summary>
+    public static DateTimeOffset? CloseTime(ClosedPlayFacts facts) => DetectedAt(facts) is { } detected
+        ? PlayExitTime.LatestValidExit(facts, detected) ?? detected : facts.Play.EndedAtUtc;
+
+    /// <summary>When a check or refresh detected a venue close; null for manual ledgers and retrospective Plays.</summary>
+    public static DateTimeOffset? DetectedAt(ClosedPlayFacts facts) =>
+        facts is { ManualSource: false, Play.Origin: PlayOrigin.Planned, Play.Status: PlayStatus.Closed } ? facts.Play.EndedAtUtc : null;
 
     private static PlayOutcome? Calculate(ClosedPlayFacts facts, DateTimeOffset closedAt)
     {

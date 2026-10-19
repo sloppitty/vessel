@@ -166,8 +166,9 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time)
         var fills = facts.Fills;
         var entries = fills.Where(f => f.Role == OrderLinkRole.Entry).ToList();
         var exits = fills.Where(f => f.Role != OrderLinkRole.Entry).ToList();
-        // EndedAtUtc records when sync detected closure, not necessarily when it happened.
-        var close = exits.Count > 0 ? exits.Max(f => f.Fill.OccurredAtUtc) : facts.Play.EndedAtUtc ?? facts.Play.UpdatedAtUtc;
+        // EndedAtUtc records when sync detected closure, not necessarily when it happened. Review places every Play, excluded
+        // ones too, at its unvalidated latest exit without the detection clamp sizing applies (PlayExitTime.LatestValidExit).
+        var close = PlayExitTime.LatestExit(fills) ?? facts.Play.EndedAtUtc ?? facts.Play.UpdatedAtUtc;
         var incomplete = new Evaluated(facts, close, null, "executions");
         if (incompleteOrders || facts.Play.Status != PlayStatus.Closed || facts.Play.ContractId is null || entries.Count == 0 || exits.Count == 0 ||
             fills.Select(f => f.Fill.Id).Distinct().Count() != fills.Count ||

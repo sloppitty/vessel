@@ -245,11 +245,11 @@ public sealed class SizingServiceTests
     [Fact]
     public async Task Get_uses_the_default_risk_and_reports_the_record_newest_first()
     {
-        // A long's stop and target sell.
+        // A long's stop and target sell. The outcomes close at their exits (an hour apart), not at detection.
         store.Closed.Add(Closed(Plan(), [new(OrderLinkRole.Entry, Fill(100, 1, fee: 0)),
-            new(OrderLinkRole.Stop, Fill(95, 1, pnl: -5, fee: 0, side: ExecutionFacts.Sell))], closedDay: 2));
+            new(OrderLinkRole.Stop, Fill(95, 1, pnl: -5, fee: 0, minutes: 60, side: ExecutionFacts.Sell))], closedDay: 2));
         store.Closed.Add(Closed(Plan(), [new(OrderLinkRole.Entry, Fill(100, 1, fee: 0)),
-            new(OrderLinkRole.Target, Fill(110, 1, pnl: 10, fee: 0, side: ExecutionFacts.Sell))], closedDay: 3));
+            new(OrderLinkRole.Target, Fill(110, 1, pnl: 10, fee: 0, minutes: 120, side: ExecutionFacts.Sell))], closedDay: 3));
         var sizing = await Service.GetAsync(default);
         Assert.Equal("1.25", sizing.Settings.RiskPercent);
         Assert.Equal(("full", "1", "1.25", "10", "2"), (sizing.Exposure.Level, sizing.Exposure.Multiplier, sizing.Limits.EffectiveRiskPercent,
