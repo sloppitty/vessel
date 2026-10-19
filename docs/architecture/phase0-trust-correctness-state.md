@@ -89,6 +89,50 @@ October 19, 2026, 0.4b Refresh continuity, branch `t3/phase0-refresh-continuity`
 
   This is also a clean full run of 0.4a's code.
 
+October 19, 2026, 0.4c coverage and evidence, branch
+`t3/phase0-monitor-coverage` (stacked on 0.4b):
+- Every successful check persists each Open Play's coverage in
+  `monitor_coverage`, in the check's unit of work and account lock. A row
+  holds a state, whether the Play is covered, a reason, checked-at and
+  per-stop evidence. The migration is `20261019132931_MonitorCoverage`;
+  apply it explicitly.
+- States:
+  - known: covered or not covered;
+  - shared;
+  - unknown, with a reason;
+  - unsupported;
+  - stale, projected at read time from twice the check interval.
+
+  Structural unknowns never become missing and never degrade the run.
+- RISEx (owner's choice): a `CurrentOrderBook` capability, false for RISEx,
+  gives "unsupported: current book not read". Order-book checks do not run
+  there, the UI names them, and an incomplete book alone no longer degrades
+  the run. `/v1/orders/open` is not built.
+- The heading follows open incidents, then coverage by reason. It says
+  "Monitored" only when every Play in view is covered, and "Stop coverage not
+  checked yet" before a Play's first coverage row.
+- Chart stops on Open Plays carry evidence labels in UTC, such as "resting as
+  of …", "resting at <price>", "not seen at the venue", "unknown" or "not
+  read". An unconfirmed stop is drawn hollow and faint, from theme tokens.
+- Tests failed before the fix:
+  - the RISEx run was degraded with no coverage;
+  - the heading said "Monitored" beside unknown, shared and unsupported
+    coverage;
+  - evaluator tests failed, mostly by not compiling;
+  - chart evidence labels were missing.
+- An independent review found no blocking defect. Its findings are fixed in
+  the second commit.
+- `scripts/check.sh` passed with PostgreSQL 18 and RabbitMQ 4.3.6 in
+  disposable containers:
+  - Python: 78 OK. Prototype tests pass.
+  - Release build: 0 warnings.
+  - Backend: 3,456 passed, 5 skipped (live venue and S3), 0 failed.
+  - Frontend: typecheck and lint clean, 2,504 tests, build OK.
+
+  The migration was applied only to disposable test databases.
+- Still open: 0.4d (`docs/app-status.md`, after jcarcaboso PR #66) and a
+  rendered browser check.
+
 ## 0.5 Managed stops
 
 Not started.

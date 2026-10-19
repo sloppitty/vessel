@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- The monitor records each Open Play's stop coverage (known, shared,
+  unknown with a reason, unsupported, or stale) and never says "Monitored"
+  unless every Play is covered. Chart stops say what the venue evidence shows
+  ("resting as of … UTC", "not seen at the venue", "unknown"). RISEx, whose
+  current order book Vessel cannot read, is labelled "current book not read"
+  instead of being permanently degraded (D-08, D-09, D-18). New migration
+  `MonitorCoverage`; apply it explicitly.
 - A manual Refresh now records fill continuity like a scheduled check, so a
   run of Refresh-only use no longer leaves a permanent false history gap that
   switched off missing- and short-stop checks. Refresh can set a gap but never
