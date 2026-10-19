@@ -37,7 +37,7 @@ the parent contrasted findings and reviewed the fixes.
 Regression cases were added for each corrected behavior. Review also checked
 owner/account/native-market isolation, exact entry-notional arithmetic,
 missing-execution guards, gross/net fee treatment, session refusal ordering,
-single-flight cancellation, transaction snapshots and migration rollback.
+single-flight cancellation, transaction snapshots, transaction rollback and migration Down SQL.
 
 ## Delivery and limits
 

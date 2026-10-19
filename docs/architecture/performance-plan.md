@@ -392,7 +392,7 @@ before later account locks and cannot guarantee global lock ordering across
 separate firings. Both functions capture the migration's search path, so a
 writer changing its search path cannot redirect or break revision-table access.
 
-All writers of the nine facts tables must use **READ COMMITTED**, including
+All writers of the ten facts tables must use **READ COMMITTED**, including
 operator SQL/import tools. A RepeatableRead/Serializable writer whose snapshot
 predates another same-owner commit can fail at commit with PostgreSQL `40001`
 on the shared revision row, even if its fact rows do not conflict. `UnitOfWork`
