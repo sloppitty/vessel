@@ -347,6 +347,7 @@
 .plays-page .available-budget form { display: grid; gap: 7px; }
 .plays-page .available-budget input { height: 39px; padding: 8px 10px; font-size: 16px; }
 .plays-page .available-budget p { margin: 0; font-size: var(--text-2xs); line-height: 1.6; }
+.plays-page .available-budget strong[data-warning="true"] { color: var(--warning); }
 
 .plays-page .budget-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .plays-page .budget-actions button { height: 28px; padding: 5px 9px; }

@@ -212,6 +212,17 @@ describe('Budget', () => {
     expect(screen.getByRole('textbox', { name: 'Budget $' })).toHaveAttribute('aria-invalid', 'true')
   })
 
+  // Phase 0, 0.5a after 0.1: a manual budget stored before the plain-decimal rule stays visible as saved, with a warning,
+  // instead of disappearing behind "Set budget"; estimates treat it as unknown and never fall back to the available amount.
+  it('keeps a stored manual budget that is not a plain decimal visible as saved', () => {
+    render(<Budget initial={{ ...createDraft(), budgetOverride: '1e2' }} available={{ value: '500', source: 'wallet' }} />)
+    expect(budget()).toHaveTextContent('Budget1e2manual')
+    const value = within(budget()).getByText('1e2')
+    expect(value).toHaveAttribute('data-warning', 'true')
+    expect(value.getAttribute('title')).toMatch(/^Saved earlier as “1e2”, .* estimates here ignore it/)
+    expect(screen.getByRole('button', { name: 'Use the available amount' })).toBeInTheDocument()
+  })
+
   it('discards an open unsaved budget when the selected account changes', async () => {
     const onChange = vi.fn()
     const initial = { ...createDraft(), accountId: accountFixture.id }

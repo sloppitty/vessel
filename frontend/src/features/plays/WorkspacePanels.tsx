@@ -16,7 +16,7 @@ import { JournalStateContext, useJournalStore } from './journal-state'
 import { PositionRiskSummary } from './PositionRiskSummary'
 import type { RiskReference } from './position-risk-summary'
 import { averageEntryPrice, formatDraggedPrice, leverageOf } from './levels'
-import { isPlanText, planTextLength } from './numbers'
+import { isPlanText, keptPlanTextTitle, planNumber, planTextLength } from './numbers'
 import { availableLabel, availableOf, budgetSourceLabel, defaultSizeUnits, formatMoney, formatQuantity, playBudget, positionSize, type AvailableBalance, type SizeUnits } from './sizing'
 import './plays-workspace.css'
 import { NativeSelect } from '@/components/ui/native-select'
@@ -40,7 +40,9 @@ export function AvailableBudget({ draft, onChange, available = null }: {
   const [budget, setBudget] = useState('')
   const [error, setError] = useState('')
   const id = useId()
-  const current = playBudget(draft, available)
+  // A manual budget stored before the plain-decimal rule is no budget to the estimates, but it stays visible as it was saved.
+  const kept = draft.budgetOverride !== null && planNumber(draft.budgetOverride) === null
+  const current = playBudget(draft, available) ?? (kept ? { value: draft.budgetOverride!, amount: NaN, source: 'manual' as const } : null)
 
   function saveBudget(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -75,7 +77,8 @@ export function AvailableBudget({ draft, onChange, available = null }: {
   const source = current.source === 'manual' || !available ? budgetSourceLabel(current) : availableLabel(available)
   return <div className="available-budget" role="group" aria-label="Budget">
     <span className="budget-label">Budget</span>
-    <strong title={current.value}>{displayMoney(current.value)}</strong>
+    {kept ? <strong title={keptPlanTextTitle(current.value)} data-warning="true">{current.value}</strong>
+      : <strong title={current.value}>{displayMoney(current.value)}</strong>}
     <small title={current.source === 'manual' ? 'Set for this play' : 'The account\'s available balance, as the server reports it'}>{source}</small>
     <Button type="button" variant="ghost" size="icon-sm" aria-label="Edit budget" title="Set a budget for this play" onClick={edit}><Pencil aria-hidden="true" size={13} /></Button>
     {current.source === 'manual' && available !== null && <Button type="button" variant="ghost" size="icon-sm" aria-label="Use the available amount"

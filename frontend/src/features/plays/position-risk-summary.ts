@@ -1,6 +1,6 @@
 import type { PlayDraft } from './draft'
 import { exitsOf, type ExitKind } from './levels'
-import { finitePlanNumber as decimal, planShare, planTextLength, positivePlanNumber } from './numbers'
+import { finitePlanNumber as decimal, planShare, planTextLength, serverPositivePlanNumber } from './numbers'
 import { wrongSide } from './planChecks'
 import { defaultSizeUnits, exitEstimate, positionSize, type SizeUnits } from './sizing'
 
@@ -182,7 +182,8 @@ export function stopCoverageGap(draft: Pick<PlayDraft, 'entries' | 'direction' |
   const priced = summary.pricedCoverage
   if (priced.status !== 'complete' && priced.percent !== null) return `${gapPercent.format(100 - priced.percent)}% of the position has no entry price`
   const wrong = draft.entries.some(entry => {
-    const price = positivePlanNumber(entry.price)
+    // Read as the server's side check reads it, like every wrongSide caller that names a wrong stop.
+    const price = serverPositivePlanNumber(entry.price)
     return planShare(entry.share) !== 0 && entry.stops.some(stop => planShare(stop.share) !== 0 && wrongSide(price, stop, 'stop', draft.direction))
   })
   if (wrong) return 'A stop sits on the wrong side of its entry'
