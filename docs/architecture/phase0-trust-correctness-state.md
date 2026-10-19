@@ -58,8 +58,9 @@ October 19, 2026, 0.4a monitor visibility, branch
     server. The 10 passed when rerun alone.
   - Frontend, run separately because the script stops at the first failure:
     typecheck and lint clean, 2,481 tests, build OK.
-- Not run: `scripts/monitor-browser-smoke.cjs`, `scripts/e2e/browser-e2e.cjs`
-  and a rendered browser check.
+- The rendered browser check is recorded under 0.4c below. The isolated
+  full-stack e2e found one stale assertion in `browser-e2e.cjs`; it was
+  fixed on this branch.
 
 October 19, 2026, 0.4b Refresh continuity, branch `t3/phase0-refresh-continuity`:
 - Every import, Refresh included, checks fill continuity against the later of
@@ -130,8 +131,17 @@ October 19, 2026, 0.4c coverage and evidence, branch
   - Frontend: typecheck and lint clean, 2,504 tests, build OK.
 
   The migration was applied only to disposable test databases.
-- Still open: 0.4d (`docs/app-status.md`, after jcarcaboso PR #66) and a
-  rendered browser check.
+- The isolated full-stack e2e (`scripts/e2e-full-stack.py`) ran on this
+  branch, which includes 0.4a and 0.4b:
+  - All 177 checks across its 16 steps passed: packaged images, the fake
+    venue and Playwright 1.63.
+  - The first run failed one browser step. A 0.4a assertion still filtered
+    on "Entry order <id>"; it was fixed on the 0.4a branch.
+  - Captures are in
+    `docs/product-review/verification/2026-10-19-phase0-monitor/`.
+- `scripts/monitor-browser-smoke.cjs` was not run. It needs a host browser,
+  which this machine cannot start, and release CI does not run it either.
+- Still open: 0.4d (`docs/app-status.md`, after jcarcaboso PR #66).
 
 ## 0.5 Managed stops
 
