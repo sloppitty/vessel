@@ -14,9 +14,10 @@ import { InstrumentPicker } from './InstrumentPicker'
 import { pairLabel, useInstrumentCatalog } from './instruments'
 import { leverageOf } from './levels'
 import { useLeverageChange } from './useLeverageChange'
-import { defaultSizeUnits, estimatedLiquidation, playBudget, type SizeUnits } from './sizing'
+import { availableOf, budgetSourceLabel, defaultSizeUnits, estimatedLiquidation, playBudget, type SizeUnits } from './sizing'
 import { planSuggestions } from './suggestions'
 import { SuggestionsPanel } from './Suggestions'
+import type { SizingStatus } from './useSizing'
 import { PlanNotices } from './PlanNotices'
 import { PositionEditor, defaultMaxLeverage, type SuggestionMarks } from './PositionEditor'
 import { ChartPanel } from './PlayChart'
@@ -28,7 +29,8 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { pickerAccounts } from '@/features/workspace/account-picker-options'
 
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, revision = null,
-  lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, onRiskChange, retrospective = false }: {
+  lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, sizingStatus = 'ready', onRetrySizing, onRiskChange,
+  filledEntries, onUnits, retrospective = false }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -52,7 +54,14 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   retrospective?: boolean
   /** Risk settings and record for sizing suggestions, which only apply to editable plays. */
   sizing?: SizingDocument | null
+  /** Whether `sizing` is current; a stale or failed record offers no Accept and marks no field. */
+  sizingStatus?: SizingStatus
+  onRetrySizing?: () => void
   onRiskChange?: (riskPercent: string) => Promise<void>
+  /** Entries with a linked or manual fill (`'all'` when one has filled but not which): no size or leverage suggestions. */
+  filledEntries?: ReadonlySet<string> | 'all'
+  /** The size units in use, so the page can word its own messages in the instrument's quote asset. */
+  onUnits?: (units: SizeUnits) => void
 }) {
   const fieldId = useId()
   const [selectedId, setSelectedId] = useState(draft.entries[0]?.id ?? '')
@@ -92,12 +101,16 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const units: SizeUnits = instrumentInfo
     ? { quote: instrumentInfo.quoteAsset, base: instrumentInfo.contractId, quantityDecimals: instrumentInfo.quantityDecimals }
     : manualUsd ? { quote: 'USD', base: draft.instrument, quantityDecimals: null } : defaultSizeUnits
-  const riskAmount = account?.accountValueUsd && Number(account.accountValueUsd) > 0 ? account.accountValueUsd
-    : draft.budgetOverride && Number(draft.budgetOverride) > 0 ? draft.budgetOverride : null
-  const riskName = account?.accountValueUsd && Number(account.accountValueUsd) > 0 ? `${account.name} account value` : 'Explicit manual budget'
+  // The Summary's risk share divides by the same account balance the size suggestion uses; an explicit
+  // manual budget is a labelled fallback. Without either the share stays unknown.
+  const balanceText = account?.balanceUsd != null && Number(account.balanceUsd) > 0 ? account.balanceUsd : null
+  const riskAmount = balanceText ?? (draft.budgetOverride && Number(draft.budgetOverride) > 0 ? draft.budgetOverride : null)
+  const riskName = balanceText ? `${account!.name} balance` : 'Explicit manual budget'
   // Listed stablecoins count as nominal USD at 1:1, with no FX or depeg valuation.
   const riskReference = riskAmount && isNominalUsdQuote(units.quote)
     ? { name: units.quote === 'USD' ? riskName : `${riskName} · nominal USD/${units.quote} at 1:1`, amount: riskAmount, quote: units.quote } : null
+  const { quote, base, quantityDecimals } = units
+  useEffect(() => { onUnits?.({ quote, base, quantityDecimals }) }, [onUnits, quote, base, quantityDecimals])
 
   // Manual instruments are labels: say what Vessel assumes about them beside the Instrument label.
   const manualNote = retrospective ? undefined : manualUsd
@@ -133,10 +146,14 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const leverage = leverageOf(draft.leverage)
   const leverageChange = useLeverageChange(draft, onChange, units)
   const balance = account?.balanceUsd != null && Number(account.balanceUsd) > 0 ? Number(account.balanceUsd) : null
-  const available = account?.availableStablecoinNominalUsd ?? null
+  const available = availableOf(account)
+  const budget = status === 'draft' ? playBudget(draft, available) : null
   const suggestions = sizing && !readOnly ? planSuggestions({ draft, leverage, maxLeverage, maintenanceMargin, priceStep, sizing, units, balance,
-    budget: status === 'draft' ? playBudget(draft, available)?.amount ?? null : null, defaultMaximum: defaultMaxLeverage }) : null
-  const marks: SuggestionMarks | null = suggestions ? {
+    budget: budget?.amount ?? null, budgetSource: budget ? budgetSourceLabel(budget) : null, ...(filledEntries ? { filledEntries } : {}),
+    defaultMaximum: defaultMaxLeverage }) : null
+  // A stale or missing record cannot back a suggestion, so no field is marked for one.
+  const sizingCurrent = sizingStatus === 'ready' || sizingStatus === 'loading'
+  const marks: SuggestionMarks | null = suggestions && sizingCurrent ? {
     size: !!suggestions.size, leverage: !!suggestions.leverage,
     levels: new Set([...suggestions.stops, ...suggestions.targets].map(level => level.levelId)),
   } : null
@@ -211,7 +228,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
     </fieldset>
     {!retrospective && <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} lockDirection={lockDirection} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} />}
     <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} retrospective={retrospective} />
-    {suggestions && sizing && onRiskChange && <SuggestionsPanel plan={suggestions} sizing={sizing} draft={draft} leverage={leverage} units={units}
+    {!readOnly && onRiskChange && (suggestions || sizingStatus === 'failed') && <SuggestionsPanel plan={suggestions} sizing={sizing}
+      status={sizingStatus} onRetry={onRetrySizing} draft={draft} leverage={leverage} units={units}
       onSize={size => onChange({ ...draft, size })} onLevel={acceptLevel} onRiskChange={onRiskChange}
       onLeverage={next => leverageChange.request(String(next))} />}
     {leverageChange.dialog}

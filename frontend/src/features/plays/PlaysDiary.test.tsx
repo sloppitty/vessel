@@ -540,17 +540,19 @@ describe('diary workspace integration', () => {
     expect(screen.queryByText(/Orders link automatically by price/)).not.toBeInTheDocument()
   })
 
+  // Phase 0, 0.1 (D-12): the Summary divides by the account balance the size uses, with a labelled manual-budget fallback.
   it.each([
-    { quote: 'USD', manual: true, accountValue: '1000', label: 'Risk / Main account account value', share: '2%' },
-    { quote: 'USDC', manual: false, accountValue: '1000', label: 'Risk / Main account account value · nominal USD/USDC at 1:1', share: '2%' },
-    { quote: 'USDG', manual: false, accountValue: '1000', label: 'Risk / Main account account value · nominal USD/USDG at 1:1', share: '2%' },
-    { quote: 'USDT0', manual: false, accountValue: '1000', label: 'Risk / Main account account value · nominal USD/USDT0 at 1:1', share: '2%' },
-    { quote: 'EUR', manual: false, accountValue: '1000', label: 'Risk share', share: 'Unknown' },
-    { quote: 'usdg', manual: false, accountValue: '1000', label: 'Risk share', share: 'Unknown' },
-    { quote: 'USD', manual: true, accountValue: null, label: 'Risk / Explicit manual budget', share: '4%' },
-  ])('uses an honest named risk reference for $quote, manual=$manual, account value=$accountValue', async ({ quote, manual, accountValue, label, share }) => {
+    { quote: 'USD', manual: true, balance: '1000', label: 'Risk / Main account balance', share: '2%' },
+    { quote: 'USDC', manual: false, balance: '1000', label: 'Risk / Main account balance · nominal USD/USDC at 1:1', share: '2%' },
+    { quote: 'USDG', manual: false, balance: '1000', label: 'Risk / Main account balance · nominal USD/USDG at 1:1', share: '2%' },
+    { quote: 'USDT0', manual: false, balance: '1000', label: 'Risk / Main account balance · nominal USD/USDT0 at 1:1', share: '2%' },
+    { quote: 'EUR', manual: false, balance: '1000', label: 'Risk share', share: 'Unknown' },
+    { quote: 'usdg', manual: false, balance: '1000', label: 'Risk share', share: 'Unknown' },
+    { quote: 'USD', manual: true, balance: null, label: 'Risk / Explicit manual budget', share: '4%' },
+  ])('uses an honest named risk reference for $quote, manual=$manual, balance=$balance', async ({ quote, manual, balance, label, share }) => {
     const venueId = manual ? 'manual' : 'hyperliquid'
-    const account = { ...accountFixture, venueId, accountValueUsd: accountValue }
+    // Perps equity (account value) differs from the balance and is never the reference.
+    const account = { ...accountFixture, venueId, accountValueUsd: '5000', balanceUsd: balance }
     const draft = { ...createDraft(), accountId: account.id, instrument: 'BTC',
       instrumentSource: manual ? 'manual' as const : 'venue' as const, sizingMode: 'quantity' as const,
       size: '2', leverage: '1', budgetOverride: '500' }

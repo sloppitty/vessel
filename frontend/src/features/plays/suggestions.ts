@@ -4,6 +4,7 @@ import { averageEntryPrice, levelPrice, stepDecimals } from './levels'
 import { wrongSide } from './planChecks'
 import { positivePlanNumber as positive } from './numbers'
 import { averageDistance, estimatedLiquidation, positionSize, rewardToRisk, weightedLevels, type SizeUnits } from './sizing'
+import { stopCoverageGap } from './position-risk-summary'
 
 /*
  * Sizing suggestions after the owner's risk settings and record (docs/architecture/sizing-suggestions.md).
@@ -81,8 +82,13 @@ export interface RiskSize {
   margin: number
 }
 
-/** The risk-based size: balance × effective risk % ÷ loss per unit. Null without a balance, entries or stops. */
+/**
+ * The risk-based size: balance × effective risk % ÷ loss per unit. Null without a balance, or unless
+ * priced stops cover the whole position (`stopCoverageGap`): a part without a priced stop has no
+ * bounded loss, so averaging the priced stops would understate the risk.
+ */
 export function riskSize(draft: SizedDraft, leverage: number, balance: number | null, sizing: SizingDocument, units: SizeUnits): RiskSize | null {
+  if (stopCoverageGap({ entries: draft.entries, direction: draft.direction, leverage: String(leverage) }) !== null) return null
   const effectiveRiskPercent = amount(sizing.limits.effectiveRiskPercent)
   const perUnit = lossPerUnit(draft.entries, draft.direction, leverage)
   const average = averageEntryPrice(draft.entries, 1)
@@ -242,6 +248,12 @@ export interface PlanSuggestions {
   lossPerUnit: number | null
   /** The budget the margin is held to, or null when it is not checked. */
   budget: number | null
+  /** Where the budget comes from ("manual", "wallet", "reported margin"…), for the explanation. */
+  budgetSource: string | null
+  /** What keeps the priced stops from covering the whole position; null when they cover it. */
+  stopCoverage: string | null
+  /** An entry has a linked or manual fill: size and leverage are no longer suggested. */
+  filled: boolean
 }
 
 export interface SuggestionInputs {
@@ -256,23 +268,33 @@ export interface SuggestionInputs {
   units: SizeUnits
   balance: number | null
   budget: number | null
+  budgetSource?: string | null
+  /** Entries with a linked or manual fill; `'all'` when one has filled but not which. They get no suggestions. */
+  filledEntries?: ReadonlySet<string> | 'all'
   defaultMaximum?: number
 }
+
+const noFills: ReadonlySet<string> = new Set()
 
 const levelLabel = (exits: readonly DraftExit[], kind: 'stop' | 'target', index: number) =>
   exits.length > 1 || kind === 'target' ? `${kind} ${index + 1}` : kind
 
 export function planSuggestions({ draft, leverage, maxLeverage, maintenanceMargin = null, priceStep = null, sizing, units, balance, budget,
-  defaultMaximum = 100 }: SuggestionInputs): PlanSuggestions {
+  budgetSource = null, filledEntries = noFills, defaultMaximum = 100 }: SuggestionInputs): PlanSuggestions {
   const maxStop = amount(sizing.limits.maxStopPercent)
   const minRewardRisk = amount(sizing.limits.minRewardRisk)
-  const size = suggestSize(draft, leverage, balance, sizing, units, budget)
-  const risked = riskSize(draft, leverage, balance, sizing, units)
+  // Once an entry has filled, the position exists: sizing and leverage are revisions of an open trade, not
+  // suggestions. Stops and targets are still suggested for the entries that have not filled.
+  const filled = filledEntries === 'all' || filledEntries.size > 0
+  const entryFilled = (id: string) => filledEntries === 'all' || filledEntries.has(id)
+  const stopCoverage = stopCoverageGap({ entries: draft.entries, direction: draft.direction, leverage: String(leverage) })
+  const size = filled ? null : suggestSize(draft, leverage, balance, sizing, units, budget)
+  const risked = filled ? null : riskSize(draft, leverage, balance, sizing, units)
   const stops: PlanSuggestions['stops'] = []
   const targets: PlanSuggestions['targets'] = []
   for (const entry of draft.entries) {
     const entryPrice = positive(entry.price)
-    if (entryPrice === null) continue
+    if (entryPrice === null || entryFilled(entry.id)) continue
     if (maxStop !== null) entry.stops.forEach((stop, index) => {
       const suggestion = suggestMaxStop(entry, stop, draft.direction, leverage, maxStop, priceStep)
       const price = levelPrice(entryPrice, stop, 'stop', draft.direction, leverage)
@@ -285,9 +307,12 @@ export function planSuggestions({ draft, leverage, maxLeverage, maintenanceMargi
       unit: entry.targets[index]!.unit, current: entry.targets[index]!.value, ratio: rewardToRisk(entry, draft.direction, leverage)! })
   }
   return {
-    size, stops, targets, balance, budget,
-    leverage: suggestLeverage(draft, leverage, maxLeverage, budget, sizing, risked?.notional ?? null, defaultMaximum, maintenanceMargin),
-    lossPerUnit: lossPerUnit(draft.entries, draft.direction, leverage),
+    size, stops, targets, balance, budget, budgetSource, stopCoverage, filled,
+    // Without complete stop coverage nothing sizes the position, so only the liquidation estimate against
+    // the priced stops can decide a leverage.
+    leverage: filled ? null : suggestLeverage(draft, leverage, maxLeverage, stopCoverage === null ? budget : null, sizing,
+      risked?.notional ?? null, defaultMaximum, maintenanceMargin),
+    lossPerUnit: stopCoverage === null ? lossPerUnit(draft.entries, draft.direction, leverage) : null,
   }
 }
 

@@ -5,11 +5,13 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { SizingDocument } from '@/api/sizing'
 import { ApiError } from '@/api/errors'
-import type { WorkspaceApi } from '@/api/workspace'
-import { accountFixture, portfolioFixture, sizingFixture } from '@/test/workspace-fixture'
-import { createDraft, createExit, type DraftExit, type PlayDraft } from './draft'
+import type { BrokerAccount, WorkspaceApi } from '@/api/workspace'
+import type { PlayStatus } from '@/api/plays'
+import { accountFixture, idleMarketStream, instrumentCatalogFixture, portfolioFixture, sizingFixture } from '@/test/workspace-fixture'
+import { pickInstrument } from '@/test/instrument'
+import { createDraft, createEntry, createExit, type DraftExit, type PlayDraft } from './draft'
 import { PlayWorkspace } from './PlayWorkspace'
-import { useSizing } from './useSizing'
+import { useSizing, type SizingStatus } from './useSizing'
 
 const exit = (value: string, unit: DraftExit['unit'] = 'price'): DraftExit => ({ ...createExit('100'), value, unit })
 
@@ -29,19 +31,32 @@ const reduced: SizingDocument = {
 // The catalogue never loads, so units are generic and the venue maximum is unknown.
 const api = { instruments: () => new Promise(() => {}) } as unknown as WorkspaceApi
 
-function Workspace({ initial, sizing = sizingFixture, balance = '10000', available = null, onDraft, onRiskChange = () => Promise.resolve(), readOnly = false }: {
+function Workspace({ initial, sizing = sizingFixture, balance = '10000', available = null, availableSource = 'wallet', wallet = null, onDraft,
+  onRiskChange = () => Promise.resolve(), readOnly = false, status, sizingStatus, onRetry, filledEntries, account: base = accountFixture, workspaceApi = api }: {
   initial: PlayDraft
   sizing?: SizingDocument | null
   balance?: string | null
+  /** The account's normalized available balance (`availableBalanceUsd`) and its source. */
   available?: string | null
+  availableSource?: 'wallet' | 'margin' | 'withdrawable'
+  /** Supported stablecoins available in the venue wallet, a separate ledger. */
+  wallet?: string | null
   onDraft?: (draft: PlayDraft) => void
   onRiskChange?: (risk: string) => Promise<void>
   readOnly?: boolean
+  status?: PlayStatus
+  sizingStatus?: SizingStatus
+  onRetry?: () => void
+  filledEntries?: ReadonlySet<string> | 'all'
+  account?: BrokerAccount
+  workspaceApi?: WorkspaceApi
 }) {
-  const account = { ...accountFixture, balanceUsd: balance, availableStablecoinNominalUsd: available }
+  const account = { ...base, balanceUsd: balance, availableStablecoinNominalUsd: wallet, availableBalanceUsd: available,
+    availableBalanceSource: available === null ? null : availableSource }
   const [draft, setDraft] = useState({ ...initial, accountId: account.id })
-  return <PlayWorkspace accounts={[account]} portfolios={[portfolioFixture]} api={api} draft={draft} onChange={next => { onDraft?.(next); setDraft(next) }}
-    sizing={sizing} onRiskChange={onRiskChange} readOnly={readOnly} status={readOnly ? 'closed' : 'draft'} />
+  return <PlayWorkspace accounts={[account]} portfolios={[portfolioFixture]} api={workspaceApi} draft={draft} onChange={next => { onDraft?.(next); setDraft(next) }}
+    sizing={sizing} onRiskChange={onRiskChange} readOnly={readOnly} status={status ?? (readOnly ? 'closed' : 'draft')}
+    {...(sizingStatus ? { sizingStatus } : {})} {...(onRetry ? { onRetrySizing: onRetry } : {})} {...(filledEntries ? { filledEntries } : {})} />
 }
 
 const field = (name: string) => screen.getByRole('spinbutton', { name })
@@ -76,7 +91,7 @@ describe('suggestions panel', () => {
     // 10,000 × 1.25% = 125 at risk over a 5 stop: 25 units, 2,500 margin at 1×.
     const row = screen.getByTestId('size-suggestion')
     expect(row).toHaveTextContent('2,500 quote units')
-    expect(row).toHaveTextContent(/Loses 125 quote units if every stop fills: 10,000 quote units balance × 1\.25% risk/)
+    expect(row).toHaveTextContent(/Would lose about 125 quote units if every stop fills at its price: 10,000 quote units balance × 1\.25% risk/)
     expect(onDraft).not.toHaveBeenCalled()
     await user.click(within(row).getByRole('button', { name: 'Accept suggested size' }))
     expect(onDraft.mock.lastCall?.[0]).toMatchObject({ size: '2500', leverage: '1' })
@@ -120,7 +135,7 @@ describe('suggestions panel', () => {
     render(<Workspace initial={plan()} available="1000" onDraft={onDraft} />)
     await openPanel(user)
     const size = screen.getByTestId('size-suggestion')
-    expect(size).toHaveTextContent(/needs more margin than the 1,000 quote units budget at 1×\. Raise the leverage/)
+    expect(size).toHaveTextContent(/needs more margin than the 1,000 quote units budget \(wallet\) at 1×\. Raise the leverage/)
     expect(within(size).queryByRole('button')).not.toBeInTheDocument()
     // 2,500 notional in a 1,000 budget: 3×.
     const leverage = screen.getByTestId('leverage-suggestion')
@@ -176,7 +191,7 @@ describe('stop and target suggestions', () => {
     await openPanel(user)
     const row = screen.getByTestId('min-target-suggestion')
     expect(row).toHaveTextContent('105 → 115')
-    expect(row).toHaveTextContent('Winning 25% of your plays, you break even at 1:3')
+    expect(row).toHaveTextContent('With a 25% win rate over your plays, 1:3 is the break-even reward to risk')
     await user.click(within(row).getByRole('button', { name: 'Accept suggested Entry 1 target 1' }))
     expect(field('Entry 1 planned target 1 price (quote units)')).toHaveValue(115)
   })
@@ -283,10 +298,120 @@ describe('sizing document', () => {
     expect(api.updateSizingSettings).toHaveBeenCalledWith({ riskPercent: '1.5' })
   })
 
-  it('stays empty when the record cannot load', async () => {
+  it('fails without a record when the first read fails', async () => {
     const api = { sizing: vi.fn().mockRejectedValue(new ApiError('unavailable', 'Down.')) } as unknown as WorkspaceApi
     const { result } = renderHook(() => useSizing(api))
-    await waitFor(() => expect(api.sizing).toHaveBeenCalled())
+    await waitFor(() => expect(result.current.status).toBe('failed'))
     expect(result.current.sizing).toBeNull()
+  })
+})
+
+// Phase 0, 0.1 sizing truth: the review's probes as workspace tests.
+describe('sizing truth', () => {
+  const headline = () => within(panel()).getByRole('button', { name: /^Suggestions/ })
+
+  it('offers no size while half the position has no priced stop, and says so (F2)', async () => {
+    const user = userEvent.setup()
+    // Long 100, quantity mode at 5×, stops 50% at 95 and 50% blank.
+    const draft = plan({ sizingMode: 'quantity', leverage: '5' }, { ...exit('95'), share: '50' })
+    draft.entries[0]!.stops.push({ ...exit(''), share: '50' })
+    render(<Workspace initial={draft} />)
+    expect(headline()).toHaveTextContent('50% of the position has no priced stop')
+    expect(headline()).not.toHaveTextContent('Plan within your limits')
+    expect(field('Whole-position quantity (units)')).not.toHaveAttribute('data-suggested')
+    await openPanel(user)
+    expect(screen.queryByTestId('size-suggestion')).not.toBeInTheDocument()
+    expect(screen.getByTestId('suggestions-empty')).toHaveTextContent('50% of the position has no priced stop, so no size is suggested.')
+  })
+
+  it('budgets from the reported withdrawal of a standard account, not its spot stablecoins (U5)', async () => {
+    const user = userEvent.setup()
+    // $10,000 balance, $250 of spot stablecoins and $9,906.67 withdrawable from perps; 25 units at 100 are 500 margin at 5×.
+    render(<Workspace initial={plan({ leverage: '5' })} available="9906.67" availableSource="withdrawable" wallet="250" />)
+    const budget = within(screen.getByRole('group', { name: 'Budget' }))
+    expect(budget.getByText('$9,906.67')).toBeInTheDocument()
+    expect(budget.getByText('reported withdrawal')).toBeInTheDocument()
+    await openPanel(user)
+    expect(within(screen.getByTestId('size-suggestion')).getByRole('button', { name: 'Accept suggested size' })).toBeInTheDocument()
+    expect(screen.queryByTestId('leverage-suggestion')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Accept suggested size' }))
+    await user.clear(field('Whole-position margin (quote units)'))
+    await user.type(field('Whole-position margin (quote units)'), '700')
+    expect(screen.queryByText(/is above the/)).not.toBeInTheDocument()
+  })
+
+  it('holds a draft on a margin-only venue to its reported available margin (f4)', () => {
+    render(<Workspace initial={plan({ size: '500' })} available="100" availableSource="margin" />)
+    expect(within(screen.getByRole('group', { name: 'Budget' })).getByText('reported margin')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('Margin 500 quote units is above the 100 quote units budget (reported margin).')
+  })
+
+  it('keeps a known zero budget and never suggests raising leverage to fit it', async () => {
+    const user = userEvent.setup()
+    render(<Workspace initial={plan()} available="0" availableSource="wallet" />)
+    const budget = within(screen.getByRole('group', { name: 'Budget' }))
+    expect(budget.getByText('$0.00')).toBeInTheDocument()
+    expect(budget.getByText('wallet')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Set budget' })).not.toBeInTheDocument()
+    await openPanel(user)
+    const size = screen.getByTestId('size-suggestion')
+    expect(within(size).queryByRole('button')).not.toBeInTheDocument()
+    expect(size).toHaveTextContent('the budget (wallet) is 0 quote units')
+    expect(screen.queryByTestId('leverage-suggestion')).not.toBeInTheDocument()
+    expect(field('Leverage (×)')).not.toHaveAttribute('data-suggested')
+  })
+
+  it('hides size and leverage once an entry has filled, keeping level suggestions for the others (R3b)', async () => {
+    const user = userEvent.setup()
+    const draft = plan({ leverage: '5', size: '100' }, exit('80'), exit('105'))
+    const second = { ...createEntry(1), name: 'Entry 2', price: '90', stops: [exit('70')], targets: [exit('95')] }
+    draft.entries = [{ ...draft.entries[0]!, share: '50' }, { ...second, share: '50' }]
+    render(<Workspace initial={draft} status="open" filledEntries={new Set([draft.entries[0]!.id])} available="1" />)
+    expect(field('Whole-position margin (quote units)')).not.toHaveAttribute('data-suggested')
+    expect(field('Leverage (×)')).not.toHaveAttribute('data-suggested')
+    await openPanel(user)
+    expect(screen.queryByTestId('size-suggestion')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('leverage-suggestion')).not.toBeInTheDocument()
+    expect(screen.getAllByTestId('max-stop-suggestion').map(row => row.querySelector('.suggestion-row-title')?.textContent)).toEqual(['Entry 2 · stop'])
+    expect(screen.getAllByTestId('min-target-suggestion').map(row => row.querySelector('.suggestion-row-title')?.textContent)).toEqual(['Entry 2 · target 1'])
+    expect(screen.getByTestId('suggestions-empty')).toHaveTextContent('An entry has filled, so size and leverage are not suggested.')
+  })
+
+  it('shows an accepted 1.25% risk as 1.25% of the same account balance in the Summary (budget.mjs)', async () => {
+    const user = userEvent.setup()
+    const venueApi = { instruments: () => Promise.resolve(instrumentCatalogFixture), candles: () => new Promise(() => {}),
+      marketContext: () => new Promise(() => {}), marketStream: idleMarketStream } as unknown as WorkspaceApi
+    const venue: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}`, accountValueUsd: '5000' }
+    render(<Workspace initial={plan({ instrumentSource: 'venue' })} account={venue} workspaceApi={venueApi} />)
+    await pickInstrument(user, 'BTC')
+    await openPanel(user)
+    await user.click(screen.getByRole('button', { name: 'Accept suggested size' }))
+    const summary = within(screen.getByRole('group', { name: 'Planned position money summary' }))
+    const share = summary.getByText('Risk / Main account balance · nominal USD/USDC at 1:1').parentElement!
+    expect(share).toHaveTextContent('1.25%')
+  })
+
+  it('keeps a stale record visible without Accept or field marks, and retries', async () => {
+    const user = userEvent.setup()
+    const onRetry = vi.fn()
+    render(<Workspace initial={plan({}, exit('80'), exit('105'))} sizingStatus="stale" onRetry={onRetry} />)
+    expect(field('Whole-position margin (quote units)')).not.toHaveAttribute('data-suggested')
+    expect(field('Entry 1 planned stop price (quote units)')).not.toHaveAttribute('data-suggested')
+    expect(within(panel()).getByText(/The sizing record could not be reloaded/)).toBeInTheDocument()
+    await openPanel(user)
+    expect(screen.getByTestId('size-suggestion')).toBeInTheDocument()
+    expect(within(panel()).queryByRole('button', { name: /^Accept/ })).not.toBeInTheDocument()
+    await user.click(within(panel()).getByRole('button', { name: /^Retry/ }))
+    expect(onRetry).toHaveBeenCalledOnce()
+  })
+
+  it('says when the record could not be loaded at all, with Retry', async () => {
+    const user = userEvent.setup()
+    const onRetry = vi.fn()
+    render(<Workspace initial={plan()} sizing={null} sizingStatus="failed" onRetry={onRetry} />)
+    expect(within(panel()).getByText(/The sizing record could not be loaded/)).toBeInTheDocument()
+    expect(field('Whole-position margin (quote units)')).not.toHaveAttribute('data-suggested')
+    await user.click(within(panel()).getByRole('button', { name: /^Retry/ }))
+    expect(onRetry).toHaveBeenCalledOnce()
   })
 })

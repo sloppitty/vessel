@@ -7,7 +7,8 @@ import { EntryForm } from './EntryForm'
 import { formatDraggedPrice, leverageOf, percentLevels } from './levels'
 import { AvailableBudget } from './WorkspacePanels'
 import {
-  convertSize, defaultSizeUnits, estimatedLiquidation, formatMoney, formatQuantity, formatRewardToRisk, marginOverBudget, positionSize, rewardToRisk, sizeForBudget, type SizeUnits,
+  convertSize, defaultSizeUnits, estimatedLiquidation, formatMoney, formatQuantity, formatRewardToRisk, marginOverBudget, overBudgetMessage, positionSize, rewardToRisk,
+  sizeForBudget, type AvailableBalance, type SizeUnits,
 } from './sizing'
 import { Equal, Expand, Plus, Trash2 } from 'lucide-react'
 import { NativeSelect } from '@/components/ui/native-select'
@@ -45,8 +46,8 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
   instrumentName?: string
   /** Quote asset and contract for the size readout. */
   units?: SizeUnits
-  /** What the account has available, used as the budget unless a manual one is set. */
-  availableBudget?: string | null
+  /** The account's available balance and its source, used as the budget unless a manual one is set. */
+  availableBudget?: AvailableBalance | null
   /** Holds the margin to the budget. Off once orders may rest, since the venue then counts their margin as used. */
   checkBudget?: boolean
   /** Fields with a waiting suggestion; null marks none (read-only plays, or the record did not load). */
@@ -113,7 +114,8 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
   const sized = positionSize(draft, leverage)
   const liquidation = estimatedLiquidation(draft.entries, draft.direction, leverage, maxLeverage, maintenanceMargin)
   const overBudget = checkBudget ? marginOverBudget(draft, leverage, availableBudget) : null
-  const budgetSize = overBudget ? sizeForBudget(draft, leverage, overBudget.budget.value, units) : null
+  // A zero (or negative) budget has no size to offer.
+  const budgetSize = overBudget && overBudget.budget.amount > 0 ? sizeForBudget(draft, leverage, overBudget.budget.value, units) : null
   // One entry takes the whole position, so its share and the split are fixed.
   const single = draft.entries.length === 1
 
@@ -169,7 +171,7 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
               Liq. ≈ <strong>{formatDraggedPrice(liquidation)}</strong></span>}
           </p> : null}
           {overBudget && <p id={`${prefix}-over-budget`} className="size-over-budget" role="alert">
-            <span>Margin {formatMoney(overBudget.margin, units)} is above the {formatMoney(overBudget.budget.amount, units)} {overBudget.budget.source === 'manual' ? 'budget' : 'available'}.</span>
+            <span>{overBudgetMessage(overBudget, units)}</span>
             {budgetSize !== null && <Button type="button" variant="outline" size="sm" onClick={() => onChange({ ...draft, size: budgetSize })}>
               Use {draft.sizingMode === 'margin' ? formatMoney(overBudget.budget.amount, units) : formatQuantity(Number(budgetSize), units)}</Button>}
           </p>}

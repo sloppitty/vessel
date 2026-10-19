@@ -8,13 +8,13 @@ import { pickInstrument } from '@/test/instrument'
 import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api/workspace'
 import type { PlayExecution, PlayFields, PlayHistory, PlayListQuery, PlayStatus, PlaySummary, SavedEvidence, SavedPlay, StatusRequest } from '@/api/plays'
 import { ApiError } from '@/api/errors'
-import { accountFixture, idleMarketStream, instrumentCatalogFixture, playCountsFrom, playsFrom, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
+import { accountFixture, idleMarketStream, instrumentCatalogFixture, playCountsFrom, playsFrom, portfolioFixture, savedPlayFixture, sizingFixture } from '@/test/workspace-fixture'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { PlaysPage } from './PlaysPage'
 import { createDraft } from './draft'
 import { createEvidence } from './evidence'
 import type { ImageMarkup } from '@/api/markup'
-import { createPlaysSession, describePlanChanges, planFromDraft, syncEvidence, type PlaysSession } from './saved'
+import { createPlaysSession, describePlanChanges, draftFromSaved, planFromDraft, savedState, syncEvidence, type PlaysSession } from './saved'
 import { accountPicker, chooseInPicker } from '@/test/account-picker'
 
 const ids = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
@@ -611,5 +611,54 @@ describe('saved play helpers', () => {
     expect(failed.error).toBeInstanceOf(ApiError)
     expect(failed.pendingDeletes).toEqual([ids(1)])
     expect(failed.evidence[0]!.serverId).toBeUndefined()
+  })
+})
+
+// Phase 0, 0.1 sizing truth: wiring between the page, the execution and the workspace.
+describe('sizing truth on the page', () => {
+  const venue: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}`, balanceUsd: '10000' }
+  const venueApi = (server: ReturnType<typeof fakeServer>, overrides: Partial<WorkspaceApi> = {}) => client(server, {
+    instruments: () => Promise.resolve(instrumentCatalogFixture), candles: () => new Promise(() => {}), marketContext: () => new Promise(() => {}),
+    sizing: vi.fn().mockResolvedValue(sizingFixture), ...overrides })
+
+  it('blocks a save above the reported available margin in the quote unit of the instrument (F-16)', async () => {
+    const server = fakeServer()
+    const user = userEvent.setup()
+    render(<Page api={venueApi(server)} accounts={[{ ...venue, availableBalanceUsd: '100', availableBalanceSource: 'margin' }]} />)
+    await user.click(await screen.findByRole('button', { name: 'New play' }))
+    await chooseInPicker('Account', venue.name, user)
+    await pickInstrument(user, 'BTC')
+    await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
+    await user.type(screen.getByRole('spinbutton', { name: 'Whole-position margin (USDC)' }), '500')
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    expect(server.api.createPlay).not.toHaveBeenCalled()
+    expect(within(screen.getByRole('region', { name: 'Notifications' })).getByRole('alert'))
+      .toHaveTextContent('Fix the plan first. Margin 500 USDC is above the 100 USDC budget (reported margin).')
+  })
+
+  it('offers no size or leverage once an entry has a linked fill, and level suggestions only for the unfilled entry (R3b)', async () => {
+    const server = fakeServer()
+    const exit = (id: string, value: string) => ({ id, unit: 'price' as const, value, share: '100' })
+    const open: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, status: 'open', planRevision: 1, venueId: 'hyperliquid',
+      instrument: 'BTC', instrumentSource: 'venue', plannedAtUtc: '2026-10-03T10:00:00.000Z' },
+      plan: { ...savedPlayFixture.plan, size: '100', entries: [
+        { id: 'entry-1', name: 'Entry 1', color: '#b9c9e4', share: '50', price: '100', stops: [exit('stop-1', '80')], targets: [exit('target-1', '105')] },
+        { id: 'entry-2', name: 'Entry 2', color: '#e4c9b9', share: '50', price: '90', stops: [exit('stop-2', '70')], targets: [exit('target-2', '95')] },
+      ] } }
+    server.plays.set(open.summary.id, open)
+    const playExecution = vi.fn(() => Promise.resolve({ ...server.execution(open), entries: [
+      { entryId: 'entry-1', filledQuantity: '1', averageFillPrice: '100', restingOrders: 0 },
+      { entryId: 'entry-2', filledQuantity: '0', averageFillPrice: null, restingOrders: 1 },
+    ] }))
+    const draft = draftFromSaved(open, [])
+    const user = userEvent.setup()
+    render(<Page api={venueApi(server, { playExecution })} accounts={[venue]} initial={{ view: 'editor', draft, saved: savedState(open, draft) }} />)
+    await waitFor(() => expect(playExecution).toHaveBeenCalled())
+    await user.click(within(await screen.findByTestId('suggestions-panel')).getByRole('button', { name: /^Suggestions/ }))
+    await waitFor(() => expect(screen.getAllByTestId('max-stop-suggestion').map(row => row.querySelector('.suggestion-row-title')?.textContent))
+      .toEqual(['Entry 2 · stop']))
+    expect(screen.queryByTestId('size-suggestion')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('leverage-suggestion')).not.toBeInTheDocument()
+    expect(screen.getByRole('spinbutton', { name: 'Whole-position margin (USDC)' })).not.toHaveAttribute('data-suggested')
   })
 })

@@ -16,7 +16,7 @@ import { JournalStateContext, useJournalStore } from './journal-state'
 import { PositionRiskSummary } from './PositionRiskSummary'
 import type { RiskReference } from './position-risk-summary'
 import { averageEntryPrice, formatDraggedPrice, leverageOf } from './levels'
-import { defaultSizeUnits, formatMoney, formatQuantity, positionSize, type SizeUnits } from './sizing'
+import { budgetSourceLabel, defaultSizeUnits, formatMoney, formatQuantity, playBudget, positionSize, type AvailableBalance, type SizeUnits } from './sizing'
 import './plays-workspace.css'
 import { NativeSelect } from '@/components/ui/native-select'
 
@@ -25,23 +25,21 @@ const displayMoney = (value: string | null | undefined) => value == null ? 'Unav
 const isPlaceholder = (value: string) => ['Unavailable', 'Not calculated', 'Not chosen', 'Not set', 'Needs a size', 'Needs an entry price'].includes(value)
 
 /**
- * The play's budget: a manual amount when set, otherwise what the account has available. Without
- * either, only a "Set budget" action shows.
+ * The play's budget: a manual amount when set, otherwise the account's available balance, named by
+ * its source (wallet, reported margin or reported withdrawal). A known zero is a budget of zero; only
+ * without either does a "Set budget" action show.
  */
 export function AvailableBudget({ draft, onChange, available = null }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
-  /** The account's available wallet amount in nominal USD, or null when unknown. */
-  available?: string | null
+  /** The account's normalized available balance in nominal USD and its source, or null when unknown. */
+  available?: AvailableBalance | null
 }) {
   const [editing, setEditing] = useState(false)
   const [budget, setBudget] = useState('')
   const [error, setError] = useState('')
   const id = useId()
-  const manual = draft.budgetOverride
-  // An empty wallet is not a budget; the owner sets one instead.
-  const usable = available != null && Number(available) > 0 ? available : null
-  const value = manual ?? usable
+  const current = playBudget(draft, available)
 
   function saveBudget(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -54,11 +52,11 @@ export function AvailableBudget({ draft, onChange, available = null }: {
     setEditing(false)
     setError('')
   }
-  const edit = () => { setBudget(manual ?? ''); setError(''); setEditing(true) }
+  const edit = () => { setBudget(draft.budgetOverride ?? ''); setError(''); setEditing(true) }
 
   if (editing) return <form className="available-budget available-budget-editing" onSubmit={saveBudget} noValidate>
     <label htmlFor={`${id}-budget`}>Budget <small>$</small></label>
-    <Input id={`${id}-budget`} inputMode="decimal" autoFocus value={budget} maxLength={100} placeholder={usable ?? '0'}
+    <Input id={`${id}-budget`} inputMode="decimal" autoFocus value={budget} maxLength={100} placeholder={available?.value ?? '0'}
       aria-invalid={!!error} aria-describedby={error ? `${id}-budget-error` : undefined}
       onChange={(event) => { setBudget(event.target.value); setError('') }} />
     {error && <p id={`${id}-budget-error`} className="error" role="alert">{error}</p>}
@@ -68,17 +66,19 @@ export function AvailableBudget({ draft, onChange, available = null }: {
     </div>
   </form>
 
-  if (value == null) return <div className="available-budget available-budget-empty">
+  if (current === null) return <div className="available-budget available-budget-empty">
     <Button type="button" variant="ghost" size="sm" className="set-budget" onClick={edit}><Plus size={13} aria-hidden="true" />Set budget</Button>
   </div>
 
+  const source = budgetSourceLabel(current)
   return <div className="available-budget" role="group" aria-label="Budget">
     <span className="budget-label">Budget</span>
-    <strong title={value}>{displayMoney(value)}</strong>
-    <small>{manual != null ? 'manual' : 'available'}</small>
+    <strong title={current.value}>{displayMoney(current.value)}</strong>
+    <small title={current.source === 'manual' ? 'Set for this play' : 'The account\'s available balance, as the server reports it'}>{source}</small>
     <Button type="button" variant="ghost" size="icon-sm" aria-label="Edit budget" title="Set a budget for this play" onClick={edit}><Pencil aria-hidden="true" size={13} /></Button>
-    {manual != null && usable != null && <Button type="button" variant="ghost" size="icon-sm" aria-label="Use the available amount"
-      title="Use the available amount" onClick={() => onChange({ ...draft, budgetOverride: null })}><RotateCcw aria-hidden="true" size={13} /></Button>}
+    {current.source === 'manual' && available !== null && <Button type="button" variant="ghost" size="icon-sm" aria-label="Use the available amount"
+      title={`Use the available amount${available.source ? ` (${budgetSourceLabel({ source: available.source })})` : ''}`}
+      onClick={() => onChange({ ...draft, budgetOverride: null })}><RotateCcw aria-hidden="true" size={13} /></Button>}
   </div>
 }
 
@@ -102,6 +102,8 @@ export function CapitalContext({ accounts, portfolios, draft, retrospective = fa
   // Shares of the balance treat the quote asset as USD, like the nominal account values.
   const share = (value: number | null) => value === null || !balanceValue ? '—' : `${(value / balanceValue * 100).toFixed(1)}%`
   const coverage = portfolio?.balanceCoverage ?? portfolio?.valueCoverage
+  // Each ratio names the balance it divides by: the portfolio's, or an unassigned account's own.
+  const reference = portfolio ? `${portfolio.name} balance` : account ? `${account.name} balance` : 'balance'
   const metric = (label: string, value: string | null | undefined, title?: string) =>
     <div title={title}><dt>{label}</dt><dd data-placeholder={value == null}>{displayMoney(value)}</dd></div>
   return <section className="panel capital-context" aria-label="Capital context" data-testid="capital-context">
@@ -115,8 +117,8 @@ export function CapitalContext({ accounts, portfolios, draft, retrospective = fa
         {wallet && metric('Available', account.availableStablecoinNominalUsd, 'Wallet total minus amounts held by open orders.')}
         {wallet && !unified && metric('Perps equity', account.accountValueUsd, 'Perpetual account value at the venue.')}
         {!wallet && account && metric('Account value', account.accountValueUsd)}
-        {!retrospective && <><div title="Committed margin as a share of the balance"><dt>Margin / balance</dt><dd data-placeholder={share(sized.margin) === '—'}>{share(sized.margin)}</dd></div>
-          <div title="Position size (notional) as a share of the balance"><dt>Exposure / balance</dt><dd data-placeholder={share(sized.notional) === '—'}>{share(sized.notional)}</dd></div></>}
+        {!retrospective && <><div title={`Committed margin as a share of the ${reference}`}><dt>Margin / {reference}</dt><dd data-placeholder={share(sized.margin) === '—'}>{share(sized.margin)}</dd></div>
+          <div title={`Position size (notional) as a share of the ${reference}`}><dt>Exposure / {reference}</dt><dd data-placeholder={share(sized.notional) === '—'}>{share(sized.notional)}</dd></div></>}
       </dl>
     </div>
   </section>

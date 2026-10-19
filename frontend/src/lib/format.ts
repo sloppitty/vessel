@@ -47,6 +47,9 @@ export function shortSource(value: string | null | undefined): string | null {
   return value.length > 16 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value
 }
 /** The account state shown in rows and detail. */
+/** Where an account's normalized available balance comes from, in the words account pages use. */
+export const availableSourceLabels = { wallet: 'wallet', margin: 'reported margin', withdrawable: 'reported withdrawal' } as const
+
 export const accountStatus = (account: BrokerAccount) => account.isEnabled === false ? 'Disabled' : account.syncStatus === 'manual' ? 'Manual' :
   account.syncStatus === 'synced' ? 'Read-only' : account.syncStatus === 'error' ? 'Refresh failed' : 'Not refreshed'
 

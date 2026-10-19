@@ -3,7 +3,7 @@ import type { SizingDocument } from '@/api/sizing'
 import { sizingFixture } from '@/test/workspace-fixture'
 import { createEntry, createExit, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
 import { rewardToRisk, type SizeUnits } from './sizing'
-import { lossPerUnit, riskSize, roundPrice, suggestLeverage, suggestMaxStop, suggestMinTarget, suggestSize } from './suggestions'
+import { lossPerUnit, planSuggestions, riskSize, roundPrice, suggestLeverage, suggestMaxStop, suggestMinTarget, suggestSize, suggestionCount } from './suggestions'
 
 type Level = [value: string, share?: string, unit?: DraftExit['unit']]
 const level = ([value, share = '100', unit = 'price']: Level): DraftExit => ({ ...createExit(share), value, unit })
@@ -229,5 +229,89 @@ describe('price rounding', () => {
   it('keeps suggested stops on the tick and within the limit', () => {
     const stop = suggestMaxStop(entry('100', '100', [['90']]), level(['90']), 'long', 1, 3.33, 0.5)
     expect(stop).toMatchObject({ value: '97', price: 97 })
+  })
+})
+
+// Phase 0, 0.1 (D-04): the review probe `verify-sol-frontend/f1f2.mjs` F2 and its variants.
+describe('stop coverage gate', () => {
+  const inputs = (entries: DraftEntry[]) => ({
+    draft: { ...draft(entries, { sizingMode: 'quantity', size: '1' }), leverage: '5' }, leverage: 5, maxLeverage: 50,
+    sizing: sizing(), units: units(5), balance: 10_000, budget: 100_000,
+  })
+  const stopEntry = (stops: Level[], share = '100', price = '100') => entry(price, share, stops, [['120']])
+
+  it.each([
+    ['one stop of two is blank', [stopEntry([['95', '50'], ['', '50']])]],
+    ['the only stop closes half the entry', [stopEntry([['95', '50']])]],
+    ['half the position has no entry price', [stopEntry([['95']], '50'), stopEntry([['90']], '50', '')]],
+  ])('offers no size or size-driven leverage while %s', (_case, entries) => {
+    const plan = planSuggestions(inputs(entries))
+    expect(riskSize(inputs(entries).draft, 5, 10_000, sizing(), units(5))).toBeNull()
+    expect(plan.size).toBeNull()
+    expect(plan.lossPerUnit).toBeNull()
+    expect(plan.leverage).toBeNull()
+    expect(plan.stopCoverage).toMatch(/^50% of the position has no (priced stop|entry price)$/)
+    expect(suggestionCount(plan)).toBe(0)
+  })
+
+  it('still sizes a plan whose stops cover the whole position (control: stops at 95 and 90)', () => {
+    const plan = planSuggestions(inputs([stopEntry([['95', '50'], ['90', '50']])]))
+    // 125 at risk over a 7.5 average distance: 16.66666 units at five decimals.
+    expect(plan.size?.value).toBe('16.66666')
+    expect(plan.stopCoverage).toBeNull()
+  })
+
+  it('names stops on the wrong side and incomplete entry shares', () => {
+    expect(planSuggestions(inputs([stopEntry([['105']])])).stopCoverage).toBe('A stop sits on the wrong side of its entry')
+    expect(planSuggestions(inputs([stopEntry([['95']], '60')])).stopCoverage).toBe('Entry shares total 60%, not 100%')
+  })
+
+  it('keeps only a liquidation leverage line, against the priced stops', () => {
+    // A long at 120.5 with one priced stop at 114 for half the entry, at 20× on a 20× contract: the estimate sits inside it.
+    const partial = { ...inputs([entry('120.5', '100', [['114', '50'], ['', '50']])]), leverage: 20, maxLeverage: 20 }
+    partial.draft = { ...partial.draft, leverage: '20' }
+    expect(planSuggestions(partial).leverage).toEqual({ leverage: 12, reason: 'liquidation' })
+    // Without the gate the entered quantity's margin would be held to a tiny budget instead.
+    expect(planSuggestions({ ...partial, budget: 1 }).leverage).toEqual({ leverage: 12, reason: 'liquidation' })
+  })
+})
+
+// Phase 0, 0.1 (D-11): the review probe `round3-dotnet/R3b.cs`.
+describe('after a fill', () => {
+  const entries = [{ ...entry('100', '50', [['80']], [['105']]), id: 'entry-1', name: 'Entry 1' },
+    { ...entry('90', '50', [['70']], [['95']]), id: 'entry-2', name: 'Entry 2' }]
+  const inputs = (filledEntries?: ReadonlySet<string> | 'all') => ({
+    // Without a venue maximum the liquidation is unknown, so the 100 budget decides the leverage (6×).
+    draft: { ...draft(entries), leverage: '5' }, leverage: 5, maxLeverage: null, sizing: sizing(), units: units(5), balance: 10_000,
+    budget: 100, ...(filledEntries ? { filledEntries } : {}),
+  })
+
+  it('suggests size, leverage, stops and targets before any fill', () => {
+    const plan = planSuggestions(inputs())
+    expect(plan.size).not.toBeNull()
+    expect(plan.leverage).not.toBeNull()
+    expect(plan.stops.map(stop => stop.entryName)).toEqual(['Entry 1', 'Entry 2'])
+    expect(plan.filled).toBe(false)
+  })
+
+  it('hides size and leverage once an entry has filled and keeps level suggestions only for unfilled entries', () => {
+    const plan = planSuggestions(inputs(new Set(['entry-1'])))
+    expect(plan.size).toBeNull()
+    expect(plan.leverage).toBeNull()
+    expect(plan.filled).toBe(true)
+    expect(plan.stops.map(stop => stop.entryName)).toEqual(['Entry 2'])
+    expect(plan.targets.map(target => target.entryName)).toEqual(['Entry 2'])
+    const unknown = planSuggestions(inputs('all'))
+    expect([unknown.size, unknown.leverage, unknown.stops.length, unknown.targets.length]).toEqual([null, null, 0, 0])
+  })
+})
+
+// Phase 0, 0.1 (D-07): a known zero budget never asks for more leverage to fit it.
+describe('zero budget', () => {
+  it('reports the size above a zero budget without a leverage to fit it', () => {
+    const plan = planSuggestions({ draft: { ...draft(twoEntries()), leverage: '2' }, leverage: 2, maxLeverage: 50, sizing: sizing(),
+      units: units(5), balance: 13_000, budget: 0 })
+    expect(plan.size).toMatchObject({ value: '1200', overBudget: 0 })
+    expect(plan.leverage).toBeNull()
   })
 })

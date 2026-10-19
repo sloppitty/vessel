@@ -1,6 +1,7 @@
 import type { PlayDraft } from './draft'
 import { exitsOf, type ExitKind } from './levels'
-import { finitePlanNumber as decimal } from './numbers'
+import { finitePlanNumber as decimal, planShare, positivePlanNumber } from './numbers'
+import { wrongSide } from './planChecks'
 import { defaultSizeUnits, exitEstimate, positionSize, type SizeUnits } from './sizing'
 
 /** The caller supplies a named reference in the position's quote asset. No conversion is inferred. */
@@ -71,7 +72,10 @@ function allocation(values: string[]): RiskCoverage {
  * No fees, slippage, funding or execution claims. Zero-share entries/exits contribute nothing.
  * Unlike per-entry R:R, missing exit shares/prices are never normalized or equally distributed.
  */
-export function positionRiskSummary(draft: PlayDraft, units: SizeUnits = defaultSizeUnits,
+/** The parts of a draft the summary reads. */
+export type SummaryDraft = Pick<PlayDraft, 'entries' | 'direction' | 'size' | 'sizingMode' | 'leverage'>
+
+export function positionRiskSummary(draft: SummaryDraft, units: SizeUnits = defaultSizeUnits,
   riskReference?: RiskReference | null): PositionRisk {
   const entryAllocation = allocation(draft.entries.map(entry => entry.share))
   const priced = draft.entries.flatMap(entry => {
@@ -153,4 +157,32 @@ export function positionRiskSummary(draft: PlayDraft, units: SizeUnits = default
   const riskSharePercent = reference !== null && stops.totalAmount !== null
     ? finite(stops.totalAmount / reference.amount * 100) : null
   return { quantity, entryAllocation, pricedCoverage, pricedQuantity, stops, targets, rewardToRisk, reference, riskSharePercent }
+}
+
+const gapPercent = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 })
+
+/**
+ * What keeps the planned stops from covering the whole position, by the summary's coverage rule:
+ * entry shares total 100%, every entry with a share is priced, each entry's stop shares total 100%,
+ * and every stop with a share is priced on the loss side at a whole leverage. Null when coverage is
+ * complete, which sizing by risk requires: otherwise part of the position has no bounded loss.
+ * The size does not matter to coverage.
+ */
+export function stopCoverageGap(draft: Pick<PlayDraft, 'entries' | 'direction' | 'leverage'>): string | null {
+  const summary = positionRiskSummary({ ...draft, size: '', sizingMode: 'quantity' })
+  const coverage = summary.stops.coverage
+  if (coverage.status === 'complete') return null
+  if (coverage.status === 'invalid' || summary.entryAllocation.status === 'invalid') return 'Entry or stop shares are not valid or exceed 100%'
+  const lever = decimal(draft.leverage)
+  if (lever === null || !Number.isInteger(lever) || lever < 1) return 'The leverage is not a whole number'
+  const entries = summary.entryAllocation
+  if (entries.status !== 'complete') return entries.percent === null ? 'Entry shares are missing' : `Entry shares total ${gapPercent.format(entries.percent)}%, not 100%`
+  const priced = summary.pricedCoverage
+  if (priced.status !== 'complete' && priced.percent !== null) return `${gapPercent.format(100 - priced.percent)}% of the position has no entry price`
+  const wrong = draft.entries.some(entry => {
+    const price = positivePlanNumber(entry.price)
+    return planShare(entry.share) !== 0 && entry.stops.some(stop => planShare(stop.share) !== 0 && wrongSide(price, stop, 'stop', draft.direction))
+  })
+  if (wrong) return 'A stop sits on the wrong side of its entry'
+  return coverage.percent === null ? 'The stop coverage is unknown' : `${gapPercent.format(Math.max(0, 100 - coverage.percent))}% of the position has no priced stop`
 }

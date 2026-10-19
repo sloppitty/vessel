@@ -448,11 +448,11 @@ describe('local-draft position editor', () => {
     function Harness() {
       const [draft, setDraft] = useState(() => ({ ...createDraft(), size: '263' }))
       return <PositionEditor draft={draft} onChange={next => { onChange(next); setDraft(next) }} selectedId={draft.entries[0]!.id} onSelect={() => {}}
-        availableBudget="151.77" units={{ quote: 'USDC', base: 'SOL', quantityDecimals: 2 }} />
+        availableBudget={{ value: '151.77', source: 'wallet' }} units={{ quote: 'USDC', base: 'SOL', quantityDecimals: 2 }} />
     }
     const user = userEvent.setup()
     render(<Harness />)
-    expect(screen.getByRole('alert')).toHaveTextContent('Margin 263 USDC is above the 151.77 USDC available.')
+    expect(screen.getByRole('alert')).toHaveTextContent('Margin 263 USDC is above the 151.77 USDC budget (wallet).')
     expect(screen.getByRole('spinbutton', { name: /Whole-position margin/ })).toHaveAttribute('aria-invalid', 'true')
     await user.click(screen.getByRole('button', { name: 'Use 151.77 USDC' }))
     expect(onChange.mock.lastCall?.[0].size).toBe('151.77')

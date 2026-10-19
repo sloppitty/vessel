@@ -9,6 +9,7 @@ import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { AvailableBudget, CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
 import { journalReviewVisible } from './journal'
 import { createDraft, type PlayDraft } from './draft'
+import type { AvailableBalance } from './sizing'
 
 function BudgetHarness({ initial = createDraft(), accounts = [], portfolios = [], onChange = vi.fn() }: {
   initial?: PlayDraft
@@ -69,8 +70,18 @@ describe('Capital context', () => {
     const draft = { ...createDraft(), accountId: accountFixture.id, size: '500', leverage: '4' }
     draft.entries[0]!.price = '100'
     render(<BudgetHarness initial={draft} accounts={[accountFixture]} portfolios={[portfolio]} />)
-    expect(metric('Margin / balance')).toHaveTextContent('5.0%')
-    expect(metric('Exposure / balance')).toHaveTextContent('20.0%')
+    // Phase 0, 0.1 (D-12): each ratio names the balance it divides by.
+    expect(metric('Margin / Swing trading balance')).toHaveTextContent('5.0%')
+    expect(metric('Exposure / Swing trading balance')).toHaveTextContent('20.0%')
+  })
+
+  it('names an unassigned account in its ratios, since its own balance is the reference', () => {
+    const account = { ...accountFixture, portfolioId: null, balanceUsd: '1000' }
+    const draft = { ...createDraft(), accountId: account.id, size: '50', leverage: '2' }
+    draft.entries[0]!.price = '100'
+    render(<BudgetHarness initial={draft} accounts={[account]} portfolios={[portfolioFixture]} />)
+    expect(metric('Margin / Main account balance')).toHaveTextContent('5.0%')
+    expect(metric('Exposure / Main account balance')).toHaveTextContent('10.0%')
   })
 
   it('keeps a reported zero distinct from missing values and does not create a default portfolio', () => {
@@ -90,7 +101,7 @@ describe('Capital context', () => {
 })
 
 describe('Budget', () => {
-  function Budget({ initial = createDraft(), available = null as string | null, onChange = vi.fn() }) {
+  function Budget({ initial = createDraft(), available = null as AvailableBalance | null, onChange = vi.fn() }) {
     const [draft, setDraft] = useState(initial)
     return <AvailableBudget key={draft.accountId} draft={draft} available={available} onChange={next => { setDraft(next); onChange(next) }} />
   }
@@ -98,8 +109,8 @@ describe('Budget', () => {
 
   it('uses the available amount until a manual budget is set, and can go back to it', async () => {
     const onChange = vi.fn()
-    render(<Budget available="151.77" onChange={onChange} />)
-    expect(budget()).toHaveTextContent('Budget$151.77available')
+    render(<Budget available={{ value: '151.77', source: 'wallet' }} onChange={onChange} />)
+    expect(budget()).toHaveTextContent('Budget$151.77wallet')
     await userEvent.click(screen.getByRole('button', { name: 'Edit budget' }))
     const input = screen.getByRole('textbox', { name: 'Budget $' })
     expect(input).toHaveAttribute('placeholder', '151.77')
@@ -110,12 +121,21 @@ describe('Budget', () => {
     expect(budget()).toHaveTextContent('$9,007,199,254,740,990.99manual')
     await userEvent.click(screen.getByRole('button', { name: 'Use the available amount' }))
     expect(onChange.mock.lastCall![0].budgetOverride).toBeNull()
-    expect(budget()).toHaveTextContent('$151.77available')
+    expect(budget()).toHaveTextContent('$151.77wallet')
   })
 
-  it('treats an empty wallet as no available budget', () => {
-    render(<Budget available="0" />)
-    expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
+  // Phase 0, 0.1 (D-07, decision 6): only null is unknown, and the budget names where it comes from.
+  it('keeps a known zero available balance as a zero budget', () => {
+    render(<Budget available={{ value: '0', source: 'wallet' }} />)
+    expect(budget()).toHaveTextContent('Budget$0.00wallet')
+    expect(screen.queryByRole('button', { name: 'Set budget' })).toBeNull()
+  })
+
+  it.each([
+    ['margin', 'reported margin'], ['withdrawable', 'reported withdrawal'], ['wallet', 'wallet'],
+  ] as const)('names a %s budget source', (source, label) => {
+    render(<Budget available={{ value: '25', source }} />)
+    expect(budget()).toHaveTextContent(`Budget$25.00${label}`)
   })
 
   it('offers only a set action without an available amount, and accepts an explicit zero', async () => {

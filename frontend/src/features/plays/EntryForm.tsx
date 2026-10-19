@@ -139,7 +139,7 @@ export function EntryForm({ entry, onChange, idPrefix, direction = 'long', lever
         onChange={event => onChange({ ...entry, price: event.target.value })} />
     </label>
     {own !== null && entryPrice !== null && <p className="entry-liquidation" data-testid="entry-liquidation"
-      title={`Estimated for isolated margin at ${leverage}×${shareLocked ? '' : ' if only this entry fills'}; ignores fees, funding and margin tiers. Cross margin liquidates further away.`}>
+      title={`Estimated for isolated margin at ${leverage}×${shareLocked ? '' : ' if only this entry fills'}; ignores fees, funding and margin tiers. Cross margin depends on shared collateral and other positions; it is not always safer.`}>
       Liq. ≈ <strong>{formatDraggedPrice(own)}</strong>
       {' '}<span>{percent.format(Math.abs(own - entryPrice) / entryPrice * 100)}% {direction === 'long' ? 'below' : 'above'} entry{shareLocked ? '' : ' · this entry alone'}</span>
     </p>}

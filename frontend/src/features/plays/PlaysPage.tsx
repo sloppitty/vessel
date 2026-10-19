@@ -23,7 +23,7 @@ import { useMonitorRun } from '@/features/monitor/useMonitorRun'
 import { usePlayExecution } from './usePlayExecution'
 import { useSizing } from './useSizing'
 import { planIssues, planIssueSummary } from './planChecks'
-import { formatMoney, marginOverBudget } from './sizing'
+import { availableOf, defaultSizeUnits, marginOverBudget, overBudgetMessage, type SizeUnits } from './sizing'
 import { leverageOf } from './levels'
 import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
 import { initialPlaysList, playSearchDelay, playViewTabs, type PlaysListState } from './plays-list'
@@ -187,11 +187,26 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   }, [visible, api, venueStatus, reloadGeneration, saved?.summary.id])
   // The server keeps the direction once an entry has filled: it decides which side closes the position.
   const filled = venueStatus !== undefined && !!tracking.execution?.links.some(link => link.role === 'entry' && link.fills.length > 0)
+  const status = saved?.summary.status ?? 'draft'
+  // Entries with a fill get no size, leverage, stop or target suggestions (D-11). Open means an entry has
+  // filled; until the execution says which, or for manual Plays whose ledger the editor does not read, all count.
+  const playExecution = venueStatus !== undefined ? tracking.execution : null
+  const filledEntries = useMemo<ReadonlySet<string> | 'all'>(() => {
+    const ids = new Set<string>()
+    if (!manual && playExecution) {
+      for (const entry of playExecution.entries) if (/[1-9]/.test(entry.filledQuantity)) ids.add(entry.entryId)
+      for (const link of playExecution.links) if (link.role === 'entry' && link.entryId && link.fills.length > 0) ids.add(link.entryId)
+    }
+    return ids.size === 0 && status === 'open' ? 'all' : ids
+  }, [manual, playExecution, status])
+  // The workspace knows the instrument's units; page messages such as the blocked-save reason use them.
+  const [units, setUnits] = useState<SizeUnits>(defaultSizeUnits)
+  const onUnits = useCallback((next: SizeUnits) => setUnits(current => current.quote === next.quote && current.base === next.base &&
+    current.quantityDecimals === next.quantityDecimals ? current : next), [])
   const dirty = useMemo(() => saved ? isDirty(draft, saved) : hasDraftContent(draft), [draft, saved])
   const changedPlan = useMemo(() => !!saved && planChanged(draft, saved), [draft, saved])
   const unsaved = dirty || hasManualDraft(session.manual)
   // A blocked save says why until the plan is fixed.
-  const status = saved?.summary.status ?? 'draft'
   const fixed = !planProblem(draft, status)
   useEffect(() => { if (fixed) dismiss('plan-blocked') }, [fixed, dismiss])
 
@@ -205,9 +220,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     const issues = planIssues(current.entries, current.direction)
     if (issues.length) return planIssueSummary(issues)
     const account = accounts.find(item => item.id === current.accountId)
-    const over = currentStatus === 'draft' ? marginOverBudget(current, leverageOf(current.leverage), account?.availableStablecoinNominalUsd) : null
-    const units = { quote: 'USD', base: '', quantityDecimals: null }
-    return over && `The margin (${formatMoney(over.margin, units)}) is above the ${formatMoney(over.budget.amount, units)} ${over.budget.source === 'manual' ? 'budget' : 'available'}.`
+    const over = currentStatus === 'draft' ? marginOverBudget(current, leverageOf(current.leverage), availableOf(account)) : null
+    return over && overBudgetMessage(over, units)
   }
 
   function planBlocked() {
@@ -438,7 +452,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     <PlayWorkspace accounts={accounts} portfolios={portfolios} api={api} draft={draft} onChange={next => update({ draft: next })}
       {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} revision={revision} lockInstrument={locked}
       lockDirection={status === 'open' || filled} readOnly={readOnly} retrospective={retrospective}
-      sizing={sizing.sizing} onRiskChange={sizing.updateRisk}
+      sizing={sizing.sizing} sizingStatus={sizing.status} onRetrySizing={sizing.retry} onRiskChange={sizing.updateRisk}
+      filledEntries={filledEntries} onUnits={onUnits}
       execution={manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
         enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}
         working={busy !== null}
