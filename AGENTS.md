@@ -64,6 +64,15 @@ October 18, 2026: the owner asked Activity to recover and show the leverage of o
 
 ## Project tracking
 
+October 19, 2026: the owner restricted GitHub Actions to release tags to conserve
+runner minutes. This supersedes the earlier branch/PR foundation checks and
+packaging rehearsal policy. `checks.yml` is reusable only; Release calls it once
+for a release tag, alongside both storage verifications before publishing.
+Branch pushes and PRs do not start CI. Manual Release reruns must select a
+release tag; branch dispatches skip before allocating a runner. Run local checks
+before merging. Existing branches must incorporate the updated workflow files
+to stop their older branch-triggered runs.
+
 October 16, 2026: the owner requested funding retrieval per venue, storage,
 display and operation aggregation. Follow `docs/architecture/venue-funding.md`
 and the four venue funding research notes. Funding is a signed actual settlement,
