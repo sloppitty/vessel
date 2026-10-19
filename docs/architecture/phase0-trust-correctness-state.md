@@ -55,11 +55,11 @@ October 19, 2026, branch `t3/phase0-journal-images`:
 - A backend test now covers `GET /api/evidence/{id}/content` during an S3
   outage: 503 and 500 from storage both give 503, AccessDenied gives 500 and
   NoSuchKey gives 404.
-- `scripts/check.sh` passed:
+- `scripts/check.sh` passed after the rebase onto `main` with #8 and #10,
+  with PostgreSQL 18 and RabbitMQ 4.3.6 in disposable containers:
   - Python: 78 OK.
   - Prototype tests: pass.
   - Release build: 0 warnings.
-  - Backend: 3,424 passed, 17 skipped (RabbitMQ, S3, live venue).
+  - Backend: 3,436 passed, 5 skipped (live venue and S3).
   - Frontend: typecheck and lint clean, 2,463 tests, build OK.
-- PostgreSQL tests ran on a disposable container.
 - Still to do: a rendered browser check of the placeholder card and viewer.
