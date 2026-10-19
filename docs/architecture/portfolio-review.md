@@ -201,8 +201,11 @@ it.
   position opened outside Vessel, a Play's venue result can take another
   position's entry price and even the wrong sign. The Play-local result uses
   only the Play's own linked fills: `direction sign × (Σ exit quantity × price
-  − Σ entry quantity × price) − Σ trading fees of every linked fill`, with
-  exact products and both P&L bases, so a RISEx fee is charged once. It has no
+  − Σ entry quantity × price) − Σ trading fees of every linked fill`, that is
+  sell proceeds minus buy costs for either direction (a short sold at 100 and
+  bought back at 90 gains 10), with exact products and both P&L bases, so a
+  RISEx fee is charged once. The browser describes it as "sell proceeds minus
+  buy costs, less every trading fee". It has no
   funding by construction and is never called total profit. The shared
   `PlayLocalResult` calculator in `Vessel.Application.Plays` serves Review,
   sizing and the Execution panel.
@@ -226,7 +229,10 @@ it.
   `basis` is `executions` or `manual-ledger`, `netUsd` an exact string or null
   with `reason`. The contributing-Plays table shows Net P&L with its basis
   ("Venue result" or "Manual ledger") and a Play-local column; an unknown one
-  reads "Unknown" with the reason in an InfoTip.
+  reads "Unknown" with the reason in an InfoTip. Both per-Play figures use
+  adaptive precision: a non-zero value that would round to "$0" keeps its sign
+  and leading digits (−0.00001 shows as "-$0.00001"), so only an exact zero
+  reads "$0".
 - **Sign differs by basis.** Signs compare as negative, zero and positive.
   Zero against a nonzero result counts as a difference, since scratch is
   exactly zero and the class would change. A warning pill in the row flags it;
@@ -235,9 +241,11 @@ it.
 - **Fee-only losses (I-04).** `metrics.feeOnlyLosses` counts losses whose
   venue result before trading fees is zero or better: Σ venue closed P&L plus
   the listed stablecoin fees already inside net-of-fee P&L (the Activity
-  before-fee rule). A net-of-fee fee in an unlisted token leaves that figure
-  unknown: such losses are counted in `metrics.unknownGrossLosses`, not as
-  fee-only. They still count as losses.
+  before-fee rule). The sign is decided from the exact sum
+  (`PlayOutcome.GrossResult` is an exact amount), so a before-fee result beyond
+  decimal precision still counts. A net-of-fee fee in an unlisted token leaves
+  that figure unknown: such losses are counted in `metrics.unknownGrossLosses`,
+  not as fee-only. They still count as losses.
 - **Funding.** Whether venue-reported P&L includes funding is unverified for
   every venue ([venue funding](venue-funding.md)), so a sign difference or a
   fee-only loss can reflect funding rather than the Play's own fills. The

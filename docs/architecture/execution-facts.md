@@ -71,10 +71,11 @@ Two derived results now sit beside the facts; neither changes a fact.
   Whether the venue's execution P&L includes funding is unverified
   ([venue funding](venue-funding.md)). `PlayOutcomeCalculator.VenueGross`
   is the same basis before trading fees (closed PnL plus the listed fees
-  already inside `net-of-fee` PnL; unknown for an unlisted one) and feeds the
-  fee-only-loss counts.
-- **Play-local result** (`PlayLocalResult`): the Play's own fills, exits minus
-  entries at exact quantity × price, less the fee of every linked fill whatever
+  already inside `net-of-fee` PnL; unknown for an unlisted one), kept exact,
+  and feeds the fee-only-loss counts.
+- **Play-local result** (`PlayLocalResult`): the Play's own fills, sell
+  proceeds minus buy costs (direction × (exits − entries)) at exact
+  quantity × price, less the fee of every linked fill whatever
   its `PnlBasis`, so each fee is charged once. It needs verified fees: a
   `FeeBasis`, a non-blank token, and a listed stablecoin or a zero fee. The
   totals expose it as `local` with `netUsd`, `basis`, `reason` and

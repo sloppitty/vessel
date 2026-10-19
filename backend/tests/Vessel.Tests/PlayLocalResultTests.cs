@@ -3,6 +3,7 @@ using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
 using Vessel.Domain.Workspace;
@@ -107,7 +108,7 @@ public sealed class PlayLocalResultTests
         // Charging only gross-basis fills' fees would leave 10.
         Assert.Equal(("10", "9.895"), (local.Gross.ToString(), local.Net.ToString()));
         // The venue figure before fees adds back the fees already inside net-of-fee P&L.
-        Assert.Equal(10m, Venue(facts).GrossResult);
+        Assert.Equal(ExactAmount.From(10m), Venue(facts).GrossResult);
     }
 
     [Fact]
@@ -266,10 +267,24 @@ public sealed class PlayLocalResultTests
         var cost = decimal.Parse(fee, System.Globalization.CultureInfo.InvariantCulture);
         var facts = Closed("long", (OrderLinkRole.Entry, Buy(0, 1, 100, fee: cost)), (OrderLinkRole.Target, Sell(10, 1, 100 + closed, pnl: closed, fee: cost)));
         var outcome = Venue(facts);
-        Assert.Equal(closed, outcome.GrossResult);
+        Assert.Equal(ExactAmount.From(closed), outcome.GrossResult);
         Assert.Equal(feeOnly, outcome.FeeOnlyLoss);
         // The win/loss/scratch class is unchanged (decision 8).
         Assert.Equal(closed - 2 * cost > 0 ? PlayOutcomeKind.Win : PlayOutcomeKind.Loss, outcome.Kind);
+    }
+
+    [Fact]
+    public void A_fee_only_loss_is_decided_from_the_exact_result_before_fees()
+    {
+        // Gross 8.0000000000000000000000000001 has 29 significant digits, beyond decimal; fees 9.0000000000000000000000000001
+        // leave a net of exactly -1. Narrowing the gross first made it unknown and the fee-only loss disappeared.
+        var facts = Closed("long", (OrderLinkRole.Entry, Buy(0, 2, 100, fee: 3)),
+            (OrderLinkRole.Target, Sell(10, 1, 104, pnl: 4.0000000000000000000000000001m, fee: 3)),
+            (OrderLinkRole.Target, Sell(20, 1, 104, pnl: 4, fee: 3.0000000000000000000000000001m)));
+        var outcome = Venue(facts);
+        Assert.Equal((-1m, PlayOutcomeKind.Loss), (outcome.NetResult, outcome.Kind));
+        Assert.Equal("8.0000000000000000000000000001", outcome.GrossResult.ToString());
+        Assert.True(outcome.FeeOnlyLoss);
     }
 
     [Fact]
@@ -351,6 +366,21 @@ public sealed class ResultBasisReviewTests
         var row = Assert.Single(report.Plays);
         Assert.Equal((play.Play.Id, "-5", new PlayLocalResultDto("5", PlayLocalResult.Executions, null, true)), (row.Id, row.Net, row.Local));
         Assert.Equal((1, 0, 1, 1, 0), (report.Metrics.Count, report.Metrics.Wins, report.Metrics.Losses, report.Metrics.SignDiffers, report.Metrics.FeeOnlyLosses));
+    }
+
+    [Fact]
+    public async Task Review_and_sizing_count_a_fee_only_loss_beyond_decimal_precision()
+    {
+        var facts = Add("long", (OrderLinkRole.Entry, "buy", 2, 100, 0, 3, "USDC", Gross),
+            (OrderLinkRole.Target, "sell", 1, 104, 4.0000000000000000000000000001m, 3, "USDC", Gross),
+            (OrderLinkRole.Target, "sell", 1, 104, 4, 3.0000000000000000000000000001m, "USDC", Gross));
+        var metrics = (await f.Service.GetAsync(new(), default)).Metrics;
+        Assert.Equal((1, 1, 0), (metrics.Losses, metrics.FeeOnlyLosses, metrics.UnknownGrossLosses));
+        var store = new MemorySizingStore();
+        store.Closed.Add(facts);
+        var record = (await new SizingService(store, new CoreOwner(f.Owner), TimeProvider.System, TestUnitOfWork.None, null, TestVenues.With())
+            .GetAsync(default)).Record;
+        Assert.Equal((1, 1, 0), (record.Losses, record.FeeOnlyLosses, record.UnknownGrossLosses));
     }
 
     [Fact]

@@ -18,13 +18,14 @@ public sealed record PlayOutcome(Guid PlayId, DateTimeOffset ClosedAtUtc, decima
     public PlayOutcomeKind Kind => NetResult switch { > 0 => PlayOutcomeKind.Win, < 0 => PlayOutcomeKind.Loss, _ => PlayOutcomeKind.Scratch };
 
     /// <summary>
-    /// The scored result before trading fees, on the same basis as <see cref="NetResult"/>; null when unknown. It never
-    /// changes win, loss or scratch.
+    /// The scored result before trading fees, on the same basis as <see cref="NetResult"/>, kept exact: a sum of
+    /// representable amounts can exceed decimal precision, and narrowing it would turn a known sign into an unknown one.
+    /// Null only when the basis leaves it unknown. It never changes win, loss or scratch.
     /// </summary>
-    public decimal? GrossResult { get; init; }
+    public ExactAmount? GrossResult { get; init; }
 
     /// <summary>A loss made by fees alone: zero or better before fees, below zero after them. Unknown gross is not one.</summary>
-    public bool FeeOnlyLoss => GrossResult >= 0 && NetResult < 0;
+    public bool FeeOnlyLoss => GrossResult is { } gross && gross.Units.Sign >= 0 && NetResult < 0;
 }
 
 /// <summary>

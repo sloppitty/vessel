@@ -127,7 +127,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
                     null, true)
                 {
                     // The operation's before-fee P&L (null when a net-of-fee fee is in an unlisted token); never excludes it.
-                    GrossResult = operation.GrossClosedPnlUsd is { } gross ? PlayOutcomeCalculator.Exact(ExactAmount.Parse(gross)) : null
+                    GrossResult = operation.GrossClosedPnlUsd is { } gross ? ExactAmount.Parse(gross) : null
                 };
                 // The record and its row read the return, so an unusable one is excluded here, like the Play calculator does.
                 var row = Row(null, $"{operation.ContractId} {(operation.Direction == "long" ? "Long" : "Short")}", operation.ContractId, outcome) with

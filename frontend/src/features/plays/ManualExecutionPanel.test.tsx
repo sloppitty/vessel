@@ -79,7 +79,7 @@ describe('manual executions', () => {
     render(<Harness api={api} initial={ledger('closed', [record]).play} />)
     const tip = await screen.findByRole('button', { name: 'About the Play-local result' })
     expect(tip.closest('dt')).toHaveTextContent(/^Net realized USD/)
-    expect(tip).toHaveAccessibleDescription(/Play-local result on the manual ledger basis/)
+    expect(tip).toHaveAccessibleDescription(/Play-local result on the manual ledger basis: sell proceeds minus buy costs/)
   })
   it('keeps failed and stale submissions intact and retries the same request identity and version', async () => {
     const { api, methods } = client()

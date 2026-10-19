@@ -70,7 +70,7 @@ public static class PlayOutcomeCalculator
         var revisions = facts.Revisions.OrderBy(r => r.Number).ToList();
         var plan = (revisions.LastOrDefault(r => r.CreatedAtUtc <= firstEntry) ?? revisions.FirstOrDefault())?.Plan ?? facts.Play.Plan;
         decimal? risk = facts.Play.Origin != PlayOrigin.Retrospective && StopDistance(facts.ParsedPlan(plan)) is { } distance ? notional * distance : null;
-        return new PlayOutcome(facts.Play.Id, closedAt, net, notional, risk, feesComplete) { GrossResult = Exact(VenueGross(fills)) };
+        return new PlayOutcome(facts.Play.Id, closedAt, net, notional, risk, feesComplete) { GrossResult = VenueGross(fills) };
     }
 
     /// <summary>
@@ -104,14 +104,6 @@ public static class PlayOutcomeCalculator
             else if (fill.Fee != 0) return null;
         }
         return sum;
-    }
-
-    /// <summary>The exact decimal of an amount, or null outside decimal range or precision; for figures that must not exclude an outcome.</summary>
-    internal static decimal? Exact(ExactAmount? value)
-    {
-        if (value is not { } amount) return null;
-        try { return ToDecimal(amount); }
-        catch (OverflowException) { return null; }
     }
 
     /// <summary>The exact decimal of a sum; outside decimal range or precision it throws <see cref="OverflowException"/>.</summary>

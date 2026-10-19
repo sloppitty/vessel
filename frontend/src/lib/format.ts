@@ -28,6 +28,16 @@ export function reviewMoney(value: string | null, signed = false): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: digits,
     minimumFractionDigits: 0, signDisplay: signed ? 'exceptZero' : 'auto' }).format(decimalString(value))
 }
+/**
+ * One Play's signed result (venue net or Play-local) in Review: compact like `reviewMoney`, but a non-zero value that would
+ * round to "$0" keeps its sign and leading digits, so it never reads as an exact scratch. Only exact zero is "$0".
+ */
+export function reviewResult(value: string | null): string {
+  if (value === null) return 'N/A'
+  const standard = Number(value) !== 0 && Math.abs(Number(value)) < 1 ? 4 : 2
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: fractionDigits(value, standard),
+    minimumFractionDigits: 0, signDisplay: 'exceptZero' }).format(decimalString(value))
+}
 export function reviewPercent(value: string | null, fraction = false): string {
   if (value === null) return 'N/A'
   const formatted = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1, minimumFractionDigits: 1,

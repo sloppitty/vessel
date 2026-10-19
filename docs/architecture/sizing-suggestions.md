@@ -159,7 +159,8 @@ The record, ladder, limits, window and win/loss/scratch rules keep scoring the
 venue result above (owner decisions 1 and 8). The record now reports how its
 window looks under the Play-local basis described in
 [Review's result bases](portfolio-review.md#result-bases-october-19-2026):
-each Play's own fills, exits minus entries, less every trading fee.
+each Play's own fills, sell proceeds minus buy costs (direction × (exits −
+entries)), less every trading fee.
 
 - **Counts.** Over the decided results of the window (the latest 20 by close
   time, chosen as the record chooses them), `record.localSignChanges` counts
@@ -167,7 +168,8 @@ each Play's own fills, exits minus entries, less every trading fee.
   from the scored venue result, and `record.localUnknown` those with no
   Play-local result. Both are null for the Activity fallback: positions are
   not Plays. `record.feeOnlyLosses` counts window losses whose scored result
-  before trading fees is zero or better (`PlayOutcome.GrossResult`: Σ venue
+  before trading fees is zero or better (`PlayOutcome.GrossResult`, exact so a
+  value beyond decimal precision keeps its sign: Σ venue
   closed P&L plus listed stablecoin fees already inside net-of-fee P&L; for the
   fallback, the operation's before-fee P&L), and `record.unknownGrossLosses`
   the losses where that figure is unknown. All four are init fields, so the

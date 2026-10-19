@@ -153,6 +153,9 @@ describe('Review result bases', () => {
     const dialog = screen.getByRole('dialog')
     expect(dialog).toHaveTextContent(/Result bases.*Play-local result.*includes funding is unverified, so a sign difference or a fee-only loss can reflect funding/)
     expect(dialog).toHaveTextContent(/Estimated R \(planned-stop model\).*plan revision at or before the first entry fill/)
+    // The formula holds for shorts too: a short sold at 100 and bought back at 90 gains 10.
+    expect(dialog).toHaveTextContent(/its own fills' sell proceeds minus buy costs, less every trading fee/)
+    expect(dialog).not.toHaveTextContent(/exits minus entries/)
   })
 
   it('shows each Play-local result beside the venue result, with the flag and unknown reasons', async () => {
@@ -174,6 +177,21 @@ describe('Review result bases', () => {
     expect(within(rows[1]!).queryByRole('button', { name: 'Sign differs by basis' })).not.toBeInTheDocument()
     expect(rows[2]).toHaveTextContent('Manual ledger')
     expect(within(rows[2]!).queryByRole('button', { name: 'Sign differs by basis' })).not.toBeInTheDocument()
+  })
+
+  it('never shows a tiny non-zero result as an exact-looking zero', async () => {
+    const tiny: ReviewDocument = { ...report, plays: [
+      { ...report.plays[0]!, net: '-0.00001', local: { netUsd: '0.00001', basis: 'executions', reason: null, signDiffers: true } },
+      { ...report.plays[2]!, net: '0', local: { netUsd: '0', basis: 'manual-ledger', reason: null, signDiffers: false } },
+    ] }
+    const { user } = setup(vi.fn().mockResolvedValue(tiny))
+    await user.click(await screen.findByRole('button', { name: `${tiny.metrics.count} Plays` }))
+    const table = await within(await screen.findByRole('dialog')).findByRole('table', { name: 'Contributing closed Plays' })
+    const [first, second] = within(table).getAllByRole('row').slice(1).map(row => within(row).getAllByRole('cell'))
+    expect(first![1]).toHaveTextContent(/^-\$0\.00001Venue result$/)
+    expect(first![2]).toHaveTextContent(/^\+\$0\.00001Sign differs by basis/)
+    expect(second![1]).toHaveTextContent(/^\$0Manual ledger$/)
+    expect(second![2]).toHaveTextContent(/^\$0$/)
   })
 
   it('omits the result-basis figures for reports from servers before them', async () => {

@@ -1,8 +1,8 @@
 import { isNonBlankText, isNullOr, isPlainDecimal, isRecord } from './guards'
 
 /**
- * The Play-local result beside the scored venue result (October 19, 2026): the play's own fills, exits minus entries,
- * less every trading fee. No funding, not total profit, never scored. A manual ledger's result is its Play-local result.
+ * The Play-local result beside the scored venue result (October 19, 2026): the play's own fills, sell proceeds minus buy
+ * costs (direction × (exits − entries)), less every trading fee. No funding, not total profit, never scored. A manual ledger's result is its Play-local result.
  */
 export interface PlayLocalResult {
   /** Exact decimal string; null when unknown. */

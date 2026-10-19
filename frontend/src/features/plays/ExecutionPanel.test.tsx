@@ -64,7 +64,7 @@ describe('execution panel', () => {
     expect(venueTip).toHaveAccessibleDescription(/retrospective plays are not in sizing/)
     expect(venueTip).not.toHaveAccessibleDescription(/score this result/)
     expect(value('Play-local result')).toHaveTextContent(/^-2\.1 USD/)
-    expect(screen.getByRole('button', { name: 'About the Play-local result' })).toHaveAccessibleDescription(/exits minus entries, less every trading fee/)
+    expect(screen.getByRole('button', { name: 'About the Play-local result' })).toHaveAccessibleDescription(/sell proceeds minus buy costs, less every trading fee/)
     expect(screen.getByRole('button', { name: 'Sign differs by basis' })).toBeInTheDocument()
 
     const reason = 'The play is not closed.'
@@ -73,6 +73,12 @@ describe('execution panel', () => {
     expect(screen.getByRole('button', { name: 'Unknown Play-local result' })).toHaveAccessibleDescription(reason)
     expect(screen.getByRole('button', { name: 'Unknown venue net' })).toHaveAccessibleDescription(/listed stablecoins/)
     expect(screen.queryByRole('button', { name: 'Sign differs by basis' })).not.toBeInTheDocument()
+
+    // Tiny results keep their exact strings: never rounded into a zero that reads as a scratch.
+    view.rerender(<ExecutionPanel execution={{ ...closed, totals: { ...closed.totals, venueNetUsd: '-0.00001',
+      local: { netUsd: '0.00001', basis: 'executions', reason: null, signDiffers: true } } }} {...props} />)
+    expect(value('Venue net')).toHaveTextContent(/^-0\.00001 USD$/)
+    expect(value('Play-local result')).toHaveTextContent(/^0\.00001 USD/)
 
     // Servers before October 19, 2026 send neither figure.
     view.rerender(<ExecutionPanel execution={execution} {...props} />)
