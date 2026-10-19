@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- Each closed Play shows a Play-local result from its own fills beside the
+  scored venue result, with basis labels and a "Sign differs by basis" flag
+  in the Execution panel and Review; Review and sizing count sign differences
+  and fee-only losses. R is labelled "Estimated R (planned-stop model)". The
+  scored basis is unchanged (D-01, F-09, I-04, I-05).
+
 ### Fixed
 
 - Sizing orders closed Plays by when they actually closed, their latest linked

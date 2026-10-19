@@ -49,7 +49,42 @@ October 19, 2026, branch `t3/phase0-exit-time-ordering`:
 
 ## 0.3 Result-basis receipt
 
-Not started.
+October 19, 2026, branch `t3/phase0-result-basis` (stacked on 0.2):
+- The scored basis stays the venue result. Classification, thresholds, the
+  ladder, the window and the scratch rule are unchanged.
+- `PlayLocalResult` computes a Play-local result from the Play's own fills:
+  - gross = sign × (Σ exit quantity × price − Σ entry quantity × price),
+    with exact products;
+  - net = gross − every linked fill's fee.
+
+  It is null with a reason unless the Play is closed and settled, the fills
+  match its account and instrument, the venue quotes in a listed nominal
+  stablecoin and every fee is verified. Manual Plays use the ledger.
+- The Execution panel and Review rows show the venue net and the Play-local
+  result with basis labels and a "Sign differs by basis" pill. Review and the
+  sizing record count sign differences, unknown Play-local results and
+  fee-only losses.
+- "Avg. realized R" becomes "Estimated R (planned-stop model)" with its
+  denominator; the column is "Est. R".
+- The copy says venue P&L may include funding, which is unverified.
+- Differences from the contract wording, raised in the pull request:
+  - the sizing sign line shows only when a count is above zero;
+  - the quote asset is read per venue, not per instrument.
+- Tests:
+  - 31 backend cases port R3 and More.cs: A local +8 and B −2 against venue
+    +3/+3, flag on B.
+  - Before the fix, the new backend tests did not compile and 5 new frontend
+    tests failed.
+- An independent review found no blocking defect; its low findings are fixed
+  in the second commit.
+- `scripts/check.sh` passed with PostgreSQL 18 and RabbitMQ 4.3.6 in
+  disposable containers:
+  - Python: 78 OK. Prototype tests pass.
+  - Release build: 0 warnings.
+  - Backend: 3,475 passed, 5 skipped (live venue and S3), 0 failed.
+  - Frontend: typecheck and lint clean, 2,480 tests, build OK.
+
+  The broker-gated contract fixture test passed.
 
 ## 0.4 Monitor truth and visibility
 
