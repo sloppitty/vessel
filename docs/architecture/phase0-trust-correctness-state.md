@@ -141,6 +141,28 @@ October 19, 2026, 0.4c coverage and evidence, branch
     `docs/product-review/verification/2026-10-19-phase0-monitor/`.
 - `scripts/monitor-browser-smoke.cjs` was not run. It needs a host browser,
   which this machine cannot start, and release CI does not run it either.
+- Three Sol (Codex, GPT-6.1-Sol) review rounds covered 0.4a–0.4c.
+  - Round 1 found:
+    - **high:** an undismissed unverifiable incident vanished from every
+      badge once its account had no active work, because the summary
+      listed accounts only by scheduling eligibility;
+    - **medium:** the new browser rejected an older server's discrepancy
+      without `lastObservedAtUtc`;
+    - **medium:** account detail said "Monitored" before the first coverage
+      row.
+  - Round 2 confirmed those fixes and found one more medium defect: 500
+    historical records could push an outstanding incident out of the
+    capped list. Incidents now sort first, and `discrepanciesTruncated` is
+    reported.
+  - Round 3 found nothing, and confirmed the restack kept both sides.
+
+  Every fix has a test that failed before it.
+- Final `scripts/check.sh` on this branch (0.4a + 0.4b + 0.4c):
+  - Backend: 3,460 passed, 5 skipped, 0 failed.
+  - Frontend: 2,509 tests, build OK.
+  - Release build: 0 warnings.
+
+  0.4a alone: 3,436 backend and 2,485 frontend tests passed.
 - Still open: 0.4d (`docs/app-status.md`, after jcarcaboso PR #66).
 
 ## 0.5 Managed stops
