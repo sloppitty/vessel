@@ -19,14 +19,17 @@ const valueOf = (a: PickerAccount) => a.value ?? a.id
 /**
  * The account selector: a button showing the selected account's venue logo and name (plus its source when another
  * account shares the name) that opens a searchable list with venue filters. `labelledBy` names an element holding the
- * field's visible label; the button's accessible name is that label followed by the current value.
+ * field's visible label; the button's accessible name is that label followed by the current value. `showVenue` adds the
+ * venue tag to the trigger; `missingLabel` names a value that matches no listed choice or account (otherwise the
+ * placeholder shows); `density="bare"` drops the border and background for dense field bars, like `NativeSelect`.
  * Keyboard: arrow keys open the list and move through it, Enter chooses, Escape closes and returns to the button.
  */
 export function AccountPicker({ labelledBy, id, value, onChange, accounts, choices = [], accountsHeading, placeholder = 'Choose an account',
-  searchLabel = 'Search accounts', disabled = false, className = '' }: {
+  missingLabel, searchLabel = 'Search accounts', showVenue = false, density, disabled = false, className = '' }: {
   labelledBy: string; id?: string | undefined; value: string; onChange: (value: string) => void
   accounts: readonly PickerAccount[]; choices?: readonly PickerChoice[]; accountsHeading?: string | undefined
-  placeholder?: string; searchLabel?: string; disabled?: boolean; className?: string
+  placeholder?: string; missingLabel?: string | undefined; searchLabel?: string; showVenue?: boolean; density?: 'bare' | undefined
+  disabled?: boolean; className?: string
 }) {
   const venues = useVenues()
   const base = useId()
@@ -49,6 +52,7 @@ export function AccountPicker({ labelledBy, id, value, onChange, accounts, choic
 
   const selectedChoice = choices.find(c => c.value === value)
   const selectedAccount = selectedChoice ? undefined : accounts.find(a => valueOf(a) === value)
+  const empty = selectedChoice || selectedAccount ? null : value && missingLabel ? missingLabel : placeholder
 
   const openWith = (next: boolean) => {
     if (next) {
@@ -86,7 +90,7 @@ export function AccountPicker({ labelledBy, id, value, onChange, accounts, choic
     // React refuses `key` inside a spread; it is passed on its own.
     const key = `${item.kind}:${item.value}`
     const common = {
-      id: optionId(index), role: 'option' as const, 'aria-selected': selected,
+      id: optionId(index), role: 'option' as const, 'aria-selected': selected, 'data-value': item.value,
       className: `account-picker-option${index === active ? ' is-active' : ''}${selected ? ' is-selected' : ''}`,
       onPointerMove: () => { if (index !== active) setActive(index) },
       // Keep focus in the search field; the click chooses.
@@ -118,15 +122,16 @@ export function AccountPicker({ labelledBy, id, value, onChange, accounts, choic
 
   return <Popover.Root open={open} onOpenChange={openWith}>
     <Popover.Trigger asChild>
-      <button type="button" id={id} data-value={value} disabled={disabled} className={`account-picker-trigger ${className}`.trim()} aria-labelledby={`${labelledBy} ${base}-value`}
+      <button type="button" id={id} data-value={value} data-density={density} disabled={disabled} className={`account-picker-trigger ${className}`.trim()} aria-labelledby={`${labelledBy} ${base}-value`}
         title={selectedAccount ? accountTitle(selectedAccount, venues.name(selectedAccount.venueId)) : undefined}
         onKeyDown={event => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); openWith(true) } }}>
         <span id={`${base}-value`} className="account-picker-value">
-          <span className="sr-only">{selectedChoice ? selectedChoice.label : selectedAccount ? accountSpoken(selectedAccount, ambiguous.has(selectedAccount.id)) : placeholder}</span>
+          <span className="sr-only">{selectedChoice ? selectedChoice.label : selectedAccount ? accountSpoken(selectedAccount, ambiguous.has(selectedAccount.id)) : empty}</span>
           {selectedChoice ? <><IdentityTile size="sm">{selectedChoice.icon}</IdentityTile><span className="account-name" aria-hidden="true">{selectedChoice.label}</span></>
             : selectedAccount ? <span className="account-picker-value-marks" aria-hidden="true"><AccountAvatar venueId={selectedAccount.venueId} size="sm" /><AccountName account={selectedAccount} />
+              {showVenue && <VenueTag venueId={selectedAccount.venueId} />}
               {ambiguous.has(selectedAccount.id) && selectedAccount.name.trim() && selectedAccount.source !== undefined && <SourceChip source={selectedAccount.source} />}</span>
-            : <span className="account-picker-placeholder" aria-hidden="true">{placeholder}</span>}
+            : <span className="account-picker-placeholder" aria-hidden="true">{empty}</span>}
         </span>
         <ChevronDown size={14} className="account-picker-chevron" aria-hidden="true" />
       </button>

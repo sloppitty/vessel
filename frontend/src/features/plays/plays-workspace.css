@@ -47,7 +47,7 @@
 .plays-page .plays-draft-fields > label,
 .plays-page .plays-draft-fields .field-label,
 .plays-page .plays-instrument-field > label,
-.plays-page .plays-field-heading > label { color: var(--muted-foreground); font-size: var(--text-2xs); font-weight: 600; letter-spacing: .07em; text-transform: uppercase; }
+.plays-page .plays-field-heading > :is(label, .plays-field-label) { color: var(--muted-foreground); font-size: var(--text-2xs); font-weight: 600; letter-spacing: .07em; text-transform: uppercase; }
 .plays-page .plays-draft-fields .field-label, .plays-page .plays-instrument-field > label { display: block; margin-bottom: 7px; }
 .plays-page .plays-draft-fields :is(input, select) { display: block; width: 100%; min-height: 28px; height: auto; padding: 5px 0; border: 0; background: transparent; box-shadow: none; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0; text-transform: none; }
 .plays-page .plays-portfolio-field :is(strong, p),
@@ -685,8 +685,7 @@
 .plays-page .plays-heading-actions .plays-venue-link { height: 32px; }
 .plays-page .plays-select-row { display: flex; align-items: center; gap: 6px; }
 .plays-page .plays-account-heading { margin-bottom: 7px; }
-.plays-page .plays-account-venue { flex-shrink: 1; color: var(--muted-foreground); font-size: var(--text-2xs); font-weight: 500; gap: 5px; }
-.plays-page .plays-select-row > .native-select { flex: 1; min-width: 0; }
+.plays-page .plays-select-row > .account-picker-trigger { flex: 1; min-width: 0; }
 .plays-page .plays-reload-accounts { display: inline-grid; flex-shrink: 0; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; color: var(--muted-foreground); background: transparent; cursor: pointer; }
 .plays-page .plays-reload-accounts:disabled { opacity: .5; cursor: default; }
 .plays-page .plays-reload-accounts:hover { color: var(--foreground); background: var(--accent); }

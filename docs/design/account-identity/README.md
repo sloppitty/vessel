@@ -85,3 +85,9 @@ on Hyperliquid and an unassigned account.
 | Activity picker searching "main" | ![](implementation/desktop-activity-picker-search.png) |
 | Activity picker, Paper (light) | ![](implementation/light-activity-picker.png) |
 | Review account filter | ![](implementation/desktop-review-picker.png) |
+| Play editor account select (`AccountSelect`), October 18 | ![](implementation/desktop-play-account-select.png) |
+| Play account select open | ![](implementation/desktop-play-account-select-open.png) |
+| Play account select searching "scalp" | ![](implementation/desktop-play-account-select-search.png) |
+| Play account select open, Paper (light) | ![](implementation/light-play-account-select-open.png) |
+| Play account select open, 390px | ![](implementation/mobile-play-account-select-open.png) |
+| Account select states: chosen, empty, unavailable, no accounts | ![](implementation/account-select-states.png) |

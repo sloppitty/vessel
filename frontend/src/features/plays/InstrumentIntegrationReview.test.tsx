@@ -7,8 +7,9 @@ import { createWorkspaceApi, type BrokerAccount } from '@/api/workspace'
 import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { createDraft } from './draft'
 import { PlayWorkspace } from './PlayWorkspace'
+import { accountPicker, chooseInPicker } from '@/test/account-picker'
 
-it('does not restore an obsolete portfolio filter when clearing an account after its portfolio changes', async () => {
+it('does not restore an obsolete portfolio filter when changing the account after its portfolio changes', async () => {
   const api = createWorkspaceApi('test-only')
   function Harness({ accounts }: { accounts: BrokerAccount[] }) {
     const [draft, setDraft] = useState(() => ({
@@ -19,17 +20,19 @@ it('does not restore an obsolete portfolio filter when clearing an account after
   }
 
   const user = userEvent.setup()
-  const view = render(<Harness accounts={[accountFixture]} />)
+  const other = { ...accountFixture, id: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', name: 'Other account' }
+  const view = render(<Harness accounts={[accountFixture, other]} />)
   await user.selectOptions(screen.getByRole('combobox', { name: 'Portfolio' }), portfolioFixture.id)
 
-  view.rerender(<Harness accounts={[{ ...accountFixture, portfolioId: null }]} />)
+  view.rerender(<Harness accounts={[{ ...accountFixture, portfolioId: null }, other]} />)
   expect(screen.getByRole('combobox', { name: 'Portfolio' })).toHaveValue('')
-  expect(screen.getByRole('combobox', { name: 'Account' })).toHaveValue(accountFixture.id)
+  expect(accountPicker('Account')).toHaveAttribute('data-value', accountFixture.id)
   expect(screen.getByRole('textbox', { name: 'Perpetual instrument' })).toHaveValue('Manual contract')
 
-  await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), '')
-  expect(screen.getByRole('combobox', { name: 'Account' })).toHaveValue('')
+  await chooseInPicker('Account', other.name, user)
+  expect(accountPicker('Account')).toHaveAttribute('data-value', other.id)
   expect(screen.getByRole('textbox', { name: 'Perpetual instrument' })).toHaveValue('')
   expect(screen.getByRole('combobox', { name: 'Portfolio' })).toHaveValue('')
-  expect(screen.getByRole('option', { name: 'Main account · Manual' })).toBeInTheDocument()
+  await user.click(accountPicker('Account'))
+  expect(screen.getByRole('option', { name: /^Main account,/ })).toBeInTheDocument()
 })

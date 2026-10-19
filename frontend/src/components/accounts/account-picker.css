@@ -74,3 +74,14 @@
 .account-picker-foot kbd { margin: 0 2px; padding: 2px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--muted); font: inherit; font-size: var(--text-2xs); }
 @media (pointer: coarse) { .account-picker-keys { display: none; } }
 @media (max-width: 480px) { .account-picker-aside { display: none; } }
+
+/* Bare density, for dense field bars such as the Play context: no border or background, the row's own height. */
+.account-picker-trigger[data-density="bare"] { --trigger-height: 28px; padding: 0; border-color: transparent; background: transparent; font-weight: 600; }
+.account-picker-trigger[data-density="bare"]:hover:not(:disabled) { border-color: transparent; }
+.account-picker-trigger[data-density="bare"][data-state="open"] { border-color: transparent; box-shadow: none; }
+.account-picker-trigger[data-density="bare"][data-state="open"] .account-name { color: var(--brand); }
+.account-picker-trigger[data-density="bare"] .account-avatar { --avatar-gap: var(--card); }
+.account-picker-value-marks > .venue-tag { flex-shrink: 1; }
+/* A narrow trigger keeps the account name readable: the logo already shows the venue, so its tag goes first. */
+.account-picker-value:has(> .account-picker-value-marks > .venue-tag) { container-type: inline-size; }
+@container (max-width: 200px) { .account-picker-value-marks > .venue-tag { display: none; } }

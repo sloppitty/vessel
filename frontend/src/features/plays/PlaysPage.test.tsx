@@ -15,6 +15,7 @@ import { createDraft } from './draft'
 import { createEvidence } from './evidence'
 import type { ImageMarkup } from '@/api/markup'
 import { createPlaysSession, describePlanChanges, planFromDraft, syncEvidence, type PlaysSession } from './saved'
+import { accountPicker, chooseInPicker } from '@/test/account-picker'
 
 const ids = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 
@@ -120,7 +121,7 @@ const client = (server: ReturnType<typeof fakeServer>, overrides: Partial<Worksp
 async function newPlannedPlay(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole('button', { name: 'New play' }))
   await user.type(screen.getByRole('textbox', { name: 'Play title' }), '  Range reclaim')
-  await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
+  await chooseInPicker('Account', accountFixture.name, user)
   expect(screen.getByRole('button', { name: 'Plan it' })).toBeDisabled()
   await user.type(screen.getByRole('textbox', { name: 'Perpetual instrument' }), 'BTC-PERP')
   await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
@@ -140,7 +141,7 @@ describe('saved plays', () => {
     expect(server.api.createPlay.mock.calls[0]![0]).toMatchObject({ accountId: accountFixture.id, instrument: 'BTC-PERP', instrumentSource: 'manual' })
     expect(server.api.changePlayStatus).toHaveBeenCalledWith(ids(1), 1, { status: 'planned' })
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Range reclaim')
-    expect(screen.getByRole('combobox', { name: 'Account' })).toBeDisabled()
+    expect(accountPicker('Account')).toBeDisabled()
     expect(screen.getByRole('textbox', { name: 'Perpetual instrument' })).toHaveAttribute('readonly')
     expect(screen.getByRole('button', { name: /Saved/ })).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
@@ -208,7 +209,7 @@ describe('saved plays', () => {
     const user = userEvent.setup()
     render(<Page api={client(server)} />)
     await user.click(await screen.findByRole('button', { name: 'New play' }))
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
+    await chooseInPicker('Account', accountFixture.name, user)
     await user.type(screen.getByRole('textbox', { name: 'Play title' }), 'First')
     await user.click(screen.getByRole('button', { name: /^Save$/ }))
     await waitFor(() => expect(server.api.createPlay).toHaveBeenCalledOnce())
@@ -262,7 +263,7 @@ describe('saved plays', () => {
     const user = userEvent.setup()
     render(<Page api={client(server)} />)
     await user.click(await screen.findByRole('button', { name: 'New play' }))
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
+    await chooseInPicker('Account', accountFixture.name, user)
     // Delete keeps its place but stays disabled until the draft is saved.
     expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled()
     await user.click(screen.getByRole('button', { name: /^Save$/ }))
@@ -278,7 +279,7 @@ describe('saved plays', () => {
     const user = userEvent.setup()
     render(<Page api={client(server, { createPlay: vi.fn().mockRejectedValue(new ApiError('http', 'Enable the account before using it for a Play.', 409)) })} />)
     await user.click(await screen.findByRole('button', { name: 'New play' }))
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
+    await chooseInPicker('Account', accountFixture.name, user)
     await user.type(screen.getByRole('textbox', { name: 'Play title' }), 'Kept')
     await user.click(screen.getByRole('button', { name: /^Save$/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Enable the account before using it for a Play.')
@@ -290,7 +291,7 @@ describe('saved plays', () => {
     const user = userEvent.setup()
     render(<Page api={client(server)} />)
     await user.click(await screen.findByRole('button', { name: 'New play' }))
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
+    await chooseInPicker('Account', accountFixture.name, user)
     await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
     const stop = screen.getByRole('spinbutton', { name: 'Entry 1 planned stop price (quote units)' })
     await user.type(stop, '105')
@@ -378,7 +379,7 @@ describe('saved plays', () => {
     render(<Page api={client(server, { instruments: () => Promise.resolve(instrumentCatalogFixture), candles: () => new Promise(() => {}),
       marketContext: () => new Promise(() => {}) })} accounts={[venue]} />)
     await user.click(await screen.findByRole('button', { name: 'New play' }))
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
+    await chooseInPicker('Account', venue.name, user)
     expect(screen.queryByRole('link', { name: /on Hyperliquid/ })).not.toBeInTheDocument()
     await pickInstrument(user, 'BTC')
     const link = screen.getByRole('link', { name: 'Open BTC/USDC on Hyperliquid' })
@@ -394,7 +395,7 @@ describe('default play title', () => {
 
   const startDraft = async (user: ReturnType<typeof userEvent.setup>) => {
     await user.click(await screen.findByRole('button', { name: 'New play' }))
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), accountFixture.id)
+    await chooseInPicker('Account', accountFixture.name, user)
     await user.type(screen.getByRole('textbox', { name: 'Perpetual instrument' }), 'BTC-PERP')
   }
   const titleBox = () => screen.getByRole('textbox', { name: 'Play title' })
@@ -525,7 +526,7 @@ describe('venue tracking', () => {
     const user = userEvent.setup()
     render(<Page api={api} accounts={[venue]} />)
     await user.click(await screen.findByRole('button', { name: 'New play' }))
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
+    await chooseInPicker('Account', venue.name, user)
     await pickInstrument(user, 'BTC')
     await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
     const direction = () => within(screen.getByRole('group', { name: 'Direction' }))
@@ -565,7 +566,7 @@ describe('monitor credential', () => {
     const user = userEvent.setup()
     render(<Page api={api} accounts={[venue]} onManageAccount={manage} />)
     await user.click(await screen.findByRole('button', { name: 'New play' }))
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Account' }), venue.id)
+    await chooseInPicker('Account', venue.name, user)
     await pickInstrument(user, 'BTC')
     await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
     await user.click(screen.getByRole('button', { name: 'Plan it' }))
