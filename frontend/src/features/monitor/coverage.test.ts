@@ -85,8 +85,11 @@ describe('stop coverage heading (Phase 0, 0.4c)', () => {
     expect(coverageHeading([coverageAs('unknown', 'history-gap'), uncovered('short')])).toBe('Stop short of the position')
   })
   it('never lets an Open Play without a recorded check read as covered', () => {
-    expect(coverageHeading([], true)).toBe('Stop coverage not checked yet')
-    expect(coverageLines([], String, true, true)).toEqual(['This Play\'s stop coverage has not been checked yet.'])
+    expect(coverageHeading([], 1)).toBe('Stop coverage not checked yet')
+    expect(coverageLines([], String, true, 1)).toEqual(['An Open Play\'s stop coverage has not been checked yet.'])
+    expect(coverageLines([coverageFixture], String, true, 2)).toEqual(['2 Open Plays\' stop coverage has not been checked yet.'])
+    // Recorded coverage of other Plays does not make the unchecked ones covered.
+    expect(coverageHeading([coverageFixture], 1)).toBe('Stop coverage not checked yet')
   })
   it('names every order-book check that does not run without the current book, and the new order-read reasons', () => {
     const [line] = coverageLines([coverageAs('unsupported', 'current-book-not-read')], String)

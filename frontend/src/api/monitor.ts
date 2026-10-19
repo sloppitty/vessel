@@ -1,4 +1,4 @@
-import { isFilledText, isPlainDecimal, isPositiveCount, isRecord as object, isText as text, isTimestamp } from './guards'
+import { isCount, isFilledText, isPlainDecimal, isPositiveCount, isRecord as object, isText as text, isTimestamp } from './guards'
 import { isEventCursor, isEventSequence, type EventCursor } from './event-cursor'
 import { isNotificationFrame, isNotificationsStatus, type NotificationFrame, type NotificationsStatus } from './notifications'
 
@@ -94,6 +94,11 @@ export interface AccountMonitor {
   discrepanciesTruncated?: boolean
   /** Stored stop coverage of the account's Open Plays. Optional: an older API omits it. */
   coverage?: MonitorCoverage[]
+  /**
+   * Open, tracked Plays on the account with no recorded coverage yet (after the migration, or once reconciliation opens
+   * one, until the next check). Optional, like `coverage`; absent reads as none.
+   */
+  uncheckedPlays?: number
 }
 
 export interface MonitorSummary {
@@ -178,7 +183,8 @@ export const isAccountMonitor = (v: unknown): v is AccountMonitor => object(v) &
   Array.isArray(v.discrepancies) && v.discrepancies.every(d => isMonitorDiscrepancy(d) && d.accountId === v.accountId) &&
   (v.discrepanciesTruncated === undefined || typeof v.discrepanciesTruncated === 'boolean') &&
   (v.coverage === undefined || Array.isArray(v.coverage) && v.coverage.length <= 500 && v.coverage.every(isMonitorCoverage) &&
-    new Set(v.coverage.map(c => c.playId)).size === v.coverage.length)
+    new Set(v.coverage.map(c => c.playId)).size === v.coverage.length) &&
+  (v.uncheckedPlays === undefined || isCount(v.uncheckedPlays))
 
 export const isMonitorSummary = (v: unknown): v is MonitorSummary => object(v) && typeof v.workerOnline === 'boolean' &&
   nullableDate(v.heartbeatAtUtc) && Array.isArray(v.accounts) && v.accounts.length <= 200 && v.accounts.every(isAccountMonitor) &&

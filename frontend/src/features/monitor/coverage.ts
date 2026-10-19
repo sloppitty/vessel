@@ -33,8 +33,9 @@ const reasons: Record<string, string> = {
 /** Said wherever the venue's order reader does not return the current order book. */
 export const currentBookNotRead = 'Order-book checks do not run here: missing, short, cancelled and excess stops, orphaned exits and entries, and level drift. This venue does not return its current order book.'
 
-/** Said for an Open, tracked Play that no check has recorded yet. */
-export const notCheckedYet = 'This Play\'s stop coverage has not been checked yet.'
+/** Said for Open, tracked Plays that no check has recorded yet. */
+export const notCheckedYet = (count: number) => count === 1 ? 'An Open Play\'s stop coverage has not been checked yet.'
+  : `${count} Open Plays' stop coverage has not been checked yet.`
 
 export const coverageReason = (code: string) => reasons[code] ?? 'The monitor recorded no further detail.'
 
@@ -48,14 +49,14 @@ const uncoveredHeadings: [reason: string, heading: string][] = [
 
 /**
  * The heading for the coverage in scope, least certain first, or null when every recorded Play is covered (or none is
- * recorded), so the run state ("Monitored") may head the panel. `unchecked` marks an Open, tracked Play in scope that no
- * check has recorded yet: it is never "Monitored".
+ * recorded), so the run state ("Monitored") may head the panel. `unchecked` counts Open, tracked Plays in scope that no
+ * check has recorded yet: they are never "Monitored".
  */
-export function coverageHeading(rows: readonly MonitorCoverage[], unchecked = false): string | null {
+export function coverageHeading(rows: readonly MonitorCoverage[], unchecked = 0): string | null {
   const open = rows.filter(uncovered)
   if (open.length) return uncoveredHeadings.find(([reason]) => open.some(row => row.reason === reason))?.[1] ?? 'Stop does not cover the position'
   if (rows.some(row => row.state === 'unknown')) return 'Stop coverage unknown'
-  if (unchecked) return 'Stop coverage not checked yet'
+  if (unchecked > 0) return 'Stop coverage not checked yet'
   if (rows.some(row => row.state === 'stale')) return 'Stop coverage stale'
   if (rows.some(row => row.state === 'unsupported')) return 'Current book not read'
   if (rows.some(row => row.state === 'shared')) return 'Stop shared with other Plays'
@@ -63,18 +64,18 @@ export function coverageHeading(rows: readonly MonitorCoverage[], unchecked = fa
 }
 
 /** The heading's tone: uncovered, unknown and unchecked coverage warn; stale, unsupported and shared stay neutral. */
-export const coverageTone = (rows: readonly MonitorCoverage[], unchecked = false): 'warning' | 'info' | null =>
-  unchecked || rows.some(uncovered) || rows.some(row => row.state === 'unknown') ? 'warning'
+export const coverageTone = (rows: readonly MonitorCoverage[], unchecked = 0): 'warning' | 'info' | null =>
+  unchecked > 0 || rows.some(uncovered) || rows.some(row => row.state === 'unknown') ? 'warning'
     : rows.some(row => row.state !== 'known') ? 'info' : null
 
 /**
  * One line per distinct outcome that is not plain covered, with the number of Plays when there are several.
  * `currentBookRead: false` (the venue capability) states the unsupported checks even before a Play is open.
  */
-export function coverageLines(rows: readonly MonitorCoverage[], time: (value: string) => string, currentBookRead = true, unchecked = false): string[] {
+export function coverageLines(rows: readonly MonitorCoverage[], time: (value: string) => string, currentBookRead = true, unchecked = 0): string[] {
   const lines = new Map<string, { text: string; count: number }>()
   const add = (key: string, text: string) => { const line = lines.get(key); lines.set(key, { text, count: (line?.count ?? 0) + 1 }) }
-  if (unchecked) add('unchecked', notCheckedYet)
+  if (unchecked > 0) add('unchecked', notCheckedYet(unchecked))
   for (const row of rows) {
     if (row.state === 'known' && row.covered) continue
     if (row.state === 'stale') add(`stale|${row.checkedAtUtc}`, `Stop coverage was last checked ${time(row.checkedAtUtc)} and is out of date.`)

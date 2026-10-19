@@ -41,6 +41,8 @@ internal sealed class MonitorWorkerOnline(IMonitorStore inner, TimeProvider cloc
         inner.SaveCoverageAsync(accountId, rows, ct);
     public Task<IReadOnlyList<MonitorCoverage>> CoverageAsync(IReadOnlyCollection<Guid> accountIds, CancellationToken ct) =>
         inner.CoverageAsync(accountIds, ct);
+    public Task<IReadOnlyDictionary<Guid, int>> UncheckedPlaysAsync(IReadOnlyCollection<Guid> accountIds, CancellationToken ct) =>
+        inner.UncheckedPlaysAsync(accountIds, ct);
     public Task<bool> VenueAtCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct) => inner.VenueAtCapacityAsync(venueId, now, ct);
     public Task<bool> OwnerAtCapacityAsync(DateTimeOffset now, CancellationToken ct) => inner.OwnerAtCapacityAsync(now, ct);
     public Task<bool> ReadCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct) => inner.ReadCapacityAsync(venueId, now, ct);

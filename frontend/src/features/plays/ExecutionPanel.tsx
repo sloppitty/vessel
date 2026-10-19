@@ -64,7 +64,7 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
     {error && <p className="error" role="alert">{error}</p>}
     {/* The heading follows this Play's own records and stop coverage, the ones listed below it. */}
     {shownMonitor && <MonitorPanel monitor={shownMonitor} discrepancies={execution.discrepancies}
-      coverage={coverage} unchecked={execution.status === 'open' && execution.tracked && coverage.length === 0} currentBookRead={currentBookRead}
+      coverage={coverage} unchecked={execution.status === 'open' && execution.tracked && coverage.length === 0 ? 1 : 0} currentBookRead={currentBookRead}
       busy={busy || monitorBusy} error={monitorError}
       retryAtUtc={retryAtUtc} statusUnavailable={monitorUnavailable} onCheck={onCheck} onManageCredential={onManageCredential} />}
     {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss} levelName={recordLevel} />}

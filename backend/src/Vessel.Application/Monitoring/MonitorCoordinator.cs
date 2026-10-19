@@ -22,12 +22,14 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         // One bounded read of rows and venue deadlines; no per-row account capture.
         var budgets = await store.VenueRetriesAsync(ct);
         var rows = await store.SummaryAsync(EligibleVenues(), time.GetUtcNow(), ct);
-        // One bounded coverage read for every listed account.
-        var coverage = (await store.CoverageAsync(rows.Select(x => x.Row.AccountId).ToArray(), ct)).ToLookup(x => x.AccountId);
+        // One bounded coverage read, and one count of Open Plays still without coverage, for every listed account.
+        var ids = rows.Select(x => x.Row.AccountId).ToArray();
+        var coverage = (await store.CoverageAsync(ids, ct)).ToLookup(x => x.AccountId);
+        var uncheckedPlays = await store.UncheckedPlaysAsync(ids, ct);
         var accounts = new List<AccountMonitorDto>();
         foreach (var (row, venueId) in rows)
             accounts.Add(await ToDto(row, budgets.TryGetValue(venueId, out var deadline) ? deadline : null, online,
-                coverage[row.AccountId], ct));
+                coverage[row.AccountId], uncheckedPlays.GetValueOrDefault(row.AccountId), ct));
         return new(online, heartbeat?.HeartbeatAtUtc, accounts);
     }
 
@@ -36,7 +38,8 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         var capture = await store.CaptureAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
         var row = await store.FindAsync(id, ct) ?? new() { AccountId = id, OwnerId = owner.OwnerId };
         return await ToDto(row, await store.VenueRetryAtAsync(capture.Account.VenueId, ct),
-            IsOnline((await store.HeartbeatAsync(ct))?.HeartbeatAtUtc), await store.CoverageAsync([id], ct), ct);
+            IsOnline((await store.HeartbeatAsync(ct))?.HeartbeatAtUtc), await store.CoverageAsync([id], ct),
+            (await store.UncheckedPlaysAsync([id], ct)).GetValueOrDefault(id), ct);
     }
 
     public Task<IReadOnlyList<MonitorWatchDto>> WatchesAsync(Guid playId, CancellationToken ct) =>
@@ -657,14 +660,14 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     private bool IsOnline(DateTimeOffset? heartbeat) => heartbeat is { } at && at <= time.GetUtcNow() &&
         time.GetUtcNow() - at <= options.HeartbeatTimeout;
     private async Task<AccountMonitorDto> ToDto(MonitorAccount row, DateTimeOffset? venueDeadline, bool online,
-        IEnumerable<MonitorCoverage> coverage, CancellationToken ct)
+        IEnumerable<MonitorCoverage> coverage, int uncheckedPlays, CancellationToken ct)
     {
         var state = row.State == "live" && row.LastSuccessAtUtc < time.GetUtcNow() - options.Interval * 2 ? "stale" : row.State;
         var records = evaluator is null ? new MonitorDiscrepancyList([], false) : await evaluator.ReadListAsync(row.AccountId, null, ct);
         return new(row.AccountId, state, row.LastAttemptAtUtc, row.LastSuccessAtUtc,
             row.NextRunAtUtc is null ? null : Later(row.NextRunAtUtc, venueDeadline),
             row.ManualState, RunTrigger(row), Later(row.NextManualAllowedAtUtc, venueDeadline), row.Error, online,
-            records.Records, records.Truncated, coverage.Where(x => x.AccountId == row.AccountId).Select(Coverage).ToArray());
+            records.Records, records.Truncated, coverage.Where(x => x.AccountId == row.AccountId).Select(Coverage).ToArray(), uncheckedPlays);
     }
 
     private static readonly JsonSerializerOptions CoverageJson = new(JsonSerializerDefaults.Web);

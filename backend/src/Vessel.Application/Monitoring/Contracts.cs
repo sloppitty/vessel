@@ -42,10 +42,13 @@ public sealed record MonitorCoverageOutcome(Guid PlayId, string ContractId, stri
 /// out unless the incidents alone exceed the cap. Optional: an older producer omits it.</param>
 /// <param name="Coverage">Stored stop coverage of the account's Open Plays, stale projected at read time. Optional: an
 /// older producer may omit it.</param>
+/// <param name="UncheckedPlays">Open, tracked Plays on the account with no recorded coverage yet (after the migration, or
+/// once reconciliation opens one, until the next check). Never "Monitored" while above zero. Optional, like
+/// <paramref name="Coverage"/>.</param>
 public sealed record AccountMonitorDto(Guid AccountId, string State, DateTimeOffset? LastAttemptAtUtc,
     DateTimeOffset? LastSuccessAtUtc, DateTimeOffset? NextRunAtUtc, string ManualState, string? RunTrigger,
     DateTimeOffset? NextManualAllowedAtUtc, string? Error, bool WorkerOnline, IReadOnlyList<MonitorDiscrepancyDto> Discrepancies,
-    bool DiscrepanciesTruncated = false, IReadOnlyList<MonitorCoverageDto>? Coverage = null);
+    bool DiscrepanciesTruncated = false, IReadOnlyList<MonitorCoverageDto>? Coverage = null, int UncheckedPlays = 0);
 /// <summary>
 /// Visible records, outstanding incidents (open, or unverifiable and not dismissed since) first, then the rest by
 /// confirmation time, newest first; at most <see cref="MaxRecords"/>. <paramref name="Truncated"/> says the cap left some out.
@@ -163,6 +166,8 @@ public interface IMonitorStore
     Task SaveCoverageAsync(Guid accountId, IReadOnlyList<MonitorCoverage> rows, CancellationToken ct);
     /// <summary>Stored coverage of the accounts' currently Open Plays, at most 500 per account, by account and Play.</summary>
     Task<IReadOnlyList<MonitorCoverage>> CoverageAsync(IReadOnlyCollection<Guid> accountIds, CancellationToken ct);
+    /// <summary>Per account, its Open tracked Plays (planned, on a venue instrument) without a coverage row; absent when none.</summary>
+    Task<IReadOnlyDictionary<Guid, int>> UncheckedPlaysAsync(IReadOnlyCollection<Guid> accountIds, CancellationToken ct);
     /// <summary>Inside account admission transaction. Locks the owner budget, then this venue budget, and checks both capacities.</summary>
     Task<bool> ReadCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct);
     /// <summary>Lock-free preflight only; admission rechecks under the venue budget lock.</summary>

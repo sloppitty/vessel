@@ -78,6 +78,11 @@ describe('monitor contract', () => {
     expect(isAccountMonitor({ ...monitorFixture, coverage: [] })).toBe(true)
     expect(isAccountMonitor({ ...monitorFixture, coverage: null })).toBe(false)
     expect(isAccountMonitor({ ...monitorFixture, coverage: [coverageFixture, coverageFixture] })).toBe(false)
+    // The count of Open Plays without coverage: a whole number, optional for an older API.
+    expect(isAccountMonitor({ ...monitorFixture, uncheckedPlays: 2 })).toBe(true)
+    expect(isAccountMonitor({ ...monitorFixture, uncheckedPlays: -1 })).toBe(false)
+    expect(isAccountMonitor({ ...monitorFixture, uncheckedPlays: 1.5 })).toBe(false)
+    expect(isAccountMonitor({ ...monitorFixture, uncheckedPlays: null })).toBe(false)
     for (const [state, reason] of [['shared', 'shared-whole-position-stop'], ['unknown', 'opposing-plays'], ['unsupported', 'current-book-not-read']] as const)
       expect(isMonitorCoverage(coverageAs(state, reason))).toBe(true)
     expect(isMonitorCoverage({ ...coverageFixture, state: 'stale' })).toBe(true)

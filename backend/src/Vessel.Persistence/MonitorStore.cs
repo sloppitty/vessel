@@ -336,6 +336,16 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         return rows.GroupBy(x => x.AccountId).SelectMany(x => x.Take(500)).ToArray();
     }
 
+    public async Task<IReadOnlyDictionary<Guid, int>> UncheckedPlaysAsync(IReadOnlyCollection<Guid> accountIds, CancellationToken ct)
+    {
+        if (accountIds.Count == 0) return new Dictionary<Guid, int>();
+        var ids = accountIds.Distinct().ToArray();
+        var coverage = db.Set<MonitorCoverage>();
+        return await ActivePlays.Where(p => ids.Contains(p.AccountId) && p.Status == PlayStatus.Open && !coverage.Any(c => c.PlayId == p.Id))
+            .GroupBy(p => p.AccountId).Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+    }
+
     public async Task<IReadOnlyList<MonitorWatchDto>> WatchesAsync(Guid playId, DateTimeOffset now, CancellationToken ct)
     {
         var cutoff = now - settings.WatchLifetime;

@@ -312,6 +312,40 @@ public sealed class MonitorCoveragePostgresTests
         Assert.Empty(await scope.Db.Set<MonitorCoverage>().AsNoTracking().ToListAsync());
     }
 
+    /// <summary>
+    /// Review: account detail said "Monitored" before any coverage existed (after the migration, or once reconciliation opens
+    /// a Play, until the next check). The account monitor now counts its Open tracked Plays without a coverage row.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_account_monitor_counts_open_plays_without_coverage_until_a_check_records_it()
+    {
+        await using var database = await DiscrepancyDatabase.Create();
+        var f = new DiscrepancyFixture();
+        f.Account.Configure(null, "0x" + Guid.NewGuid().ToString("N") + "00000000", null);
+        var sibling = f.AddPlay("long", 1);
+        f.Position = 2;
+        // A Closed Play never counts: only Open Plays have a position to cover.
+        var closed = f.AddPlay("long", 1);
+        closed.MarkClosed("fixture", f.Clock.Now.AddMinutes(-5));
+        await database.Seed(f);
+        await using var scope = database.Scope(f);
+        var (store, coordinator) = Create(scope, f, HyperliquidPerpetualReader.Descriptor.Capabilities);
+        // A live monitor row from before the migration: a success, but no coverage rows yet.
+        await coordinator.DiscoverAsync([HyperliquidPerpetualReader.Id], f.Clock.Now, default);
+
+        var before = await coordinator.AccountAsync(f.Account.Id, default);
+        Assert.Equal((2, 0), (before.UncheckedPlays, before.Coverage!.Count));
+        Assert.Equal(2, Assert.Single((await coordinator.SummaryAsync(default)).Accounts).UncheckedPlays);
+        Assert.Equal(2, (await store.UncheckedPlaysAsync([f.Account.Id], default))[f.Account.Id]);
+
+        await CheckAsync(coordinator, store, f);
+        var after = await coordinator.AccountAsync(f.Account.Id, default);
+        Assert.Equal((0, 2), (after.UncheckedPlays, after.Coverage!.Count));
+        Assert.Equal(0, Assert.Single((await coordinator.SummaryAsync(default)).Accounts).UncheckedPlays);
+        Assert.Empty(await store.UncheckedPlaysAsync([f.Account.Id], default));
+        Assert.Contains(sibling.Id, after.Coverage!.Select(x => x.PlayId));
+    }
+
     [PostgresFact]
     public async Task Coverage_reads_only_open_plays_and_rows_cascade_with_their_play_and_account()
     {

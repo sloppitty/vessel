@@ -451,7 +451,7 @@ describe('stop coverage (Phase 0, 0.4c)', () => {
     expect(within(panel()).getByText('No stop at the venue')).toBeInTheDocument()
     expect(within(panel()).getByText(/No resting stop was seen at the venue/)).toBeInTheDocument()
     // An Open Play that no check has recorded is never "Monitored".
-    view.rerender(<MonitorPanel monitor={monitorFixture} coverage={[]} unchecked busy={false} error={null} onCheck={vi.fn()} />)
+    view.rerender(<MonitorPanel monitor={monitorFixture} coverage={[]} unchecked={1} busy={false} error={null} onCheck={vi.fn()} />)
     expect(within(panel()).queryByText('Monitored')).not.toBeInTheDocument()
     expect(within(panel()).getByText('Stop coverage not checked yet')).toBeInTheDocument()
     // The Execution tab scopes the heading to its own Play.

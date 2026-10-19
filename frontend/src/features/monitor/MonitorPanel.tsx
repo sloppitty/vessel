@@ -47,16 +47,18 @@ function CheckButton({ until, monitor, busy, blocked, onCheck }: {
  * The heading follows open incidents, then stop coverage, before the run state, so a healthy run never reads
  * "Monitored" beside an open record, a structural unknown, shared or unsupported coverage. `discrepancies` and
  * `coverage` are what the panel speaks for: the account's by default, a Play's own in its Execution tab.
- * `currentBookRead: false` is the venue capability: its order reader does not return the current book. `unchecked` marks
- * an Open, tracked Play in scope that no check has recorded yet, which is never "Monitored".
+ * `currentBookRead: false` is the venue capability: its order reader does not return the current book. `unchecked` counts
+ * Open, tracked Plays in scope that no check has recorded yet (the account's, from the server, by default), which are
+ * never "Monitored".
  */
-export function MonitorPanel({ monitor, discrepancies, coverage = monitor.coverage ?? [], currentBookRead = true, unchecked = false,
+export function MonitorPanel({ monitor, discrepancies, coverage = monitor.coverage ?? [], currentBookRead = true,
+  unchecked = monitor.uncheckedPlays ?? 0,
   busy, error, retryAtUtc, statusUnavailable = false, onCheck, onManageCredential }: {
   monitor: AccountMonitor; busy: boolean; error: string | null; retryAtUtc?: string | undefined
   discrepancies?: readonly MonitorDiscrepancy[] | undefined
   coverage?: readonly MonitorCoverage[]
   currentBookRead?: boolean
-  unchecked?: boolean
+  unchecked?: number
   onCheck: () => void; onManageCredential?: (() => void) | undefined
   statusUnavailable?: boolean
 }) {
