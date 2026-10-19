@@ -32,7 +32,34 @@ Not started.
 
 ## 0.4 Monitor truth and visibility
 
-Not started.
+October 19, 2026, 0.4a monitor visibility, branch
+`t3/phase0-monitor-visibility`:
+- One helper (`features/monitor/incidents.ts`) derives incidents from the
+  stored `GET /api/monitor` summary: open records, and unverifiable records
+  not dismissed since. Incidents map to Plays through `playId` or
+  `details.playIds`. No new endpoint or polling.
+- A severity-toned count shows on the Plays navigation entry, on Plays list
+  rows and in the Play header, where it opens the Execution tab.
+- Overview shows a conditional incident row above the metric tiles. It is not
+  scoped by the Overview scope; the pull request asks the owner.
+- The monitor heading follows open incidents and never says "Monitored"
+  beside an open record.
+- Records show a human title, a fact table and one next action:
+  - the fact table has open, stop and uncovered quantity (uncovered only for
+    order coverage) and last observed;
+  - the JSON moves behind "Recorded details".
+- The discrepancy DTO adds `lastObservedAtUtc`. No migration.
+- `scripts/check.sh` with PostgreSQL 18 and RabbitMQ 4.3.6 in disposable
+  containers:
+  - Python: 78 OK. Prototype tests pass.
+  - Release build: 0 warnings.
+  - Backend: 3,423 passed, 5 skipped and 10 failed, all PostgreSQL or HTTP
+    timeouts while four agents ran PostgreSQL tests against the same
+    server. The 10 passed when rerun alone.
+  - Frontend, run separately because the script stops at the first failure:
+    typecheck and lint clean, 2,481 tests, build OK.
+- Not run: `scripts/monitor-browser-smoke.cjs`, `scripts/e2e/browser-e2e.cjs`
+  and a rendered browser check.
 
 ## 0.5 Managed stops
 

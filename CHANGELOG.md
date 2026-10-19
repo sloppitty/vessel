@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+
+- Open monitor incidents stay visible: a count on the Plays navigation entry,
+  Plays rows and the Play header, a conditional row on Overview, and a monitor
+  heading that never says "Monitored" beside an open record. Discrepancies
+  read as plain facts (open, stop and uncovered quantity, last observed) with
+  one next action; the recorded JSON moves behind a disclosure (D-08, F-02).
+
 ## 0.3.1 - October 19, 2026
 
 Release notes: [docs/releases/v0.3.1.md](docs/releases/v0.3.1.md).
