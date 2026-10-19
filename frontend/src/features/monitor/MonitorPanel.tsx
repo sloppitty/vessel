@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { AccountMonitor, MonitorDiscrepancy, MonitorWatch } from '@/api/monitor'
 import { Button } from '@/components/ui/button'
 import { InfoTip } from '@/components/ui/info-tip'
@@ -70,8 +70,10 @@ export function MonitorPanel({ monitor, busy, error, retryAtUtc, statusUnavailab
   </section>
 }
 
-export function MonitorDiscrepancies({ discrepancies, busy, onDismiss }: {
+export function MonitorDiscrepancies({ discrepancies, busy, onDismiss, action }: {
   discrepancies: MonitorDiscrepancy[]; busy: boolean; onDismiss: (id: string, note?: string) => Promise<void>
+  /** What the owner can do about one record besides dismissing it, such as rebinding a drifted level. */
+  action?: ((item: MonitorDiscrepancy) => ReactNode) | undefined
 }) {
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [pending, setPending] = useState<string | null>(null)
@@ -97,6 +99,7 @@ export function MonitorDiscrepancies({ discrepancies, busy, onDismiss }: {
         It is not resolved and is no longer checked; a later fresh observation can still decide it.</p>}
       {Object.keys(item.details).length > 0 && <details><summary>Recorded details</summary><pre>{JSON.stringify(item.details, null, 2)}</pre></details>}
       {item.note && <p>{item.note}</p>}
+      {action?.(item)}
       {(item.state === 'open' || item.outcome === 'unverifiable') && <div className="monitor-dismiss">
         <label><span className="sr-only">Dismissal note for {item.kind} {item.contractId}</span>
           <input maxLength={500} placeholder="Optional dismissal note" value={notes[item.id] ?? ''}

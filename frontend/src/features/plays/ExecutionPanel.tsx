@@ -1,4 +1,4 @@
-import type { LinkOrder, PlayExecution, PlaySummary } from '@/api/plays'
+import type { LinkOrder, PlayExecution, PlaySummary, RebindLevel } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { Link2, Link2Off } from 'lucide-react'
 import { MonitorDiscrepancies, MonitorPanel, MonitorWatches } from '@/features/monitor/MonitorPanel'
@@ -8,6 +8,7 @@ import { describeOrder, fillSummary, levelName, levelOptions, orderFitsRole } fr
 import { NativeSelect } from '@/components/ui/native-select'
 import { InfoTip } from '@/components/ui/info-tip'
 import { useJournalState } from './journal-state'
+import { LevelDriftAction } from './LevelDriftAction'
 
 // One shared empty object, so an untouched panel does not look like new state on every render.
 const noChoices: Record<string, string> = {}
@@ -21,7 +22,8 @@ const pnlBasisNote = {
   mixed: 'Some fills report closed PnL before fees and some after.',
 } as const
 
-export function ExecutionPanel({ execution, error, busy, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, onDismiss, onManageCredential }: {
+export function ExecutionPanel({ execution, error, busy, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, onDismiss, onManageCredential,
+  version, onRebind, rebindBlocked }: {
   execution: PlayExecution | null
   error: string | null
   busy: boolean
@@ -38,6 +40,12 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
   onCheck: () => void
   onLink: (request: LinkOrder) => void
   onUnlink: (linkId: string) => void
+  /** The saved Play's version, which a rebind of a drifted level expects. */
+  version?: number
+  /** Moves a drifted linked stop or target to its order's price (`level.drift`); resolves once the Play is saved. */
+  onRebind?: (linkId: string, request: RebindLevel) => Promise<void>
+  /** Why a rebind is not available now, such as unsaved plan edits. */
+  rebindBlocked?: string | undefined
 }) {
   // The chosen roles belong to the journal, not to this tab: expanding the journal remounts the panel. Scoped by play.
   const [choices, setChoices] = useJournalState(`execution-choices:${execution?.playId ?? ''}`, noChoices)
@@ -56,7 +64,10 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
     {error && <p className="error" role="alert">{error}</p>}
     {shownMonitor && <MonitorPanel monitor={shownMonitor} busy={busy || monitorBusy} error={monitorError}
       retryAtUtc={retryAtUtc} statusUnavailable={monitorUnavailable} onCheck={onCheck} onManageCredential={onManageCredential} />}
-    {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss} />}
+    {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss}
+      action={editable && onRebind && version !== undefined ? item => <LevelDriftAction discrepancy={item} links={execution.links} entries={entries}
+        origin={origin} playId={execution.playId} version={version} blocked={busy ? 'Wait for the current change to finish.' : rebindBlocked}
+        onRebind={onRebind} /> : undefined} />}
     <MonitorWatches watches={execution.watches} />
     <dl className="execution-totals">
       <div><dt>Entered</dt><dd>{totals.enteredQuantity}</dd></div>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkspaceApi } from '@/api/workspace'
-import type { LinkOrder, PlayExecution } from '@/api/plays'
+import type { LinkOrder, PlayExecution, RebindLevel, SavedPlay } from '@/api/plays'
 import { errorMessage } from '@/api/errors'
 
 /**
@@ -58,7 +58,10 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
   const link = useCallback((request: LinkOrder) => run((id, signal) => api.linkOrder(id, request, signal)).catch(() => undefined), [api, run])
   const unlink = useCallback((linkId: string) => run((id, signal) => api.unlinkOrder(id, linkId, signal)).catch(() => undefined), [api, run])
   const dismiss = useCallback((id: string, note?: string) => run((play, signal) => api.dismissPlayDiscrepancy(play, id, note, signal)), [api, run])
+  /** The new plan revision belongs to the Play, so the saved Play goes to `onPlay`; the execution is read again after. */
+  const rebind = useCallback((linkId: string, request: RebindLevel, onPlay: (play: SavedPlay) => void) =>
+    run(async (play, signal) => { onPlay(await api.rebindLevel(play, linkId, request, signal)) }), [api, run])
   return { execution: result?.context === context ? result.execution : null,
     error: error?.context === context ? error.message : null,
-    busy: workState?.context === context && !workState.signal.aborted && workState.busy, reload, link, unlink, dismiss }
+    busy: workState?.context === context && !workState.signal.aborted && workState.busy, reload, link, unlink, dismiss, rebind }
 }

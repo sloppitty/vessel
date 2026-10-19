@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createEntry, type DraftEntry } from './draft'
 import { planFixes, planIssues, stopsPastLiquidation } from './planChecks'
+import { planTextState } from './numbers'
 
 const entry = (price: string, stop: string, target: string, unit: 'price' | 'percent' = 'price'): DraftEntry => {
   const base = createEntry(0)
@@ -36,6 +37,35 @@ describe('plan checks', () => {
     // A stop above the entry with a target also above it: neither swapping nor switching fixes both.
     expect(planFixes({ direction: 'long', entries: [entry('100', '105', '110')] })).toEqual({ swapped: null, reversed: null })
     expect(planFixes({ direction: 'long', entries: [entry('100', '95', '110')] })).toEqual({ swapped: null, reversed: null })
+  })
+})
+
+// Phase 0, 0.5b (decision 2): the review probe verify-sol-frontend/f1f2.mjs F1, an Open long at 100 with a revised stop.
+describe('stops of a filled entry', () => {
+  const filled = new Set(['e1'])
+  const open = (unit: 'price' | 'percent', stop: string) => ({ ...entry('100', stop, '120', 'price'), id: 'e1',
+    stops: [{ id: 's1', unit, value: stop, share: '100' }] })
+
+  it('may sit at or beyond the entry once it has filled; an unfilled entry keeps the wrong-side rule', () => {
+    for (const [unit, value] of [['price', '95'], ['price', '100'], ['price', '105'], ['percent', '0'], ['percent', '5']] as const) {
+      expect(planIssues([open(unit, value)], 'long', filled)).toEqual([])
+      expect(planIssues([open(unit, value)], 'long', 'all')).toEqual([])
+    }
+    // Before the fix, the browser refused these with "a long stop goes below the entry price".
+    expect(planIssues([open('price', '100')], 'long').map(issue => issue.message))
+      .toEqual(['Entry 1 stop is at the entry price; a long stop goes below it.'])
+    expect(planIssues([open('price', '105')], 'long', new Set(['other'])).map(issue => issue.kind)).toEqual(['stop'])
+    // Shorts mirror it; targets keep their side whether or not the entry filled.
+    expect(planIssues([{ ...entry('100', '95', '90'), id: 'e1' }], 'short', filled)).toEqual([])
+    expect(planIssues([{ ...entry('100', '105', '95'), id: 'e1' }], 'long', filled).map(issue => issue.message))
+      .toEqual(['Entry 1 target 1 is below the entry price; a long target goes above it.'])
+    expect(planFixes({ direction: 'long', entries: [open('price', '105')] }, filled)).toEqual({ swapped: null, reversed: null })
+  })
+
+  it('refuses a negative percentage with a pointer to a price stop (-5% once saved as no stop)', () => {
+    expect(planTextState('-5', 'Entry 1 stop 1', null, 'stop')).toEqual({ status: 'invalid',
+      reason: 'Entry 1 stop 1: use a price for a stop beyond the entry; a percentage cannot be negative.' })
+    expect(planTextState('0', 'Entry 1 stop 1', null, 'stop')).toEqual({ status: 'valid' })
   })
 })
 

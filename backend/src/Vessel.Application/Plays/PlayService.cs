@@ -3,6 +3,7 @@ using System.Text.Json;
 using Vessel.Application.Common;
 using Vessel.Application.Evidence;
 using Vessel.Application.Ownership;
+using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
@@ -89,9 +90,10 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         RequireVersion(play, request.ExpectedVersion);
         if (request.Plan is null) throw new ProblemException(400, "A plan compatibility document is required.");
         // Retrospectives keep an empty compatibility document, not a manufactured plan. Number text unchanged from
-        // the stored plan still saves, even where it predates the plain-decimal rule.
-        var plan = play.Origin == PlayOrigin.Retrospective
-            ? PlayDocuments.Serialize(request.Plan) : PlayDocuments.Serialize(PlayDocuments.Normalize(request.Plan, PlayDocuments.Read(play.Plan)));
+        // the stored plan still saves, even where it predates the plain-decimal rule. Stops of filled entries may sit
+        // at or beyond the entry; the fills are read under the Play lock, so none arrives in between.
+        var plan = play.Origin == PlayOrigin.Retrospective ? PlayDocuments.Serialize(request.Plan)
+            : PlayDocuments.Serialize(PlayDocuments.Normalize(request.Plan, PlayDocuments.Read(play.Plan), await ExecutedEntriesAsync(store, play, ct)));
         var drawings = PlayDocuments.NormalizeDrawings(request.Drawings);
         var now = time.GetUtcNow();
         if (request.AccountId != play.AccountId || request.Instrument != play.ContractId ||
@@ -211,6 +213,22 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             if (now is null || now.Price != old.Price || now.Share != old.Share)
                 throw new ProblemException(409, $"{old.Name} has fills or linked orders, so its price and share stay as planned. Unlinked stops and targets can still change.");
         }
+    }
+
+    private static readonly IReadOnlySet<string> NoEntries = new HashSet<string>();
+
+    /// <summary>
+    /// Entries that have filled: a fill of a linked entry order that does not contradict the entry side, or a manual
+    /// entry execution. Their stops may sit at or beyond the entry. A Draft has none.
+    /// </summary>
+    internal static async Task<IReadOnlySet<string>> ExecutedEntriesAsync(IPlayStore store, Play play, CancellationToken ct)
+    {
+        if (play.Status == PlayStatus.Draft || play.Origin == PlayOrigin.Retrospective) return NoEntries;
+        // Fills keep the direction fixed, so the stored plan's entry side is the one they were checked against.
+        var side = ExecutionIntegrity.EntrySide(PlayDocuments.Read(play.Plan));
+        return (await store.EntryExecutionsAsync(play.Id, ct))
+            .Where(e => e.Fill is null || !ExecutionIntegrity.Contradicts(OrderLinkRole.Entry, side, e.Fill))
+            .Select(e => e.EntryId).ToHashSet(StringComparer.Ordinal);
     }
 
     private async Task<Play> Find(Guid id, CancellationToken ct) =>

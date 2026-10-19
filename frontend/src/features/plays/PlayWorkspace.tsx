@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import type { SizingDocument } from '@/api/sizing'
 import { ExternalLink, PencilLine, RefreshCw } from 'lucide-react'
@@ -23,15 +23,18 @@ import { PlanNotices } from './PlanNotices'
 import { PositionEditor, defaultMaxLeverage, type SuggestionMarks } from './PositionEditor'
 import { ChartPanel } from './PlayChart'
 import { CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
+import { noFilledEntries } from './planChecks'
 import { isNominalUsdQuote } from './stablecoins'
 import { defaultPlayTitle } from './default-title'
 import './plays-workspace.css'
 import { NativeSelect } from '@/components/ui/native-select'
 import { pickerAccounts } from '@/features/workspace/account-picker-options'
 
+const noAverages: ReadonlyMap<string, string> = new Map()
+
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, revision = null,
   lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, sizingStatus = 'ready', onRetrySizing, onRiskChange,
-  filledEntries, onUnits, retrospective = false }: {
+  filledEntries, averageFills, onUnits, retrospective = false }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -59,8 +62,13 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   sizingStatus?: SizingStatus
   onRetrySizing?: () => void
   onRiskChange?: (riskPercent: string) => Promise<void>
-  /** Entries with a linked or manual fill (`'all'` when one has filled but not which): no size or leverage suggestions. */
+  /**
+   * Entries with a linked or manual fill (`'all'` when one has filled but not which): no size or leverage suggestions,
+   * and their stops may sit at or beyond the entry.
+   */
   filledEntries?: ReadonlySet<string> | 'all'
+  /** Exact average fill price per filled entry, as the execution reports it; the Summary measures their stops from it. */
+  averageFills?: ReadonlyMap<string, string>
   /** The size units in use, so the page can word its own messages in the instrument's quote asset. */
   onUnits?: (units: SizeUnits) => void
 }) {
@@ -142,6 +150,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   // Runs after the expanded chart closes, so the journal is in the page again.
   const showEvidence = () => requestAnimationFrame(() =>
     leftColumn.current?.querySelector('[data-testid="journal-panel"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+
+  const fills = useMemo(() => ({ filled: filledEntries ?? noFilledEntries, averages: averageFills ?? noAverages }), [filledEntries, averageFills])
 
   // Suggestions sit in their own panel above the workspace; the fields only carry a marker.
   const leverage = leverageOf(draft.leverage)
@@ -227,7 +237,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           Recorded after execution: no original plan, thesis, initial stop or initial-risk R.</InfoTip>}
       </span></div>
     </fieldset>
-    {!retrospective && <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} lockDirection={lockDirection} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} />}
+    {!retrospective && <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} lockDirection={lockDirection} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin}
+      filledEntries={fills.filled} />}
     <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} retrospective={retrospective} />
     {!readOnly && onRiskChange && (suggestions || sizingStatus === 'failed') && <SuggestionsPanel plan={suggestions} sizing={sizing}
       status={sizingStatus} onRetry={onRetrySizing} draft={draft} leverage={leverage} units={units}
@@ -257,11 +268,11 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
       </div>
       {retrospective ? <section className="panel retrospective-position" aria-label="No original plan"><h2>No original plan</h2></section>
         : readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>
-        <PositionEditor onLeverageChange={leverageChange.request} draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} units={units} availableBudget={available} checkBudget={false} />
+        <PositionEditor onLeverageChange={leverageChange.request} draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} units={units} availableBudget={available} checkBudget={false} filledEntries={fills.filled} />
       </fieldset> : <PositionEditor onLeverageChange={leverageChange.request} draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId}
         maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} instrumentName={instrumentName} units={units} availableBudget={available} checkBudget={status === 'draft'}
-        marks={marks} />}
+        marks={marks} filledEntries={fills.filled} />}
     </div>
-    {!retrospective && <PositionSummary draft={draft} units={units} instrumentName={instrumentName} riskReference={riskReference} />}
+    {!retrospective && <PositionSummary draft={draft} units={units} instrumentName={instrumentName} riskReference={riskReference} fills={fills} />}
   </section>
 }

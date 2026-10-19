@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from '@/components/ui/input'
 import { addEntry as withEntry, createNextEntry, removeEntry as withoutEntry, splitEqually as equalSplit, type DraftEntry, type PlayDraft } from './draft'
 import { EntryForm } from './EntryForm'
+import { entryFilled, noFilledEntries, type FilledEntries } from './planChecks'
 import { formatDraggedPrice, leverageOf, percentLevels } from './levels'
 import { AvailableBudget } from './WorkspacePanels'
 import {
@@ -35,7 +36,7 @@ function allocatedShare(entries: DraftEntry[]) {
   return Number(known.reduce((total, share) => total + share, 0).toFixed(2))
 }
 export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, maintenanceMargin = null, instrumentName = '', units = defaultSizeUnits, availableBudget = null, checkBudget = true,
-  marks = null }: {
+  marks = null, filledEntries = noFilledEntries }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
   onLeverageChange: (value: string) => void
@@ -55,6 +56,8 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
   checkBudget?: boolean
   /** Fields with a waiting suggestion; null marks none (read-only plays, or the record did not load). */
   marks?: SuggestionMarks | null
+  /** Entries with a linked or manual fill: their stops may sit at or beyond the entry. */
+  filledEntries?: FilledEntries
 }) {
   const leverageLimit = maxLeverage ?? defaultMaxLeverage
   const stored = useStoredPlanText()
@@ -232,7 +235,7 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
                   {draft.entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
                 </NativeSelect>
               </label>
-              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} liquidation={liquidation} suggested={marks?.levels ?? null} quantity={sized.quantity} units={units} />}
+              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} liquidation={liquidation} suggested={marks?.levels ?? null} quantity={sized.quantity} units={units} filled={entryFilled(filledEntries, selected.id)} />}
             </DialogContent>
           </Dialog>
         </div>
@@ -252,7 +255,7 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
               {draft.entries.length > 1 && <Button type="button" variant="ghost" size="icon-sm" className="remove-entry" aria-label={`Remove ${entry.name}`}
                 title={`Remove ${entry.name}`} onClick={() => removeEntry(entry.id)}><Trash2 size={13} aria-hidden="true" /></Button>}
             </div>
-            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} liquidation={liquidation} suggested={marks?.levels ?? null} quantity={sized.quantity} units={units} />}
+            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} liquidation={liquidation} suggested={marks?.levels ?? null} quantity={sized.quantity} units={units} filled={entryFilled(filledEntries, entry.id)} />}
             {expanded && selected?.id === entry.id && <p className="muted expanded-placeholder">Editing in the expanded view.</p>}
           </article>)}
         </div>

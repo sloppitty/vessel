@@ -200,6 +200,10 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     }
     return ids.size === 0 && status === 'open' ? 'all' : ids
   }, [manual, playExecution, status])
+  // The Summary measures a filled entry's stops from its average fill, as the execution reports it (exact text).
+  const averageFills = useMemo<ReadonlyMap<string, string>>(() => new Map(manual || !playExecution ? []
+    : playExecution.entries.flatMap(entry => entry.averageFillPrice !== null && /[1-9]/.test(entry.filledQuantity)
+      ? [[entry.entryId, entry.averageFillPrice] as const] : [])), [manual, playExecution])
   // The workspace knows the instrument's units; page messages such as the blocked-save reason use them.
   const [units, setUnits] = useState<SizeUnits>(defaultSizeUnits)
   const onUnits = useCallback((next: SizeUnits) => setUnits(current => current.quote === next.quote && current.base === next.base &&
@@ -222,7 +226,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     if (retrospective) return null
     const numbers = planNumberIssues(current, stored)
     if (numbers.length) return planNumberSummary(numbers)
-    const issues = planIssues(current.entries, current.direction)
+    // A filled entry's stops may sit at or beyond it; the server decides per entry from its own fills.
+    const issues = planIssues(current.entries, current.direction, filledEntries)
     if (issues.length) return planIssueSummary(issues)
     const account = accounts.find(item => item.id === current.accountId)
     const over = currentStatus === 'draft' ? marginOverBudget(current, leverageOf(current.leverage), availableOf(account)) : null
@@ -460,7 +465,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} revision={revision} lockInstrument={locked}
       lockDirection={status === 'open' || filled} readOnly={readOnly} retrospective={retrospective}
       sizing={sizing.sizing} sizingStatus={sizing.status} onRetrySizing={sizing.retry} onRiskChange={sizing.updateRisk}
-      filledEntries={filledEntries} onUnits={onUnits}
+      filledEntries={filledEntries} averageFills={averageFills} onUnits={onUnits}
       execution={manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
         enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}
         working={busy !== null}
@@ -471,7 +476,10 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         entries={draft.entries} direction={draft.direction} origin={saved.summary.origin} monitor={monitorRun.monitor} monitorBusy={monitorRun.busy} monitorError={monitorRun.error} retryAtUtc={monitorRun.retryAtUtc} monitorUnavailable={monitorRun.statusUnavailable}
         {...(onManageAccount && account ? { onManageCredential: () => onManageAccount(account.id) } : {})}
         onDismiss={tracking.dismiss} onCheck={() => { void monitorRun.check() }} onLink={request => { void tracking.link(request) }}
-        onUnlink={linkId => { void tracking.unlink(linkId) }} /> : undefined} />
+        onUnlink={linkId => { void tracking.unlink(linkId) }}
+        // A rebind writes a plan revision, so it waits for unsaved edits and other Play work, and its answer is the saved Play.
+        version={saved.summary.version} rebindBlocked={dirty ? 'Save or discard your plan changes first.' : busy !== null ? 'Wait for the current change to finish.' : undefined}
+        onRebind={(linkId, request) => tracking.rebind(linkId, request, acceptStoredPlay)} /> : undefined} />
     </StoredPlanTextContext.Provider>
     {dialog === 'revision' && saved && <RevisionDialog revision={saved.summary.planRevision} pending={saving} error={dialogError}
       onSave={reason => { void save(reason) }} onClose={() => setDialog(null)} />}

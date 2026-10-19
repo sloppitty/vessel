@@ -44,8 +44,11 @@ public static partial class PlayDocuments
     /// earlier plan never becomes unsaveable and nothing stored is rewritten. Unchanged means the same field of the same
     /// item: an entry's price or share by entry ID, a stop's or target's value (in the same unit) or share by entry and
     /// level ID, and the plan's size or budget. A negative percentage is refused with a pointer to a price stop.
+    /// Stops of the <paramref name="executedEntries"/> (entries with a linked or manual fill) may sit at or beyond the
+    /// entry, at break-even or in profit; every other price stop and target keeps its side of the entry.
     /// </summary>
-    public static PlayPlanDocument Normalize(PlayPlanDocument? plan, PlayPlanDocument? stored = null)
+    public static PlayPlanDocument Normalize(PlayPlanDocument? plan, PlayPlanDocument? stored = null,
+        IReadOnlySet<string>? executedEntries = null)
     {
         if (plan is null) throw Invalid("A plan is required.");
         if (plan.Direction is not ("long" or "short")) throw Invalid("Direction must be long or short.");
@@ -85,7 +88,7 @@ public static partial class PlayDocuments
                     : $"{label}: a percentage cannot be negative; use a price instead.");
             return new PlanExit(id, unit, Number(exit.Value, valueKey, label), Number(exit.Share, LevelKey(kind, entryId, id, "share"), $"{label} share"));
         }).ToList();
-        foreach (var entry in entries) RequireSides(entry, plan.Direction);
+        foreach (var entry in entries) RequireSides(entry, plan.Direction, executedEntries?.Contains(entry.Id) == true);
         return new PlayPlanDocument(plan.Direction, plan.SizingMode, Number(plan.Size, "size", "Size"), plan.Leverage,
             plan.BudgetOverride is null ? null : Number(plan.BudgetOverride, "budget", "Budget"), entries,
             new PlanNotes(Note(plan.Notes.Thesis), Note(plan.Notes.Invalidation), Note(plan.Notes.Strategy), Note(plan.Notes.Evidence)));
@@ -123,13 +126,15 @@ public static partial class PlayDocuments
 
     /// <summary>
     /// Price stops and targets must sit on their side of a priced entry: long stops below and targets above,
-    /// short the reverse. Percent levels are placed by direction, so they always do.
+    /// short the reverse. Percent levels are placed by direction, so they always do. Once an entry has filled, its
+    /// stops protect a position that exists: they may sit at or beyond the entry (break-even or profit).
     /// </summary>
-    private static void RequireSides(PlanEntry entry, string direction)
+    private static void RequireSides(PlanEntry entry, string direction, bool executed)
     {
         if (Positive(entry.Price) is not { } entryPrice) return;
         foreach (var (kind, exits) in new[] { ("stop", entry.Stops), ("target", entry.Targets) })
         {
+            if (kind == "stop" && executed) continue;
             var above = kind == "target" == (direction == "long");
             if (exits.Any(exit => exit.Unit == "price" && Positive(exit.Value) is { } price && (above ? price <= entryPrice : price >= entryPrice)))
                 throw Invalid($"{entry.Name}: a {direction} {kind} goes {(above ? "above" : "below")} the entry price.");

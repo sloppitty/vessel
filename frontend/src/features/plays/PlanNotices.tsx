@@ -1,12 +1,13 @@
 import { ArrowDownUp, CircleAlert, Repeat, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { PlayDraft } from './draft'
-import { planFixes, planIssues, stopsPastLiquidation } from './planChecks'
+import { noFilledEntries, planFixes, planIssues, stopsPastLiquidation, type FilledEntries } from './planChecks'
 import { leverageOf } from './levels'
 import { estimatedLiquidation } from './sizing'
 
 /** Problems in the plan, with the corrections that clear them. Shown between the play fields and the workspace. */
-export function PlanNotices({ draft, onChange, readOnly = false, lockDirection = false, maxLeverage = null, maintenanceMargin = null }: {
+export function PlanNotices({ draft, onChange, readOnly = false, lockDirection = false, maxLeverage = null, maintenanceMargin = null,
+  filledEntries = noFilledEntries }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
   readOnly?: boolean
@@ -16,8 +17,10 @@ export function PlanNotices({ draft, onChange, readOnly = false, lockDirection =
   maxLeverage?: number | null
   /** Maintenance margin fraction the venue states for the contract, or null. */
   maintenanceMargin?: number | null
+  /** Entries with a linked or manual fill: their stops may sit at or beyond the entry. */
+  filledEntries?: FilledEntries
 }) {
-  const issues = planIssues(draft.entries, draft.direction)
+  const issues = planIssues(draft.entries, draft.direction, filledEntries)
   const leverage = leverageOf(draft.leverage)
   // Wrong-side stops are already errors; the liquidation warning only applies to a consistent plan.
   const pastLiquidation = issues.length ? [] : stopsPastLiquidation(draft.entries, draft.direction, leverage,
@@ -32,7 +35,7 @@ export function PlanNotices({ draft, onChange, readOnly = false, lockDirection =
       </div>
     </div>
   </section>
-  const fixes = planFixes(draft)
+  const fixes = planFixes(draft, filledEntries)
   const swapped = fixes.swapped
   const reversed = lockDirection ? null : fixes.reversed
   const other = draft.direction === 'long' ? 'Short' : 'Long'

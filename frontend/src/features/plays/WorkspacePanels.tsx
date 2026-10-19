@@ -14,7 +14,7 @@ import { EvidencePanel } from './EvidencePanel'
 import { journalReviewVisible } from './journal'
 import { JournalStateContext, useJournalStore } from './journal-state'
 import { PositionRiskSummary } from './PositionRiskSummary'
-import type { RiskReference } from './position-risk-summary'
+import type { EntryFills, RiskReference } from './position-risk-summary'
 import { averageEntryPrice, formatDraggedPrice, leverageOf } from './levels'
 import { isPlanText, keptPlanTextTitle, planNumber, planTextLength } from './numbers'
 import { availableLabel, availableOf, budgetSourceLabel, defaultSizeUnits, formatMoney, formatQuantity, playBudget, positionSize, type AvailableBalance, type SizeUnits } from './sizing'
@@ -262,7 +262,9 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   </section></JournalStateContext.Provider>
 }
 
-export function PositionSummary({ draft, units = defaultSizeUnits, instrumentName, riskReference }: { draft: PlayDraft; units?: SizeUnits; instrumentName?: string; riskReference?: RiskReference | null | undefined }) {
+export function PositionSummary({ draft, units = defaultSizeUnits, instrumentName, riskReference, fills }: { draft: PlayDraft; units?: SizeUnits; instrumentName?: string; riskReference?: RiskReference | null | undefined
+  /** Filled entries and their average fills; the all-stops result is measured from them. */
+  fills?: EntryFills | undefined }) {
   const count = draft.entries.length
   // Same quantity-weighted planned average as the chart's AVG line, for one or more priced entries.
   const average = averageEntryPrice(draft.entries, 1)
@@ -283,6 +285,6 @@ export function PositionSummary({ draft, units = defaultSizeUnits, instrumentNam
     <dl>
       {values.map(([label, value]) => <div key={label}><dt>{label}</dt><dd data-placeholder={isPlaceholder(value)}>{value}</dd></div>)}
     </dl>
-    <PositionRiskSummary draft={draft} units={units} riskReference={riskReference ?? null} />
+    <PositionRiskSummary draft={draft} units={units} riskReference={riskReference ?? null} {...(fills ? { fills } : {})} />
   </section>
 }

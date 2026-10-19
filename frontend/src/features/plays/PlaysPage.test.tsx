@@ -718,3 +718,108 @@ describe('sizing truth on the page', () => {
     expect(screen.getByRole('spinbutton', { name: 'Whole-position margin (USDC)' })).not.toHaveAttribute('data-suggested')
   })
 })
+
+// Phase 0, 0.5b: stops at or beyond a filled entry, the signed Summary row and the rebind of a drifted linked level.
+describe('managed stops on the page', () => {
+  const venue: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}`, balanceUsd: '10000' }
+  const level = (id: string, value: string) => ({ id, unit: 'price' as const, value, share: '100' })
+  const open: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, status: 'open', planRevision: 1, venueId: 'hyperliquid',
+    instrument: 'BTC', instrumentSource: 'venue', plannedAtUtc: '2026-10-03T10:00:00.000Z', version: 4 },
+    plan: { ...savedPlayFixture.plan, sizingMode: 'quantity', size: '1', leverage: '3', entries: [
+      { id: 'entry-1', name: 'Entry 1', color: '#b9c9e4', share: '100', price: '100', stops: [level('stop-1', '95')], targets: [level('target-1', '110')] },
+    ] } }
+  const stopLink = { id: '00000000-0000-4000-8000-0000000000d1', role: 'stop' as const, entryId: 'entry-1', levelId: 'stop-1', state: 'linked' as const,
+    source: 'automatic' as const, filledQuantity: '0', fills: [], order: { orderId: 's-order', side: 'sell' as const, orderType: 'Stop Market',
+      limitPrice: '100', triggerPrice: '101', reduceOnly: true, isPositionTpsl: false, originalSize: '1', remainingSize: '1',
+      placedAtUtc: '2026-10-03T10:00:00Z', status: 'open' as const, venueStatus: 'open', statusAtUtc: '2026-10-03T10:00:00Z' } }
+  /** The venue filled the entry at 100: the execution reports its average fill. */
+  const filledExecution = (server: ReturnType<typeof fakeServer>, extra: Partial<PlayExecution> = {}) => vi.fn((id: string) =>
+    Promise.resolve({ ...server.execution(server.plays.get(id)!), entries: [{ entryId: 'entry-1', filledQuantity: '1', averageFillPrice: '100', restingOrders: 0 }],
+      ...extra }))
+  const venueApi = (server: ReturnType<typeof fakeServer>, overrides: Partial<WorkspaceApi> = {}) => client(server, {
+    instruments: () => Promise.resolve(instrumentCatalogFixture), candles: () => new Promise(() => {}), marketContext: () => new Promise(() => {}),
+    sizing: vi.fn().mockResolvedValue(sizingFixture), ...overrides })
+  const summaryValue = (label: string) =>
+    within(screen.getByRole('group', { name: 'Planned position money summary' })).getByText(label, { selector: 'dt' }).nextElementSibling!
+
+  it('saves a stop at 105 on an Open long filled at 100 with a reason and shows +5 locked in (acceptance)', async () => {
+    const server = fakeServer()
+    server.plays.set(open.summary.id, open)
+    server.history.set(open.summary.id, { revisions: [], statusChanges: [] })
+    const playExecution = filledExecution(server)
+    const draft = draftFromSaved(open, [])
+    const user = userEvent.setup()
+    render(<Page api={venueApi(server, { playExecution })} accounts={[venue]} initial={{ view: 'editor', draft, saved: savedState(open, draft) }} />)
+    await waitFor(() => expect(summaryValue('All stops')).toHaveTextContent(/^−5 USDC at riskFrom the average fill$/))
+    const stop = screen.getByRole('spinbutton', { name: 'Entry 1 planned stop price (quote units)' })
+    await user.clear(stop)
+    await user.type(stop, '105')
+    // No wrong-side error: the entry has filled, so its stop may lock in a profit.
+    expect(stop).not.toHaveAttribute('aria-invalid')
+    expect(screen.queryByRole('region', { name: 'Plan notifications' })).not.toBeInTheDocument()
+    expect(summaryValue('All stops')).toHaveTextContent(/^\+5 USDC locked inFrom the average fill$/)
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Why did the plan change?' })
+    await user.type(within(dialog).getByRole('textbox', { name: 'Reason' }), 'Lock in +5 after the breakout held')
+    await user.click(within(dialog).getByRole('button', { name: 'Save revision' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(server.api.updatePlay.mock.lastCall![1]).toMatchObject({ revisionReason: 'Lock in +5 after the breakout held', expectedVersion: 4 })
+    expect(server.api.updatePlay.mock.lastCall![1].plan.entries[0]!.stops[0]).toEqual(level('stop-1', '105'))
+    expect(summaryValue('All stops')).toHaveTextContent(/^\+5 USDC locked in/)
+  })
+
+  it('keeps the wrong-side rule for an entry that has not filled', async () => {
+    const server = fakeServer()
+    const planned = { ...open, summary: { ...open.summary, status: 'planned' as const } }
+    server.plays.set(planned.summary.id, planned)
+    const draft = draftFromSaved(planned, [])
+    const user = userEvent.setup()
+    render(<Page api={venueApi(server)} accounts={[venue]} initial={{ view: 'editor', draft, saved: savedState(planned, draft) }} />)
+    const stop = screen.getByRole('spinbutton', { name: 'Entry 1 planned stop price (quote units)' })
+    await user.clear(stop)
+    await user.type(stop, '105')
+    expect(stop).toHaveAttribute('aria-invalid', 'true')
+    expect(within(screen.getByRole('region', { name: 'Plan notifications' })).getByRole('alert'))
+      .toHaveTextContent('Entry 1 stop is above the entry price; a long stop goes below it.')
+  })
+
+  it('rebinds a drifted linked stop to its order price from the drift record and adopts the saved Play', async () => {
+    const server = fakeServer()
+    server.plays.set(open.summary.id, open)
+    const discrepancy = { id: '00000000-0000-4000-8000-0000000000d2', accountId: venue.id, playId: open.summary.id, contractId: 'BTC',
+      kind: 'level.drift', severity: 'info' as const, state: 'open' as const, openedAtUtc: '2026-10-03T10:10:00Z', confirmedAtUtc: '2026-10-03T10:11:00Z',
+      resolvedAtUtc: null, dismissedAtUtc: null, note: null, outcome: null, unverifiableAtUtc: null,
+      details: { coverage: {}, levels: [{ orderId: 's-order', actualPrice: '101', plannedPrice: '95', remainingQuantity: '1' }] } }
+    const playExecution = filledExecution(server, { links: [stopLink], discrepancies: [discrepancy] })
+    const rebound: SavedPlay = { ...open, summary: { ...open.summary, version: 5, planRevision: 2 },
+      plan: { ...open.plan, entries: [{ ...open.plan.entries[0]!, stops: [level('stop-1', '101')] }] } }
+    const rebindLevel = vi.fn(() => { server.plays.set(open.summary.id, rebound); return Promise.resolve(rebound) })
+    const draft = draftFromSaved(open, [])
+    const user = userEvent.setup()
+    render(<Page api={venueApi(server, { playExecution, rebindLevel })} accounts={[venue]} initial={{ view: 'editor', draft, saved: savedState(open, draft) }} />)
+    await user.click(await screen.findByRole('tab', { name: 'Execution' }))
+    const record = within(await screen.findByRole('region', { name: 'Monitor discrepancies' }))
+    const use = record.getByRole('button', { name: 'Use 101 for Entry 1 stop' })
+
+    // Unsaved plan edits come first: the rebind writes a revision of the saved plan.
+    const target = screen.getByRole('spinbutton', { name: 'Entry 1 planned target 1 price (quote units)' })
+    await user.clear(target)
+    await user.type(target, '111')
+    await user.type(record.getByRole('textbox', { name: 'Reason to move Entry 1 stop to 101' }), 'Trailed at the venue')
+    expect(use).toBeDisabled()
+    expect(use).toHaveAttribute('title', 'Save or discard your plan changes first.')
+    await user.clear(target)
+    await user.type(target, '110')
+    await waitFor(() => expect(use).toBeEnabled())
+    const reads = playExecution.mock.calls.length
+    await user.click(use)
+    await waitFor(() => expect(rebindLevel).toHaveBeenCalledWith(open.summary.id, stopLink.id,
+      { expectedVersion: 4, orderId: 's-order', observedPrice: '101', reason: 'Trailed at the venue' }, expect.any(AbortSignal)))
+    // The saved Play is adopted, and the execution is read again.
+    await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Entry 1 planned stop price (quote units)' })).toHaveValue(101))
+    expect(screen.getByText('Revision 2', { selector: '.badge' })).toBeInTheDocument()
+    await waitFor(() => expect(playExecution.mock.calls.length).toBeGreaterThan(reads))
+    expect(within(screen.getByRole('region', { name: 'Monitor discrepancies' }))
+      .getByText('The plan uses 101 now. The monitor clears this on its next check.')).toBeInTheDocument()
+  })
+})

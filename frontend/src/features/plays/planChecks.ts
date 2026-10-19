@@ -9,11 +9,21 @@ type Direction = PlayDraft['direction']
 const belongsAbove = (kind: ExitKind, direction: Direction) => (kind === 'target') === (direction === 'long')
 
 /**
+ * Entries with a linked or manual fill, by ID; `'all'` when an entry has filled but the editor does not know which (a
+ * manual Play's ledger, or before the execution loads). The server decides per entry from its own facts.
+ */
+export type FilledEntries = ReadonlySet<string> | 'all'
+export const noFilledEntries: FilledEntries = new Set<string>()
+export const entryFilled = (filled: FilledEntries | undefined, entryId: string) => filled === 'all' || !!filled?.has(entryId)
+
+/**
  * A stop or target in price units on the wrong side of its entry, or at it. Percent levels are always placed on the right
  * side. Prices are read as the server's side check reads them, so stored text such as 1e2 counts; pass the entry price
- * read the same way (`serverPositivePlanNumber`).
+ * read the same way (`serverPositivePlanNumber`). Once its entry has filled, a stop protects a position that exists and
+ * may sit at or beyond the entry (break-even or locked-in profit), as the server allows; targets keep their side.
  */
-export function wrongSide(entryPrice: number | null, exit: DraftExit, kind: ExitKind, direction: Direction) {
+export function wrongSide(entryPrice: number | null, exit: DraftExit, kind: ExitKind, direction: Direction, filled = false) {
+  if (kind === 'stop' && filled) return false
   const price = exit.unit === 'price' ? storedPositive(exit.value) : null
   if (entryPrice === null || price === null) return false
   return belongsAbove(kind, direction) ? price <= entryPrice : price >= entryPrice
@@ -27,11 +37,11 @@ export interface PlanIssue {
 }
 
 /** Stops and targets that contradict the direction. A plan with issues cannot be saved. */
-export function planIssues(entries: readonly DraftEntry[], direction: Direction): PlanIssue[] {
+export function planIssues(entries: readonly DraftEntry[], direction: Direction, filled: FilledEntries = noFilledEntries): PlanIssue[] {
   return entries.flatMap(entry => {
     const entryPrice = storedPositive(entry.price)
     return (['stop', 'target'] as const).flatMap(kind => exitsOf(entry, kind)
-      .filter(exit => wrongSide(entryPrice, exit, kind, direction))
+      .filter(exit => wrongSide(entryPrice, exit, kind, direction, entryFilled(filled, entry.id)))
       .map(exit => {
         const side = storedPositive(exit.value) === entryPrice ? 'at' : belongsAbove(kind, direction) ? 'below' : 'above'
         return {
@@ -46,15 +56,15 @@ export function planIssues(entries: readonly DraftEntry[], direction: Direction)
  * Corrections that clear every issue, when there is one: swapping the stops and targets of the
  * entries with issues, or switching the direction. Null when it would not fix the whole plan.
  */
-export function planFixes(draft: Pick<PlayDraft, 'entries' | 'direction'>) {
-  const issues = planIssues(draft.entries, draft.direction)
+export function planFixes(draft: Pick<PlayDraft, 'entries' | 'direction'>, filled: FilledEntries = noFilledEntries) {
+  const issues = planIssues(draft.entries, draft.direction, filled)
   if (!issues.length) return { swapped: null, reversed: null }
   const affected = new Set(issues.map(issue => issue.entryId))
   const swapped = draft.entries.map(entry => affected.has(entry.id) ? { ...entry, stops: entry.targets, targets: entry.stops } : entry)
   const reversed: Direction = draft.direction === 'long' ? 'short' : 'long'
   return {
-    swapped: planIssues(swapped, draft.direction).length ? null : swapped,
-    reversed: planIssues(draft.entries, reversed).length ? null : reversed,
+    swapped: planIssues(swapped, draft.direction, filled).length ? null : swapped,
+    reversed: planIssues(draft.entries, reversed, filled).length ? null : reversed,
   }
 }
 

@@ -31,7 +31,7 @@ const copy = {
 } as const
 
 /** Stops or targets of one entry. Each closes a share of the entry; percentages are returns at the play's leverage. */
-function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidation, suggested, quantity, units }: {
+function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidation, suggested, quantity, units, filled = false }: {
   entry: DraftEntry
   kind: ExitKind
   direction: PlayDraft['direction']
@@ -44,6 +44,8 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
   suggested: ReadonlySet<string> | null
   quantity: number | null
   units: SizeUnits
+  /** The entry has filled: its stops may sit at or beyond it (break-even or profit). */
+  filled?: boolean
 }) {
   const exits = exitsOf(entry, kind)
   const text = copy[kind]
@@ -69,7 +71,7 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
       const percentValue = exit.unit === 'percent' ? positivePlanNumber(exit.value) : null
       const move = estimate?.move ?? (percentValue !== null ? priceMovePercent(percentValue, leverage) : null)
       const outcome = kind === 'stop' ? 'loss' : 'gain'
-      const wrong = wrongSide(sideEntryPrice, exit, kind, direction)
+      const wrong = wrongSide(sideEntryPrice, exit, kind, direction, filled)
       const stopPrice = kind === 'stop' ? levelPrice(entryPrice, exit, kind, direction, leverage) : null
       const marked = suggested?.has(exit.id) ?? false
       const pastLiquidation = !wrong && stopPrice !== null && liquidation !== null && (direction === 'long' ? stopPrice <= liquidation : stopPrice >= liquidation)
@@ -108,7 +110,7 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
   </fieldset>
 }
 
-export function EntryForm({ entry, onChange, idPrefix, direction = 'long', leverage = 1, shareLocked = false, maxLeverage = null, maintenanceMargin = null, liquidation = null, suggested = null, quantity = null, units = defaultSizeUnits }: {
+export function EntryForm({ entry, onChange, idPrefix, direction = 'long', leverage = 1, shareLocked = false, maxLeverage = null, maintenanceMargin = null, liquidation = null, suggested = null, quantity = null, units = defaultSizeUnits, filled = false }: {
   entry: DraftEntry
   onChange: (entry: DraftEntry) => void
   idPrefix?: string
@@ -128,6 +130,8 @@ export function EntryForm({ entry, onChange, idPrefix, direction = 'long', lever
   /** Full-position quantity, already including leverage; null until the size and average entry are known. */
   quantity?: number | null
   units?: SizeUnits
+  /** The entry has a linked or manual fill: its stops may sit at or beyond it, as the server allows. */
+  filled?: boolean
 }) {
   const generatedId = useId()
   const prefix = idPrefix ?? generatedId
@@ -159,7 +163,7 @@ export function EntryForm({ entry, onChange, idPrefix, direction = 'long', lever
       Liq. ≈ <strong>{formatDraggedPrice(own)}</strong>
       {' '}<span>{percent.format(Math.abs(own - entryPrice) / entryPrice * 100)}% {direction === 'long' ? 'below' : 'above'} entry{shareLocked ? '' : ' · this entry alone'}</span>
     </p>}
-    <ExitList entry={entry} kind="stop" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={liquidation ?? own} suggested={suggested} quantity={quantity} units={units} />
+    <ExitList entry={entry} kind="stop" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={liquidation ?? own} suggested={suggested} quantity={quantity} units={units} filled={filled} />
     <ExitList entry={entry} kind="target" direction={direction} leverage={leverage} onChange={onChange} prefix={prefix} liquidation={null} suggested={suggested} quantity={quantity} units={units} />
   </div>
 }

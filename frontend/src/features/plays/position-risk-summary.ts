@@ -1,7 +1,10 @@
-import type { PlayDraft } from './draft'
+import {
+  exactAdd, exactDecimal, exactDiv, exactFixed, exactInteger, exactMul, exactNumber, exactSignOf, exactSub, exactZero, type Exact,
+} from '@/lib/decimal'
+import type { DraftEntry, DraftExit, PlayDraft } from './draft'
 import { exitsOf, type ExitKind } from './levels'
-import { finitePlanNumber as decimal, planShare, planTextLength, serverPositivePlanNumber } from './numbers'
-import { wrongSide } from './planChecks'
+import { finitePlanNumber as decimal, planNumber, planShare, planTextLength, serverPositivePlanNumber } from './numbers'
+import { entryFilled, noFilledEntries, wrongSide, type FilledEntries } from './planChecks'
 import { defaultSizeUnits, exitEstimate, positionSize, type SizeUnits } from './sizing'
 
 /** The caller supplies a named reference in the position's quote asset. No conversion is inferred. */
@@ -25,12 +28,37 @@ export interface PlannedExitSummary {
   totalAmount: number | null
 }
 
+/** Where the all-stops result is measured from: each filled entry's average fill, otherwise its planned price. */
+export type PayoffBasis = 'average fill' | 'planned entry' | 'mixed'
+
+/**
+ * The all-stops result, signed and exact: positive is locked in, negative at risk, zero break-even. Unknown is null,
+ * never zero. Phase 0, 0.5b: a filled entry's stops may sit at or beyond the entry.
+ */
+export interface StopPayoff {
+  /** The modeled stops' result, also when coverage is partial. */
+  known: Exact | null
+  /** The whole position's result, only with complete stop coverage. */
+  total: Exact | null
+  basis: PayoffBasis | null
+}
+
+/** What the execution says about the entries: which have filled, and the exact average fill price where it is reported. */
+export interface EntryFills {
+  filled: FilledEntries
+  averages: ReadonlyMap<string, string>
+}
+
+export const noEntryFills: EntryFills = { filled: noFilledEntries, averages: new Map() }
+
 export interface PositionRisk {
   quantity: number | null
   entryAllocation: RiskCoverage
   pricedCoverage: RiskCoverage
   pricedQuantity: number | null
+  /** Loss amounts (`knownAmount`, `totalAmount`) are the payoff's negation, as display numbers; a locked-in result is negative. */
   stops: PlannedExitSummary
+  stopPayoff: StopPayoff
   targets: PlannedExitSummary
   rewardToRisk: number | null
   reference: { name: string; amount: number } | null
@@ -75,8 +103,46 @@ function allocation(values: string[]): RiskCoverage {
 /** The parts of a draft the summary reads. */
 export type SummaryDraft = Pick<PlayDraft, 'entries' | 'direction' | 'size' | 'sizingMode' | 'leverage'>
 
+/** Plan text as an exact value; anything the plan grammar refuses is unknown, as for every estimate. */
+const exactPlan = (value: string): Exact | null => {
+  const text = value.trim()
+  return planNumber(text) === null ? null : exactDecimal(text)
+}
+
+/**
+ * The full-position quantity, exactly: the size in quantity sizing, or margin × leverage over the share-weighted planned
+ * average entry (the editor's `positionSize`). The caller decides whether the plan can be sized at all.
+ */
+function exactQuantity(draft: SummaryDraft, leverage: number): Exact | null {
+  const size = exactPlan(draft.size)
+  if (size === null || exactSignOf(size) === 0 || draft.sizingMode === 'quantity') return size
+  let shares = exactZero
+  let notional = exactZero
+  for (const entry of draft.entries) {
+    const price = exactPlan(entry.price)
+    const share = exactPlan(entry.share)
+    if (price === null || share === null || exactSignOf(price) <= 0 || exactSignOf(share) <= 0) continue
+    shares = exactAdd(shares, share)
+    notional = exactAdd(notional, exactMul(price, share))
+  }
+  const average = exactDiv(notional, shares)
+  return average === null ? null : exactDiv(exactMul(size, exactInteger(leverage)), average)
+}
+
+/** A stop's price, exactly: its price, or a loss on margin that moves the price percent ÷ leverage from the planned entry. */
+function exactStopPrice(entry: DraftEntry, stop: DraftExit, direction: PlayDraft['direction'], leverage: number): Exact | null {
+  const value = exactPlan(stop.value)
+  if (value === null) return null
+  if (stop.unit === 'price') return exactSignOf(value) > 0 ? value : null
+  const planned = exactPlan(entry.price)
+  if (planned === null || exactSignOf(planned) <= 0) return null
+  const move = exactDiv(exactMul(planned, value), exactInteger(leverage * 100))!
+  const price = direction === 'long' ? exactSub(planned, move) : exactAdd(planned, move)
+  return exactSignOf(price) > 0 ? price : null
+}
+
 export function positionRiskSummary(draft: SummaryDraft, units: SizeUnits = defaultSizeUnits,
-  riskReference?: RiskReference | null): PositionRisk {
+  riskReference?: RiskReference | null, fills: EntryFills = noEntryFills): PositionRisk {
   const entryAllocation = allocation(draft.entries.map(entry => entry.share))
   const priced = draft.entries.flatMap(entry => {
     const share = shareOf(entry.share)
@@ -146,17 +212,96 @@ export function positionRiskSummary(draft: SummaryDraft, units: SizeUnits = defa
     }
   }
 
-  const stops = scenario('stop')
+  /**
+   * The all-stops result with the same coverage rules, in exact arithmetic. An unfilled entry's stop counts only on the
+   * loss side of its planned price, as before. A filled entry's priced stop counts wherever it sits, measured from the
+   * entry's average fill when the execution reports one, otherwise from the planned price.
+   */
+  function stopScenario(): { summary: PlannedExitSummary; payoff: StopPayoff } {
+    const size = canSize ? exactQuantity(draft, leverage!) : null
+    const direction = exactInteger(draft.direction === 'long' ? 1 : -1)
+    let allocated = 0
+    let covered = 0
+    let known = exactZero
+    let hasAmount = false
+    let completeAllocation = entryAllocation.status === 'complete'
+    let completeCoverage = pricedCoverage.status === 'complete' && leverage !== null
+    let invalid = entryAllocation.status === 'invalid'
+    let hasShare = false
+    const bases = new Set<'fill' | 'plan'>()
+    for (const entry of draft.entries) {
+      const entryShare = shareOf(entry.share)
+      if (entryShare === null) continue
+      hasShare = true
+      if (entryShare === 0) continue
+      const exitAllocation = allocation(entry.stops.map(stop => stop.share))
+      allocated += entryShare / 100 * (exitAllocation.percent ?? 0)
+      completeAllocation &&= exitAllocation.status === 'complete'
+      invalid ||= exitAllocation.status === 'invalid'
+      const planned = exactPlan(entry.price)
+      const filled = entryFilled(fills.filled, entry.id)
+      const reported = filled ? fills.averages.get(entry.id) : undefined
+      const average = reported === undefined ? null : exactDecimal(reported)
+      const fromFill = average !== null && exactSignOf(average) > 0
+      const reference = fromFill ? average : planned
+      for (const stop of entry.stops) {
+        const stopShare = shareOf(stop.share)
+        if (stopShare === null || stopShare === 0 || leverage === null) continue
+        const price = exactStopPrice(entry, stop, draft.direction, leverage)
+        const lossSide = price !== null && planned !== null && exactSignOf(planned) > 0 &&
+          exactSignOf(exactMul(direction, exactSub(planned, price))) > 0
+        if (price === null || reference === null || planned === null || exactSignOf(planned) <= 0 || (!filled && !lossSide)) {
+          completeCoverage = false
+          continue
+        }
+        covered += entryShare / 100 * stopShare
+        bases.add(fromFill ? 'fill' : 'plan')
+        if (size === null) continue
+        const portion = exactDiv(exactMul(exactPlan(entry.share)!, exactPlan(stop.share)!), exactInteger(10_000))!
+        known = exactAdd(known, exactMul(exactMul(size, portion), exactMul(direction, exactSub(price, reference))))
+        hasAmount = true
+      }
+    }
+    const allocatedPercent = hasShare ? finite(allocated) : null
+    const coveredPercent = hasShare ? finite(covered) : null
+    const allocationCoverage = coverage(allocatedPercent, completeAllocation && allocatedPercent !== null, invalid)
+    const exitCoverage = coverage(coveredPercent,
+      allocationCoverage.status === 'complete' && completeCoverage && coveredPercent !== null, invalid)
+    const payoff = hasAmount && !invalid ? known : null
+    const total = exitCoverage.status === 'complete' ? payoff : null
+    const loss = payoff === null ? null : finite(-exactNumber(payoff) || 0)
+    return {
+      summary: { allocation: allocationCoverage, coverage: exitCoverage, knownAmount: loss, totalAmount: total === null ? null : loss },
+      payoff: { known: payoff, total, basis: bases.size === 0 ? null : bases.size > 1 ? 'mixed' : bases.has('fill') ? 'average fill' : 'planned entry' },
+    }
+  }
+
+  const { summary: stops, payoff: stopPayoff } = stopScenario()
   const targets = scenario('target')
+  // A result that is not a loss at the stops has no risk to measure reward against.
   const rewardToRisk = stops.totalAmount !== null && stops.totalAmount > 0 && targets.totalAmount !== null
     ? finite(targets.totalAmount / stops.totalAmount) : null
   const referenceAmount = riskReference ? decimal(riskReference.amount) : null
   const reference = riskReference?.name.trim() && riskReference.quote === units.quote
     && referenceAmount !== null && referenceAmount > 0
     ? { name: riskReference.name.trim(), amount: referenceAmount } : null
-  const riskSharePercent = reference !== null && stops.totalAmount !== null
-    ? finite(stops.totalAmount / reference.amount * 100) : null
-  return { quantity, entryAllocation, pricedCoverage, pricedQuantity, stops, targets, rewardToRisk, reference, riskSharePercent }
+  // Stops that lock in a result risk nothing of the balance: a known zero, not unknown.
+  const riskSharePercent = reference !== null && stops.totalAmount !== null && stopPayoff.total !== null
+    ? exactSignOf(stopPayoff.total) >= 0 ? 0 : finite(stops.totalAmount / reference.amount * 100) : null
+  return { quantity, entryAllocation, pricedCoverage, pricedQuantity, stops, stopPayoff, targets, rewardToRisk, reference, riskSharePercent }
+}
+
+const payoffMoney = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
+
+/**
+ * "+5 USDC locked in", "−5 USDC at risk" or "0 USDC break-even": rounded once from the exact value for display, so a
+ * small result reads "< 0.01" and the sign is never rounded away.
+ */
+export function signedPayoffText(value: Exact, units: SizeUnits) {
+  const sign = exactSignOf(value)
+  const text = exactFixed(value, 2).replace(/^-/, '')
+  const amount = sign !== 0 && text === '0' ? '< 0.01' : payoffMoney.format(text as Intl.StringNumericLiteral)
+  return sign > 0 ? `+${amount} ${units.quote} locked in` : sign < 0 ? `\u2212${amount} ${units.quote} at risk` : `0 ${units.quote} break-even`
 }
 
 const gapPercent = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 })

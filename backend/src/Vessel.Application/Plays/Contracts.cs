@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Vessel.Application.Common;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Workspace;
 
 namespace Vessel.Application.Plays;
 
@@ -110,6 +111,11 @@ public interface IPlayStore
     Task<List<PlayReviewRevision>> ReviewsAsync(Guid playId, CancellationToken ct);
     /// <summary>Entries referenced by linked orders or manual facts; their price, share and existence are fixed.</summary>
     Task<IReadOnlySet<string>> FilledEntryIdsAsync(Guid playId, CancellationToken ct);
+    /// <summary>
+    /// The executions of the Play's entries: each fill of a linked entry order, through the shared order-key rule, and
+    /// each manual entry execution (with no fill). Facts only; the caller decides which count.
+    /// </summary>
+    Task<List<EntryExecution>> EntryExecutionsAsync(Guid playId, CancellationToken ct);
     /// <summary>Linked orders of the Play with the venue's order ID, for the owner's messages.</summary>
     Task<List<LinkedPlanReference>> LinkedPlanReferencesAsync(Guid playId, CancellationToken ct);
     void Add(Play play);
@@ -130,3 +136,6 @@ public interface IPlayStore
 
 /// <summary>A linked order that fixes a plan level, with its venue order ID.</summary>
 public sealed record LinkedPlanReference(PlayOrderLink Link, string ExternalOrderId);
+
+/// <summary>One execution of a plan entry: a fill of a linked entry order, or a manual entry execution (<paramref name="Fill"/> null).</summary>
+public sealed record EntryExecution(string EntryId, ImportedFill? Fill);

@@ -56,6 +56,9 @@ public static class PlayEndpoints
         api.MapDelete("/{id:guid}/execution/links/{linkId:guid}", async (Guid id, Guid linkId, PlayExecutionService service,
             MonitorExecutionView monitor, CancellationToken ct) =>
             Results.Ok(await monitor.ComposeAsync(await service.UnlinkAsync(id, linkId, ct), ct)));
+        // Answers level.drift: one plan revision moves the linked level to the observed order's price. Returns the Play.
+        api.MapPost("/{id:guid}/execution/links/{linkId:guid}/rebind", async (Guid id, Guid linkId, RebindLevelRequest request,
+            PlayExecutionService service, CancellationToken ct) => Results.Ok(await service.RebindAsync(id, linkId, request, ct)));
         api.MapDelete("/{id:guid}", async (Guid id, PlayService service, CancellationToken ct) =>
         {
             await service.DeleteAsync(id, ct);

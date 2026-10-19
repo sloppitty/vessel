@@ -115,6 +115,7 @@ public abstract class PlayIsolationCases(IsolationHost api)
     [Covers("POST", "/api/plays/{id:guid}/execution/check")]
     [Covers("POST", "/api/plays/{id:guid}/execution/links")]
     [Covers("DELETE", "/api/plays/{id:guid}/execution/links/{linkId:guid}")]
+    [Covers("POST", "/api/plays/{id:guid}/execution/links/{linkId:guid}/rebind")]
     public async Task Order_links_of_another_owner_answer_like_unknown_ones_and_stay_unchanged()
     {
         var (a, b) = await api.Owners();
@@ -128,7 +129,8 @@ public abstract class PlayIsolationCases(IsolationHost api)
 
         // B follows the same address, so the same native order IDs exist in its own account too.
         var bAccount = (await b.SyncedVenueAccount(Isolated.Marker("venue-b"))).GetProperty("id").GetGuid();
-        var bPlay = Id(await Planned(b, bAccount, Isolated.Marker("linked-b")));
+        var bPlanned = await Planned(b, bAccount, Isolated.Marker("linked-b"));
+        var bPlay = Id(bPlanned);
         var bPaths = new[] { $"/api/plays/{bPlay}", $"/api/plays/{bPlay}/execution" };
         // Past the cooldown both refreshes set, before any check: a foreign check that reached A's account would be
         // admitted and change A's monitor state, not hide behind a cooldown the positive control has escaped.
@@ -149,6 +151,11 @@ public abstract class PlayIsolationCases(IsolationHost api)
             // A's link ID under B's own Play reaches the link lookup: it unlinks nothing.
             await state.After(() => Isolated.NotFound(b, link, Isolated.Request(HttpMethod.Delete, id => $"/api/plays/{bPlay}/execution/links/{id}"),
                 "Link not found."));
+            // A rebind of A's link answers like an unknown Play, and under B's own current Play like an unknown link.
+            await state.After(() => Isolated.NotFound(b, play, Isolated.Request(HttpMethod.Post, id => $"/api/plays/{id}/execution/links/{link}/rebind",
+                _ => new RebindLevelRequest(1, "entry", "100", "Moved at the venue")), PlayNotFound));
+            await state.After(() => Isolated.NotFound(b, link, Isolated.Request(HttpMethod.Post, id => $"/api/plays/{bPlay}/execution/links/{id}/rebind",
+                _ => new RebindLevelRequest(Version(bPlanned), "entry", "100", "Moved at the venue")), "Linked stop or target not found."));
 
             // B links the same native order ID in its own account: a separate link that leaves A's untouched.
             var aState = await Snapshot.Of(a, paths);
@@ -164,6 +171,9 @@ public abstract class PlayIsolationCases(IsolationHost api)
             Assert.Equal(("pending", aAccount), (check.GetProperty("monitor").GetProperty("manualState").GetString(),
                 check.GetProperty("monitor").GetProperty("accountId").GetGuid()));
             await a.Send(HttpMethod.Delete, $"/api/plays/{play}/execution/links/{link}");
+            // Positive control: A's own rebind reaches its Play, whose version moved on: a conflict, not an unknown Play.
+            await a.Post($"/api/plays/{play}/execution/links/{link}/rebind", new RebindLevelRequest(0, "entry", "100", "Moved at the venue"),
+                HttpStatusCode.Conflict);
         }
         finally { api.Clock.Now = now; }
     }

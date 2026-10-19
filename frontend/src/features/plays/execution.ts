@@ -1,5 +1,8 @@
 import type { ExecutionFill, ExecutionOrder, LinkOrder, LinkRole, OrderLink, PlaySummary } from '@/api/plays'
+import type { MonitorDiscrepancy } from '@/api/monitor'
+import { exactCompare, exactDecimal } from '@/lib/decimal'
 import type { DraftEntry } from './draft'
+import { isPlanText } from './numbers'
 
 export function describeOrder(order: ExecutionOrder) {
   const side = order.side === 'buy' ? 'Buy' : 'Sell'
@@ -50,4 +53,42 @@ export function fillSummary(fills: readonly ExecutionFill[]) {
   const average = fills.reduce((sum, fill) => sum + Number(fill.price) * Number(fill.quantity), 0) / quantity
   const directions = [...new Set(fills.map(fill => fill.direction))].join(', ')
   return `${directions} · ${fills.length} fills, average ${Number(average.toPrecision(8))}`
+}
+
+/** A linked stop or target a `level.drift` record names, and the price its order rests at. */
+export interface LevelDrift {
+  link: OrderLink
+  /** The order's acting price as Vessel stores it (trigger, else limit): what a rebind sends as observed. */
+  observed: string
+  /** The plan price the monitor compared it with. */
+  planned: string
+  /** The plan already holds the observed price; the monitor clears the record on its next check. */
+  applied: boolean
+}
+
+const sameDecimal = (a: string, b: string) => {
+  const [x, y] = [exactDecimal(a), exactDecimal(b)]
+  return x !== null && y !== null && exactCompare(x, y) === 0
+}
+
+/**
+ * The drifted linked stops and targets of a `level.drift` record, with their resting order's price. Rows whose order no
+ * longer rests, entries, unplanned exits and orders the record lists at their planned price are left out. An order price is
+ * never a fill: a rebind only moves the plan level to it.
+ */
+export function levelDrifts(discrepancy: MonitorDiscrepancy, links: readonly OrderLink[], entries: readonly DraftEntry[]): LevelDrift[] {
+  const rows = discrepancy.kind === 'level.drift' && Array.isArray(discrepancy.details.levels) ? discrepancy.details.levels as unknown[] : []
+  return rows.flatMap(row => {
+    if (typeof row !== 'object' || row === null) return []
+    const { orderId, actualPrice, plannedPrice } = row as Record<string, unknown>
+    if (typeof orderId !== 'string' || typeof actualPrice !== 'string' || typeof plannedPrice !== 'string' ||
+      sameDecimal(actualPrice, plannedPrice)) return []
+    const link = links.find(item => (item.role === 'stop' || item.role === 'target') && item.state === 'linked' && item.order?.orderId === orderId)
+    if (!link?.order || link.order.status !== 'open') return []
+    const observed = link.order.triggerPrice ?? link.order.limitPrice
+    const entry = entries.find(item => item.id === link.entryId)
+    const level = (link.role === 'stop' ? entry?.stops : entry?.targets)?.find(item => item.id === link.levelId)
+    const applied = level?.unit === 'price' && isPlanText(level.value.trim()) && sameDecimal(level.value.trim(), observed)
+    return [{ link, observed, planned: plannedPrice, applied }]
+  })
 }

@@ -237,10 +237,10 @@ Inside **plays**, the pure modules carry the rules and the components stay thin:
 | `saved.ts` | `PlaysSession`, saved state and dirty checks, draft ↔ document conversion, evidence sync, plan change descriptions |
 | `levels.ts` | level prices (percentages are returns at the leverage), chart overlays, drag and pick placement, price rounding |
 | `sizing.ts` | position size, exit estimates, liquidation estimate, budget checks, formatting in quote/base units |
-| `position-risk-summary.ts` | the summary's money, coverage and R:R figures |
-| `planChecks.ts` | wrong-side stops and targets, the fixes offered, stops past liquidation |
+| `position-risk-summary.ts` | the summary's money, coverage and R:R figures; the signed, exact all-stops result |
+| `planChecks.ts` | wrong-side stops and targets (a filled entry's stops are exempt), the fixes offered, stops past liquidation |
 | `suggestions.ts` | sizing suggestions from the sizing document |
-| `execution.ts`, `manual.ts` | order and level names for the Execution tab; manual execution drafts and requests |
+| `execution.ts`, `manual.ts` | order and level names for the Execution tab, the drifted levels a `level.drift` record names; manual execution drafts and requests |
 | `evidence.ts`, `markup.ts` | image limits and signature checks; vector markup and its SVG/PNG rendering |
 | `instruments.ts` | the venue catalogue hook and instrument search |
 
@@ -322,6 +322,7 @@ existing cleanup, but cannot promise rollback of a request already sent.
 - **Status** changes (`Plan it`, `Pause`, `Resume`, `Cancel play`) go through `POST /status`; planning a dirty draft saves it first.
 - A **saved Play** is tracked by `usePlayExecution`: it reads `/execution`, runs `/execution/check` when opened and every 60 seconds while visible, and offers order links. Busy state counts all current-session requests, and polling skips ticks while work is in flight. Responses cannot overwrite a newer applied result. A status that moved on the server (Open, Closed) reloads the Play.
 - **Manual accounts** show `ManualExecutionPanel` instead, with idempotent request IDs.
+- **Filled entries** (October 19, 2026, Phase 0 0.5b). `PlaysPage` derives `filledEntries` and the exact `averageFills` from the execution (`'all'` for an Open manual Play, whose ledger the editor does not read). Plan checks let a filled entry's stops sit at or beyond it, and the Summary measures them from the average fill. A `level.drift` record in the Execution tab offers `LevelDriftAction`: with a reason, `POST …/execution/links/{linkId}/rebind` moves the linked level to its order's price as one revision. The answer is the saved Play, adopted like any stored Play. The action waits while plan edits are unsaved or other Play work runs.
 - **Unsaved work** is protected: opening another Play or starting a new one never replaces a dirty draft.
 - `useLeverageChange` owns one confirmation for the position controls and Suggestions. Controls keep showing the committed leverage while the dialog previews the pending value.
 - `useObjectUrl` acquires evidence image URLs in effects and releases them on Blob replacement or unmount. A thumbnail and viewer own separate URLs, so closing either cannot invalidate the other.
@@ -357,7 +358,7 @@ features/plays/PlayChart.tsx      ChartPanel: plan overlays, plan tools, drawing
 
 ## Conventions
 
-- **Exact numbers.** API amounts are decimal strings. Format them with `Intl.NumberFormat` on the original string (`money`, `amount`, `reviewMoney`); use `Number` only for chart geometry, sorting or display estimates. Compare or sum exactly with `BigInt` when it matters.
+- **Exact numbers.** API amounts are decimal strings. Format them with `Intl.NumberFormat` on the original string (`money`, `amount`, `reviewMoney`); use `Number` only for chart geometry, sorting or display estimates. Compare or sum exactly with `BigInt` when it matters. `lib/decimal.ts` has exact fractions (`Exact`) for money derived from plan text, such as the Summary's all-stops result: they round once for display, and the sign comes from the exact value.
 - **Unknown stays unknown.** Null is shown as "—", "Unavailable" or "Unknown", never as zero.
 - **Notices are part of the API.** Server notices and scope notes are shown verbatim.
 - **Capabilities, not names.** Use `useVenues().can(venueId, 'candles')` and friends, never `venueId === 'hyperliquid'`.
