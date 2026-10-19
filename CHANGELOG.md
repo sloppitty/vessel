@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- A manual Refresh now records fill continuity like a scheduled check, so a
+  run of Refresh-only use no longer leaves a permanent false history gap that
+  switched off missing- and short-stop checks. Refresh can set a gap but never
+  clears one (D-02).
 - Open monitor incidents stay visible: a count on the Plays navigation entry,
   Plays rows and the Play header, a conditional row on Overview, and a monitor
   heading that never says "Monitored" beside an open record. Discrepancies

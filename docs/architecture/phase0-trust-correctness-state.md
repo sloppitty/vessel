@@ -61,6 +61,34 @@ October 19, 2026, 0.4a monitor visibility, branch
 - Not run: `scripts/monitor-browser-smoke.cjs`, `scripts/e2e/browser-e2e.cjs`
   and a rendered browser check.
 
+October 19, 2026, 0.4b Refresh continuity, branch `t3/phase0-refresh-continuity`:
+- Every import, Refresh included, checks fill continuity against the later of
+  the continuity watermark and the newest retained fill. The boundary is read
+  under the account lock before the import.
+- A Refresh records continuity in its snapshot-only unit:
+  - a capped read whose oldest raw fill is newer than the boundary sets the
+    gap;
+  - otherwise the watermark advances.
+- A Refresh never clears a gap, and records nothing when truncation is
+  unknown. Run state, backoff, attempts, due time and credential revision
+  stay check-only. No migration.
+- `MonitorRefreshContinuityTests` (PostgreSQL) ports the probe's `Watermark`
+  scenario and adds a capped-Refresh negative control, first-import and
+  Refresh-scope cases. Before the fix, 7 of its 9 cases failed.
+- Limitations recorded in the pull request:
+  - Lighter's unknown-truncation reads still move the boundary through their
+    retained fills.
+  - Old real gaps that a Refresh imported past before the upgrade are no
+    longer flagged.
+- `scripts/check.sh` passed on this branch, which includes 0.4a, with
+  PostgreSQL 18 and RabbitMQ 4.3.6 in disposable containers:
+  - Python: 78 OK. Prototype tests pass.
+  - Release build: 0 warnings.
+  - Backend: 3,442 passed, 5 skipped (live venue and S3), 0 failed.
+  - Frontend: typecheck and lint clean, 2,481 tests, build OK.
+
+  This is also a clean full run of 0.4a's code.
+
 ## 0.5 Managed stops
 
 Not started.
