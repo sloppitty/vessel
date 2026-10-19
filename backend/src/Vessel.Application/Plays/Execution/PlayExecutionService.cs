@@ -87,8 +87,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             var own = linked.Where(l => l.Role == OrderLinkRole.Entry && l.EntryId == entry.Id).ToList();
             var filled = own.SelectMany(l => fills[l.ImportedOrderId]).Where(f => !ExecutionIntegrity.Contradicts(OrderLinkRole.Entry, settlement.EntrySide, f)).ToList();
             var quantity = ExecutionIntegrity.Quantity(filled);
-            var notional = filled.Aggregate(BigInteger.Zero,
-                (sum, f) => sum + ExactAmount.From(f.Price).Units * ExactAmount.From(f.Quantity).Units);
+            var notional = filled.Aggregate(BigInteger.Zero, (sum, f) => sum + ExactAmount.Product(f.Price, f.Quantity));
             return new EntryProgressDto(entry.Id, quantity.ToString(), quantity.Units.Sign > 0 ? ExactAmount.Average(notional, quantity) : null,
                 own.Count(l => orders.TryGetValue(l.ImportedOrderId, out var o) && o.Status == "open"));
         }).ToList();

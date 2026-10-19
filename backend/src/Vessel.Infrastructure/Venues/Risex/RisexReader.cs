@@ -262,10 +262,19 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
                 Direction(side, positionSide, effect, liquidation), Json.Positive(Json.Property(trade, "price")),
                 Json.Positive(Json.Property(trade, "size")), fee, QuoteAsset, pnl, Nanoseconds(Json.Property(trade, "time"), latest),
                 Json.Text(Json.Property(trade, "order_id")), Json.TextOrEmpty(Json.Property(chain, "tx_hash"), 256), trade.GetRawText(),
-                effect, ExecutionFacts.FeeReported, ExecutionFacts.PnlNetOfFee, marketId));
+                effect, ExecutionFacts.FeeReported, ExecutionFacts.PnlNetOfFee, marketId, FillLeverage(trade)));
         }
         return fills;
     }
+
+    /// <summary>
+    /// The trade's documented <c>leverage</c> ("Leverage of position"), kept only as a whole number from 1 to 1000 like
+    /// the snapshot rule. Absent, null, empty, zero, fractional or larger values are unknown, never rounded or guessed;
+    /// a non-decimal value is an invalid response.
+    /// </summary>
+    internal static int? FillLeverage(JsonElement trade) =>
+        Json.OptionalAmount(trade, "leverage") is { } leverage && leverage > 0 && leverage == decimal.Truncate(leverage) && leverage <= 1000
+            ? (int)leverage : null;
 
     // ---- Orders ----
 

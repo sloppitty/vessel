@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Added
+
+- Activity operations show the venue-reported leverage observed while they were
+  open or closed: from RISEx fills that report it and from retained refresh
+  observations (new `LeverageObservations` migration), including a position
+  that closed and reopened identically between refreshes. Unobserved leverage,
+  and the latest value when its observations conflict, is shown as unknown,
+  never inferred.
+- Sizing suggestions start from closed Activity positions while no closed Play
+  has a win or loss, labelled "From Activity"; R multiples stay unknown, and
+  positions with known missing executions, an out-of-range return or an entry
+  notional beyond exact decimal precision are left out.
+
+### Fixed
+
+- A Play's entry notional is now the exact sum of its entry fills' quantity ×
+  price, summed before any conversion. A Play whose summed entry notional needs
+  more than 28 decimal places is excluded from Review and sizing as beyond exact
+  precision, instead of being rounded into a different return.
+
 ## 0.3.0 - October 18, 2026
 
 Release notes: [docs/releases/v0.3.0.md](docs/releases/v0.3.0.md).

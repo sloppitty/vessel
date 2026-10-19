@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Vessel.Application.Activity;
+using Vessel.Domain.Workspace;
 using Vessel.Persistence;
 
 namespace Vessel.Tests;
@@ -127,6 +128,27 @@ public sealed class ActivitySummaryCacheTests
         Assert.Equal(2, calls);
         Assert.Throws<InvalidOperationException>(() =>
             new ServiceCollection().AddVesselPersistence(Config("-1")));
+    }
+
+    [Fact]
+    public async Task Leverage_observations_count_toward_the_retained_memory_budget()
+    {
+        var cache = new ActivitySummaryCache(capacity: 16 * 1024); var key = Key(); var calls = 0;
+        var observed = Value with
+        {
+            Facts = Value.Facts with
+            {
+                LeverageObservations = Enumerable.Range(0, 20).Select(_ => new LeverageObservation
+                {
+                    Id = Guid.NewGuid(), OwnerId = key.OwnerId, AccountId = Guid.NewGuid(), ContractId = "BTC",
+                    ObservedAtUtc = DateTimeOffset.UnixEpoch, SignedQuantity = 1, EntryPrice = 100, Leverage = 5
+                }).ToList()
+            }
+        };
+        Task<ActivitySummaries> Compute(CancellationToken _) { calls++; return Task.FromResult(observed); }
+        await cache.ReadAsync(key, Compute, Unused, default);
+        await cache.ReadAsync(key, Compute, Unused, default);
+        Assert.Equal(2, calls);
     }
 
     [Fact]

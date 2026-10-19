@@ -15,6 +15,7 @@ internal sealed class ImportedFillConfiguration : IEntityTypeConfiguration<Impor
             table.HasCheckConstraint("CK_imported_fills_position_effect", "\"PositionEffect\" IN ('open', 'close', 'flip', 'unknown')");
             table.HasCheckConstraint("CK_imported_fills_fee_basis", "\"FeeBasis\" IN ('reported', 'standard-account-free')");
             table.HasCheckConstraint("CK_imported_fills_pnl_basis", "\"PnlBasis\" IN ('gross', 'net-of-fee')");
+            table.HasCheckConstraint("CK_imported_fills_leverage", "\"Leverage\" IS NULL OR \"Leverage\" BETWEEN 1 AND 1000");
         });
         builder.HasKey(x => x.Id);
         builder.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId })

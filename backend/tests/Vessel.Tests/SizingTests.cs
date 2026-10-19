@@ -122,6 +122,9 @@ internal sealed class MemorySizingStore : ISizingStore
     public int Saves { get; private set; }
     public Task<SizingSettings?> SettingsAsync(CancellationToken ct) => Task.FromResult(Settings);
     public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct) => Task.FromResult(Closed.ToList());
+    public List<ImportedOrder> Orders { get; } = [];
+    public Task<List<ImportedOrder>> OrdersAsync(IReadOnlyCollection<OrderKey> orders, CancellationToken ct) =>
+        Task.FromResult(Orders.Where(o => orders.Contains(OrderKey.Of(o))).ToList());
     public void Add(SizingSettings settings) => Settings = settings;
     public Task SaveAsync(CancellationToken ct) { Saves++; return Task.CompletedTask; }
 }

@@ -236,6 +236,17 @@ public sealed class ActivityCachePostgresTests
             Assert.Same(next, await Read(provider, owner)); previous = next;
         }
         await Change(db => { db.Fills.Add(Fill(account, 2)); return Task.CompletedTask; });
+        await Change(db =>
+        {
+            db.LeverageObservations.Add(new()
+            {
+                Id = Guid.NewGuid(), OwnerId = owner, AccountId = account.Id, ContractId = "BTC",
+                ObservedAtUtc = At.AddMinutes(2).AddSeconds(30), SignedQuantity = 1, EntryPrice = 100, Leverage = 5
+            });
+            return Task.CompletedTask;
+        });
+        await Change(async db => (await db.LeverageObservations.SingleAsync()).Leverage = 7);
+        await Change(async db => db.LeverageObservations.Remove(await db.LeverageObservations.SingleAsync()));
         await Change(async db => (await db.Fills.OrderBy(f => f.OccurredAtUtc).FirstAsync()).Price = 101);
         await Change(async db => (await db.Orders.SingleAsync()).ExternalOrderId = "other");
         await Change(async db => (await db.Orders.SingleAsync()).ExternalOrderId = "0");
@@ -254,7 +265,7 @@ public sealed class ActivityCachePostgresTests
         await Change(async db => (await db.Accounts.SingleAsync()).UpdateSettings("Renamed", null, true));
         await Change(async db => { db.Fills.RemoveRange(await db.Fills.ToListAsync()); db.FundingPayments.RemoveRange(await db.FundingPayments.ToListAsync()); db.FundingStates.RemoveRange(await db.FundingStates.ToListAsync()); db.Snapshots.RemoveRange(await db.Snapshots.ToListAsync()); db.Orders.RemoveRange(await db.Orders.ToListAsync()); db.Plays.RemoveRange(await db.Plays.ToListAsync()); });
         await Change(async db => db.Accounts.Remove(await db.Accounts.SingleAsync()));
-        Assert.Equal(20, reads.Count);
+        Assert.Equal(23, reads.Count);
     }
 
     [PostgresFact]

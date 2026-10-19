@@ -4,11 +4,12 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Vessel.Persistence.Migrations;
 
 [DbContext(typeof(VesselDbContext))]
-[Migration("20261018130000_ActivityFactsRevision")]
+[Migration("20261019100000_ActivityFactsRevision")]
 public sealed class ActivityFactsRevision : Migration
 {
     private static readonly string[] Tables = ["accounts", "imported_fills", "imported_orders", "play_order_links",
-        "funding_payments", "account_funding_states", "account_snapshots", "account_positions", "account_stablecoins"];
+        "funding_payments", "account_funding_states", "account_snapshots", "account_positions", "account_stablecoins",
+        "account_leverage_observations"];
 
     protected override void Up(MigrationBuilder migrationBuilder)
     {

@@ -16,8 +16,14 @@ export interface SizingExposure {
   lossStreak: number
   winsSinceStepDown: number
 }
+/** Where the record comes from: closed Plays, closed Activity positions while no Play has a win or loss, or neither. */
+export type RecordSource = 'plays' | 'activity' | 'none'
 export interface RecordedPlay {
-  playId: string
+  /** Null for an Activity position, which is not a Play. */
+  playId: string | null
+  /** An Activity fallback outcome's operation and account; absent or null for a Play. */
+  operationId?: string | null
+  accountId?: string | null
   title: string
   instrument: string | null
   closedAtUtc: string
@@ -30,6 +36,8 @@ export interface RecordedPlay {
   feesComplete: boolean
 }
 export interface SizingRecord {
+  source: RecordSource
+  /** Closed outcomes of the source: Plays, or Activity positions when `source` is `activity`. */
   closedPlays: number
   decidedPlays: number
   window: number
@@ -64,11 +72,12 @@ export interface SizingDocument {
 /** The risk setting the API accepts, in percent of the balance. Above the warning level the editor warns. */
 export const riskPercentRange = { min: 0.1, max: 5, warnAbove: 2.5 } as const
 
-const recorded = (v: unknown): v is RecordedPlay => isRecord(v) && isText(v.playId, 64) && isText(v.title, 200) &&
+const recorded = (v: unknown): v is RecordedPlay => isRecord(v) && isNullOr(v.playId, x => isText(x, 64)) && isText(v.title, 200) &&
+  (v.operationId === undefined || isNullOr(v.operationId, x => isText(x, 48))) && (v.accountId === undefined || isNullOr(v.accountId, x => isText(x, 64))) &&
   isNullOr(v.instrument, x => isText(x, 128)) && isTimestamp(v.closedAtUtc, 64) && isPlainDecimal(v.netResultUsd) &&
   isNullOr(v.returnPercent, isPlainDecimal) && isNullOr(v.riskUsd, isPlainDecimal) && isNullOr(v.rMultiple, isPlainDecimal) &&
   ['win', 'loss', 'scratch'].includes(v.outcome as string) && typeof v.feesComplete === 'boolean'
-const record = (v: unknown): v is SizingRecord => isRecord(v) &&
+const record = (v: unknown): v is SizingRecord => isRecord(v) && ['plays', 'activity', 'none'].includes(v.source as string) &&
   ['closedPlays', 'decidedPlays', 'window', 'wins', 'losses', 'scratches'].every(k => isCount(v[k])) &&
   ['battingAverage', 'averageGainPercent', 'averageLossPercent', 'winLossRatio', 'breakEvenRewardRisk', 'averageWinR', 'averageLossR']
     .every(k => isNullOr(v[k], isPlainDecimal)) &&

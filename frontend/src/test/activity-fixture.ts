@@ -16,6 +16,7 @@ export const operationFixture: ActivityOperation = {
   averageExitPrice: null, entryOrderCount: 1, exitOrderCount: 0, fillCount: 1, reportedClosedPnlUsd: '0', grossClosedPnlUsd: '0',
   stablecoinFeesNominalUsd: '0.01', otherFees: [], netResultUsd: '-0.01', pnlBasis: 'gross', playId: null, playAssociation: 'unassigned',
   totalResultUsd: null, fundingNetUsd: null, fundingStatus: 'unavailable', fundingPnlBasis: 'unknown', fundingAsOfUtc: null, fundingPaymentCount: 0,
+  leverage: null, leverageMin: null, leverageMax: null,
   coverage: [],
 }
 /** The same operation with its rows, as a retrospective preview carries it. */
@@ -52,6 +53,7 @@ export const unknownPeakOperationFixture: OperationWithFills = {
   entryOrderCount: 2, exitOrderCount: 2, fillCount: 4, reportedClosedPnlUsd: '30', grossClosedPnlUsd: '30', stablecoinFeesNominalUsd: '3',
   otherFees: [], netResultUsd: '27', pnlBasis: 'gross', playId: null, playAssociation: 'unassigned',
   totalResultUsd: null, fundingNetUsd: null, fundingStatus: 'unavailable', fundingPnlBasis: 'unknown', fundingAsOfUtc: null, fundingPaymentCount: 0,
+  leverage: null, leverageMin: null, leverageMax: null,
   coverage: ['Effect-consistent orders at a shared timestamp disagree on peak position; maximum quantity is unknown, while operation boundaries and totals are retained.'],
   fills: [peakFill(1, 0, 'buy', '2'), peakFill(2, 1, 'buy', '1'), peakFill(3, 1, 'sell', '1', '10', '1'), peakFill(4, 2, 'sell', '2', '20', '2')],
   omittedFillCount: 0,

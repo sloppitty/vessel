@@ -254,6 +254,49 @@ public sealed partial class RisexAdapterTests
         Assert.Contains("net of fees", result.HistoryNotice);
     }
 
+    [Theory]
+    [InlineData("\"10\"", 10)]
+    [InlineData("\"25.0\"", 25)]
+    [InlineData("\"2.5\"", null)]
+    [InlineData("\"0\"", null)]
+    [InlineData("\"-3\"", null)]
+    [InlineData("\"1001\"", null)]
+    [InlineData("\"\"", null)]
+    [InlineData("null", null)]
+    [InlineData(null, null)]
+    public async Task Fill_leverage_is_kept_only_as_a_reported_whole_number(string? field, int? expected)
+    {
+        var history = JsonNode.Parse(Trades)!;
+        var trade = history["data"]!["trades"]![0]!.AsObject();
+        if (field is null) trade.Remove("leverage");
+        else trade["leverage"] = JsonNode.Parse(field);
+        var result = await Reader(new() { ["/v1/trade-history"] = history.ToJsonString() }).Reader.ReadAsync(Address, default);
+        var fill = result.Fills.Single(f => f.SourceFillId == "0xopen");
+        Assert.Equal(expected, fill.Leverage);
+        Assert.True(VenueFactChecks.Valid(fill));
+        Assert.Equal(10, result.Fills.Single(f => f.SourceFillId == "0xclose").Leverage);
+    }
+
+    [Fact]
+    public async Task Malformed_fill_leverage_is_an_invalid_response_not_a_guess()
+    {
+        var history = JsonNode.Parse(Trades)!;
+        history["data"]!["trades"]![0]!["leverage"] = "ten";
+        var reader = Reader(new() { ["/v1/trade-history"] = history.ToJsonString() }).Reader;
+        Assert.Equal("RISEx returned an invalid or unsupported response.",
+            (await Assert.ThrowsAsync<VenueReadException>(() => reader.ReadAsync(Address, default))).Message);
+    }
+
+    [Fact]
+    public void Fact_checks_reject_leverage_outside_the_whole_number_range()
+    {
+        var fill = new VenueFill("f", "BTC", ExecutionFacts.Buy, "Open Long", 1, 1, 0, "USDC", 0, Now, "o", "h", "{}", ExecutionFacts.Open);
+        Assert.True(VenueFactChecks.Valid(fill with { Leverage = 1 }));
+        Assert.True(VenueFactChecks.Valid(fill with { Leverage = 1000 }));
+        Assert.False(VenueFactChecks.Valid(fill with { Leverage = 0 }));
+        Assert.False(VenueFactChecks.Valid(fill with { Leverage = 1001 }));
+    }
+
     [Fact]
     public async Task Orders_include_tpsl_records_as_trigger_orders()
     {

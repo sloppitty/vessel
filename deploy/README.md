@@ -957,7 +957,7 @@ v0.2.0's migrations, followed in order by:
 | `20261018100000_ServerEventSubscriptions` | Server-wide subscription registrations, separate per-owner progress. Renamed from the unshipped `20261017120000_ServerEventSubscriptions`. |
 | `20261018110000_ServerMonitorState` | Copies MAX venue deadlines, creates empty per-deployment monitor heartbeats, drops `monitor_heartbeats` and `monitor_venue_budgets`. Renamed from the unshipped `20261017193000_ServerMonitorState`. |
 | `20261018120000_ServerNotificationState` | Creates **empty** `server_notification_heartbeats` keyed by deployment and **drops/replaces** `notification_heartbeats`. Owner liveness is not copied; the notifications worker must complete a productive pass. |
-| `20261018130000_ActivityFactsRevision` | Adds per-owner activity revision counters and commit-deferred invalidation triggers for the bounded in-process aggregation cache. Existing owners start at revision 1. Apply with the explicit journal migration bundle before starting the new API/workers. |
+| `20261019100000_ActivityFactsRevision` | Adds per-owner activity revision counters and commit-deferred invalidation triggers for the bounded in-process aggregation cache. Existing owners start at revision 1. Apply with the explicit journal migration bundle before starting the new API/workers. |
 
 Do not rename applied migration-history rows or run old and new hosts together.
 Recreate disposable databases that applied the old development IDs. Rolling back

@@ -764,6 +764,8 @@
 .plays-page .record-figures dt { color: var(--muted-foreground); font-size: var(--text-2xs); }
 .plays-page .record-figures dd { display: grid; margin: 2px 0 0; font-size: 15px; font-variant-numeric: tabular-nums; }
 .plays-page .record-figures dd small { color: var(--muted-foreground); font-size: var(--text-2xs); }
+.plays-page .record-source-note { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; color: var(--muted-foreground); line-height: 1.5; }
+.plays-page .record-source { padding: 0 6px; border: 1px solid color-mix(in srgb, var(--warning) 30%, var(--line)); border-radius: 999px; color: var(--foreground); font-size: var(--text-2xs); font-weight: 600; line-height: 16px; }
 .plays-page .record-exposure { margin: 0 0 10px; color: var(--muted-foreground); line-height: 1.5; }
 .plays-page .record-exposure[data-reduced="true"] strong { color: var(--warning); }
 .plays-page .record-limits { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; color: var(--muted-foreground); font-size: var(--text-2xs); font-variant-numeric: tabular-nums; }

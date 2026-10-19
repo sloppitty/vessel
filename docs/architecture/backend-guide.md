@@ -281,7 +281,7 @@ Every write use case runs in one `IUnitOfWork.ExecuteAsync`, which owns the only
 
 - **Activity** groups retained fills per account and native contract and walks the signed position to find round trips. When the history is incomplete or several fills share a timestamp ambiguously, the operation is marked incomplete with a notice instead of guessed. Filters and pages apply after aggregation, so they never change a metric. Shared `ListScope` and `ListPaging` (`Application/Common/ListQuery.cs`) parse the `scope`, `page` and `pageSize` used by Overview, Activity and Plays.
 - **Overview** reuses workspace balances and Activity operations to build scoped totals and grouped rows.
-- **Review and Sizing** read closed Plays with their revisions, linked fills and known-incomplete orders (`SizingStore.ClosedPlaysAsync`). `PlayOutcomeCalculator` computes the net result (reported closed PnL minus USDC fees on gross-basis fills), entry notional and planned risk. Review applies stricter eligibility and explains every exclusion; Sizing feeds the Domain track record, exposure ladder and limits.
+- **Review and Sizing** read closed Plays with their revisions, linked fills and known-incomplete orders (`SizingStore.ClosedPlaysAsync`). With no decided Play outcome, Sizing falls back to closed Activity operations, excluding those with known missing executions of retained orders (`SizingStore.OrdersAsync`) ([sizing](sizing-suggestions.md#activity-fallback-for-the-record-october-18-2026)). `PlayOutcomeCalculator` computes the net result (reported closed PnL minus USDC fees on gross-basis fills), entry notional and planned risk. Review applies stricter eligibility and explains every exclusion; Sizing feeds the Domain track record, exposure ladder and limits.
 
 ### Market data
 
@@ -332,6 +332,7 @@ Journal-owned entities carry `OwnerId` and use owner-scoped relationships. The s
 | `play_evidence` | `PlayEvidence` | Metadata; bytes live in the evidence object store. |
 | `sizing_settings` | `SizingSettings` | Risk per trade. |
 | `funding_payments`, `account_funding_states` | `FundingPayment`, … | Signed funding settlements with native identities, and the covered window per account. |
+| `account_leverage_observations` | `LeverageObservation` | Venue-reported position leverage kept when a refresh sees a position appear or change, or new executions on its market, so closed Activity operations keep it. |
 | `monitor_accounts`, `monitor_exit_watches` | | Owner-scoped monitor state, lease/schedule per account and watched exits. |
 | `server_monitor_heartbeats`, `server_venue_deadlines`, `server_notification_heartbeats` | (system SQL stores) | Monitor/notification health per deployment, venue `Retry-After` across owners. No journal context. |
 | `notifications`, `notification_sources`, `notification_deliveries`, `notification_cursors`, `notification_preferences` | (SQL, `Persistence/Notifications`) | Owner-scoped Hub output, handled sources, delivery/claim state, feed/unread cursor and preferences. |

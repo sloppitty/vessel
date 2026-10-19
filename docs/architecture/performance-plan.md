@@ -282,7 +282,7 @@ the process's immutable venue capabilities. No linked-fill table, Play plan,
 review, event, notification or credential is read. Portfolio labels/icons and
 workspace balances are still queried outside the aggregate cache.
 
-Migration `20261018130000_ActivityFactsRevision` covers INSERT, UPDATE and DELETE
+Migration `20261019100000_ActivityFactsRevision` covers INSERT, UPDATE and DELETE
 on `accounts`, `imported_fills`, `imported_orders`, `play_order_links`,
 `funding_payments`, `account_funding_states`, `account_snapshots`,
 `account_positions` and (conservatively) `account_stablecoins`. Whole-row account
@@ -380,7 +380,7 @@ Final validation in the pinned SDK container, from `backend/`, with disposable
 
 ## 2026-10-18 — activity cache review corrections
 
-The unshipped `20261018130000_ActivityFactsRevision` migration is corrected in
+The unshipped `20261019100000_ActivityFactsRevision` migration is corrected in
 place. Its transaction-local bumped-owner set replaces the single boolean:
 `INSERT A; SET CONSTRAINTS ALL IMMEDIATE; INSERT B; COMMIT` now advances both
 owners exactly once. Immediate row events also collect their own old/new owners
@@ -475,3 +475,11 @@ Final correction validation used `mcr.microsoft.com/dotnet/sdk:10.0.302`, from
 All benchmark/test API, PostgreSQL and RabbitMQ containers were removed. No
 owner database, live migration, deployment or publication was involved. Remote
 PostgreSQL cancel latency and the browser/nginx abort path were not measured.
+
+## Combined PR verification (October 19, 2026)
+
+The API performance work now depends on the observed-leverage/sizing PR. The revision migration is `20261019100000_ActivityFactsRevision`, after `LeverageObservations`, and installs its INSERT/UPDATE/DELETE invalidation triggers on `account_leverage_observations` too (40 triggers across ten tables). Cache memory charging includes retained leverage observations and per-fill leverage allocations. Open-operation leverage depends only on retained observations; closed lifetimes still bound attribution.
+
+The opaque Activity version now hashes every displayed summary field, sorted coverage and full funding DTO details incrementally, once per aggregate, without materializing execution rows. This corrects previously missed metric/coverage changes. Startup work is separately scheduled so its timeout covers synchronous model construction; readiness completes before cancellation cleanup, which observes callback/read faults and retains the cancellation source until both finish. Three timeout and six data-version regressions were demonstrated failing before their fixes. See [the verification record](pr-3-6-verification.md).
+
+The previous unshipped revision ID `20261018130000_ActivityFactsRevision` must not remain in development migration history: recreate those disposable databases. Existing installation migrations remain explicit; no live database or deployment is part of this verification. Original benchmark measurements above predate these correctness follow-ups and were not rerun.

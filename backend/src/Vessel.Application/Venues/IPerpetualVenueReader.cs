@@ -75,14 +75,16 @@ public sealed record VenueFill(
     string FeeBasis = ExecutionFacts.FeeReported,
     string PnlBasis = ExecutionFacts.PnlGross,
     // Set by venues whose own identifier differs from Vessel's instrument key.
-    string? VenueContractId = null);
+    string? VenueContractId = null,
+    // The position leverage the venue reports on the execution (RISEx), whole numbers only; null when not reported.
+    int? Leverage = null);
 
 /// <summary>Rejects adapter output that does not use Vessel's execution vocabulary, before anything is stored.</summary>
 public static class VenueFactChecks
 {
     public static bool Valid(VenueFill fill) => ExecutionFacts.IsSide(fill.Side) && ExecutionFacts.IsEffect(fill.PositionEffect) &&
         ExecutionFacts.IsFeeBasis(fill.FeeBasis) && ExecutionFacts.IsPnlBasis(fill.PnlBasis) &&
-        (fill.FeeBasis != ExecutionFacts.FeeStandardAccountFree || fill.Fee == 0);
+        (fill.FeeBasis != ExecutionFacts.FeeStandardAccountFree || fill.Fee == 0) && fill.Leverage is null or (>= 1 and <= 1000);
 
     public static bool Valid(VenueOrder order) => ExecutionFacts.IsSide(order.Side);
 }

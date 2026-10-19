@@ -67,7 +67,8 @@ public sealed class OverviewSummaryPostgresTests
         Assert.All(facts.FillPlayIds.Keys, id => Assert.Contains(facts.Fills, f => f.Id == id));
         Assert.Equal(selected.Id, Assert.Single(facts.FundingPayments).AccountId);
         Assert.Equal(selected.Id, Assert.Single(facts.FundingStates).AccountId);
-        Assert.Equal(6, commands.Count); // Scoped accounts, fills, snapshots, funding, funding state and linked orders.
+        // Scoped accounts, fills, snapshots, funding, funding state, leverage observations and linked orders.
+        Assert.Equal(7, commands.Count);
         // Even caller-supplied disabled/foreign IDs cannot bypass the SQL account restrictions.
         var guarded = await store.ReadAsync(null, default, new HashSet<Guid> { selected.Id, disabled.Id, foreign.Id });
         Assert.Equal(selected.Id, Assert.Single(guarded.Accounts).Id);
@@ -75,7 +76,7 @@ public sealed class OverviewSummaryPostgresTests
         commands.Clear();
         var empty = await store.ReadAsync(null, default, new HashSet<Guid>());
         Assert.Empty(empty.Accounts); Assert.Empty(empty.Fills); Assert.Empty(empty.Snapshots); Assert.Empty(empty.FillPlayIds);
-        Assert.Empty(empty.FundingPayments); Assert.Empty(empty.FundingStates);
+        Assert.Empty(empty.FundingPayments); Assert.Empty(empty.FundingStates); Assert.Empty(empty.LeverageObservations);
         Assert.Empty(commands);
     }
 

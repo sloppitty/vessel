@@ -18,7 +18,8 @@ public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int 
     private static readonly Dictionary<Type, PropertyInfo[]> StringProperties = new[]
     {
         typeof(Account), typeof(ImportedFill), typeof(AccountSnapshot), typeof(AccountPosition), typeof(AccountStablecoin),
-        typeof(FundingPayment), typeof(AccountFundingState), typeof(ActivityOperationDto), typeof(OperationFeeDto), typeof(ActivityCoverageDto)
+        typeof(FundingPayment), typeof(AccountFundingState), typeof(LeverageObservation),
+        typeof(ActivityOperationDto), typeof(OperationFeeDto), typeof(ActivityCoverageDto)
     }.ToDictionary(type => type, type => type.GetProperties().Where(p => p.PropertyType == typeof(string)).ToArray());
 
     public async Task<ActivitySummaries> ReadAsync(ActivitySummaryKey key,
@@ -152,8 +153,9 @@ public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int 
         return 4096L + 2L * key.Accounts.Length + facts.Accounts.Sum(Row) + facts.Fills.Sum(Row)
             + facts.Snapshots.Sum(s => Row(s) + s.Positions.Sum(Row) + s.Stablecoins.Sum(Row))
             + facts.FundingPayments.Sum(Row) + facts.FundingStates.Sum(Row) + 128L * facts.FillPlayIds.Count
+            + facts.LeverageObservations.Sum(Row)
             + value.Operations.Sum(o => Row(o) + 256L * o.FillCount + o.OtherFees.Sum(Row)
-                + o.Coverage.Sum(s => 64L + 2L * s.Length) + 16L * o.FundingPaymentCount)
+                + o.Coverage.Sum(s => 64L + 2L * s.Length) + 16L * o.FundingPaymentCount + 32L * o.FillLeverages.Count)
             + value.Coverage.Sum(Row) + 16L * value.UnassignedFunding.Count;
     }
 
