@@ -219,7 +219,7 @@ async function main() {
         await openPlay('E2E P3 AVAX long')
         assert.equal(await statusPill().innerText(), 'Cancelled')
         const watches = page.getByRole('region', { name: 'Watched orders', exact: true })
-        await watches.getByRole('listitem').filter({ hasText: `Entry order ${ids.p3_entry}` }).getByText('Watching', { exact: true }).waitFor()
+        await watches.getByRole('listitem').filter({ hasText: `Order ${ids.p3_entry}` }).getByText('Watching', { exact: true }).waitFor()
         await issue('An entry order still rests after the Play ended').waitFor()
         await shot('p3-cancelled')
       })
