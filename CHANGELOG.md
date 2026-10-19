@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Fixed
+
+- Sizing suggestions tell the truth about their inputs. A size is suggested
+  only when every part of the position has a priced stop. Nothing offers
+  Accept while the record is stale or failed. The budget is the account's
+  normalized available balance with its source and time, and a known zero
+  stays zero. The Summary's risk uses the account balance. Size and leverage
+  are no longer suggested after an entry fills. Lighter liquidations are no
+  longer counted as fee-bearing (D-04, D-07, D-11, D-12, D-13, D-24, D-25,
+  F-16).
+
 ## 0.3.1 - October 19, 2026
 
 Release notes: [docs/releases/v0.3.1.md](docs/releases/v0.3.1.md).
