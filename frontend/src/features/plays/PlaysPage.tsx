@@ -200,7 +200,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const venueFills = useMemo(() => !manual && playExecution ? executionFills(playExecution, fillsDirection) : null,
     [manual, playExecution, fillsDirection])
   const fills: EntryFills | 'unknown' = status === 'draft' ? noEntryFills
-    : manual ? ledger ?? 'unknown' : venueFills && !tracking.readFailed ? venueFills : 'unknown'
+    : manual ? ledger ?? 'unknown' : venueFills && !tracking.stale ? venueFills : 'unknown'
   // Entries with a fill get no size, leverage, stop or target suggestions (D-11). An Open Play has a fill somewhere, so
   // until the facts say which entry, none gets one.
   const opened = status === 'open' || venueStatus === 'open'
