@@ -254,5 +254,43 @@ describe('stored Play execution', () => {
     await act(async () => reads[2]!.resolve(execution))
     expect(view.result.current.readFailed).toBe(false)
   })
+
+  it('keeps a failed read stale when an overlapping action superseded it (third Sol review)', async () => {
+    const api = client()
+    const reread = deferred()
+    const followUp = deferred()
+    let failDismissal!: (cause: unknown) => void
+    api.playExecution = vi.fn().mockResolvedValueOnce(execution).mockImplementationOnce(() => reread.promise).mockImplementationOnce(() => followUp.promise)
+    api.dismissPlayDiscrepancy = vi.fn(() => new Promise<void>((_resolve, reject) => { failDismissal = reject }))
+    const view = renderHook(() => usePlayExecution(api, execution.playId, 'open'))
+    await act(async () => {})
+    expect(view.result.current.readFailed).toBe(false)
+    // A reread starts, then a dismissal starts before it answers.
+    act(() => view.result.current.reload())
+    let dismissal!: Promise<void>
+    act(() => { dismissal = view.result.current.dismiss(discrepancyFixture.id).catch(() => undefined) })
+    // The reread fails: superseded by the dismissal or not, the shown execution is now uncertain.
+    await act(async () => reread.reject(new ApiError('unavailable', 'Execution unavailable.')))
+    expect(view.result.current.readFailed).toBe(true)
+    // The dismissal fails too, and its follow-up reload stays pending: still uncertain.
+    await act(async () => { failDismissal(new ApiError('http', 'Dismissal was refused.', 409)); await dismissal })
+    expect(api.playExecution).toHaveBeenCalledTimes(3)
+    expect(view.result.current.readFailed).toBe(true)
+    await act(async () => followUp.resolve(execution))
+    expect(view.result.current.readFailed).toBe(false)
+  })
+
+  it('does not mark known facts uncertain while a routine refresh is only pending', async () => {
+    const api = client()
+    const refresh = deferred()
+    api.playExecution = vi.fn().mockResolvedValueOnce(execution).mockImplementationOnce(() => refresh.promise)
+    const view = renderHook(({ generation }) => usePlayExecution(api, execution.playId, 'open', generation), { initialProps: { generation: 0 } })
+    await act(async () => {})
+    view.rerender({ generation: 1 })
+    expect(api.playExecution).toHaveBeenCalledTimes(2)
+    expect(view.result.current.readFailed).toBe(false)
+    await act(async () => refresh.resolve(execution))
+    expect(view.result.current.readFailed).toBe(false)
+  })
 })
 

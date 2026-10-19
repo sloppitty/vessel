@@ -12,9 +12,16 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
   const context = useMemo(() => ({ api, playId }), [api, playId])
   const [result, setResult] = useState<{ context: typeof context; execution: PlayExecution } | null>(null)
   const [error, setError] = useState<{ context: typeof context; message: string; source: 'read' | 'action' } | null>(null)
-  // Whether the shown execution is fresh, kept apart from the error message: an action's error or success never makes a
-  // failed read fresh. Only a successful read, or an action that returns the execution itself, does.
-  const [freshness, setFreshness] = useState<{ context: typeof context; stale: boolean } | null>(null)
+  // Whether the shown execution is fresh, kept apart from the error message. Reads and actions are numbered as they start
+  // (`read`). `fresh` is the newest one whose execution was applied; `uncertain` the newest read that ended without being
+  // applied, because it failed or a later action superseded it. The execution is stale while an uncertain read is newer
+  // than the fresh facts: an action's error, or an action that returns nothing, never changes that. A read that is only
+  // pending does not count, so routine refreshes do not flicker known facts to unknown.
+  const [freshness, setFreshness] = useState<{ context: typeof context; fresh: number; uncertain: number } | null>(null)
+  const mark = useCallback((kind: 'fresh' | 'uncertain', sequence: number) => setFreshness(current => {
+    const base = current?.context === context ? current : { context, fresh: 0, uncertain: 0 }
+    return kind === 'fresh' ? { ...base, fresh: Math.max(base.fresh, sequence) } : { ...base, uncertain: Math.max(base.uncertain, sequence) }
+  }), [context])
   const [workState, setWorkState] = useState<{ context: typeof context; signal: AbortSignal; busy: boolean } | null>(null)
   const [revision, setRevision] = useState(0)
   const session = useRef<{ context: typeof context; controller: AbortController; busy: boolean } | null>(null)
@@ -30,19 +37,21 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
     const controller = new AbortController()
     const version = ++read.current
     api.playExecution(playId, controller.signal).then(execution => {
-      if (!controller.signal.aborted && read.current === version) {
+      if (controller.signal.aborted) return
+      if (read.current === version) {
         setResult({ context, execution })
-        setFreshness({ context, stale: false })
+        mark('fresh', version)
         setError(current => current?.context === context && current.source === 'action' ? current : null)
-      }
+      // An action started meanwhile supersedes this answer: until newer facts arrive, the shown execution may be behind.
+      } else mark('uncertain', version)
     }).catch(cause => {
-      if (!controller.signal.aborted && read.current === version) {
-        setFreshness({ context, stale: true })
-        setError({ context, message: errorMessage(cause, 'The change could not be completed. Try again.'), source: 'read' })
-      }
+      if (controller.signal.aborted) return
+      // Failed, superseded or not, it leaves the shown execution uncertain until fresh facts arrive.
+      mark('uncertain', version)
+      if (read.current === version) setError({ context, message: errorMessage(cause, 'The change could not be completed. Try again.'), source: 'read' })
     })
     return () => controller.abort()
-  }, [api, playId, context, status, generation, revision])
+  }, [api, playId, context, status, generation, revision, mark])
 
   const run = useCallback(async (action: (id: string, signal: AbortSignal) => Promise<PlayExecution | void>) => {
     const work = session.current
@@ -53,7 +62,7 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
     try {
       const execution = await action(context.playId, work.controller.signal)
       if (!work.controller.signal.aborted) {
-        if (execution && read.current === version) { setResult({ context, execution }); setFreshness({ context, stale: false }) }
+        if (execution && read.current === version) { setResult({ context, execution }); mark('fresh', version) }
         setError(null)
       }
     } catch (cause) {
@@ -62,7 +71,7 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
       work.busy = false
       if (!work.controller.signal.aborted) { setWorkState({ context, signal: work.controller.signal, busy: false }); reload() }
     }
-  }, [context, reload])
+  }, [context, reload, mark])
   // The error state above shows link/unlink failures; the rejection itself needs no other handler.
   const link = useCallback((request: LinkOrder) => run((id, signal) => api.linkOrder(id, request, signal)).catch(() => undefined), [api, run])
   const unlink = useCallback((linkId: string) => run((id, signal) => api.unlinkOrder(id, linkId, signal)).catch(() => undefined), [api, run])
@@ -73,6 +82,9 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
   return { execution: result?.context === context ? result.execution : null,
     error: error?.context === context ? error.message : null,
     busy: workState?.context === context && !workState.signal.aborted && workState.busy,
-    /** A read failed and no read (or action returning the execution) has succeeded since: `execution` may be out of date. */
-    readFailed: freshness?.context === context && freshness.stale, reload, link, unlink, dismiss, rebind }
+    /**
+     * A read failed, or was superseded by an action, and no newer read (or action returning the execution) has been
+     * applied since: `execution` may be out of date.
+     */
+    readFailed: freshness?.context === context && freshness.uncertain > freshness.fresh, reload, link, unlink, dismiss, rebind }
 }
