@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
@@ -53,6 +54,8 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
             if (store is not null)
             {
                 services.AddSingleton(store);
+                // In-memory workspace fixtures use their supplied facts store, without a database revision probe.
+                services.RemoveAll<Vessel.Application.Activity.IActivitySummaryReader>();
                 services.AddSingleton<Vessel.Application.Ownership.IUnitOfWork>(TestUnitOfWork.None);
             }
             if (reader is not null) services.AddSingleton<IPerpetualVenueReader>(reader);

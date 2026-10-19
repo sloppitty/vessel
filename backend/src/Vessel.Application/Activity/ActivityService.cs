@@ -1,12 +1,14 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Vessel.Application.Workspace;
 using Vessel.Application.Common;
 using Vessel.Application.Venues;
 
 namespace Vessel.Application.Activity;
 
-public sealed class ActivityService(IActivityStore store, IWorkspaceStore workspace, TimeProvider time, IVenueRegistry? venues = null)
+public sealed class ActivityService(IActivityStore store, IWorkspaceStore workspace, TimeProvider time, IVenueRegistry? venues = null,
+    IActivitySummaryReader? summaries = null)
 {
     /// <summary>Retrospective preview limit; whole-order attribution beyond it is refused.</summary>
     public const int MaxFillsPerOperation = 200;
@@ -47,7 +49,7 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
         var filtered = scoped.Where(o => filter.Matches(o, portfolioOf.GetValueOrDefault(o.AccountId))).ToList();
         page = ListPaging.Clamp(page, pageSize, filtered.Count);
         return new(filtered.Skip(ListPaging.Skip(page, pageSize)).Take(pageSize).Select(ActivityOperationSummaryDto.From).ToList(),
-            page, pageSize, filtered.Count, scoped.Count, summary.Facts.Fills.Count, asOf, Version(scoped, summary.Facts),
+            page, pageSize, filtered.Count, scoped.Count, summary.Facts.Fills.Count, asOf, summary.Version,
             new(scoped.Select(o => o.AccountId).Distinct().OrderBy(id => id.ToString("D"), StringComparer.Ordinal).ToList(),
                 scoped.Select(o => o.ContractId).Distinct().Order(StringComparer.Ordinal).ToList()),
             summary.Coverage, ScopeNote)
@@ -58,7 +60,7 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
         };
     }
 
-    /// <summary>One operation's constituent rows, re-aggregated from that account only. Changed history is 404.</summary>
+    /// <summary>One operation's constituent rows, from that account only. Changed history is 404.</summary>
     public async Task<OperationFillsDto> FillsAsync(Guid? accountId, string? operationId, CancellationToken ct)
     {
         if (accountId is null || accountId == Guid.Empty || string.IsNullOrWhiteSpace(operationId) || operationId.Length > MaxOperationIdLength)
@@ -75,26 +77,25 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
         };
     }
 
-    // Changes when any scoped operation's identity, fill count, last execution, open quantity, Play association, funding or
-    // observed leverage changes.
-    private static string Version(IEnumerable<ActivityOperationDto> operations, ActivityFacts facts)
+    // Include every displayed operation metric and coverage notice, plus retained funding details. Summary projection
+    // keeps constituent execution DTOs lazy; hash rows incrementally rather than buffering the complete payload.
+    private static string Version(IEnumerable<ActivityOperationDto> operations, ActivityFacts facts, IEnumerable<ActivityCoverageDto> coverage)
     {
-        var text = new StringBuilder();
-        foreach (var o in operations)
-            text.Append(o.AccountId.ToString("N")).Append('|').Append(o.Id).Append('|').Append(o.FillCount).Append('|')
-                .Append(o.LastOccurredAtUtc.UtcTicks).Append('|').Append(o.OpenQuantity ?? "?").Append('|')
-                .Append(o.PlayAssociation).Append('|').Append(o.PlayId?.ToString("N")).Append('|')
-                .Append(o.FundingNetUsd).Append('|').Append(o.FundingPaymentCount).Append('|').Append(o.FundingStatus).Append('|')
-                .Append(o.FundingAsOfUtc?.UtcTicks).Append('|').Append(o.FundingPnlBasis).Append('|').Append(o.TotalResultUsd).Append('|')
-                .Append(o.Leverage).Append('|').Append(o.LeverageMin).Append('|').Append(o.LeverageMax).Append('\n');
-        foreach (var p in facts.FundingPayments.OrderBy(p => p.Id))
-            text.Append(p.Id.ToString("N")).Append('|').Append(p.OccurredAtUtc.UtcTicks).Append('|')
-                .Append(Vessel.Domain.Numerics.ExactDecimal.Format(p.Amount)).Append('|').Append(p.Asset).Append('|')
-                .Append(p.OccurredAtUnixNanoseconds).Append('\n');
-        foreach (var s in facts.FundingStates.OrderBy(s => s.AccountId))
-            text.Append(s.AccountId.ToString("N")).Append('|').Append(s.LastAttemptToUtc.UtcTicks).Append('|')
-                .Append(s.LastReadComplete).Append('|').Append(s.PnlBasis).Append('|').Append(s.Notice).Append('\n');
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())), 0, 16);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        void Append<T>(string section, IEnumerable<T> rows)
+        {
+            hash.AppendData(Encoding.UTF8.GetBytes(section));
+            foreach (var row in rows) hash.AppendData(JsonSerializer.SerializeToUtf8Bytes(row));
+        }
+        Append("operations", operations.Select(ActivityOperationSummaryDto.From));
+        Append("coverage", coverage.OrderBy(c => c.AccountId).ThenBy(c => c.ContractId, StringComparer.Ordinal)
+            .ThenBy(c => c.Notice, StringComparer.Ordinal));
+        Append("funding-payments", facts.FundingPayments.OrderBy(p => p.Id).Select(OperationFunding.ToDto));
+        Append("funding-states", facts.FundingStates.OrderBy(s => s.AccountId).Select(s => new
+        {
+            s.AccountId, s.LastAttemptToUtc, s.LastReadComplete, s.PnlBasis, s.Notice
+        }));
+        return Convert.ToHexStringLower(hash.GetHashAndReset(), 0, 16);
     }
 
     // Overview, Activity pages and the fills endpoint share these unbounded aggregate results; constituent DTOs
@@ -103,7 +104,13 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
     {
         if (accountId == Guid.Empty) throw new ProblemException(400, "Choose a valid account.");
         if (accountIds is { Count: 0 }) return new([], [], new([], [], [], new Dictionary<Guid, Guid>()));
-        var facts = await store.ReadAsync(accountId, ct, accountIds);
+        if (summaries is not null) return await summaries.ReadAsync(accountId, ct, accountIds);
+        return Aggregate(await store.ReadAsync(accountId, ct, accountIds), accountId, accountIds, venues);
+    }
+
+    public static ActivitySummaries Aggregate(ActivityFacts facts, Guid? accountId = null,
+        IReadOnlySet<Guid>? accountIds = null, IVenueRegistry? venues = null)
+    {
         var accounts = facts.Accounts.Where(a => a.IsEnabled && (accountId == null || a.Id == accountId) &&
             (accountIds == null || accountIds.Contains(a.Id))).ToDictionary(a => a.Id);
         var fills = facts.Fills.Where(f => accounts.ContainsKey(f.AccountId)).ToList();
@@ -169,12 +176,15 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
             coverage.Add(new(state.AccountId, null, state.Notice));
         foreach (var group in funding.Unassigned.GroupBy(p => p.AccountId))
             coverage.Add(new(group.Key, null, $"{group.Count()} retained funding settlements could not be attributed safely to an operation. They are not added to operation results."));
-        return new(funding.Operations, coverage, facts) { UnassignedFunding = funding.Unassigned };
+        var ordered = funding.Operations.OrderByDescending(o => o.LastOccurredAtUtc)
+            .ThenBy(o => o.AccountId.ToString("D"), StringComparer.Ordinal).ThenBy(o => o.Id, StringComparer.Ordinal).ToList();
+        return new(funding.Operations, coverage, facts) { UnassignedFunding = funding.Unassigned, Version = Version(ordered, facts, coverage) };
     }
 }
 
-internal sealed record ActivitySummaries(IReadOnlyList<ActivityOperationDto> Operations,
+public sealed record ActivitySummaries(IReadOnlyList<ActivityOperationDto> Operations,
     IReadOnlyList<ActivityCoverageDto> Coverage, ActivityFacts Facts)
 {
+    public string Version { get; init; } = Convert.ToHexStringLower(SHA256.HashData([]), 0, 16);
     public IReadOnlyList<Vessel.Domain.Workspace.FundingPayment> UnassignedFunding { get; init; } = [];
 }

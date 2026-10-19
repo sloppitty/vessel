@@ -4,12 +4,16 @@ WORKDIR /src
 COPY global.json ./
 COPY backend/ backend/
 WORKDIR /src/backend
-RUN dotnet restore Vessel.slnx --locked-mode && dotnet tool restore
+# The API and worker list linux-x64 in RuntimeIdentifiers, so the locked restore covers their RID graph;
+# PublishReadyToRun here downloads the crossgen and runtime packs the publish needs.
+RUN dotnet restore Vessel.slnx --locked-mode -p:PublishReadyToRun=true && dotnet tool restore
 ARG VERSION=0.3.0
+# ReadyToRun precompiles the application and package assemblies to cut first-request JIT after a start.
+# Still framework-dependent, with the default tiered compilation and dynamic PGO; no trimming or AOT.
 RUN dotnet publish src/Vessel.Api/Vessel.Api.csproj -c Release --no-restore \
-    -p:Version=${VERSION} -o /out/api
+    -r linux-x64 --self-contained false -p:PublishReadyToRun=true -p:Version=${VERSION} -o /out/api
 RUN dotnet publish src/Vessel.Worker/Vessel.Worker.csproj -c Release --no-restore \
-    -p:Version=${VERSION} -o /out/worker
+    -r linux-x64 --self-contained false -p:PublishReadyToRun=true -p:Version=${VERSION} -o /out/worker
 # The design-time factory needs a syntactically valid connection, never a live database or a secret.
 RUN ConnectionStrings__Vessel='Host=localhost;Database=vessel;Username=vessel' \
     dotnet ef migrations bundle --project src/Vessel.Persistence --configuration Release \

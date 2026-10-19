@@ -958,6 +958,7 @@ v0.2.0's migrations, followed in order by:
 | `20261018110000_ServerMonitorState` | Copies MAX venue deadlines, creates empty per-deployment monitor heartbeats, drops `monitor_heartbeats` and `monitor_venue_budgets`. Renamed from the unshipped `20261017193000_ServerMonitorState`. |
 | `20261018120000_ServerNotificationState` | Creates **empty** `server_notification_heartbeats` keyed by deployment and **drops/replaces** `notification_heartbeats`. Owner liveness is not copied; the notifications worker must complete a productive pass. |
 | `20261018180202_LeverageObservations` | Retains observed position leverage and adds nullable leverage to imported fills. Copies current leveraged snapshot positions; historical fills stay unknown. Apply explicitly before starting upgraded hosts. |
+| `20261019100000_ActivityFactsRevision` | Adds per-owner activity revision counters and commit-deferred invalidation triggers for the bounded in-process aggregation cache. Existing owners start at revision 1. Apply with the explicit journal migration bundle before starting the new API/workers. |
 
 Do not rename applied migration-history rows or run old and new hosts together.
 Recreate disposable databases that applied the old development IDs. Rolling back
@@ -1361,6 +1362,11 @@ failure categories, not raw dependency details.
 - `/health/live` only proves the API process responds.
 - `/health/ready` returns 200 when PostgreSQL is reachable and there are no pending
   migrations. A 503 reveals no database details. It does not verify venue or object-store access.
+  Right after start it answers 503 `warming-up` while a read-only warm-up prepares the
+  sign-in and first-page reads, for at most `Vessel__Startup__Warmup__Timeout`
+  (default `00:00:30`, at most `00:01:00` so it ends inside the healthcheck
+  budget); a failed or slow warm-up never stops the API.
+  `Vessel__Startup__Warmup__Enabled=false` turns it off.
 - If API does not start, check the generated token length, owner GUID, migration
   exit status, database health and optional key-file mode/readability.
 - If Lighter reports insecure transport, check HTTPS and trusted proxy addresses.

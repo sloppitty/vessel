@@ -30,6 +30,9 @@ builder.Services.AddVesselApplication();
 builder.AddVesselMessaging(MessagingHosting.ApiDeployment);
 builder.Services.AddVesselMonitoring(builder.Configuration);
 builder.Services.AddVesselNotifications(builder.Configuration);
+// Read-only first-use warm-up; readiness waits for it (bounded by its timeout).
+builder.Services.AddSingleton<StartupWarmup>();
+builder.Services.AddHostedService(services => services.GetRequiredService<StartupWarmup>());
 builder.Services.AddOpenApi();
 builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
 builder.Services.AddResponseCompression(options =>
@@ -117,6 +120,8 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "healthy" })).AllowAn
 // Readiness for a proxy or orchestrator: the database answers and every migration is applied. No details.
 app.MapGet("/health/ready", async (IServiceProvider services, CancellationToken ct) =>
 {
+    if (!services.GetRequiredService<StartupWarmup>().Completed)
+        return Results.Json(new { status = "unavailable", reason = "warming-up" }, statusCode: 503);
     try
     {
         var db = services.GetRequiredService<VesselDbContext>();

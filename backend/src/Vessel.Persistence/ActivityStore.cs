@@ -11,7 +11,9 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
     public async Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
     {
         if (accountIds is { Count: 0 }) return new([], [], [], new Dictionary<Guid, Guid>());
-        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
+        // A shared aggregate reader supplies its own repeatable-read snapshot.
+        await using var transaction = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct) : null;
         if (accountId is { } id && !await db.Accounts.AnyAsync(a => a.Id == id, ct))
             throw new ProblemException(404, "Account not found.");
         var query = db.Accounts.Where(a => a.IsEnabled && (accountId == null || a.Id == accountId));
@@ -33,7 +35,7 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         var byOrder = links.ToDictionary(l => new OrderKey(l.AccountId, l.ContractId, l.ExternalOrderId), l => l.PlayId);
         var playIds = fills.Where(f => byOrder.ContainsKey(OrderKey.Of(f)))
             .ToDictionary(f => f.Id, f => byOrder[OrderKey.Of(f)]);
-        await transaction.CommitAsync(ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
         return new(accounts, fills, snapshots, playIds) { FundingPayments = funding, FundingStates = fundingStates, LeverageObservations = leverage };
     }
 }

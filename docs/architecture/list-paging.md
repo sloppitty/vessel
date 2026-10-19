@@ -63,9 +63,9 @@ Response:
 Aggregation still runs over all retained enabled-account fills before filtering
 and paging, so every metric and coverage notice is unchanged. The 500-operation
 and 10,000-row response caps are removed; `scopeNote` drops that sentence.
-`version` changes when any scoped operation's identity, fill count, last
-execution, open quantity or Play association changes; it is not a security
-token.
+`version` changes when scoped operation summary metrics, coverage notices or retained
+funding details change. It hashes summary projections without loading execution
+DTOs, once per aggregate; it is not a security token.
 
 `GET /api/activity/fills?accountId={id}&operationId={id}` returns one
 operation's constituent rows on expand:
