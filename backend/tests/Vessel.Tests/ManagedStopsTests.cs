@@ -276,8 +276,8 @@ public sealed class ManagedStopPostgresTests
         1m, status == "open" ? 1m : 0m, DateTimeOffset.UtcNow.AddSeconds(placedLater), HyperliquidPerpetualReader.Normalize(status), status,
         DateTimeOffset.UtcNow);
 
-    private static VenueFill Fill(string id, string orderId, string dir, decimal price, decimal pnl = 0) =>
-        new(id, "BTC", HyperliquidPerpetualReader.SideOf(dir.Contains("Long") == dir.StartsWith("Open") ? "B" : "A"), dir, price, 1m, 0m, "USDC",
+    private static VenueFill Fill(string id, string orderId, string dir, decimal price, decimal pnl = 0, decimal quantity = 1m) =>
+        new(id, "BTC", HyperliquidPerpetualReader.SideOf(dir.Contains("Long") == dir.StartsWith("Open") ? "B" : "A"), dir, price, quantity, 0m, "USDC",
             pnl, DateTimeOffset.UtcNow, orderId, "hash-" + id, "{}", HyperliquidPerpetualReader.EffectOf(dir));
 
     /// <summary>A long planned at 100 (stop 95, target 110, 3×) whose entry filled 1 at 100, with its stop order resting at 95.</summary>
@@ -498,5 +498,80 @@ public sealed class ManagedStopPostgresTests
         Assert.Equal(1, fail.Failed);
         Assert.Equal(before, await Stored(h, play.Summary.Id));
         Assert.Equal("stop", (await h.Execution.GetAsync(play.Summary.Id, default)).Links.Single(l => l.Role == "stop").Order!.OrderId);
+    }
+
+    /// <summary>
+    /// Review finding: an Open long saved a stop at 105 while its entry was filled, then the owner unlinked the entry. The
+    /// stop is unchanged from the stored plan, so a title-only save and a rebind of another level still succeed; a new
+    /// stop beyond the now unfilled entry is still refused.
+    /// </summary>
+    [PostgresFact]
+    public async Task Unlinking_a_filled_entry_keeps_a_stored_beyond_entry_stop_saveable()
+    {
+        var (database, h, account) = await SetUp();
+        await using var _ = database;
+        var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Breakout", TestPlays.Plan()), default);
+        var play = await h.Plays.ChangeStatusAsync(draft.Summary.Id, new(draft.Summary.Version, "planned"), default);
+        h.Orders.Orders.AddRange([Order("entry", "buy", 100m, "filled"), Order("target", "sell", 110m, reduceOnly: true)]);
+        h.Reader.Result = h.Reader.Result with { Fills = [Fill("f-entry", "entry", "Open Long", 100m)] };
+        var execution = await h.CheckAsync(play.Summary.Id);
+        Assert.Equal("open", execution.Status);
+        Assert.Equal(["entry", "target"], execution.Links.Select(l => l.Role));
+        play = await h.Plays.UpdateAsync(play.Summary.Id, Revise(await h.Plays.GetAsync(play.Summary.Id, default), TestPlays.Plan(stop: "105"), "Lock in +5"), default);
+        await h.Execution.UnlinkAsync(play.Summary.Id, execution.Links.Single(l => l.Role == "entry").Id, default);
+        play = await h.Plays.GetAsync(play.Summary.Id, default);
+
+        // Before the fix every save failed with "a long stop goes below the entry price", even a title.
+        play = await h.Plays.UpdateAsync(play.Summary.Id, Revise(play, play.Plan, null) with { Title = "Renamed", Review = "Still holding" }, default);
+        Assert.Equal(("Renamed", "105"), (play.Summary.Title, play.Plan.Entries[0].Stops[0].Value));
+        h.Orders.Orders[1] = Order("target", "sell", 112m, reduceOnly: true);
+        var target = (await h.CheckAsync(play.Summary.Id)).Links.Single(l => l.Role == "target");
+        play = await h.Execution.RebindAsync(play.Summary.Id, target.Id, new(play.Summary.Version, "target", "112", "Target moved at the venue"), default);
+        Assert.Equal(("112", "105"), (play.Plan.Entries[0].Targets[0].Value, play.Plan.Entries[0].Stops[0].Value));
+
+        // The entry has no fill now: a changed stop beyond it is checked again.
+        var error = await Assert.ThrowsAsync<ProblemException>(() => h.Plays.UpdateAsync(play.Summary.Id,
+            Revise(play, TestPlays.Plan(stop: "106") with { Entries = [TestPlays.Plan(stop: "106").Entries[0] with { Targets = play.Plan.Entries[0].Targets }] }, "Trail"), default));
+        Assert.Equal((400, "Entry 1: a long stop goes below the entry price."), (error.StatusCode, error.Message));
+    }
+
+    /// <summary>Review finding: replacing a link whose order already filled would drop those exits from the Play.</summary>
+    [PostgresFact]
+    public async Task A_rebind_does_not_replace_a_link_whose_order_has_fills()
+    {
+        var (database, h, account) = await SetUp();
+        await using var _ = database;
+        var play = await OpenPlay(h, account);
+        // Half of the stop executed and the rest still rests; the owner places another stop for the remainder.
+        h.Orders.Orders[1] = new("stop", "BTC", "sell", "Stop Market", 94m, 95m, true, false, 1m, 0.5m, DateTimeOffset.UtcNow,
+            VenueOrderStatus.Open, "open", DateTimeOffset.UtcNow);
+        h.Orders.Orders.Add(Order("new-stop", "sell", 95m, trigger: 96m, type: "Stop Market", placedLater: 5));
+        h.Reader.Result = h.Reader.Result with { Fills = [.. h.Reader.Result.Fills, Fill("f-stop", "stop", "Close Long", 95m, pnl: -2.5m, quantity: 0.5m)] };
+        var stop = (await h.CheckAsync(play.Summary.Id)).Links.Single(l => l.Role == "stop");
+        Assert.Equal("0.5", stop.FilledQuantity);
+        var before = await Stored(h, play.Summary.Id);
+        var error = await Assert.ThrowsAsync<ProblemException>(() => h.Execution.RebindAsync(play.Summary.Id, stop.Id,
+            new(play.Summary.Version, "new-stop", "96", "Replaced the rest at the venue"), default));
+        Assert.Equal((409, "Order stop has fills that count for this play, so its link cannot be replaced."), (error.StatusCode, error.Message));
+        Assert.Equal(before, await Stored(h, play.Summary.Id));
+    }
+
+    /// <summary>Review finding: a level with two linked orders moves through neither, as a save refuses it.</summary>
+    [PostgresFact]
+    public async Task A_rebind_refuses_a_level_another_linked_order_still_references()
+    {
+        var (database, h, account) = await SetUp();
+        await using var _ = database;
+        var play = await OpenPlay(h, account);
+        h.Orders.Orders.Add(Order("stop-b", "sell", 94m, trigger: 95m, type: "Stop Market", reduceOnly: true, placedLater: 5));
+        var links = (await h.CheckAsync(play.Summary.Id)).Links.Where(l => l.Role == "stop").ToList();
+        Assert.Equal(["stop", "stop-b"], links.Select(l => l.Order!.OrderId).Order());
+        h.Orders.Orders[1] = Order("stop", "sell", 96m, trigger: 97m, type: "Stop Market", reduceOnly: true);
+        await h.CheckAsync(play.Summary.Id);
+        var before = await Stored(h, play.Summary.Id);
+        var error = await Assert.ThrowsAsync<ProblemException>(() => h.Execution.RebindAsync(play.Summary.Id,
+            links.Single(l => l.Order!.OrderId == "stop").Id, new(play.Summary.Version, "stop", "97", "Trailed one of two"), default));
+        Assert.Equal((409, "Order stop-b still references this plan level. Unlink it before changing or removing the level."), (error.StatusCode, error.Message));
+        Assert.Equal(before, await Stored(h, play.Summary.Id));
     }
 }

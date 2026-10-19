@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { createEntry, type DraftEntry } from './draft'
-import { planFixes, planIssues, stopsPastLiquidation } from './planChecks'
+import { createDraft, createEntry, type DraftEntry } from './draft'
+import { keptStopWarnings, planFixes, planIssues, stopsPastLiquidation } from './planChecks'
+import { storedPlanText } from './stored-plan-text'
+import { planFromDraft } from './saved'
 import { planTextState } from './numbers'
 
 const entry = (price: string, stop: string, target: string, unit: 'price' | 'percent' = 'price'): DraftEntry => {
@@ -49,7 +51,6 @@ describe('stops of a filled entry', () => {
   it('may sit at or beyond the entry once it has filled; an unfilled entry keeps the wrong-side rule', () => {
     for (const [unit, value] of [['price', '95'], ['price', '100'], ['price', '105'], ['percent', '0'], ['percent', '5']] as const) {
       expect(planIssues([open(unit, value)], 'long', filled)).toEqual([])
-      expect(planIssues([open(unit, value)], 'long', 'all')).toEqual([])
     }
     // Before the fix, the browser refused these with "a long stop goes below the entry price".
     expect(planIssues([open('price', '100')], 'long').map(issue => issue.message))
@@ -60,6 +61,20 @@ describe('stops of a filled entry', () => {
     expect(planIssues([{ ...entry('100', '105', '95'), id: 'e1' }], 'long', filled).map(issue => issue.message))
       .toEqual(['Entry 1 target 1 is below the entry price; a long target goes above it.'])
     expect(planFixes({ direction: 'long', entries: [open('price', '105')] }, filled)).toEqual({ swapped: null, reversed: null })
+  })
+
+  it('keeps a stop saved beyond an entry that no longer has a fill as a warning, not an error', () => {
+    // The stop at 105 was saved while the entry had a fill; the fill was unlinked since.
+    const saved = open('price', '105')
+    const stored = storedPlanText(planFromDraft({ ...createDraft(), entries: [saved] }))
+    expect(planIssues([saved], 'long', new Set(), stored)).toEqual([])
+    expect(keptStopWarnings([saved], 'long', new Set(), stored).map(issue => issue.message))
+      .toEqual(['Entry 1 stop is above the entry price, but its entry has no fill. It was saved there and still saves unchanged.'])
+    // Changed text, unit or entry price is checked again; with a fill there is nothing to warn about.
+    for (const changed of [open('price', '106'), { ...saved, price: '101' }, open('percent', '105')])
+      expect(planIssues([changed], 'long', new Set(), stored).map(issue => issue.kind)).toEqual(changed.stops[0]!.unit === 'percent' ? [] : ['stop'])
+    expect(keptStopWarnings([saved], 'long', filled, stored)).toEqual([])
+    expect(planIssues([saved], 'long', new Set())).toHaveLength(1)
   })
 
   it('refuses a negative percentage with a pointer to a price stop (-5% once saved as no stop)', () => {

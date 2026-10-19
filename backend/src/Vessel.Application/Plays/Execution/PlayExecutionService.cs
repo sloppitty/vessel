@@ -198,11 +198,18 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             var entry = plan.Entries.FirstOrDefault(e => e.Id == link.EntryId);
             var level = (link.Role == OrderLinkRole.Stop ? entry?.Stops : entry?.Targets)?.FirstOrDefault(l => l.Id == link.LevelId)
                 ?? throw new ProblemException(409, "The linked level is no longer in the plan. Review the link first.");
+            // As in a save: another order linked to this level still references its price.
+            if ((await plays.LinkedPlanReferencesAsync(play.Id, ct)).FirstOrDefault(r => r.Link.Id != link.Id && r.Link.LevelKey == link.LevelKey) is { } other)
+                throw new ProblemException(409, $"Order {other.ExternalOrderId} still references this plan level. Unlink it before changing or removing the level.");
             var replacing = order.Id != link.ImportedOrderId;
             if (replacing)
             {
                 if ((await store.LinksAsync(play.AccountId, [order.Id], [], ct)).Any(l => l.State == OrderLinkState.Linked))
                     throw new ProblemException(409, "This order is already linked. Unlink it first.");
+                // Dismissing a link with fills would drop executed exits from the Play.
+                var previous = (await store.OrdersAsync(play.AccountId, [link.ImportedOrderId], NoContracts, ct)).FirstOrDefault();
+                if (previous is not null && (await store.FillsAsync(play.AccountId, [OrderKey.Of(previous)], ct)).Count > 0)
+                    throw new ProblemException(409, $"Order {previous.ExternalOrderId} has fills that count for this play, so its link cannot be replaced.");
                 if (ExecutionIntegrity.RoleConflict(link.Role, plan, order, await store.FillsAsync(play.AccountId, [OrderKey.Of(order)], ct)) is { } conflict)
                     throw new ProblemException(409, conflict);
             }

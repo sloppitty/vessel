@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   decimalLess, decimalSign, exactAdd, exactCompare, exactDecimal, exactDiv, exactFixed, exactInteger, exactMul, exactNumber, exactSignOf, exactSub,
-  exactZero,
+  exactZero, exactScientific, exactAbs,
 } from './decimal'
 
 describe('exact plain decimals', () => {
@@ -52,5 +52,15 @@ describe('exact values', () => {
     expect(exactSignOf(x('-0.004'))).toBe(-1)
     expect(exactFixed(x('5.000'), 2)).toBe('5')
     expect(exactNumber(x('-0.25'))).toBe(-0.25)
+  })
+})
+
+describe('exact manual facts', () => {
+  it('reads a sign and an exponent exactly', () => {
+    expect(exactScientific('+1.5e2')).toEqual({ n: 150n, d: 1n })
+    expect(exactScientific('25e-3')).toEqual({ n: 1n, d: 40n })
+    expect(exactScientific('-2')).toEqual({ n: -2n, d: 1n })
+    for (const text of ['', '1e', '.5', '1e999', 'e2']) expect(exactScientific(text)).toBeNull()
+    expect(exactAbs({ n: -3n, d: 2n })).toEqual({ n: 3n, d: 2n })
   })
 })

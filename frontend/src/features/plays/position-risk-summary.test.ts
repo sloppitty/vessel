@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createDraft, createEntry, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
-import { exactFixed, type Exact } from '@/lib/decimal'
-import { positionRiskSummary, type EntryFills, type RiskReference } from './position-risk-summary'
+import { exactDecimal, exactFixed, type Exact } from '@/lib/decimal'
+import { positionRiskSummary, signedPayoffText, type EntryFills, type RiskReference } from './position-risk-summary'
 import type { SizeUnits } from './sizing'
 
 const units: SizeUnits = { quote: 'USDC', base: 'ETH', quantityDecimals: 4 }
@@ -407,10 +407,10 @@ describe('signed all-stops result', () => {
   const one = (stop: string, overrides: Partial<PlayDraft> = {}, unit: DraftExit['unit'] = 'price'): PlayDraft => plan({
     size: '1', leverage: '3', entries: [{ ...entry('100', '100', [exit(stop, '100', unit)], [exit('110')]), id: 'e1' }], ...overrides,
   })
-  const fills = (average?: string, filled: ReadonlySet<string> | 'all' = new Set(['e1'])): EntryFills =>
-    ({ filled, averages: new Map(average === undefined ? [] : [['e1', average]]) })
+  const fills = (average?: string, filled: ReadonlySet<string> = new Set(['e1'])): EntryFills =>
+    ({ filled, averages: new Map(average === undefined ? [] : [['e1', exactDecimal(average)!]]) })
   const text = (value: Exact | null) => value === null ? null : exactFixed(value, 28)
-  const signed = (draft: PlayDraft, entryFills?: EntryFills) => positionRiskSummary(draft, units, reference, entryFills)
+  const signed = (draft: PlayDraft, entryFills?: EntryFills | 'unknown') => positionRiskSummary(draft, units, reference, entryFills)
 
   it('reads +5 locked in for an Open long filled at 100 with its stop at 105 (acceptance)', () => {
     const result = signed(one('105'), fills('100'))
@@ -428,9 +428,13 @@ describe('signed all-stops result', () => {
   it('measures from the average fill, not the planned entry, and says when it falls back', () => {
     expect(text(signed(one('101'), fills('102')).stopPayoff.total)).toBe('-1')
     expect(text(signed(one('100'), fills('100')).stopPayoff.total)).toBe('0')
-    // Filled, but the execution names no average (a manual Play, or before it loads): from the planned entry.
-    const planned = signed(one('105'), fills(undefined, 'all'))
+    // Filled, but no average is reported for the entry: from the planned entry, and it says so.
+    const planned = signed(one('105'), fills(undefined))
     expect([text(planned.stopPayoff.total), planned.stopPayoff.basis]).toEqual(['5', 'planned entry'])
+    // While the fills load nothing is measured, not even from the planned entry.
+    const pending = signed(one('105'), 'unknown')
+    expect(pending.stopPayoff).toMatchObject({ known: null, total: null, basis: null, pending: true })
+    expect([pending.stops.totalAmount, pending.riskSharePercent, pending.rewardToRisk]).toEqual([null, null, null])
     // A percentage resolves from the planned entry at the leverage, as the matcher does: 0% is 100, 1 under a 101 fill.
     expect(text(signed(one('0', {}, 'percent'), fills('101')).stopPayoff.total)).toBe('-1')
     expect(text(signed(one('95')).stopPayoff.total)).toBe('-5')
@@ -470,6 +474,14 @@ describe('signed all-stops result', () => {
     expect(text(result.stopPayoff.known)).toBe('2.5')
     expect(result.stopPayoff.total).toBeNull()
     expect(result.riskSharePercent).toBeNull()
-    expect(signed({ ...one('105'), size: '' }, fills('100')).stopPayoff).toEqual({ known: null, total: null, basis: 'average fill' })
+    expect(signed({ ...one('105'), size: '' }, fills('100')).stopPayoff)
+      .toEqual({ known: null, total: null, basis: 'average fill', empty: false, pending: false })
+  })
+
+  it('marks a size of zero as no position, not break-even', () => {
+    const empty = signed({ ...one('95'), size: '0' })
+    expect([text(empty.stopPayoff.total), empty.stopPayoff.empty]).toEqual(['0', true])
+    expect(signedPayoffText(empty.stopPayoff.total!, units, true)).toBe('0 USDC')
+    expect(signedPayoffText(empty.stopPayoff.total!, units)).toBe('0 USDC break-even')
   })
 })

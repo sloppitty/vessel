@@ -1,7 +1,8 @@
 import { ArrowDownUp, CircleAlert, Repeat, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { PlayDraft } from './draft'
-import { noFilledEntries, planFixes, planIssues, stopsPastLiquidation, type FilledEntries } from './planChecks'
+import { keptStopWarnings, noFilledEntries, planFixes, planIssues, stopsPastLiquidation, type FilledEntries } from './planChecks'
+import { useStoredPlanText } from './stored-plan-text'
 import { leverageOf } from './levels'
 import { estimatedLiquidation } from './sizing'
 
@@ -20,22 +21,32 @@ export function PlanNotices({ draft, onChange, readOnly = false, lockDirection =
   /** Entries with a linked or manual fill: their stops may sit at or beyond the entry. */
   filledEntries?: FilledEntries
 }) {
-  const issues = planIssues(draft.entries, draft.direction, filledEntries)
+  const stored = useStoredPlanText()
+  const issues = planIssues(draft.entries, draft.direction, filledEntries, stored)
   const leverage = leverageOf(draft.leverage)
   // Wrong-side stops are already errors; the liquidation warning only applies to a consistent plan.
   const pastLiquidation = issues.length ? [] : stopsPastLiquidation(draft.entries, draft.direction, leverage,
     estimatedLiquidation(draft.entries, draft.direction, leverage, maxLeverage, maintenanceMargin))
-  if (!issues.length && !pastLiquidation.length) return null
+  // A stop saved beyond its entry while it had a fill still saves unchanged after the fill is unlinked.
+  const kept = issues.length ? [] : keptStopWarnings(draft.entries, draft.direction, filledEntries, stored)
+  if (!issues.length && !pastLiquidation.length && !kept.length) return null
   if (!issues.length) return <section className="plays-notifications" aria-label="Plan notifications">
-    <div className="plays-notification is-warning" role="status">
+    {kept.length > 0 && <div className="plays-notification is-warning" role="status">
+      <TriangleAlert size={15} aria-hidden="true" />
+      <div className="plays-notification-body">
+        <strong>{kept.length === 1 ? 'A stop sits' : 'Stops sit'} beyond an entry without a fill</strong>
+        <ul>{kept.map(item => <li key={item.levelId}>{item.message}</li>)}</ul>
+      </div>
+    </div>}
+    {pastLiquidation.length > 0 && <div className="plays-notification is-warning" role="status">
       <TriangleAlert size={15} aria-hidden="true" />
       <div className="plays-notification-body">
         <strong>{pastLiquidation.length === 1 ? 'A stop' : 'Stops'} would not trigger before liquidation</strong>
         <ul>{pastLiquidation.map(item => <li key={item.levelId}>{item.message}</li>)}</ul>
       </div>
-    </div>
+    </div>}
   </section>
-  const fixes = planFixes(draft, filledEntries)
+  const fixes = planFixes(draft, filledEntries, stored)
   const swapped = fixes.swapped
   const reversed = lockDirection ? null : fixes.reversed
   const other = draft.direction === 'long' ? 'Short' : 'Long'

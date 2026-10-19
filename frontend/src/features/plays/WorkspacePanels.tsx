@@ -263,8 +263,8 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
 }
 
 export function PositionSummary({ draft, units = defaultSizeUnits, instrumentName, riskReference, fills }: { draft: PlayDraft; units?: SizeUnits; instrumentName?: string; riskReference?: RiskReference | null | undefined
-  /** Filled entries and their average fills; the all-stops result is measured from them. */
-  fills?: EntryFills | undefined }) {
+  /** Filled entries and their average fills, or `'unknown'` while they load; the all-stops result is measured from them. */
+  fills?: EntryFills | 'unknown' | undefined }) {
   const count = draft.entries.length
   // Same quantity-weighted planned average as the chart's AVG line, for one or more priced entries.
   const average = averageEntryPrice(draft.entries, 1)

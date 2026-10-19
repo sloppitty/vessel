@@ -1,9 +1,9 @@
 import {
-  exactAdd, exactDecimal, exactDiv, exactFixed, exactInteger, exactMul, exactNumber, exactSignOf, exactSub, exactZero, type Exact,
+  exactAdd, exactDiv, exactFixed, exactInteger, exactMul, exactNumber, exactSignOf, exactSub, exactZero, type Exact,
 } from '@/lib/decimal'
-import type { DraftEntry, DraftExit, PlayDraft } from './draft'
-import { exitsOf, type ExitKind } from './levels'
-import { finitePlanNumber as decimal, planNumber, planShare, planTextLength, serverPositivePlanNumber } from './numbers'
+import type { PlayDraft } from './draft'
+import { exactLevelPrice, exitsOf, type ExitKind } from './levels'
+import { exactPlanNumber, finitePlanNumber as decimal, planShare, planTextLength, serverPositivePlanNumber } from './numbers'
 import { entryFilled, noFilledEntries, wrongSide, type FilledEntries } from './planChecks'
 import { defaultSizeUnits, exitEstimate, positionSize, type SizeUnits } from './sizing'
 
@@ -41,15 +41,22 @@ export interface StopPayoff {
   /** The whole position's result, only with complete stop coverage. */
   total: Exact | null
   basis: PayoffBasis | null
+  /** The size is zero: there is no position, so a zero result is not break-even. */
+  empty: boolean
+  /** The entries' fills are still loading, so the result is unknown rather than measured from the planned entries. */
+  pending: boolean
 }
 
-/** What the execution says about the entries: which have filled, and the exact average fill price where it is reported. */
+/**
+ * What the execution or the manual ledger says about the entries: which have filled, and each one's exact average fill
+ * price where it is known. `'unknown'` while it loads.
+ */
 export interface EntryFills {
   filled: FilledEntries
-  averages: ReadonlyMap<string, string>
+  averages: ReadonlyMap<string, Exact>
 }
 
-export const noEntryFills: EntryFills = { filled: noFilledEntries, averages: new Map() }
+export const noEntryFills: EntryFills = { filled: noFilledEntries, averages: new Map<string, Exact>() }
 
 export interface PositionRisk {
   quantity: number | null
@@ -104,10 +111,7 @@ function allocation(values: string[]): RiskCoverage {
 export type SummaryDraft = Pick<PlayDraft, 'entries' | 'direction' | 'size' | 'sizingMode' | 'leverage'>
 
 /** Plan text as an exact value; anything the plan grammar refuses is unknown, as for every estimate. */
-const exactPlan = (value: string): Exact | null => {
-  const text = value.trim()
-  return planNumber(text) === null ? null : exactDecimal(text)
-}
+const exactPlan = exactPlanNumber
 
 /**
  * The full-position quantity, exactly: the size in quantity sizing, or margin × leverage over the share-weighted planned
@@ -129,20 +133,10 @@ function exactQuantity(draft: SummaryDraft, leverage: number): Exact | null {
   return average === null ? null : exactDiv(exactMul(size, exactInteger(leverage)), average)
 }
 
-/** A stop's price, exactly: its price, or a loss on margin that moves the price percent ÷ leverage from the planned entry. */
-function exactStopPrice(entry: DraftEntry, stop: DraftExit, direction: PlayDraft['direction'], leverage: number): Exact | null {
-  const value = exactPlan(stop.value)
-  if (value === null) return null
-  if (stop.unit === 'price') return exactSignOf(value) > 0 ? value : null
-  const planned = exactPlan(entry.price)
-  if (planned === null || exactSignOf(planned) <= 0) return null
-  const move = exactDiv(exactMul(planned, value), exactInteger(leverage * 100))!
-  const price = direction === 'long' ? exactSub(planned, move) : exactAdd(planned, move)
-  return exactSignOf(price) > 0 ? price : null
-}
-
 export function positionRiskSummary(draft: SummaryDraft, units: SizeUnits = defaultSizeUnits,
-  riskReference?: RiskReference | null, fills: EntryFills = noEntryFills): PositionRisk {
+  riskReference?: RiskReference | null, entryFills: EntryFills | 'unknown' = noEntryFills): PositionRisk {
+  const pending = entryFills === 'unknown'
+  const fills = pending ? noEntryFills : entryFills
   const entryAllocation = allocation(draft.entries.map(entry => entry.share))
   const priced = draft.entries.flatMap(entry => {
     const share = shareOf(entry.share)
@@ -240,14 +234,13 @@ export function positionRiskSummary(draft: SummaryDraft, units: SizeUnits = defa
       invalid ||= exitAllocation.status === 'invalid'
       const planned = exactPlan(entry.price)
       const filled = entryFilled(fills.filled, entry.id)
-      const reported = filled ? fills.averages.get(entry.id) : undefined
-      const average = reported === undefined ? null : exactDecimal(reported)
+      const average = filled ? fills.averages.get(entry.id) ?? null : null
       const fromFill = average !== null && exactSignOf(average) > 0
       const reference = fromFill ? average : planned
       for (const stop of entry.stops) {
         const stopShare = shareOf(stop.share)
         if (stopShare === null || stopShare === 0 || leverage === null) continue
-        const price = exactStopPrice(entry, stop, draft.direction, leverage)
+        const price = exactLevelPrice(entry, stop, 'stop', draft.direction, leverage)
         const lossSide = price !== null && planned !== null && exactSignOf(planned) > 0 &&
           exactSignOf(exactMul(direction, exactSub(planned, price))) > 0
         if (price === null || reference === null || planned === null || exactSignOf(planned) <= 0 || (!filled && !lossSide)) {
@@ -267,12 +260,14 @@ export function positionRiskSummary(draft: SummaryDraft, units: SizeUnits = defa
     const allocationCoverage = coverage(allocatedPercent, completeAllocation && allocatedPercent !== null, invalid)
     const exitCoverage = coverage(coveredPercent,
       allocationCoverage.status === 'complete' && completeCoverage && coveredPercent !== null, invalid)
-    const payoff = hasAmount && !invalid ? known : null
+    // While the fills load, no stop can be measured: the planned entry would be the wrong reference for a filled one.
+    const payoff = hasAmount && !invalid && !pending ? known : null
     const total = exitCoverage.status === 'complete' ? payoff : null
     const loss = payoff === null ? null : finite(-exactNumber(payoff) || 0)
     return {
       summary: { allocation: allocationCoverage, coverage: exitCoverage, knownAmount: loss, totalAmount: total === null ? null : loss },
-      payoff: { known: payoff, total, basis: bases.size === 0 ? null : bases.size > 1 ? 'mixed' : bases.has('fill') ? 'average fill' : 'planned entry' },
+      payoff: { known: payoff, total, empty: size !== null && exactSignOf(size) === 0, pending,
+        basis: pending || bases.size === 0 ? null : bases.size > 1 ? 'mixed' : bases.has('fill') ? 'average fill' : 'planned entry' },
     }
   }
 
@@ -297,7 +292,9 @@ const payoffMoney = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 
  * "+5 USDC locked in", "−5 USDC at risk" or "0 USDC break-even": rounded once from the exact value for display, so a
  * small result reads "< 0.01" and the sign is never rounded away.
  */
-export function signedPayoffText(value: Exact, units: SizeUnits) {
+export function signedPayoffText(value: Exact, units: SizeUnits, empty = false) {
+  // Without a position there is nothing to lock in or put at risk.
+  if (empty && exactSignOf(value) === 0) return `0 ${units.quote}`
   const sign = exactSignOf(value)
   const text = exactFixed(value, 2).replace(/^-/, '')
   const amount = sign !== 0 && text === '0' ? '< 0.01' : payoffMoney.format(text as Intl.StringNumericLiteral)

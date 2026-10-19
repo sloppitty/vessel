@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { createExit, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
 import { exitsOf, formatDraggedPrice, levelPrice, priceMovePercent, type ExitKind } from './levels'
-import { wrongSide } from './planChecks'
+import { keptStop, wrongSide } from './planChecks'
 import { planInputType, positivePlanNumber, serverPositivePlanNumber } from './numbers'
 import { defaultSizeUnits, estimatedLiquidation, exitEstimate, formatMoney, type SizeUnits } from './sizing'
 import { entryFieldState, exitFieldState, planTextMarks, useStoredPlanText } from './stored-plan-text'
@@ -71,7 +71,10 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
       const percentValue = exit.unit === 'percent' ? positivePlanNumber(exit.value) : null
       const move = estimate?.move ?? (percentValue !== null ? priceMovePercent(percentValue, leverage) : null)
       const outcome = kind === 'stop' ? 'loss' : 'gain'
-      const wrong = wrongSide(sideEntryPrice, exit, kind, direction, filled)
+      // A stop kept unchanged from the saved plan still saves, so beyond an unfilled entry it is a warning, not an error.
+      const beyond = wrongSide(sideEntryPrice, exit, kind, direction, filled)
+      const kept = beyond && kind === 'stop' && keptStop(entry, exit, stored)
+      const wrong = beyond && !kept
       const stopPrice = kind === 'stop' ? levelPrice(entryPrice, exit, kind, direction, leverage) : null
       const marked = suggested?.has(exit.id) ?? false
       const pastLiquidation = !wrong && stopPrice !== null && liquidation !== null && (direction === 'long' ? stopPrice <= liquidation : stopPrice >= liquidation)
@@ -84,9 +87,10 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
         <Input id={`${prefix}-${exit.id}-value`} {...planInputType(exit.value)} step="any" min={0} className={kind === 'stop' ? 'exit-value-stop' : 'exit-value-target'}
           placeholder={exit.unit === 'price' ? '$' : kind === 'stop' ? 'Loss %' : 'Gain %'}
           aria-label={`${entry.name} planned ${label(index)} ${exit.unit === 'price' ? 'price (quote units)' : `return at ${leverage}× leverage (%)`}`}
-          aria-invalid={wrong || valueMarks?.invalid || undefined} data-warning={pastLiquidation || valueMarks?.warning || undefined}
+          aria-invalid={wrong || valueMarks?.invalid || undefined} data-warning={pastLiquidation || kept || valueMarks?.warning || undefined}
           data-suggested={marked || undefined}
           title={valueMarks ? valueMarks.title : wrong ? `A ${direction} ${kind} goes ${(kind === 'target') === (direction === 'long') ? 'above' : 'below'} the entry price`
+            : kept ? `Saved beyond the entry while it had a fill; it still saves unchanged. Until the entry fills again, a changed ${direction} stop goes ${direction === 'long' ? 'below' : 'above'} it.`
             : pastLiquidation ? `Past the estimated liquidation price of ${formatDraggedPrice(liquidation!)}; it would not trigger first`
             : marked ? 'A suggestion for this level is in Suggestions above the chart.' : undefined}
           value={exit.value} onChange={event => update(exit.id, { value: event.target.value })} />

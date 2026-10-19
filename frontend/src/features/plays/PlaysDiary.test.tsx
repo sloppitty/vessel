@@ -1274,3 +1274,37 @@ describe('Plays review wave request regressions', () => {
     expect(nextSession).not.toHaveBeenCalled()
   })
 })
+
+// Phase 0, 0.5b review: a manual Play measures its stops from the ledger's average fill per entry, as the server decides.
+describe('manual fills in the Summary', () => {
+  const level = (id: string, value: string) => ({ id, unit: 'price' as const, value, share: '100' })
+  const open: SavedPlay = { ...planned, summary: { ...planned.summary, status: 'open', version: 3 },
+    plan: { ...planned.plan, sizingMode: 'quantity', size: '1', leverage: '1', entries: [
+      { id: 'entry-1', name: 'Entry 1', color: '#b9c9e4', share: '50', price: '100', stops: [level('stop-1', '101')], targets: [level('target-1', '110')] },
+      { id: 'entry-2', name: 'Entry 2', color: '#c9b9e4', share: '50', price: '100', stops: [level('stop-2', '101')], targets: [level('target-2', '110')] },
+    ] } }
+  const fill = (id: string, entryId: string, quantity: string, price: string): ManualExecutions['records'][number] => ({ id, role: 'entry', entryId,
+    occurredAtUtc: at, side: 'buy', quantity, price, fee: '0', feeCurrency: 'USD', source: 'Statement', createdAtUtc: at, updatedAtUtc: at })
+  const summaryValue = (label: string) =>
+    within(screen.getByRole('group', { name: 'Planned position money summary' })).getByText(label, { selector: 'dt' }).nextElementSibling!
+
+  it('measures each filled entry from its ledger average, and waits for the ledger instead of using the planned entry', async () => {
+    const { api } = client(open)
+    const ledger = deferred<ManualExecutions>()
+    api.manualExecutions = vi.fn(() => ledger.promise)
+    render(<Harness api={api} initial={sessionFor(open)} manual />)
+    expect(summaryValue('All stops')).toHaveTextContent(/^UnknownWaiting for the entries' fills$/)
+    // Entry 1 filled 1 at 101 and 1 at 103 (average 102); entry 2 has no fill, so its saved stop above 100 is only a warning.
+    await act(async () => ledger.resolve({ ...manualLedger(open), records: [fill(ids(1), 'entry-1', '1', '101'), fill(ids(2), 'entry-1', '1e0', '103')] }))
+    expect(api.manualExecutions).toHaveBeenCalledWith(open.summary.id, expect.any(AbortSignal))
+    // Only the selected entry shows its form; entry 1's stop above its planned price is fine, since entry 1 filled.
+    const stop = screen.getByRole('spinbutton', { name: 'Entry 1 planned stop price (quote units)' })
+    expect(stop).not.toHaveAttribute('data-warning')
+    expect(stop).not.toHaveAttribute('aria-invalid')
+    // Entry 2's stop is not covered, so only entry 1's half is known: 0.5 × (101 − 102), not +0.5 from the planned 100.
+    expect(summaryValue('All stops')).toHaveTextContent(/^Known \u22120.5 USD at riskTotal unknown · from the average fill$/)
+    expect(within(screen.getByRole('region', { name: 'Plan notifications' })).getByRole('status'))
+      .toHaveTextContent('Entry 2 stop is above the entry price, but its entry has no fill.')
+  })
+})
+const ids = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`

@@ -24,17 +24,17 @@ import { PositionEditor, defaultMaxLeverage, type SuggestionMarks } from './Posi
 import { ChartPanel } from './PlayChart'
 import { CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
 import { noFilledEntries } from './planChecks'
+import { noEntryFills, type EntryFills } from './position-risk-summary'
 import { isNominalUsdQuote } from './stablecoins'
 import { defaultPlayTitle } from './default-title'
 import './plays-workspace.css'
 import { NativeSelect } from '@/components/ui/native-select'
 import { pickerAccounts } from '@/features/workspace/account-picker-options'
 
-const noAverages: ReadonlyMap<string, string> = new Map()
 
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, revision = null,
   lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, sizingStatus = 'ready', onRetrySizing, onRiskChange,
-  filledEntries, averageFills, onUnits, retrospective = false }: {
+  filledEntries, fills: entryFills, onUnits, onPriceStep, retrospective = false }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -67,10 +67,16 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
    * and their stops may sit at or beyond the entry.
    */
   filledEntries?: ReadonlySet<string> | 'all'
-  /** Exact average fill price per filled entry, as the execution reports it; the Summary measures their stops from it. */
-  averageFills?: ReadonlyMap<string, string>
+  /**
+   * Which entries have filled and each one's average fill, from the execution or the manual ledger, or `'unknown'` while it
+   * loads. Their stops may sit at or beyond the entry, and the Summary measures them from the fill. Without it, the entries
+   * in `filledEntries` count as filled with no known average.
+   */
+  fills?: EntryFills | 'unknown'
   /** The size units in use, so the page can word its own messages in the instrument's quote asset. */
   onUnits?: (units: SizeUnits) => void
+  /** The instrument's tick, or null, so the page can match order prices as the server does. */
+  onPriceStep?: (step: number | null) => void
 }) {
   const fieldId = useId()
   const [selectedId, setSelectedId] = useState(draft.entries[0]?.id ?? '')
@@ -120,6 +126,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
     ? { name: units.quote === 'USD' ? riskName : `${riskName} · nominal USD/${units.quote} at 1:1`, amount: riskAmount, quote: units.quote } : null
   const { quote, base, quantityDecimals } = units
   useEffect(() => { onUnits?.({ quote, base, quantityDecimals }) }, [onUnits, quote, base, quantityDecimals])
+  useEffect(() => { onPriceStep?.(priceStep) }, [onPriceStep, priceStep])
 
   // Manual instruments are labels: say what Vessel assumes about them beside the Instrument label.
   const manualNote = retrospective ? undefined : manualUsd
@@ -151,7 +158,10 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const showEvidence = () => requestAnimationFrame(() =>
     leftColumn.current?.querySelector('[data-testid="journal-panel"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
 
-  const fills = useMemo(() => ({ filled: filledEntries ?? noFilledEntries, averages: averageFills ?? noAverages }), [filledEntries, averageFills])
+  const fills = useMemo<EntryFills | 'unknown'>(() => entryFills ?? { ...noEntryFills, filled: filledEntries instanceof Set ? filledEntries : noFilledEntries },
+    [entryFills, filledEntries])
+  // While the fills load, every stop keeps the wrong-side rule; the server decides per entry from its own facts.
+  const filled = fills === 'unknown' ? noFilledEntries : fills.filled
 
   // Suggestions sit in their own panel above the workspace; the fields only carry a marker.
   const leverage = leverageOf(draft.leverage)
@@ -238,7 +248,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
       </span></div>
     </fieldset>
     {!retrospective && <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} lockDirection={lockDirection} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin}
-      filledEntries={fills.filled} />}
+      filledEntries={filled} />}
     <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} retrospective={retrospective} />
     {!readOnly && onRiskChange && (suggestions || sizingStatus === 'failed') && <SuggestionsPanel plan={suggestions} sizing={sizing}
       status={sizingStatus} onRetry={onRetrySizing} draft={draft} leverage={leverage} units={units}
@@ -268,10 +278,10 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
       </div>
       {retrospective ? <section className="panel retrospective-position" aria-label="No original plan"><h2>No original plan</h2></section>
         : readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>
-        <PositionEditor onLeverageChange={leverageChange.request} draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} units={units} availableBudget={available} checkBudget={false} filledEntries={fills.filled} />
+        <PositionEditor onLeverageChange={leverageChange.request} draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} units={units} availableBudget={available} checkBudget={false} filledEntries={filled} />
       </fieldset> : <PositionEditor onLeverageChange={leverageChange.request} draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId}
         maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} instrumentName={instrumentName} units={units} availableBudget={available} checkBudget={status === 'draft'}
-        marks={marks} filledEntries={fills.filled} />}
+        marks={marks} filledEntries={filled} />}
     </div>
     {!retrospective && <PositionSummary draft={draft} units={units} instrumentName={instrumentName} riskReference={riskReference} fills={fills} />}
   </section>

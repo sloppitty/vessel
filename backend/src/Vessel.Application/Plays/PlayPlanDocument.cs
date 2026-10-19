@@ -45,7 +45,8 @@ public static partial class PlayDocuments
     /// item: an entry's price or share by entry ID, a stop's or target's value (in the same unit) or share by entry and
     /// level ID, and the plan's size or budget. A negative percentage is refused with a pointer to a price stop.
     /// Stops of the <paramref name="executedEntries"/> (entries with a linked or manual fill) may sit at or beyond the
-    /// entry, at break-even or in profit; every other price stop and target keeps its side of the entry.
+    /// entry, at break-even or in profit; every other price stop and target keeps its side of the entry, except a stop
+    /// unchanged from the stored plan (same text, unit and entry price), which a fill since unlinked may have allowed.
     /// </summary>
     public static PlayPlanDocument Normalize(PlayPlanDocument? plan, PlayPlanDocument? stored = null,
         IReadOnlySet<string>? executedEntries = null)
@@ -88,7 +89,12 @@ public static partial class PlayDocuments
                     : $"{label}: a percentage cannot be negative; use a price instead.");
             return new PlanExit(id, unit, Number(exit.Value, valueKey, label), Number(exit.Share, LevelKey(kind, entryId, id, "share"), $"{label} share"));
         }).ToList();
-        foreach (var entry in entries) RequireSides(entry, plan.Direction, executedEntries?.Contains(entry.Id) == true);
+        // A stop saved while its entry had a fill stays saveable unchanged, like stored number text: the same stop text in
+        // the same unit on the same entry price. Unlinking the entry's fills must not lock the Play.
+        bool Kept(PlanEntry entry, PlanExit stop) =>
+            kept.TryGetValue(LevelKey("stop", entry.Id, stop.Id, $"{stop.Unit} value"), out var value) && value == stop.Value &&
+            kept.TryGetValue(EntryKey(entry.Id, "price"), out var price) && price == entry.Price;
+        foreach (var entry in entries) RequireSides(entry, plan.Direction, executedEntries?.Contains(entry.Id) == true, stop => Kept(entry, stop));
         return new PlayPlanDocument(plan.Direction, plan.SizingMode, Number(plan.Size, "size", "Size"), plan.Leverage,
             plan.BudgetOverride is null ? null : Number(plan.BudgetOverride, "budget", "Budget"), entries,
             new PlanNotes(Note(plan.Notes.Thesis), Note(plan.Notes.Invalidation), Note(plan.Notes.Strategy), Note(plan.Notes.Evidence)));
@@ -127,16 +133,18 @@ public static partial class PlayDocuments
     /// <summary>
     /// Price stops and targets must sit on their side of a priced entry: long stops below and targets above,
     /// short the reverse. Percent levels are placed by direction, so they always do. Once an entry has filled, its
-    /// stops protect a position that exists: they may sit at or beyond the entry (break-even or profit).
+    /// stops protect a position that exists: they may sit at or beyond the entry (break-even or profit). A
+    /// <paramref name="kept"/> stop, unchanged from the stored plan, is not checked again.
     /// </summary>
-    private static void RequireSides(PlanEntry entry, string direction, bool executed)
+    private static void RequireSides(PlanEntry entry, string direction, bool executed, Func<PlanExit, bool> kept)
     {
         if (Positive(entry.Price) is not { } entryPrice) return;
         foreach (var (kind, exits) in new[] { ("stop", entry.Stops), ("target", entry.Targets) })
         {
             if (kind == "stop" && executed) continue;
             var above = kind == "target" == (direction == "long");
-            if (exits.Any(exit => exit.Unit == "price" && Positive(exit.Value) is { } price && (above ? price <= entryPrice : price >= entryPrice)))
+            if (exits.Any(exit => exit.Unit == "price" && Positive(exit.Value) is { } price && (above ? price <= entryPrice : price >= entryPrice) &&
+                    !(kind == "stop" && kept(exit))))
                 throw Invalid($"{entry.Name}: a {direction} {kind} goes {(above ? "above" : "below")} the entry price.");
         }
     }

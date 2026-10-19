@@ -13,8 +13,8 @@ export interface PositionRiskSummaryProps {
   units?: SizeUnits
   /** Explicit named, positive reference in `units.quote`. Never inferred from margin or budget. */
   riskReference?: RiskReference | null
-  /** Filled entries and their average fills; the all-stops result is measured from them. */
-  fills?: EntryFills
+  /** Filled entries and their average fills, or `'unknown'` while they load; the all-stops result is measured from them. */
+  fills?: EntryFills | 'unknown'
 }
 
 const percent = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
@@ -32,10 +32,12 @@ const basisText: Record<PayoffBasis, string> = {
 
 /** The all-stops row: what every stop filling would lock in or put at risk, and what it is measured from. */
 function StopOutcome({ value, coverage, units }: { value: StopPayoff; coverage: RiskCoverage; units: SizeUnits }) {
-  const basis = value.basis && basisText[value.basis]
-  if (value.total !== null) return <>{signedPayoffText(value.total, units)}{basis && <small>{basis}</small>}</>
+  // No position: the row reads 0 as before, with no reference to measure from.
+  const basis = !value.empty && value.basis && basisText[value.basis]
+  if (value.pending) return <>Unknown<small>Waiting for the entries' fills</small></>
+  if (value.total !== null) return <>{signedPayoffText(value.total, units, value.empty)}{basis && <small>{basis}</small>}</>
   if (coverage.status === 'invalid') return <>Unknown<small>Invalid allocation</small></>
-  return <>{value.known === null ? 'Unknown' : `Known ${signedPayoffText(value.known, units)}`}
+  return <>{value.known === null ? 'Unknown' : `Known ${signedPayoffText(value.known, units, value.empty)}`}
     <small>Total unknown{basis && ` · ${basis.toLowerCase()}`}</small></>
 }
 
@@ -50,7 +52,7 @@ function Outcome({ value, units }: { value: PlannedExitSummary; units: SizeUnits
 export function PositionRiskSummary({ draft, units = defaultSizeUnits, riskReference, fills = noEntryFills }: PositionRiskSummaryProps) {
   const summary = positionRiskSummary(draft, units, riskReference, fills)
   const payoff = summary.stopPayoff.total ?? summary.stopPayoff.known
-  const tone = payoff === null ? undefined : exactSignOf(payoff) > 0 ? 'gain' : exactSignOf(payoff) < 0 ? 'loss' : undefined
+  const tone = payoff === null || summary.stopPayoff.empty ? undefined : exactSignOf(payoff) > 0 ? 'gain' : exactSignOf(payoff) < 0 ? 'loss' : undefined
   // Stops that lock in a result or break even on a sized position: there is no risk to measure reward against.
   const lockedIn = summary.stopPayoff.total !== null && exactSignOf(summary.stopPayoff.total) >= 0 && (summary.quantity ?? 0) > 0
   const coverages: Array<[string, RiskCoverage, string]> = [

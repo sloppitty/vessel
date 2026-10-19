@@ -1,6 +1,9 @@
 import type { PriceOverlay } from '@/components/chart/types'
 import { createExit, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
-import { finitePlanNumber as unsigned, formatPlanNumber, positiveFinitePlanNumber as positive } from './numbers'
+import {
+  exactAbs, exactAdd, exactDecimal, exactDiv, exactInteger, exactMul, exactNumber, exactSignOf, exactSub, type Exact,
+} from '@/lib/decimal'
+import { exactPlanNumber, finitePlanNumber as unsigned, formatPlanNumber, positiveFinitePlanNumber as positive } from './numbers'
 
 export type ChartView = 'aggregate' | 'selected'
 export type ExitKind = 'stop' | 'target'
@@ -44,6 +47,36 @@ export function levelPrice(entryPrice: number | null, level: DraftExit, kind: Ex
   const distance = percent / Math.max(1, leverage)
   const price = entryPrice * (1 + (above(kind, direction) ? distance : -distance) / 100)
   return price > 0 ? price : null
+}
+
+/**
+ * A stop's or target's price as an exact value: its price, or a percentage of return on margin that moves the price
+ * percent ÷ leverage from the planned entry, as `levelPrice` places it and the server's matcher resolves it. Null when
+ * a field is not plan text or the price is not above zero.
+ */
+export function exactLevelPrice(entry: DraftEntry, level: DraftExit, kind: ExitKind, direction: PlayDraft['direction'], leverage: number): Exact | null {
+  const value = exactPlanNumber(level.value)
+  if (value === null) return null
+  if (level.unit === 'price') return exactSignOf(value) > 0 ? value : null
+  const planned = exactPlanNumber(entry.price)
+  if (planned === null || exactSignOf(planned) <= 0) return null
+  const move = exactDiv(exactMul(planned, value), exactInteger(Math.max(1, leverage) * 100))!
+  const price = above(kind, direction) ? exactAdd(planned, move) : exactSub(planned, move)
+  return exactSignOf(price) > 0 ? price : null
+}
+
+/**
+ * Whether an order's price matches a planned price as the server's matcher and monitor decide (`ExecutionMatcher.Near`):
+ * within one step of the fifth significant figure of the planned price (1 at 84,541; 0.01 at 100), or within one tick
+ * when the instrument's tick is coarser.
+ */
+export function pricesMatch(actual: Exact, planned: Exact, tick: number | null = null) {
+  if (exactSignOf(planned) <= 0) return false
+  const magnitude = Math.floor(Math.log10(exactNumber(planned))) - 4
+  let step = magnitude >= 0 ? exactInteger(10n ** BigInt(magnitude)) : { n: 1n, d: 10n ** BigInt(-magnitude) }
+  const coarser = tick !== null && tick > 0 ? exactDecimal(formatPlanNumber(tick, 20)) : null
+  if (coarser !== null && exactSignOf(exactSub(coarser, step)) > 0) step = coarser
+  return exactSignOf(exactSub(step, exactAbs(exactSub(actual, planned)))) >= 0
 }
 
 /** Price move from the entry, in percent, that a percent level stands for at this leverage. */

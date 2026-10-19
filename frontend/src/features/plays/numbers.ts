@@ -6,6 +6,8 @@
  * saves unchanged; see `planTextState`.
  */
 
+import { exactDecimal, type Exact } from '@/lib/decimal'
+
 /** The longest plan number text the server stores. */
 export const planTextLength = 64
 const maxCoefficient = '79228162514264337593543950335'
@@ -35,6 +37,12 @@ export const isNegativePlanText = (text: string) => text.startsWith('-') && isPl
 export function planNumber(value: string): number | null {
   const text = value.trim()
   return text !== '' && isPlanText(text) ? Number(text) : null
+}
+
+/** A plan field as an exact value, read like `planNumber`: trimmed plan text, otherwise unknown. */
+export function exactPlanNumber(value: string): Exact | null {
+  const text = value.trim()
+  return text !== '' && isPlanText(text) ? exactDecimal(text) : null
 }
 
 /** Above zero. Plan text is always finite; the finite profiles below are kept for their callers' intent. */

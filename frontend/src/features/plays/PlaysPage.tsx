@@ -22,7 +22,9 @@ import { emptyManualDraft, hasManualDraft } from './manual'
 import { useMonitorRun } from '@/features/monitor/useMonitorRun'
 import { usePlayExecution } from './usePlayExecution'
 import { useSizing } from './useSizing'
-import { planIssues, planIssueSummary } from './planChecks'
+import { noFilledEntries, planIssues, planIssueSummary } from './planChecks'
+import { executionFills, useLedgerFills } from './entry-fills'
+import { noEntryFills, type EntryFills } from './position-risk-summary'
 import { planNumberIssues, planNumberSummary, storedPlanText, StoredPlanTextContext, type StoredPlanText } from './stored-plan-text'
 import { availableOf, defaultSizeUnits, marginOverBudget, overBudgetMessage, type SizeUnits } from './sizing'
 import { leverageOf } from './levels'
@@ -189,21 +191,18 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   // The server keeps the direction once an entry has filled: it decides which side closes the position.
   const filled = venueStatus !== undefined && !!tracking.execution?.links.some(link => link.role === 'entry' && link.fills.length > 0)
   const status = saved?.summary.status ?? 'draft'
-  // Entries with a fill get no size, leverage, stop or target suggestions (D-11). Open means an entry has
-  // filled; until the execution says which, or for manual Plays whose ledger the editor does not read, all count.
+  // Which entries have filled, per entry, as the server decides it: the execution's per-entry filled quantity for a venue
+  // Play, the manual ledger for a manual one. Only Open and Closed Plays can have fills; until the facts load they are
+  // unknown, never assumed from the status.
   const playExecution = venueStatus !== undefined ? tracking.execution : null
-  const filledEntries = useMemo<ReadonlySet<string> | 'all'>(() => {
-    const ids = new Set<string>()
-    if (!manual && playExecution) {
-      for (const entry of playExecution.entries) if (/[1-9]/.test(entry.filledQuantity)) ids.add(entry.entryId)
-      for (const link of playExecution.links) if (link.role === 'entry' && link.entryId && link.fills.length > 0) ids.add(link.entryId)
-    }
-    return ids.size === 0 && status === 'open' ? 'all' : ids
-  }, [manual, playExecution, status])
-  // The Summary measures a filled entry's stops from its average fill, as the execution reports it (exact text).
-  const averageFills = useMemo<ReadonlyMap<string, string>>(() => new Map(manual || !playExecution ? []
-    : playExecution.entries.flatMap(entry => entry.averageFillPrice !== null && /[1-9]/.test(entry.filledQuantity)
-      ? [[entry.entryId, entry.averageFillPrice] as const] : [])), [manual, playExecution])
+  const fillsPossible = status === 'open' || status === 'closed'
+  const ledger = useLedgerFills(api, visible && manual && fillsPossible && saved ? saved.summary.id : null, saved?.summary.version ?? 0)
+  const venueFills = useMemo(() => !manual && playExecution ? executionFills(playExecution) : null, [manual, playExecution])
+  const fills: EntryFills | 'unknown' = !fillsPossible ? noEntryFills : (manual ? ledger : venueFills) ?? 'unknown'
+  // Entries with a fill get no size, leverage, stop or target suggestions (D-11). An Open Play has a fill somewhere, so
+  // until the facts say which entry, none gets one.
+  const filledEntries: ReadonlySet<string> | 'all' = fills === 'unknown' ? status === 'open' ? 'all' : noFilledEntries : fills.filled
+  const [priceStep, setPriceStep] = useState<number | null>(null)
   // The workspace knows the instrument's units; page messages such as the blocked-save reason use them.
   const [units, setUnits] = useState<SizeUnits>(defaultSizeUnits)
   const onUnits = useCallback((next: SizeUnits) => setUnits(current => current.quote === next.quote && current.base === next.base &&
@@ -226,8 +225,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     if (retrospective) return null
     const numbers = planNumberIssues(current, stored)
     if (numbers.length) return planNumberSummary(numbers)
-    // A filled entry's stops may sit at or beyond it; the server decides per entry from its own fills.
-    const issues = planIssues(current.entries, current.direction, filledEntries)
+    // A filled entry's stops may sit at or beyond it, and a stop kept unchanged from the saved plan still saves.
+    const issues = planIssues(current.entries, current.direction, fills === 'unknown' ? noFilledEntries : fills.filled, stored)
     if (issues.length) return planIssueSummary(issues)
     const account = accounts.find(item => item.id === current.accountId)
     const over = currentStatus === 'draft' ? marginOverBudget(current, leverageOf(current.leverage), availableOf(account)) : null
@@ -465,7 +464,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} revision={revision} lockInstrument={locked}
       lockDirection={status === 'open' || filled} readOnly={readOnly} retrospective={retrospective}
       sizing={sizing.sizing} sizingStatus={sizing.status} onRetrySizing={sizing.retry} onRiskChange={sizing.updateRisk}
-      filledEntries={filledEntries} averageFills={averageFills} onUnits={onUnits}
+      filledEntries={filledEntries} fills={fills} onUnits={onUnits} onPriceStep={setPriceStep}
       execution={manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
         enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}
         working={busy !== null}
@@ -478,7 +477,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         onDismiss={tracking.dismiss} onCheck={() => { void monitorRun.check() }} onLink={request => { void tracking.link(request) }}
         onUnlink={linkId => { void tracking.unlink(linkId) }}
         // A rebind writes a plan revision, so it waits for unsaved edits and other Play work, and its answer is the saved Play.
-        version={saved.summary.version} rebindBlocked={dirty ? 'Save or discard your plan changes first.' : busy !== null ? 'Wait for the current change to finish.' : undefined}
+        version={saved.summary.version} leverage={leverageOf(draft.leverage)} priceStep={priceStep} rebindBlocked={dirty ? 'Save or discard your plan changes first.' : busy !== null ? 'Wait for the current change to finish.' : undefined}
         onRebind={(linkId, request) => tracking.rebind(linkId, request, acceptStoredPlay)} /> : undefined} />
     </StoredPlanTextContext.Provider>
     {dialog === 'revision' && saved && <RevisionDialog revision={saved.summary.planRevision} pending={saving} error={dialogError}

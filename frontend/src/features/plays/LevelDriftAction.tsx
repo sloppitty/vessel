@@ -4,7 +4,7 @@ import type { MonitorDiscrepancy } from '@/api/monitor'
 import type { OrderLink, PlaySummary, RebindLevel } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import type { DraftEntry } from './draft'
-import { levelDrifts, levelName } from './execution'
+import { levelDrifts, levelName, type DriftContext } from './execution'
 import { useJournalState } from './journal-state'
 
 const noReasons: Record<string, string> = {}
@@ -14,10 +14,12 @@ const noReasons: Record<string, string> = {}
  * plan revision with a reason. Vessel never edits the order, and an order's price is not a fill. The server refuses when
  * the Play or the order changed since; the monitor clears the record on its next check.
  */
-export function LevelDriftAction({ discrepancy, links, entries, origin, playId, version, blocked, onRebind }: {
+export function LevelDriftAction({ discrepancy, links, entries, context, origin, playId, version, blocked, onRebind }: {
   discrepancy: MonitorDiscrepancy
   links: readonly OrderLink[]
   entries: readonly DraftEntry[]
+  /** Direction, leverage and tick that resolve and match the plan's levels as the server does. */
+  context: DriftContext
   origin: PlaySummary['origin']
   playId: string
   /** The saved Play's version the rebind expects. */
@@ -30,7 +32,7 @@ export function LevelDriftAction({ discrepancy, links, entries, origin, playId, 
   const [reasons, setReasons] = useJournalState(`rebind-reasons:${playId}`, noReasons)
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const drifts = discrepancy.state === 'open' ? levelDrifts(discrepancy, links, entries) : []
+  const drifts = discrepancy.state === 'open' ? levelDrifts(discrepancy, links, entries, context) : []
   if (!drifts.length) return null
 
   async function rebind(linkId: string, orderId: string, observedPrice: string) {
@@ -47,21 +49,23 @@ export function LevelDriftAction({ discrepancy, links, entries, origin, playId, 
 
   return <div className="level-drift">
     {error && <p className="error" role="alert">{error}</p>}
-    {drifts.map(({ link, observed, planned, applied }) => {
+    {drifts.map(({ link, observed, planned, applied, percent }) => {
       const name = levelName(entries, link, origin)
       const orderId = link.order!.orderId
       const reason = reasons[link.id] ?? ''
+      // A percentage level becomes a fixed price; the owner is told before choosing it.
+      const label = percent === null ? `Use ${observed}` : `Use ${observed} (changes ${percent} % to a price)`
       return <div key={link.id} className="level-drift-row">
         <p>{name}: order {orderId} rests at {observed}; the plan said {planned}.</p>
-        {applied ? <p className="muted">The plan uses {observed} now. The monitor clears this on its next check.</p>
+        {applied ? <p className="muted">The plan matches this order now. The monitor clears this on its next check.</p>
           : <div className="monitor-dismiss">
             <label><span className="sr-only">Reason to move {name} to {observed}</span>
               <input maxLength={2000} placeholder="Why the level moves (kept with the revision)" value={reason} disabled={pending !== null}
                 onChange={event => { const value = event.target.value; setReasons(current => ({ ...current, [link.id]: value })) }} /></label>
             <Button size="sm" variant="outline" disabled={!!blocked || pending !== null || !reason.trim()}
               title={blocked ?? `Move ${name} to the order's price as a plan revision. The order is not changed.`}
-              aria-label={pending === link.id ? undefined : `Use ${observed} for ${name}`} onClick={() => { void rebind(link.id, orderId, observed) }}>
-              {pending === link.id ? 'Moving…' : `Use ${observed}`}</Button>
+              aria-label={pending === link.id ? undefined : `${label} for ${name}`} onClick={() => { void rebind(link.id, orderId, observed) }}>
+              {pending === link.id ? 'Moving…' : label}</Button>
           </div>}
       </div>
     })}

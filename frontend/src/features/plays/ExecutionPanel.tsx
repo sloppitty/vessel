@@ -23,7 +23,7 @@ const pnlBasisNote = {
 } as const
 
 export function ExecutionPanel({ execution, error, busy, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, onDismiss, onManageCredential,
-  version, onRebind, rebindBlocked }: {
+  version, leverage = 1, priceStep = null, onRebind, rebindBlocked }: {
   execution: PlayExecution | null
   error: string | null
   busy: boolean
@@ -42,6 +42,9 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
   onUnlink: (linkId: string) => void
   /** The saved Play's version, which a rebind of a drifted level expects. */
   version?: number
+  /** The plan's leverage and the instrument's tick, to resolve and match levels as the server does. */
+  leverage?: number
+  priceStep?: number | null
   /** Moves a drifted linked stop or target to its order's price (`level.drift`); resolves once the Play is saved. */
   onRebind?: (linkId: string, request: RebindLevel) => Promise<void>
   /** Why a rebind is not available now, such as unsaved plan edits. */
@@ -66,7 +69,7 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
       retryAtUtc={retryAtUtc} statusUnavailable={monitorUnavailable} onCheck={onCheck} onManageCredential={onManageCredential} />}
     {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss}
       action={editable && onRebind && version !== undefined ? item => <LevelDriftAction discrepancy={item} links={execution.links} entries={entries}
-        origin={origin} playId={execution.playId} version={version} blocked={busy ? 'Wait for the current change to finish.' : rebindBlocked}
+        context={{ direction, leverage, tick: priceStep }} origin={origin} playId={execution.playId} version={version} blocked={busy ? 'Wait for the current change to finish.' : rebindBlocked}
         onRebind={onRebind} /> : undefined} />}
     <MonitorWatches watches={execution.watches} />
     <dl className="execution-totals">

@@ -46,6 +46,17 @@ export function exactDecimal(text: string): Exact | null {
   return reduce(n, 10n ** BigInt(fraction.length))
 }
 
+/** A decimal with an optional sign and exponent, as manual execution facts allow (`+1.5`, `2e3`), exactly; else null. */
+export function exactScientific(text: string): Exact | null {
+  const match = /^([+-]?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(text)
+  if (!match) return null
+  const [, sign, whole, fraction = '', exponent = '0'] = match
+  const shift = Number(exponent) - fraction.length
+  if (!Number.isSafeInteger(shift) || Math.abs(shift) > 400) return null
+  const n = BigInt(`${whole}${fraction}`) * (sign === '-' ? -1n : 1n)
+  return shift >= 0 ? reduce(n * 10n ** BigInt(shift), 1n) : reduce(n, 10n ** BigInt(-shift))
+}
+
 export const exactAdd = (a: Exact, b: Exact) => reduce(a.n * b.d + b.n * a.d, a.d * b.d)
 export const exactSub = (a: Exact, b: Exact) => reduce(a.n * b.d - b.n * a.d, a.d * b.d)
 export const exactMul = (a: Exact, b: Exact) => reduce(a.n * b.n, a.d * b.d)
@@ -53,6 +64,7 @@ export const exactMul = (a: Exact, b: Exact) => reduce(a.n * b.n, a.d * b.d)
 export const exactDiv = (a: Exact, b: Exact): Exact | null => b.n === 0n ? null : reduce(a.n * b.d, a.d * b.n)
 export const exactSignOf = (value: Exact): -1 | 0 | 1 => value.n > 0n ? 1 : value.n < 0n ? -1 : 0
 export const exactCompare = (a: Exact, b: Exact) => exactSignOf(exactSub(a, b))
+export const exactAbs = (value: Exact): Exact => value.n < 0n ? { n: -value.n, d: value.d } : value
 
 /**
  * The value as a plain decimal string with at most `places` decimals, rounded half away from zero once, trailing zeros

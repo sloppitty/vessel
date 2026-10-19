@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { createDraft, createEntry, type PlayDraft } from './draft'
 import { PositionRiskSummary } from './PositionRiskSummary'
+import { exactDecimal } from '@/lib/decimal'
 import type { SizeUnits } from './sizing'
 
 const units: SizeUnits = { quote: 'USDC', base: 'ETH', quantityDecimals: 4 }
@@ -80,7 +81,9 @@ describe('PositionRiskSummary', () => {
 
   it('shows zero quantities without claiming a reward-to-risk ratio', () => {
     render(<PositionRiskSummary draft={{ ...plan(), size: '0' }} units={units} riskReference={reference} />)
-    expect(value('All stops')).toHaveTextContent(/^0 USDC break-evenFrom the planned entry$/)
+    // No position: the row reads 0 as before, not break-even.
+    expect(value('All stops')).toHaveTextContent(/^0 USDC$/)
+    expect(value('All stops')).not.toHaveAttribute('data-tone')
     expect(value('All-targets planned gain')).toHaveTextContent(/^0 USDC$/)
     expect(value('Risk / Trading account balance')).toHaveTextContent(/^0%$/)
     expect(value('Planned R:R')).toHaveTextContent('Unknown')
@@ -113,7 +116,7 @@ describe('PositionRiskSummary after a fill (0.5b)', () => {
     item.targets[0]!.value = direction === 'long' ? '110' : '90'
     return { ...createDraft(), direction, sizingMode: 'quantity', size: '1', leverage: '3', entries: [item] }
   }
-  const fills = { filled: new Set(['e1']), averages: new Map([['e1', '100']]) }
+  const fills = { filled: new Set(['e1']), averages: new Map([['e1', exactDecimal('100')!]]) }
 
   it('shows +5 locked in for an Open long filled at 100 with its stop at 105', () => {
     render(<PositionRiskSummary draft={filled('105')} units={units} riskReference={reference} fills={fills} />)
@@ -134,6 +137,12 @@ describe('PositionRiskSummary after a fill (0.5b)', () => {
     expect(value('All stops')).not.toHaveAttribute('data-tone')
     view.rerender(<PositionRiskSummary draft={filled('95', 'short')} units={units} fills={fills} />)
     expect(value('All stops')).toHaveTextContent(/^\+5 USDC locked in/)
+  })
+
+  it('waits for the fills instead of measuring from the planned entry', () => {
+    render(<PositionRiskSummary draft={filled('105')} units={units} riskReference={reference} fills="unknown" />)
+    expect(value('All stops')).toHaveTextContent(/^UnknownWaiting for the entries' fills$/)
+    expect(value('Risk / Trading account balance')).toHaveTextContent('Unknown')
   })
 
   it('does not count a stop beyond an unfilled entry', () => {
