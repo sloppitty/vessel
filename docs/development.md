@@ -90,8 +90,7 @@ not dispatch an older tag whose packaged version or release notes do not match.
 An existing tag is never moved without the owner's explicit direction, and a
 published versioned image from another revision is never overwritten. Confirm
 the Release run, both image digests and the GitHub Release before calling it
-published. The owner explicitly approved correcting the unprepared v0.3.1 tag;
-its replacement must point to the merged v0.3.1 release, not the release branch.
+published.
 
 Linux amd64 images can still be built locally from the repository root:
 

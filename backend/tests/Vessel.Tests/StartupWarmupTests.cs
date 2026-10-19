@@ -192,9 +192,14 @@ public sealed class StartupWarmupTests
     [InlineData("00:01:01")]
     public void An_out_of_range_timeout_refuses_to_start(string timeout)
     {
-        using var factory = new CoreApiFactory(Guid.NewGuid(), settings: new() { ["Vessel:Startup:Warmup:Timeout"] = timeout });
-        var error = Assert.ThrowsAny<Exception>(() => factory.Services);
-        Assert.Contains("Vessel:Startup:Warmup:Timeout", error.ToString(), StringComparison.Ordinal);
+        var logs = new Logs();
+        using var factory = new CoreApiFactory(Guid.NewGuid(), settings: new() { ["Vessel:Startup:Warmup:Timeout"] = timeout },
+            configure: services => services.AddSingleton<ILoggerProvider>(logs));
+        Assert.ThrowsAny<Exception>(() => factory.Services);
+        // TestServer teardown can surface ObjectDisposedException to the caller instead of the startup
+        // exception. The host records the actual failure before teardown, so require that exact cause.
+        Assert.Contains(logs.Entries, entry => entry.Exception is InvalidOperationException error
+            && error.Message == "Vessel:Startup:Warmup:Timeout must be between 00:00:01 and 00:01:00.");
     }
 
     private sealed class BlockingWarmupContexts(bool callbackThrows, bool blockSynchronously = false)
