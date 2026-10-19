@@ -39,6 +39,40 @@ owner/account/native-market isolation, exact entry-notional arithmetic,
 missing-execution guards, gross/net fee treatment, session refusal ordering,
 single-flight cancellation, transaction snapshots, transaction rollback and migration Down SQL.
 
+## Validation
+
+- PR #3 full backend baseline: 3,391 passed, zero failed, five opt-in live
+  venue/S3 checks skipped. Final leverage/sizing suite: 34 passed, including two
+  regressions first demonstrated failing against the original refresh code.
+- PR #6 focused cache/startup suite before stacking: 32 passed, zero skipped.
+  Six Activity version cases and three startup deadline cases first failed on
+  the original code. The startup checks include Token and Wallet read-only
+  database paths.
+- Frontend: 2,447 tests passed; the final affected-file run passed 20 tests.
+  Typecheck, lint and the production build passed after the tooltip change.
+- Operator scripts: 78 tests passed on both branches. Prototype: 76 passed.
+  `scripts/release.py check` passed. JavaScript checks use pinned pnpm 12.8.1;
+  backend checks use the pinned .NET SDK 10.0.302 container.
+
+The final combined Release build completed with zero warnings. Its suite passed
+3,432 tests, with zero failures and five opt-in venue/S3 skips (3,437 total), using
+locked restore and `dotnet test` against throwaway PostgreSQL 18 and RabbitMQ 4. Packaged verification builds the API and
+worker from `backend/Dockerfile`; it never publishes an image.
+
+The packaged one-shot migrator applied identity/journal migrations and messaging
+provisioning to a new synthetic database. The Activity revision migration was
+then explicitly downgraded to `LeverageObservations` and reapplied before the API
+started; the seeded executions/observation survived and all 40 revision triggers
+were restored. This is an isolated migration check, not an installation rollback
+procedure.
+
+Packaged HTTP smoke passed readiness, unauthenticated 401, no-store responses,
+unchanged-fact version reuse, observation-only invalidation, corrected result and
+version, Activity sizing fallback, Overview and Summary. Startup warm-up finished
+with zero failed steps. These are loopback Kestrel/Podman checks; nginx aborts,
+real Docker Engine health scheduling and remote-database cancellation are not
+verified here.
+
 ## Delivery and limits
 
 Merge #3 before #6. Apply journal migrations explicitly before starting upgraded
@@ -53,3 +87,7 @@ real-wallet signing and remote-database cancellation latency are separate checks
 
 Unnecessary structural changes (including a wider Activity sorting refactor)
 were deferred. The fixes stay within the existing feature and module boundaries.
+
+GitHub Actions is enabled, but the repository returned no workflow runs or PR
+check results for these pushes at verification time. The checks above were run
+locally in isolation; no GitHub CI pass is claimed.
