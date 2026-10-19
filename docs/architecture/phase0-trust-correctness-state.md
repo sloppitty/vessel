@@ -96,6 +96,44 @@ October 19, 2026, 0.5a plan-number grammar, branch
   - Backend: 3,446 passed, 5 skipped (live venue and S3), 0 failed.
   - Frontend: typecheck and lint clean, 2,524 tests, build OK.
 
+October 19, 2026, 0.5b managed stops, branch `t3/phase0-managed-stops`
+(stacked on 0.5a):
+- After an entry has a real fill (a linked entry-side fill or a manual entry
+  execution, decided per entry), its price stops may sit at or beyond it,
+  with a revision reason (decision 2). Unfilled entries and all targets keep
+  the wrong-side rule. A stop unchanged from the stored plan is not
+  re-checked, so unlinking a filled entry never makes the Play unsaveable.
+- `StopDistance` is signed, so a stop that is not on the loss side adds no
+  planned risk. Initial risk and R stay frozen at the revision in force at
+  the first entry fill. Results for loss-side stops are unchanged.
+- The Summary's "All stops" row is signed and exact, for example "+5 USDC
+  locked in", "−5 USDC at risk" or "0 USDC break-even". It is measured from
+  each entry's average fill (manual Plays read their ledger) or else the
+  planned entry, and says which. While fills load it reads unknown.
+- `POST /api/plays/{id}/execution/links/{linkId}/rebind` rebinds a linked
+  stop or target to the observed order's acting price, under the account and
+  Play locks. It is version-checked against the Play and the observed price,
+  writes one plan revision and replaces the link in the same unit of work.
+  It refuses a level with another linked order and a replacement whose old
+  order has fills. The browser offers it on a `level.drift` record, within
+  the matcher's tolerance.
+- No migration.
+- Tests:
+  - the `More4.cs StopRevision` and `f1f2.mjs F1` probes are ported;
+  - with the gate and signed distance reverted, 13 of 22 backend tests fail;
+  - after review, 3 PostgreSQL tests and 10 frontend tests failed before
+    their fixes.
+- An independent review confirmed the scored result, ladder and loss-side R
+  are unchanged. Its findings are fixed in the second commit: unlink
+  unsaveability, manual Plays measured from the plan, size 0, rebind guards,
+  drift tolerance and per-entry fills.
+- `scripts/check.sh` passed with PostgreSQL 18 and RabbitMQ 4.3.6 in
+  disposable containers:
+  - Python: 78 OK. Prototype tests pass.
+  - Release build: 0 warnings.
+  - Backend: 3,471 passed, 5 skipped (live venue and S3), 0 failed.
+  - Frontend: typecheck and lint clean, 2,557 tests, build OK.
+
 ## 0.6 Journal opens without every image
 
 Not started.
