@@ -12,6 +12,9 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
   const context = useMemo(() => ({ api, playId }), [api, playId])
   const [result, setResult] = useState<{ context: typeof context; execution: PlayExecution } | null>(null)
   const [error, setError] = useState<{ context: typeof context; message: string; source: 'read' | 'action' } | null>(null)
+  // Whether the shown execution is fresh, kept apart from the error message: an action's error or success never makes a
+  // failed read fresh. Only a successful read, or an action that returns the execution itself, does.
+  const [freshness, setFreshness] = useState<{ context: typeof context; stale: boolean } | null>(null)
   const [workState, setWorkState] = useState<{ context: typeof context; signal: AbortSignal; busy: boolean } | null>(null)
   const [revision, setRevision] = useState(0)
   const session = useRef<{ context: typeof context; controller: AbortController; busy: boolean } | null>(null)
@@ -29,9 +32,15 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
     api.playExecution(playId, controller.signal).then(execution => {
       if (!controller.signal.aborted && read.current === version) {
         setResult({ context, execution })
+        setFreshness({ context, stale: false })
         setError(current => current?.context === context && current.source === 'action' ? current : null)
       }
-    }).catch(cause => { if (!controller.signal.aborted && read.current === version) setError({ context, message: errorMessage(cause, 'The change could not be completed. Try again.'), source: 'read' }) })
+    }).catch(cause => {
+      if (!controller.signal.aborted && read.current === version) {
+        setFreshness({ context, stale: true })
+        setError({ context, message: errorMessage(cause, 'The change could not be completed. Try again.'), source: 'read' })
+      }
+    })
     return () => controller.abort()
   }, [api, playId, context, status, generation, revision])
 
@@ -44,7 +53,7 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
     try {
       const execution = await action(context.playId, work.controller.signal)
       if (!work.controller.signal.aborted) {
-        if (execution && read.current === version) setResult({ context, execution })
+        if (execution && read.current === version) { setResult({ context, execution }); setFreshness({ context, stale: false }) }
         setError(null)
       }
     } catch (cause) {
@@ -64,6 +73,6 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
   return { execution: result?.context === context ? result.execution : null,
     error: error?.context === context ? error.message : null,
     busy: workState?.context === context && !workState.signal.aborted && workState.busy,
-    /** The last read failed, so `execution` is an earlier answer that may be out of date. */
-    readFailed: error?.context === context && error.source === 'read', reload, link, unlink, dismiss, rebind }
+    /** A read failed and no read (or action returning the execution) has succeeded since: `execution` may be out of date. */
+    readFailed: freshness?.context === context && freshness.stale, reload, link, unlink, dismiss, rebind }
 }

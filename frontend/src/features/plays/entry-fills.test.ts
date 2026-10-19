@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ManualExecutionRecord, ManualExecutions } from '@/api/diary'
 import type { ExecutionFill, OrderLink, PlayExecution } from '@/api/plays'
@@ -61,4 +61,25 @@ describe('entry fills', () => {
     await waitFor(() => expect(manualExecutions).toHaveBeenCalledTimes(2))
     expect(result.current).toBe('unknown')
   })
+
+  it('drops the previous answer at every read attempt, including a reread at the same version (second Sol review)', async () => {
+    const ledger: ManualExecutions = { play: { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, version: 3 } },
+      records: [record('entry-1', '1', '100')], history: [], totals: { enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1',
+        grossResultUsd: null, netResultUsd: null, feesComplete: true }, notice: 'Manual facts only.' }
+    let failRead!: (cause: unknown) => void
+    const manualExecutions = vi.fn<WorkspaceApi['manualExecutions']>().mockResolvedValueOnce(ledger)
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { failRead = reject }))
+    const api = { manualExecutions } as unknown as WorkspaceApi
+    const { result, rerender } = renderHook(({ playId }) => useLedgerFills(api, playId, 3), { initialProps: { playId: savedPlayFixture.summary.id as string | null } })
+    await waitFor(() => expect(result.current).not.toBe('unknown'))
+    // The page is left and shown again at the same known version; another tab may have corrected the entry meanwhile.
+    rerender({ playId: null })
+    expect(result.current).toBeNull()
+    rerender({ playId: savedPlayFixture.summary.id })
+    await waitFor(() => expect(manualExecutions).toHaveBeenCalledTimes(2))
+    expect(result.current).toBe('unknown')
+    await act(async () => failRead(new Error('Ledger unavailable')))
+    expect(result.current).toBe('unknown')
+  })
 })
+

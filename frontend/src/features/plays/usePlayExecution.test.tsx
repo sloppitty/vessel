@@ -229,4 +229,30 @@ describe('stored Play execution', () => {
     expect(api.playExecution).toHaveBeenCalledTimes(2)
     expect(api.runAccountMonitor).not.toHaveBeenCalled()
   })
+
+  it('keeps a failed read stale through action errors and through actions that return no execution (second Sol review)', async () => {
+    const api = client()
+    const reads = [deferred(), deferred(), deferred()]
+    api.playExecution = vi.fn().mockResolvedValueOnce(execution)
+      .mockImplementationOnce(() => reads[0]!.promise).mockImplementationOnce(() => reads[1]!.promise).mockImplementationOnce(() => reads[2]!.promise)
+    api.dismissPlayDiscrepancy = vi.fn().mockRejectedValueOnce(new ApiError('http', 'Dismissal was refused.', 409)).mockResolvedValueOnce(undefined)
+    const view = renderHook(() => usePlayExecution(api, execution.playId, 'open'))
+    await act(async () => {})
+    expect(view.result.current.readFailed).toBe(false)
+    // The next read fails: the execution shown is an earlier answer.
+    act(() => view.result.current.reload())
+    await act(async () => reads[0]!.reject(new ApiError('unavailable', 'Execution unavailable.')))
+    expect(view.result.current.readFailed).toBe(true)
+    // A failed action replaces the message, not the staleness, also while its reload is pending.
+    await act(async () => { await view.result.current.dismiss(discrepancyFixture.id).catch(() => undefined) })
+    expect(view.result.current.error).toBe('Dismissal was refused.')
+    expect(view.result.current.readFailed).toBe(true)
+    // A successful action that returns no execution leaves it stale until a read succeeds.
+    await act(async () => { await view.result.current.dismiss(discrepancyFixture.id) })
+    expect(view.result.current.error).toBeNull()
+    expect(view.result.current.readFailed).toBe(true)
+    await act(async () => reads[2]!.resolve(execution))
+    expect(view.result.current.readFailed).toBe(false)
+  })
 })
+

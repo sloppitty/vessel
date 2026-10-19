@@ -71,8 +71,10 @@ export function ledgerFills(records: readonly ManualExecutionRecord[]): EntryFil
 
 /**
  * The manual ledger's entry fills for a saved Play, read again whenever its known version moves (a manual write, a
- * correction or a rebind). An answer counts only for the version it was read at: until the reread arrives, or when it
- * fails, the fills are `'unknown'`, never the previous figures shown as current. Null without a Play to read.
+ * correction or a rebind) and whenever the page shows the Play again. Only the answer of the current read attempt counts,
+ * and only for the version it was read at: every attempt drops the previous answer as it starts, so while it is pending
+ * or after it fails the fills are `'unknown'`, never earlier figures shown as current (another tab may have corrected an
+ * entry at the same version). Null without a Play to read.
  */
 export function useLedgerFills(api: WorkspaceApi, playId: string | null, version: number): EntryFills | 'unknown' | null {
   const [state, setState] = useState<{ api: WorkspaceApi; playId: string; version: number; fills: EntryFills } | null>(null)
@@ -84,7 +86,8 @@ export function useLedgerFills(api: WorkspaceApi, playId: string | null, version
       if (!controller.signal.aborted && ledger.play.summary.id === playId && ledger.play.summary.version >= version)
         setState({ api, playId, version, fills: ledgerFills(ledger.records) })
     }).catch(() => { /* Unknown stays unknown; the Execution tab shows the ledger's own error. */ })
-    return () => controller.abort()
+    // The next attempt, for any version, starts from unknown: this answer is not reused.
+    return () => { controller.abort(); setState(null) }
   }, [api, playId, version])
   if (!playId) return null
   return state?.api === api && state.playId === playId && state.version === version ? state.fills : 'unknown'
