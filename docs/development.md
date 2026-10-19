@@ -57,8 +57,15 @@ The workflow checks that the tag, packaged versions and notes agree
 only after both are verified, and creates the GitHub Release from the notes. It
 never overwrites a version published from another commit. It needs the
 `DOCKERHUB_TOKEN` secret on the `docker-hub` environment; see the
-[`vessel-release` skill](../.agents/skills/vessel-release/SKILL.md). Pull requests
-that change packaging rehearse publication against a throwaway local registry.
+[`vessel-release` skill](../.agents/skills/vessel-release/SKILL.md).
+
+CI runs only for release tags to conserve runner minutes. Branch pushes and
+pull requests do not run foundation checks, packaging verification or a publish
+rehearsal; run the documented local checks before merging. Foundation checks are
+reused once by Release. A manual Release rerun must select a `vX.Y.Z` tag;
+dispatching from a branch skips all jobs before allocating a runner. Existing
+branches must incorporate this workflow change before their pushes stop running
+the older branch-triggered configuration.
 
 ### Publishing from the organization fork
 
@@ -66,8 +73,6 @@ The active release repository is `sloppitty/vessel`; the Docker Hub destination
 remains `skorcius/vessel`. A fork needs its own GitHub Actions configuration:
 
 - Enable Actions and the Release/Foundation checks workflows in the fork.
-  Foundation checks can also be dispatched manually before pushing a release
-  tag (`gh workflow run checks.yml --repo sloppitty/vessel --ref main`).
 - Grant the Blacksmith GitHub app access to the organization repository. Both
   workflows use `blacksmith-4vcpu-ubuntu-2404` runners.
 - Create the `docker-hub` environment with a deployment policy allowing only

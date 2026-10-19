@@ -3,43 +3,31 @@ name: Release
 # Pushing an annotated vX.Y.Z tag that is on main runs the foundation checks and
 # release verification, publishes skorcius/vessel:api-X.Y.Z and web-X.Y.Z, moves
 # both latest tags and creates the GitHub Release from docs/releases/vX.Y.Z.md.
-# Pull requests that touch release packaging run the same verification and a
-# publish rehearsal against a throwaway local registry, never Docker Hub.
+# Branch pushes and pull requests consume no CI runner time.
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+']
   # Re-run a release from its tag: choose the tag under "Use workflow from".
   workflow_dispatch:
-  pull_request:
-    paths:
-      - .github/workflows/release.yml
-      - .github/workflows/checks.yml
-      - .dockerignore
-      - backend/Dockerfile
-      - frontend/Dockerfile
-      - deploy/**
-      - '!deploy/README.md'
-      - docs/releases/**
-      - scripts/release.py
-      - scripts/verify-release.py
 
 permissions:
   contents: read
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 jobs:
   source:
     name: Release source
+    # A manual dispatch from a branch must not allocate a runner either.
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: useblacksmith/checkout@v1
         with:
           fetch-depth: 0
       - name: Require an annotated tag on main
-        if: github.event_name != 'pull_request'
         run: |
           if [ "$GITHUB_REF_TYPE" != tag ]; then
             echo "::error::Run the release from a vX.Y.Z tag, not $GITHUB_REF."
@@ -55,17 +43,11 @@ jobs:
             exit 1
           fi
       - name: Versions, changelog and release notes
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            python3 scripts/release.py check
-          else
-            python3 scripts/release.py check --tag "$GITHUB_REF_NAME"
-          fi
+        run: python3 scripts/release.py check --tag "$GITHUB_REF_NAME"
 
   checks:
     name: Foundation checks
     needs: source
-    if: github.event_name != 'pull_request'
     uses: ./.github/workflows/checks.yml
 
   verify:
@@ -81,27 +63,9 @@ jobs:
       - name: Isolated images, transport, restore
         run: python3 scripts/verify-release.py --storage "${{ matrix.storage }}"
 
-  rehearsal:
-    name: Publish rehearsal (local registry)
-    needs: source
-    if: github.event_name == 'pull_request'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    services:
-      registry:
-        image: registry:2
-        ports:
-          - 5000:5000
-    steps:
-      - uses: useblacksmith/checkout@v1
-      - name: Publish, then publish again as a re-run
-        run: |
-          python3 scripts/release.py publish --image localhost:5000/vessel --revision "$GITHUB_SHA"
-          python3 scripts/release.py publish --image localhost:5000/vessel --revision "$GITHUB_SHA"
-
   publish:
     name: Publish images
     needs: [source, checks, verify]
-    if: github.event_name != 'pull_request'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment:
       name: docker-hub

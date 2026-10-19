@@ -1,11 +1,7 @@
 name: Foundation checks
 
 on:
-  push:
-    # Tags run these checks through the Release workflow instead.
-    branches: ['**']
-  pull_request:
-  workflow_dispatch:
+  # Run once through Release, never separately for branch pushes or PRs.
   workflow_call:
 
 permissions:
@@ -13,6 +9,7 @@ permissions:
 
 jobs:
   foundation:
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: blacksmith-4vcpu-ubuntu-2404
     services:
       postgres:

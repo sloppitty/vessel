@@ -67,9 +67,12 @@ section of `docs/development.md` first.
 
 ## Release pull request
 
-Commit the release changes on a branch and open a pull request. CI runs the
-foundation checks; when packaging files change, the Release workflow also runs
-both verifications and a publish rehearsal against a throwaway local registry.
+Commit the release changes on a branch and open a pull request. October 19,
+2026: the owner restricted CI to release tags to conserve runner minutes.
+Branch pushes and PRs do not run CI; complete the local checks above before
+opening the PR. The tag-triggered Release workflow runs foundation checks and
+both storage verifications before publication. Manual Release reruns must select
+a release tag; branch dispatches skip all jobs without allocating a runner.
 The owner merges it.
 
 ## Tag and publish
