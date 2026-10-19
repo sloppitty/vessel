@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+
+- Sizing orders closed Plays by when they actually closed, their latest linked
+  exit fill, instead of when a check or Refresh noticed. Several results found
+  by one Refresh no longer get a ladder level that depends on Play IDs; results
+  that share an exit time are disclosed (D-05). Historical ladder levels can
+  change on upgrade.
+
 ## 0.3.1 - October 19, 2026
 
 Release notes: [docs/releases/v0.3.1.md](docs/releases/v0.3.1.md).

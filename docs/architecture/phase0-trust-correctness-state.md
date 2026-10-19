@@ -24,7 +24,28 @@ Not started.
 
 ## 0.2 Exit-time ordering
 
-Not started.
+October 19, 2026, branch `t3/phase0-exit-time-ordering`:
+- A venue-linked Play's outcome closes at its latest valid linked exit:
+  non-entry fills of a settled Play, clamped to the detection time
+  (`PlayExitTime`). Manual and retrospective Plays keep their stored exit.
+- `Play.EndedAtUtc` and status changes keep the detection time. Outcome rows
+  expose it as `detectedAtUtc`.
+- Ties keep the Play-ID order and are disclosed through
+  `exposure.tiedOutcomes` and a reason sentence, for Play and Activity
+  records alike.
+- The consecutive-win ladder, thresholds and window are unchanged. The docs
+  now say "two consecutive winning plays".
+- Before/after on synthetic data, 2,000 runs with random Play IDs:
+  - W, L, L, L went from Full 977 / Half 1,023 to Half 2,000.
+  - L, L, L, W went from Full 998 / Half 1,002 to Half 2,000.
+
+  The ladder-level change on upgrade is called out in the pull request.
+- `scripts/check.sh` passed with PostgreSQL 18 and RabbitMQ 4.3.6
+  in disposable containers:
+  - Python: 78 OK. Prototype tests pass.
+  - Release build: 0 warnings.
+  - Backend: 3,443 passed, 5 skipped (live venue and S3).
+  - Frontend: typecheck and lint clean, 2,460 tests, build OK.
 
 ## 0.3 Result-basis receipt
 
