@@ -66,6 +66,8 @@ The active release repository is `sloppitty/vessel`; the Docker Hub destination
 remains `skorcius/vessel`. A fork needs its own GitHub Actions configuration:
 
 - Enable Actions and the Release/Foundation checks workflows in the fork.
+  Foundation checks can also be dispatched manually before pushing a release
+  tag (`gh workflow run checks.yml --repo sloppitty/vessel --ref main`).
 - Grant the Blacksmith GitHub app access to the organization repository. Both
   workflows use `blacksmith-4vcpu-ubuntu-2404` runners.
 - Create the `docker-hub` environment with a deployment policy allowing only
