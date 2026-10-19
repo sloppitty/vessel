@@ -1,5 +1,7 @@
+using System.Numerics;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Application.Activity;
@@ -9,6 +11,7 @@ public sealed record ActivityFacts(IReadOnlyList<Account> Accounts, IReadOnlyLis
 {
     public IReadOnlyList<FundingPayment> FundingPayments { get; init; } = [];
     public IReadOnlyList<AccountFundingState> FundingStates { get; init; } = [];
+    public IReadOnlyList<LeverageObservation> LeverageObservations { get; init; } = [];
 }
 public interface IActivityStore
 {
@@ -36,7 +39,24 @@ public sealed record ActivityOperationDto(string Id, Guid AccountId, string Cont
     public string FundingPnlBasis { get; init; } = FundingFacts.Unknown;
     public DateTimeOffset? FundingAsOfUtc { get; init; }
     public int FundingPaymentCount { get; init; }
+    /// <summary>
+    /// The latest venue-reported position leverage observed during the operation, with the lowest and highest when it
+    /// changed. All three are null when no observation falls inside the operation. Only the latest is null, with the range
+    /// kept, when the latest observation time reports conflicting values. Never inferred from margin, notional or a plan.
+    /// </summary>
+    public int? Leverage { get; init; }
+    public int? LeverageMin { get; init; }
+    public int? LeverageMax { get; init; }
     internal IReadOnlyList<FundingPayment> FundingPayments { get; init; } = [];
+    // The first retained execution, the lower bound for observations when opening entries are missing.
+    internal DateTimeOffset FirstOccurredAtUtc { get; init; }
+    // Leverage reported on this operation's executions, excluding split flip allocations.
+    internal IReadOnlyList<(DateTimeOffset At, int Leverage)> FillLeverages { get; init; } = [];
+    // The exact entry notional, Σ allocated entry quantity × fill price as 10^-56 units (never rounded), for the sizing
+    // fallback's return.
+    internal BigInteger? ExactEntryNotional { get; init; }
+    // The imported executions behind the allocations, read lazily (order keys for sizing) without building row DTOs.
+    internal IEnumerable<ImportedFill> SourceFills { get; init; } = [];
     // Internal partition identity, never the canonical display key or a serialized API field.
     internal ActivityContractKey ContractKey { get; init; }
 }
@@ -57,13 +77,17 @@ public sealed record ActivityOperationSummaryDto(string Id, Guid AccountId, stri
     public string FundingPnlBasis { get; init; } = FundingFacts.Unknown;
     public DateTimeOffset? FundingAsOfUtc { get; init; }
     public int FundingPaymentCount { get; init; }
+    public int? Leverage { get; init; }
+    public int? LeverageMin { get; init; }
+    public int? LeverageMax { get; init; }
     public static ActivityOperationSummaryDto From(ActivityOperationDto o) => new(o.Id, o.AccountId, o.ContractId, o.Direction, o.Status,
         o.OpenedAtUtc, o.ClosedAtUtc, o.LastOccurredAtUtc, o.Quantity, o.TotalEnteredQuantity, o.TotalExitedQuantity, o.OpenQuantity,
         o.AverageEntryPrice, o.AverageExitPrice, o.EntryOrderCount, o.ExitOrderCount, o.FillCount, o.ReportedClosedPnlUsd,
         o.StablecoinFeesNominalUsd, o.OtherFees, o.NetResultUsd, o.PnlBasis, o.PlayId, o.PlayAssociation, o.Coverage, o.GrossClosedPnlUsd)
     {
         TotalResultUsd = o.TotalResultUsd, FundingNetUsd = o.FundingNetUsd, FundingStatus = o.FundingStatus,
-        FundingPnlBasis = o.FundingPnlBasis, FundingAsOfUtc = o.FundingAsOfUtc, FundingPaymentCount = o.FundingPaymentCount
+        FundingPnlBasis = o.FundingPnlBasis, FundingAsOfUtc = o.FundingAsOfUtc, FundingPaymentCount = o.FundingPaymentCount,
+        Leverage = o.Leverage, LeverageMin = o.LeverageMin, LeverageMax = o.LeverageMax
     };
 }
 public sealed record ActivityFacetsDto(IReadOnlyList<Guid> AccountIds, IReadOnlyList<string> Contracts);

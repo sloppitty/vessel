@@ -21,6 +21,9 @@
 .operation-status.partial, .operation-status.incomplete { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 35%, var(--border)); }
 .operation-status.incomplete { border-style: dashed; }
 .operation-status.closed { color: var(--muted-foreground); }
+.operation-leverage { display: inline-flex; align-items: center; padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--text-2xs); line-height: 1.2; background: var(--card); color: var(--foreground); font-feature-settings: var(--figures); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.operation-leverage[data-changed] { border-style: dashed; }
+.operation-leverage.unknown { color: var(--muted-foreground); }
 .operation-timezone { font-size: var(--text-2xs); }
 .operation-dates { white-space: nowrap; }
 .operation-entry, .operation-fees { color: var(--muted-foreground); }
@@ -67,7 +70,7 @@
 /* Fixed widths at typical content sizes: percentage bars would leave column widths to the headers alone. Margins
    give each bar the line box of the text it stands in for: 16px values, then 17px small lines 4px apart. */
 .operations-skeleton .skeleton-asset { width: 48px; height: 16px; margin: 3px 0; }
-.operations-skeleton .skeleton-tags { width: 130px; height: 24px; margin-top: 6px; }
+.operations-skeleton .skeleton-tags { width: 165px; height: 24px; margin-top: 6px; }
 .operations-skeleton .skeleton-line { height: 12px; margin: 2px 0; }
 .operations-skeleton .skeleton-line.skeleton-small { height: 11px; margin: 10px 0 3px; }
 .operations-skeleton .operation-pnl .skeleton-line { margin: 0; }

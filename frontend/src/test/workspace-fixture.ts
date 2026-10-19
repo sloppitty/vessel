@@ -136,7 +136,7 @@ export const sizingFixture: SizingDocument = {
   settings: { riskPercent: '1.25' },
   exposure: { level: 'full', multiplier: '1', reason: 'No losing streak.', lossStreak: 0, winsSinceStepDown: 0 },
   record: {
-    closedPlays: 0, decidedPlays: 0, window: 20, wins: 0, losses: 0, scratches: 0,
+    source: 'none', closedPlays: 0, decidedPlays: 0, window: 20, wins: 0, losses: 0, scratches: 0,
     battingAverage: null, averageGainPercent: null, averageLossPercent: null, winLossRatio: null, breakEvenRewardRisk: null,
     averageWinR: null, averageLossR: null, recent: [],
   },

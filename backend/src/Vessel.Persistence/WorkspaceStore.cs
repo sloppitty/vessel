@@ -75,6 +75,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         await db.Orders.Where(o => o.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.FundingPayments.Where(p => p.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.FundingStates.Where(s => s.AccountId == account.Id).ExecuteDeleteAsync(ct);
+        await db.LeverageObservations.Where(o => o.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.Snapshots.Where(s => s.AccountId == account.Id).ExecuteDeleteAsync(ct);
         // Event identities whose subject is this account go with it; their receipts cascade. A removed
         // sequence is a permanent hole that subscribers count as settled.
@@ -98,6 +99,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 AccountSnapshot s => s.OwnerId == account.OwnerId && s.AccountId == account.Id,
                 AccountPosition p => p.OwnerId == account.OwnerId && p.AccountId == account.Id,
                 FundingPayment p => p.OwnerId == account.OwnerId && p.AccountId == account.Id,
+                LeverageObservation o => o.OwnerId == account.OwnerId && o.AccountId == account.Id,
                 AccountFundingState s => s.OwnerId == account.OwnerId && s.AccountId == account.Id,
                 Vessel.Domain.Credentials.AccountCredential c => c.OwnerId == account.OwnerId && c.AccountId == account.Id,
                 _ => false
@@ -138,6 +140,14 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         var wallet = observation.StablecoinWallet;
         var replaceWallet = wallet is not null &&
             (snapshot?.StablecoinsObservedAtUtc is null || wallet.ObservedAtUtc > snapshot.StablecoinsObservedAtUtc);
+        var incomingSourceIds = result.Fills.Select(f => f.SourceFillId).Distinct().ToArray();
+        var existing = (await db.Fills.Where(f => f.AccountId == account.Id && incomingSourceIds.Contains(f.SourceFillId))
+            .Select(f => new { f.ContractId, f.SourceFillId }).ToListAsync(ct))
+            .Select(f => (f.ContractId, f.SourceFillId)).ToHashSet();
+        var newFills = result.Fills.Where(f => existing.Add((f.ContractId, f.SourceFillId))).ToList();
+        // Leverage would be lost with the replaced positions; keep an observation when a position appears or changes,
+        // or when new executions show it may have closed and reopened identically since the last refresh.
+        if (replacePerps) await RecordLeverageAsync(account, observation, snapshot?.Positions ?? [], newFills, ct);
         if (snapshot is null)
         {
             snapshot = new AccountSnapshot { OwnerId = account.OwnerId, AccountId = account.Id };
@@ -198,13 +208,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 Available = balance.Available
             }).ToList();
         }
-        var incomingSourceIds = result.Fills.Select(f => f.SourceFillId).Distinct().ToArray();
-        var existing = (await db.Fills.Where(f => f.AccountId == account.Id && incomingSourceIds.Contains(f.SourceFillId))
-            .Select(f => new { f.ContractId, f.SourceFillId }).ToListAsync(ct))
-            .Select(f => (f.ContractId, f.SourceFillId)).ToHashSet();
-        foreach (var f in result.Fills)
+        foreach (var f in newFills)
         {
-            if (!existing.Add((f.ContractId, f.SourceFillId))) continue;
             db.Fills.Add(new ImportedFill
             {
                 Id = Guid.NewGuid(),
@@ -225,7 +230,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 PnlBasis = f.PnlBasis,
                 OccurredAtUtc = f.OccurredAtUtc.ToUniversalTime(),
                 ExternalOrderId = f.OrderId,
-                TransactionHash = f.TransactionHash
+                TransactionHash = f.TransactionHash,
+                Leverage = f.Leverage
             });
         }
         // RawJson intentionally never crosses into journal persistence or logs.
@@ -233,4 +239,65 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         await unitOfWork.SaveChangesAsync(ct);
         return true;
     }, ct);
+
+    /// <summary>
+    /// Appends one observation per reported leverage whose position is new to the replaced snapshot, whose signed
+    /// quantity, entry price or leverage differs from the latest retained observation of that account and native
+    /// contract, or whose market received newly imported executions or has retained executions at or after its last
+    /// observation. A position can close and reopen identically between refreshes, and history can arrive before the
+    /// snapshot that observes the reopening. Preserve that later observation even when its executions are already
+    /// retained. A fill without a native identity matches every native market of its canonical contract. After any
+    /// equal-timestamp execution gets a later observation, idle refreshes add nothing.
+    /// </summary>
+    private async Task RecordLeverageAsync(Account account, VenueSnapshot observation, IReadOnlyCollection<AccountPosition> replaced,
+        IReadOnlyCollection<VenueFill> newFills, CancellationToken ct)
+    {
+        var reported = observation.Positions.Where(p => p.Leverage is not null).ToList();
+        if (reported.Count == 0) return;
+        var contracts = reported.Select(p => p.ContractId).Distinct().ToArray();
+        var latest = await db.LeverageObservations.Where(o => o.AccountId == account.Id && contracts.Contains(o.ContractId))
+            .GroupBy(o => new { o.ContractId, o.VenueContractId })
+            .Select(g => g.OrderByDescending(o => o.ObservedAtUtc).ThenByDescending(o => o.Id).First())
+            .AsNoTracking().ToListAsync(ct);
+        var observedAt = observation.ObservedAtUtc.ToUniversalTime();
+        var previousByPartition = latest.ToDictionary(o => (o.ContractId, o.VenueContractId));
+        var relevant = latest.Where(o => o.ObservedAtUtc < observedAt && reported.Any(p =>
+            p.ContractId == o.ContractId && p.VenueContractId == o.VenueContractId)).ToList();
+        // History is read separately from the snapshot and may already include a close/reopen that the replaced
+        // snapshot predates. Keep only the latest execution time per partition, bounded to the observation interval;
+        // no execution before the previous observation or after this snapshot can prove that it saw the reopening.
+        var since = relevant.Count == 0 ? (DateTimeOffset?)null : relevant.Min(o => o.ObservedAtUtc);
+        var retainedExecutions = since is { } from
+            ? await db.Fills.Where(f => f.AccountId == account.Id && contracts.Contains(f.ContractId) &&
+                f.OccurredAtUtc >= from && f.OccurredAtUtc <= observedAt)
+                .GroupBy(f => new { f.ContractId, f.VenueContractId })
+                .Select(g => new { g.Key.ContractId, g.Key.VenueContractId, LastOccurredAtUtc = g.Max(f => f.OccurredAtUtc) })
+                .ToListAsync(ct)
+            : [];
+        foreach (var position in reported)
+        {
+            var previous = previousByPartition.GetValueOrDefault((position.ContractId, position.VenueContractId));
+            var continued = replaced.Any(p => p.ContractId == position.ContractId && p.VenueContractId == position.VenueContractId &&
+                p.SignedQuantity == position.SignedQuantity && p.EntryPrice == position.EntryPrice);
+            var executed = newFills.Any(f => f.ContractId == position.ContractId &&
+                (f.VenueContractId is null || position.VenueContractId is null || f.VenueContractId == position.VenueContractId)) ||
+                previous is not null && retainedExecutions.Any(f => f.LastOccurredAtUtc >= previous.ObservedAtUtc &&
+                    f.ContractId == position.ContractId &&
+                    (f.VenueContractId is null || position.VenueContractId is null || f.VenueContractId == position.VenueContractId));
+            if (continued && !executed && previous is not null && previous.Leverage == position.Leverage && previous.SignedQuantity == position.SignedQuantity &&
+                previous.EntryPrice == position.EntryPrice || previous is not null && previous.ObservedAtUtc >= observedAt) continue;
+            db.LeverageObservations.Add(new LeverageObservation
+            {
+                Id = Guid.NewGuid(),
+                OwnerId = account.OwnerId,
+                AccountId = account.Id,
+                ContractId = position.ContractId,
+                VenueContractId = position.VenueContractId,
+                ObservedAtUtc = observedAt,
+                SignedQuantity = position.SignedQuantity,
+                EntryPrice = position.EntryPrice,
+                Leverage = position.Leverage!.Value
+            });
+        }
+    }
 }

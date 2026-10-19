@@ -23,6 +23,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<AccountPosition> Positions => Set<AccountPosition>();
     public DbSet<AccountStablecoin> Stablecoins => Set<AccountStablecoin>();
     public DbSet<ImportedFill> Fills => Set<ImportedFill>();
+    public DbSet<LeverageObservation> LeverageObservations => Set<LeverageObservation>();
     public DbSet<FundingPayment> FundingPayments => Set<FundingPayment>();
     public DbSet<AccountFundingState> FundingStates => Set<AccountFundingState>();
     public DbSet<PlayEvidence> Evidence => Set<PlayEvidence>();

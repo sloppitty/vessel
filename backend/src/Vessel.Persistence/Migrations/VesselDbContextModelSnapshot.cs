@@ -1167,6 +1167,9 @@ namespace Vessel.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<int?>("Leverage")
+                        .HasColumnType("integer");
+
                     b.Property<DateTimeOffset>("OccurredAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -1220,6 +1223,8 @@ namespace Vessel.Persistence.Migrations
                     b.ToTable("imported_fills", null, t =>
                         {
                             t.HasCheckConstraint("CK_imported_fills_fee_basis", "\"FeeBasis\" IN ('reported', 'standard-account-free')");
+
+                            t.HasCheckConstraint("CK_imported_fills_leverage", "\"Leverage\" IS NULL OR \"Leverage\" BETWEEN 1 AND 1000");
 
                             t.HasCheckConstraint("CK_imported_fills_pnl_basis", "\"PnlBasis\" IN ('gross', 'net-of-fee')");
 
@@ -1310,6 +1315,49 @@ namespace Vessel.Persistence.Migrations
                     b.ToTable("imported_orders", null, t =>
                         {
                             t.HasCheckConstraint("CK_imported_orders_side", "\"Side\" IN ('buy', 'sell')");
+                        });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Workspace.LeverageObservation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContractId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<decimal>("EntryPrice")
+                        .HasColumnType("numeric");
+
+                    b.Property<int>("Leverage")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("ObservedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("SignedQuantity")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("VenueContractId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "AccountId", "ContractId", "ObservedAtUtc");
+
+                    b.ToTable("account_leverage_observations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_account_leverage_observations_leverage", "\"Leverage\" BETWEEN 1 AND 1000");
                         });
                 });
 
@@ -1546,6 +1594,16 @@ namespace Vessel.Persistence.Migrations
                 });
 
             modelBuilder.Entity("Vessel.Domain.Workspace.ImportedOrder", b =>
+                {
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Workspace.LeverageObservation", b =>
                 {
                     b.HasOne("Vessel.Domain.Accounts.Account", null)
                         .WithMany()

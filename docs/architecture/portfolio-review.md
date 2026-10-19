@@ -122,6 +122,11 @@ RISEx's reported realized P&L embeds funding remains unverified, so the UI
 does not promise funding-free results. Stablecoin FX and transfers are not
 part of this calculation.
 
+October 18, 2026: executed entry notional is the exact sum of entry fills'
+quantity × price products. A notional beyond exact decimal precision or range
+excludes the Play as an arithmetic reason under incomplete executions; it is
+never rounded into a different return.
+
 ### Planned-risk estimates
 
 `PlayOutcomeCalculator` extracts the existing sizing arithmetic unchanged.

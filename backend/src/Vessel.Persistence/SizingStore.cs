@@ -36,6 +36,17 @@ public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISi
                 ExecutionIntegrity.MissingExecutions(order, FillsOf(l))).Select(l => known[l.ImportedOrderId].ExternalOrderId).ToList())).ToList();
     }
 
+    public async Task<List<ImportedOrder>> OrdersAsync(IReadOnlyCollection<OrderKey> orders, CancellationToken ct)
+    {
+        if (orders.Count == 0) return [];
+        var keys = orders.ToHashSet();
+        var accounts = keys.Select(k => k.AccountId).Distinct().ToArray();
+        var ids = keys.Select(k => k.ExternalOrderId).Distinct(StringComparer.Ordinal).ToArray();
+        // SQL narrows by account and external ID; the shared OrderKey rule keeps only each key's own contract.
+        return (await db.Orders.Where(o => accounts.Contains(o.AccountId) && ids.Contains(o.ExternalOrderId)).AsNoTracking().ToListAsync(ct))
+            .Where(o => keys.Contains(OrderKey.Of(o))).ToList();
+    }
+
     private static ClosedPlayFacts ManualFacts(Play play, IReadOnlyList<PlayPlanRevision> revisions, IEnumerable<ManualExecution> rows)
     {
         var ledger = ManualLedger.Calculate(play, rows);

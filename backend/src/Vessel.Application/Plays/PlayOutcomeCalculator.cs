@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
 using Vessel.Application.Workspace;
@@ -37,7 +38,7 @@ public static class PlayOutcomeCalculator
         }
         catch (OverflowException)
         {
-            problem = "Executed result, return percent or initial-risk R exceeds the supported decimal range or exact precision.";
+            problem = "Executed result, entry notional, return percent or initial-risk R exceeds the supported decimal range or exact precision.";
             return null;
         }
     }
@@ -46,7 +47,8 @@ public static class PlayOutcomeCalculator
     {
         var entries = facts.Fills.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill).ToList();
         if (entries.Count == 0) return null;
-        var notional = ToDecimal(entries.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Quantity * f.Price)));
+        // Sum the exact 56-place products; decimal multiplication would round each one to 28 places before this guard.
+        var notional = ToDecimal(entries.Aggregate(BigInteger.Zero, (sum, f) => sum + ExactAmount.Product(f.Quantity, f.Price)));
         if (notional <= 0) return null;
         var fills = facts.Fills.Select(f => f.Fill).ToList();
         // A net-of-fee closed PnL already has its fee taken off; only gross PnL needs the fee subtracted.
@@ -63,11 +65,25 @@ public static class PlayOutcomeCalculator
         return new PlayOutcome(facts.Play.Id, closedAt, net, notional, risk, feesComplete);
     }
 
-    private static decimal ToDecimal(ExactAmount value)
+    /// <summary>The exact decimal of a sum; outside decimal range or precision it throws <see cref="OverflowException"/>.</summary>
+    internal static decimal ToDecimal(ExactAmount value)
     {
         var result = decimal.Parse(value.ToString(), CultureInfo.InvariantCulture);
         if (ExactAmount.From(result) != value) throw new OverflowException();
         return result;
+    }
+
+    private static readonly BigInteger ProductScale = BigInteger.Pow(10, 28);
+
+    /// <summary>
+    /// The exact decimal of a 56-place product of two amounts' units (quantity × price). A nonzero remainder beyond 28
+    /// places or a value outside decimal range throws <see cref="OverflowException"/>; nothing is rounded.
+    /// </summary>
+    internal static decimal ToDecimal(BigInteger product)
+    {
+        var units = BigInteger.DivRem(product, ProductScale, out var remainder);
+        if (!remainder.IsZero) throw new OverflowException();
+        return ToDecimal(new ExactAmount(units));
     }
 
     /// <summary>

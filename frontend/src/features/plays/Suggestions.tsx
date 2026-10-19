@@ -2,6 +2,7 @@ import { useId, useState, type FormEvent, type ReactNode } from 'react'
 import { Check, ChevronDown, Lightbulb, X } from 'lucide-react'
 import { riskPercentRange, type SizingDocument } from '@/api/sizing'
 import { Button } from '@/components/ui/button'
+import { InfoTip } from '@/components/ui/info-tip'
 import { Input } from '@/components/ui/input'
 import type { PlayDraft } from './draft'
 import { formatDraggedPrice } from './levels'
@@ -114,7 +115,7 @@ export function SuggestionsPanel({ plan, sizing, draft, leverage, units, onSize,
             onAccept={() => onLevel(target.entryId, 'target', target.levelId, target.value)}>
             Planned R:R is {formatRewardToRisk(target.ratio)}, below {formatRewardToRisk(minRewardRisk)}.
             {' '}{limits.minRewardRiskSource === 'battingAverage'
-              ? <>Winning {percentOf(record.battingAverage)}% of your plays, you break even at {formatRewardToRisk(minRewardRisk)}; below it the record loses money.</>
+              ? <>Winning {percentOf(record.battingAverage)}% of your {record.source === 'activity' ? 'closed positions' : 'plays'}, you break even at {formatRewardToRisk(minRewardRisk)}; below it the record loses money.</>
               : <>Minervini aims for at least 2:1, so a 50% win rate still makes money. Moving the farthest target is one way; a tighter stop is another.</>}
           </SuggestionRow>)}
           {plan.leverage && <SuggestionRow testId="leverage-suggestion" title="Leverage" label="Accept suggested leverage"
@@ -142,12 +143,21 @@ function emptyReason(plan: PlanSuggestions) {
 function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRiskChange: (riskPercent: string) => Promise<void> }) {
   const { record, exposure, limits } = sizing
   const decided = Math.min(record.decidedPlays, record.window)
+  const activity = record.source === 'activity'
+  const positions = record.closedPlays === 1 ? 'position' : 'positions'
   return <div className="sizing-suggestions-record" data-testid="track-record">
     <h3>Your record</h3>
+    {activity && <p className="record-source-note" data-testid="record-source">
+      <span className="record-source">From Activity</span>
+      <span>Based on {record.closedPlays} closed {positions} from Activity — no closed play with a win or loss yet.</span>
+      <InfoTip label="About the Activity record">
+        {sizing.notice}
+      </InfoTip>
+    </p>}
     {record.decidedPlays === 0
       ? <p className="suggestion-empty">{record.closedPlays === 0 ? 'No closed plays yet.' : 'No wins or losses yet.'} Limits use the defaults until there are some.</p>
       : <dl className="record-figures">
-        <div><dt>Win rate</dt><dd>{percentOf(record.battingAverage) ?? '—'}%<small>{record.wins} of last {decided}</small></dd></div>
+        <div><dt>Win rate</dt><dd>{percentOf(record.battingAverage) ?? '—'}%<small>{record.wins} of last {decided}{activity ? ' positions' : ''}</small></dd></div>
         <div><dt>Win/loss ratio</dt><dd>{decimal(record.winLossRatio) ?? '—'}<small>avg +{decimal(record.averageGainPercent) ?? '—'}% / −{decimal(record.averageLossPercent) ?? '—'}%</small></dd></div>
         <div><dt>Break-even R:R</dt><dd>{record.breakEvenRewardRisk === null ? '—' : formatRewardToRisk(Number(record.breakEvenRewardRisk))}<small>at this win rate</small></dd></div>
       </dl>}
@@ -167,7 +177,8 @@ function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRisk
         <li><strong>Stops</strong>: never more than 10% from the entry; once you have five wins, no more than half your average gain.</li>
         <li><strong>Targets</strong>: at least 2:1, or the break-even R:R of your win rate once you have ten wins and losses, whichever is higher.</li>
         <li><strong>Exposure</strong>: size halves after three losses in a row and halves again after two more. It steps back up after two wins with a positive result since stepping down. Minervini gives no fixed counts; these are Vessel's.</li>
-        <li><strong>Record</strong>: your last {record.window} closed plays with wins or losses, all enabled accounts, from linked fills: venue closed PnL less fees.</li>
+        <li><strong>Record</strong>: your last {record.window} closed plays with wins or losses, all enabled accounts, from linked fills: venue closed PnL less fees.
+          Until a play has a win or loss, closed positions from Activity stand in, scored the same way without R multiples.</li>
       </ul>
       <p>Mechanical estimates before fees, funding and slippage, not advice.</p>
     </details>

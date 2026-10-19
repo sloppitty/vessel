@@ -73,8 +73,7 @@ public static class VesselEventValues
     {
         var rows = values.ToList();
         var quantity = rows.Aggregate(default(ExactAmount), (sum, row) => sum + ExactAmount.From(row.Quantity));
-        var notional = rows.Aggregate(BigInteger.Zero,
-            (sum, row) => sum + ExactAmount.From(row.Price).Units * ExactAmount.From(row.Quantity).Units);
+        var notional = rows.Aggregate(BigInteger.Zero, (sum, row) => sum + ExactAmount.Product(row.Price, row.Quantity));
         return ExactAmount.Average(notional, quantity);
     }
     public static readonly string[] Types =
