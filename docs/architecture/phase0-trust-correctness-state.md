@@ -40,4 +40,26 @@ Not started.
 
 ## 0.6 Journal opens without every image
 
-Not started.
+October 19, 2026, branch `t3/phase0-journal-images`:
+- A saved Play opens from its metadata alone. Originals load afterwards, at
+  most three at a time, through `EvidenceImageLoader`, outside the draft.
+- Each image shows one of three states:
+  - loading;
+  - unavailable, with Retry, for 503, 500, a timeout or a transport failure;
+  - missing from storage, for a 404.
+- Save never deletes or uploads an image that has not loaded. Its note still
+  saves.
+- Regression tests port the review probe `f6.mjs`. Before the fix, 7 of the
+  new frontend tests failed, including "Unable to find role=textbox name
+  Thesis" when one original returned 503.
+- A backend test now covers `GET /api/evidence/{id}/content` during an S3
+  outage: 503 and 500 from storage both give 503, AccessDenied gives 500 and
+  NoSuchKey gives 404.
+- `scripts/check.sh` passed:
+  - Python: 78 OK.
+  - Prototype tests: pass.
+  - Release build: 0 warnings.
+  - Backend: 3,424 passed, 17 skipped (RabbitMQ, S3, live venue).
+  - Frontend: typecheck and lint clean, 2,463 tests, build OK.
+- PostgreSQL tests ran on a disposable container.
+- Still to do: a rendered browser check of the placeholder card and viewer.

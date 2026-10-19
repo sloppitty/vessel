@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixed
+
+- A saved Play opens even when an evidence image cannot be read. Originals load
+  one by one after the Play opens; an unavailable image offers Retry, a missing
+  one says so, and saving never deletes or re-uploads an image that has not
+  loaded (D-10).
+
 ## 0.3.1 - October 19, 2026
 
 Release notes: [docs/releases/v0.3.1.md](docs/releases/v0.3.1.md).
