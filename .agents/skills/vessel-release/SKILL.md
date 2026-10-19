@@ -36,8 +36,9 @@ section of `docs/development.md` first.
    names, upgrade requirements and known limits. Preserve historical entries.
 3. Write `docs/releases/vX.Y.Z.md`: owner-facing highlights, upgrade steps,
    image tags and known limits. It becomes the GitHub Release body, so link
-   repository files with absolute `https://github.com/jcarcaboso/vessel/blob/vX.Y.Z/...`
-   URLs, not relative paths.
+   repository files with absolute `https://github.com/<owner>/<repo>/blob/vX.Y.Z/...`
+   URLs for the active release repository (currently `sloppitty/vessel`), not
+   relative paths or links to a tag that exists only in another repository.
 4. Keep the version in step across:
    - `frontend/package.json`
    - `backend/Directory.Build.props`

@@ -3,8 +3,8 @@
 Vessel is a self-hosted trading diary. These examples use the
 API and web images in one Docker Hub repository:
 
-- `skorcius/vessel:api-0.3.0` and `skorcius/vessel:api-latest`
-- `skorcius/vessel:web-0.3.0` and `skorcius/vessel:web-latest`
+- `skorcius/vessel:api-0.3.1` and `skorcius/vessel:api-latest`
+- `skorcius/vessel:web-0.3.1` and `skorcius/vessel:web-latest`
 
 Use versioned tags for deployments. The `latest` tags move with each release.
 This release targets Linux amd64.
@@ -888,6 +888,30 @@ unchanged and compresses static assets only.
 
 ## Upgrade
 
+### From v0.3.0 to v0.3.1
+
+Read the [release notes](../docs/releases/v0.3.1.md). Stop web, API and every
+worker on all hosts, including `worker-notifications`, and back up both database
+schemas, evidence and credential keys. Preserve the owner GUID and all selected
+storage, credential, authentication and TLS overlays.
+
+Set `VESSEL_VERSION=0.3.1` and run the explicit `migrate` service before starting
+the matching API, web and worker images. It applies these journal migrations in
+order; there are no new identity migrations:
+
+| Journal migration | Effect |
+| --- | --- |
+| `20261018180202_LeverageObservations` | Retains observed position leverage and adds nullable leverage to imported fills. Copies current leveraged snapshot positions; historical fills stay unknown. Apply explicitly before starting upgraded hosts. |
+| `20261019100000_ActivityFactsRevision` | Adds per-owner activity revision counters and commit-deferred invalidation triggers for the bounded in-process aggregation cache. Existing owners start at revision 1. Apply with the explicit journal migration bundle before starting the new API/workers. |
+
+Current snapshot leverage is backfilled; past leverage is not reconstructed.
+The cache holds Activity aggregates only and never caches authorization. No
+application host migrates at startup. Rollback requires the pre-upgrade backup
+and matching previous images. Recreate disposable databases that used the
+unshipped `20261018130000_ActivityFactsRevision` ID; never rename migration-history
+rows. When upgrading from v0.2.0 or earlier, the v0.3.0 order-identity restriction
+below still applies.
+
 ### From v0.2.0 to v0.3.0
 
 Read the [release notes](../docs/releases/v0.3.0.md) first. This release includes
@@ -957,8 +981,6 @@ v0.2.0's migrations, followed in order by:
 | `20261018100000_ServerEventSubscriptions` | Server-wide subscription registrations, separate per-owner progress. Renamed from the unshipped `20261017120000_ServerEventSubscriptions`. |
 | `20261018110000_ServerMonitorState` | Copies MAX venue deadlines, creates empty per-deployment monitor heartbeats, drops `monitor_heartbeats` and `monitor_venue_budgets`. Renamed from the unshipped `20261017193000_ServerMonitorState`. |
 | `20261018120000_ServerNotificationState` | Creates **empty** `server_notification_heartbeats` keyed by deployment and **drops/replaces** `notification_heartbeats`. Owner liveness is not copied; the notifications worker must complete a productive pass. |
-| `20261018180202_LeverageObservations` | Retains observed position leverage and adds nullable leverage to imported fills. Copies current leveraged snapshot positions; historical fills stay unknown. Apply explicitly before starting upgraded hosts. |
-| `20261019100000_ActivityFactsRevision` | Adds per-owner activity revision counters and commit-deferred invalidation triggers for the bounded in-process aggregation cache. Existing owners start at revision 1. Apply with the explicit journal migration bundle before starting the new API/workers. |
 
 Do not rename applied migration-history rows or run old and new hosts together.
 Recreate disposable databases that applied the old development IDs. Rolling back
@@ -1389,11 +1411,11 @@ From the repository root, with no populated secret files in the build context:
 ```sh
 REVISION=$(git rev-parse HEAD)
 docker build --platform linux/amd64 -f backend/Dockerfile \
-  --build-arg VERSION=0.3.0 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:api-0.3.0 .
+  --build-arg VERSION=0.3.1 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:api-0.3.1 .
 docker build --platform linux/amd64 -f frontend/Dockerfile \
-  --build-arg VERSION=0.3.0 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:web-0.3.0 .
+  --build-arg VERSION=0.3.1 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:web-0.3.1 .
 ```
 
 The API build pins SDK `10.0.302` to match the repository's `global.json`. The
