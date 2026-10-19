@@ -35,6 +35,7 @@ function StopOutcome({ value, coverage, units }: { value: StopPayoff; coverage: 
   // No position: the row reads 0 as before, with no reference to measure from.
   const basis = !value.empty && value.basis && basisText[value.basis]
   if (value.pending) return <>Unknown<small>Waiting for the entries' fills</small></>
+  if (value.rounding) return <>Unknown<small>Within the rounding of the reported average fill</small></>
   if (value.total !== null) return <>{signedPayoffText(value.total, units, value.empty)}{basis && <small>{basis}</small>}</>
   if (coverage.status === 'invalid') return <>Unknown<small>Invalid allocation</small></>
   return <>{value.known === null ? 'Unknown' : `Known ${signedPayoffText(value.known, units, value.empty)}`}

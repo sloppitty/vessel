@@ -191,17 +191,20 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   // The server keeps the direction once an entry has filled: it decides which side closes the position.
   const filled = venueStatus !== undefined && !!tracking.execution?.links.some(link => link.role === 'entry' && link.fills.length > 0)
   const status = saved?.summary.status ?? 'draft'
-  // Which entries have filled, per entry, as the server decides it: the execution's per-entry filled quantity for a venue
-  // Play, the manual ledger for a manual one. Only Open and Closed Plays can have fills; until the facts load they are
-  // unknown, never assumed from the status.
+  // Which entries have filled, per entry, as the server decides it: the execution's linked entry fills for a venue Play,
+  // the manual ledger for a manual one. Whatever facts are loaded count, whatever the saved status says (a reread of the
+  // Play can fail after the execution moved it to Open). Until they load, or after a failed reread, they are unknown.
   const playExecution = venueStatus !== undefined ? tracking.execution : null
-  const fillsPossible = status === 'open' || status === 'closed'
-  const ledger = useLedgerFills(api, visible && manual && fillsPossible && saved ? saved.summary.id : null, saved?.summary.version ?? 0)
-  const venueFills = useMemo(() => !manual && playExecution ? executionFills(playExecution) : null, [manual, playExecution])
-  const fills: EntryFills | 'unknown' = !fillsPossible ? noEntryFills : (manual ? ledger : venueFills) ?? 'unknown'
+  const fillsDirection = saved?.plan.direction ?? draft.direction
+  const ledger = useLedgerFills(api, visible && manual && saved && status !== 'draft' ? saved.summary.id : null, observedPlayVersion(session, api))
+  const venueFills = useMemo(() => !manual && playExecution ? executionFills(playExecution, fillsDirection) : null,
+    [manual, playExecution, fillsDirection])
+  const fills: EntryFills | 'unknown' = status === 'draft' ? noEntryFills
+    : manual ? ledger ?? 'unknown' : venueFills && !tracking.readFailed ? venueFills : 'unknown'
   // Entries with a fill get no size, leverage, stop or target suggestions (D-11). An Open Play has a fill somewhere, so
   // until the facts say which entry, none gets one.
-  const filledEntries: ReadonlySet<string> | 'all' = fills === 'unknown' ? status === 'open' ? 'all' : noFilledEntries : fills.filled
+  const opened = status === 'open' || venueStatus === 'open'
+  const filledEntries: ReadonlySet<string> | 'all' = fills === 'unknown' ? opened ? 'all' : noFilledEntries : fills.filled
   const [priceStep, setPriceStep] = useState<number | null>(null)
   // The workspace knows the instrument's units; page messages such as the blocked-save reason use them.
   const [units, setUnits] = useState<SizeUnits>(defaultSizeUnits)

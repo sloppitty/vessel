@@ -1,5 +1,5 @@
 import {
-  exactAdd, exactDiv, exactFixed, exactInteger, exactMul, exactNumber, exactSignOf, exactSub, exactZero, type Exact,
+  exactAbs, exactAdd, exactDiv, exactFixed, exactInteger, exactMul, exactNumber, exactSignOf, exactSub, exactZero, type Exact,
 } from '@/lib/decimal'
 import type { PlayDraft } from './draft'
 import { exactLevelPrice, exitsOf, type ExitKind } from './levels'
@@ -45,6 +45,8 @@ export interface StopPayoff {
   empty: boolean
   /** The entries' fills are still loading, so the result is unknown rather than measured from the planned entries. */
   pending: boolean
+  /** A rounded average fill leaves the result too close to zero to know its sign, so it is unknown. */
+  rounding: boolean
 }
 
 /**
@@ -54,6 +56,8 @@ export interface StopPayoff {
 export interface EntryFills {
   filled: FilledEntries
   averages: ReadonlyMap<string, Exact>
+  /** Entries whose average is a rounded figure (28 places) rather than exact; a result within that rounding has no known sign. */
+  rounded?: ReadonlySet<string>
 }
 
 export const noEntryFills: EntryFills = { filled: noFilledEntries, averages: new Map<string, Exact>() }
@@ -223,6 +227,7 @@ export function positionRiskSummary(draft: SummaryDraft, units: SizeUnits = defa
     let invalid = entryAllocation.status === 'invalid'
     let hasShare = false
     const bases = new Set<'fill' | 'plan'>()
+    let roundedUsed = false
     for (const entry of draft.entries) {
       const entryShare = shareOf(entry.share)
       if (entryShare === null) continue
@@ -249,6 +254,7 @@ export function positionRiskSummary(draft: SummaryDraft, units: SizeUnits = defa
         }
         covered += entryShare / 100 * stopShare
         bases.add(fromFill ? 'fill' : 'plan')
+        roundedUsed ||= fromFill && !!fills.rounded?.has(entry.id)
         if (size === null) continue
         const portion = exactDiv(exactMul(exactPlan(entry.share)!, exactPlan(stop.share)!), exactInteger(10_000))!
         known = exactAdd(known, exactMul(exactMul(size, portion), exactMul(direction, exactSub(price, reference))))
@@ -260,13 +266,17 @@ export function positionRiskSummary(draft: SummaryDraft, units: SizeUnits = defa
     const allocationCoverage = coverage(allocatedPercent, completeAllocation && allocatedPercent !== null, invalid)
     const exitCoverage = coverage(coveredPercent,
       allocationCoverage.status === 'complete' && completeCoverage && coveredPercent !== null, invalid)
+    // A rounded average is off by at most half a unit in the 28th place, so the stops' result can be off by at most the
+    // quantity times that: within it, its sign is not known.
+    const rounding = roundedUsed && hasAmount && size !== null &&
+      exactSignOf(exactSub(exactDiv(exactAbs(size), exactInteger(2n * 10n ** 28n))!, exactAbs(known))) >= 0
     // While the fills load, no stop can be measured: the planned entry would be the wrong reference for a filled one.
-    const payoff = hasAmount && !invalid && !pending ? known : null
+    const payoff = hasAmount && !invalid && !pending && !rounding ? known : null
     const total = exitCoverage.status === 'complete' ? payoff : null
     const loss = payoff === null ? null : finite(-exactNumber(payoff) || 0)
     return {
       summary: { allocation: allocationCoverage, coverage: exitCoverage, knownAmount: loss, totalAmount: total === null ? null : loss },
-      payoff: { known: payoff, total, empty: size !== null && exactSignOf(size) === 0, pending,
+      payoff: { known: payoff, total, empty: size !== null && exactSignOf(size) === 0, pending, rounding,
         basis: pending || bases.size === 0 ? null : bases.size > 1 ? 'mixed' : bases.has('fill') ? 'average fill' : 'planned entry' },
     }
   }

@@ -46,7 +46,7 @@ public static partial class PlayDocuments
     /// level ID, and the plan's size or budget. A negative percentage is refused with a pointer to a price stop.
     /// Stops of the <paramref name="executedEntries"/> (entries with a linked or manual fill) may sit at or beyond the
     /// entry, at break-even or in profit; every other price stop and target keeps its side of the entry, except a stop
-    /// unchanged from the stored plan (same text, unit and entry price), which a fill since unlinked may have allowed.
+    /// unchanged from the stored plan (same text, unit, entry price and direction), which a fill since unlinked may have allowed.
     /// </summary>
     public static PlayPlanDocument Normalize(PlayPlanDocument? plan, PlayPlanDocument? stored = null,
         IReadOnlySet<string>? executedEntries = null)
@@ -90,8 +90,10 @@ public static partial class PlayDocuments
             return new PlanExit(id, unit, Number(exit.Value, valueKey, label), Number(exit.Share, LevelKey(kind, entryId, id, "share"), $"{label} share"));
         }).ToList();
         // A stop saved while its entry had a fill stays saveable unchanged, like stored number text: the same stop text in
-        // the same unit on the same entry price. Unlinking the entry's fills must not lock the Play.
-        bool Kept(PlanEntry entry, PlanExit stop) =>
+        // the same unit on the same entry price, in the same direction. Unlinking the entry's fills must not lock the Play.
+        // Those are everything the side check reads, so a change to any of them (a direction switch included) checks again.
+        var sameDirection = stored?.Direction == plan.Direction;
+        bool Kept(PlanEntry entry, PlanExit stop) => sameDirection &&
             kept.TryGetValue(LevelKey("stop", entry.Id, stop.Id, $"{stop.Unit} value"), out var value) && value == stop.Value &&
             kept.TryGetValue(EntryKey(entry.Id, "price"), out var price) && price == entry.Price;
         foreach (var entry in entries) RequireSides(entry, plan.Direction, executedEntries?.Contains(entry.Id) == true, stop => Kept(entry, stop));

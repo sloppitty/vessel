@@ -63,5 +63,7 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
     run(async (play, signal) => { onPlay(await api.rebindLevel(play, linkId, request, signal)) }), [api, run])
   return { execution: result?.context === context ? result.execution : null,
     error: error?.context === context ? error.message : null,
-    busy: workState?.context === context && !workState.signal.aborted && workState.busy, reload, link, unlink, dismiss, rebind }
+    busy: workState?.context === context && !workState.signal.aborted && workState.busy,
+    /** The last read failed, so `execution` is an earlier answer that may be out of date. */
+    readFailed: error?.context === context && error.source === 'read', reload, link, unlink, dismiss, rebind }
 }

@@ -18,12 +18,14 @@ export const noFilledEntries: FilledEntries = new Set<string>()
 export const entryFilled = (filled: FilledEntries | undefined, entryId: string) => !!filled?.has(entryId)
 
 /**
- * A stop unchanged from the saved plan (the same text in the same unit, on the same entry price). The server does not
- * check its side again, so a stop saved beyond an entry while it had a fill still saves after that fill is unlinked.
+ * A stop unchanged from the saved plan (the same text in the same unit, on the same entry price, in the same direction).
+ * The server does not check its side again, so a stop saved beyond an entry while it had a fill still saves after that
+ * fill is unlinked. Those are everything the side check reads: changing any of them, the direction included, checks again.
  */
-export function keptStop(entry: DraftEntry, stop: DraftExit, stored: StoredPlanText | undefined) {
+export function keptStop(entry: DraftEntry, stop: DraftExit, stored: StoredPlanText | undefined, direction: Direction) {
   const same = (key: string, value: string) => { const text = stored?.get(key); return text !== undefined && (text === value || text === value.trim()) }
-  return same(levelFieldKey('stop', entry.id, stop, 'value'), stop.value) && same(entryFieldKey(entry.id, 'price'), entry.price)
+  return stored?.get('direction') === direction &&
+    same(levelFieldKey('stop', entry.id, stop, 'value'), stop.value) && same(entryFieldKey(entry.id, 'price'), entry.price)
 }
 
 /**
@@ -52,7 +54,7 @@ export interface PlanIssue {
  */
 export function planIssues(entries: readonly DraftEntry[], direction: Direction, filled: FilledEntries = noFilledEntries,
   stored?: StoredPlanText): PlanIssue[] {
-  return sideIssues(entries, direction, filled, (entry, kind, exit) => !(kind === 'stop' && keptStop(entry, exit, stored)))
+  return sideIssues(entries, direction, filled, (entry, kind, exit) => !(kind === 'stop' && keptStop(entry, exit, stored, direction)))
 }
 
 /**
@@ -61,7 +63,7 @@ export function planIssues(entries: readonly DraftEntry[], direction: Direction,
  */
 export function keptStopWarnings(entries: readonly DraftEntry[], direction: Direction, filled: FilledEntries = noFilledEntries,
   stored?: StoredPlanText): PlanIssue[] {
-  return sideIssues(entries, direction, filled, (entry, kind, exit) => kind === 'stop' && keptStop(entry, exit, stored)).map(issue => ({
+  return sideIssues(entries, direction, filled, (entry, kind, exit) => kind === 'stop' && keptStop(entry, exit, stored, direction)).map(issue => ({
     ...issue, message: `${issue.message.replace(/; a .*$/, '')}, but its entry has no fill. It was saved there and still saves unchanged.`,
   }))
 }

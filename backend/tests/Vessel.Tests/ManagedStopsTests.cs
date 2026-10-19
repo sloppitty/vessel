@@ -574,4 +574,29 @@ public sealed class ManagedStopPostgresTests
         Assert.Equal((409, "Order stop-b still references this plan level. Unlink it before changing or removing the level."), (error.StatusCode, error.Message));
         Assert.Equal(before, await Stored(h, play.Summary.Id));
     }
+
+    /// <summary>
+    /// Sol review: the unchanged-stop exemption ignored direction. A long draft (entry 100, stop 95, no target) switched to
+    /// short with the same numbers was accepted and could be planned with its stop below the entry. A direction change now
+    /// checks every stop again, as for a new short; the kept long saves unchanged.
+    /// </summary>
+    [PostgresFact]
+    public async Task Switching_direction_checks_every_stop_again()
+    {
+        var (database, h, account) = await SetUp();
+        await using var _ = database;
+        var longPlan = TestPlays.Plan() with { Entries = [TestPlays.Plan().Entries[0] with { Targets = [] }] };
+        var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Turning", longPlan), default);
+        var refused = await Assert.ThrowsAsync<ProblemException>(() => h.Plays.UpdateAsync(draft.Summary.Id,
+            Revise(draft, longPlan with { Direction = "short" }, null), default));
+        Assert.Equal((400, "Entry 1: a short stop goes above the entry price."), (refused.StatusCode, refused.Message));
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => h.Plays.CreateAsync(
+            new CreatePlayRequest(account, "BTC", "venue", "New short", longPlan with { Direction = "short" }), default))).StatusCode);
+        var stored = await h.Plays.GetAsync(draft.Summary.Id, default);
+        Assert.Equal(("long", draft.Summary.Version), (stored.Plan.Direction, stored.Summary.Version));
+        // Unchanged in the same direction it still saves; planning then keeps the long plan.
+        stored = await h.Plays.UpdateAsync(draft.Summary.Id, Revise(stored, stored.Plan, null) with { Title = "Still long" }, default);
+        var planned = await h.Plays.ChangeStatusAsync(draft.Summary.Id, new(stored.Summary.Version, "planned"), default);
+        Assert.Equal(("planned", "long", "95"), (planned.Summary.Status, planned.Plan.Direction, planned.Plan.Entries[0].Stops[0].Value));
+    }
 }

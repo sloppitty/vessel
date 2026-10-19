@@ -868,3 +868,41 @@ describe('filled entries on the page', () => {
       .toHaveTextContent('Entry 1 stop is above the entry price; a long stop goes below it.')
   })
 })
+
+// Sol review of 0.5b: the execution's fill facts count whatever the saved status says.
+describe('fills from the execution, independent of the saved status', () => {
+  const venue: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}`, balanceUsd: '10000' }
+  const level = (id: string, value: string) => ({ id, unit: 'price' as const, value, share: '100' })
+  const planned: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, status: 'planned', planRevision: 1, venueId: 'hyperliquid',
+    instrument: 'BTC', instrumentSource: 'venue', plannedAtUtc: '2026-10-03T10:00:00.000Z', version: 2 },
+    plan: { ...savedPlayFixture.plan, size: '100', leverage: '3', entries: [
+      { id: 'entry-1', name: 'Entry 1', color: '#b9c9e4', share: '100', price: '100', stops: [level('stop-1', '80')], targets: [level('target-1', '105')] },
+    ] } }
+  const venueApi = (server: ReturnType<typeof fakeServer>, overrides: Partial<WorkspaceApi> = {}) => client(server, {
+    instruments: () => Promise.resolve(instrumentCatalogFixture), candles: () => new Promise(() => {}), marketContext: () => new Promise(() => {}),
+    sizing: vi.fn().mockResolvedValue(sizingFixture), ...overrides })
+
+  it('hides size suggestions and allows a stop beyond the filled entry when the Play could not be reread after it opened', async () => {
+    const server = fakeServer()
+    server.plays.set(planned.summary.id, planned)
+    const entryLink = { id: '00000000-0000-4000-8000-0000000000f1', role: 'entry' as const, entryId: 'entry-1', levelId: null, state: 'linked' as const,
+      source: 'automatic' as const, filledQuantity: '1', order: null, fills: [{ sourceFillId: 'f1', direction: 'Open Long', price: '100', quantity: '1',
+        fee: '0', feeToken: 'USDC', closedPnlUsd: '0', side: 'buy' as const, positionEffect: 'open' as const, pnlBasis: 'gross' as const, occurredAtUtc: '2026-10-03T10:01:00Z' }] }
+    // The venue moved the Play to Open, but rereading the saved Play fails, so it still says Planned.
+    const playExecution = vi.fn((id: string) => Promise.resolve({ ...server.execution(server.plays.get(id)!), status: 'open' as const,
+      links: [entryLink], entries: [{ entryId: 'entry-1', filledQuantity: '1', averageFillPrice: '100', restingOrders: 0 }] }))
+    const play = vi.fn(() => Promise.reject(new ApiError('unavailable', 'The Play could not be read.')))
+    const draft = draftFromSaved(planned, [])
+    const user = userEvent.setup()
+    render(<Page api={venueApi(server, { playExecution, play })} accounts={[venue]} initial={{ view: 'editor', draft, saved: savedState(planned, draft) }} />)
+    await waitFor(() => expect(play).toHaveBeenCalled())
+    expect(await screen.findByText('The Play could not be read.')).toBeInTheDocument()
+    await user.click(within(await screen.findByTestId('suggestions-panel')).getByRole('button', { name: /^Suggestions/ }))
+    expect(screen.queryByTestId('size-suggestion')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Accept suggested size/ })).not.toBeInTheDocument()
+    const stop = screen.getByRole('spinbutton', { name: 'Entry 1 planned stop price (quote units)' })
+    await user.clear(stop)
+    await user.type(stop, '105')
+    expect(stop).not.toHaveAttribute('aria-invalid')
+  })
+})

@@ -19,6 +19,8 @@ export const levelFieldKey = (kind: ExitKind, entryId: string, exit: Pick<DraftE
 export function storedPlanText(plan: PlayPlan | null | undefined): StoredPlanText {
   const text = new Map<string, string>()
   if (!plan) return text
+  // The direction decides which side of an entry a stop must sit on, so an unchanged stop is kept only in it.
+  text.set('direction', plan.direction)
   text.set('size', plan.size)
   if (plan.budgetOverride !== null) text.set('budget', plan.budgetOverride)
   for (const entry of plan.entries) {

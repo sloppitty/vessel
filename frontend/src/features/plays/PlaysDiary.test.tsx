@@ -990,8 +990,10 @@ describe('diary mutation ownership in the actual shell', () => {
     expect(screen.getByRole('textbox', { name: 'Review' })).toHaveValue(shellPlay.review)
     expect(screen.getByRole('button', { name: /^Save$/ })).toBeEnabled()
     expect(warnsOnUnload()).toBe(true)
+    // The page reads the ledger for the Summary's fills as well; the shown tab reads it again for its own records.
+    const reads = api.manualExecutions.mock.calls.length
     await user.click(screen.getByRole('tab', { name: 'Execution' }))
-    await waitFor(() => expect(api.manualExecutions).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(api.manualExecutions.mock.calls.length).toBeGreaterThan(reads))
     expect(api.manualExecutions).toHaveBeenLastCalledWith(shellPlay.summary.id, expect.any(AbortSignal))
     expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled()
     expect(api.updatePlay).toHaveBeenCalledOnce()

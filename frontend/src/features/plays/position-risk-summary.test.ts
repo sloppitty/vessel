@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { createDraft, createEntry, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
-import { exactDecimal, exactFixed, type Exact } from '@/lib/decimal'
+import { exactDecimal, exactFixed, exactSignOf, type Exact } from '@/lib/decimal'
+import type { PlayExecution } from '@/api/plays'
+import { executionFills } from './entry-fills'
 import { positionRiskSummary, signedPayoffText, type EntryFills, type RiskReference } from './position-risk-summary'
 import type { SizeUnits } from './sizing'
 
@@ -475,7 +477,23 @@ describe('signed all-stops result', () => {
     expect(result.stopPayoff.total).toBeNull()
     expect(result.riskSharePercent).toBeNull()
     expect(signed({ ...one('105'), size: '' }, fills('100')).stopPayoff)
-      .toEqual({ known: null, total: null, basis: 'average fill', empty: false, pending: false })
+      .toEqual({ known: null, total: null, basis: 'average fill', empty: false, pending: false, rounding: false })
+  })
+
+  it('keeps the sign the venue\'s rounded average would erase', () => {
+    // Fills of 2 at 100 and 1 at 100.0000000000000000000000000001: the server's 28-place average is 100.
+    const execution = { entries: [{ entryId: 'e1', filledQuantity: '3', averageFillPrice: '100', restingOrders: 0 }], links: [{
+      id: 'l1', role: 'entry', entryId: 'e1', levelId: null, state: 'linked', source: 'automatic', order: null, filledQuantity: '3',
+      fills: [['2', '100'], ['1', '100.0000000000000000000000000001']].map(([quantity, price]) => ({ sourceFillId: price, direction: 'Open Long',
+        price, quantity, fee: '0', feeToken: 'USDC', closedPnlUsd: '0', occurredAtUtc: '2026-10-19T10:00:00Z', side: 'buy', positionEffect: 'open',
+        pnlBasis: 'gross' })) }] } as unknown as PlayExecution
+    const exact = signed(one('100', { size: '3' }), executionFills(execution, 'long'))
+    expect(exactSignOf(exact.stopPayoff.total!)).toBe(-1)
+    expect(signedPayoffText(exact.stopPayoff.total!, units)).toBe('\u2212< 0.01 USDC at risk')
+    // With only the rounded average, a result within its rounding has no known sign: unknown, not break-even.
+    const rounded = signed(one('100', { size: '3' }), { ...fills('100'), rounded: new Set(['e1']) })
+    expect(rounded.stopPayoff).toMatchObject({ known: null, total: null, rounding: true })
+    expect(text(signed(one('105', { size: '3' }), { ...fills('100'), rounded: new Set(['e1']) }).stopPayoff.total)).toBe('15')
   })
 
   it('marks a size of zero as no position, not break-even', () => {

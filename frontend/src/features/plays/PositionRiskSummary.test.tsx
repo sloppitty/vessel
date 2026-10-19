@@ -145,6 +145,11 @@ describe('PositionRiskSummary after a fill (0.5b)', () => {
     expect(value('Risk / Trading account balance')).toHaveTextContent('Unknown')
   })
 
+  it('says when a rounded average fill leaves the sign unknown', () => {
+    render(<PositionRiskSummary draft={filled('100')} units={units} fills={{ ...fills, rounded: new Set(['e1']) }} />)
+    expect(value('All stops')).toHaveTextContent(/^UnknownWithin the rounding of the reported average fill$/)
+  })
+
   it('does not count a stop beyond an unfilled entry', () => {
     render(<PositionRiskSummary draft={filled('105')} units={units} />)
     expect(value('All stops')).toHaveTextContent(/^UnknownTotal unknown$/)

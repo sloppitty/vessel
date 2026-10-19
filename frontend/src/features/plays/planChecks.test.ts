@@ -77,6 +77,16 @@ describe('stops of a filled entry', () => {
     expect(planIssues([saved], 'long', new Set())).toHaveLength(1)
   })
 
+  it('checks every stop again when the direction changes (Sol review)', () => {
+    // A long saved with entry 100, stop 95 and no target, switched to short with the same numbers: the stop is below a short entry.
+    const saved = { ...open('price', '95'), targets: [] }
+    const stored = storedPlanText(planFromDraft({ ...createDraft(), direction: 'long', entries: [saved] }))
+    expect(planIssues([saved], 'short', new Set(), stored).map(issue => issue.message))
+      .toEqual(['Entry 1 stop is below the entry price; a short stop goes above it.'])
+    expect(keptStopWarnings([saved], 'short', new Set(), stored)).toEqual([])
+    expect(planFixes({ direction: 'long', entries: [saved] }, new Set(), stored)).toEqual({ swapped: null, reversed: null })
+  })
+
   it('refuses a negative percentage with a pointer to a price stop (-5% once saved as no stop)', () => {
     expect(planTextState('-5', 'Entry 1 stop 1', null, 'stop')).toEqual({ status: 'invalid',
       reason: 'Entry 1 stop 1: use a price for a stop beyond the entry; a percentage cannot be negative.' })

@@ -73,7 +73,7 @@ function ExitList({ entry, kind, direction, leverage, onChange, prefix, liquidat
       const outcome = kind === 'stop' ? 'loss' : 'gain'
       // A stop kept unchanged from the saved plan still saves, so beyond an unfilled entry it is a warning, not an error.
       const beyond = wrongSide(sideEntryPrice, exit, kind, direction, filled)
-      const kept = beyond && kind === 'stop' && keptStop(entry, exit, stored)
+      const kept = beyond && kind === 'stop' && keptStop(entry, exit, stored, direction)
       const wrong = beyond && !kept
       const stopPrice = kind === 'stop' ? levelPrice(entryPrice, exit, kind, direction, leverage) : null
       const marked = suggested?.has(exit.id) ?? false
