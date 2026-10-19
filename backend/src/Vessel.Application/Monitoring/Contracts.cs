@@ -14,12 +14,15 @@ public sealed record MonitorDiscrepancyDto(Guid Id, Guid AccountId, Guid? PlayId
     DateTimeOffset? ResolvedAtUtc, DateTimeOffset? DismissedAtUtc, string? Note, JsonElement Details,
     string? Outcome = null, DateTimeOffset? UnverifiableAtUtc = null, DateTimeOffset? LastObservedAtUtc = null);
 /// <summary>
-/// Evidence for one planned stop level: <c>resting</c> (a linked order rested in the current book at
-/// <paramref name="ObservedAtUtc"/>), <c>not-seen</c> (a complete, fresh book had none), <c>unknown</c> or
-/// <c>not-read</c> (the venue's order reader does not return the current book). <paramref name="OrderId"/> is the venue
-/// order ID of the resting (or not resting) linked order, when there is one.
+/// Evidence for one planned stop level: <c>resting</c> (a linked closing stop rested in the current book at
+/// <paramref name="ObservedAtUtc"/>, at the planned price within the matcher's step), <c>resting-elsewhere</c> (the same,
+/// at another price), <c>not-seen</c> (a complete, fresh book had none), <c>unknown</c> or <c>not-read</c> (the venue's
+/// order reader does not return the current book). <paramref name="OrderId"/> is the venue order ID of the linked order
+/// concerned, when there is one. <paramref name="Price"/> is that resting order's acting price and
+/// <paramref name="PlannedPrice"/> the saved level price the check compared it with, both exact; null when unknown.
 /// </summary>
-public sealed record MonitorStopEvidenceDto(string EntryId, string LevelId, string Evidence, string? OrderId, DateTimeOffset? ObservedAtUtc);
+public sealed record MonitorStopEvidenceDto(string EntryId, string LevelId, string Evidence, string? OrderId, DateTimeOffset? ObservedAtUtc,
+    string? Price = null, string? PlannedPrice = null);
 
 /// <summary>
 /// The last stop-coverage outcome recorded for an Open Play. <paramref name="State"/> is projected at read time:
@@ -66,9 +69,9 @@ public sealed record MonitorLease(Guid OwnerId, Guid AccountId, Guid RequestId, 
 public sealed record MonitorRead(PerpetualVenueReadResult Sync, VenueOrderReadResult? Orders,
     string? OrderError = null, bool CredentialError = false);
 /// <param name="CurrentOrderBook">The venue capability: its order reader returns the current open book. Without it the
-/// book-dependent checks do not run and protection coverage is unsupported.</param>
+/// book-dependent checks do not run and protection coverage is unsupported. Required, so no caller assumes a book.</param>
 public sealed record MonitorEvaluation(Guid RunId, Account Account, MonitorRead Read, DateTimeOffset? PreviousSuccessAtUtc,
-    DateTimeOffset? NewestFillBeforeReadUtc, bool HistoryGap, string Trigger, bool CurrentOrderBook = true);
+    DateTimeOffset? NewestFillBeforeReadUtc, bool HistoryGap, string Trigger, bool CurrentOrderBook);
 /// <param name="Coverage">Stop coverage of each evaluated Open Play; null when the facts were too incomplete to name them,
 /// which leaves the stored outcomes to go stale.</param>
 public sealed record MonitorEvaluationResult(DateTimeOffset? NextConfirmationAtUtc, bool Incomplete = false, string? SafeNotice = null,

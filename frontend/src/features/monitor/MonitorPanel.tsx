@@ -47,14 +47,16 @@ function CheckButton({ until, monitor, busy, blocked, onCheck }: {
  * The heading follows open incidents, then stop coverage, before the run state, so a healthy run never reads
  * "Monitored" beside an open record, a structural unknown, shared or unsupported coverage. `discrepancies` and
  * `coverage` are what the panel speaks for: the account's by default, a Play's own in its Execution tab.
- * `currentBookRead: false` is the venue capability: its order reader does not return the current book.
+ * `currentBookRead: false` is the venue capability: its order reader does not return the current book. `unchecked` marks
+ * an Open, tracked Play in scope that no check has recorded yet, which is never "Monitored".
  */
-export function MonitorPanel({ monitor, discrepancies, coverage = monitor.coverage ?? [], currentBookRead = true, busy, error, retryAtUtc,
-  statusUnavailable = false, onCheck, onManageCredential }: {
+export function MonitorPanel({ monitor, discrepancies, coverage = monitor.coverage ?? [], currentBookRead = true, unchecked = false,
+  busy, error, retryAtUtc, statusUnavailable = false, onCheck, onManageCredential }: {
   monitor: AccountMonitor; busy: boolean; error: string | null; retryAtUtc?: string | undefined
   discrepancies?: readonly MonitorDiscrepancy[] | undefined
   coverage?: readonly MonitorCoverage[]
   currentBookRead?: boolean
+  unchecked?: boolean
   onCheck: () => void; onManageCredential?: (() => void) | undefined
   statusUnavailable?: boolean
 }) {
@@ -64,13 +66,13 @@ export function MonitorPanel({ monitor, discrepancies, coverage = monitor.covera
     : countIncidents(incidentsOf(monitor.discrepancies), incidentsBeyondCap([monitor]))
   const tone = topTone(counts)
   // Other run states already name themselves ("Monitor degraded"); only a live run could claim "Monitored".
-  const coverageTitle = monitor.state === 'live' ? coverageHeading(coverage) ?? (currentBookRead ? null : 'Current book not read') : null
-  const lines = coverageLines(coverage, time, currentBookRead)
+  const coverageTitle = monitor.state === 'live' ? coverageHeading(coverage, unchecked) ?? (currentBookRead ? null : 'Current book not read') : null
+  const lines = coverageLines(coverage, time, currentBookRead, unchecked)
   return <section className="monitor-panel" aria-label="Background monitor">
     <div className="monitor-heading">
       <div>{tone ? <><strong className="monitor-attention" data-tone={tone}><TriangleAlert size={14} aria-hidden="true" />Needs attention · {incidentSummary(counts)}</strong>
         {monitor.state !== 'live' && monitor.state !== 'idle' && <span className="monitor-badge">{labels[monitor.state]}</span>}</>
-        : coverageTitle ? <strong className="monitor-coverage-heading" data-tone={coverageTone(coverage) ?? 'info'}>
+        : coverageTitle ? <strong className="monitor-coverage-heading" data-tone={coverageTone(coverage, unchecked) ?? 'info'}>
           <ShieldQuestion size={14} aria-hidden="true" />{coverageTitle}</strong>
         : <strong>{labels[monitor.state]}</strong>}
         {(monitor.lastSuccessAtUtc || monitor.nextRunAtUtc) && <p className="muted">

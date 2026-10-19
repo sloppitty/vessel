@@ -19,11 +19,19 @@ public static class MonitorCoverageStates
 /// <summary>Evidence for one planned stop level, from the last check's current order book.</summary>
 public static class MonitorStopEvidence
 {
-    /// <summary>A linked order for the level rested in the current book at the observation time.</summary>
+    /// <summary>
+    /// A linked closing stop for the level rested in the current book at the observation time, at the planned price
+    /// within the matcher's step.
+    /// </summary>
     public const string Resting = "resting";
+    /// <summary>A linked closing stop for the level rested in the current book, at another price than the planned one.</summary>
+    public const string RestingElsewhere = "resting-elsewhere";
     /// <summary>A complete, fresh current book had no resting order linked to the level.</summary>
     public const string NotSeen = "not-seen";
-    /// <summary>The book was incomplete, stale or inconsistent, so the level's order could be neither seen nor ruled out.</summary>
+    /// <summary>
+    /// The book was incomplete, stale or inconsistent, or the resting linked order is not a recognized closing stop, so the
+    /// level's stop could be neither confirmed nor ruled out.
+    /// </summary>
     public const string Unknown = "unknown";
     /// <summary>The venue's order reader does not return the current book.</summary>
     public const string NotRead = "not-read";
@@ -46,6 +54,6 @@ public sealed class MonitorCoverage : IOwned
     /// <summary>A short reason code, e.g. <c>stop-orders</c>, <c>opposing-plays</c> or <c>current-book-not-read</c>.</summary>
     public string Reason { get; set; } = "";
     public DateTimeOffset CheckedAtUtc { get; set; }
-    /// <summary>Per planned stop level evidence as JSON: entry, level, evidence, order and observation time.</summary>
+    /// <summary>Per planned stop level evidence as JSON: entry, level, evidence, order, observation time, acting and planned price.</summary>
     public string Stops { get; set; } = "[]";
 }

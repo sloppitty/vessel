@@ -433,7 +433,7 @@ describe('stop coverage (Phase 0, 0.4c)', () => {
     ['unknown', 'opposing-plays', 'Stop coverage unknown', /Opposite Plays net out/],
     ['shared', 'shared-whole-position-stop', 'Stop shared with other Plays', /covers this position together with other Plays/],
     // D-09: a venue whose order reader does not return the current book.
-    ['unsupported', 'current-book-not-read', 'Current book not read', /Missing, short and cancelled stop checks do not run here/],
+    ['unsupported', 'current-book-not-read', 'Current book not read', /Order-book checks do not run here/],
   ] as const)('never says Monitored beside %s coverage', (state, reason, heading, line) => {
     render(<MonitorPanel monitor={{ ...monitorFixture, coverage: [coverageAs(state, reason)] }} busy={false} error={null} onCheck={vi.fn()} />)
     expect(within(panel()).queryByText('Monitored')).not.toBeInTheDocument()
@@ -448,8 +448,12 @@ describe('stop coverage (Phase 0, 0.4c)', () => {
     expect(within(panel()).getByText('Stop coverage stale')).toBeInTheDocument()
     const uncovered = { ...coverageAs('known', 'no-stop', '00000000-0000-4000-8000-0000000000f1'), covered: false }
     view.rerender(<MonitorPanel monitor={{ ...monitorFixture, coverage: [coverageFixture, uncovered] }} busy={false} error={null} onCheck={vi.fn()} />)
-    expect(within(panel()).getByText('Stop not seen at the venue')).toBeInTheDocument()
+    expect(within(panel()).getByText('No stop at the venue')).toBeInTheDocument()
     expect(within(panel()).getByText(/No resting stop was seen at the venue/)).toBeInTheDocument()
+    // An Open Play that no check has recorded is never "Monitored".
+    view.rerender(<MonitorPanel monitor={monitorFixture} coverage={[]} unchecked busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).queryByText('Monitored')).not.toBeInTheDocument()
+    expect(within(panel()).getByText('Stop coverage not checked yet')).toBeInTheDocument()
     // The Execution tab scopes the heading to its own Play.
     view.rerender(<MonitorPanel monitor={{ ...monitorFixture, coverage: [coverageAs('unknown', 'mechanics')] }} coverage={[coverageFixture]}
       busy={false} error={null} onCheck={vi.fn()} />)
@@ -457,6 +461,6 @@ describe('stop coverage (Phase 0, 0.4c)', () => {
   })
   it('says the stop checks do not run on a venue without the current book, even before a Play is open', () => {
     render(<MonitorPanel monitor={monitorFixture} currentBookRead={false} busy={false} error={null} onCheck={vi.fn()} />)
-    expect(within(panel()).getByText(/Missing, short and cancelled stop checks do not run here/)).toBeInTheDocument()
+    expect(within(panel()).getByText(/Order-book checks do not run here/)).toBeInTheDocument()
   })
 })

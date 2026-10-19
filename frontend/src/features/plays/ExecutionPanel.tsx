@@ -49,6 +49,8 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
   const editable = !retrospective && ['planned', 'paused', 'open'].includes(execution.status)
   const options = levelOptions(entries, execution.status === 'open')
   const shownMonitor = monitor === undefined ? execution.monitor : monitor
+  // This Play's own recorded stop coverage; an Open Play without one has not been checked since it opened.
+  const coverage = (shownMonitor?.coverage ?? []).filter(row => row.playId === execution.playId)
   const { totals } = execution
   // Monitor records and watches name this Play's levels ("Entry 1 stop") rather than only the order's role.
   const recordLevel = (key: unknown) => { const level = levelKey(key); return level ? levelName(entries, level, origin) : null }
@@ -62,7 +64,7 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
     {error && <p className="error" role="alert">{error}</p>}
     {/* The heading follows this Play's own records and stop coverage, the ones listed below it. */}
     {shownMonitor && <MonitorPanel monitor={shownMonitor} discrepancies={execution.discrepancies}
-      coverage={(shownMonitor.coverage ?? []).filter(row => row.playId === execution.playId)} currentBookRead={currentBookRead}
+      coverage={coverage} unchecked={execution.status === 'open' && execution.tracked && coverage.length === 0} currentBookRead={currentBookRead}
       busy={busy || monitorBusy} error={monitorError}
       retryAtUtc={retryAtUtc} statusUnavailable={monitorUnavailable} onCheck={onCheck} onManageCredential={onManageCredential} />}
     {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss} levelName={recordLevel} />}

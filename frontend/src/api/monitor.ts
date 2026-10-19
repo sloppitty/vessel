@@ -1,4 +1,4 @@
-import { isFilledText, isPositiveCount, isRecord as object, isText as text, isTimestamp } from './guards'
+import { isFilledText, isPlainDecimal, isPositiveCount, isRecord as object, isText as text, isTimestamp } from './guards'
 import { isEventCursor, isEventSequence, type EventCursor } from './event-cursor'
 import { isNotificationFrame, isNotificationsStatus, type NotificationFrame, type NotificationsStatus } from './notifications'
 
@@ -40,16 +40,21 @@ export interface MonitorWatch {
 }
 
 /**
- * Evidence for one planned stop level from the last check's order read: `resting` (a linked order rested in the current
- * book at `observedAtUtc`), `not-seen` (a complete, fresh book had none), `unknown`, or `not-read` (the venue's order
- * reader does not return the current book).
+ * Evidence for one planned stop level from the last check's order read: `resting` (a linked closing stop rested in the
+ * current book at `observedAtUtc`, at the saved level price within the matcher's step), `resting-elsewhere` (the same, at
+ * another price), `not-seen` (a complete, fresh book had none), `unknown`, or `not-read` (the venue's order reader does
+ * not return the current book).
  */
 export interface MonitorStopEvidence {
   entryId: string
   levelId: string
-  evidence: 'resting' | 'not-seen' | 'unknown' | 'not-read'
+  evidence: 'resting' | 'resting-elsewhere' | 'not-seen' | 'unknown' | 'not-read'
   orderId: string | null
   observedAtUtc: string | null
+  /** The resting order's acting price, exact; set for both resting kinds. */
+  price: string | null
+  /** The saved level price the check compared it with, exact; null for an unpriced level. */
+  plannedPrice: string | null
 }
 
 /**
@@ -151,10 +156,12 @@ export const isMonitorWatch = (v: unknown): v is MonitorWatch => object(v) && id
   (v.state === 'watching' ? v.endedAtUtc === null : nullableDate(v.endedAtUtc))
 
 const recordedStates = ['known', 'shared', 'unknown', 'unsupported']
+const resting = (v: unknown) => v === 'resting' || v === 'resting-elsewhere'
 export const isMonitorStopEvidence = (v: unknown): v is MonitorStopEvidence => object(v) && id(v.entryId) && id(v.levelId) &&
-  ['resting', 'not-seen', 'unknown', 'not-read'].includes(v.evidence as string) && (v.orderId === null || id(v.orderId)) &&
-  // A resting order is always dated; evidence that saw nothing carries no time it could not know.
-  (v.evidence === 'resting' ? date(v.observedAtUtc) : nullableDate(v.observedAtUtc))
+  ['resting', 'resting-elsewhere', 'not-seen', 'unknown', 'not-read'].includes(v.evidence as string) && (v.orderId === null || id(v.orderId)) &&
+  // A resting order is always dated and priced.
+  (resting(v.evidence) ? date(v.observedAtUtc) && isPlainDecimal(v.price) : nullableDate(v.observedAtUtc) && (v.price === null || isPlainDecimal(v.price))) &&
+  (v.plannedPrice === null || isPlainDecimal(v.plannedPrice))
 export const isMonitorCoverage = (v: unknown): v is MonitorCoverage => object(v) && id(v.playId) && id(v.contractId) &&
   recordedStates.includes(v.recordedState as string) && (v.state === 'stale' || v.state === v.recordedState) &&
   (v.recordedState === 'known' ? typeof v.covered === 'boolean' : v.covered === null) &&

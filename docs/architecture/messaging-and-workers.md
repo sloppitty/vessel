@@ -885,7 +885,7 @@ Recreate every other service that uses the same user too, for example additional
 | `live` | Last check succeeded within twice the interval | None |
 | `idle` | Nothing to watch (no eligible Plays, watches or discrepancy work) | None |
 | `degraded` | Incomplete coverage: omitted executions, a fill-history gap, partial positions or orders (on a venue that reads the current book), an order-read failure, or one or two consecutive failed checks | Read the monitor error; check venue status. Most causes clear on the next complete check; a fill-history gap stays until an adapter reports complete fill history, which none does today |
-| Stop coverage "Current book not read" (live) | The venue's order reader does not return the current book (RISEx); missing, short and cancelled stop checks do not run there | Not a fault. Check stops at the venue itself |
+| Stop coverage "Current book not read" (live) | The venue's order reader does not return the current book (RISEx); order-book checks (missing, short, cancelled and excess stops, orphaned exits and entries, level drift) do not run there | Not a fault. Check stops at the venue itself |
 | `stale` | Three or more consecutive failures, or no success for twice the interval | Check worker logs (types and IDs), venue reachability and `server_venue_deadlines` deadlines |
 | `credential-error` | Read-only token missing, refused or expired; scheduling stops | Save a valid token; discovery reschedules the account |
 | Worker offline (`workerOnline: false`) | Heartbeat older than `HeartbeatTimeout` | `docker compose ps worker`, `docker compose logs --tail=100 worker`; check database and broker reachability and provisioning |

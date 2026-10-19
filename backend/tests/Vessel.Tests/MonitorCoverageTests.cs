@@ -101,9 +101,10 @@ public sealed class MonitorCoverageTests
         // RISEx-like: history rows only (never stamped with the read time), never a complete book; the stop was cancelled.
         var f = new DiscrepancyFixture { OrdersComplete = false, StampOpenOrders = false };
         f.Stop(o => o with { Status = VenueOrderStatus.Canceled, VenueStatus = "ORDER_STATUS_CANCELLED" });
-        var first = await f.Service.EvaluateAsync(f.Observation() with { CurrentOrderBook = false }, default);
+        f.CurrentOrderBook = false;
+        var first = await f.Evaluate();
         f.Advance(60);
-        var second = await f.Service.EvaluateAsync(f.Observation() with { CurrentOrderBook = false }, default);
+        var second = await f.Evaluate();
 
         Assert.False(first.Incomplete);
         Assert.False(second.Incomplete);
@@ -112,6 +113,70 @@ public sealed class MonitorCoverageTests
         var coverage = Assert.Single(second.Coverage!);
         Assert.Equal((MonitorCoverageStates.Unsupported, (bool?)null, "current-book-not-read"), (coverage.State, coverage.Covered, coverage.Reason));
         Assert.Equal(MonitorStopEvidence.NotRead, Assert.Single(coverage.Stops).Evidence);
+    }
+
+    [Fact] // Review: per-level evidence counts only what coverage counts as a closing stop.
+    public async Task A_resting_linked_order_that_is_not_a_recognized_closing_stop_never_confirms_its_level()
+    {
+        var f = new DiscrepancyFixture();
+        f.Stop(o => o with { OrderType = "Trigger Market" }); // a trigger whose mechanics are not recognized
+        var coverage = Assert.Single((await f.Evaluate()).Coverage!);
+        Assert.Equal((MonitorCoverageStates.Unknown, "mechanics"), (coverage.State, coverage.Reason));
+        var stop = Assert.Single(coverage.Stops);
+        Assert.Equal((MonitorStopEvidence.Unknown, "stop", (DateTimeOffset?)null), (stop.Evidence, stop.OrderId, stop.ObservedAtUtc));
+
+        // A plain limit linked as the stop rests, but no stop protects the position: not confirmed either.
+        f.Stop(o => o with { OrderType = "Limit", TriggerPrice = null }); f.Advance(60);
+        coverage = Assert.Single((await f.Evaluate()).Coverage!);
+        Assert.Equal((MonitorCoverageStates.Known, (bool?)false, "no-stop"), (coverage.State, coverage.Covered, coverage.Reason));
+        Assert.Equal(MonitorStopEvidence.Unknown, Assert.Single(coverage.Stops).Evidence);
+
+        // A buy stop does not close a long: same answer.
+        f.Stop(o => o with { OrderType = "Stop Market", TriggerPrice = 90m, Side = "buy" }); f.Advance(60);
+        coverage = Assert.Single((await f.Evaluate()).Coverage!);
+        Assert.Equal(MonitorStopEvidence.Unknown, Assert.Single(coverage.Stops).Evidence);
+    }
+
+    [Fact] // Review: a stop resting away from its planned price protects, but does not confirm the planned price.
+    public async Task A_stop_resting_away_from_its_planned_price_is_said_with_its_price()
+    {
+        var f = new DiscrepancyFixture();
+        f.Stop(o => o with { TriggerPrice = 85m, LimitPrice = 85m });
+        var coverage = Assert.Single((await f.Evaluate()).Coverage!);
+        Assert.Equal((MonitorCoverageStates.Known, (bool?)true, "stop-orders"), (coverage.State, coverage.Covered, coverage.Reason));
+        var stop = Assert.Single(coverage.Stops);
+        Assert.Equal((MonitorStopEvidence.RestingElsewhere, "stop", "85", "90", (DateTimeOffset?)f.Clock.Now),
+            (stop.Evidence, stop.OrderId, stop.Price, stop.PlannedPrice, stop.ObservedAtUtc));
+
+        // Within the matcher's step of the planned price it confirms the level, with both prices.
+        f.Stop(o => o with { TriggerPrice = 90.0004m, LimitPrice = 90.0004m }); f.Advance(60);
+        stop = Assert.Single(Assert.Single((await f.Evaluate()).Coverage!).Stops);
+        Assert.Equal((MonitorStopEvidence.Resting, "90.0004", "90"), (stop.Evidence, stop.Price, stop.PlannedPrice));
+    }
+
+    [Fact] // Review: missing evidence comes before a structural unknown, and each order-read failure is named.
+    public async Task Missing_evidence_reasons_come_first_and_name_the_order_read_failure()
+    {
+        // Opposing Plays without a complete position read: the position is unknown, not the opposing structure.
+        var f = new DiscrepancyFixture { Position = 1, PositionsComplete = false };
+        var sibling = f.AddPlay("long", 1);
+        f.AddPlay("short", 1);
+        f.Stop(o => o with { IsPositionTpsl = true, OriginalSize = 0, RemainingSize = 0 });
+        Assert.Equal("position-unknown", (await f.Evaluate()).Coverage!.Single(x => x.PlayId == sibling.Id).Reason);
+        f.PositionsComplete = true; f.Advance(60);
+        Assert.Equal("opposing-plays", (await f.Evaluate()).Coverage!.Single(x => x.PlayId == sibling.Id).Reason);
+
+        async Task<string> Reason(Action<DiscrepancyFixture> change)
+        {
+            var g = new DiscrepancyFixture();
+            change(g);
+            return Assert.Single((await g.Evaluate()).Coverage!).Reason;
+        }
+        Assert.Equal("incomplete-book", await Reason(g => g.OrdersComplete = false));
+        // An order read older than the freshness window is stale, not incomplete.
+        Assert.Equal("stale-order-read", await Reason(g => g.ObservationOffset = -MonitorOptions.Lease - TimeSpan.FromMinutes(1)));
+        // The same venue order twice in one read: the read cannot be trusted, though it claims completeness.
+        Assert.Equal("order-read-unreliable", await Reason(g => g.VenueOrders.Add(g.VenueOrders[0])));
     }
 
     /// <summary>A resting whole-position stop linked to <paramref name="play"/>'s first stop level.</summary>
@@ -148,8 +213,7 @@ public sealed class MonitorCoveragePostgresTests
         var (store, coordinator) = Create(scope, f, capabilities);
 
         await CheckAsync(coordinator, store, f);
-        f.Advance(60 * 11);
-        await CheckAsync(coordinator, store, f);
+        await CheckWhenDueAsync(coordinator, store, scope, f);
 
         scope.Db.ChangeTracker.Clear();
         var row = await scope.Db.Set<MonitorAccount>().AsNoTracking().SingleAsync();
@@ -210,6 +274,90 @@ public sealed class MonitorCoveragePostgresTests
         Assert.Equal((MonitorCoverageStates.Known, (bool?)false, "no-stop", f.Clock.Now),
             (read.State, read.Covered, read.Reason, read.CheckedAtUtc));
         Assert.Equal(MonitorStopEvidence.NotSeen, Assert.Single(read.Stops).Evidence);
+    }
+
+    [PostgresTheory] // Review: coverage never outlives the Play's open position.
+    [InlineData("closed")]
+    [InlineData("cancelled")]
+    public async Task A_play_that_closes_or_is_cancelled_is_hidden_at_once_and_its_row_removed_by_the_next_check(string ending)
+    {
+        await using var database = await DiscrepancyDatabase.Create();
+        var f = new DiscrepancyFixture();
+        f.Account.Configure(null, "0x" + Guid.NewGuid().ToString("N") + "00000000", null);
+        await database.Seed(f);
+        await using var scope = database.Scope(f);
+        var (store, coordinator) = Create(scope, f, HyperliquidPerpetualReader.Descriptor.Capabilities);
+        await CheckAsync(coordinator, store, f);
+        Assert.Single((await coordinator.AccountAsync(f.Account.Id, default)).Coverage!);
+
+        scope.Db.ChangeTracker.Clear();
+        if (ending == "closed")
+        {
+            var play = await scope.Db.Plays.SingleAsync(x => x.Id == f.Play.Id);
+            play.MarkClosed("synthetic close", f.Clock.Now);
+            await scope.Db.SaveChangesAsync();
+        }
+        // An Open Play cannot be cancelled through the domain; the read must still hide any stored row for it.
+        else await scope.Db.Plays.Where(x => x.Id == f.Play.Id).ExecuteUpdateAsync(x => x.SetProperty(p => p.Status, PlayStatus.Cancelled));
+
+        // Hidden on every read straight away: the store returns only currently Open Plays.
+        Assert.Empty(await store.CoverageAsync([f.Account.Id], default));
+        Assert.Empty((await coordinator.AccountAsync(f.Account.Id, default)).Coverage!);
+        Assert.Empty(Assert.Single((await coordinator.SummaryAsync(default)).Accounts).Coverage!);
+        Assert.Single(await scope.Db.Set<MonitorCoverage>().AsNoTracking().ToListAsync());
+
+        // The next check (the linked stop is still watched) no longer evaluates it as Open and removes the row.
+        await CheckWhenDueAsync(coordinator, store, scope, f);
+        scope.Db.ChangeTracker.Clear();
+        Assert.Empty(await scope.Db.Set<MonitorCoverage>().AsNoTracking().ToListAsync());
+    }
+
+    [PostgresFact]
+    public async Task Coverage_reads_only_open_plays_and_rows_cascade_with_their_play_and_account()
+    {
+        await using var database = await DiscrepancyDatabase.Create();
+        var f = new DiscrepancyFixture();
+        await database.Seed(f);
+        await using var scope = database.Scope(f);
+        var store = MonitorTestPaths.Store(scope.Db, scope.Work);
+        // A second, Closed Play on the account, and a third Open one without links that can be deleted on its own.
+        var closed = new Play(Guid.NewGuid(), f.Account, new("hyperliquid", "BTC"), InstrumentSource.Venue, f.Play.Plan, f.Clock.Now.AddHours(-1));
+        closed.MarkPlanned(f.Clock.Now.AddMinutes(-30)); closed.MarkOpen("fixture", f.Clock.Now.AddMinutes(-20)); closed.MarkClosed("fixture", f.Clock.Now.AddMinutes(-5));
+        var loose = new Play(Guid.NewGuid(), f.Account, new("hyperliquid", "BTC"), InstrumentSource.Venue, f.Play.Plan, f.Clock.Now.AddHours(-1));
+        loose.MarkPlanned(f.Clock.Now.AddMinutes(-30)); loose.MarkOpen("fixture", f.Clock.Now.AddMinutes(-20));
+        scope.Db.AddRange(closed, loose);
+        await scope.Db.SaveChangesAsync();
+        MonitorCoverage Row(Play play) => new()
+        {
+            PlayId = play.Id, OwnerId = f.Account.OwnerId, AccountId = f.Account.Id, ContractId = "BTC",
+            State = MonitorCoverageStates.Unknown, Reason = "incomplete-book", CheckedAtUtc = f.Clock.Now
+        };
+        await scope.Work.ExecuteAsync(async () =>
+        {
+            await store.SaveCoverageAsync(f.Account.Id, [Row(f.Play), Row(closed), Row(loose)], default);
+            return true;
+        }, default);
+
+        Assert.Equal(new[] { f.Play.Id, loose.Id }.Order(), (await store.CoverageAsync([f.Account.Id], default)).Select(x => x.PlayId).Order());
+        Assert.Equal(3, await scope.Db.Set<MonitorCoverage>().CountAsync());
+
+        // Deleting a Play removes its row with it.
+        await scope.Db.Plays.Where(x => x.Id == loose.Id).ExecuteDeleteAsync();
+        Assert.Equal(new[] { f.Play.Id, closed.Id }.Order(), await scope.Db.Set<MonitorCoverage>().Select(x => x.PlayId).OrderBy(x => x).ToListAsync());
+        // Both foreign keys cascade: an account cannot keep its Plays (they restrict it), but its rows never outlive it.
+        var rules = await scope.Db.Database.SqlQuery<string>($"""
+            SELECT confrelid::regclass::text || ':' || confdeltype::text AS "Value" FROM pg_constraint
+            WHERE conrelid = 'monitor_coverage'::regclass AND contype = 'f' ORDER BY 1
+            """).ToListAsync();
+        Assert.Equal(["accounts:c", "plays:c"], rules);
+    }
+
+    private static async Task CheckWhenDueAsync(MonitorCoordinator coordinator, MonitorStore store, DiscrepancyDatabaseScope scope, DiscrepancyFixture f)
+    {
+        scope.Db.ChangeTracker.Clear();
+        var due = (await scope.Db.Set<MonitorAccount>().AsNoTracking().SingleAsync()).NextRunAtUtc!.Value;
+        f.Clock.Now = (due > f.Clock.Now ? due : f.Clock.Now).AddSeconds(1);
+        await CheckAsync(coordinator, store, f);
     }
 
     private static (MonitorStore, MonitorCoordinator) Create(DiscrepancyDatabaseScope scope, DiscrepancyFixture f, VenueCapabilities capabilities)

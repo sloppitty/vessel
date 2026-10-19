@@ -26,13 +26,14 @@ export const shortStopFixture: MonitorDiscrepancy = {
 export const coverageFixture: MonitorCoverage = {
   playId: savedPlayFixture.summary.id, contractId: 'BTC', state: 'known', recordedState: 'known', covered: true, reason: 'stop-orders',
   checkedAtUtc: '2026-10-14T10:00:00Z',
-  stops: [{ entryId: 'entry-1', levelId: 'stop-1', evidence: 'resting', orderId: '900000029', observedAtUtc: '2026-10-14T10:00:00Z' }],
+  stops: [{ entryId: 'entry-1', levelId: 'stop-1', evidence: 'resting', orderId: '900000029', observedAtUtc: '2026-10-14T10:00:00Z',
+    price: '60000', plannedPrice: '60000' }],
 }
 /** Coverage in another state, e.g. `coverageAs('unknown', 'opposing-plays')`; evidence follows the state. */
 export const coverageAs = (state: MonitorCoverage['recordedState'], reason: string, playId = savedPlayFixture.summary.id): MonitorCoverage => ({
   ...coverageFixture, playId, state, recordedState: state, covered: state === 'known' ? coverageFixture.covered : null, reason,
-  stops: coverageFixture.stops.map(stop => state === 'unsupported' ? { ...stop, evidence: 'not-read', orderId: null, observedAtUtc: null }
-    : state === 'unknown' ? { ...stop, evidence: 'unknown', orderId: null, observedAtUtc: null } : stop),
+  stops: coverageFixture.stops.map(stop => state === 'unsupported' ? { ...stop, evidence: 'not-read', orderId: null, observedAtUtc: null, price: null }
+    : state === 'unknown' ? { ...stop, evidence: 'unknown', orderId: null, observedAtUtc: null, price: null } : stop),
 })
 export const monitorFixture: AccountMonitor = {
   accountId: accountFixture.id, state: 'live', lastAttemptAtUtc: '2026-10-14T10:00:00Z', lastSuccessAtUtc: '2026-10-14T10:00:00Z',

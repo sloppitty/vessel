@@ -97,9 +97,12 @@ describe('Chart panel', () => {
     const { state, factory } = fakeAdapter()
     const props = { entries: list, selectedId: list[0]!.id, instrument: 'BTC', onSelect: vi.fn(), createAdapter: factory,
       source: { api: chartApi(candles), accountId: accountFixture.id } }
-    const view = render(<ChartPanel {...props} stopEvidence={(entryId, levelId) =>
-      entryId === list[0]!.id && levelId === 'stop-1' ? { text: 'not seen at the venue', confirmed: false } : null} />)
+    const evidence = vi.fn((entryId: string, levelId: string) =>
+      entryId === list[0]!.id && levelId === 'stop-1' ? { text: 'not seen at the venue', confirmed: false } : null)
+    const view = render(<ChartPanel {...props} stopEvidence={evidence} />)
     expect(await screen.findByText(/Updated .* UTC/)).toBeInTheDocument()
+    // The evidence is asked at the price the line is drawn, so a stop the draft moved is judged where it now stands.
+    expect(evidence).toHaveBeenCalledWith(list[0]!.id, 'stop-1', 99)
     const stop = () => state.overlays.find(overlay => overlay.kind === 'stop')!
     expect([stop().label, stop().unconfirmed]).toEqual(['E1 SL · not seen at the venue', true])
     // Entries carry no venue claim of their own here.

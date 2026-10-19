@@ -84,8 +84,11 @@ export function levelTag(entries: readonly DraftEntry[], ref: LevelRef) {
 
 /** What the venue evidence says about one planned level: a short label in its own words, and whether an order is confirmed there. */
 export interface LevelEvidence { text: string; confirmed: boolean }
-/** Evidence for a planned stop by entry and level, or null when there is nothing to say about it. */
-export type StopEvidenceOf = (entryId: string, levelId: string) => LevelEvidence | null
+/**
+ * Evidence for a planned stop by entry and level, at the price the line is drawn (an unsaved draft may have moved it), or
+ * null when there is nothing to say about it.
+ */
+export type StopEvidenceOf = (entryId: string, levelId: string, price: number) => LevelEvidence | null
 
 /**
  * Chart levels for the plan. With `stopEvidence`, each stop's tag adds the evidence's words ("SL · not seen at the venue")
@@ -106,7 +109,7 @@ export function planOverlays(entries: readonly DraftEntry[], selectedId: string,
       const price = levelPrice(entryPrice, exit, kind, direction, leverage)
       const ref = { entryId: entry.id, kind, levelId: exit.id }
       if (price === null) continue
-      const evidence = kind === 'stop' ? stopEvidence?.(entry.id, exit.id) ?? null : null
+      const evidence = kind === 'stop' ? stopEvidence?.(entry.id, exit.id, price) ?? null : null
       const tag = levelTag(entries, ref)
       overlays.push({ ...base, id: overlayId(ref), label: evidence ? `${tag} · ${evidence.text}` : tag, price, kind, color: kind === 'stop' ? stopColor : targetColor,
         ...evidence ? { unconfirmed: !evidence.confirmed } : {} })

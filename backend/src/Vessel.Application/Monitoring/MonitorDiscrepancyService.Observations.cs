@@ -318,42 +318,52 @@ public sealed partial class MonitorDiscrepancyService
                 new { coverage = details, levels = levelRows }, new { quantity = details.quantity, levels = levelRows });
 
             if (!open) return;
-            // The recorded coverage outcome follows the same evidence as the checks above. Missing evidence comes first;
-            // then a structural unknown (opposing Plays, a shared stop the position cannot allocate) is unknown, never
-            // missing; a whole-position stop covering several same-direction Plays is shared.
+            // The recorded coverage outcome follows the same evidence as the checks above. Missing evidence comes first,
+            // each with its own reason; only then a structural unknown (opposing Plays, a shared stop the position cannot
+            // allocate), which is unknown, never missing; a whole-position stop covering several same-direction Plays is shared.
             var (state, covered, reason) =
                 !bookRead ? (MonitorCoverageStates.Unsupported, (bool?)null, "current-book-not-read") :
                 observation.HistoryGap ? (MonitorCoverageStates.Unknown, null, "history-gap") :
                 sync.OmittedExecutions > 0 ? (MonitorCoverageStates.Unknown, null, "omitted-executions") :
                 !p.Valid ? (MonitorCoverageStates.Unknown, null, "quantity-unknown") :
                 orders is null ? (MonitorCoverageStates.Unknown, null, "orders-unavailable") :
-                !completeOrders ? (MonitorCoverageStates.Unknown, null, "incomplete-book") :
+                !ordersFresh ? (MonitorCoverageStates.Unknown, null, "stale-order-read") :
+                // Duplicate rows, an order on another native market or a status newer than the read.
+                !knownOrders ? (MonitorCoverageStates.Unknown, null, "order-read-unreliable") :
+                !orders.OpenOrdersComplete ? (MonitorCoverageStates.Unknown, null, "incomplete-book") :
                 !freshQuantity ? (MonitorCoverageStates.Unknown, null, "fills-after-read") :
                 !mechanicsKnown ? (MonitorCoverageStates.Unknown, null, "mechanics") :
                 cancelledPresent == true ? (MonitorCoverageStates.Known, false, "cancelled") :
                 ownWholeStop || siblingWholeStop ?
                     established ? (MonitorCoverageStates.Known, true, "whole-position-stop") :
-                    position?.Opposing == true ? (MonitorCoverageStates.Unknown, null, "opposing-plays") :
                     agrees is null ? (MonitorCoverageStates.Unknown, null, "position-unknown") :
+                    position!.Opposing ? (MonitorCoverageStates.Unknown, null, "opposing-plays") :
                     agrees == false ? (MonitorCoverageStates.Unknown, null, "position-mismatch") :
                     (MonitorCoverageStates.Shared, null, "shared-whole-position-stop") :
                 stops.Length == 0 ? (MonitorCoverageStates.Known, false, "no-stop") :
                 Compare(stopQuantity, p.Quantity, p.Instrument) < 0 ? (MonitorCoverageStates.Known, false, "short") :
                 (MonitorCoverageStates.Known, true, "stop-orders");
-            // Each planned stop level in the evidence's own terms: its linked order rested in the current book, a complete
-            // fresh book had none, the book could not tell, or the venue's book is not read at all.
+            // Each planned stop level in the evidence's own terms, counting only what coverage counts as a stop: a linked
+            // order resting in the current book on the closing side with stop mechanics. Resting at the planned price (the
+            // matcher's step) confirms the level; resting elsewhere is said with its price; a resting linked order that is
+            // not a recognized closing stop proves nothing. Otherwise a complete fresh book had none, or the book could not tell.
             var stopEvidence = ExecutionMatcher.Levels(p.Plan).Where(x => x.Role == OrderLinkRole.Stop && x.EntryId is not null && x.LevelId is not null)
                 .Select(level =>
                 {
+                    MonitorStopEvidenceDto Evidence(string evidence, (PlayOrderLink Link, VenueOrder? Order)? row = null, DateTimeOffset? observed = null) =>
+                        new(level.EntryId!, level.LevelId!, evidence, row is { } r ? External(r.Link) : null, observed,
+                            row is { Order: { } order } ? ExactAmount.From(order.ActingPrice).ToString() : null,
+                            level.Price is { } planned ? ExactAmount.From(planned).ToString() : null);
+                    if (!bookRead) return Evidence(MonitorStopEvidence.NotRead);
                     var linked = scoped.Where(x => x.Link.Role == OrderLinkRole.Stop && x.Link.LevelKey == level.Key).ToArray();
-                    var restingLink = linked.FirstOrDefault(x => Resting(x.Order)).Link;
-                    return !bookRead ? new MonitorStopEvidenceDto(level.EntryId!, level.LevelId!, MonitorStopEvidence.NotRead, null, null) :
-                        knownOrders && restingLink is not null
-                            ? new MonitorStopEvidenceDto(level.EntryId!, level.LevelId!, MonitorStopEvidence.Resting, External(restingLink), at) :
-                        completeOrders
-                            ? new MonitorStopEvidenceDto(level.EntryId!, level.LevelId!, MonitorStopEvidence.NotSeen,
-                                linked.Length == 0 ? null : External(linked[0].Link), at)
-                            : new MonitorStopEvidenceDto(level.EntryId!, level.LevelId!, MonitorStopEvidence.Unknown, null, null);
+                    var resting = knownOrders ? linked.Where(x => Resting(x.Order)).ToArray() : [];
+                    var protective = resting.Where(x => x.Order!.Side == exitSide && OrderMechanics.Classify(x.Order) == OrderMechanism.Stop).ToArray();
+                    var atLevel = protective.Where(x => level.Price is { } planned && ExecutionMatcher.Near(x.Order!.ActingPrice, planned, p.Instrument.PriceStep)).ToArray();
+                    return atLevel.Length > 0 ? Evidence(MonitorStopEvidence.Resting, atLevel[0], at) :
+                        protective.Length > 0 ? Evidence(MonitorStopEvidence.RestingElsewhere, protective[0], at) :
+                        resting.Length > 0 ? Evidence(MonitorStopEvidence.Unknown, resting[0]) :
+                        completeOrders ? Evidence(MonitorStopEvidence.NotSeen, linked.Length == 0 ? null : linked[0], at) :
+                        Evidence(MonitorStopEvidence.Unknown);
                 }).ToArray();
             scan.Coverage!.Add(new(play.Id, p.Instrument.ContractId, state, covered, reason, stopEvidence));
         }

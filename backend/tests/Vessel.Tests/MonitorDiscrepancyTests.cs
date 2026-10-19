@@ -472,7 +472,7 @@ internal sealed class DiscrepancyFixture
     public readonly List<VenueOrder> VenueOrders = [];
     public decimal Position = 1;
     public decimal? PriceStep;
-    public bool PositionsComplete = true, OrdersComplete = true, HistoryGap, StampOpenOrders = true, Retired;
+    public bool PositionsComplete = true, OrdersComplete = true, HistoryGap, StampOpenOrders = true, Retired, CurrentOrderBook = true;
     public bool? Truncated;
     public int Omitted;
     public TimeSpan ObservationOffset;
@@ -541,7 +541,7 @@ internal sealed class DiscrepancyFixture
         return new(Guid.NewGuid(), Account, new(new(new(at, "primary-perpetuals", 100, 100, 0,
             Position == 0 || Retired ? [] : [new("BTC", Position, 100, 0, 0, 1)]), Retired ? [] : [new("BTC", 4, 10, "USDC", PriceStep)], [], "bounded",
             PositionsComplete, false, Truncated, OmittedExecutions: Omitted), new(VenueOrders.Select(x => StampOpenOrders && x.Status == VenueOrderStatus.Open ? x with { StatusAtUtc = at } : x).ToArray(), at, "bounded", OrdersComplete)),
-            null, null, HistoryGap, "scheduled");
+            null, null, HistoryGap, "scheduled", CurrentOrderBook);
     }
     public Task<MonitorEvaluationResult> Evaluate() => Service.EvaluateAsync(Observation(), default);
     public async Task Confirm() { await Evaluate(); Advance(60); await Evaluate(); }

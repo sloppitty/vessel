@@ -254,11 +254,12 @@ public sealed class MonitorEndToEndTests
             fixture.Clock.GetUtcNow().AddMinutes(-30)), json);
         var watch = JsonSerializer.SerializeToElement(new MonitorWatchDto(Guid.NewGuid(), fixture.BtcPlay, "exit-order", "stop", "unverifiable",
             fixture.Clock.GetUtcNow(), fixture.Clock.GetUtcNow()), json);
-        // Stop coverage needs an Open Play: a known covered outcome with dated resting evidence, and a stale unsupported one.
+        // Stop coverage needs an Open Play: a known covered outcome whose stop rests away from its planned price, and a
+        // stale unsupported one.
         var coverage = JsonSerializer.SerializeToElement(new MonitorCoverageDto(fixture.BtcPlay, "BTC", "known", "known", true, "stop-orders",
-            fixture.Clock.GetUtcNow(), [new("entry-1", "stop-1", "resting", "stop-order", fixture.Clock.GetUtcNow())]), json);
+            fixture.Clock.GetUtcNow(), [new("entry-1", "stop-1", "resting-elsewhere", "stop-order", fixture.Clock.GetUtcNow(), "94.5", "95")]), json);
         var coverageUnsupported = JsonSerializer.SerializeToElement(new MonitorCoverageDto(fixture.BtcPlay, "BTC", "stale", "unsupported", null,
-            "current-book-not-read", fixture.Clock.GetUtcNow().AddMinutes(-30), [new("entry-1", "stop-1", "not-read", null, null)]), json);
+            "current-book-not-read", fixture.Clock.GetUtcNow().AddMinutes(-30), [new("entry-1", "stop-1", "not-read", null, null, null, "95")]), json);
         var document = new JsonObject
         {
             ["runAccepted"] = JsonNode.Parse(accepted.GetRawText()),

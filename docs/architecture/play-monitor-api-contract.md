@@ -151,26 +151,29 @@ interface MonitorCoverage {
   state: 'known' | 'shared' | 'unknown' | 'unsupported' | 'stale'
   recordedState: 'known' | 'shared' | 'unknown' | 'unsupported'
   covered: boolean | null // only for recordedState 'known'; null otherwise, never omitted
-  reason: string          // e.g. 'stop-orders', 'no-stop', 'opposing-plays', 'incomplete-book', 'current-book-not-read'
+  reason: string          // e.g. 'stop-orders', 'no-stop', 'short', 'opposing-plays', 'stale-order-read', 'current-book-not-read'
   checkedAtUtc: string
   stops: MonitorStopEvidence[]
 }
 interface MonitorStopEvidence {
   entryId: string
   levelId: string
-  // resting: a linked order rested in the current book at observedAtUtc; not-seen: a complete, fresh book had none;
+  // resting: a linked closing stop (exit side, stop mechanics) rested in the current book at observedAtUtc, at the saved
+  // level price within the matcher's step; resting-elsewhere: the same at another price; not-seen: a complete, fresh book had none;
   // unknown: the book could not tell; not-read: the venue's order reader does not return the current book.
-  evidence: 'resting' | 'not-seen' | 'unknown' | 'not-read'
+  evidence: 'resting' | 'resting-elsewhere' | 'not-seen' | 'unknown' | 'not-read'
   orderId: string | null
-  observedAtUtc: string | null // always set for resting
+  observedAtUtc: string | null // always set for both resting kinds
+  price: string | null          // the resting order's exact acting price; always set for both resting kinds
+  plannedPrice: string | null   // the saved level price the check compared it with; null for an unpriced level
 }
 ```
 
 States and reasons are listed in the [monitor plan](play-monitor-plan.md#stop-coverage). `unsupported` comes from the `currentOrderBook` venue capability ([venue registry](venue-registry.md#current-order-book-october-19-2026)), never a venue name. Coverage is a record, not a discrepancy, and never counts as an incident.
 
 The browser:
-- heads the monitor panel with open incidents first (0.4a), then with coverage that is not plainly covered, least certain first: "Stop not seen at the venue" (known, not covered), "Stop coverage unknown", "Stop coverage stale", "Current book not read", "Stop shared with other Plays". It says "Monitored" only when the run is live and every recorded Play in scope is known covered. The Execution tab scopes this to its own Play; account detail to the account;
-- adds one line per distinct outcome that is not plainly covered (the reason in words, with a count when several Plays share it), and, where the venue states `currentOrderBook: false`, "Missing, short and cancelled stop checks do not run here" even before a Play is open;
-- labels each planned stop of an Open, tracked Play on the chart with the evidence's words: "resting as of <time>" (confirmed only while the record is not stale), "not seen at the venue", "unknown" (no recorded check, a level the check did not record, or stale absence) or "not read" (not monitored, or no current book). A stop without a confirmed resting order is drawn with a hollow tag and a fainter, sparser line in its theme colour; positions and layout do not change. Drafts and plans without an Open position keep their plain tags.
+- heads the monitor panel with open incidents first (0.4a), then with coverage that is not plainly covered. A known uncovered Play is named by its reason, most serious first: "Stop cancelled at the venue", "No stop at the venue", "Stop short of the position" (any other reason: "Stop does not cover the position"). Then, least certain first: "Stop coverage unknown", "Stop coverage not checked yet" (an Open, tracked Play with no recorded row, e.g. after the migration or once reconciliation opens it, until the next check), "Stop coverage stale", "Current book not read", "Stop shared with other Plays". It says "Monitored" only when the run is live and every Play in scope is recorded and known covered. The Execution tab scopes this to its own Play; account detail to the account's recorded rows;
+- adds one line per distinct outcome that is not plainly covered (the reason in words, with a count when several Plays share it), and, where the venue states `currentOrderBook: false`, even before a Play is open: "Order-book checks do not run here: missing, short, cancelled and excess stops, orphaned exits and entries, and level drift. This venue does not return its current order book.";
+- labels each planned stop of an Open, tracked Play on the chart with the evidence's words, times in UTC like the chart axis and captures: "resting as of Oct 14, 14:02 UTC" (confirmed only for `resting` while the record is not stale and the drawn line still stands at `plannedPrice`), "resting at <price> as of …" (`resting-elsewhere`, or a line the unsaved draft moved away from the saved level), "not seen at the venue", "unknown" (no recorded check, a level the check did not record, stale absence, or a resting linked order that is not a recognized closing stop) or "not read" (not monitored, or no current book). A stop without a confirmed resting order is drawn with a hollow tag and a fainter, sparser line in its theme colour; positions and layout do not change. Drafts and plans without an Open position keep their plain tags.
 
 The contract fixture (`frontend/src/test/contracts/monitor-api.json`) records real coverage from the end-to-end flow (an Open ETH Play with a resting linked stop) plus serialized known and stale unsupported samples.

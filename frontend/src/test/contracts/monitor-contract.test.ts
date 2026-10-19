@@ -32,11 +32,12 @@ describe('monitor API contract fixture', () => {
   it('records stop coverage on every account monitor and its states with explicit nulls (Phase 0, 0.4c)', () => {
     // The end-to-end account holds an Open ETH Play whose linked stop rests: a real check recorded its coverage.
     expect(fixture.accountMonitorIdle).toMatchObject({ coverage: [{ contractId: 'ETH', state: 'known', recordedState: 'known', covered: true,
-      reason: 'stop-orders', stops: [{ evidence: 'resting', orderId: expect.any(String), observedAtUtc: expect.any(String) }] }] })
+      reason: 'stop-orders', stops: [{ evidence: expect.stringMatching(/^resting/), orderId: expect.any(String), observedAtUtc: expect.any(String),
+        price: expect.any(String), plannedPrice: expect.any(String) }] }] })
     expect(fixture.coverage).toMatchObject({ state: 'known', recordedState: 'known', covered: true, reason: 'stop-orders',
-      stops: [{ evidence: 'resting', observedAtUtc: expect.any(String) }] })
+      stops: [{ evidence: 'resting-elsewhere', observedAtUtc: expect.any(String), price: '94.5', plannedPrice: '95' }] })
     expect(fixture.coverageUnsupported).toMatchObject({ state: 'stale', recordedState: 'unsupported', covered: null,
-      reason: 'current-book-not-read', stops: [{ evidence: 'not-read', orderId: null, observedAtUtc: null }] })
+      reason: 'current-book-not-read', stops: [{ evidence: 'not-read', orderId: null, observedAtUtc: null, price: null, plannedPrice: '95' }] })
   })
   it('records an accepted owner Check as pending with its trigger, and its completion event', () => {
     expect(fixture.runAccepted).toMatchObject({ monitor: { manualState: 'pending', runTrigger: 'owner' } })

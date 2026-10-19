@@ -91,7 +91,13 @@ describe('monitor contract', () => {
     const stop = coverageFixture.stops[0]!
     expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, observedAtUtc: null }] })).toBe(false)
     expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, evidence: 'seen' }] })).toBe(false)
-    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, evidence: 'not-seen', observedAtUtc: null, orderId: null }] })).toBe(true)
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, evidence: 'not-seen', observedAtUtc: null, orderId: null, price: null }] })).toBe(true)
+    // Both resting kinds carry the order's exact acting price; prices are plain decimals or null.
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, evidence: 'resting-elsewhere', price: '59000' }] })).toBe(true)
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, evidence: 'resting-elsewhere', price: null }] })).toBe(false)
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, price: null }] })).toBe(false)
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, plannedPrice: null }] })).toBe(true)
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, plannedPrice: '6e4' }] })).toBe(false)
   })
   it('validates watched orders and keeps a watching order open-ended', () => {
     const watch = { linkId: 'link-1', playId: savedPlayFixture.summary.id, orderId: 'exit-1', role: 'stop', state: 'unverifiable',

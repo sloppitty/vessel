@@ -21,6 +21,8 @@ const reasons: Record<string, string> = {
   'history-gap': 'The fill history may have a gap.',
   'omitted-executions': 'The venue reported executions Vessel could not verify.',
   'incomplete-book': 'The open-order read was incomplete.',
+  'stale-order-read': 'The open-order read was too old to rely on.',
+  'order-read-unreliable': 'The open-order read was inconsistent (a repeated order, another market or a newer status).',
   'orders-unavailable': 'Orders could not be read.',
   'fills-after-read': 'Fills arrived after the order read.',
   mechanics: 'A linked stop\'s trigger mechanics were not recognized.',
@@ -29,37 +31,50 @@ const reasons: Record<string, string> = {
 }
 
 /** Said wherever the venue's order reader does not return the current order book. */
-export const currentBookNotRead = 'Missing, short and cancelled stop checks do not run here: this venue\'s order reader does not return the current order book.'
+export const currentBookNotRead = 'Order-book checks do not run here: missing, short, cancelled and excess stops, orphaned exits and entries, and level drift. This venue does not return its current order book.'
+
+/** Said for an Open, tracked Play that no check has recorded yet. */
+export const notCheckedYet = 'This Play\'s stop coverage has not been checked yet.'
 
 export const coverageReason = (code: string) => reasons[code] ?? 'The monitor recorded no further detail.'
 
 const uncovered = (row: MonitorCoverage) => row.state === 'known' && row.covered === false
+/** Known uncovered headings, most serious first; the reason decides the words. */
+const uncoveredHeadings: [reason: string, heading: string][] = [
+  ['cancelled', 'Stop cancelled at the venue'],
+  ['no-stop', 'No stop at the venue'],
+  ['short', 'Stop short of the position'],
+]
 
 /**
  * The heading for the coverage in scope, least certain first, or null when every recorded Play is covered (or none is
- * recorded), so the run state ("Monitored") may head the panel.
+ * recorded), so the run state ("Monitored") may head the panel. `unchecked` marks an Open, tracked Play in scope that no
+ * check has recorded yet: it is never "Monitored".
  */
-export function coverageHeading(rows: readonly MonitorCoverage[]): string | null {
-  if (rows.some(uncovered)) return 'Stop not seen at the venue'
+export function coverageHeading(rows: readonly MonitorCoverage[], unchecked = false): string | null {
+  const open = rows.filter(uncovered)
+  if (open.length) return uncoveredHeadings.find(([reason]) => open.some(row => row.reason === reason))?.[1] ?? 'Stop does not cover the position'
   if (rows.some(row => row.state === 'unknown')) return 'Stop coverage unknown'
+  if (unchecked) return 'Stop coverage not checked yet'
   if (rows.some(row => row.state === 'stale')) return 'Stop coverage stale'
   if (rows.some(row => row.state === 'unsupported')) return 'Current book not read'
   if (rows.some(row => row.state === 'shared')) return 'Stop shared with other Plays'
   return null
 }
 
-/** The heading's tone: uncovered and unknown coverage warn; stale, unsupported and shared stay neutral. */
-export const coverageTone = (rows: readonly MonitorCoverage[]): 'warning' | 'info' | null =>
-  rows.some(uncovered) || rows.some(row => row.state === 'unknown') ? 'warning'
+/** The heading's tone: uncovered, unknown and unchecked coverage warn; stale, unsupported and shared stay neutral. */
+export const coverageTone = (rows: readonly MonitorCoverage[], unchecked = false): 'warning' | 'info' | null =>
+  unchecked || rows.some(uncovered) || rows.some(row => row.state === 'unknown') ? 'warning'
     : rows.some(row => row.state !== 'known') ? 'info' : null
 
 /**
  * One line per distinct outcome that is not plain covered, with the number of Plays when there are several.
  * `currentBookRead: false` (the venue capability) states the unsupported checks even before a Play is open.
  */
-export function coverageLines(rows: readonly MonitorCoverage[], time: (value: string) => string, currentBookRead = true): string[] {
+export function coverageLines(rows: readonly MonitorCoverage[], time: (value: string) => string, currentBookRead = true, unchecked = false): string[] {
   const lines = new Map<string, { text: string; count: number }>()
   const add = (key: string, text: string) => { const line = lines.get(key); lines.set(key, { text, count: (line?.count ?? 0) + 1 }) }
+  if (unchecked) add('unchecked', notCheckedYet)
   for (const row of rows) {
     if (row.state === 'known' && row.covered) continue
     if (row.state === 'stale') add(`stale|${row.checkedAtUtc}`, `Stop coverage was last checked ${time(row.checkedAtUtc)} and is out of date.`)
@@ -71,28 +86,45 @@ export function coverageLines(rows: readonly MonitorCoverage[], time: (value: st
   return [...lines.values()].map(line => line.count > 1 ? `${line.count} Plays · ${line.text}` : line.text)
 }
 
-const defaultTime = (value: string) => new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+// The chart's own time format (axis, "Updated … UTC", capture stamp): UTC and said so, since the label is drawn on the canvas.
+const utcFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' })
+/** A chart label time such as "Oct 14, 14:02 UTC", whatever the browser's zone. */
+export const chartUtcTime = (value: string) => `${utcFormat.format(new Date(value))} UTC`
 const unknown: LevelEvidence = { text: 'unknown', confirmed: false }
 const notRead: LevelEvidence = { text: 'not read', confirmed: false }
+/** The drawn level still stands at the saved price the check compared (both come from the same plan text). */
+const atSavedPrice = (drawn: number, saved: string | null) => {
+  if (saved === null) return false
+  const planned = Number(saved)
+  return Number.isFinite(planned) && Math.abs(drawn - planned) <= Math.abs(planned) * 1e-9
+}
 
 /**
- * What the venue evidence says about each planned stop of an Open, tracked Play, for the chart's level tags. Only a stop
- * the last current check saw resting is confirmed ("resting as of 14:02"); anything else keeps the evidence's own words:
- * "not seen at the venue", "unknown", or "not read" where nothing reads the venue's current book. Undefined where the
- * plan makes no venue claim (drafts, plans before an entry fills, untracked Plays), so the plan keeps its plain tags.
+ * What the venue evidence says about each planned stop of an Open, tracked Play, for the chart's level tags. Only a
+ * linked closing stop the last current check saw resting at the saved level confirms it ("resting as of Oct 14, 14:02
+ * UTC"), and only while the drawn line still stands there and the record is not stale. A stop resting at another price,
+ * or a line the unsaved draft has moved, says where the order rests ("resting at 95 as of …"). Anything else keeps the
+ * evidence's own words: "not seen at the venue", "unknown", or "not read" where nothing reads the venue's current book.
+ * Undefined where the plan makes no venue claim (drafts, plans before an entry fills, untracked Plays).
  */
-export function stopEvidenceFor(execution: PlayExecution | null | undefined, time: (value: string) => string = defaultTime): StopEvidenceOf | undefined {
+export function stopEvidenceFor(execution: PlayExecution | null | undefined, time: (value: string) => string = chartUtcTime): StopEvidenceOf | undefined {
   if (!execution || execution.status !== 'open' || !execution.tracked) return undefined
   if (!execution.monitor) return () => notRead
   const coverage = execution.monitor.coverage?.find(row => row.playId === execution.playId)
   if (!coverage) return () => unknown
   const stale = coverage.state === 'stale'
-  return (entryId, levelId) => {
+  return (entryId, levelId, price) => {
     const stop = coverage.stops.find(item => item.entryId === entryId && item.levelId === levelId)
     if (!stop) return coverage.recordedState === 'unsupported' ? notRead : unknown
     switch (stop.evidence) {
-      // Stale evidence keeps its date but no longer confirms anything.
-      case 'resting': return stop.observedAtUtc ? { text: `resting as of ${time(stop.observedAtUtc)}`, confirmed: !stale } : unknown
+      case 'resting':
+      case 'resting-elsewhere': {
+        if (!stop.observedAtUtc) return unknown
+        const asOf = ` as of ${time(stop.observedAtUtc)}`
+        // Stale evidence keeps its date but no longer confirms anything.
+        if (stop.evidence === 'resting' && atSavedPrice(price, stop.plannedPrice)) return { text: `resting${asOf}`, confirmed: !stale }
+        return { text: stop.price ? `resting at ${stop.price}${asOf}` : `resting elsewhere${asOf}`, confirmed: false }
+      }
       case 'not-seen': return stale ? unknown : { text: 'not seen at the venue', confirmed: false }
       case 'not-read': return notRead
       default: return unknown
