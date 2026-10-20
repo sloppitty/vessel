@@ -693,3 +693,10 @@ October 20, 2026, branch `t3/phase1-time`, stacked on 1.6b–d:
   - **Overview window (low).** "About these numbers" showed the window's ends as raw ISO times. They use the shared
     time now.
   - **Check.** `scripts/check.sh` passed again: backend 3,612 passed, 5 skipped; frontend 155 files and 3,855 tests.
+
+- **Sol (Codex) round 3.** Both round-2 fixes confirmed. One new finding, fixed:
+  - **Sub-second corrections (medium).** The audit history showed times to the second, so a correction of a fraction
+    looked unchanged. Manual records, their audit and the correction choices now use an exact style that keeps the
+    stored fraction digit for digit. A test shows a 0.1 s to 0.9 s correction. Tests now restore an unset process time
+    zone by deleting it, since assigning undefined set it to "undefined".
+  - **Check.** `scripts/check.sh` passed again: backend 3,612 passed, 5 skipped; frontend 155 files and 3,856 tests.
