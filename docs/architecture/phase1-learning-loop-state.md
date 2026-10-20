@@ -189,6 +189,16 @@ October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
     again; the Log that sent it already shows the returned list. A test fails without this fix.
   - **Check.** `scripts/check.sh` passed again: backend 3,591 passed, 5 skipped; frontend 152 files and 3,802 tests.
 
+- **Sol (Codex) round 4.** Two new findings, both fixed:
+  - **A page that has gone (medium).** Round 3 stopped a gone page from publishing, but that dropped its write's
+    acknowledgement. The shell now takes the change through `onLogChange` and applies it to its current session under
+    its API and work checks, so newer text survives, the entry shows and a discarded session is never changed. The
+    page test checks the entry appears.
+  - **A replaced attempt (medium).** A delayed write whose draft had moved on to another entry did not refresh the
+    list. Every confirmed write for the Play now counts, whichever request owns the draft; only the entry a write sent
+    is cleared. A test fails without this fix.
+  - **Check.** `scripts/check.sh` passed again: backend 3,591 passed, 5 skipped; frontend 152 files and 3,803 tests.
+
 ## 1.3 Record repair
 
 Not started.
