@@ -145,6 +145,17 @@ October 20, 2026, branch `t3/phase1-fill-markers`, stacked on 1.4b:
   - The candle chart shows the hovered fill's tooltip and lists every fill.
 - **Checks.** `scripts/check.sh` passed: backend 3,608 passed, 5 skipped; frontend 153 files and 3,825 tests; build clean.
 
+- **Sol (Codex) round 1.** Three findings, all fixed:
+  - **Fractional end (medium).** A quarter of a trade with millisecond fills could be fractional, which the candle
+    request refuses. The focus is rounded out to whole milliseconds.
+  - **Late fills (medium).** When today's candles loaded before the Play's fills, the trade's candles arrived without a
+    reset, so the focus never applied. The anchor is now part of the chart's view key, so they arrive as a reset. A
+    test with candles before fills fails without this fix.
+  - **Gaps and lone candles (medium).** A marker took the span of the neighbouring candles, or an endless one for a lone
+    candle. Each marker now carries its interval and sits on a candle only within that candle's own span. Adapter
+    tests cover a gap, a sparse end and a lone candle.
+  - **Check.** `scripts/check.sh` passed again: backend 3,609 passed, 5 skipped; frontend 153 files and 3,829 tests.
+
 ## 1.2 Honest review queue and in-trade log
 
 October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
