@@ -16,6 +16,13 @@
   in the Execution panel and Review; Review and sizing count sign differences
   and fee-only losses. R is labelled "Estimated R (planned-stop model)". The
   scored basis is unchanged (D-01, F-09, I-04, I-05).
+- Review can include closed imported positions that belong to no Play. An
+  "Include imported positions" switch is automatic by default: positions are
+  included while the selection has fewer scored Plays than a threshold (5 by
+  default, set in Settings → Review, stored in the browser). A Play weighs
+  twice a position in batting average, average gain and loss, payoff and
+  expectancy; net P&L, profit factor, drawdown, streaks and counts are not
+  weighted. Positions have no plan, R or review and never become Plays.
 
 ### Fixed
 

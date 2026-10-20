@@ -1,0 +1,5 @@
+/* Review section of Settings. Theme tokens only. */
+.review-settings-field { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; font-size: var(--text-sm); color: var(--foreground); }
+.review-settings-field input { width: 6rem; flex: none; }
+.review-settings p { font-size: var(--text-xs); color: var(--muted-foreground); }
+.review-settings p.review-settings-error { color: var(--destructive); }
