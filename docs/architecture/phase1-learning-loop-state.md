@@ -118,7 +118,46 @@ October 20, 2026, branch `t3/phase1-receipt`, stacked on the integration base:
 
 ## 1.2 Honest review queue and in-trade log
 
-Not started.
+October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
+- **Completion (D-14, decision 3).**
+  - A Play records a review completion kind (`completed`, `not-needed` or `legacy`) and its time.
+  - **Complete review** works on a Closed or Cancelled Play with unchanged text or none. A save of changed structured
+    answers on an ended Play completes it too. **No review needed** is offered on a Cancelled Play unless its receipt
+    shows fills, and the server refuses it with 409 when the Play has a linked fill or a manual execution.
+  - **Review again** clears the completion. Text and answers stay.
+  - Writing text never completes a review. `ReviewedAtUtc` still means "review last edited".
+  - Each action is a review revision with its action and time. History names it: "review completed", "reviewed
+    again" or "no review needed".
+  - The three actions are version-checked against the Play and return 409 when it changed.
+- **Lists and Review.** Needs review and Reviewed read the completion. Review's count is "Completed reviews".
+- **Legacy.** The explicit migration `20261020093407_ReviewCompletion` records a `legacy` completion for every Closed
+  or Cancelled Play the Reviewed view listed before, at its `ReviewedAtUtc`, else its end time. Nothing else changes, and
+  saved text is never moved or rewritten.
+- **In-trade log (G-04).**
+  - The journal's Log tab, after Evidence, takes append-only, timestamped entries of up to 2,000 characters on any
+    saved Play, each with an optional state: calm, rushed, FOMO, tired or after a loss.
+  - Entries live in their own owner-scoped `play_notes` table. They cannot be edited or deleted, and they never count
+    as a review or feed Review.
+  - An entry is written idempotently by its request ID, so a retried request never writes it twice, and the same ID
+    with different content gets 409. Appending never changes the Play, so it is not version-checked. A Play holds at
+    most 500 entries.
+- **Open Plays.** The Review box stays, with a hint that the Log is for in-trade notes and that the review completes
+  after the Play ends.
+- **Not in this pull request.** Leaving a final state (an Unresolved Play returning to Open, or venue facts closing
+  it) arrives with Unresolved in 1.3a. Today no Play leaves Closed or Cancelled.
+- **Tests.**
+  - Domain and service: completion paths, Review again, No review needed with and without fills, unchanged and changed
+    answers, versions, and the log's idempotency and text bounds.
+  - PostgreSQL: `Verify2.F8` and `More4.EarlyReview` (a note written while Open lands in Needs review after the close
+    until Complete review), Complete review with unchanged text and Review again, a no-fill cancellation leaving the
+    queue in one step, a log entry changing neither list, and the migration's legacy backfill down to `PlanPreflight`
+    and back up. The two-owner isolation test covers the five new routes.
+  - Older-schema migration tests insert Plays through `LegacyPlayRows`, because EF now maps the new columns.
+  - Frontend: the completion bar, the log, History's actions, the Plays page's Complete review and the response
+    guards.
+- **Checks.** `scripts/check.sh` passed on main: backend 3,588 passed, 5 skipped; frontend 152 files and 3,790 tests;
+  build clean. A first run had one isolation test time out under a load average near 60 from other work; it passed
+  alone, and the full rerun passed.
 
 ## 1.3 Record repair
 
