@@ -162,6 +162,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const venues = useVenues()
   const account = accounts.find(item => item.id === (saved?.summary.accountId ?? draft.accountId))
   const manual = !!account && venues.can(account.venueId, 'manualExecutions')
+  const currentBookRead = !account || venues.readsCurrentBook(account.venueId)
   const retrospective = saved?.summary.origin === 'retrospective'
   // Record-based suggestions also follow accepted stored-state reloads.
   const sizing = useSizing(api, reloadGeneration, visible)
@@ -491,7 +492,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         onStored={acceptStoredPlay} onBegin={() => latest.current.saved?.summary.id === saved?.summary.id ? beginWork('manual') : null} />
         : saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy}
         entries={draft.entries} direction={draft.direction} origin={saved.summary.origin} monitor={monitorRun.monitor} monitorBusy={monitorRun.busy} monitorError={monitorRun.error} retryAtUtc={monitorRun.retryAtUtc} monitorUnavailable={monitorRun.statusUnavailable}
-        currentBookRead={!account || venues.readsCurrentBook(account.venueId)}
+        currentBookRead={currentBookRead}
         {...(onManageAccount && account ? { onManageCredential: () => onManageAccount(account.id) } : {})}
         onDismiss={tracking.dismiss} onCheck={() => { void monitorRun.check() }} onLink={request => { void tracking.link(request) }}
         onUnlink={linkId => { void tracking.unlink(linkId) }}
