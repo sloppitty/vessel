@@ -69,6 +69,12 @@
 .pr-reset { display: flex; align-items: center; justify-content: center; gap: 7px; height: 36px; padding: 0 10px !important; }
 .pr-scope { display: flex; justify-content: space-between; gap: 8px; font-size: var(--text-2xs); color: var(--pr-muted); margin: 12px 0 23px; }
 .pr-scope > span { padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-sunken); line-height: 18px; }
+.pr-scope > .pr-positions-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none; line-height: 1.4; }
+.pr-positions-toggle label { display: inline-flex; align-items: center; gap: 7px; color: var(--foreground); font-size: var(--text-xs); }
+.pr-positions-toggle input[type='checkbox'] { width: 15px; height: 15px; accent-color: var(--ring); }
+.pr-positions-toggle small { padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-sunken); line-height: 18px; }
+.pr-weight-note { margin-left: auto; margin-right: 12px; font-size: var(--text-2xs); color: var(--muted-foreground); }
+.pr-position-title { cursor: default; }
 .pr-periods { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--pr-border); border-radius: var(--radius-panel); overflow: hidden; background: var(--card); box-shadow: var(--elevation-2); }
 .pr-periods button { padding: 15px 19px 14px; position: relative; text-align: left; border-right: 1px solid var(--pr-border); transition: background .15s; }
 .pr-periods button:last-child { border-right: none; }

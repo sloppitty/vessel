@@ -258,6 +258,55 @@ it.
 The Average outcome card gains the sign-differs and fee-only-loss rows; nothing
 moves. Older servers omit the new fields and the browser omits the figures.
 
+## Imported positions (October 20, 2026)
+
+The owner asked Review to use imported positions when there are no Plays, with
+documented Plays weighing more, a toggle and a configurable threshold.
+
+- **What is added.** Closed Activity operations whose fills belong to no Play
+  (`playAssociation` `unassigned`), on the selection's enabled accounts and
+  asset. Eligibility is the sizing fallback's rule, shared through
+  `SizingService.CompleteOperationsAsync`: closed, known direction and net
+  result, positive exact entry notional, no ambiguous identity, no known
+  missing execution by the `OrderKey`/`MissingExecutions` rule, and an
+  in-range return. Net is the operation's execution net (reported closed P&L
+  less listed stablecoin fees on gross fills, never charged twice) and return
+  is net over entry notional. Positions have no plan, R, review or Play-local
+  result, are placed at their last exit and never become Plays or links.
+  Linked and mixed operations are left out, so a Play is never counted twice.
+- **Modes.** `GET /api/review` accepts `positions=exclude|include|auto`
+  (default `exclude` for older clients) and `minPlays` (0–1000, default 5).
+  `auto` includes positions while the selection (scope, asset and period) has
+  fewer scored Plays than `minPlays`; 0 never includes them automatically.
+  The decision applies to every period total in the response. The response
+  carries `positions: { mode, included, minPlays, plays, positions, omitted,
+  playWeight }`; `positions` and `omitted` (closed positions that cannot be
+  scored, by their close time) are null when positions were not read. Plays and
+  positions come from separate reads, so Review rereads the Play snapshot after
+  the positions and retries (three attempts, then 409) if closed Plays, their
+  linked fills or enabled accounts changed in between.
+  Activity is resolved only when positions are read. The exclusions endpoint
+  still lists Plays only.
+- **Weight.** A Play weighs `PlayWeight` = 2 positions in batting average,
+  average gain and loss (percent and USD), payoff and expectancy. Net P&L,
+  profit factor, drawdown, streaks, the chart, groups' net and every count are
+  real amounts and unweighted. With one kind only, the weighted figures equal
+  the unweighted ones. `metrics.positions` and `periods[].positions` count
+  positions among `count`; R, reviews and Play-local counts cover Plays only.
+- **Rows.** A position row has `id: null`, `operationId`, `origin`
+  `position`, a `<asset> Long|Short` title, null R and no Play-local result.
+  It cannot open a Play.
+- **Browser.** An "Include imported positions" switch beside the scope shows
+  the server's decision with an Automatic/Manual pill; switching it sends
+  `include`/`exclude` and "Use automatic" returns to `auto`. Drill-downs pin
+  the current report's decision so a narrower selection never switches it.
+  The threshold is a browser preference (`review.preferences.v1`, per user in
+  Wallet mode) in the Review section of Settings, saved when a valid value
+  is completed (blur or Enter) and reread after another tab changes it.
+  Reset and the asset shortcuts keep the positions mode. Counts read "N Plays · M positions"; with
+  positions the breakdown's count column is "Results", and the Play-local and
+  R denominators count Plays only. The scorecard says Plays weigh 2× in rates.
+
 ## Sample sizes and plans written after execution (October 20, 2026)
 
 Phase 1.4a of the [learning-loop contract](phase1-learning-loop-contract.md),
@@ -276,6 +325,11 @@ covering F-08 and the first part of D-17. No statistic changes.
 
   - The highest and lowest asset cards are marked by their Play counts.
   - Breakdown rows are marked by their decided counts.
+- **With imported positions.** Each n counts real results, unweighted, as
+  every count does. A Play counts once in n although it weighs
+  `PlayWeight` in the rates. Expectancy reads "n = 3 Plays · 2 positions",
+  and the asset cards use the same count. Estimated R, sign-differs and
+  review denominators count Plays only.
 - **"Estimated R expectancy (planned-stop model)"** is the existing average
   of estimated R under a clearer name. Its formula and eligibility are
   unchanged.
