@@ -624,3 +624,16 @@ and scoped whitespace checks pass. Evidence:
 `/home/ops/.cache/vessel-verification/paper-r3-ui/`.
 Backend recovery/windowing corrections and another fresh review are still
 pending; frontend verification does not close those P2s.
+
+The accepted bounded B/C corrective policy is recorded in the delivery contract:
+per-complete-account read windows, exact tick-local window sharing, five-minute
+clock-based grace for a genuinely recent trailing missing suffix, and a
+separate five-minute first-deterministic-failure recovery timer. Old/interior
+missing history stays a gap. Transport/timeouts/429 are not deterministic source
+rejections. Only affected-symbol simulations terminalize after deterministic
+expiry, preserving known sibling protective eligibility and unresolved capital.
+One internal nullable `SourceFailureSinceUtc` field is allowed in the same
+unshipped foundation schema; no state DTO or endpoint is added. Implementation
+and boundary regressions are in progress. These five-minute policies do not
+assert venue publication/finality guarantees and do not authorize live sampling
+or migration.

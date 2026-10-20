@@ -183,6 +183,30 @@ shared schema/connectivity failures must still fail health. Ordinary candle
 read/validation failures have local retry consequences, not a server-wide
 real-venue deadline. Only genuine venue rate limits share that deadline.
 
+Each complete account derives a bounded read window from its own oldest
+active frontier. Tick-local sharing may reuse an identical native-contract/
+from/through window, but a lagging account must not cap another account's
+progress. Fetch the account's required symbols before locking/applying its
+atomic timeline; do not advance through unavailable evidence.
+
+Recent trailing absence has a five-minute publication grace measured from the
+first missing minute's **close**, not from the first observation. Only an absent
+trailing suffix with no later returned candle qualifies. A proven complete
+prefix may commit; retain the missing frontier with a visible transient issue
+and a one-minute retry. An interior hole, or missing coverage at least five
+minutes old, is a conservative gap. This is a bounded simulation policy,
+not a claim that Hyperliquid publishes or finalizes every candle within five
+minutes.
+
+Proven malformed candle responses and explicit source/request rejection get
+five minutes of recovery from their first deterministic failure, retained in
+internal simulation state. Successful validated progression or a safe owner
+suspension clears the timer. Transport outages, timeouts and rate limits do not
+start or expire that deterministic-failure timer. Expiry terminalizes only the
+affected native-symbol simulations with visible gap evidence and retained
+unresolved capital; known sibling protective exits remain eligible. Do not
+classify arbitrary venue failures or 5xx responses as deterministic rejections.
+
 Keep existing deployment module sets immutable. Run the optional paper module
 as its own `paper` deployment; do not silently append it to a registered
 `monitor` deployment. The implementation uses a standalone paper-only host path
