@@ -193,7 +193,9 @@ export const isPlayHistory = (v: unknown): v is PlayHistory => isRecord(v) && Ar
   v.statusChanges.every(c => isRecord(c) && playStatuses.includes(c.from as PlayStatus) && playStatuses.includes(c.to as PlayStatus) &&
     isNullOr(c.reason, x => cancelReasons.includes(x as CancelReason)) && isNullOr(c.note, x => isText(x, 2000)) && isTimestamp(c.occurredAtUtc, timeLength) &&
     (c.source === undefined || c.source === 'owner' || c.source === 'venue' || c.source === 'manual') &&
-    (c.unresolvedReason == null || c.to === 'unresolved' && unresolvedReasons.includes(c.unresolvedReason as UnresolvedReason)) &&
+    // A declaration names its reason; a return to Open names the reason of the declaration it undoes (1.3a).
+    (c.unresolvedReason == null || (c.to === 'unresolved' || c.from === 'unresolved' && c.to === 'open') &&
+      unresolvedReasons.includes(c.unresolvedReason as UnresolvedReason)) &&
     (c.evidence == null || c.to === 'unresolved' && isUnresolvedEvidence(c.evidence))) &&
   (v.reviews == null || Array.isArray(v.reviews) && v.reviews.every(r => isRecord(r) && isCount(r.number) &&
     isTimestamp(r.occurredAtUtc, timeLength) && isText(r.review, noteLength) && isStructuredReview(r.structuredReview) &&

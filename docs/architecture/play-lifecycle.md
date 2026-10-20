@@ -171,11 +171,15 @@ decision 4. It covers D-06.
 - **Events.** The declaration and the return are `play.status-changed`, with
   the unresolved reason as `reason`. A return keeps the reason of the
   declaration it undoes on its own status change, bound under the Play lock,
-  and History shows it there. The current declaration is the one at the
-  Play's end time, so a stepped-back clock never picks an earlier one. No
+  and History shows it there. Each status change keeps the Play version it
+  produced (`PlayVersion`), and the current declaration is the one with the
+  highest, so a tied or stepped-back clock never picks an earlier one. No
   notification rule is added.
 - **Migration.** The explicit `UnresolvedStatus` migration adds the nullable
-  `UnresolvedReason` and `Evidence` columns to `play_status_changes`. Rolling
+  `UnresolvedReason`, `Evidence` and `PlayVersion` columns to
+  `play_status_changes`; older changes keep a null version. It changed in
+  place on October 20, before shipping: recreate a development database that
+  applied the earlier version. Rolling
   it back is refused while any Play or history row names Unresolved; restore
   the pre-upgrade backup instead.
 

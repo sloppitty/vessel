@@ -352,6 +352,7 @@ public sealed class Play : IOwned
         var change = new PlayStatusChange(this, Status, to, reason, note, now, source);
         Status = to;
         Touch(now);
+        change.PlayVersion = Version;
         return change;
     }
 
@@ -437,6 +438,11 @@ public sealed class PlayStatusChange : IOwned
     public UnresolvedReason? UnresolvedReason { get; internal set; }
     /// <summary>The Play's execution facts when it was declared unresolved, as JSON; only on a change to Unresolved.</summary>
     public string? Evidence { get; internal set; }
+    /// <summary>
+    /// The Play's version this change produced: a strict order of the Play's transitions, whatever the clock says (phase 1,
+    /// 1.3a). Null on changes recorded before it was kept.
+    /// </summary>
+    public long? PlayVersion { get; internal set; }
     public DateTimeOffset OccurredAtUtc { get; private set; }
     private PlayStatusChange() { }
 

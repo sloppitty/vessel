@@ -116,5 +116,13 @@ describe('Unresolved Plays in the API guards (phase 1, 1.3a)', () => {
     expect(isPlayHistory(history({ ...declared, evidence: { ...evidence, open: '-1' } }))).toBe(true)
     expect(isPlayHistory({ ...history(declared), reviews: [{ number: 1, occurredAtUtc: '2026-10-20T11:00:00Z', review: '',
       structuredReview: { adherence: null, mistakeTag: null, lesson: '', nextAction: '' }, action: 'cleared' }] })).toBe(true)
+    // A return to Open names the declaration it undoes, with no facts of its own; a whole declare, return, settle history reads.
+    const returned = { from: 'unresolved', to: 'open', reason: null, note: 'Relinked.', occurredAtUtc: '2026-10-20T12:00:00Z', source: 'owner',
+      unresolvedReason: 'shared-close', evidence: null }
+    const settled = { ...declared, from: 'unresolved', to: 'closed', note: 'Exits covered the entry.', source: 'venue', unresolvedReason: null, evidence: null }
+    expect(isPlayHistory({ revisions: [], reviews: [], statusChanges: [declared, returned, { ...declared, occurredAtUtc: '2026-10-20T13:00:00Z' }, settled] }))
+      .toBe(true)
+    expect(isPlayHistory(history({ ...returned, evidence }))).toBe(false)
+    expect(isPlayHistory(history({ ...returned, from: 'open', to: 'closed' }))).toBe(false)
   })
 })

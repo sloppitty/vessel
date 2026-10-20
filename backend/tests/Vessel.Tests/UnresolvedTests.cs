@@ -104,6 +104,23 @@ public sealed class UnresolvedDomainTests
     }
 
     [Fact]
+    public void Declarations_at_one_instant_are_ordered_by_the_Play_versions_they_produced()
+    {
+        // Random change IDs must never decide: repeat so either ID order occurs.
+        for (var round = 0; round < 64; round++)
+        {
+            var play = Open();
+            var first = play.DeclareUnresolved(UnresolvedReason.SharedClose, "Shared.", "{}", At.AddHours(1));
+            var (back, _) = play.ReturnToOpen("Relinked.", At.AddHours(1), PlayUnresolved.Current([first], play.EndedAtUtc)!.UnresolvedReason);
+            var second = play.DeclareUnresolved(UnresolvedReason.Flip, "Flipped.", "{}", At.AddHours(1));
+            Assert.True(first.PlayVersion < back.PlayVersion && back.PlayVersion < second.PlayVersion);
+            Assert.Equal(play.Version, second.PlayVersion);
+            Assert.Equal(UnresolvedReason.Flip, PlayUnresolved.Current([second, back, first], play.EndedAtUtc)!.UnresolvedReason);
+            Assert.Equal(UnresolvedReason.Flip, PlayUnresolved.Current([first, back, second], play.EndedAtUtc)!.UnresolvedReason);
+        }
+    }
+
+    [Fact]
     public void A_Play_without_a_completed_review_records_nothing_when_it_leaves_a_final_state()
     {
         var play = Open();

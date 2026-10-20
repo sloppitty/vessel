@@ -986,6 +986,9 @@ namespace Vessel.Persistence.Migrations
                     b.Property<Guid>("PlayId")
                         .HasColumnType("uuid");
 
+                    b.Property<long?>("PlayVersion")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("Reason")
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");

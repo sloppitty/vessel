@@ -22,6 +22,12 @@ namespace Vessel.Persistence.Migrations
                 type: "character varying(32)",
                 maxLength: 32,
                 nullable: true);
+
+            migrationBuilder.AddColumn<long>(
+                name: "PlayVersion",
+                table: "play_status_changes",
+                type: "bigint",
+                nullable: true);
         }
 
         /// <inheritdoc />
@@ -45,6 +51,10 @@ namespace Vessel.Persistence.Migrations
 
             migrationBuilder.DropColumn(
                 name: "UnresolvedReason",
+                table: "play_status_changes");
+
+            migrationBuilder.DropColumn(
+                name: "PlayVersion",
                 table: "play_status_changes");
         }
     }

@@ -76,15 +76,14 @@ public static class PlayUnresolved
     }
 
     /// <summary>
-    /// The declaration an Unresolved Play is in: the one at its end time, which a declaration sets to its own time, so an
-    /// earlier declaration never wins on a tied or stepped-back clock. Otherwise the latest by time. Null when it has none.
+    /// The declaration an Unresolved Play is in: the one its latest transition produced, by the Play version each change
+    /// keeps, so a tied or stepped-back clock never picks an earlier one. A change without a version falls back to the one
+    /// at the Play's end time, then the latest by time. Null when it has none.
     /// </summary>
-    public static PlayStatusChange? Current(IEnumerable<PlayStatusChange> changes, DateTimeOffset? endedAtUtc)
-    {
-        var declarations = changes.Where(c => c.To == PlayStatus.Unresolved && c.UnresolvedReason is not null).ToList();
-        return declarations.Where(c => c.OccurredAtUtc == endedAtUtc).OrderByDescending(c => c.Id).FirstOrDefault()
-            ?? declarations.OrderByDescending(c => c.OccurredAtUtc).ThenByDescending(c => c.Id).FirstOrDefault();
-    }
+    public static PlayStatusChange? Current(IEnumerable<PlayStatusChange> changes, DateTimeOffset? endedAtUtc) =>
+        changes.Where(c => c.To == PlayStatus.Unresolved && c.UnresolvedReason is not null)
+            .OrderByDescending(c => c.PlayVersion ?? long.MinValue).ThenByDescending(c => c.OccurredAtUtc == endedAtUtc)
+            .ThenByDescending(c => c.OccurredAtUtc).ThenByDescending(c => c.Id).FirstOrDefault();
 
     /// <summary>An Unresolved Play's current declaration, as Review's exclusion drill-down shows it, or null.</summary>
     public static UnresolvedDeclarationDto? Latest(IEnumerable<PlayStatusChange> changes, DateTimeOffset? endedAtUtc) =>
