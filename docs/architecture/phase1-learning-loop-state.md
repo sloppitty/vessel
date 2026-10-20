@@ -284,6 +284,14 @@ October 20, 2026, branch `t3/phase1-unresolved`, stacked on 1.2:
   - **Check.** After the rebase onto the 1.2 round-2 fix, `scripts/check.sh` passed: backend 3,600 passed, 5 skipped;
     frontend 152 files and 3,809 tests.
 
+- **Sol (Codex) round 2.** The round-1 fix worked for ordinary use. One finding about ties, fixed:
+  - **Which declaration (low).** The return event read the latest declaration by time then a random ID, so a tied or
+    stepped-back clock, or several transitions in one unit of work, could name an earlier declaration. A return now
+    keeps the reason of the declaration it undoes on its own status change, chosen under the Play lock. The current
+    declaration is the one at the Play's end time, which a declaration sets to its own time; Review reads it the same
+    way. A domain test steps the clock back between declarations, and History shows the reason on the return.
+  - **Check.** `scripts/check.sh` passed again: backend 3,601 passed, 5 skipped; frontend 152 files and 3,810 tests.
+
 ### 1.3b Manual correction batch
 
 Not started.
