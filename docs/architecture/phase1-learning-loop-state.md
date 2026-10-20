@@ -73,4 +73,32 @@ Not started.
 
 ## 1.6 Capture friction and time consistency
 
-Not started.
+### 1.6a Activity and the retrospective preview
+
+October 20, 2026, branch `t3/phase1-activity-journal`, stacked on the contract:
+- **Activity Play column (F-05).**
+  - Page rows carry `playTitle`, read with the owner filter for the shown linked rows only, after the cached aggregate.
+  - Titles are not part of `version`.
+  - The Play column opens the Play by its title. An unreadable title shows as "Untitled play". Long titles are cut with
+    an ellipsis and the full title in a tooltip.
+- **Journal this trade.** A closed, unassigned operation offers this button in its Play cell. It opens the same
+  server-checked preview. Open and incomplete operations still say "Unassigned", and mixed ones say "Mixed".
+- **Retrospective preview (F-06).**
+  - It leads with quantity, average entry and exit, net result, and the UTC dates with the duration.
+  - Fill IDs and transaction hashes move into a collapsed disclosure.
+  - The title starts with the blank-title rule on the opening day in UTC, and a cleared field saves that default.
+- **Tests.**
+  - Backend: page rows name only their linked Play, mixed and unassigned rows stay untitled, a renamed Play keeps the
+    version, and the title read is owner-scoped in PostgreSQL. The multi-owner isolation test now checks that each owner
+    reads its own title and never the other owner's.
+  - Frontend: the title link, the journal button, disabled links while opening, a failed open, the response guard, and
+    the preview's summary, collapsed records and default title.
+- **Checks.** `scripts/check.sh` passed with disposable PostgreSQL 18 and RabbitMQ 4.3.6:
+  - Python: 78 tests;
+  - prototype tests;
+  - Release build: 0 warnings;
+  - backend: 3,433 passed, 5 skipped (S3 and live venues);
+  - frontend: typecheck, lint, 138 files and 2,456 tests, and the build.
+- An earlier run failed once in an unrelated multi-owner worker test: a PostgreSQL read timed out while dropping a test
+  database. It happened while other PostgreSQL tests ran against the same container. The test passes alone, and the
+  full run above had nothing else running against the database.

@@ -4,6 +4,11 @@
 
 ### Added
 
+- Activity names each linked Play by its title, as a link that opens it,
+  instead of a UUID prefix. A closed, unassigned operation offers "Journal
+  this trade". The retrospective preview leads with the trade in plain terms,
+  keeps fill IDs and hashes in a collapsed disclosure, and starts with a
+  default title such as `BTC Long · 12 Oct 2026` (F-05, F-06).
 - Once an entry has filled, its stops can be moved to break-even or into
   profit with a reason; before any fill, a stop at the entry, `0 %`
   included, is refused. The Summary shows the signed result if every stop is
