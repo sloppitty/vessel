@@ -102,3 +102,16 @@ October 20, 2026, branch `t3/phase1-activity-journal`, stacked on the contract:
 - An earlier run failed once in an unrelated multi-owner worker test: a PostgreSQL read timed out while dropping a test
   database. It happened while other PostgreSQL tests ran against the same container. The test passes alone, and the
   full run above had nothing else running against the database.
+- **Sol (Codex) round 1.** Two medium findings, both fixed:
+  - **The title read loaded whole Plays.** It loaded plans, drawings and reviews. It now projects only the ID and
+    title.
+  - **Accessible names.** Two names did not start with the visible text. They now read "BTC breakout, open Play" and
+    "Journal this trade, BTC".
+  - **New tests.**
+    - Titles are read only for the shown page.
+    - A rename shows through the warm Activity cache in PostgreSQL, with an unchanged version.
+    - The default title names the UTC day across a non-UTC midnight.
+  - **Check.** `scripts/check.sh` passed again:
+    - backend: 3,434 passed, 5 skipped;
+    - frontend: 138 files and 2,457 tests;
+    - build clean.
