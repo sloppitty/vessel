@@ -37,10 +37,10 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         _ => throw new ProblemException(400, "Choose day, week, month, year or all."),
     };
 
-    public async Task<ReviewDto> GetAsync(ReviewQuery query, CancellationToken ct)
+    /// <summary>The filters every Review read validates the same way, with the portfolio ID normalized.</summary>
+    private static ReviewQuery Validated(ReviewQuery query)
     {
-        var now = time.GetUtcNow();
-        var from = From(query.Period, now);
+        From(query.Period, DateTimeOffset.UnixEpoch);
         if (query.Portfolio is not ("all" or "unassigned") &&
             (!Guid.TryParse(query.Portfolio, out var portfolio) || portfolio == Guid.Empty))
             throw new ProblemException(400, "Choose a valid portfolio.");
@@ -48,6 +48,14 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         if (query.AccountId == Guid.Empty || query.Offset is < 0 or > 1_000_000 ||
             query.Instrument is { } instrument && (string.IsNullOrWhiteSpace(instrument) || instrument.Length > 128 || instrument != instrument.Trim()))
             throw new ProblemException(400, "Invalid review filters.");
+        return query;
+    }
+
+    public async Task<ReviewDto> GetAsync(ReviewQuery query, CancellationToken ct)
+    {
+        var now = time.GetUtcNow();
+        var from = From(query.Period, now);
+        query = Validated(query);
 
         var facts = await store.ReadAsync(query, now, ct);
         var accounts = facts.Accounts.Where(a => a.IsEnabled).ToDictionary(a => a.Id);
@@ -68,7 +76,8 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             facts.Portfolios.OrderBy(p => p.Name).Select(p => new ReviewPortfolioDto(p.Id.ToString(), p.Name)).ToList(),
             accounts.Values.OrderBy(a => a.Name).Select(a => new ReviewAccountDto(a.Id, a.Name, a.PortfolioId, a.VenueId,
                 a.LastSyncedAtUtc, a.SyncStatus, a.HistoryNotice)).ToList(),
-            facts.ClosedPlays.Select(f => f.Play).Concat(facts.UnresolvedPlays.Select(u => u.Play)).Where(p => accounts.ContainsKey(p.AccountId))
+            facts.ClosedPlays.Select(f => f.Play).Concat(facts.UnresolvedPlays.Select(u => u.Play)).Concat(facts.CancelledPlays.Select(c => c.Play))
+                .Where(p => accounts.ContainsKey(p.AccountId))
                 .Select(p => p.ContractId).OfType<string>().Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList());
         var series = Series(current, from, now);
         List<ReviewGroupDto> Groups(Func<Evaluated, string> key, Func<string, string> name, Func<string, List<Evaluated>, string> detail) =>
@@ -89,7 +98,12 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             Groups(e => e.Facts.Play.AccountId.ToString(), id => accounts[Guid.Parse(id)].Name,
                 (id, _) => accounts[Guid.Parse(id)].VenueId),
             Groups(e => e.Facts.Play.ContractId!, id => id, (_, items) =>
-                string.Join(", ", items.Select(e => e.Facts.Play.VenueId).Distinct().Order())));
+                string.Join(", ", items.Select(e => e.Facts.Play.VenueId).Distinct().Order())))
+        {
+            // Fixed order rather than by result (1.4b).
+            Origins = Fixed(current, e => OriginName(e.Facts.Play), [("planned", "Planned"), ("retrospective", "Retrospective")]),
+            Directions = Fixed(current, e => e.Facts.Play.Direction, [("long", "Long"), ("short", "Short")]),
+        };
         var page = current.OrderByDescending(e => e.ClosedAt).ThenBy(e => e.Facts.Play.Id).Skip(query.Offset).Take(PageSize)
             .Select(e => new ReviewPlayDto(e.Facts.Play.Id, e.Facts.Play.Title, e.Facts.Play.AccountId,
                 accounts[e.Facts.Play.AccountId].Name, e.Facts.Play.VenueId, e.Facts.Play.ContractId!, e.ClosedAt,
@@ -98,7 +112,10 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
                 e.Facts.ManualSource ? "manual" : "imported")
             {
                 Local = e.Local!.ToDto(e.Result.NetResult), PlannedAfterExecution = PlayReceipts.PlannedAfterExecution(e.Facts),
+                Adherence = e.Facts.Play.ReviewAdherence, MistakeTag = e.Facts.Play.ReviewMistakeTag, Direction = e.Facts.Play.Direction,
+                ReviewCompletion = PlayService.CompletionName(e.Facts.Play.ReviewCompletion),
             }).ToList();
+        var cases = ProcessCases(evaluated, facts, scoped, query.Instrument, from, now);
         return new ReviewDto(now, from ?? current.FirstOrDefault()?.ClosedAt, query.Period, "USD",
             options, Periods.Select(period => {
                 var selected = accepted.Where(e => InPeriod(e.ClosedAt, From(period, now), now)).ToList();
@@ -111,33 +128,140 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             { Unresolved = unresolved },
             page, query.Offset, query.Offset + page.Count < current.Count ? query.Offset + page.Count : null)
         {
-            Preflight = Preflight(candidates.Select(e => e.Facts)),
+            Preflight = Preflight(cases),
+            Process = Process(cases),
         };
     }
 
-    /// <summary>Pre-flights of planned-origin Plays; a retrospective Play has no plan and is left out.</summary>
-    private static ReviewPreflightDto Preflight(IEnumerable<ClosedPlayFacts> plays)
+    /// <summary>
+    /// Pre-flights over the process population's planned Plays that were planned (a Draft cancelled before planning had no
+    /// Plan it); a retrospective Play has no plan and is left out. Each count equals its drill-down.
+    /// </summary>
+    private static ReviewPreflightDto Preflight(IReadOnlyList<ProcessCase> cases)
     {
-        var planned = plays.Where(f => f.Play.Origin == PlayOrigin.Planned)
-            .Select(f => PlayPreflight.Read(f.Revisions.SingleOrDefault(r => r.Number == 1)?.Preflight)).ToList();
+        var planned = cases.Where(PreflightApplies).Select(c => c.Preflight).ToList();
         var recorded = planned.OfType<IReadOnlyList<PreflightCheckDto>>().ToList();
         return new(recorded.Count, planned.Count - recorded.Count, PlayPreflight.Codes
             .Select(code => new ReviewPreflightCountDto(code, recorded.Count(checks => checks.Any(c => c.Code == code && c.Outcome == "skipped"))))
             .ToList());
     }
 
+    private static bool PreflightApplies(ProcessCase c) => c.Play.Origin == PlayOrigin.Planned && c.Play.PlannedAtUtc is not null;
+
+    /// <summary>The mistake-tag key: trimmed and case-insensitive, so spellings of one tag count together.</summary>
+    public static string TagKey(string tag) => tag.Trim().ToUpperInvariant();
+
+    private static string OriginName(Play play) => play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned";
+
+    /// <summary>Groups in a fixed order, each with the existing metrics; a group without Plays is left out.</summary>
+    private static List<ReviewGroupDto> Fixed(List<Evaluated> current, Func<Evaluated, string> key, (string Id, string Name)[] order) =>
+        order.Select(group => (group, Items: current.Where(e => key(e) == group.Id).ToList())).Where(x => x.Items.Count > 0)
+            .Select(x => new ReviewGroupDto(x.group.Id, x.group.Name, $"{x.Items.Count} scored", Metrics(x.Items))).ToList();
+
+    /// <summary>
+    /// One Play of the process view (phase 1, 1.4b): Closed, Cancelled or Unresolved, in scope and period, with Review's verdict.
+    /// <see cref="Lane"/> is the first that applies: retrospective, unscored (with answers), unanswered, not-applicable, or cells;
+    /// null for an unscored planned Play with no answers, which only the exclusion list shows.
+    /// </summary>
+    private sealed record ProcessCase(Play Play, DateTimeOffset At, PlayOutcome? Result, IReadOnlyList<PreflightCheckDto>? Preflight,
+        bool PostHoc, string? Lane, string? Cell)
+    {
+        public string Outcome => Result is null ? "unscored" : Result.NetResult > 0 ? "win" : Result.NetResult < 0 ? "loss" : "scratch";
+    }
+
+    private static ProcessCase Case(Play play, DateTimeOffset at, PlayOutcome? result, IReadOnlyList<PlayPlanRevision> revisions, bool postHoc)
+    {
+        // The answers as stored: a completed review is not required.
+        var answers = play.Answers;
+        var outcome = result is null ? null : result.NetResult > 0 ? "win" : result.NetResult < 0 ? "loss" : "scratch";
+        var (lane, cell) = play.Origin == PlayOrigin.Retrospective ? ("retrospective", (string?)null)
+            : result is null ? (answers.IsAnswered ? "unscored" : null, null)
+            : answers.Adherence is null ? ("unanswered", null)
+            : answers.Adherence == "not-applicable" ? ("not-applicable", null)
+            : ("cells", $"{answers.Adherence}-{outcome}");
+        return new(play, at, result, PlayPreflight.Read(revisions.SingleOrDefault(r => r.Number == 1)?.Preflight), postHoc, lane, cell);
+    }
+
+    /// <summary>The process population: the period's Closed, Cancelled and Unresolved Plays in scope, each by its own time.</summary>
+    private static List<ProcessCase> ProcessCases(IEnumerable<Evaluated> closed, ReviewFacts facts, HashSet<Guid> scope, string? instrument,
+        DateTimeOffset? from, DateTimeOffset now) =>
+        closed.Select(e => Case(e.Facts.Play, e.ClosedAt, e.Result, e.Facts.Revisions, PlayReceipts.PlannedAfterExecution(e.Facts)))
+            .Concat(facts.CancelledPlays.Where(c => scope.Contains(c.Play.AccountId) && (instrument is null || c.Play.ContractId == instrument))
+                .Select(c => Case(c.Play, c.Play.EndedAtUtc ?? c.Play.UpdatedAtUtc, null, c.Revisions, false)))
+            .Concat(Unresolved(facts, scope, instrument).Select(u => Case(u.Play, u.EndedAt, null, u.Revisions,
+                u.Play is { Origin: PlayOrigin.Planned, PlannedAtUtc: { } planned } && u.FirstExecutionAtUtc is { } first && planned > first)))
+            .Where(c => InPeriod(c.At, from, now)).ToList();
+
+    private const int MaxMistakeTags = 200;
+
+    private static ReviewProcessDto Process(IReadOnlyList<ProcessCase> cases)
+    {
+        ReviewProcessRowDto Row(string adherence) => new(cases.Count(c => c.Cell == $"{adherence}-win"),
+            cases.Count(c => c.Cell == $"{adherence}-loss"), cases.Count(c => c.Cell == $"{adherence}-scratch"));
+        var tags = Tags(cases).ToList();
+        return new(Row("followed"), Row("deviated"), cases.Count(c => c.Lane == "retrospective"), cases.Count(c => c.Lane == "unscored"),
+            cases.Count(c => c.Lane == "unanswered"), cases.Count(c => c.Lane == "not-applicable"),
+            tags.OrderBy(t => t.Key, StringComparer.Ordinal).Take(MaxMistakeTags).Select(t => new ReviewMistakeTagDto(t.Spelling,
+                t.Cases.Count(c => c.Outcome == "win"), t.Cases.Count(c => c.Outcome == "loss"), t.Cases.Count(c => c.Outcome == "scratch"),
+                t.Cases.Count(c => c.Outcome == "unscored"))).ToList(), tags.Count);
+    }
+
+    /// <summary>Process cases per mistake tag, keyed case-insensitively and shown in the latest spelling (newest review first).</summary>
+    private static IEnumerable<(string Key, string Spelling, List<ProcessCase> Cases)> Tags(IReadOnlyList<ProcessCase> cases) =>
+        cases.Where(c => c.Lane is not null && !string.IsNullOrWhiteSpace(c.Play.ReviewMistakeTag))
+            .GroupBy(c => TagKey(c.Play.ReviewMistakeTag!))
+            .Select(g => (g.Key, g.OrderByDescending(c => c.Play.ReviewedAtUtc).ThenByDescending(c => c.Play.UpdatedAtUtc).ThenBy(c => c.Play.Id)
+                .First().Play.ReviewMistakeTag!.Trim(), g.ToList()));
+
+    public static readonly string[] ProcessCells = ["followed-win", "followed-loss", "followed-scratch", "deviated-win", "deviated-loss", "deviated-scratch"];
+    public static readonly string[] ProcessLanes = ["retrospective", "unscored", "unanswered", "not-applicable"];
+
+    /// <summary>
+    /// One process drill-down (phase 1, 1.4b), paged, newest first: exactly the Plays its count holds, from the same snapshot
+    /// rules as <see cref="GetAsync"/>. Financial values are null for Plays Review does not score.
+    /// </summary>
+    public async Task<ReviewProcessPageDto> ProcessAsync(ReviewProcessQuery request, CancellationToken ct)
+    {
+        var now = time.GetUtcNow();
+        var query = Validated(request.Filters);
+        var from = From(query.Period, now);
+        var selectors = new[] { request.Cell, request.Lane, request.MistakeTag, request.SkippedCheck }.Count(s => s is not null);
+        if (selectors != 1) throw new ProblemException(400, "Choose one cell, lane, mistake tag or skipped check.");
+        if (request.Cell is { } cell && !ProcessCells.Contains(cell) || request.Lane is { } lane && !ProcessLanes.Contains(lane) ||
+            request.MistakeTag is { } tag && (string.IsNullOrWhiteSpace(tag) || tag.Length > 100) ||
+            request.SkippedCheck is { } check && check != "not-recorded" && !PlayPreflight.Codes.Contains(check))
+            throw new ProblemException(400, "Invalid process selection.");
+        var facts = await store.ReadAsync(query, now, ct);
+        var accounts = facts.Accounts.Where(a => a.IsEnabled).ToDictionary(a => a.Id);
+        var scoped = accounts.Values.Where(a => (query.AccountId is null || a.Id == query.AccountId) &&
+            (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||
+                a.PortfolioId?.ToString() == query.Portfolio)).Select(a => a.Id).ToHashSet();
+        var evaluated = facts.ClosedPlays.Where(f => scoped.Contains(f.Play.AccountId) && (query.Instrument is null || f.Play.ContractId == query.Instrument))
+            .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true || f.IncompleteOrders is { Count: > 0 }));
+        var cases = ProcessCases(evaluated, facts, scoped, query.Instrument, from, now);
+        var selected = (request.Cell is { } c1 ? cases.Where(c => c.Cell == c1)
+            : request.Lane is { } l1 ? cases.Where(c => c.Lane == l1)
+            : request.MistakeTag is { } t1 ? Tags(cases).Where(t => t.Key == TagKey(t1)).SelectMany(t => t.Cases)
+            : request.SkippedCheck == "not-recorded" ? cases.Where(c => PreflightApplies(c) && c.Preflight is null)
+            : cases.Where(c => PreflightApplies(c) && c.Preflight?.Any(p => p.Code == request.SkippedCheck && p.Outcome == "skipped") == true))
+            .OrderByDescending(c => c.At).ThenBy(c => c.Play.Id).ToList();
+        var items = selected.Skip(query.Offset).Take(PageSize).Select(c => new ReviewProcessPlayDto(c.Play.Id, c.Play.Title, c.Play.AccountId,
+            accounts[c.Play.AccountId].Name, c.Play.VenueId, c.Play.ContractId ?? "", PlayService.StatusName(c.Play.Status), OriginName(c.Play),
+            c.Play.Direction, c.At, ExactDecimal.Format(c.Result?.NetResult), ExactDecimal.Format(c.Result?.ReturnPercent),
+            ExactDecimal.Format(c.Result?.RMultiple), c.Play.ReviewAdherence, c.Play.ReviewMistakeTag, c.PostHoc,
+            PlayService.CompletionName(c.Play.ReviewCompletion))).ToList();
+        return new(items, selected.Count, query.Offset, query.Offset + items.Count < selected.Count ? query.Offset + items.Count : null);
+    }
+
+    /// <summary>The owner's earlier mistake tags for the review form's autocomplete, newest use first.</summary>
+    public Task<IReadOnlyList<string>> MistakeTagsAsync(CancellationToken ct) => store.MistakeTagsAsync(100, ct);
+
     public async Task<ReviewExclusionsDto> ExclusionsAsync(ReviewQuery query, CancellationToken ct)
     {
         // Run the same filter validation as reporting, then evaluate one fresh snapshot with the same boundary.
         var now = time.GetUtcNow();
         var from = From(query.Period, now);
-        if (query.Portfolio is not ("all" or "unassigned") &&
-            (!Guid.TryParse(query.Portfolio, out var portfolio) || portfolio == Guid.Empty))
-            throw new ProblemException(400, "Choose a valid portfolio.");
-        if (Guid.TryParse(query.Portfolio, out var normalized)) query = query with { Portfolio = normalized.ToString() };
-        if (query.AccountId == Guid.Empty || query.Offset is < 0 or > 1_000_000 ||
-            query.Instrument is { } instrument && (string.IsNullOrWhiteSpace(instrument) || instrument.Length > 128 || instrument != instrument.Trim()))
-            throw new ProblemException(400, "Invalid review filters.");
+        query = Validated(query);
         var facts = await store.ReadAsync(query, now, ct);
         var accounts = facts.Accounts.Where(a => a.IsEnabled && (query.AccountId is null || a.Id == query.AccountId) &&
             (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||

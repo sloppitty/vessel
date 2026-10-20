@@ -5,7 +5,7 @@ import type { BrokerAccount, WorkspaceApi } from '@/api/workspace'
 import { AccountPicker } from '@/components/accounts/AccountPicker'
 import { allAccountsChoice } from '@/features/workspace/account-picker-options'
 import { errorMessage } from '@/api/errors'
-import { defaultReviewQuery, reviewPeriods, type ReviewDocument, type ReviewGroup, type ReviewGroupBy, type ReviewQuery } from '@/api/review'
+import { defaultReviewQuery, reviewPeriods, type ReviewDocument, type ReviewGroup, type ReviewGroupBy, type ReviewProcessSelection, type ReviewQuery } from '@/api/review'
 import { useVenues } from '@/api/venues'
 import { PlayIdentity } from '@/features/plays/PlayIdentity'
 import { LocalResultValue, SignDiffersFlag, fundingNote, localResultNote } from '@/features/plays/LocalResult'
@@ -13,6 +13,7 @@ import { PostHocBadge } from '@/features/plays/PostHocBadge'
 import { preflightLabels } from '@/features/plays/preflight'
 import { ReviewChart } from './ReviewChart'
 import { ReviewExclusions } from './ReviewExclusions'
+import { ProcessSection, ReviewProcessList } from './ReviewProcess'
 import { reviewDate, reviewMoney, reviewMultiple, reviewPercent, reviewResult } from '@/lib/format'
 import { negative, tone } from './format'
 import './review.css'
@@ -35,6 +36,9 @@ const definitions = [
 
 /** Below this many cases a metric is marked "Small sample", measured by its own denominator (F-08). */
 const smallSample = 20
+/** The breakdown's groupings: the ranked ones, then origin and direction in a fixed order (phase 1, 1.4b). */
+const groupTabs = [['portfolios', 'Portfolios', 'Portfolio'], ['accounts', 'Accounts', 'Account'], ['assets', 'Assets', 'Asset'],
+  ['origins', 'Origin', 'Origin'], ['directions', 'Direction', 'Direction']] as const
 /** Every Play the period leaves out: incomplete fees or executions, and Unresolved Plays, which have no result (1.3a). */
 const excludedCount = (coverage: ReviewDocument['coverage']) =>
   coverage.incompleteFees + coverage.incompleteExecutions + (coverage.unresolved ?? 0)
@@ -45,11 +49,21 @@ function SampleMark({ n }: { n: number }) {
   return n < smallSample ? <small className="pr-sample">Small sample</small> : null
 }
 
-/** What the pre-flight at Plan it recorded for the period's closed Plays (phase 1, 1.5): counts only, no rates. */
-function PreflightCounts({ preflight }: { preflight: NonNullable<ReviewDocument['preflight']> }) {
+/**
+ * What the pre-flight at Plan it recorded for the period's planned Closed, Cancelled and Unresolved Plays (phase 1, 1.5 and
+ * 1.4b): counts only, no rates. Each skipped count and "not recorded" opens its Plays.
+ */
+function PreflightCounts({ preflight, onInspect }: {
+  preflight: NonNullable<ReviewDocument['preflight']>; onInspect?: (title: string, selection: ReviewProcessSelection) => void
+}) {
   const skipped = preflight.skipped.filter(item => item.count > 0)
-  return <p>Pre-flight at Plan it: {preflight.recorded} recorded · {preflight.notRecorded} not recorded.
-    {skipped.length > 0 ? <> Planned without: {skipped.map(item => `${preflightLabels[item.code].toLowerCase()} (${item.count})`).join(' · ')}.</> : null}</p>
+  return <p>Pre-flight at Plan it: {preflight.recorded} recorded · {onInspect && preflight.notRecorded > 0
+    ? <button className="pr-count-link" onClick={() => onInspect('Pre-flight not recorded', { skippedCheck: 'not-recorded' })}>{preflight.notRecorded} not recorded</button>
+    : `${preflight.notRecorded} not recorded`}.
+    {skipped.length > 0 ? <> Planned without: {skipped.map((item, index) => <span key={item.code}>{index > 0 && ' · '}{onInspect
+      ? <button className="pr-count-link" onClick={() => onInspect(`Planned without: ${preflightLabels[item.code].toLowerCase()}`, { skippedCheck: item.code })}>
+        {preflightLabels[item.code].toLowerCase()} ({item.count})</button>
+      : `${preflightLabels[item.code].toLowerCase()} (${item.count})`}</span>)}.</> : null}</p>
 }
 
 /** A metric's own n, marked as a small sample below `smallSample`. */
@@ -128,6 +142,7 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay, workspaceAccount
   const [methods, setMethods] = useState(false)
   const [detail, setDetail] = useState<{ title: string; query: ReviewQuery } | null>(null)
   const [exclusions, setExclusions] = useState<ReviewQuery | null>(null)
+  const [process, setProcess] = useState<{ title: string; query: ReviewQuery; selection: ReviewProcessSelection } | null>(null)
   const trigger = useRef<HTMLElement | null>(null)
   const { report, loading, error, options } = useReport(api, query, reload + reloadGeneration)
   const remember = () => { trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null }
@@ -138,6 +153,9 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay, workspaceAccount
     setDetail({ title, query: { ...query, ...filter, offset: 0 } })
   }
   const inspectExclusions = () => { remember(); setExclusions({ ...query, offset: 0 }) }
+  const inspectProcess = (title: string, selection: ReviewProcessSelection) => { remember(); setProcess({ title, query: { ...query, offset: 0 }, selection }) }
+  // Origin and direction have no server filter, so their rows are not inspected; they keep a fixed order.
+  const fixedGroup = group === 'origins' || group === 'directions'
   const accounts = options?.accounts.filter(a => query.portfolio === 'all' ||
     (query.portfolio === 'unassigned' ? a.portfolioId === null : a.portfolioId === query.portfolio)) ?? []
   const stats = report?.metrics
@@ -193,17 +211,18 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay, workspaceAccount
         <button onClick={() => setQuery(previous => ({ ...previous, instrument: best.id }))}><span className="pr-insight-icon positive"><ArrowUpRight size={18} /></span><span><small>HIGHEST ASSET P&L</small><strong>{best.name}<b className={tone(best.metrics.net)}>{reviewMoney(best.metrics.net, true)}</b></strong></span><span className="pr-insight-count">{best.metrics.count} Plays{best.metrics.count < smallSample && <small>Small sample</small>}<ChevronRight size={14} /></span></button>
         <button onClick={() => setQuery(previous => ({ ...previous, instrument: worst.id }))}><span className="pr-insight-icon negative"><ArrowDownRight size={18} /></span><span><small>LOWEST ASSET P&L</small><strong>{worst.name}<b className={tone(worst.metrics.net)}>{reviewMoney(worst.metrics.net, true)}</b></strong></span><span className="pr-insight-count">{worst.metrics.count} Plays{worst.metrics.count < smallSample && <small>Small sample</small>}<ChevronRight size={14} /></span></button>
       </div>}
-      <section className="pr-panel pr-breakdown"><header className="pr-panel-heading"><h2>Breakdown</h2><div className="pr-segmented" role="group" aria-label="Break down results by">{(['portfolios', 'accounts', 'assets'] as const).map(item => <button key={item} aria-pressed={group === item} onClick={() => setGroup(item)}>{item[0]!.toUpperCase() + item.slice(1)}</button>)}</div></header>
-        <div className="pr-table-scroll"><table className="pr-breakdown-table"><caption className="sr-only">{group} ranked by net closed-play P&L</caption><thead><tr><th>{group === 'portfolios' ? 'Portfolio' : group === 'accounts' ? 'Account' : 'Asset'}</th><th>Plays</th><th>Batting avg.</th><th>Avg. gain / loss</th><th>Profit factor</th><th>Net P&L</th><th><span className="sr-only">Inspect</span></th></tr></thead><tbody>
-          {groups.map((row, index) => <tr key={row.id}><th scope="row"><button onClick={() => inspect(row.id, row.name)}><span className="pr-rank">{String(index + 1).padStart(2, '0')}</span><span><strong>{row.name}</strong><small>{groupDetail(row)}</small></span></button></th><td>{row.metrics.count}<small>{row.metrics.wins}W · {row.metrics.losses}L · {row.metrics.scratches}S</small></td><td>{reviewPercent(row.metrics.batting, true)}<SampleMark n={row.metrics.wins + row.metrics.losses} /></td><td>{reviewMultiple(row.metrics.payoff)}<SampleMark n={Math.min(row.metrics.wins, row.metrics.losses)} /></td><td>{reviewMultiple(row.metrics.profitFactor)}<SampleMark n={row.metrics.wins + row.metrics.losses} /></td><td className={tone(row.metrics.net)}><strong>{reviewMoney(row.metrics.net, true)}</strong><i className="pr-pnl-bar"><b style={{ width: `${Math.abs(Number(row.metrics.net)) / Math.max(...groups.map(g => Math.abs(Number(g.metrics.net))), 1) * 100}%`, background: Number(row.metrics.net) >= 0 ? 'var(--pr-green)' : 'var(--pr-red)' }} /></i></td><td><button className="pr-row-open" aria-label={`Inspect ${row.name}`} onClick={() => inspect(row.id, row.name)}><ChevronRight size={16} /></button></td></tr>)}
+      <section className="pr-panel pr-breakdown"><header className="pr-panel-heading"><h2>Breakdown</h2><div className="pr-segmented" role="group" aria-label="Break down results by">{groupTabs.filter(([item]) => item in report.groups).map(([item, label]) => <button key={item} aria-pressed={group === item} onClick={() => setGroup(item)}>{label}</button>)}</div></header>
+        <div className="pr-table-scroll"><table className="pr-breakdown-table"><caption className="sr-only">{fixedGroup ? `${group} in a fixed order` : `${group} ranked by net closed-play P&L`}</caption><thead><tr><th>{groupTabs.find(([item]) => item === group)?.[2]}</th><th>Plays</th><th>Batting avg.</th><th>Avg. gain / loss</th><th>Profit factor</th><th>Net P&L</th><th><span className="sr-only">Inspect</span></th></tr></thead><tbody>
+          {groups.map((row, index) => <tr key={row.id}><th scope="row">{fixedGroup ? <span className="pr-group-name"><strong>{row.name}</strong><small>{row.detail}</small></span> : <button onClick={() => inspect(row.id, row.name)}><span className="pr-rank">{String(index + 1).padStart(2, '0')}</span><span><strong>{row.name}</strong><small>{groupDetail(row)}</small></span></button>}</th><td>{row.metrics.count}<small>{row.metrics.wins}W · {row.metrics.losses}L · {row.metrics.scratches}S</small></td><td>{reviewPercent(row.metrics.batting, true)}<SampleMark n={row.metrics.wins + row.metrics.losses} /></td><td>{reviewMultiple(row.metrics.payoff)}<SampleMark n={Math.min(row.metrics.wins, row.metrics.losses)} /></td><td>{reviewMultiple(row.metrics.profitFactor)}<SampleMark n={row.metrics.wins + row.metrics.losses} /></td><td className={tone(row.metrics.net)}><strong>{reviewMoney(row.metrics.net, true)}</strong><i className="pr-pnl-bar"><b style={{ width: `${Math.abs(Number(row.metrics.net)) / Math.max(...groups.map(g => Math.abs(Number(g.metrics.net))), 1) * 100}%`, background: Number(row.metrics.net) >= 0 ? 'var(--pr-green)' : 'var(--pr-red)' }} /></i></td><td>{!fixedGroup && <button className="pr-row-open" aria-label={`Inspect ${row.name}`} onClick={() => inspect(row.id, row.name)}><ChevronRight size={16} /></button>}</td></tr>)}
           {!groups.length && <tr><td colSpan={7}><div className="pr-empty"><BarChart3 size={25} /><strong>No scored closed Plays</strong>{filtered && <button className="pr-outline-button" onClick={() => setQuery(defaultReviewQuery)}>Reset view</button>}</div></td></tr>}
         </tbody>{groups.length > 0 && <tfoot><tr><th scope="row">Combined result</th><td>{stats.count}</td><td>{reviewPercent(stats.batting, true)}<SampleMark n={decided} /></td><td>{reviewMultiple(stats.payoff)}<SampleMark n={Math.min(stats.wins, stats.losses)} /></td><td>{reviewMultiple(stats.profitFactor)}<SampleMark n={decided} /></td><td className={tone(stats.net)}>{reviewMoney(stats.net, true)}</td><td /></tr></tfoot>}</table></div>
       </section>
+      {report.process && <ProcessSection process={report.process} onInspect={inspectProcess} />}
       <section className="pr-coverage" aria-label="Data coverage"><ShieldCheck size={16} /><details><summary>{stats.count} scored · {excludedCount(report.coverage)} excluded · {stats.reviewed} {stats.reviewed === 1 ? 'review' : 'reviews'} complete</summary>
         <p><button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteFees} incomplete fees</button> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteExecutions} incomplete executions</button>{report.coverage.unresolved ? <> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.unresolved} unresolved</button></> : null} · {report.coverage.openPlays} currently open</p>
         <p>{report.coverage.unassignedFills} unassigned fills in this period.</p>
         <p>Initial planned-risk inputs for {stats.riskCount} of {stats.count} scored Plays.</p>
-        {report.preflight && <PreflightCounts preflight={report.preflight} />}
+        {report.preflight && <PreflightCounts preflight={report.preflight} {...(report.process ? { onInspect: inspectProcess } : {})} />}
         <p>{report.coverage.notice}</p>
         {report.coverage.firstFillAtUtc && <p>Earliest retained fill in this scope: {reviewDate(report.coverage.firstFillAtUtc, true)}.</p>}
         <ul>{activeAccounts.map(a => <li key={a.id}><strong>{a.name}</strong> · {venues.name(a.venueId)} · {a.syncStatus} · {a.lastSyncedAtUtc ? `last refreshed ${reviewDate(a.lastSyncedAtUtc, true)}` : 'not refreshed'}{a.historyNotice && <p>{a.historyNotice}</p>}</li>)}</ul>
@@ -212,6 +231,9 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay, workspaceAccount
     <Dialog open={methods} onOpenChange={setMethods}><DialogContent className="pr-dialog" onCloseAutoFocus={restore}><DialogHeader><DialogTitle>Definitions</DialogTitle><DialogDescription className="sr-only">Closed-Play results from retained execution facts.</DialogDescription></DialogHeader><div className="pr-methods">{definitions.map(([title, text]) => <section key={title}><h3>{title}</h3><p>{text}</p></section>)}</div></DialogContent></Dialog>
     <Dialog open={detail !== null} onOpenChange={open => { if (!open) setDetail(null) }}><DialogContent className="pr-dialog pr-detail-dialog" onCloseAutoFocus={restore}><DialogHeader><DialogTitle>{detail?.title}</DialogTitle><DialogDescription className="sr-only">Contributing closed Plays. Select a Play to open its journal.</DialogDescription></DialogHeader>
       {detail && <ReviewPlays api={api} initialQuery={detail.query} onOpenPlay={onOpenPlay} />}
+    </DialogContent></Dialog>
+    <Dialog open={process !== null} onOpenChange={open => { if (!open) setProcess(null) }}><DialogContent className="pr-dialog pr-detail-dialog" onCloseAutoFocus={restore}><DialogHeader><DialogTitle>{process?.title}</DialogTitle><DialogDescription className="sr-only">The Plays this count holds, newest first. Select a Play to open its journal.</DialogDescription></DialogHeader>
+      {process && <ReviewProcessList api={api} query={process.query} selection={process.selection} onOpenPlay={onOpenPlay} />}
     </DialogContent></Dialog>
     <Dialog open={exclusions !== null} onOpenChange={open => { if (!open) setExclusions(null) }}><DialogContent className="pr-dialog pr-detail-dialog" onCloseAutoFocus={restore}><DialogHeader><DialogTitle>Excluded Plays</DialogTitle><DialogDescription className="sr-only">Exact server reasons for this Review period and scope. Open the saved Play to inspect its records.</DialogDescription></DialogHeader>
       {exclusions && <ReviewExclusions api={api} initialQuery={exclusions} onOpenPlay={onOpenPlay} />}

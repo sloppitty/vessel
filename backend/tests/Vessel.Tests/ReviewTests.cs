@@ -26,13 +26,16 @@ internal sealed class ReviewFixture : IReviewStore
     public List<Account> Accounts { get; } = [];
     public List<Portfolio> Portfolios { get; } = [];
     public List<ClosedPlayFacts> Closed { get; } = [];
+    public List<EndedPlayFacts> Cancelled { get; } = [];
+    public List<UnresolvedPlayFacts> Unresolved { get; } = [];
     /// <summary>With the Hyperliquid descriptor, so Play-local results know the venue's quote asset.</summary>
     public ReviewService Service => new(this, new ReviewClock(), TestVenues.With());
     public ReviewQuery? LastQuery { get; private set; }
+    public Task<IReadOnlyList<string>> MistakeTagsAsync(int limit, CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([]);
     public Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct)
     {
         LastQuery = query;
-        return Task.FromResult(new ReviewFacts(Portfolios, Accounts, Closed, 0, 0, null));
+        return Task.FromResult(new ReviewFacts(Portfolios, Accounts, Closed, 0, 0, null) { CancelledPlays = Cancelled, UnresolvedPlays = Unresolved });
     }
     public Account Account(string name = "Main", Guid? portfolio = null)
     {

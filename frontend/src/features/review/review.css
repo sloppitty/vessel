@@ -276,3 +276,15 @@
 /* Result bases (October 19, 2026): the basis under each result and the sign-differs flag beside the Play-local one. */
 .pr-play-list td small { display: block; margin-top: 3px; font-size: var(--text-2xs); color: var(--pr-muted); }
 .pr-play-list td span.workspace-badge.sign-differs { margin: 4px 0 0 6px; }
+
+/* Process and outcome as cases (phase 1, 1.4b): counts in a fixed order, no ranking. */
+.pr-process { display: grid; gap: 14px; }
+.pr-process h3 { margin: 6px 0 0; font-size: var(--text-sm); }
+.pr-process-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.pr-process-table :is(th, td) { padding: 10px 12px; border-bottom: 1px solid var(--pr-border); text-align: left; vertical-align: top; }
+.pr-process-table thead th { color: var(--pr-muted); font-size: var(--text-2xs); font-weight: 600; }
+.pr-process-lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; list-style: none; margin: 0; padding: 0; }
+.pr-process-lanes li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border: 1px solid var(--pr-border); border-radius: var(--radius); }
+.pr-muted { color: var(--pr-muted); }
+.pr-group-name { display: grid; gap: 2px; }
+.pr-group-name small { color: var(--pr-muted); }

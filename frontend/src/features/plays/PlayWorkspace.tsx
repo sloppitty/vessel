@@ -40,7 +40,7 @@ import '@/features/monitor/incidents.css'
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, revision = null,
   lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, sizingStatus = 'ready', onRetrySizing, onRiskChange,
   filledEntries, fills: entryFills, onUnits, onPriceStep, retrospective = false, incidents, stopEvidence, evidenceImages,
-  reviewReceipt, journalSave, retrospectiveReceipt, plannedAfterExecution = false, onPreflight, nextActions, onOpenPlay, log, reviewCompletion }: {
+  reviewReceipt, journalSave, retrospectiveReceipt, plannedAfterExecution = false, onPreflight, nextActions, onOpenPlay, log, reviewCompletion, mistakeTags }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -107,6 +107,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   log?: ReactNode
   /** Review completion under the review. */
   reviewCompletion?: ReactNode
+  mistakeTags?: readonly string[] | undefined
 }) {
   const fieldId = useId()
   const [selectedId, setSelectedId] = useState(draft.entries[0]?.id ?? '')
@@ -323,7 +324,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           structuredReview={draft.structuredReview}
           onStructuredReviewChange={structuredReview => onChange({ ...draft, structuredReview })}
           evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceImages={evidenceImages} evidenceRequest={evidenceRequest} executionRequest={executionRequest}
-          reviewReceipt={reviewReceipt} journalSave={journalSave} nextActions={offeredActions} log={log} reviewCompletion={reviewCompletion} />
+          reviewReceipt={reviewReceipt} journalSave={journalSave} nextActions={offeredActions} log={log} reviewCompletion={reviewCompletion} mistakeTags={mistakeTags} />
       </div>
       {retrospective ? <section className="panel retrospective-position" aria-label="No original plan"><h2>No original plan</h2>{retrospectiveReceipt}</section>
         : readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>

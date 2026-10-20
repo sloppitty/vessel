@@ -16,18 +16,40 @@ public sealed record ReviewFacts(IReadOnlyList<Portfolio> Portfolios, IReadOnlyL
 {
     /// <summary>Unresolved Plays on enabled accounts with their latest declaration (phase 1, 1.3a). They are never scored.</summary>
     public IReadOnlyList<UnresolvedPlayFacts> UnresolvedPlays { get; init; } = [];
+    /// <summary>Cancelled Plays on enabled accounts, with plan revision 1 for the pre-flight (phase 1, 1.4b). Never scored.</summary>
+    public IReadOnlyList<EndedPlayFacts> CancelledPlays { get; init; } = [];
 }
+
+/// <summary>A Cancelled Play in Review's process view: never scored, placed by its cancellation time.</summary>
+public sealed record EndedPlayFacts(Play Play, IReadOnlyList<PlayPlanRevision> Revisions);
 
 /// <summary>An Unresolved Play and its latest declaration, placed in a period by its end, the declaration time.</summary>
 public sealed record UnresolvedPlayFacts(Play Play, UnresolvedDeclarationDto? Declaration)
 {
     public DateTimeOffset EndedAt => Play.EndedAtUtc ?? Declaration?.DeclaredAtUtc ?? Play.UpdatedAtUtc;
+    /// <summary>Plan revision 1, for the pre-flight (phase 1, 1.4b).</summary>
+    public IReadOnlyList<PlayPlanRevision> Revisions { get; init; } = [];
+    /// <summary>Its earliest linked execution, for the "plan written after first execution" badge; null without one.</summary>
+    public DateTimeOffset? FirstExecutionAtUtc { get; init; }
 }
 
 public interface IReviewStore
 {
     Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct);
+    /// <summary>
+    /// The owner's own mistake tags for autocomplete, newest use first: trimmed, grouped case-insensitively in their latest
+    /// spelling, at most <paramref name="limit"/> (phase 1, 1.4b).
+    /// </summary>
+    Task<IReadOnlyList<string>> MistakeTagsAsync(int limit, CancellationToken ct);
 }
+
+/// <summary>
+/// One process drill-down (phase 1, 1.4b): Review's filters with exactly one of a cell (<c>followed-win</c> … <c>deviated-scratch</c>),
+/// a lane (<c>retrospective</c>, <c>unscored</c>, <c>unanswered</c>, <c>not-applicable</c>), a mistake tag, or a pre-flight check
+/// that was skipped (a check code, or <c>not-recorded</c>).
+/// </summary>
+public sealed record ReviewProcessQuery(ReviewQuery Filters, string? Cell = null, string? Lane = null, string? MistakeTag = null,
+    string? SkippedCheck = null);
 
 public sealed record ReviewPortfolioDto(string Id, string Name);
 public sealed record ReviewAccountDto(Guid Id, string Name, Guid? PortfolioId, string VenueId,
@@ -55,7 +77,13 @@ public sealed record ReviewMetricsDto(int Count, int Wins, int Losses, int Scrat
 public sealed record ReviewPeriodDto(string Id, int Count, string? Net);
 public sealed record ReviewGroupDto(string Id, string Name, string Detail, ReviewMetricsDto Metrics);
 public sealed record ReviewGroupsDto(IReadOnlyList<ReviewGroupDto> Portfolios, IReadOnlyList<ReviewGroupDto> Accounts,
-    IReadOnlyList<ReviewGroupDto> Assets);
+    IReadOnlyList<ReviewGroupDto> Assets)
+{
+    /// <summary>Planned and retrospective Plays, in that fixed order (phase 1, 1.4b).</summary>
+    public IReadOnlyList<ReviewGroupDto> Origins { get; init; } = [];
+    /// <summary>Long and short Plays, in that fixed order (phase 1, 1.4b).</summary>
+    public IReadOnlyList<ReviewGroupDto> Directions { get; init; } = [];
+}
 public sealed record ReviewPointDto(DateTimeOffset AtUtc, string Net, string Cumulative, string Drawdown, int Count);
 /// <summary>
 /// One scored Play. <paramref name="Net"/> is the scored result: the venue result for imported executions, the ledger for
@@ -68,7 +96,30 @@ public sealed record ReviewPlayDto(Guid Id, string Title, Guid AccountId, string
     public PlayLocalResultDto? Local { get; init; }
     /// <summary>The plan was written after the Play's first execution (D-17); it is scored like any other.</summary>
     public bool PlannedAfterExecution { get; init; }
+    /// <summary>The stored answers, read as they are: a completed review is not required (phase 1, 1.4b).</summary>
+    public string? Adherence { get; init; }
+    public string? MistakeTag { get; init; }
+    public string Direction { get; init; } = "";
+    /// <summary>completed, not-needed, legacy, or null while the review is not complete.</summary>
+    public string? ReviewCompletion { get; init; }
 }
+
+/// <summary>One adherence row of the process cases: scored Plays by win and loss, with its scratches counted beside them.</summary>
+public sealed record ReviewProcessRowDto(int Wins, int Losses, int Scratches);
+/// <summary>Plays per mistake tag, in its latest spelling: scored ones by outcome, and unscored ones. No money.</summary>
+public sealed record ReviewMistakeTagDto(string Tag, int Wins, int Losses, int Scratches, int Unscored);
+/// <summary>
+/// Process and outcome as cases (phase 1, 1.4b): adherence (followed, deviated) × outcome (win, loss) over the period's
+/// Closed, Cancelled and Unresolved Plays, plus the lanes a Play falls into first: retrospective, unscored with answers,
+/// unanswered, not applicable. Counts only; rates are left to the reader's own denominator.
+/// </summary>
+public sealed record ReviewProcessDto(ReviewProcessRowDto Followed, ReviewProcessRowDto Deviated, int Retrospective, int Unscored,
+    int Unanswered, int NotApplicable, IReadOnlyList<ReviewMistakeTagDto> MistakeTags, int MistakeTagCount);
+/// <summary>One Play of a process drill-down; financial values are null when Review does not score it.</summary>
+public sealed record ReviewProcessPlayDto(Guid Id, string Title, Guid AccountId, string AccountName, string VenueId, string Instrument,
+    string Status, string Origin, string Direction, DateTimeOffset AtUtc, string? Net, string? ReturnPercent, string? RMultiple,
+    string? Adherence, string? MistakeTag, bool PlannedAfterExecution, string? ReviewCompletion);
+public sealed record ReviewProcessPageDto(IReadOnlyList<ReviewProcessPlayDto> Items, int Total, int Offset, int? NextOffset);
 public sealed record ReviewExclusionDto(Guid PlayId, string Title, Guid AccountId, string AccountName, string Instrument,
     IReadOnlyList<string> Reasons)
 {
@@ -87,8 +138,13 @@ public sealed record ReviewDto(DateTimeOffset AsOfUtc, DateTimeOffset? FromUtc, 
     IReadOnlyList<ReviewPointDto> Series, int BucketDays, ReviewGroupsDto Groups, ReviewCoverageDto Coverage,
     IReadOnlyList<ReviewPlayDto> Plays, int Offset, int? NextOffset)
 {
-    /// <summary>The pre-flight recorded at Plan it, over the period's closed planned Plays, scored or excluded (phase 1, 1.5).</summary>
+    /// <summary>
+    /// The pre-flight recorded at Plan it, over the period's planned Plays in the process view: Closed, Cancelled and
+    /// Unresolved, scored or not (phase 1, 1.5 and 1.4b).
+    /// </summary>
     public ReviewPreflightDto? Preflight { get; init; }
+    /// <summary>Process and outcome as cases (phase 1, 1.4b).</summary>
+    public ReviewProcessDto? Process { get; init; }
 }
 /// <summary>
 /// <paramref name="Recorded"/> Plays have a pre-flight on revision 1 and <paramref name="NotRecorded"/> were planned before

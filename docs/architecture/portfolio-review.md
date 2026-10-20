@@ -302,8 +302,10 @@ Phase 1.5 of the [learning-loop contract](phase1-learning-loop-contract.md):
   - per check, the recorded Plays that went ahead without it.
 - Retrospective Plays have no plan and are left out.
 - The coverage disclosure shows the counts only, with no rate.
-- Cancelled and Unresolved Plays join with the process view (1.4b), where the
-  drill-down by skipped check lives.
+- Since 1.4b the population is the process view's planned Plays that were
+  planned: Closed, Cancelled and Unresolved, scored or not (a Draft cancelled
+  before Plan it is left out). Each skipped count and "not recorded" opens its
+  Plays through `GET /api/review/process?skippedCheck=…`.
 
 ## Completed reviews (October 20, 2026)
 
@@ -324,3 +326,43 @@ executions can never settle it ([play lifecycle](play-lifecycle.md)).
   its declaration time, and an `unresolved` block: the reason, the note, the
   declaration time and the execution facts kept with it.
 - If its fills later settle it, it is Closed and scored like any other.
+
+## Process cases (October 20, 2026)
+
+Phase 1.4b of the [learning-loop contract](phase1-learning-loop-contract.md),
+decision 9. It covers G-01.
+- **Population.** The period's Closed, Cancelled and Unresolved Plays in
+  scope, each placed by its own time: Review's close time (the latest exit),
+  the cancellation time, or the declaration time.
+- **Lanes.** Each Play lands in the first that applies:
+  1. retrospective, scored or not;
+  2. unscored (excluded, Cancelled or Unresolved) with at least one
+     structured answer;
+  3. scored with no adherence answer;
+  4. scored and answered not applicable;
+  5. the cells: followed or deviated, by win or loss, with each row's
+     scratches counted beside it.
+
+  An unscored planned Play with no answers is only in the exclusion list.
+  Answers are read as stored; a completed review is not required.
+- **`ReviewDto.process`.** Two rows (`followed`, `deviated`) of wins, losses
+  and scratches, the four lane counts, and mistake tags. Counts only: the
+  browser shows a share only where its own denominator is at least 10.
+- **Mistake tags.** Grouped case-insensitively after trimming and shown in
+  their latest spelling (newest review first), alphabetical, each with wins,
+  losses, scratches and unscored Plays and no money. At most 200 are listed,
+  with the total.
+- **Drill-down.** `GET /api/review/process` takes Review's filters and
+  exactly one of `cell`, `lane`, `mistakeTag` or `skippedCheck`. It returns
+  those Plays newest first, 50 per page, with nullable financial values, the
+  stored answers, the post-hoc flag and the completion. Every count equals
+  its drill-down's membership across all pages.
+- **Post-hoc plans** (decision 9) count in their cells like any other; their
+  drill-down rows carry the badge.
+- **Autocomplete.** `GET /api/review/mistake-tags` returns the owner's
+  earlier tags, newest use first, at most 100, for the review form.
+- **Breakdown.** Origin (planned, retrospective) and Direction (long, short)
+  join Portfolios, Accounts and Assets, in that fixed order and without row
+  inspection, since Review has no origin or direction filter.
+- **Plays.** Review's Play rows gain `adherence`, `mistakeTag`, `direction`
+  and `reviewCompletion`.
