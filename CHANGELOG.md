@@ -4,6 +4,11 @@
 
 ### Added
 
+- Several manual executions can be corrected together with one reason: a
+  closed 1-in/1-out ledger can become 2-in/2-out in one step. The corrections
+  apply all or nothing, only the final ledger has to be valid, and the audit
+  history groups them (D-15). New migration `ManualCorrectionBatch`; apply it
+  explicitly.
 - An open Play whose venue executions can never settle it (a shared close, a
   flip, a forced exit that was not retained) can be declared Unresolved, with
   a reason and a note. Vessel keeps a snapshot of its execution facts, gives
