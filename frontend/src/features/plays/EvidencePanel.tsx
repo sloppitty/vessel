@@ -9,8 +9,8 @@ import { flattenMarkup, hasMarks, markedFileName, markupDataUrl } from './markup
 import { MarkupEditor } from './MarkupEditor'
 import { useObjectUrl } from './useObjectUrl'
 import { evidenceImage, type EvidenceImages, type EvidenceImageState } from './evidence-images'
+import { Time } from '@/components/ui/time'
 
-const timeFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC', hour12: false })
 const describe = (item: DraftEvidence) => item.source === 'capture' ? `Chart capture${item.context ? ` · ${item.context}` : ''}` : item.name
 const itemLabel = (item: DraftEvidence, index: number) => `Image ${index + 1}: ${describe(item)}`
 
@@ -154,7 +154,7 @@ export function EvidencePanel({ evidence, onChange, images }: {
             <div className="evidence-meta">
               <span className="evidence-kind" data-source={item.source}>{item.source === 'capture' ? 'Capture' : 'Upload'}</span>
               <span className="evidence-name" title={describe(item)}>{item.source === 'capture' ? item.context || 'Chart' : item.name}</span>
-              <time dateTime={item.addedAt} title={`${timeFormat.format(new Date(item.addedAt))} UTC`}>{timeFormat.format(new Date(item.addedAt))}</time>
+              <Time at={item.addedAt} style="day-time" />
             </div>
             <small className="evidence-state">{!item.serverId ? 'Unsaved image' : !item.savedState || item.note !== item.savedState.note || JSON.stringify(item.markup) !== JSON.stringify(item.savedState.markup)
               ? 'Image saved · note or marks unsaved' : 'Saved to this Play'}</small>
@@ -166,7 +166,7 @@ export function EvidencePanel({ evidence, onChange, images }: {
       {viewed && viewedState && <DialogContent className="plays-entry-dialog evidence-dialog"
         onEscapeKeyDown={event => { if (editing) event.preventDefault() }}>
         <DialogTitle>{describe(viewed)}</DialogTitle>
-        <DialogDescription>{viewed.source === 'capture' ? 'Captured' : 'Added'} {timeFormat.format(new Date(viewed.addedAt))} UTC{viewedBytes === undefined ? '' : ` · ${formatBytes(viewedBytes)}`}{viewed.serverId ? '' : ' · unsaved'}</DialogDescription>
+        <DialogDescription>{viewed.source === 'capture' ? 'Captured' : 'Added'} <Time at={viewed.addedAt} style="day-time" />{viewedBytes === undefined ? '' : ` · ${formatBytes(viewedBytes)}`}{viewed.serverId ? '' : ' · unsaved'}</DialogDescription>
         {editing && viewedState.status === 'loaded'
           ? <EvidenceMarkupEditor item={viewed} image={viewedState.image}
             onChange={markup => setMarkup(viewed.id, markup)} onDone={() => { setEditing(false); setView('marked') }} />

@@ -17,6 +17,7 @@ import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import type { InAppNotifications } from './useInAppNotifications'
 import { categoryLabels, exactTime, notificationQuery, relativeTime, severityLabels, type NotificationListState } from './notification-list'
 import './notifications-page.css'
+import { useDisplayZone } from '@/lib/display-zone'
 
 const count = new Intl.NumberFormat('en-US')
 
@@ -185,6 +186,7 @@ function NotificationRow({ notification, accounts, onMarkRead, onLink }: {
   onMarkRead: () => void
   onLink: (link: InAppNotification['content']['links'][number]) => void
 }) {
+  const zone = useDisplayZone()
   const [expanded, setExpanded] = useState(false)
   const detailId = useId()
   const { content, severity, state } = notification
@@ -204,7 +206,7 @@ function NotificationRow({ notification, accounts, onMarkRead, onLink }: {
           <AccountName account={{ id: account.id, name: account.name, venueId: account.venueId, source: account.sourceId ?? account.address }} />
           <VenueTag venueId={account.venueId} /><SourceChip source={account.sourceId ?? account.address} /></span>
           : content.subject.accountName && <span className="notification-row-account">{content.subject.accountName}</span>}
-        <InfoTip trigger={relativeTime(notification.createdAt)} className="notification-row-time">{exactTime(notification.createdAt)}</InfoTip>
+        <InfoTip trigger={relativeTime(notification.createdAt)} className="notification-row-time">{exactTime(notification.createdAt, zone)}</InfoTip>
         {content.late && <span className="notification-pill">Late</span>}
         {state === 'withdrawn' && <span className="notification-pill is-withdrawn">No longer current</span>}
       </div>

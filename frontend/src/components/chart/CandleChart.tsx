@@ -3,6 +3,7 @@ import type { ChartDrawing, DrawingKind } from './drawings'
 import { IndicatorOverlay } from './IndicatorControls'
 import { computeIndicators, describeIndicators, type IndicatorSettings, type PaneLayout } from './indicators'
 import { createLazyLightweightAdapter } from './lazy'
+import { useDisplayZone } from '@/lib/display-zone'
 import type { ChartAdapter, ChartAdapterFactory, ChartCallbacks, ChartCandle, ChartFocus, ChartMarker, PriceOverlay } from './types'
 import './chart.css'
 
@@ -91,7 +92,9 @@ export const CandleChart = memo(function CandleChart({
     }
   }, [createAdapter])
 
-  // Before the candles, so a reset opens on the focus.
+  // The display zone first, then the focus before the candles, so a reset opens on it.
+  const zone = useDisplayZone()
+  useEffect(() => { adapter.current?.setTimeZone(zone) }, [zone, createAdapter])
   useEffect(() => { adapter.current?.setFocus(focus) }, [focus, createAdapter])
   useEffect(() => {
     const reset = shownKey.current !== viewKey

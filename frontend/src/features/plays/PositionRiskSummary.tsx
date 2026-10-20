@@ -7,6 +7,7 @@ import { defaultSizeUnits, formatMoney, formatQuantity, formatRewardToRisk, type
 import { InfoTip } from '@/components/ui/info-tip'
 import { exactSignOf } from '@/lib/decimal'
 import './position-risk-summary.css'
+import { numberFormat } from '@/lib/format'
 
 export interface PositionRiskSummaryProps {
   draft: PlayDraft
@@ -17,7 +18,7 @@ export interface PositionRiskSummaryProps {
   fills?: EntryFills | 'unknown'
 }
 
-const percent = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
+const percent = numberFormat({ maximumFractionDigits: 2 })
 const percentText = (value: number) => value > 0 && value < 0.01 ? '< 0.01%' : `${percent.format(value)}%`
 const moneyText = (value: number, units: SizeUnits) =>
   value > 0 && value < 0.01 ? `< 0.01 ${units.quote}` : formatMoney(value, units)

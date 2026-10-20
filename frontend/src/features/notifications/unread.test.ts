@@ -33,8 +33,8 @@ describe('unread count', () => {
     expect(view.result.current).toBe('No unread notifications')
   })
   it('describes the worker status', () => {
-    expect(workerStatus(true, null)).toBe('Delivering')
-    expect(workerStatus(false, '2026-10-17T14:02:00Z')).toMatch(/^Notification worker offline since /)
-    expect(workerStatus(false, null)).toMatch(/has not reported yet/)
+    expect(workerStatus(true, null, 'utc')).toBe('Delivering')
+    expect(workerStatus(false, '2026-10-17T14:02:00Z', 'utc')).toBe('Notification worker offline since 17 Oct 2026, 14:02:00 UTC')
+    expect(workerStatus(false, null, 'local')).toMatch(/has not reported yet/)
   })
 })

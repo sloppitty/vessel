@@ -16,5 +16,5 @@ Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn
 Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
 // jsdom has no canvas. Feature tests inject a fake adapter; the real renderer is checked in a browser.
 vi.mock('@/components/chart/lightweight', () => ({
-  createLightweightAdapter: () => ({ setCandles: vi.fn(), setOverlays: vi.fn(), setDrawings: vi.fn(), setDrawingTool: vi.fn(), setPricePicker: vi.fn(), setIndicators: vi.fn(), setMarkers: vi.fn(), setFocus: vi.fn(), capture: vi.fn().mockResolvedValue(null), destroy: vi.fn() }),
+  createLightweightAdapter: () => ({ setCandles: vi.fn(), setOverlays: vi.fn(), setDrawings: vi.fn(), setDrawingTool: vi.fn(), setPricePicker: vi.fn(), setIndicators: vi.fn(), setMarkers: vi.fn(), setFocus: vi.fn(), setTimeZone: vi.fn(), capture: vi.fn().mockResolvedValue(null), destroy: vi.fn() }),
 }))

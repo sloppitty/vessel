@@ -11,12 +11,13 @@ import { formatMoney, formatQuantity, formatRewardToRisk, type SizeUnits } from 
 import { fundingNote } from './LocalResult'
 import { exposureLabels, suggestionCount, type PlanSuggestions } from './suggestions'
 import type { SizingStatus } from './useSizing'
+import { numberFormat } from '@/lib/format'
 
-const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
+const number = numberFormat({ maximumFractionDigits: 2 })
 /** "1.25" from an API decimal string, or null when it is missing or not a number. */
 const decimal = (value: string | null) => value === null || !Number.isFinite(Number(value)) ? null : number.format(Number(value))
 /** Risk percentages keep a third decimal, e.g. 0.625% at half of 1.25%. */
-const riskNumber = new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 })
+const riskNumber = numberFormat({ maximumFractionDigits: 3 })
 const percentOf = (fraction: string | null) => fraction === null ? null : decimal(String(Number(fraction) * 100))
 
 /** One suggestion: what changes, the Accept button and why, in its own row of the panel. */

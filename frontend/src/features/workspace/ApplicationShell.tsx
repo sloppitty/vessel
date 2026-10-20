@@ -47,6 +47,7 @@ import { AccountMenu } from '@/features/identity/AccountMenu'
 import type { SettingsTab } from './SettingsPage'
 import './application-shell.css'
 import './skip-content.css'
+import { Time } from '@/components/ui/time'
 
 const PlaysPage = lazyPage(async () => ({ default: (await import('@/features/plays/PlaysPage')).PlaysPage }))
 const ReviewPage = lazyPage(async () => ({ default: (await import('@/features/review/ReviewPage')).ReviewPage }))
@@ -371,7 +372,7 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
         {monitor.error && <div className="workspace-alert" role="status">{monitor.error} Stored data remains available; no venue check was requested.</div>}
         {monitor.notice && <div className="workspace-alert" role="status">{monitor.notice}</div>}
         {monitor.summary && !monitor.summary.workerOnline && monitor.summary.accounts.some(item => item.state !== 'idle' || item.manualState !== 'idle' || item.discrepancies.some(issue => issue.state === 'open')) && <div className="workspace-alert monitor-offline" role="status">
-          Worker offline. Background Play checks are delayed. Last heartbeat {monitor.summary.heartbeatAtUtc ? new Date(monitor.summary.heartbeatAtUtc).toLocaleString() : 'not recorded'}. Stored executions may be out of date.
+          Worker offline. Background Play checks are delayed. Last heartbeat <Time at={monitor.summary.heartbeatAtUtc} fallback="not recorded" />. Stored executions may be out of date.
         </div>}
         {inApp.status.known && inApp.status.enabled && !inApp.status.workerOnline && tracked && <div className="workspace-alert notifications-offline" role="status">
           Notifications offline: they will arrive when it returns

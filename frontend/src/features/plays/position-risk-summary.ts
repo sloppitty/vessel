@@ -6,6 +6,7 @@ import { exactLevelPrice, exitsOf, type ExitKind } from './levels'
 import { exactPlanNumber, finitePlanNumber as decimal, planShare, planTextLength, serverPositivePlanNumber } from './numbers'
 import { entryFilled, noFilledEntries, wrongSide, type FilledEntries } from './planChecks'
 import { defaultSizeUnits, exitEstimate, positionSize, type SizeUnits } from './sizing'
+import { numberFormat } from '@/lib/format'
 
 /** The caller supplies a named reference in the position's quote asset. No conversion is inferred. */
 export interface RiskReference {
@@ -296,7 +297,7 @@ export function positionRiskSummary(draft: SummaryDraft, units: SizeUnits = defa
   return { quantity, entryAllocation, pricedCoverage, pricedQuantity, stops, stopPayoff, targets, rewardToRisk, reference, riskSharePercent }
 }
 
-const payoffMoney = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
+const payoffMoney = numberFormat({ maximumFractionDigits: 2 })
 
 /**
  * "+5 USDC locked in", "−5 USDC at risk" or "0 USDC break-even": rounded once from the exact value for display, so a

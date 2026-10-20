@@ -6,11 +6,12 @@ import type { AccountSnapshot, BrokerAccount, WorkspaceApi } from '@/api/workspa
 import { errorMessage } from '@/api/errors'
 import { Button } from '@/components/ui/button'
 import { ActivityOperations } from './ActivityOperations'
-import { accountStatus, accountStatusTone, amount, money, time } from '@/lib/format'
+import { accountStatus, accountStatusTone, amount, money } from '@/lib/format'
 import { useVenues } from '@/api/venues'
 import { ArrowLeft, RefreshCw } from 'lucide-react'
 import { VenueLogo } from '@/components/venues/VenueBadge'
 import { InfoTip } from '@/components/ui/info-tip'
+import { Time } from '@/components/ui/time'
 
 /** A short source tag on a figure; the tag opens the full description. */
 function SourcePill({ text, detail }: { text: string; detail: string }) {
@@ -62,7 +63,7 @@ export function AccountDetail({ account, api, refreshing, busy = refreshing, onS
       title={venues.can(account.venueId, 'readOnlyCredential') ? 'Rename, move or disable; inspect or replace the read-only token if order access is unavailable or expired' : undefined}>Manage account</Button>{synced && <Button variant="outline" onClick={() => onSync(account.id)} disabled={busy || account.isEnabled === false}
       title="Rereads current state and bounded recent executions, not complete lifetime history"><RefreshCw size={15} className={refreshing ? 'is-spinning' : ''} />{refreshing ? 'Refreshing…' : 'Refresh account'}</Button>}</div></div>
     {/* The page title already names the account, so this card carries only the venue and freshness. */}
-    <section className="shell-panel account-detail-heading" aria-label="Account summary"><VenueLogo venueId={account.venueId} size="lg" /><div><p>{venues.name(account.venueId)}{synced ? ` · ${account.lastSyncedAtUtc ? `refreshed ${time(account.lastSyncedAtUtc)}` : 'not refreshed yet'}` : venues.isManual(account.venueId) ? '' : ' · reader not enabled'}</p></div><span className={`workspace-badge ${accountStatusTone(account)}`}>{accountStatus(account)}</span>{account.isEnabled !== false && <MonitorBadge monitor={monitorRun.monitor} />}</section>
+    <section className="shell-panel account-detail-heading" aria-label="Account summary"><VenueLogo venueId={account.venueId} size="lg" /><div><p>{venues.name(account.venueId)}{synced ? <> · {account.lastSyncedAtUtc ? <>refreshed <Time at={account.lastSyncedAtUtc} /></> : 'not refreshed yet'}</> : venues.isManual(account.venueId) ? '' : ' · reader not enabled'}</p></div><span className={`workspace-badge ${accountStatusTone(account)}`}>{accountStatus(account)}</span>{account.isEnabled !== false && <MonitorBadge monitor={monitorRun.monitor} />}</section>
     {(account.sourceId ?? account.address) && <p className="account-source"><span>Source</span> {account.sourceId ?? account.address}</p>}
     {error && <div className="workspace-alert" role="alert">{error}</div>}
     {account.isEnabled === false && <div className="workspace-alert" role="status">Disabled: imports and positions are hidden and excluded from totals.</div>}

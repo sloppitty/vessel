@@ -7,10 +7,11 @@ import { InfoTip } from '@/components/ui/info-tip'
 import { VenueLogo } from '@/components/venues/VenueBadge'
 import { ArrowUpRight, Pencil, RefreshCw } from 'lucide-react'
 import { useId } from 'react'
-import { accountStatus, accountStatusTone, availableSourceLabels as availableSources, money, shortSource, time } from '@/lib/format'
+import { accountStatus, accountStatusTone, availableSourceLabels as availableSources, money, shortSource } from '@/lib/format'
 import { AccountGroupHeader } from './AccountGroupHeader'
 import type { AccountGroup } from './account-groups'
 import './accounts.css'
+import { Time } from '@/components/ui/time'
 
 /** One balance figure per row with its unit; what each venue reports is explained once, on the Balance header. */
 function BalanceCell({ account }: { account: BrokerAccount }) {
@@ -54,7 +55,7 @@ export function AccountRows({ accounts, groups, portfolioNames, refreshing, sele
       </button></td>
       <td><span className={`account-portfolio${portfolio ? '' : ' is-unassigned'}`}>{portfolio ?? 'Unassigned'}</span></td>
       <td className="numeric"><BalanceCell account={account} /></td>
-      <td><span className={`workspace-badge ${accountStatusTone(account)}`}>{accountStatus(account)}</span><small>{time(account.lastSyncedAtUtc)}</small><small>{account.positionCount} reported positions</small></td>
+      <td><span className={`workspace-badge ${accountStatusTone(account)}`}>{accountStatus(account)}</span><small><Time at={account.lastSyncedAtUtc} fallback="Not refreshed yet" /></small><small>{account.positionCount} reported positions</small></td>
       <td><div className="row-actions"><Button disabled={selection?.disabled} variant="ghost" size="sm" onClick={() => onDetail(account.id)} aria-label={`View ${account.name}`}>View<ArrowUpRight size={14} /></Button>
         <button disabled={selection?.disabled} className="icon-button" onClick={() => onManage(account)} aria-label={`Manage ${account.name}`} title="Rename, move, disable or delete"><Pencil size={14} /></button>
         {venues.can(account.venueId, 'sync') && <button className="icon-button" disabled={selection?.disabled || refreshing !== null || account.isEnabled === false} aria-busy={refreshing === account.id} onClick={() => onSync(account.id)} aria-label={`Refresh ${account.name}`} title={account.isEnabled === false ? 'Enable this account before refreshing' : 'Refresh current state and recent executions'}><RefreshCw size={15} className={refreshing === account.id ? 'is-spinning' : ''} /></button>}</div></td>

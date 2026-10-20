@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { amount, money, reviewDate, reviewMoney, reviewMultiple, reviewPercent, reviewResult, shortAddress, shortSource, time } from './format'
+import { amount, money, reviewDate, reviewMoney, reviewMultiple, reviewPercent, reviewResult, shortAddress, shortSource } from './format'
 
 it('keeps unavailable values distinct from a reported zero', () => {
   expect(money(null)).toBe('—')
@@ -21,10 +21,6 @@ it('formats negative exact totals with the same grouping', () => {
   expect(money('-79228162514264337593543950336.25')).toBe('-$79,228,162,514,264,337,593,543,950,336.25')
   expect(money('-12.5')).toBe('-$12.50')
   expect(amount('-0.000000001234')).toBe('-0.000000001234')
-})
-it('retains a year in historical dates', () => {
-  expect(time('2024-02-15T12:00:00Z')).toContain('2024')
-  expect(time(null)).toBe('Not refreshed yet')
 })
 it('preserves distinct workspace and Review money outputs', () => {
   expect(money(null)).toBe('—')

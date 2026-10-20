@@ -8,6 +8,7 @@ import { breakEvenStop, keptStop, wrongSide } from './planChecks'
 import { planInputType, positivePlanNumber, serverPositivePlanNumber } from './numbers'
 import { defaultSizeUnits, estimatedLiquidation, exitEstimate, formatMoney, type SizeUnits } from './sizing'
 import { entryFieldState, exitFieldState, planTextMarks, useStoredPlanText } from './stored-plan-text'
+import { numberFormat } from '@/lib/format'
 
 function LevelUnits({ value, label, onChange }: {
   value: DraftExit['unit']
@@ -23,7 +24,7 @@ function LevelUnits({ value, label, onChange }: {
   </div>
 }
 
-const percent = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
+const percent = numberFormat({ maximumFractionDigits: 2 })
 
 const copy = {
   stop: { legend: 'Planned stops', singular: 'stop' },

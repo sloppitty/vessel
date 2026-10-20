@@ -1,6 +1,8 @@
 import type { NotificationCategory, NotificationQuery, NotificationSeverity, NotificationTab } from '@/api/notifications'
 import { isNotificationCategory, isNotificationSeverity } from '@/api/notifications'
 import { defaultPageSize, type PageSize } from '@/components/ui/paging'
+import type { DisplayZone } from '@/lib/display-zone'
+import { formatTime } from '@/lib/time'
 
 /** Tab, filters and paging of the Notifications page, kept in shell memory across navigation. Blank filters mean all. */
 export interface NotificationListState { tab: NotificationTab; category: string; severity: string; page: number; pageSize: PageSize }
@@ -30,4 +32,5 @@ export function relativeTime(at: string, now = Date.now()) {
   }
   return ''
 }
-export const exactTime = (at: string) => new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' })
+/** The full time of a notification, in the display zone and naming it (phase 1, 1.6e). */
+export const exactTime = (at: string, zone: DisplayZone) => formatTime(at, zone, 'datetime-seconds')

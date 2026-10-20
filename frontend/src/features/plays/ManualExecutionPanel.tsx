@@ -12,6 +12,8 @@ import type { DraftEntry } from './draft'
 import { nominalStablecoins } from './stablecoins'
 import { NativeSelect } from '@/components/ui/native-select'
 import { EntryReceipts, ManualFees, ReceiptTotals } from './Receipt'
+import { Time } from '@/components/ui/time'
+import { formatTime } from '@/lib/time'
 
 export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form, onChange, onStored, onBegin, working = false, observedVersion, zone = 'local' }: {
   api: WorkspaceApi
@@ -27,7 +29,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
   onBegin: () => (() => void) | null
   working?: boolean
   observedVersion?: number
-  /** The display time zone times are typed and shown in (phase 1, 1.6b); the browser's own until 1.6e adds the setting. */
+  /** The display time zone times are typed and shown in (phase 1, 1.6b and 1.6e). */
   zone?: EntryZone
 }) {
   const id = useId()
@@ -190,7 +192,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
       <ol className="manual-records" aria-label="Manual executions">
         {ledger.records.map(record => <li key={record.id}>
           <strong>{record.role === 'entry' ? 'Entry' : 'Exit'} · {record.side} {record.quantity} at {record.price}</strong>
-          <time dateTime={record.occurredAtUtc}>{record.occurredAtUtc}</time>
+          <Time at={record.occurredAtUtc} style="datetime-seconds" />
           <span>Source: {record.source} · Fee: {record.fee === null ? 'Unknown' : `${record.fee} ${record.feeCurrency}`}</span>
           <Button type="button" size="sm" variant="outline" disabled={!enabled || dirty || pending || !canCorrect || hasManualDraft(form)}
             aria-label={`Correct ${record.id}`} onClick={() => { if (submission.current || pending) return; setError(null); setErrors({}); onChange(manualCorrectionDraft(record, zone)) }}>Correct</Button>
@@ -200,7 +202,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
         <ol>{ledger.history.map(change => <li key={change.id}>
           <strong>{change.before ? change.batchId ? 'Correction batch' : 'Correction' : 'Recorded'} · {change.reason ?? 'Initial record'}</strong>
           {change.batchId && <small>Batch {change.batchId.slice(0, 8)}: {ledger.history.filter(item => item.batchId === change.batchId).length} executions corrected together</small>}
-          <time dateTime={change.occurredAtUtc}>{change.occurredAtUtc}</time>
+          <Time at={change.occurredAtUtc} style="datetime-seconds" />
           {change.before && <p>Before: {change.before.role} · {change.before.side} {change.before.quantity} at {change.before.price} · {change.before.occurredAtUtc} · {change.before.source} · fee {change.before.fee === null ? 'unknown' : `${change.before.fee} ${change.before.feeCurrency}`}</p>}
           <p>After: {change.after.role} · {change.after.side} {change.after.quantity} at {change.after.price} · {change.after.occurredAtUtc} · {change.after.source} · fee {change.after.fee === null ? 'unknown' : `${change.after.fee} ${change.after.feeCurrency}`}</p>
         </li>)}</ol>
@@ -254,7 +256,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
               if (record) change({ together: [...together, manualCorrectionDraft(record, zone)] })
             }}>
             <option value="">Another execution, with the same reason…</option>
-            {addable.map(record => <option key={record.id} value={record.id}>{record.role === 'entry' ? 'Entry' : 'Exit'} · {record.side} {record.quantity} at {record.price} · {record.occurredAtUtc}</option>)}
+            {addable.map(record => <option key={record.id} value={record.id}>{record.role === 'entry' ? 'Entry' : 'Exit'} · {record.side} {record.quantity} at {record.price} · {formatTime(record.occurredAtUtc, zone, 'datetime-seconds')}</option>)}
           </NativeSelect></label>}
           {together.length > 0 && <p className="muted">These corrections are saved together with one reason, or not at all. Only the final ledger has to be valid.</p>}
         </div>}

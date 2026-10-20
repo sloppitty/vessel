@@ -10,6 +10,8 @@ import { NominalUsdTag } from './CoverageBadge'
 import { duration, operationDates, operationPriceReturn, operationStatus, resultSign } from './activity-format'
 import { amount, money } from '@/lib/format'
 import './activity-operations.css'
+import { useDisplayZone } from '@/lib/display-zone'
+import { otherZoneTime } from '@/lib/time'
 
 function Result({ value }: { value: string | null }) {
   return <span className={`operation-result ${resultSign(value)}`} title={value ?? 'Unknown'}>{money(value)}</span>
@@ -60,6 +62,7 @@ export function OperationsTable({ operations, accounts, compact = false, onPrevi
   /** Changes with every accepted Activity response, so expanded operations re-read their executions. */
   refreshGeneration?: number
 }) {
+  const zone = useDisplayZone()
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const toggle = (id: string) => setExpanded(previous => {
     const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next
@@ -76,7 +79,7 @@ export function OperationsTable({ operations, accounts, compact = false, onPrevi
       if (!(event.target as Element).closest('button, a, input, select, textarea') && !window.getSelection()?.toString()) toggle(op.id)
     }}>
       <td><div className="operation-heading"><button type="button" className="operation-toggle" aria-label={`${open ? 'Collapse' : 'Expand'} ${op.contractId} operation`} aria-expanded={open} aria-controls={open ? `operation-${op.id}` : undefined} onClick={() => toggle(op.id)}>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button><div><strong className="operation-asset">{op.contractId}</strong><div className="operation-tags"><OperationDirection direction={op.direction} /><OperationLeverage operation={op} /><span className={`operation-status ${status.tone}`}>{status.label}</span></div></div></div></td>
-      <td><strong>{accounts.find(a => a.id === op.accountId)?.name ?? 'Account'}</strong><small className="operation-dates" title={`Opened: ${op.openedAtUtc ?? 'unknown'}; ${op.closedAtUtc ? `Closed: ${op.closedAtUtc}` : `Last execution: ${op.lastOccurredAtUtc}`}`}>{operationDates(op)}</small>{op.openedAtUtc !== null && op.closedAtUtc !== null && <small>{duration(op.openedAtUtc, op.closedAtUtc)}</small>}</td>
+      <td><strong>{accounts.find(a => a.id === op.accountId)?.name ?? 'Account'}</strong><small className="operation-dates" title={`Opened: ${op.openedAtUtc ? otherZoneTime(op.openedAtUtc, zone) : 'unknown'}; ${op.closedAtUtc ? `Closed: ${otherZoneTime(op.closedAtUtc, zone)}` : `Last execution: ${otherZoneTime(op.lastOccurredAtUtc, zone)}`}`}>{operationDates(op, zone)}</small>{op.openedAtUtc !== null && op.closedAtUtc !== null && <small>{duration(op.openedAtUtc, op.closedAtUtc)}</small>}</td>
       <td className="numeric"><strong title={op.quantity === null ? 'Peak quantity unknown' : `Peak quantity: ${op.quantity}`}>{op.quantity === null ? '—' : amount(op.quantity)}</strong>{resultSign(op.openQuantity) === 'positive' && <small>Remaining {amount(op.openQuantity!)}</small>}</td>
       {!compact && <><td className="numeric operation-entry"><span title={op.averageEntryPrice ?? 'Unknown'}>{money(op.averageEntryPrice)}</span></td><td className={`numeric operation-result ${priceTone}`}><span title={op.averageExitPrice ?? 'Unknown'}>{money(op.averageExitPrice)}</span></td><td className="numeric"><div className="operation-pnl"><Result value={op.grossClosedPnlUsd} />{priceReturn !== null && <span className={`operation-return operation-result ${priceTone}`} title="Average entry-to-exit price return, direction-adjusted, before fees and leverage. Not an account or margin return.">{priceReturn}</span>}</div></td>
       <td className="numeric operation-fees"><span title={op.stablecoinFeesNominalUsd}>{money(op.stablecoinFeesNominalUsd)}</span>{op.otherFees.map(f => <small key={f.token}>{amount(f.amount)} {f.token}</small>)}</td>

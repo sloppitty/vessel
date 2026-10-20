@@ -4,8 +4,9 @@ import type { WorkspaceApi } from '@/api/workspace'
 import { ApiError, errorMessage } from '@/api/errors'
 import { newDiaryRequestId } from '@/api/diary'
 import { Button } from '@/components/ui/button'
-import { money, time } from '@/lib/format'
+import { money } from '@/lib/format'
 import { OperationDirection } from './OperationDirection'
+import { Time } from '@/components/ui/time'
 
 export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, onCreated }: {
   api: WorkspaceApi; accountId: string; operationId: string
@@ -78,7 +79,7 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
   const op = preview.operation
   return <div className="retrospective-preview">
     <div className="retrospective-summary" title={`Operation ${op.id} · Account ${op.accountId}`}><strong>{op.contractId}</strong><OperationDirection direction={op.direction} /><span className="workspace-badge">{op.status} · {op.playAssociation}</span></div>
-    <dl className="retrospective-times"><div><dt>Original opening</dt><dd>{op.openedAtUtc ? time(op.openedAtUtc) : 'Unknown'}</dd></div><div><dt>Original closing</dt><dd>{op.closedAtUtc ? time(op.closedAtUtc) : 'Unknown'}</dd></div><div><dt>Net execution result</dt><dd title={op.netResultUsd ?? 'Unknown'}>{money(op.netResultUsd)}</dd></div></dl>
+    <dl className="retrospective-times"><div><dt>Original opening</dt><dd><Time at={op.openedAtUtc} fallback="Unknown" /></dd></div><div><dt>Original closing</dt><dd><Time at={op.closedAtUtc} fallback="Unknown" /></dd></div><div><dt>Net execution result</dt><dd title={op.netResultUsd ?? 'Unknown'}>{money(op.netResultUsd)}</dd></div></dl>
     <p className="workspace-scope-note">{preview.notice}</p>
     <details className="operation-scope"><summary>Basis</summary><p className="workspace-scope-note">P&amp;L basis: {op.pnlBasis}. Fees follow the reported basis, with no second deduction from net-of-fee P&amp;L. Separate funding cashflows are not added; RISEx funding inclusion is unverified.</p></details>
     {!preview.eligible && <div role="status"><strong>Cannot create a retrospective Play</strong><ul className="operation-coverage">{preview.reasons.map((reason, i) => <li key={i}>{reason}</li>)}</ul></div>}
@@ -86,7 +87,7 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
     <h3>Original imported fills and associations</h3>
     <div className="workspace-table-wrap retrospective-fills"><table className="workspace-table"><caption className="sr-only">Original imported fills and associations</caption><thead><tr><th>Record / time</th><th>Side / effect / role</th><th>Original quantity / price</th><th>Original fee / P&amp;L</th><th>Order / Play</th></tr></thead><tbody>{op.fills.map((part, index) => {
       const fill = part.fill
-      return <tr key={`${fill.id}-${index}`}><td><strong>{fill.id}</strong><small>{fill.occurredAtUtc}</small><small>Source fill {fill.sourceFillId}</small><small>Transaction {fill.transactionHash || 'Not reported'}</small></td>
+      return <tr key={`${fill.id}-${index}`}><td><strong>{fill.id}</strong><small><Time at={fill.occurredAtUtc} style="datetime-seconds" /></small><small>Source fill {fill.sourceFillId}</small><small>Transaction {fill.transactionHash || 'Not reported'}</small></td>
         <td>{fill.side}<small>Effect {fill.positionEffect}</small><small>Operation role {part.role}</small></td>
         <td>{fill.quantity}<small>Price {fill.price}</small><small>Allocated quantity {part.quantity}</small></td>
         <td>{fill.fee} {fill.feeToken}<small>{fill.feeBasis}</small><small>Closed P&amp;L {fill.closedPnlUsd}</small><small>{fill.pnlBasis}</small><small>Allocated fee {part.fee} · P&amp;L {part.closedPnlUsd}</small></td>

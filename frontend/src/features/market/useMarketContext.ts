@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MarketContext, WorkspaceApi } from '@/api/workspace'
 import { ApiError, errorMessage } from '@/api/errors'
 import { candleCache } from './candleCache'
+import { numberFormat } from '@/lib/format'
 
 /**
  * Venue header statistics, loaded once per instrument, refreshed with the chart and replaced by live updates.
@@ -48,8 +49,8 @@ export function useMarketContext(api: WorkspaceApi, accountId: string, instrumen
 }
 
 const decimals = (value: string) => value.split('.')[1]?.length ?? 0
-const grouped = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 })
-const groupedPrecise = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
+const grouped = numberFormat({ maximumFractionDigits: 0 })
+const groupedPrecise = numberFormat({ maximumFractionDigits: 2 })
 
 /** Display-only statistics derived from venue strings; not valuation or performance figures. */
 export function describeMarket(context: MarketContext) {

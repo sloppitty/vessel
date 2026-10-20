@@ -28,6 +28,8 @@ import { addEntry, createNextEntry, removeEntry, type DraftEntry, type PlayDraft
 import { LevelEditor } from './LevelEditor'
 import { applyEntryEdit, applyLevelDrag, averageEntryPrice, formatDraggedPrice, levelTag, parseOverlayId, placeLevel, planOverlays, type ChartView, type ExitKind, type StopEvidenceOf } from './levels'
 import { positivePlanNumber } from './numbers'
+import { useDisplayZone } from '@/lib/display-zone'
+import { formatTime } from '@/lib/time'
 
 export interface ChartSource {
   api: WorkspaceApi
@@ -89,11 +91,10 @@ const liquidationOverlay = (price: number): PriceOverlay => ({
 })
 const planToolIcon = { size: 16, strokeWidth: 1.6, 'aria-hidden': true } as const
 
-const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'UTC', hour12: false })
-
 export function ChartPanel({ entries, selectedId, onSelect, instrument, instrumentName = instrument, venue = null, direction = 'long', leverage = 1, liquidation = null,
   editable = true, source = null, onEntriesChange, drawings = noDrawings, onDrawingsChange, onCapture, onShowEvidence, createAdapter,
   intervals = candleIntervals, priceStep = null, streamable = true, marketContext = true, stopEvidence, fills = noFills, tradeDates = false }: ChartPanelProps) {
+  const zone = useDisplayZone()
   const [view, setView] = useState<ChartView>('aggregate')
   const [planTool, setPlanTool] = useState<PlanTool | null>(null)
   const [preferences, setPreferences] = useChartPreferences()
@@ -190,7 +191,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   // A preferred interval the venue does not serve falls back to the hour, or the venue's first interval.
   const interval = intervals.includes(preferences.interval) ? preferences.interval
     : intervals.includes('1h') ? '1h' : intervals[0] ?? preferences.interval
-  const markers = useMemo(() => fillMarkers(fills, interval), [fills, interval])
+  const markers = useMemo(() => fillMarkers(fills, interval, zone), [fills, interval, zone])
   const [expanded, setExpanded] = useState(false)
   const expandButton = useRef<HTMLButtonElement>(null)
   const live = source !== null && instrument !== ''
@@ -358,6 +359,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
   markers: readonly ChartMarker[]
   tradeDates: boolean
 }) {
+  const zone = useDisplayZone()
   // An ended trade opens on its dates: candles end shortly after its last fill, and the view frames it.
   const focus = useMemo(() => tradeDates ? tradeFocus(markers, interval) : null, [tradeDates, markers, interval])
   const data = useCandles({ ...source, instrument, interval, anchor: focus?.to ?? null })
@@ -395,7 +397,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
     try {
       // The canvas has no legend, so the caption names the indicators as shown.
       const control = expanded ? dialogChart.current : inlineChart.current
-      image = control ? await control.capture([context, `${now.toISOString().slice(0, 16).replace('T', ' ')} UTC`, control.indicatorSummary(), 'Planned levels are not fills']
+      image = control ? await control.capture([context, formatTime(now, zone), control.indicatorSummary(), 'Planned levels are not fills']
         .filter(Boolean).join(' · ')) : null
     } catch {
       image = null
@@ -423,9 +425,9 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
   const header = marketContext && <ChartHeader stats={stats} statsLabel={`${instrument} market statistics`}
     notice={market.error && <p className="chart-header-error" role="alert">{market.error}</p>} />
   const status = data.status === 'loading' ? 'Loading candles…'
-    : data.refreshing ? `Refreshing…${updatedAt ? ` Updated ${timeFormat.format(new Date(updatedAt))} UTC (cached)` : ''}`
+    : data.refreshing ? `Refreshing…${updatedAt ? ` Updated ${formatTime(updatedAt, zone, 'time-seconds')} (cached)` : ''}`
       : data.loadingOlder ? 'Loading older candles…'
-        : updatedAt ? `Updated ${timeFormat.format(new Date(updatedAt))} UTC` : ''
+        : updatedAt ? `Updated ${formatTime(updatedAt, zone, 'time-seconds')}` : ''
   const toolbar = (inDialog: boolean) => <ChartToolbar label="Chart controls" end={<>
     {/* Streamed updates change the time every few seconds; only announce it when updates are manual. */}
     <span className="chart-status" role="status" aria-live={live.state === 'off' ? 'polite' : 'off'} title={`${caption}${status ? ` · ${status}` : ''}`}>

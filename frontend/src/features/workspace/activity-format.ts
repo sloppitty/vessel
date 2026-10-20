@@ -1,6 +1,8 @@
 import type { ImportedFill } from '@/api/fills'
 import { decimalSign } from '@/lib/decimal'
 import type { ActivityOperation } from '@/api/activity'
+import type { DisplayZone } from '@/lib/display-zone'
+import { formatIn, zoneLabel } from '@/lib/time'
 
 /** A fill's own trade side from the normalized side, never venue wording: a buy is Long, a sell is Short. */
 export function sideDirection(fill: ImportedFill): 'long' | 'short' {
@@ -42,15 +44,15 @@ export function operationStatus(op: ActivityOperation): { label: string; tone: s
     ? { label: 'Partially closed', tone: 'partial' } : { label: 'Open', tone: 'open' }
 }
 
-export function operationDates(op: ActivityOperation): string {
+/** An operation's open and close, in the display zone, naming it once at the end (phase 1, 1.6e). */
+export function operationDates(op: ActivityOperation, zone: DisplayZone): string {
   const end = op.closedAtUtc ?? (op.status === 'incomplete' ? op.lastOccurredAtUtc : null)
-  const year = op.openedAtUtc?.slice(0, 4) !== end?.slice(0, 4) && end !== null
-  const date = (value: string, timeOnly = false) => new Date(value).toLocaleString('en-GB', {
-    ...(!timeOnly ? { day: 'numeric', month: 'short', ...(year ? { year: 'numeric' } as const : {}) } as const : {}),
-    hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC',
-  })
+  const year = end !== null && (op.openedAtUtc === null || formatIn(op.openedAtUtc, zone, 'year') !== formatIn(end, zone, 'year'))
+  const date = (value: string, timeOnly = false) => formatIn(value, zone, timeOnly ? 'time' : year ? 'datetime' : 'day-time')
+  if (op.openedAtUtc === null && end === null) return 'Opened unknown'
   const opened = op.openedAtUtc === null ? 'Opened unknown' : date(op.openedAtUtc)
-  if (end === null) return opened
-  const sameDay = op.openedAtUtc?.slice(0, 10) === end.slice(0, 10)
-  return `${opened} → ${op.closedAtUtc === null ? 'last fill ' : ''}${date(end, sameDay)}`
+  const named = (text: string, at: string) => `${text} ${zoneLabel(at, zone)}`
+  if (end === null) return named(opened, op.openedAtUtc!)
+  const sameDay = op.openedAtUtc !== null && formatIn(op.openedAtUtc, zone, 'date') === formatIn(end, zone, 'date')
+  return named(`${opened} → ${op.closedAtUtc === null ? 'last fill ' : ''}${date(end, sameDay)}`, end)
 }

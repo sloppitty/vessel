@@ -8,6 +8,7 @@ import { describePlanChanges } from './saved'
 import { preflightLabels } from './preflight'
 import { evidenceLines } from './unresolved'
 import { NativeSelect } from '@/components/ui/native-select'
+import { Time } from '@/components/ui/time'
 
 /** Asks why a planned Play's plan changed; the reason is kept with the revision. */
 export function RevisionDialog({ revision, pending, error, onSave, onClose }: {
@@ -163,7 +164,6 @@ export function DeleteDialog({ pending, error, onDelete, onClose }: {
 const reviewActionLabels = { completed: 'review completed', reopened: 'reviewed again', 'not-needed': 'no review needed',
   cleared: 'completion cleared: the Play left its final state' } as const
 
-const when = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
 type HistoryItem = { at: string; key: string; title: string; detail: string[] }
 
@@ -206,7 +206,7 @@ export function HistoryDialog({ api, playId, onClose }: { api: WorkspaceApi; pla
       {result === null && <p role="status">Loading history…</p>}
       {result && 'error' in result && <p className="error" role="alert">{result.error}</p>}
       {result && 'history' in result && (items.length ? <ol className="play-history">
-        {items.map(item => <li key={item.key}><time dateTime={item.at}>{when(item.at)}</time><strong>{item.title}</strong>
+        {items.map(item => <li key={item.key}><Time at={item.at} /><strong>{item.title}</strong>
           {item.detail.length > 0 && <ul>{item.detail.map((line, index) => <li key={index}>{line}</li>)}</ul>}</li>)}
       </ol> : <p className="muted">Nothing yet. History starts when the play is planned.</p>)}
     </DialogContent>

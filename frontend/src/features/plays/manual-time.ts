@@ -1,10 +1,12 @@
+import type { DisplayZone } from '@/lib/display-zone'
+
 /*
- * Manual execution times as the owner types them (phase 1, 1.6b): in the display time zone, sent as UTC. The browser's
- * own zone is the display zone until the time-zone setting (1.6e) lets the owner choose UTC. Fractions of a second are
- * kept digit for digit, so a stored microsecond time shown and sent back unchanged is the same instant.
+ * Manual execution times as the owner types them (phase 1, 1.6b): in the display time zone (1.6e), sent as UTC.
+ * Fractions of a second are kept digit for digit, so a stored microsecond time shown and sent back unchanged is the
+ * same instant.
  */
 
-export type EntryZone = 'local' | 'utc'
+export type EntryZone = DisplayZone
 
 const pad = (value: number) => String(value).padStart(2, '0')
 const stored = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(\.\d+)?(?:Z|\+00:00)$/

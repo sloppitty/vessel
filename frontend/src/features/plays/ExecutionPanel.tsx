@@ -12,11 +12,11 @@ import { useJournalState } from './journal-state'
 import { LevelDriftAction } from './LevelDriftAction'
 import { LocalResultValue, SignDiffersFlag, localResultNote } from './LocalResult'
 import { EntryReceipts, ReceiptTotals } from './Receipt'
+import { Time } from '@/components/ui/time'
 
 // One shared empty object, so an untouched panel does not look like new state on every render.
 const noChoices: Record<string, string> = {}
 
-const time = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
 /** Venue orders and fills linked to the play, suggestions to confirm and orders that could be linked by hand. */
 const pnlBasisNote = {
@@ -73,7 +73,7 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
   return <div className="execution-panel">
     {!retrospective && (!execution.tracked || !shownMonitor) && <div className="execution-header">
       <p className="muted" title={execution.tracked ? 'Orders link automatically by price and side; Vessel asks only when several plays could own one.' : undefined}>
-        {execution.tracked ? execution.checkedAtUtc ? `Checked ${time(execution.checkedAtUtc)}` : 'Not checked yet'
+        {execution.tracked ? execution.checkedAtUtc ? <>Checked <Time at={execution.checkedAtUtc} /></> : 'Not checked yet'
           : execution.reason ?? 'Execution is not tracked for this play.'}</p>
     </div>}
     {error && <p className="error" role="alert">{error}</p>}
@@ -149,7 +149,7 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
         const chosen = choices[order.orderId] ?? ''
         const option = allowed.find(item => item.value === chosen)
         return <li key={order.orderId}>
-          <span><strong>{describeOrder(order)}</strong><small>{order.status} · placed {time(order.placedAtUtc)}</small></span>
+          <span><strong>{describeOrder(order)}</strong><small>{order.status} · placed <Time at={order.placedAtUtc} /></small></span>
           <span className="execution-actions">
             <NativeSelect density="compact" aria-label={`Level for order ${order.orderId}`} value={chosen} disabled={busy}
               onChange={event => setChoices(current => ({ ...current, [order.orderId]: event.target.value }))}>

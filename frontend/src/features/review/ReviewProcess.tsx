@@ -5,8 +5,9 @@ import { errorMessage } from '@/api/errors'
 import { InfoTip } from '@/components/ui/info-tip'
 import { PlayIdentity } from '@/features/plays/PlayIdentity'
 import { PostHocBadge } from '@/features/plays/PostHocBadge'
-import { reviewDate, reviewMoney, reviewMultiple, reviewPercent } from '@/lib/format'
+import { reviewMoney, reviewMultiple, reviewPercent } from '@/lib/format'
 import { tone } from './format'
+import { Time } from '@/components/ui/time'
 
 /*
  * Process and outcome as cases (phase 1, 1.4b): how the period's ended Plays were answered beside how they turned out.
@@ -110,7 +111,7 @@ export function ReviewProcessList({ api, query, selection, onOpenPlay }: {
     <ul className="pr-exclusion-list">{page.items.map(item => <li key={item.id}>
       <button className="pr-play-link" disabled={opening !== null} onClick={() => { void open(item.id) }}>{item.title || item.instrument}{opening === item.id ? ' · Opening…' : ''}</button>
       <PlayIdentity instrument={item.instrument} venueId={item.venueId} accountName={item.accountName} />
-      <small>{statusNames[item.status]} · {item.origin === 'retrospective' ? 'Retrospective' : 'Planned'}{item.direction ? ` · ${item.direction === 'long' ? 'Long' : 'Short'}` : ''} · {reviewDate(item.atUtc, true)}</small>
+      <small>{statusNames[item.status]} · {item.origin === 'retrospective' ? 'Retrospective' : 'Planned'}{item.direction ? ` · ${item.direction === 'long' ? 'Long' : 'Short'}` : ''} · <Time at={item.atUtc} style="date" /></small>
       <p>{item.net === null ? 'Not scored' : <><span className={tone(item.net)}>{reviewMoney(item.net, true)}</span> · {reviewPercent(item.returnPercent)} return{item.rMultiple !== null && <> · {reviewMultiple(item.rMultiple)}</>}</>}
         {' · '}{item.adherence ? adherenceNames[item.adherence] : 'No adherence answer'}{item.mistakeTag ? ` · ${item.mistakeTag}` : ''}
         {' · '}{item.reviewCompletion ? 'Review complete' : 'Review not complete'}</p>
