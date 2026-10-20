@@ -665,3 +665,40 @@ The parent is now running the complete disjoint backend batches and the
 final explicit synthetic schema/standalone-worker smoke under
 `/home/ops/.cache/vessel-verification/paper-recovery-final/`.
 No final complete-suite or fresh independent approval is claimed yet.
+
+### Final recovery snapshot complete-suite checkpoint
+
+Corrections were committed and pushed as
+`9c66d65c7dfa1231d3c1b9201ce0cb3f5d7ba329`. The complete frozen backend run
+passed **3,832 tests, zero failed, five skipped** (3,837 total), across all
+231 discovered classes in four disjoint bounded batches:
+
+| Batch | Passed | Failed | Skipped |
+| --- | ---: | ---: | ---: |
+| 1 | 963 | 0 | 1 |
+| 2 | 790 | 0 | 2 |
+| 3 | 841 | 0 | 1 |
+| 4 | 1,238 | 0 | 1 |
+
+All 12 explicit broker-backed facts passed. TRX reconciliation confirms no
+cross-batch duplicate test IDs, all discovered classes covered, and unchanged
+production source. The five skips remain two Lighter live, one RISEx live
+and two isolated S3 checks; they are not passes. The frozen combined
+backend/frontend production manifest SHA-256 is
+`935f02bb72720fba88dad4c5489b4a9e7dd29f891b1b721b227621b3c7e27ad5`.
+Exact totals, logs, TRXs and manifests:
+`/home/ops/.cache/vessel-verification/paper-recovery-final/summary.json`.
+
+The explicit final migration was applied only to separate synthetic database
+`paper_recovery_smoke`. EF reports no pending model changes. Four Production
+Token standalone-host checks passed: productive healthy heartbeat without
+broker/bearer/origin, heartbeat expiry on missing schema, recovery after schema
+restore without restarting, and final audit columns/ModelVersion 1 with no
+messaging schema. The temporary host was stopped. This is schema/health smoke,
+not active-candle execution or combined browser/API E2E.
+
+Root checks pass **82/82**. The unchanged latest frontend remains **3,892/3,892**
+with typecheck/lint/build passing. A fresh app-owned **Claude Opus/max round
+four** is evaluating the exact `9c66d65` code, including the upstream Review
+integration and all prior findings. **PR remains draft; no new independent
+approval or final readiness is claimed while that review is running.**
