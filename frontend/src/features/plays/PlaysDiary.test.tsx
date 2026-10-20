@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import type { ManualExecutions } from '@/api/diary'
-import { emptyStructuredReview, type PlayExecution, type PlayFields, type PlayList, type PlaySummary, type PlayView, type SavedPlay } from '@/api/plays'
+import { emptyStructuredReview, preflightCodes, type PlayExecution, type PlayFields, type PlayList, type PlaySummary, type PlayView, type SavedPlay } from '@/api/plays'
 import { VenuesProvider } from '@/api/venues'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { accountFixture, idleMarketStream, instrumentCatalogFixture, overviewFixture, playApiStubs, playCountsFrom, playListPage, playsFrom, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
@@ -19,6 +19,7 @@ import { createPlaysSession, draftFromSaved, savedState, type PlaysSession } fro
 import { ApplicationShell } from '@/features/workspace/ApplicationShell'
 import * as overviewActions from '@/features/workspace/OverviewActions'
 import * as savedChecks from './saved'
+import * as preflightChecks from './preflight'
 
 const at = '2026-10-13T10:00:00Z'
 const otherId = '00000000-0000-4000-8000-000000000002'
@@ -345,6 +346,22 @@ describe('diary workspace integration', () => {
     await user.click(screen.getByRole('button', { name: 'Back to the plan' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(api.changePlayStatus).not.toHaveBeenCalled()
+  })
+  it('shows the pre-flight even when every check is met (phase 1, 1.5)', async () => {
+    const draftPlay: SavedPlay = { ...planned, plan: { ...planned.plan, entries: planned.plan.entries.map(entry => ({ ...entry, price: '100' })) },
+      summary: { ...planned.summary, status: 'draft', version: 1, planRevision: 0, plannedAtUtc: null } }
+    const met = vi.spyOn(preflightChecks, 'preflightChecks').mockReturnValue(preflightCodes.map(code => ({ code, outcome: 'passed' as const })))
+    try {
+      const { api } = client(draftPlay)
+      const plan = vi.fn<WorkspaceApi['changePlayStatus']>()
+      api.changePlayStatus = plan
+      const user = userEvent.setup()
+      render(<Harness api={api} initial={sessionFor(draftPlay)} />)
+      await user.click(screen.getByRole('button', { name: 'Plan it' }))
+      const checks = within(await screen.findByRole('list', { name: 'Pre-flight checks' })).getAllByRole('listitem')
+      expect(checks.every(item => item.textContent?.endsWith('Met'))).toBe(true)
+      expect(plan).not.toHaveBeenCalled()
+    } finally { met.mockRestore() }
   })
   it('offers recent next actions at planning and copies one into the thesis only on request (phase 1, 1.5)', async () => {
     const draftPlay: SavedPlay = { ...planned, summary: { ...planned.summary, status: 'draft', version: 1, planRevision: 0, plannedAtUtc: null } }

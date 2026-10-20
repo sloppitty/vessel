@@ -72,9 +72,9 @@ Phase 1.5 of the [learning-loop contract](phase1-learning-loop-contract.md).
   most once. It stores them in a fixed order on plan revision 1, in the
   nullable `Preflight` column added by the explicit `PlanPreflight`
   migration. History shows them.
-- **Never blocking.** The checklist never blocks planning. Plan it plans at
-  once when every check is met. Otherwise the owner sees the checklist, with
-  **Plan it anyway** and **Back to the plan**.
+- **Never blocking.** The checklist never blocks planning. Plan it always
+  shows it first, with **Plan it anyway** and **Back to the plan**, also when
+  every check is met.
 - **Limits.** Resuming a Paused Play is not planning a Draft, so a pre-flight
   sent then is refused with 400. Older plans have none, and nothing is
   backfilled.

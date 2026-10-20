@@ -18,10 +18,13 @@ public static class PlayPreflight
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    /// <summary>Validated checks in the fixed order, or null when none were sent (an older client).</summary>
+    /// <summary>
+    /// Validated checks in the fixed order, or null when none were sent (an older client). An empty checklist records
+    /// nothing either, so History and Review both read it as not recorded.
+    /// </summary>
     public static IReadOnlyList<PreflightCheckDto>? Normalize(IReadOnlyList<PreflightCheckDto>? checks)
     {
-        if (checks is null) return null;
+        if (checks is null || checks.Count == 0) return null;
         if (checks.Count > Codes.Count || checks.Any(c => c is null || !Codes.Contains(c.Code) || !Outcomes.Contains(c.Outcome)) ||
             checks.Select(c => c.Code).Distinct(StringComparer.Ordinal).Count() != checks.Count)
             throw new ProblemException(400, "Pre-flight checks are priced-stops, allocations, thesis, risk and liquidation, " +
@@ -31,11 +34,15 @@ public static class PlayPreflight
 
     public static string? Serialize(IReadOnlyList<PreflightCheckDto>? checks) => checks is null ? null : JsonSerializer.Serialize(checks, Json);
 
-    /// <summary>The stored checks, or null when the revision has none. Unknown stored entries are dropped, never guessed.</summary>
+    /// <summary>
+    /// The stored checks, or null when the revision has none. Unknown stored entries are dropped, never guessed, and a
+    /// checklist with no known check left counts as not recorded.
+    /// </summary>
     public static IReadOnlyList<PreflightCheckDto>? Read(string? stored)
     {
         if (string.IsNullOrWhiteSpace(stored)) return null;
-        var checks = JsonSerializer.Deserialize<List<PreflightCheckDto>>(stored, Json) ?? [];
-        return checks.Where(c => c is not null && Codes.Contains(c.Code) && Outcomes.Contains(c.Outcome)).ToList();
+        var checks = (JsonSerializer.Deserialize<List<PreflightCheckDto>>(stored, Json) ?? [])
+            .Where(c => c is not null && Codes.Contains(c.Code) && Outcomes.Contains(c.Outcome)).ToList();
+        return checks.Count == 0 ? null : checks;
     }
 }

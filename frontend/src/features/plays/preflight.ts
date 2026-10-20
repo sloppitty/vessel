@@ -5,7 +5,7 @@ import type { PlayDraft } from './draft'
 import { levelPrice } from './levels'
 import { positivePlanNumber } from './numbers'
 import { stopsPastLiquidation } from './planChecks'
-import { stopCoverageGap, type PositionRisk } from './position-risk-summary'
+import type { PositionRisk } from './position-risk-summary'
 
 /*
  * The pre-flight at Plan it (phase 1, 1.5): a non-blocking checklist of what the plan already says, recorded with
@@ -41,6 +41,11 @@ const isHundred = (shares: readonly string[]) => { const sum = total(shares); re
 export function preflightChecks({ draft, risk, sizing, liquidation }: PreflightInput): PreflightCheck[] {
   const leverage = positivePlanNumber(draft.leverage) ?? 1
   const outcome = (code: PreflightCode, value: PreflightCheck['outcome']): PreflightCheck => ({ code, outcome: value })
+  // Each priced entry needs a stop that resolves to a price. Shares are the allocation check's concern, so an entry with
+  // less than the whole position still has its stop; with no priced entry there is nothing to judge.
+  const priced = draft.entries.filter(entry => positivePlanNumber(entry.price) !== null)
+  const pricedStops = priced.length === 0 ? 'unknown' : priced.every(entry => entry.stops.some(stop =>
+    levelPrice(positivePlanNumber(entry.price), stop, 'stop', draft.direction, leverage) !== null)) ? 'passed' : 'skipped'
   // An entry with no stops or no targets totals 0% there, which is not 100%.
   const allocations = isHundred(draft.entries.map(entry => entry.share)) && draft.entries.every(entry =>
     isHundred(entry.stops.map(stop => stop.share)) && isHundred(entry.targets.map(target => target.share)))
@@ -55,7 +60,7 @@ export function preflightChecks({ draft, risk, sizing, liquidation }: PreflightI
     : stopsPastLiquidation(draft.entries, draft.direction, leverage, liquidation).length > 0 ? 'skipped'
     : stops.length > 0 && stops.every(price => price !== null) ? 'passed' : 'unknown'
   return [
-    outcome('priced-stops', stopCoverageGap(draft) === null ? 'passed' : 'skipped'),
+    outcome('priced-stops', pricedStops),
     outcome('allocations', allocations ? 'passed' : 'skipped'),
     outcome('thesis', draft.notes.thesis.trim() && draft.notes.invalidation.trim() ? 'passed' : 'skipped'),
     outcome('risk', riskOutcome),

@@ -39,6 +39,16 @@ describe('pre-flight at Plan it (phase 1, 1.5)', () => {
     expect(outcomes(preflightChecks({ draft: thesis, risk: null, sizing, liquidation: 80 })).thesis).toBe('skipped')
   })
 
+  it('judges priced stops per priced entry, leaving shares to the allocation check', () => {
+    // Half the position at 100, with its stop priced: the stop is there, the shares are what is missing.
+    const half = { ...ready, entries: [{ ...entry, share: '50' }] }
+    expect(outcomes(preflightChecks({ draft: half, risk: null, sizing, liquidation: 80 }))).toMatchObject({ 'priced-stops': 'passed', allocations: 'skipped' })
+    const unpricedEntry = { ...ready, entries: [{ ...entry, price: '' }] }
+    expect(outcomes(preflightChecks({ draft: unpricedEntry, risk: null, sizing, liquidation: 80 }))['priced-stops']).toBe('unknown')
+    const second = { ...ready, entries: [{ ...entry, share: '50' }, { ...entry, id: 'entry-2', share: '50', stops: [] }] }
+    expect(outcomes(preflightChecks({ draft: second, risk: null, sizing, liquidation: 80 }))['priced-stops']).toBe('skipped')
+  })
+
   it('meets the liquidation check only when every stop is priced, and never hides a stop past it', () => {
     const halves = (second: string) => ({ ...ready, entries: [{ ...entry, stops: [{ ...entry.stops[0]!, share: '50' },
       { ...entry.stops[0]!, id: 'second', value: second, share: '50' }] }] })
