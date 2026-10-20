@@ -170,6 +170,15 @@ October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
   - **Older servers (low).** Without a completion field, the journal shows no completion actions the server lacks.
   - **Check.** `scripts/check.sh` passed again: backend 3,591 passed, 5 skipped; frontend 152 files and 3,796 tests.
 
+- **Sol (Codex) round 2.** All five round-1 findings resolved. Two new findings, both fixed:
+  - **Late write after a remount (medium).** A log write that finishes after the Log remounts now changes the kept
+    draft as it is then. It clears the entry only while the draft still holds that request with the same text and
+    state. Otherwise it settles the request and keeps the newer text. A test fails without this fix.
+  - **Unsaved log entries (medium).** The open Play's typed entry, or one whose write is unconfirmed, counts as unsaved
+    work for New play, opening or requesting another Play, and the shell's disconnect guard. A page test fails without
+    this fix.
+  - **Check.** `scripts/check.sh` passed again: backend 3,591 passed, 5 skipped; frontend 152 files and 3,801 tests.
+
 ## 1.3 Record repair
 
 Not started.
