@@ -277,6 +277,13 @@ October 20, 2026, branch `t3/phase1-unresolved`, stacked on 1.2:
   watch is one of two linked-order watches, compared at the database's microsecond precision, and events are written
   only through an event-capturing unit of work); the dedicated event test covers the last.
 
+- **Sol (Codex) round 1.** One finding, fixed:
+  - **Return event reason (low).** A return to Open now carries the reason of the Play's latest declaration as its
+    event `reason`, as the lifecycle doc says. The event test declares, returns, declares for another reason and
+    returns again; it fails without this fix.
+  - **Check.** After the rebase onto the 1.2 round-2 fix, `scripts/check.sh` passed: backend 3,600 passed, 5 skipped;
+    frontend 152 files and 3,809 tests.
+
 ### 1.3b Manual correction batch
 
 Not started.
