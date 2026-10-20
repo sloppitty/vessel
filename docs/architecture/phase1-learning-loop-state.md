@@ -451,6 +451,11 @@ October 20, 2026, branch `t3/phase1-process-cases`, stacked on 1.3b:
   - **Check.** After the rebase onto the fixed 1.3a, `scripts/check.sh` passed: backend 3,608 passed, 5 skipped;
     frontend 153 files and 3,819 tests.
 
+- **Sol (Codex) round 2.** All four round-1 findings resolved. One new finding, fixed:
+  - **Venue (low).** Process drill-down rows now show the venue logo beside the instrument and account, as other Play
+    lists do.
+  - **Check.** After the rebase onto the fixed 1.3a, `scripts/check.sh` passed: backend 3,609 passed, 5 skipped; frontend 153 files and 3,820 tests.
+
 ## 1.5 Lessons return and a recorded pre-flight
 
 October 20, 2026, branch `t3/phase1-preflight`, stacked on 1.4a:
