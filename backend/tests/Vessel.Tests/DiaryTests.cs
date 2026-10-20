@@ -504,6 +504,32 @@ public sealed class DiaryPostgresTests
     }
 
     [PostgresFact]
+    public async Task A_log_request_ID_reused_at_once_on_two_accounts_writes_one_entry_and_conflicts_the_other()
+    {
+        // Request IDs are unique per owner, across accounts: concurrent reuse is one entry and a 409, never a 500.
+        await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
+        var (first, second) = (await Account(database, owner), await Account(database, owner));
+        var (a, b) = (TestPlays.Create(first, new("manual", "BTC")), TestPlays.Create(second, new("manual", "BTC")));
+        await using (var seed = database.Context(owner))
+        {
+            seed.Plays.AddRange(a, b);
+            await seed.SaveChangesAsync();
+        }
+        var request = Guid.NewGuid();
+        async Task<int> Write(Guid playId, string text)
+        {
+            await using var db = database.Context(owner);
+            var service = new PlayService(new PlayStore(db, TestUnitOfWork.For(db)), new MemoryObjectStore(), TimeProvider.System, TestUnitOfWork.For(db));
+            try { await service.AddNoteAsync(playId, new(request, text, null), default); return 200; }
+            catch (ProblemException problem) { return problem.StatusCode; }
+        }
+        var results = await Task.WhenAll(Write(a.Id, "On the first account."), Write(b.Id, "On the second account."));
+        Assert.Equal([200, 409], results.Order());
+        await using var verify = database.Context(owner);
+        Assert.Single(await verify.PlayNotes.ToListAsync());
+    }
+
+    [PostgresFact]
     public async Task Migration_keeps_today_s_Reviewed_Plays_as_legacy_completions_and_reclassifies_nothing_else()
     {
         // Decision 3: nothing is guessed. The upgrade keeps exactly the Plays the old Reviewed view listed.

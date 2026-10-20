@@ -5,6 +5,7 @@ import { isChartDrawing, type ChartDrawing } from '@/components/chart/drawings'
 import { createDraft, createEvidenceId, type DraftEvidence, type PlayDraft } from './draft'
 import { hasManualDraft, type ManualExecutionDraft } from './manual'
 import { titleForSave } from './default-title'
+import type { PlayLogDraft } from './ReviewCompletion'
 import { storedPlanText, trimPlanNumbers } from './stored-plan-text'
 
 
@@ -25,6 +26,8 @@ export interface PlaysSession {
   draft: PlayDraft
   saved: SavedState | null
   manual?: ManualExecutionDraft
+  /** The in-trade log entry being written, with its request identity, so a tab switch never loses it (phase 1, 1.2). */
+  log?: PlayLogDraft
   /** Latest whole document observed, even when dirty fields keep an older editable baseline. */
   observedPlay?: { api: WorkspaceApi; id: string; accountId: string; version: number; conflict: boolean } | null
 }

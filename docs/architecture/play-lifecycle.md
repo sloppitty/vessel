@@ -108,7 +108,7 @@ decision 3. It covers D-14 and G-04.
   end time. Nothing else is reclassified, and no text moves.
   - An Open Play with a note in its Review box needs review once it closes.
 - **In-trade log.** `GET` and `POST /api/plays/{id}/notes` hold append-only,
-  timestamped entries on any saved, planned-origin Play.
+  timestamped entries on any saved Play, retrospective ones included.
   - An entry is up to 2,000 characters, with an optional state: calm,
     rushed, FOMO, tired or after a loss.
   - Entries cannot be edited or deleted.

@@ -37,6 +37,8 @@ export function ReviewCompletionBar({ summary, dirty, busy, filled = false, onAc
       ? <p className="review-completion muted">Notes during the trade belong in the Log. The review is completed after the Play ends.</p>
       : null
   }
+  // An older server sends no completion and has no completion actions; its lists still read review text as before.
+  if (summary.reviewCompletion === undefined) return null
   if (summary.reviewCompletion) {
     return <div className="review-completion" role="group" aria-label="Review completion">
       <span><strong>{completedLabels[summary.reviewCompletion]}</strong>
@@ -55,38 +57,61 @@ export function ReviewCompletionBar({ summary, dirty, busy, filled = false, onAc
   </div>
 }
 
+/** The log entry being written: kept by the page for its Play, so switching journal tabs never loses it. */
+export interface PlayLogDraft {
+  playId: string
+  text: string
+  state: PlayNoteState | ''
+  /** The request last sent for this entry; a retry of the same entry sends it again, so it is never written twice. */
+  attempt?: { requestId: string; text: string; state: PlayNoteState | null }
+}
+
 /**
  * The Play's in-trade log: append-only entries with an optional state, read and written on their own. A failed write keeps
- * its request ID, so trying again never writes the entry twice.
+ * its request ID, so trying again never writes the entry twice. The entry being written lives in `draft` when the page
+ * keeps it, otherwise here.
  */
-export function PlayLog({ api, playId }: { api: WorkspaceApi; playId: string }) {
+export function PlayLog({ api, playId, draft, onDraft }: {
+  api: WorkspaceApi; playId: string; draft?: PlayLogDraft | undefined; onDraft?: (draft: PlayLogDraft) => void
+}) {
   const id = useId()
   const [notes, setNotes] = useState<PlayNote[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [text, setText] = useState('')
-  const [state, setState] = useState<PlayNoteState | ''>('')
+  const [own, setOwn] = useState<PlayLogDraft>({ playId, text: '', state: '' })
+  const current = (onDraft ? draft : own)?.playId === playId ? (onDraft ? draft : own)! : { playId, text: '', state: '' as const }
+  const setDraft = onDraft ?? setOwn
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const attempt = useRef<{ requestId: string; text: string; state: PlayNoteState | null } | null>(null)
   const [reload, setReload] = useState(0)
+  // Reads and writes answer out of order. A list counts only if it was read after the latest written list arrived, so an
+  // older read never hides an entry that a write already showed.
+  const sequence = useRef(0)
+  const shown = useRef(0)
   useEffect(() => {
     const controller = new AbortController()
-    api.playNotes(playId, controller.signal).then(value => { if (!controller.signal.aborted) { setNotes(value); setLoadError(null) } })
-      .catch(cause => { if (!controller.signal.aborted) setLoadError(errorMessage(cause, 'The log could not be loaded.')) })
+    const read = ++sequence.current
+    api.playNotes(playId, controller.signal).then(value => {
+      if (controller.signal.aborted || read < shown.current) return
+      shown.current = read
+      setNotes(value); setLoadError(null)
+    }).catch(cause => { if (!controller.signal.aborted && read >= shown.current) setLoadError(errorMessage(cause, 'The log could not be loaded.')) })
     return () => controller.abort()
   }, [api, playId, reload])
 
   async function add(event: FormEvent) {
     event.preventDefault()
-    const entry = { text: text.trim(), state: state === '' ? null : state }
+    const entry = { text: current.text.trim(), state: current.state === '' ? null : current.state }
     if (!entry.text || saving) return
     // The same entry keeps its request ID until it is written; an edited entry is a new request.
-    if (attempt.current?.text !== entry.text || attempt.current.state !== entry.state) attempt.current = { requestId: newDiaryRequestId(), ...entry }
+    const attempt = current.attempt?.text === entry.text && current.attempt.state === entry.state ? current.attempt
+      : { requestId: newDiaryRequestId(), ...entry }
+    setDraft({ ...current, attempt })
     setSaving(true); setSaveError(null)
     try {
-      setNotes(await api.addPlayNote(playId, attempt.current))
-      attempt.current = null
-      setText(''); setState('')
+      const written = await api.addPlayNote(playId, attempt)
+      shown.current = ++sequence.current
+      setNotes(written); setLoadError(null)
+      setDraft({ playId, text: '', state: '' })
     } catch (cause) {
       setSaveError(errorMessage(cause, 'The entry could not be added. Try again; it will not be written twice.'))
     } finally { setSaving(false) }
@@ -105,15 +130,15 @@ export function PlayLog({ api, playId }: { api: WorkspaceApi; playId: string }) 
       </li>)}</ol>}
     <form className="play-log-form" onSubmit={event => { void add(event) }}>
       <label htmlFor={`${id}-text`}>Log entry</label>
-      <textarea id={`${id}-text`} rows={2} maxLength={2000} value={text} disabled={saving} placeholder="What is happening, and how you feel about it"
-        onChange={event => setText(event.target.value)} />
+      <textarea id={`${id}-text`} rows={2} maxLength={2000} value={current.text} disabled={saving} placeholder="What is happening, and how you feel about it"
+        onChange={event => setDraft({ ...current, text: event.target.value })} />
       <label htmlFor={`${id}-state`}>State <small>optional</small></label>
-      <NativeSelect id={`${id}-state`} value={state} disabled={saving} onChange={event => setState(event.target.value as PlayNoteState | '')}>
+      <NativeSelect id={`${id}-state`} value={current.state} disabled={saving} onChange={event => setDraft({ ...current, state: event.target.value as PlayNoteState | '' })}>
         <option value="">No state</option>
         {playNoteStates.map(value => <option key={value} value={value}>{playNoteStateLabels[value]}</option>)}
       </NativeSelect>
       {saveError && <p className="error" role="alert">{saveError}</p>}
-      <Button type="submit" size="sm" variant="outline" disabled={saving || !text.trim()}>{saving ? 'Adding…' : 'Add to log'}</Button>
+      <Button type="submit" size="sm" variant="outline" disabled={saving || !current.text.trim()}>{saving ? 'Adding…' : 'Add to log'}</Button>
     </form>
   </section>
 }

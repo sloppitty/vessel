@@ -99,3 +99,25 @@ describe('in-trade log (phase 1, 1.2)', () => {
     expect(await screen.findByText('Felt rushed adding.')).toBeInTheDocument()
   })
 })
+
+describe('log reads and older servers (phase 1, 1.2)', () => {
+  it('never lets an earlier read hide an entry a write already showed', async () => {
+    let finishRead!: (notes: PlayNote[]) => void
+    const api = { playNotes: vi.fn(() => new Promise<PlayNote[]>(resolve => { finishRead = resolve })),
+      addPlayNote: vi.fn().mockResolvedValue([note]) } as unknown as WorkspaceApi
+    const user = userEvent.setup()
+    render(<PlayLog api={api} playId={note.id} />)
+    await user.type(screen.getByLabelText('Log entry'), note.text)
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    expect(await screen.findByText(note.text)).toBeInTheDocument()
+    await act(async () => finishRead([]))
+    expect(screen.getByText(note.text)).toBeInTheDocument()
+  })
+  it('offers no completion action when the server reports no completion field', () => {
+    const { reviewCompletion: _, reviewCompletedAtUtc: __, ...older } = summary({ status: 'closed' })
+    void _; void __
+    render(<ReviewCompletionBar summary={older} dirty={false} busy={false} onAction={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'Complete review' })).not.toBeInTheDocument()
+    expect(screen.queryByText('This review is not complete yet.')).not.toBeInTheDocument()
+  })
+})

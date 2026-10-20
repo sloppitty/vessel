@@ -194,7 +194,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     /// so it never conflicts with plan or review edits. A retry with the same request ID returns the log unchanged.
     /// </summary>
     public Task<IReadOnlyList<PlayNoteDto>> AddNoteAsync(Guid id, AddPlayNoteRequest request, CancellationToken ct) =>
-        unitOfWork.ExecuteAsync(() => store.WithPlayLockAsync(id, async () =>
+        unitOfWork.ExecuteAsync(() => store.WithNoteRequestLockAsync(request.RequestId, () => store.WithPlayLockAsync(id, async () =>
     {
         var play = await Find(id, ct);
         if (await store.NoteAsync(request.RequestId, ct) is { } earlier)
@@ -209,7 +209,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             await store.SaveAsync(ct);
         }
         return (IReadOnlyList<PlayNoteDto>)(await store.NotesAsync(play.Id, ct)).Select(NoteDto).ToList();
-    }, ct), ct);
+    }, ct), ct), ct);
 
     private static PlayNoteDto NoteDto(PlayNote note) => new(note.Id, note.Text, note.State, note.CreatedAtUtc);
 

@@ -544,7 +544,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       incidents={saved ? playIncidents.get(saved.summary.id) : undefined} stopEvidence={manual ? undefined : stopEvidence}
       evidenceImages={evidenceImages} reviewReceipt={reviewReceipt} journalSave={journalSave} retrospectiveReceipt={retrospectiveReceipt}
       onPreflight={setPreflight} nextActions={nextActions?.api === api ? nextActions.actions : null} onOpenPlay={id => { void open(id) }}
-      log={saved && !retrospective ? <PlayLog key={saved.summary.id} api={api} playId={saved.summary.id} /> : undefined}
+      log={saved ? <PlayLog key={saved.summary.id} api={api} playId={saved.summary.id} draft={session.log}
+        onDraft={log => update({ log })} /> : undefined}
       reviewCompletion={saved ? <ReviewCompletionBar summary={saved.summary} dirty={dirty} busy={pending}
         filled={(playReceipt?.fillCount ?? 0) > 0} onAction={action => { void reviewAction(action) }} /> : undefined}
       plannedAfterExecution={playReceipt?.plannedAfterExecution === true}

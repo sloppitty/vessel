@@ -11,6 +11,7 @@ import { VenuesProvider } from '@/api/venues'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { accountFixture, idleMarketStream, instrumentCatalogFixture, overviewFixture, playApiStubs, playCountsFrom, playListPage, playsFrom, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { systemFixture } from '@/test/system-fixture'
+import { retrospectiveSavedFixture } from '@/test/retrospective.fixtures'
 import { PlaysPage } from './PlaysPage'
 import { PlayWorkspace } from './PlayWorkspace'
 import { createDraft } from './draft'
@@ -751,6 +752,26 @@ describe('diary workspace integration', () => {
     await user.click(screen.getByRole('tab', { name: 'Log' }))
     expect(await screen.findByText('No entries yet.')).toBeInTheDocument()
     expect(methods.playNotes).toHaveBeenCalledWith(closed.summary.id, expect.any(AbortSignal))
+  })
+  it('keeps an unfinished log entry across journal tabs and the expanded journal (phase 1, 1.2)', async () => {
+    const open: SavedPlay = { ...planned, summary: { ...planned.summary, status: 'open' } }
+    const { api } = client(open)
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(open)} />)
+    await user.click(screen.getByRole('tab', { name: 'Log' }))
+    await user.type(await screen.findByLabelText('Log entry'), 'Adding into strength')
+    await user.selectOptions(screen.getByLabelText(/^State/), 'fomo')
+    await user.click(screen.getByRole('tab', { name: 'Thesis' }))
+    await user.click(screen.getByRole('tab', { name: 'Log' }))
+    expect(screen.getByLabelText('Log entry')).toHaveValue('Adding into strength')
+    expect(screen.getByLabelText(/^State/)).toHaveValue('fomo')
+    await user.click(screen.getByRole('button', { name: 'Expand journal' }))
+    expect(within(await screen.findByRole('dialog')).getByLabelText('Log entry')).toHaveValue('Adding into strength')
+  })
+  it('offers the log on a retrospective Play too (phase 1, 1.2)', async () => {
+    const { api } = client(retrospectiveSavedFixture)
+    render(<Harness api={api} initial={sessionFor(retrospectiveSavedFixture)} />)
+    expect(await screen.findByRole('tab', { name: 'Log' })).toBeInTheDocument()
   })
   it('saves from the expanded journal too, keeping focus in the dialog', async () => {
     const closed: SavedPlay = { ...terminal, summary: { ...terminal.summary, status: 'closed', cancelReason: null } }

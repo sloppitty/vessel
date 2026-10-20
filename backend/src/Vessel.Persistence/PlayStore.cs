@@ -165,6 +165,13 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
         return result;
     }, ct);
 
+    public Task<T> WithNoteRequestLockAsync<T>(Guid requestId, Func<Task<T>> action, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
+    {
+        var key = $"vessel-play-note-request:{db.CurrentOwnerId}:{requestId}";
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", ct);
+        return await action();
+    }, ct);
+
     public Task<IReadOnlyList<string>> DeleteAsync(Play play, CancellationToken ct) => unitOfWork.ParticipateAsync<IReadOnlyList<string>>(async () =>
     {
         var evidence = await db.Evidence.Where(x => x.PlayId == play.Id).ToListAsync(ct);
