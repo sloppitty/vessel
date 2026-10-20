@@ -11,7 +11,8 @@ public static class ReviewEndpoints
             ReviewService service, CancellationToken ct) => Results.Ok(await service.ExclusionsAsync(
                 new(period ?? "month", portfolio ?? "all", accountId, instrument, offset ?? 0), ct)));
         api.MapGet("", async (string? period, string? portfolio, Guid? accountId, string? instrument, int? offset,
-            ReviewService service, CancellationToken ct) =>
-            Results.Ok(await service.GetAsync(new(period ?? "month", portfolio ?? "all", accountId, instrument, offset ?? 0), ct)));
+            string? positions, int? minPlays, ReviewService service, CancellationToken ct) =>
+            Results.Ok(await service.GetAsync(new(period ?? "month", portfolio ?? "all", accountId, instrument, offset ?? 0,
+                positions ?? "exclude", minPlays ?? ReviewQuery.DefaultMinPlays), ct)));
     }
 }

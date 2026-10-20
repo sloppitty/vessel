@@ -171,6 +171,12 @@ October 20, 2026, branch `t3/phase1-post-hoc-badge`, stacked on 1.1a:
   - **Spacing test.** A stylesheet test now fails if the sample label's own-line rule is removed.
   - **Check.** After the rebase onto main, `scripts/check.sh` passed: backend 3,571 passed, 5 skipped; frontend 149
     files and 3,768 tests.
+- **Main sync with PR #33 (imported positions).** Merged forward, not rebased.
+  - Each n counts real results, unweighted, like every count in #33. A Play counts once in n although it weighs 2 in
+    the rates.
+  - Expectancy and the asset cards read "n = 3 Plays · 2 positions" when positions are included.
+  - Estimated R and sign-differs denominators count Plays only.
+  - Position rows never carry the badge.
 
 ## 1.5 Lessons return and a recorded pre-flight
 
