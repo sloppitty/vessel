@@ -688,11 +688,22 @@ The scheduler's productive-pass file is
 `/app/worker-health` selects it for the `paper` module. A configured paper check
 is not a promise of real-time execution or a venue fill.
 
+Evaluation waits ten seconds after a minute closes. Explicit native zero-trade
+minutes carry coverage but do not simulate a touch; unknown missing minutes are
+not invented. An account-local arithmetic/validation failure is retained for
+retry without stopping other owners, while shared database/schema failures still
+fail worker health.
+
 This first version cannot manually resolve a candle gap/ambiguity or manually
 close a simulated position. Affected reservations may remain held indefinitely
 and unresolved results stay unscored; normal closes use planned exits. Virtual
 equity stays unknown while open/unresolved rather than using stale candle marks.
 Changing the shared sizing risk preference remains a Real-only action.
+Owner suspension is different from a genuine source gap: enabling monitoring
+again resumes previously active Plays at a fresh minute boundary, skips
+disabled-period touches and retains unscored history. Owner-paused Plays stay
+paused. A declined capital admission does not stop protective exits on already
+open tranches.
 
 **Include `worker-paper` when stopping all writers for any migration, backup,
 restore, identity reconciliation or event-epoch operation.** In paper-enabled

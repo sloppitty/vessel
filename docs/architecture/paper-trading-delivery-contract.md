@@ -12,9 +12,24 @@ independent verification. No deployment, publication or owner-database migration
   immutable thereafter. No adjustments, deposits, withdrawals or destructive reset.
 - Full eligible allocation at a touched entry/TP/SL's defined price. Zero fees,
   zero slippage. No real execution claim, order submission or imported fake fills.
+- Model v1 arithmetic is bounded: quantities round down at 12 fractional
+  digits, committed USD margin rounds up at 12 fractional digits and USD P&L
+  rounds toward negative infinity at that scale. Defined prices are unchanged.
+  Final exits consume the exact remaining recorded quantity and margin, not
+  rounding dust. Per-fact quantity/price ≤ `1e12`, margin/absolute P&L ≤ `1e15`;
+  positive allocations/exit shares below the quantum fail arm/revision
+  validation. These limits are not fees, venue lot sizes or slippage.
+  Account totals and admission comparisons use exact sums, not decimal casts.
 - Paper check interval defaults to 60 minutes, independently configurable;
   bounded closed one-minute candle windows since the last successful checkpoint,
   shared per native instrument. No continuous paper price stream.
+  The scheduler excludes the newest ten seconds before selecting closed
+  minutes, allowing final trades to settle. Account-local arithmetic/validation
+  failures retain that account's frontier and retry without starving other
+  owners; shared schema/connection failures still fail worker health.
+  Preserve native trade counts: a validated explicit zero-trade candle advances
+  coverage without creating a price touch. An absent candle is unknown, not a
+  zero-trade observation; never fill missing slots with invented flat prices.
 - Same-candle entry/exit or opposing exit ambiguity is flagged, not guessed,
   and does not become a scored result. No new capital admissions against
   unresolved capital. Preserve revisions/effective activation boundaries.
@@ -68,6 +83,10 @@ reported to the parent before a dependent implementation is changed.
   evaluation and retain gap/ambiguity evidence atomically. Re-enable starts at
   a fresh effective candle boundary without replaying the disabled period.
   Existing history stays visible; unresolved gaps remain excluded from scoring.
+  Suspension is distinct from a fatal source gap. Record start/resume times,
+  resume only previously active simulations and leave owner-paused Plays paused.
+  Suspension history permanently excludes that Play's result from scoring but
+  does not permanently block fresh work on an otherwise flat, resolved account.
 - GET sizing in paper may read the existing owner risk preference read-only.
   PUT sizing settings in paper returns 409, never modifies the real preference.
   The paper record/window/ladder/limits use only paper outcomes. No separate
@@ -80,7 +99,7 @@ reported to the parent before a dependent implementation is changed.
 ```ts
 interface PaperPlayState {
   playId: string
-  status: 'not-armed' | 'waiting' | 'ready' | 'ambiguous' | 'gap' | 'disabled'
+  status: 'not-armed' | 'waiting' | 'ready' | 'blocked' | 'suspended' | 'ambiguous' | 'gap' | 'disabled'
   checkedAtUtc: string | null
   nextCheckAtUtc: string | null
   enteredQuantity: string
@@ -88,6 +107,9 @@ interface PaperPlayState {
   openQuantity: string
   realizedPnlUsd: string
   issues: string[]
+  declinedEntries: Array<{ entryId: string, reason: string, declinedAtUtc: string }>
+  suspensions: Array<{ reason: string, suspendedAtUtc: string, resumedAtUtc: string | null }>
+  hasUnscoredHistory: boolean
   executions: Array<{
     id: string
     entryId: string
@@ -102,6 +124,14 @@ interface PaperPlayState {
   }>
 }
 ```
+
+Declined entries are durable per-entry decisions, not candle history gaps.
+Advance the frontier, never retro-execute a declined touch, and keep evaluating
+already-open tranches' protective exits. `blocked` is active work; `suspended`
+has no due time until prospective resumption. `issues` contains transient/fatal
+source problems, not declined-entry or suspension history. Terminal gap/
+ambiguity without a due time does not poll indefinitely in the browser; Reload
+still observes stored state only.
 
 Paper Plays use this view instead of the actual-order linking/manual-execution
 UI and polling. Existing lifecycle save/status routes remain version-checked.

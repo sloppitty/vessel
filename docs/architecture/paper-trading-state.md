@@ -1,6 +1,8 @@
 # Paper trading delivery state
 
-October 20, 2026. Bounded implementation delivered and integration verified.
+October 20, 2026. **PR remains draft: subsequent Claude Opus review found
+confirmed simulation/accounting blockers. Earlier integration approval is
+superseded pending corrections and fresh review.**
 Authority: [delivery contract](paper-trading-delivery-contract.md) and
 [owner-refined plan](paper-trading-plan.md).
 
@@ -366,7 +368,7 @@ Earlier harness failures (missing Tailwind source discovery and wrong dialog/
 tab locators) are not counted as application passes or
 production defects. The final complete harness run passed all nine checks.
 
-## Parent integration sign-off
+## Initial parent integration sign-off (superseded by Opus findings)
 
 The bounded first delivery is verified against the recorded contract and
 accepted limits: independent Sol backend/frontend/packaging approvals, complete
@@ -407,3 +409,75 @@ Keep the PR draft until the requested Opus evaluation can complete and any
 actionable findings are addressed. The recorded Sol approvals and frozen-tree
 test results above remain the implementation baseline. PR creation does not
 authorize merging, deployment, release or owner-data migration.
+
+### Delayed Opus completion: changes requested
+
+The initially rate-limited task resumed and completed an independent review of
+`54be38e`. The duplicate retry was stopped; a fresh review will follow fixes.
+The previous statement that no evaluation occurred describes the earlier
+handoff, not the current state. Report and runnable probes:
+`/tmp/vessel-paper-opus-eYeSX3/REPORT.md`.
+
+**Not ready to leave draft.** The review reproduced:
+
+- **P1:** ordinary non-terminating sizing/margin/P&L precision can overflow
+  decimal conversions, break paper financial reads/arming, freeze siblings and
+  poison the shared scheduler across owners. A final-exit rounding residue can
+  also leave a phantom position/zero-margin fact rejected by PostgreSQL.
+- **Conditional P1:** an absent minute is treated as a permanent gap. Whether
+  native Hyperliquid omits zero-trade minutes needs recorded primary-source
+  verification; do not guess that absence proves either coverage or a touch.
+- **P2:** declining an entry due to capital/ambiguity freezes already-open
+  tranches' protective exits and cascades to siblings.
+- **P2:** global/account disable has no genuine re-enable transition, making
+  ordinary suspension an irreversible account-wide hold.
+- **P3:** unchanged protective levels lose jump detection across a revision;
+  just-closed candles lack a settlement delay; terminal state keeps polling.
+
+Existing paper tests passed 162/162 as the review's control, demonstrating that
+the earlier tests did not cover these cases. No owner or real-account data leak
+was found. Corrections are in progress with dedicated disposable PostgreSQL and
+new regression cases; earlier full-suite counts are not proof of those fixes.
+
+### Corrective work and native candle evidence
+
+- Core corrections are in progress: explicit 12-place fact quantization,
+  exact account sums/comparisons, exact final-exit remainders, per-entry decline
+  receipts and reversible prospective suspension with retained unscored history.
+  The unshipped foundation schema gains decline/suspension JSON records and an
+  internal previous-close timestamp; no live database has been changed.
+- Additive state wire: `blocked` / `suspended`, `declinedEntries`, `suspensions`
+  and `hasUnscoredHistory`. The frontend correction passed 107 focused tests,
+  typecheck/lint/build. Parent complete corrected frontend suite: **154 files /
+  3,850 tests passed**, normal timeouts, two workers, 159.92 seconds
+  (`/tmp/vessel-paper-opus-frontend-full.log`).
+  Parent synthetic production-component UI repeat: **12 checks passed**,
+  including distinct blocked/suspended labels, decline receipts, resumed
+  unscored history, 390-pixel layout and light theme; zero external requests,
+  page errors or forbidden actual API calls. This remains UI-only, not backend
+  E2E. Captures were visually inspected; its isolated server was stopped.
+  Harness/results: `/home/ops/.cache/vessel-verification/paper-opus-ui-20261020/`.
+  Core integration and independent approval are not yet verified.
+- Parent worker tests reproduced both starvation/heartbeat and just-closed
+  candle bugs before fixes (two failures), then passed 17 worker checks in an
+  isolated baseline-plus-worker snapshot. Explicit trade-count validation
+  reproduced three more failures, then all 21 worker checks passed there.
+  This is not a full integrated-core pass; that run must follow the core freeze.
+  Logs: `/tmp/vessel-paper-worker-{red,green,native-green}.log`.
+- Native public evidence did **not** establish ordinary zero-trade omissions:
+  two quiet Hyperliquid markets returned all 360 requested minute slots,
+  including 343 explicit zero-trade candles. Thus Opus F2 remains conditional,
+  not a confirmed quiet-market outage. The source does not guarantee universal
+  completeness; an absent slot is still unknown and is never silently skipped.
+  Native zero-trade carried prices must not fabricate fresh touches.
+  See [the research note](paper-candle-coverage-research.md) and exact seven-read
+  artifacts under `/tmp/vessel-paper-candle-research-N1XmIP/`.
+- Worker correction uses a ten-second candle-settlement lag and contains
+  account-local arithmetic/validation failures with a fenced retry in a fresh
+  scope. Shared schema/connection failures remain unhealthy, not silently
+  swallowed. Native trade counts are retained; null/negative counts or
+  contradictory zero-trade rows are not treated as complete empty observations.
+  The caught-up scheduling predicate shares the settled frontier, so the delay
+  does not accidentally turn hourly checks into perpetual one-minute catch-up.
+- Parent root checks remain **82/82 passed**. No corrective code commit or
+  readiness claim is made before the core snapshot is stable and tested.

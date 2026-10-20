@@ -355,6 +355,16 @@ The real Overview and real statistics are identical before and after.
   equity unknown/partial, not equal to cash by assumption. Cash stays known.
 - Preserve exact decimal strings and existing precision checks end to end.
 
+October 20 Opus-review correction: model-v1 facts use 12 fractional digits
+(quantity down, USD margin up, USD P&L toward negative infinity), with exact
+aggregate capital comparisons. Final exits consume exact recorded remainders.
+See the delivery contract for preflight limits. A declined entry is persisted
+with its reason/time; it advances the candle frontier and never disables
+protective exits on other already-open tranches. Owner suspension has separate
+start/resume history, not a permanent terminal source gap. Previously active
+work resumes at a fresh full-minute boundary without simulating skipped touches;
+owner-paused work remains paused and suspension-history outcomes stay unscored.
+
 ## 8. Worker integration and result provenance
 
 Add an opt-in standalone `paper` host path to the existing worker binary. It has
