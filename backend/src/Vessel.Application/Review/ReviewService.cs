@@ -106,7 +106,21 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             Metrics(current), series.Points, series.BucketDays, groups,
             new ReviewCoverageDto(candidates.Count, candidates.Count(e => e.Exclusion == "fees"),
                 candidates.Count(e => e.Exclusion == "executions"), facts.OpenPlays, facts.UnassignedFills, facts.FirstFillAtUtc, Notice),
-            page, query.Offset, query.Offset + page.Count < current.Count ? query.Offset + page.Count : null);
+            page, query.Offset, query.Offset + page.Count < current.Count ? query.Offset + page.Count : null)
+        {
+            Preflight = Preflight(candidates.Select(e => e.Facts)),
+        };
+    }
+
+    /// <summary>Pre-flights of planned-origin Plays; a retrospective Play has no plan and is left out.</summary>
+    private static ReviewPreflightDto Preflight(IEnumerable<ClosedPlayFacts> plays)
+    {
+        var planned = plays.Where(f => f.Play.Origin == PlayOrigin.Planned)
+            .Select(f => PlayPreflight.Read(f.Revisions.SingleOrDefault(r => r.Number == 1)?.Preflight)).ToList();
+        var recorded = planned.OfType<IReadOnlyList<PreflightCheckDto>>().ToList();
+        return new(recorded.Count, planned.Count - recorded.Count, PlayPreflight.Codes
+            .Select(code => new ReviewPreflightCountDto(code, recorded.Count(checks => checks.Any(c => c.Code == code && c.Outcome == "skipped"))))
+            .ToList());
     }
 
     public async Task<ReviewExclusionsDto> ExclusionsAsync(ReviewQuery query, CancellationToken ct)

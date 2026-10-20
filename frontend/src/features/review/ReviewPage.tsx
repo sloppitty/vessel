@@ -10,6 +10,7 @@ import { useVenues } from '@/api/venues'
 import { PlayIdentity } from '@/features/plays/PlayIdentity'
 import { LocalResultValue, SignDiffersFlag, fundingNote, localResultNote } from '@/features/plays/LocalResult'
 import { PostHocBadge } from '@/features/plays/PostHocBadge'
+import { preflightLabels } from '@/features/plays/preflight'
 import { ReviewChart } from './ReviewChart'
 import { ReviewExclusions } from './ReviewExclusions'
 import { reviewDate, reviewMoney, reviewMultiple, reviewPercent, reviewResult } from '@/lib/format'
@@ -39,6 +40,13 @@ const smallSample = 20
  * Plays, average gain / loss the smaller of wins and losses. */
 function SampleMark({ n }: { n: number }) {
   return n < smallSample ? <small className="pr-sample">Small sample</small> : null
+}
+
+/** What the pre-flight at Plan it recorded for the period's closed Plays (phase 1, 1.5): counts only, no rates. */
+function PreflightCounts({ preflight }: { preflight: NonNullable<ReviewDocument['preflight']> }) {
+  const skipped = preflight.skipped.filter(item => item.count > 0)
+  return <p>Pre-flight at Plan it: {preflight.recorded} recorded · {preflight.notRecorded} not recorded.
+    {skipped.length > 0 ? <> Planned without: {skipped.map(item => `${preflightLabels[item.code].toLowerCase()} (${item.count})`).join(' · ')}.</> : null}</p>
 }
 
 /** A metric's own n, marked as a small sample below `smallSample`. */
@@ -192,6 +200,7 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay, workspaceAccount
         <p><button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteFees} incomplete fees</button> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteExecutions} incomplete executions</button> · {report.coverage.openPlays} currently open</p>
         <p>{report.coverage.unassignedFills} unassigned fills in this period.</p>
         <p>Initial planned-risk inputs for {stats.riskCount} of {stats.count} scored Plays.</p>
+        {report.preflight && <PreflightCounts preflight={report.preflight} />}
         <p>{report.coverage.notice}</p>
         {report.coverage.firstFillAtUtc && <p>Earliest retained fill in this scope: {reviewDate(report.coverage.firstFillAtUtc, true)}.</p>}
         <ul>{activeAccounts.map(a => <li key={a.id}><strong>{a.name}</strong> · {venues.name(a.venueId)} · {a.syncStatus} · {a.lastSyncedAtUtc ? `last refreshed ${reviewDate(a.lastSyncedAtUtc, true)}` : 'not refreshed'}{a.historyNotice && <p>{a.historyNotice}</p>}</li>)}</ul>

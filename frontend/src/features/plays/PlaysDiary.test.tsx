@@ -57,6 +57,7 @@ function client(play = terminal, more: SavedPlay[] = []) {
     playExecution: vi.fn(() => Promise.resolve(execution(current))),
     sizing: vi.fn(() => Promise.reject(new ApiError('unavailable', 'No sizing.'))),
     evidence: vi.fn(() => Promise.resolve([])),
+    nextActions: vi.fn<WorkspaceApi['nextActions']>(() => Promise.resolve([])),
     updatePlay: vi.fn((_id: string, fields: PlayFields & { expectedVersion: number }) => {
       current = { ...current, review: fields.review, structuredReview: fields.structuredReview ?? emptyStructuredReview(),
         summary: { ...current.summary, version: current.summary.version + 1, hasReview: true, reviewedAtUtc: at } }
@@ -328,6 +329,53 @@ describe('diary workspace integration', () => {
       else recording.reject(new ApiError('unavailable', 'Manual response lost.'))
     })
   })
+  it('shows the pre-flight at Plan it and goes back to the plan without planning (phase 1, 1.5)', async () => {
+    const draftPlay: SavedPlay = { ...planned, plan: { ...planned.plan, entries: planned.plan.entries.map(entry => ({ ...entry, price: '100' })) },
+      summary: { ...planned.summary, status: 'draft', version: 1, planRevision: 0, plannedAtUtc: null } }
+    const { api } = client(draftPlay)
+    api.changePlayStatus = vi.fn()
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(draftPlay)} />)
+    await user.click(screen.getByRole('button', { name: 'Plan it' }))
+    const checks = within(await screen.findByRole('list', { name: 'Pre-flight checks' })).getAllByRole('listitem')
+    expect(checks.map(item => item.textContent)).toEqual([
+      'A priced stop for every priced entryNot met', 'Entry, stop and target shares each total 100%Met', 'Thesis and invalidation are writtenNot met',
+      'Risk within the sizing setting at the current ladder levelUnknown', 'The estimated liquidation lies beyond every stopUnknown',
+    ])
+    await user.click(screen.getByRole('button', { name: 'Back to the plan' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(api.changePlayStatus).not.toHaveBeenCalled()
+  })
+  it('offers recent next actions at planning and copies one into the thesis only on request (phase 1, 1.5)', async () => {
+    const draftPlay: SavedPlay = { ...planned, summary: { ...planned.summary, status: 'draft', version: 1, planRevision: 0, plannedAtUtc: null } }
+    const { api, methods } = client(draftPlay)
+    methods.nextActions.mockResolvedValue([{ playId: otherId, title: 'BTC breakout', nextAction: 'Wait for the retest', reviewedAtUtc: at }])
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(draftPlay)} />)
+    const thesis = screen.getByRole('textbox', { name: 'Thesis' })
+    const before = (thesis as HTMLTextAreaElement).value
+    await user.click(await screen.findByText('Your recent next actions (1)'))
+    expect(screen.getByText('Wait for the retest')).toBeInTheDocument()
+    expect(thesis).toHaveValue(before)
+    await user.click(screen.getByRole('button', { name: 'Copy into plan' }))
+    expect(screen.getByRole('textbox', { name: 'Thesis' })).toHaveValue(
+      `${before.trim() ? `${before.trimEnd()}\n\n` : ''}If …, then Wait for the retest (from BTC breakout)`)
+  })
+  it('asks for a reason when a next action is copied into a planned Play, writing one revision (phase 1, 1.5)', async () => {
+    const { api, methods } = client(planned)
+    methods.nextActions.mockResolvedValue([{ playId: otherId, title: 'BTC breakout', nextAction: 'Wait for the retest', reviewedAtUtc: at }])
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(planned)} />)
+    await user.click(await screen.findByText('Your recent next actions (1)'))
+    await user.click(screen.getByRole('button', { name: 'Copy into plan' }))
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByRole('textbox'), 'Adding my rule from the BTC breakout')
+    await user.click(within(dialog).getByRole('button', { name: 'Save revision' }))
+    await waitFor(() => expect(methods.updatePlay).toHaveBeenCalledOnce())
+    expect(methods.updatePlay.mock.calls[0]![1]).toMatchObject({ revisionReason: 'Adding my rule from the BTC breakout' })
+    expect(methods.updatePlay.mock.calls[0]![1].plan.notes.thesis).toContain('If …, then Wait for the retest (from BTC breakout)')
+  })
   it('holds one guard through the save prerequisite and the planning request', async () => {
     const draftPlay: SavedPlay = { ...planned, plan: { ...planned.plan, size: '100',
       entries: planned.plan.entries.map(entry => ({ ...entry, price: '100' })) },
@@ -341,15 +389,21 @@ describe('diary workspace integration', () => {
     initial.draft.notes.review = 'Saved before planning'
     render(<Harness api={api} initial={initial} manual />)
     await userEvent.click(screen.getByRole('button', { name: 'Plan it' }))
+    // The plan has no thesis, so the pre-flight shows first; nothing is saved or planned until the owner goes ahead.
+    expect(methods.updatePlay).not.toHaveBeenCalled()
+    await userEvent.click(await screen.findByRole('button', { name: 'Plan it anyway' }))
     expect(methods.updatePlay).toHaveBeenCalledOnce()
     expect(api.changePlayStatus).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: 'Plan it' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /^Save$/ })).toBeDisabled()
+    // The checklist stays open while the work runs, so the page behind it is hidden from the accessibility tree.
+    expect(screen.getByRole('button', { name: 'Planning…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Plan it', hidden: true })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Save$/, hidden: true })).toBeDisabled()
     const stored = { ...draftPlay, review: initial.draft.notes.review, summary: { ...draftPlay.summary, version: 2 } }
     await act(async () => saving.resolve(stored))
-    expect(api.changePlayStatus).toHaveBeenCalledWith(planned.summary.id, 2, { status: 'planned' })
-    expect(screen.getByRole('button', { name: 'Plan it' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Saved' })).toBeDisabled()
+    expect(api.changePlayStatus).toHaveBeenCalledWith(planned.summary.id, 2, { status: 'planned', preflight: expect.arrayContaining([
+      { code: 'thesis', outcome: 'skipped' }]) })
+    expect(screen.getByRole('button', { name: 'Plan it', hidden: true })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Saved', hidden: true })).toBeDisabled()
     await act(async () => planning.resolve({ ...stored, summary: { ...planned.summary, version: 3 } }))
     expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled()
     expect(methods.updatePlay).toHaveBeenCalledOnce()

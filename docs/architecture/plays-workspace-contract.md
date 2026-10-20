@@ -269,3 +269,26 @@ the Play never disagrees with Review.
   badge beside the status, and the Review tab shows it above the outcome,
   when the receipt's `plannedAfterExecution` is true. See the October 20
   section of `portfolio-review.md`.
+
+## Lessons at planning (October 20, 2026)
+
+Phase 1.5 of the [learning-loop contract](phase1-learning-loop-contract.md),
+covering G-02 and G-05.
+- **Recent next actions.**
+  - `GET /api/plays/next-actions` returns the owner's newest non-blank next
+    actions from Closed or Cancelled Plays, by review time, at most ten.
+    Each comes with its source Play's ID and title.
+  - The Thesis tab of a Draft, Planned or Paused Play lists them in a
+    collapsed "Your recent next actions (N)". Each one's source opens that
+    Play.
+  - **Copy into plan** appends `If …, then <next action> (from <title>)` to
+    the thesis. Nothing is copied without that click.
+  - On a Planned or Paused Play, the change saves through the usual
+    revision-reason dialog and writes one revision.
+  - A failed read shows no suggestions; planning never depends on them.
+- **Pre-flight.** See the pre-flight section of `play-lifecycle.md`.
+  - The workspace evaluates the checks from the same Summary risk, the
+    sizing setting × ladder level and the liquidation estimate the page
+    shows.
+  - Plan it sends them with the planning request.
+

@@ -847,6 +847,17 @@
 .journal-tabs .execution-totals dd small { color: var(--muted-foreground); font-size: var(--text-2xs); font-weight: 500; }
 .journal-tabs .review-receipt { margin-bottom: 10px; }
 .journal-save { display: inline-flex; margin-right: 4px; }
+/* Recent next actions in the Thesis tab and the pre-flight list (phase 1, 1.5). */
+.journal-tabs .next-actions { margin: 0 0 8px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-sunken); }
+.journal-tabs .next-actions > summary { padding: 7px 10px; color: var(--muted-foreground); font-size: var(--text-xs); font-weight: 600; cursor: pointer; }
+.journal-tabs .next-actions ul { display: grid; gap: 6px; margin: 0; padding: 0 10px 10px; list-style: none; }
+.journal-tabs .next-actions li { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--journal-paper); }
+.journal-tabs .next-actions p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.journal-tabs .next-action-source { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--muted-foreground); font-size: var(--text-xs); }
+.preflight-checks { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.preflight-checks li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-sunken); }
+.preflight-checks li[data-outcome="skipped"] strong { color: var(--warning); }
+.preflight-checks li[data-outcome="unknown"] strong { color: var(--muted-foreground); }
 .retrospective-receipt { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin: 12px 0 0; }
 .retrospective-receipt div { padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-sunken); }
 .retrospective-receipt dt { color: var(--muted-foreground); font-size: var(--text-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: var(--tracking-label); }

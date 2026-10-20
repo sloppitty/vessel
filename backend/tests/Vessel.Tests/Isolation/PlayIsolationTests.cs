@@ -290,6 +290,7 @@ public abstract class PlayIsolationCases(IsolationHost api)
     [Covers("GET", "/api/review/exclusions")]
     [Covers("PUT", "/api/plays/{id:guid}")]
     [Covers("GET", "/api/plays/{id:guid}/history")]
+    [Covers("GET", "/api/plays/next-actions")]
     public async Task Reviews_exclusions_and_ended_tabs_stay_separate_and_foreign_reviews_answer_like_unknown_ones()
     {
         var (aOwner, bOwner) = await api.Owners();
@@ -315,6 +316,9 @@ public abstract class PlayIsolationCases(IsolationHost api)
             Assert.Equal(mine.Text, play.GetProperty("review").GetString());
             Assert.Equal((mine.Answers.MistakeTag, mine.Answers.Lesson), (play.GetProperty("structuredReview").GetProperty("mistakeTag").GetString(),
                 play.GetProperty("structuredReview").GetProperty("lesson").GetString()));
+            // The next actions offered at planning are the owner's own (phase 1, 1.5).
+            var next = Assert.Single((await owner.GetJson("/api/plays/next-actions")).EnumerateArray());
+            Assert.Equal((mine.ScoredId, mine.Answers.NextAction), (next.GetProperty("playId").GetGuid(), next.GetProperty("nextAction").GetString()));
             var history = await owner.GetJson($"/api/plays/{mine.ScoredId}/history");
             Assert.Equal(mine.Answers.NextAction, Assert.Single(history.GetProperty("reviews").EnumerateArray())
                 .GetProperty("structuredReview").GetProperty("nextAction").GetString());
@@ -333,14 +337,15 @@ public abstract class PlayIsolationCases(IsolationHost api)
                 Assert.Equal(ids.Length, counts.GetProperty(view).GetInt32());
             }
             foreach (var path in new[] { "/api/review?period=all", "/api/review/exclusions?period=all", "/api/plays/counts", "/api/plays?view=all",
-                "/api/plays?view=reviewed", "/api/plays?view=review", $"/api/plays/{mine.ScoredId}", $"/api/plays/{mine.ScoredId}/history" })
+                "/api/plays?view=reviewed", "/api/plays?view=review", $"/api/plays/{mine.ScoredId}", $"/api/plays/{mine.ScoredId}/history",
+                "/api/plays/next-actions" })
                 Isolated.NoLeak(await owner.GetText(path), theirs.Markers);
         }
 
         // B rewrites or clears the review of A's Plays, with A's current version and either account, and reads its history:
         // each answers like an unknown Play and A's review stays as it was.
         var aPaths = new[] { $"/api/plays/{a.ScoredId}", $"/api/plays/{a.ScoredId}/history", $"/api/plays/{a.Excluded}", $"/api/plays/{a.Cancelled}",
-            "/api/review?period=all", "/api/review/exclusions?period=all", "/api/plays/counts" };
+            "/api/review?period=all", "/api/review/exclusions?period=all", "/api/plays/counts", "/api/plays/next-actions" };
         var state = await Snapshot.Of((a.Owner, aPaths), (b.Owner, ["/api/review?period=all", "/api/plays/counts", $"/api/plays/{b.ScoredId}"]));
         var taken = new ReviewAnswers("followed", "taken-by-b", "Taken", "Taken");
         foreach (var account in new[] { a.Account, b.Account })

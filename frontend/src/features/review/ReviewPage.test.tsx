@@ -185,6 +185,14 @@ describe('Review result bases', () => {
     expect(within(rows[0]!).getByText('Plan written after first execution')).toBeInTheDocument()
     expect(within(rows[1]!).queryByText('Plan written after first execution')).not.toBeInTheDocument()
   })
+  it('counts the pre-flight recorded at Plan it, with what Plays went ahead without (phase 1, 1.5)', async () => {
+    const { user } = setup(vi.fn().mockResolvedValue({ ...reviewFixture, preflight: { recorded: 3, notRecorded: 2,
+      skipped: [{ code: 'priced-stops', count: 2 }, { code: 'allocations', count: 0 }, { code: 'thesis', count: 1 },
+        { code: 'risk', count: 0 }, { code: 'liquidation', count: 0 }] } }))
+    await user.click(await screen.findByText('3 scored · 2 excluded · 1 reviewed'))
+    expect(screen.getByText(/^Pre-flight at Plan it: 3 recorded · 2 not recorded\./)).toHaveTextContent(
+      'Planned without: a priced stop for every priced entry (2) · thesis and invalidation are written (1).')
+  })
   it('names the R estimate with its denominator and counts sign differences and fee-only losses', async () => {
     setup(vi.fn().mockResolvedValue(report))
     const card = (await screen.findByRole('heading', { name: 'Average outcome' })).closest('section')!

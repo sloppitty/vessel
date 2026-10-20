@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import type { SizingDocument } from '@/api/sizing'
 import { ExternalLink, PencilLine, RefreshCw, TriangleAlert } from 'lucide-react'
-import { statusLabels, type PlayStatus } from '@/api/plays'
+import { statusLabels, type NextAction, type PlayStatus, type PreflightCheck } from '@/api/plays'
 import { useVenues } from '@/api/venues'
 import { AccountSelect } from '@/components/accounts/AccountSelect'
 import { Input } from '@/components/ui/input'
@@ -24,7 +24,8 @@ import { PositionEditor, defaultMaxLeverage, type SuggestionMarks } from './Posi
 import { ChartPanel } from './PlayChart'
 import { CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
 import { noFilledEntries } from './planChecks'
-import { noEntryFills, type EntryFills } from './position-risk-summary'
+import { noEntryFills, positionRiskSummary, type EntryFills } from './position-risk-summary'
+import { preflightChecks, withIfThen } from './preflight'
 import type { EvidenceImages } from './evidence-images'
 import { isNominalUsdQuote } from './stablecoins'
 import { defaultPlayTitle } from './default-title'
@@ -39,7 +40,7 @@ import '@/features/monitor/incidents.css'
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, revision = null,
   lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, sizingStatus = 'ready', onRetrySizing, onRiskChange,
   filledEntries, fills: entryFills, onUnits, onPriceStep, retrospective = false, incidents, stopEvidence, evidenceImages,
-  reviewReceipt, journalSave, retrospectiveReceipt, plannedAfterExecution = false }: {
+  reviewReceipt, journalSave, retrospectiveReceipt, plannedAfterExecution = false, onPreflight, nextActions, onOpenPlay }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -96,6 +97,12 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   retrospectiveReceipt?: ReactNode
   /** The plan was written after the Play's first execution (D-17), as the server's receipt says. */
   plannedAfterExecution?: boolean
+  /** Receives a Draft's pre-flight checks as the plan changes, for Plan it to show and record (phase 1, 1.5). */
+  onPreflight?: (checks: PreflightCheck[]) => void
+  /** The owner's recent next actions, offered in the Thesis tab while the Play is not yet under way. */
+  nextActions?: readonly NextAction[] | null
+  /** Opens a next action's source Play. */
+  onOpenPlay?: (id: string) => void
 }) {
   const fieldId = useId()
   const [selectedId, setSelectedId] = useState(draft.entries[0]?.id ?? '')
@@ -184,6 +191,16 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
     [entryFills, filledEntries])
   // While the fills load, every stop keeps the wrong-side rule; the server decides per entry from its own facts.
   const filled = fills === 'unknown' ? noFilledEntries : fills.filled
+  // The Draft's pre-flight, from the same Summary risk and liquidation estimate the page shows. It reaches the page only
+  // when a check's outcome changes, so the page's copy is never older than what the owner sees.
+  const preflight = status === 'draft' && onPreflight && !retrospective ? JSON.stringify(preflightChecks({ draft, sizing,
+    risk: positionRiskSummary(draft, units, riskReference, fills),
+    liquidation: estimatedLiquidation(draft.entries, draft.direction, leverageOf(draft.leverage), maxLeverage, maintenanceMargin) })) : null
+  useEffect(() => { if (preflight) onPreflight?.(JSON.parse(preflight) as PreflightCheck[]) }, [preflight, onPreflight])
+  // A next action is copied only on the owner's click, as an if-then the owner completes.
+  const copyNextAction = (action: NextAction) => onChange({ ...draft, notes: { ...draft.notes, thesis: withIfThen(draft.notes.thesis, action) } })
+  const offeredActions = !readOnly && !retrospective && (status === 'draft' || status === 'planned' || status === 'paused') && nextActions?.length
+    ? { actions: nextActions, onCopy: copyNextAction, ...(onOpenPlay ? { onOpen: onOpenPlay } : {}) } : undefined
 
   // Suggestions sit in their own panel above the workspace; the fields only carry a marker.
   const leverage = leverageOf(draft.leverage)
@@ -301,7 +318,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           structuredReview={draft.structuredReview}
           onStructuredReviewChange={structuredReview => onChange({ ...draft, structuredReview })}
           evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceImages={evidenceImages} evidenceRequest={evidenceRequest} executionRequest={executionRequest}
-          reviewReceipt={reviewReceipt} journalSave={journalSave} />
+          reviewReceipt={reviewReceipt} journalSave={journalSave} nextActions={offeredActions} />
       </div>
       {retrospective ? <section className="panel retrospective-position" aria-label="No original plan"><h2>No original plan</h2>{retrospectiveReceipt}</section>
         : readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>

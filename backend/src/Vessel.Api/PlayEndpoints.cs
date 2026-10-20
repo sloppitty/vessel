@@ -39,6 +39,7 @@ public static class PlayEndpoints
             Results.Ok(await service.UpdateAsync(id, request, ct)));
         api.MapPost("/{id:guid}/status", async (Guid id, ChangePlayStatusRequest request, PlayService service, CancellationToken ct) =>
             Results.Ok(await service.ChangeStatusAsync(id, request, ct)));
+        api.MapGet("/next-actions", async (PlayService service, CancellationToken ct) => Results.Ok(await service.NextActionsAsync(ct)));
         api.MapGet("/{id:guid}/history", async (Guid id, PlayService service, CancellationToken ct) =>
             Results.Ok(await service.HistoryAsync(id, ct)));
         api.MapGet("/{id:guid}/execution", async (Guid id, PlayExecutionService service, MonitorExecutionView monitor, CancellationToken ct) =>

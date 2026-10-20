@@ -58,6 +58,27 @@ Stops, targets and entries that have not been taken can always change, because c
 - Revisions are append-only snapshots of the plan: direction, sizing, leverage, budget override, entries with stops and targets, thesis, invalidation, strategy and evidence notes.
 - Once entry fills are linked, direction stays fixed. Only entries without fills can change their entry price or share. Stops and targets can still change with a revision reason. Since October 19, 2026, a filled entry's stops may sit at or beyond it (see [Managed stops](#managed-stops)).
 
+### Pre-flight at Plan it (October 20, 2026)
+
+Phase 1.5 of the [learning-loop contract](phase1-learning-loop-contract.md).
+- **The checks.** Planning a Draft may carry the pre-flight the owner saw.
+  Each check is passed, skipped or unknown:
+  - a priced stop for every priced entry;
+  - entry, stop and target shares each total 100%;
+  - thesis and invalidation are written;
+  - risk is within the sizing setting at the current ladder level;
+  - the estimated liquidation lies beyond every stop.
+- **Storage.** The server accepts only those codes and outcomes, each at
+  most once. It stores them in a fixed order on plan revision 1, in the
+  nullable `Preflight` column added by the explicit `PlanPreflight`
+  migration. History shows them.
+- **Never blocking.** The checklist never blocks planning. Plan it plans at
+  once when every check is met. Otherwise the owner sees the checklist, with
+  **Plan it anyway** and **Back to the plan**.
+- **Limits.** Resuming a Paused Play is not planning a Draft, so a pre-flight
+  sent then is refused with 400. Older plans have none, and nothing is
+  backfilled.
+
 ## Managed stops
 
 October 19, 2026, Phase 0 item 0.5b of the [trust and correctness contract](phase0-trust-correctness-contract.md#05-managed-stops), under the owner's decision 2.

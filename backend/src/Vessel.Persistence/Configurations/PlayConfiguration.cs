@@ -54,6 +54,7 @@ internal sealed class PlayPlanRevisionConfiguration : IEntityTypeConfiguration<P
         builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
         builder.Property(x => x.Plan).HasColumnType("jsonb");
         builder.Property(x => x.Reason).HasMaxLength(PlayPlanRevision.MaxReasonLength);
+        builder.Property(x => x.Preflight).HasColumnType("jsonb");
     }
 }
 

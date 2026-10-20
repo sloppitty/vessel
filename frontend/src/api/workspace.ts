@@ -24,8 +24,8 @@ import {
   type AccountCredential, type AccountDiscovery,
 } from './account-access'
 import {
-  isPlayCounts, isPlayExecution, isPlayHistory, isPlayList, isSavedEvidence, isSavedPlay, playCountsPath, playListPath,
-  type LinkOrder, type RebindLevel, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest,
+  isNextAction, isPlayCounts, isPlayExecution, isPlayHistory, isPlayList, isSavedEvidence, isSavedPlay, playCountsPath, playListPath,
+  type LinkOrder, type NextAction, type RebindLevel, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest,
 } from './plays'
 import { isSizingDocument, type SizingDocument } from './sizing'
 import { isReviewDocument, reviewPath, isReviewExclusions, reviewExclusionsPath, type ReviewDocument, type ReviewQuery, type ReviewExclusions } from './review'
@@ -297,6 +297,8 @@ export interface WorkspaceApi {
   updatePlay(id: string, fields: PlayFields & { expectedVersion: number; revisionReason?: string }): Promise<SavedPlay>
   changePlayStatus(id: string, expectedVersion: number, request: StatusRequest): Promise<SavedPlay>
   playHistory(id: string, signal?: AbortSignal): Promise<PlayHistory>
+  /** The owner's most recent next actions from ended Plays, newest first, at most ten (phase 1, 1.5). */
+  nextActions(signal?: AbortSignal): Promise<NextAction[]>
   manualExecutions(id: string, signal?: AbortSignal): Promise<ManualExecutions>
   addManualExecution(id: string, input: ManualExecutionInput, signal?: AbortSignal): Promise<ManualExecutions>
   correctManualExecution(id: string, executionId: string, input: ManualExecutionCorrection, signal?: AbortSignal): Promise<ManualExecutions>
@@ -649,6 +651,8 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
     changePlayStatus: (id, expectedVersion, request) =>
       call(`${playPath(id)}/status`, { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify({ expectedVersion, ...request }) }),
     playHistory: (id, signal) => call(`${playPath(id)}/history`, { ...playRequest, validate: isPlayHistory, ...withSignal(signal) }),
+    nextActions: signal => call('/api/plays/next-actions', { ...playRequest,
+      validate: (v): v is NextAction[] => Array.isArray(v) && v.length <= 10 && v.every(isNextAction), ...withSignal(signal) }),
     manualExecutions: (id, signal) => call(`${playPath(id)}/manual-executions`, { ...playRequest, validate: (v): v is ManualExecutions => isManualExecutions(v) && v.play.summary.id === id, ...withSignal(signal) }),
     addManualExecution: (id, input, signal) => {
       if (!isManualExecutionInput(input)) return Promise.reject(new ApiError('invalid-response', 'Provide valid manual execution facts, a UTC time and a request identity.'))

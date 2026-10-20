@@ -72,12 +72,23 @@ export interface PlayFields {
   review: string
   structuredReview?: StructuredReview
 }
-export interface PlanRevision { number: number; status: PlayStatus; reason: string; createdAtUtc: string; plan: PlayPlan }
+export interface PlanRevision {
+  number: number; status: PlayStatus; reason: string; createdAtUtc: string; plan: PlayPlan
+  /** The pre-flight seen at Plan it, on revision 1 only; null or absent for older plans and later revisions. */
+  preflight?: PreflightCheck[] | null
+}
+/** The non-blocking checks shown at Plan it, in display order (phase 1, 1.5). */
+export const preflightCodes = ['priced-stops', 'allocations', 'thesis', 'risk', 'liquidation'] as const
+export type PreflightCode = typeof preflightCodes[number]
+export interface PreflightCheck { code: PreflightCode; outcome: 'passed' | 'skipped' | 'unknown' }
+/** One of the owner's recent next actions and the Play it was written for. */
+export interface NextAction { playId: string; title: string; nextAction: string; reviewedAtUtc: string | null }
 export interface StatusChange { from: PlayStatus; to: PlayStatus; reason: CancelReason | null; note: string | null; occurredAtUtc: string; source?: 'owner' | 'venue' | 'manual' }
 export interface ReviewRevision { number: number; occurredAtUtc: string; review: string; structuredReview: StructuredReview }
 export interface PlayHistory { revisions: PlanRevision[]; statusChanges: StatusChange[]; reviews?: ReviewRevision[] | null }
 export type StatusRequest =
-  | { status: 'planned' | 'paused' }
+  | { status: 'planned'; preflight?: PreflightCheck[] }
+  | { status: 'paused' }
   | { status: 'cancelled'; reason: CancelReason; note?: string }
 export interface SavedEvidence {
   id: string
@@ -122,9 +133,14 @@ export const isSavedPlay = (v: unknown): v is SavedPlay => isRecord(v) && isPlay
   (v.summary.origin === 'retrospective' ? isRetrospectivePlan(v.plan) : isPlayPlan(v.plan)) &&
   isRecord(v.drawings) && Object.values(v.drawings).every(Array.isArray) && isText(v.review, noteLength) &&
   (v.structuredReview == null || isStructuredReview(v.structuredReview))
+export const isPreflightCheck = (v: unknown): v is PreflightCheck => isRecord(v) && preflightCodes.includes(v.code as PreflightCode) &&
+  ['passed', 'skipped', 'unknown'].includes(v.outcome as string)
+export const isNextAction = (v: unknown): v is NextAction => isRecord(v) && isGuid(v.playId) && isText(v.title, 200) &&
+  isText(v.nextAction, 4000) && v.nextAction.trim() !== '' && isNullOr(v.reviewedAtUtc, x => isTimestamp(x, timeLength))
 export const isPlayHistory = (v: unknown): v is PlayHistory => isRecord(v) && Array.isArray(v.revisions) && Array.isArray(v.statusChanges) &&
   v.revisions.every(r => isRecord(r) && isCount(r.number) && playStatuses.includes(r.status as PlayStatus) && isText(r.reason, 2000) &&
-    isTimestamp(r.createdAtUtc, timeLength) && isPlayPlan(r.plan)) &&
+    isTimestamp(r.createdAtUtc, timeLength) && isPlayPlan(r.plan) &&
+    (r.preflight == null || Array.isArray(r.preflight) && r.preflight.length <= preflightCodes.length && r.preflight.every(isPreflightCheck))) &&
   v.statusChanges.every(c => isRecord(c) && playStatuses.includes(c.from as PlayStatus) && playStatuses.includes(c.to as PlayStatus) &&
     isNullOr(c.reason, x => cancelReasons.includes(x as CancelReason)) && isNullOr(c.note, x => isText(x, 2000)) && isTimestamp(c.occurredAtUtc, timeLength) &&
     (c.source === undefined || c.source === 'owner' || c.source === 'venue' || c.source === 'manual')) &&

@@ -122,6 +122,12 @@ function Page({ api, accounts = [accountFixture], initial = createPlaysSession()
 const client = (server: ReturnType<typeof fakeServer>, overrides: Partial<WorkspaceApi> = {}) =>
   ({ ...createWorkspaceApi('test-only'), ...server.api, marketStream: idleMarketStream, ...overrides }) as unknown as WorkspaceApi
 
+/** Plan it, through the pre-flight checklist these test plans open: they have no thesis or invalidation (phase 1, 1.5). */
+async function planIt(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: 'Plan it' }))
+  await user.click(await screen.findByRole('button', { name: 'Plan it anyway' }))
+}
+
 async function newPlannedPlay(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole('button', { name: 'New play' }))
   await user.type(screen.getByRole('textbox', { name: 'Play title' }), '  Range reclaim')
@@ -130,7 +136,7 @@ async function newPlannedPlay(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByRole('textbox', { name: 'Perpetual instrument' }), 'BTC-PERP')
   await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
   await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned stop price (quote units)' }), '95')
-  await user.click(screen.getByRole('button', { name: 'Plan it' }))
+  await planIt(user)
   await waitFor(() => expect(within(screen.getByRole('region', { name: 'Play draft workspace' })).getByText('Planned', { selector: '.badge' })).toBeInTheDocument())
 }
 
@@ -143,7 +149,10 @@ describe('saved plays', () => {
     await newPlannedPlay(user)
     expect(server.api.createPlay).toHaveBeenCalledOnce()
     expect(server.api.createPlay.mock.calls[0]![0]).toMatchObject({ accountId: accountFixture.id, instrument: 'BTC-PERP', instrumentSource: 'manual' })
-    expect(server.api.changePlayStatus).toHaveBeenCalledWith(ids(1), 1, { status: 'planned' })
+    // The pre-flight the owner saw goes with the planning request, all five checks in order (phase 1, 1.5).
+    expect(server.api.changePlayStatus).toHaveBeenCalledWith(ids(1), 1, { status: 'planned', preflight: [
+      { code: 'priced-stops', outcome: 'passed' }, { code: 'allocations', outcome: 'passed' }, { code: 'thesis', outcome: 'skipped' },
+      { code: 'risk', outcome: 'unknown' }, { code: 'liquidation', outcome: 'unknown' }] })
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Range reclaim')
     expect(accountPicker('Account')).toBeDisabled()
     expect(screen.getByRole('textbox', { name: 'Perpetual instrument' })).toHaveAttribute('readonly')
@@ -704,7 +713,7 @@ describe('venue tracking', () => {
       server.plays.set(id, opened)
       return Promise.resolve({ requestId: ids(5000), monitor: monitorFixture })
     })
-    await user.click(screen.getByRole('button', { name: 'Plan it' }))
+    await planIt(user)
     expect(server.api.runAccountMonitor).not.toHaveBeenCalled()
     await user.click(screen.getByRole('tab', { name: 'Execution' }))
     await user.click(await screen.findByRole('button', { name: 'Check' }))
@@ -734,7 +743,7 @@ describe('monitor credential', () => {
     await chooseInPicker('Account', venue.name, user)
     await pickInstrument(user, 'BTC')
     await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
-    await user.click(screen.getByRole('button', { name: 'Plan it' }))
+    await planIt(user)
     await user.click(await screen.findByRole('tab', { name: 'Execution' }))
     await user.click(await screen.findByRole('button', { name: 'Manage account credential' }))
     expect(manage).toHaveBeenCalledWith(venue.id)
@@ -757,7 +766,7 @@ describe('Play header incidents (Phase 0, 0.4a)', () => {
     await chooseInPicker('Account', venue.name, user)
     await pickInstrument(user, 'BTC')
     await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
-    await user.click(screen.getByRole('button', { name: 'Plan it' }))
+    await planIt(user)
     const indicator = await screen.findByRole('button', { name: 'Needs attention · 1 critical' })
     expect(screen.getByRole('tab', { name: 'Thesis' })).toHaveAttribute('aria-selected', 'true')
     await user.click(indicator)
@@ -777,7 +786,7 @@ describe('Play header incidents (Phase 0, 0.4a)', () => {
     await chooseInPicker('Account', venue.name, user)
     await pickInstrument(user, 'BTC')
     await user.type(screen.getByRole('spinbutton', { name: 'Entry 1 planned entry price (quote units)' }), '100')
-    await user.click(screen.getByRole('button', { name: 'Plan it' }))
+    await planIt(user)
     await waitFor(() => expect(within(screen.getByRole('region', { name: 'Play draft workspace' })).getByText('Planned', { selector: '.badge' })).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: /^Needs attention/ })).not.toBeInTheDocument()
   })

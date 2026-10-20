@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type FocusEvent, type FormEvent, ty
 import { useVenues } from '@/api/venues'
 import { Maximize2, Minimize2, NotebookPen, Pencil, Plus, RotateCcw } from 'lucide-react'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
-import { emptyStructuredReview, type PlayStatus, type StructuredReview } from '@/api/plays'
+import { emptyStructuredReview, type NextAction, type PlayStatus, type StructuredReview } from '@/api/plays'
 import { ChartIconButton } from '@/components/chart/ChartToolbar'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
@@ -142,7 +142,7 @@ const journalSections = [
 ] as const
 
 export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceImages, evidenceRequest = 0, executionRequest = 0, readOnly = false, execution,
-  structuredReview, onStructuredReviewChange, status = 'draft', retrospective = false, reviewReceipt, journalSave }: {
+  structuredReview, onStructuredReviewChange, status = 'draft', retrospective = false, reviewReceipt, journalSave, nextActions }: {
   notes: PlayDraft['notes']
   onChange: (notes: PlayDraft['notes']) => void
   evidence?: DraftEvidence[]
@@ -166,6 +166,8 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   reviewReceipt?: ReactNode
   /** Saves the Play from the journal and its expanded view; present only while there is something to save. */
   journalSave?: ReactNode
+  /** The owner's recent next actions, shown in the Thesis tab with a way to copy one into it (phase 1, 1.5). */
+  nextActions?: { actions: readonly NextAction[]; onCopy: (action: NextAction) => void; onOpen?: (id: string) => void } | undefined
 }) {
   const id = useId()
   const state = useJournalStore()
@@ -248,6 +250,16 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
       } : {}}>
       {key === 'evidence' && onEvidenceChange && <EvidencePanel evidence={evidence} onChange={onEvidenceChange} images={evidenceImages} />}
       {key === 'review' && reviewReceipt}
+      {key === 'thesis' && nextActions && <details className="next-actions">
+        <summary>Your recent next actions ({nextActions.actions.length})</summary>
+        <ul>{nextActions.actions.map(action => <li key={action.playId}>
+          <p>{action.nextAction}</p>
+          <span className="next-action-source">From {nextActions.onOpen
+            ? <button type="button" className="text-action" onClick={() => nextActions.onOpen!(action.playId)}>{action.title || 'Untitled play'}</button>
+            : <strong>{action.title || 'Untitled play'}</strong>}
+            <Button type="button" size="sm" variant="outline" onClick={() => nextActions.onCopy(action)}>Copy into plan</Button></span>
+        </li>)}</ul>
+      </details>}
       <label className="sr-only" htmlFor={`${id}-${key}`}>{label}</label>
       <textarea id={`${id}-${key}`} className="journal-note" value={notes[key]} placeholder={help} readOnly={readOnly && key !== 'review'}
         onChange={(event) => onChange({ ...notes, [key]: event.target.value })} />

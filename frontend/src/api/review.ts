@@ -1,5 +1,6 @@
 import { isCount, isGuid, isListOf, isNonBlankText, isNullOr, isRecord, isReviewDecimal, isText, isTimestamp } from './guards'
 import { isOptionalPlayLocalResult, type PlayLocalResult } from './local-result'
+import { preflightCodes, type PreflightCode } from './plays'
 
 export const reviewPeriods = [
   { id: 'day', label: 'Last 24 hours' }, { id: 'week', label: 'Last 7 days' },
@@ -61,6 +62,11 @@ export interface ReviewDocument {
     unassignedFills: number; firstFillAtUtc: string | null; notice: string
   }
   plays: ReviewPlay[]; offset: number; nextOffset: number | null
+  /**
+   * The pre-flight recorded at Plan it over the period's closed planned Plays, scored or excluded: how many have one, how
+   * many were planned before it existed, and per check how many went ahead without it. Absent from older servers.
+   */
+  preflight?: { recorded: number; notRecorded: number; skipped: Array<{ code: PreflightCode; count: number }> }
 }
 /** Lists hold at most 10,000 items unless stated. */
 const listLimit = 10_000
@@ -100,7 +106,10 @@ export const isReviewDocument = (v: unknown): v is ReviewDocument => isRecord(v)
   isRecord(v.groups) && isListOf(v.groups.portfolios, group, listLimit) && isListOf(v.groups.accounts, group, listLimit) && isListOf(v.groups.assets, group, listLimit) &&
   isRecord(v.coverage) && ['closedCandidates', 'incompleteFees', 'incompleteExecutions', 'openPlays', 'unassignedFills'].every(key => isCount((v.coverage as Record<string, unknown>)[key])) &&
   isNullOr(v.coverage.firstFillAtUtc, x => isTimestamp(x, 64)) && isText(v.coverage.notice, 4000) && isListOf(v.plays, play, 50) &&
-  isCount(v.offset) && (v.nextOffset === null || isCount(v.nextOffset) && v.nextOffset > v.offset)
+  isCount(v.offset) && (v.nextOffset === null || isCount(v.nextOffset) && v.nextOffset > v.offset) &&
+  (v.preflight === undefined || isRecord(v.preflight) && isCount(v.preflight.recorded) && isCount(v.preflight.notRecorded) &&
+    isListOf(v.preflight.skipped, s => isRecord(s) && preflightCodes.includes(s.code as PreflightCode) && isCount(s.count) &&
+      s.count <= ((v.preflight as Record<string, unknown>).recorded as number), preflightCodes.length))
 
 export function reviewPath(query: ReviewQuery): string {
   const params = new URLSearchParams({ period: query.period, portfolio: query.portfolio })
