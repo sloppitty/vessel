@@ -632,3 +632,12 @@ October 20, 2026, branch `t3/phase1-capture`, stacked on 1.1b:
   - **Focus order (low).** A refused submit focuses the first invalid field in the form's order. A test fails without
     this fix.
   - **Check.** `scripts/check.sh` passed again: backend 3,611 passed, 5 skipped; frontend 153 files and 3,845 tests.
+
+- **Sol (Codex) round 2.** Two findings, both fixed:
+  - **Rejection and revisions (high).** A revision adding a level the rejected order matched let the next check link
+    it. "Not this play" now keeps one `Rejected` link record for the Play and order; matching treats it as declined at
+    every level and as an unplanned exit. The rejection reads no plan, so a concurrent revision cannot escape it. The
+    owner can still link the order by hand. The PostgreSQL test adds a matching target after the rejection.
+  - **Other overlaps (medium).** Ambiguity was checked at fixed steps, missing Casey's three-hour overlap. A typed time
+    is now matched against every offset the zone uses around it; tests cover Casey and Lord Howe.
+  - **Check.** `scripts/check.sh` passed again: backend 3,612 passed, 5 skipped; frontend 153 files and 3,848 tests.
