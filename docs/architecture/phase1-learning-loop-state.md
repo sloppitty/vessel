@@ -188,14 +188,11 @@ October 20, 2026, branch `t3/phase1-preflight`, stacked on 1.4a:
     - thesis and invalidation;
     - risk within the setting × ladder level;
     - liquidation beyond the stops.
-  - When all are met, it plans at once. Otherwise the checklist opens with **Plan it anyway** and **Back to the plan**.
-    It never blocks.
+  - The checklist always opens, with **Plan it anyway** and **Back to the plan**. It never blocks.
   - The server validates codes and outcomes, refuses a pre-flight anywhere but Draft → Planned, and stores it on plan
     revision 1. That uses the explicit migration `20261020085301_PlanPreflight`, a nullable `jsonb` column.
-  - History shows the recorded checks.
+  - History shows the recorded checks, or says "Pre-flight not recorded" for a plan from before them.
   - Review counts, over the period's closed planned Plays, those recorded, those not recorded, and the skips per check.
-- **Refinement of the contract wording.** The checklist opens only when a check is not met. A plan that passes every
-  check plans in one click, and its checks are recorded all the same.
 - **Tests.**
   - PostgreSQL: a Draft with an unpriced stop plans, its revision 1 records the skip, and Review counts it beside one
     unrecorded Play.
@@ -207,11 +204,23 @@ October 20, 2026, branch `t3/phase1-preflight`, stacked on 1.4a:
     - the dialog and going back;
     - copying into Draft and Planned Plays;
     - History, Review counts and the response guards.
-  - Existing Plan it tests now go through the checklist, because their plans have no thesis.
+  - Existing Plan it tests now go through the checklist.
 - **Checks.** `scripts/check.sh` passed:
   - backend: 3,564 passed, 5 skipped;
   - frontend: 151 files and 3,757 tests;
   - build clean.
+
+- **Sol (Codex) round 1.** Five findings, all fixed:
+  - **Stale sizing (medium).** A sizing record that could not be reloaded is no record, so the risk check is unknown
+    rather than met against an old ladder level. A test fails without this fix.
+  - **Liquidation (medium).** The check is met only when every stop is priced. A priced stop past the liquidation is not
+    met, and anything else is unknown.
+  - **Allocations (medium).** An entry with no stops or no targets totals 0% there, which is not met.
+  - **Dialog (low).** The checklist opens at every Plan it, as the contract says, including when every check is met. The
+    earlier refinement is withdrawn.
+  - **History (low).** A plan from before the pre-flight says "Pre-flight not recorded".
+  - **Check.** After the rebase onto main, `scripts/check.sh` passed: backend 3,574 passed, 5 skipped; frontend 151
+    files and 3,782 tests.
 
 ## 1.6 Capture friction and time consistency
 
