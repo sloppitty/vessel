@@ -212,6 +212,73 @@ October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
 
 ## 1.3 Record repair
 
+### 1.3a Unresolved
+
+October 20, 2026, branch `t3/phase1-unresolved`, stacked on 1.2:
+- **The status (D-06, decision 4).** `Unresolved` ends an Open Play whose venue executions can never settle it.
+  - Only the owner declares it, through `POST /api/plays/{id}/unresolved`, with `expectedVersion`, a reason
+    (`shared-close`, `flip`, `forced-exit-not-retained` or `other`) and a note.
+  - The Play must be Open and have imported executions on its linked orders. The monitor never sets it, and account
+    flatness is never read.
+  - It runs under the account and Play locks that imports hold.
+- **Evidence.** The status change keeps the execution facts at that moment in a new `jsonb` column:
+  - entered and exited quantity, and entered minus exited;
+  - its linked orders (up to 200 listed, all counted), each with its filled quantity;
+  - the integrity problems.
+
+  History and Review's drill-down show them.
+- **No result.** It has no result, no inferred sign and no R; the receipt says why.
+- **Lists and review.**
+  - Needs review or Reviewed list it by its completion, and All lists it, with an "Unresolved" chip. The Closed tab
+    stays Closed only. Counts carry `unresolved`.
+  - It is reviewed like a Closed Play: Complete review, structured answers and next actions.
+- **Review and sizing.**
+  - Review excludes it with the reason "unresolved" and counts it in coverage. The drill-down shows its reason, note
+    and facts.
+  - The sizing record shows "N unresolved not counted" beside the ladder. Ladder, window and Activity fallback are
+    unchanged.
+- **Settlement.**
+  - It takes no new links or suggestions; a link attempt says to return it to Open first.
+  - Reconciliation still settles it from its existing linked orders, by the Open rule. It then closes with the same
+    `play.closed` event, and the declaration stays in history.
+- **Monitor.**
+  - It leaves the open-Play position comparison, so a position still at the venue is unexplained, never this Play's.
+  - Its linked orders are watched by the Closed and Cancelled rule from the declaration. A later declaration starts a
+    new watch, by also restarting a watch when the Play's end moves past its start; Closed and Cancelled ends never
+    move.
+- **Return to Open.** `POST /api/plays/{id}/return-to-open` takes `expectedVersion` and a reason.
+- **Leaving a final state (completes 1.2).** Returning to Open, or venue facts closing it, clears a completed review
+  with a `cleared` review revision. Text and answers stay. While Open again, stored answers save unchanged but cannot
+  change.
+- **Browser.**
+  - **Declare unresolved** appears on an Open venue Play whose linked orders hold fills. It opens a dialog with the
+    reason and "What happened".
+  - **Return to Open** appears on an Unresolved Play.
+  - Both wait for unsaved edits.
+- **Migration.** The explicit `20261020102320_UnresolvedStatus` migration adds the nullable `UnresolvedReason` and
+  `Evidence` columns to `play_status_changes`. Its rollback is refused while any Play or history row names Unresolved,
+  because older code cannot read it.
+- **Tests.**
+  - Domain: who may declare, return and settle, the evidence, and the cleared completion. Stored answers save
+    unchanged while Open again.
+  - PostgreSQL acceptance:
+    - a stuck Play (`More4.CloseApi`, `Exec.SharedExit`, `Exec.FlipOrder`) is declared with its evidence, excluded
+      from Review with that reason, counted beside the ladder, refused new links, reviewed and returned to Open on
+      request;
+    - a delayed exit fill on its linked order closes it with the normal `play.closed` event, on an account with no
+      other active Play;
+    - its linked stop's watch starts at the declaration, and a second declaration starts it again;
+    - the migration's rollback is refused.
+  - The two-owner isolation test covers both new routes.
+  - Frontend: the actions and dialogs, History, Review's drill-down and count, the sizing note, the completion bar
+    and the response guards.
+- **Checks.** `scripts/check.sh` passed: backend 3,600 passed, 5 skipped; frontend 152 files and 3,804 tests; build clean. The first
+  run found two expected changes (the counts shape and the owner-scope SQL inventory) and two test mistakes (the stop
+  watch is one of two linked-order watches, compared at the database's microsecond precision, and events are written
+  only through an event-capturing unit of work); the dedicated event test covers the last.
+
+### 1.3b Manual correction batch
+
 Not started.
 
 ## 1.4 Process and outcome as cases
