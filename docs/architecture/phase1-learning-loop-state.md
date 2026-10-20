@@ -159,6 +159,17 @@ October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
   build clean. A first run had one isolation test time out under a load average near 60 from other work; it passed
   alone, and the full rerun passed.
 
+- **Sol (Codex) round 1.** Five findings, all fixed:
+  - **Unfinished entry (medium).** The entry being written, with its request identity, now lives in the Plays session
+    for its Play, so switching journal tabs or expanding the journal never loses it. A test fails without this fix.
+  - **Late read (medium).** A log read that started before a write arrived no longer replaces the list the write
+    returned. A test fails without this fix.
+  - **Request IDs across accounts (medium).** Log writes take an owner-wide request-ID lock before the Play lock, so the
+    same ID sent at once on two accounts is one entry and a 409, not a 500. A PostgreSQL test sends both at once.
+  - **Retrospective Plays (medium).** They get the log, as the contract says; the lifecycle doc no longer narrows it.
+  - **Older servers (low).** Without a completion field, the journal shows no completion actions the server lacks.
+  - **Check.** `scripts/check.sh` passed again: backend 3,591 passed, 5 skipped; frontend 152 files and 3,796 tests.
+
 ## 1.3 Record repair
 
 Not started.
