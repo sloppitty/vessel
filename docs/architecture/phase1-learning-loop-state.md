@@ -179,6 +179,16 @@ October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
     this fix.
   - **Check.** `scripts/check.sh` passed again: backend 3,591 passed, 5 skipped; frontend 152 files and 3,801 tests.
 
+- **Sol (Codex) round 3.** Both round-2 findings resolved. Two new findings, both fixed:
+  - **A page that has gone (medium).** A log write that finished after the whole Plays page remounted, or after
+    disconnecting, published that page's outdated session, erasing newer text or bringing back a discarded session. A
+    page that has unmounted, or whose API changed, now never publishes from a log write. A page test that remounts the
+    page during a write fails without this fix.
+  - **Entry after a remount (medium).** A Log mounted while a write was out showed "No entries yet" after the write
+    landed. A confirmed write now counts on the kept draft, so a mounted Log that did not send it reads the list
+    again; the Log that sent it already shows the returned list. A test fails without this fix.
+  - **Check.** `scripts/check.sh` passed again: backend 3,591 passed, 5 skipped; frontend 152 files and 3,802 tests.
+
 ## 1.3 Record repair
 
 Not started.
