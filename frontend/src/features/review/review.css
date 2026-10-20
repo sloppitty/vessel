@@ -83,6 +83,8 @@
 .pr-scorecard strong { display: block; font-size: clamp(26px, 2.3vw, 36px); font-weight: 620; line-height: 1.25; letter-spacing: var(--tracking-display); margin: 8px 0 9px; font-feature-settings: var(--figures); font-variant-numeric: tabular-nums; }
 .pr-scorecard small { font-size: var(--text-2xs); color: var(--pr-muted); }
 .pr-scorecard small b { font-weight: 450; margin-right: 10px; }
+/* Each metric's own n sits on its own line, under the figures it qualifies (F-08). */
+.pr-sample { display: block; margin-top: 4px; }
 .pr-outcomes { display: flex; height: 4px; gap: 3px; margin: 0 0 8px; width: 88%; border-radius: 2px; overflow: hidden; background: var(--accent); }
 .pr-outcomes i { min-width: 0; }
 .pr-chart-grid { display: grid; grid-template-columns: minmax(0, 1.95fr) minmax(290px, 1fr); gap: 18px; }

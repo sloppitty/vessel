@@ -147,6 +147,20 @@ describe('Review result bases', () => {
     expect(screen.getByText('LOWEST ASSET P&L').closest('button')).toHaveTextContent('3 PlaysSmall sample')
     const breakdown = screen.getByRole('table', { name: /ranked by net/ })
     expect(within(breakdown).getAllByText(/Small sample/)).not.toHaveLength(0)
+    // Each n is its own line, never run into the text before it.
+    expect(within(card('Batting average')).getByText('n = 1 decided · Small sample')).toHaveClass('pr-sample')
+  })
+  it('marks each breakdown cell by its own denominator: 20 wins and one loss leave only gain / loss small', async () => {
+    const lopsided = { ...reviewFixture.metrics, count: 21, wins: 20, losses: 1, scratches: 0, batting: '0.9523809524' }
+    setup(vi.fn().mockResolvedValue({ ...reviewFixture, metrics: lopsided,
+      groups: { ...reviewFixture.groups, portfolios: [{ ...reviewFixture.groups.portfolios[0]!, metrics: lopsided }] } }))
+    const breakdown = await screen.findByRole('table', { name: /ranked by net/ })
+    const [batting, payoff, profitFactor] = within(breakdown).getAllByRole('row')[1]!.querySelectorAll('td:nth-child(3), td:nth-child(4), td:nth-child(5)')
+    expect(batting).not.toHaveTextContent('Small sample')
+    expect(payoff).toHaveTextContent('Small sample')
+    expect(profitFactor).not.toHaveTextContent('Small sample')
+    const footer = within(breakdown).getAllByRole('row').at(-1)!
+    expect(footer.querySelectorAll('td')[2]).toHaveTextContent('Small sample')
   })
   it('marks a Play whose plan was written after its first execution, and only that one (D-17)', async () => {
     const { user } = setup(vi.fn().mockResolvedValue({ ...reviewFixture, plays: [
