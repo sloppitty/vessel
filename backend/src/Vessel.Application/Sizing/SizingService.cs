@@ -91,7 +91,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
         }
         var complete = candidates.Where(c => !c.Orders.Overlaps(incomplete)).Select(c => c.Operation).ToList();
         var kept = new HashSet<ActivityOperationDto>(complete, ReferenceEqualityComparer.Instance);
-        return (complete, summaries.Operations.Where(o => o.Status is "closed" or "incomplete" && !kept.Contains(o)).ToList());
+        return (complete, summaries.Operations.Where(o => o.ClosedAtUtc is not null && o.Status is "closed" or "incomplete" && !kept.Contains(o)).ToList());
     }
 
     private static bool Candidate(ActivityOperationDto operation) =>

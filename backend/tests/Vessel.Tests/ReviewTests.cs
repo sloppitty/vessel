@@ -32,7 +32,7 @@ internal sealed class ReviewFixture : IReviewStore
     public Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct)
     {
         LastQuery = query;
-        return Task.FromResult(new ReviewFacts(Portfolios, Accounts, Closed, 0, 0, null));
+        return Task.FromResult(new ReviewFacts(Portfolios.ToList(), Accounts.ToList(), Closed.ToList(), 0, 0, null)); // A snapshot, like the store
     }
     public Account Account(string name = "Main", Guid? portfolio = null)
     {

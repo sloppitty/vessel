@@ -281,7 +281,10 @@ documented Plays weighing more, a toggle and a configurable threshold.
   The decision applies to every period total in the response. The response
   carries `positions: { mode, included, minPlays, plays, positions, omitted,
   playWeight }`; `positions` and `omitted` (closed positions that cannot be
-  scored, by their last execution) are null when positions were not read.
+  scored, by their close time) are null when positions were not read. Plays and
+  positions come from separate reads, so Review rereads the Play snapshot after
+  the positions and retries (three attempts, then 409) if closed Plays, their
+  linked fills or enabled accounts changed in between.
   Activity is resolved only when positions are read. The exclusions endpoint
   still lists Plays only.
 - **Weight.** A Play weighs `PlayWeight` = 2 positions in batting average,

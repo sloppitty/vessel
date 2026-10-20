@@ -1,3 +1,4 @@
+using Vessel.Domain.Accounts;
 using Vessel.Application.Workspace;
 using System.Globalization;
 using Vessel.Application.Common;
@@ -57,22 +58,37 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         if (!PositionModes.Contains(query.Positions) || query.MinPlays is < 0 or > ReviewQuery.MaxMinPlays)
             throw new ProblemException(400, "Choose exclude, include or auto positions and a Play threshold from 0 to 1000.");
 
-        var facts = await store.ReadAsync(query, now, ct);
-        var accounts = facts.Accounts.Where(a => a.IsEnabled).ToDictionary(a => a.Id);
-        var scoped = accounts.Values.Where(a =>
-            (query.AccountId is null || a.Id == query.AccountId) &&
-            (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||
-                a.PortfolioId?.ToString() == query.Portfolio)).Select(a => a.Id).ToHashSet();
-        var evaluated = facts.ClosedPlays.Where(f => scoped.Contains(f.Play.AccountId) &&
-            (query.Instrument is null || f.Play.ContractId == query.Instrument))
-            .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true || f.IncompleteOrders is { Count: > 0 })).ToList();
-        var accepted = evaluated.Where(e => e.Result is not null).ToList();
-        var candidates = evaluated.Where(e => InPeriod(e.ClosedAt, from, now)).ToList();
-        // Auto counts the scored Plays of the selected scope and period, and the decision applies to every period total.
-        var playCount = accepted.Count(e => InPeriod(e.ClosedAt, from, now));
-        var include = positionSource is not null &&
-            (query.Positions == "include" || query.Positions == "auto" && playCount < query.MinPlays);
-        var read = (include ? await positionSource!.ReadAsync(scoped, ct) : []).Where(p => accounts.ContainsKey(p.AccountId)).ToList();
+        ReviewFacts facts;
+        Dictionary<Guid, Account> accounts;
+        List<Evaluated> accepted, candidates;
+        List<ReviewPosition> read;
+        int playCount;
+        bool include;
+        for (var attempt = 1; ; attempt++)
+        {
+            facts = await store.ReadAsync(query, now, ct);
+            accounts = facts.Accounts.Where(a => a.IsEnabled).ToDictionary(a => a.Id);
+            var scoped = accounts.Values.Where(a =>
+                (query.AccountId is null || a.Id == query.AccountId) &&
+                (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||
+                    a.PortfolioId?.ToString() == query.Portfolio)).Select(a => a.Id).ToHashSet();
+            var evaluated = facts.ClosedPlays.Where(f => scoped.Contains(f.Play.AccountId) &&
+                (query.Instrument is null || f.Play.ContractId == query.Instrument))
+                .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true || f.IncompleteOrders is { Count: > 0 })).ToList();
+            accepted = evaluated.Where(e => e.Result is not null).ToList();
+            candidates = evaluated.Where(e => InPeriod(e.ClosedAt, from, now)).ToList();
+            // Auto counts the scored Plays of the selected scope and period, and the decision applies to every period total.
+            playCount = accepted.Count(e => InPeriod(e.ClosedAt, from, now));
+            include = positionSource is not null &&
+                (query.Positions == "include" || query.Positions == "auto" && playCount < query.MinPlays);
+            read = [];
+            if (!include) break;
+            read = (await positionSource!.ReadAsync(scoped, ct)).Where(p => accounts.ContainsKey(p.AccountId)).ToList();
+            // Plays and position claims come from separate reads. A Play created or linked in between (a retrospective
+            // conversion) would hide its result or count it twice, so the Play snapshot must be unchanged around them.
+            if (Claims(facts) == Claims(await store.ReadAsync(query, now, ct))) break;
+            if (attempt == 3) throw new ProblemException(409, "Plays changed while Review read imported positions. Reload Review.");
+        }
         var positions = read.Where(p => query.Instrument is null || p.ContractId == query.Instrument)
             .Select(p => new Evaluated(null, p.ClosedAtUtc, p.Outcome, p.Outcome is null ? "position" : null)
             {
@@ -255,6 +271,11 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
                 levels[e.Id].FirstOrDefault(l => l.LevelId == s.Id)?.Price is > 0 and var stop &&
                 (plan.Direction == "long" ? stop < Positive(e.Price) : stop > Positive(e.Price))));
     }
+
+    /// <summary>The closed Plays, their linked fills and the enabled accounts: what decides which positions a Play claims.</summary>
+    private static string Claims(ReviewFacts facts) => string.Join(';', facts.ClosedPlays.OrderBy(f => f.Play.Id)
+        .Select(f => $"{f.Play.Id}:{f.Play.Status}:{string.Join(',', f.Fills.Select(x => x.Fill.Id).Order())}")
+        .Concat(facts.Accounts.Where(a => a.IsEnabled).Select(a => a.Id.ToString()).Order()));
 
     private static bool InPeriod(DateTimeOffset at, DateTimeOffset? from, DateTimeOffset now) =>
         at <= now && (from is null || at > from);

@@ -30,7 +30,7 @@ public sealed class ActivityReviewPositions(ActivityService activity, ISizingSto
         var scored = SizingService.ActivityOutcomes(complete.Where(Unclaimed))
             .ToDictionary(s => s.Row.OperationId!, s => s.Outcome, StringComparer.Ordinal);
         return complete.Concat(omitted).Where(Unclaimed).Select(o => new ReviewPosition(o.Id, o.AccountId, o.ContractId, o.Direction,
-            o.ClosedAtUtc ?? o.LastOccurredAtUtc, scored.GetValueOrDefault(o.Id))).ToList();
+            o.ClosedAtUtc!.Value, scored.GetValueOrDefault(o.Id))).ToList();
     }
 
     private static bool Unclaimed(ActivityOperationDto operation) => operation.PlayAssociation == "unassigned";

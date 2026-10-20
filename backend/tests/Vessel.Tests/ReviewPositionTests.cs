@@ -21,9 +21,11 @@ public sealed class ReviewPositionTests
     {
         public List<ReviewPosition> Items { get; } = [];
         public int Reads { get; private set; }
+        public Action? OnRead { get; set; }
         public Task<IReadOnlyList<ReviewPosition>> ReadAsync(IReadOnlySet<Guid> accountIds, CancellationToken ct)
         {
             Reads++;
+            OnRead?.Invoke();
             return Task.FromResult<IReadOnlyList<ReviewPosition>>(Items.Where(p => accountIds.Contains(p.AccountId)).ToList());
         }
     }
@@ -125,6 +127,15 @@ public sealed class ReviewPositionTests
         Assert.Equal(("1", 1), (scoped.Metrics.Net, scoped.Metrics.Count));
         Assert.Equal(2, (await Read(new(Period: "all", AccountId: main.Id, Instrument: "BTC", Positions: "include"))).Metrics.Count);
         Assert.Contains("ETH", scoped.Options.Instruments);
+    }
+
+    [Fact]
+    public async Task Plays_changing_on_every_positions_read_end_in_a_conflict_not_a_mixed_report()
+    {
+        Position(1);
+        source.OnRead = () => f.Add(1); // another request closes a Play during each positions read
+        var error = await Assert.ThrowsAsync<ProblemException>(() => Read(new(Positions: "include")));
+        Assert.Equal((409, 3), (error.StatusCode, source.Reads));
     }
 
     [Theory]
