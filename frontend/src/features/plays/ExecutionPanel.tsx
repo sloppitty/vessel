@@ -11,6 +11,7 @@ import { InfoTip } from '@/components/ui/info-tip'
 import { useJournalState } from './journal-state'
 import { LevelDriftAction } from './LevelDriftAction'
 import { LocalResultValue, SignDiffersFlag, localResultNote } from './LocalResult'
+import { EntryReceipts, ReceiptTotals } from './Receipt'
 
 // One shared empty object, so an untouched panel does not look like new state on every render.
 const noChoices: Record<string, string> = {}
@@ -94,7 +95,9 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
         <dd>{totals.venueNetUsd === null ? <InfoTip className="value-tag" trigger="Unknown" label="venue net">A fee is unverified or in a token outside the listed stablecoins.</InfoTip> : `${totals.venueNetUsd} USD`}</dd></div>}
       {totals.local && <div><dt>Play-local result<InfoTip label="About the Play-local result">{localResultNote}</InfoTip></dt>
         <dd><LocalResultValue local={totals.local} format={value => `${value} USD`} />{totals.local.signDiffers && <SignDiffersFlag />}</dd></div>}
+      {execution.receipt && <ReceiptTotals receipt={execution.receipt} status={execution.status} />}
     </dl>
+    <EntryReceipts progress={execution.entries} entries={entries} />
 
     {execution.issues.length > 0 && <section aria-label="Not reconciled" className="execution-section execution-issues">
       <h3>Not reconciled<InfoTip label="About unreconciled executions">Vessel neither closes nor scores a play while these remain. Fills that contradict their link are left out of the totals.</InfoTip></h3>

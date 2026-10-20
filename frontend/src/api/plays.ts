@@ -283,7 +283,7 @@ export interface PlayExecution {
     /** The Play-local result beside it, known once the play is closed and its fills settle it. */
     local?: PlayLocalResult
   }
-  entries: Array<{ entryId: string; filledQuantity: string; averageFillPrice: string | null; restingOrders: number }>
+  entries: EntryProgress[]
   links: OrderLink[]
   suggestions: OrderLink[]
   unlinkedOrders: ExecutionOrder[]
@@ -294,6 +294,37 @@ export interface PlayExecution {
   discrepancies: MonitorDiscrepancy[]
   /** Linked orders still watched after the Play ended; empty while it is active. */
   watches: MonitorWatch[]
+  /** Times, averages and estimated R by Review's rules; absent from servers before Phase 1. */
+  receipt?: PlayReceipt | null
+}
+/** One planned entry's fills beside its plan (phase 1, 1.1a). */
+export interface EntryProgress {
+  entryId: string
+  filledQuantity: string
+  averageFillPrice: string | null
+  restingOrders: number
+  /**
+   * The entry as planned, from the plan revision in force at its first fill (`planRevision`, null for a Draft or a
+   * retrospective Play); before any fill, the current plan. Null when the plan cannot give it; absent from older servers.
+   */
+  plannedPrice?: string | null
+  plannedQuantity?: string | null
+  planRevision?: number | null
+}
+/**
+ * What happened, beside the plan, by Review's own rules: the first entry and last exit fills (time held runs between
+ * them once closed), average entry and exit, and estimated R (planned-stop model) with the initial risk it divides by, or
+ * why it is unknown.
+ */
+export interface PlayReceipt {
+  firstEntryAtUtc: string | null
+  lastExitAtUtc: string | null
+  averageEntryPrice: string | null
+  averageExitPrice: string | null
+  fillCount: number
+  estimatedR: string | null
+  initialRisk: string | null
+  estimatedRReason: string | null
 }
 export interface LinkOrder { orderId: string; role: LinkRole; entryId?: string; levelId?: string }
 /**
@@ -315,14 +346,22 @@ const orderLink = (v: unknown): v is OrderLink => isRecord(v) && isGuid(v.id) &&
   isNullOr(v.entryId, x => isText(x, 64)) && isNullOr(v.levelId, x => isText(x, 64)) && (v.state === 'linked' || v.state === 'suggested') &&
   (v.source === 'automatic' || v.source === 'owner') && (v.order === null || executionOrder(v.order)) && isPlainDecimal(v.filledQuantity) &&
   Array.isArray(v.fills) && v.fills.every(executionFill)
+export const isEntryProgress = (e: unknown): e is EntryProgress => isRecord(e) && isText(e.entryId, 64) && isPlainDecimal(e.filledQuantity) &&
+  isNullOr(e.averageFillPrice, isPlainDecimal) && isCount(e.restingOrders) && (e.plannedPrice === undefined || isNullOr(e.plannedPrice, isPlainDecimal)) &&
+  (e.plannedQuantity === undefined || isNullOr(e.plannedQuantity, isPlainDecimal)) && (e.planRevision === undefined || isNullOr(e.planRevision, isCount))
+export const isPlayReceipt = (r: unknown): r is PlayReceipt => isRecord(r) &&
+  isNullOr(r.firstEntryAtUtc, x => isTimestamp(x, timeLength)) && isNullOr(r.lastExitAtUtc, x => isTimestamp(x, timeLength)) &&
+  isNullOr(r.averageEntryPrice, isPlainDecimal) && isNullOr(r.averageExitPrice, isPlainDecimal) && isCount(r.fillCount) &&
+  isNullOr(r.estimatedR, isPlainDecimal) && isNullOr(r.initialRisk, isPlainDecimal) && isNullOr(r.estimatedRReason, x => isText(x, 500)) &&
+  // R and its denominator come together, or neither comes and a reason says why.
+  (r.estimatedR === null) === (r.initialRisk === null) && (r.estimatedR === null) === (r.estimatedRReason !== null)
 export const isPlayExecution = (v: unknown): v is PlayExecution => isRecord(v) && isGuid(v.playId) && playStatuses.includes(v.status as PlayStatus) &&
   typeof v.tracked === 'boolean' && isNullOr(v.reason, x => isText(x, 500)) && isNullOr(v.checkedAtUtc, x => isTimestamp(x, timeLength)) &&
   isRecord(v.totals) && ['enteredQuantity', 'exitedQuantity', 'openQuantity', 'closedPnlUsd'].every(k => isPlainDecimal((v.totals as Record<string, unknown>)[k])) &&
   ['gross', 'net-of-fee', 'mixed'].includes(v.totals.closedPnlBasis as string) &&
   Array.isArray(v.totals.fees) && v.totals.fees.every(f => isRecord(f) && isText(f.token, 64) && isPlainDecimal(f.amount)) &&
   (v.totals.venueNetUsd === undefined || isNullOr(v.totals.venueNetUsd, isPlainDecimal)) && isOptionalPlayLocalResult(v.totals.local) &&
-  Array.isArray(v.entries) && v.entries.every(e => isRecord(e) && isText(e.entryId, 64) && isPlainDecimal(e.filledQuantity) &&
-    isNullOr(e.averageFillPrice, isPlainDecimal) && isCount(e.restingOrders)) &&
+  Array.isArray(v.entries) && v.entries.every(isEntryProgress) && (v.receipt === undefined || isNullOr(v.receipt, isPlayReceipt)) &&
   Array.isArray(v.links) && v.links.every(orderLink) && Array.isArray(v.suggestions) && v.suggestions.every(orderLink) &&
   Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(executionOrder) && isText(v.notice, 1000) &&
   Array.isArray(v.issues) && v.issues.every(issue => isText(issue, 1000)) &&

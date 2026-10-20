@@ -73,6 +73,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             .OrderByDescending(o => o.PlacedAtUtc).Take(MaxUnlinkedOrders).Select(OrderDto).ToList();
 
         var plan = PlayDocuments.Read(play.Plan);
+        var revisions = await plays.RevisionsAsync(play.Id, ct);
         var settlement = Settle(plan, linked, orders, fills, play.Origin == PlayOrigin.Retrospective);
         var entered = settlement.Entered;
         var exited = settlement.Exited;
@@ -97,8 +98,12 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             var filled = own.SelectMany(l => fills[l.ImportedOrderId]).Where(f => !ExecutionIntegrity.Contradicts(OrderLinkRole.Entry, settlement.EntrySide, f)).ToList();
             var quantity = ExecutionIntegrity.Quantity(filled);
             var notional = filled.Aggregate(BigInteger.Zero, (sum, f) => sum + ExactAmount.Product(f.Price, f.Quantity));
+            var planned = PlayReceipts.Planned(play, revisions, entry.Id, filled.Count == 0 ? null : filled.Min(f => f.OccurredAtUtc));
             return new EntryProgressDto(entry.Id, quantity.ToString(), quantity.Units.Sign > 0 ? ExactAmount.Average(notional, quantity) : null,
-                own.Count(l => orders.TryGetValue(l.ImportedOrderId, out var o) && o.Status == "open"));
+                own.Count(l => orders.TryGetValue(l.ImportedOrderId, out var o) && o.Status == "open"))
+            {
+                PlannedPrice = planned.Price, PlannedQuantity = planned.Quantity, PlanRevision = planned.Revision,
+            };
         }).ToList();
         OrderLinkDto Link(PlayOrderLink link) => new(link.Id, Name(link.Role), link.EntryId, link.LevelId, Name(link.State), Name(link.Source),
             orders.TryGetValue(link.ImportedOrderId, out var order) ? OrderDto(order) : null, ExecutionIntegrity.Quantity(fills[link.ImportedOrderId]).ToString(),
@@ -107,7 +112,10 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         if (reason is null && account is { IsEnabled: true } && play.Status is not (PlayStatus.Closed or PlayStatus.Cancelled))
             reason = await CredentialReasonAsync(account, ct);
         return new PlayExecutionDto(play.Id, PlayService.StatusName(play.Status), reason is null, reason, account?.LastSyncedAtUtc,
-            totals, entries, linked.Select(Link).ToList(), suggestions.Select(Link).ToList(), unlinked, Notice, settlement.Problems);
+            totals, entries, linked.Select(Link).ToList(), suggestions.Select(Link).ToList(), unlinked, Notice, settlement.Problems)
+        {
+            Receipt = PlayReceipts.Build(new ClosedPlayFacts(play, revisions, settlement.All, settlement.Incomplete), time.GetUtcNow()),
+        };
     }
 
     /// <summary>The owner links an order (or confirms a suggestion). It must not belong to another level already.</summary>

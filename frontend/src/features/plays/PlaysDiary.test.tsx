@@ -577,6 +577,43 @@ describe('diary workspace integration', () => {
     if (quote === 'EUR' || quote === 'usdg') expect(summary.queryByText(/nominal USD/)).not.toBeInTheDocument()
   })
 
+  it('writes the review beside the outcome and saves it from inside the journal (phase 1, 1.1a)', async () => {
+    const closed: SavedPlay = { ...terminal, summary: { ...terminal.summary, status: 'closed', cancelReason: null } }
+    const { api, methods } = client(closed)
+    methods.playExecution.mockImplementation(() => Promise.resolve({ ...execution(closed), tracked: true, reason: null,
+      totals: { ...execution(closed).totals, enteredQuantity: '0.5', exitedQuantity: '0.5', closedPnlUsd: '5', venueNetUsd: '4.97',
+        fees: [{ token: 'USDC', amount: '0.03' }] },
+      receipt: { firstEntryAtUtc: '2026-10-13T08:00:00Z', lastExitAtUtc: '2026-10-13T09:30:00Z', averageEntryPrice: '100.4', averageExitPrice: '110',
+        fillCount: 3, estimatedR: '1.98', initialRisk: '2.51', estimatedRReason: null } }))
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(closed)} />)
+    await user.click(screen.getByRole('tab', { name: 'Review' }))
+    const outcome = await screen.findByLabelText('Outcome')
+    for (const text of ['4.97 USD', '0.03 USDC', '+1.98R', '2.51 initial risk', '1h 30m']) expect(outcome).toHaveTextContent(text)
+    // Nothing to save yet: the journal offers no Save of its own.
+    expect(screen.queryByRole('button', { name: 'Save play' })).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('Lesson'), 'Sized too small')
+    await user.click(screen.getByRole('button', { name: 'Save play' }))
+    await waitFor(() => expect(methods.updatePlay).toHaveBeenCalledOnce())
+    expect(methods.updatePlay.mock.calls[0]![1].structuredReview?.lesson).toBe('Sized too small')
+    // Saved: the journal's Save leaves, and focus stays in the journal instead of falling to the page.
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save play' })).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Expand journal' })).toHaveFocus()
+  })
+  it('saves from the expanded journal too, keeping focus in the dialog', async () => {
+    const closed: SavedPlay = { ...terminal, summary: { ...terminal.summary, status: 'closed', cancelReason: null } }
+    const { api, methods } = client(closed)
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(closed)} />)
+    await user.click(screen.getByRole('tab', { name: 'Review' }))
+    await user.type(screen.getByLabelText('Lesson'), 'Wait for the retest')
+    await user.click(screen.getByRole('button', { name: 'Expand journal' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Save play' }))
+    await waitFor(() => expect(methods.updatePlay).toHaveBeenCalledOnce())
+    await waitFor(() => expect(within(dialog).queryByRole('button', { name: 'Save play' })).not.toBeInTheDocument())
+    expect(within(dialog).getByRole('button', { name: 'Close expanded journal' })).toHaveFocus()
+  })
   it('preserves free text, structured edits during save, and reports a stale rejected save without clearing dirty work', async () => {
     const { api, methods } = client()
     let complete!: (play: SavedPlay) => void

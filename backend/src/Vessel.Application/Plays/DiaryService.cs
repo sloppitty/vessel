@@ -1,5 +1,6 @@
 using Vessel.Application.Workspace;
 using System.Globalization;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -141,12 +142,29 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
         var history = await diary.ManualHistoryAsync(play.Id, ct);
         if (rows.Count > MaxManualRecords || history.Count > MaxManualHistory)
             throw new ProblemException(409, "Stored ledger exceeds its explicit response limits.");
+        var revisions = await plays.RevisionsAsync(play.Id, ct);
+        var entries = PlayDocuments.Read(play.Plan).Entries.Select(entry =>
+        {
+            var own = rows.Where(r => r.Role == "entry" && r.EntryId == entry.Id)
+                .Select(r => (r.OccurredAtUtc, Quantity: ManualLedger.Number(r.Quantity, true), Price: ManualLedger.Number(r.Price, true))).ToList();
+            var quantity = own.Aggregate(default(ExactAmount), (sum, r) => sum + ExactAmount.From(r.Quantity));
+            var planned = PlayReceipts.Planned(play, revisions, entry.Id, own.Count == 0 ? null : own.Min(r => r.OccurredAtUtc));
+            return new EntryProgressDto(entry.Id, quantity.ToString(), quantity.Units.Sign > 0
+                ? ExactAmount.Average(own.Aggregate(BigInteger.Zero, (sum, r) => sum + ExactAmount.Product(r.Price, r.Quantity)), quantity) : null, 0)
+            {
+                PlannedPrice = planned.Price, PlannedQuantity = planned.Quantity, PlanRevision = planned.Revision,
+            };
+        }).ToList();
         return new(PlayService.ToDto(play), rows.OrderBy(r => r.OccurredAtUtc).ThenBy(r => r.Id).Select(Dto).ToList(),
             history.Select(h => new ManualHistoryDto(h.Id, h.ExecutionId, h.Reason, h.OccurredAtUtc,
                 h.Before is null ? null : JsonSerializer.Deserialize<ManualExecutionDto>(h.Before, Json),
                 JsonSerializer.Deserialize<ManualExecutionDto>(h.After, Json)!)).ToList(),
             new(ManualLedger.Text(ledger.Entered), ManualLedger.Text(ledger.Exited), ManualLedger.Text(ledger.Open),
-                ManualLedger.Text(ledger.Gross), ledger.Net is { } net ? ManualLedger.Text(net) : null, ledger.FeesComplete), ManualNotice);
+                ManualLedger.Text(ledger.Gross), ledger.Net is { } net ? ManualLedger.Text(net) : null, ledger.FeesComplete), ManualNotice)
+        {
+            Entries = entries,
+            Receipt = PlayReceipts.Build(new ClosedPlayFacts(play, revisions, ledger.Projection, [], true, ledger.FeesComplete), time.GetUtcNow()),
+        };
     }
     private static ManualExecutionDto Dto(ManualExecution row) => new(row.Id, row.Role, row.EntryId, row.OccurredAtUtc,
         row.Side, row.Quantity, row.Price, row.Fee, row.FeeCurrency, row.Source, row.CreatedAtUtc, row.UpdatedAtUtc);

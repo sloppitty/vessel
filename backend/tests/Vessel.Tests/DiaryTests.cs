@@ -10,6 +10,7 @@ using Vessel.Application.Review;
 using Vessel.Application.Sizing;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
@@ -217,6 +218,40 @@ public sealed class DiaryPostgresTests
         var report = await new ReviewService(new ReviewStore(verify, new SizingStore(verify, TestUnitOfWork.For(verify))), TimeProvider.System).GetAsync(new(Period: "all"), default);
         Assert.Equal(1, report.Metrics.Count);
         Assert.Equal(("manual", "planned", "-0.4"), (report.Plays[0].ExecutionSource, report.Plays[0].Origin, report.Plays[0].Net));
+    }
+
+    [PostgresFact]
+    public async Task Manual_ledger_receipt_sets_each_entry_beside_its_plan_and_scores_R_as_Review_does()
+    {
+        // Phase 1.1a (G-03): the receipt the review is written beside. Entry planned at 100 for 7.5 (margin 250 at 3x).
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var account = await Account(database, owner);
+        await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
+        using var client = factory.AuthorizedClient();
+        var play = await Planned(client, account.Id);
+        var now = DateTimeOffset.UtcNow;
+        var first = new DateTimeOffset(now.Ticks - now.Ticks % TimeSpan.TicksPerMicrosecond, TimeSpan.Zero);
+        ManualExecutionRequest At(long version, string role, string quantity, string price, DateTimeOffset at) =>
+            Fact(version, role, quantity, price, 0) with { OccurredAtUtc = at };
+        var one = await Add(client, play, At(play.Summary.Version, "entry", "0.25", "100.2", first));
+        var open = await Add(client, one.Play, At(one.Play.Summary.Version, "entry", "0.25", "100.6", first));
+        var entry = Assert.Single(open.Entries);
+        Assert.Equal(("entry-1", "100", "7.5", 1), (entry.EntryId, entry.PlannedPrice, entry.PlannedQuantity, entry.PlanRevision));
+        Assert.Equal(("0.5", "100.4"), (entry.FilledQuantity, entry.AverageFillPrice));
+        Assert.Equal((null, PlayReceipts.OpenReason, first), (open.Receipt!.EstimatedR, open.Receipt.EstimatedRReason, open.Receipt.FirstEntryAtUtc));
+
+        var exitAt = first.AddMilliseconds(1);
+        var closed = await Add(client, open.Play, At(open.Play.Summary.Version, "exit", "0.5", "110", exitAt));
+        Assert.Equal("closed", closed.Play.Summary.Status);
+        // Net 4.8 over 50.2 notional × 5% stop distance = 2.51 initial risk.
+        Assert.Equal((ExactDecimal.Format(4.8m / 2.51m), "2.51", "100.4", "110", exitAt, 3),
+            (closed.Receipt!.EstimatedR, closed.Receipt.InitialRisk, closed.Receipt.AverageEntryPrice, closed.Receipt.AverageExitPrice,
+                closed.Receipt.LastExitAtUtc, closed.Receipt.FillCount));
+        await using var verify = database.Context(owner);
+        var report = await new ReviewService(new ReviewStore(verify, new SizingStore(verify, TestUnitOfWork.For(verify))), TimeProvider.System)
+            .GetAsync(new(Period: "all"), default);
+        Assert.Equal(closed.Receipt.EstimatedR, Assert.Single(report.Plays).RMultiple);
+        Assert.Equal(closed.Receipt, (await client.GetFromJsonAsync<ManualExecutionsDto>($"/api/plays/{play.Summary.Id}/manual-executions"))!.Receipt);
     }
 
     [PostgresFact]

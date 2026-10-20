@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type FocusEvent, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type FocusEvent, type FormEvent, type ReactNode } from 'react'
 import { useVenues } from '@/api/venues'
 import { Maximize2, Minimize2, NotebookPen, Pencil, Plus, RotateCcw } from 'lucide-react'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
@@ -142,7 +142,7 @@ const journalSections = [
 ] as const
 
 export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceImages, evidenceRequest = 0, executionRequest = 0, readOnly = false, execution,
-  structuredReview, onStructuredReviewChange, status = 'draft', retrospective = false }: {
+  structuredReview, onStructuredReviewChange, status = 'draft', retrospective = false, reviewReceipt, journalSave }: {
   notes: PlayDraft['notes']
   onChange: (notes: PlayDraft['notes']) => void
   evidence?: DraftEvidence[]
@@ -162,12 +162,26 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   /** Decides whether the Review tab is offered and whether structured answers can be given. */
   status?: PlayStatus
   retrospective?: boolean
+  /** The outcome at the top of the Review tab, so the review is written beside it. */
+  reviewReceipt?: ReactNode
+  /** Saves the Play from the journal and its expanded view; present only while there is something to save. */
+  journalSave?: ReactNode
 }) {
   const id = useId()
   const state = useJournalStore()
   const [tab, setTab] = useState(retrospective ? 'review' : 'thesis')
   const [expanded, setExpanded] = useState(false)
   const expandButton = useRef<HTMLButtonElement>(null)
+  const closeButton = useRef<HTMLButtonElement>(null)
+  // A save from the journal removes its button while it has focus (a blur elsewhere clears the flag); focus then moves to
+  // the journal's own expand or close button rather than to the page or the dialog's frame.
+  const saveFocused = useRef(false)
+  useEffect(() => {
+    if (journalSave || !saveFocused.current) return
+    saveFocused.current = false
+    const target = expanded ? closeButton : expandButton
+    target.current?.focus({ preventScroll: true })
+  }, [journalSave, expanded])
   const [shownRequest, setShownRequest] = useState(evidenceRequest)
   const [shownExecution, setShownExecution] = useState(executionRequest)
   // While the owner is writing in the Review tab it stays, even if they clear the note to rewrite it.
@@ -208,8 +222,10 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
           ? [trigger, <TabsTrigger key="execution" value="execution">Execution</TabsTrigger>] : [trigger])}
       </TabsList>
       <div className="journal-actions">
+        {journalSave && <span className="journal-save" onFocus={() => { saveFocused.current = true }}
+          onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) saveFocused.current = false }}>{journalSave}</span>}
         {inDialog
-          ? <ChartIconButton label="Close expanded journal" icon={<Minimize2 size={15} aria-hidden="true" />} onClick={() => setExpanded(false)} />
+          ? <ChartIconButton ref={closeButton} label="Close expanded journal" icon={<Minimize2 size={15} aria-hidden="true" />} onClick={() => setExpanded(false)} />
           : <ChartIconButton ref={expandButton} label="Expand journal" icon={<Maximize2 size={15} aria-hidden="true" />} onClick={() => setExpanded(true)} />}
       </div>
     </header>
@@ -219,6 +235,7 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
         onBlur: (event: FocusEvent<HTMLDivElement>) => { if (!event.currentTarget.contains(event.relatedTarget)) setWritingReview(false) },
       } : {}}>
       {key === 'evidence' && onEvidenceChange && <EvidencePanel evidence={evidence} onChange={onEvidenceChange} images={evidenceImages} />}
+      {key === 'review' && reviewReceipt}
       <label className="sr-only" htmlFor={`${id}-${key}`}>{label}</label>
       <textarea id={`${id}-${key}`} className="journal-note" value={notes[key]} placeholder={help} readOnly={readOnly && key !== 'review'}
         onChange={(event) => onChange({ ...notes, [key]: event.target.value })} />
