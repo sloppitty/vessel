@@ -12,6 +12,7 @@ import { money } from '@/lib/format'
 import './overview-summary.css'
 import { NativeSelect } from '@/components/ui/native-select'
 import { CoverageBadge, NominalUsdTag, SummaryCoverageBadge } from './CoverageBadge'
+import { Time } from '@/components/ui/time'
 
 
 
@@ -86,7 +87,8 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
       {(current?.document || workspaceNote) && <details className="operation-scope"><summary>About these numbers</summary>
         {current?.document && <p className="workspace-scope-note">{current.document.scopeNote}</p>}
         {workspaceNote && workspaceNote !== current?.document?.scopeNote && <p className="workspace-scope-note">{workspaceNote}</p>}
-        {current?.document && <><p className="workspace-scope-note">Window ends {new Date(current.document.asOfUtc).toISOString()}{current.document.fromUtc ? `, starts ${new Date(current.document.fromUtc).toISOString()}` : ', all retained history'}.</p>{(['balance', 'available', 'unrealizedPnl', 'realizedResult'] as const).flatMap(name => current.document!.totals[name].coverage.reasons.map((r, i) => <p className="workspace-scope-note" key={`${name}-${i}`}>{name}: {r.count} · {r.reason}</p>))}</>}
+        {current?.document && <><p className="workspace-scope-note">Window ends <Time at={current.document.asOfUtc} style="datetime-seconds" />{current.document.fromUtc
+          ? <>, starts <Time at={current.document.fromUtc} style="datetime-seconds" /></> : ', all retained history'}.</p>{(['balance', 'available', 'unrealizedPnl', 'realizedResult'] as const).flatMap(name => current.document!.totals[name].coverage.reasons.map((r, i) => <p className="workspace-scope-note" key={`${name}-${i}`}>{name}: {r.count} · {r.reason}</p>))}</>}
       </details>}
     </section>
   </>

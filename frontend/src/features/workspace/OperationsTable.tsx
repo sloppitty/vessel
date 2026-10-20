@@ -20,7 +20,7 @@ function Result({ value }: { value: string | null }) {
 
 function OperationsHead({ compact }: { compact: boolean }) {
   return <thead><tr>
-    <th>Operation</th><th>Account / time <span className="operation-timezone">UTC</span></th><th title="Peak position quantity">Size</th>{!compact && <><th>Average entry</th><th>Average exit</th><th title="Before reported fees; venue-reported P&L is preserved in the executions">Closed P&amp;L</th><th title="Stablecoin fees in nominal USD; other tokens listed separately">Fees</th><th title="Settled funding in nominal USD: positive received, negative paid. Partial coverage is not zero.">Funding</th></>}<th title="Fee-adjusted reported execution P&L. Funding inclusion may be unverified; expand for the separate combined total.">Net result</th>{!compact && <th>Play</th>}
+    <th>Operation</th><th>Account / time</th><th title="Peak position quantity">Size</th>{!compact && <><th>Average entry</th><th>Average exit</th><th title="Before reported fees; venue-reported P&L is preserved in the executions">Closed P&amp;L</th><th title="Stablecoin fees in nominal USD; other tokens listed separately">Fees</th><th title="Settled funding in nominal USD: positive received, negative paid. Partial coverage is not zero.">Funding</th></>}<th title="Fee-adjusted reported execution P&L. Funding inclusion may be unverified; expand for the separate combined total.">Net result</th>{!compact && <th>Play</th>}
   </tr></thead>
 }
 

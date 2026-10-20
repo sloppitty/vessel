@@ -24,7 +24,6 @@
 .operation-leverage { display: inline-flex; align-items: center; padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--text-2xs); line-height: 1.2; background: var(--card); color: var(--foreground); font-feature-settings: var(--figures); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .operation-leverage[data-changed] { border-style: dashed; }
 .operation-leverage.unknown { color: var(--muted-foreground); }
-.operation-timezone { font-size: var(--text-2xs); }
 .operation-dates { white-space: nowrap; }
 .operation-entry, .operation-fees { color: var(--muted-foreground); }
 .operation-pnl { display: flex; align-items: center; gap: 8px; }

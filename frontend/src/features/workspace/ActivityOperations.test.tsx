@@ -252,6 +252,8 @@ describe('activity loading, filters and pages', () => {
     else await waitFor(() => expect(screen.getByRole('combobox', { name: label })).toHaveValue(''))
     await waitFor(() => expect(lastQuery(activity)).toEqual({ page: 1, pageSize: 25 }))
     expect(await within(await screen.findByRole('table')).findByText('BTC')).toBeInTheDocument()
+    // Each row names its own zone, so the column claims none (phase 1, 1.6e).
+    expect(screen.getByRole('columnheader', { name: 'Account / time' })).toBeInTheDocument()
   })
   it('sends every filter to the server, returns to page 1 and resets', async () => {
     const activity = vi.fn().mockImplementation((query: ActivityQuery) => Promise.resolve(activityPage(numbered(25), { totalCount: 60, scopeCount: 80, page: query.page, facets: { accountIds: [accountFixture.id], contracts: ['ETH', ...numbered(25).map(op => op.contractId)] } })))
