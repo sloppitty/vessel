@@ -15,6 +15,17 @@ public sealed record LinkOrderRequest(
     string? EntryId = null,
     string? LevelId = null);
 
+/// <summary>
+/// Rebinds a linked stop or target to the observed venue order at its acting price (<c>level.drift</c>). The Play
+/// must still be at <paramref name="ExpectedVersion"/> and the order at <paramref name="ObservedPrice"/>; the change
+/// is one plan revision with <paramref name="Reason"/>, plus the link to <paramref name="OrderId"/> when it is another order.
+/// </summary>
+public sealed record RebindLevelRequest(
+    [property: JsonRequired] long ExpectedVersion,
+    [property: JsonRequired] string OrderId,
+    [property: JsonRequired] string ObservedPrice,
+    [property: JsonRequired] string Reason);
+
 public sealed record ExecutionOrderDto(string OrderId, string Side, string OrderType, string LimitPrice, string? TriggerPrice,
     bool ReduceOnly, bool IsPositionTpsl, string OriginalSize, string RemainingSize, DateTimeOffset PlacedAtUtc,
     string Status, string VenueStatus, DateTimeOffset StatusAtUtc);
@@ -34,7 +45,18 @@ public sealed record FeeTotalDto(string Token, string Amount);
 /// <paramref name="ClosedPnlBasis"/> is gross (fees separate), net-of-fee (fees already taken off) or mixed.
 /// </summary>
 public sealed record ExecutionTotalsDto(string EnteredQuantity, string ExitedQuantity, string OpenQuantity,
-    string ClosedPnlUsd, string ClosedPnlBasis, IReadOnlyList<FeeTotalDto> Fees);
+    string ClosedPnlUsd, string ClosedPnlBasis, IReadOnlyList<FeeTotalDto> Fees)
+{
+    /// <summary>
+    /// Venue closed PnL less listed stablecoin fees on gross-basis fills, over the fills counted here (contradicting fills
+    /// are left out), so far while the play is open. Review and sizing score this basis only for a closed play whose fills
+    /// settle it, each with its own eligibility rules; retrospective plays are not in sizing. Null when a fee is
+    /// unverified or in another token.
+    /// </summary>
+    public string? VenueNetUsd { get; init; }
+    /// <summary>The Play-local result beside it; known once the play is closed and its fills settle it.</summary>
+    public PlayLocalResultDto? Local { get; init; }
+}
 
 /// <summary><paramref name="Issues"/> say why linked fills cannot settle the play; their quantities stay out of the totals when they contradict it.</summary>
 public sealed record PlayExecutionDto(Guid PlayId, string Status, bool Tracked, string? Reason, DateTimeOffset? CheckedAtUtc,

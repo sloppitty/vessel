@@ -122,11 +122,12 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
     this.overlays = [...overlays]
       .sort((a, b) => Number(a.emphasis === 'selected') - Number(b.emphasis === 'selected'))
       .map(overlay => ({ ...overlay, ...(this.preview?.id === overlay.id ? { price: this.preview.price } : {}), color: this.resolve(overlay.color), ...(overlay.accent ? { accent: this.resolve(overlay.accent) } : {}) }))
+    // An unconfirmed level (e.g. a stop not seen resting at the venue) is hollow: its colour on the chart background.
     this.axisViews = this.overlays.map(overlay => ({
       coordinate: () => this.y(overlay.price) ?? -1000,
       text: () => this.series?.priceFormatter().format(overlay.price) ?? String(overlay.price),
-      textColor: () => readableInk(overlay.color),
-      backColor: () => overlay.color,
+      textColor: () => overlay.unconfirmed ? overlay.color : readableInk(overlay.color),
+      backColor: () => overlay.unconfirmed ? this.theme.background : overlay.color,
     }))
     this.requestUpdate?.()
   }
@@ -201,16 +202,19 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
         const selected = overlay.emphasis === 'selected'
         const lineWidth = Math.max(1, Math.round((selected ? 2 : 1) * v))
         const lineY = Math.round(y * v) + (lineWidth % 2 ? 0.5 : 0)
-        context.globalAlpha = selected || overlay.kind === 'reference' ? 1 : 0.72
+        const alpha = selected || overlay.kind === 'reference' ? 1 : 0.72
+        // An unconfirmed level keeps its colour and position but reads as a sparser, fainter line.
+        context.globalAlpha = overlay.unconfirmed ? alpha * 0.6 : alpha
         context.strokeStyle = overlay.color
         context.lineWidth = lineWidth
-        context.setLineDash(overlay.kind === 'entry' ? [] : overlay.kind === 'stop' ? [2 * h, 3 * h]
+        context.setLineDash(overlay.unconfirmed ? [2 * h, 7 * h] : overlay.kind === 'entry' ? [] : overlay.kind === 'stop' ? [2 * h, 3 * h]
           : overlay.kind === 'reference' ? [10 * h, 3 * h, 2 * h, 3 * h] : [7 * h, 4 * h])
         context.beginPath()
         context.moveTo(0, lineY)
         context.lineTo(bitmapSize.width, lineY)
         context.stroke()
         context.setLineDash([])
+        context.globalAlpha = alpha
 
         const padding = 5 * h
         const tagHeight = Math.round(16 * v)
@@ -220,13 +224,20 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
         // Keep tags clear of the required TradingView attribution in the bottom-left corner.
         const inLogoZone = this.avoidLogo && tagY + tagHeight > bitmapSize.height - logoZone.height * v
         const tagX = Math.round((inLogoZone ? logoZone.width : 8) * h)
-        context.fillStyle = overlay.color
+        // A hollow tag (outlined on the chart background) marks an unconfirmed level; a filled one a confirmed or planned level.
+        context.fillStyle = overlay.unconfirmed ? this.theme.background : overlay.color
         context.fillRect(tagX, tagY, tagWidth, tagHeight)
+        if (overlay.unconfirmed) {
+          const edge = Math.max(1, Math.round(v))
+          context.lineWidth = edge
+          context.strokeStyle = overlay.color
+          context.strokeRect(tagX + edge / 2, tagY + edge / 2, tagWidth - edge, tagHeight - edge)
+        }
         if (marker) {
           context.fillStyle = overlay.accent!
           context.fillRect(tagX, tagY, marker, tagHeight)
         }
-        context.fillStyle = readableInk(overlay.color)
+        context.fillStyle = overlay.unconfirmed ? overlay.color : readableInk(overlay.color)
         context.fillText(overlay.label, tagX + marker + padding, lineY)
         if (overlay.kind !== 'reference') tags.push({ id: overlay.id, left: tagX / h, right: (tagX + tagWidth) / h, top: tagY / v, bottom: (tagY + tagHeight) / v })
 

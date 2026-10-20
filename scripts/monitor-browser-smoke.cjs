@@ -10,7 +10,7 @@ async function monitorFixture(page, accountId) {
     id: '00000000-0000-4000-8000-0000000000d1', accountId, playId: null,
     contractId: 'BTC', kind: 'position.excess', severity: 'warning', state: 'open',
     openedAtUtc: now, confirmedAtUtc: now, resolvedAtUtc: null, dismissedAtUtc: null, note: null,
-    details: { venueQuantity: '0.100000000000000001', playQuantity: '0.1' }, outcome: null, unverifiableAtUtc: null,
+    details: { venueQuantity: '0.100000000000000001', playQuantity: '0.1' }, outcome: null, unverifiableAtUtc: null, lastObservedAtUtc: now,
   }
   // A publicly announced candidate whose subject stayed unobservable past the monitor lifetime.
   const unverifiable = {
@@ -67,6 +67,14 @@ async function monitorFixture(page, accountId) {
     }
     // Navigating and receiving events must not request venue checks.
     assert.equal(checks, 0)
+    // Open incidents are visible above the Overview tiles and on the Plays entry, not only in a popup.
+    await page.getByRole('link', { name: 'Overview', exact: true }).click()
+    const incidents = page.getByRole('region', { name: 'Monitor incidents', exact: true })
+    await incidents.getByText('2 incidents need attention', { exact: true }).waitFor()
+    await incidents.getByRole('button', { name: /^The venue position is larger than expected · BTC/ }).waitFor()
+    assert.ok(await incidents.evaluate(row => !!(row.compareDocumentPosition(document.querySelector('.overview-metrics')) & Node.DOCUMENT_POSITION_FOLLOWING)))
+    await page.locator('#plays-nav-incidents').waitFor({ state: 'attached' })
+    await capture('monitor-overview-incidents')
     await page.getByRole('link', { name: 'Settings', exact: true }).click()
     await page.getByRole('button', { name: /^Graphite(\s|$)/ }).click()
     await page.getByRole('link', { name: 'Accounts', exact: true }).click()
@@ -74,8 +82,9 @@ async function monitorFixture(page, accountId) {
     const panel = page.getByRole('region', { name: 'Background monitor', exact: true })
     await panel.getByText('Worker offline.', { exact: false }).waitFor()
     await panel.getByText('Monitor stale', { exact: true }).waitFor()
+    await panel.getByText('Needs attention · 2 warnings', { exact: true }).waitFor()
     const warnings = page.getByRole('region', { name: 'Monitor discrepancies', exact: true })
-    const excess = warnings.getByRole('listitem').filter({ hasText: 'position.excess' })
+    const excess = warnings.getByRole('listitem').filter({ hasText: 'The venue position is larger than expected' })
     await excess.getByText('Recorded details', { exact: true }).click()
     await excess.getByText('0.100000000000000001', { exact: false }).waitFor()
     await warnings.getByText('warning · unverifiable', { exact: true }).waitFor()
@@ -93,18 +102,22 @@ async function monitorFixture(page, accountId) {
     assert.ok(await panel.getByRole('button').isDisabled())
     // No stream event arrives for this synthetic run; the bounded status read must still end it.
     await panel.getByRole('button', { name: /^Check in \d+s$/ }).waitFor({ timeout: 20_000 })
-    await panel.getByText('Monitored', { exact: true }).waitFor()
+    // The run is live again, but open records still head the panel: never "Monitored" beside them.
+    await panel.getByText('Monitor stale', { exact: true }).waitFor({ state: 'detached' })
+    await panel.getByText('Needs attention · 2 warnings', { exact: true }).waitFor()
+    assert.equal(await panel.getByText('Monitored', { exact: true }).count(), 0)
     assert.ok(await panel.getByRole('button').isDisabled())
     assert.equal(checks, 1)
     pass('Check is explicit, stays pending until stored status completes, and is blocked during the server cooldown')
 
-    await excess.getByRole('textbox', { name: 'Dismissal note for position.excess BTC' }).fill('Reviewed synthetic venue position')
+    await excess.getByRole('textbox', { name: 'Dismissal note: The venue position is larger than expected · BTC' }).fill('Reviewed synthetic venue position')
     await excess.getByRole('button', { name: 'Dismiss', exact: true }).click()
     await excess.getByText('warning · dismissed', { exact: true }).waitFor()
     assert.equal(dismissals, 1)
     assert.equal(await excess.getByRole('button', { name: 'Dismiss', exact: true }).count(), 0)
     // The unverifiable record stays announced, so the owner can still acknowledge it.
-    assert.equal(await warnings.getByRole('listitem').filter({ hasText: 'position.missing' }).getByRole('button', { name: 'Dismiss', exact: true }).count(), 1)
+    assert.equal(await warnings.getByRole('listitem').filter({ hasText: 'The venue shows no position' }).getByRole('button', { name: 'Dismiss', exact: true }).count(), 1)
+    await panel.getByText('Needs attention · 1 warning', { exact: true }).waitFor()
     await warnings.getByText('It does not change executions or stop checks', { exact: false }).waitFor()
     pass('dismissal persists its note and explains that monitoring continues')
 

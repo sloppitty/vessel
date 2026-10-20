@@ -1,0 +1,13 @@
+/* The conditional incident row above the Overview metric tiles. Its tone comes from incidents.css; text stays on the panel. */
+.overview-incidents { display: grid; gap: 8px; margin-bottom: 18px; padding: 12px 16px; box-shadow: inset 3px 0 0 var(--tone), var(--elevation-2); }
+.overview-incidents-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.overview-incidents-head > svg { flex-shrink: 0; color: var(--tone); }
+.overview-incidents-head strong { font-size: var(--text-sm); font-weight: 600; }
+.overview-incidents ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.overview-incidents li { --item-tone: var(--warning); display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; min-width: 0; }
+.overview-incidents li[data-tone="critical"] { --item-tone: var(--negative); }
+.overview-incidents li[data-tone="info"] { --item-tone: var(--muted-foreground); }
+.overview-incidents li::before { content: ''; flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--item-tone); }
+.overview-incidents li .text-action { min-width: 0; padding: 2px 0; font-size: var(--text-sm); text-align: left; white-space: normal; }
+.overview-incidents li .text-action:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.overview-incidents li small, .overview-incidents-more { margin: 0; color: var(--muted-foreground); font-size: var(--text-xs); }

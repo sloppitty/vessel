@@ -28,6 +28,16 @@ export function reviewMoney(value: string | null, signed = false): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: digits,
     minimumFractionDigits: 0, signDisplay: signed ? 'exceptZero' : 'auto' }).format(decimalString(value))
 }
+/**
+ * One Play's signed result (venue net or Play-local) in Review: compact like `reviewMoney`, but a non-zero value that would
+ * round to "$0" keeps its sign and leading digits, so it never reads as an exact scratch. Only exact zero is "$0".
+ */
+export function reviewResult(value: string | null): string {
+  if (value === null) return 'N/A'
+  const standard = Number(value) !== 0 && Math.abs(Number(value)) < 1 ? 4 : 2
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: fractionDigits(value, standard),
+    minimumFractionDigits: 0, signDisplay: 'exceptZero' }).format(decimalString(value))
+}
 export function reviewPercent(value: string | null, fraction = false): string {
   if (value === null) return 'N/A'
   const formatted = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1, minimumFractionDigits: 1,
@@ -45,6 +55,14 @@ export function shortSource(value: string | null | undefined): string | null {
   if (/^0x[\da-f]{40}$/i.test(value)) return `${value.slice(0, 6)}…${value.slice(-4)}`
   if (/^\d+$/.test(value)) return value.length > 10 ? `#${value.slice(0, 4)}…${value.slice(-4)}` : `#${value}`
   return value.length > 16 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value
+}
+/** Where an account's normalized available balance comes from, in the words account pages use. */
+export const availableSourceLabels = { wallet: 'wallet', margin: 'reported margin', withdrawable: 'reported withdrawal' } as const
+/** When a reported figure was read: "as of 14:02", or "as of 18 Oct 14:02" on an earlier day. */
+export function asOf(value: string, now = new Date()): string {
+  const at = new Date(value)
+  const clock = at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  return `as of ${at.toDateString() === now.toDateString() ? clock : `${at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} ${clock}`}`
 }
 /** The account state shown in rows and detail. */
 export const accountStatus = (account: BrokerAccount) => account.isEnabled === false ? 'Disabled' : account.syncStatus === 'manual' ? 'Manual' :

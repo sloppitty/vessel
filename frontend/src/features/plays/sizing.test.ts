@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { createEntry, type DraftEntry, type DraftExit } from './draft'
-import { estimatedLiquidation, exitEstimate, marginOverBudget, positionSize, rewardToRisk, sizeForBudget } from './sizing'
+import type { BrokerAccount } from '@/api/workspace'
+import { accountFixture } from '@/test/workspace-fixture'
+import { availableLabel, availableOf, convertSize, estimatedLiquidation, exitEstimate, marginOverBudget, overBudgetMessage, playBudget, positionSize, rewardToRisk,
+  sizeForBudget } from './sizing'
+import { isPlanText } from './numbers'
 
 const entry = (price: string, share = '100'): DraftEntry => ({ ...createEntry(0), price, share })
 
@@ -80,19 +84,85 @@ describe('estimated liquidation', () => {
 
 describe('margin budget', () => {
   const draft = { size: '263', sizingMode: 'margin' as const, entries: [entry('121.54')], budgetOverride: null }
+  const wallet = (value: string) => ({ value, source: 'wallet' as const })
 
   it('flags margin above the available amount or a manual budget', () => {
-    expect(marginOverBudget(draft, 10, '151.77')).toMatchObject({ margin: 263, budget: { amount: 151.77, source: 'available' } })
-    expect(marginOverBudget({ ...draft, budgetOverride: '300' }, 10, '151.77')).toBeNull()
-    expect(marginOverBudget({ ...draft, budgetOverride: '200' }, 10, '500')).toMatchObject({ budget: { source: 'manual' } })
+    expect(marginOverBudget(draft, 10, wallet('151.77'))).toMatchObject({ margin: 263, budget: { amount: 151.77, source: 'wallet' } })
+    expect(marginOverBudget({ ...draft, budgetOverride: '300' }, 10, wallet('151.77'))).toBeNull()
+    expect(marginOverBudget({ ...draft, budgetOverride: '200' }, 10, wallet('500'))).toMatchObject({ budget: { source: 'manual' } })
     expect(marginOverBudget(draft, 10, null)).toBeNull()
   })
 
   it('checks the margin a quantity needs at the leverage', () => {
     const quantity = { ...draft, sizingMode: 'quantity' as const, size: '20' }
-    expect(marginOverBudget(quantity, 10, '200')?.margin).toBeCloseTo(243.08, 2)
-    expect(marginOverBudget(quantity, 20, '200')).toBeNull()
+    expect(marginOverBudget(quantity, 10, wallet('200'))?.margin).toBeCloseTo(243.08, 2)
+    expect(marginOverBudget(quantity, 20, wallet('200'))).toBeNull()
     expect(sizeForBudget(quantity, 10, '200', { quote: 'USDC', base: 'SOL', quantityDecimals: 2 })).toBe('16.45')
+  })
+
+  // Phase 0, 0.1 (D-07, decision 6): review probes `correctness-frontend/budget.mjs` and `verify-sol-frontend-resolver/f4.mjs`.
+  it('budgets from the normalized available balance with its source, and keeps a known zero', () => {
+    // Lighter and RISEx report available margin and no wallet: they gain the budget check.
+    expect(playBudget(draft, { value: '100', source: 'margin' })).toEqual({ value: '100', amount: 100, source: 'margin' })
+    expect(marginOverBudget(draft, 10, { value: '100', source: 'margin' })).toMatchObject({ margin: 263, budget: { amount: 100, source: 'margin' } })
+    // A known zero is a budget of zero, not an unknown one.
+    expect(playBudget(draft, { value: '0', source: 'withdrawable' })).toEqual({ value: '0', amount: 0, source: 'withdrawable' })
+    expect(marginOverBudget(draft, 10, wallet('0'))).toMatchObject({ budget: { amount: 0, source: 'wallet' } })
+    // Only null is unknown; a manual amount still wins.
+    expect(playBudget(draft, null)).toBeNull()
+    expect(playBudget({ budgetOverride: '50' }, wallet('0'))).toEqual({ value: '50', amount: 50, source: 'manual' })
+  })
+
+  it('reads the availability the server selected, never the stablecoin wallet field of a standard account', () => {
+    // A standard Hyperliquid account with $3.12 of spot dust and $4,906.67 withdrawable from perps.
+    const standard: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', availableStablecoinNominalUsd: '3.12',
+      availableBalanceUsd: '4906.67', availableBalanceSource: 'withdrawable' }
+    expect(availableOf(standard)).toEqual({ value: '4906.67', source: 'withdrawable', asOfUtc: null, refreshFailed: false })
+    expect(availableOf({ ...standard, availableBalanceUsd: '0', availableBalanceSource: 'wallet' })).toMatchObject({ value: '0', source: 'wallet' })
+    expect(availableOf({ ...standard, availableBalanceUsd: null, availableBalanceSource: null })).toBeNull()
+    expect(availableOf({ ...standard, isEnabled: false })).toBeNull()
+    expect(availableOf(undefined)).toBeNull()
+  })
+
+  // Review of 0.1: no age limit is invented; the figure says when it was read and whether the last refresh failed.
+  it('labels the available balance with its source, snapshot time and a failed refresh', () => {
+    const at = new Date()
+    at.setHours(14, 2, 0, 0)
+    const account: BrokerAccount = { ...accountFixture, venueId: 'lighter-rh', availableBalanceUsd: '25', availableBalanceSource: 'margin',
+      lastSyncedAtUtc: at.toISOString(), syncStatus: 'error', lastSyncError: 'Lighter is unavailable.' }
+    expect(availableOf(account)).toEqual({ value: '25', source: 'margin', asOfUtc: at.toISOString(), refreshFailed: true })
+    expect(availableLabel(availableOf(account)!)).toBe('reported margin · as of 14:02 · last refresh failed')
+    expect(availableLabel({ value: '25', source: 'withdrawable' })).toBe('reported withdrawal')
+    const earlier = new Date(at)
+    earlier.setDate(earlier.getDate() - 1)
+    expect(availableLabel({ value: '25', source: 'wallet', asOfUtc: earlier.toISOString() }))
+      .toBe(`wallet · as of ${earlier.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} 14:02`)
+  })
+
+  it('names the budget and its source in the quote unit of the instrument', () => {
+    const over = marginOverBudget(draft, 10, { value: '100', source: 'withdrawable' })!
+    expect(overBudgetMessage(over, { quote: 'USDC', base: 'SOL', quantityDecimals: 2 })).toBe('Margin 263 USDC is above the 100 USDC budget (reported withdrawal).')
+    expect(overBudgetMessage(marginOverBudget({ ...draft, budgetOverride: '200' }, 10, null)!, { quote: 'USDG', base: 'SOL', quantityDecimals: 2 }))
+      .toBe('Margin 263 USDG is above the 200 USDG budget (manual).')
+  })
+
+  it('reads a manual budget with the plan number rule; text the server would not store is no budget', () => {
+    expect(playBudget({ budgetOverride: '250' }, wallet('500'))).toEqual({ value: '250', amount: 250, source: 'manual' })
+    expect(playBudget({ budgetOverride: '1e2' }, wallet('500'))).toBeNull()
+  })
+})
+
+describe('size conversion text', () => {
+  const units = { quote: 'USDC', base: 'BTC', quantityDecimals: 8 }
+  it('never writes an exponent into the size field', () => {
+    // 0.0001 margin at 1,000 buys 1e-7; String(Number('0.00000010')) would print "1e-7".
+    const tiny = convertSize({ size: '0.0001', sizingMode: 'margin', entries: [entry('1000')] }, 1, units)
+    expect(tiny).toBe('0.0000001')
+    const budget = sizeForBudget({ sizingMode: 'quantity', entries: [entry('1')] }, 1, '0.0000005', units)
+    expect(budget).toBe('0.0000005')
+    const huge = convertSize({ size: '1000000000000000000000000', sizingMode: 'quantity', entries: [entry('1000')] }, 1, units)
+    expect(huge).toBe('1000000000000000000000000000')
+    for (const text of [tiny, budget ?? '', huge]) expect(isPlanText(text), text).toBe(true)
   })
 })
 

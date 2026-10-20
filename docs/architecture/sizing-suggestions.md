@@ -27,7 +27,7 @@ He gives no fixed loss count or recovery threshold; the ladder below is the owne
 
 - **Risk per trade**: 1.25% by default, editable per owner from 0.1% to 5%. Above 2.5% the editor warns.
 - **Risk reference**: the play's account balance (`balanceUsd`: perps equity plus supported stablecoin wallet, or the wallet alone for unified accounts). Without a balance there is no size suggestion; the other suggestions still show.
-- **Exposure ladder**: three consecutive losing plays step size down to 50%; two more consecutive losses step it to 25%. Two winning plays at a reduced level with a positive net result since stepping down step it back up one level.
+- **Exposure ladder**: three consecutive losing plays step size down to 50%; two more consecutive losses step it to 25%. Two consecutive winning plays at a reduced level with a positive net result since stepping down step it back up one level; a loss resets the win count (owner decision 7, October 19, 2026).
 - **Scope**: the record covers the owner's closed plays on all enabled accounts.
 
 ## Track record (backend)
@@ -40,14 +40,14 @@ Entry notional  = Σ entry fill quantity × fill price
 Return          = net result ÷ entry notional × 100          (unlevered price-move equivalent)
 Stop distance   = Σ_entries share × Σ_stops stopShare × |entry − stop|  ÷  Σ_entries share × entry
 Planned risk    = entry notional × stop distance
-R multiple      = net result ÷ planned risk
+R multiple      = net result ÷ planned risk        (Estimated R, planned-stop model)
 ```
 
 Stop distance uses the plan revision in force at the first entry fill (the latest revision created at or before it, else revision 1, else the current plan), with percent stops resolved at that plan's leverage. Stop shares are normalized within each entry, so they need not total 100%. Entries or stops without a price are skipped; with none left, planned risk and R are null. Fees in another token are left out and the outcome says so (`feesComplete: false`).
 
 A play with a net result above zero is a win, below zero a loss and exactly zero a scratch. Scratches count in totals but are neither wins nor losses and do not break streaks.
 
-Statistics use the most recent 20 decided (win or loss) closed plays, ordered by close time:
+A play's close time is its latest valid linked exit fill (see [Exit-time ordering](#exit-time-ordering-october-19-2026)), not the time a check or refresh detected the closure. Statistics use the most recent 20 decided (win or loss) closed plays, ordered by close time:
 
 - Batting average = wins ÷ decided plays.
 - Average gain and average loss: mean return of wins and of losses (losses as positive numbers).
@@ -55,7 +55,7 @@ Statistics use the most recent 20 decided (win or loss) closed plays, ordered by
 - Break-even reward-to-risk = (1 − batting average) ÷ batting average.
 - Average R of wins and losses where planned risk is known.
 
-The ladder walks every decided play from the oldest, so its level reflects the whole history.
+The ladder walks every decided play from the oldest, so its level reflects the whole history. Plays with the same close time walk in Play-ID order, which is stable but not economic; the exposure reason discloses them.
 
 ### Execution eligibility correction on October 13
 
@@ -81,14 +81,15 @@ Stop distance is the price move from entry, not the return on margin.
 ```json
 {
   "settings": { "riskPercent": "1.25" },
-  "exposure": { "level": "full|half|quarter", "multiplier": "1", "reason": "…", "lossStreak": 0, "winsSinceStepDown": 0 },
+  "exposure": { "level": "full|half|quarter", "multiplier": "1", "reason": "…", "lossStreak": 0, "winsSinceStepDown": 0, "tiedOutcomes": 0 },
   "record": {
     "closedPlays": 0, "decidedPlays": 0, "window": 20,
     "wins": 0, "losses": 0, "scratches": 0,
     "battingAverage": null, "averageGainPercent": null, "averageLossPercent": null,
     "winLossRatio": null, "breakEvenRewardRisk": null, "averageWinR": null, "averageLossR": null,
-    "recent": [{ "playId": "…", "title": "…", "instrument": "BTC", "closedAtUtc": "…", "netResultUsd": "…",
-                 "returnPercent": "…", "riskUsd": null, "rMultiple": null, "outcome": "win|loss|scratch", "feesComplete": true }]
+    "recent": [{ "playId": "…", "title": "…", "instrument": "BTC", "closedAtUtc": "…", "detectedAtUtc": "…|null", "netResultUsd": "…",
+                 "returnPercent": "…", "riskUsd": null, "rMultiple": null, "outcome": "win|loss|scratch", "feesComplete": true }],
+    "localSignChanges": 0, "localUnknown": 0, "feeOnlyLosses": 0, "unknownGrossLosses": 0
   },
   "limits": { "effectiveRiskPercent": "1.25", "maxStopPercent": "10", "minRewardRisk": "2",
               "maxStopSource": "default|averageGain", "minRewardRiskSource": "default|battingAverage" },
@@ -109,12 +110,22 @@ Computed live from the draft, the account balance and `GET /api/sizing`, in the 
 
 Accepting changes only that field; changing anything afterwards never reapplies a suggestion. An accepted leverage with percent levels opens the existing leverage dialog first.
 
-- **Size**: `balance × effective risk % ÷ loss per unit` where loss per unit is `Σ share × Σ stopShare × |entry − stop|`. Accept sets the size in the current unit (margin at the current leverage, or quantity rounded down to venue precision). Shows the risk amount and the exposure level when reduced. Every priced entry needs a priced stop on the right side, otherwise the risk is unbounded and there is no size line. Hidden while the entered size is within 2% of it, and when the margin would exceed the budget the line says so and suggests a leverage instead.
+- **Size**: `balance × effective risk % ÷ loss per unit` where loss per unit is `Σ share × Σ stopShare × |entry − stop|`. Accept sets the size in the current unit (margin at the current leverage, or quantity rounded down to venue precision). Shows the risk amount and the exposure level when reduced. Priced stops must cover the whole position (see the Phase 0 coverage gate below), otherwise part of the risk is unbounded and there is no size line. Hidden while the entered size is within 2% of it, and when the margin would exceed the budget the line says so and suggests a leverage instead.
 - **Maximum stop**, for each stop: when the stop is further than the max stop distance from its entry, suggest the price at that distance. Accept sets the stop to that price (percent stops keep their unit).
 - **Minimum target**, for each entry: when the entry's planned R:R is below the minimum, suggest the target price that reaches it for the entry's farthest target. Accept sets that target.
 - **Leverage**: the lowest whole leverage that fits the suggested (or entered quantity's) margin in the budget and keeps the estimated liquidation beyond the farthest stop, capped at the venue maximum and, while exposure is reduced, at the current leverage. It shows only when the current leverage is a problem: the margin does not fit, the liquidation sits inside a stop, or exposure is reduced. A working higher leverage is left alone. Without a budget only the liquidation decides: when the estimate sits inside a stop, it suggests the highest lower leverage that clears the stops ("keeps liq. past the stops"). Accepting with percent levels goes through the existing leverage dialog.
 
 Suggestions only apply to editable plays. Planned plays change through revisions as before.
+
+### Phase 0 sizing truth (October 19, 2026)
+
+The [Phase 0 contract](phase0-trust-correctness-contract.md#01-sizing-truth) (owner decision 6 accepted) tightens when a suggestion may be offered. The thresholds, ladder, window and scratch rule are unchanged.
+
+- **Stop coverage gate.** The size, and every suggestion derived from it, needs complete priced stop coverage by the Summary's rule (`stopCoverageGap` beside `positionRiskSummary`): entry shares total 100%, every entry with a share is priced, each entry's stop shares total 100%, and every stop with a share is priced on the loss side. Priced stops are no longer averaged over a partly covered position. Otherwise there is no size line and no size-driven leverage line, and the block says what is missing ("50% of the position has no priced stop, so no size is suggested."); its collapsed headline names the gap instead of "Plan within your limits". Only a liquidation leverage line can remain, worded as an estimate past the priced stops.
+- **Freshness.** `useSizing` reports `loading`, `ready`, `stale` (a reload failed after an earlier success) or `failed` (no record), with `retry`; aborted reads are not failures. While stale or failed no row offers Accept, field markers clear, and the block says the record could not be reloaded (or loaded) beside a Retry button. The record stays stale or failed while Retry or a new reload runs; only a successful read or an accepted risk change makes it current again. A first-load failure shows the block with that notice instead of hiding it. A read that started before an accepted risk change is ignored, and a risk change answered after the API was replaced is dropped.
+- **Budget.** The budget the suggestions hold the margin to is the draft's budget: the manual amount, otherwise `availableBalanceUsd` with its source (wallet, reported margin, reported withdrawal). A known zero is a zero budget: the size line says the budget is zero (a manual zero is called the manual budget, without asking for one) and no leverage is suggested to fit it. The budget shows when its snapshot was read and when the account's last refresh failed; no age limit is assumed. A positive budget keeps the leverage line that fits the margin (the owner declined a rule never to raise leverage for a budget). The over-budget size line suggests raising leverage only when the leverage line does.
+- **After a fill.** Once any entry has a linked fill (the execution's per-entry filled quantity or a linked entry fill), Size and Leverage are not suggested; maximum-stop and minimum-target suggestions remain only for entries without fills, named by entry. An Open Play whose execution has not loaded yet, and an Open manual Play (the editor does not read its manual ledger), counts every entry as filled. Plan revisions through the editor are unchanged.
+- **Wording.** Rows state estimates under their assumptions: the size "would lose about" the amount "if every stop fills at its price", before fees, slippage and funding; the half-average-gain stop limit is the arithmetic of "half the average gain of your winning plays/closed positions"; the break-even line says that below it "wins at that rate would not have covered the losses, before fees"; the 2:1 line says a 50% win rate "comes out ahead before fees, if wins and losses land at the planned levels"; the liquidation line says "the estimated liquidation sits inside a stop". The plays-or-positions branch of the Activity fallback is kept, and "not advice" stays in the rules.
 
 ## Implementation notes
 
@@ -139,3 +150,53 @@ The same window (latest 20 decided by actual close time), win/loss/scratch rules
 ## Exact Play entry notional (October 18, 2026)
 
 A Play's entry notional is the exact sum of its entry fills' quantity × price products, the same unrounded rule as the Activity fallback above; no product is rounded before the precision check. A notional beyond exact decimal precision (more than 28 decimal places) or range leaves the Play out of the record, never rounded into a different return. Planned risk keeps its documented estimate: the exact notional times the stop distance, a rounded ratio.
+
+## Exit-time ordering (October 19, 2026)
+
+Phase 0 item 0.2 ([contract](phase0-trust-correctness-contract.md#02-exit-time-ordering), defect D-05). A venue close used to be scored at the time a check or refresh detected it, so several closures found by one refresh shared one timestamp and the ladder followed random Play IDs: a W, L, L, L sequence found together came out Full or Half by GUID.
+
+- **Close time.** A venue-linked Play's outcome closes at its latest valid linked exit: the latest non-entry fill of a Play whose linked fills settle it (`ExecutionIntegrity.Settled`), clamped to no later than the detection time, since a fill stamped after the check that saw it is no evidence of a later close. `PlayExitTime.LatestValidExit` computes it for both the outcome calculator and the `play.closed` event's source time. Fills that cannot settle the Play keep the detection time (sizing does not score them anyway). Manual ledgers keep their owner-entered exit and retrospective Plays their operation's closing fill, as before. Review keeps its own rule (the unvalidated latest exit, `PlayExitTime.LatestExit`, without the clamp, also for excluded Plays).
+- **Detection time.** `Play.EndedAtUtc` and the status change rows still record the detection time; monitor watches and list ordering read it. Each Play-sourced `recent` row carries it as audit data in `detectedAtUtc`; it is null for manual ledgers and Activity fallback rows.
+- **Ties.** Outcomes with the same exact close time keep the stable Play-ID order; no economic order is invented. `exposure.tiedOutcomes` counts the decided outcomes the ladder walks that share a close time with another, and when it is above zero the exposure reason gains, before any Activity suffix, "N results share an exit time; their order is not known." (or "N results share M exit times; …"). Activity fallback outcomes already close at their closing fill and are disclosed the same way.
+- **Recovery wins** stay consecutive (owner decision 7): the ladder code is unchanged. Only wording changes: this document says "two consecutive winning plays" and the Suggestions "How these are worked out" list says "two wins in a row".
+
+Thresholds, the 20-decided window, win/loss/scratch rules and the pooled ladder are unchanged. On upgrade, historical last-20 membership, limits and ladder levels can change because outcomes move from their detection time to their exit. On synthetic data, a W, L, L, L sequence found by one refresh was Full in 977 and Half in 1,023 of 2,000 random Play-ID sets before the change, and Half in all 2,000 after it.
+
+## Result bases (October 19, 2026)
+
+Phase 0 item 0.3 ([contract](phase0-trust-correctness-contract.md#03-result-basis-receipt)).
+The record, ladder, limits, window and win/loss/scratch rules keep scoring the
+venue result above (owner decisions 1 and 8). The record now reports how its
+window looks under the Play-local basis described in
+[Review's result bases](portfolio-review.md#result-bases-october-19-2026):
+each Play's own fills, sell proceeds minus buy costs (direction × (exits −
+entries)), less every trading fee.
+
+- **Counts.** Over the decided results of the window (the latest 20 by close
+  time, chosen as the record chooses them), `record.localSignChanges` counts
+  results whose Play-local result differs in sign (negative, zero, positive)
+  from the scored venue result, and `record.localUnknown` those with no
+  Play-local result. Both are null for the Activity fallback: positions are
+  not Plays. `record.feeOnlyLosses` counts window losses whose scored result
+  before trading fees is zero or better (`PlayOutcome.GrossResult`, exact so a
+  value beyond decimal precision keeps its sign: Σ venue
+  closed P&L plus listed stablecoin fees already inside net-of-fee P&L; for the
+  fallback, the operation's before-fee P&L), and `record.unknownGrossLosses`
+  the losses where that figure is unknown. All four are init fields, so the
+  positional records the fallback builds are unchanged.
+- **Suggestions.** The record column adds one short line, e.g. "1 of the last
+  11 changes sign under the Play-local basis. 2 have no Play-local figure. 1
+  loss came from fees alone.", with an InfoTip. Each part appears only when its
+  count is above zero: a zero count adds nothing, and with every count zero (or
+  absent from an older server) there is no line at all, following the
+  helper-text reduction of the visual refresh. "None change sign" is never
+  stated. The sign and unknown parts are omitted for the Activity fallback.
+- **Funding.** Whether venue-reported P&L includes funding is unverified for
+  every venue ([venue funding](venue-funding.md)), so a sign change or a
+  fee-only loss can reflect funding; the InfoTip says so.
+- **R.** Sizing's API `rMultiple`, `averageWinR` and `averageLossR` are the
+  estimated R (planned-stop model): net result ÷ (entry notional × stop
+  distance) from the plan in force at the first entry, with the fallbacks
+  above for partial plans. Review's figure has the same name but a stricter
+  plan rule. Neither is actual risk, and sizing's R is not shown in the
+  browser.

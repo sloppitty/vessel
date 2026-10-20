@@ -7,12 +7,10 @@ import { InfoTip } from '@/components/ui/info-tip'
 import { VenueLogo } from '@/components/venues/VenueBadge'
 import { ArrowUpRight, Pencil, RefreshCw } from 'lucide-react'
 import { useId } from 'react'
-import { accountStatus, accountStatusTone, money, shortSource, time } from '@/lib/format'
+import { accountStatus, accountStatusTone, availableSourceLabels as availableSources, money, shortSource, time } from '@/lib/format'
 import { AccountGroupHeader } from './AccountGroupHeader'
 import type { AccountGroup } from './account-groups'
 import './accounts.css'
-
-const availableSources = { wallet: 'wallet', margin: 'reported margin', withdrawable: 'reported withdrawal' } as const
 
 /** One balance figure per row with its unit; what each venue reports is explained once, on the Balance header. */
 function BalanceCell({ account }: { account: BrokerAccount }) {

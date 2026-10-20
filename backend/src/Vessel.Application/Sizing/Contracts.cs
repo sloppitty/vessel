@@ -11,23 +11,47 @@ public sealed record UpdateSizingSettingsRequest([property: JsonRequired] string
 
 public sealed record SizingSettingsDto(string RiskPercent);
 
-public sealed record ExposureDto(string Level, string Multiplier, string Reason, int LossStreak, int WinsSinceStepDown);
+public sealed record ExposureDto(string Level, string Multiplier, string Reason, int LossStreak, int WinsSinceStepDown)
+{
+    /// <summary>
+    /// Decided outcomes the ladder walks that share an exact close time with another; they keep the Play-ID order, which is
+    /// not a known economic order. When above zero the reason says so.
+    /// </summary>
+    public int TiedOutcomes { get; init; }
+}
 
 /// <summary>
 /// One scored outcome. A Play outcome carries its <paramref name="PlayId"/>; an Activity fallback outcome carries the
-/// operation and account instead and has no Play, plan, risk or R multiple.
+/// operation and account instead and has no Play, plan, risk or R multiple. <paramref name="ClosedAtUtc"/> is the latest
+/// valid linked exit for a venue-linked Play, the owner-entered exit for a manual ledger, the closing fill for an operation.
+/// <paramref name="RMultiple"/> is the estimated R (planned-stop model): net result over planned risk, with the sizing
+/// fallbacks for partial plans.
 /// </summary>
 public sealed record PlayOutcomeDto(Guid? PlayId, string Title, string? Instrument, DateTimeOffset ClosedAtUtc, string NetResultUsd,
     string ReturnPercent, string? RiskUsd, string? RMultiple, string Outcome, bool FeesComplete)
 {
     public string? OperationId { get; init; }
     public Guid? AccountId { get; init; }
+    /// <summary>Audit only: when a check or refresh detected a venue-linked Play's close. Null for manual ledgers and operations.</summary>
+    public DateTimeOffset? DetectedAtUtc { get; init; }
 }
 
 public sealed record TrackRecordDto(int ClosedPlays, int DecidedPlays, int Window, int Wins, int Losses, int Scratches,
     string? BattingAverage, string? AverageGainPercent, string? AverageLossPercent, string? WinLossRatio, string? BreakEvenRewardRisk,
     string? AverageWinR, string? AverageLossR, IReadOnlyList<PlayOutcomeDto> Recent)
 {
+    /// <summary>
+    /// Decided results in the window whose Play-local result differs in sign from the scored venue result. Null for the
+    /// Activity fallback: positions are not Plays.
+    /// </summary>
+    public int? LocalSignChanges { get; init; }
+    /// <summary>Decided results in the window with no Play-local result. Null for the Activity fallback.</summary>
+    public int? LocalUnknown { get; init; }
+    /// <summary>Losses in the window whose scored result before fees is zero or better. Win, loss and scratch are unchanged.</summary>
+    public int FeeOnlyLosses { get; init; }
+    /// <summary>Losses in the window whose scored result before fees is unknown; they are not counted as fee-only.</summary>
+    public int UnknownGrossLosses { get; init; }
+
     /// <summary>
     /// <see cref="SizingService.SourcePlays"/> when closed Plays have a win or loss, <see cref="SizingService.SourceActivity"/>
     /// when the record falls back to closed Activity operations, <see cref="SizingService.SourceNone"/> when neither has one.

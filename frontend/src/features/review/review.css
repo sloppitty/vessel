@@ -31,7 +31,8 @@
 }
 .pr-coverage ul { list-style: none; padding: 0; color: var(--pr-muted); font-size: var(--text-2xs); }
 .pr-coverage li { margin-top: 12px; }
-.portfolio-review button { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
+/* Keep the page reset below shared controls such as the account picker. */
+:where(.portfolio-review) button { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
 .portfolio-review a { color: inherit; text-decoration: none; }
 .portfolio-review button:disabled { opacity: .45; cursor: default; }
 .portfolio-review .positive, .pr-dialog .positive { color: var(--pr-green); }
@@ -265,3 +266,6 @@
 }
 @media(prefers-reduced-motion: reduce) { .portfolio-review * { transition: none !important; } }
 .pr-th-tip { display: inline-flex; align-items: center; gap: 3px; }
+/* Result bases (October 19, 2026): the basis under each result and the sign-differs flag beside the Play-local one. */
+.pr-play-list td small { display: block; margin-top: 3px; font-size: var(--text-2xs); color: var(--pr-muted); }
+.pr-play-list td span.workspace-badge.sign-differs { margin: 4px 0 0 6px; }

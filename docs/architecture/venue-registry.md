@@ -7,7 +7,7 @@ October 5, 2026, slice S1 of the RISEx-first plan ([risex-integration.md](risex-
 **Application** (`Vessel.Application.Venues`):
 
 - `VenueDescriptor(Id, Name, Status, Source, Capabilities, QuoteAsset?, TradeUrlTemplate?)` describes a venue. `Source` is how an account is identified: `evm-address` or `none` (manual and planned venues). `TradeUrlTemplate` contains an `{instrument}` placeholder.
-- `VenueCapabilities(Sync, Instruments, Orders, Candles, MarketContext, Stream, StablecoinWallet)`. Use cases and the browser check these, never a venue name.
+- `VenueCapabilities(Sync, Instruments, Orders, Candles, MarketContext, Stream, StablecoinWallet)`, with optional `AccountDiscovery`, `ReadOnlyCredential`, `ManualExecutions` and `CurrentOrderBook`. Use cases and the browser check these, never a venue name.
 - `IVenueRegistry` returns a venue's descriptor and its adapters: `Reader`, `Orders`, `Candles`, `MarketContext`, `Stream`. A missing adapter means the venue does not offer that capability. Each service turns that into its own safe error (502 or 503, with the same messages as before). When one venue has several registrations of a port, the last wins, as with a single injected service.
 - `WorkspaceService`, `CandleService`, `MarketContextService`, `MarketStreamService` and `PlayExecutionService` resolve adapters through the registry. No `"hyperliquid"` literal remains in `Vessel.Application` except the two Hyperliquid-specific notices and comments scheduled for slice S3 (candle limit text and the matcher's price rule).
 
@@ -20,13 +20,26 @@ October 5, 2026, slice S1 of the RISEx-first plan ([risex-integration.md](risex-
 ```json
 { "id": "hyperliquid", "name": "Hyperliquid", "status": "read-only", "source": "evm-address",
   "capabilities": { "sync": true, "instruments": true, "orders": true, "candles": true,
-                    "marketContext": true, "stream": true, "stablecoinWallet": true },
+                    "marketContext": true, "stream": true, "stablecoinWallet": true,
+                    "accountDiscovery": false, "readOnlyCredential": false, "manualExecutions": false,
+                    "currentOrderBook": true },
   "quoteAsset": "USDC", "tradeUrlTemplate": "https://app.hyperliquid.xyz/trade/{instrument}", "logo": "hyperliquid" }
 ```
 
 `logo` is an optional key from the fixed backend set `VenueLogos` (`hyperliquid`, `lighter`, `lighter-rh`, `risex`, `manual`). `VenueRegistry` refuses to build when a registered descriptor uses any other key, so an unknown key fails at the first registry use rather than reaching the browser. Planned venues have no logo (`null`). The browser maps the key to a bundled same-origin asset (`venue-logos.ts`, kept in step like portfolio icons) and falls back to a generic icon.
 
 Planned venues report every capability `false`. The browser accepts any number of venues as long as each states its capabilities, IDs are unique, `manual` is present and trade links are `https://` with an `{instrument}` placeholder.
+
+## Current order book (October 19, 2026)
+
+Phase 0 item 0.4c (review defect D-09, the owner chose the label). `CurrentOrderBook` says whether the venue's order reader returns the current open order book: open rows observed with the read, and an `OpenOrdersComplete` that means something. It defaults to false, so a venue opts in. Hyperliquid and both Lighter instances say true. RISEx says false: its reader reads bounded order history and TP/SL records, not `/v1/orders/open`.
+
+Without it, the monitor:
+- records protection coverage as **unsupported: current book not read** (reason `current-book-not-read`);
+- does not run the book-dependent checks (missing, short and cancelled stops, excess exits, orphaned exits and entries, level drift). They are undecidable by design, never missing evidence;
+- does not degrade a run because the order read is incomplete. Other degradation reasons (a gap, omitted executions, partial positions, an order-read failure) still apply.
+
+The browser reads the same flag (`capabilities.currentOrderBook`, optional; `Venues.readsCurrentBook` is false only when an order-reading venue states false) and says that those checks do not run there. Exit and entry watches are unchanged: a reported terminal order still ends a watch, and absence still needs a complete current read. See the [monitor plan](play-monitor-plan.md#stop-coverage).
 
 ## Behaviour that follows from the descriptor
 
@@ -50,4 +63,4 @@ One module may register several venues. The Lighter module registers one instanc
 
 ## Tests
 
-`VenueRegistryTests` covers lookup (including last-wins), a fake second venue through create, catalogue and sync rules, capability-driven order tracking, the metadata order and logo-key validation. `ApiTests` checks the contract shape, including `logo` and the `lighter-rh` descriptor. `LighterRobinhoodTests` covers host validation, configured hosts per named client and one registration per Lighter instance. Frontend `venues.test.tsx` and `system.test.ts` cover lookups and contract validation. Tests that need venues in the browser tree use `@/test/render`.
+`MonitorCoverageTests` pins which descriptors read the current book and the monitor behaviour without it. `VenueRegistryTests` covers lookup (including last-wins), a fake second venue through create, catalogue and sync rules, capability-driven order tracking, the metadata order and logo-key validation. `ApiTests` checks the contract shape, including `logo` and the `lighter-rh` descriptor. `LighterRobinhoodTests` covers host validation, configured hosts per named client and one registration per Lighter instance. Frontend `venues.test.tsx` and `system.test.ts` cover lookups and contract validation. Tests that need venues in the browser tree use `@/test/render`.

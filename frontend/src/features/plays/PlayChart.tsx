@@ -25,7 +25,8 @@ import { useLiveMarket } from '@/features/market/useLiveMarket'
 import { describeMarket, useMarketContext } from '@/features/market/useMarketContext'
 import { addEntry, createNextEntry, removeEntry, type DraftEntry, type PlayDraft } from './draft'
 import { LevelEditor } from './LevelEditor'
-import { applyEntryEdit, applyLevelDrag, averageEntryPrice, formatDraggedPrice, levelTag, parseOverlayId, placeLevel, planOverlays, type ChartView, type ExitKind } from './levels'
+import { applyEntryEdit, applyLevelDrag, averageEntryPrice, formatDraggedPrice, levelTag, parseOverlayId, placeLevel, planOverlays, type ChartView, type ExitKind, type StopEvidenceOf } from './levels'
+import { positivePlanNumber } from './numbers'
 
 export interface ChartSource {
   api: WorkspaceApi
@@ -66,6 +67,11 @@ interface ChartPanelProps {
   streamable?: boolean
   /** False for venues without market context: the header statistics are not requested. */
   marketContext?: boolean
+  /**
+   * Venue evidence for each planned stop of a saved, Open Play. A stop without a confirmed resting order is drawn apart
+   * and its tag says what the evidence says ("not seen at the venue", "resting as of 14:02"). Absent for drafts.
+   */
+  stopEvidence?: StopEvidenceOf | undefined
 }
 
 const noDrawings: readonly ChartDrawing[] = []
@@ -81,7 +87,7 @@ const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute:
 
 export function ChartPanel({ entries, selectedId, onSelect, instrument, instrumentName = instrument, venue = null, direction = 'long', leverage = 1, liquidation = null,
   editable = true, source = null, onEntriesChange, drawings = noDrawings, onDrawingsChange, onCapture, onShowEvidence, createAdapter,
-  intervals = candleIntervals, priceStep = null, streamable = true, marketContext = true }: ChartPanelProps) {
+  intervals = candleIntervals, priceStep = null, streamable = true, marketContext = true, stopEvidence }: ChartPanelProps) {
   const [view, setView] = useState<ChartView>('aggregate')
   const [planTool, setPlanTool] = useState<PlanTool | null>(null)
   const [preferences, setPreferences] = useChartPreferences()
@@ -156,7 +162,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
     const entry = current.find(item => item.id === selectedEntry?.id)
     if (!planTool || !entry) return
     setPlanTool(null)
-    if (planTool === 'entry' && Number(entry.price) > 0) {
+    if (planTool === 'entry' && positivePlanNumber(entry.price) !== null) {
       const added = placeLevel(createNextEntry(current), 'entry', price, priceStep)
       const change = (next: DraftEntry[]) => latest.current.onEntriesChange?.(next)
       change(addEntry(current, added))
@@ -182,16 +188,16 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   const expandButton = useRef<HTMLButtonElement>(null)
   const live = source !== null && instrument !== ''
   const overlays = useMemo(() => {
-    const plan = planOverlays(chartEntries, selectedId, view, direction, leverage).map(overlay => ({ ...overlay, priceStep, draggable: overlay.draggable && editable }))
+    const plan = planOverlays(chartEntries, selectedId, view, direction, leverage, stopEvidence).map(overlay => ({ ...overlay, priceStep, draggable: overlay.draggable && editable }))
     return liquidation === null ? plan : [...plan, liquidationOverlay(liquidation)]
-  }, [chartEntries, selectedId, view, direction, leverage, liquidation, priceStep, editable])
+  }, [chartEntries, selectedId, view, direction, leverage, liquidation, priceStep, editable, stopEvidence])
   // The HTML legend stays committed too, so a wrapping value cannot resize the canvas mid-drag.
   const average = view === 'aggregate' ? averageEntryPrice(entries) : null
   const several = entries.length > 1
 
-  const priced = selectedEntry !== undefined && Number(selectedEntry.price) > 0
+  const priced = selectedEntry !== undefined && positivePlanNumber(selectedEntry.price) !== null
   const planTools = editable && selectedEntry ? [
-    { id: 'plan:entry', label: 'Add an entry on the chart', description: Number(selectedEntry.price) > 0 ? 'Click the chart at the price of a new entry.' : `Click the chart at ${selectedName} price.`, icon: <ArrowRightToLine {...planToolIcon} />, available: true },
+    { id: 'plan:entry', label: 'Add an entry on the chart', description: priced ? 'Click the chart at the price of a new entry.' : `Click the chart at ${selectedName} price.`, icon: <ArrowRightToLine {...planToolIcon} />, available: true },
     { id: 'plan:stop', label: `Add a stop to ${selectedName} on the chart`, description: 'Click the chart at the stop price. Add several for partial stops.', icon: <OctagonX {...planToolIcon} />, available: priced, unavailableReason: 'Set the entry price first' },
     { id: 'plan:target', label: `Add a target to ${selectedName} on the chart`, description: 'Click the chart at the target price. Add several for partial targets.', icon: <Target {...planToolIcon} />, available: priced, unavailableReason: 'Set the entry price first' },
   ] : []

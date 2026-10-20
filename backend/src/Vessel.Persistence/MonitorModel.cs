@@ -37,5 +37,22 @@ public static class MonitorModel
         exit.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Cascade);
         exit.HasIndex(x => new { x.OwnerId, x.AccountId, x.EndedAtUtc });
+
+        var coverage = model.Entity<MonitorCoverage>();
+        coverage.ToTable("monitor_coverage", table =>
+        {
+            table.HasCheckConstraint("CK_monitor_coverage_state", "\"State\" IN ('known','shared','unknown','unsupported')");
+            table.HasCheckConstraint("CK_monitor_coverage_covered", "(\"State\" = 'known') = (\"Covered\" IS NOT NULL)");
+        });
+        coverage.HasKey(x => x.PlayId);
+        coverage.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId })
+            .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+        coverage.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })
+            .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+        coverage.Property(x => x.ContractId).HasMaxLength(200);
+        coverage.Property(x => x.State).HasMaxLength(16);
+        coverage.Property(x => x.Reason).HasMaxLength(48);
+        coverage.Property(x => x.Stops).HasColumnType("jsonb");
+        coverage.HasIndex(x => new { x.OwnerId, x.AccountId });
     }
 }

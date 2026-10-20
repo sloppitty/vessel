@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { createDraft, createEntry, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
-import { positionRiskSummary, type RiskReference } from './position-risk-summary'
+import { exactDecimal, exactFixed, exactSignOf, type Exact } from '@/lib/decimal'
+import type { PlayExecution } from '@/api/plays'
+import { executionFills } from './entry-fills'
+import { positionRiskSummary, signedPayoffText, stopCoverageGap, type EntryFills, type RiskReference } from './position-risk-summary'
 import type { SizeUnits } from './sizing'
 
 const units: SizeUnits = { quote: 'USDC', base: 'ETH', quantityDecimals: 4 }
@@ -212,7 +215,7 @@ describe('whole-position planned money summary', () => {
     expect(summary(draft).stops.allocation.status).toBe('partial')
   })
 
-  it.each(['99.99999999999999', '99.9999999999999999999999999999'])(
+  it.each(['99.99999999999999', '99.99999999999999999999999999'])(
     'keeps entry shortfall %s partial without tolerance or rounding', share => {
       const draft = plan({ entries: [entry('100', share, [exit('90')], [exit('120')])] })
       const result = summary(draft)
@@ -231,7 +234,7 @@ describe('whole-position planned money summary', () => {
       expect(summary({ ...draft, sizingMode: 'margin' }).quantity).toBeNull()
     })
 
-  it.each(['99.99999999999999', '99.9999999999999999999999999999'])(
+  it.each(['99.99999999999999', '99.99999999999999999999999999'])(
     'keeps exit shortfall %s partial independently for stops and targets', share => {
       for (const kind of ['stops', 'targets'] as const) {
         const draft = plan({ entries: [entry('100', '100', [exit('90')], [exit('120')])] })
@@ -250,8 +253,8 @@ describe('whole-position planned money summary', () => {
 
   it.each([
     ['100.00000000000001'],
-    ['100.0000000000000000000000000001'],
-    ['99.9999999999999999999999999999', '0.0000000000000000000000000002'],
+    ['100.00000000000000000000000001'],
+    ['99.99999999999999999999999999', '0.00000000000000000000000002'],
   ])('rejects tiny overallocation in exact shares %j', (...shares) => {
     const draft = plan({ entries: shares.map(share => entry('100', share, [exit('90')], [exit('120')])) })
     const result = summary(draft)
@@ -274,7 +277,7 @@ describe('whole-position planned money summary', () => {
 
   it.each([
     ['33.3', '33.3', '33.4'],
-    ['99.9999999999999999999999999999', '0.0000000000000000000000000001'],
+    ['99.99999999999999999999999999', '0.00000000000000000000000001'],
     ['0.1', '0.2', '99.7'],
   ])('accepts exactly complete decimal splits %j', (...shares) => {
     const draft = plan({ entries: shares.map(share => entry('100', share,
@@ -293,8 +296,8 @@ describe('whole-position planned money summary', () => {
 
   it('does not offset a tiny per-entry exit overage against another entry shortfall', () => {
     const result = summary(plan({ entries: [
-      entry('100', '50', [exit('90', '100.0000000000000000000000000001')], [exit('120')]),
-      entry('100', '50', [exit('90', '99.9999999999999999999999999999')], [exit('120')]),
+      entry('100', '50', [exit('90', '100.00000000000000000000000001')], [exit('120')]),
+      entry('100', '50', [exit('90', '99.99999999999999999999999999')], [exit('120')]),
     ] }))
     expect(result.stops.allocation).toEqual({ percent: 100, status: 'invalid' })
     expect(result.stops.coverage.status).toBe('invalid')
@@ -303,9 +306,10 @@ describe('whole-position planned money summary', () => {
     expect(result.targets.totalAmount).toBe(200)
   })
 
-  it('keeps an exactly allocated tiny unpriced exit uncovered at the plan share length limit', () => {
-    const nearFull = `99.${'9'.repeat(61)}`
-    const tiny = `0.${'0'.repeat(60)}1`
+  it('keeps an exactly allocated tiny unpriced exit uncovered at the plan share precision limit', () => {
+    // The finest split plan text allows: 28 decimal places and a C# decimal coefficient.
+    const nearFull = `99.${'9'.repeat(26)}`
+    const tiny = `0.${'0'.repeat(25)}1`
     const draft = plan({ entries: [entry('100', '100', [exit('90', nearFull), exit('', tiny)], [exit('120')])] })
     const result = summary(draft)
     expect(result.stops.allocation.status).toBe('complete')
@@ -397,5 +401,116 @@ describe('whole-position planned money summary', () => {
     expect(result.reference).toBeNull()
     expect(result.riskSharePercent).toBeNull()
     expect(result.stops.totalAmount).toBe(130)
+  })
+})
+
+// Phase 0, 0.5b: the all-stops row is signed and exact, and a filled entry's stops are measured from its average fill.
+describe('signed all-stops result', () => {
+  const one = (stop: string, overrides: Partial<PlayDraft> = {}, unit: DraftExit['unit'] = 'price'): PlayDraft => plan({
+    size: '1', leverage: '3', entries: [{ ...entry('100', '100', [exit(stop, '100', unit)], [exit('110')]), id: 'e1' }], ...overrides,
+  })
+  const fills = (average?: string, filled: ReadonlySet<string> = new Set(['e1'])): EntryFills =>
+    ({ filled, averages: new Map(average === undefined ? [] : [['e1', exactDecimal(average)!]]) })
+  const text = (value: Exact | null) => value === null ? null : exactFixed(value, 28)
+  const signed = (draft: PlayDraft, entryFills?: EntryFills | 'unknown') => positionRiskSummary(draft, units, reference, entryFills)
+
+  it('reads +5 locked in for an Open long filled at 100 with its stop at 105 (acceptance)', () => {
+    const result = signed(one('105'), fills('100'))
+    expect(text(result.stopPayoff.total)).toBe('5')
+    expect(result.stopPayoff.basis).toBe('average fill')
+    expect(result.stops.coverage).toEqual({ percent: 100, status: 'complete' })
+    // Nothing of the balance is at risk, and there is no loss to measure reward against.
+    expect(result.riskSharePercent).toBe(0)
+    expect(result.rewardToRisk).toBeNull()
+    // Before the fill the same stop is on the wrong side: not covered, so the total stays unknown.
+    expect(signed(one('105')).stopPayoff.total).toBeNull()
+    expect(signed(one('105')).stops.coverage.status).toBe('partial')
+  })
+
+  it('measures from the average fill, not the planned entry, and says when it falls back', () => {
+    expect(text(signed(one('101'), fills('102')).stopPayoff.total)).toBe('-1')
+    expect(text(signed(one('100'), fills('100')).stopPayoff.total)).toBe('0')
+    // Filled, but no average is reported for the entry: from the planned entry, and it says so.
+    const planned = signed(one('105'), fills(undefined))
+    expect([text(planned.stopPayoff.total), planned.stopPayoff.basis]).toEqual(['5', 'planned entry'])
+    // While the fills load nothing is measured, not even from the planned entry.
+    const pending = signed(one('105'), 'unknown')
+    expect(pending.stopPayoff).toMatchObject({ known: null, total: null, basis: null, pending: true })
+    expect([pending.stops.totalAmount, pending.riskSharePercent, pending.rewardToRisk]).toEqual([null, null, null])
+    // A percentage resolves from the planned entry at the leverage, as the matcher does: 0% is 100, 1 under a 101 fill.
+    expect(text(signed(one('0', {}, 'percent'), fills('101')).stopPayoff.total)).toBe('-1')
+    expect(text(signed(one('95')).stopPayoff.total)).toBe('-5')
+  })
+
+  it('mirrors shorts', () => {
+    const short = plan({ direction: 'short', size: '2', leverage: '3', entries: [{ ...entry('100', '100', [exit('95')], [exit('90')]), id: 'e1' }] })
+    expect(text(signed(short, fills('100')).stopPayoff.total)).toBe('10')
+    expect(text(signed({ ...short, entries: [{ ...short.entries[0]!, stops: [exit('104')] }] }, fills('100')).stopPayoff.total)).toBe('-8')
+  })
+
+  it('keeps the sign exact where floating point would not', () => {
+    // 3 × 70% × (100.3 − 100) − 3 × 30% × (100 − 99.3) is exactly zero; in floats it is −8.5e-15, a loss.
+    const draft = plan({ size: '3', leverage: '1', entries: [
+      { ...entry('100', '70', [exit('100.3')], [exit('110')]), id: 'e1' },
+      { ...entry('100', '30', [exit('99.3')], [exit('110')]), id: 'e2' },
+    ] })
+    const result = signed(draft, fills('100'))
+    expect(result.stopPayoff.total).toEqual({ n: 0n, d: 1n })
+    expect(result.stopPayoff.basis).toBe('mixed')
+    expect(result.riskSharePercent).toBe(0)
+  })
+
+  it('stays exact through margin sizing and percentages at leverage', () => {
+    // 100 margin at 3× buys 3 at an average entry of 100; a 10% stop is a 3⅓% move to 96.66…, so 3 × 3.33… = 10.
+    const draft = one('10', { sizingMode: 'margin', size: '100' }, 'percent')
+    expect(text(signed(draft).stopPayoff.total)).toBe('-10')
+    expect(signed(draft).stops.totalAmount).toBeCloseTo(10)
+  })
+
+  it('keeps unknown parts unknown', () => {
+    const partial = plan({ size: '1', leverage: '3', entries: [
+      { ...entry('100', '50', [exit('105')], [exit('110')]), id: 'e1' },
+      { ...entry('100', '50', [], [exit('110')]), id: 'e2' },
+    ] })
+    const result = signed(partial, fills('100'))
+    expect(text(result.stopPayoff.known)).toBe('2.5')
+    expect(result.stopPayoff.total).toBeNull()
+    expect(result.riskSharePercent).toBeNull()
+    expect(signed({ ...one('105'), size: '' }, fills('100')).stopPayoff)
+      .toEqual({ known: null, total: null, basis: 'average fill', empty: false, pending: false, rounding: false })
+  })
+
+  it('keeps the sign the venue\'s rounded average would erase', () => {
+    // Fills of 2 at 100 and 1 at 100.0000000000000000000000000001: the server's 28-place average is 100.
+    const execution = { entries: [{ entryId: 'e1', filledQuantity: '3', averageFillPrice: '100', restingOrders: 0 }], links: [{
+      id: 'l1', role: 'entry', entryId: 'e1', levelId: null, state: 'linked', source: 'automatic', order: null, filledQuantity: '3',
+      fills: [['2', '100'], ['1', '100.0000000000000000000000000001']].map(([quantity, price]) => ({ sourceFillId: price, direction: 'Open Long',
+        price, quantity, fee: '0', feeToken: 'USDC', closedPnlUsd: '0', occurredAtUtc: '2026-10-19T10:00:00Z', side: 'buy', positionEffect: 'open',
+        pnlBasis: 'gross' })) }] } as unknown as PlayExecution
+    const exact = signed(one('100', { size: '3' }), executionFills(execution, 'long'))
+    expect(exactSignOf(exact.stopPayoff.total!)).toBe(-1)
+    expect(signedPayoffText(exact.stopPayoff.total!, units)).toBe('\u2212< 0.01 USDC at risk')
+    // With only the rounded average, a result within its rounding has no known sign: unknown, not break-even.
+    const rounded = signed(one('100', { size: '3' }), { ...fills('100'), rounded: new Set(['e1']) })
+    expect(rounded.stopPayoff).toMatchObject({ known: null, total: null, rounding: true })
+    expect(text(signed(one('105', { size: '3' }), { ...fills('100'), rounded: new Set(['e1']) }).stopPayoff.total)).toBe('15')
+  })
+
+  it('treats a stop that is not set as no stop, never break-even (October 20, 2026)', () => {
+    for (const unit of ['price', 'percent'] as const) {
+      const blank = one('', {}, unit)
+      expect(signed(blank).stopPayoff, unit).toMatchObject({ known: null, total: null })
+      expect(signed(blank, fills('100')).stopPayoff, unit).toMatchObject({ known: null, total: null })
+      expect(signed(blank).stops.coverage, unit).toEqual({ percent: 0, status: 'partial' })
+      // The sizing gate counts it as unpriced.
+      expect(stopCoverageGap(blank), unit).toBe('100% of the position has no priced stop')
+    }
+  })
+
+  it('marks a size of zero as no position, not break-even', () => {
+    const empty = signed({ ...one('95'), size: '0' })
+    expect([text(empty.stopPayoff.total), empty.stopPayoff.empty]).toEqual(['0', true])
+    expect(signedPayoffText(empty.stopPayoff.total!, units, true)).toBe('0 USDC')
+    expect(signedPayoffText(empty.stopPayoff.total!, units)).toBe('0 USDC break-even')
   })
 })

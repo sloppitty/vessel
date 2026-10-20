@@ -11,6 +11,7 @@ import type { ChartAdapterFactory, ChartCallbacks, ChartCandle, PriceOverlay } f
 import { accountFixture, candleSeriesFixture, idleMarketStream, marketContextFixture } from '@/test/workspace-fixture'
 import { createEntry, createExit, type DraftEntry } from './draft'
 import { ChartPanel } from './PlayChart'
+import { plainDecimalRule } from './numbers'
 
 function fakeAdapter() {
   const state = {
@@ -89,6 +90,29 @@ describe('Chart panel', () => {
 
     act(() => state.callbacks!.onLevelSelect(state.overlays[2]!.id))
     expect(onSelect).toHaveBeenCalledWith(list[1]!.id)
+  })
+
+  it('styles a planned stop without a confirmed resting order apart, labelled in the evidence\'s own words (Phase 0, 0.4c)', async () => {
+    const list = entries()
+    const candles = vi.fn().mockResolvedValue(candleSeriesFixture)
+    const { state, factory } = fakeAdapter()
+    const props = { entries: list, selectedId: list[0]!.id, instrument: 'BTC', onSelect: vi.fn(), createAdapter: factory,
+      source: { api: chartApi(candles), accountId: accountFixture.id } }
+    const evidence = vi.fn((entryId: string, levelId: string) =>
+      entryId === list[0]!.id && levelId === 'stop-1' ? { text: 'not seen at the venue', confirmed: false } : null)
+    const view = render(<ChartPanel {...props} stopEvidence={evidence} />)
+    expect(await screen.findByText(/Updated .* UTC/)).toBeInTheDocument()
+    // The evidence is asked at the price the line is drawn, so a stop the draft moved is judged where it now stands.
+    expect(evidence).toHaveBeenCalledWith(list[0]!.id, 'stop-1', 99)
+    const stop = () => state.overlays.find(overlay => overlay.kind === 'stop')!
+    expect([stop().label, stop().unconfirmed]).toEqual(['E1 SL · not seen at the venue', true])
+    // Entries carry no venue claim of their own here.
+    expect(state.overlays.filter(overlay => overlay.kind === 'entry').map(o => [o.label, o.unconfirmed])).toEqual([['E1', undefined], ['E2', undefined]])
+    view.rerender(<ChartPanel {...props} stopEvidence={() => ({ text: 'resting as of 10:00', confirmed: true })} />)
+    expect([stop().label, stop().unconfirmed]).toEqual(['E1 SL · resting as of 10:00', false])
+    // Without evidence (a draft, or a Play that makes no venue claim) the plan keeps its plain tags.
+    view.rerender(<ChartPanel {...props} />)
+    expect([stop().label, stop().unconfirmed]).toEqual(['E1 SL', undefined])
   })
 
   it('refreshes on request only for a venue without a live stream, offering its own intervals', async () => {
@@ -690,6 +714,22 @@ describe('Chart panel level editing', () => {
     expect(shown()[0]!.targets).toEqual([])
   })
 
+  it('treats an entry price that is not plan text as unpriced, as its chart line does', async () => {
+    const { state, factory } = fakeAdapter()
+    const initial = two()
+    initial[0] = { ...initial[0]!, price: '1e2' }
+    render(<LevelHarness factory={factory} initial={initial} />)
+    await screen.findByText(/Updated/)
+    expect(state.overlays.some(o => o.label === 'E1')).toBe(false)
+    const plan = screen.getByRole('group', { name: 'Plan levels for Entry 1' })
+    expect(within(plan).getByRole('button', { name: 'Add a stop to Entry 1 on the chart' })).toBeDisabled()
+    // The entry tool prices Entry 1 instead of adding a third entry beside an invisible one.
+    await userEvent.click(within(plan).getByRole('button', { name: 'Add an entry on the chart' }))
+    expect(screen.getByText(/Click to set Entry 1 price/)).toBeInTheDocument()
+    act(() => state.callbacks!.onPricePick(101.234))
+    expect(shown().map(entry => entry.price)).toEqual(['101.23', '90'])
+  })
+
   it('adds a new entry with the entry tool once the selected entry has a price, and undoes it', async () => {
     const { state, factory } = fakeAdapter()
     const onSelect = vi.fn()
@@ -723,6 +763,10 @@ describe('Chart panel level editing', () => {
     const price = screen.getByRole('textbox', { name: 'Price' })
     await userEvent.clear(price)
     await userEvent.type(price, '-5{Enter}')
+    expect(screen.getByRole('alert')).toHaveTextContent(`Entry 1 price: ${plainDecimalRule}`)
+    expect(shown()[0]!.price).toBe('100')
+    await userEvent.clear(price)
+    await userEvent.type(price, '0{Enter}')
     expect(screen.getByRole('alert')).toHaveTextContent('Enter a price above zero.')
     expect(shown()[0]!.price).toBe('100')
     await userEvent.keyboard('{Escape}')

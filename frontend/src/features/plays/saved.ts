@@ -5,6 +5,7 @@ import { isChartDrawing, type ChartDrawing } from '@/components/chart/drawings'
 import { createDraft, createEvidenceId, type DraftEvidence, type PlayDraft } from './draft'
 import { hasManualDraft, type ManualExecutionDraft } from './manual'
 import { titleForSave } from './default-title'
+import { storedPlanText, trimPlanNumbers } from './stored-plan-text'
 
 
 /** What was last saved, to tell unsaved edits and plan changes (which need a reason) apart. */
@@ -12,6 +13,8 @@ export interface SavedState {
   summary: PlaySummary
   fieldsKey: string
   planKey: string
+  /** The plan as saved, whose unchanged number text still saves even where it predates the plain-decimal rule. */
+  plan: PlayPlan
   /** Server evidence IDs present at the last save; a missing one was removed locally. */
   evidenceIds: string[]
 }
@@ -73,17 +76,20 @@ export function fieldsFromDraft(draft: PlayDraft): PlayFields {
 /**
  * The fields to send when saving. A blank title becomes the default name (asset, direction and date) while the
  * Play can still change it; saved state and dirtiness keep comparing the title as typed, so only a save names it.
+ * Plan numbers lose surrounding whitespace, except text unchanged from the `saved` plan, which goes back as stored.
  */
-export function fieldsToSave(draft: PlayDraft, status: PlayStatus | undefined, now: Date = new Date()): PlayFields {
-  return { ...fieldsFromDraft(draft), title: titleForSave(draft, status, now) }
+export function fieldsToSave(draft: PlayDraft, status: PlayStatus | undefined, now: Date = new Date(), saved: PlayPlan | null = null): PlayFields {
+  const fields = fieldsFromDraft(draft)
+  return { ...fields, title: titleForSave(draft, status, now), plan: trimPlanNumbers(fields.plan, storedPlanText(saved)) }
 }
 
 const planKey = (plan: PlayPlan) => JSON.stringify(plan)
 const fieldsKey = (draft: PlayDraft) => JSON.stringify(fieldsFromDraft(draft))
 
 export function savedState(play: SavedPlay, draft: PlayDraft): SavedState {
+  const plan = planFromDraft(draft)
   return {
-    summary: play.summary, fieldsKey: fieldsKey(draft), planKey: planKey(planFromDraft(draft)),
+    summary: play.summary, fieldsKey: fieldsKey(draft), planKey: planKey(plan), plan,
     evidenceIds: draft.evidence.flatMap(item => item.serverId ? [item.serverId] : []),
   }
 }

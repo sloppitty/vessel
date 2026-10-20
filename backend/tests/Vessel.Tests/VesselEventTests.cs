@@ -7,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Vessel.Application.Events;
 using Vessel.Application.Ownership;
 using Vessel.Application.Plays;
+using Vessel.Application.Sizing;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
@@ -373,6 +374,55 @@ public sealed class VesselEventTests
             Assert.Equal("2", closed.Data.GetProperty("enteredQuantity").GetString());
             Assert.Equal("2", closed.Data.GetProperty("exitedQuantity").GetString());
         }
+    }
+
+    [VesselEventPostgresFact]
+    public async Task Closures_found_by_one_run_close_at_the_latest_valid_exit_their_outcomes_score()
+    {
+        // Phase 0 item 0.2: the play.closed source time and the sizing outcome share one helper. Three Plays exit at
+        // different times and one check detects them together; an exit stamped after detection is clamped to it.
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        var exits = new[] { now.AddHours(-2), now.AddHours(-1), now.AddMinutes(5) };
+        await using (var scope = new EventScope(database, owner))
+            await scope.ExecuteAsync(async () =>
+            {
+                var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+                scope.Db.Accounts.Add(account);
+                var plays = new List<Play>();
+                for (var i = 0; i < exits.Length; i++)
+                {
+                    var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
+                    scope.Db.Plays.Add(play);
+                    plays.Add(play);
+                    var planned = play.MarkPlanned(now.AddHours(-4));
+                    scope.Db.StatusChanges.Add(planned.Change); scope.Db.PlanRevisions.Add(planned.Revision);
+                    AddOrder(scope.Db, play, $"entry-{i}", OrderLinkRole.Entry, 1, 0, "filled", now);
+                    AddOrder(scope.Db, play, $"exit-{i}", OrderLinkRole.Exit, 1, 0, "filled", now);
+                    var exit = VenueFill(play, $"exit-{i}", $"x{i}", 1, exits[i], exit: true);
+                    exit.ClosedPnlUsd = i == 1 ? 5 : -5;
+                    scope.Db.Fills.AddRange(VenueFill(play, $"entry-{i}", $"e{i}", 1, now.AddHours(-3)), exit);
+                    scope.Db.StatusChanges.Add(play.MarkOpen("Synthetic entry", now));
+                }
+                await scope.SaveChangesAsync(default);
+                foreach (var play in plays) scope.Db.StatusChanges.Add(play.MarkClosed("Synthetic settlement", now));
+                return true;
+            }, default);
+        await using var db = database.Context(owner);
+        var closed = (await EventReads.ReadAsync(db, 0, 200, default)).Events.Where(e => e.Type == "play.closed")
+            .ToDictionary(e => e.Subject.PlayId!.Value, e => e.OccurredAt);
+        Assert.Equal([exits[0], exits[1], now], closed.Values.Order());
+        var sizing = await new SizingService(new SizingStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TimeProvider.System,
+            TestUnitOfWork.For(db)).GetAsync(default);
+        Assert.Equal(3, sizing.Record.Recent.Count);
+        Assert.All(sizing.Record.Recent, row =>
+        {
+            Assert.Equal(closed[row.PlayId!.Value], row.ClosedAtUtc);
+            Assert.Equal(now, row.DetectedAtUtc);
+        });
+        // The Plays themselves keep the detection time.
+        Assert.All(await db.Plays.ToListAsync(), play => Assert.Equal(now, play.EndedAtUtc));
     }
 
     [VesselEventPostgresFact]

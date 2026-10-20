@@ -29,7 +29,8 @@ public sealed class LighterExchange
         Json = new($"{name} returned an invalid or unsupported response.");
         Descriptor = new(VenueId, Name, "read-only", VenueSources.AccountIndex,
             new VenueCapabilities(Sync: true, Instruments: true, Orders: true, Candles: true,
-                MarketContext: false, Stream: false, StablecoinWallet: false, AccountDiscovery: true, ReadOnlyCredential: true),
+                MarketContext: false, Stream: false, StablecoinWallet: false, AccountDiscovery: true, ReadOnlyCredential: true,
+                CurrentOrderBook: true),
             QuoteAsset: Collateral, TradeUrlTemplate: TradeUrlTemplate, Intervals: [.. Intervals.Keys], PriceRule: PriceRules.TickSize,
             CandleNotice: CandleNotice, CredentialSetupUrl: CredentialSetupUrl, Logo: Logo);
     }

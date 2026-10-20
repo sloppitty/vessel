@@ -1,13 +1,16 @@
-import type { LinkOrder, PlayExecution, PlaySummary } from '@/api/plays'
+import type { LinkOrder, PlayExecution, PlaySummary, RebindLevel } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { Link2, Link2Off } from 'lucide-react'
 import { MonitorDiscrepancies, MonitorPanel, MonitorWatches } from '@/features/monitor/MonitorPanel'
+import { levelKey } from '@/features/monitor/discrepancy-text'
 import type { AccountMonitor } from '@/api/monitor'
 import type { DraftEntry } from './draft'
 import { describeOrder, fillSummary, levelName, levelOptions, orderFitsRole } from './execution'
 import { NativeSelect } from '@/components/ui/native-select'
 import { InfoTip } from '@/components/ui/info-tip'
 import { useJournalState } from './journal-state'
+import { LevelDriftAction } from './LevelDriftAction'
+import { LocalResultValue, SignDiffersFlag, localResultNote } from './LocalResult'
 
 // One shared empty object, so an untouched panel does not look like new state on every render.
 const noChoices: Record<string, string> = {}
@@ -21,7 +24,8 @@ const pnlBasisNote = {
   mixed: 'Some fills report closed PnL before fees and some after.',
 } as const
 
-export function ExecutionPanel({ execution, error, busy, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, onDismiss, onManageCredential }: {
+export function ExecutionPanel({ execution, error, busy, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, currentBookRead = true, onDismiss, onManageCredential,
+  version, leverage = 1, priceStep = null, onRebind, rebindBlocked }: {
   execution: PlayExecution | null
   error: string | null
   busy: boolean
@@ -32,12 +36,23 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
   monitorBusy?: boolean
   monitorError?: string | null
   monitorUnavailable?: boolean
+  /** False when the account's venue does not return the current order book (a venue capability). */
+  currentBookRead?: boolean
   retryAtUtc?: string | undefined
   onDismiss?: (id: string, note?: string) => Promise<void>
   onManageCredential?: (() => void) | undefined
   onCheck: () => void
   onLink: (request: LinkOrder) => void
   onUnlink: (linkId: string) => void
+  /** The saved Play's version, which a rebind of a drifted level expects. */
+  version?: number
+  /** The plan's leverage and the instrument's tick, to resolve and match levels as the server does. */
+  leverage?: number
+  priceStep?: number | null
+  /** Moves a drifted linked stop or target to its order's price (`level.drift`); resolves once the Play is saved. */
+  onRebind?: (linkId: string, request: RebindLevel) => Promise<void>
+  /** Why a rebind is not available now, such as unsaved plan edits. */
+  rebindBlocked?: string | undefined
 }) {
   // The chosen roles belong to the journal, not to this tab: expanding the journal remounts the panel. Scoped by play.
   const [choices, setChoices] = useJournalState(`execution-choices:${execution?.playId ?? ''}`, noChoices)
@@ -46,7 +61,12 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
   const editable = !retrospective && ['planned', 'paused', 'open'].includes(execution.status)
   const options = levelOptions(entries, execution.status === 'open')
   const shownMonitor = monitor === undefined ? execution.monitor : monitor
+  // This Play's own recorded stop coverage; an Open Play without one has not been checked since it opened.
+  const coverage = (shownMonitor?.coverage ?? []).filter(row => row.playId === execution.playId)
   const { totals } = execution
+  // Monitor records and watches name this Play's levels ("Entry 1 stop") rather than only the order's role.
+  const recordLevel = (key: unknown) => { const level = levelKey(key); return level ? levelName(entries, level, origin) : null }
+  const watchLevel = (watch: { linkId: string }) => { const link = execution.links.find(item => item.id === watch.linkId); return link ? levelName(entries, link, origin) : null }
   return <div className="execution-panel">
     {!retrospective && (!execution.tracked || !shownMonitor) && <div className="execution-header">
       <p className="muted" title={execution.tracked ? 'Orders link automatically by price and side; Vessel asks only when several plays could own one.' : undefined}>
@@ -54,16 +74,26 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
           : execution.reason ?? 'Execution is not tracked for this play.'}</p>
     </div>}
     {error && <p className="error" role="alert">{error}</p>}
-    {shownMonitor && <MonitorPanel monitor={shownMonitor} busy={busy || monitorBusy} error={monitorError}
+    {/* The heading follows this Play's own records and stop coverage, the ones listed below it. */}
+    {shownMonitor && <MonitorPanel monitor={shownMonitor} discrepancies={execution.discrepancies}
+      coverage={coverage} unchecked={execution.status === 'open' && execution.tracked && coverage.length === 0 ? 1 : 0} currentBookRead={currentBookRead}
+      busy={busy || monitorBusy} error={monitorError}
       retryAtUtc={retryAtUtc} statusUnavailable={monitorUnavailable} onCheck={onCheck} onManageCredential={onManageCredential} />}
-    {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss} />}
-    <MonitorWatches watches={execution.watches} />
+    {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss} levelName={recordLevel}
+      action={editable && onRebind && version !== undefined ? item => <LevelDriftAction discrepancy={item} links={execution.links} entries={entries}
+        context={{ direction, leverage, tick: priceStep }} origin={origin} playId={execution.playId} version={version} blocked={busy ? 'Wait for the current change to finish.' : rebindBlocked}
+        onRebind={onRebind} /> : undefined} />}
+    <MonitorWatches watches={execution.watches} levelName={watchLevel} />
     <dl className="execution-totals">
       <div><dt>Entered</dt><dd>{totals.enteredQuantity}</dd></div>
       <div><dt>Exited</dt><dd>{totals.exitedQuantity}</dd></div>
       <div><dt>Still open</dt><dd>{totals.openQuantity}</dd></div>
       <div title={pnlBasisNote[totals.closedPnlBasis]}><dt>Venue closed PnL{totals.closedPnlBasis === 'net-of-fee' ? ' · after fees' : ''}</dt><dd>{totals.closedPnlUsd} USD</dd></div>
       <div><dt>Fees</dt><dd>{totals.fees.length ? totals.fees.map(fee => `${fee.amount} ${fee.token}`).join(' · ') : '0'}</dd></div>
+      {totals.venueNetUsd !== undefined && <div><dt>Venue net<InfoTip label="About venue net">Venue closed PnL less fees in listed stablecoins on before-fee fills, over the fills counted here, so far while the play is open. Review and sizing score the venue result of a closed play whose fills settle it, each with its own eligibility rules; retrospective plays are not in sizing.</InfoTip></dt>
+        <dd>{totals.venueNetUsd === null ? <InfoTip className="value-tag" trigger="Unknown" label="venue net">A fee is unverified or in a token outside the listed stablecoins.</InfoTip> : `${totals.venueNetUsd} USD`}</dd></div>}
+      {totals.local && <div><dt>Play-local result<InfoTip label="About the Play-local result">{localResultNote}</InfoTip></dt>
+        <dd><LocalResultValue local={totals.local} format={value => `${value} USD`} />{totals.local.signDiffers && <SignDiffersFlag />}</dd></div>}
     </dl>
 
     {execution.issues.length > 0 && <section aria-label="Not reconciled" className="execution-section execution-issues">

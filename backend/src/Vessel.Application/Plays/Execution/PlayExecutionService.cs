@@ -78,10 +78,19 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var exited = settlement.Exited;
         var open = entered - exited;
         var all = settlement.Counted.Select(f => f.Fill).ToList();
+        // The scored venue basis and the Play-local basis side by side. The local result reads the same facts sizing and
+        // Review read: every linked fill and the orders known to be missing executions.
+        var venueNet = PlayOutcomeCalculator.VenueNet(all);
+        var local = PlayLocalResult.From(new ClosedPlayFacts(play, [], settlement.All, settlement.Incomplete),
+            venues.Descriptor(play.VenueId)?.QuoteAsset);
         var totals = new ExecutionTotalsDto(entered.ToString(), exited.ToString(), open.Units.Sign > 0 ? open.ToString() : "0",
             all.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.ClosedPnlUsd)).ToString(), PnlBasis(all),
             all.GroupBy(f => f.FeeToken).OrderBy(g => g.Key).Select(g => new FeeTotalDto(g.Key,
-                g.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Fee)).ToString())).ToList());
+                g.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Fee)).ToString())).ToList())
+        {
+            VenueNetUsd = venueNet.FeesComplete ? venueNet.Net.ToString() : null,
+            Local = local.ToDto(venueNet.FeesComplete ? venueNet.Net : null),
+        };
         var entries = plan.Entries.Select(entry =>
         {
             var own = linked.Where(l => l.Role == OrderLinkRole.Entry && l.EntryId == entry.Id).ToList();
@@ -165,6 +174,79 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         }, ct), ct);
         return await GetAsync(playId, ct);
     }
+
+    /// <summary>
+    /// Answers <c>level.drift</c>: the linked stop or target takes the observed order's acting price as a price level, in
+    /// one plan revision with the owner's reason. When the observed order is another order, it replaces the link: the old
+    /// link is dismissed and the order is linked to the level. Under the account and Play locks, the Play must still be at
+    /// the expected version and the retained order resting at the observed price; otherwise nothing changes (409).
+    /// Nothing is sent to the venue, and an order's price is never treated as a fill.
+    /// </summary>
+    public Task<PlayDto> RebindAsync(Guid playId, Guid linkId, RebindLevelRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason)) throw new ProblemException(400, "Say why the level moves. The reason is kept with the revision.");
+        if (!ExactDecimal.IsPlanText(request.ObservedPrice) || !ExactDecimal.TryParseVenue(request.ObservedPrice, out var observed) || observed <= 0)
+            throw new ProblemException(400, $"Observed price: {PlayDocuments.PlainDecimalRule}");
+        if (string.IsNullOrEmpty(request.OrderId)) throw new ProblemException(400, "Name the observed order.");
+        return unitOfWork.ExecuteAsync(() => plays.WithPlayLockAsync(playId, async () =>
+        {
+            var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+            if (play.Version != request.ExpectedVersion) throw new ProblemException(409, StalePlay);
+            if (!ExecutionMatcher.IsActive(play) || play.Origin == PlayOrigin.Retrospective || play.ContractId is null)
+                throw new ProblemException(409, "Only planned, paused or open plays rebind their levels.");
+            var link = await store.LinkAsync(play.AccountId, play.Id, linkId, ct) is { State: OrderLinkState.Linked, Role: OrderLinkRole.Stop or OrderLinkRole.Target } found
+                ? found : throw new ProblemException(404, "Linked stop or target not found.");
+            // The venue ID resolves within the Play's account and contract; another contract's order is not this one.
+            var order = await store.OrderAsync(play.AccountId, play.ContractId, request.OrderId, ct)
+                ?? throw new ProblemException(404, "This order is not known for the play's instrument. Check the venue first.");
+            if (order.Status != "open") throw new ProblemException(409, "This order no longer rests at the venue. Check again before rebinding.");
+            // A trigger order acts at its trigger price, a limit order at its limit price, as the matcher compares them.
+            var acting = order.TriggerPrice ?? order.LimitPrice;
+            if (acting != observed) throw new ProblemException(409, "The order's price changed since it was observed. Check again before rebinding.");
+            var plan = PlayDocuments.Read(play.Plan);
+            var entry = plan.Entries.FirstOrDefault(e => e.Id == link.EntryId);
+            var level = (link.Role == OrderLinkRole.Stop ? entry?.Stops : entry?.Targets)?.FirstOrDefault(l => l.Id == link.LevelId)
+                ?? throw new ProblemException(409, "The linked level is no longer in the plan. Review the link first.");
+            // As in a save: another order linked to this level still references its price.
+            if ((await plays.LinkedPlanReferencesAsync(play.Id, ct)).FirstOrDefault(r => r.Link.Id != link.Id && r.Link.LevelKey == link.LevelKey) is { } other)
+                throw new ProblemException(409, $"Order {other.ExternalOrderId} still references this plan level. Unlink it before changing or removing the level.");
+            var replacing = order.Id != link.ImportedOrderId;
+            if (replacing)
+            {
+                if ((await store.LinksAsync(play.AccountId, [order.Id], [], ct)).Any(l => l.State == OrderLinkState.Linked))
+                    throw new ProblemException(409, "This order is already linked. Unlink it first.");
+                // Dismissing a link with fills would drop executed exits from the Play.
+                var previous = (await store.OrdersAsync(play.AccountId, [link.ImportedOrderId], NoContracts, ct)).FirstOrDefault();
+                if (previous is not null && (await store.FillsAsync(play.AccountId, [OrderKey.Of(previous)], ct)).Count > 0)
+                    throw new ProblemException(409, $"Order {previous.ExternalOrderId} has fills that count for this play, so its link cannot be replaced.");
+                if (ExecutionIntegrity.RoleConflict(link.Role, plan, order, await store.FillsAsync(play.AccountId, [OrderKey.Of(order)], ct)) is { } conflict)
+                    throw new ProblemException(409, conflict);
+            }
+            var rebound = level with { Unit = "price", Value = ExactDecimal.Format(acting) };
+            var next = plan with
+            {
+                Entries = plan.Entries.Select(e => e.Id != entry!.Id ? e : link.Role == OrderLinkRole.Stop
+                    ? e with { Stops = e.Stops.Select(s => s.Id == level.Id ? rebound : s).ToList() }
+                    : e with { Targets = e.Targets.Select(t => t.Id == level.Id ? rebound : t).ToList() }).ToList()
+            };
+            var now = time.GetUtcNow();
+            // The same plan rules as a save: a stop of a filled entry may sit at or beyond it, everything else keeps its side.
+            var revision = play.ChangePlan(PlayDocuments.Serialize(PlayDocuments.Normalize(next, plan, await PlayService.ExecutedEntriesAsync(plays, play, ct))),
+                request.Reason, now) ?? throw new ProblemException(409, "This level already sits at the order's price.");
+            plays.Add(revision);
+            if (replacing)
+            {
+                link.Dismiss(now);
+                store.Add(new PlayOrderLink(play, order, link.Role, link.EntryId, link.LevelId, OrderLinkState.Linked, OrderLinkSource.Owner, now));
+                // As with an owner link, fills the new order already has count toward the Play's status at once.
+                await store.SaveAsync(ct);
+                await ApplyTransitionsAsync(play.AccountId, [play], ct);
+            }
+            return PlayService.ToDto(play);
+        }, ct), ct);
+    }
+
+    private const string StalePlay = "This Play changed elsewhere. Reload it before saving again.";
 
     private static readonly IReadOnlyDictionary<string, DateTimeOffset> NoContracts = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
 
@@ -324,9 +406,14 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         }
     }
 
-    /// <summary>The linked fills that count for a Play, with the reasons they cannot settle it yet.</summary>
+    /// <summary>
+    /// The linked fills that count for a Play, with the reasons they cannot settle it yet. <see cref="All"/> keeps every
+    /// linked fill and <see cref="Incomplete"/> the orders known to be missing executions, as sizing and Review read them.
+    /// </summary>
     private sealed record Settlement(string EntrySide, List<LinkedFill> Counted, List<string> Problems)
     {
+        public List<LinkedFill> All { get; init; } = [];
+        public List<string> Incomplete { get; init; } = [];
         public ExactAmount Entered => ExecutionIntegrity.Quantity(Counted.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill));
         public ExactAmount Exited => ExecutionIntegrity.Quantity(Counted.Where(f => f.Role != OrderLinkRole.Entry).Select(f => f.Fill));
     }
@@ -338,7 +425,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var side = ExecutionIntegrity.EntrySide(plan);
         var all = linked.SelectMany(l => fills[l.ImportedOrderId].Select(f => new LinkedFill(l.Role, f))).ToList();
         var incomplete = linked.Where(l => orders.TryGetValue(l.ImportedOrderId, out var order) &&
-            ExecutionIntegrity.MissingExecutions(order, fills[l.ImportedOrderId])).Select(l => orders[l.ImportedOrderId].ExternalOrderId);
+            ExecutionIntegrity.MissingExecutions(order, fills[l.ImportedOrderId])).Select(l => orders[l.ImportedOrderId].ExternalOrderId).ToList();
         var problems = ExecutionIntegrity.Problems(side, all, incomplete);
         if (!retrospective)
         {
@@ -346,7 +433,10 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             problems.AddRange(linked.Where(l => l.Role != OrderLinkRole.Exit && !levels.Contains(l.LevelKey))
                 .Select(l => $"Order {External(orders, l)} references a plan entry or level that no longer exists; review its association."));
         }
-        return new(side, all.Where(f => !ExecutionIntegrity.Contradicts(f.Role, side, f.Fill)).ToList(), problems);
+        return new(side, all.Where(f => !ExecutionIntegrity.Contradicts(f.Role, side, f.Fill)).ToList(), problems)
+        {
+            All = all, Incomplete = incomplete
+        };
     }
 
     /// <summary>Each order's fills by its internal ID, through the shared <see cref="OrderKey"/> rule.</summary>

@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Vessel.Domain.Common;
 
 namespace Vessel.Domain.Monitoring;
@@ -50,6 +51,18 @@ public sealed class PlayDiscrepancy : IOwned
 
     /// <summary>Anything ever announced stays visible.</summary>
     public bool Visible => PublishedTransition is not null;
+
+    /// <summary>
+    /// An outstanding announcement, the browser's incident: an announced record that is open, or that became unverifiable
+    /// and was not dismissed since. The one predicate for the monitor summary's membership (translated by EF) and for
+    /// listing incidents ahead of historical records.
+    /// </summary>
+    public static readonly Expression<Func<PlayDiscrepancy, bool>> IsOutstanding = d => d.PublishedTransition != null &&
+        (d.State == DiscrepancyLifecycle.Open ||
+         d.UnverifiableAtUtc != null && (d.DismissedAtUtc == null || d.DismissedAtUtc < d.UnverifiableAtUtc));
+    private static readonly Func<PlayDiscrepancy, bool> OutstandingOf = IsOutstanding.Compile();
+    /// <summary>See <see cref="IsOutstanding"/>.</summary>
+    public bool Outstanding => OutstandingOf(this);
     /// <summary>The last announcement (opened or unverifiable) still awaits its matching close.</summary>
     public bool PublicOpen => PublishedTransition is DiscrepancyLifecycle.Opened or DiscrepancyLifecycle.Unverifiable;
     /// <summary>Scheduling work: a candidate, an open warning or a pending (re-)confirmation not yet unverifiable.</summary>

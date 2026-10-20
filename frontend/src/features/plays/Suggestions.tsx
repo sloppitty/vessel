@@ -1,6 +1,6 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react'
 import { Check, ChevronDown, Lightbulb, X } from 'lucide-react'
-import { riskPercentRange, type SizingDocument } from '@/api/sizing'
+import { riskPercentRange, type SizingDocument, type SizingRecord } from '@/api/sizing'
 import { Button } from '@/components/ui/button'
 import { InfoTip } from '@/components/ui/info-tip'
 import { Input } from '@/components/ui/input'
@@ -8,7 +8,9 @@ import type { PlayDraft } from './draft'
 import { formatDraggedPrice } from './levels'
 import { errorMessage } from '@/api/errors'
 import { formatMoney, formatQuantity, formatRewardToRisk, type SizeUnits } from './sizing'
+import { fundingNote } from './LocalResult'
 import { exposureLabels, suggestionCount, type PlanSuggestions } from './suggestions'
+import type { SizingStatus } from './useSizing'
 
 const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
 /** "1.25" from an API decimal string, or null when it is missing or not a number. */
@@ -45,11 +47,16 @@ function SuggestionRow({ title, value, current, label, onAccept, testId, childre
 /**
  * Sizing suggestions in one yellow block above the workspace, kept apart from the entered plan. Each
  * row says what would change and why; nothing applies until the owner accepts it. The record and the
- * risk setting the suggestions come from sit beside them, with the rules behind them.
+ * risk setting the suggestions come from sit beside them, with the rules behind them. While the record
+ * is stale or could not be loaded, rows only inform: nothing offers Accept until a read succeeds.
  */
-export function SuggestionsPanel({ plan, sizing, draft, leverage, units, onSize, onLevel, onLeverage, onRiskChange, defaultOpen = false }: {
-  plan: PlanSuggestions
-  sizing: SizingDocument
+export function SuggestionsPanel({ plan, sizing, status = 'ready', onRetry, draft, leverage, units, onSize, onLevel, onLeverage, onRiskChange,
+  defaultOpen = false }: {
+  /** Null only when the record could not be loaded. */
+  plan: PlanSuggestions | null
+  sizing: SizingDocument | null
+  status?: SizingStatus
+  onRetry?: (() => void) | undefined
   draft: Pick<PlayDraft, 'sizingMode' | 'direction'>
   leverage: number
   units: SizeUnits
@@ -61,6 +68,22 @@ export function SuggestionsPanel({ plan, sizing, draft, leverage, units, onSize,
 }) {
   const id = useId()
   const [open, setOpen] = useState(defaultOpen)
+  // A stale or missing record cannot back an Accept; the rows that remain only inform.
+  const current = status === 'ready' || status === 'loading'
+  const accept = <T,>(action: T) => current ? action : undefined
+  const freshness = !current && <div className="sizing-suggestions-freshness" role="status">
+    <span>{sizing ? 'The sizing record could not be reloaded. These use the last record and cannot be accepted until it reloads.'
+      : 'The sizing record could not be loaded, so there are no suggestions.'}</span>
+    {onRetry && <Button type="button" variant="outline" size="sm" aria-label="Retry loading the sizing record" onClick={onRetry}>Retry</Button>}
+  </div>
+  if (!plan || !sizing) return <section className="sizing-suggestions" data-testid="suggestions-panel" aria-label="Sizing suggestions">
+    <div className="sizing-suggestions-summary sizing-suggestions-unavailable">
+      <Lightbulb size={16} aria-hidden="true" />
+      <span className="sizing-suggestions-title"><strong>Suggestions</strong></span>
+    </div>
+    {freshness}
+  </section>
+
   const count = suggestionCount(plan)
   const { limits, exposure, record } = sizing
   const reduced = exposure.level !== 'full'
@@ -69,8 +92,12 @@ export function SuggestionsPanel({ plan, sizing, draft, leverage, units, onSize,
   const maxStop = decimal(limits.maxStopPercent)
   const minRewardRisk = Number(limits.minRewardRisk)
   const riskRule = `${decimal(sizing.settings.riskPercent)}% risk${reduced ? ` × ${percentOf(exposure.multiplier)}% exposure` : ''}`
+  const outcomes = record.source === 'activity' ? 'closed positions' : 'plays'
+  const budget = plan.budget === null ? '' : `${formatMoney(plan.budget, units)} budget${plan.budgetSource ? ` (${plan.budgetSource})` : ''}`
+  const reason = emptyReason(plan)
 
-  const headline = count === 0 ? 'Plan within your limits'
+  const headline = !current ? (sizing ? 'Record could not be reloaded' : 'Record could not be loaded')
+    : count === 0 ? reason?.headline ?? 'Plan within your limits'
     : [plan.size && plan.size.overBudget === null ? `Size ${formatSize(plan.size.value)}` : null,
       ...plan.stops.map(stop => `${stop.entryName} stop ${stop.value}`), ...plan.targets.map(target => `${target.entryName} target ${target.value}`),
       plan.leverage ? `${plan.leverage.leverage}×` : null].filter(Boolean).join(' · ')
@@ -79,49 +106,58 @@ export function SuggestionsPanel({ plan, sizing, draft, leverage, units, onSize,
     <button type="button" className="sizing-suggestions-summary" aria-expanded={open} aria-controls={`${id}-body`} onClick={() => setOpen(!open)}>
       <Lightbulb size={16} aria-hidden="true" />
       <span className="sizing-suggestions-title">
-        <strong>Suggestions{count > 0 && <span className="sizing-suggestions-count">{count}</span>}
+        <strong>Suggestions{current && count > 0 && <span className="sizing-suggestions-count">{count}</span>}
           <span className="sizing-suggestions-tag" title="From your risk setting and record. Nothing changes until you accept.">Estimates</span></strong>
       </span>
       {reduced && <span className="sizing-suggestions-exposure">{exposureLabels[exposure.level]}</span>}
       <span className="sizing-suggestions-headline">{headline}</span>
       <ChevronDown size={16} aria-hidden="true" className="sizing-suggestions-chevron" />
     </button>
+    {freshness}
     {open && <div id={`${id}-body`} className="sizing-suggestions-body">
       <div className="sizing-suggestions-list">
         <h3>For this plan</h3>
-        {count === 0 && !plan.size && emptyReason(plan) && <p className="suggestion-empty" data-testid="suggestions-empty">{emptyReason(plan)}</p>}
+        {!plan.size && reason && <p className="suggestion-empty" data-testid="suggestions-empty">{reason.text}</p>}
         <ul>
           {plan.size && (plan.size.overBudget === null
             ? <SuggestionRow testId="size-suggestion" title="Size" label="Accept suggested size" value={formatSize(plan.size.value)}
-              onAccept={() => onSize(plan.size!.value)}>
-              Loses <strong>{formatMoney(plan.size.risk, units)}</strong> if every stop fills: {formatMoney(plan.balance!, units)} balance × {riskRule}
+              onAccept={accept(() => onSize(plan.size!.value))}>
+              Would lose about <strong>{formatMoney(plan.size.risk, units)}</strong> if every stop fills at its price: {formatMoney(plan.balance!, units)} balance × {riskRule}
               {' '}= {riskNumber.format(plan.size.effectiveRiskPercent)}%. Each {units.base === 'units' ? 'unit' : units.base} loses {formatDraggedPrice(plan.lossPerUnit!)} at the stops,
-              so the position is risk ÷ loss per unit{draft.sizingMode === 'margin' ? `, as margin at ${leverage}×` : ''}. Before fees.
+              so the position is risk ÷ loss per unit{draft.sizingMode === 'margin' ? `, as margin at ${leverage}×` : ''}. Before fees, slippage and funding.
             </SuggestionRow>
             : <SuggestionRow testId="size-suggestion" title="Size" label="Accept suggested size" value={`${formatMoney(plan.size.margin, units)} margin`}>
-              Risking {formatMoney(plan.size.risk, units)} ({riskRule}) needs more margin than the {formatMoney(plan.size.overBudget, units)} budget at {leverage}×.
-              {plan.leverage ? ' Raise the leverage below, or tighten the stops.' : ' Tighten the stops or raise the budget.'}
+              {plan.size.overBudget > 0
+                ? <>Risking {formatMoney(plan.size.risk, units)} ({riskRule}) needs more margin than the {budget} at {leverage}×.
+                  {plan.leverage?.reason === 'budget' ? ' Raise the leverage below, or tighten the stops.' : ' Tighten the stops or raise the budget.'}</>
+                : plan.budgetSource === 'manual'
+                  ? <>Risking {formatMoney(plan.size.risk, units)} ({riskRule}) needs this margin at {leverage}×, and the manual budget is {formatMoney(plan.size.overBudget, units)}.</>
+                  : <>Risking {formatMoney(plan.size.risk, units)} ({riskRule}) needs this margin at {leverage}×, and the budget{plan.budgetSource ? ` (${plan.budgetSource})` : ''} is
+                    {' '}{formatMoney(plan.size.overBudget, units)}. Set a manual budget to size this play.</>}
             </SuggestionRow>)}
           {plan.stops.map(stop => <SuggestionRow key={stop.levelId} testId="max-stop-suggestion" title={`${stop.entryName} · ${stop.label}`}
             label={`Accept suggested ${stop.entryName} ${stop.label}`} current={stop.current} value={level(stop.unit, stop.value, stop.price)}
-            onAccept={() => onLevel(stop.entryId, 'stop', stop.levelId, stop.value)}>
+            onAccept={accept(() => onLevel(stop.entryId, 'stop', stop.levelId, stop.value))}>
             {number.format(stop.distancePercent)}% from the entry, past the {maxStop}% maximum.
             {' '}{limits.maxStopSource === 'averageGain'
-              ? <>That is half your {decimal(record.averageGainPercent)}% average gain: Minervini cuts losses at about half the average gain, so one loss never undoes more than half a win.</>
+              ? <>That is half the {decimal(record.averageGainPercent)}% average gain of your winning {outcomes}: Minervini cuts losses at about half the average gain.
+                {' '}A loss at the limit is half that past average as a price move, before fees and slippage.</>
               : <>Minervini's absolute maximum is 10% from the entry; his average loss is much smaller. Once you have five wins, the limit follows half your average gain.</>}
           </SuggestionRow>)}
           {plan.targets.map(target => <SuggestionRow key={target.levelId} testId="min-target-suggestion" title={`${target.entryName} · ${target.label}`}
             label={`Accept suggested ${target.entryName} ${target.label}`} current={target.current} value={level(target.unit, target.value, target.price)}
-            onAccept={() => onLevel(target.entryId, 'target', target.levelId, target.value)}>
+            onAccept={accept(() => onLevel(target.entryId, 'target', target.levelId, target.value))}>
             Planned R:R is {formatRewardToRisk(target.ratio)}, below {formatRewardToRisk(minRewardRisk)}.
             {' '}{limits.minRewardRiskSource === 'battingAverage'
-              ? <>Winning {percentOf(record.battingAverage)}% of your {record.source === 'activity' ? 'closed positions' : 'plays'}, you break even at {formatRewardToRisk(minRewardRisk)}; below it the record loses money.</>
-              : <>Minervini aims for at least 2:1, so a 50% win rate still makes money. Moving the farthest target is one way; a tighter stop is another.</>}
+              ? <>With a {percentOf(record.battingAverage)}% win rate over your {outcomes}, {formatRewardToRisk(minRewardRisk)} is the break-even reward to risk:
+                {' '}below it, wins at that rate would not have covered the losses, before fees.</>
+              : <>Minervini aims for at least 2:1: at that ratio a 50% win rate comes out ahead before fees, if wins and losses land at the planned levels.
+                {' '}Moving the farthest target is one way; a tighter stop is another.</>}
           </SuggestionRow>)}
           {plan.leverage && <SuggestionRow testId="leverage-suggestion" title="Leverage" label="Accept suggested leverage"
-            current={`${leverage}×`} value={`${plan.leverage.leverage}×`} onAccept={() => onLeverage(plan.leverage!.leverage)}>
-            {plan.leverage.reason === 'budget' ? <>The margin does not fit the {formatMoney(plan.budget!, units)} budget at {leverage}×. {plan.leverage.leverage}× is the lowest that fits with the estimated liquidation past the stops.</>
-              : plan.leverage.reason === 'liquidation' ? <>At {leverage}× the estimated liquidation is inside a stop, so the stop would never trigger. {plan.leverage.leverage}× keeps it past the stops.</>
+            current={`${leverage}×`} value={`${plan.leverage.leverage}×`} onAccept={accept(() => onLeverage(plan.leverage!.leverage))}>
+            {plan.leverage.reason === 'budget' ? <>The margin does not fit the {budget} at {leverage}×. {plan.leverage.leverage}× is the lowest that fits with the estimated liquidation past the priced stops.</>
+              : plan.leverage.reason === 'liquidation' ? <>At {leverage}× the estimated liquidation sits inside a stop. {plan.leverage.leverage}× keeps the estimate past the priced stops.</>
               : <>Exposure is reduced after losses. Minervini gets off margin while trading is going badly, so this is the lowest leverage that still fits the budget.</>}
             {' '}Isolated margin, before fees and funding.
           </SuggestionRow>}
@@ -132,11 +168,29 @@ export function SuggestionsPanel({ plan, sizing, draft, leverage, units, onSize,
   </section>
 }
 
-/** Why there is no size suggestion; a plan within its limits needs no reason, the headline says so. */
+/** Why there is no size suggestion, in a sentence and as a short headline; a plan within its limits needs no reason. */
 function emptyReason(plan: PlanSuggestions) {
-  if (plan.balance === null) return 'Choose an account with a balance to size by risk.'
-  if (plan.lossPerUnit === null) return 'Give each priced entry a stop on the right side to size by risk.'
+  if (plan.filled) return { headline: 'An entry has filled',
+    text: 'An entry has filled, so size and leverage are not suggested. Stops and targets are suggested only for entries without fills.' }
+  if (plan.balance === null) return { headline: 'No account balance', text: 'Choose an account with a balance to size by risk.' }
+  if (plan.stopCoverage !== null) return { headline: plan.stopCoverage, text: `${plan.stopCoverage}, so no size is suggested.` }
+  if (plan.lossPerUnit === null) return { headline: 'No loss per unit', text: 'Give each priced entry a stop on the right side to size by risk.' }
   return null
+}
+
+/**
+ * What the result bases say about the window's decided results: sign changes under the Play-local basis and results
+ * without one (Play records only; positions are not Plays), and losses made by fees alone. Zero and absent counts say nothing.
+ */
+function recordBasisNotes(record: SizingRecord, decided: number) {
+  const notes: string[] = []
+  const changes = record.localSignChanges ?? 0, unknown = record.localUnknown ?? 0
+  const feeOnly = record.feeOnlyLosses ?? 0, unknownGross = record.unknownGrossLosses ?? 0
+  if (record.source === 'plays' && changes > 0) notes.push(`${changes} of the last ${decided} ${changes === 1 ? 'changes' : 'change'} sign under the Play-local basis.`)
+  if (record.source === 'plays' && unknown > 0) notes.push(`${unknown} ${unknown === 1 ? 'has' : 'have'} no Play-local figure.`)
+  if (feeOnly > 0) notes.push(`${feeOnly} ${feeOnly === 1 ? 'loss came' : 'losses came'} from fees alone.`)
+  if (unknownGross > 0) notes.push(`${unknownGross} ${unknownGross === 1 ? 'loss has' : 'losses have'} no before-fee figure.`)
+  return notes
 }
 
 /** The record and rules behind the suggestions, with the risk per trade editable in place. */
@@ -145,6 +199,7 @@ function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRisk
   const decided = Math.min(record.decidedPlays, record.window)
   const activity = record.source === 'activity'
   const positions = record.closedPlays === 1 ? 'position' : 'positions'
+  const basisNotes = recordBasisNotes(record, decided)
   return <div className="sizing-suggestions-record" data-testid="track-record">
     <h3>Your record</h3>
     {activity && <p className="record-source-note" data-testid="record-source">
@@ -161,6 +216,8 @@ function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRisk
         <div><dt>Win/loss ratio</dt><dd>{decimal(record.winLossRatio) ?? '—'}<small>avg +{decimal(record.averageGainPercent) ?? '—'}% / −{decimal(record.averageLossPercent) ?? '—'}%</small></dd></div>
         <div><dt>Break-even R:R</dt><dd>{record.breakEvenRewardRisk === null ? '—' : formatRewardToRisk(Number(record.breakEvenRewardRisk))}<small>at this win rate</small></dd></div>
       </dl>}
+    {basisNotes.length > 0 && <p className="record-basis" data-testid="record-basis">{basisNotes.join(' ')}
+      <InfoTip label="About result bases">The record scores the venue result. The Play-local basis uses each play’s own fills: sell proceeds minus buy costs, less every fee. Fee-only losses were zero or better before fees and still count as losses. {fundingNote}, so a sign change or a fee-only loss can reflect funding.</InfoTip></p>}
     <p className="record-exposure" data-reduced={exposure.level !== 'full' || undefined}>
       <strong>{exposure.level === 'full' ? 'Full size' : exposureLabels[exposure.level]}</strong> · {exposure.reason}
     </p>
@@ -176,8 +233,8 @@ function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRisk
         <li><strong>Size</strong>: risk a fixed share of the account balance per play (Minervini: about 1.25%, never above 2.5%). Position = amount at risk ÷ loss per unit at the stops.</li>
         <li><strong>Stops</strong>: never more than 10% from the entry; once you have five wins, no more than half your average gain.</li>
         <li><strong>Targets</strong>: at least 2:1, or the break-even R:R of your win rate once you have ten wins and losses, whichever is higher.</li>
-        <li><strong>Exposure</strong>: size halves after three losses in a row and halves again after two more. It steps back up after two wins with a positive result since stepping down. Minervini gives no fixed counts; these are Vessel's.</li>
-        <li><strong>Record</strong>: your last {record.window} closed plays with wins or losses, all enabled accounts, from linked fills: venue closed PnL less fees.
+        <li><strong>Exposure</strong>: size halves after three losses in a row and halves again after two more. It steps back up after two wins in a row with a positive result since stepping down. Minervini gives no fixed counts; these are Vessel's.</li>
+        <li><strong>Record</strong>: your last {record.window} closed plays with wins or losses by exit time, all enabled accounts, from linked fills: venue closed PnL less fees.
           Until a play has a win or loss, closed positions from Activity stand in, scored the same way without R multiples.</li>
       </ul>
       <p>Mechanical estimates before fees, funding and slippage, not advice.</p>

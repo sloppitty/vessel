@@ -212,6 +212,7 @@ public sealed class SizingAggregateOverflowTests
             PositionEffect = ExecutionFacts.Unknown, Direction = "", TransactionHash = "",
         };
         return new ClosedPlayFacts(play, [revision],
-            [new(OrderLinkRole.Entry, Fill(ExecutionFacts.Buy, 0, 30)), new(OrderLinkRole.Target, Fill(ExecutionFacts.Sell, pnl, 60))]);
+            // Each Play exits an hour before its own detection day, so outcomes never share an exit time.
+            [new(OrderLinkRole.Entry, Fill(ExecutionFacts.Buy, 0, 30)), new(OrderLinkRole.Target, Fill(ExecutionFacts.Sell, pnl, 60 * 24 * day - 60))]);
     }
 }

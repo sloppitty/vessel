@@ -1,4 +1,4 @@
-import { monitorFixture } from '@/test/monitor-fixture'
+import { coverageAs, coverageFixture, monitorFixture } from '@/test/monitor-fixture'
 import { screen, within } from '@testing-library/react'
 import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
@@ -31,6 +31,30 @@ const execution: PlayExecution = {
 }
 
 describe('execution panel', () => {
+  it('heads the monitor with this Play\'s own stop coverage, never Monitored beside an unknown (Phase 0, 0.4c)', () => {
+    const props = { error: null, busy: false, entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn() }
+    const monitor = { ...monitorFixture, coverage: [coverageAs('unknown', 'opposing-plays', execution.playId),
+      { ...coverageFixture, playId: '00000000-0000-4000-8000-0000000000f2' }] }
+    const view = render(<ExecutionPanel {...props} execution={{ ...execution, monitor }} />)
+    const panel = () => screen.getByRole('region', { name: 'Background monitor' })
+    expect(within(panel()).queryByText('Monitored')).not.toBeInTheDocument()
+    expect(within(panel()).getByText('Stop coverage unknown')).toBeInTheDocument()
+    // Another Play's coverage on the account does not speak for this one: an Open Play without its own record is not
+    // checked yet, never "Monitored" (after the migration, or once reconciliation opens it until the next check).
+    view.rerender(<ExecutionPanel {...props} execution={{ ...execution, monitor: { ...monitor, coverage: [monitor.coverage[1]!] } }} />)
+    expect(within(panel()).queryByText('Monitored')).not.toBeInTheDocument()
+    expect(within(panel()).getByText('Stop coverage not checked yet')).toBeInTheDocument()
+    view.rerender(<ExecutionPanel {...props} execution={{ ...execution, monitor: { ...monitor, coverage: [{ ...coverageFixture, playId: execution.playId }] } }} />)
+    expect(within(panel()).getByText('Monitored')).toBeInTheDocument()
+    // A Planned Play has no position to cover yet.
+    view.rerender(<ExecutionPanel {...props} execution={{ ...execution, status: 'planned', monitor: monitorFixture }} />)
+    expect(within(panel()).getByText('Monitored')).toBeInTheDocument()
+    // The venue capability: without a current book the stop checks do not run, which the panel says.
+    view.rerender(<ExecutionPanel {...props} execution={{ ...execution, status: 'planned', monitor: monitorFixture }} currentBookRead={false} />)
+    expect(within(panel()).getByText('Current book not read')).toBeInTheDocument()
+    expect(within(panel()).getByText(/Order-book checks do not run here/)).toBeInTheDocument()
+  })
+
   it('shows the check timestamp only once, retaining the fallback and untracked reason', () => {
     const props = { execution, error: null, busy: false, entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn() }
     const view = render(<ExecutionPanel {...props} />)
@@ -50,6 +74,42 @@ describe('execution panel', () => {
     render(<ExecutionPanel execution={net} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
     expect(screen.getByText('Venue closed PnL · after fees').parentElement).toHaveAttribute('title', expect.stringMatching(/fees already taken off/))
   })
+  it('shows the scored venue net beside the Play-local result and flags a sign difference', () => {
+    const closed: PlayExecution = { ...execution, status: 'closed', totals: { ...execution.totals, enteredQuantity: '1', exitedQuantity: '1', openQuantity: '0',
+      closedPnlUsd: '3', venueNetUsd: '2.9', local: { netUsd: '-2.1', basis: 'executions', reason: null, signDiffers: true } } }
+    const props = { error: null, busy: false, entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn() }
+    const view = render(<ExecutionPanel execution={closed} {...props} />)
+    const value = (term: string) => screen.getByText(term).closest('div')!.querySelector('dd')
+    expect(value('Venue net')).toHaveTextContent(/^2\.9 USD$/)
+    // Only what is true: a running figure while open, scored only once closed and settled, never for retrospective sizing.
+    const venueTip = screen.getByRole('button', { name: 'About venue net' })
+    expect(venueTip).toHaveAccessibleDescription(/so far while the play is open/)
+    expect(venueTip).toHaveAccessibleDescription(/closed play whose fills settle it/)
+    expect(venueTip).toHaveAccessibleDescription(/retrospective plays are not in sizing/)
+    expect(venueTip).not.toHaveAccessibleDescription(/score this result/)
+    expect(value('Play-local result')).toHaveTextContent(/^-2\.1 USD/)
+    expect(screen.getByRole('button', { name: 'About the Play-local result' })).toHaveAccessibleDescription(/sell proceeds minus buy costs, less every trading fee/)
+    expect(screen.getByRole('button', { name: 'Sign differs by basis' })).toBeInTheDocument()
+
+    const reason = 'The play is not closed.'
+    view.rerender(<ExecutionPanel execution={{ ...execution, totals: { ...execution.totals, venueNetUsd: null,
+      local: { netUsd: null, basis: 'executions', reason, signDiffers: false } } }} {...props} />)
+    expect(screen.getByRole('button', { name: 'Unknown Play-local result' })).toHaveAccessibleDescription(reason)
+    expect(screen.getByRole('button', { name: 'Unknown venue net' })).toHaveAccessibleDescription(/listed stablecoins/)
+    expect(screen.queryByRole('button', { name: 'Sign differs by basis' })).not.toBeInTheDocument()
+
+    // Tiny results keep their exact strings: never rounded into a zero that reads as a scratch.
+    view.rerender(<ExecutionPanel execution={{ ...closed, totals: { ...closed.totals, venueNetUsd: '-0.00001',
+      local: { netUsd: '0.00001', basis: 'executions', reason: null, signDiffers: true } } }} {...props} />)
+    expect(value('Venue net')).toHaveTextContent(/^-0\.00001 USD$/)
+    expect(value('Play-local result')).toHaveTextContent(/^0\.00001 USD/)
+
+    // Servers before October 19, 2026 send neither figure.
+    view.rerender(<ExecutionPanel execution={execution} {...props} />)
+    expect(screen.queryByText('Venue net')).not.toBeInTheDocument()
+    expect(screen.queryByText('Play-local result')).not.toBeInTheDocument()
+  })
+
   it('shows linked fills, asks about ambiguous orders and links others by hand', async () => {
     const onLink = vi.fn()
     const onUnlink = vi.fn()
