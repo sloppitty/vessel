@@ -578,4 +578,43 @@ October 20, 2026, branch `t3/phase1-preflight`, stacked on 1.4a:
 
 ## 1.6 Capture friction and time consistency
 
-Not started.
+1.6a is recorded with its own pull request.
+
+### 1.6b–d Manual entry, Duplicate and Confirm rows
+
+October 20, 2026, branch `t3/phase1-capture`, stacked on 1.1b:
+- **Manual entry (1.6b, F-01).**
+  - Each field shows its own error under it, marked invalid and described by the message. The first takes focus, and
+    typing clears it. An empty Source highlights the Source field (U11).
+  - The time is typed in the browser's zone (1.6e makes it the display zone) with **Now** and a "Sent as … UTC"
+    line. A trailing `Z` or an offset is read as written. A time the zone skips, or 30 February, is refused, never
+    moved. Fractions are kept digit for digit, so an unchanged correction sends the same instant.
+  - The side follows the role and the Play's direction until the owner chooses one, and follows again when the role
+    changes.
+  - **Source label (required)** sits beside the time and side. Text fields are sent trimmed.
+- **Duplicate to Draft (1.6c, F-04).**
+  - The header of a saved planned-origin Play has **Duplicate**. Unsaved work (edits, a manual execution or a log
+    entry) disables it, and a retrospective Play does not offer it.
+  - It opens an unsaved Draft with the account, instrument, direction, leverage, the current plan's entries, stops and
+    targets, thesis, invalidation and strategy, titled "<title> (copy)". Nothing else is copied, and the copy has no
+    saved or observed identity.
+  - The usual plan checks apply before the first Save creates it. An Open long's managed stop at 105 over an entry at
+    100 is flagged in the copy until moved.
+- **Confirm rows (1.6d, F-03).**
+  - Suggestions are grouped by order: one row per order, a **Link as <level>** button per level it matches, and
+    **Not this play** turning all of them down in one action.
+  - The execution's suggestions carry `otherPlay`: whether the same order is also suggested to another Planned,
+    Paused or Open Play of the account, read in one query. Only then does a row say "another play"; several levels of
+    one Play read "Matches several levels of this play" (U7). Linked orders carry null.
+- **Tests.**
+  - Unit: the time in each zone (offsets, the spring-forward gap, microseconds, Now), per-field errors, the side rule,
+    trimmed corrections and per-row batch errors; Duplicate's copy and session.
+  - Panel: U11's Source error and focus, Now in Europe/Madrid sent as UTC, the side following the role, a stored
+    microsecond time shown in Europe/Madrid and sent back unchanged.
+  - Page: Duplicate's flagged stop, its created fields and untouched original; disabled with unsaved work and absent
+    on a retrospective Play.
+  - Confirm rows: U7's two orders in two rows with both levels and no "another play", the other-play wording, one
+    action turning an order down; PostgreSQL: four suggestions for two take-profits, `otherPlay` on an entry two
+    Plays match, false once the other Play is cancelled.
+- **Checks.** `scripts/check.sh` passed: backend 3,609 passed, 5 skipped; frontend 153 files and 3,839 tests; build clean. A
+  first run found the monitor contract fixture without the new `otherPlay` field; it was regenerated.
