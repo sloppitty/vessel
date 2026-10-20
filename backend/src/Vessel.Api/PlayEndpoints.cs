@@ -30,6 +30,10 @@ public static class PlayEndpoints
         api.MapPut("/{id:guid}/manual-executions/{executionId:guid}", async (Guid id, Guid executionId, ManualExecutionRequest request,
             DiaryService service, CancellationToken ct) => Results.Ok(await service.RecordAsync(id, executionId, request, ct)))
             .WithBodyLimit(ManualExecutionBodyBytes, DiaryTooLarge);
+        // Phase 1.3b: several corrections with one reason, all or nothing.
+        api.MapPost("/{id:guid}/manual-executions/corrections", async (Guid id, ManualCorrectionBatchRequest request,
+            DiaryService service, CancellationToken ct) => Results.Ok(await service.CorrectBatchAsync(id, request, ct)))
+            .WithBodyLimit(ManualCorrectionBatchBodyBytes, DiaryTooLarge);
         // Previewing a retrospective Play starts from an Activity operation, so it lives under /api/activity.
         var activity = app.MapGroup("/api/activity").RequireAuthorization();
         activity.MapGet("/retrospective", async (Guid accountId, string operationId, DiaryService service, CancellationToken ct) =>

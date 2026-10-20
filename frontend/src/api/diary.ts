@@ -18,6 +18,10 @@ export interface ManualExecutionInput {
   source: string
 }
 export interface ManualExecutionCorrection extends ManualExecutionInput { reason: string }
+/** One existing execution's full corrected facts within a batch (phase 1, 1.3b). */
+export type ManualCorrectionRow = Omit<ManualExecutionInput, 'requestId' | 'expectedVersion'> & { executionId: string }
+/** Several corrections with one reason, applied all or nothing; only the final ledger is checked as a whole. */
+export interface ManualCorrectionBatch { requestId: string; expectedVersion: number; reason: string; corrections: ManualCorrectionRow[] }
 export interface ManualExecutionRecord extends Omit<ManualExecutionInput, 'requestId' | 'expectedVersion'> {
   id: string
   createdAtUtc: string
@@ -26,7 +30,11 @@ export interface ManualExecutionRecord extends Omit<ManualExecutionInput, 'reque
 export interface ManualExecutions {
   play: SavedPlay
   records: ManualExecutionRecord[]
-  history: Array<{ id: string; executionId: string; reason: string | null; occurredAtUtc: string; before: ManualExecutionRecord | null; after: ManualExecutionRecord }>
+  history: Array<{
+    id: string; executionId: string; reason: string | null; occurredAtUtc: string; before: ManualExecutionRecord | null; after: ManualExecutionRecord
+    /** Shared by the rows one correction batch changed together; absent from servers before phase 1.3b. */
+    batchId?: string | null
+  }>
   totals: {
     enteredQuantity: string
     exitedQuantity: string
@@ -55,12 +63,18 @@ export const isManualExecutionInput = (v: unknown): v is ManualExecutionInput =>
   isPositiveCount(v.expectedVersion) && facts(v)
 export const isManualExecutionCorrection = (v: unknown): v is ManualExecutionCorrection => isManualExecutionInput(v) &&
   isRecord(v) && isNonBlankText(v.reason, 2000) && hasNoControlCharacters(v.reason)
+export const isManualCorrectionBatch = (v: unknown): v is ManualCorrectionBatch => isRecord(v) && isGuid(v.requestId) &&
+  isPositiveCount(v.expectedVersion) && isNonBlankText(v.reason, 2000) && hasNoControlCharacters(v.reason) &&
+  Array.isArray(v.corrections) && v.corrections.length > 0 && v.corrections.length <= 200 &&
+  v.corrections.every(c => isRecord(c) && isGuid(c.executionId) && facts(c)) &&
+  new Set(v.corrections.map(c => (c as ManualCorrectionRow).executionId)).size === v.corrections.length
 export const isManualExecutionRecord = (v: unknown): v is ManualExecutionRecord => isRecord(v) && isGuid(v.id) &&
   facts(v) && isUtcTimestamp(v.createdAtUtc) && isUtcTimestamp(v.updatedAtUtc)
 export const isManualExecutions = (v: unknown): v is ManualExecutions => isRecord(v) && isSavedPlay(v.play) &&
   Array.isArray(v.records) && v.records.length <= 200 && v.records.every(isManualExecutionRecord) && Array.isArray(v.history) && v.history.length <= 1000 &&
   v.history.every(h => isRecord(h) && isGuid(h.id) && isGuid(h.executionId) && (h.reason === null || isText(h.reason, 2000)) && isUtcTimestamp(h.occurredAtUtc) &&
-    (h.before === null || isManualExecutionRecord(h.before)) && isManualExecutionRecord(h.after)) && isRecord(v.totals) &&
+    (h.before === null || isManualExecutionRecord(h.before)) && isManualExecutionRecord(h.after) &&
+    (h.batchId === undefined || h.batchId === null || isGuid(h.batchId))) && isRecord(v.totals) &&
   ['enteredQuantity', 'exitedQuantity', 'openQuantity'].every(key => isDiaryNonNegativeDecimal((v.totals as Record<string, unknown>)[key])) &&
   (v.totals.grossResultUsd === null || isDiaryDecimal(v.totals.grossResultUsd)) &&
   (v.totals.netResultUsd === null || isDiaryDecimal(v.totals.netResultUsd)) && typeof v.totals.feesComplete === 'boolean' && isText(v.notice, 4000) &&

@@ -47,13 +47,15 @@ public sealed class EndpointTransportTests
 
         Assert.Equal(
             ["POST /api/plays/retrospective", "POST /api/plays/{id:guid}/manual-executions",
-             "PUT /api/plays/{id:guid}/manual-executions/{executionId:guid}"],
+             "POST /api/plays/{id:guid}/manual-executions/corrections", "PUT /api/plays/{id:guid}/manual-executions/{executionId:guid}"],
             limits.Keys.Order(StringComparer.Ordinal));
         Assert.All(limits, pair => Assert.Equal("Diary request is too large.", pair.Value.TooLargeMessage));
         Assert.All(Endpoints(factory), endpoint => Assert.Null(endpoint.Metadata.GetMetadata<IRequestSizeLimitMetadata>()));
         Assert.Equal(131_072, limits["POST /api/plays/retrospective"].MaxBytes);
         Assert.Equal(16_384, limits["POST /api/plays/{id:guid}/manual-executions"].MaxBytes);
         Assert.Equal(16_384, limits["PUT /api/plays/{id:guid}/manual-executions/{executionId:guid}"].MaxBytes);
+        // A correction batch holds up to 200 full rows and one reason (phase 1, 1.3b).
+        Assert.Equal(262_144, limits["POST /api/plays/{id:guid}/manual-executions/corrections"].MaxBytes);
     }
 
     [Fact]

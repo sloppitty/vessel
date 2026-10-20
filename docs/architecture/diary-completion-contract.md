@@ -89,6 +89,31 @@ No deletion, reopening, direction change after entry, or cancellation with
 entered quantity is introduced. A correction that would reopen a Closed Play
 is rejected without partial changes.
 
+**Correction batch (October 20, 2026).** Phase 1.3b of the
+[learning-loop contract](phase1-learning-loop-contract.md), decision 5.
+- `POST /api/plays/{id}/manual-executions/corrections` takes `requestId`,
+  `expectedVersion`, one `reason` and 1–200 `corrections`. Each correction is
+  an existing execution's ID with its full corrected facts, as a single
+  correction sends them.
+- Each row is validated as a single correction is. Role, entry and side stay,
+  and a Closed ledger keeps each source label.
+- Only the final ledger is checked as a whole. A closed 1/1 ledger therefore
+  becomes 2/2 in one batch, which no single correction can do without
+  reopening it.
+- The batch applies all or nothing in one unit of work. It never adds, deletes
+  or reopens rows, a Closed ledger stays closed, and an Open one may close.
+- Each row's before and after are kept, with the reason and a shared
+  `batchId`. Single-row writes have none.
+- The batch counts toward the record and history limits. Retries with the same
+  `requestId` and payload return the first result; another payload conflicts.
+  Its body limit is 262,144 bytes.
+- The explicit `ManualCorrectionBatch` migration adds the nullable `BatchId`
+  column to `manual_execution_history`.
+- In the browser, a correction can take further executions through **Also
+  correct**. Each has its own fields under the one reason, and with more than
+  one row the correction is saved as a batch. The audit history labels batch
+  entries and counts the rows corrected together.
+
 ## HTTP contract
 
 Existing authenticated API conventions, decimal strings, owner scope, body
@@ -104,6 +129,7 @@ doubles still compile; the real API factory implements every method.
 - `GET /api/plays/{id}/manual-executions`
 - `POST /api/plays/{id}/manual-executions`
 - `PUT /api/plays/{id}/manual-executions/{executionId}`
+- `POST /api/plays/{id}/manual-executions/corrections` (phase 1.3b, above)
 
 Writes accept the inputs above; correction also accepts `reason`. Return:
 
@@ -112,7 +138,7 @@ Writes accept the inputs above; correction also accepts `reason`. Return:
   play: SavedPlay,
   records: [{ id, role, entryId, occurredAtUtc, side, quantity, price,
               fee, feeCurrency, source, createdAtUtc, updatedAtUtc }],
-  history: [{ id, executionId, reason, occurredAtUtc, before, after }],
+  history: [{ id, executionId, reason, occurredAtUtc, before, after, batchId }],
   totals: { enteredQuantity, exitedQuantity, openQuantity,
             grossResultUsd, netResultUsd, feesComplete },
   notice

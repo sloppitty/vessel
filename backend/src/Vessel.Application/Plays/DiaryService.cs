@@ -56,50 +56,107 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
                     throw new ProblemException(409, "This manual ledger reached its explicit record/history limit.");
                 var previous = executionId is { } id ? rows.SingleOrDefault(r => r.Id == id)
                     ?? throw new ProblemException(404, "Manual execution not found.") : null;
-                var before = previous is null ? null : Dto(previous);
                 Validate(request, play, executionId is not null);
-                if (previous is not null && (previous.Role != request.Role || previous.EntryId != request.EntryId || previous.Side != request.Side))
-                    throw new ProblemException(409, "A correction keeps execution role, entry and side.");
-                if (play.Status == PlayStatus.Closed && previous?.Source != request.Source)
-                    throw new ProblemException(409, "Closed corrections keep the source label; correct amounts, prices, costs or times.");
                 var now = time.GetUtcNow();
-                var row = new ManualExecution
+                var row = previous is null ? new ManualExecution
                 {
-                    Id = previous?.Id ?? Guid.NewGuid(), OwnerId = play.OwnerId, PlayId = play.Id,
+                    Id = Guid.NewGuid(), OwnerId = play.OwnerId, PlayId = play.Id,
                     Role = request.Role, EntryId = request.EntryId, OccurredAtUtc = request.OccurredAtUtc,
                     Side = request.Side, Quantity = request.Quantity, Price = request.Price, Fee = request.Fee,
-                    FeeCurrency = request.FeeCurrency, Source = request.Source,
-                    CreatedAtUtc = previous?.CreatedAtUtc ?? now, UpdatedAtUtc = now
-                };
-                var resulting = rows.Where(r => r.Id != row.Id).Append(row).ToList();
-                var ledger = ManualLedger.Calculate(play, resulting);
-                if (play.Status == PlayStatus.Closed && ledger.ClosedAt is null)
-                    throw new ProblemException(409, "A correction cannot reopen a Closed Play.");
-                if (ledger.ClosedAt is { } projectedClose)
-                {
-                    var facts = new ClosedPlayFacts(play, await plays.RevisionsAsync(play.Id, ct),
-                        ledger.Projection, ManualSource: true, ManualFeesComplete: ledger.FeesComplete);
-                    PlayOutcomeCalculator.Outcome(facts, out var problem, projectedClose);
-                    if (problem is not null) throw new ProblemException(400, problem);
-                }
-                if (previous is null) diary.Add(row);
-                else
-                {
-                    previous.OccurredAtUtc = row.OccurredAtUtc; previous.Quantity = row.Quantity; previous.Price = row.Price;
-                    previous.Fee = row.Fee; previous.FeeCurrency = row.FeeCurrency; previous.Source = row.Source; previous.UpdatedAtUtc = now;
-                }
-                diary.Add(new ManualExecutionHistory
-                {
-                    Id = Guid.NewGuid(), OwnerId = play.OwnerId, PlayId = play.Id, ExecutionId = row.Id,
-                    Reason = previous is null ? null : request.Reason!.Trim(), OccurredAtUtc = now,
-                    Before = before is null ? null : JsonSerializer.Serialize(before, Json), After = JsonSerializer.Serialize(Dto(row), Json)
-                });
-                if (play.Status == PlayStatus.Planned && ledger.Entered > 0) plays.Add(play.RecordManualOpen(now));
-                if (play.Status == PlayStatus.Open && ledger.ClosedAt is { } closedAt) plays.Add(play.RecordManualClose(closedAt, now));
-                else play.RecordManualCorrection(ledger.ClosedAt, now);
-                await plays.SaveAsync(ct);
-                return await ManualResult(play, resulting, ct);
+                    FeeCurrency = request.FeeCurrency, Source = request.Source, CreatedAtUtc = now, UpdatedAtUtc = now
+                } : Corrected(play, previous, request, now);
+                return await ApplyAsync(play, rows, [(previous, row)], request.Reason, null, now, ct);
             }, ct), ct);
+
+    /// <summary>
+    /// Corrects several existing executions with one reason, all or nothing (phase 1, 1.3b, decision 5). Each row is
+    /// validated as a single correction is; only the final ledger is checked as a whole, so a closed 1/1 ledger can
+    /// become 2/2 in one step. It never adds, deletes or reopens rows, and each row's history shares one batch ID.
+    /// </summary>
+    public Task<ManualExecutionsDto> CorrectBatchAsync(Guid playId, ManualCorrectionBatchRequest request, CancellationToken ct) =>
+        Idempotent(request.RequestId, new { playId, batch = request }, async () =>
+            await plays.WithPlayLockAsync(playId, async () =>
+            {
+                var play = await RequireManual(playId, ct);
+                if (play.Version != request.ExpectedVersion) throw new ProblemException(409, "This Play changed. Reload before recording facts.");
+                if (play.Status is not (PlayStatus.Open or PlayStatus.Closed))
+                    throw new ProblemException(409, "Corrections require Open/Closed Plays.");
+                if (request.Corrections is not { Count: > 0 } corrections || corrections.Count > MaxManualRecords)
+                    throw new ProblemException(400, $"A correction batch changes 1 to {MaxManualRecords} executions.");
+                if (corrections.Any(c => c is null) || corrections.Select(c => c.ExecutionId).Distinct().Count() != corrections.Count)
+                    throw new ProblemException(400, "A correction batch changes each execution once.");
+                var rows = await diary.ManualAsync(playId, ct);
+                if ((await diary.ManualHistoryAsync(playId, ct)).Count + corrections.Count > MaxManualHistory)
+                    throw new ProblemException(409, "This manual ledger reached its explicit record/history limit.");
+                var now = time.GetUtcNow();
+                var changes = corrections.Select(c =>
+                {
+                    var previous = rows.SingleOrDefault(r => r.Id == c.ExecutionId) ?? throw new ProblemException(404, "Manual execution not found.");
+                    var single = new ManualExecutionRequest(request.RequestId, request.ExpectedVersion, c.Role, c.EntryId, c.OccurredAtUtc,
+                        c.Side, c.Quantity, c.Price, c.Fee, c.FeeCurrency, c.Source, request.Reason);
+                    Validate(single, play, correction: true);
+                    return ((ManualExecution?)previous, Corrected(play, previous, single, now));
+                }).ToList();
+                return await ApplyAsync(play, rows, changes, request.Reason, Guid.NewGuid(), now, ct);
+            }, ct), ct);
+
+    /// <summary>A correction of an existing row: role, entry and side stay, and a Closed ledger keeps its source label.</summary>
+    private static ManualExecution Corrected(Play play, ManualExecution previous, ManualExecutionRequest request, DateTimeOffset now)
+    {
+        if (previous.Role != request.Role || previous.EntryId != request.EntryId || previous.Side != request.Side)
+            throw new ProblemException(409, "A correction keeps execution role, entry and side.");
+        if (play.Status == PlayStatus.Closed && previous.Source != request.Source)
+            throw new ProblemException(409, "Closed corrections keep the source label; correct amounts, prices, costs or times.");
+        return new ManualExecution
+        {
+            Id = previous.Id, OwnerId = play.OwnerId, PlayId = play.Id,
+            Role = request.Role, EntryId = request.EntryId, OccurredAtUtc = request.OccurredAtUtc,
+            Side = request.Side, Quantity = request.Quantity, Price = request.Price, Fee = request.Fee,
+            FeeCurrency = request.FeeCurrency, Source = request.Source, CreatedAtUtc = previous.CreatedAtUtc, UpdatedAtUtc = now
+        };
+    }
+
+    /// <summary>
+    /// Checks the resulting ledger as a whole, then writes the rows, one history entry each (sharing
+    /// <paramref name="batchId"/> when given), and the status the ledger reaches. Nothing is written when a check fails.
+    /// </summary>
+    private async Task<ManualExecutionsDto> ApplyAsync(Play play, List<ManualExecution> rows,
+        IReadOnlyList<(ManualExecution? Previous, ManualExecution Row)> changes, string? reason, Guid? batchId, DateTimeOffset now, CancellationToken ct)
+    {
+        var replaced = changes.Select(c => c.Row.Id).ToHashSet();
+        var resulting = rows.Where(r => !replaced.Contains(r.Id)).Concat(changes.Select(c => c.Row)).ToList();
+        var ledger = ManualLedger.Calculate(play, resulting);
+        if (play.Status == PlayStatus.Closed && ledger.ClosedAt is null)
+            throw new ProblemException(409, "A correction cannot reopen a Closed Play.");
+        if (ledger.ClosedAt is { } projectedClose)
+        {
+            var facts = new ClosedPlayFacts(play, await plays.RevisionsAsync(play.Id, ct),
+                ledger.Projection, ManualSource: true, ManualFeesComplete: ledger.FeesComplete);
+            PlayOutcomeCalculator.Outcome(facts, out var problem, projectedClose);
+            if (problem is not null) throw new ProblemException(400, problem);
+        }
+        foreach (var (previous, row) in changes)
+        {
+            var before = previous is null ? null : Dto(previous);
+            if (previous is null) diary.Add(row);
+            else
+            {
+                previous.OccurredAtUtc = row.OccurredAtUtc; previous.Quantity = row.Quantity; previous.Price = row.Price;
+                previous.Fee = row.Fee; previous.FeeCurrency = row.FeeCurrency; previous.Source = row.Source; previous.UpdatedAtUtc = now;
+            }
+            diary.Add(new ManualExecutionHistory
+            {
+                Id = Guid.NewGuid(), OwnerId = play.OwnerId, PlayId = play.Id, ExecutionId = row.Id,
+                Reason = previous is null ? null : reason!.Trim(), OccurredAtUtc = now, BatchId = batchId,
+                Before = before is null ? null : JsonSerializer.Serialize(before, Json), After = JsonSerializer.Serialize(Dto(row), Json)
+            });
+        }
+        if (play.Status == PlayStatus.Planned && ledger.Entered > 0) plays.Add(play.RecordManualOpen(now));
+        if (play.Status == PlayStatus.Open && ledger.ClosedAt is { } closedAt) plays.Add(play.RecordManualClose(closedAt, now));
+        else play.RecordManualCorrection(ledger.ClosedAt, now);
+        await plays.SaveAsync(ct);
+        return await ManualResult(play, resulting, ct);
+    }
 
     private async Task<Play> RequireManual(Guid id, CancellationToken ct)
     {
@@ -158,7 +215,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
         return new(PlayService.ToDto(play), rows.OrderBy(r => r.OccurredAtUtc).ThenBy(r => r.Id).Select(Dto).ToList(),
             history.Select(h => new ManualHistoryDto(h.Id, h.ExecutionId, h.Reason, h.OccurredAtUtc,
                 h.Before is null ? null : JsonSerializer.Deserialize<ManualExecutionDto>(h.Before, Json),
-                JsonSerializer.Deserialize<ManualExecutionDto>(h.After, Json)!)).ToList(),
+                JsonSerializer.Deserialize<ManualExecutionDto>(h.After, Json)!) { BatchId = h.BatchId }).ToList(),
             new(ManualLedger.Text(ledger.Entered), ManualLedger.Text(ledger.Exited), ManualLedger.Text(ledger.Open),
                 ManualLedger.Text(ledger.Gross), ledger.Net is { } net ? ManualLedger.Text(net) : null, ledger.FeesComplete), ManualNotice)
         {

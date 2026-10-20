@@ -34,8 +34,8 @@ import {
   type RetrospectivePreview, type CreateRetrospectivePlayRequest,
 } from './retrospective'
 import {
-  isManualExecutions, isManualExecutionInput, isManualExecutionCorrection,
-  type ManualExecutions, type ManualExecutionInput, type ManualExecutionCorrection,
+  isManualCorrectionBatch, isManualExecutions, isManualExecutionInput, isManualExecutionCorrection,
+  type ManualCorrectionBatch, type ManualExecutions, type ManualExecutionInput, type ManualExecutionCorrection,
 } from './diary'
 import type { ImageMarkup } from './markup'
 
@@ -312,6 +312,8 @@ export interface WorkspaceApi {
   manualExecutions(id: string, signal?: AbortSignal): Promise<ManualExecutions>
   addManualExecution(id: string, input: ManualExecutionInput, signal?: AbortSignal): Promise<ManualExecutions>
   correctManualExecution(id: string, executionId: string, input: ManualExecutionCorrection, signal?: AbortSignal): Promise<ManualExecutions>
+  /** Corrects several executions with one reason, all or nothing (phase 1, 1.3b). */
+  correctManualExecutions(id: string, batch: ManualCorrectionBatch, signal?: AbortSignal): Promise<ManualExecutions>
   deletePlay(id: string): Promise<void>
   playExecution(id: string, signal?: AbortSignal): Promise<PlayExecution>
   linkOrder(id: string, link: LinkOrder, signal?: AbortSignal): Promise<PlayExecution>
@@ -685,6 +687,10 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
     correctManualExecution: (id, executionId, input, signal) => {
       if (!isManualExecutionCorrection(input)) return Promise.reject(new ApiError('invalid-response', 'Provide valid correction facts and a reason.'))
       return call(`${playPath(id)}/manual-executions/${resourceId(executionId)}`, { ...playRequest, validate: (v): v is ManualExecutions => isManualExecutions(v) && v.play.summary.id === id, method: 'PUT', body: JSON.stringify(input), ...withSignal(signal) })
+    },
+    correctManualExecutions: (id, batch, signal) => {
+      if (!isManualCorrectionBatch(batch)) return Promise.reject(new ApiError('invalid-response', 'Provide valid correction facts for each execution and one reason.'))
+      return call(`${playPath(id)}/manual-executions/corrections`, { ...playRequest, validate: (v): v is ManualExecutions => isManualExecutions(v) && v.play.summary.id === id, method: 'POST', body: JSON.stringify(batch), ...withSignal(signal) })
     },
     deletePlay: id => call(playPath(id), { ...playRequest, validate: none, method: 'DELETE' }),
     playExecution: (id, signal) => call(`${playPath(id)}/execution`, { ...playRequest, validate: isPlayExecution, ...withSignal(signal) }),

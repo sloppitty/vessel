@@ -617,6 +617,9 @@ namespace Vessel.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("jsonb");
 
+                    b.Property<Guid?>("BatchId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Before")
                         .HasColumnType("jsonb");
 

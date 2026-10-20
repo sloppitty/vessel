@@ -18,7 +18,26 @@ public sealed record ManualExecutionDto(Guid Id, string Role, string? EntryId, D
     string Side, string Quantity, string Price, string? Fee, string? FeeCurrency, string Source,
     DateTimeOffset CreatedAtUtc, DateTimeOffset UpdatedAtUtc);
 public sealed record ManualHistoryDto(Guid Id, Guid ExecutionId, string? Reason, DateTimeOffset OccurredAtUtc,
-    ManualExecutionDto? Before, ManualExecutionDto After);
+    ManualExecutionDto? Before, ManualExecutionDto After)
+{
+    /// <summary>Shared by the rows one correction batch changed together; null for single-row writes.</summary>
+    public Guid? BatchId { get; init; }
+}
+
+/// <summary>One row of a correction batch: an existing execution's full corrected facts, as a single correction sends them.</summary>
+public sealed record ManualCorrectionRow(
+    [property: JsonRequired] Guid ExecutionId, [property: JsonRequired] string Role, string? EntryId,
+    [property: JsonRequired] DateTimeOffset OccurredAtUtc, [property: JsonRequired] string Side,
+    [property: JsonRequired] string Quantity, [property: JsonRequired] string Price,
+    string? Fee, string? FeeCurrency, [property: JsonRequired] string Source);
+
+/// <summary>
+/// Several corrections with one reason, applied all or nothing (phase 1, 1.3b, decision 5). Only the final ledger is
+/// checked as a whole, so a closed 1/1 ledger can become 2/2 in one step.
+/// </summary>
+public sealed record ManualCorrectionBatchRequest(
+    [property: JsonRequired] Guid RequestId, [property: JsonRequired] long ExpectedVersion,
+    [property: JsonRequired] string Reason, [property: JsonRequired] IReadOnlyList<ManualCorrectionRow> Corrections);
 public sealed record ManualTotalsDto(string EnteredQuantity, string ExitedQuantity, string OpenQuantity,
     string GrossResultUsd, string? NetResultUsd, bool FeesComplete);
 public sealed record ManualExecutionsDto(PlayDto Play, IReadOnlyList<ManualExecutionDto> Records,
