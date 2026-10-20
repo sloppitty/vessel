@@ -286,6 +286,9 @@ const magnetReach = 12
 
 const timeLabel = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })
 
+/** The narrowest a candle may be drawn, in pixels, so a trade of thousands of candles still fits a chart. */
+const minimumBarSpacing = 0.05
+
 /** Bars of space right of the last candle when a chart opens. */
 const openingRightOffset = 12
 
@@ -323,7 +326,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     ...chartColors(),
     layout: { ...chartColors().layout, fontFamily: theme.font, fontSize: 11, attributionLogo: true },
     // Room right of the last candle keeps it clear of the price scale labels and level tags when the chart opens.
-    timeScale: { ...chartColors().timeScale, timeVisible: true, secondsVisible: false, rightOffset: openingRightOffset },
+    // A long trade's whole range must fit: the library's default stops zooming out at half a pixel per candle.
+    timeScale: { ...chartColors().timeScale, timeVisible: true, secondsVisible: false, rightOffset: openingRightOffset, minBarSpacing: minimumBarSpacing },
     crosshair: { mode: CrosshairMode.Normal },
   })
   const series = chart.addSeries(CandlestickSeries, { ...candleColors(), borderVisible: true })
@@ -355,6 +359,9 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     if (!focus || !loaded.length) return
     chart.timeScale().setVisibleRange({ from: (focus.from / 1000) as UTCTimestamp, to: (focus.to / 1000) as UTCTimestamp })
     focusPending = focus.from < loaded[0]!.time
+    // The trade starts before the loaded candles: ask for the older page directly, since a wide range can leave the
+    // view's left edge, which otherwise asks for it, off screen. Loading stops on its own when no older candles come.
+    if (focusPending) callbacks.onNeedOlder()
   }
   const keepView = () => { focusPending = false }
   container.addEventListener('pointerdown', keepView, true)

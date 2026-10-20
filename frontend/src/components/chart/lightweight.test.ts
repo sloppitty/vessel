@@ -232,15 +232,20 @@ describe('fill markers and trade focus (phase 1, 1.1b)', () => {
     const range = chart.timeScale().setVisibleRange
     adapter.setCandles(candles, true)
     range.mockClear()
-    // The trade starts 30 seconds in; the first page starts at 60 seconds.
+    // The trade starts 30 seconds in; the first page starts at 60 seconds, so the older page is asked for directly.
+    vi.mocked(callbacks.onNeedOlder).mockClear()
     adapter.setFocus({ from: 30_000, to: 300_000 })
     expect(range).toHaveBeenCalledOnce()
+    expect(callbacks.onNeedOlder).toHaveBeenCalledOnce()
     const older = (time: number) => [{ ...candles[0]!, time }, ...candles]
     adapter.setCandles(older(0), false)
     expect(range).toHaveBeenCalledTimes(2)
-    // Covered now: a further page leaves the view alone.
+    // Covered now: no more pages are asked for, and a further page leaves the view alone.
+    expect(callbacks.onNeedOlder).toHaveBeenCalledOnce()
     adapter.setCandles([{ ...candles[0]!, time: -60_000 }, ...older(0)], false)
     expect(range).toHaveBeenCalledTimes(2)
+    // Thousands of candles can be drawn in one view.
+    expect(library.createChart.mock.calls[0]![1]).toMatchObject({ timeScale: { minBarSpacing: 0.05 } })
     // The owner moving the view first ends the wait.
     adapter.setFocus({ from: -300_000, to: 300_000 })
     expect(range).toHaveBeenCalledTimes(3)

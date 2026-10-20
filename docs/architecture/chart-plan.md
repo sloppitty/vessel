@@ -350,7 +350,8 @@ Phase 1.1b of the [learning-loop contract](phase1-learning-loop-contract.md). It
   fill, padded either side by a quarter of its length and at least five candles.
   - `ChartAdapter.setFocus(range)` applies the range at a reset and once per new range, so the owner can pan freely.
     The chart can only show loaded candles, so a trade longer than the first page is framed again as older pages
-    arrive, until it fits or the owner moves the view.
+    arrive, until it fits or the owner moves the view. While it does not fit, the chart asks for the next older page
+    itself, and candles can be drawn as narrow as 0.05 px, so a trade of thousands of candles fits one view.
   - Its candles come from an anchored cache entry: the tail ends at the padded end of the trade, rounded out to whole
     milliseconds and never later than now, and older pages load on scroll as usual.
   - The anchor is part of the chart's view key, so the trade's candles arrive as a reset and the focus applies even
