@@ -96,6 +96,16 @@ October 20, 2026, branch `t3/phase1-receipt`, stacked on the integration base:
   - typecheck, lint and build clean.
 - **Not in this pull request.** Fill markers and the trade-dated chart are 1.1b. The popup-over-a-focused-field report
   has not been reproduced yet.
+- **Sol (Codex) round 1.** Five findings, all fixed:
+  - **Plan text (medium).** Planned values read plan numbers with the editor's plain-decimal grammar, and leverage as
+    `leverageOf` does. Legacy text such as `100.`, `.5` or ` 3 ` can no longer make an execution response invalid or
+    disagree with the editor.
+  - **Manual fees (medium).** The manual ledger lists known fees by currency and counts executions with unknown costs.
+    Both show in its Execution totals and its Review header.
+  - **Small R (medium).** A non-zero R that rounds to zero reads "−<0.01R" or "+<0.01R".
+  - **Focus (low).** A journal save that goes through the revision-reason dialog still returns focus to the journal. A
+    test fails without this fix.
+  - **Check.** `scripts/check.sh` passed again: backend 3,558 passed, 5 skipped; frontend 149 files and 3,741 tests.
 
 ## 1.2 Honest review queue and in-trade log
 
