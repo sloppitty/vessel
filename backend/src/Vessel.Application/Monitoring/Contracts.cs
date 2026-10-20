@@ -7,13 +7,56 @@ namespace Vessel.Application.Monitoring;
 
 /// <param name="Outcome"><c>unverifiable</c> when the subject stayed unobservable beyond the monitor lifetime; the
 /// record is neither resolved nor still checked. Null otherwise.</param>
+/// <param name="LastObservedAtUtc">Source time of the last decisive (fresh present or absent) observation; null when none
+/// is recorded.</param>
 public sealed record MonitorDiscrepancyDto(Guid Id, Guid AccountId, Guid? PlayId, string ContractId, string Kind,
     string Severity, string State, DateTimeOffset OpenedAtUtc, DateTimeOffset? ConfirmedAtUtc,
     DateTimeOffset? ResolvedAtUtc, DateTimeOffset? DismissedAtUtc, string? Note, JsonElement Details,
-    string? Outcome = null, DateTimeOffset? UnverifiableAtUtc = null);
+    string? Outcome = null, DateTimeOffset? UnverifiableAtUtc = null, DateTimeOffset? LastObservedAtUtc = null);
+/// <summary>
+/// Evidence for one planned stop level: <c>resting</c> (a linked closing stop rested in the current book at
+/// <paramref name="ObservedAtUtc"/>, at the planned price within the matcher's step), <c>resting-elsewhere</c> (the same,
+/// at another price), <c>not-seen</c> (a complete, fresh book had none), <c>unknown</c> or <c>not-read</c> (the venue's
+/// order reader does not return the current book). <paramref name="OrderId"/> is the venue order ID of the linked order
+/// concerned, when there is one. <paramref name="Price"/> is that resting order's acting price and
+/// <paramref name="PlannedPrice"/> the saved level price the check compared it with, both exact; null when unknown.
+/// </summary>
+public sealed record MonitorStopEvidenceDto(string EntryId, string LevelId, string Evidence, string? OrderId, DateTimeOffset? ObservedAtUtc,
+    string? Price = null, string? PlannedPrice = null);
+
+/// <summary>
+/// The last stop-coverage outcome recorded for an Open Play. <paramref name="State"/> is projected at read time:
+/// <c>stale</c> when <paramref name="CheckedAtUtc"/> is older than twice the monitor interval, otherwise
+/// <paramref name="RecordedState"/> (<c>known</c>, <c>shared</c>, <c>unknown</c> or <c>unsupported</c>).
+/// <paramref name="Covered"/> is set only for a recorded <c>known</c> state.
+/// </summary>
+public sealed record MonitorCoverageDto(Guid PlayId, string ContractId, string State, string RecordedState, bool? Covered,
+    string Reason, DateTimeOffset CheckedAtUtc, IReadOnlyList<MonitorStopEvidenceDto> Stops);
+
+/// <summary>One Open Play's coverage as a check evaluated it, before it is stored.</summary>
+public sealed record MonitorCoverageOutcome(Guid PlayId, string ContractId, string State, bool? Covered, string Reason,
+    IReadOnlyList<MonitorStopEvidenceDto> Stops);
+
+/// <param name="DiscrepanciesTruncated">More visible records exist than <paramref name="Discrepancies"/> lists (at most
+/// <see cref="MonitorDiscrepancyList.MaxRecords"/>). Outstanding incidents are listed first, so only older records are left
+/// out unless the incidents alone exceed the cap. Optional: an older producer omits it.</param>
+/// <param name="Coverage">Stored stop coverage of the account's Open Plays, stale projected at read time. Optional: an
+/// older producer may omit it.</param>
+/// <param name="UncheckedPlays">Open, tracked Plays on the account with no recorded coverage yet (after the migration, or
+/// once reconciliation opens one, until the next check). Never "Monitored" while above zero. Optional, like
+/// <paramref name="Coverage"/>.</param>
 public sealed record AccountMonitorDto(Guid AccountId, string State, DateTimeOffset? LastAttemptAtUtc,
     DateTimeOffset? LastSuccessAtUtc, DateTimeOffset? NextRunAtUtc, string ManualState, string? RunTrigger,
-    DateTimeOffset? NextManualAllowedAtUtc, string? Error, bool WorkerOnline, IReadOnlyList<MonitorDiscrepancyDto> Discrepancies);
+    DateTimeOffset? NextManualAllowedAtUtc, string? Error, bool WorkerOnline, IReadOnlyList<MonitorDiscrepancyDto> Discrepancies,
+    bool DiscrepanciesTruncated = false, IReadOnlyList<MonitorCoverageDto>? Coverage = null, int UncheckedPlays = 0);
+/// <summary>
+/// Visible records, outstanding incidents (open, or unverifiable and not dismissed since) first, then the rest by
+/// confirmation time, newest first; at most <see cref="MaxRecords"/>. <paramref name="Truncated"/> says the cap left some out.
+/// </summary>
+public sealed record MonitorDiscrepancyList(IReadOnlyList<MonitorDiscrepancyDto> Records, bool Truncated)
+{
+    public const int MaxRecords = 500;
+}
 public sealed record MonitorSummaryDto(bool WorkerOnline, DateTimeOffset? HeartbeatAtUtc, IReadOnlyList<AccountMonitorDto> Accounts);
 public sealed record MonitorRunAccepted(Guid RequestId, AccountMonitorDto Monitor);
 
@@ -28,16 +71,24 @@ public sealed record MonitorCapture(Account Account, string? CredentialRevision,
 public sealed record MonitorLease(Guid OwnerId, Guid AccountId, Guid RequestId, long Generation, string WorkerId, string Trigger);
 public sealed record MonitorRead(PerpetualVenueReadResult Sync, VenueOrderReadResult? Orders,
     string? OrderError = null, bool CredentialError = false);
+/// <param name="CurrentOrderBook">The venue capability: its order reader returns the current open book. Without it the
+/// book-dependent checks do not run and protection coverage is unsupported. Required, so no caller assumes a book.</param>
 public sealed record MonitorEvaluation(Guid RunId, Account Account, MonitorRead Read, DateTimeOffset? PreviousSuccessAtUtc,
-    DateTimeOffset? NewestFillBeforeReadUtc, bool HistoryGap, string Trigger);
-public sealed record MonitorEvaluationResult(DateTimeOffset? NextConfirmationAtUtc, bool Incomplete = false, string? SafeNotice = null);
+    DateTimeOffset? NewestFillBeforeReadUtc, bool HistoryGap, string Trigger, bool CurrentOrderBook);
+/// <param name="Coverage">Stop coverage of each evaluated Open Play; null when the facts were too incomplete to name them,
+/// which leaves the stored outcomes to go stale.</param>
+public sealed record MonitorEvaluationResult(DateTimeOffset? NextConfirmationAtUtc, bool Incomplete = false, string? SafeNotice = null,
+    IReadOnlyList<MonitorCoverageOutcome>? Coverage = null);
 
 /// <summary>Called inside the fenced account unit of work, after imports and execution reconciliation.</summary>
 public interface IMonitorEvaluator
 {
     /// <returns>A confirmation deadline, if another fresh account-wide observation is needed.</returns>
     Task<MonitorEvaluationResult> EvaluateAsync(MonitorEvaluation observation, CancellationToken ct);
+    /// <summary>The records of <see cref="ReadListAsync"/>, without its truncation flag.</summary>
     Task<IReadOnlyList<MonitorDiscrepancyDto>> ReadAsync(Guid accountId, Guid? playId, CancellationToken ct);
+    /// <summary>Visible records of the account (or of a Play), outstanding incidents first, and whether the cap left any out.</summary>
+    Task<MonitorDiscrepancyList> ReadListAsync(Guid accountId, Guid? playId, CancellationToken ct);
     /// <summary>
     /// Discrepancy housekeeping for a lease-owned run that made no discrepancy decisions, under the same account fence.
     /// <paramref name="interrupted"/> (failed or discarded checks) breaks pending confirmation sequences; every run
@@ -75,7 +126,10 @@ public interface IMonitorRunLog
 public interface IMonitorStore
 {
     Task<MonitorCapture?> CaptureAsync(Guid accountId, CancellationToken ct);
-    /// <summary>Monitor rows of enabled, currently eligible accounts on the given venues, bounded, in one read.</summary>
+    /// <summary>
+    /// Monitor rows of enabled accounts on the given venues that are currently eligible, or still hold an outstanding
+    /// announcement (an open record, or an unverifiable one not dismissed since), bounded, in one read.
+    /// </summary>
     Task<IReadOnlyList<(MonitorAccount Row, string VenueId)>> SummaryAsync(IReadOnlyCollection<string> venueIds,
         DateTimeOffset now, CancellationToken ct);
     Task<MonitorAccount?> FindAsync(Guid accountId, CancellationToken ct);
@@ -105,6 +159,15 @@ public interface IMonitorStore
     /// </summary>
     Task UpdateWatchesAsync(Guid accountId, VenueOrderReadResult? orders, DateTimeOffset now, CancellationToken ct);
     Task<IReadOnlyList<MonitorWatchDto>> WatchesAsync(Guid playId, DateTimeOffset now, CancellationToken ct);
+    /// <summary>
+    /// Inside the account lock and unit of work: replaces the account's stored coverage with one evaluated check's rows,
+    /// upserting by Play and removing Plays the check no longer evaluated.
+    /// </summary>
+    Task SaveCoverageAsync(Guid accountId, IReadOnlyList<MonitorCoverage> rows, CancellationToken ct);
+    /// <summary>Stored coverage of the accounts' currently Open Plays, at most 500 per account, by account and Play.</summary>
+    Task<IReadOnlyList<MonitorCoverage>> CoverageAsync(IReadOnlyCollection<Guid> accountIds, CancellationToken ct);
+    /// <summary>Per account, its Open tracked Plays (planned, on a venue instrument) without a coverage row; absent when none.</summary>
+    Task<IReadOnlyDictionary<Guid, int>> UncheckedPlaysAsync(IReadOnlyCollection<Guid> accountIds, CancellationToken ct);
     /// <summary>Inside account admission transaction. Locks the owner budget, then this venue budget, and checks both capacities.</summary>
     Task<bool> ReadCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct);
     /// <summary>Lock-free preflight only; admission rechecks under the venue budget lock.</summary>

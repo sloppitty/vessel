@@ -10,6 +10,8 @@ import { accountFixture, idleMarketStream, playApiStubs, playCountsFrom, playsFr
 import { PlaysPage } from './PlaysPage'
 import { createPlaysSession } from './saved'
 import { initialPlaysList, type PlaysListState } from './plays-list'
+import type { AccountMonitor } from '@/api/monitor'
+import { discrepancyFixture, missingStopFixture, monitorFixture, shortStopFixture } from '@/test/monitor-fixture'
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const play = (n: number, fields: Partial<PlaySummary> = {}): PlaySummary => ({ ...savedPlayFixture.summary, id: id(n), title: `Play ${n}`,
@@ -26,11 +28,12 @@ function client(plays: PlaySummary[] = library, overrides: Partial<WorkspaceApi>
     plays: ReturnType<typeof vi.fn<WorkspaceApi['plays']>>; playCounts: ReturnType<typeof vi.fn<WorkspaceApi['playCounts']>> }
 }
 /** The shell's memory: the Play session and the list state live outside the page. */
-function Shell({ api, initial = initialPlaysList, onList }: { api: WorkspaceApi; initial?: PlaysListState; onList?: (list: PlaysListState) => void }) {
+function Shell({ api, initial = initialPlaysList, onList, monitors }: { api: WorkspaceApi; initial?: PlaysListState; onList?: (list: PlaysListState) => void
+  monitors?: AccountMonitor[] }) {
   const [session, setSession] = useState(createPlaysSession)
   const [list, setList] = useState(initial)
   return <NotificationProvider><PlaysPage accounts={[accountFixture]} portfolios={[portfolioFixture]} api={api} session={session} onSession={setSession}
-    list={list} onList={next => { setList(next); onList?.(next) }} /></NotificationProvider>
+    list={list} onList={next => { setList(next); onList?.(next) }} {...monitors ? { accountMonitors: monitors } : {}} /></NotificationProvider>
 }
 const lastQuery = (api: ReturnType<typeof client>) => api.plays.mock.calls.at(-1)![0]
 
@@ -180,3 +183,28 @@ function PlaysPageWith({ api, list }: { api: WorkspaceApi; list: PlaysListState 
   return <NotificationProvider><PlaysPage accounts={[accountFixture]} portfolios={[portfolioFixture]} api={api} session={session} onSession={setSession}
     list={list} onList={vi.fn()} /></NotificationProvider>
 }
+
+describe('Plays list monitor incidents (Phase 0, 0.4a)', () => {
+  it('marks each row with its open incidents from the monitor summary, by Play or by the instrument\'s listed Plays', async () => {
+    const api = client()
+    const monitors: AccountMonitor[] = [{ ...monitorFixture, discrepancies: [
+      { ...missingStopFixture, playId: id(3) },
+      // An instrument-level record names its Plays in details.
+      { ...discrepancyFixture, id: 'position', kind: 'position.excess', playId: null, details: { playIds: [id(2), id(3)], expectedQuantity: '1', venueQuantity: '2' } },
+      // Resolved and dismissed records are history, not incidents.
+      { ...shortStopFixture, playId: id(2), state: 'resolved' },
+      { ...shortStopFixture, id: 'dismissed', playId: id(2), state: 'dismissed' },
+    ] }]
+    render(<Shell api={api} monitors={monitors} />)
+    const open = await screen.findByRole('button', { name: 'Open Open ETH' })
+    expect(within(open).getByText('1 critical · 1 warning')).toBeInTheDocument()
+    expect(open).toHaveAccessibleDescription(expect.stringContaining('Needs attention: 1 critical · 1 warning'))
+    expect(within(screen.getByRole('button', { name: 'Open Planned BTC' })).getByText('1 warning')).toBeInTheDocument()
+  })
+  it('shows nothing on rows without an open incident', async () => {
+    const api = client()
+    render(<Shell api={api} monitors={[{ ...monitorFixture, discrepancies: [{ ...shortStopFixture, playId: id(3), state: 'resolved' }] }]} />)
+    const open = await screen.findByRole('button', { name: 'Open Open ETH' })
+    expect(within(open).queryByText(/critical|warning/)).not.toBeInTheDocument()
+  })
+})

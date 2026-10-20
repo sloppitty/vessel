@@ -318,6 +318,56 @@ namespace Vessel.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Vessel.Domain.Monitoring.MonitorCoverage", b =>
+                {
+                    b.Property<Guid>("PlayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CheckedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ContractId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool?>("Covered")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(48)
+                        .HasColumnType("character varying(48)");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Stops")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("PlayId");
+
+                    b.HasIndex("OwnerId", "AccountId");
+
+                    b.HasIndex("OwnerId", "PlayId");
+
+                    b.ToTable("monitor_coverage", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_monitor_coverage_covered", "(\"State\" = 'known') = (\"Covered\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_monitor_coverage_state", "\"State\" IN ('known','shared','unknown','unsupported')");
+                        });
+                });
+
             modelBuilder.Entity("Vessel.Domain.Monitoring.MonitorExitWatch", b =>
                 {
                     b.Property<Guid>("LinkId")
@@ -1421,6 +1471,23 @@ namespace Vessel.Persistence.Migrations
                     b.HasOne("Vessel.Domain.Accounts.Account", null)
                         .WithMany()
                         .HasForeignKey("OwnerId", "AccountId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Monitoring.MonitorCoverage", b =>
+                {
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Vessel.Domain.Plays.Play", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "PlayId")
                         .HasPrincipalKey("OwnerId", "Id")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();

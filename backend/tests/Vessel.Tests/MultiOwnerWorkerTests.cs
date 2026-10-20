@@ -643,6 +643,8 @@ public sealed class MultiOwnerWorkerTests
         public Task<MonitorEvaluationResult> EvaluateAsync(MonitorEvaluation observation, CancellationToken ct) => Task.FromResult(new MonitorEvaluationResult(null));
         public Task<IReadOnlyList<MonitorDiscrepancyDto>> ReadAsync(Guid accountId, Guid? playId, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<MonitorDiscrepancyDto>>([]);
+        public Task<MonitorDiscrepancyList> ReadListAsync(Guid accountId, Guid? playId, CancellationToken ct) =>
+            Task.FromResult(new MonitorDiscrepancyList([], false));
         public Task SettleAsync(Account account, Guid runId, string trigger, bool interrupted, CancellationToken ct) => Task.CompletedTask;
     }
 

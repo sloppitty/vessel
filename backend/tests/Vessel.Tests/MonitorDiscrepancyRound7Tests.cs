@@ -155,6 +155,7 @@ public sealed class MonitorDiscrepancyRound7Tests
         public Task<MonitorEvaluationResult> EvaluateAsync(MonitorEvaluation observation, CancellationToken ct)
         { Evaluations++; return inner.EvaluateAsync(observation, ct); }
         public Task<IReadOnlyList<MonitorDiscrepancyDto>> ReadAsync(Guid account, Guid? play, CancellationToken ct) => inner.ReadAsync(account, play, ct);
+        public Task<MonitorDiscrepancyList> ReadListAsync(Guid account, Guid? play, CancellationToken ct) => inner.ReadListAsync(account, play, ct);
         public Task SettleAsync(Account account, Guid run, string trigger, bool interrupted, CancellationToken ct)
         { Settlements.Add(interrupted); return inner.SettleAsync(account, run, trigger, interrupted, ct); }
     }

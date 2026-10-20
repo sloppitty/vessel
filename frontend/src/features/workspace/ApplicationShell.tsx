@@ -1,4 +1,4 @@
-import { createRef, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createRef, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Tooltip } from 'radix-ui'
 import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
@@ -11,6 +11,8 @@ import { createPlaysSession, hasUnsavedPlayWork, startNewPlay, type PlaysSession
 import { initialPlaysList } from '@/features/plays/plays-list'
 import type { PlayView } from '@/api/plays'
 import { useMonitorEvents } from './useMonitorEvents'
+import { countIncidents, incidentsBeyondCap, monitorIncidents } from '@/features/monitor/incidents'
+import { IncidentCount } from '@/features/monitor/IncidentBadge'
 import { useInAppNotifications } from '@/features/notifications/useInAppNotifications'
 import { initialNotificationList } from '@/features/notifications/notification-list'
 import { NotificationBadge } from '@/features/notifications/NotificationBadge'
@@ -180,6 +182,9 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
   const inApp = useInAppNotifications({ api, active: disconnectedApi !== api, onLink: link => notificationLink.current(link),
     onOpenPage: () => navigate('notifications') })
   const monitor = useMonitorEvents(api, disconnectedApi !== api, reload, reloadKey, inApp.handlers)
+  // The persistent incident count: stored monitor records only, never notifications. Shared by the Plays entry and Overview.
+  const incidents = useMemo(() => monitorIncidents(monitor.summary?.accounts ?? []), [monitor.summary])
+  const incidentCounts = countIncidents(incidents, incidentsBeyondCap(monitor.summary?.accounts ?? []))
   // Derived from the request generation so Reload shows progress and a repeated
   // failure visibly clears and returns, without a synchronous effect render.
   const loading = loaded === null || loaded.api !== api || loaded.key !== reloadKey
@@ -318,7 +323,14 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
         {navigationCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
       </button>
       <div className="nav-section-label">Workspace</div>
-      <nav>{pages.filter(p => p.id !== 'settings' && p.id !== 'notifications').map(({ id, label, icon: Icon }) => <a key={id} href={`#${id}`} className={`shell-nav-item ${page === id ? 'active' : ''}`} aria-label={label} title={label} onClick={() => navigate(id)} aria-current={page === id ? 'page' : undefined}><Icon size={18} aria-hidden="true" /><span className="sidebar-copy">{label}</span>{id === 'accounts' && accounts.length > 0 && <small>{accounts.length}</small>}</a>)}</nav>
+      <nav>{pages.filter(p => p.id !== 'settings' && p.id !== 'notifications').map(({ id, label, icon: Icon }) => {
+        // Plays keeps its name; open monitor incidents describe it, beside a count in their severity tone.
+        const incidentsShown = id === 'plays' && incidentCounts.total > 0
+        return <a key={id} href={`#${id}`} className={`shell-nav-item ${page === id ? 'active' : ''}`} aria-label={label} title={label} onClick={() => navigate(id)} aria-current={page === id ? 'page' : undefined}
+          aria-describedby={incidentsShown ? 'plays-nav-incidents' : undefined}><Icon size={18} aria-hidden="true" /><span className="sidebar-copy">{label}</span>
+          {id === 'accounts' && accounts.length > 0 && <small>{accounts.length}</small>}
+          {incidentsShown && <IncidentCount counts={incidentCounts} id="plays-nav-incidents" />}</a>
+      })}</nav>
       <div className="nav-section-label later-section">Later</div>
       <div className="shell-nav-later" role="link" aria-label="Strategies" aria-disabled="true" title="Strategies are not available yet"><Compass size={18} aria-hidden="true" /><span className="sidebar-copy">Strategies</span><small className="sidebar-copy" aria-hidden="true">Soon</small></div>
       <div className="shell-sidebar-bottom">
@@ -368,7 +380,7 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
         <PageErrorBoundary key={page}><div className="page-settle">
         {page === 'review' && cursorReady && <Suspense fallback={<PageLoading />}><ReviewPage api={api} reloadGeneration={reloadKey} onOpenPlay={viewPlay} workspaceAccounts={accounts} /></Suspense>}
 
-        {page === 'overview' && data && <OverviewPage data={data} api={api} monitors={monitor.summary?.accounts ?? []} overviewQuery={overviewQuery} setOverviewQuery={setOverviewQuery}
+        {page === 'overview' && data && <OverviewPage data={data} api={api} monitors={monitor.summary?.accounts ?? []} incidents={incidents} overviewQuery={overviewQuery} setOverviewQuery={setOverviewQuery}
           reloadKey={reloadKey} refreshAllAction={refreshAllAction} refreshing={refreshing} onAddAccount={() => setAccountDialog(true)}
           onCreatePortfolio={() => setPortfolioDialog(true)} onAccounts={() => navigate('accounts')} onActivity={() => navigate('activity')}
           viewAccount={viewAccount} sync={sync} manageAccount={manageAccount} browsePlays={browsePlays} viewPlay={viewPlay} reload={reload} />}

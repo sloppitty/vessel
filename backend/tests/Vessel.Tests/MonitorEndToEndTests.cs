@@ -245,13 +245,21 @@ public sealed class MonitorEndToEndTests
         var json = fixture.ApiJsonOptions();
         var discrepancy = JsonSerializer.SerializeToElement(new MonitorDiscrepancyDto(Guid.NewGuid(), fixture.AccountId, fixture.BtcPlay,
             "BTC", "position.excess", "warning", "open", fixture.Clock.GetUtcNow(), fixture.Clock.GetUtcNow(), null, null, null,
-            JsonSerializer.SerializeToElement(new { venueQuantity = "0.100000000000000001", playQuantity = "0.1" })), json);
+            JsonSerializer.SerializeToElement(new { venueQuantity = "0.100000000000000001", playQuantity = "0.1" }),
+            LastObservedAtUtc: fixture.Clock.GetUtcNow()), json);
         // Outcomes that need lifetimes to pass: a publicly unverifiable candidate and an unverifiable exit watch.
         var unverifiable = JsonSerializer.SerializeToElement(new MonitorDiscrepancyDto(Guid.NewGuid(), fixture.AccountId, fixture.BtcPlay,
             "BTC", "position.missing", "warning", "candidate", fixture.Clock.GetUtcNow(), null, null, null, null,
-            JsonSerializer.SerializeToElement(new { venueQuantity = "0", playQuantity = "0.1" }), "unverifiable", fixture.Clock.GetUtcNow()), json);
+            JsonSerializer.SerializeToElement(new { venueQuantity = "0", playQuantity = "0.1" }), "unverifiable", fixture.Clock.GetUtcNow(),
+            fixture.Clock.GetUtcNow().AddMinutes(-30)), json);
         var watch = JsonSerializer.SerializeToElement(new MonitorWatchDto(Guid.NewGuid(), fixture.BtcPlay, "exit-order", "stop", "unverifiable",
             fixture.Clock.GetUtcNow(), fixture.Clock.GetUtcNow()), json);
+        // Stop coverage needs an Open Play: a known covered outcome whose stop rests away from its planned price, and a
+        // stale unsupported one.
+        var coverage = JsonSerializer.SerializeToElement(new MonitorCoverageDto(fixture.BtcPlay, "BTC", "known", "known", true, "stop-orders",
+            fixture.Clock.GetUtcNow(), [new("entry-1", "stop-1", "resting-elsewhere", "stop-order", fixture.Clock.GetUtcNow(), "94.5", "95")]), json);
+        var coverageUnsupported = JsonSerializer.SerializeToElement(new MonitorCoverageDto(fixture.BtcPlay, "BTC", "stale", "unsupported", null,
+            "current-book-not-read", fixture.Clock.GetUtcNow().AddMinutes(-30), [new("entry-1", "stop-1", "not-read", null, null, null, "95")]), json);
         var document = new JsonObject
         {
             ["runAccepted"] = JsonNode.Parse(accepted.GetRawText()),
@@ -264,6 +272,8 @@ public sealed class MonitorEndToEndTests
             ["discrepancy"] = JsonNode.Parse(discrepancy.GetRawText()),
             ["discrepancyUnverifiable"] = JsonNode.Parse(unverifiable.GetRawText()),
             ["watchUnverifiable"] = JsonNode.Parse(watch.GetRawText()),
+            ["coverage"] = JsonNode.Parse(coverage.GetRawText()),
+            ["coverageUnsupported"] = JsonNode.Parse(coverageUnsupported.GetRawText()),
         };
         var actual = ContractFixtures.Normalize(document.ToJsonString(new JsonSerializerOptions
             { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping })) + "\n";

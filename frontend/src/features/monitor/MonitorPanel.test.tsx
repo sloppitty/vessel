@@ -1,9 +1,9 @@
-import { act, fireEvent, render, renderHook, screen } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceApi } from '@/api/workspace'
 import type { AccountMonitor } from '@/api/monitor'
 import { ApiError } from '@/api/errors'
-import { discrepancyFixture, monitorFixture } from '@/test/monitor-fixture'
+import { coverageAs, coverageFixture, discrepancyFixture, missingStopFixture, monitorFixture, shortStopFixture } from '@/test/monitor-fixture'
 import { MonitorBadge, MonitorDiscrepancies, MonitorPanel, MonitorWatches } from './MonitorPanel'
 import { useMonitorRun } from './useMonitorRun'
 
@@ -208,7 +208,11 @@ describe('monitor controls', () => {
     expect(screen.getByText('No longer resting')).toHaveAttribute('data-watch', 'resolved')
     expect(screen.getByText('Unverifiable')).toHaveAttribute('data-watch', 'unverifiable')
     expect(screen.getAllByText(/may still rest at the venue/)).toHaveLength(1)
-    expect(screen.getByText('Entry order entry-3')).toBeInTheDocument()
+    // Orders read "Order <venue ID> · <role>", or the plan level's name where the Play knows it.
+    expect(screen.getByText('Order entry-3 · entry')).toBeInTheDocument()
+    view.rerender(<MonitorWatches watches={[{ ...base, linkId: 'l-1', orderId: 'exit-1', role: 'stop', state: 'watching', endedAtUtc: null }]}
+      levelName={watch => watch.linkId === 'l-1' ? 'Entry 1 stop' : null} />)
+    expect(screen.getByText('Order exit-1 · Entry 1 stop')).toBeInTheDocument()
     view.rerender(<MonitorWatches watches={[]} />)
     expect(screen.queryByRole('region', { name: 'Watched orders' })).not.toBeInTheDocument()
   })
@@ -314,5 +318,149 @@ describe('monitor controls', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(17_000) })
     expect(screen.getByRole('button', { name: 'Check' })).toBeEnabled()
     expect(api.accountMonitor).toHaveBeenCalledTimes(2)
+  })
+})
+
+/** The value beside a fact-table label, or null when the record has no such row. */
+const fact = (item: HTMLElement, label: string) => {
+  const term = within(item).queryByText(label, { selector: 'dt' })
+  return term ? term.nextElementSibling?.textContent ?? null : null
+}
+
+describe('incident visibility (Phase 0, 0.4a)', () => {
+  it('says when older records are not shown, and counts incidents as a lower bound when they alone fill the cap', () => {
+    const view = render(<MonitorDiscrepancies discrepancies={[missingStopFixture, { ...shortStopFixture, state: 'resolved' }]} truncated
+      busy={false} onDismiss={vi.fn()} />)
+    expect(screen.getByText('Older records not shown.')).toBeInTheDocument()
+    view.rerender(<MonitorDiscrepancies discrepancies={[missingStopFixture]} busy={false} onDismiss={vi.fn()} />)
+    expect(screen.queryByText('Older records not shown.')).not.toBeInTheDocument()
+    view.unmount()
+    // Every listed record is an incident and the server says the list was cut: further incidents may exist.
+    const panel = render(<MonitorPanel monitor={{ ...monitorFixture, discrepancies: [missingStopFixture, shortStopFixture], discrepanciesTruncated: true }}
+      busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(screen.getByRole('region', { name: 'Background monitor' })).getByText('Needs attention · 2+ incidents')).toBeInTheDocument()
+    // With history in the list, every incident was listed: exact counts.
+    panel.rerender(<MonitorPanel monitor={{ ...monitorFixture, discrepancies: [missingStopFixture, { ...shortStopFixture, state: 'resolved' }],
+      discrepanciesTruncated: true }} busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(screen.getByRole('region', { name: 'Background monitor' })).getByText('Needs attention · 1 critical')).toBeInTheDocument()
+  })
+  it('heads the panel with its open incidents and never says Monitored beside an open critical record', () => {
+    const view = render(<MonitorPanel monitor={{ ...monitorFixture, discrepancies: [missingStopFixture] }} busy={false} error={null} onCheck={vi.fn()} />)
+    const panel = () => screen.getByRole('region', { name: 'Background monitor' })
+    expect(within(panel()).queryByText('Monitored')).not.toBeInTheDocument()
+    expect(within(panel()).getByText('Needs attention · 1 critical')).toBeInTheDocument()
+    // The Execution tab passes the Play's own records instead of the account's.
+    view.rerender(<MonitorPanel monitor={monitorFixture} discrepancies={[missingStopFixture, shortStopFixture]} busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).getByText('Needs attention · 1 critical · 1 warning')).toBeInTheDocument()
+    // Resolved and dismissed records leave the run state as the heading.
+    view.rerender(<MonitorPanel monitor={monitorFixture} discrepancies={[{ ...missingStopFixture, state: 'resolved' }, { ...shortStopFixture, state: 'dismissed' }]}
+      busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).getByText('Monitored')).toBeInTheDocument()
+    // A stale run keeps its state beside the incidents; an unverifiable record counts until it is dismissed.
+    const unverifiable = { ...shortStopFixture, state: 'candidate' as const, outcome: 'unverifiable' as const, unverifiableAtUtc: '2026-10-21T10:00:00Z' }
+    view.rerender(<MonitorPanel monitor={{ ...monitorFixture, state: 'stale' }} discrepancies={[unverifiable]} busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).getByText('Needs attention · 1 warning')).toBeInTheDocument()
+    expect(within(panel()).getByText('Monitor stale')).toBeInTheDocument()
+  })
+  it('replaces raw kinds and JSON with a human fact table, the orders and one next action', () => {
+    render(<MonitorDiscrepancies discrepancies={[shortStopFixture]} busy={false} onDismiss={vi.fn()} />)
+    const item = screen.getByRole('listitem')
+    expect(within(item).getByText('The stop covers less than the position')).toBeInTheDocument()
+    expect(within(item).queryByText(/protection\.short/)).not.toBeInTheDocument()
+    expect(fact(item, 'Open quantity')).toBe('1.25')
+    expect(fact(item, 'Stop quantity')).toBe('0.5')
+    expect(fact(item, 'Uncovered')).toBe('0.75')
+    expect(fact(item, 'Last observed')).toBe(new Date('2026-10-14T10:05:00Z').toLocaleString())
+    expect(within(item).getByText('Order 900000029 · stop · resting')).toBeInTheDocument()
+    expect(within(item).getAllByText(/^Next: /)).toHaveLength(1)
+    // The recorded JSON stays available, closed, behind a disclosure.
+    const disclosure = within(item).getByText('Recorded details').closest('details')!
+    expect(disclosure).not.toHaveAttribute('open')
+    expect(disclosure.querySelector('pre')).toHaveTextContent('"stopCoverage": "orders"')
+    expect(screen.getByRole('textbox', { name: 'Dismissal note: The stop covers less than the position · BTC' })).toBeInTheDocument()
+  })
+  it('names whole-position or unknown coverage instead of computing an uncovered quantity, and keeps unknown as Unknown', () => {
+    const whole = { ...shortStopFixture, details: { ...shortStopFixture.details, stopCoverage: 'whole-position' } }
+    const unknown = { ...missingStopFixture, id: 'unknown', details: { ...missingStopFixture.details, quantity: null, stopCoverage: 'unknown' } }
+    render(<MonitorDiscrepancies discrepancies={[whole, unknown]} busy={false} onDismiss={vi.fn()} />)
+    const [first, second] = screen.getAllByRole('listitem')
+    expect(fact(first!, 'Stop coverage')).toBe('Whole-position stop')
+    expect(fact(first!, 'Uncovered')).toBeNull()
+    expect(fact(first!, 'Stop quantity')).toBeNull()
+    expect(fact(second!, 'Open quantity')).toBe('Unknown')
+    expect(fact(second!, 'Stop coverage')).toBe('Unknown')
+    expect(fact(second!, 'Uncovered')).toBeNull()
+    expect(within(second!).getByText('No stop protects the open position')).toBeInTheDocument()
+    expect(within(second!).getByText('Order 900000028 · target · resting')).toBeInTheDocument()
+  })
+  it('closes an unverifiable record once dismissed, and offers no next action or dismissal for history', () => {
+    const dismissed = { ...shortStopFixture, state: 'dismissed' as const, outcome: 'unverifiable' as const,
+      unverifiableAtUtc: '2026-10-21T10:00:00Z', dismissedAtUtc: '2026-10-21T11:00:00Z', note: 'Checked at the venue.' }
+    const view = render(<MonitorDiscrepancies discrepancies={[dismissed]} busy={false} onDismiss={vi.fn()} />)
+    expect(screen.getByText('warning · dismissed')).not.toHaveAttribute('data-outcome')
+    expect(screen.queryByText(/no longer checked/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^Next: /)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument()
+    // Changed evidence that became unverifiable after the dismissal is outstanding again.
+    view.rerender(<MonitorDiscrepancies discrepancies={[{ ...dismissed, unverifiableAtUtc: '2026-10-22T10:00:00Z' }]} busy={false} onDismiss={vi.fn()} />)
+    expect(screen.getByText('warning · unverifiable')).toHaveAttribute('data-outcome', 'unverifiable')
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeEnabled()
+  })
+  it('names position, unlinked-fill and drift facts, and Play levels where the Play is known', () => {
+    const position = { ...discrepancyFixture, id: 'position', kind: 'position.excess', playId: null, lastObservedAtUtc: null,
+      details: { playIds: [], expectedQuantity: '0.1', venueQuantity: '0.100000000000000001' } }
+    const fills = { ...discrepancyFixture, id: 'fills', kind: 'fill.unlinked', playId: null, details: { count: 2, totalQuantity: '0.3', fills: [] } }
+    const drift = { ...discrepancyFixture, id: 'drift', kind: 'level.drift', severity: 'info' as const,
+      details: { levels: [{ orderId: '900000030', actualPrice: '61000', plannedPrice: '60000', remainingQuantity: '0.5' }] } }
+    render(<MonitorDiscrepancies discrepancies={[position, fills, drift, shortStopFixture]} busy={false} onDismiss={vi.fn()}
+      levelName={key => key === 'stop|entry-1|stop-1' ? 'Entry 1 stop' : null} />)
+    const [first, second, third, fourth] = screen.getAllByRole('listitem')
+    expect(fact(first!, 'Expected by open Plays')).toBe('0.1')
+    expect(fact(first!, 'Venue position')).toBe('0.100000000000000001')
+    expect(fact(first!, 'Last observed')).toBe('Unknown')
+    expect(fact(second!, 'Unlinked fills')).toBe('2')
+    expect(fact(second!, 'Total quantity')).toBe('0.3')
+    expect(within(third!).getByText('A linked order no longer matches its plan level')).toBeInTheDocument()
+    expect(within(third!).getByText('Order 900000030 · at 61000, plan 60000')).toBeInTheDocument()
+    expect(within(fourth!).getByText('Order 900000029 · Entry 1 stop · resting')).toBeInTheDocument()
+  })
+})
+
+describe('stop coverage (Phase 0, 0.4c)', () => {
+  const panel = () => screen.getByRole('region', { name: 'Background monitor' })
+  it.each([
+    // D-18: opposite Plays sharing one whole-position stop are a structural unknown, never "Monitored".
+    ['unknown', 'opposing-plays', 'Stop coverage unknown', /Opposite Plays net out/],
+    ['shared', 'shared-whole-position-stop', 'Stop shared with other Plays', /covers this position together with other Plays/],
+    // D-09: a venue whose order reader does not return the current book.
+    ['unsupported', 'current-book-not-read', 'Current book not read', /Order-book checks do not run here/],
+  ] as const)('never says Monitored beside %s coverage', (state, reason, heading, line) => {
+    render(<MonitorPanel monitor={{ ...monitorFixture, coverage: [coverageAs(state, reason)] }} busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).queryByText('Monitored')).not.toBeInTheDocument()
+    expect(within(panel()).getByText(heading)).toBeInTheDocument()
+    expect(within(panel()).getByText(line)).toBeInTheDocument()
+  })
+  it('keeps Monitored only when every recorded Play is covered, and projects a stale outcome as stale', () => {
+    const view = render(<MonitorPanel monitor={{ ...monitorFixture, coverage: [coverageFixture] }} busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).getByText('Monitored')).toBeInTheDocument()
+    view.rerender(<MonitorPanel monitor={{ ...monitorFixture, coverage: [{ ...coverageFixture, state: 'stale' }] }} busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).queryByText('Monitored')).not.toBeInTheDocument()
+    expect(within(panel()).getByText('Stop coverage stale')).toBeInTheDocument()
+    const uncovered = { ...coverageAs('known', 'no-stop', '00000000-0000-4000-8000-0000000000f1'), covered: false }
+    view.rerender(<MonitorPanel monitor={{ ...monitorFixture, coverage: [coverageFixture, uncovered] }} busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).getByText('No stop at the venue')).toBeInTheDocument()
+    expect(within(panel()).getByText(/No resting stop was seen at the venue/)).toBeInTheDocument()
+    // An Open Play that no check has recorded is never "Monitored".
+    view.rerender(<MonitorPanel monitor={monitorFixture} coverage={[]} unchecked={1} busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).queryByText('Monitored')).not.toBeInTheDocument()
+    expect(within(panel()).getByText('Stop coverage not checked yet')).toBeInTheDocument()
+    // The Execution tab scopes the heading to its own Play.
+    view.rerender(<MonitorPanel monitor={{ ...monitorFixture, coverage: [coverageAs('unknown', 'mechanics')] }} coverage={[coverageFixture]}
+      busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).getByText('Monitored')).toBeInTheDocument()
+  })
+  it('says the stop checks do not run on a venue without the current book, even before a Play is open', () => {
+    render(<MonitorPanel monitor={monitorFixture} currentBookRead={false} busy={false} error={null} onCheck={vi.fn()} />)
+    expect(within(panel()).getByText(/Order-book checks do not run here/)).toBeInTheDocument()
   })
 })

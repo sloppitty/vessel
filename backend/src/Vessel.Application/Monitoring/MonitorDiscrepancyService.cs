@@ -77,7 +77,8 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
             await Unobservable(row);
             if (row.HasWork) scan.Incomplete = true;
         }
-        return new(next, scan.Incomplete, scan.Incomplete ? "Some discrepancy checks lack fresh, complete or consistent evidence." : null);
+        return new(next, scan.Incomplete, scan.Incomplete ? "Some discrepancy checks lack fresh, complete or consistent evidence." : null,
+            scan.Coverage);
 
         async Task Unobservable(PlayDiscrepancy row)
         {
@@ -103,12 +104,19 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
         }
     }
 
-    public async Task<IReadOnlyList<MonitorDiscrepancyDto>> ReadAsync(Guid accountId, Guid? playId, CancellationToken ct)
+    public async Task<IReadOnlyList<MonitorDiscrepancyDto>> ReadAsync(Guid accountId, Guid? playId, CancellationToken ct) =>
+        (await ReadListAsync(accountId, playId, ct)).Records;
+
+    public async Task<MonitorDiscrepancyList> ReadListAsync(Guid accountId, Guid? playId, CancellationToken ct)
     {
         await RequireSubject(accountId, playId, ct);
-        return (await store.RecordsAsync(accountId, ct)).Where(x => x.Visible &&
-            (playId is null || x.PlayId == playId || x.InvolvedPlayIds.Contains(playId.Value)))
-            .OrderByDescending(x => x.ConfirmedAtUtc).ThenBy(x => x.Id).Take(500).Select(Dto).ToArray();
+        var visible = (await store.RecordsAsync(accountId, ct)).Where(x => x.Visible &&
+            (playId is null || x.PlayId == playId || x.InvolvedPlayIds.Contains(playId.Value))).ToArray();
+        // Outstanding incidents first, so historical records can never push them past the cap; each group keeps the
+        // previous order (newest confirmation first, then ID).
+        var listed = visible.OrderByDescending(x => x.Outstanding).ThenByDescending(x => x.ConfirmedAtUtc).ThenBy(x => x.Id)
+            .Take(MonitorDiscrepancyList.MaxRecords).Select(Dto).ToArray();
+        return new(listed, visible.Length > listed.Length);
     }
 
     /// <summary>Owner/account and optional involved-Play membership are validated under the account fence.</summary>
@@ -181,6 +189,7 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
 
     private static MonitorDiscrepancyDto Dto(PlayDiscrepancy row) => new(row.Id, row.AccountId, row.PlayId, row.ContractId,
         row.Kind, row.Severity, row.State, row.OpenedAtUtc, row.ConfirmedAtUtc, row.ResolvedAtUtc, row.DismissedAtUtc,
-        row.Note, JsonSerializer.Deserialize<JsonElement>(row.Details), row.UnverifiableAtUtc is null ? null : "unverifiable", row.UnverifiableAtUtc);
+        row.Note, JsonSerializer.Deserialize<JsonElement>(row.Details), row.UnverifiableAtUtc is null ? null : "unverifiable", row.UnverifiableAtUtc,
+        row.LastObservedAtUtc == default ? null : row.LastObservedAtUtc);
     private static DateTimeOffset Earlier(DateTimeOffset? a, DateTimeOffset b) => a is { } value && value < b ? value : b;
 }
