@@ -59,6 +59,9 @@ October 20, 2026: `t3/phase1-base`, the draft "Phase 0 integration — do not me
 - **Checks.** With disposable PostgreSQL 18 and RabbitMQ 4.3.6:
   - frontend: typecheck, lint and build clean; 147 files and 3,722 tests pass;
   - backend: the Release build has 0 warnings; 3,549 tests pass and 5 are skipped (S3 and live venues).
+- **Retired the same day.** Every Phase 0 pull request merged into main (`c39d98e`), with main's own fix for the same
+  lint failure (`962c9f6`). The contract was rebased onto main, 1.6a and 1.1a onward were rebased onto the contract,
+  and the draft pull request was closed. Each branch's check was then run again on main.
 
 ## 1.1 Actual versus plan
 
