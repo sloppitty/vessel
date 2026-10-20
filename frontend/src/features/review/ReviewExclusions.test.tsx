@@ -29,7 +29,7 @@ describe('Review actionable exclusions', () => {
     await user.click(await screen.findByRole('button', { name: 'Inspect exclusions (51)' }))
     const dialog = screen.getByRole('dialog')
     expect(await within(dialog).findByText(items[0]!.reasons[0]!)).toBeInTheDocument()
-    expect(exclusions).toHaveBeenLastCalledWith({ ...defaultReviewQuery, portfolio: 'unassigned', offset: 0 }, expect.any(AbortSignal))
+    expect(exclusions).toHaveBeenLastCalledWith({ ...defaultReviewQuery, positions: 'auto', minPlays: 5, portfolio: 'unassigned', offset: 0 }, expect.any(AbortSignal))
     expect(within(dialog).getByText(`Play ${items[0]!.playId} · Account ${items[0]!.accountId}`)).toBeInTheDocument()
     // Exclusion records carry no venue, so only the asset chip and the wallet account are shown.
     const identity = within(dialog).getAllByRole('button', { name: /^Open excluded Play / })[0]!.closest('li')!.querySelector('.play-identity')!
