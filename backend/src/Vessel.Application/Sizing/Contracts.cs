@@ -58,6 +58,12 @@ public sealed record TrackRecordDto(int ClosedPlays, int DecidedPlays, int Windo
     /// The counts above describe the source's outcomes.
     /// </summary>
     public string Source { get; init; } = SizingService.SourcePlays;
+
+    /// <summary>
+    /// Unresolved Plays on enabled accounts (phase 1, 1.3a). They have no result, so they are never in the record, the
+    /// window or the ladder; the count is shown beside the ladder as "N unresolved not counted".
+    /// </summary>
+    public int Unresolved { get; init; }
 }
 
 public sealed record SizingLimitsDto(string EffectiveRiskPercent, string MaxStopPercent, string MinRewardRisk, string MaxStopSource,
@@ -112,6 +118,8 @@ public interface ISizingStore
     Task<SizingSettings?> SettingsAsync(CancellationToken ct);
     /// <summary>Closed Plays on enabled accounts with their revisions, linked fills and incompletely retained orders.</summary>
     Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct);
+    /// <summary>How many Unresolved Plays the owner has on enabled accounts; they are never counted in the record.</summary>
+    Task<int> UnresolvedPlaysAsync(CancellationToken ct);
     /// <summary>
     /// The owner's retained venue orders with these keys (any account state), for the Activity fallback's missing-execution
     /// check. Matching uses the shared <see cref="OrderKey"/> rule, never the external ID alone.

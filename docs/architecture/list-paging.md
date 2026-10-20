@@ -138,3 +138,8 @@ grouped query with the same search and scope.
   page and size survive opening a Play and returning, in shell memory.
 - Overview Plays: tabs Drafts, In progress, Needs review and All with scoped
   counts and the 5 most recent rows each; View all opens Plays on the same tab.
+- Unresolved Plays (phase 1, 1.3a) have no tab of their own. They are ended, so
+  Needs review or Reviewed lists them by their completion, and All lists them;
+  Closed stays Closed only. Counts carry `unresolved`, so Drafts + In progress
+  + Closed + Cancelled + Unresolved = All, and Needs review + Reviewed =
+  Closed + Cancelled + Unresolved. Older servers omit it.

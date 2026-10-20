@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowDownRight, ArrowRight, ArrowUpRight, BookOpen } from 'lucide-react'
-import { isReviewed, statusLabels, type PlayCounts, type PlaySummary, type PlayView } from '@/api/plays'
+import { isEndedStatus, isReviewed, statusLabels, type PlayCounts, type PlaySummary, type PlayView } from '@/api/plays'
 import type { BrokerAccount, WorkspaceApi } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { Skeleton, SkeletonStatus } from '@/components/ui/skeleton'
@@ -13,13 +13,13 @@ import { useDelayedFlag } from '@/lib/use-delayed-flag'
 const filters = [
   { id: 'drafts', label: 'Drafts', description: 'Saved drafts, most recently updated first', empty: 'No drafts' },
   { id: 'progress', label: 'In progress', description: 'Planned, paused and open plays', empty: 'No plays in progress' },
-  { id: 'review', label: 'Needs review', description: 'Closed or cancelled plays without a review', empty: 'No plays waiting for review' },
+  { id: 'review', label: 'Needs review', description: 'Closed, cancelled or unresolved plays whose review is not complete', empty: 'No plays waiting for review' },
   { id: 'all', label: 'All', description: 'All saved plays, most recently updated first', empty: 'No saved plays yet' },
 ] as const satisfies readonly { id: PlayView; label: string; description: string; empty: string }[]
 type Filter = typeof filters[number]['id']
 /** Rows per tab: the most recent few, with View all for the rest. */
 const recentRows = 5
-const ended = (play: PlaySummary) => play.status === 'closed' || play.status === 'cancelled'
+const ended = (play: PlaySummary) => isEndedStatus(play.status)
 
 export function OverviewPlays({ api, accounts, reloadGeneration, onBrowse, onOpen, scope = 'all' }: {
   api: WorkspaceApi

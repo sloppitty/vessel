@@ -32,6 +32,7 @@ public static class PlayReceipts
     public const string ExecutionsReason = "Review leaves this Play out because its executions are incomplete or do not settle it.";
     public const string NoStopReason = "The plan in force at the first entry fill lacks a complete stop on the loss side of every entry.";
     public const string PlanAfterFillReason = "No plan revision was in force at the first entry fill: the plan was written after it.";
+    public const string UnresolvedNote = "An unresolved Play has no result, so it has no R.";
 
     /// <summary>The receipt of a Play from the facts Review and sizing read: every linked fill, or the manual ledger.</summary>
     public static PlayReceiptDto Build(ClosedPlayFacts facts, DateTimeOffset now)
@@ -55,6 +56,7 @@ public static class PlayReceipts
     private static (string? R, string? Risk, string? Reason) EstimatedR(ClosedPlayFacts facts, DateTimeOffset now)
     {
         if (facts.Play.Origin == PlayOrigin.Retrospective) return (null, null, RetrospectiveReason);
+        if (facts.Play.Status == PlayStatus.Unresolved) return (null, null, UnresolvedNote);
         if (facts.Play.Status != PlayStatus.Closed) return (null, null, OpenReason);
         var score = ReviewService.Score(facts, now, facts.IncompleteOrders is { Count: > 0 });
         if (score.Exclusion == "fees") return (null, null, FeesReason);

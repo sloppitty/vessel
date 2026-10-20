@@ -54,6 +54,13 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
 
     private async Task<SizingDto> BuildAsync(decimal risk, CancellationToken ct)
     {
+        var dto = await RecordAsync(risk, ct);
+        // Unresolved Plays have no result: they stay out of the record and the ladder, and are only counted beside it.
+        return dto with { Record = dto.Record with { Unresolved = await store.UnresolvedPlaysAsync(ct) } };
+    }
+
+    private async Task<SizingDto> RecordAsync(decimal risk, CancellationToken ct)
+    {
         var plays = PlayOutcomes(await store.ClosedPlaysAsync(ct), venues);
         if (plays.Any(x => x.Outcome.Kind != PlayOutcomeKind.Scratch) || activity is null) return ToDto(risk, plays, SourcePlays);
         // Only with no decided Play outcome; the two sources are never mixed.

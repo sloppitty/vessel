@@ -556,6 +556,8 @@
 .plays-page .badge.play-status-open::before { box-shadow: 0 0 0 3px color-mix(in srgb, var(--positive) 22%, transparent); }
 .plays-page .badge.play-status-closed { --status: var(--foreground); color: var(--muted-foreground); }
 .plays-page .badge.play-status-cancelled { --status: var(--negative); }
+/* Declared by the owner; it has ended without a result, so it reads apart from Paused by its dashed edge. */
+.plays-page .badge.play-status-unresolved { --status: var(--warning); border-style: dashed; }
 
 .plays-list-page h1 { margin: 9px 0 6px; font-size: var(--text-display); font-weight: 650; letter-spacing: var(--tracking-display); line-height: 1.15; }
 .plays-list-page .plays-unsaved { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 14px; }

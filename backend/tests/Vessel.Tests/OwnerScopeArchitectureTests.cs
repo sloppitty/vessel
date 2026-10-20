@@ -141,8 +141,8 @@ public sealed class OwnerScopeArchitectureTests
             // Progress row: inserts @owner from the server-wide registration and the owner's own retention floor.
             "Vessel.Persistence/Events/Subscriptions/SubscriptionProgress.cs|6a6e7519684ffb58f2e2cf0a0af6c1baf38c72a25cd1c8174919b0c641bd0b3c",
             // Fail-closed rule (quoted identifiers are never exempt); each is single-table with "OwnerId" = the scope owner:
-            // Open-play lock: plays by "AccountId" and "OwnerId" = db.CurrentOwnerId, constant status list.
-            "Vessel.Persistence/ExecutionStore.cs|c253ae2be16f266bec3f4831b268ad49ad6d2c287af43eec38cc45830ac92276",
+            // Open-play lock: plays by "AccountId" and "OwnerId" = db.CurrentOwnerId, a constant status list (Unresolved when settling).
+            "Vessel.Persistence/ExecutionStore.cs|2f0259ddb4eba4dacc0a17b339ed5d757e687e85b6f750e49547e60bfcb0b911",
             // Account row lock: "Id" and "OwnerId" = db.CurrentOwnerId.
             "Vessel.Persistence/ExecutionStore.cs|f893e1f76d22fb36ed9f16200cec96625e462cf6930d1e287e08257755036a55",
             "Vessel.Persistence/MonitorDiscrepancyStore.cs|f893e1f76d22fb36ed9f16200cec96625e462cf6930d1e287e08257755036a55",

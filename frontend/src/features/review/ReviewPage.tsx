@@ -35,6 +35,9 @@ const definitions = [
 
 /** Below this many cases a metric is marked "Small sample", measured by its own denominator (F-08). */
 const smallSample = 20
+/** Every Play the period leaves out: incomplete fees or executions, and Unresolved Plays, which have no result (1.3a). */
+const excludedCount = (coverage: ReviewDocument['coverage']) =>
+  coverage.incompleteFees + coverage.incompleteExecutions + (coverage.unresolved ?? 0)
 
 /** A breakdown cell's mark when its own denominator is below `smallSample`: batting and profit factor count decided
  * Plays, average gain / loss the smaller of wins and losses. */
@@ -196,15 +199,15 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay, workspaceAccount
           {!groups.length && <tr><td colSpan={7}><div className="pr-empty"><BarChart3 size={25} /><strong>No scored closed Plays</strong>{filtered && <button className="pr-outline-button" onClick={() => setQuery(defaultReviewQuery)}>Reset view</button>}</div></td></tr>}
         </tbody>{groups.length > 0 && <tfoot><tr><th scope="row">Combined result</th><td>{stats.count}</td><td>{reviewPercent(stats.batting, true)}<SampleMark n={decided} /></td><td>{reviewMultiple(stats.payoff)}<SampleMark n={Math.min(stats.wins, stats.losses)} /></td><td>{reviewMultiple(stats.profitFactor)}<SampleMark n={decided} /></td><td className={tone(stats.net)}>{reviewMoney(stats.net, true)}</td><td /></tr></tfoot>}</table></div>
       </section>
-      <section className="pr-coverage" aria-label="Data coverage"><ShieldCheck size={16} /><details><summary>{stats.count} scored · {report.coverage.incompleteFees + report.coverage.incompleteExecutions} excluded · {stats.reviewed} {stats.reviewed === 1 ? 'review' : 'reviews'} complete</summary>
-        <p><button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteFees} incomplete fees</button> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteExecutions} incomplete executions</button> · {report.coverage.openPlays} currently open</p>
+      <section className="pr-coverage" aria-label="Data coverage"><ShieldCheck size={16} /><details><summary>{stats.count} scored · {excludedCount(report.coverage)} excluded · {stats.reviewed} {stats.reviewed === 1 ? 'review' : 'reviews'} complete</summary>
+        <p><button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteFees} incomplete fees</button> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteExecutions} incomplete executions</button>{report.coverage.unresolved ? <> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.unresolved} unresolved</button></> : null} · {report.coverage.openPlays} currently open</p>
         <p>{report.coverage.unassignedFills} unassigned fills in this period.</p>
         <p>Initial planned-risk inputs for {stats.riskCount} of {stats.count} scored Plays.</p>
         {report.preflight && <PreflightCounts preflight={report.preflight} />}
         <p>{report.coverage.notice}</p>
         {report.coverage.firstFillAtUtc && <p>Earliest retained fill in this scope: {reviewDate(report.coverage.firstFillAtUtc, true)}.</p>}
         <ul>{activeAccounts.map(a => <li key={a.id}><strong>{a.name}</strong> · {venues.name(a.venueId)} · {a.syncStatus} · {a.lastSyncedAtUtc ? `last refreshed ${reviewDate(a.lastSyncedAtUtc, true)}` : 'not refreshed'}{a.historyNotice && <p>{a.historyNotice}</p>}</li>)}</ul>
-      </details><button className="pr-outline-button" onClick={inspectExclusions} aria-label={`Inspect exclusions (${report.coverage.incompleteFees + report.coverage.incompleteExecutions})`}>{report.coverage.incompleteFees + report.coverage.incompleteExecutions} excluded</button></section>
+      </details><button className="pr-outline-button" onClick={inspectExclusions} aria-label={`Inspect exclusions (${excludedCount(report.coverage)})`}>{excludedCount(report.coverage)} excluded</button></section>
     </>}
     <Dialog open={methods} onOpenChange={setMethods}><DialogContent className="pr-dialog" onCloseAutoFocus={restore}><DialogHeader><DialogTitle>Definitions</DialogTitle><DialogDescription className="sr-only">Closed-Play results from retained execution facts.</DialogDescription></DialogHeader><div className="pr-methods">{definitions.map(([title, text]) => <section key={title}><h3>{title}</h3><p>{text}</p></section>)}</div></DialogContent></Dialog>
     <Dialog open={detail !== null} onOpenChange={open => { if (!open) setDetail(null) }}><DialogContent className="pr-dialog pr-detail-dialog" onCloseAutoFocus={restore}><DialogHeader><DialogTitle>{detail?.title}</DialogTitle><DialogDescription className="sr-only">Contributing closed Plays. Select a Play to open its journal.</DialogDescription></DialogHeader>

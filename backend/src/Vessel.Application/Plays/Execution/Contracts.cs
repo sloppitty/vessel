@@ -86,9 +86,10 @@ public interface IPlayExecutionStore
     Task<Account?> AccountAsync(Guid id, CancellationToken ct);
     /// <summary>
     /// Planned, paused and open Plays of the account, tracked for status changes with their committed values and locked
-    /// until the transaction ends, so owner status and plan changes take turns with linking.
+    /// until the transaction ends, so owner status and plan changes take turns with linking. <paramref name="settling"/>
+    /// adds Unresolved Plays, which take no new links but whose existing linked orders still settle them.
     /// </summary>
-    Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct);
+    Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct, bool settling = false);
     /// <summary>Every retained order of the account, read-only, by placement time then external order ID.</summary>
     Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct);
 

@@ -1,7 +1,10 @@
 import { hasStructuredReview, type PlayStatus, type StructuredReview } from '@/api/plays'
 
-/** A review looks back at a trade: one that has filled (Open, Closed) or ended without filling (Cancelled). */
-const reviewStatuses: readonly PlayStatus[] = ['open', 'closed', 'cancelled']
+/**
+ * A review looks back at a trade: one that has filled (Open, Closed), ended without filling (Cancelled), or was declared
+ * unresolved after filling.
+ */
+const reviewStatuses: readonly PlayStatus[] = ['open', 'closed', 'cancelled', 'unresolved']
 
 /**
  * Whether the journal offers its Review tab. Draft and Planned have nothing to look back on yet. Paused

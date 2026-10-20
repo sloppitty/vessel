@@ -1,6 +1,7 @@
 using Vessel.Application.Plays;
 using Vessel.Application.Sizing;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Application.Review;
@@ -11,7 +12,17 @@ public sealed record ReviewQuery(string Period = "month", string Portfolio = "al
 /// <summary>One repeatable-read snapshot of the owner's enabled accounts and retained execution facts.</summary>
 public sealed record ReviewFacts(IReadOnlyList<Portfolio> Portfolios, IReadOnlyList<Account> Accounts,
     IReadOnlyList<ClosedPlayFacts> ClosedPlays, int OpenPlays, int UnassignedFills, DateTimeOffset? FirstFillAtUtc,
-    IReadOnlySet<Guid>? IncompleteOrderPlayIds = null);
+    IReadOnlySet<Guid>? IncompleteOrderPlayIds = null)
+{
+    /// <summary>Unresolved Plays on enabled accounts with their latest declaration (phase 1, 1.3a). They are never scored.</summary>
+    public IReadOnlyList<UnresolvedPlayFacts> UnresolvedPlays { get; init; } = [];
+}
+
+/// <summary>An Unresolved Play and its latest declaration, placed in a period by its end, the declaration time.</summary>
+public sealed record UnresolvedPlayFacts(Play Play, UnresolvedDeclarationDto? Declaration)
+{
+    public DateTimeOffset EndedAt => Play.EndedAtUtc ?? Declaration?.DeclaredAtUtc ?? Play.UpdatedAtUtc;
+}
 
 public interface IReviewStore
 {
@@ -59,10 +70,18 @@ public sealed record ReviewPlayDto(Guid Id, string Title, Guid AccountId, string
     public bool PlannedAfterExecution { get; init; }
 }
 public sealed record ReviewExclusionDto(Guid PlayId, string Title, Guid AccountId, string AccountName, string Instrument,
-    IReadOnlyList<string> Reasons);
+    IReadOnlyList<string> Reasons)
+{
+    /// <summary>An Unresolved Play's declaration: its reason, note and execution facts (phase 1, 1.3a).</summary>
+    public UnresolvedDeclarationDto? Unresolved { get; init; }
+}
 public sealed record ReviewExclusionsDto(IReadOnlyList<ReviewExclusionDto> Items, int Total, int Offset, int? NextOffset, string Notice);
 public sealed record ReviewCoverageDto(int ClosedCandidates, int IncompleteFees, int IncompleteExecutions, int OpenPlays,
-    int UnassignedFills, DateTimeOffset? FirstFillAtUtc, string Notice);
+    int UnassignedFills, DateTimeOffset? FirstFillAtUtc, string Notice)
+{
+    /// <summary>Unresolved Plays declared in the period, excluded with the reason "unresolved" (phase 1, 1.3a).</summary>
+    public int Unresolved { get; init; }
+}
 public sealed record ReviewDto(DateTimeOffset AsOfUtc, DateTimeOffset? FromUtc, string Period, string Currency,
     ReviewOptionsDto Options, IReadOnlyList<ReviewPeriodDto> Periods, ReviewMetricsDto Metrics,
     IReadOnlyList<ReviewPointDto> Series, int BucketDays, ReviewGroupsDto Groups, ReviewCoverageDto Coverage,

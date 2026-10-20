@@ -1,6 +1,6 @@
 import { isCount, isGuid, isListOf, isNonBlankText, isNullOr, isRecord, isReviewDecimal, isText, isTimestamp } from './guards'
 import { isOptionalPlayLocalResult, type PlayLocalResult } from './local-result'
-import { preflightCodes, type PreflightCode } from './plays'
+import { isUnresolvedEvidence, preflightCodes, unresolvedReasons, type PreflightCode, type UnresolvedEvidence, type UnresolvedReason } from './plays'
 
 export const reviewPeriods = [
   { id: 'day', label: 'Last 24 hours' }, { id: 'week', label: 'Last 7 days' },
@@ -43,6 +43,8 @@ export interface ReviewPlay {
 }
 export interface ReviewExclusion {
   playId: string; title: string; accountId: string; accountName: string; instrument: string; reasons: string[]
+  /** An Unresolved Play's declaration: reason, note, time and execution facts (phase 1, 1.3a). */
+  unresolved?: { reason: UnresolvedReason; note: string | null; declaredAtUtc: string; evidence: UnresolvedEvidence | null } | null
 }
 export interface ReviewExclusions {
   items: ReviewExclusion[]; total: number; offset: number; nextOffset: number | null; notice: string
@@ -60,6 +62,8 @@ export interface ReviewDocument {
   coverage: {
     closedCandidates: number; incompleteFees: number; incompleteExecutions: number; openPlays: number
     unassignedFills: number; firstFillAtUtc: string | null; notice: string
+    /** Unresolved Plays declared in the period, excluded with no result (phase 1, 1.3a); absent from older servers. */
+    unresolved?: number
   }
   plays: ReviewPlay[]; offset: number; nextOffset: number | null
   /**
@@ -105,7 +109,8 @@ export const isReviewDocument = (v: unknown): v is ReviewDocument => isRecord(v)
   isCount(v.bucketDays) && v.bucketDays > 0 &&
   isRecord(v.groups) && isListOf(v.groups.portfolios, group, listLimit) && isListOf(v.groups.accounts, group, listLimit) && isListOf(v.groups.assets, group, listLimit) &&
   isRecord(v.coverage) && ['closedCandidates', 'incompleteFees', 'incompleteExecutions', 'openPlays', 'unassignedFills'].every(key => isCount((v.coverage as Record<string, unknown>)[key])) &&
-  isNullOr(v.coverage.firstFillAtUtc, x => isTimestamp(x, 64)) && isText(v.coverage.notice, 4000) && isListOf(v.plays, play, 50) &&
+  isNullOr(v.coverage.firstFillAtUtc, x => isTimestamp(x, 64)) && isText(v.coverage.notice, 4000) &&
+  (v.coverage.unresolved === undefined || isCount(v.coverage.unresolved)) && isListOf(v.plays, play, 50) &&
   isCount(v.offset) && (v.nextOffset === null || isCount(v.nextOffset) && v.nextOffset > v.offset) &&
   (v.preflight === undefined || isRecord(v.preflight) && isCount(v.preflight.recorded) && isCount(v.preflight.notRecorded) &&
     isListOf(v.preflight.skipped, s => isRecord(s) && preflightCodes.includes(s.code as PreflightCode) && isCount(s.count) &&
@@ -122,7 +127,9 @@ export function reviewPath(query: ReviewQuery): string {
 export const isReviewExclusions = (v: unknown): v is ReviewExclusions => isRecord(v) &&
   isListOf(v.items, item => isRecord(item) && isGuid(item.playId) && isText(item.title, 200) && isGuid(item.accountId) &&
     isText(item.accountName, 200) && isText(item.instrument, 128) && isListOf(item.reasons, reason => isNonBlankText(reason, 2000), listLimit) &&
-    (item.reasons as string[]).length > 0, 50) &&
+    (item.reasons as string[]).length > 0 && (item.unresolved == null || isRecord(item.unresolved) &&
+      unresolvedReasons.includes(item.unresolved.reason as UnresolvedReason) && isNullOr(item.unresolved.note, x => isText(x, 2000)) &&
+      isTimestamp(item.unresolved.declaredAtUtc, 64) && isNullOr(item.unresolved.evidence, isUnresolvedEvidence)), 50) &&
   isCount(v.total) && isCount(v.offset) && (v.items as unknown[]).length <= v.total &&
   (v.items as unknown[]).length === Math.min(50, Math.max(0, v.total - v.offset)) &&
   new Set((v.items as ReviewExclusion[]).map(item => item.playId)).size === (v.items as unknown[]).length &&

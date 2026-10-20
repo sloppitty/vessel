@@ -11,14 +11,16 @@ namespace Vessel.Persistence;
 public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlayExecutionStore
 {
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => db.Accounts.SingleOrDefaultAsync(x => x.Id == id, ct);
-    public async Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct)
+    public async Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct, bool settling = false)
     {
         unitOfWork.RequireActive();
         // The row locks make owner status and plan changes wait for this transaction (PlayStore.WithPlayLockAsync).
-        // Owner is explicit in raw SQL as well as the global query filter.
+        // Owner is explicit in raw SQL as well as the global query filter. Settling adds Unresolved Plays, whose existing
+        // linked orders still reconcile (phase 1, 1.3a).
+        string[] statuses = settling ? ["Planned", "Paused", "Open", "Unresolved"] : ["Planned", "Paused", "Open"];
         var plays = await db.Plays.FromSqlInterpolated($"""
             SELECT * FROM plays WHERE "AccountId" = {accountId} AND "OwnerId" = {db.CurrentOwnerId}
-            AND "Status" IN ('Planned', 'Paused', 'Open') FOR NO KEY UPDATE
+            AND "Status" = ANY({statuses}) FOR NO KEY UPDATE
             """).OrderBy(p => p.CreatedAtUtc).ThenBy(p => p.Id).ToListAsync(ct);
         // A scoped context could already track a Play read before waiting on the lock.
         foreach (var play in plays) await db.Entry(play).ReloadAsync(ct);

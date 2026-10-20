@@ -97,7 +97,7 @@ export const playCountsFrom = (plays: PlaySummary[]): WorkspaceApi['playCounts']
   Object.fromEntries(playViews.map(view => [view, playListPage(plays, { ...query, view }).totalCount])) as PlayCounts)
 
 /** Saved-play API stubs: no saved plays, and every write rejects unless a test overrides it. */
-export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' | 'playCounts' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' | 'nextActions' | 'completeReview' | 'reopenReview' | 'noReviewNeeded' | 'playNotes' | 'addPlayNote' |
+export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' | 'playCounts' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' | 'nextActions' | 'completeReview' | 'reopenReview' | 'noReviewNeeded' | 'declareUnresolved' | 'returnToOpen' | 'playNotes' | 'addPlayNote' |
   'deletePlay' | 'playExecution' | 'monitor' | 'accountMonitor' | 'runAccountMonitor' | 'monitorEvents' | 'monitorStream' | 'dismissPlayDiscrepancy' | 'dismissAccountDiscrepancy' | 'linkOrder' | 'unlinkOrder' | 'rebindLevel' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'review' | 'reviewExclusions' | 'retrospectivePreview' | 'createRetrospectivePlay' | 'manualExecutions' | 'addManualExecution' | 'correctManualExecution' |
   'notificationHead' | 'notifications' | 'claimNotifications' | 'readNotification' | 'readAllNotifications' | 'notificationPreferences' |
   'saveNotificationPreferences' | 'requestTestNotification'> {
@@ -109,6 +109,7 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
     changePlayStatus: vi.fn(unexpected), playHistory: vi.fn().mockResolvedValue({ revisions: [], statusChanges: [] }),
     nextActions: vi.fn().mockResolvedValue([]),
     completeReview: vi.fn(unexpected), reopenReview: vi.fn(unexpected), noReviewNeeded: vi.fn(unexpected),
+    declareUnresolved: vi.fn(unexpected), returnToOpen: vi.fn(unexpected),
     playNotes: vi.fn().mockResolvedValue([]), addPlayNote: vi.fn(unexpected),
     deletePlay: vi.fn(unexpected), playExecution: vi.fn(unexpected),
     monitor: vi.fn().mockResolvedValue({ workerOnline: true, heartbeatAtUtc: null, accounts: [] }),

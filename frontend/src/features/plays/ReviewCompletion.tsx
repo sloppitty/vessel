@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { newDiaryRequestId } from '@/api/diary'
 import { errorMessage } from '@/api/errors'
-import { playNoteStateLabels, playNoteStates, type PlayNote, type PlayNoteState, type PlaySummary } from '@/api/plays'
+import { isEndedStatus, playNoteStateLabels, playNoteStates, type PlayNote, type PlayNoteState, type PlaySummary } from '@/api/plays'
 import type { WorkspaceApi } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
@@ -33,7 +33,7 @@ export function ReviewCompletionBar({ summary, dirty, busy, filled = false, onAc
   dirty: boolean; busy: boolean; filled?: boolean; onAction: (action: ReviewAction) => void
 }) {
   const blocked = dirty ? 'Save your changes first' : undefined
-  if (summary.status !== 'closed' && summary.status !== 'cancelled') {
+  if (!isEndedStatus(summary.status)) {
     return summary.status === 'open'
       ? <p className="review-completion muted">Notes during the trade belong in the Log. The review is completed after the Play ends.</p>
       : null

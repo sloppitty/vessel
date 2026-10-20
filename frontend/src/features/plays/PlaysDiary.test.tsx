@@ -383,6 +383,55 @@ describe('diary workspace integration', () => {
       expect(plan).not.toHaveBeenCalled()
     } finally { met.mockRestore() }
   })
+  it('declares an open Play with imported fills unresolved, then returns it to Open (phase 1, 1.3a)', async () => {
+    const open: SavedPlay = { ...planned, summary: { ...planned.summary, status: 'open' } }
+    const fill = { sourceFillId: 'f1', direction: 'Open Long', price: '100', quantity: '1', fee: '0', feeToken: 'USDC', closedPnlUsd: '0',
+      side: 'buy' as const, positionEffect: 'open' as const, pnlBasis: 'gross' as const, occurredAtUtc: at }
+    const filled = (play: SavedPlay): PlayExecution => ({ ...execution(play), tracked: true, reason: null,
+      links: [{ id: ids(161), role: 'entry', entryId: 'entry-1', levelId: null, state: 'linked', source: 'automatic', order: null, filledQuantity: '1', fills: [fill] }] })
+    let current = open
+    const { api, methods } = client(open)
+    methods.play.mockImplementation(() => Promise.resolve(current))
+    methods.playExecution.mockImplementation(() => Promise.resolve(filled(current)))
+    const declare = vi.fn<WorkspaceApi['declareUnresolved']>((_id, version) => {
+      current = { ...current, summary: { ...current.summary, status: 'unresolved', version: version + 1, endedAtUtc: at } }
+      return Promise.resolve(current)
+    })
+    const back = vi.fn<WorkspaceApi['returnToOpen']>((_id, version) => {
+      current = { ...current, summary: { ...current.summary, status: 'open', version: version + 1, endedAtUtc: null } }
+      return Promise.resolve(current)
+    })
+    api.declareUnresolved = declare
+    api.returnToOpen = back
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(open)} />)
+    await user.click(await screen.findByRole('button', { name: 'Declare unresolved' }))
+    const dialog = await screen.findByRole('dialog')
+    const submit = within(dialog).getByRole('button', { name: 'Declare unresolved' })
+    expect(submit).toBeDisabled()
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Reason' }), 'shared-close')
+    expect(submit).toBeDisabled()
+    await user.type(within(dialog).getByRole('textbox', { name: 'What happened' }), 'Closed with another position.')
+    await user.click(submit)
+    await waitFor(() => expect(declare).toHaveBeenCalledWith(open.summary.id, open.summary.version, 'shared-close', 'Closed with another position.'))
+    const status = screen.getByText('Status').closest('div')!
+    expect(await within(status).findByText('Unresolved')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Declare unresolved' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Return to Open' }))
+    const returning = await screen.findByRole('dialog')
+    await user.type(within(returning).getByRole('textbox', { name: 'Reason' }), 'The close was another play\'s.')
+    await user.click(within(returning).getByRole('button', { name: 'Return to Open' }))
+    await waitFor(() => expect(back).toHaveBeenCalledWith(open.summary.id, open.summary.version + 1, 'The close was another play\'s.'))
+    expect(await within(status).findByText('Open')).toBeInTheDocument()
+  })
+  it('offers Declare unresolved only once the Play holds imported fills (phase 1, 1.3a)', async () => {
+    const open: SavedPlay = { ...planned, summary: { ...planned.summary, status: 'open' } }
+    const { api, methods } = client(open)
+    render(<Harness api={api} initial={sessionFor(open)} />)
+    await waitFor(() => expect(methods.playExecution).toHaveBeenCalled())
+    expect(screen.queryByRole('button', { name: 'Declare unresolved' })).not.toBeInTheDocument()
+  })
   it('offers recent next actions at planning and copies one into the thesis only on request (phase 1, 1.5)', async () => {
     const draftPlay: SavedPlay = { ...planned, summary: { ...planned.summary, status: 'draft', version: 1, planRevision: 0, plannedAtUtc: null } }
     const { api, methods } = client(draftPlay)

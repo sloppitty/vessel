@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from './workspace'
-import { playCountsPath, playListPath, type PlayCounts, type PlayListQuery, type PlaySummary } from './plays'
+import { isPlayCounts, isPlayHistory, playCountsPath, playInView as isPlayInView, playListPath, type PlayCounts, type PlayListQuery, type PlaySummary } from './plays'
 import { accountFixture, savedPlayFixture } from '@/test/workspace-fixture'
 
 function response(value: unknown) { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(value), { status: 200 }))) }
@@ -87,5 +87,34 @@ describe('level rebind API (0.5b)', () => {
     vi.mocked(fetch).mockClear()
     await expect(createWorkspaceApi('token').rebindLevel(base.id, '../links', request)).rejects.toMatchObject({ kind: 'invalid-response' })
     expect(fetch).not.toHaveBeenCalled()
+  })
+})
+
+describe('Unresolved Plays in the API guards (phase 1, 1.3a)', () => {
+  const counts: PlayCounts = { drafts: 1, progress: 1, review: 1, reviewed: 1, closed: 1, cancelled: 1, all: 4 }
+  it('adds unresolved Plays to the ended totals, and still reads counts from older servers', () => {
+    expect(isPlayCounts(counts)).toBe(true)
+    expect(isPlayCounts({ ...counts, unresolved: 1, all: 5, review: 2 })).toBe(true)
+    // An unresolved Play missing from either total is an invalid reply.
+    expect(isPlayCounts({ ...counts, unresolved: 1 })).toBe(false)
+    expect(isPlayCounts({ ...counts, unresolved: 1, all: 5 })).toBe(false)
+    expect(isPlayCounts({ ...counts, unresolved: -1, all: 3, review: 0 })).toBe(false)
+    expect(isPlayInView({ ...savedPlayFixture.summary, status: 'unresolved', reviewCompletion: null, reviewCompletedAtUtc: null }, 'review')).toBe(true)
+    expect(isPlayInView({ ...savedPlayFixture.summary, status: 'unresolved', reviewCompletion: null, reviewCompletedAtUtc: null }, 'closed')).toBe(false)
+  })
+
+  it('reads a declaration with its reason and facts only on a change to Unresolved', () => {
+    const evidence = { entered: '1', exited: '0', open: '1', orderCount: 1,
+      orders: [{ orderId: '21', role: 'entry', entryId: 'entry-1', levelId: null, status: 'filled', filled: '1' }], problems: [] }
+    const declared = { from: 'open', to: 'unresolved', reason: null, note: 'Shared close.', occurredAtUtc: '2026-10-20T10:00:00Z', source: 'owner',
+      unresolvedReason: 'shared-close', evidence }
+    const history = (change: object) => ({ revisions: [], statusChanges: [change], reviews: [] })
+    expect(isPlayHistory(history(declared))).toBe(true)
+    expect(isPlayHistory(history({ ...declared, unresolvedReason: 'liquidated' }))).toBe(false)
+    expect(isPlayHistory(history({ ...declared, to: 'closed' }))).toBe(false)
+    expect(isPlayHistory(history({ ...declared, evidence: { ...evidence, entered: '1e3' } }))).toBe(false)
+    expect(isPlayHistory(history({ ...declared, evidence: { ...evidence, open: '-1' } }))).toBe(true)
+    expect(isPlayHistory({ ...history(declared), reviews: [{ number: 1, occurredAtUtc: '2026-10-20T11:00:00Z', review: '',
+      structuredReview: { adherence: null, mistakeTag: null, lesson: '', nextAction: '' }, action: 'cleared' }] })).toBe(true)
   })
 })

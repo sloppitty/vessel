@@ -27,7 +27,8 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         "Results are nominal USD and include reported execution fees once. " + NominalStablecoins.Caveat +
         " Venues with different quote stablecoins are pooled nominally. Separate funding cashflows are not added; " +
         "whether RISEx reported realized P&L includes funding remains unverified. Balanced retained fills are not proof of full venue history. " +
-        "Accounts use current portfolio membership; disabled accounts are excluded. Open-play counts are current, not a historical cohort.";
+        "Accounts use current portfolio membership; disabled accounts are excluded. Open-play counts are current, not a historical cohort. " +
+        "Unresolved Plays, declared by the owner because their executions cannot settle them, have no result and are excluded.";
 
     public static DateTimeOffset? From(string period, DateTimeOffset now) => period switch
     {
@@ -61,13 +62,14 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             .OrderBy(e => e.ClosedAt).ThenBy(e => e.Facts.Play.Id).ToList();
         var current = accepted.Where(e => InPeriod(e.ClosedAt, from, now)).ToList();
         var candidates = evaluated.Where(e => InPeriod(e.ClosedAt, from, now)).ToList();
+        var unresolved = Unresolved(facts, scoped, query.Instrument).Count(u => InPeriod(u.EndedAt, from, now));
         var portfolioNames = facts.Portfolios.ToDictionary(p => p.Id.ToString(), p => p.Name);
         var options = new ReviewOptionsDto(
             facts.Portfolios.OrderBy(p => p.Name).Select(p => new ReviewPortfolioDto(p.Id.ToString(), p.Name)).ToList(),
             accounts.Values.OrderBy(a => a.Name).Select(a => new ReviewAccountDto(a.Id, a.Name, a.PortfolioId, a.VenueId,
                 a.LastSyncedAtUtc, a.SyncStatus, a.HistoryNotice)).ToList(),
-            facts.ClosedPlays.Where(f => accounts.ContainsKey(f.Play.AccountId)).Select(f => f.Play.ContractId)
-                .OfType<string>().Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList());
+            facts.ClosedPlays.Select(f => f.Play).Concat(facts.UnresolvedPlays.Select(u => u.Play)).Where(p => accounts.ContainsKey(p.AccountId))
+                .Select(p => p.ContractId).OfType<string>().Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList());
         var series = Series(current, from, now);
         List<ReviewGroupDto> Groups(Func<Evaluated, string> key, Func<string, string> name, Func<string, List<Evaluated>, string> detail) =>
             current.GroupBy(key).Select(group =>
@@ -105,7 +107,8 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             }).ToList(),
             Metrics(current), series.Points, series.BucketDays, groups,
             new ReviewCoverageDto(candidates.Count, candidates.Count(e => e.Exclusion == "fees"),
-                candidates.Count(e => e.Exclusion == "executions"), facts.OpenPlays, facts.UnassignedFills, facts.FirstFillAtUtc, Notice),
+                candidates.Count(e => e.Exclusion == "executions"), facts.OpenPlays, facts.UnassignedFills, facts.FirstFillAtUtc, Notice)
+            { Unresolved = unresolved },
             page, query.Offset, query.Offset + page.Count < current.Count ? query.Offset + page.Count : null)
         {
             Preflight = Preflight(candidates.Select(e => e.Facts)),
@@ -144,11 +147,27 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true || f.IncompleteOrders is { Count: > 0 }))
             .Where(e => e.Exclusion is not null && InPeriod(e.ClosedAt, from, now))
             .OrderByDescending(e => e.ClosedAt).ThenBy(e => e.Facts.Play.Id).ToList();
-        var items = excluded.Skip(query.Offset).Take(PageSize).Select(e => new ReviewExclusionDto(e.Facts.Play.Id,
-            e.Facts.Play.Title, e.Facts.Play.AccountId, accounts[e.Facts.Play.AccountId].Name,
-            e.Facts.Play.ContractId ?? "", ExclusionReasons(e.Facts, now, e.Exclusion!))).ToList();
-        return new(items, excluded.Count, query.Offset, query.Offset + items.Count < excluded.Count ? query.Offset + items.Count : null, Notice);
+        // Unresolved Plays join the drill-down by their declaration time, with its reason, note and execution facts.
+        var all = excluded.Select(e => (At: e.ClosedAt, e.Facts.Play, Item: (Func<ReviewExclusionDto>)(() => new ReviewExclusionDto(e.Facts.Play.Id,
+                e.Facts.Play.Title, e.Facts.Play.AccountId, accounts[e.Facts.Play.AccountId].Name,
+                e.Facts.Play.ContractId ?? "", ExclusionReasons(e.Facts, now, e.Exclusion!)))))
+            .Concat(Unresolved(facts, accounts.Keys.ToHashSet(), query.Instrument).Where(u => InPeriod(u.EndedAt, from, now))
+                .Select(u => (At: u.EndedAt, u.Play, Item: (Func<ReviewExclusionDto>)(() => new ReviewExclusionDto(u.Play.Id, u.Play.Title,
+                    u.Play.AccountId, accounts[u.Play.AccountId].Name, u.Play.ContractId ?? "", [UnresolvedReason(u.Declaration)])
+                    { Unresolved = u.Declaration }))))
+            .OrderByDescending(x => x.At).ThenBy(x => x.Play.Id).ToList();
+        var items = all.Skip(query.Offset).Take(PageSize).Select(x => x.Item()).ToList();
+        return new(items, all.Count, query.Offset, query.Offset + items.Count < all.Count ? query.Offset + items.Count : null, Notice);
     }
+
+    /// <summary>Unresolved Plays in the scope's accounts and instrument; they are excluded with the reason "unresolved".</summary>
+    private static IEnumerable<UnresolvedPlayFacts> Unresolved(ReviewFacts facts, HashSet<Guid> accounts, string? instrument) =>
+        facts.UnresolvedPlays.Where(u => accounts.Contains(u.Play.AccountId) && (instrument is null || u.Play.ContractId == instrument));
+
+    private static string UnresolvedReason(UnresolvedDeclarationDto? declaration) =>
+        declaration is null || PlayUnresolved.ParseReason(declaration.Reason) is not { } reason
+            ? "Declared unresolved by the owner: its executions cannot settle it, so it has no result."
+            : $"Declared unresolved by the owner because of {PlayUnresolved.ReasonLabel(reason)}: its executions cannot settle it, so it has no result.";
 
     private static IReadOnlyList<string> ExclusionReasons(ClosedPlayFacts facts, DateTimeOffset now, string exclusion)
     {

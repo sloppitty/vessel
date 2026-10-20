@@ -28,6 +28,8 @@ public sealed class PlayReviewRevision : IOwned
 public static class ReviewActions
 {
     public const string Edited = "edited", Completed = "completed", Reopened = "reopened", NotNeeded = "not-needed";
+    /// <summary>The completion was cleared because the Play left a final state (phase 1, 1.3a).</summary>
+    public const string Cleared = "cleared";
 }
 
 /// <summary>

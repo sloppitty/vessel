@@ -5,10 +5,28 @@ import { validOverviewScope } from './overview-summary'
 import { isAccountMonitor, isMonitorDiscrepancy, isMonitorWatch, type AccountMonitor, type MonitorDiscrepancy, type MonitorWatch } from './monitor'
 import { isOptionalPlayLocalResult, type PlayLocalResult } from './local-result'
 
-export const playStatuses = ['draft', 'planned', 'paused', 'open', 'closed', 'cancelled'] as const
+export const playStatuses = ['draft', 'planned', 'paused', 'open', 'closed', 'cancelled', 'unresolved'] as const
 export type PlayStatus = typeof playStatuses[number]
+/** Statuses that end a Play: its review can be completed. Unresolved is declared by the owner (phase 1, 1.3a). */
+export const endedStatuses: readonly PlayStatus[] = ['closed', 'cancelled', 'unresolved']
+export const isEndedStatus = (status: PlayStatus) => endedStatuses.includes(status)
 export const cancelReasons = ['invalidated', 'missed', 'changed-mind', 'expired', 'mistake', 'other'] as const
 export type CancelReason = typeof cancelReasons[number]
+/** Why the owner declared an Open Play unresolved: its executions can never settle it. */
+export const unresolvedReasons = ['shared-close', 'flip', 'forced-exit-not-retained', 'other'] as const
+export type UnresolvedReason = typeof unresolvedReasons[number]
+export const unresolvedReasonLabels: Record<UnresolvedReason, string> = {
+  'shared-close': 'Shared close', flip: 'Flip', 'forced-exit-not-retained': 'Forced exit not retained', other: 'Other',
+}
+/** The execution facts kept with a declaration: quantities, linked orders and the problems that kept it from settling. */
+export interface UnresolvedEvidence {
+  /** Entered and exited quantity; open is entered minus exited, negative when exits exceed entries. */
+  entered: string; exited: string; open: string
+  /** Every linked order; at most 200 are listed. */
+  orderCount: number
+  orders: { orderId: string; role: string; entryId: string | null; levelId: string | null; status: string; filled: string }[]
+  problems: string[]
+}
 export interface StructuredReview {
   adherence: 'followed' | 'deviated' | 'not-applicable' | null
   mistakeTag: string | null
@@ -95,11 +113,17 @@ export type PreflightCode = typeof preflightCodes[number]
 export interface PreflightCheck { code: PreflightCode; outcome: 'passed' | 'skipped' | 'unknown' }
 /** One of the owner's recent next actions and the Play it was written for. */
 export interface NextAction { playId: string; title: string; nextAction: string; reviewedAtUtc: string | null }
-export interface StatusChange { from: PlayStatus; to: PlayStatus; reason: CancelReason | null; note: string | null; occurredAtUtc: string; source?: 'owner' | 'venue' | 'manual' }
+export interface StatusChange {
+  from: PlayStatus; to: PlayStatus; reason: CancelReason | null; note: string | null; occurredAtUtc: string; source?: 'owner' | 'venue' | 'manual'
+  /** On a change to Unresolved: the owner's reason and the execution facts kept with it. */
+  unresolvedReason?: UnresolvedReason | null
+  evidence?: UnresolvedEvidence | null
+}
+export const reviewActions = ['edited', 'completed', 'reopened', 'not-needed', 'cleared'] as const
 export interface ReviewRevision {
   number: number; occurredAtUtc: string; review: string; structuredReview: StructuredReview
-  /** What happened: edited, completed, reopened or not-needed; absent from older servers. */
-  action?: 'edited' | 'completed' | 'reopened' | 'not-needed'
+  /** What happened: edited, completed, reopened, not-needed, or cleared when the Play left a final state; absent from older servers. */
+  action?: typeof reviewActions[number]
 }
 export interface PlayHistory { revisions: PlanRevision[]; statusChanges: StatusChange[]; reviews?: ReviewRevision[] | null }
 export type StatusRequest =
@@ -156,16 +180,24 @@ export const isPreflightCheck = (v: unknown): v is PreflightCheck => isRecord(v)
   ['passed', 'skipped', 'unknown'].includes(v.outcome as string)
 export const isNextAction = (v: unknown): v is NextAction => isRecord(v) && isGuid(v.playId) && isText(v.title, 200) &&
   isText(v.nextAction, 4000) && v.nextAction.trim() !== '' && isNullOr(v.reviewedAtUtc, x => isTimestamp(x, timeLength))
+const isEvidenceAmount = (v: unknown) => typeof v === 'string' && /^-?[0-9]+(\.[0-9]+)?$/.test(v) && v.length <= 80
+export const isUnresolvedEvidence = (v: unknown): v is UnresolvedEvidence => isRecord(v) && isEvidenceAmount(v.entered) &&
+  isEvidenceAmount(v.exited) && isEvidenceAmount(v.open) && isCount(v.orderCount) && Array.isArray(v.orders) && v.orders.length <= 200 &&
+  v.orders.length <= v.orderCount && v.orders.every(o => isRecord(o) && isText(o.orderId, 128) && isText(o.role, 16) &&
+    isNullOr(o.entryId, x => isText(x, 64)) && isNullOr(o.levelId, x => isText(x, 64)) && isText(o.status, 32) && isEvidenceAmount(o.filled)) &&
+  Array.isArray(v.problems) && v.problems.length <= 50 && v.problems.every(x => isText(x, 2000))
 export const isPlayHistory = (v: unknown): v is PlayHistory => isRecord(v) && Array.isArray(v.revisions) && Array.isArray(v.statusChanges) &&
   v.revisions.every(r => isRecord(r) && isCount(r.number) && playStatuses.includes(r.status as PlayStatus) && isText(r.reason, 2000) &&
     isTimestamp(r.createdAtUtc, timeLength) && isPlayPlan(r.plan) &&
     (r.preflight == null || Array.isArray(r.preflight) && r.preflight.length <= preflightCodes.length && r.preflight.every(isPreflightCheck))) &&
   v.statusChanges.every(c => isRecord(c) && playStatuses.includes(c.from as PlayStatus) && playStatuses.includes(c.to as PlayStatus) &&
     isNullOr(c.reason, x => cancelReasons.includes(x as CancelReason)) && isNullOr(c.note, x => isText(x, 2000)) && isTimestamp(c.occurredAtUtc, timeLength) &&
-    (c.source === undefined || c.source === 'owner' || c.source === 'venue' || c.source === 'manual')) &&
+    (c.source === undefined || c.source === 'owner' || c.source === 'venue' || c.source === 'manual') &&
+    (c.unresolvedReason == null || c.to === 'unresolved' && unresolvedReasons.includes(c.unresolvedReason as UnresolvedReason)) &&
+    (c.evidence == null || c.to === 'unresolved' && isUnresolvedEvidence(c.evidence))) &&
   (v.reviews == null || Array.isArray(v.reviews) && v.reviews.every(r => isRecord(r) && isCount(r.number) &&
     isTimestamp(r.occurredAtUtc, timeLength) && isText(r.review, noteLength) && isStructuredReview(r.structuredReview) &&
-    (r.action === undefined || ['edited', 'completed', 'reopened', 'not-needed'].includes(r.action as string))))
+    (r.action === undefined || reviewActions.includes(r.action as typeof reviewActions[number]))))
 export const isPlayNote = (v: unknown): v is PlayNote => isRecord(v) && isGuid(v.id) && isText(v.text, 2000) && v.text.trim() !== '' &&
   (v.state === null || playNoteStates.includes(v.state as PlayNoteState)) && isTimestamp(v.createdAtUtc, timeLength)
 export const isSavedEvidence = (v: unknown): v is SavedEvidence => isRecord(v) && isGuid(v.id) && isGuid(v.playId) &&
@@ -188,7 +220,8 @@ export interface PlayListQuery {
   pageSize?: number
 }
 export interface PlayList { plays: PlaySummary[]; view: PlayView; page: number; pageSize: number; totalCount: number }
-export type PlayCounts = Record<'drafts' | 'progress' | 'review' | 'reviewed' | 'closed' | 'cancelled' | 'all', number>
+/** Counts per view; `unresolved` has no tab of its own and is absent from servers before phase 1.3a. */
+export type PlayCounts = Record<'drafts' | 'progress' | 'review' | 'reviewed' | 'closed' | 'cancelled' | 'all', number> & { unresolved?: number }
 
 /** Whether a closed or cancelled Play counts as reviewed, as the list views define it. */
 /**
@@ -197,14 +230,13 @@ export type PlayCounts = Record<'drafts' | 'progress' | 'review' | 'reviewed' | 
  */
 export const isReviewed = (play: PlaySummary) => play.reviewCompletion !== undefined ? play.reviewCompletion !== null
   : play.hasReview || !!play.reviewedAtUtc
-const endedStatus = (status: PlayStatus) => status === 'closed' || status === 'cancelled'
 /** Whether a Play belongs to a list view, as the server selects it. */
 export const playInView = (play: PlaySummary, view: PlayView) => {
   switch (view) {
     case 'drafts': return play.status === 'draft'
     case 'progress': return play.status === 'planned' || play.status === 'paused' || play.status === 'open'
-    case 'review': return endedStatus(play.status) && !isReviewed(play)
-    case 'reviewed': return endedStatus(play.status) && isReviewed(play)
+    case 'review': return isEndedStatus(play.status) && !isReviewed(play)
+    case 'reviewed': return isEndedStatus(play.status) && isReviewed(play)
     case 'closed': case 'cancelled': return play.status === view
     case 'all': return true
   }
@@ -250,12 +282,14 @@ export function isPlayList(v: unknown, query: PlayListQuery): v is PlayList {
 }
 export function isPlayCounts(v: unknown): v is PlayCounts {
   if (!isRecord(v) || !['drafts', 'progress', 'review', 'reviewed', 'closed', 'cancelled', 'all'].every(k => isCount(v[k]))) return false
+  if (v.unresolved !== undefined && !isCount(v.unresolved)) return false
   const c = v as PlayCounts
-  return c.drafts + c.progress + c.closed + c.cancelled === c.all && c.review + c.reviewed === c.closed + c.cancelled
+  const unresolved = c.unresolved ?? 0
+  return c.drafts + c.progress + c.closed + c.cancelled + unresolved === c.all && c.review + c.reviewed === c.closed + c.cancelled + unresolved
 }
 
 export const statusLabels: Record<PlayStatus, string> = {
-  draft: 'Draft', planned: 'Planned', paused: 'Paused', open: 'Open', closed: 'Closed', cancelled: 'Cancelled',
+  draft: 'Draft', planned: 'Planned', paused: 'Paused', open: 'Open', closed: 'Closed', cancelled: 'Cancelled', unresolved: 'Unresolved',
 }
 export const cancelReasonLabels: Record<CancelReason, string> = {
   invalidated: 'Thesis invalidated', missed: 'Missed the entry', 'changed-mind': 'Changed my mind',

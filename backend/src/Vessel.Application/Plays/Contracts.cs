@@ -55,11 +55,15 @@ public sealed record AddPlayNoteRequest([property: JsonRequired] Guid RequestId,
 public sealed record PlayNoteDto(Guid Id, string Text, string? State, DateTimeOffset CreatedAtUtc);
 
 public sealed record PlayListDto(IReadOnlyList<PlaySummaryDto> Plays, string View, int Page, int PageSize, int TotalCount);
-public sealed record PlayCountsDto(int Drafts, int Progress, int Review, int Reviewed, int Closed, int Cancelled, int All);
+public sealed record PlayCountsDto(int Drafts, int Progress, int Review, int Reviewed, int Closed, int Cancelled, int All)
+{
+    /// <summary>Unresolved Plays (phase 1, 1.3a). They have no tab of their own: Needs review or Reviewed, and All, list them.</summary>
+    public int Unresolved { get; init; }
+}
 
 /// <summary>
-/// List views. Drafts and In progress are unpaged (capped); the ended views and All are paged. "Reviewed" means
-/// a Closed or Cancelled Play whose review has text or answers, or that was ever reviewed (<c>ReviewedAtUtc</c>).
+/// List views. Drafts and In progress are unpaged (capped); the ended views and All are paged. Needs review and Reviewed
+/// hold the ended Plays (Closed, Cancelled or Unresolved) by their review completion; Closed holds Closed Plays only.
 /// </summary>
 public enum PlayListView { Drafts, Progress, Review, Reviewed, Closed, Cancelled, All }
 
@@ -110,10 +114,16 @@ public sealed record PlanRevisionDto(int Number, string Status, string Reason, D
 
 /// <summary>One of the owner's recent next actions, with the Play it was written for (phase 1, 1.5).</summary>
 public sealed record NextActionDto(Guid PlayId, string Title, string NextAction, DateTimeOffset? ReviewedAtUtc);
-public sealed record StatusChangeDto(string From, string To, string? Reason, string? Note, DateTimeOffset OccurredAtUtc, string Source = "owner");
+public sealed record StatusChangeDto(string From, string To, string? Reason, string? Note, DateTimeOffset OccurredAtUtc, string Source = "owner")
+{
+    /// <summary>Why the owner declared the Play unresolved, on a change to Unresolved only.</summary>
+    public string? UnresolvedReason { get; init; }
+    /// <summary>The execution facts kept with that declaration.</summary>
+    public UnresolvedEvidenceDto? Evidence { get; init; }
+}
 public sealed record ReviewRevisionDto(int Number, DateTimeOffset OccurredAtUtc, string Review, ReviewAnswers StructuredReview)
 {
-    /// <summary>edited, completed, reopened or not-needed.</summary>
+    /// <summary>edited, completed, reopened, not-needed, or cleared when the Play left a final state.</summary>
     public string Action { get; init; } = ReviewActions.Edited;
 }
 public sealed record PlayHistoryDto(IReadOnlyList<PlanRevisionDto> Revisions, IReadOnlyList<StatusChangeDto> StatusChanges,

@@ -31,7 +31,7 @@ public sealed class ExecutionNarrowedReadsTests
     private sealed class FullReadStore(ExecutionStore inner) : IPlayExecutionStore
     {
         public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => inner.AccountAsync(id, ct);
-        public Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct) => inner.ActivePlaysAsync(accountId, ct);
+        public Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct, bool settling = false) => inner.ActivePlaysAsync(accountId, ct, settling);
         public Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct) => inner.OrdersAsync(accountId, ct);
         public Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset observedAt, CancellationToken ct) =>
             inner.UpsertOrdersAsync(account, orders, observedAt, ct);
@@ -53,7 +53,7 @@ public sealed class ExecutionNarrowedReadsTests
         public int FillOrderIds { get; private set; }
         public bool FullReads { get; private set; }
         public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => inner.AccountAsync(id, ct);
-        public Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct) => inner.ActivePlaysAsync(accountId, ct);
+        public Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct, bool settling = false) => inner.ActivePlaysAsync(accountId, ct, settling);
         public Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct) { FullReads = true; return inner.OrdersAsync(accountId, ct); }
         public async Task<List<ImportedOrder>> OrdersAsync(Guid accountId, IReadOnlyCollection<Guid> orderIds,
             IReadOnlyDictionary<string, DateTimeOffset> placedSince, CancellationToken ct)

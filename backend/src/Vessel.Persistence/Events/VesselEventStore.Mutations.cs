@@ -56,8 +56,9 @@ public sealed partial class VesselEventStore
         {
             var play = await lookups.PlayAsync(change.PlayId, ct);
             if (play is null) continue;
+            // An Unresolved Play that its fills settle closes with the same closed-result event as an Open one (1.3a).
             var type = change.To == PlayStatus.Open && change.From is PlayStatus.Planned or PlayStatus.Paused
-                ? "play.opened" : change.From == PlayStatus.Open && change.To == PlayStatus.Closed
+                ? "play.opened" : change.From is PlayStatus.Open or PlayStatus.Unresolved && change.To == PlayStatus.Closed
                     ? "play.closed" : "play.status-changed";
             var key = type == "play.opened" ? $"play:{play.Id}:opened" : type == "play.closed"
                 ? $"play:{play.Id}:closed" : $"status-change:{change.Id}";
@@ -66,7 +67,8 @@ public sealed partial class VesselEventStore
             var data = type == "play.closed" ? await ClosedDataAsync(play, ct) : VesselEventJson.Element(new
             {
                 previous = change.From.ToString().ToLowerInvariant(), current = change.To.ToString().ToLowerInvariant(),
-                source = change.Source.ToString().ToLowerInvariant(), reason = change.Reason?.ToString().ToLowerInvariant()
+                source = change.Source.ToString().ToLowerInvariant(),
+                reason = change.UnresolvedReason is { } unresolved ? PlayUnresolved.ReasonName(unresolved) : change.Reason?.ToString().ToLowerInvariant()
             });
             drafts.Add(new(type, runId, key, change.From == PlayStatus.Paused && change.To == PlayStatus.Open
                 ? "warning" : "info", occurred, detected,

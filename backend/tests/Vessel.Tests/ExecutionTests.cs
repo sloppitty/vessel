@@ -237,7 +237,7 @@ public sealed class ExecutionMatcherTests
         Assert.Equal(expected, HyperliquidPerpetualReader.Normalize(status));
 }
 
-public sealed class ExecutionPostgresTests
+public sealed partial class ExecutionPostgresTests
 {
     private sealed class Harness(VesselDbContext db, Guid owner, FixtureReader reader, FakeOrderReader orders)
     {

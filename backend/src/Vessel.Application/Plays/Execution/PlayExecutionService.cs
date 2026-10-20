@@ -65,7 +65,9 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var fills = FillsByOrder(mineLoaded, await store.FillsAsync(play.AccountId, mineLoaded.Select(OrderKey.Of).ToList(), ct));
         var linked = mine.Where(l => l.State == OrderLinkState.Linked)
             .OrderBy(l => l.Role).ThenBy(l => l.EntryId).ThenBy(l => l.LevelId).ThenBy(l => External(orders, l)).ToList();
-        var suggestions = mine.Where(l => l.State == OrderLinkState.Suggested && !linkedOrders.Contains(l.ImportedOrderId)).ToList();
+        // An Unresolved Play is never offered orders (1.3a); it takes a link only after a return to Open.
+        var suggestions = play.Status == PlayStatus.Unresolved ? [] :
+            mine.Where(l => l.State == OrderLinkState.Suggested && !linkedOrders.Contains(l.ImportedOrderId)).ToList();
         // Cancelled orders that never filled cannot be part of the play, so only live or filled ones are offered.
         var unlinked = play.ContractId is null ? [] : loaded
             .Where(o => o.ContractId == play.ContractId && o.PlacedAtUtc >= play.CreatedAtUtc && !linkedOrders.Contains(o.Id) &&
@@ -122,6 +124,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     public async Task<PlayExecutionDto> LinkAsync(Guid playId, LinkOrderRequest request, CancellationToken ct)
     {
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+        if (play.Status == PlayStatus.Unresolved) throw new ProblemException(409, "Return this Play to Open before linking another order.");
         if (!ExecutionMatcher.IsActive(play)) throw new ProblemException(409, NotLinkable);
         var role = request.Role switch
         {
@@ -165,8 +168,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     }
 
     /// <summary>
-    /// Removes a link or declines a suggestion. It is never proposed for that level again. Closed and Cancelled are
-    /// final, so their links stay: removing one would leave a final status its fills no longer support.
+    /// Removes a link or declines a suggestion. It is never proposed for that level again. Closed, Cancelled and Unresolved
+    /// are final, so their links stay: removing one would leave a final status its fills no longer support.
     /// </summary>
     public async Task<PlayExecutionDto> UnlinkAsync(Guid playId, Guid linkId, CancellationToken ct)
     {
@@ -175,7 +178,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         {
             var link = await store.LinkAsync(play.AccountId, play.Id, linkId, ct) is { State: not OrderLinkState.Dismissed } found
                 ? found : throw new ProblemException(404, "Link not found.");
-            if (link.State == OrderLinkState.Linked) await RequireActiveAsync(play, "Closed and cancelled plays keep their linked orders.", ct);
+            if (link.State == OrderLinkState.Linked) await RequireActiveAsync(play, "Closed, cancelled and unresolved plays keep their linked orders.", ct);
             link.Dismiss(time.GetUtcNow());
             await store.SaveAsync(ct);
             return true;
@@ -256,6 +259,67 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
 
     private const string StalePlay = "This Play changed elsewhere. Reload it before saving again.";
 
+    /// <summary>
+    /// The owner declares an Open venue Play unresolved: its executions can never settle it (phase 1, 1.3a, decision 4).
+    /// Under the account and Play locks that imports hold, the Play must still be Open at the expected version and have
+    /// imported executions; the declaration keeps a snapshot of its execution facts. Its result stays null. Nothing is
+    /// sent to the venue, and nothing here reads account flatness or the monitor.
+    /// </summary>
+    public Task<PlayDto> DeclareUnresolvedAsync(Guid playId, DeclareUnresolvedRequest request, CancellationToken ct)
+    {
+        var reason = PlayUnresolved.ParseReason(request.Reason) ?? throw new ProblemException(400, PlayUnresolved.ReasonRule);
+        if (string.IsNullOrWhiteSpace(request.Note)) throw new ProblemException(400, "Say what happened. The note is kept with the declaration.");
+        return unitOfWork.ExecuteAsync(() => plays.WithPlayLockAsync(playId, async () =>
+        {
+            var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+            if (play.Version != request.ExpectedVersion) throw new ProblemException(409, StalePlay);
+            if (play.Status != PlayStatus.Open) throw new ProblemException(409, "Only an open Play can be declared unresolved.");
+            var evidence = await EvidenceAsync(play, ct)
+                ?? throw new ProblemException(409, "Only a Play with imported executions can be declared unresolved.");
+            plays.Add(play.DeclareUnresolved(reason, request.Note, PlayUnresolved.Serialize(evidence), time.GetUtcNow()));
+            return PlayService.ToDto(play);
+        }, ct), ct);
+    }
+
+    /// <summary>
+    /// The owner returns an Unresolved Play to Open, with a reason. It can take new links again, and a completed review is
+    /// needed again once it ends; text and answers stay.
+    /// </summary>
+    public Task<PlayDto> ReturnToOpenAsync(Guid playId, ReturnToOpenRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.Note)) throw new ProblemException(400, "Say why the Play returns to open. The reason is kept with the change.");
+        return unitOfWork.ExecuteAsync(() => plays.WithPlayLockAsync(playId, async () =>
+        {
+            var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+            if (play.Version != request.ExpectedVersion) throw new ProblemException(409, StalePlay);
+            if (play.Status != PlayStatus.Unresolved) throw new ProblemException(409, "Only an unresolved Play returns to open.");
+            var (change, cleared) = play.ReturnToOpen(request.Note, time.GetUtcNow());
+            plays.Add(change);
+            if (cleared is not null) plays.Add(cleared);
+            return PlayService.ToDto(play);
+        }, ct), ct);
+    }
+
+    /// <summary>
+    /// The Play's execution facts as the execution view reads them: entered, exited, the signed difference, its linked
+    /// orders with their filled quantity, and the integrity problems. Null when it has no imported execution.
+    /// </summary>
+    private async Task<UnresolvedEvidenceDto?> EvidenceAsync(Play play, CancellationToken ct)
+    {
+        var links = (await store.LinksAsync(play.AccountId, new HashSet<Guid>(), new HashSet<Guid> { play.Id }, ct))
+            .Where(l => l.PlayId == play.Id && l.State == OrderLinkState.Linked).ToList();
+        var orders = (await store.OrdersAsync(play.AccountId, links.Select(l => l.ImportedOrderId).ToHashSet(), NoContracts, ct)).ToDictionary(o => o.Id);
+        var fills = FillsByOrder(orders.Values, await store.FillsAsync(play.AccountId, orders.Values.Select(OrderKey.Of).ToList(), ct));
+        var settlement = Settle(PlayDocuments.Read(play.Plan), links, orders, fills);
+        if (settlement.All.Count == 0) return null;
+        return new(settlement.Entered.ToString(), settlement.Exited.ToString(), (settlement.Entered - settlement.Exited).ToString(), links.Count,
+            links.OrderBy(l => l.Role).ThenBy(l => l.EntryId).ThenBy(l => l.LevelId).ThenBy(l => External(orders, l), StringComparer.Ordinal)
+                .Take(PlayUnresolved.MaxEvidenceOrders).Select(l => new UnresolvedOrderDto(External(orders, l), Name(l.Role), l.EntryId, l.LevelId,
+                    orders.TryGetValue(l.ImportedOrderId, out var order) ? order.Status : "unknown",
+                    ExecutionIntegrity.Quantity(fills[l.ImportedOrderId]).ToString())).ToList(),
+            settlement.Problems.Take(PlayUnresolved.MaxEvidenceProblems).ToList());
+    }
+
     private static readonly IReadOnlyDictionary<string, DateTimeOffset> NoContracts = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
 
     private const string NotLinkable = "Only planned, paused or open plays link orders.";
@@ -272,7 +336,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
 
     private async Task ReconcileAsync(Account account, VenueOrderReadResult read, IReadOnlyDictionary<string, decimal> ticks, CancellationToken ct)
     {
-        var active = (await store.ActivePlaysAsync(account.Id, ct))
+        // Unresolved Plays settle from their existing linked orders but never take new links or suggestions.
+        var active = (await store.ActivePlaysAsync(account.Id, ct, settling: true))
             .Where(p => p.InstrumentSource == InstrumentSource.Venue && p.ContractId is not null).ToList();
         if (active.Count == 0) return;
         var since = active.GroupBy(p => p.ContractId!).ToDictionary(g => g.Key, g => g.Min(p => p.CreatedAtUtc), StringComparer.Ordinal);
@@ -283,7 +348,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         for (var pass = 0; pass < 3; pass++)
         {
             var before = active.Select(p => p.Status).ToList();
-            await MatchAsync(account, active, ticks, ct);
+            await MatchAsync(account, active.Where(ExecutionMatcher.IsActive).ToList(), ticks, ct);
             await ApplyTransitionsAsync(account.Id, active, ct);
             await store.SaveAsync(ct);
             if (before.SequenceEqual(active.Select(p => p.Status))) break;
@@ -384,8 +449,9 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     }
 
     /// <summary>
-    /// Planned or paused → Open on the first linked entry fill; Open → Closed once linked exits equal the entries and
-    /// nothing is known missing, contradictory or out of order. Closed is final, so it waits until the fills settle the play.
+    /// Planned or paused → Open on the first linked entry fill; Open or Unresolved → Closed once linked exits equal the
+    /// entries and nothing is known missing, contradictory or out of order. Closed is final, so it waits until the fills
+    /// settle the play. An Unresolved Play closes by the same rule and keeps its declaration in history.
     /// </summary>
     private async Task ApplyTransitionsAsync(Guid accountId, IReadOnlyList<Play> targets, CancellationToken ct)
     {
@@ -409,8 +475,15 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
                     $"Entry fill of {ExactDecimal.Format(first.Quantity)} at {ExactDecimal.Format(first.Price)} on order {first.ExternalOrderId}.", now));
             }
             var resting = own.Any(l => l.Role == OrderLinkRole.Entry && orders.TryGetValue(l.ImportedOrderId, out var o) && o.Status == "open");
-            if (play.Status == PlayStatus.Open && entered.Units.Sign > 0 && settlement.Exited == entered && settlement.Problems.Count == 0 && !resting)
+            var settled = entered.Units.Sign > 0 && settlement.Exited == entered && settlement.Problems.Count == 0 && !resting;
+            if (play.Status == PlayStatus.Open && settled)
                 store.Add(play.MarkClosed($"Linked exits covered the {entered} entered.", now));
+            else if (play.Status == PlayStatus.Unresolved && settled)
+            {
+                var (change, cleared) = play.SettleUnresolved($"Linked exits covered the {entered} entered.", now);
+                store.Add(change);
+                if (cleared is not null) plays.Add(cleared);
+            }
         }
     }
 

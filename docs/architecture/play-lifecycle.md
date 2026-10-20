@@ -36,6 +36,9 @@ Draft ──► Planned ◄──► Paused
   ├──────────┴────────────┴──► Cancelled (reason)
   │          ▼
   │        Open ──► Closed
+  │          ▲ │       ▲
+  │          │ ▼       │ (its fills settle it)
+  │        Unresolved ─┘ (declared by the owner)
   └──► deleted (Drafts only)
 ```
 
@@ -45,6 +48,7 @@ Draft ──► Planned ◄──► Paused
 - **Open**: at least one linked entry fill.
 - **Closed**: compatible linked exit quantity equals linked entry quantity, execution chronology is valid, no fixed-size filled order has known missing executions, and no linked entry order is still resting. Over-exits and contradictory fills prevent closure. A flat venue position is not enough, because concurrent Plays can share one account and instrument.
 - **Cancelled**: never filled. Keeps a reason (invalidated, missed, changed mind, expired, mistake, other) and an optional note. Missed and abandoned ideas are review material.
+- **Unresolved** (October 20, 2026): an Open Play the owner declares its venue executions can never settle. It has no result. See below.
 
 Closed and Cancelled are final. A follow-up idea is a new Play rather than a reopened one. Imported history without a plan will enter as Open or Closed, marked retrospective, with no invented thesis.
 
@@ -116,6 +120,60 @@ decision 3. It covers D-14 and G-04.
     version, because it changes nothing the Play holds.
   - An entry never counts as a review and never feeds Review.
   - The journal shows them in a Log tab after Evidence.
+
+## Unresolved (October 20, 2026)
+
+Phase 1.3a of the [learning-loop contract](phase1-learning-loop-contract.md),
+decision 4. It covers D-06.
+- **Declared by the owner only.** `POST /api/plays/{id}/unresolved` takes
+  `expectedVersion`, a reason (`shared-close`, `flip`,
+  `forced-exit-not-retained` or `other`) and a note.
+  - The Play must be Open and have imported executions on its linked orders.
+  - The monitor never sets it, and account flatness never does.
+  - The browser offers **Declare unresolved** only on an Open venue Play
+    whose linked orders hold fills.
+- **Evidence.** The status change keeps a snapshot of the Play's execution
+  facts at that moment:
+  - entered and exited quantity, and entered minus exited, which is negative
+    when exits exceed entries;
+  - its linked orders (up to 200 listed, all counted), each with its role,
+    level, status and filled quantity;
+  - the integrity problems that kept it from settling.
+- **No result.** Its result stays null and no sign is inferred. The receipt's
+  estimated R says why.
+- **An ended Play.** It is reviewed like a Closed Play. It keeps its plan,
+  and the account and lists treat it as ended:
+  - Needs review or Reviewed by its completion, and All;
+  - the Closed tab stays Closed only;
+  - counts carry `unresolved`.
+- **Review and sizing.** Review leaves it out with the reason "unresolved",
+  counts it in coverage and lists it in the exclusion drill-down with its
+  reason, note and facts. The sizing record says "N unresolved not counted"
+  beside the ladder; the ladder, the window and the Activity fallback rule do
+  not change.
+- **Matching and settlement.**
+  - It takes no new links or suggestions; linking another order needs a
+    return to Open first.
+  - Fills on its existing linked orders are still reconciled under the
+    account lock. If they settle it, it closes from venue facts by the Open
+    rule, with the same `play.closed` event. The declaration stays in
+    history.
+- **Monitor.** It leaves the open-Play position comparison, so a position
+  still at the venue shows as unexplained, never as this Play's. Its linked
+  orders are watched by the Closed and Cancelled rule, from the declaration.
+  A later declaration starts a new window.
+- **Return to Open.** `POST /api/plays/{id}/return-to-open` takes
+  `expectedVersion` and a reason.
+- **Leaving a final state** (1.2). Returning to Open, or venue facts closing
+  it, clears a completed review. A `cleared` review revision records it beside
+  the status change. Text and answers stay. While Open again, stored answers
+  save unchanged but cannot change.
+- **Events.** The declaration and the return are `play.status-changed`, with
+  the unresolved reason as `reason`. No notification rule is added.
+- **Migration.** The explicit `UnresolvedStatus` migration adds the nullable
+  `UnresolvedReason` and `Evidence` columns to `play_status_changes`. Rolling
+  it back is refused while any Play or history row names Unresolved; restore
+  the pre-upgrade backup instead.
 
 ## Managed stops
 

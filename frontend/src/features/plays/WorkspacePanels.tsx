@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type FocusEvent, type FormEvent, ty
 import { useVenues } from '@/api/venues'
 import { Maximize2, Minimize2, NotebookPen, Pencil, Plus, RotateCcw } from 'lucide-react'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
-import { emptyStructuredReview, type NextAction, type PlayStatus, type StructuredReview } from '@/api/plays'
+import { emptyStructuredReview, isEndedStatus, type NextAction, type PlayStatus, type StructuredReview } from '@/api/plays'
 import { ChartIconButton } from '@/components/chart/ChartToolbar'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
@@ -215,7 +215,7 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
     setShownExecution(executionRequest)
     if (execution) { setTab('execution'); setWritingReview(false) }
   }
-  const terminal = status === 'closed' || status === 'cancelled'
+  const terminal = isEndedStatus(status)
   const showReview = writingReview || journalReviewVisible({ status, retrospective, review: notes.review, structuredReview })
   const sections = journalSections.filter(([key]) => (key !== 'review' || showReview) && (!retrospective || key === 'evidence' || key === 'review'))
   const fallback = retrospective ? 'review' : 'thesis'
@@ -271,7 +271,7 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
         onChange={(event) => onChange({ ...notes, [key]: event.target.value })} />
       {key === 'review' && onStructuredReviewChange && <fieldset className="structured-review" disabled={!terminal}>
         <legend><span>Structured review</span>{terminal ? <small>optional</small>
-          : <small title="Structured answers are available after Closed or Cancelled. Your free-text note stays readable.">After close or cancel</small>}</legend>
+          : <small title="Structured answers are available once the Play has ended: Closed, Cancelled or Unresolved. Your free-text note stays readable.">After the Play ends</small>}</legend>
         <div className="structured-review-fields">
           <div className="structured-review-field">
             <label htmlFor={`${id}-adherence`}>Plan adherence</label>

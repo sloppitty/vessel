@@ -83,3 +83,27 @@ describe('Review actionable exclusions', () => {
     expect(within(dialog).getByText('N/A')).toBeInTheDocument()
   })
 })
+
+describe('Unresolved Plays in Review (phase 1, 1.3a)', () => {
+  it('counts them among the excluded and lists each with its reason, note and execution facts', async () => {
+    const declared: Exclusions = { total: 1, offset: 0, nextOffset: null, notice: 'Retained history only.', items: [{
+      ...items[0]!, title: 'Stuck BTC', reasons: ['Declared unresolved by the owner because of a shared close: its executions cannot settle it, so it has no result.'],
+      unresolved: { reason: 'shared-close', note: 'Closed with another position.', declaredAtUtc: '2026-10-20T10:00:00Z',
+        evidence: { entered: '1', exited: '0', open: '1', orderCount: 1,
+          orders: [{ orderId: '21', role: 'entry', entryId: 'entry-1', levelId: null, status: 'filled', filled: '1' }],
+          problems: ['Order 22 is missing retained executions.'] } },
+    }] }
+    const api = { review: vi.fn().mockResolvedValue({ ...reviewFixture, coverage: { ...reviewFixture.coverage, incompleteFees: 0, incompleteExecutions: 0, unresolved: 1 } }),
+      reviewExclusions: vi.fn().mockResolvedValue(declared) } as unknown as WorkspaceApi
+    const user = userEvent.setup()
+    render(<ReviewPage api={api} reloadGeneration={0} onOpenPlay={vi.fn()} />)
+    expect(await screen.findByText('1 unresolved')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Inspect exclusions (1)' }))
+    const facts = within(await within(screen.getByRole('dialog')).findByLabelText('Unresolved declaration'))
+    expect(facts.getByText('Shared close')).toBeInTheDocument()
+    expect(facts.getByText('Closed with another position.')).toBeInTheDocument()
+    expect(facts.getByText('When declared: entered 1, exited 0, entered minus exited 1.')).toBeInTheDocument()
+    expect(facts.getByText('Linked orders: entry order 21 (filled, filled 1).')).toBeInTheDocument()
+    expect(facts.getByText('Order 22 is missing retained executions.')).toBeInTheDocument()
+  })
+})

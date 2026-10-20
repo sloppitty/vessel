@@ -21,6 +21,11 @@
 .pr-exclusion-list > li { padding: 16px 0; border-bottom: 1px solid var(--border); }
 .pr-exclusion-list p, .pr-exclusion-list small { color: var(--muted-foreground); }
 .pr-exclusion-list .play-identity { margin: 7px 0 4px; }
+.pr-unresolved { display: grid; gap: 6px; margin: 10px 0 0; padding: 10px 12px; border: 1px dashed color-mix(in srgb, var(--warning) 45%, var(--border)); border-radius: var(--radius); }
+.pr-unresolved > div { display: grid; grid-template-columns: minmax(96px, max-content) 1fr; gap: 10px; }
+.pr-unresolved dt { color: var(--muted-foreground); }
+.pr-unresolved dd { margin: 0; }
+.pr-unresolved ul { margin: 0; padding-left: 18px; }
 .pr-play-list .play-identity { margin-top: 7px; }
 .pr-exclusion-list small, .pr-exclusion-list li { overflow-wrap: anywhere; }
 .pr-exclusion-list ul { padding-left: 20px; margin-top: 10px; }
