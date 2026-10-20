@@ -77,6 +77,10 @@ Phase 1 edits these same files, so its code stacks on one branch,
   unmerged tips, and Phase 1 pull requests are retargeted in order.
 - This contract and the state document stack on #7. 1.6a has no Phase 0
   overlap, so it stacks on this contract.
+- **October 20, 2026: Phase 0 merged into main** (`c39d98e`), with every tip
+  above. The rebuilt base is therefore main itself. This contract was rebased
+  onto main, 1.1a and the chain above it were rebased onto this contract, and
+  the draft base pull request was closed.
 
 ## 1.1 Actual versus plan
 
@@ -509,9 +513,8 @@ Small pull requests against `sloppitty/vessel`. Each pull request's diff
 stays within its own item.
 
 ```text
-#7 → contract + state (this document)
-     └─ 1.6a Activity link, Journal this trade, retrospective summary and title
-t3/phase1-base (draft, do not merge: #9 + #14 + #17 + #18)
+main (Phase 0 merged October 20) → contract + state (this document)
+├─ 1.6a Activity link, Journal this trade, retrospective summary and title
 └─ 1.1a receipt, journal Save, retrospective receipt
    └─ 1.4a post-hoc badge, per-metric n, R expectancy label
       └─ 1.5 next actions and pre-flight            (migration)
