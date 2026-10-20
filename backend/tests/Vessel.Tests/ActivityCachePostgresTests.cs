@@ -46,6 +46,8 @@ public sealed class ActivityCachePostgresTests
             if (reads.BeforeRead is { } before) await before();
             return await new ActivityStore(db).ReadAsync(accountId, ct, accountIds);
         }
+        public Task<IReadOnlyDictionary<Guid, string>> PlayTitlesAsync(IReadOnlyCollection<Guid> playIds, CancellationToken ct) =>
+            new ActivityStore(db).PlayTitlesAsync(playIds, ct);
     }
     private static ServiceProvider Provider(CoreDatabase database, Reads reads, bool verifyReleased = false)
     {

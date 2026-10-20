@@ -53,6 +53,8 @@ export interface ActivityOperation {
   pnlBasis: 'gross' | 'net-of-fee' | 'mixed'
   playId: string | null
   playAssociation: 'linked' | 'unassigned' | 'mixed'
+  /** The linked Play's current title on Activity pages; null when unlinked or unreadable, absent in a preview. */
+  playTitle?: string | null
   coverage: string[]
 }
 /** An operation with its constituent rows, as a retrospective preview carries it. */
@@ -210,7 +212,8 @@ export function isActivityOperation(op: unknown): op is ActivityOperation {
     !['linked', 'unassigned', 'mixed'].includes(String(op.playAssociation)) || !isListOf(op.coverage, n => isFilledText(n, 2000), 100) ||
     !Array.isArray(op.otherFees) || !op.otherFees.every(f => isRecord(f) && isFilledText(f.token, 64) && isPlainDecimal(f.amount, decimalLength)) ||
     (op.fillCount as number) === 0 || (op.entryOrderCount as number) > (op.fillCount as number) || (op.exitOrderCount as number) > (op.fillCount as number) ||
-    (op.playAssociation === 'linked') !== (op.playId !== null)) return false
+    (op.playAssociation === 'linked') !== (op.playId !== null) ||
+    op.playTitle !== undefined && !isNullOr(op.playTitle, x => typeof x === 'string' && x.length <= 200) || op.playTitle != null && op.playId === null) return false
   if (op.status === 'incomplete') {
     if (!op.coverage.length) return false
     if (op.direction === null) {

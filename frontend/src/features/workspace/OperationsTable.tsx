@@ -15,6 +15,26 @@ function Result({ value }: { value: string | null }) {
   return <span className={`operation-result ${resultSign(value)}`} title={value ?? 'Unknown'}>{money(value)}</span>
 }
 
+/**
+ * The operation's Play: a linked Play by its title, opening it; a closed unassigned operation offers to journal it
+ * (the retrospective preview checks eligibility); anything else says how it is associated.
+ */
+function PlayCell({ operation: op, onOpenPlay, opening, onJournal }: {
+  operation: ActivityOperation; onOpenPlay: ((id: string) => void) | undefined; opening: string | null
+  onJournal: ((operation: ActivityOperation) => void) | undefined
+}) {
+  if (op.playId) {
+    const title = op.playTitle?.trim() || 'Untitled play'
+    if (!onOpenPlay) return <span className="workspace-badge operation-play-title" title={title}>{title}</span>
+    const playId = op.playId
+    return <><button type="button" className="text-action operation-play-link" title={title} disabled={opening !== null}
+      aria-label={`Open Play ${title}`} onClick={() => onOpenPlay(playId)}>{title}</button>{opening === playId && <small role="status">Opening…</small>}</>
+  }
+  if (onJournal && op.status === 'closed' && op.playAssociation === 'unassigned')
+    return <button type="button" className="text-action operation-journal" aria-label={`Journal this ${op.contractId} trade`} onClick={() => onJournal(op)}>Journal this trade</button>
+  return <span className="workspace-badge">{op.playAssociation === 'mixed' ? 'Mixed' : 'Unassigned'}</span>
+}
+
 function OperationsHead({ compact }: { compact: boolean }) {
   return <thead><tr>
     <th>Operation</th><th>Account / time <span className="operation-timezone">UTC</span></th><th title="Peak position quantity">Size</th>{!compact && <><th>Average entry</th><th>Average exit</th><th title="Before reported fees; venue-reported P&L is preserved in the executions">Closed P&amp;L</th><th title="Stablecoin fees in nominal USD; other tokens listed separately">Fees</th><th title="Settled funding in nominal USD: positive received, negative paid. Partial coverage is not zero.">Funding</th></>}<th title="Fee-adjusted reported execution P&L. Funding inclusion may be unverified; expand for the separate combined total.">Net result</th>{!compact && <th>Play</th>}
@@ -50,9 +70,13 @@ export function OperationsSkeleton({ compact = false, rows, note = false }: { co
   </SkeletonStatus>
 }
 
-export function OperationsTable({ operations, accounts, compact = false, onPreview, api, onReload, refreshGeneration = 0 }: {
+export function OperationsTable({ operations, accounts, compact = false, onPreview, onOpenPlay, opening = null, api, onReload, refreshGeneration = 0 }: {
   operations: ActivityOperation[]; accounts: BrokerAccount[]; compact?: boolean
   onPreview?: (operation: ActivityOperation) => void
+  /** Opens a linked Play from the Play column. */
+  onOpenPlay?: (id: string) => void
+  /** The Play being opened, which disables the other Play links. */
+  opening?: string | null
   /** Reads an expanded operation's executions. */
   api: WorkspaceApi
   /** Reloads Activity when an expanded operation no longer exists. */
@@ -82,7 +106,7 @@ export function OperationsTable({ operations, accounts, compact = false, onPrevi
       <td className="numeric operation-fees"><span title={op.stablecoinFeesNominalUsd}>{money(op.stablecoinFeesNominalUsd)}</span>{op.otherFees.map(f => <small key={f.token}>{amount(f.amount)} {f.token}</small>)}</td>
       <td className="numeric"><Result value={op.fundingNetUsd} />{op.fundingStatus !== 'complete' && <small>{op.fundingStatus === 'partial' ? 'Partial' : 'Unavailable'}</small>}</td></>}
       <td className="numeric operation-net"><Result value={op.netResultUsd} /></td>
-      {!compact && <td>{op.playId ? <span className="workspace-badge" title={op.playId}>Play {op.playId.slice(0, 8)}</span> : <span className="workspace-badge">{op.playAssociation === 'mixed' ? 'Mixed' : 'Unassigned'}</span>}</td>}
+      {!compact && <td className="operation-play"><PlayCell operation={op} onOpenPlay={onOpenPlay} opening={opening} onJournal={onPreview} /></td>}
     </tr>{open && <tr id={`operation-${op.id}`}><td colSpan={compact ? 4 : 10} className="operation-expanded">
       {onPreview && <button className="text-action" aria-label={`Inspect ${op.contractId} retrospective eligibility`} onClick={() => onPreview(op)}>Inspect retrospective eligibility</button>}
       <p className="workspace-scope-note operation-details">Entered {op.totalEnteredQuantity === null ? 'unknown' : amount(op.totalEnteredQuantity)} · Exited {op.totalExitedQuantity === null ? 'unknown' : amount(op.totalExitedQuantity)} · Remaining {op.openQuantity === null ? 'unknown' : amount(op.openQuantity)}</p>

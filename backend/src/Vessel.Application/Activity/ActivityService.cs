@@ -48,7 +48,15 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
             .ThenBy(o => o.AccountId.ToString("D"), StringComparer.Ordinal).ThenBy(o => o.Id, StringComparer.Ordinal).ToList();
         var filtered = scoped.Where(o => filter.Matches(o, portfolioOf.GetValueOrDefault(o.AccountId))).ToList();
         page = ListPaging.Clamp(page, pageSize, filtered.Count);
-        return new(filtered.Skip(ListPaging.Skip(page, pageSize)).Take(pageSize).Select(ActivityOperationSummaryDto.From).ToList(),
+        var rows = filtered.Skip(ListPaging.Skip(page, pageSize)).Take(pageSize).Select(ActivityOperationSummaryDto.From).ToList();
+        // Titles are read for the shown rows only, after the cached aggregate, so a renamed Play shows its current title.
+        var linked = rows.Where(r => r.PlayId is not null).Select(r => r.PlayId!.Value).Distinct().ToList();
+        if (linked.Count > 0)
+        {
+            var titles = await store.PlayTitlesAsync(linked, ct);
+            rows = rows.Select(r => r.PlayId is { } id && titles.TryGetValue(id, out var title) ? r with { PlayTitle = title } : r).ToList();
+        }
+        return new(rows,
             page, pageSize, filtered.Count, scoped.Count, summary.Facts.Fills.Count, asOf, summary.Version,
             new(scoped.Select(o => o.AccountId).Distinct().OrderBy(id => id.ToString("D"), StringComparer.Ordinal).ToList(),
                 scoped.Select(o => o.ContractId).Distinct().Order(StringComparer.Ordinal).ToList()),
