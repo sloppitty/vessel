@@ -165,6 +165,13 @@ October 20, 2026, branch `t3/phase1-post-hoc-badge`, stacked on 1.1a:
   - **Rebase.** The branch was rebased onto the fixed 1.1a. `scripts/check.sh` passed again: backend 3,561 passed, 5
     skipped; frontend 149 files and 3,745 tests.
 
+- **Sol (Codex) round 2.** Both round-1 findings resolved. One new finding and a test gap, both fixed:
+  - **Average outcome (medium).** The Winning Play and Losing Play averages each show their own n, with the small-sample
+    mark below 20.
+  - **Spacing test.** A stylesheet test now fails if the sample label's own-line rule is removed.
+  - **Check.** After the rebase onto main, `scripts/check.sh` passed: backend 3,571 passed, 5 skipped; frontend 149
+    files and 3,768 tests.
+
 ## 1.5 Lessons return and a recorded pre-flight
 
 Not started.
