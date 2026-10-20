@@ -435,6 +435,22 @@ October 20, 2026, branch `t3/phase1-process-cases`, stacked on 1.3b:
     the tag suggestions and the response guards.
 - **Checks.** `scripts/check.sh` passed: backend 3,607 passed, 5 skipped; frontend 153 files and 3,813 tests; build clean.
 
+- **Sol (Codex) round 1.** Four findings, all fixed:
+  - **Cancelled Plays (medium).** An unanswered Cancelled Play was in neither the lanes nor the exclusion list. The
+    exclusion drill-down now lists the period's Cancelled Plays with their cancel reason, `coverage.cancelled` counts
+    them, and the excluded total includes them. The lane test checks the exclusion list and coverage add up; it fails
+    without this fix. The two-owner isolation test expects the owner's own cancelled Play there.
+  - **Rates (medium).** Origin and Direction rows and their combined row show batting average, average gain / loss and
+    profit factor only where their own denominator is at least 10, otherwise `—` with the n. A test fails without
+    this fix.
+  - **Queries (medium).** Review read one query per Unresolved Play for the post-hoc flag. It now reads the first
+    linked execution of every Unresolved Play in scope in one grouped query. A PostgreSQL test counts Review's queries
+    with one and three Unresolved Plays (it fails on the old loop) and checks the earliest of two fills decides the
+    flag.
+  - **Link names (low).** Process drill-down links are named by their visible title.
+  - **Check.** After the rebase onto the fixed 1.3a, `scripts/check.sh` passed: backend 3,608 passed, 5 skipped;
+    frontend 153 files and 3,819 tests.
+
 ## 1.5 Lessons return and a recorded pre-flight
 
 October 20, 2026, branch `t3/phase1-preflight`, stacked on 1.4a:

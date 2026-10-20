@@ -9,8 +9,10 @@
   applicable, unanswered) beside how they turned out, with retrospective and
   unscored Plays in their own lanes and each mistake tag counted. Every count
   opens exactly its Plays; a share appears only once its own count reaches 10.
-  The breakdown adds Origin and Direction, the pre-flight counts open their
-  Plays, and the review form suggests your earlier mistake tags (G-01).
+  The breakdown adds Origin and Direction, whose rates also wait for 10, the
+  pre-flight counts open their Plays, and the review form suggests your
+  earlier mistake tags (G-01). Cancelled Plays now appear with the exclusions,
+  with their cancel reason, and count in the excluded total.
 - Several manual executions can be corrected together with one reason: a
   closed 1-in/1-out ledger can become 2-in/2-out in one step. The corrections
   apply all or nothing, only the final ledger has to be valid, and the audit
