@@ -63,8 +63,11 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Persistence/ExecutionStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             // Paper settings serialize by the assigned journal owner's advisory key; no owner rows are bypassed.
             "Vessel.Persistence/PaperStore.cs|ca35ce83e5046ca71b824a5e1463e632f7a8a1da5a1d567b9cbd4c62cf33a4d3",
+            // Exact capital aggregates explicitly bind owner+account; suspended exposure correlates that owner's Play facts.
+            "Vessel.Persistence/PaperStore.cs|03709fdf8f9f4ee1c8ac2bc0eff423494c13010ee2d3d8f01038e080312b4737",
+            "Vessel.Persistence/PaperStore.cs|08d7fae2990f586cb97eda7d7b88003197c70bfdbcc6cea9c4e121d2ae85e800",
             // One snapshot of paper balances: outer account is assigned-owner filtered; every lateral aggregate correlates owner+account.
-            "Vessel.Persistence/WorkspaceStore.Paper.cs|67ffa4b9116b27e781f80ec72a73a2d462956bbd94e5e74b62d1c5d4cb4c1802",
+            "Vessel.Persistence/WorkspaceStore.Paper.cs|d536769e0d360a5190b0e2a654164db45c584b6035d845183f94a9538cccfb7e",
             // Paper schema probe returns no rows; the scheduler's sole global acquire/release protects shared public reads.
             "Vessel.Worker/PaperScheduler.cs|836ebdb2b79c67541fb7174785661d0bb001697ceeee2ce7e06a2a15ca0b2f5b",
             "Vessel.Worker/PaperScheduler.cs|5553fefce46ca5daf07aa5e90a20bae242e0cf92c34cbaec98217b8b48a581d1",

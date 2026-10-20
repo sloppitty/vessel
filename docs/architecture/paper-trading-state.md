@@ -530,3 +530,16 @@ Evidence root:
 The frozen combined backend/frontend production manifest has SHA-256
 `e0ad24699b2cac87edcd79f5dfda800c1338874e388ad14e7704867a33744b3b`.
 No corrected-tree complete-suite or independent review pass is claimed yet.
+
+The first complete corrective run exposed a stale SQL-audit inventory and one
+worker case expecting two reads/executions but observing zero during parallel
+tests. The new exact-capital/suspension SQL was reviewed for explicit
+owner/account parameters and correlated owner/Play facts, and its three
+statement hashes were updated rather than exempting a file. Worker tests now
+use a nonparallel collection because real monitor tests share their
+database-wide venue advisory key even across synthetic schemas; that specific
+failed invocation's cause was not traced. Its failure is retained, not counted
+as a pass. These are test-only follow-ups; production remains byte-identical to
+the frozen manifest. A rebuilt audit/worker run and the affected complete batch
+must pass before handoff; final batches use separate synthetic databases to
+avoid cross-testhost advisory-lock contention.

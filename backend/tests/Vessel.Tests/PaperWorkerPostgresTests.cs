@@ -21,6 +21,11 @@ using Vessel.Worker;
 
 namespace Vessel.Tests;
 
+// Real monitor tests use the same database-wide venue advisory key even in a different synthetic schema.
+[CollectionDefinition("Paper worker server state", DisableParallelization = true)]
+public sealed class PaperWorkerServerStateCollection;
+
+[Collection("Paper worker server state")]
 public sealed class PaperWorkerPostgresTests
 {
     private static readonly DateTimeOffset Open = new(2026, 10, 20, 12, 1, 0, TimeSpan.Zero);
