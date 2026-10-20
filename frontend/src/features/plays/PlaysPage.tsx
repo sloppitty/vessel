@@ -48,7 +48,7 @@ const ended: PlayStatus[] = ['closed', 'cancelled']
 type DialogKind = null | 'revision' | 'cancel' | 'delete' | 'history' | 'preflight'
 type WorkKind = 'save' | 'status' | 'open' | 'delete' | 'manual'
 
-export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef, list, onList, reloadGeneration = 0, accountMonitors = [], onManageAccount, onLogChange }: {
+export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef, list, onList, reloadGeneration = 0, accountMonitors = [], onManageAccount, onLogChange, onLogApplier }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -59,6 +59,11 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
    * gone reaches the session through it; the owner refuses it once the session was discarded.
    */
   onLogChange?: ((change: PlayLogChange) => void) | undefined
+  /**
+   * Registers this page as the one that applies log changes while it is mounted, so the owner's late acknowledgements
+   * go through the page's own current session and never race its edits; returns the unregistration.
+   */
+  onLogApplier?: ((apply: (change: PlayLogChange) => void) => () => void) | undefined
   onReload?: (() => void) | undefined
   reloadGeneration?: number
   accountMonitors?: AccountMonitor[]
@@ -85,6 +90,9 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     latest.current = { ...latest.current, ...next }
     onSession(latest.current)
   }, [onSession])
+  // While mounted, every log change, a departed page's included, applies to this page's current session (1.2).
+  const applyLog = useCallback((change: PlayLogChange) => update({ log: change(latest.current.log) }), [update])
+  useEffect(() => onLogApplier?.(applyLog), [onLogApplier, applyLog])
   const [busy, setBusy] = useState<WorkKind | null>(null)
   const activeWork = useRef(workRef ?? { current: null as symbol | null })
   const [navigationError, setNavigationError] = useState<string | null>(null)

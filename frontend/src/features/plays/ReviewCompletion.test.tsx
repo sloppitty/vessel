@@ -188,6 +188,37 @@ describe('writes answered out of order (phase 1, 1.2)', () => {
   })
 })
 
+describe('a delayed answer of the mounted Log (phase 1, 1.2)', () => {
+  it('never hides an entry another answer already showed', async () => {
+    let finishFirst!: (notes: PlayNote[]) => void
+    let finishSecond!: (notes: PlayNote[]) => void
+    const first = { ...note, id: '00000000-0000-4000-8000-0000000000e1', text: 'First thought.', createdAtUtc: '2026-10-20T10:02:00Z' }
+    const second = { ...note, id: '00000000-0000-4000-8000-0000000000e2', text: 'Second thought.', createdAtUtc: '2026-10-20T10:01:00Z' }
+    let stored: PlayNote[] = []
+    const add = vi.fn().mockImplementationOnce(() => new Promise<PlayNote[]>(resolve => { finishFirst = resolve }))
+      .mockImplementationOnce(() => new Promise<PlayNote[]>(resolve => { finishSecond = resolve }))
+    const api = { playNotes: vi.fn(() => Promise.resolve(stored)), addPlayNote: add } as unknown as WorkspaceApi
+    const user = userEvent.setup()
+    const playId = savedPlayFixture.summary.id
+    const { rerender } = render(<KeptLog api={api} playId={playId} mounted onKept={vi.fn()} />)
+    await screen.findByText('No entries yet.')
+    await user.type(screen.getByLabelText('Log entry'), first.text)
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    rerender(<KeptLog api={api} playId={playId} mounted={false} onKept={vi.fn()} />)
+    rerender(<KeptLog api={api} playId={playId} mounted onKept={vi.fn()} />)
+    await user.clear(screen.getByLabelText('Log entry'))
+    await user.type(screen.getByLabelText('Log entry'), second.text)
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    // The second entry was stored first, but its answer is late; the first write's answer and the read it prompts show both.
+    stored = [second, first]
+    await act(async () => finishFirst([second, first]))
+    expect(await screen.findByText(first.text)).toBeInTheDocument()
+    await act(async () => finishSecond([second]))
+    expect(screen.getByText(first.text)).toBeInTheDocument()
+    expect(screen.getByText(second.text)).toBeInTheDocument()
+  })
+})
+
 describe('log reads and older servers (phase 1, 1.2)', () => {
   it('never lets an earlier read hide an entry a write already showed', async () => {
     let finishRead!: (notes: PlayNote[]) => void

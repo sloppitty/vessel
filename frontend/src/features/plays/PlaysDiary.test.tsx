@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
@@ -16,7 +16,8 @@ import { PlaysPage } from './PlaysPage'
 import { PlayWorkspace } from './PlayWorkspace'
 import { createDraft } from './draft'
 import { emptyManualDraft } from './manual'
-import { createPlaysSession, draftFromSaved, savedState, type PlaysSession } from './saved'
+import { createPlaysSession, draftFromSaved, hasUnsavedPlayWork, savedState, type PlaysSession } from './saved'
+import type { PlayLogChange } from './log-draft'
 import { ApplicationShell } from '@/features/workspace/ApplicationShell'
 import * as overviewActions from '@/features/workspace/OverviewActions'
 import * as savedChecks from './saved'
@@ -93,13 +94,20 @@ function Harness({ api, initial = createPlaysSession(), request = null, onHandle
   const [session, setSession] = useState(initial)
   const [requested, setRequested] = useState(request)
   const [shown, setShown] = useState(true)
+  // As the shell does: a mounted page applies log changes; without one, they go to the current session.
+  const applier = useRef<((change: PlayLogChange) => void) | null>(null)
+  const onLogApplier = useCallback((apply: (change: PlayLogChange) => void) => {
+    applier.current = apply
+    return () => { if (applier.current === apply) applier.current = null }
+  }, [])
   const venues = systemFixture.venues.map(venue => venue.id === accountFixture.venueId
     ? { ...venue, capabilities: { ...venue.capabilities, manualExecutions: manual } } : venue)
   return <VenuesProvider venues={venues}><NotificationProvider>
     <button onClick={() => setRequested(otherId)}>Request another Play</button>
     <button onClick={() => setShown(value => !value)}>Toggle Plays page</button>
     {shown && <PlaysPage accounts={[accountFixture]} portfolios={[portfolioFixture]} api={api} session={session}
-      onSession={next => { setSession(next); onSession(next) }} onLogChange={change => setSession(current => ({ ...current, log: change(current.log) }))}
+      onSession={next => { setSession(next); onSession(next) }} onLogApplier={onLogApplier}
+      onLogChange={change => { if (applier.current) applier.current(change); else setSession(current => ({ ...current, log: change(current.log) })) }}
       requestedPlayId={requested}
       onRequestedPlayHandled={() => { onHandled(); setRequested(null) }} />}
   </NotificationProvider></VenuesProvider>
@@ -807,6 +815,32 @@ describe('diary workspace integration', () => {
     expect(screen.getByLabelText('Log entry')).toHaveValue('A newer thought')
     // The current page reads the list again and shows the entry the gone page wrote.
     expect(await screen.findByText('Adding into strength')).toBeInTheDocument()
+  })
+  it('applies a gone page\'s acknowledgement through the mounted page, so an edit before it renders keeps it (phase 1, 1.2)', async () => {
+    const open: SavedPlay = { ...planned, summary: { ...planned.summary, status: 'open' } }
+    const { api, methods } = client(open)
+    let finish!: (notes: PlayNote[]) => void
+    methods.addPlayNote.mockImplementation(() => new Promise<PlayNote[]>(resolve => { finish = resolve }))
+    const sessions = vi.fn()
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(open)} onSession={sessions} />)
+    await user.click(screen.getByRole('tab', { name: 'Log' }))
+    await user.type(await screen.findByLabelText('Log entry'), 'Adding into strength')
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    await user.click(screen.getByRole('button', { name: 'Toggle Plays page' }))
+    await user.click(screen.getByRole('button', { name: 'Toggle Plays page' }))
+    await user.click(await screen.findByRole('tab', { name: 'Log' }))
+    const entry = await screen.findByLabelText('Log entry')
+    const written: PlayNote = { id: '00000000-0000-4000-8000-0000000000c1', text: 'Adding into strength', state: null, createdAtUtc: at }
+    // The write lands, and the owner clears the field before the page renders the acknowledgement.
+    await act(async () => {
+      finish([written])
+      await new Promise(resolve => setTimeout(resolve, 0))
+      fireEvent.change(entry, { target: { value: '' } })
+    })
+    const last = sessions.mock.lastCall![0] as PlaysSession
+    expect(last.log?.attempt).toBeUndefined()
+    expect(hasUnsavedPlayWork(last)).toBe(false)
   })
   it('offers the log on a retrospective Play too (phase 1, 1.2)', async () => {
     const { api } = client(retrospectiveSavedFixture)

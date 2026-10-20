@@ -6,7 +6,7 @@ import type { WorkspaceApi } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
 import { time } from '@/lib/format'
-import type { PlayLogChange, PlayLogDraft } from './log-draft'
+import { mergeNotes, type PlayLogChange, type PlayLogDraft } from './log-draft'
 
 /*
  * Review completion and the in-trade log (phase 1, 1.2, decision 3). A review is complete only when the owner says so:
@@ -96,7 +96,7 @@ export function PlayLog({ api, playId, draft, onDraft }: {
     api.playNotes(playId, controller.signal).then(value => {
       if (controller.signal.aborted || read < shown.current) return
       shown.current = read
-      setNotes(value); setLoadError(null)
+      setNotes(shown => mergeNotes(shown, value)); setLoadError(null)
     }).catch(cause => { if (!controller.signal.aborted && read >= shown.current) setLoadError(errorMessage(cause, 'The log could not be loaded.')) })
     return () => controller.abort()
   }, [api, playId, reload, written])
@@ -113,7 +113,7 @@ export function PlayLog({ api, playId, draft, onDraft }: {
     try {
       const written = await api.addPlayNote(playId, attempt)
       shown.current = ++sequence.current
-      setNotes(written); setLoadError(null)
+      setNotes(shown => mergeNotes(shown, written)); setLoadError(null)
       // Possibly after a remount, with newer text typed: only the entry this write sent is cleared.
       // Every confirmed write counts, so whichever Log is mounted shows it; only the entry it sent is cleared.
       change(stored => {
