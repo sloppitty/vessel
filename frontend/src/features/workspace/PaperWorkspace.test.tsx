@@ -152,6 +152,15 @@ describe('paper account creation and immutable capital', () => {
     expect(screen.getByRole('button', { name: 'Create paper account' })).toBeDisabled()
     expect(within(screen.getByRole('group', { name: 'Venue' })).queryAllByRole('radio')).toHaveLength(0)
   })
+  it('discloses the post-resume entry hold before disabling a paper account', async () => {
+    render(<VenuesProvider venues={system.venues}><ManageAccountDialog api={api({ tradingMode: 'paper' })}
+      account={paperAccount} portfolios={[paperPortfolio]} onClose={vi.fn()} onChanged={vi.fn()} /></VenuesProvider>)
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Account enabled' }))
+    expect(screen.getByText(/Disabling suspends this account/)).toHaveTextContent('re-enabling resumes at a fresh minute boundary')
+    expect(screen.getByText(/Disabling suspends this account/)).toHaveTextContent('Any position open at suspension keeps new entries blocked after re-enabling until that exposure closes')
+    expect(screen.getByText(/Disabling suspends this account/)).toHaveTextContent('Touches during the hold are declined, not replayed')
+    expect(screen.getByText(/Disabling suspends this account/)).toHaveTextContent('unscored')
+  })
 })
 
 

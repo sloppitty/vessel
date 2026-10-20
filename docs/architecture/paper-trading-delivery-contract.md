@@ -87,6 +87,9 @@ reported to the parent before a dependent implementation is changed.
   resume only previously active simulations and leave owner-paused Plays paused.
   Suspension history permanently excludes that Play's result from scoring but
   does not permanently block fresh work on an otherwise flat, resolved account.
+  Both global and account disable controls must disclose that still-open
+  pre-suspension exposure continues to block new entries after re-enabling
+  until it closes, and entries touched during that hold are declined, not replayed.
 - GET sizing in paper may read the existing owner risk preference read-only.
   PUT sizing settings in paper returns 409, never modifies the real preference.
   The paper record/window/ladder/limits use only paper outcomes. No separate
@@ -129,9 +132,9 @@ Declined entries are durable per-entry decisions, not candle history gaps.
 Advance the frontier, never retro-execute a declined touch, and keep evaluating
 already-open tranches' protective exits. `blocked` is active work; `suspended`
 has no due time until prospective resumption. `issues` contains transient/fatal
-source problems, not declined-entry or suspension history. Terminal gap/
-ambiguity without a due time does not poll indefinitely in the browser; Reload
-still observes stored state only.
+source problems, not declined-entry or suspension history. A null next check
+stops automatic browser polling for every status, including Closed Plays
+reported as `ready`; Reload still observes stored state only.
 
 Paper Plays use this view instead of the actual-order linking/manual-execution
 UI and polling. Existing lifecycle save/status routes remain version-checked.

@@ -611,3 +611,16 @@ one frontend one-second timeout passed unchanged on repeated one-worker runs.
 These bounded results are not a clean full-suite claim or overall approval.
 Report, original iterations and runnable probes:
 `/home/ops/.cache/vessel-verification/opus-r3-31e565c/REPORT.md`.
+
+Parent frontend follow-up is frozen: automatic observations stop for every
+state without a next check, including Closed `ready` and `blocked` states;
+manual stored-state Reload still works. Global/account disable copy explicitly
+discloses the continuing pre-suspension exposure admission hold after re-enable,
+declined hold-period entries and retained unscored history. Three polling cases
+and both disclosure checks failed before their fixes. The focused set passes
+**71/71**, and the complete frontend suite passes **157 files / 3,892 tests**
+with normal timeouts and two workers (170.45 seconds). Typecheck, lint, build
+and scoped whitespace checks pass. Evidence:
+`/home/ops/.cache/vessel-verification/paper-r3-ui/`.
+Backend recovery/windowing corrections and another fresh review are still
+pending; frontend verification does not close those P2s.

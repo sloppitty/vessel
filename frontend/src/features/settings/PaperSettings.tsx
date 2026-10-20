@@ -118,6 +118,8 @@ export function PaperSettings({ api, onChange }: PaperSettingsProps) {
           <DialogDescription>Monitoring will stop for all armed and open paper Plays. Existing capital reservations remain held while open exposure is unknown.
             Re-enabling resumes suspended Plays prospectively at a fresh minute boundary; owner-paused Plays stay paused.
             Price touches while disabled are not retroactively simulated. Unevaluated history remains unscored after resumption.
+            Any position open at suspension keeps new entries on that account blocked after re-enabling until that exposure closes.
+            Entries touched during the hold are declined, not replayed.
             Paper history stays available.</DialogDescription></DialogHeader>
         <DialogFooter><Button type="button" variant="outline" onClick={() => setConfirmingFor(null)}>Cancel</Button>
           <Button type="button" variant="destructive" onClick={() => { void save(true) }}>Disable paper monitoring</Button></DialogFooter>

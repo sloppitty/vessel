@@ -251,7 +251,6 @@ describe('PaperExecutionPanel', () => {
     ['next-check-plus-two-seconds', '2026-10-20T12:00:10Z', 12_000],
     ['minimum', '2026-10-20T12:00:01Z', 5000],
     ['maximum', '2026-10-20T13:00:00Z', 300_000],
-    ['missing', null, 60_000],
     ['past', '2026-10-20T11:59:00Z', 60_000],
   ] as const)('observes local paper state using the bounded %s delay', async (_label, nextCheckAtUtc, delay) => {
     vi.useFakeTimers({ now: Date.parse('2026-10-20T12:00:00Z') })
@@ -268,7 +267,7 @@ describe('PaperExecutionPanel', () => {
     expect(onState).toHaveBeenLastCalledWith({ ...state, nextCheckAtUtc })
   })
 
-  it.each(['not-armed', 'disabled', 'suspended', 'gap', 'ambiguous'] as const)('stops automatic reads for %s without a next check, but permits a stored-state reload', async status => {
+  it.each(['not-armed', 'waiting', 'ready', 'blocked', 'disabled', 'suspended', 'gap', 'ambiguous'] as const)('stops automatic reads for %s without a next check, but permits a stored-state reload', async status => {
     vi.useFakeTimers({ now: Date.parse('2026-10-20T12:00:00Z') })
     const api = makeApi({ ...state, status, nextCheckAtUtc: null })
     render(<PaperExecutionPanel api={api} playId={playId} />)
@@ -307,7 +306,7 @@ describe('PaperExecutionPanel', () => {
   it.each(['gap', 'ambiguous'] as const)('cancels future observations when active blocked evaluation becomes terminal %s', async status => {
     vi.useFakeTimers({ now: Date.parse('2026-10-20T12:00:00Z') })
     const api = makeApi({ ...state, status, nextCheckAtUtc: null })
-    api.paperState.mockResolvedValueOnce({ ...state, status: 'blocked', nextCheckAtUtc: null })
+    api.paperState.mockResolvedValueOnce({ ...state, status: 'blocked', nextCheckAtUtc: '2026-10-20T12:00:58Z' })
     render(<PaperExecutionPanel api={api} playId={playId} />)
     await act(async () => {})
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
@@ -338,8 +337,8 @@ describe('PaperExecutionPanel', () => {
   it('does not overlap timed reads, and keeps facts cleared after a failed observation until manual retry', async () => {
     vi.useFakeTimers({ now: Date.parse('2026-10-20T12:00:00Z') })
     const pending = deferred<PaperPlayState>()
-    const api = makeApi({ ...state, nextCheckAtUtc: null })
-    api.paperState.mockResolvedValueOnce({ ...state, nextCheckAtUtc: null }).mockReturnValueOnce(pending.promise)
+    const api = makeApi({ ...state, nextCheckAtUtc: '2026-10-20T11:59:00Z' })
+    api.paperState.mockResolvedValueOnce({ ...state, nextCheckAtUtc: '2026-10-20T11:59:00Z' }).mockReturnValueOnce(pending.promise)
     const onState = vi.fn()
     render(<PaperExecutionPanel api={api} playId={playId} onState={onState} />)
     await act(async () => {})
@@ -364,7 +363,7 @@ describe('PaperExecutionPanel', () => {
     vi.useFakeTimers({ now: Date.parse('2026-10-20T12:00:00Z') })
     let visibility: DocumentVisibilityState = 'visible'
     vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility)
-    const api = makeApi({ ...state, nextCheckAtUtc: null })
+    const api = makeApi({ ...state, nextCheckAtUtc: '2026-10-20T11:59:00Z' })
     const view = render(<PaperExecutionPanel api={api} playId={playId} />)
     await act(async () => {})
     visibility = 'hidden'

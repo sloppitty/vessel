@@ -182,7 +182,9 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
           {portfolioId && !portfolioOptions.some(p => p.id === portfolioId) && <option value={portfolioId}>Current portfolio</option>}
         </NativeSelect>
         <label className="account-enabled-control"><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} disabled={pending} />Account enabled</label>
-        {!enabled && <p className="field-help">Records are kept; history and positions are hidden and excluded from totals, and refresh is blocked.</p>}
+        {!enabled && <p className="field-help">{account.tradingMode === 'paper' ?
+          'Disabling suspends this account’s paper checks; re-enabling resumes at a fresh minute boundary without replaying disabled touches. Any position open at suspension keeps new entries blocked after re-enabling until that exposure closes. Touches during the hold are declined, not replayed. The affected history remains unscored. Records are kept but hidden and excluded from totals while disabled.' :
+          'Records are kept; history and positions are hidden and excluded from totals, and refresh is blocked.'}</p>}
         {conflict && <div className="workspace-form"><p className="field-help">These settings may be outdated. Reload the latest saved values and review them; your changes are not replayed.</p><Button type="button" variant="outline" onClick={() => { void reloadSettings() }} disabled={pending}>Reload current settings</Button></div>}
         {error && <p className="error" role="alert">{error}</p>}
         <div className="management-actions"><Button type="button" variant="ghost" className="danger-action" onClick={() => { setDeleting(true); setError(null) }} disabled={pending || credentialPending}><Trash2 size={14} />Delete</Button><Button type="submit" disabled={pending || credentialPending || conflict}>{pending ? 'Saving…' : 'Save settings'}</Button></div>

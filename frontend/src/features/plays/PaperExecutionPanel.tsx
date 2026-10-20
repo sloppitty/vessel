@@ -58,8 +58,7 @@ export function PaperExecutionPanel({ api, playId, onState, reloadGeneration = 0
   const loading = current === null
 
   useEffect(() => {
-    if (!state || ['not-armed', 'disabled', 'suspended'].includes(state.status) ||
-      state.nextCheckAtUtc === null && ['gap', 'ambiguous'].includes(state.status)) return
+    if (!state || state.nextCheckAtUtc === null || ['not-armed', 'disabled', 'suspended'].includes(state.status)) return
     let timer: ReturnType<typeof setTimeout> | undefined
     const schedule = () => {
       clearTimeout(timer)
