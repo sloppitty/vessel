@@ -155,6 +155,15 @@ October 20, 2026, branch `t3/phase1-post-hoc-badge`, stacked on 1.1a:
   - backend: 3,560 passed, 5 skipped;
   - frontend: 149 files and 3,741 tests;
   - build clean.
+- **Sol (Codex) round 1.** Two findings, both fixed:
+  - **Breakdown markers.** Breakdown rows and the combined footer now mark each cell by its own n:
+    - batting average and profit factor by decided Plays;
+    - average gain / loss by the smaller of wins and losses.
+
+    So 20 wins and one loss flags only the gain / loss cell.
+  - **Spacing.** Each metric's n sits on its own line instead of running into the text before it.
+  - **Rebase.** The branch was rebased onto the fixed 1.1a. `scripts/check.sh` passed again: backend 3,561 passed, 5
+    skipped; frontend 149 files and 3,745 tests.
 
 ## 1.5 Lessons return and a recorded pre-flight
 
