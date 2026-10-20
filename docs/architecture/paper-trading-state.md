@@ -702,3 +702,20 @@ with typecheck/lint/build passing. A fresh app-owned **Claude Opus/max round
 four** is evaluating the exact `9c66d65` code, including the upstream Review
 integration and all prior findings. **PR remains draft; no new independent
 approval or final readiness is claimed while that review is running.**
+
+### Round-four review interrupted by provider limit
+
+Claude Opus/max round four stopped after partial code inspection and a clean
+snapshot build with `Claude API rate limit reached. Try again later.`
+The provider reports a session reset at **October 20, 2026, 23:50 UTC**; the
+child thread is snoozed until that time. Its task is failed and has no final
+review verdict. No unfinished hypothesis or partial inspection is treated as a
+confirmed finding, closure, zero-findings result or approval.
+
+The parent has not launched a duplicate retry. Review task:
+`paper-claude-opus-recovery-review-20261020-r4`, provider `claudeAgent`, model
+`claude-opus-5-5`, effort `max`. Its retained snapshot and the dedicated synthetic
+`paper_recovery_opus` database remain available for a completed review; no owner
+data or production service is involved. **PR stays draft pending final
+independent review**, despite the complete green verification above. No merge,
+deployment, release or owner-database migration has been performed.
