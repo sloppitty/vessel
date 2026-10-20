@@ -341,6 +341,10 @@ October 20, 2026, branch `t3/phase1-correction-batch`, stacked on 1.3a:
 - **Checks.** `scripts/check.sh` passed: backend 3,601 passed, 5 skipped; frontend 152 files and 3,807 tests; build clean. A first
   run found the body-limit inventory missing the new route, now listed at its 262,144-byte limit.
 
+- **Sol (Codex) round 1.** No findings. The reviewer named test gaps that are not defects and are not addressed
+  here: a batch replayed after a later change, a request ID reused on another Play, the history-limit boundaries, an
+  Open-to-Closed batch, and chunked, case-changed or trailing-slash requests against the body limit.
+
 ## 1.4 Process and outcome as cases
 
 ### 1.4a Post-hoc badge and per-metric n
