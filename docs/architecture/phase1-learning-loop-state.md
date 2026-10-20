@@ -115,3 +115,9 @@ October 20, 2026, branch `t3/phase1-activity-journal`, stacked on the contract:
     - backend: 3,434 passed, 5 skipped;
     - frontend: 138 files and 2,457 tests;
     - build clean.
+- **Sol round 2.** Both fixes were confirmed:
+  - The projection compiles to `SELECT p."Id", p."Title"` with the owner filter.
+  - Both accessible names start with their visible text.
+  - The warm-cache and UTC-day tests are sound.
+
+  No new finding of medium severity or above.
