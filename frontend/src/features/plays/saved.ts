@@ -5,7 +5,7 @@ import { isChartDrawing, type ChartDrawing } from '@/components/chart/drawings'
 import { createDraft, createEvidenceId, type DraftEvidence, type PlayDraft } from './draft'
 import { hasManualDraft, type ManualExecutionDraft } from './manual'
 import { titleForSave } from './default-title'
-import type { PlayLogDraft } from './ReviewCompletion'
+import { hasLogDraft, type PlayLogDraft } from './log-draft'
 import { storedPlanText, trimPlanNumbers } from './stored-plan-text'
 
 
@@ -27,7 +27,7 @@ export interface PlaysSession {
   saved: SavedState | null
   manual?: ManualExecutionDraft
   /** The in-trade log entry being written, with its request identity, so a tab switch never loses it (phase 1, 1.2). */
-  log?: PlayLogDraft
+  log?: PlayLogDraft | undefined
   /** Latest whole document observed, even when dirty fields keep an older editable baseline. */
   observedPlay?: { api: WorkspaceApi; id: string; accountId: string; version: number; conflict: boolean } | null
 }
@@ -45,8 +45,12 @@ export function startNewPlay(session: PlaysSession): PlaysSession {
 }
 
 export function hasUnsavedPlayWork(session: PlaysSession) {
-  return (session.saved ? isDirty(session.draft, session.saved) : hasDraftContent(session.draft)) || hasManualDraft(session.manual)
+  return (session.saved ? isDirty(session.draft, session.saved) : hasDraftContent(session.draft)) || hasManualDraft(session.manual) ||
+    hasPlayLogDraft(session)
 }
+
+/** The open Play's log entry being typed, or its write not yet confirmed (phase 1, 1.2). */
+export const hasPlayLogDraft = (session: PlaysSession) => hasLogDraft(session.log) && session.log?.playId === session.saved?.summary.id
 
 export function hasDraftContent(draft: PlayDraft) {
   return !!(draft.title.trim() || draft.accountId || draft.instrument || draft.evidence.length || draft.notes.review.trim() ||

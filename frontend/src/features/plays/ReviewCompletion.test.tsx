@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react'
 import { act, screen, within, waitFor } from '@testing-library/react'
 import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
@@ -7,6 +8,7 @@ import { isPlayNote, isPlaySummary, isReviewed, type PlayNote, type PlaySummary 
 import type { WorkspaceApi } from '@/api/workspace'
 import { savedPlayFixture } from '@/test/workspace-fixture'
 import { PlayLog, ReviewCompletionBar } from './ReviewCompletion'
+import type { PlayLogChange, PlayLogDraft } from './log-draft'
 
 const summary = (patch: Partial<PlaySummary>): PlaySummary => ({ ...savedPlayFixture.summary, ...patch })
 const note: PlayNote = { id: '00000000-0000-4000-8000-0000000000c1', text: 'Felt rushed adding.', state: 'fomo', createdAtUtc: '2026-10-20T10:00:00Z' }
@@ -97,6 +99,57 @@ describe('in-trade log (phase 1, 1.2)', () => {
     expect(add.mock.calls[1]![1].requestId).toBe(add.mock.calls[0]![1].requestId)
     await act(async () => {})
     expect(await screen.findByText('Felt rushed adding.')).toBeInTheDocument()
+  })
+})
+
+/** The page's keeping of the log draft: it outlives the Log, so a remount reads it back. */
+function KeptLog({ api, playId, mounted, onKept }: { api: WorkspaceApi; playId: string; mounted: boolean; onKept: (draft: PlayLogDraft | undefined) => void }) {
+  const [draft, setDraft] = useState<PlayLogDraft | undefined>(undefined)
+  const latest = useRef<PlayLogDraft | undefined>(undefined)
+  const onDraft = (change: PlayLogChange) => { latest.current = change(latest.current); onKept(latest.current); setDraft(latest.current) }
+  return mounted ? <PlayLog api={api} playId={playId} draft={draft} onDraft={onDraft} /> : null
+}
+
+describe('a late log write after a remount (phase 1, 1.2)', () => {
+  it('clears only the entry it wrote, never newer text typed since', async () => {
+    let finish!: (notes: PlayNote[]) => void
+    const api = { playNotes: vi.fn().mockResolvedValue([]),
+      addPlayNote: vi.fn(() => new Promise<PlayNote[]>(resolve => { finish = resolve })) } as unknown as WorkspaceApi
+    const kept = vi.fn()
+    const user = userEvent.setup()
+    const playId = savedPlayFixture.summary.id
+    const { rerender } = render(<KeptLog api={api} playId={playId} mounted onKept={kept} />)
+    await screen.findByText('No entries yet.')
+    await user.type(screen.getByLabelText('Log entry'), note.text)
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    // The journal tab changes and comes back while the write is still out.
+    rerender(<KeptLog api={api} playId={playId} mounted={false} onKept={kept} />)
+    rerender(<KeptLog api={api} playId={playId} mounted onKept={kept} />)
+    expect(screen.getByLabelText('Log entry')).toHaveValue(note.text)
+    await user.clear(screen.getByLabelText('Log entry'))
+    await user.type(screen.getByLabelText('Log entry'), 'A newer thought.')
+    await act(async () => finish([note]))
+    expect(screen.getByLabelText('Log entry')).toHaveValue('A newer thought.')
+    // The written entry's request is settled; the newer text is a new entry with its own request.
+    expect(kept).toHaveBeenLastCalledWith({ playId, text: 'A newer thought.', state: '' })
+  })
+
+  it('clears the entry once its write is confirmed, when nothing newer was typed', async () => {
+    let finish!: (notes: PlayNote[]) => void
+    const api = { playNotes: vi.fn().mockResolvedValue([]),
+      addPlayNote: vi.fn(() => new Promise<PlayNote[]>(resolve => { finish = resolve })) } as unknown as WorkspaceApi
+    const kept = vi.fn()
+    const user = userEvent.setup()
+    const playId = savedPlayFixture.summary.id
+    const { rerender } = render(<KeptLog api={api} playId={playId} mounted onKept={kept} />)
+    await screen.findByText('No entries yet.')
+    await user.type(screen.getByLabelText('Log entry'), note.text)
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    rerender(<KeptLog api={api} playId={playId} mounted={false} onKept={kept} />)
+    rerender(<KeptLog api={api} playId={playId} mounted onKept={kept} />)
+    await act(async () => finish([note]))
+    expect(screen.getByLabelText('Log entry')).toHaveValue('')
+    expect(kept).toHaveBeenLastCalledWith({ playId, text: '', state: '' })
   })
 })
 

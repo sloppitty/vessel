@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createDraft, createEntry } from './draft'
 import { savedPlayFixture } from '@/test/workspace-fixture'
-import { createPlaysSession, draftEvidenceFromSaved, draftFromSaved, fieldsToSave, hasDraftContent, isDirty, loadSavedPlay, observedPlayVersion, savedState, startNewPlay, syncEvidence } from './saved'
+import { createPlaysSession, draftEvidenceFromSaved, draftFromSaved, fieldsToSave, hasDraftContent, hasUnsavedPlayWork, isDirty, loadSavedPlay, observedPlayVersion, savedState, startNewPlay, syncEvidence } from './saved'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import type { SavedEvidence } from '@/api/plays'
@@ -55,6 +55,24 @@ describe('Unsaved draft protection', () => {
   })
 })
 
+
+describe('in-trade log drafts as unsaved work (phase 1, 1.2)', () => {
+  const draft = draftFromSaved(savedPlayFixture, [])
+  const clean = { ...createPlaysSession(), view: 'editor' as const, draft, saved: savedState(savedPlayFixture, draft) }
+  const playId = savedPlayFixture.summary.id
+  it('protects typed text and a write not yet confirmed for the open Play', () => {
+    expect(hasUnsavedPlayWork(clean)).toBe(false)
+    expect(hasUnsavedPlayWork({ ...clean, log: { playId, text: '   ', state: '' } })).toBe(false)
+    const typed = { ...clean, log: { playId, text: 'Moved my stop.', state: '' as const } }
+    expect(hasUnsavedPlayWork(typed)).toBe(true)
+    expect(startNewPlay(typed)).toEqual({ ...typed, view: 'editor' })
+    // Cleared text whose write is still out may already be stored: it is kept until the answer.
+    expect(hasUnsavedPlayWork({ ...clean, log: { playId, text: '', state: '', attempt: { requestId: 'r1', text: 'Moved my stop.', state: null } } })).toBe(true)
+  })
+  it('ignores an entry kept for a Play that is no longer open', () => {
+    expect(hasUnsavedPlayWork({ ...clean, log: { playId: 'another-play', text: 'Moved my stop.', state: '' } })).toBe(false)
+  })
+})
 
 describe('saved-Play observation cancellation', () => {
   it('passes the same signal to the Play and evidence reads and leaves the originals to load afterwards', async () => {

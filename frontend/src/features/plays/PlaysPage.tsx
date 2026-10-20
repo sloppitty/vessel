@@ -37,7 +37,7 @@ import { leverageOf } from './levels'
 import { CancelDialog, DeleteDialog, HistoryDialog, PreflightDialog, RevisionDialog } from './PlayDialogs'
 import { initialPlaysList, playSearchDelay, playViewTabs, type PlaysListState } from './plays-list'
 import {
-  createPlaysSession, draftFromSaved, fieldsToSave, hasDraftContent, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
+  createPlaysSession, draftFromSaved, fieldsToSave, hasDraftContent, hasPlayLogDraft, hasUnsavedPlayWork, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
   observedPlayVersion, startNewPlay, syncEvidence,
   type PlaysSession, type SavedState,
 } from './saved'
@@ -243,7 +243,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   // Number text unchanged from the saved plan still saves, even where it predates the plain-decimal rule.
   const storedText = useMemo(() => storedPlanText(saved?.plan), [saved?.plan])
   const changedPlan = useMemo(() => !!saved && planChanged(draft, saved), [draft, saved])
-  const unsaved = dirty || hasManualDraft(session.manual)
+  const unsaved = dirty || hasManualDraft(session.manual) || hasPlayLogDraft(session)
   // A blocked save says why until the plan is fixed.
   const fixed = !planProblem(draft, status, storedText)
   useEffect(() => { if (fixed) dismiss('plan-blocked') }, [fixed, dismiss])
@@ -396,7 +396,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
 
   async function open(id: string): Promise<boolean> {
     const before = latest.current
-    if ((before.saved ? isDirty(before.draft, before.saved) : hasDraftContent(before.draft)) || hasManualDraft(before.manual)) {
+    if (hasUnsavedPlayWork(before)) {
       setNavigationError('Keep your current work. Save or explicitly discard it before opening the requested Play.')
       return false
     }
@@ -410,7 +410,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     try {
       const loaded = await loadSavedPlay(api, id, controller.signal)
       if (started !== epoch.current || controller.signal.aborted) return false
-      if (latest.current.draft !== before.draft || hasManualDraft(latest.current.manual)) {
+      if (latest.current.draft !== before.draft || hasManualDraft(latest.current.manual) || hasPlayLogDraft(latest.current)) {
         setNavigationError('Your edits made while loading were kept. Save them before trying the requested Play again.')
         return false
       }
@@ -545,7 +545,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       evidenceImages={evidenceImages} reviewReceipt={reviewReceipt} journalSave={journalSave} retrospectiveReceipt={retrospectiveReceipt}
       onPreflight={setPreflight} nextActions={nextActions?.api === api ? nextActions.actions : null} onOpenPlay={id => { void open(id) }}
       log={saved ? <PlayLog key={saved.summary.id} api={api} playId={saved.summary.id} draft={session.log}
-        onDraft={log => update({ log })} /> : undefined}
+        onDraft={change => update({ log: change(latest.current.log) })} /> : undefined}
       reviewCompletion={saved ? <ReviewCompletionBar summary={saved.summary} dirty={dirty} busy={pending}
         filled={(playReceipt?.fillCount ?? 0) > 0} onAction={action => { void reviewAction(action) }} /> : undefined}
       plannedAfterExecution={playReceipt?.plannedAfterExecution === true}

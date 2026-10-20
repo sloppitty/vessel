@@ -768,6 +768,18 @@ describe('diary workspace integration', () => {
     await user.click(screen.getByRole('button', { name: 'Expand journal' }))
     expect(within(await screen.findByRole('dialog')).getByLabelText('Log entry')).toHaveValue('Adding into strength')
   })
+  it('keeps an unfinished log entry when another Play is requested (phase 1, 1.2)', async () => {
+    const open: SavedPlay = { ...planned, summary: { ...planned.summary, status: 'open' } }
+    const { api, methods } = client(open)
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(open)} />)
+    await user.click(screen.getByRole('tab', { name: 'Log' }))
+    await user.type(await screen.findByLabelText('Log entry'), 'Adding into strength')
+    await user.click(screen.getByRole('button', { name: 'Request another Play' }))
+    expect(await screen.findByText(/Your current work is kept/)).toBeInTheDocument()
+    expect(methods.play).not.toHaveBeenCalledWith(otherId, expect.anything())
+    expect(screen.getByLabelText('Log entry')).toHaveValue('Adding into strength')
+  })
   it('offers the log on a retrospective Play too (phase 1, 1.2)', async () => {
     const { api } = client(retrospectiveSavedFixture)
     render(<Harness api={api} initial={sessionFor(retrospectiveSavedFixture)} />)
