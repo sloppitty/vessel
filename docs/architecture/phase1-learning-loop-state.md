@@ -199,6 +199,15 @@ October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
     is cleared. A test fails without this fix.
   - **Check.** `scripts/check.sh` passed again: backend 3,591 passed, 5 skipped; frontend 152 files and 3,803 tests.
 
+- **Sol (Codex) round 5.** Two new findings, both fixed:
+  - **Edits before a render (medium).** The shell applied a departed page's acknowledgement to its own session, and a
+    mounted page's edit made before it rendered could overwrite it with an older copy, leaving a written entry as
+    unsaved work. A mounted page now registers as the one that applies log changes, so acknowledgements land in its
+    current session. A test clears the field in the same tick as the acknowledgement; it fails without this fix.
+  - **A late own answer (medium).** A delayed answer could replace a newer list and hide an entry. Log answers merge by
+    entry ID in time order, since entries are append-only. A test fails without this fix.
+  - **Check.** `scripts/check.sh` passed again: backend 3,591 passed, 5 skipped; frontend 152 files and 3,805 tests.
+
 ## 1.3 Record repair
 
 Not started.
