@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { DraftEntry } from './draft'
 import { createEntry } from './draft'
 import { LevelEditor } from './LevelEditor'
+import { plainDecimalRule } from './numbers'
 
 function setup({ kind = 'entry', unit = 'price', priceStep = null, direction = 'long', value = '84000.1234567890' }: {
   kind?: 'entry' | 'stop' | 'target'; unit?: 'price' | 'percent'; priceStep?: number | null; direction?: 'long' | 'short'; value?: string
@@ -63,13 +64,34 @@ describe('in-chart level editor', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it.each(['0', '-1', '1e5', 'NaN', 'Infinity', '1.2.3', '9'.repeat(400)])('rejects invalid price %s without applying it', value => {
+  it.each(['0', '', '00.000'])('rejects price %j that is not above zero without applying it', value => {
     const { price, save, onApply, onClose } = setup()
     fireEvent.change(price, { target: { value } })
     save()
     expect(screen.getByRole('alert')).toHaveTextContent('Enter a price above zero.')
     expect(onApply).not.toHaveBeenCalled()
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it.each(['-1', '1e5', '1e2', '.5', '5.', 'NaN', 'Infinity', '1.2.3', '9'.repeat(400)])('rejects price %s with the server\'s plain-decimal reason', value => {
+    const { price, save, onApply, onClose } = setup()
+    fireEvent.change(price, { target: { value } })
+    save()
+    expect(screen.getByRole('alert')).toHaveTextContent(`Entry 1 price: ${plainDecimalRule}`)
+    expect(onApply).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('names a stop or target and its share as the server does when their text is refused', () => {
+    const { price, save, onApply } = setup({ kind: 'stop' })
+    fireEvent.change(price, { target: { value: '1e2' } })
+    save()
+    expect(screen.getByRole('alert')).toHaveTextContent(`Entry 1 stop 1: ${plainDecimalRule}`)
+    fireEvent.change(price, { target: { value: '82000' } })
+    fireEvent.change(screen.getByRole('textbox', { name: /Share/ }), { target: { value: '.5' } })
+    save()
+    expect(screen.getByRole('alert')).toHaveTextContent(`Entry 1 stop 1 share: ${plainDecimalRule}`)
+    expect(onApply).not.toHaveBeenCalled()
   })
 
   it('rejects invalid shares but accepts zero, and Escape closes without an edit', () => {

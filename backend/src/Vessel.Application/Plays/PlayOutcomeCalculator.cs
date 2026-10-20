@@ -128,12 +128,16 @@ public static class PlayOutcomeCalculator
     }
 
     /// <summary>
-    /// The share-weighted price distance to the stops over the share-weighted entry, as a fraction. Stop shares
-    /// are normalized within each entry; entries or stops without a price are skipped.
+    /// The share-weighted loss to the stops over the share-weighted entry, as a fraction. Stop shares are normalized
+    /// within each entry; entries or stops without a price are skipped. The distance is signed by the direction: a stop
+    /// at or beyond its entry (break-even or locked-in profit) loses nothing and offsets the others, so a plan whose
+    /// stops are not a loss in total has no planned risk (null), never the absolute distance.
     /// </summary>
     public static decimal? StopDistance(PlayPlanDocument plan)
     {
         var stops = ExecutionMatcher.Levels(plan).Where(l => l.Role == OrderLinkRole.Stop && l.Price is > 0).ToLookup(l => l.EntryId!);
+        // Long stops lose below the entry, short stops above it.
+        var sign = plan.Direction == "short" ? -1m : 1m;
         decimal loss = 0, entry = 0;
         foreach (var item in plan.Entries)
         {
@@ -142,7 +146,7 @@ public static class PlayOutcomeCalculator
                 .Where(s => s is { Share: not null, Price: not null }).ToList();
             var shares = weighted.Sum(s => s.Share!.Value);
             if (shares <= 0) continue;
-            loss += share * weighted.Sum(s => s.Share!.Value * Math.Abs(price - s.Price!.Value)) / shares;
+            loss += share * weighted.Sum(s => s.Share!.Value * sign * (price - s.Price!.Value)) / shares;
             entry += share * price;
         }
         return entry > 0 && loss > 0 ? loss / entry : null;

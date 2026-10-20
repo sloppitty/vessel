@@ -46,14 +46,14 @@ request (versions, a dated changelog section and `docs/releases/vX.Y.Z.md`),
 then push an annotated tag on `main`:
 
 ```sh
-git tag -a v0.3.1 -m "Vessel v0.3.1" origin/main
-git push origin v0.3.1
+git tag -a v0.3.2 -m "Vessel v0.3.2" origin/main
+git push origin v0.3.2
 ```
 
 The workflow checks that the tag, packaged versions and notes agree
-(`python3 scripts/release.py check --tag v0.3.1`), runs the foundation checks and
+(`python3 scripts/release.py check --tag v0.3.2`), runs the foundation checks and
 `scripts/verify-release.py` for S3 and local storage, then builds and pushes
-`skorcius/vessel:api-0.3.1` and `web-0.3.1`, moves `api-latest` and `web-latest`
+`skorcius/vessel:api-0.3.2` and `web-0.3.2`, moves `api-latest` and `web-latest`
 only after both are verified, and creates the GitHub Release from the notes. It
 never overwrites a version published from another commit. It needs the
 `DOCKERHUB_TOKEN` secret on the `docker-hub` environment; see the
@@ -102,11 +102,11 @@ Linux amd64 images can still be built locally from the repository root:
 ```sh
 REVISION=$(git rev-parse HEAD)
 docker build --platform linux/amd64 -f backend/Dockerfile \
-  --build-arg VERSION=0.3.1 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:api-0.3.1 .
+  --build-arg VERSION=0.3.2 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:api-0.3.2 .
 docker build --platform linux/amd64 -f frontend/Dockerfile \
-  --build-arg VERSION=0.3.1 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:web-0.3.1 .
+  --build-arg VERSION=0.3.2 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:web-0.3.2 .
 ```
 
 The `api-latest` and `web-latest` tags move with releases; deploy fixed versions

@@ -118,6 +118,11 @@ public sealed class ApiTests
         Assert.False(risex.GetProperty("capabilities").GetProperty("stream").GetBoolean());
         Assert.False(risex.GetProperty("capabilities").GetProperty("stablecoinWallet").GetBoolean());
         Assert.True(risex.GetProperty("capabilities").GetProperty("orders").GetBoolean());
+        // Only an order reader that returns the current open book says so; RISEx reads order history (Phase 0, 0.4c).
+        Assert.Equal((true, false, true, true), (hyperliquid.GetProperty("capabilities").GetProperty("currentOrderBook").GetBoolean(),
+            risex.GetProperty("capabilities").GetProperty("currentOrderBook").GetBoolean(),
+            venues["lighter"].GetProperty("capabilities").GetProperty("currentOrderBook").GetBoolean(),
+            venues["lighter-rh"].GetProperty("capabilities").GetProperty("currentOrderBook").GetBoolean()));
         var lighter = venues["lighter"];
         Assert.Equal("account-index", lighter.GetProperty("source").GetString());
         Assert.Equal("https://app.lighter.xyz/read-only-tokens", lighter.GetProperty("credentialSetupUrl").GetString());

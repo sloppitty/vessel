@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createEntry, createExit, type DraftEntry, type DraftExit } from './draft'
 import {
-  addChartExit, applyEntryEdit, applyLevelDrag, averageEntryPrice, averageOverlayId, formatDraggedPrice, levelPrice,
+  addChartExit, applyEntryEdit, applyLevelDrag, averageEntryPrice, averageOverlayId, formatDraggedPrice, keepPercentLevelPrices, levelPrice,
   overlayPrice, parseOverlayId, placeLevel, planOverlays, removeExit, setExitShare,
 } from './levels'
 
@@ -208,5 +208,20 @@ describe('chart level editing helpers', () => {
     const chartEdit = { ...before, stops: [{ ...before.stops[0]!, value: '94' }] }
     const sideEdit = { ...chartEdit, share: '40', stops: [...chartEdit.stops, stop('s2', 'price', '90', '')] }
     expect(applyEntryEdit(sideEdit, chartEdit, before)).toEqual({ ...sideEdit, stops: [stop('s', 'price', '95'), stop('s2', 'price', '90', '')] })
+  })
+})
+
+describe('plan text written by level helpers', () => {
+  it('rescales percentage levels for a leverage change without writing an exponent', () => {
+    const before = entry(0, { price: '100', stops: [stop('s', 'percent', '5')], targets: [stop('t', 'percent', '10000000000000000000000')] })
+    const [after] = keepPercentLevelPrices([before], 1, 10)
+    expect(after!.stops[0]!.value).toBe('50')
+    // (1e22 × 10).toFixed(4) is "1e+23".
+    expect(after!.targets[0]!.value).toBe('100000000000000000000000')
+  })
+
+  it('places dragged prices as plain decimals at any magnitude', () => {
+    expect(formatDraggedPrice(0.000012345)).toBe('0.00001234')
+    expect(formatDraggedPrice(2e21)).toBe('2000000000000000000000')
   })
 })

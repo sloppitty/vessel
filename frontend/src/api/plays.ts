@@ -296,6 +296,11 @@ export interface PlayExecution {
   watches: MonitorWatch[]
 }
 export interface LinkOrder { orderId: string; role: LinkRole; entryId?: string; levelId?: string }
+/**
+ * Answers a `level.drift` record: the linked stop or target takes the observed order's acting price in one plan revision.
+ * The server refuses (409) when the Play moved past `expectedVersion` or the order no longer rests at `observedPrice`.
+ */
+export interface RebindLevel { expectedVersion: number; orderId: string; observedPrice: string; reason: string }
 
 const executionOrder = (v: unknown): v is ExecutionOrder => isRecord(v) && isText(v.orderId, 128) && (v.side === 'buy' || v.side === 'sell') &&
   isText(v.orderType, 32) && isPlainDecimal(v.limitPrice) && (v.triggerPrice === null || isPlainDecimal(v.triggerPrice)) &&

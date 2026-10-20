@@ -4,13 +4,17 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from '@/components/ui/input'
 import { addEntry as withEntry, createNextEntry, removeEntry as withoutEntry, splitEqually as equalSplit, type DraftEntry, type PlayDraft } from './draft'
 import { EntryForm } from './EntryForm'
+import { entryFilled, noFilledEntries, type FilledEntries } from './planChecks'
 import { formatDraggedPrice, leverageOf, percentLevels } from './levels'
 import { AvailableBudget } from './WorkspacePanels'
 import {
-  convertSize, defaultSizeUnits, estimatedLiquidation, formatMoney, formatQuantity, formatRewardToRisk, marginOverBudget, positionSize, rewardToRisk, sizeForBudget, type SizeUnits,
+  convertSize, defaultSizeUnits, estimatedLiquidation, formatMoney, formatQuantity, formatRewardToRisk, marginOverBudget, overBudgetMessage, positionSize, rewardToRisk,
+  sizeForBudget, type AvailableBalance, type SizeUnits,
 } from './sizing'
 import { Equal, Expand, Plus, Trash2 } from 'lucide-react'
 import { NativeSelect } from '@/components/ui/native-select'
+import { planInputType, planNumber } from './numbers'
+import { planTextMarks, sizeState, useStoredPlanText } from './stored-plan-text'
 
 const leveragePresets = [1, 5, 10, 25, 50]
 /** Control range when the venue maximum is unknown, e.g. manual instruments. Saved plans accept up to 100×. */
@@ -26,12 +30,13 @@ export interface SuggestionMarks {
 const markTitle = 'A suggestion for this field is in Suggestions above the chart.'
 
 function allocatedShare(entries: DraftEntry[]) {
-  const shares = entries.map(entry => entry.share.trim()).filter(Boolean).map(Number)
-  if (!shares.length || shares.some(share => !Number.isFinite(share))) return null
-  return Number(shares.reduce((total, share) => total + share, 0).toFixed(2))
+  const shares = entries.filter(entry => entry.share.trim()).map(entry => planNumber(entry.share))
+  const known = shares.filter((share): share is number => share !== null)
+  if (!known.length || known.length < shares.length) return null
+  return Number(known.reduce((total, share) => total + share, 0).toFixed(2))
 }
 export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, selectionRequest = 0, onSelect, maxLeverage = null, maintenanceMargin = null, instrumentName = '', units = defaultSizeUnits, availableBudget = null, checkBudget = true,
-  marks = null }: {
+  marks = null, filledEntries = noFilledEntries }: {
   draft: PlayDraft
   onChange: (draft: PlayDraft) => void
   onLeverageChange: (value: string) => void
@@ -45,14 +50,17 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
   instrumentName?: string
   /** Quote asset and contract for the size readout. */
   units?: SizeUnits
-  /** What the account has available, used as the budget unless a manual one is set. */
-  availableBudget?: string | null
+  /** The account's available balance and its source, used as the budget unless a manual one is set. */
+  availableBudget?: AvailableBalance | null
   /** Holds the margin to the budget. Off once orders may rest, since the venue then counts their margin as used. */
   checkBudget?: boolean
   /** Fields with a waiting suggestion; null marks none (read-only plays, or the record did not load). */
   marks?: SuggestionMarks | null
+  /** Entries with a linked or manual fill: their stops may sit at or beyond the entry. */
+  filledEntries?: FilledEntries
 }) {
   const leverageLimit = maxLeverage ?? defaultMaxLeverage
+  const stored = useStoredPlanText()
   const leverage = leverageOf(draft.leverage)
   const presets = leveragePresets.filter(preset => preset < leverageLimit).concat(leverageLimit)
   const prefix = useId()
@@ -113,7 +121,9 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
   const sized = positionSize(draft, leverage)
   const liquidation = estimatedLiquidation(draft.entries, draft.direction, leverage, maxLeverage, maintenanceMargin)
   const overBudget = checkBudget ? marginOverBudget(draft, leverage, availableBudget) : null
-  const budgetSize = overBudget ? sizeForBudget(draft, leverage, overBudget.budget.value, units) : null
+  // A zero (or negative) budget has no size to offer.
+  const budgetSize = overBudget && overBudget.budget.amount > 0 ? sizeForBudget(draft, leverage, overBudget.budget.value, units) : null
+  const sizeMarks = planTextMarks(sizeState(draft, stored), draft.size)
   // One entry takes the whole position, so its share and the split are fixed.
   const single = draft.entries.length === 1
 
@@ -142,9 +152,10 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
         <div className="whole-size-input">
           <label htmlFor={`${prefix}-size`}>
             <span>{draft.sizingMode === 'margin' ? 'Margin' : 'Quantity'}</span>
-            <Input id={`${prefix}-size`} type="number" min={0} step="any" value={draft.size} placeholder="0"
-              aria-invalid={overBudget ? true : undefined} aria-describedby={overBudget ? `${prefix}-over-budget` : undefined}
-              data-suggested={marks?.size || undefined} title={marks?.size ? markTitle : undefined}
+            <Input id={`${prefix}-size`} {...planInputType(draft.size)} min={0} step="any" value={draft.size} placeholder="0"
+              aria-invalid={overBudget || sizeMarks?.invalid ? true : undefined} aria-describedby={overBudget ? `${prefix}-over-budget` : undefined}
+              data-warning={sizeMarks?.warning || undefined} data-suggested={marks?.size || undefined}
+              title={sizeMarks?.title ?? (marks?.size ? markTitle : undefined)}
             aria-label={draft.sizingMode === 'margin' ? `Whole-position margin (${units.quote})` : `Whole-position quantity (${units.base})`}
               onChange={event => onChange({ ...draft, size: event.target.value })} />
           </label>
@@ -169,7 +180,7 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
               Liq. ≈ <strong>{formatDraggedPrice(liquidation)}</strong></span>}
           </p> : null}
           {overBudget && <p id={`${prefix}-over-budget`} className="size-over-budget" role="alert">
-            <span>Margin {formatMoney(overBudget.margin, units)} is above the {formatMoney(overBudget.budget.amount, units)} {overBudget.budget.source === 'manual' ? 'budget' : 'available'}.</span>
+            <span>{overBudgetMessage(overBudget, units)}</span>
             {budgetSize !== null && <Button type="button" variant="outline" size="sm" onClick={() => onChange({ ...draft, size: budgetSize })}>
               Use {draft.sizingMode === 'margin' ? formatMoney(overBudget.budget.amount, units) : formatQuantity(Number(budgetSize), units)}</Button>}
           </p>}
@@ -224,7 +235,7 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
                   {draft.entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
                 </NativeSelect>
               </label>
-              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} liquidation={liquidation} suggested={marks?.levels ?? null} quantity={sized.quantity} units={units} />}
+              {selected && <EntryForm key={selected.id} entry={selected} onChange={updateEntry} idPrefix={`${prefix}-expanded-${selected.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} liquidation={liquidation} suggested={marks?.levels ?? null} quantity={sized.quantity} units={units} filled={entryFilled(filledEntries, selected.id)} />}
             </DialogContent>
           </Dialog>
         </div>
@@ -244,7 +255,7 @@ export function PositionEditor({ draft, onChange, onLeverageChange, selectedId, 
               {draft.entries.length > 1 && <Button type="button" variant="ghost" size="icon-sm" className="remove-entry" aria-label={`Remove ${entry.name}`}
                 title={`Remove ${entry.name}`} onClick={() => removeEntry(entry.id)}><Trash2 size={13} aria-hidden="true" /></Button>}
             </div>
-            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} liquidation={liquidation} suggested={marks?.levels ?? null} quantity={sized.quantity} units={units} />}
+            {shown(entry.id) && <EntryForm entry={entry} onChange={updateEntry} idPrefix={`${prefix}-sidebar-${entry.id}`} direction={draft.direction} leverage={leverage} shareLocked={single} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} liquidation={liquidation} suggested={marks?.levels ?? null} quantity={sized.quantity} units={units} filled={entryFilled(filledEntries, entry.id)} />}
             {expanded && selected?.id === entry.id && <p className="muted expanded-placeholder">Editing in the expanded view.</p>}
           </article>)}
         </div>

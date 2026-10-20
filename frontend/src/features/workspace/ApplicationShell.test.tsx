@@ -11,8 +11,9 @@ import { ApplicationShell } from './ApplicationShell'
 import { activityFillsFixture, activityFixture, activityPage, operationFixture } from '@/test/activity-fixture'
 import { retrospectiveFixture, retrospectiveSavedFixture } from '@/test/retrospective.fixtures'
 import { discoveryFixture, indexAccount, indexVenue } from '@/test/account-access-fixture'
-import { discrepancyFixture, eventCursor, eventFrame, monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
+import { discrepancyFixture, eventCursor, eventFrame, missingStopFixture, monitorFixture, monitorSummaryFixture, shortStopFixture } from '@/test/monitor-fixture'
 import type { MonitorEventPage, MonitorStreamEvent } from '@/api/monitor'
+import type { PlayExecution } from '@/api/plays'
 import { chooseInPicker } from '@/test/account-picker'
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
@@ -1094,4 +1095,76 @@ describe('Main application shell', () => {
     expect(screen.getByLabelText('Portfolio')).toHaveValue(second.id)
   })
 
+})
+
+describe('monitor incidents in the shell (Phase 0, 0.4a)', () => {
+  const venueAccount = { ...accountFixture, venueId: 'hyperliquid', balanceUsd: '1250.123456' }
+  const precedes = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+  it('badges the Plays entry and adds an Overview row above the metric tiles, linking the affected Play and account', async () => {
+    const play = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, venueId: 'hyperliquid', instrumentSource: 'venue' as const, status: 'open' as const } }
+    const instrumentLevel = { ...discrepancyFixture, id: 'instrument', kind: 'position.excess', playId: null,
+      details: { playIds: [], expectedQuantity: '0', venueQuantity: '2' } }
+    const client = api({ overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [venueAccount] }),
+      play: vi.fn().mockResolvedValue(play), evidence: vi.fn().mockResolvedValue([]),
+      playExecution: vi.fn(() => new Promise<PlayExecution>(() => {})),
+      monitor: vi.fn().mockResolvedValue({ ...monitorSummaryFixture, accounts: [{ ...monitorFixture, discrepancies: [
+        missingStopFixture, instrumentLevel, { ...shortStopFixture, state: 'resolved' }] }] }) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    const row = await screen.findByRole('region', { name: 'Monitor incidents' })
+    expect(row).toHaveTextContent('2 incidents need attention')
+    expect(within(row).getByText('1 critical · 1 warning')).toBeInTheDocument()
+    // Above the metric tiles; Allocation stays between the tiles and Summary.
+    const tiles = screen.getByRole('region', { name: 'Scoped overview totals' })
+    expect(precedes(row, tiles)).toBe(true)
+    expect(precedes(tiles, screen.getByRole('region', { name: 'Balance allocation' }))).toBe(true)
+    expect(precedes(screen.getByRole('region', { name: 'Balance allocation' }), screen.getByRole('region', { name: 'Overview summary' }))).toBe(true)
+    // The persistent count on the Plays entry keeps its name and describes the incidents.
+    const plays = screen.getByRole('link', { name: 'Plays' })
+    expect(within(plays).getByText('2')).toBeInTheDocument()
+    expect(plays).toHaveAccessibleDescription('Needs attention: 1 critical · 1 warning')
+    // An instrument-level record opens its account; a Play's record opens the Play.
+    await userEvent.click(within(row).getByRole('button', { name: /^The venue position is larger than expected · BTC/ }))
+    expect(await screen.findByRole('region', { name: 'Background monitor' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('link', { name: 'Overview' }))
+    await userEvent.click(within(await screen.findByRole('region', { name: 'Monitor incidents' })).getByRole('button', { name: /^No stop protects the open position · BTC/ }))
+    await waitFor(() => expect(client.play).toHaveBeenCalledWith(play.summary.id, expect.any(AbortSignal)))
+    // The Play header points to the Execution tab with the same count.
+    expect(await screen.findByRole('button', { name: 'Needs attention · 1 critical' })).toBeInTheDocument()
+  })
+  it('counts incidents as a lower bound on the Plays entry and Overview when they alone fill the server\'s record cap', async () => {
+    const client = api({ overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [venueAccount] }),
+      monitor: vi.fn().mockResolvedValue({ ...monitorSummaryFixture, accounts: [{ ...monitorFixture, discrepanciesTruncated: true,
+        discrepancies: [missingStopFixture, shortStopFixture] }] }) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    const row = await screen.findByRole('region', { name: 'Monitor incidents' })
+    expect(row).toHaveTextContent('2+ incidents need attention')
+    expect(within(row).getByText('2+ incidents')).toBeInTheDocument()
+    const plays = screen.getByRole('link', { name: 'Plays' })
+    expect(within(plays).getByText('2+')).toBeInTheDocument()
+    expect(plays).toHaveAccessibleDescription('Needs attention: 2+ incidents')
+  })
+  it('keeps the Overview row compact: the four most severe incidents, then how many more', async () => {
+    const records = Array.from({ length: 6 }, (_, index) => ({ ...shortStopFixture, id: `w-${index}`, playId: `00000000-0000-4000-8000-00000000010${index}` }))
+    const client = api({ overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [venueAccount] }),
+      monitor: vi.fn().mockResolvedValue({ ...monitorSummaryFixture, accounts: [{ ...monitorFixture, discrepancies: [...records, missingStopFixture] }] }) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    const row = await screen.findByRole('region', { name: 'Monitor incidents' })
+    const items = within(row).getAllByRole('listitem')
+    expect(items).toHaveLength(4)
+    expect(items[0]).toHaveTextContent('No stop protects the open position · BTC')
+    expect(items[0]).toHaveTextContent(venueAccount.name)
+    expect(row).toHaveTextContent('and 3 more on the affected accounts')
+    expect(within(screen.getByRole('link', { name: 'Plays' })).getByText('7')).toBeInTheDocument()
+  })
+  it('shows no incident row and no Plays badge when every record is resolved or dismissed', async () => {
+    const client = api({ overview: vi.fn().mockResolvedValue({ ...overviewFixture, accounts: [venueAccount] }),
+      monitor: vi.fn().mockResolvedValue({ ...monitorSummaryFixture, accounts: [{ ...monitorFixture, discrepancies: [
+        { ...missingStopFixture, state: 'resolved' }, { ...shortStopFixture, state: 'dismissed' }] }] }) })
+    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client} />)
+    await screen.findByRole('region', { name: 'Scoped overview totals' })
+    await waitFor(() => expect(client.monitor).toHaveBeenCalled())
+    await act(async () => {})
+    expect(screen.queryByRole('region', { name: 'Monitor incidents' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Plays' })).not.toHaveAccessibleDescription(/Needs attention/)
+  })
 })

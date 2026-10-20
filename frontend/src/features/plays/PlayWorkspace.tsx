@@ -1,7 +1,7 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import type { SizingDocument } from '@/api/sizing'
-import { ExternalLink, PencilLine, RefreshCw } from 'lucide-react'
+import { ExternalLink, PencilLine, RefreshCw, TriangleAlert } from 'lucide-react'
 import { statusLabels, type PlayStatus } from '@/api/plays'
 import { useVenues } from '@/api/venues'
 import { AccountSelect } from '@/components/accounts/AccountSelect'
@@ -12,23 +12,31 @@ import { captureFileName, createEvidence, evidenceLimits } from './evidence'
 import { DirectionToggle } from './DirectionToggle'
 import { InstrumentPicker } from './InstrumentPicker'
 import { pairLabel, useInstrumentCatalog } from './instruments'
-import { leverageOf } from './levels'
+import { leverageOf, type StopEvidenceOf } from './levels'
+import { positivePlanNumber } from './numbers'
 import { useLeverageChange } from './useLeverageChange'
-import { defaultSizeUnits, estimatedLiquidation, playBudget, type SizeUnits } from './sizing'
+import { availableOf, budgetSourceLabel, defaultSizeUnits, estimatedLiquidation, playBudget, type SizeUnits } from './sizing'
 import { planSuggestions } from './suggestions'
 import { SuggestionsPanel } from './Suggestions'
+import type { SizingStatus } from './useSizing'
 import { PlanNotices } from './PlanNotices'
 import { PositionEditor, defaultMaxLeverage, type SuggestionMarks } from './PositionEditor'
 import { ChartPanel } from './PlayChart'
 import { CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
+import { noFilledEntries } from './planChecks'
+import { noEntryFills, type EntryFills } from './position-risk-summary'
 import { isNominalUsdQuote } from './stablecoins'
 import { defaultPlayTitle } from './default-title'
 import './plays-workspace.css'
 import { NativeSelect } from '@/components/ui/native-select'
 import { pickerAccounts } from '@/features/workspace/account-picker-options'
+import { incidentSummary, topTone, type IncidentCounts } from '@/features/monitor/incidents'
+import '@/features/monitor/incidents.css'
+
 
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, revision = null,
-  lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, onRiskChange, retrospective = false }: {
+  lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, sizingStatus = 'ready', onRetrySizing, onRiskChange,
+  filledEntries, fills: entryFills, onUnits, onPriceStep, retrospective = false, incidents, stopEvidence }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -49,10 +57,32 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   readOnly?: boolean
   /** Execution tab content for a saved play. */
   execution?: ReactNode
+  /** This Play's open monitor incidents, from the shell's monitor summary; shown in the header with a way to the Execution tab. */
+  incidents?: IncidentCounts | undefined
+  /** Venue evidence for the planned stops of a saved, Open Play; the chart draws unconfirmed stops apart. */
+  stopEvidence?: StopEvidenceOf | undefined
   retrospective?: boolean
   /** Risk settings and record for sizing suggestions, which only apply to editable plays. */
   sizing?: SizingDocument | null
+  /** Whether `sizing` is current; a stale or failed record offers no Accept and marks no field. */
+  sizingStatus?: SizingStatus
+  onRetrySizing?: () => void
   onRiskChange?: (riskPercent: string) => Promise<void>
+  /**
+   * Entries with a linked or manual fill (`'all'` when one has filled but not which): no size or leverage suggestions,
+   * and their stops may sit at or beyond the entry.
+   */
+  filledEntries?: ReadonlySet<string> | 'all'
+  /**
+   * Which entries have filled and each one's average fill, from the execution or the manual ledger, or `'unknown'` while it
+   * loads. Their stops may sit at or beyond the entry, and the Summary measures them from the fill. Without it, the entries
+   * in `filledEntries` count as filled with no known average.
+   */
+  fills?: EntryFills | 'unknown'
+  /** The size units in use, so the page can word its own messages in the instrument's quote asset. */
+  onUnits?: (units: SizeUnits) => void
+  /** The instrument's tick, or null, so the page can match order prices as the server does. */
+  onPriceStep?: (step: number | null) => void
 }) {
   const fieldId = useId()
   const [selectedId, setSelectedId] = useState(draft.entries[0]?.id ?? '')
@@ -92,12 +122,17 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const units: SizeUnits = instrumentInfo
     ? { quote: instrumentInfo.quoteAsset, base: instrumentInfo.contractId, quantityDecimals: instrumentInfo.quantityDecimals }
     : manualUsd ? { quote: 'USD', base: draft.instrument, quantityDecimals: null } : defaultSizeUnits
-  const riskAmount = account?.accountValueUsd && Number(account.accountValueUsd) > 0 ? account.accountValueUsd
-    : draft.budgetOverride && Number(draft.budgetOverride) > 0 ? draft.budgetOverride : null
-  const riskName = account?.accountValueUsd && Number(account.accountValueUsd) > 0 ? `${account.name} account value` : 'Explicit manual budget'
+  // The Summary's risk share divides by the same account balance the size suggestion uses; an explicit
+  // manual budget is a labelled fallback. Without either the share stays unknown.
+  const balanceText = account?.balanceUsd != null && Number(account.balanceUsd) > 0 ? account.balanceUsd : null
+  const riskAmount = balanceText ?? (draft.budgetOverride && positivePlanNumber(draft.budgetOverride) !== null ? draft.budgetOverride : null)
+  const riskName = balanceText ? `${account!.name} balance` : 'Explicit manual budget'
   // Listed stablecoins count as nominal USD at 1:1, with no FX or depeg valuation.
   const riskReference = riskAmount && isNominalUsdQuote(units.quote)
     ? { name: units.quote === 'USD' ? riskName : `${riskName} · nominal USD/${units.quote} at 1:1`, amount: riskAmount, quote: units.quote } : null
+  const { quote, base, quantityDecimals } = units
+  useEffect(() => { onUnits?.({ quote, base, quantityDecimals }) }, [onUnits, quote, base, quantityDecimals])
+  useEffect(() => { onPriceStep?.(priceStep) }, [onPriceStep, priceStep])
 
   // Manual instruments are labels: say what Vessel assumes about them beside the Instrument label.
   const manualNote = retrospective ? undefined : manualUsd
@@ -127,16 +162,28 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const leftColumn = useRef<HTMLDivElement>(null)
   // Runs after the expanded chart closes, so the journal is in the page again.
   const showEvidence = () => requestAnimationFrame(() =>
-    leftColumn.current?.querySelector('[data-testid="journal-panel"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+    leftColumn.current?.querySelector('[data-testid="journal-panel"]')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }))
+  const [executionRequest, setExecutionRequest] = useState(0)
+  const incidentTone = incidents ? topTone(incidents) : null
+  const showExecution = () => { setExecutionRequest(current => current + 1); showEvidence() }
+
+  const fills = useMemo<EntryFills | 'unknown'>(() => entryFills ?? { ...noEntryFills, filled: filledEntries instanceof Set ? filledEntries : noFilledEntries },
+    [entryFills, filledEntries])
+  // While the fills load, every stop keeps the wrong-side rule; the server decides per entry from its own facts.
+  const filled = fills === 'unknown' ? noFilledEntries : fills.filled
 
   // Suggestions sit in their own panel above the workspace; the fields only carry a marker.
   const leverage = leverageOf(draft.leverage)
   const leverageChange = useLeverageChange(draft, onChange, units)
   const balance = account?.balanceUsd != null && Number(account.balanceUsd) > 0 ? Number(account.balanceUsd) : null
-  const available = account?.availableStablecoinNominalUsd ?? null
+  const available = availableOf(account)
+  const budget = status === 'draft' ? playBudget(draft, available) : null
   const suggestions = sizing && !readOnly ? planSuggestions({ draft, leverage, maxLeverage, maintenanceMargin, priceStep, sizing, units, balance,
-    budget: status === 'draft' ? playBudget(draft, available)?.amount ?? null : null, defaultMaximum: defaultMaxLeverage }) : null
-  const marks: SuggestionMarks | null = suggestions ? {
+    budget: budget?.amount ?? null, budgetSource: budget ? budgetSourceLabel(budget) : null, ...(filledEntries ? { filledEntries } : {}),
+    defaultMaximum: defaultMaxLeverage }) : null
+  // A stale or missing record cannot back a suggestion, so no field is marked for one.
+  const sizingCurrent = sizingStatus === 'ready' || sizingStatus === 'loading'
+  const marks: SuggestionMarks | null = suggestions && sizingCurrent ? {
     size: !!suggestions.size, leverage: !!suggestions.leverage,
     levels: new Set([...suggestions.stops, ...suggestions.targets].map(level => level.levelId)),
   } : null
@@ -160,6 +207,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           placeholder={readOnly ? 'Name this play' : defaultPlayTitle(draft)} disabled={readOnly} onChange={event => onChange({ ...draft, title: event.target.value })} />
       </div>
       <div className="plays-heading-actions">
+        {incidents && incidentTone && <button type="button" className="play-incidents" data-tone={incidentTone} disabled={!execution}
+          title={execution ? 'Show in the Execution tab' : undefined} onClick={showExecution}>
+          <TriangleAlert size={14} aria-hidden="true" />Needs attention · {incidentSummary(incidents)}</button>}
         {tradeUrl && <a className="plays-venue-link" href={tradeUrl} target="_blank" rel="noopener noreferrer"
           title="Place the planned orders on the venue. Vessel never sends orders.">
           <ExternalLink size={14} aria-hidden="true" />Open {instrumentName} on {venues.name(account!.venueId)}</a>}
@@ -209,9 +259,11 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           Recorded after execution: no original plan, thesis, initial stop or initial-risk R.</InfoTip>}
       </span></div>
     </fieldset>
-    {!retrospective && <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} lockDirection={lockDirection} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} />}
+    {!retrospective && <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} lockDirection={lockDirection} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin}
+      filledEntries={filled} />}
     <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} retrospective={retrospective} />
-    {suggestions && sizing && onRiskChange && <SuggestionsPanel plan={suggestions} sizing={sizing} draft={draft} leverage={leverage} units={units}
+    {!readOnly && onRiskChange && (suggestions || sizingStatus === 'failed') && <SuggestionsPanel plan={suggestions} sizing={sizing}
+      status={sizingStatus} onRetry={onRetrySizing} draft={draft} leverage={leverage} units={units}
       onSize={size => onChange({ ...draft, size })} onLevel={acceptLevel} onRiskChange={onRiskChange}
       onLeverage={next => leverageChange.request(String(next))} />}
     {leverageChange.dialog}
@@ -229,20 +281,20 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         onEntriesChange={entries => planChange({ ...draft, entries })}
         drawings={drawingKey ? draft.drawings[drawingKey] : undefined}
         onDrawingsChange={drawings => { if (drawingKey) planChange({ ...draft, drawings: { ...draft.drawings, [drawingKey]: drawings } }) }}
-        editable={!readOnly} onCapture={addCapture} onShowEvidence={showEvidence} />
+        editable={!readOnly} onCapture={addCapture} onShowEvidence={showEvidence} stopEvidence={retrospective ? undefined : stopEvidence} />
         <PlayJournal notes={draft.notes} onChange={notes => onChange({ ...draft, notes: readOnly ? { ...draft.notes, review: notes.review } : notes })}
           execution={execution} readOnly={readOnly} retrospective={retrospective} status={status}
           structuredReview={draft.structuredReview}
           onStructuredReviewChange={structuredReview => onChange({ ...draft, structuredReview })}
-          evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceRequest={evidenceRequest} />
+          evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceRequest={evidenceRequest} executionRequest={executionRequest} />
       </div>
       {retrospective ? <section className="panel retrospective-position" aria-label="No original plan"><h2>No original plan</h2></section>
         : readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>
-        <PositionEditor onLeverageChange={leverageChange.request} draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} units={units} availableBudget={available} checkBudget={false} />
+        <PositionEditor onLeverageChange={leverageChange.request} draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} units={units} availableBudget={available} checkBudget={false} filledEntries={filled} />
       </fieldset> : <PositionEditor onLeverageChange={leverageChange.request} draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId}
         maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} instrumentName={instrumentName} units={units} availableBudget={available} checkBudget={status === 'draft'}
-        marks={marks} />}
+        marks={marks} filledEntries={filled} />}
     </div>
-    {!retrospective && <PositionSummary draft={draft} units={units} instrumentName={instrumentName} riskReference={riskReference} />}
+    {!retrospective && <PositionSummary draft={draft} units={units} instrumentName={instrumentName} riskReference={riskReference} fills={fills} />}
   </section>
 }

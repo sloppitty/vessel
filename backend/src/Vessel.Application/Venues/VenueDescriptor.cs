@@ -35,8 +35,15 @@ public static class VenueLogos
 }
 
 /// <summary>What Vessel can do at a venue. Use cases and the browser check these instead of venue names.</summary>
+/// <param name="CurrentOrderBook">
+/// The order reader returns the venue's current open order book: open rows observed with the read and a meaningful
+/// <see cref="VenueOrderReadResult.OpenOrdersComplete"/>. False means order history only, so a stop is never seen
+/// resting and its absence proves nothing: protection coverage is unsupported ("current book not read"), the
+/// book-dependent checks (missing, short and cancelled stops, excess, orphaned exits and entries, level drift) do not
+/// run, and the history-only read alone does not degrade a check. Defaults to false, so a venue opts in.
+/// </param>
 public sealed record VenueCapabilities(bool Sync, bool Instruments, bool Orders, bool Candles, bool MarketContext, bool Stream, bool StablecoinWallet,
-    bool AccountDiscovery = false, bool ReadOnlyCredential = false, bool ManualExecutions = false)
+    bool AccountDiscovery = false, bool ReadOnlyCredential = false, bool ManualExecutions = false, bool CurrentOrderBook = false)
 {
     public static readonly VenueCapabilities None = new(false, false, false, false, false, false, false);
 }

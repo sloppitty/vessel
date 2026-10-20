@@ -4,6 +4,13 @@
 
 ### Added
 
+- Once an entry has filled, its stops can be moved to break-even or into
+  profit with a reason; before any fill, a stop at the entry, `0 %`
+  included, is refused. The Summary shows the signed result if every stop is
+  hit ("+5 USDC locked in" or "−5 USDC at risk") from the average fill, and
+  initial R stays frozen at the first fill. A drifted linked stop or target
+  can be rebound to the order resting at the venue in one version-checked
+  step (D-03, F-10).
 - Each closed Play shows a Play-local result from its own fills beside the
   scored venue result, with basis labels and a "Sign differs by basis" flag
   in the Execution panel and Review; Review and sizing count sign differences
@@ -12,11 +19,58 @@
 
 ### Fixed
 
+- Plan numbers follow one grammar everywhere: the server refuses exponent,
+  signed and trailing-dot text on write, naming the field, while unchanged
+  stored text still saves; the browser never writes exponent text; a negative
+  percentage stop is refused instead of saving as no stop (D-03).
+- Sizing suggestions tell the truth about their inputs. A size is suggested
+  only when every part of the position has a priced stop. Nothing offers
+  Accept while the record is stale or failed. The budget is the account's
+  normalized available balance with its source and time, and a known zero
+  stays zero. The Summary's risk uses the account balance. Size and leverage
+  are no longer suggested after an entry fills. Lighter liquidations are no
+  longer counted as fee-bearing (D-04, D-07, D-11, D-12, D-13, D-24, D-25,
+  F-16).
+- The monitor records each Open Play's stop coverage (known, shared,
+  unknown with a reason, unsupported, or stale) and never says "Monitored"
+  unless every Play is covered. Chart stops say what the venue evidence shows
+  ("resting as of … UTC", "not seen at the venue", "unknown"). RISEx, whose
+  current order book Vessel cannot read, is labelled "current book not read"
+  instead of being permanently degraded (D-08, D-09, D-18). New migration
+  `MonitorCoverage`; apply it explicitly.
+- A manual Refresh now records fill continuity like a scheduled check, so a
+  run of Refresh-only use no longer leaves a permanent false history gap that
+  switched off missing- and short-stop checks. Refresh can set a gap but never
+  clears one (D-02).
+- Open monitor incidents stay visible: a count on the Plays navigation entry,
+  Plays rows and the Play header, a conditional row on Overview, and a monitor
+  heading that never says "Monitored" beside an open record. Discrepancies
+  read as plain facts (open, stop and uncovered quantity, last observed) with
+  one next action; the recorded JSON moves behind a disclosure (D-08, F-02).
 - Sizing orders closed Plays by when they actually closed, their latest linked
   exit fill, instead of when a check or Refresh noticed. Several results found
   by one Refresh no longer get a ladder level that depends on Play IDs; results
   that share an exit time are disclosed (D-05). Historical ladder levels can
   change on upgrade.
+
+## 0.3.2 - October 19, 2026
+
+Release notes: [docs/releases/v0.3.2.md](docs/releases/v0.3.2.md).
+
+### Fixed
+
+- The Review account selector keeps its shared border, field background and
+  typography instead of inheriting the page button reset.
+
+### Changed
+
+- GitHub Actions runs checks and publication only for release tags; branch
+  pushes and pull requests use local checks without starting CI runners.
+
+### Upgrade
+
+- No new database migrations or configuration changes from v0.3.1. Use matching
+  v0.3.2 API and web images; earlier upgrade requirements still apply.
 
 ## 0.3.1 - October 19, 2026
 

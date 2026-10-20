@@ -16,9 +16,27 @@ public sealed partial class LighterReader
     internal const string CredentialRefusedNotice = "The optional read-only credential could not be verified. Public reads only; verify or replace the token.";
     internal const string HistoryRetryNotice = "The history credential was refused. Retrying this page once as a public read.";
     internal const string HistoryUnavailableNotice = "Recent execution history is unavailable without a usable read-only token. The public snapshot was refreshed; retained fills were not replaced.";
-    internal static string MissingPnlNotice(int count) => $"{count} executions omitted because realized PnL was not reported.";
-    internal static string FeeNotice(int count) => $"{count} fee-bearing or unverified-fee executions omitted.";
-    internal static string SelfTradeNotice(int count) => $"{count} self-trade executions omitted.";
+    /// <summary>
+    /// One sentence counting every in-scope execution left out, by reason: no reported realized PnL, a fee that is
+    /// nonzero or cannot be verified as zero, venue-forced liquidations, deleverages and market settlements (left out
+    /// whatever their fee, and never called fee-bearing), and out-of-scope self-trades. For example "Omitted executions:
+    /// 1 fee-bearing or unverified-fee, 1 liquidation, 2 deleverages." Null when nothing was left out. One sentence
+    /// keeps the account's 1,000-character HistoryNotice column within budget with every reason at its largest count.
+    /// </summary>
+    internal static string? OmissionNotice(int missingPnl, int fees, int liquidations, int deleverages, int settlements, int selfTrades)
+    {
+        static string? Count(int count, string singular, string plural) => count > 0 ? $"{count} {(count == 1 ? singular : plural)}" : null;
+        var parts = new[]
+        {
+            Count(missingPnl, "without reported PnL", "without reported PnL"),
+            Count(fees, "fee-bearing or unverified-fee", "fee-bearing or unverified-fee"),
+            Count(liquidations, "liquidation", "liquidations"),
+            Count(deleverages, "deleverage", "deleverages"),
+            Count(settlements, "market settlement", "market settlements"),
+            Count(selfTrades, "self-trade", "self-trades"),
+        }.OfType<string>().ToArray();
+        return parts.Length == 0 ? null : $"Omitted executions: {string.Join(", ", parts)}.";
+    }
 
     public async Task<PerpetualVenueReadResult> ReadAsync(string sourceId, CancellationToken cancellationToken) =>
         (await ReadCoreAsync(Index(sourceId, venue), null, cancellationToken)).Result;
@@ -82,6 +100,7 @@ public sealed partial class LighterReader
             var missingPnl = 0;
             var fees = 0;
             var selfTrades = 0;
+            var (liquidations, deleverages, settlements) = (0, 0, 0);
             string? cursor = null;
             if (fillsAllowed)
                 // Each exchange's budget respects its trades weight (Robinhood's is three times mainnet's).
@@ -121,22 +140,23 @@ public sealed partial class LighterReader
                         missingPnl += result.MissingPnl;
                         fees += result.Fees;
                         selfTrades += result.SelfTrades;
+                        liquidations += result.Liquidations;
+                        deleverages += result.Deleverages;
+                        settlements += result.Settlements;
                         cursor = Cursor(json, trades.RootElement);
                     }
                     if (cursor is null) break;
                     if (!cursors.Add(cursor)) throw json.Invalid();
                 }
             if (cursor is not null) notices.Add(venue.PageLimitNotice);
-            if (missingPnl > 0) notices.Add(MissingPnlNotice(missingPnl));
-            if (fees > 0) notices.Add(FeeNotice(fees));
-            if (selfTrades > 0) notices.Add(SelfTradeNotice(selfTrades));
+            if (OmissionNotice(missingPnl, fees, liquidations, deleverages, settlements, selfTrades) is { } omitted) notices.Add(omitted);
             return (new PerpetualVenueReadResult(snapshot,
                 catalogue.Markets.Where(m => m.Active).Select(m => m.Instrument!).ToArray(), fills, string.Join(" ", notices),
                 PositionsComplete: positionsComplete,
                 FillHistoryTruncated: historyAvailable ? cursor is not null || fillCoverage.Count == venue.TradePages * PageSize : null,
                 OldestRawFillAtUtc: historyAvailable ? fillCoverage.OldestAtUtc : null,
                 // Self-trades are out of scope (they leave the position unchanged); these are in-scope facts left out.
-                OmittedExecutions: missingPnl + fees), refused);
+                OmittedExecutions: missingPnl + fees + liquidations + deleverages + settlements), refused);
         }, cancellationToken);
 
     internal static VenueSnapshot ReadSnapshot(JsonElement account, Catalogue catalogue, DateTimeOffset observed)
@@ -198,7 +218,8 @@ public sealed partial class LighterReader
         return result;
     }
 
-    internal sealed record FillPage(IReadOnlyList<VenueFill> Fills, int MissingPnl, int Fees, int SelfTrades = 0);
+    internal sealed record FillPage(IReadOnlyList<VenueFill> Fills, int MissingPnl, int Fees, int SelfTrades = 0,
+        int Liquidations = 0, int Deleverages = 0, int Settlements = 0);
 
     internal static string Effect(string side, decimal before, decimal quantity) =>
         before == 0 || (before > 0) == (side == ExecutionFacts.Buy) ? ExecutionFacts.Open
@@ -216,6 +237,7 @@ public sealed partial class LighterReader
         var missingPnl = 0;
         var fees = 0;
         var selfTrades = 0;
+        var (liquidations, deleverages, settlements) = (0, 0, 0);
         foreach (var row in Rows(json, root, "trades", PageSize).EnumerateArray())
         {
             var marketId = Identity(json, json.Property(row, "market_id"));
@@ -245,7 +267,11 @@ public sealed partial class LighterReader
             var rateValue = hasFee ? json.Integer(rate) : 0;
             var integratorRate = row.TryGetProperty("integrator_" + role + "_fee", out var integrator) &&
                 integrator.ValueKind != JsonValueKind.Null ? json.Integer(integrator) : 0;
-            if (rateValue != 0 || integratorRate != 0 || type != "trade")
+            // Venue-forced executions are omitted whatever their (still validated) fee, and counted by kind, not as fee-bearing.
+            if (type == "liquidation") { liquidations++; continue; }
+            if (type == "deleverage") { deleverages++; continue; }
+            if (type == "market-settlement") { settlements++; continue; }
+            if (rateValue != 0 || integratorRate != 0)
             {
                 fees++;
                 continue;
@@ -281,6 +307,6 @@ public sealed partial class LighterReader
                 effect, standardTier ? ExecutionFacts.FeeStandardAccountFree : ExecutionFacts.FeeReported,
                 ExecutionFacts.PnlGross, marketId));
         }
-        return new(fills, missingPnl, fees, selfTrades);
+        return new(fills, missingPnl, fees, selfTrades, liquidations, deleverages, settlements);
     }
 }

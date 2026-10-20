@@ -9,16 +9,20 @@ import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { AvailableBudget, CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
 import { journalReviewVisible } from './journal'
 import { createDraft, type PlayDraft } from './draft'
+import { availableOf, type AvailableBalance } from './sizing'
 
-function BudgetHarness({ initial = createDraft(), accounts = [], portfolios = [], onChange = vi.fn() }: {
+function BudgetHarness({ initial = createDraft(), accounts = [], portfolios = [], onChange = vi.fn(), available = false }: {
   initial?: PlayDraft
   accounts?: BrokerAccount[]
   portfolios?: Portfolio[]
   onChange?: (draft: PlayDraft) => void
+  /** Pass the chosen account's available balance to the budget, as the workspace does. */
+  available?: boolean
 }) {
   const [draft, setDraft] = useState(initial)
   return <><CapitalContext accounts={accounts} portfolios={portfolios} draft={draft} />
-    <AvailableBudget key={draft.accountId} draft={draft} onChange={next => { setDraft(next); onChange(next) }} /></>
+    <AvailableBudget key={draft.accountId} draft={draft} onChange={next => { setDraft(next); onChange(next) }}
+      available={available ? availableOf(accounts.find(account => account.id === draft.accountId)) : null} /></>
 }
 
 describe('Capital context', () => {
@@ -45,15 +49,38 @@ describe('Capital context', () => {
   it('shows the portfolio balance, wallet total and available amount of a unified account without perps equity', () => {
     const account: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', accountValueUsd: '0',
       availableStablecoinNominalUsd: '150', totalStablecoinNominalUsd: '151.77', balanceUsd: '151.77',
-      stablecoinScope: 'hypercore-spot-stablecoins', accountMode: 'unifiedAccount' }
+      availableBalanceUsd: '150', availableBalanceSource: 'wallet', stablecoinScope: 'hypercore-spot-stablecoins', accountMode: 'unifiedAccount' }
     const portfolio: Portfolio = { ...portfolioFixture, totalValueUsd: '0', balanceUsd: '1151.77', balanceCoverage: 'complete' }
     render(<BudgetHarness initial={{ ...createDraft(), accountId: account.id }} accounts={[account]} portfolios={[portfolio]} />)
     expect(metric(`${portfolio.name} balance`)).toHaveTextContent('$1,151.77')
     expect(metric(`${portfolio.name} balance`)).toHaveAttribute('title', expect.stringContaining('coverage complete'))
     expect(metric('Wallet total')).toHaveTextContent('$151.77')
     expect(metric('Wallet total')).toHaveAttribute('title', 'hypercore-spot-stablecoins · unifiedAccount. Nominal 1 token = 1 USD.')
-    expect(metric('Available')).toHaveTextContent('$150.00')
+    expect(metric('Available')).toHaveTextContent('$150.00wallet')
     expect(within(screen.getByTestId('capital-context')).queryByText('Perps equity')).toBeNull()
+  })
+
+  // Review of 0.1: one available figure per account, the same normalized one the budget uses.
+  it('shows the normalized available balance of a standard account, not its spot stablecoins, beside the same budget', () => {
+    const account: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', portfolioId: null, accountValueUsd: '5000', balanceUsd: '5003.12',
+      availableStablecoinNominalUsd: '3.12', totalStablecoinNominalUsd: '3.12', accountMode: 'default',
+      availableBalanceUsd: '4906.67', availableBalanceSource: 'withdrawable' }
+    render(<BudgetHarness initial={{ ...createDraft(), accountId: account.id }} accounts={[account]} available />)
+    expect(metric('Available')).toHaveTextContent('$4,906.67reported withdrawal')
+    expect(metric('Available')).not.toHaveTextContent('$3.12')
+    // The spot stablecoins stay a separate, explicitly labelled ledger.
+    expect(metric('Wallet total')).toHaveTextContent('$3.12')
+    expect(screen.getByRole('group', { name: 'Budget' })).toHaveTextContent('Budget$4,906.67reported withdrawal')
+  })
+
+  it('shows a margin venue its reported available margin, and no available figure for manual accounts', () => {
+    const lighter: BrokerAccount = { ...accountFixture, venueId: 'lighter-rh', portfolioId: null, balanceUsd: '100',
+      availableBalanceUsd: '40', availableBalanceSource: 'margin' }
+    const { unmount } = render(<BudgetHarness initial={{ ...createDraft(), accountId: lighter.id }} accounts={[lighter]} />)
+    expect(metric('Available')).toHaveTextContent('$40.00reported margin')
+    unmount()
+    render(<BudgetHarness initial={{ ...createDraft(), accountId: accountFixture.id }} accounts={[accountFixture]} portfolios={[portfolioFixture]} />)
+    expect(within(screen.getByTestId('capital-context')).queryByText('Available')).toBeNull()
   })
 
   it('shows perps equity beside the wallet for a standard account', () => {
@@ -69,8 +96,18 @@ describe('Capital context', () => {
     const draft = { ...createDraft(), accountId: accountFixture.id, size: '500', leverage: '4' }
     draft.entries[0]!.price = '100'
     render(<BudgetHarness initial={draft} accounts={[accountFixture]} portfolios={[portfolio]} />)
-    expect(metric('Margin / balance')).toHaveTextContent('5.0%')
-    expect(metric('Exposure / balance')).toHaveTextContent('20.0%')
+    // Phase 0, 0.1 (D-12): each ratio names the balance it divides by.
+    expect(metric('Margin / Swing trading balance')).toHaveTextContent('5.0%')
+    expect(metric('Exposure / Swing trading balance')).toHaveTextContent('20.0%')
+  })
+
+  it('names an unassigned account in its ratios, since its own balance is the reference', () => {
+    const account = { ...accountFixture, portfolioId: null, balanceUsd: '1000' }
+    const draft = { ...createDraft(), accountId: account.id, size: '50', leverage: '2' }
+    draft.entries[0]!.price = '100'
+    render(<BudgetHarness initial={draft} accounts={[account]} portfolios={[portfolioFixture]} />)
+    expect(metric('Margin / Main account balance')).toHaveTextContent('5.0%')
+    expect(metric('Exposure / Main account balance')).toHaveTextContent('10.0%')
   })
 
   it('keeps a reported zero distinct from missing values and does not create a default portfolio', () => {
@@ -90,7 +127,7 @@ describe('Capital context', () => {
 })
 
 describe('Budget', () => {
-  function Budget({ initial = createDraft(), available = null as string | null, onChange = vi.fn() }) {
+  function Budget({ initial = createDraft(), available = null as AvailableBalance | null, onChange = vi.fn() }) {
     const [draft, setDraft] = useState(initial)
     return <AvailableBudget key={draft.accountId} draft={draft} available={available} onChange={next => { setDraft(next); onChange(next) }} />
   }
@@ -98,8 +135,8 @@ describe('Budget', () => {
 
   it('uses the available amount until a manual budget is set, and can go back to it', async () => {
     const onChange = vi.fn()
-    render(<Budget available="151.77" onChange={onChange} />)
-    expect(budget()).toHaveTextContent('Budget$151.77available')
+    render(<Budget available={{ value: '151.77', source: 'wallet' }} onChange={onChange} />)
+    expect(budget()).toHaveTextContent('Budget$151.77wallet')
     await userEvent.click(screen.getByRole('button', { name: 'Edit budget' }))
     const input = screen.getByRole('textbox', { name: 'Budget $' })
     expect(input).toHaveAttribute('placeholder', '151.77')
@@ -110,12 +147,28 @@ describe('Budget', () => {
     expect(budget()).toHaveTextContent('$9,007,199,254,740,990.99manual')
     await userEvent.click(screen.getByRole('button', { name: 'Use the available amount' }))
     expect(onChange.mock.lastCall![0].budgetOverride).toBeNull()
-    expect(budget()).toHaveTextContent('$151.77available')
+    expect(budget()).toHaveTextContent('$151.77wallet')
   })
 
-  it('treats an empty wallet as no available budget', () => {
-    render(<Budget available="0" />)
-    expect(screen.getByRole('button', { name: 'Set budget' })).toBeInTheDocument()
+  // Phase 0, 0.1 (D-07, decision 6): only null is unknown, and the budget names where it comes from.
+  it('keeps a known zero available balance as a zero budget', () => {
+    render(<Budget available={{ value: '0', source: 'wallet' }} />)
+    expect(budget()).toHaveTextContent('Budget$0.00wallet')
+    expect(screen.queryByRole('button', { name: 'Set budget' })).toBeNull()
+  })
+
+  it('says when the available budget was read and that the last refresh failed', () => {
+    const at = new Date()
+    at.setHours(14, 2, 0, 0)
+    render(<Budget available={{ value: '25', source: 'margin', asOfUtc: at.toISOString(), refreshFailed: true }} />)
+    expect(budget()).toHaveTextContent('Budget$25.00reported margin · as of 14:02 · last refresh failed')
+  })
+
+  it.each([
+    ['margin', 'reported margin'], ['withdrawable', 'reported withdrawal'], ['wallet', 'wallet'],
+  ] as const)('names a %s budget source', (source, label) => {
+    render(<Budget available={{ value: '25', source }} />)
+    expect(budget()).toHaveTextContent(`Budget$25.00${label}`)
   })
 
   it('offers only a set action without an available amount, and accepts an explicit zero', async () => {
@@ -157,6 +210,17 @@ describe('Budget', () => {
     expect(onChange).not.toHaveBeenCalled()
     expect(screen.getByRole('alert')).toHaveTextContent('Enter a non-negative USD amount')
     expect(screen.getByRole('textbox', { name: 'Budget $' })).toHaveAttribute('aria-invalid', 'true')
+  })
+
+  // Phase 0, 0.5a after 0.1: a manual budget stored before the plain-decimal rule stays visible as saved, with a warning,
+  // instead of disappearing behind "Set budget"; estimates treat it as unknown and never fall back to the available amount.
+  it('keeps a stored manual budget that is not a plain decimal visible as saved', () => {
+    render(<Budget initial={{ ...createDraft(), budgetOverride: '1e2' }} available={{ value: '500', source: 'wallet' }} />)
+    expect(budget()).toHaveTextContent('Budget1e2manual')
+    const value = within(budget()).getByText('1e2')
+    expect(value).toHaveAttribute('data-warning', 'true')
+    expect(value.getAttribute('title')).toMatch(/^Saved earlier as “1e2”, .* estimates here ignore it/)
+    expect(screen.getByRole('button', { name: 'Use the available amount' })).toBeInTheDocument()
   })
 
   it('discards an open unsaved budget when the selected account changes', async () => {

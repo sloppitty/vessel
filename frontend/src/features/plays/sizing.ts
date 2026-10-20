@@ -1,6 +1,8 @@
+import type { BrokerAccount } from '@/api/workspace'
+import { asOf, availableSourceLabels } from '@/lib/format'
 import type { DraftEntry, DraftExit, PlayDraft } from './draft'
 import { averageEntryPrice, exitsOf, levelPrice, type ExitKind } from './levels'
-import { planShare, positivePlanNumber as positive } from './numbers'
+import { formatPlanNumber, planNumber, planShare, positivePlanNumber as positive } from './numbers'
 
 /**
  * Whole-position size at a leverage, before fees. Margin sizing fixes the margin, so leverage changes
@@ -96,38 +98,87 @@ export function convertSize(draft: Pick<PlayDraft, 'size' | 'sizingMode' | 'entr
   const sized = positionSize(draft, leverage)
   if (draft.sizingMode === 'margin') {
     if (sized.quantity === null) return ''
-    const digits = units.quantityDecimals ?? 6
-    return String(Number(sized.quantity.toFixed(digits)))
+    return formatPlanNumber(sized.quantity, units.quantityDecimals ?? 6)
   }
-  return sized.margin === null ? '' : String(Number(sized.margin.toFixed(2)))
+  return sized.margin === null ? '' : formatPlanNumber(sized.margin, 2)
+}
+
+/** Where the account's available balance comes from: the server selects exactly one source per account. */
+export type AvailableSource = NonNullable<BrokerAccount['availableBalanceSource']>
+/** The account's normalized available balance (`availableBalanceUsd`), an exact decimal string, with its source. */
+export interface AvailableBalance {
+  value: string
+  /** Null only from an older server that did not name it. */
+  source: AvailableSource | null
+  /** When the snapshot it comes from was read: the account's last successful refresh. */
+  asOfUtc?: string | null
+  /** The account's latest refresh failed, so the figure is from an earlier snapshot. */
+  refreshFailed?: boolean
 }
 
 /**
- * The play's budget: the manual amount when set, otherwise what the account has available. An empty
- * wallet is not a budget. Null when neither is known.
+ * What an enabled account reports as available: the server's one normalized figure (wallet funds for
+ * unified wallet accounts, otherwise the venue's available margin or else its withdrawable amount),
+ * never the separate stablecoin wallet ledger of a standard account. Null when it is not reported.
+ * No age limit is assumed; the figure carries its snapshot time and whether the last refresh failed.
  */
-export function playBudget(draft: Pick<PlayDraft, 'budgetOverride'>, available: string | null | undefined) {
-  const usable = available != null && Number(available) > 0 ? available : null
-  const value = draft.budgetOverride ?? usable
-  return value === null ? null : { value, amount: Number(value), source: draft.budgetOverride !== null ? 'manual' as const : 'available' as const }
+export function availableOf(account: BrokerAccount | null | undefined): AvailableBalance | null {
+  if (!account || account.isEnabled === false || account.availableBalanceUsd == null) return null
+  return { value: account.availableBalanceUsd, source: account.availableBalanceSource ?? null,
+    asOfUtc: account.lastSyncedAtUtc, refreshFailed: account.syncStatus === 'error' }
+}
+
+/** "reported margin · as of 14:02", with "last refresh failed" when the latest refresh did not succeed. */
+export const availableLabel = (available: AvailableBalance) => [available.source ? availableSourceLabels[available.source] : 'available',
+  available.asOfUtc ? asOf(available.asOfUtc) : null, available.refreshFailed ? 'last refresh failed' : null].filter(Boolean).join(' · ')
+
+export interface PlayBudget {
+  /** Exact decimal string. */
+  value: string
+  amount: number
+  source: 'manual' | AvailableSource | 'available'
+}
+
+/** "manual", "wallet", "reported margin" or "reported withdrawal". */
+export const budgetSourceLabel = (budget: Pick<PlayBudget, 'source'>) =>
+  budget.source === 'manual' || budget.source === 'available' ? budget.source : availableSourceLabels[budget.source]
+
+/**
+ * The play's budget: the manual amount when set, otherwise the account's available balance with its
+ * source. A known zero is a budget of zero; only an unknown balance leaves the budget unknown (null),
+ * and so does a manual amount that is not plan text (stored before the plain-decimal rule).
+ */
+export function playBudget(draft: Pick<PlayDraft, 'budgetOverride'>, available: AvailableBalance | null | undefined): PlayBudget | null {
+  if (draft.budgetOverride !== null) {
+    const amount = planNumber(draft.budgetOverride)
+    return amount === null ? null : { value: draft.budgetOverride, amount, source: 'manual' }
+  }
+  if (!available) return null
+  return { value: available.value, amount: Number(available.value), source: available.source ?? 'available' }
 }
 
 /** Margin above the budget, before fees. Null when it fits or either side is unknown. */
-export function marginOverBudget(draft: Pick<PlayDraft, 'size' | 'sizingMode' | 'entries' | 'budgetOverride'>, leverage: number, available: string | null | undefined) {
+export function marginOverBudget(draft: Pick<PlayDraft, 'size' | 'sizingMode' | 'entries' | 'budgetOverride'>, leverage: number,
+  available: AvailableBalance | null | undefined) {
   const budget = playBudget(draft, available)
   const { margin } = positionSize(draft, leverage)
   // Cents of rounding are not worth blocking a plan.
-  if (budget === null || margin === null || margin <= budget.amount + 0.005) return null
+  if (budget === null || !Number.isFinite(budget.amount) || margin === null || margin <= budget.amount + 0.005) return null
   return { margin, budget }
 }
+
+/** Why a draft's margin does not fit, in the instrument's quote unit, naming the budget's source. */
+export const overBudgetMessage = (over: NonNullable<ReturnType<typeof marginOverBudget>>, units: SizeUnits) =>
+  `Margin ${formatMoney(over.margin, units)} is above the ${formatMoney(over.budget.amount, units)} budget (${budgetSourceLabel(over.budget)}).`
 
 /** The size field value that uses the whole budget, or null when it cannot be converted. Quantities round down. */
 export function sizeForBudget(draft: Pick<PlayDraft, 'sizingMode' | 'entries'>, leverage: number, budget: string, units: SizeUnits) {
   if (draft.sizingMode === 'margin') return budget
   const averageEntry = averageEntryPrice(draft.entries, 1)
   if (averageEntry === null) return null
-  const factor = 10 ** (units.quantityDecimals ?? 6)
-  return String(Math.floor(Number(budget) * Math.max(1, leverage) / averageEntry * factor) / factor)
+  const decimals = units.quantityDecimals ?? 6
+  const factor = 10 ** decimals
+  return formatPlanNumber(Math.floor(Number(budget) * Math.max(1, leverage) / averageEntry * factor) / factor, decimals)
 }
 
 /**
@@ -181,8 +232,8 @@ export const formatRewardToRisk = (ratio: number) => `1:${new Intl.NumberFormat(
  * and the position uses isolated margin. The margin is the notional ÷ leverage, so the price is
  * where that margin plus the unrealized result falls to the maintenance margin: the fraction the
  * venue states for the contract, otherwise assumed to be half the initial margin at the venue
- * maximum leverage. Fees, funding, margin tiers of large positions and the mark price are ignored;
- * cross margin liquidates further away, since the account backs it.
+ * maximum leverage. Fees, funding, margin tiers of large positions and the mark price are ignored.
+ * Cross margin depends on shared collateral and other positions; it is not always safer.
  * Null without an average entry or maintenance margin, or when there is no liquidation price (1× long).
  */
 export function estimatedLiquidation(entries: PlayDraft['entries'], direction: PlayDraft['direction'], leverage: number, maxLeverage: number | null,

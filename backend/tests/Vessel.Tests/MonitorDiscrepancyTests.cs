@@ -60,6 +60,21 @@ public sealed class MonitorDiscrepancyTests
     }
 
     [Fact]
+    public async Task Read_records_carry_the_last_decisive_observation_time_in_the_api_json()
+    {
+        var f = new DiscrepancyFixture { Position = 0 };
+        await f.Confirm();
+        var observed = f.Clock.Now;
+        f.Advance(90); f.PositionsComplete = false;
+        // An incomplete read is not an observation: the time stays at the last fresh decision.
+        await f.Evaluate();
+        var row = Assert.Single(await f.Service.ReadAsync(f.Account.Id, null, default), x => x.Kind == "position.missing");
+        Assert.Equal(observed, row.LastObservedAtUtc);
+        var json = System.Text.Json.JsonSerializer.SerializeToElement(row, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        Assert.Equal(observed, json.GetProperty("lastObservedAtUtc").GetDateTimeOffset());
+    }
+
+    [Fact]
     public async Task Bounded_lifetime_history_does_not_disable_safe_current_comparisons()
     {
         var f = new DiscrepancyFixture { Position = 2, Truncated = true };
@@ -457,7 +472,7 @@ internal sealed class DiscrepancyFixture
     public readonly List<VenueOrder> VenueOrders = [];
     public decimal Position = 1;
     public decimal? PriceStep;
-    public bool PositionsComplete = true, OrdersComplete = true, HistoryGap, StampOpenOrders = true, Retired;
+    public bool PositionsComplete = true, OrdersComplete = true, HistoryGap, StampOpenOrders = true, Retired, CurrentOrderBook = true;
     public bool? Truncated;
     public int Omitted;
     public TimeSpan ObservationOffset;
@@ -526,7 +541,7 @@ internal sealed class DiscrepancyFixture
         return new(Guid.NewGuid(), Account, new(new(new(at, "primary-perpetuals", 100, 100, 0,
             Position == 0 || Retired ? [] : [new("BTC", Position, 100, 0, 0, 1)]), Retired ? [] : [new("BTC", 4, 10, "USDC", PriceStep)], [], "bounded",
             PositionsComplete, false, Truncated, OmittedExecutions: Omitted), new(VenueOrders.Select(x => StampOpenOrders && x.Status == VenueOrderStatus.Open ? x with { StatusAtUtc = at } : x).ToArray(), at, "bounded", OrdersComplete)),
-            null, null, HistoryGap, "scheduled");
+            null, null, HistoryGap, "scheduled", CurrentOrderBook);
     }
     public Task<MonitorEvaluationResult> Evaluate() => Service.EvaluateAsync(Observation(), default);
     public async Task Confirm() { await Evaluate(); Advance(60); await Evaluate(); }
