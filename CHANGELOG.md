@@ -4,6 +4,10 @@
 
 ### Added
 
+- A Play's fills appear on its chart as buy and sell markers at their time
+  and price, with a tooltip, never as a level line. Closed, unresolved and
+  retrospective Plays open the chart on the trade's own dates instead of
+  today (G-03, F-06).
 - Review shows process and outcome as cases: how the period's closed,
   cancelled and unresolved Plays were answered (followed, deviated, not
   applicable, unanswered) beside how they turned out, with retrospective and

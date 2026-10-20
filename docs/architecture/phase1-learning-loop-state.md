@@ -116,6 +116,35 @@ October 20, 2026, branch `t3/phase1-receipt`, stacked on the integration base:
     A test fails without this fix.
   - **Check.** `scripts/check.sh` passed again: backend 3,558 passed, 5 skipped; frontend 149 files and 3,742 tests.
 
+### 1.1b Fills on the chart
+
+October 20, 2026, branch `t3/phase1-fill-markers`, stacked on 1.4b:
+- **Markers (G-03, F-06).** A saved Play's fills, its linked venue fills or its manual ledger's executions, are drawn as
+  markers at their time and price.
+  - Buys are up arrows, sells down arrows, in the positive and negative theme colours.
+  - Each sits on the candle its execution falls in. A fill outside the loaded candles is not drawn.
+  - A tooltip shows the role, side, exact quantity and price, and UTC time. A visually hidden list carries the same
+    text.
+  - Plan levels keep their lines and tags, so a fill cannot be read as a level.
+- **Trade dates.** Closed, Unresolved and retrospective Plays with fills open the chart on the trade: first to last fill,
+  padded by a quarter of its length and at least five candles.
+  - The candles come from an anchored cache entry whose tail ends at the padded end, never later than now.
+  - Older pages load on scroll as usual, and live updates stay off.
+  - The focus applies at a reset and once per new range, so the owner can pan.
+  - Open Plays keep today's view and the live tail.
+- **Adapter.** `ChartAdapter` gains `setMarkers` (Lightweight Charts series markers, hover through the hovered-object ID)
+  and `setFocus`. The renderer still knows nothing of Plays.
+- **Popup over a focused field.** Not reproduced: no browser session ran for it. The notification stack is fixed at the
+  bottom right, up to 400 px wide and above the page, so it can sit over a field there on a short window. Notification
+  delivery does not change in Phase 1, so the report stays open.
+- **Tests.**
+  - Adapter: markers snap to their candle and drop outside it, move when candles arrive, report hover, and the focus
+    applies once per range and at resets.
+  - Chart panel: an ended trade requests candles ending after it, focuses on it, marks its fills (never as levels) and
+    never streams; an open trade stays live.
+  - The candle chart shows the hovered fill's tooltip and lists every fill.
+- **Checks.** `scripts/check.sh` passed: backend 3,608 passed, 5 skipped; frontend 153 files and 3,825 tests; build clean.
+
 ## 1.2 Honest review queue and in-trade log
 
 October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
