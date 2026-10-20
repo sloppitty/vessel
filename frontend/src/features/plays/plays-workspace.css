@@ -618,6 +618,8 @@
 .journal-tabs .execution-totals div { padding: 9px 12px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-sunken); }
 .journal-tabs .execution-totals dt { color: var(--muted-foreground); font-size: var(--text-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: var(--tracking-label); }
 .journal-tabs .execution-totals dd { margin: 4px 0 0; font-size: var(--text-sm); font-weight: 650; font-feature-settings: var(--figures); overflow-wrap: anywhere; }
+/* The sign-differs pill beside the Play-local result (October 19, 2026); outranks the shared badge's zero margin. */
+.journal-tabs .execution-totals dd span.workspace-badge.sign-differs { margin-left: 6px; }
 .journal-tabs .execution-section h3 { display: flex; align-items: center; gap: 4px; margin: 0 0 4px; font-size: var(--text-xs); font-weight: 650; }
 .journal-tabs .execution-section > p { margin: 0 0 6px; }
 .journal-tabs .execution-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
@@ -772,6 +774,7 @@
 .plays-page .record-source-note { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 10px; color: var(--muted-foreground); line-height: 1.5; }
 .plays-page .record-source { padding: 0 6px; border: 1px solid color-mix(in srgb, var(--warning) 30%, var(--line)); border-radius: 999px; color: var(--foreground); font-size: var(--text-2xs); font-weight: 600; line-height: 16px; }
 .plays-page .record-exposure { margin: 0 0 10px; color: var(--muted-foreground); line-height: 1.5; }
+.plays-page .record-basis { margin: 0 0 10px; color: var(--muted-foreground); font-size: var(--text-xs); line-height: 1.5; }
 .plays-page .record-exposure[data-reduced="true"] strong { color: var(--warning); }
 .plays-page .record-limits { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; color: var(--muted-foreground); font-size: var(--text-2xs); font-variant-numeric: tabular-nums; }
 .plays-page .record-limits strong { color: var(--foreground); font-weight: 600; }

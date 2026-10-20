@@ -26,7 +26,8 @@ internal sealed class ReviewFixture : IReviewStore
     public List<Account> Accounts { get; } = [];
     public List<Portfolio> Portfolios { get; } = [];
     public List<ClosedPlayFacts> Closed { get; } = [];
-    public ReviewService Service => new(this, new ReviewClock());
+    /// <summary>With the Hyperliquid descriptor, so Play-local results know the venue's quote asset.</summary>
+    public ReviewService Service => new(this, new ReviewClock(), TestVenues.With());
     public ReviewQuery? LastQuery { get; private set; }
     public Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct)
     {

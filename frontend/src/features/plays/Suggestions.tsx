@@ -1,6 +1,6 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react'
 import { Check, ChevronDown, Lightbulb, X } from 'lucide-react'
-import { riskPercentRange, type SizingDocument } from '@/api/sizing'
+import { riskPercentRange, type SizingDocument, type SizingRecord } from '@/api/sizing'
 import { Button } from '@/components/ui/button'
 import { InfoTip } from '@/components/ui/info-tip'
 import { Input } from '@/components/ui/input'
@@ -8,6 +8,7 @@ import type { PlayDraft } from './draft'
 import { formatDraggedPrice } from './levels'
 import { errorMessage } from '@/api/errors'
 import { formatMoney, formatQuantity, formatRewardToRisk, type SizeUnits } from './sizing'
+import { fundingNote } from './LocalResult'
 import { exposureLabels, suggestionCount, type PlanSuggestions } from './suggestions'
 import type { SizingStatus } from './useSizing'
 
@@ -177,12 +178,28 @@ function emptyReason(plan: PlanSuggestions) {
   return null
 }
 
+/**
+ * What the result bases say about the window's decided results: sign changes under the Play-local basis and results
+ * without one (Play records only; positions are not Plays), and losses made by fees alone. Zero and absent counts say nothing.
+ */
+function recordBasisNotes(record: SizingRecord, decided: number) {
+  const notes: string[] = []
+  const changes = record.localSignChanges ?? 0, unknown = record.localUnknown ?? 0
+  const feeOnly = record.feeOnlyLosses ?? 0, unknownGross = record.unknownGrossLosses ?? 0
+  if (record.source === 'plays' && changes > 0) notes.push(`${changes} of the last ${decided} ${changes === 1 ? 'changes' : 'change'} sign under the Play-local basis.`)
+  if (record.source === 'plays' && unknown > 0) notes.push(`${unknown} ${unknown === 1 ? 'has' : 'have'} no Play-local figure.`)
+  if (feeOnly > 0) notes.push(`${feeOnly} ${feeOnly === 1 ? 'loss came' : 'losses came'} from fees alone.`)
+  if (unknownGross > 0) notes.push(`${unknownGross} ${unknownGross === 1 ? 'loss has' : 'losses have'} no before-fee figure.`)
+  return notes
+}
+
 /** The record and rules behind the suggestions, with the risk per trade editable in place. */
 function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRiskChange: (riskPercent: string) => Promise<void> }) {
   const { record, exposure, limits } = sizing
   const decided = Math.min(record.decidedPlays, record.window)
   const activity = record.source === 'activity'
   const positions = record.closedPlays === 1 ? 'position' : 'positions'
+  const basisNotes = recordBasisNotes(record, decided)
   return <div className="sizing-suggestions-record" data-testid="track-record">
     <h3>Your record</h3>
     {activity && <p className="record-source-note" data-testid="record-source">
@@ -199,6 +216,8 @@ function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRisk
         <div><dt>Win/loss ratio</dt><dd>{decimal(record.winLossRatio) ?? '—'}<small>avg +{decimal(record.averageGainPercent) ?? '—'}% / −{decimal(record.averageLossPercent) ?? '—'}%</small></dd></div>
         <div><dt>Break-even R:R</dt><dd>{record.breakEvenRewardRisk === null ? '—' : formatRewardToRisk(Number(record.breakEvenRewardRisk))}<small>at this win rate</small></dd></div>
       </dl>}
+    {basisNotes.length > 0 && <p className="record-basis" data-testid="record-basis">{basisNotes.join(' ')}
+      <InfoTip label="About result bases">The record scores the venue result. The Play-local basis uses each play’s own fills: sell proceeds minus buy costs, less every fee. Fee-only losses were zero or better before fees and still count as losses. {fundingNote}, so a sign change or a fee-only loss can reflect funding.</InfoTip></p>}
     <p className="record-exposure" data-reduced={exposure.level !== 'full' || undefined}>
       <strong>{exposure.level === 'full' ? 'Full size' : exposureLabels[exposure.level]}</strong> · {exposure.reason}
     </p>
@@ -214,8 +233,8 @@ function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRisk
         <li><strong>Size</strong>: risk a fixed share of the account balance per play (Minervini: about 1.25%, never above 2.5%). Position = amount at risk ÷ loss per unit at the stops.</li>
         <li><strong>Stops</strong>: never more than 10% from the entry; once you have five wins, no more than half your average gain.</li>
         <li><strong>Targets</strong>: at least 2:1, or the break-even R:R of your win rate once you have ten wins and losses, whichever is higher.</li>
-        <li><strong>Exposure</strong>: size halves after three losses in a row and halves again after two more. It steps back up after two wins with a positive result since stepping down. Minervini gives no fixed counts; these are Vessel's.</li>
-        <li><strong>Record</strong>: your last {record.window} closed plays with wins or losses, all enabled accounts, from linked fills: venue closed PnL less fees.
+        <li><strong>Exposure</strong>: size halves after three losses in a row and halves again after two more. It steps back up after two wins in a row with a positive result since stepping down. Minervini gives no fixed counts; these are Vessel's.</li>
+        <li><strong>Record</strong>: your last {record.window} closed plays with wins or losses by exit time, all enabled accounts, from linked fills: venue closed PnL less fees.
           Until a play has a win or loss, closed positions from Activity stand in, scored the same way without R multiples.</li>
       </ul>
       <p>Mechanical estimates before fees, funding and slippage, not advice.</p>

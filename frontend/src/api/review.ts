@@ -1,4 +1,5 @@
 import { isCount, isGuid, isListOf, isNonBlankText, isNullOr, isRecord, isReviewDecimal, isText, isTimestamp } from './guards'
+import { isOptionalPlayLocalResult, type PlayLocalResult } from './local-result'
 
 export const reviewPeriods = [
   { id: 'day', label: 'Last 24 hours' }, { id: 'week', label: 'Last 7 days' },
@@ -14,8 +15,18 @@ export interface ReviewMetrics {
   count: number; wins: number; losses: number; scratches: number
   net: string | null; batting: string | null; averageGain: string | null; averageLoss: string | null
   payoff: string | null; profitFactor: string | null; averageWin: string | null; averageLossUsd: string | null
-  expectancy: string | null; averageR: string | null; riskCount: number; reviewed: number
+  expectancy: string | null
+  /** Estimated R (planned-stop model), over the `riskCount` Plays with a complete initial stop. */
+  averageR: string | null; riskCount: number; reviewed: number
   drawdown: string | null; maxWins: number; maxLosses: number
+  /** Plays whose Play-local and venue results differ in sign. These four are absent from servers before October 19, 2026. */
+  signDiffers?: number
+  /** Plays with no Play-local result. */
+  localUnknown?: number
+  /** Losses whose venue result before fees is zero or better. Win, loss and scratch are unchanged. */
+  feeOnlyLosses?: number
+  /** Losses whose venue result before fees is unknown; not counted as fee-only. */
+  unknownGrossLosses?: number
 }
 export interface ReviewGroup { id: string; name: string; detail: string; metrics: ReviewMetrics }
 export interface ReviewPoint { atUtc: string; net: string; cumulative: string; drawdown: string; count: number }
@@ -24,6 +35,8 @@ export interface ReviewPlay {
   closedAtUtc: string; net: string; returnPercent: string; rMultiple: string | null; reviewed: boolean
   origin?: 'planned' | 'retrospective'
   executionSource?: 'imported' | 'manual'
+  /** The Play-local result beside the scored `net`; absent from servers before October 19, 2026. */
+  local?: PlayLocalResult
 }
 export interface ReviewExclusion {
   playId: string; title: string; accountId: string; accountName: string; instrument: string; reasons: string[]
@@ -57,14 +70,18 @@ export const isReviewMetrics = (v: unknown): v is ReviewMetrics => isRecord(v) &
   (v.wins as number) + (v.losses as number) + (v.scratches as number) === v.count &&
   (v.riskCount as number) <= (v.count as number) && (v.reviewed as number) <= (v.count as number) &&
   (v.batting === null || Number(v.batting) >= 0 && Number(v.batting) <= 1) &&
-  (v.count === 0 ? v.net === null : isReviewDecimal(v.net))
+  (v.count === 0 ? v.net === null : isReviewDecimal(v.net)) &&
+  ['signDiffers', 'localUnknown'].every(key => v[key] === undefined || isCount(v[key]) && (v[key] as number) <= (v.count as number)) &&
+  ['feeOnlyLosses', 'unknownGrossLosses'].every(key => v[key] === undefined || isCount(v[key]) && (v[key] as number) <= (v.losses as number))
 const group = (v: unknown) => isRecord(v) && isText(v.id, 128) && isText(v.name, 200) && isText(v.detail, 2000) && isReviewMetrics(v.metrics)
 const play = (v: unknown) => isRecord(v) && isGuid(v.id) && isText(v.title, 200) && isGuid(v.accountId) && isText(v.accountName, 200) &&
   isText(v.venueId, 64) && isText(v.instrument, 128) && isTimestamp(v.closedAtUtc, 64) && isReviewDecimal(v.net) &&
   isReviewDecimal(v.returnPercent) && isNullOr(v.rMultiple, isReviewDecimal) && typeof v.reviewed === 'boolean' &&
   (v.origin === undefined || v.origin === 'planned' || v.origin === 'retrospective') &&
   (v.executionSource === undefined || v.executionSource === 'imported' || v.executionSource === 'manual') &&
-  (v.origin !== 'retrospective' || v.rMultiple === null)
+  (v.origin !== 'retrospective' || v.rMultiple === null) &&
+  isOptionalPlayLocalResult(v.local, isReviewDecimal) &&
+  (!isRecord(v.local) || v.local.basis === 'manual-ledger' === (v.executionSource === 'manual'))
 const account = (v: unknown) => isRecord(v) && isGuid(v.id) && isText(v.name, 200) && isNullOr(v.portfolioId, isGuid) &&
   isText(v.venueId, 64) && isNullOr(v.lastSyncedAtUtc, x => isTimestamp(x, 64)) && isText(v.syncStatus, 32) &&
   isNullOr(v.historyNotice, x => isText(x, 1000))

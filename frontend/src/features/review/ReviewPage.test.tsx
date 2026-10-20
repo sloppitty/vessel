@@ -114,6 +114,96 @@ describe('Production portfolio review', () => {
   })
 })
 
+describe('Review result bases', () => {
+  const local = { netUsd: '-2', basis: 'executions' as const, reason: null, signDiffers: true }
+  const reason = 'A fill\'s fee is unverified or not in a listed USD stablecoin.'
+  const report: ReviewDocument = {
+    ...reviewFixture,
+    metrics: { ...reviewFixture.metrics, signDiffers: 1, localUnknown: 1, feeOnlyLosses: 1, unknownGrossLosses: 0 },
+    plays: [
+      { ...reviewFixture.plays[0]!, net: '3', executionSource: 'imported', local },
+      { ...reviewFixture.plays[0]!, id: '22222222-3333-4444-5555-777777777777', title: 'ETH fade', net: '-1.1', executionSource: 'imported',
+        local: { netUsd: null, basis: 'executions', reason, signDiffers: false } },
+      { ...reviewFixture.plays[0]!, id: '22222222-3333-4444-5555-888888888888', title: 'Paper trade', net: '5.8', executionSource: 'manual',
+        local: { netUsd: '5.8', basis: 'manual-ledger', reason: null, signDiffers: false } },
+    ],
+  }
+
+  it('names the R estimate with its denominator and counts sign differences and fee-only losses', async () => {
+    setup(vi.fn().mockResolvedValue(report))
+    const card = (await screen.findByRole('heading', { name: 'Average outcome' })).closest('section')!
+    expect(within(card).queryByText('Avg. realized R')).not.toBeInTheDocument()
+    expect(within(card).getByText('Estimated R (planned-stop model)')).toBeVisible()
+    expect(within(card).getByText('2 of 3 with a complete initial stop')).toBeVisible()
+    const estimate = within(card).getByRole('button', { name: 'About estimated R' })
+    expect(estimate).toHaveAccessibleDescription(/entry notional × share-weighted stop distance/)
+    expect(estimate).toHaveAccessibleDescription(/at or before the first entry fill/)
+    const value = (term: string) => within(card).getByText(term).closest('div')!.querySelector('dd')
+    expect(value('Sign differs by basis')).toHaveTextContent(/^1 of 31 unknown$/)
+    expect(value('Fee-only losses')).toHaveTextContent(/^1 of 1 loss$/)
+    expect(within(card).getByRole('button', { name: 'About result bases' })).toHaveAccessibleDescription(/own fills/)
+    // Funding inside venue-reported P&L is unverified, so both counts can reflect it.
+    expect(within(card).getByRole('button', { name: 'About result bases' })).toHaveAccessibleDescription(/includes funding is unverified/)
+    expect(within(card).getByRole('button', { name: 'About fee-only losses' })).toHaveAccessibleDescription(/includes funding is unverified/)
+  })
+
+  it('defines both bases, the unverified funding and the estimated R revision rule', async () => {
+    const { user } = setup(vi.fn().mockResolvedValue(report))
+    await user.click(await screen.findByRole('button', { name: 'Definitions' }))
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent(/Result bases.*Play-local result.*includes funding is unverified, so a sign difference or a fee-only loss can reflect funding/)
+    expect(dialog).toHaveTextContent(/Estimated R \(planned-stop model\).*plan revision at or before the first entry fill/)
+    // The formula holds for shorts too: a short sold at 100 and bought back at 90 gains 10.
+    expect(dialog).toHaveTextContent(/its own fills' sell proceeds minus buy costs, less every trading fee/)
+    expect(dialog).not.toHaveTextContent(/exits minus entries/)
+  })
+
+  it('shows each Play-local result beside the venue result, with the flag and unknown reasons', async () => {
+    const { user } = setup(vi.fn().mockResolvedValue(report))
+    await user.click(await screen.findByRole('button', { name: `${report.metrics.count} Plays` }))
+    const dialog = await screen.findByRole('dialog')
+    const table = await within(dialog).findByRole('table', { name: 'Contributing closed Plays' })
+    expect(within(table).getByRole('columnheader', { name: /Play-local/ })).toBeInTheDocument()
+    // The per-Play R column uses the same name as the metric, with the same tip.
+    const estimated = within(table).getByRole('columnheader', { name: /^Est\. R/ })
+    expect(within(estimated).getByRole('button', { name: 'About estimated R' })).toHaveAccessibleDescription(/planned-stop model/)
+    const rows = within(table).getAllByRole('row').slice(1)
+    expect(rows[0]).toHaveTextContent('+$3Venue result')
+    expect(rows[0]).toHaveTextContent('-$2')
+    expect(within(rows[0]!).getByRole('button', { name: 'Sign differs by basis' })).toHaveAccessibleDescription(/still follow the venue result/)
+    const unknown = within(rows[1]!).getByRole('button', { name: 'Unknown Play-local result' })
+    expect(unknown).toHaveTextContent('Unknown')
+    expect(unknown).toHaveAccessibleDescription(reason)
+    expect(within(rows[1]!).queryByRole('button', { name: 'Sign differs by basis' })).not.toBeInTheDocument()
+    expect(rows[2]).toHaveTextContent('Manual ledger')
+    expect(within(rows[2]!).queryByRole('button', { name: 'Sign differs by basis' })).not.toBeInTheDocument()
+  })
+
+  it('never shows a tiny non-zero result as an exact-looking zero', async () => {
+    const tiny: ReviewDocument = { ...report, plays: [
+      { ...report.plays[0]!, net: '-0.00001', local: { netUsd: '0.00001', basis: 'executions', reason: null, signDiffers: true } },
+      { ...report.plays[2]!, net: '0', local: { netUsd: '0', basis: 'manual-ledger', reason: null, signDiffers: false } },
+    ] }
+    const { user } = setup(vi.fn().mockResolvedValue(tiny))
+    await user.click(await screen.findByRole('button', { name: `${tiny.metrics.count} Plays` }))
+    const table = await within(await screen.findByRole('dialog')).findByRole('table', { name: 'Contributing closed Plays' })
+    const [first, second] = within(table).getAllByRole('row').slice(1).map(row => within(row).getAllByRole('cell'))
+    expect(first![1]).toHaveTextContent(/^-\$0\.00001Venue result$/)
+    expect(first![2]).toHaveTextContent(/^\+\$0\.00001Sign differs by basis/)
+    expect(second![1]).toHaveTextContent(/^\$0Manual ledger$/)
+    expect(second![2]).toHaveTextContent(/^\$0$/)
+  })
+
+  it('omits the result-basis figures for reports from servers before them', async () => {
+    const { user } = setup()
+    await user.click(await screen.findByRole('button', { name: `${reviewFixture.metrics.count} Plays` }))
+    expect(screen.queryByText('Sign differs by basis')).not.toBeInTheDocument()
+    expect(screen.queryByText('Fee-only losses')).not.toBeInTheDocument()
+    const table = await within(await screen.findByRole('dialog')).findByRole('table', { name: 'Contributing closed Plays' })
+    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('Not reported')
+  })
+})
+
 describe('Review venue names', () => {
   it('shows venue descriptor names instead of raw venue IDs in breakdowns and the Play list', async () => {
     const api = { ...createWorkspaceApi('test'), review: vi.fn().mockResolvedValue(reviewFixture) }
