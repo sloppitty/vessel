@@ -156,6 +156,15 @@ October 20, 2026, branch `t3/phase1-fill-markers`, stacked on 1.4b:
     tests cover a gap, a sparse end and a lone candle.
   - **Check.** `scripts/check.sh` passed again: backend 3,609 passed, 5 skipped; frontend 153 files and 3,829 tests.
 
+- **Sol (Codex) round 2.** All three round-1 findings resolved. Two new findings, both fixed:
+  - **Long trades (medium).** The chart shows only loaded candles, so a trade longer than the first page opened
+    clipped. A focus that starts before the loaded candles is applied again as older pages arrive, until it fits or
+    the owner moves the view.
+  - **Monthly candles (medium).** The 30-day span put a January 31 fill outside January and a March 1 fill on a lone
+    February. Monthly candles now span their calendar month.
+  - Adapter tests cover both.
+  - **Check.** `scripts/check.sh` passed again: backend 3,610 passed, 5 skipped; frontend 153 files and 3,832 tests.
+
 ## 1.2 Honest review queue and in-trade log
 
 October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
