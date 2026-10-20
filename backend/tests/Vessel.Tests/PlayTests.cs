@@ -365,6 +365,35 @@ public sealed class PlayDocumentTests
         Assert.Equal("0", PlayDocuments.Normalize(Plan("5", target: "0")).Entries[0].Targets[0].Value);
     }
 
+    /// <summary>
+    /// The server reads stored % stop text with decimal, which keeps 28 places and rounds half to even on the exact digits:
+    /// a stored <c>5e-29</c> is zero, so once its entry price changes (no longer kept) it is refused as a 0 % stop before a
+    /// fill. Just above the midpoint it is not zero. The browser reads it the same way (<c>numbers.ts</c>).
+    /// </summary>
+    [Theory]
+    [InlineData("5e-29", true)]
+    [InlineData("0.00000000000000000000000000005", true)]
+    [InlineData("4.9999999999999999999999e-29", true)]
+    [InlineData("5.0000000000000000000001e-29", false)]
+    [InlineData("6e-29", false)]
+    public void A_stored_percent_stop_that_decimal_reads_as_zero_is_a_zero_percent_stop(string text, bool zero)
+    {
+        PlayPlanDocument Plan(string price) => TestPlays.Plan() with
+        {
+            Entries = [TestPlays.Plan().Entries[0] with
+            {
+                Price = price, Stops = [new PlanExit("stop-1", "percent", text, "100")], Targets = [new PlanExit("target-1", "percent", "10", "100")]
+            }]
+        };
+        var stored = Plan("100");
+        // Unchanged, the stored stop is kept and saves.
+        Assert.Equal(text, PlayDocuments.Normalize(Plan("100"), stored).Entries[0].Stops[0].Value);
+        if (zero)
+            Assert.Equal("Entry 1: a long stop goes below the entry price; 0 % (break-even) needs a fill on the entry.",
+                Assert.Throws<ProblemException>(() => PlayDocuments.Normalize(Plan("101"), stored)).Message);
+        else Assert.Equal(text, PlayDocuments.Normalize(Plan("101"), stored).Entries[0].Stops[0].Value);
+    }
+
     internal const string PlainDecimalRule =
         "use a plain decimal such as 100 or 0.5, with no sign, exponent or spaces, at most 64 characters and within decimal precision (28 decimal places).";
 

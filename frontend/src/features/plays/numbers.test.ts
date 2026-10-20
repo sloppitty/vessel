@@ -140,6 +140,16 @@ describe('plan number text shared with the server (test/contracts/plan-numbers.j
     for (const [text, read] of reads) expect(serverPlanNumber(text), show(text)).toBe(read)
     expect(planNumber('1e2')).toBeNull()
   })
+  // Sol review of the 0 % rule: decimal keeps 28 places and rounds half to even on the exact digits, so 5e-29 itself is
+  // zero on the server; a double read it as non-zero.
+  it.each(['5e-29', '0.00000000000000000000000000005', '4.9999999999999999999999e-29', '1e-30', '0e5', '-5e-29', '1e-99999',
+    '0.000', ' 5e-29 '])('reads %j as zero, as the server does', text => {
+    expect(serverPlanNumber(text)).toBe(0)
+  })
+  it.each([['5.0000000000000000000001e-29', 5e-29], ['0.000000000000000000000000000050001', 5.0001e-29], ['1e-28', 1e-28], ['6e-29', 6e-29],
+    ['1.5e-28', 1.5e-28]] as const)('reads %j as non-zero, as the server does', (text, read) => {
+    expect(serverPlanNumber(text)).toBe(read)
+  })
   it('writes numbers into plan fields without an exponent', () => {
     expect(formatPlanNumber(5e-7, 8)).toBe('0.0000005')
     expect(formatPlanNumber(0.000000049, 8)).toBe('0.00000005')

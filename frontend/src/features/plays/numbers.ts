@@ -127,16 +127,34 @@ const serverReadPattern = /^[\t\n\v\f\r ]*[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[e
 const decimalMax = 7.922816251426434e28
 
 /**
+ * Whether the server's decimal parse reads the text (already in `serverReadPattern`) as zero. Decimal keeps 28 places
+ * and rounds half to even on the exact digits, so a magnitude below 5e-29, or exactly 5e-29 (the midpoint between 0 and
+ * 1e-28, where even 0 wins), is zero. Decided from the digits and the exponent, never through a double: `5e-29` is zero
+ * there, `5.0000000000000000000001e-29` is not, and `1e-99999` needs no precision.
+ */
+function readsAsDecimalZero(text: string): boolean {
+  const [, whole = '', fraction = '', exponent = '0'] = /^[+-]?([0-9]*)\.?([0-9]*)(?:[eE]([+-]?[0-9]+))?$/.exec(text.trim()) ?? []
+  const digits = whole + fraction
+  const first = digits.search(/[1-9]/)
+  if (first < 0) return true
+  // The power of ten of the first significant digit.
+  const power = BigInt(whole.length - 1 - first) + BigInt(exponent)
+  if (power !== -29n) return power < -29n
+  return digits[first]! < '5' || digits[first] === '5' && !/[1-9]/.test(digits.slice(first + 1))
+}
+
+/**
  * A plan field read as the server reads stored text (`decimal.TryParse` with `NumberStyles.Float`), within decimal
- * range; doubles stand in for decimal at its precision edge. Only the wrong-side check uses it, so a stored `1e2` entry
- * meets a new stop at 105 here as it does on the server. Estimates keep reading plan text only (`planNumber`).
+ * range. Zero is decided exactly from the text, as the server rounds it; other magnitudes are doubles, which stand in
+ * for decimal at its precision edge. Only the side checks use it, so a stored `1e2` entry meets a new stop at 105 here
+ * as it does on the server, and a stored `5e-29` % stop is a 0 % stop. Estimates keep reading plan text only
+ * (`planNumber`).
  */
 export function serverPlanNumber(value: string): number | null {
   if (!serverReadPattern.test(value)) return null
   const number = Number(value.trim())
   if (!Number.isFinite(number) || Math.abs(number) > decimalMax) return null
-  // Decimal keeps 28 places: smaller magnitudes parse as zero.
-  return Math.abs(number) < 5e-29 ? 0 : number
+  return readsAsDecimalZero(value) ? 0 : number
 }
 
 export function serverPositivePlanNumber(value: string): number | null {

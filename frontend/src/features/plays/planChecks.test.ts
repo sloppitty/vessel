@@ -113,6 +113,19 @@ describe('a 0 % stop', () => {
     expect(planIssues([zero('100', '0')], direction, new Set(['e2']))).toHaveLength(1)
   })
 
+  it('reads a stored % stop that the server reads as zero as 0 %, such as 5e-29 (Sol review)', () => {
+    // A legacy draft stored a 5e-29 % stop; the server's decimal rounds it to zero.
+    const saved = zero('100', '5e-29')
+    const stored = storedPlanText(planFromDraft({ ...createDraft(), direction: 'long', entries: [saved] }))
+    expect(planIssues([saved], 'long', new Set(), stored)).toEqual([])
+    expect(keptStopWarnings([saved], 'long', new Set(), stored)).toHaveLength(1)
+    // A changed entry price no longer keeps it: the server refuses it as a 0 % stop, and so does the browser.
+    expect(planIssues([{ ...saved, price: '101' }], 'long', new Set(), stored).map(issue => issue.message))
+      .toEqual(['Entry 1 stop is at the entry price; a long stop goes below it. 0 % (break-even) needs a fill on the entry.'])
+    // Just above the midpoint it is not zero, so it is no 0 % stop.
+    expect(planIssues([{ ...zero('100', '5.0000000000000000000001e-29'), price: '101' }], 'long', new Set(), stored)).toEqual([])
+  })
+
   it('keeps a stored 0 % stop saveable as a warning, and leaves blank stops and 0 % targets alone', () => {
     const saved = zero('100', '0')
     const stored = storedPlanText(planFromDraft({ ...createDraft(), direction: 'long', entries: [saved] }))
