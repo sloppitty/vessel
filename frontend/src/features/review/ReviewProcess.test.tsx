@@ -17,7 +17,7 @@ const process: ReviewProcess = {
 }
 const play = reviewFixture.plays[0]!
 const page: ReviewProcessPage = { total: 1, offset: 0, nextOffset: null, items: [{
-  id: play.id, title: 'Late plan', accountId: play.accountId, accountName: play.accountName, venueId: play.venueId, instrument: play.instrument,
+  id: play.id!, title: 'Late plan', accountId: play.accountId, accountName: play.accountName, venueId: play.venueId, instrument: play.instrument,
   status: 'closed', origin: 'planned', direction: 'long', atUtc: play.closedAtUtc, net: '12.5', returnPercent: '2.5', rMultiple: null,
   adherence: 'followed', mistakeTag: null, plannedAfterExecution: true, reviewCompletion: null,
 }] }

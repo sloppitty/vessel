@@ -32,6 +32,27 @@ describe('Review API', () => {
   ])('rejects malformed data %#', change => {
     expect(isReviewDocument({ ...reviewFixture, ...change })).toBe(false)
   })
+  const positionReport = {
+    ...reviewFixture,
+    metrics: { ...reviewFixture.metrics, positions: 1 },
+    positions: { mode: 'auto', included: true, minPlays: 5, plays: 2, positions: 1, omitted: 0, playWeight: '2' },
+    plays: [...reviewFixture.plays, { ...reviewFixture.plays[0], id: null, operationId: 'abc:long', title: 'BTC Long', origin: 'position',
+      executionSource: 'imported', rMultiple: null, reviewed: false, local: null }],
+  }
+  it('accepts imported positions only without a Play ID, R or Play-local result', () => {
+    expect(isReviewDocument(positionReport)).toBe(true)
+    const position = positionReport.plays.at(-1)!
+    for (const change of [{ id: reviewFixture.plays[0]!.id }, { operationId: null }, { rMultiple: '1' }, { local: reviewFixture.plays[0]!.local ?? { netUsd: '1', basis: 'executions', reason: null, signDiffers: false } }])
+      expect(isReviewDocument({ ...positionReport, plays: [{ ...position, ...change }] })).toBe(false)
+    expect(isReviewDocument({ ...positionReport, plays: [{ ...reviewFixture.plays[0], id: null }] })).toBe(false)
+    expect(isReviewDocument({ ...positionReport, metrics: { ...positionReport.metrics, positions: 99 } })).toBe(false)
+    expect(isReviewDocument({ ...positionReport, positions: { ...positionReport.positions, positions: null } })).toBe(false)
+    expect(isReviewDocument({ ...positionReport, positions: { ...positionReport.positions, mode: 'sometimes' } })).toBe(false)
+  })
+  it('sends the positions mode and threshold', () => {
+    const query = new URL(reviewPath({ ...defaultReviewQuery, positions: 'auto', minPlays: 5 }), 'http://localhost').searchParams
+    expect([query.get('positions'), query.get('minPlays')]).toEqual(['auto', '5'])
+  })
   it('encodes asset identifiers without changing scope', () => {
     const path = reviewPath({ ...defaultReviewQuery, instrument: 'A&B/#', offset: 50 })
     const query = new URL(path, 'http://localhost').searchParams

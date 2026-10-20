@@ -42,6 +42,10 @@ public static class ApplicationServices
         services.AddScoped<DiaryService>();
         services.AddScoped<PlayExecutionService>();
         services.AddScoped<SizingService>();
+        // Review resolves Activity (and the database) only when a report includes imported positions.
+        services.AddScoped<ActivityReviewPositions>();
+        services.AddScoped<IReviewPositionSource>(sp =>
+            new DeferredReviewPositions(() => sp.GetRequiredService<ActivityReviewPositions>()));
         services.AddScoped<ReviewService>();
         services.AddScoped<CandleService>();
         services.AddScoped<MarketContextService>();
@@ -74,6 +78,12 @@ public static class ApplicationServices
         services.AddScoped<MonitorRunExecutor>();
         return services;
     }
+}
+
+internal sealed class DeferredReviewPositions(Func<IReviewPositionSource> source) : IReviewPositionSource
+{
+    public Task<IReadOnlyList<ReviewPosition>> ReadAsync(IReadOnlySet<Guid> accountIds, CancellationToken ct) =>
+        source().ReadAsync(accountIds, ct);
 }
 
 internal sealed class DeferredAccountCredentialReader(Func<AccountCredentialReader> reader) : IAccountCredentialReader
