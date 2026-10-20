@@ -456,6 +456,8 @@ October 20, 2026, branch `t3/phase1-process-cases`, stacked on 1.3b:
     lists do.
   - **Check.** After the rebase onto the fixed 1.3a, `scripts/check.sh` passed: backend 3,609 passed, 5 skipped; frontend 153 files and 3,820 tests.
 
+- **Sol (Codex) round 3.** No findings: the venue fix and the rebase onto 1.3a's change hold.
+
 ## 1.5 Lessons return and a recorded pre-flight
 
 October 20, 2026, branch `t3/phase1-preflight`, stacked on 1.4a:
