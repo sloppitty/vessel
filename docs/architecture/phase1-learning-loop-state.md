@@ -396,6 +396,45 @@ October 20, 2026, branch `t3/phase1-post-hoc-badge`, stacked on 1.1a:
   - **Check.** After the rebase onto main, `scripts/check.sh` passed: backend 3,571 passed, 5 skipped; frontend 149
     files and 3,768 tests.
 
+### 1.4b Process cases
+
+October 20, 2026, branch `t3/phase1-process-cases`, stacked on 1.3b:
+- **Process section (G-01, decision 9).** Below the Breakdown, over the period's Closed, Cancelled and Unresolved Plays
+  in scope:
+  - followed and deviated, by win and loss, with each row's scratches;
+  - lanes for retrospective, unscored but answered, unanswered, and not-applicable Plays.
+
+  Each Play is in the first lane that applies, and an unscored planned Play with no answers is only in the exclusion
+  list. Answers are read as stored.
+- **Times.** Closed Plays by Review's close time, Cancelled ones by their cancellation, Unresolved ones by their
+  declaration.
+- **Mistake tags.**
+  - Counted per tag, trimmed and case-insensitive, shown in the latest spelling.
+  - Each tag has its wins, losses, scratches and unscored Plays, with no money.
+  - The review form autocompletes from `GET /api/review/mistake-tags` (at most 100, newest first).
+- **Rates.** A win share appears only where its own decided count is at least 10. Rows keep a fixed order, with no
+  ranking or labels.
+- **Drill-down.** `GET /api/review/process` takes Review's filters and exactly one cell, lane, mistake tag or skipped
+  pre-flight check (or `not-recorded`). It returns those Plays newest first, with nullable money, the stored answers,
+  the post-hoc flag and the completion. Every count equals its drill-down.
+- **Pre-flight counts (1.5).** They now cover the same population's planned Plays that were planned, and each skipped
+  count and "not recorded" opens its Plays.
+- **Breakdown.** Origin and Direction join in a fixed order, without row inspection, since Review has no such filter.
+- **Contracts.** Review's Play rows gain adherence, mistake tag, direction and completion.
+- **Tests.**
+  - Service:
+    - every lane, cell and exclusion-only case, with each count equal to its drill-down total;
+    - tag grouping and latest spelling;
+    - pre-flight counts and drill-downs across Closed, Cancelled and Unresolved Plays;
+    - selection validation;
+    - the fixed-order groups and row fields.
+  - PostgreSQL (T29): a manual Play planned after its executions counts in its followed cell with the badge, a cancelled
+    answered Play is unscored, and tags, pre-flight counts and drill-downs agree. The two-owner isolation test covers
+    both routes.
+  - Frontend: the shares at n ≥ 10, counts opening their Plays, the pre-flight drill-downs, the Origin/Direction tabs,
+    the tag suggestions and the response guards.
+- **Checks.** `scripts/check.sh` passed: backend 3,607 passed, 5 skipped; frontend 153 files and 3,813 tests; build clean.
+
 ## 1.5 Lessons return and a recorded pre-flight
 
 October 20, 2026, branch `t3/phase1-preflight`, stacked on 1.4a:
