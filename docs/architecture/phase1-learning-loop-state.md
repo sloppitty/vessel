@@ -618,3 +618,17 @@ October 20, 2026, branch `t3/phase1-capture`, stacked on 1.1b:
     Plays match, false once the other Play is cancelled.
 - **Checks.** `scripts/check.sh` passed: backend 3,609 passed, 5 skipped; frontend 153 files and 3,839 tests; build clean. A
   first run found the monitor contract fixture without the new `otherPlay` field; it was regenerated.
+
+- **Sol (Codex) round 1.** Three findings, all fixed:
+  - **Not this play (high).** Turning an order down sent one request per level, so a check between them could link the
+    remaining level, and turning every level down still let the order link as an unplanned exit and close the Play.
+    It is now one request, `POST /api/plays/{id}/execution/rejections`: under the account lock it declines every
+    suggestion of that order to this Play and dismisses it for each level of the current plan and as an unplanned exit.
+    An order linked to this Play is refused. A PostgreSQL test reproduces the reviewer's case; the two-owner isolation
+    test covers the route.
+  - **Autumn overlap (high).** A stored time in the repeated hour, shown and sent back unchanged, moved by an hour. Such
+    a time is now shown with its offset, and Now does the same; a repeated local time typed without an offset asks
+    for one. Tests cover both occurrences.
+  - **Focus order (low).** A refused submit focuses the first invalid field in the form's order. A test fails without
+    this fix.
+  - **Check.** `scripts/check.sh` passed again: backend 3,611 passed, 5 skipped; frontend 153 files and 3,845 tests.
