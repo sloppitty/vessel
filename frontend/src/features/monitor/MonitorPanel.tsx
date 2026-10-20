@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { AccountMonitor, MonitorCoverage, MonitorDiscrepancy, MonitorWatch } from '@/api/monitor'
 import { Button } from '@/components/ui/button'
 import { InfoTip } from '@/components/ui/info-tip'
@@ -101,8 +101,10 @@ export function MonitorPanel({ monitor, discrepancies, coverage = monitor.covera
 
 /** `levelName` names a plan level from its monitor key ("Entry 1 stop") where the Play is known. */
 /** `truncated`: the server's cap left older records out (incidents are listed first). */
-export function MonitorDiscrepancies({ discrepancies, busy, onDismiss, levelName, truncated = false }: {
+export function MonitorDiscrepancies({ discrepancies, busy, onDismiss, action, levelName, truncated = false }: {
   discrepancies: MonitorDiscrepancy[]; busy: boolean; onDismiss: (id: string, note?: string) => Promise<void>
+  /** What the owner can do about one record besides dismissing it, such as rebinding a drifted level. */
+  action?: ((item: MonitorDiscrepancy) => ReactNode) | undefined
   levelName?: ((key: unknown) => string | null) | undefined
   truncated?: boolean
 }) {
@@ -141,6 +143,7 @@ export function MonitorDiscrepancies({ discrepancies, busy, onDismiss, levelName
           It is not resolved and is no longer checked; a later fresh observation can still decide it.</p>}
         {Object.keys(item.details).length > 0 && <details><summary>Recorded details</summary><pre>{JSON.stringify(item.details, null, 2)}</pre></details>}
         {item.note && <p>{item.note}</p>}
+        {action?.(item)}
         {incident && <div className="monitor-dismiss">
           <label><span className="sr-only">Dismissal note: {title} · {item.contractId}</span>
             <input maxLength={500} placeholder="Optional dismissal note" value={notes[item.id] ?? ''}

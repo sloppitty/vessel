@@ -26,6 +26,7 @@ import { describeMarket, useMarketContext } from '@/features/market/useMarketCon
 import { addEntry, createNextEntry, removeEntry, type DraftEntry, type PlayDraft } from './draft'
 import { LevelEditor } from './LevelEditor'
 import { applyEntryEdit, applyLevelDrag, averageEntryPrice, formatDraggedPrice, levelTag, parseOverlayId, placeLevel, planOverlays, type ChartView, type ExitKind, type StopEvidenceOf } from './levels'
+import { positivePlanNumber } from './numbers'
 
 export interface ChartSource {
   api: WorkspaceApi
@@ -161,7 +162,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
     const entry = current.find(item => item.id === selectedEntry?.id)
     if (!planTool || !entry) return
     setPlanTool(null)
-    if (planTool === 'entry' && Number(entry.price) > 0) {
+    if (planTool === 'entry' && positivePlanNumber(entry.price) !== null) {
       const added = placeLevel(createNextEntry(current), 'entry', price, priceStep)
       const change = (next: DraftEntry[]) => latest.current.onEntriesChange?.(next)
       change(addEntry(current, added))
@@ -194,9 +195,9 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   const average = view === 'aggregate' ? averageEntryPrice(entries) : null
   const several = entries.length > 1
 
-  const priced = selectedEntry !== undefined && Number(selectedEntry.price) > 0
+  const priced = selectedEntry !== undefined && positivePlanNumber(selectedEntry.price) !== null
   const planTools = editable && selectedEntry ? [
-    { id: 'plan:entry', label: 'Add an entry on the chart', description: Number(selectedEntry.price) > 0 ? 'Click the chart at the price of a new entry.' : `Click the chart at ${selectedName} price.`, icon: <ArrowRightToLine {...planToolIcon} />, available: true },
+    { id: 'plan:entry', label: 'Add an entry on the chart', description: priced ? 'Click the chart at the price of a new entry.' : `Click the chart at ${selectedName} price.`, icon: <ArrowRightToLine {...planToolIcon} />, available: true },
     { id: 'plan:stop', label: `Add a stop to ${selectedName} on the chart`, description: 'Click the chart at the stop price. Add several for partial stops.', icon: <OctagonX {...planToolIcon} />, available: priced, unavailableReason: 'Set the entry price first' },
     { id: 'plan:target', label: `Add a target to ${selectedName} on the chart`, description: 'Click the chart at the target price. Add several for partial targets.', icon: <Target {...planToolIcon} />, available: priced, unavailableReason: 'Set the entry price first' },
   ] : []

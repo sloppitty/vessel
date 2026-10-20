@@ -1,6 +1,9 @@
 import type { PriceOverlay } from '@/components/chart/types'
 import { createExit, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
-import { finitePlanNumber as unsigned, positiveFinitePlanNumber as positive } from './numbers'
+import {
+  exactAbs, exactAdd, exactDecimal, exactDiv, exactInteger, exactMul, exactNumber, exactSignOf, exactSub, type Exact,
+} from '@/lib/decimal'
+import { exactPlanNumber, finitePlanNumber as unsigned, formatPlanNumber, positiveFinitePlanNumber as positive } from './numbers'
 
 export type ChartView = 'aggregate' | 'selected'
 export type ExitKind = 'stop' | 'target'
@@ -18,10 +21,11 @@ export function parseOverlayId(id: string): LevelRef | null {
   return null
 }
 
-/** The play's whole-number leverage, or 1 while it is blank or invalid. */
+/** The play's whole-number leverage, or 1 while it is blank or invalid. Digits only, as the server reads it. */
 export function leverageOf(leverage: string) {
-  const value = Number(leverage)
-  return Number.isInteger(value) && value >= 1 ? value : 1
+  const text = leverage.trim()
+  const value = /^[0-9]+$/.test(text) ? Number(text) : NaN
+  return Number.isSafeInteger(value) && value >= 1 ? value : 1
 }
 
 export const exitsOf = (entry: DraftEntry, kind: ExitKind) => kind === 'stop' ? entry.stops : entry.targets
@@ -43,6 +47,36 @@ export function levelPrice(entryPrice: number | null, level: DraftExit, kind: Ex
   const distance = percent / Math.max(1, leverage)
   const price = entryPrice * (1 + (above(kind, direction) ? distance : -distance) / 100)
   return price > 0 ? price : null
+}
+
+/**
+ * A stop's or target's price as an exact value: its price, or a percentage of return on margin that moves the price
+ * percent ÷ leverage from the planned entry, as `levelPrice` places it and the server's matcher resolves it. Null when
+ * a field is not plan text or the price is not above zero.
+ */
+export function exactLevelPrice(entry: DraftEntry, level: DraftExit, kind: ExitKind, direction: PlayDraft['direction'], leverage: number): Exact | null {
+  const value = exactPlanNumber(level.value)
+  if (value === null) return null
+  if (level.unit === 'price') return exactSignOf(value) > 0 ? value : null
+  const planned = exactPlanNumber(entry.price)
+  if (planned === null || exactSignOf(planned) <= 0) return null
+  const move = exactDiv(exactMul(planned, value), exactInteger(Math.max(1, leverage) * 100))!
+  const price = above(kind, direction) ? exactAdd(planned, move) : exactSub(planned, move)
+  return exactSignOf(price) > 0 ? price : null
+}
+
+/**
+ * Whether an order's price matches a planned price as the server's matcher and monitor decide (`ExecutionMatcher.Near`):
+ * within one step of the fifth significant figure of the planned price (1 at 84,541; 0.01 at 100), or within one tick
+ * when the instrument's tick is coarser.
+ */
+export function pricesMatch(actual: Exact, planned: Exact, tick: number | null = null) {
+  if (exactSignOf(planned) <= 0) return false
+  const magnitude = Math.floor(Math.log10(exactNumber(planned))) - 4
+  let step = magnitude >= 0 ? exactInteger(10n ** BigInt(magnitude)) : { n: 1n, d: 10n ** BigInt(-magnitude) }
+  const coarser = tick !== null && tick > 0 ? exactDecimal(formatPlanNumber(tick, 20)) : null
+  if (coarser !== null && exactSignOf(exactSub(coarser, step)) > 0) step = coarser
+  return exactSignOf(exactSub(step, exactAbs(exactSub(actual, planned)))) >= 0
 }
 
 /** Price move from the entry, in percent, that a percent level stands for at this leverage. */
@@ -122,8 +156,6 @@ export function planOverlays(entries: readonly DraftEntry[], selectedId: string,
   return overlays
 }
 
-const trim = (text: string) => text.includes('.') ? text.replace(/\.?0+$/, '') : text
-
 /** Decimal places of a tick such as 0.5 or 0.00001, at most twelve. */
 export function stepDecimals(step: number) {
   let places = 0
@@ -138,10 +170,10 @@ export function stepDecimals(step: number) {
 export function formatDraggedPrice(price: number, step?: number | null) {
   if (step != null && step > 0) {
     const places = stepDecimals(step)
-    return trim((Math.round(price / step) * step).toFixed(places))
+    return formatPlanNumber(Math.round(price / step) * step, places)
   }
   const decimals = Math.min(8, Math.max(0, 4 - Math.floor(Math.log10(price))))
-  return trim(price.toFixed(decimals))
+  return formatPlanNumber(price, decimals)
 }
 
 /** A chart drag chooses a fixed price, switching percentage stops and targets to price units. */
@@ -216,7 +248,7 @@ export function keepPercentLevelPrices(entries: readonly DraftEntry[], from: num
   const factor = Math.max(1, to) / Math.max(1, from)
   const rescale = (exit: DraftExit): DraftExit => {
     const percent = exit.unit === 'percent' ? unsigned(exit.value) : null
-    return percent === null ? exit : { ...exit, value: trim((percent * factor).toFixed(4)) }
+    return percent === null ? exit : { ...exit, value: formatPlanNumber(percent * factor, 4) }
   }
   return entries.map(entry => ({ ...entry, stops: entry.stops.map(rescale), targets: entry.targets.map(rescale) }))
 }

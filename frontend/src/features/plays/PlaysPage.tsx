@@ -25,8 +25,11 @@ import { IncidentPill } from '@/features/monitor/IncidentBadge'
 import { stopEvidenceFor } from '@/features/monitor/coverage'
 import { usePlayExecution } from './usePlayExecution'
 import { useSizing } from './useSizing'
-import { planIssues, planIssueSummary } from './planChecks'
-import { formatMoney, marginOverBudget } from './sizing'
+import { noFilledEntries, planIssues, planIssueSummary } from './planChecks'
+import { executionFills, useLedgerFills } from './entry-fills'
+import { noEntryFills, type EntryFills } from './position-risk-summary'
+import { planNumberIssues, planNumberSummary, storedPlanText, StoredPlanTextContext, type StoredPlanText } from './stored-plan-text'
+import { availableOf, defaultSizeUnits, marginOverBudget, overBudgetMessage, type SizeUnits } from './sizing'
 import { leverageOf } from './levels'
 import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
 import { initialPlaysList, playSearchDelay, playViewTabs, type PlaysListState } from './plays-list'
@@ -196,31 +199,55 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   }, [visible, api, venueStatus, reloadGeneration, saved?.summary.id])
   // The server keeps the direction once an entry has filled: it decides which side closes the position.
   const filled = venueStatus !== undefined && !!tracking.execution?.links.some(link => link.role === 'entry' && link.fills.length > 0)
+  const status = saved?.summary.status ?? 'draft'
+  // Which entries have filled, per entry, as the server decides it: the execution's linked entry fills for a venue Play,
+  // the manual ledger for a manual one. Whatever facts are loaded count, whatever the saved status says (a reread of the
+  // Play can fail after the execution moved it to Open). Until they load, or after a failed reread, they are unknown.
+  const playExecution = venueStatus !== undefined ? tracking.execution : null
+  const fillsDirection = saved?.plan.direction ?? draft.direction
+  const ledger = useLedgerFills(api, visible && manual && saved && status !== 'draft' ? saved.summary.id : null, observedPlayVersion(session, api))
+  const venueFills = useMemo(() => !manual && playExecution ? executionFills(playExecution, fillsDirection) : null,
+    [manual, playExecution, fillsDirection])
+  const fills: EntryFills | 'unknown' = status === 'draft' ? noEntryFills
+    : manual ? ledger ?? 'unknown' : venueFills && !tracking.stale ? venueFills : 'unknown'
+  // Entries with a fill get no size, leverage, stop or target suggestions (D-11). An Open Play has a fill somewhere, so
+  // until the facts say which entry, none gets one.
+  const opened = status === 'open' || venueStatus === 'open'
+  const filledEntries: ReadonlySet<string> | 'all' = fills === 'unknown' ? opened ? 'all' : noFilledEntries : fills.filled
+  const [priceStep, setPriceStep] = useState<number | null>(null)
+  // The workspace knows the instrument's units; page messages such as the blocked-save reason use them.
+  const [units, setUnits] = useState<SizeUnits>(defaultSizeUnits)
+  const onUnits = useCallback((next: SizeUnits) => setUnits(current => current.quote === next.quote && current.base === next.base &&
+    current.quantityDecimals === next.quantityDecimals ? current : next), [])
   const dirty = useMemo(() => saved ? isDirty(draft, saved) : hasDraftContent(draft), [draft, saved])
+  // Number text unchanged from the saved plan still saves, even where it predates the plain-decimal rule.
+  const storedText = useMemo(() => storedPlanText(saved?.plan), [saved?.plan])
   const changedPlan = useMemo(() => !!saved && planChanged(draft, saved), [draft, saved])
   const unsaved = dirty || hasManualDraft(session.manual)
   // A blocked save says why until the plan is fixed.
-  const status = saved?.summary.status ?? 'draft'
-  const fixed = !planProblem(draft, status)
+  const fixed = !planProblem(draft, status, storedText)
   useEffect(() => { if (fixed) dismiss('plan-blocked') }, [fixed, dismiss])
 
   /**
-   * Stops and targets on the wrong side of their entry, and a draft's margin above its budget, block
-   * saving and planning until they are fixed. Once orders may rest the venue counts their margin as
-   * used, so the budget is only held while the play is a draft.
+   * Plan numbers the server would refuse, stops and targets on the wrong side of their entry, and a
+   * draft's margin above its budget block saving and planning until they are fixed. Once orders may
+   * rest the venue counts their margin as used, so the budget is only held while the play is a draft.
    */
-  function planProblem(current: PlayDraft, currentStatus: PlayStatus) {
+  function planProblem(current: PlayDraft, currentStatus: PlayStatus, stored: StoredPlanText) {
     if (retrospective) return null
-    const issues = planIssues(current.entries, current.direction)
+    const numbers = planNumberIssues(current, stored)
+    if (numbers.length) return planNumberSummary(numbers)
+    // A filled entry's stops may sit at or beyond it, and a stop kept unchanged from the saved plan still saves.
+    const issues = planIssues(current.entries, current.direction, fills === 'unknown' ? noFilledEntries : fills.filled, stored)
     if (issues.length) return planIssueSummary(issues)
     const account = accounts.find(item => item.id === current.accountId)
-    const over = currentStatus === 'draft' ? marginOverBudget(current, leverageOf(current.leverage), account?.availableStablecoinNominalUsd) : null
-    const units = { quote: 'USD', base: '', quantityDecimals: null }
-    return over && `The margin (${formatMoney(over.margin, units)}) is above the ${formatMoney(over.budget.amount, units)} ${over.budget.source === 'manual' ? 'budget' : 'available'}.`
+    const over = currentStatus === 'draft' ? marginOverBudget(current, leverageOf(current.leverage), availableOf(account)) : null
+    return over && overBudgetMessage(over, units)
   }
 
   function planBlocked() {
-    const problem = planProblem(latest.current.draft, latest.current.saved?.summary.status ?? 'draft')
+    const { draft: current, saved: state } = latest.current
+    const problem = planProblem(current, state?.summary.status ?? 'draft', storedPlanText(state?.plan))
     if (problem) notify({ tone: 'error', key: 'plan-blocked', title: 'Not saved', message: `Fix the plan first. ${problem}` })
     return !!problem
   }
@@ -241,7 +268,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     if (planBlocked()) return null
     setError(null); setDialogError(null)
     try {
-      const fields = fieldsToSave(sent, before?.summary.status)
+      const fields = fieldsToSave(sent, before?.summary.status, new Date(), before?.plan ?? null)
       const play = before
         ? await api.updatePlay(before.summary.id, { ...fields, expectedVersion: before.summary.version, ...(reason ? { revisionReason: reason } : {}) })
         : await api.createPlay(fields)
@@ -445,11 +472,13 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
 
   return <>{requested}{conflict}{storedReadError && <p className="error" role="status">{storedReadError}</p>}
     <Button variant="ghost" size="sm" className="plays-back" onClick={() => update({ view: 'list' })}><ArrowLeft size={14} />All plays</Button>
+    <StoredPlanTextContext.Provider value={storedText}>
     <PlayWorkspace accounts={accounts} portfolios={portfolios} api={api} draft={draft} onChange={next => update({ draft: next })}
       {...(onReload ? { onReload } : {})} loading={loading} status={status} actions={actions} revision={revision} lockInstrument={locked}
       lockDirection={status === 'open' || filled} readOnly={readOnly} retrospective={retrospective}
-      sizing={sizing.sizing} onRiskChange={sizing.updateRisk} incidents={saved ? playIncidents.get(saved.summary.id) : undefined}
-      stopEvidence={manual ? undefined : stopEvidence}
+      sizing={sizing.sizing} sizingStatus={sizing.status} onRetrySizing={sizing.retry} onRiskChange={sizing.updateRisk}
+      filledEntries={filledEntries} fills={fills} onUnits={onUnits} onPriceStep={setPriceStep}
+      incidents={saved ? playIncidents.get(saved.summary.id) : undefined} stopEvidence={manual ? undefined : stopEvidence}
       execution={manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
         enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}
         working={busy !== null}
@@ -461,7 +490,11 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         currentBookRead={!account || venues.readsCurrentBook(account.venueId)}
         {...(onManageAccount && account ? { onManageCredential: () => onManageAccount(account.id) } : {})}
         onDismiss={tracking.dismiss} onCheck={() => { void monitorRun.check() }} onLink={request => { void tracking.link(request) }}
-        onUnlink={linkId => { void tracking.unlink(linkId) }} /> : undefined} />
+        onUnlink={linkId => { void tracking.unlink(linkId) }}
+        // A rebind writes a plan revision, so it waits for unsaved edits and other Play work, and its answer is the saved Play.
+        version={saved.summary.version} leverage={leverageOf(draft.leverage)} priceStep={priceStep} rebindBlocked={dirty ? 'Save or discard your plan changes first.' : busy !== null ? 'Wait for the current change to finish.' : undefined}
+        onRebind={(linkId, request) => tracking.rebind(linkId, request, acceptStoredPlay)} /> : undefined} />
+    </StoredPlanTextContext.Provider>
     {dialog === 'revision' && saved && <RevisionDialog revision={saved.summary.planRevision} pending={saving} error={dialogError}
       onSave={reason => { void save(reason) }} onClose={() => setDialog(null)} />}
     {dialog === 'cancel' && <CancelDialog pending={busy === 'status'} error={dialogError}

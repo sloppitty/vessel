@@ -214,8 +214,8 @@ public sealed class ExecutionMatcherTests
             Direction = direction, Leverage = "1",
             Entries = [TestPlays.Plan("100000").Entries[0] with
             {
-                Stops = [new PlanExit("stop-1", "percent", "1e28", "100")],
-                Targets = [new PlanExit("target-1", "percent", "1e28", "100")]
+                Stops = [new PlanExit("stop-1", "percent", "10000000000000000000000000000", "100")],
+                Targets = [new PlanExit("target-1", "percent", "10000000000000000000000000000", "100")]
             }]
         });
         var levels = ExecutionMatcher.Levels(plan).ToList();
@@ -290,7 +290,7 @@ public sealed class ExecutionPostgresTests
             Leverage = "1",
             Entries = [TestPlays.Plan("100000").Entries[0] with
             {
-                Targets = [new PlanExit("target-1", "percent", "1e28", "100")]
+                Targets = [new PlanExit("target-1", "percent", "10000000000000000000000000000", "100")]
             }]
         };
         var play = await h.Plays.CreateAsync(new(account, "BTC", "venue", "Extreme target", plan), default);
@@ -300,7 +300,7 @@ public sealed class ExecutionPostgresTests
         Assert.Equal("planned", execution.Status);
         Assert.Empty(execution.Links);
         Assert.Equal("0", execution.Totals.EnteredQuantity);
-        Assert.Equal("1e28", play.Plan.Entries[0].Targets[0].Value);
+        Assert.Equal("10000000000000000000000000000", play.Plan.Entries[0].Targets[0].Value);
         Assert.Null(ExecutionMatcher.Levels(play.Plan).Single(l => l.Role == OrderLinkRole.Target).Price);
 
         h.Orders.Orders.AddRange([Order("entry", "buy", 100000m), Order("exit", "sell", 1000000m, reduceOnly: true)]);
@@ -316,9 +316,9 @@ public sealed class ExecutionPostgresTests
         var (database, h, account) = await SetUp();
         await using var _ = database;
         var ordinary = await PlannedPlay(h, account);
-        var plan = TestPlays.Plan("1e-25") with
+        var plan = TestPlays.Plan("0.0000000000000000000000001") with
         {
-            Entries = [TestPlays.Plan("1e-25").Entries[0] with { Stops = [], Targets = [] }]
+            Entries = [TestPlays.Plan("0.0000000000000000000000001").Entries[0] with { Stops = [], Targets = [] }]
         };
         var tiny = await h.Plays.CreateAsync(new(account, "BTC", "venue", "Tiny entry", plan), default);
         tiny = await h.Plays.ChangeStatusAsync(tiny.Summary.Id, new(tiny.Summary.Version, "planned"), default);
@@ -332,7 +332,7 @@ public sealed class ExecutionPostgresTests
         Assert.Empty(tinyExecution.Suggestions);
         Assert.Equal("planned", tinyExecution.Status);
         Assert.Equal("0", tinyExecution.Totals.EnteredQuantity);
-        Assert.Equal("1e-25", tiny.Plan.Entries[0].Price);
+        Assert.Equal("0.0000000000000000000000001", tiny.Plan.Entries[0].Price);
     }
 
     [PostgresFact]

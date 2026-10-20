@@ -25,7 +25,7 @@ import {
 } from './account-access'
 import {
   isPlayCounts, isPlayExecution, isPlayHistory, isPlayList, isSavedEvidence, isSavedPlay, playCountsPath, playListPath,
-  type LinkOrder, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest,
+  type LinkOrder, type RebindLevel, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest,
 } from './plays'
 import { isSizingDocument, type SizingDocument } from './sizing'
 import { isReviewDocument, reviewPath, isReviewExclusions, reviewExclusionsPath, type ReviewDocument, type ReviewQuery, type ReviewExclusions } from './review'
@@ -304,6 +304,8 @@ export interface WorkspaceApi {
   playExecution(id: string, signal?: AbortSignal): Promise<PlayExecution>
   linkOrder(id: string, link: LinkOrder, signal?: AbortSignal): Promise<PlayExecution>
   unlinkOrder(id: string, linkId: string, signal?: AbortSignal): Promise<PlayExecution>
+  /** Moves a linked stop or target to its observed order's price as one plan revision; returns the saved Play. */
+  rebindLevel(id: string, linkId: string, request: RebindLevel, signal?: AbortSignal): Promise<SavedPlay>
   evidence(playId: string, signal?: AbortSignal): Promise<SavedEvidence[]>
   evidenceImage(id: string, signal?: AbortSignal): Promise<Blob>
   uploadEvidence(playId: string, image: Blob, fields: { source: 'capture' | 'upload'; note: string; markup: ImageMarkup | null; name: string }): Promise<SavedEvidence>
@@ -662,6 +664,11 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
     unlinkOrder: (id, linkId, signal) => {
       if (!isGuid(linkId)) return Promise.reject(new ApiError('invalid-response', 'The link identifier is invalid.'))
       return call(`${playPath(id)}/execution/links/${linkId}`, { ...playRequest, validate: isPlayExecution, method: 'DELETE', ...withSignal(signal) })
+    },
+    rebindLevel: (id, linkId, request, signal) => {
+      if (!isGuid(linkId)) return Promise.reject(new ApiError('invalid-response', 'The link identifier is invalid.'))
+      return call(`${playPath(id)}/execution/links/${linkId}/rebind`, { ...playRequest,
+        validate: (v): v is SavedPlay => isSavedPlay(v) && v.summary.id === id, method: 'POST', body: JSON.stringify(request), ...withSignal(signal) })
     },
     evidence: (playId, signal) => call(`${playPath(playId)}/evidence`, { ...playRequest, validate: (v): v is SavedEvidence[] => Array.isArray(v) && v.every(isSavedEvidence), ...withSignal(signal) }),
     evidenceImage: (id, signal) => call(`${evidencePath(id)}/content`, { ...playRequest, ...withSignal(signal),
