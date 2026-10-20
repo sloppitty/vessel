@@ -1,3 +1,4 @@
+using Vessel.Domain.Accounts;
 using Vessel.Application.Workspace;
 using System.Globalization;
 using Vessel.Application.Common;
@@ -16,9 +17,16 @@ namespace Vessel.Application.Review;
 /// Read-only reporting. Never assigns fills, mutates lifecycle or refreshes a venue. The venue registry supplies each
 /// venue's quote asset for the Play-local result; without it that result is unknown.
 /// </summary>
-public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueRegistry? venues = null)
+public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueRegistry? venues = null,
+    IReviewPositionSource? positionSource = null)
 {
     public const int PageSize = 50;
+    /// <summary>How many imported positions one Play counts as in rate metrics. Dollar totals are never weighted.</summary>
+    public const int PlayWeight = 2;
+    public static readonly string[] PositionModes = ["exclude", "include", "auto"];
+    private const string PositionNotice = " Imported positions are included: closed Activity round trips whose fills belong to no Play, scored by " +
+        "the same net and return rules. They have no plan, R or review and never become Plays. A Play weighs twice a position in batting " +
+        "average, average gain and loss, payoff and expectancy; P&L, profit factor, drawdown, streaks and the chart are not weighted.";
     public static readonly string[] Periods = ["day", "week", "month", "year", "all"];
     private const string Notice = "Saved closed Plays only, from linked imported executions or explicit owner-entered manual facts. " +
         "Manual facts are estimates, not venue balance reconciliation or imported Activity. Retrospective Plays have no contemporaneous " +
@@ -47,26 +55,55 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         if (query.AccountId == Guid.Empty || query.Offset is < 0 or > 1_000_000 ||
             query.Instrument is { } instrument && (string.IsNullOrWhiteSpace(instrument) || instrument.Length > 128 || instrument != instrument.Trim()))
             throw new ProblemException(400, "Invalid review filters.");
+        if (!PositionModes.Contains(query.Positions) || query.MinPlays is < 0 or > ReviewQuery.MaxMinPlays)
+            throw new ProblemException(400, "Choose exclude, include or auto positions and a Play threshold from 0 to 1000.");
 
-        var facts = await store.ReadAsync(query, now, ct);
-        var accounts = facts.Accounts.Where(a => a.IsEnabled).ToDictionary(a => a.Id);
-        var scoped = accounts.Values.Where(a =>
-            (query.AccountId is null || a.Id == query.AccountId) &&
-            (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||
-                a.PortfolioId?.ToString() == query.Portfolio)).Select(a => a.Id).ToHashSet();
-        var evaluated = facts.ClosedPlays.Where(f => scoped.Contains(f.Play.AccountId) &&
-            (query.Instrument is null || f.Play.ContractId == query.Instrument))
-            .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true || f.IncompleteOrders is { Count: > 0 })).ToList();
-        var accepted = evaluated.Where(e => e.Result is not null)
-            .OrderBy(e => e.ClosedAt).ThenBy(e => e.Facts.Play.Id).ToList();
+        ReviewFacts facts;
+        Dictionary<Guid, Account> accounts;
+        List<Evaluated> accepted, candidates;
+        List<ReviewPosition> read;
+        int playCount;
+        bool include;
+        for (var attempt = 1; ; attempt++)
+        {
+            facts = await store.ReadAsync(query, now, ct);
+            accounts = facts.Accounts.Where(a => a.IsEnabled).ToDictionary(a => a.Id);
+            var scoped = accounts.Values.Where(a =>
+                (query.AccountId is null || a.Id == query.AccountId) &&
+                (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||
+                    a.PortfolioId?.ToString() == query.Portfolio)).Select(a => a.Id).ToHashSet();
+            var evaluated = facts.ClosedPlays.Where(f => scoped.Contains(f.Play.AccountId) &&
+                (query.Instrument is null || f.Play.ContractId == query.Instrument))
+                .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true || f.IncompleteOrders is { Count: > 0 })).ToList();
+            accepted = evaluated.Where(e => e.Result is not null).ToList();
+            candidates = evaluated.Where(e => InPeriod(e.ClosedAt, from, now)).ToList();
+            // Auto counts the scored Plays of the selected scope and period, and the decision applies to every period total.
+            playCount = accepted.Count(e => InPeriod(e.ClosedAt, from, now));
+            include = positionSource is not null &&
+                (query.Positions == "include" || query.Positions == "auto" && playCount < query.MinPlays);
+            read = [];
+            if (!include) break;
+            read = (await positionSource!.ReadAsync(scoped, ct)).Where(p => accounts.ContainsKey(p.AccountId)).ToList();
+            // Plays and position claims come from separate reads. A Play created or linked in between (a retrospective
+            // conversion) would hide its result or count it twice, so the Play snapshot must be unchanged around them.
+            if (Claims(facts) == Claims(await store.ReadAsync(query, now, ct))) break;
+            if (attempt == 3) throw new ProblemException(409, "Plays changed while Review read imported positions. Reload Review.");
+        }
+        var positions = read.Where(p => query.Instrument is null || p.ContractId == query.Instrument)
+            .Select(p => new Evaluated(null, p.ClosedAtUtc, p.Outcome, p.Outcome is null ? "position" : null)
+            {
+                Position = p, PositionVenue = accounts[p.AccountId].VenueId
+            }).ToList();
+        accepted = accepted.Concat(positions.Where(p => p.Result is not null))
+            .OrderBy(e => e.ClosedAt).ThenBy(e => e.Facts?.Play.Id ?? Guid.Empty).ThenBy(e => e.Position?.OperationId, StringComparer.Ordinal).ToList();
         var current = accepted.Where(e => InPeriod(e.ClosedAt, from, now)).ToList();
-        var candidates = evaluated.Where(e => InPeriod(e.ClosedAt, from, now)).ToList();
         var portfolioNames = facts.Portfolios.ToDictionary(p => p.Id.ToString(), p => p.Name);
         var options = new ReviewOptionsDto(
             facts.Portfolios.OrderBy(p => p.Name).Select(p => new ReviewPortfolioDto(p.Id.ToString(), p.Name)).ToList(),
             accounts.Values.OrderBy(a => a.Name).Select(a => new ReviewAccountDto(a.Id, a.Name, a.PortfolioId, a.VenueId,
                 a.LastSyncedAtUtc, a.SyncStatus, a.HistoryNotice)).ToList(),
             facts.ClosedPlays.Where(f => accounts.ContainsKey(f.Play.AccountId)).Select(f => f.Play.ContractId)
+                .Concat(read.Where(p => p.Outcome is not null).Select(p => p.ContractId))
                 .OfType<string>().Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList());
         var series = Series(current, from, now);
         List<ReviewGroupDto> Groups(Func<Evaluated, string> key, Func<string, string> name, Func<string, List<Evaluated>, string> detail) =>
@@ -78,32 +115,47 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             }).OrderByDescending(x => x.Total).ThenBy(x => x.Dto.Name, StringComparer.Ordinal).Select(x => x.Dto).ToList();
 
         var groups = new ReviewGroupsDto(
-            Groups(e => accounts[e.Facts.Play.AccountId].PortfolioId?.ToString() ?? "unassigned",
+            Groups(e => accounts[e.AccountId].PortfolioId?.ToString() ?? "unassigned",
                 id => portfolioNames.GetValueOrDefault(id) ?? "Unassigned", (_, items) =>
                 {
-                    var count = items.Select(x => x.Facts.Play.AccountId).Distinct().Count();
+                    var count = items.Select(x => x.AccountId).Distinct().Count();
                     return $"{count} account{(count == 1 ? "" : "s")}";
                 }),
-            Groups(e => e.Facts.Play.AccountId.ToString(), id => accounts[Guid.Parse(id)].Name,
+            Groups(e => e.AccountId.ToString(), id => accounts[Guid.Parse(id)].Name,
                 (id, _) => accounts[Guid.Parse(id)].VenueId),
-            Groups(e => e.Facts.Play.ContractId!, id => id, (_, items) =>
-                string.Join(", ", items.Select(e => e.Facts.Play.VenueId).Distinct().Order())));
-        var page = current.OrderByDescending(e => e.ClosedAt).ThenBy(e => e.Facts.Play.Id).Skip(query.Offset).Take(PageSize)
-            .Select(e => new ReviewPlayDto(e.Facts.Play.Id, e.Facts.Play.Title, e.Facts.Play.AccountId,
-                accounts[e.Facts.Play.AccountId].Name, e.Facts.Play.VenueId, e.Facts.Play.ContractId!, e.ClosedAt,
-                ExactDecimal.Format(e.Result!.NetResult), ExactDecimal.Format(e.Result.ReturnPercent), ExactDecimal.Format(e.Result.RMultiple),
-                e.Facts.Play.HasReview, e.Facts.Play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned",
-                e.Facts.ManualSource ? "manual" : "imported") { Local = e.Local!.ToDto(e.Result.NetResult) }).ToList();
+            Groups(e => e.ContractId, id => id, (_, items) =>
+                string.Join(", ", items.Select(e => e.VenueId).Distinct().Order())));
+        var page = current.OrderByDescending(e => e.ClosedAt).ThenBy(e => e.Facts?.Play.Id ?? Guid.Empty)
+            .ThenBy(e => e.Position?.OperationId, StringComparer.Ordinal).Skip(query.Offset).Take(PageSize)
+            .Select(e => e.Facts is { } play
+                ? new ReviewPlayDto(play.Play.Id, play.Play.Title, play.Play.AccountId,
+                    accounts[play.Play.AccountId].Name, play.Play.VenueId, play.Play.ContractId!, e.ClosedAt,
+                    ExactDecimal.Format(e.Result!.NetResult), ExactDecimal.Format(e.Result.ReturnPercent), ExactDecimal.Format(e.Result.RMultiple),
+                    play.Play.HasReview, play.Play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned",
+                    play.ManualSource ? "manual" : "imported") { Local = e.Local!.ToDto(e.Result.NetResult) }
+                : new ReviewPlayDto(null, $"{e.ContractId} {(e.Position!.Direction == "short" ? "Short" : "Long")}", e.AccountId,
+                    accounts[e.AccountId].Name, e.VenueId, e.ContractId, e.ClosedAt, ExactDecimal.Format(e.Result!.NetResult),
+                    ExactDecimal.Format(e.Result.ReturnPercent), null, false, "position", "imported") { OperationId = e.Position.OperationId })
+            .ToList();
         return new ReviewDto(now, from ?? current.FirstOrDefault()?.ClosedAt, query.Period, "USD",
             options, Periods.Select(period => {
                 var selected = accepted.Where(e => InPeriod(e.ClosedAt, From(period, now), now)).ToList();
                 return new ReviewPeriodDto(period, selected.Count,
-                    selected.Count == 0 ? null : ExactDecimal.Format(Sum(selected.Select(e => e.Result!.NetResult))));
+                    selected.Count == 0 ? null : ExactDecimal.Format(Sum(selected.Select(e => e.Result!.NetResult))))
+                {
+                    Positions = selected.Count(e => e.Position is not null)
+                };
             }).ToList(),
             Metrics(current), series.Points, series.BucketDays, groups,
             new ReviewCoverageDto(candidates.Count, candidates.Count(e => e.Exclusion == "fees"),
-                candidates.Count(e => e.Exclusion == "executions"), facts.OpenPlays, facts.UnassignedFills, facts.FirstFillAtUtc, Notice),
-            page, query.Offset, query.Offset + page.Count < current.Count ? query.Offset + page.Count : null);
+                candidates.Count(e => e.Exclusion == "executions"), facts.OpenPlays, facts.UnassignedFills, facts.FirstFillAtUtc,
+                include ? Notice + PositionNotice : Notice),
+            page, query.Offset, query.Offset + page.Count < current.Count ? query.Offset + page.Count : null)
+        {
+            Positions = new ReviewPositionsDto(query.Positions, include, query.MinPlays, playCount,
+                include ? current.Count(e => e.Position is not null) : null,
+                include ? positions.Count(e => e.Result is null && InPeriod(e.ClosedAt, from, now)) : null, PlayWeight.ToString(CultureInfo.InvariantCulture))
+        };
     }
 
     public async Task<ReviewExclusionsDto> ExclusionsAsync(ReviewQuery query, CancellationToken ct)
@@ -126,8 +178,8 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             (query.Instrument is null || f.Play.ContractId == query.Instrument))
             .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true || f.IncompleteOrders is { Count: > 0 }))
             .Where(e => e.Exclusion is not null && InPeriod(e.ClosedAt, from, now))
-            .OrderByDescending(e => e.ClosedAt).ThenBy(e => e.Facts.Play.Id).ToList();
-        var items = excluded.Skip(query.Offset).Take(PageSize).Select(e => new ReviewExclusionDto(e.Facts.Play.Id,
+            .OrderByDescending(e => e.ClosedAt).ThenBy(e => e.Facts!.Play.Id).ToList();
+        var items = excluded.Skip(query.Offset).Take(PageSize).Select(e => new ReviewExclusionDto(e.Facts!.Play.Id,
             e.Facts.Play.Title, e.Facts.Play.AccountId, accounts[e.Facts.Play.AccountId].Name,
             e.Facts.Play.ContractId ?? "", ExclusionReasons(e.Facts, now, e.Exclusion!))).ToList();
         return new(items, excluded.Count, query.Offset, query.Offset + items.Count < excluded.Count ? query.Offset + items.Count : null, Notice);
@@ -163,10 +215,18 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         return DiaryService.BoundedReasons(reasons);
     }
 
-    /// <summary>One closed Play; an accepted one also has its Play-local result beside the scored venue result.</summary>
-    private sealed record Evaluated(ClosedPlayFacts Facts, DateTimeOffset ClosedAt, PlayOutcome? Result, string? Exclusion)
+    /// <summary>
+    /// One closed Play or imported position; an accepted Play also has its Play-local result beside the scored venue result.
+    /// </summary>
+    private sealed record Evaluated(ClosedPlayFacts? Facts, DateTimeOffset ClosedAt, PlayOutcome? Result, string? Exclusion)
     {
         public PlayLocalResult? Local { get; init; }
+        public ReviewPosition? Position { get; init; }
+        public string? PositionVenue { get; init; }
+        public Guid AccountId => Facts?.Play.AccountId ?? Position!.AccountId;
+        public string ContractId => Facts is { } facts ? facts.Play.ContractId! : Position!.ContractId;
+        public string VenueId => Facts?.Play.VenueId ?? PositionVenue!;
+        public int Weight => Facts is null ? 1 : PlayWeight;
     }
 
     private Evaluated Evaluate(ClosedPlayFacts facts, DateTimeOffset now, bool incompleteOrders)
@@ -212,20 +272,27 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
                 (plan.Direction == "long" ? stop < Positive(e.Price) : stop > Positive(e.Price))));
     }
 
+    /// <summary>The closed Plays, their linked fills and the enabled accounts: what decides which positions a Play claims.</summary>
+    private static string Claims(ReviewFacts facts) => string.Join(';', facts.ClosedPlays.OrderBy(f => f.Play.Id)
+        .Select(f => $"{f.Play.Id}:{f.Play.Status}:{string.Join(',', f.Fills.Select(x => x.Fill.Id).Order())}")
+        .Concat(facts.Accounts.Where(a => a.IsEnabled).Select(a => a.Id.ToString()).Order()));
+
     private static bool InPeriod(DateTimeOffset at, DateTimeOffset? from, DateTimeOffset now) =>
         at <= now && (from is null || at > from);
 
     private static ReviewMetricsDto Metrics(List<Evaluated> plays)
     {
-        var outcomes = plays.Select(p => p.Result!).ToList();
-        var wins = outcomes.Where(o => o.NetResult > 0).ToList();
-        var losses = outcomes.Where(o => o.NetResult < 0).ToList();
-        var gain = Average(wins.Select(o => o.ReturnPercent));
-        var loss = Average(losses.Select(o => -o.ReturnPercent));
-        var risks = outcomes.Where(o => o.RMultiple is not null).ToList();
+        // Rate metrics weigh each Play PlayWeight times a position; with only one kind they equal the unweighted figures.
+        var outcomes = plays.Select(p => (Outcome: p.Result!, p.Weight)).ToList();
+        var wins = outcomes.Where(o => o.Outcome.NetResult > 0).ToList();
+        var losses = outcomes.Where(o => o.Outcome.NetResult < 0).ToList();
+        var gain = Average(wins.Select(o => (o.Outcome.ReturnPercent, o.Weight)));
+        var loss = Average(losses.Select(o => (-o.Outcome.ReturnPercent, o.Weight)));
+        var risks = outcomes.Where(o => o.Outcome.RMultiple is not null).ToList();
         ExactAmount running = default, peak = default, drawdown = default;
         int streak = 0, maxWins = 0, maxLosses = 0;
-        foreach (var play in plays.OrderBy(e => e.ClosedAt).ThenBy(e => e.Facts.Play.Id))
+        foreach (var play in plays.OrderBy(e => e.ClosedAt).ThenBy(e => e.Facts?.Play.Id ?? Guid.Empty)
+            .ThenBy(e => e.Position?.OperationId, StringComparer.Ordinal))
         {
             var net = play.Result!.NetResult;
             running += ExactAmount.From(net);
@@ -236,21 +303,24 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             maxWins = Math.Max(maxWins, streak);
             maxLosses = Math.Max(maxLosses, -streak);
         }
+        var played = plays.Where(p => p.Facts is not null).ToList();
         return new ReviewMetricsDto(plays.Count, wins.Count, losses.Count, plays.Count - wins.Count - losses.Count,
             plays.Count == 0 ? null : ExactDecimal.Format(running),
-            ExactDecimal.Format(Ratio(ExactAmount.From(wins.Count), ExactAmount.From(wins.Count + losses.Count))),
+            ExactDecimal.Format(Ratio(ExactAmount.From(wins.Sum(o => o.Weight)), ExactAmount.From(wins.Concat(losses).Sum(o => o.Weight)))),
             ExactDecimal.Format(gain), ExactDecimal.Format(loss), ExactDecimal.Format(Ratio(gain, loss)),
-            ExactDecimal.Format(Ratio(Sum(wins.Select(o => o.NetResult)), -Sum(losses.Select(o => o.NetResult)))),
-            ExactDecimal.Format(Average(wins.Select(o => o.NetResult))), ExactDecimal.Format(Average(losses.Select(o => -o.NetResult))),
-            ExactDecimal.Format(Ratio(running, ExactAmount.From(plays.Count))),
-            ExactDecimal.Format(Average(risks.Select(o => o.RMultiple!.Value))), risks.Count,
-            plays.Count(p => p.Facts.Play.HasReview), plays.Count == 0 ? null : ExactDecimal.Format(drawdown),
+            ExactDecimal.Format(Ratio(Sum(wins.Select(o => o.Outcome.NetResult)), -Sum(losses.Select(o => o.Outcome.NetResult)))),
+            ExactDecimal.Format(Average(wins.Select(o => (o.Outcome.NetResult, o.Weight)))),
+            ExactDecimal.Format(Average(losses.Select(o => (-o.Outcome.NetResult, o.Weight)))),
+            ExactDecimal.Format(Average(outcomes.Select(o => (o.Outcome.NetResult, o.Weight)))),
+            ExactDecimal.Format(Average(risks.Select(o => (o.Outcome.RMultiple!.Value, 1)))), risks.Count,
+            played.Count(p => p.Facts!.Play.HasReview), plays.Count == 0 ? null : ExactDecimal.Format(drawdown),
             maxWins, maxLosses)
         {
-            SignDiffers = plays.Count(p => p.Local!.SignDiffers(p.Result!.NetResult)),
-            LocalUnknown = plays.Count(p => p.Local!.Net is null),
-            FeeOnlyLosses = outcomes.Count(o => o.FeeOnlyLoss),
-            UnknownGrossLosses = losses.Count(o => o.GrossResult is null),
+            SignDiffers = played.Count(p => p.Local!.SignDiffers(p.Result!.NetResult)),
+            LocalUnknown = played.Count(p => p.Local!.Net is null),
+            FeeOnlyLosses = outcomes.Count(o => o.Outcome.FeeOnlyLoss),
+            UnknownGrossLosses = losses.Count(o => o.Outcome.GrossResult is null),
+            Positions = plays.Count - played.Count,
         };
     }
 
@@ -280,10 +350,11 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
     private static ExactAmount Sum(IEnumerable<decimal> values) =>
         values.Aggregate(default(ExactAmount), (sum, value) => sum + ExactAmount.From(value));
     private static ExactAmount Max(ExactAmount a, ExactAmount b) => a.CompareTo(b) >= 0 ? a : b;
-    private static ExactAmount? Average(IEnumerable<decimal> values)
+    private static ExactAmount? Average(IEnumerable<(decimal Value, int Weight)> values)
     {
         var items = values.ToList();
-        return Ratio(Sum(items), ExactAmount.From(items.Count));
+        return Ratio(items.Aggregate(default(ExactAmount), (sum, item) => sum + new ExactAmount(ExactAmount.From(item.Value).Units * item.Weight)),
+            ExactAmount.From(items.Sum(item => item.Weight)));
     }
     // Aggregate sums can exceed decimal's coefficient range; round only a derived division, to 28 places.
     private static ExactAmount? Ratio(ExactAmount? a, ExactAmount? b) =>
