@@ -300,6 +300,8 @@ October 20, 2026, branch `t3/phase1-unresolved`, stacked on 1.2:
     current declaration is the one with the highest. A domain test repeats tied declarations and returns.
   - **Check.** `scripts/check.sh` passed again: backend 3,602 passed, 5 skipped; frontend 152 files and 3,811 tests.
 
+- **Sol (Codex) round 4.** No findings: both round-3 fixes hold, including the in-place migration change.
+
 ### 1.3b Manual correction batch
 
 Not started.
