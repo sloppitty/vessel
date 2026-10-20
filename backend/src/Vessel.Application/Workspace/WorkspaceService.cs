@@ -2,6 +2,7 @@ using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Workspace;
 
@@ -9,6 +10,17 @@ namespace Vessel.Application.Workspace;
 
 public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext owner, IVenueRegistry venues, IUnitOfWork unitOfWork)
 {
+    public static string ValidateTradingMode(string? tradingMode)
+    {
+        var mode = tradingMode ?? TradingMode.Real;
+        return TradingMode.IsKnown(mode) ? mode : throw new ProblemException(400, "Trading mode must be real or paper.");
+    }
+
+    private static void RequireMode(Account account, string mode)
+    {
+        if (account.TradingMode != mode) throw new ProblemException(404, "Account not found.");
+    }
+
     private static void ValidateName(string? name)
     {
         if (string.IsNullOrWhiteSpace(name) || name.Length > 200)
@@ -25,17 +37,19 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     {
         ValidateName(request.Name);
         ValidateIcon(request.Icon);
+        var mode = ValidateTradingMode(request.TradingMode);
         if (request.AccountIds is not null) ValidateAccountIds(request.AccountIds);
         ValidateExpected(request.AccountIds, request.Expected);
         return await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(async () =>
         {
             var accounts = await LockAccounts(request.AccountIds ?? [], ct);
+            foreach (var account in accounts) RequireMode(account, mode);
             CheckExpected(accounts, request.Expected);
-            var portfolio = new Portfolio(Guid.NewGuid(), owner.OwnerId, request.Name, request.Icon ?? PortfolioIcons.Default);
+            var portfolio = new Portfolio(Guid.NewGuid(), owner.OwnerId, request.Name, request.Icon ?? PortfolioIcons.Default, mode);
             await store.AddPortfolioAsync(portfolio, ct);
             MoveAccounts(accounts, portfolio.Id);
             await store.SaveAsync(ct);
-            return await PortfolioAsync(portfolio.Id, ct);
+            return await PortfolioAsync(portfolio.Id, ct, mode);
         }, ct), ct);
     }
 
@@ -78,20 +92,22 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
                 account.UpdateSettings(account.Name, portfolioId, account.IsEnabled);
     }
 
-    public async Task<IReadOnlyList<AccountDto>> MoveAccountsAsync(MoveAccountsRequest request, CancellationToken ct)
+    public async Task<IReadOnlyList<AccountDto>> MoveAccountsAsync(MoveAccountsRequest request, CancellationToken ct, string? tradingMode = TradingMode.Real)
     {
+        var mode = ValidateTradingMode(tradingMode);
         ValidateAccountIds(request.AccountIds);
         ValidateExpected(request.AccountIds, request.Expected);
         return await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(async () =>
         {
-            await ValidatePortfolio(request.PortfolioId, ct);
+            await ValidatePortfolio(request.PortfolioId, ct, mode);
             var accounts = await LockAccounts(request.AccountIds!, ct);
+            foreach (var account in accounts) RequireMode(account, mode);
             CheckExpected(accounts, request.Expected);
             MoveAccounts(accounts, request.PortfolioId);
             await store.SaveAsync(ct);
             var result = new List<AccountDto>();
             foreach (var account in accounts)
-                result.Add(ToDto(account, await store.SnapshotAsync(account.Id, ct)));
+                result.Add(await AccountAsync(account.Id, ct, mode));
             return result;
         }, ct), ct);
     }
@@ -99,13 +115,26 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     public async Task<AccountDto> CreateAccountAsync(CreateAccountRequest request, CancellationToken ct)
     {
         ValidateName(request.Name);
+        var mode = ValidateTradingMode(request.TradingMode);
         var descriptor = venues.Descriptor(request.VenueId)
             ?? throw new ProblemException(400, $"Choose {OrList(venues.Descriptors.Select(d => d.Id))}.");
 
         if (request.PortfolioId == Guid.Empty) throw new ProblemException(404, "Portfolio not found.");
-        decimal? value = null;
+        decimal? value = null, startingCapital = null;
         string? sourceId = null, address = null;
-        if (descriptor.Id == VenueDescriptor.ManualId)
+        if (mode == TradingMode.Paper)
+        {
+            if (!descriptor.Capabilities.PaperExecution)
+                throw new ProblemException(400, "This venue does not support paper execution.");
+            if (request.Address is not null || request.SourceId is not null || request.ManualAccountValueUsd is not null)
+                throw new ProblemException(400, "Paper accounts cannot use source identities or manual balances.");
+            if (request.StartingCapitalUsd is null) startingCapital = 4000m;
+            else if (ExactDecimal.TryParseOwnerAmount(request.StartingCapitalUsd, out var parsed)) startingCapital = parsed;
+            else throw new ProblemException(400, "Starting capital must be an exact nonnegative decimal string.");
+        }
+        else if (request.StartingCapitalUsd is not null)
+            throw new ProblemException(400, "Starting capital is available only when creating a paper account.");
+        else if (descriptor.Id == VenueDescriptor.ManualId)
         {
             if (request.Address is not null || request.SourceId is not null)
                 throw new ProblemException(400, "Manual accounts do not use a source identity.");
@@ -135,127 +164,168 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             }
             else throw new ProblemException(400, "The venue source identity is unsupported.");
         }
-        var account = new Account(Guid.NewGuid(), owner.OwnerId, request.VenueId, request.Name);
+        if (mode == TradingMode.Paper && request.PortfolioId is null)
+            throw new ProblemException(400, "Paper accounts require a paper portfolio.");
+        var account = new Account(Guid.NewGuid(), owner.OwnerId, request.VenueId, request.Name, mode, startingCapital);
         account.Configure(request.PortfolioId, address, value, sourceId);
         await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(async () =>
         {
-            await ValidatePortfolio(request.PortfolioId, ct);
+            await ValidatePortfolio(request.PortfolioId, ct, mode);
             if (account.SourceId is { } source && await store.SourceExistsAsync(account.VenueId, source, ct))
                 throw new ProblemException(409, "An account for this venue and source already exists. Manage or re-enable that account.");
             await store.AddAccountAsync(account, ct);
             return true;
         }, ct), ct);
-        return ToDto(account, null);
+        return await AccountAsync(account.Id, ct, mode);
     }
 
-    private async Task ValidatePortfolio(Guid? id, CancellationToken ct)
+    private async Task ValidatePortfolio(Guid? id, CancellationToken ct, string mode = TradingMode.Real)
     {
-        if (id.HasValue && !(await store.PortfoliosAsync(ct)).Any(p => p.Id == id))
+        if (mode == TradingMode.Paper && id is null)
+            throw new ProblemException(400, "Paper accounts require a paper portfolio.");
+        if (id.HasValue && !(await store.PortfoliosAsync(ct, mode)).Any(p => p.Id == id))
             throw new ProblemException(404, "Portfolio not found.");
     }
 
-    public async Task<PortfolioDto> UpdatePortfolioAsync(Guid id, UpdatePortfolioRequest request, CancellationToken ct)
+    public async Task<PortfolioDto> UpdatePortfolioAsync(Guid id, UpdatePortfolioRequest request, CancellationToken ct, string? tradingMode = TradingMode.Real)
     {
+        var mode = ValidateTradingMode(tradingMode);
+        if (request.TradingMode is not null) throw new ProblemException(400, "Trading mode is immutable.");
         ValidateName(request.Name);
         ValidateIcon(request.Icon);
         await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(async () =>
         {
-            var portfolio = (await store.PortfoliosAsync(ct)).SingleOrDefault(p => p.Id == id)
+            var portfolio = (await store.PortfoliosAsync(ct, mode)).SingleOrDefault(p => p.Id == id)
                 ?? throw new ProblemException(404, "Portfolio not found.");
             portfolio.Rename(request.Name);
             if (request.Icon is not null) portfolio.ChangeIcon(request.Icon);
             await store.SaveAsync(ct);
             return true;
         }, ct), ct);
-        return await PortfolioAsync(id, ct);
+        return await PortfolioAsync(id, ct, mode);
     }
 
-    public async Task DeletePortfolioAsync(Guid id, CancellationToken ct) =>
+    public async Task DeletePortfolioAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
+    {
+        var mode = ValidateTradingMode(tradingMode);
         await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(async () =>
         {
+            await PortfolioAsync(id, ct, mode);
+            if (mode == TradingMode.Paper && (await store.AccountsAsync(ct, mode)).Any(a => a.PortfolioId == id))
+                throw new ProblemException(409, "Move all accounts to another paper portfolio before deleting this portfolio.");
             await store.DeletePortfolioAsync(id, ct);
             return true;
         }, ct), ct);
+    }
 
-    public async Task<AccountDto> UpdateAccountAsync(Guid id, UpdateAccountRequest request, CancellationToken ct)
+    public async Task<AccountDto> UpdateAccountAsync(Guid id, UpdateAccountRequest request, CancellationToken ct, string? tradingMode = TradingMode.Real)
     {
+        var mode = ValidateTradingMode(tradingMode);
+        if (request.StartingCapitalUsd is not null || request.TradingMode is not null)
+            throw new ProblemException(400, "Trading mode and paper starting capital are creation-only.");
         ValidateName(request.Name);
         return await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
         {
+            RequireMode(account, mode);
             if (request.ExpectedRevision != account.SettingsRevision)
                 throw new ProblemException(409, "Account settings changed. Reload the current settings before saving.");
-            await ValidatePortfolio(request.PortfolioId, ct);
+            await ValidatePortfolio(request.PortfolioId, ct, mode);
             var wasEnabled = account.IsEnabled;
             account.UpdateSettings(request.Name, request.PortfolioId, request.IsEnabled);
             await store.SaveAsync(ct);
             if (wasEnabled != account.IsEnabled) await store.AccountVisibilityChangedAsync(id, account.IsEnabled, ct);
-            return ToDto(account, await store.SnapshotAsync(id, ct));
+            return await AccountAsync(id, ct, mode);
         }, ct), ct), ct);
     }
 
-    public async Task DeleteAccountAsync(Guid id, CancellationToken ct) =>
+    public async Task DeleteAccountAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
+    {
+        var mode = ValidateTradingMode(tradingMode);
         await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
         {
+            RequireMode(account, mode);
             await store.DeleteAccountAsync(account, ct);
             return true;
         }, ct), ct), ct);
-
-    public async Task<IReadOnlyList<AccountDto>> AccountsAsync(CancellationToken ct)
-    {
-        var accounts = await store.AccountsAsync(ct);
-        var snapshots = (await store.SnapshotsAsync(ct)).ToDictionary(s => s.AccountId);
-        return accounts.Select(a => ToDto(a, snapshots.GetValueOrDefault(a.Id))).ToList();
     }
 
-    public async Task<IReadOnlyList<PortfolioDto>> PortfoliosAsync(CancellationToken ct) =>
-        MapPortfolios(await store.PortfoliosAsync(ct), await store.AccountsAsync(ct),
-            (await store.SnapshotsAsync(ct)).ToDictionary(s => s.AccountId));
+    public async Task<IReadOnlyList<AccountDto>> AccountsAsync(CancellationToken ct, string? tradingMode = TradingMode.Real)
+    {
+        var mode = ValidateTradingMode(tradingMode);
+        var accounts = await store.AccountsAsync(ct, mode);
+        var snapshots = mode == TradingMode.Real
+            ? (await store.SnapshotsAsync(ct)).ToDictionary(s => s.AccountId) : new Dictionary<Guid, AccountSnapshot>();
+        var paper = await PaperBalances(accounts, ct);
+        return accounts.Select(a => ToDto(a, snapshots.GetValueOrDefault(a.Id), paper.GetValueOrDefault(a.Id))).ToList();
+    }
+
+    public async Task<IReadOnlyList<PortfolioDto>> PortfoliosAsync(CancellationToken ct, string? tradingMode = TradingMode.Real)
+    {
+        var mode = ValidateTradingMode(tradingMode);
+        var accounts = await store.AccountsAsync(ct, mode);
+        return MapPortfolios(await store.PortfoliosAsync(ct, mode), accounts,
+            mode == TradingMode.Real ? (await store.SnapshotsAsync(ct)).ToDictionary(s => s.AccountId) : new Dictionary<Guid, AccountSnapshot>(),
+            await PaperBalances(accounts, ct));
+    }
+
+    private Task<IReadOnlyDictionary<Guid, PaperAccountBalance>> PaperBalances(IReadOnlyList<Account> accounts, CancellationToken ct) =>
+        accounts.Any(a => a.TradingMode == TradingMode.Paper)
+            ? store.PaperBalancesAsync(accounts.Where(a => a.TradingMode == TradingMode.Paper).Select(a => a.Id).ToList(), ct)
+            : Task.FromResult<IReadOnlyDictionary<Guid, PaperAccountBalance>>(new Dictionary<Guid, PaperAccountBalance>());
 
     private List<PortfolioDto> MapPortfolios(IReadOnlyList<Portfolio> portfolios, IReadOnlyList<Account> accounts,
-        IReadOnlyDictionary<Guid, AccountSnapshot> snapshots)
+        IReadOnlyDictionary<Guid, AccountSnapshot> snapshots, IReadOnlyDictionary<Guid, PaperAccountBalance> paper)
     {
-        decimal? Value(Account a) => a.VenueId == VenueDescriptor.ManualId ? a.ManualAccountValueUsd : snapshots.GetValueOrDefault(a.Id)?.AccountValueUsd;
+        var dtos = accounts.Select(a => ToDto(a, snapshots.GetValueOrDefault(a.Id), paper.GetValueOrDefault(a.Id))).ToList();
         return portfolios.Select(p =>
         {
-            var members = accounts.Where(a => a.PortfolioId == p.Id).ToList();
-            var enabledMembers = members.Where(a => a.IsEnabled).ToList();
-            var values = enabledMembers.Select(Value).Where(v => v.HasValue).ToList();
-            var balances = enabledMembers.Select(a => Balance(a, snapshots.GetValueOrDefault(a.Id))).OfType<IReadOnlyList<decimal>>().ToList();
-            var available = enabledMembers.Select(a => AvailableBalance(a, snapshots.GetValueOrDefault(a.Id))).OfType<IReadOnlyList<decimal>>().ToList();
-            return new PortfolioDto(p.Id, p.Name, members.Count, values.Count == 0 ? null : ExactDecimal.Sum(values.Select(v => v!.Value)),
-                values.Count == 0 ? "unavailable" : values.Count == enabledMembers.Count ? "complete" : "partial",
-                balances.Count == 0 ? null : ExactDecimal.Sum(balances.SelectMany(v => v!)),
-                Coverage(balances.Count, enabledMembers.Count), p.Icon,
-                available.Count == 0 ? null : ExactDecimal.Sum(available.SelectMany(v => v)),
-                available.Count, Coverage(available.Count, enabledMembers.Count), enabledMembers.Count);
+            var members = dtos.Where(a => a.PortfolioId == p.Id && a.TradingMode == p.TradingMode).ToList();
+            var enabled = members.Where(a => a.IsEnabled).ToList();
+            var values = enabled.Where(a => a.AccountValueUsd is not null).ToList();
+            var balances = enabled.Where(a => a.BalanceUsd is not null).ToList();
+            var available = enabled.Where(a => a.AvailableBalanceUsd is not null).ToList();
+            return new PortfolioDto(p.Id, p.Name, members.Count, Sum(values.Select(a => a.AccountValueUsd)),
+                Coverage(values.Count, enabled.Count), Sum(balances.Select(a => a.BalanceUsd)),
+                Coverage(balances.Count, enabled.Count), p.Icon, Sum(available.Select(a => a.AvailableBalanceUsd)),
+                available.Count, Coverage(available.Count, enabled.Count), enabled.Count, p.TradingMode);
         }).ToList();
     }
 
-    public async Task<OverviewDto> OverviewAsync(CancellationToken ct)
+    private static string? Sum(IEnumerable<string?> values)
     {
-        var accounts = await store.AccountsAsync(ct);
-        var snapshots = (await store.SnapshotsAsync(ct)).ToDictionary(s => s.AccountId);
-        var dtos = accounts.Select(a => ToDto(a, snapshots.GetValueOrDefault(a.Id))).ToList();
-        decimal? Value(Account a) => a.VenueId == VenueDescriptor.ManualId ? a.ManualAccountValueUsd : snapshots.GetValueOrDefault(a.Id)?.AccountValueUsd;
-        var portfolios = MapPortfolios(await store.PortfoliosAsync(ct), accounts, snapshots);
-        var enabled = accounts.Where(a => a.IsEnabled).ToList();
-        var known = enabled.Select(Value).Where(v => v.HasValue).ToList();
-        var wallets = enabled.Select(a => snapshots.GetValueOrDefault(a.Id))
-            .OfType<AccountSnapshot>().Where(s => s.StablecoinsObservedAtUtc.HasValue).ToList();
-        var balances = enabled.Select(a => Balance(a, snapshots.GetValueOrDefault(a.Id))).OfType<IReadOnlyList<decimal>>().ToList();
-        var available = enabled.Select(a => AvailableBalance(a, snapshots.GetValueOrDefault(a.Id))).OfType<IReadOnlyList<decimal>>().ToList();
-        return new(portfolios, dtos, new(portfolios.Count, accounts.Count, known.Count == 0 ? null : ExactDecimal.Sum(known.Select(v => v!.Value)),
-            known.Count, dtos.Sum(a => a.PositionCount), await store.FillCountAsync(ct),
-            wallets.Count == 0 ? null : ExactDecimal.Sum(wallets.SelectMany(s => s.Stablecoins).Select(b => b.Available)), wallets.Count,
-            balances.Count == 0 ? null : ExactDecimal.Sum(balances.SelectMany(b => b)), balances.Count, Coverage(balances.Count, enabled.Count),
-            available.Count == 0 ? null : ExactDecimal.Sum(available.SelectMany(b => b)), available.Count, Coverage(available.Count, enabled.Count), enabled.Count),
-            (await store.FillsAsync(null, 100, ct)).Select(ToDto).ToList(),
-            "Enabled accounts across all portfolios and unassigned only. Total balance sums known perps/manual values and supported stablecoin wallet totals; unified and portfolio-margin accounts use the wallet alone. Available balance uses wallet total minus held in unified/portfolio-margin modes, otherwise reported available margin first, then withdrawable funds. Manual value, collateral and equity do not imply availability. Coverage counts accounts with a known amount, not full venue valuation. Nominal USD only: no FX, depeg, lending, EVM or risk adjustment. Availability is not guaranteed free trading margin or withdrawal. Imported fills are recent, not complete lifetime history.");
+        var known = values.OfType<string>().ToList();
+        return known.Count == 0 ? null : known.Aggregate(ExactAmount.From(0), (total, value) => total + ExactAmount.Parse(value)).ToString();
     }
 
-    public async Task<SnapshotDto?> SnapshotAsync(Guid id, CancellationToken ct)
+    public async Task<OverviewDto> OverviewAsync(CancellationToken ct, string? tradingMode = TradingMode.Real)
     {
-        if (!(await RequireAccount(id, ct)).IsEnabled) return null;
+        var mode = ValidateTradingMode(tradingMode);
+        var accounts = await store.AccountsAsync(ct, mode);
+        var snapshots = mode == TradingMode.Real
+            ? (await store.SnapshotsAsync(ct)).ToDictionary(s => s.AccountId) : new Dictionary<Guid, AccountSnapshot>();
+        var paper = await PaperBalances(accounts, ct);
+        var dtos = accounts.Select(a => ToDto(a, snapshots.GetValueOrDefault(a.Id), paper.GetValueOrDefault(a.Id))).ToList();
+        var portfolios = MapPortfolios(await store.PortfoliosAsync(ct, mode), accounts, snapshots, paper);
+        var enabled = dtos.Where(a => a.IsEnabled).ToList();
+        var known = enabled.Where(a => a.AccountValueUsd is not null).ToList();
+        var wallets = enabled.Where(a => a.TotalStablecoinNominalUsd is not null).ToList();
+        var balances = enabled.Where(a => a.BalanceUsd is not null).ToList();
+        var available = enabled.Where(a => a.AvailableBalanceUsd is not null).ToList();
+        return new(portfolios, dtos, new(portfolios.Count, dtos.Count, Sum(known.Select(a => a.AccountValueUsd)),
+            known.Count, dtos.Sum(a => a.PositionCount), mode == TradingMode.Real ? await store.FillCountAsync(ct) : 0,
+            Sum(wallets.Select(a => a.AvailableStablecoinNominalUsd)), wallets.Count,
+            Sum(balances.Select(a => a.BalanceUsd)), balances.Count, Coverage(balances.Count, enabled.Count),
+            Sum(available.Select(a => a.AvailableBalanceUsd)), available.Count, Coverage(available.Count, enabled.Count), enabled.Count),
+            mode == TradingMode.Real ? (await store.FillsAsync(null, 100, ct)).Select(ToDto).ToList() : [],
+            mode == TradingMode.Paper
+                ? "Paper accounts only. Nominal virtual USD, not real funds. Cash includes fixed starting capital and realized simulated P&L; available margin deducts open margin and pending reservations. Equity is unknown without marks for open positions. Unresolved gaps and ambiguity withhold available margin. No real wallet or imported executions."
+                : "Enabled real accounts across all real portfolios and unassigned only. Total balance sums known perps/manual values and supported stablecoin wallet totals; unified and portfolio-margin accounts use the wallet alone. Available balance uses wallet total minus held in unified/portfolio-margin modes, otherwise reported available margin first, then withdrawable funds. Manual value, collateral and equity do not imply availability. Coverage counts accounts with a known amount, not full venue valuation. Nominal USD only: no FX, depeg, lending, EVM or risk adjustment. Availability is not guaranteed free trading margin or withdrawal. Imported fills are recent, not complete lifetime history.");
+    }
+
+    public async Task<SnapshotDto?> SnapshotAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
+    {
+        var account = await RequireAccount(id, ValidateTradingMode(tradingMode), ct);
+        if (!account.IsEnabled || account.TradingMode == TradingMode.Paper) return null;
         var s = await store.SnapshotAsync(id, ct);
         return s is null ? null : new(s.ObservedAtUtc, s.ValueScope, ExactDecimal.Format(s.AccountValueUsd),
             ExactDecimal.Format(s.WithdrawableUsd), ExactDecimal.Format(s.MarginUsedUsd),
@@ -264,27 +334,32 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             WalletDto(s), ExactDecimal.Format(s.AvailableMarginUsd));
     }
 
-    public async Task<PortfolioDto> PortfolioAsync(Guid id, CancellationToken ct) =>
-        (await PortfoliosAsync(ct)).SingleOrDefault(p => p.Id == id) ??
+    public async Task<PortfolioDto> PortfolioAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real) =>
+        (await PortfoliosAsync(ct, tradingMode)).SingleOrDefault(p => p.Id == id) ??
         throw new ProblemException(404, "Portfolio not found.");
 
-    public async Task<AccountDto> AccountAsync(Guid id, CancellationToken ct)
+    public async Task<AccountDto> AccountAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
     {
-        var account = await RequireAccount(id, ct);
-        var snapshot = await store.SnapshotAsync(id, ct);
-        return ToDto(account, snapshot);
+        var account = await RequireAccount(id, ValidateTradingMode(tradingMode), ct);
+        if (account.TradingMode == TradingMode.Paper)
+            return ToDto(account, null, (await store.PaperBalancesAsync([id], ct)).GetValueOrDefault(id));
+        return ToDto(account, await store.SnapshotAsync(id, ct));
     }
 
-    public async Task<IReadOnlyList<FillDto>> FillsAsync(Guid id, CancellationToken ct)
+    public async Task<IReadOnlyList<FillDto>> FillsAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
     {
-        if (!(await RequireAccount(id, ct)).IsEnabled) return [];
+        var account = await RequireAccount(id, ValidateTradingMode(tradingMode), ct);
+        if (account.TradingMode == TradingMode.Paper) throw new ProblemException(409, "Paper accounts have simulated executions, not imported fills.");
+        if (!account.IsEnabled) return [];
         return (await store.FillsAsync(id, 100, ct)).Select(ToDto).ToList();
     }
 
-    public async Task<AccountInstrumentsDto> InstrumentsAsync(Guid id, CancellationToken ct)
+    public async Task<AccountInstrumentsDto> InstrumentsAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
     {
         ct.ThrowIfCancellationRequested();
+        var mode = ValidateTradingMode(tradingMode);
         var account = await store.MarketDataAccountAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
+        if (account.TradingMode != mode) throw new ProblemException(404, "Account not found.");
         if (!account.IsEnabled)
             throw new ProblemException(409, "Enable the account before reading its instrument catalogue.");
         if (account.VenueId == VenueDescriptor.ManualId)
@@ -315,16 +390,30 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         return list.Count <= 1 ? string.Concat(list) : $"{string.Join(", ", list[..^1])} or {list[^1]}";
     }
 
-    private async Task<Account> RequireAccount(Guid id, CancellationToken ct) =>
-        await store.AccountAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
-    private AccountDto ToDto(Account a, AccountSnapshot? s) => new(a.Id, a.PortfolioId, a.Name, a.VenueId, a.Address,
+    private async Task<Account> RequireAccount(Guid id, string mode, CancellationToken ct)
+    {
+        var account = await store.AccountAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
+        RequireMode(account, mode);
+        return account;
+    }
+    private AccountDto ToDto(Account a, AccountSnapshot? s, PaperAccountBalance? paper = null)
+    {
+        if (a.TradingMode == TradingMode.Paper)
+            return new(a.Id, a.PortfolioId, a.Name, a.VenueId, null, ExactDecimal.Format(paper?.EquityUsd), null,
+                "paper", null, a.IsEnabled ? paper?.OpenPositionCount ?? 0 : 0,
+                "Simulated execution; nominal virtual USD, zero fees and slippage. Open equity is unknown without fresh marks.",
+                a.IsEnabled, a.SettingsRevision, BalanceUsd: ExactDecimal.Format(paper?.CashUsd),
+                AvailableBalanceUsd: a.IsEnabled ? ExactDecimal.Format(paper?.AvailableMarginUsd) : null,
+                AvailableBalanceSource: "paper", TradingMode: a.TradingMode, StartingCapitalUsd: ExactDecimal.Format(a.StartingCapitalUsd));
+        return new(a.Id, a.PortfolioId, a.Name, a.VenueId, a.Address,
         ExactDecimal.Format(a.VenueId == VenueDescriptor.ManualId ? a.ManualAccountValueUsd : s?.AccountValueUsd), a.LastSyncedAtUtc,
         a.SyncStatus, a.LastSyncError, a.IsEnabled ? s?.Positions.Count ?? 0 : 0, a.HistoryNotice, a.IsEnabled, a.SettingsRevision,
         s?.StablecoinsObservedAtUtc is null ? null : ExactDecimal.Sum(s.Stablecoins.Select(balance => balance.Available)),
         s?.StablecoinScope, s?.AccountMode,
         s?.StablecoinsObservedAtUtc is null ? null : ExactDecimal.Sum(s.Stablecoins.Select(balance => balance.Total)),
         Balance(a, s) is { } balance ? ExactDecimal.Sum(balance) : null, a.SourceId,
-        AvailableBalance(a, s) is { } available ? ExactDecimal.Sum(available) : null, AvailableSource(a, s));
+        AvailableBalance(a, s) is { } available ? ExactDecimal.Sum(available) : null, AvailableSource(a, s), a.TradingMode);
+    }
 
     /// <summary>
     /// What the account holds in nominal USD. Unified and portfolio-margin accounts keep every balance in the spot

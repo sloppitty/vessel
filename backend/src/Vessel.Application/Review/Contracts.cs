@@ -6,7 +6,7 @@ using Vessel.Domain.Workspace;
 namespace Vessel.Application.Review;
 
 public sealed record ReviewQuery(string Period = "month", string Portfolio = "all", Guid? AccountId = null,
-    string? Instrument = null, int Offset = 0);
+    string? Instrument = null, int Offset = 0, string? TradingMode = "real");
 
 /// <summary>One repeatable-read snapshot of the owner's enabled accounts and retained execution facts.</summary>
 public sealed record ReviewFacts(IReadOnlyList<Portfolio> Portfolios, IReadOnlyList<Account> Accounts,
@@ -64,4 +64,4 @@ public sealed record ReviewCoverageDto(int ClosedCandidates, int IncompleteFees,
 public sealed record ReviewDto(DateTimeOffset AsOfUtc, DateTimeOffset? FromUtc, string Period, string Currency,
     ReviewOptionsDto Options, IReadOnlyList<ReviewPeriodDto> Periods, ReviewMetricsDto Metrics,
     IReadOnlyList<ReviewPointDto> Series, int BucketDays, ReviewGroupsDto Groups, ReviewCoverageDto Coverage,
-    IReadOnlyList<ReviewPlayDto> Plays, int Offset, int? NextOffset);
+    IReadOnlyList<ReviewPlayDto> Plays, int Offset, int? NextOffset, string TradingMode = "real");

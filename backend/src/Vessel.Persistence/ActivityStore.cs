@@ -3,20 +3,25 @@ using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Activity;
 using Vessel.Application.Common;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Common;
 
 namespace Vessel.Persistence;
 
 public sealed class ActivityStore(VesselDbContext db) : IActivityStore
 {
-    public async Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
+    public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) =>
+        ReadAsync(accountId, TradingMode.Real, ct, accountIds);
+
+    public async Task<ActivityFacts> ReadAsync(Guid? accountId, string tradingMode, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
     {
+        tradingMode = TradingMode.Validate(tradingMode);
         if (accountIds is { Count: 0 }) return new([], [], [], new Dictionary<Guid, Guid>());
         // A shared aggregate reader supplies its own repeatable-read snapshot.
         await using var transaction = db.Database.CurrentTransaction is null
             ? await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct) : null;
-        if (accountId is { } id && !await db.Accounts.AnyAsync(a => a.Id == id, ct))
+        if (accountId is { } id && !await db.Accounts.AnyAsync(a => a.Id == id && a.TradingMode == tradingMode, ct))
             throw new ProblemException(404, "Account not found.");
-        var query = db.Accounts.Where(a => a.IsEnabled && (accountId == null || a.Id == accountId));
+        var query = db.Accounts.Where(a => a.TradingMode == tradingMode && a.IsEnabled && (accountId == null || a.Id == accountId));
         if (accountIds is not null)
         {
             var selectedIds = accountIds.ToArray();
@@ -24,12 +29,21 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         }
         var accounts = await query.AsNoTracking().ToListAsync(ct);
         var ids = accounts.Select(a => a.Id).ToArray();
+        if (tradingMode == TradingMode.Paper)
+        {
+            var plays = await db.Plays.Where(p => p.TradingMode == tradingMode && ids.Contains(p.AccountId))
+                .AsNoTracking().ToListAsync(ct);
+            var paper = await SizingStore.PaperFactsAsync(db, plays, ct);
+            if (transaction is not null) await transaction.CommitAsync(ct);
+            return new(accounts, [], [], new Dictionary<Guid, Guid>()) { PaperPlays = paper };
+        }
         var fills = await db.Fills.Where(f => ids.Contains(f.AccountId)).AsNoTracking().ToListAsync(ct);
         var snapshots = await db.Snapshots.Where(s => ids.Contains(s.AccountId)).Include(s => s.Positions).AsNoTracking().ToListAsync(ct);
         var funding = await db.FundingPayments.Where(p => ids.Contains(p.AccountId)).AsNoTracking().ToListAsync(ct);
         var fundingStates = await db.FundingStates.Where(s => ids.Contains(s.AccountId)).AsNoTracking().ToListAsync(ct);
         var leverage = await db.LeverageObservations.Where(o => ids.Contains(o.AccountId)).AsNoTracking().ToListAsync(ct);
-        var links = await db.LinkedOrders(db.OrderLinks.Where(l => ids.Contains(l.AccountId) && l.State == OrderLinkState.Linked))
+        var links = await db.LinkedOrders(db.OrderLinks.Where(l => ids.Contains(l.AccountId) && l.State == OrderLinkState.Linked &&
+            db.Plays.Any(p => p.Id == l.PlayId && p.TradingMode == TradingMode.Real)))
             .Select(x => new { x.Order.AccountId, x.Order.ContractId, x.Order.ExternalOrderId, x.Link.PlayId }).AsNoTracking().ToListAsync(ct);
         // A fill belongs to the linked order with its account, contract and external ID.
         var byOrder = links.ToDictionary(l => new OrderKey(l.AccountId, l.ContractId, l.ExternalOrderId), l => l.PlayId);

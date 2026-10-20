@@ -3,33 +3,44 @@ using Vessel.Application.Common;
 using Vessel.Application.Workspace;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
+using Vessel.Domain.Paper;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Persistence;
 
 public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOfWork) : IWorkspaceStore
 {
-    public Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct) => db.Portfolios.OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
-    public Task<List<Account>> AccountsAsync(CancellationToken ct) => db.Accounts.OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
+    public Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct) => PortfoliosAsync(ct, TradingMode.Real);
+    public Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct, string tradingMode = TradingMode.Real) =>
+        db.Portfolios.Where(x => x.TradingMode == TradingMode.Validate(tradingMode)).OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
+    public Task<List<Account>> AccountsAsync(CancellationToken ct) => AccountsAsync(ct, TradingMode.Real);
+    public Task<List<Account>> AccountsAsync(CancellationToken ct, string tradingMode = TradingMode.Real) =>
+        db.Accounts.Where(x => x.TradingMode == TradingMode.Validate(tradingMode)).OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => db.Accounts.SingleOrDefaultAsync(x => x.Id == id, ct);
     public Task<MarketDataAccount?> MarketDataAccountAsync(Guid id, CancellationToken ct) => db.Accounts.AsNoTracking()
-        .Where(x => x.Id == id).Select(x => new MarketDataAccount(x.IsEnabled, x.VenueId)).SingleOrDefaultAsync(ct);
+        .Where(x => x.Id == id).Select(x => new MarketDataAccount(x.IsEnabled, x.VenueId, x.TradingMode)).SingleOrDefaultAsync(ct);
     public Task<bool> SourceExistsAsync(string venueId, string sourceId, CancellationToken ct) =>
-        db.Accounts.AnyAsync(a => a.VenueId == venueId && a.SourceId == sourceId, ct);
+        db.Accounts.AnyAsync(a => a.TradingMode == TradingMode.Real && a.VenueId == venueId && a.SourceId == sourceId, ct);
     public Task<AccountSnapshot?> SnapshotAsync(Guid id, CancellationToken ct) => db.Snapshots
-        .Where(s => s.AccountId == id && db.Accounts.Any(a => a.Id == s.AccountId && a.IsEnabled))
+        .Where(s => s.AccountId == id && db.Accounts.Any(a => a.Id == s.AccountId && a.IsEnabled && a.TradingMode == TradingMode.Real))
         .Include(s => s.Positions).Include(s => s.Stablecoins).AsSplitQuery().AsNoTracking().SingleOrDefaultAsync(ct);
-    public Task<List<AccountSnapshot>> SnapshotsAsync(CancellationToken ct) => db.Snapshots.Where(s => db.Accounts.Any(a => a.Id == s.AccountId && a.IsEnabled)).Include(x => x.Positions).Include(x => x.Stablecoins).AsSplitQuery().AsNoTracking().ToListAsync(ct);
+    public Task<List<AccountSnapshot>> SnapshotsAsync(CancellationToken ct) => db.Snapshots.Where(s => db.Accounts.Any(a => a.Id == s.AccountId && a.IsEnabled && a.TradingMode == TradingMode.Real)).Include(x => x.Positions).Include(x => x.Stablecoins).AsSplitQuery().AsNoTracking().ToListAsync(ct);
     public Task<List<ImportedFill>> FillsAsync(Guid? accountId, int limit, CancellationToken ct) => db.Fills
-        .Where(x => (accountId == null || x.AccountId == accountId) && db.Accounts.Any(a => a.Id == x.AccountId && a.IsEnabled)).OrderByDescending(x => x.OccurredAtUtc).ThenBy(x => x.Id)
+        .Where(x => (accountId == null || x.AccountId == accountId) && db.Accounts.Any(a => a.Id == x.AccountId && a.IsEnabled && a.TradingMode == TradingMode.Real)).OrderByDescending(x => x.OccurredAtUtc).ThenBy(x => x.Id)
         .Take(limit).AsNoTracking().ToListAsync(ct);
-    public Task<int> FillCountAsync(CancellationToken ct) => db.Fills.Where(f => db.Accounts.Any(a => a.Id == f.AccountId && a.IsEnabled)).CountAsync(ct);
+    public Task<int> FillCountAsync(CancellationToken ct) => db.Fills.Where(f => db.Accounts.Any(a => a.Id == f.AccountId && a.IsEnabled && a.TradingMode == TradingMode.Real)).CountAsync(ct);
     public async Task AddPortfolioAsync(Portfolio portfolio, CancellationToken ct) { unitOfWork.RequireActive(); db.Portfolios.Add(portfolio); await unitOfWork.SaveChangesAsync(ct); }
     public async Task AddAccountAsync(Account account, CancellationToken ct)
     {
         unitOfWork.RequireActive();
         db.Accounts.Add(account);
         await unitOfWork.SaveChangesAsync(ct);
+        if (account.TradingMode == TradingMode.Paper)
+        {
+            db.PaperLedgerEntries.Add(PaperLedgerEntry.Seed(account.OwnerId, account.Id, account.StartingCapitalUsd!.Value, DateTimeOffset.UtcNow));
+            await unitOfWork.SaveChangesAsync(ct);
+        }
     }
 
     public async Task SaveAsync(CancellationToken ct) => await unitOfWork.SaveChangesAsync(ct);
@@ -54,6 +65,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         var portfolio = portfolios.SingleOrDefault() ?? throw new ProblemException(404, "Portfolio not found.");
         var accounts = await db.Accounts.FromSqlInterpolated(
             $"SELECT * FROM accounts WHERE \"PortfolioId\" = {id} AND \"OwnerId\" = {db.CurrentOwnerId} ORDER BY \"Id\" FOR UPDATE").ToListAsync(ct);
+        if (portfolio.TradingMode == TradingMode.Paper && accounts.Count > 0)
+            throw new ProblemException(409, "Move all accounts to another paper portfolio before deleting this portfolio.");
         foreach (var account in accounts)
         {
             await db.Entry(account).ReloadAsync(ct);
@@ -69,6 +82,9 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
     {
         if (await db.Plays.AnyAsync(p => p.AccountId == account.Id, ct))
             throw new ProblemException(409, "This account has linked Plays and cannot be deleted.");
+        if (account.TradingMode == TradingMode.Paper &&
+            await db.PaperLedgerEntries.AnyAsync(e => e.AccountId == account.Id, ct))
+            throw new ProblemException(409, "Paper capital history is retained. Disable this account instead of deleting it.");
         // Explicit owner-filtered deletes run under the locked account's transaction.
         // Positions cascade from the snapshot, never from trading intent.
         await db.Fills.Where(f => f.AccountId == account.Id).ExecuteDeleteAsync(ct);
@@ -113,6 +129,22 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
 
     public Task AccountVisibilityChangedAsync(Guid accountId, bool enabled, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {
+        if (!enabled)
+        {
+            var simulations = await db.PaperSimulations.Where(s => s.AccountId == accountId &&
+                db.Plays.Any(p => p.Id == s.PlayId && (p.Status == Vessel.Domain.Plays.PlayStatus.Planned ||
+                    p.Status == Vessel.Domain.Plays.PlayStatus.Open || p.Status == Vessel.Domain.Plays.PlayStatus.Paused))).ToListAsync(ct);
+            foreach (var simulation in simulations)
+            {
+                simulation.State = "gap";
+                simulation.NextCheckAtUtc = null;
+                var issues = System.Text.Json.JsonSerializer.Deserialize<List<string>>(simulation.IssuesJson) ?? [];
+                const string issue = "Paper account was disabled; the unobserved interval is unresolved.";
+                if (!issues.Contains(issue)) issues.Add(issue);
+                simulation.IssuesJson = System.Text.Json.JsonSerializer.Serialize(issues);
+            }
+            await unitOfWork.SaveChangesAsync(ct);
+        }
         await Notifications.NotificationStore.AccountVisibilityChangedAsync(db, accountId, enabled, DateTimeOffset.UtcNow, ct);
         return true;
     }, ct);
@@ -132,6 +164,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
 
     public Task SaveRefreshAsync(Account account, PerpetualVenueReadResult result, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {
+        if (account.TradingMode != TradingMode.Real)
+            throw new ProblemException(409, "Paper accounts cannot import real venue facts.");
         // Validate immutable settlement identities before any refresh facts are written.
         if (result.Funding is { } funding) await SaveFundingAsync(account, funding, ct);
         var observation = result.Snapshot;

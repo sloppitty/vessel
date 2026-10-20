@@ -95,7 +95,7 @@ export function HistoryDialog({ api, playId, onClose }: { api: WorkspaceApi; pla
       detail: index === 0 ? ['The plan as first committed.'] : describePlanChanges(all[index - 1]!.plan, revision.plan),
     })),
     ...result.history.statusChanges.map((change, index): HistoryItem => ({
-      at: change.occurredAtUtc, key: `s${index}`, title: `${statusLabels[change.from]} → ${statusLabels[change.to]}${change.source === 'venue' ? ' · from linked venue fills' : change.source === 'manual' ? ' · from manual facts' : ''}`,
+      at: change.occurredAtUtc, key: `s${index}`, title: `${statusLabels[change.from]} → ${statusLabels[change.to]}${change.source === 'paper' ? ' · from simulated paper executions' : change.source === 'venue' ? ' · from linked venue fills' : change.source === 'manual' ? ' · from manual facts' : ''}`,
       detail: [change.reason ? cancelReasonLabels[change.reason] : '', change.note ?? ''].filter(Boolean),
     })),
     ...(result.history.reviews ?? []).map(review => ({

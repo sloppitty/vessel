@@ -13,7 +13,7 @@ public static class WorkspaceEndpoints
 {
     public static void MapWorkspace(this WebApplication app)
     {
-        var api = app.MapGroup("/api").RequireAuthorization();
+        var api = app.MapGroup("/api").RequireAuthorization().WithTradingModeBoundary();
         api.MapGet("/venues/{venueId}/accounts", async (string venueId, string? address, AccountDiscoveryService service, CancellationToken ct) =>
             Results.Ok(await service.DiscoverAsync(venueId, address, ct)));
         // This read-only preview never stores the token. It carries the same HTTPS guard, no-store and
@@ -31,50 +31,50 @@ public static class WorkspaceEndpoints
             await service.DeleteAsync(id, ct);
             return Results.NoContent();
         });
-        api.MapGet("/portfolios", async (WorkspaceService service, CancellationToken ct) =>
-            Results.Ok(await service.PortfoliosAsync(ct)));
-        api.MapGet("/portfolios/{id:guid}", async (Guid id, WorkspaceService service, CancellationToken ct) =>
-            Results.Ok(await service.PortfolioAsync(id, ct)));
+        api.MapGet("/portfolios", async (string? tradingMode, WorkspaceService service, CancellationToken ct) =>
+            Results.Ok(await service.PortfoliosAsync(ct, tradingMode)));
+        api.MapGet("/portfolios/{id:guid}", async (Guid id, string? tradingMode, WorkspaceService service, CancellationToken ct) =>
+            Results.Ok(await service.PortfolioAsync(id, ct, tradingMode)));
         api.MapPost("/portfolios", async (CreatePortfolioRequest request, WorkspaceService service, CancellationToken ct) =>
         {
             var result = await service.CreatePortfolioAsync(request, ct);
             return Results.Created($"/api/portfolios/{result.Id}", result);
         });
-        api.MapPatch("/portfolios/{id:guid}", async (Guid id, UpdatePortfolioRequest request, WorkspaceService service, CancellationToken ct) =>
-            Results.Ok(await service.UpdatePortfolioAsync(id, request, ct)));
-        api.MapDelete("/portfolios/{id:guid}", async (Guid id, WorkspaceService service, CancellationToken ct) =>
+        api.MapPatch("/portfolios/{id:guid}", async (Guid id, string? tradingMode, UpdatePortfolioRequest request, WorkspaceService service, CancellationToken ct) =>
+            Results.Ok(await service.UpdatePortfolioAsync(id, request, ct, tradingMode)));
+        api.MapDelete("/portfolios/{id:guid}", async (Guid id, string? tradingMode, WorkspaceService service, CancellationToken ct) =>
         {
-            await service.DeletePortfolioAsync(id, ct);
+            await service.DeletePortfolioAsync(id, ct, tradingMode);
             return Results.NoContent();
         });
-        api.MapPost("/accounts/portfolio", async (MoveAccountsRequest request, WorkspaceService service, CancellationToken ct) =>
-            Results.Ok(await service.MoveAccountsAsync(request, ct)));
-        api.MapPut("/accounts/{id:guid}", async (Guid id, UpdateAccountRequest request, WorkspaceService service, CancellationToken ct) =>
-            Results.Ok(await service.UpdateAccountAsync(id, request, ct)));
-        api.MapDelete("/accounts/{id:guid}", async (Guid id, WorkspaceService service, CancellationToken ct) =>
+        api.MapPost("/accounts/portfolio", async (string? tradingMode, MoveAccountsRequest request, WorkspaceService service, CancellationToken ct) =>
+            Results.Ok(await service.MoveAccountsAsync(request, ct, tradingMode)));
+        api.MapPut("/accounts/{id:guid}", async (Guid id, string? tradingMode, UpdateAccountRequest request, WorkspaceService service, CancellationToken ct) =>
+            Results.Ok(await service.UpdateAccountAsync(id, request, ct, tradingMode)));
+        api.MapDelete("/accounts/{id:guid}", async (Guid id, string? tradingMode, WorkspaceService service, CancellationToken ct) =>
         {
-            await service.DeleteAccountAsync(id, ct);
+            await service.DeleteAccountAsync(id, ct, tradingMode);
             return Results.NoContent();
         });
-        api.MapGet("/accounts", async (WorkspaceService service, CancellationToken ct) =>
-            Results.Ok(await service.AccountsAsync(ct)));
-        api.MapGet("/accounts/{id:guid}", async (Guid id, WorkspaceService service, CancellationToken ct) =>
-            Results.Ok(await service.AccountAsync(id, ct)));
+        api.MapGet("/accounts", async (string? tradingMode, WorkspaceService service, CancellationToken ct) =>
+            Results.Ok(await service.AccountsAsync(ct, tradingMode)));
+        api.MapGet("/accounts/{id:guid}", async (Guid id, string? tradingMode, WorkspaceService service, CancellationToken ct) =>
+            Results.Ok(await service.AccountAsync(id, ct, tradingMode)));
         api.MapPost("/accounts", async (CreateAccountRequest request, WorkspaceService service, CancellationToken ct) =>
         {
             var result = await service.CreateAccountAsync(request, ct);
             return Results.Created($"/api/accounts/{result.Id}", result);
         });
-        api.MapGet("/accounts/{id:guid}/snapshot", async (Guid id, WorkspaceService service, CancellationToken ct) =>
+        api.MapGet("/accounts/{id:guid}/snapshot", async (Guid id, string? tradingMode, WorkspaceService service, CancellationToken ct) =>
         {
-            var result = await service.SnapshotAsync(id, ct);
+            var result = await service.SnapshotAsync(id, ct, tradingMode);
             // Results.Ok(null) emits an empty body; the contract requires literal JSON null.
             return result is null ? Results.Text("null", "application/json") : Results.Ok(result);
         });
-        api.MapGet("/accounts/{id:guid}/fills", async (Guid id, WorkspaceService service, CancellationToken ct) =>
-            Results.Ok(await service.FillsAsync(id, ct)));
-        api.MapGet("/accounts/{id:guid}/instruments", async (Guid id, WorkspaceService service, CancellationToken ct) =>
-            Results.Ok(await service.InstrumentsAsync(id, ct))).WithMetadata(new CompressMarketData());
+        api.MapGet("/accounts/{id:guid}/fills", async (Guid id, string? tradingMode, WorkspaceService service, CancellationToken ct) =>
+            Results.Ok(await service.FillsAsync(id, ct, tradingMode)));
+        api.MapGet("/accounts/{id:guid}/instruments", async (Guid id, string? tradingMode, WorkspaceService service, CancellationToken ct) =>
+            Results.Ok(await service.InstrumentsAsync(id, ct, tradingMode))).WithMetadata(new CompressMarketData());
         api.MapGet("/accounts/{id:guid}/candles", async (Guid id, string? instrument, string? interval, long? endTime,
             string? refresh, CandleService service, CancellationToken ct) =>
             Results.Ok(await service.CandlesAsync(id, instrument, interval, endTime, ct, refresh)))
@@ -83,24 +83,26 @@ public static class WorkspaceEndpoints
             MarketContextService service, CancellationToken ct) =>
             Results.Ok(await service.ContextAsync(id, instrument, ct))).WithMetadata(new CompressMarketData());
         api.MapGet("/accounts/{id:guid}/market-stream", MarketStreamEndpoint.StreamAsync);
-        api.MapPost("/accounts/{id:guid}/sync", async (Guid id, WorkspaceService service, HttpContext context,
+        api.MapPost("/accounts/{id:guid}/sync", async (Guid id, string? tradingMode, WorkspaceService service, HttpContext context,
             MonitorRunExecutor executor, CancellationToken ct) =>
         {
+            var account = await service.AccountAsync(id, ct, tradingMode);
+            if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts cannot refresh real venue history.");
             try
             {
                 if (!await executor.RefreshAsync(id, ct))
                     throw new ProblemException(502, "The venue refresh failed or was superseded by changed account settings. Try again later.");
             }
             catch (MonitorAdmissionException ex) { return MonitorEndpoints.Busy(context, ex); }
-            return Results.Ok(await service.AccountAsync(id, ct));
+            return Results.Ok(await service.AccountAsync(id, ct, tradingMode));
         });
         api.MapGet("/activity", async ([AsParameters] ActivityQuery query, ActivityService service, CancellationToken ct) =>
             Results.Ok(await service.PageAsync(query, ct)));
-        api.MapGet("/activity/fills", async (Guid? accountId, string? operationId, ActivityService service, CancellationToken ct) =>
-            Results.Ok(await service.FillsAsync(accountId, operationId, ct)));
-        api.MapGet("/overview/summary", async (string? groupBy, string? period, string? scope,
+        api.MapGet("/activity/fills", async (Guid? accountId, string? operationId, string? tradingMode, ActivityService service, CancellationToken ct) =>
+            Results.Ok(await service.FillsAsync(accountId, operationId, ct, tradingMode)));
+        api.MapGet("/overview/summary", async (string? groupBy, string? period, string? scope, string? tradingMode,
             Vessel.Application.Overview.OverviewSummaryService service, CancellationToken ct) =>
-            Results.Ok(await service.GetAsync(groupBy, period, scope, ct)));
-        api.MapGet("/overview", async (WorkspaceService service, CancellationToken ct) => Results.Ok(await service.OverviewAsync(ct)));
+            Results.Ok(await service.GetAsync(groupBy, period, scope, ct, tradingMode)));
+        api.MapGet("/overview", async (string? tradingMode, WorkspaceService service, CancellationToken ct) => Results.Ok(await service.OverviewAsync(ct, tradingMode)));
     }
 }

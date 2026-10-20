@@ -66,6 +66,24 @@ October 19, 2026: the owner asked to deliver Phase 0 ("trust and correctness") o
 
 October 20, 2026: the owner answered the Phase 0 pull request questions. The Overview incident row stays unscoped, the sizing sign-difference line stays hidden at zero, and Lighter keeps one counted omission sentence ("Omitted executions: 1 liquidation."). Initial R follows the current first entry fill, so correcting a manual fill's time recalculates it. A stop set while planning goes below a long's entry (above a short's): a `0 %` (break-even) stop needs a fill on its entry, partial included, like a price stop at the entry, and a stop kept unchanged from the stored plan still saves. A stop that is not set is no stop, never break-even. See the 0.5b section of `phase0-trust-correctness-state.md`.
 
+October 20, 2026: the owner authorized an opt-in, Hyperliquid-only paper
+playground, with Sol implementation and independent verification. Follow
+`docs/architecture/paper-trading-delivery-contract.md`, the refined
+`paper-trading-plan.md` and current `paper-trading-state.md`; integration is not
+signed off until that state records it. Paper-only portfolios/accounts have
+creation-only immutable virtual capital (default 4,000), separate typed
+simulated executions and no effect on real financial readers or actual facts.
+Only this explicit simulation counts full eligible allocations at touched
+planned prices, with zero fees/slippage; a touch is still never an actual fill.
+Check closed minute candles hourly by default, independently configurable.
+Keep shared-account decisions chronological across all active sibling Plays.
+Ambiguities/gaps are held and unscored, not guessed; v1 has no resolution or
+manual simulated-close endpoint and open/unresolved equity is unknown.
+The standalone optional `paper` worker is broker-free; never add it to existing
+monitor/notifications module sets or generate real events from paper lifecycle.
+Reuse the existing shell/Play layout. No live migration, deployment or release
+is authorized.
+
 ## Project tracking
 
 October 19, 2026: the owner restricted GitHub Actions to release tags to conserve
