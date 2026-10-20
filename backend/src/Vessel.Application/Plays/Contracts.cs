@@ -40,7 +40,19 @@ public sealed record ChangePlayStatusRequest(
 public sealed record PlaySummaryDto(Guid Id, string Title, string Status, Guid AccountId, string VenueId, string? Instrument,
     string InstrumentSource, string Direction, int PlanRevision, long Version, string? CancelReason,
     DateTimeOffset CreatedAtUtc, DateTimeOffset UpdatedAtUtc, DateTimeOffset? PlannedAtUtc, DateTimeOffset? EndedAtUtc,
-    bool HasReview, string Origin = "planned", DateTimeOffset? ReviewedAtUtc = null);
+    bool HasReview, string Origin = "planned", DateTimeOffset? ReviewedAtUtc = null)
+{
+    /// <summary>completed, not-needed or legacy once the review is complete; null while it still needs review (phase 1, 1.2).</summary>
+    public string? ReviewCompletion { get; init; }
+    public DateTimeOffset? ReviewCompletedAtUtc { get; init; }
+}
+
+/// <summary>Complete review, Review again and No review needed: each answers the Play the owner last saw.</summary>
+public sealed record ReviewCompletionRequest([property: JsonRequired] long ExpectedVersion);
+
+/// <summary>One append-only log entry; a retry with the same <paramref name="RequestId"/> writes nothing new.</summary>
+public sealed record AddPlayNoteRequest([property: JsonRequired] Guid RequestId, [property: JsonRequired] string Text, string? State = null);
+public sealed record PlayNoteDto(Guid Id, string Text, string? State, DateTimeOffset CreatedAtUtc);
 
 public sealed record PlayListDto(IReadOnlyList<PlaySummaryDto> Plays, string View, int Page, int PageSize, int TotalCount);
 public sealed record PlayCountsDto(int Drafts, int Progress, int Review, int Reviewed, int Closed, int Cancelled, int All);
@@ -80,6 +92,8 @@ public sealed record PlayListRow
     public bool HasReview { get; init; }
     public PlayOrigin Origin { get; init; }
     public DateTimeOffset? ReviewedAtUtc { get; init; }
+    public ReviewCompletionKind? ReviewCompletion { get; init; }
+    public DateTimeOffset? ReviewCompletedAtUtc { get; init; }
 }
 
 /// <summary>Row counts by status and whether the Play counts as reviewed, from one grouped query.</summary>
@@ -97,7 +111,11 @@ public sealed record PlanRevisionDto(int Number, string Status, string Reason, D
 /// <summary>One of the owner's recent next actions, with the Play it was written for (phase 1, 1.5).</summary>
 public sealed record NextActionDto(Guid PlayId, string Title, string NextAction, DateTimeOffset? ReviewedAtUtc);
 public sealed record StatusChangeDto(string From, string To, string? Reason, string? Note, DateTimeOffset OccurredAtUtc, string Source = "owner");
-public sealed record ReviewRevisionDto(int Number, DateTimeOffset OccurredAtUtc, string Review, ReviewAnswers StructuredReview);
+public sealed record ReviewRevisionDto(int Number, DateTimeOffset OccurredAtUtc, string Review, ReviewAnswers StructuredReview)
+{
+    /// <summary>edited, completed, reopened or not-needed.</summary>
+    public string Action { get; init; } = ReviewActions.Edited;
+}
 public sealed record PlayHistoryDto(IReadOnlyList<PlanRevisionDto> Revisions, IReadOnlyList<StatusChangeDto> StatusChanges,
     IReadOnlyList<ReviewRevisionDto>? Reviews = null);
 
@@ -122,6 +140,13 @@ public interface IPlayStore
     /// <paramref name="limit"/>; only the ID, title, next action and review time are read.
     /// </summary>
     Task<List<NextActionDto>> NextActionsAsync(int limit, CancellationToken ct);
+    /// <summary>A Play's log, oldest first.</summary>
+    Task<List<PlayNote>> NotesAsync(Guid playId, CancellationToken ct);
+    /// <summary>The owner's log entry written for <paramref name="requestId"/>, if any.</summary>
+    Task<PlayNote?> NoteAsync(Guid requestId, CancellationToken ct);
+    void Add(PlayNote note);
+    /// <summary>Whether any order linked to the Play has a retained fill.</summary>
+    Task<bool> HasLinkedFillsAsync(Guid playId, CancellationToken ct);
     /// <summary>Entries referenced by linked orders or manual facts; their price, share and existence are fixed.</summary>
     Task<IReadOnlySet<string>> FilledEntryIdsAsync(Guid playId, CancellationToken ct);
     /// <summary>

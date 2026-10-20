@@ -34,6 +34,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<ManualExecution> ManualExecutions => Set<ManualExecution>();
     public DbSet<ManualExecutionHistory> ManualExecutionHistory => Set<ManualExecutionHistory>();
     public DbSet<PlayReviewRevision> ReviewRevisions => Set<PlayReviewRevision>();
+    public DbSet<PlayNote> PlayNotes => Set<PlayNote>();
     public DbSet<DiaryRequest> DiaryRequests => Set<DiaryRequest>();
     public DbSet<SizingSettings> SizingSettings => Set<SizingSettings>();
 

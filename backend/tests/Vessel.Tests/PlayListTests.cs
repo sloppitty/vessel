@@ -48,6 +48,12 @@ public sealed class PlayListPostgresTests
         return play;
     }
 
+    private static Play Completed(Play play, int minute)
+    {
+        play.CompleteReview(T0.AddMinutes(minute));
+        return play;
+    }
+
     private static Play Cancelled(Account account, string contract, int minute, string title, ReviewAnswers? answers = null)
     {
         var play = Planned(account, contract, minute, title: title);
@@ -74,7 +80,7 @@ public sealed class PlayListPostgresTests
             ["o1"] = Open(Planned(first, "SOL", 50, title: "Trend"), 51),
             ["c1"] = Closed(first, "BTC", 60, "No review"),
             ["c2"] = Closed(first, "ETH", 70, "Blank review", Whitespace, new ReviewAnswers(null, "  ", "\n", " ")),
-            ["c3"] = Closed(second, "GOLD", 80, "Zero width", "\u200B"),
+            ["c3"] = Completed(Closed(second, "GOLD", 80, "Zero width", "\u200B"), 80),
             ["x1"] = Cancelled(first, "BTC", 90, "Answered", new ReviewAnswers("not-applicable")),
             ["x2"] = Cancelled(second, "OIL", 100, "Reviewed earlier"),
             ["r1"] = Play.Retrospective(Guid.NewGuid(), first, new PerpetualInstrument("hyperliquid", "DOGE"),
@@ -85,7 +91,7 @@ public sealed class PlayListPostgresTests
         {
             db.Portfolios.Add(swing); db.Accounts.AddRange(first, second, disabled); db.Plays.AddRange(plays.Values);
             await db.SaveChangesAsync();
-            // A Play once reviewed counts as reviewed even without current text, as the Plays page defines it.
+            // A review time alone no longer completes a review (decision 3): only an explicit completion does.
             await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE plays SET \"ReviewedAtUtc\" = {T0} WHERE \"Id\" = {plays["x2"].Id}");
         }
         var foreign = new Account(Guid.NewGuid(), otherOwner, "hyperliquid", "Foreign");
@@ -115,16 +121,17 @@ public sealed class PlayListPostgresTests
 
         Assert.Equal(["d2", "d1"], await View("drafts"));
         Assert.Equal(["o1", "p2", "p1"], await View("progress"));
-        Assert.Equal(["c2", "c1", "r1"], await View("review"));
-        Assert.Equal(["x2", "x1", "c3"], await View("reviewed"));
+        // Reviewed is an explicit completion: Complete review (c3) or saved answers (x1). Text and review times never count.
+        Assert.Equal(["x2", "c2", "c1", "r1"], await View("review"));
+        Assert.Equal(["x1", "c3"], await View("reviewed"));
         Assert.Equal(["c3", "c2", "c1", "r1"], await View("closed"));
         Assert.Equal(["x2", "x1"], await View("cancelled"));
         Assert.Equal(["r1", "x2", "x1", "c3", "c2", "c1", "o1", "p2", "p1", "d2", "d1"], await View("all"));
         Assert.Equal(await View("all"), await View(null));
 
         var list = await service.ListAsync("review", null, null, null, null, default);
-        Assert.Equal(("review", 1, 25, 3), (list.View, list.Page, list.PageSize, list.TotalCount));
-        var c2 = list.Plays[0];
+        Assert.Equal(("review", 1, 25, 4), (list.View, list.Page, list.PageSize, list.TotalCount));
+        var c2 = list.Plays.Single(p => names[p.Id] == "c2");
         Assert.False(c2.HasReview); Assert.Null(c2.ReviewedAtUtc);
         var detail = await service.GetAsync(c2.Id, default);
         Assert.Equal(detail.Summary, c2);
@@ -134,10 +141,10 @@ public sealed class PlayListPostgresTests
         foreach (var (key, id) in seeded.Plays.Where(p => p.Key != "hidden"))
             Assert.Equal((await service.GetAsync(id, default)).Summary, (await service.ListAsync("all", null, null, null, "100", default)).Plays.Single(p => p.Id == id));
 
-        Assert.Equal(new PlayCountsDto(2, 3, 3, 3, 4, 2, 11), await service.CountsAsync(null, "all", default));
+        Assert.Equal(new PlayCountsDto(2, 3, 4, 2, 4, 2, 11), await service.CountsAsync(null, "all", default));
         // The unscoped Plays page also lists Plays on disabled accounts; Overview scopes never do.
         Assert.Equal(["hidden", "d2", "d1"], await View("drafts", scope: null));
-        Assert.Equal(new PlayCountsDto(3, 3, 3, 3, 4, 2, 12), await service.CountsAsync(null, null, default));
+        Assert.Equal(new PlayCountsDto(3, 3, 4, 2, 4, 2, 12), await service.CountsAsync(null, null, default));
     }
 
     [PostgresFact]
@@ -178,7 +185,8 @@ public sealed class PlayListPostgresTests
         Assert.Equal(["r1", "x1", "c2", "c1", "o1", "p1", "d1"], await All($"portfolio:{seeded.Swing.Id}"));
         Assert.Equal(await All($"portfolio:{seeded.Swing.Id}"), await All($"account:{seeded.First.Id}"));
         Assert.Empty(await All($"account:{seeded.Disabled.Id}"));
-        Assert.Equal(new PlayCountsDto(1, 1, 0, 2, 1, 1, 4), await service.CountsAsync(null, "unassigned", default));
+        // Unassigned holds x2 (a review time, not completed) and c3 (completed).
+        Assert.Equal(new PlayCountsDto(1, 1, 1, 1, 1, 1, 4), await service.CountsAsync(null, "unassigned", default));
         Assert.Equal(new PlayCountsDto(0, 0, 0, 0, 0, 0, 0), await service.CountsAsync(null, $"account:{seeded.Disabled.Id}", default));
         foreach (var scope in new[] { $"portfolio:{Guid.NewGuid()}", $"account:{Guid.NewGuid()}" })
         {
@@ -252,8 +260,8 @@ public sealed class PlayListPostgresTests
         var all = await service.ListAsync("all", null, "all", "3", "100", default);
         Assert.Equal((3, 11), (all.Page, all.Plays.Count));
         Assert.Equal(211, all.TotalCount);
-        Assert.Equal(new PlayCountsDto(202, 3, 3, 3, 4, 2, 211), await service.CountsAsync(null, "all", default));
-        Assert.Equal(new PlayCountsDto(203, 3, 3, 3, 4, 2, 212), await service.CountsAsync(null, null, default));
+        Assert.Equal(new PlayCountsDto(202, 3, 4, 2, 4, 2, 211), await service.CountsAsync(null, "all", default));
+        Assert.Equal(new PlayCountsDto(203, 3, 4, 2, 4, 2, 212), await service.CountsAsync(null, null, default));
     }
 
     [PostgresFact]
@@ -294,9 +302,11 @@ public sealed class PlayListPostgresTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode); Assert.True(response.Headers.CacheControl?.NoStore);
         var list = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(["plays", "view", "page", "pageSize", "totalCount"], list.EnumerateObject().Select(p => p.Name));
-        Assert.Equal(("reviewed", 1, 2, 2), (list.GetProperty("view").GetString(), list.GetProperty("page").GetInt32(),
+        Assert.Equal(("reviewed", 1, 2, 1), (list.GetProperty("view").GetString(), list.GetProperty("page").GetInt32(),
             list.GetProperty("pageSize").GetInt32(), list.GetProperty("totalCount").GetInt32()));
-        Assert.True(list.GetProperty("plays")[0].GetProperty("hasReview").GetBoolean() || list.GetProperty("plays")[0].GetProperty("reviewedAtUtc").ValueKind != JsonValueKind.Null);
+        // Reviewed is the explicit completion, named on the summary with its time.
+        Assert.Equal("completed", list.GetProperty("plays")[0].GetProperty("reviewCompletion").GetString());
+        Assert.NotEqual(JsonValueKind.Null, list.GetProperty("plays")[0].GetProperty("reviewCompletedAtUtc").ValueKind);
         using var counts = await client.GetAsync("/api/plays/counts?q=breakout&scope=all");
         Assert.True(counts.Headers.CacheControl?.NoStore);
         var countJson = await counts.Content.ReadFromJsonAsync<JsonElement>();

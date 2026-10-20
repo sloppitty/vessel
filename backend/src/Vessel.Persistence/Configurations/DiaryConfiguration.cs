@@ -16,6 +16,24 @@ internal sealed class PlayReviewRevisionConfiguration : IEntityTypeConfiguration
         builder.HasIndex(x => new { x.OwnerId, x.PlayId, x.Number }).IsUnique();
         builder.Property(x => x.StructuredReview).HasColumnType("jsonb");
         builder.Property(x => x.Review).HasMaxLength(Play.MaxReviewLength);
+        builder.Property(x => x.Action).HasMaxLength(16).HasDefaultValue(ReviewActions.Edited);
+    }
+}
+
+// The append-only in-trade log (phase 1, 1.2). Entries go with their Draft when it is deleted, as review history does.
+internal sealed class PlayNoteConfiguration : IEntityTypeConfiguration<PlayNote>
+{
+    public void Configure(EntityTypeBuilder<PlayNote> builder)
+    {
+        builder.ToTable("play_notes", table => table.HasCheckConstraint("CK_play_notes_state",
+            "\"State\" IS NULL OR \"State\" IN ('calm','rushed','fomo','tired','after-loss')"));
+        builder.HasKey(x => x.Id);
+        builder.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })
+            .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Cascade);
+        builder.HasIndex(x => new { x.OwnerId, x.PlayId, x.CreatedAtUtc });
+        builder.HasIndex(x => new { x.OwnerId, x.RequestId }).IsUnique();
+        builder.Property(x => x.Text).HasMaxLength(PlayNote.MaxTextLength);
+        builder.Property(x => x.State).HasMaxLength(16);
     }
 }
 

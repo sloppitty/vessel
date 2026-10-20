@@ -54,3 +54,19 @@ describe('pre-flight in history (phase 1, 1.5)', () => {
     expect(screen.getByText('Pre-flight not recorded.')).toBeInTheDocument()
   })
 })
+
+describe('review completion in history (phase 1, 1.2)', () => {
+  it('names completion, Review again and No review needed with their time', async () => {
+    const review = (number: number, action: 'edited' | 'completed' | 'reopened' | 'not-needed', minute: string) => ({ number, action,
+      occurredAtUtc: `2026-10-15T12:${minute}:00Z`, review: 'Held the plan.', structuredReview: { adherence: null, mistakeTag: null, lesson: '', nextAction: '' } })
+    const recorded: PlayHistory = { ...history('Planned'), reviews: [review(1, 'edited', '00'), review(2, 'completed', '01'),
+      review(3, 'reopened', '02'), review(4, 'not-needed', '03')] }
+    render(<HistoryDialog api={{ playHistory: vi.fn().mockResolvedValue(recorded) } as unknown as WorkspaceApi} playId="one" onClose={vi.fn()} />)
+    expect(await screen.findByText('Review revision 1')).toBeInTheDocument()
+    expect(screen.getByText('Review revision 2 · review completed')).toBeInTheDocument()
+    expect(screen.getByText('Review revision 3 · reviewed again')).toBeInTheDocument()
+    expect(screen.getByText('Review revision 4 · no review needed')).toBeInTheDocument()
+    // The text is listed with the edit and the completion, not again with the actions that leave it as it was.
+    expect(screen.getAllByText('Held the plan.')).toHaveLength(2)
+  })
+})

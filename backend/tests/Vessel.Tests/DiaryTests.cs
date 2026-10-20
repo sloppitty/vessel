@@ -1,7 +1,10 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Vessel.Application.Activity;
 using Vessel.Application.Common;
 using Vessel.Application.Plays;
@@ -404,6 +407,149 @@ public sealed class DiaryPostgresTests
         Assert.Equal(new[] { 11, 10, 9, 8, 7, 6, 5, 4, 2, 1 }.Select(n => (ids[n], $"Play {n}", $"Wait for the retest {n}")),
             actions.Select(a => (a.PlayId, a.Title, a.NextAction)));
         Assert.Equal(At.AddHours(11), actions[0].ReviewedAtUtc);
+    }
+
+    [PostgresFact]
+    public async Task Needs_review_holds_until_Complete_review_and_the_in_trade_log_never_moves_a_Play()
+    {
+        // Phase 1.2 (D-14, decision 3), end to end: an in-trade note in the Review box and a log entry while Open, then a close.
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var account = await Account(database, owner);
+        await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
+        using var client = factory.AuthorizedClient();
+        var planned = await Planned(client, account.Id);
+        var open = (await Add(client, planned, Fact(planned.Summary.Version, "entry", "1", "100", 0))).Play;
+        var note = await client.PutAsJsonAsync($"/api/plays/{open.Summary.Id}", new UpdatePlayRequest(open.Summary.Version, account.Id, "BTC",
+            "manual", open.Summary.Title, open.Plan, open.Drawings, "TP1 taken; reassess tomorrow"));
+        note.EnsureSuccessStatusCode();
+        var noted = (await note.Content.ReadFromJsonAsync<PlayDto>())!;
+        var logged = await client.PostAsJsonAsync($"/api/plays/{open.Summary.Id}/notes", new AddPlayNoteRequest(Guid.NewGuid(), "Felt rushed adding.", "fomo"));
+        logged.EnsureSuccessStatusCode();
+        var closed = (await Add(client, noted, Fact(noted.Summary.Version, "exit", "1", "110", 1))).Play;
+        Assert.Equal(("closed", null), (closed.Summary.Status, closed.Summary.ReviewCompletion));
+
+        async Task<string> Views() =>
+            $"review: {string.Join(",", (await client.GetFromJsonAsync<PlayListDto>("/api/plays?view=review"))!.Plays.Select(p => p.Id))}; " +
+            $"reviewed: {string.Join(",", (await client.GetFromJsonAsync<PlayListDto>("/api/plays?view=reviewed"))!.Plays.Select(p => p.Id))}";
+        var needsReview = $"review: {closed.Summary.Id}; reviewed: ";
+        var reviewed = $"review: ; reviewed: {closed.Summary.Id}";
+        async Task<int> Reviewed()
+        {
+            await using var read = database.Context(owner);
+            return (await new ReviewService(new ReviewStore(read, new SizingStore(read, TestUnitOfWork.For(read))), TimeProvider.System)
+                .GetAsync(new(Period: "all"), default)).Metrics.Reviewed;
+        }
+        // Before, the note made it "Reviewed" on close. Now it needs review until the owner completes it.
+        Assert.Equal(needsReview, await Views());
+        Assert.Equal(0, await Reviewed());
+        Assert.Equal(1, (await client.GetFromJsonAsync<PlayCountsDto>("/api/plays/counts"))!.Review);
+
+        var stale = await client.PostAsJsonAsync($"/api/plays/{closed.Summary.Id}/review/complete", new ReviewCompletionRequest(closed.Summary.Version - 1));
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        var completed = await client.PostAsJsonAsync($"/api/plays/{closed.Summary.Id}/review/complete", new ReviewCompletionRequest(closed.Summary.Version));
+        completed.EnsureSuccessStatusCode();
+        var done = (await completed.Content.ReadFromJsonAsync<PlayDto>())!;
+        Assert.Equal(("completed", "TP1 taken; reassess tomorrow"), (done.Summary.ReviewCompletion, done.Review));
+        Assert.Equal(reviewed, await Views());
+        Assert.Equal(1, await Reviewed());
+
+        var again = await client.PostAsJsonAsync($"/api/plays/{closed.Summary.Id}/review/reopen", new ReviewCompletionRequest(done.Summary.Version));
+        again.EnsureSuccessStatusCode();
+        Assert.Null((await again.Content.ReadFromJsonAsync<PlayDto>())!.Summary.ReviewCompletion);
+        Assert.Equal(needsReview, await Views());
+        var history = (await client.GetFromJsonAsync<PlayHistoryDto>($"/api/plays/{closed.Summary.Id}/history"))!;
+        Assert.Equal(["edited", "completed", "reopened"], history.Reviews!.Select(r => r.Action));
+
+        // The log is the owner's own record of the trade: kept in order, never a review.
+        var log = (await client.GetFromJsonAsync<List<PlayNoteDto>>($"/api/plays/{closed.Summary.Id}/notes"))!;
+        Assert.Equal(("Felt rushed adding.", "fomo"), (Assert.Single(log).Text, log[0].State));
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/plays/{closed.Summary.Id}/notes",
+            new AddPlayNoteRequest(Guid.NewGuid(), "x", "anxious"))).StatusCode);
+    }
+
+    [PostgresFact]
+    public async Task A_cancellation_that_never_filled_leaves_the_queue_in_one_step_and_one_with_a_linked_fill_cannot()
+    {
+        // Phase 1.2 acceptance: No review needed moves a no-fill cancellation to Reviewed; the store refuses it for a linked fill.
+        await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
+        var account = await Account(database, owner, "hyperliquid");
+        Play Cancelled(VesselDbContext seed)
+        {
+            var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
+            var (planned, revision) = play.MarkPlanned(At);
+            seed.Plays.Add(play); seed.StatusChanges.AddRange(planned, play.Cancel(CancelReason.Invalidated, null, At)); seed.PlanRevisions.Add(revision);
+            return play;
+        }
+        Play quiet, filled;
+        await using (var seed = database.Context(owner))
+        {
+            quiet = Cancelled(seed); filled = Cancelled(seed);
+            var order = Order(account, "late", "buy", 1);
+            seed.Orders.Add(order); seed.Fills.Add(Imported(account, "late-fill", "late", "buy", "open", 1, 100, 0));
+            seed.OrderLinks.Add(new(filled, order, OrderLinkRole.Entry, "entry-1", null, OrderLinkState.Linked, OrderLinkSource.Owner, At));
+            await seed.SaveChangesAsync();
+        }
+        await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
+        using var client = factory.AuthorizedClient();
+        async Task<string> Ids(string view) =>
+            string.Join(",", (await client.GetFromJsonAsync<PlayListDto>($"/api/plays?view={view}"))!.Plays.Select(p => p.Id).Order());
+        Assert.Equal(string.Join(",", new[] { quiet.Id, filled.Id }.Order()), await Ids("review"));
+
+        var refused = await client.PostAsJsonAsync($"/api/plays/{filled.Id}/review/not-needed", new ReviewCompletionRequest(filled.Version));
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        var marked = await client.PostAsJsonAsync($"/api/plays/{quiet.Id}/review/not-needed", new ReviewCompletionRequest(quiet.Version));
+        marked.EnsureSuccessStatusCode();
+        Assert.Equal("not-needed", (await marked.Content.ReadFromJsonAsync<PlayDto>())!.Summary.ReviewCompletion);
+        Assert.Equal((filled.Id.ToString(), quiet.Id.ToString()), (await Ids("review"), await Ids("reviewed")));
+    }
+
+    [PostgresFact]
+    public async Task Migration_keeps_today_s_Reviewed_Plays_as_legacy_completions_and_reclassifies_nothing_else()
+    {
+        // Decision 3: nothing is guessed. The upgrade keeps exactly the Plays the old Reviewed view listed.
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var account = await Account(database, owner);
+        var at = DateTimeOffset.Parse("2026-10-01T10:00:00Z", CultureInfo.InvariantCulture);
+        Play Planned(string title)
+        {
+            var play = TestPlays.Create(account, new PerpetualInstrument("manual", "BTC"));
+            play.Annotate(title, "{}", "", at);
+            play.MarkPlanned(at);
+            return play;
+        }
+        Play Closed(string title)
+        {
+            var play = Planned(title);
+            play.MarkOpen("Filled.", at.AddMinutes(1));
+            play.MarkClosed("Exited.", at.AddHours(1));
+            return play;
+        }
+        var text = Closed("text"); text.Annotate("text", "{}", "Followed the plan", at.AddHours(2));
+        var answers = Planned("answers"); answers.Cancel(CancelReason.Missed, null, at.AddMinutes(5));
+        answers.Annotate("answers", "{}", "", at.AddHours(3), new ReviewAnswers(NextAction: "Wait for the retest"));
+        var blank = Closed("blank");
+        var space = Closed("space"); space.Annotate("space", "{}", "\u00A0 \t", at.AddHours(2));
+        var open = Planned("open"); open.MarkOpen("Filled.", at.AddMinutes(1)); open.Annotate("open", "{}", "TP1 taken", at.AddMinutes(30));
+        await using (var db = database.Context(owner))
+        {
+            db.Plays.AddRange(text, answers, blank, space, open);
+            await db.SaveChangesAsync();
+        }
+        // As an upgrade runs it: from the previous migration forward.
+        await using (var db = database.Context(owner))
+        {
+            var migrator = db.GetService<IMigrator>();
+            await migrator.MigrateAsync("20261020085301_PlanPreflight");
+            await migrator.MigrateAsync();
+        }
+        await using var verify = database.Context(owner);
+        var rows = await verify.Plays.ToDictionaryAsync(p => p.Title, p => (p.ReviewCompletion, p.ReviewCompletedAtUtc));
+        Assert.Equal((ReviewCompletionKind.Legacy, at.AddHours(2)), rows["text"]);
+        Assert.Equal((ReviewCompletionKind.Legacy, at.AddHours(3)), rows["answers"]);
+        Assert.Equal(((ReviewCompletionKind?)null, (DateTimeOffset?)null), rows["blank"]);
+        Assert.Equal(((ReviewCompletionKind?)null, (DateTimeOffset?)null), rows["space"]);
+        Assert.Equal(((ReviewCompletionKind?)null, (DateTimeOffset?)null), rows["open"]);
+        Assert.Equal("TP1 taken", (await verify.Plays.SingleAsync(p => p.Title == "open")).Review);
     }
 
     [PostgresFact]

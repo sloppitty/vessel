@@ -127,8 +127,9 @@ public sealed class OrderIdentityTests
         await using var db = database.Context(owner);
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Main");
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
-        db.Accounts.Add(account); db.Plays.Add(play);
+        db.Accounts.Add(account);
         await db.SaveChangesAsync();
+        await LegacyPlayRows.InsertAsync(db, play);
         // Historical columns: "OrderId" before the change.
         switch (table)
         {

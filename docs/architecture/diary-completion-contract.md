@@ -133,7 +133,10 @@ plain strings that preserve LF and CR line breaks; other controls are rejected.
 Empty defaults mean unanswered, not failure. Existing free-text `review` stays.
 
 Summary gains `origin: planned|retrospective` and nullable `reviewedAtUtc`.
-`hasReview` includes nonempty structured answers or existing free text.
+`hasReview` includes nonempty structured answers or existing free text. Since
+October 20, 2026 (Phase 1.2), having a review no longer makes a Play
+"reviewed": completion is explicit (`reviewCompletion`). See the review
+completion section of `play-lifecycle.md`.
 Only terminal records accept nonempty structured answers. Retrospective
 adherence is null or `not-applicable`, never an invented process assessment.
 All changes to free-text or structured review append a review revision without

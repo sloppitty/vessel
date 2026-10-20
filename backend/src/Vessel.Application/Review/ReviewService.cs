@@ -92,7 +92,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             .Select(e => new ReviewPlayDto(e.Facts.Play.Id, e.Facts.Play.Title, e.Facts.Play.AccountId,
                 accounts[e.Facts.Play.AccountId].Name, e.Facts.Play.VenueId, e.Facts.Play.ContractId!, e.ClosedAt,
                 ExactDecimal.Format(e.Result!.NetResult), ExactDecimal.Format(e.Result.ReturnPercent), ExactDecimal.Format(e.Result.RMultiple),
-                e.Facts.Play.HasReview, e.Facts.Play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned",
+                e.Facts.Play.ReviewCompletion is not null, e.Facts.Play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned",
                 e.Facts.ManualSource ? "manual" : "imported")
             {
                 Local = e.Local!.ToDto(e.Result.NetResult), PlannedAfterExecution = PlayReceipts.PlannedAfterExecution(e.Facts),
@@ -277,7 +277,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             ExactDecimal.Format(Average(wins.Select(o => o.NetResult))), ExactDecimal.Format(Average(losses.Select(o => -o.NetResult))),
             ExactDecimal.Format(Ratio(running, ExactAmount.From(plays.Count))),
             ExactDecimal.Format(Average(risks.Select(o => o.RMultiple!.Value))), risks.Count,
-            plays.Count(p => p.Facts.Play.HasReview), plays.Count == 0 ? null : ExactDecimal.Format(drawdown),
+            plays.Count(p => p.Facts.Play.ReviewCompletion is not null), plays.Count == 0 ? null : ExactDecimal.Format(drawdown),
             maxWins, maxLosses)
         {
             SignDiffers = plays.Count(p => p.Local!.SignDiffers(p.Result!.NetResult)),

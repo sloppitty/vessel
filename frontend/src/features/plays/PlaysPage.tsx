@@ -29,6 +29,7 @@ import { useSizing } from './useSizing'
 import { noFilledEntries, planIssues, planIssueSummary } from './planChecks'
 import { executionFills, manualLedgerFills, useManualLedger } from './entry-fills'
 import { RetrospectiveReceipt, ReviewReceipt } from './Receipt'
+import { PlayLog, ReviewCompletionBar, type ReviewAction } from './ReviewCompletion'
 import { noEntryFills, type EntryFills } from './position-risk-summary'
 import { planNumberIssues, planNumberSummary, storedPlanText, StoredPlanTextContext, type StoredPlanText } from './stored-plan-text'
 import { availableOf, defaultSizeUnits, marginOverBudget, overBudgetMessage, type SizeUnits } from './sizing'
@@ -353,6 +354,27 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     }
   }
 
+  /** Complete review, Review again or No review needed, on the version the owner sees (phase 1, 1.2). */
+  async function reviewAction(action: ReviewAction) {
+    const state = latest.current.saved
+    if (!state) return
+    const finish = beginWork('status')
+    if (!finish) return
+    const started = epoch.current
+    try {
+      setError(null)
+      const send = action === 'complete' ? api.completeReview : action === 'reopen' ? api.reopenReview : api.noReviewNeeded
+      const play = await send(state.summary.id, state.summary.version)
+      if (started !== epoch.current) return
+      acceptStoredPlay(play)
+    } catch (cause) {
+      if (started !== epoch.current) return
+      setError(errorMessage(cause, 'The review could not be updated. Try again.'))
+    } finally {
+      finish()
+    }
+  }
+
   async function remove() {
     const started = epoch.current
     if (!saved) return
@@ -522,6 +544,9 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       incidents={saved ? playIncidents.get(saved.summary.id) : undefined} stopEvidence={manual ? undefined : stopEvidence}
       evidenceImages={evidenceImages} reviewReceipt={reviewReceipt} journalSave={journalSave} retrospectiveReceipt={retrospectiveReceipt}
       onPreflight={setPreflight} nextActions={nextActions?.api === api ? nextActions.actions : null} onOpenPlay={id => { void open(id) }}
+      log={saved && !retrospective ? <PlayLog key={saved.summary.id} api={api} playId={saved.summary.id} /> : undefined}
+      reviewCompletion={saved ? <ReviewCompletionBar summary={saved.summary} dirty={dirty} busy={pending}
+        filled={(playReceipt?.fillCount ?? 0) > 0} onAction={action => { void reviewAction(action) }} /> : undefined}
       plannedAfterExecution={playReceipt?.plannedAfterExecution === true}
       execution={manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
         enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}

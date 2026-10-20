@@ -40,6 +40,16 @@ public static class PlayEndpoints
         api.MapPost("/{id:guid}/status", async (Guid id, ChangePlayStatusRequest request, PlayService service, CancellationToken ct) =>
             Results.Ok(await service.ChangeStatusAsync(id, request, ct)));
         api.MapGet("/next-actions", async (PlayService service, CancellationToken ct) => Results.Ok(await service.NextActionsAsync(ct)));
+        // Review completion and the in-trade log (phase 1, 1.2).
+        api.MapPost("/{id:guid}/review/complete", async (Guid id, ReviewCompletionRequest request, PlayService service, CancellationToken ct) =>
+            Results.Ok(await service.CompleteReviewAsync(id, request, ct)));
+        api.MapPost("/{id:guid}/review/reopen", async (Guid id, ReviewCompletionRequest request, PlayService service, CancellationToken ct) =>
+            Results.Ok(await service.ReopenReviewAsync(id, request, ct)));
+        api.MapPost("/{id:guid}/review/not-needed", async (Guid id, ReviewCompletionRequest request, PlayService service, CancellationToken ct) =>
+            Results.Ok(await service.NoReviewNeededAsync(id, request, ct)));
+        api.MapGet("/{id:guid}/notes", async (Guid id, PlayService service, CancellationToken ct) => Results.Ok(await service.NotesAsync(id, ct)));
+        api.MapPost("/{id:guid}/notes", async (Guid id, AddPlayNoteRequest request, PlayService service, CancellationToken ct) =>
+            Results.Ok(await service.AddNoteAsync(id, request, ct)));
         api.MapGet("/{id:guid}/history", async (Guid id, PlayService service, CancellationToken ct) =>
             Results.Ok(await service.HistoryAsync(id, ct)));
         api.MapGet("/{id:guid}/execution", async (Guid id, PlayExecutionService service, MonitorExecutionView monitor, CancellationToken ct) =>

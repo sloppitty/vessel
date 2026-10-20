@@ -154,8 +154,9 @@ public sealed class MonitorDiscrepancyPostgresTests
         var f = new DiscrepancyFixture();
         var fill = f.Store.Fills[0];
         await using var scope = database.Scope(f);
-        scope.Db.Add(f.Account); scope.Db.Add(f.Play);
+        scope.Db.Add(f.Account);
         await scope.Db.SaveChangesAsync();
+        await LegacyPlayRows.InsertAsync(scope.Db, f.Play);
         // Imported facts in this historical schema's columns ("OrderId" before the order identity change).
         await scope.Db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO imported_fills ("Id", "OwnerId", "AccountId", "ContractId", "SourceFillId", "Side", "Direction", "PositionEffect",
@@ -168,7 +169,7 @@ public sealed class MonitorDiscrepancyPostgresTests
         await scope.Db.GetService<IMigrator>().MigrateAsync("20261016110400_PlayDiscrepancyUnverifiable");
         Assert.Empty(await scope.Db.Set<PlayDiscrepancy>().ToListAsync());
         Assert.Equal(fill.Quantity, await scope.Db.Database.SqlQueryRaw<decimal>("""SELECT "Quantity" AS "Value" FROM imported_fills""").SingleAsync());
-        Assert.Equal(f.Play.Status, (await scope.Db.Plays.SingleAsync()).Status);
+        Assert.Equal(f.Play.Status, await scope.Db.Plays.Select(p => p.Status).SingleAsync());
         await scope.Db.GetService<IMigrator>().MigrateAsync("20261016174509_FundingPayments");
         // The order identity change has no backfill: it refuses a database that still holds imported facts.
         Assert.Equal("20261017091636_OrderIdentity", (await scope.Db.Database.GetPendingMigrationsAsync()).First());

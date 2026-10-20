@@ -154,6 +154,65 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         return ToDto(play);
     }, ct), ct);
 
+    /// <summary>At most this many log entries are kept per Play.</summary>
+    public const int MaxNotes = 500;
+
+    /// <summary>Complete review: the review of an ended Play is complete, whether or not its text changed (decision 3).</summary>
+    public Task<PlayDto> CompleteReviewAsync(Guid id, ReviewCompletionRequest request, CancellationToken ct) =>
+        ReviewActionAsync(id, request, play => Task.FromResult(play.CompleteReview(time.GetUtcNow())), ct);
+
+    /// <summary>Review again: the completion is cleared and the Play needs review; nothing it holds is lost.</summary>
+    public Task<PlayDto> ReopenReviewAsync(Guid id, ReviewCompletionRequest request, CancellationToken ct) =>
+        ReviewActionAsync(id, request, play => Task.FromResult(play.ReopenReview(time.GetUtcNow())), ct);
+
+    /// <summary>No review needed, for a Cancelled Play with no linked fill.</summary>
+    public Task<PlayDto> NoReviewNeededAsync(Guid id, ReviewCompletionRequest request, CancellationToken ct) =>
+        ReviewActionAsync(id, request, async play =>
+        {
+            if (await store.HasLinkedFillsAsync(play.Id, ct))
+                throw new ProblemException(409, "This Play has linked fills, so its review is needed.");
+            return play.MarkNoReviewNeeded(time.GetUtcNow());
+        }, ct);
+
+    private Task<PlayDto> ReviewActionAsync(Guid id, ReviewCompletionRequest request, Func<Play, Task<PlayReviewRevision>> action,
+        CancellationToken ct) => unitOfWork.ExecuteAsync(() => store.WithPlayLockAsync(id, async () =>
+    {
+        var play = await Find(id, ct);
+        RequireVersion(play, request.ExpectedVersion);
+        store.Add(await action(play));
+        return ToDto(play);
+    }, ct), ct);
+
+    public async Task<IReadOnlyList<PlayNoteDto>> NotesAsync(Guid id, CancellationToken ct)
+    {
+        var play = await Find(id, ct);
+        return (await store.NotesAsync(play.Id, ct)).Select(NoteDto).ToList();
+    }
+
+    /// <summary>
+    /// Appends one log entry to a saved Play. It does not take the Play's version: an entry changes nothing the Play holds,
+    /// so it never conflicts with plan or review edits. A retry with the same request ID returns the log unchanged.
+    /// </summary>
+    public Task<IReadOnlyList<PlayNoteDto>> AddNoteAsync(Guid id, AddPlayNoteRequest request, CancellationToken ct) =>
+        unitOfWork.ExecuteAsync(() => store.WithPlayLockAsync(id, async () =>
+    {
+        var play = await Find(id, ct);
+        if (await store.NoteAsync(request.RequestId, ct) is { } earlier)
+        {
+            if (earlier.PlayId != play.Id || earlier.Text != (request.Text ?? "").Trim() || earlier.State != request.State)
+                throw new ProblemException(409, "This request ID was already used for another log entry.");
+        }
+        else
+        {
+            if ((await store.NotesAsync(play.Id, ct)).Count >= MaxNotes) throw new ProblemException(409, $"A Play keeps at most {MaxNotes} log entries.");
+            store.Add(new PlayNote(play, request.RequestId, request.Text ?? "", request.State, time.GetUtcNow()));
+            await store.SaveAsync(ct);
+        }
+        return (IReadOnlyList<PlayNoteDto>)(await store.NotesAsync(play.Id, ct)).Select(NoteDto).ToList();
+    }, ct), ct);
+
+    private static PlayNoteDto NoteDto(PlayNote note) => new(note.Id, note.Text, note.State, note.CreatedAtUtc);
+
     /// <summary>At most this many recent next actions are offered at planning (phase 1, 1.5).</summary>
     public const int MaxNextActions = 10;
 
@@ -170,7 +229,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             changes.Select(c => new StatusChangeDto(StatusName(c.From), StatusName(c.To), c.Reason is { } reason ? ReasonName(reason) : null,
                 c.Note, c.OccurredAtUtc, c.Source == StatusChangeSource.Venue ? "venue" : "owner")).ToList(),
             reviews.Select(r => new ReviewRevisionDto(r.Number, r.OccurredAtUtc, r.Review,
-                JsonSerializer.Deserialize<ReviewAnswers>(r.StructuredReview)!)).ToList());
+                JsonSerializer.Deserialize<ReviewAnswers>(r.StructuredReview)!) { Action = r.Action }).ToList());
     }
 
     public async Task DeleteAsync(Guid id, CancellationToken ct)
@@ -280,12 +339,24 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     private static PlaySummaryDto Summary(Play play, string direction) => new(play.Id, play.Title, StatusName(play.Status), play.AccountId, play.VenueId,
         play.ContractId, SourceName(play.InstrumentSource), direction, play.PlanRevision, play.Version,
         play.CancelReason is { } reason ? ReasonName(reason) : null, play.CreatedAtUtc, play.UpdatedAtUtc, play.PlannedAtUtc, play.EndedAtUtc,
-        play.HasReview, play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned", play.ReviewedAtUtc);
+        play.HasReview, play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned", play.ReviewedAtUtc)
+    {
+        ReviewCompletion = CompletionName(play.ReviewCompletion), ReviewCompletedAtUtc = play.ReviewCompletedAtUtc,
+    };
 
     private static PlaySummaryDto Summary(PlayListRow play) => new(play.Id, play.Title, StatusName(play.Status), play.AccountId, play.VenueId,
         play.ContractId, SourceName(play.InstrumentSource), play.Direction, play.PlanRevision, play.Version,
         play.CancelReason is { } reason ? ReasonName(reason) : null, play.CreatedAtUtc, play.UpdatedAtUtc, play.PlannedAtUtc, play.EndedAtUtc,
-        play.HasReview, play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned", play.ReviewedAtUtc);
+        play.HasReview, play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned", play.ReviewedAtUtc)
+    {
+        ReviewCompletion = CompletionName(play.ReviewCompletion), ReviewCompletedAtUtc = play.ReviewCompletedAtUtc,
+    };
+
+    public static string? CompletionName(ReviewCompletionKind? kind) => kind switch
+    {
+        ReviewCompletionKind.Completed => "completed", ReviewCompletionKind.NotNeeded => "not-needed", ReviewCompletionKind.Legacy => "legacy",
+        _ => null,
+    };
 
     public static PlayDto ToDto(Play play)
     {

@@ -43,8 +43,8 @@ public sealed class MultipleStopsMigrationTests
         // The order identity change refuses retained links, so this data migration is checked just before it.
         await db.GetService<IMigrator>().MigrateAsync(TestOrders.BeforeOrderIdentity);
 
-        var stored = await db.Plays.SingleAsync();
-        var plan = PlayDocuments.Normalize(PlayDocuments.Read(stored.Plan));
+        // Only the plan: later migrations add Play columns this schema does not have yet.
+        var plan = PlayDocuments.Normalize(PlayDocuments.Read(await db.Plays.Select(p => p.Plan).SingleAsync()));
         Assert.Equal([new PlanExit("stop-1", "percent", "5", "100")], plan.Entries[0].Stops);
         Assert.Equal([new PlanExit("stop-2", "price", "", "100")], plan.Entries[1].Stops);
         Assert.Equal("110", plan.Entries[0].Targets.Single().Value);

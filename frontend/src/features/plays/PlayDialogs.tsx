@@ -103,6 +103,8 @@ export function DeleteDialog({ pending, error, onDelete, onClose }: {
   </Dialog>
 }
 
+const reviewActionLabels = { completed: 'review completed', reopened: 'reviewed again', 'not-needed': 'no review needed' } as const
+
 const when = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
 type HistoryItem = { at: string; key: string; title: string; detail: string[] }
@@ -128,8 +130,10 @@ export function HistoryDialog({ api, playId, onClose }: { api: WorkspaceApi; pla
       detail: [change.reason ? cancelReasonLabels[change.reason] : '', change.note ?? ''].filter(Boolean),
     })),
     ...(result.history.reviews ?? []).map(review => ({
-      at: review.occurredAtUtc, key: `review${review.number}`, title: `Review revision ${review.number}`,
-      detail: [review.review, review.structuredReview.adherence ? `Adherence: ${review.structuredReview.adherence}` : '',
+      at: review.occurredAtUtc, key: `review${review.number}`,
+      title: `Review revision ${review.number}${review.action && review.action !== 'edited' ? ` · ${reviewActionLabels[review.action]}` : ''}`,
+      // Review again and No review needed change only the completion; the text they keep is already listed.
+      detail: review.action === 'reopened' || review.action === 'not-needed' ? [] : [review.review, review.structuredReview.adherence ? `Adherence: ${review.structuredReview.adherence}` : '',
         review.structuredReview.mistakeTag ? `Mistake: ${review.structuredReview.mistakeTag}` : '',
         review.structuredReview.lesson ? `Lesson: ${review.structuredReview.lesson}` : '',
         review.structuredReview.nextAction ? `Next action: ${review.structuredReview.nextAction}` : ''].filter(Boolean),

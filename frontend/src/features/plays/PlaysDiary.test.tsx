@@ -59,6 +59,15 @@ function client(play = terminal, more: SavedPlay[] = []) {
     sizing: vi.fn(() => Promise.reject(new ApiError('unavailable', 'No sizing.'))),
     evidence: vi.fn(() => Promise.resolve([])),
     nextActions: vi.fn<WorkspaceApi['nextActions']>(() => Promise.resolve([])),
+    playNotes: vi.fn<WorkspaceApi['playNotes']>(() => Promise.resolve([])),
+    completeReview: vi.fn<WorkspaceApi['completeReview']>(() => {
+      current = { ...current, summary: { ...current.summary, version: current.summary.version + 1, reviewCompletion: 'completed', reviewCompletedAtUtc: at } }
+      return Promise.resolve(current)
+    }),
+    reopenReview: vi.fn<WorkspaceApi['reopenReview']>(() => {
+      current = { ...current, summary: { ...current.summary, version: current.summary.version + 1, reviewCompletion: null, reviewCompletedAtUtc: null } }
+      return Promise.resolve(current)
+    }),
     updatePlay: vi.fn((_id: string, fields: PlayFields & { expectedVersion: number }) => {
       current = { ...current, review: fields.review, structuredReview: fields.structuredReview ?? emptyStructuredReview(),
         summary: { ...current.summary, version: current.summary.version + 1, hasReview: true, reviewedAtUtc: at } }
@@ -723,6 +732,25 @@ describe('diary workspace integration', () => {
     // The receipt has arrived, without the mark.
     expect(await screen.findByLabelText('Outcome')).toBeInTheDocument()
     expect(screen.queryByText('Plan written after first execution')).not.toBeInTheDocument()
+  })
+  it('completes a review explicitly, with unchanged text, and reopens it (phase 1, 1.2)', async () => {
+    const closed: SavedPlay = { ...terminal, summary: { ...terminal.summary, status: 'closed', cancelReason: null, reviewCompletion: null, reviewCompletedAtUtc: null } }
+    const { api, methods } = client(closed)
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(closed)} />)
+    await user.click(screen.getByRole('tab', { name: 'Review' }))
+    expect(screen.getByRole('textbox', { name: 'Review' })).toHaveValue('Existing free text')
+    await user.click(screen.getByRole('button', { name: 'Complete review' }))
+    expect(methods.completeReview).toHaveBeenCalledWith(closed.summary.id, closed.summary.version)
+    expect(await screen.findByRole('button', { name: 'Review again' })).toBeInTheDocument()
+    expect(methods.updatePlay).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Review again' }))
+    expect(methods.reopenReview).toHaveBeenCalledWith(closed.summary.id, closed.summary.version + 1)
+    expect(await screen.findByRole('button', { name: 'Complete review' })).toBeInTheDocument()
+    // The in-trade log is its own tab.
+    await user.click(screen.getByRole('tab', { name: 'Log' }))
+    expect(await screen.findByText('No entries yet.')).toBeInTheDocument()
+    expect(methods.playNotes).toHaveBeenCalledWith(closed.summary.id, expect.any(AbortSignal))
   })
   it('saves from the expanded journal too, keeping focus in the dialog', async () => {
     const closed: SavedPlay = { ...terminal, summary: { ...terminal.summary, status: 'closed', cancelReason: null } }

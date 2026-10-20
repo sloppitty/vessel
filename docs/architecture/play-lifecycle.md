@@ -79,6 +79,44 @@ Phase 1.5 of the [learning-loop contract](phase1-learning-loop-contract.md).
   sent then is refused with 400. Older plans have none, and nothing is
   backfilled.
 
+## Review completion and the in-trade log (October 20, 2026)
+
+Phase 1.2 of the [learning-loop contract](phase1-learning-loop-contract.md),
+decision 3. It covers D-14 and G-04.
+- **Completion is explicit.** A Play's review is complete only after one of
+  these:
+  - **Complete review** on a Closed or Cancelled Play
+    (`POST /api/plays/{id}/review/complete`). It works with unchanged or
+    empty text.
+  - **A save that changes structured answers** on such a Play.
+  - **No review needed** (`/review/not-needed`) on a Cancelled Play. The
+    server checks the Play has no linked or manual fill.
+- **What never completes it.** Writing or editing review text never
+  completes it, at any status. `reviewedAtUtc` keeps meaning "review last
+  edited".
+- **Review again.** `/review/reopen` clears the completion. Text, answers and
+  history stay.
+- **History.** Each action takes `expectedVersion` (409 when stale). Each is
+  kept in review history as `completed`, `reopened` or `not-needed` beside
+  `edited`.
+- **Lists.** Needs review and Reviewed read the completion, and so does
+  Review's completed-review count. Summaries carry `reviewCompletion`
+  (`completed`, `not-needed`, `legacy`) and `reviewCompletedAtUtc`.
+- **Legacy.** The explicit `ReviewCompletion` migration records a `legacy`
+  completion for exactly the Plays the old Reviewed view listed: ended, with
+  review text, answers or a review time. It uses their review time, else their
+  end time. Nothing else is reclassified, and no text moves.
+  - An Open Play with a note in its Review box needs review once it closes.
+- **In-trade log.** `GET` and `POST /api/plays/{id}/notes` hold append-only,
+  timestamped entries on any saved, planned-origin Play.
+  - An entry is up to 2,000 characters, with an optional state: calm,
+    rushed, FOMO, tired or after a loss.
+  - Entries cannot be edited or deleted.
+  - An entry is idempotent by its request ID. It does not take the Play's
+    version, because it changes nothing the Play holds.
+  - An entry never counts as a review and never feeds Review.
+  - The journal shows them in a Log tab after Evidence.
+
 ## Managed stops
 
 October 19, 2026, Phase 0 item 0.5b of the [trust and correctness contract](phase0-trust-correctness-contract.md#05-managed-stops), under the owner's decision 2.
