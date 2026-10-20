@@ -41,7 +41,9 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
                           where a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) &&
                               (ActivePlays.Any(p => p.AccountId == a.Id) ||
                                Watching.Any(x => x.Link.AccountId == a.Id && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)) ||
-                               AwaitingDiscrepancies.Any(d => d.AccountId == a.Id))
+                               AwaitingDiscrepancies.Any(d => d.AccountId == a.Id) ||
+                               // Independent of scheduling: what the persistent incident indicators read stays listed.
+                               OutstandingAnnouncements.Any(d => d.AccountId == a.Id))
                           orderby m.AccountId
                           select new { Row = m, a.VenueId }).Take(200).ToListAsync(ct);
         return rows.Select(r => (r.Row, r.VenueId)).ToArray();
@@ -92,6 +94,13 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
             await Watching.AnyAsync(x => x.Link.AccountId == accountId && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff), ct) ||
             await AwaitsDiscrepancyAsync(accountId, ct);
     }
+
+    /// <summary>
+    /// Announced records still awaiting the owner, the browser's incidents: an open record, or one announced unverifiable and
+    /// not dismissed since. They keep their account in the summary after its scheduling work has ended; they never make it
+    /// eligible for checks.
+    /// </summary>
+    private IQueryable<PlayDiscrepancy> OutstandingAnnouncements => db.Set<PlayDiscrepancy>().Where(PlayDiscrepancy.IsOutstanding);
 
     /// <summary>Outstanding, still verifiable discrepancy work: a (re-)confirmation or an open warning.</summary>
     private IQueryable<PlayDiscrepancy> AwaitingDiscrepancies => db.Set<PlayDiscrepancy>().Where(d => d.UnverifiableAtUtc == null &&
@@ -295,6 +304,46 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
                 watch.Outcome = MonitorWatchOutcomes.Unverifiable;
             }
         }
+    }
+
+    public async Task SaveCoverageAsync(Guid accountId, IReadOnlyList<MonitorCoverage> rows, CancellationToken ct)
+    {
+        unitOfWork.RequireActive();
+        if (rows.Any(x => x.AccountId != accountId || x.OwnerId != db.CurrentOwnerId))
+            throw new InvalidOperationException("Coverage rows must belong to the locked account and the current owner.");
+        var stored = await db.Set<MonitorCoverage>().Where(x => x.AccountId == accountId).ToDictionaryAsync(x => x.PlayId, ct);
+        foreach (var row in rows)
+        {
+            if (!stored.Remove(row.PlayId, out var current)) { db.Add(row); continue; }
+            current.ContractId = row.ContractId;
+            current.State = row.State;
+            current.Covered = row.Covered;
+            current.Reason = row.Reason;
+            current.CheckedAtUtc = row.CheckedAtUtc;
+            current.Stops = row.Stops;
+        }
+        // Plays the check no longer evaluated (closed, cancelled or moved) keep no stale outcome.
+        db.RemoveRange(stored.Values);
+    }
+
+    public async Task<IReadOnlyList<MonitorCoverage>> CoverageAsync(IReadOnlyCollection<Guid> accountIds, CancellationToken ct)
+    {
+        if (accountIds.Count == 0) return [];
+        var ids = accountIds.Distinct().ToArray();
+        var rows = await db.Set<MonitorCoverage>().AsNoTracking()
+            .Where(x => ids.Contains(x.AccountId) && db.Plays.Any(p => p.Id == x.PlayId && p.Status == PlayStatus.Open))
+            .OrderBy(x => x.AccountId).ThenBy(x => x.PlayId).ToListAsync(ct);
+        return rows.GroupBy(x => x.AccountId).SelectMany(x => x.Take(500)).ToArray();
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, int>> UncheckedPlaysAsync(IReadOnlyCollection<Guid> accountIds, CancellationToken ct)
+    {
+        if (accountIds.Count == 0) return new Dictionary<Guid, int>();
+        var ids = accountIds.Distinct().ToArray();
+        var coverage = db.Set<MonitorCoverage>();
+        return await ActivePlays.Where(p => ids.Contains(p.AccountId) && p.Status == PlayStatus.Open && !coverage.Any(c => c.PlayId == p.Id))
+            .GroupBy(p => p.AccountId).Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, ct);
     }
 
     public async Task<IReadOnlyList<MonitorWatchDto>> WatchesAsync(Guid playId, DateTimeOffset now, CancellationToken ct)

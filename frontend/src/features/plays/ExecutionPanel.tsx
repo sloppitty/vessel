@@ -2,6 +2,7 @@ import type { LinkOrder, PlayExecution, PlaySummary, RebindLevel } from '@/api/p
 import { Button } from '@/components/ui/button'
 import { Link2, Link2Off } from 'lucide-react'
 import { MonitorDiscrepancies, MonitorPanel, MonitorWatches } from '@/features/monitor/MonitorPanel'
+import { levelKey } from '@/features/monitor/discrepancy-text'
 import type { AccountMonitor } from '@/api/monitor'
 import type { DraftEntry } from './draft'
 import { describeOrder, fillSummary, levelName, levelOptions, orderFitsRole } from './execution'
@@ -22,7 +23,7 @@ const pnlBasisNote = {
   mixed: 'Some fills report closed PnL before fees and some after.',
 } as const
 
-export function ExecutionPanel({ execution, error, busy, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, onDismiss, onManageCredential,
+export function ExecutionPanel({ execution, error, busy, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, currentBookRead = true, onDismiss, onManageCredential,
   version, leverage = 1, priceStep = null, onRebind, rebindBlocked }: {
   execution: PlayExecution | null
   error: string | null
@@ -34,6 +35,8 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
   monitorBusy?: boolean
   monitorError?: string | null
   monitorUnavailable?: boolean
+  /** False when the account's venue does not return the current order book (a venue capability). */
+  currentBookRead?: boolean
   retryAtUtc?: string | undefined
   onDismiss?: (id: string, note?: string) => Promise<void>
   onManageCredential?: (() => void) | undefined
@@ -57,7 +60,12 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
   const editable = !retrospective && ['planned', 'paused', 'open'].includes(execution.status)
   const options = levelOptions(entries, execution.status === 'open')
   const shownMonitor = monitor === undefined ? execution.monitor : monitor
+  // This Play's own recorded stop coverage; an Open Play without one has not been checked since it opened.
+  const coverage = (shownMonitor?.coverage ?? []).filter(row => row.playId === execution.playId)
   const { totals } = execution
+  // Monitor records and watches name this Play's levels ("Entry 1 stop") rather than only the order's role.
+  const recordLevel = (key: unknown) => { const level = levelKey(key); return level ? levelName(entries, level, origin) : null }
+  const watchLevel = (watch: { linkId: string }) => { const link = execution.links.find(item => item.id === watch.linkId); return link ? levelName(entries, link, origin) : null }
   return <div className="execution-panel">
     {!retrospective && (!execution.tracked || !shownMonitor) && <div className="execution-header">
       <p className="muted" title={execution.tracked ? 'Orders link automatically by price and side; Vessel asks only when several plays could own one.' : undefined}>
@@ -65,13 +73,16 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
           : execution.reason ?? 'Execution is not tracked for this play.'}</p>
     </div>}
     {error && <p className="error" role="alert">{error}</p>}
-    {shownMonitor && <MonitorPanel monitor={shownMonitor} busy={busy || monitorBusy} error={monitorError}
+    {/* The heading follows this Play's own records and stop coverage, the ones listed below it. */}
+    {shownMonitor && <MonitorPanel monitor={shownMonitor} discrepancies={execution.discrepancies}
+      coverage={coverage} unchecked={execution.status === 'open' && execution.tracked && coverage.length === 0 ? 1 : 0} currentBookRead={currentBookRead}
+      busy={busy || monitorBusy} error={monitorError}
       retryAtUtc={retryAtUtc} statusUnavailable={monitorUnavailable} onCheck={onCheck} onManageCredential={onManageCredential} />}
-    {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss}
+    {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss} levelName={recordLevel}
       action={editable && onRebind && version !== undefined ? item => <LevelDriftAction discrepancy={item} links={execution.links} entries={entries}
         context={{ direction, leverage, tick: priceStep }} origin={origin} playId={execution.playId} version={version} blocked={busy ? 'Wait for the current change to finish.' : rebindBlocked}
         onRebind={onRebind} /> : undefined} />}
-    <MonitorWatches watches={execution.watches} />
+    <MonitorWatches watches={execution.watches} levelName={watchLevel} />
     <dl className="execution-totals">
       <div><dt>Entered</dt><dd>{totals.enteredQuantity}</dd></div>
       <div><dt>Exited</dt><dd>{totals.exitedQuantity}</dd></div>

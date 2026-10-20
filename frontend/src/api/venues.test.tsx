@@ -84,6 +84,17 @@ describe('Venues', () => {
     expect(venues.can('hyperliquid', 'accountDiscovery')).toBe(false)
     expect(venues.can('hyperliquid', 'readOnlyCredential')).toBe(false)
   })
+  it('says the current book is not read only where an order-reading venue states it, never from its name', () => {
+    const hyperliquid = systemFixture.venues[0]!
+    const listed = new Venues([
+      { ...hyperliquid, id: 'history-only', capabilities: { ...hyperliquid.capabilities, currentOrderBook: false } },
+      { ...hyperliquid, id: 'book', capabilities: { ...hyperliquid.capabilities, currentOrderBook: true } },
+      // An API that does not state the capability at all.
+      { ...hyperliquid, id: 'unstated', capabilities: { sync: true, instruments: true, orders: true, candles: true, marketContext: true, stream: true, stablecoinWallet: true } },
+      { ...hyperliquid, id: 'no-orders', capabilities: { ...hyperliquid.capabilities, orders: false, currentOrderBook: false } },
+    ])
+    expect(['history-only', 'book', 'unstated', 'no-orders', 'unknown'].map(id => listed.readsCurrentBook(id))).toEqual([false, true, true, true, true])
+  })
 
   it('is provided by the application and empty without a provider', () => {
     function Probe() { return <p>{useVenues().name('hyperliquid')}</p> }

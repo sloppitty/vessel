@@ -238,7 +238,7 @@ The endpoint calls `MonitorRunExecutor.RefreshAsync`, the same run the worker's 
 
 1. `MonitorCoordinator.AdmitRefreshAsync` locks the account and its `monitor_accounts` row in a short unit of work. It checks the account is enabled and the venue has `Sync`, applies any venue `Retry-After` and the owner's two-read budget (429 with `Retry-After` when busy), and takes a five-minute lease for the API. Pending check work that no worker claimed within `Lease + HeartbeatTimeout` returns to idle here, so it never blocks Refresh.
 2. `RunAsync` reads the venue **outside** any transaction or lock; the lease, renewed every minute, spans the read. Funding for the last 30 days is read too; a funding failure keeps retained payments and says so.
-3. A short fenced unit under the account lock applies the snapshot, new fills and funding (`WorkspaceStore.SaveRefreshAsync`). It is discarded as superseded if the lease, enabled state, `SettingsRevision`, source, venue or credential revision changed, or a newer observation is stored. The snapshot replaces only a strictly newer observation; fills are de-duplicated (also by a unique index).
+3. A short fenced unit under the account lock applies the snapshot, new fills and funding (`WorkspaceStore.SaveRefreshAsync`). It is discarded as superseded if the lease, enabled state, `SettingsRevision`, source, venue or credential revision changed, or a newer observation is stored. The snapshot replaces only a strictly newer observation; fills are de-duplicated (also by a unique index). The same unit records the import's fill continuity against the newest fill known before it: a capped read that starts after it sets the monitor's history gap, which Refresh never clears, and the continuity watermark advances ([monitor plan](play-monitor-plan.md#scheduling-and-the-unit-of-work)).
 4. Orders are read (Lighter needs the token) and retained in a second fenced unit with the order-history notice. An order-read failure still keeps the public refresh. Refresh never links orders or moves Plays.
 
 A caller cancellation releases the lease and is not recorded as a venue sync failure.
@@ -255,7 +255,8 @@ A check run:
    - `MatchAsync`: for every unlinked order, `ExecutionMatcher.Candidates` finds plan levels with the same side whose price is within the venue's tolerance (fifth significant figure or one tick). Exactly one candidate links automatically; several become suggestions; a dismissed level is never proposed again;
    - `ApplyTransitionsAsync`: the first non-contradicting linked entry fill marks the Play Open; when linked exits equal linked entries, nothing is missing or out of order (`ExecutionIntegrity`) and no entry order rests, the Play becomes Closed. Repeat up to three passes, because opening a Play can make its exit orders matchable;
 3. compares venue positions and resting orders with open Plays (`MonitorDiscrepancyService`), flags discrepancies without correcting anything, and updates exit watches;
-4. appends the resulting events in the same transaction and schedules the next run.
+4. records each Open Play's stop coverage (`monitor_coverage`, through `IMonitorStore.SaveCoverageAsync`) in the same unit: known, shared, unknown or unsupported, with the check time, a reason and per-level stop evidence. A venue whose descriptor lacks `CurrentOrderBook` gets unsupported coverage and no book-dependent checks, and its history-only order read does not degrade the run (October 19, Phase 0 item 0.4c; see the [monitor plan](play-monitor-plan.md#stop-coverage));
+5. appends the resulting events in the same transaction and schedules the next run.
 
 The browser does not poll Check. It follows `/api/events/stream` (server-sent events read from a database cursor, ended after `Vessel:Events:StreamMaxLifetime`, 30 minutes by default, and resumed from the last cursor) and reloads stored reads once a minute as a fallback. `GET /api/plays/{id}/execution` returns totals, per-entry progress, links, suggestions, recent unlinked orders and the monitor view.
 
@@ -335,6 +336,7 @@ Journal-owned entities carry `OwnerId` and use owner-scoped relationships. The s
 | `funding_payments`, `account_funding_states` | `FundingPayment`, … | Signed funding settlements with native identities, and the covered window per account. |
 | `account_leverage_observations` | `LeverageObservation` | Venue-reported position leverage kept when a refresh sees a position appear or change, or new executions on its market, so closed Activity operations keep it. |
 | `monitor_accounts`, `monitor_exit_watches` | | Owner-scoped monitor state, lease/schedule per account and watched exits. |
+| `monitor_coverage` | `MonitorCoverage` | The last stop-coverage outcome per Open Play: state, whether known coverage covers, reason, check time and per-level stop evidence (JSON). Replaced by each evaluated check; `stale` is projected on read. Migration `20261019132931_MonitorCoverage`. |
 | `server_monitor_heartbeats`, `server_venue_deadlines`, `server_notification_heartbeats` | (system SQL stores) | Monitor/notification health per deployment, venue `Retry-After` across owners. No journal context. |
 | `notifications`, `notification_sources`, `notification_deliveries`, `notification_cursors`, `notification_preferences` | (SQL, `Persistence/Notifications`) | Owner-scoped Hub output, handled sources, delivery/claim state, feed/unread cursor and preferences. |
 | `play_discrepancies` | | Venue-versus-Play discrepancies and their lifecycle. |
@@ -398,7 +400,7 @@ dotnet test backend/Vessel.slnx
 ### Add a venue
 
 1. Write the adapter in `Infrastructure/Venues/<Venue>/`, implementing only the ports the venue supports, using `BoundedJsonHttp` and `StrictJson`, mapping into `ExecutionFacts` and canonical instrument keys.
-2. Declare a `VenueDescriptor` with its capabilities, source kind (`evm-address` or `account-index`), candle intervals and price rule.
+2. Declare a `VenueDescriptor` with its capabilities, source kind (`evm-address` or `account-index`), candle intervals and price rule. Set `CurrentOrderBook` only if the order reader returns the current open book (rows observed with the read and a meaningful `OpenOrdersComplete`); it defaults to false, which labels stop coverage "current book not read".
 3. Call `AddVenueModule<TAdapter>()` in `Infrastructure/DependencyInjection.cs` with the descriptor and client configuration. The helper registers a logger-free named `HttpClient` and the adapter's supported ports. Register a stream separately if it needs a shared lifetime.
 4. Add adapter tests over recorded responses, and a live test behind an environment variable.
 5. Document coverage limits in the venue's notices and in a `docs/architecture/<venue>-…` document.

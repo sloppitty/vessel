@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  decimalLess, decimalSign, exactAdd, exactCompare, exactDecimal, exactDiv, exactFixed, exactInteger, exactMul, exactNumber, exactSignOf, exactSub,
-  exactZero, exactScientific, exactAbs,
+  decimalDifference, decimalLess, decimalSign, exactAdd, exactCompare, exactDecimal, exactDiv, exactFixed, exactInteger, exactMul, exactNumber,
+  exactSignOf, exactSub, exactZero, exactScientific, exactAbs,
 } from './decimal'
 
 describe('exact plain decimals', () => {
@@ -62,5 +62,22 @@ describe('exact manual facts', () => {
     expect(exactScientific('-2')).toEqual({ n: -2n, d: 1n })
     for (const text of ['', '1e', '.5', '1e999', 'e2']) expect(exactScientific(text)).toBeNull()
     expect(exactAbs({ n: -3n, d: 2n })).toEqual({ n: 3n, d: 2n })
+  })
+})
+
+describe('exact plain decimal difference', () => {
+  it.each([
+    ['1.25', '0.5', '0.75'],
+    ['0.5', '0', '0.5'],
+    ['1', '1.000', '0'],
+    ['0.1', '0.100000000000000001', '-0.000000000000000001'],
+    ['9007199254740993', '0.5', '9007199254740992.5'],
+    ['-1.5', '0.25', '-1.75'],
+    ['10', '2.50', '7.5'],
+  ])('%s minus %s is exactly %s', (a, b, expected) => {
+    expect(decimalDifference(a, b)).toBe(expected)
+  })
+  it.each([['1e2', '1'], ['', '1'], ['1', '.5'], ['1', '+1'], ['1', ' 1']])('refuses %j minus %j as unknown', (a, b) => {
+    expect(decimalDifference(a, b)).toBeNull()
   })
 })

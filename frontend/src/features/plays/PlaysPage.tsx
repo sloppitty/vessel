@@ -20,6 +20,9 @@ import { ExecutionPanel } from './ExecutionPanel'
 import { ManualExecutionPanel } from './ManualExecutionPanel'
 import { emptyManualDraft, hasManualDraft } from './manual'
 import { useMonitorRun } from '@/features/monitor/useMonitorRun'
+import { incidentsByPlay, monitorIncidents, type IncidentCounts } from '@/features/monitor/incidents'
+import { IncidentPill } from '@/features/monitor/IncidentBadge'
+import { stopEvidenceFor } from '@/features/monitor/coverage'
 import { usePlayExecution } from './usePlayExecution'
 import { useSizing } from './useSizing'
 import { noFilledEntries, planIssues, planIssueSummary } from './planChecks'
@@ -156,6 +159,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const venues = useVenues()
   const account = accounts.find(item => item.id === (saved?.summary.accountId ?? draft.accountId))
   const manual = !!account && venues.can(account.venueId, 'manualExecutions')
+  const currentBookRead = !account || venues.readsCurrentBook(account.venueId)
   const retrospective = saved?.summary.origin === 'retrospective'
   // Record-based suggestions also follow accepted stored-state reloads.
   const sizing = useSizing(api, reloadGeneration, visible)
@@ -163,8 +167,14 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const { reload: reloadExecution } = tracking
   // A shell reload already rereads the execution through its generation; reload it directly only without one.
   const monitorChanged = useCallback(() => { if (onReload) onReload(); else reloadExecution() }, [reloadExecution, onReload])
+  // One count per Play from the shell's monitor summary, shared by the list rows and the Play header.
+  const playIncidents = useMemo(() => incidentsByPlay(monitorIncidents(accountMonitors)), [accountMonitors])
   const executionMonitor = visible && account?.isEnabled !== false ? tracking.execution?.monitor ?? null : null
   const monitorRun = useMonitorRun(api, executionMonitor ? accountMonitors.find(item => item.accountId === executionMonitor.accountId) ?? executionMonitor : null, monitorChanged)
+  // The chart labels this Play's planned stops with the venue evidence of the newest stored monitor read.
+  const trackedExecution = tracking.execution?.playId === saved?.summary.id ? tracking.execution : null
+  const stopEvidence = useMemo(() => stopEvidenceFor(trackedExecution && monitorRun.monitor?.accountId === trackedExecution.monitor?.accountId
+    ? { ...trackedExecution, monitor: monitorRun.monitor } : trackedExecution), [trackedExecution, monitorRun.monitor])
 
   // Linked fills move a play to Open or Closed on the server; take the new status and version.
   const venueStatus = tracking.execution?.playId === saved?.summary.id ? tracking.execution?.status : undefined
@@ -417,6 +427,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     ? <div className="workspace-alert" role="alert">The saved Play changed elsewhere. Your edits and their original version were kept. Copy any edits you want to keep, then discard the local copy from All plays and reopen the latest saved Play before saving.</div> : null
   if (session.view === 'list') {
     return <>{requested}{conflict}{storedReadError && <p className="error" role="status">{storedReadError}</p>}<PlayList reloadGeneration={reloadGeneration} api={api} accounts={accounts} busy={busy !== null} list={listState} onList={setListState}
+      incidents={playIncidents}
       unsaved={unsaved ? draft.title.trim() || 'Untitled play' : null}
       onOpen={id => { void open(id) }}
       onNew={() => { if (activeWork.current.current) return; setError(null); update(startNewPlay(session)) }}
@@ -468,6 +479,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       lockDirection={status === 'open' || filled} readOnly={readOnly} retrospective={retrospective}
       sizing={sizing.sizing} sizingStatus={sizing.status} onRetrySizing={sizing.retry} onRiskChange={sizing.updateRisk}
       filledEntries={filledEntries} fills={fills} onUnits={onUnits} onPriceStep={setPriceStep}
+      incidents={saved ? playIncidents.get(saved.summary.id) : undefined} stopEvidence={manual ? undefined : stopEvidence}
       execution={manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
         enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}
         working={busy !== null}
@@ -476,6 +488,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         onStored={acceptStoredPlay} onBegin={() => latest.current.saved?.summary.id === saved?.summary.id ? beginWork('manual') : null} />
         : saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy}
         entries={draft.entries} direction={draft.direction} origin={saved.summary.origin} monitor={monitorRun.monitor} monitorBusy={monitorRun.busy} monitorError={monitorRun.error} retryAtUtc={monitorRun.retryAtUtc} monitorUnavailable={monitorRun.statusUnavailable}
+        currentBookRead={currentBookRead}
         {...(onManageAccount && account ? { onManageCredential: () => onManageAccount(account.id) } : {})}
         onDismiss={tracking.dismiss} onCheck={() => { void monitorRun.check() }} onLink={request => { void tracking.link(request) }}
         onUnlink={linkId => { void tracking.unlink(linkId) }}
@@ -494,9 +507,11 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
 
 const count = new Intl.NumberFormat('en-US')
 
-function PlayList({ api, accounts, busy, reloadGeneration, unsaved, list, onList, onOpen, onNew, onContinue, onDiscard }: {
+function PlayList({ api, accounts, busy, reloadGeneration, unsaved, list, onList, onOpen, onNew, onContinue, onDiscard, incidents }: {
   api: WorkspaceApi
   accounts: BrokerAccount[]
+  /** Open monitor incidents per Play, from the shell's monitor summary. */
+  incidents: ReadonlyMap<string, IncidentCounts>
   busy: boolean
   reloadGeneration: number
   /** Title of the play with unsaved changes, if any. */
@@ -611,8 +626,10 @@ function PlayList({ api, accounts, busy, reloadGeneration, unsaved, list, onList
             Showing the {count.format(shown.plays.length)} most recently updated of {count.format(shown.totalCount)}. Search to narrow the list.</p>}
           {shown.plays.length ? <ul className={pending ? 'plays-list list-refetching' : 'plays-list'} aria-busy={pending || undefined}>
             {shown.plays.map(play => <li key={play.id}>
-              <button type="button" className="plays-list-item" disabled={!!unsaved || busy} onClick={() => onOpen(play.id)} aria-label={`Open ${play.title || 'Untitled play'}`} aria-describedby={`plays-list-identity-${play.id}`}>
-                <span className="plays-list-title"><span className="plays-list-heading"><strong>{play.title || 'Untitled play'}</strong>{play.origin === 'retrospective' && <span className="badge play-retrospective">Retrospective</span>}</span>
+              <button type="button" className="plays-list-item" disabled={!!unsaved || busy} onClick={() => onOpen(play.id)} aria-label={`Open ${play.title || 'Untitled play'}`}
+                aria-describedby={incidents.has(play.id) ? `plays-list-identity-${play.id} plays-list-incidents-${play.id}` : `plays-list-identity-${play.id}`}>
+                <span className="plays-list-title"><span className="plays-list-heading"><strong>{play.title || 'Untitled play'}</strong>{play.origin === 'retrospective' && <span className="badge play-retrospective">Retrospective</span>}
+                  <IncidentPill id={`plays-list-incidents-${play.id}`} counts={incidents.get(play.id)} /></span>
                   <PlayIdentity id={`plays-list-identity-${play.id}`} instrument={play.instrument} source={play.instrumentSource} venueId={play.venueId} accountName={accountName(play.accountId)} /></span>
                 <span className={`direction-chip ${play.direction}`}>{play.direction === 'long' ? 'Long' : 'Short'}</span>
                 <span className={`badge play-status-${play.status}`}>{statusLabels[play.status]}</span>

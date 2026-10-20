@@ -473,10 +473,12 @@ The API also projects `stale` when a `live` row's last success is older than twi
 |---|---|---|
 | Where | Synchronous in the API, on its own lease (`api-…` holder) | Worker |
 | Shares | Admission gate, cooldown, two-read budget, venue deadlines | Same |
-| Does | Imports snapshot, fills and orders; fences older results | Also reconciles links and lifecycle, updates watches and gaps, evaluates discrepancies |
-| Leaves alone | Monitor state, backoff, last success, consecutive failures, gap evidence, due time | — |
+| Does | Imports snapshot, fills and orders; records its import's fill continuity (can set the history gap, advances the watermark); fences older results | Also reconciles links and lifecycle, updates watches, evaluates discrepancies; records fill continuity the same way |
+| Leaves alone | Monitor state, backoff, last success, consecutive failures, due time, credential revision; never clears a gap | — |
 | Refused or abandoned | Answered to the owner (429 or 502); never replayed by the worker; a crashed API's lease is released, not replayed | Pending requests survive restarts |
 | Interrupted by the caller (request abort, shutdown, lost lease renewal) | Lease released with the cooldown; no venue sync failure is recorded (the account keeps its sync status). If the snapshot was already applied, the order-coverage notice records that the order check did not complete. Venue deadlines and `HttpClient` timeouts are not caller cancellation and still record a sync failure | Superseded, not failed |
+
+October 19 (owner decision 10, Phase 0 item 0.4b): Refresh used to leave gap evidence alone, so fills it retained looked like a gap to the next check. Every import, Refresh included, now records its fill continuity in the unit that retains its fills; see [coverage signals](#coverage-signals). Everything else Refresh leaves alone stays check-only.
 
 ### Watches
 
@@ -490,8 +492,12 @@ Linked exits (stops, targets, exits) and entries of Closed or Cancelled Plays ar
 ### Coverage signals
 
 - `PerpetualVenueReadResult.OmittedExecutions` counts in-scope executions an adapter read but left out because a fact was missing or unverifiable: Lighter fills without reported P&L or with unverified or nonzero fees; Hyperliquid fills on a primary contract the catalogue does not list; RISEx fills on a USDC market the catalogue neither lists nor proves out of scope. Any omission makes the run `degraded` and fill-derived checks unknown.
-- **History gaps.** When a fill response is truncated and its oldest fill is newer than the newest fill seen before, `HasHistoryGap` is set and the run is `degraded` ("fills may be missing") until the fill history is complete again.
+- **History gaps.** Every import, Refresh included, checks continuity against the newest fill known before it: the later of the watermark `NewestFillAtUtc` and the newest retained fill. When the fill response is truncated and its oldest raw fill is newer than that boundary (or none is reported), `HasHistoryGap` is set, and checks are `degraded` ("fills may be missing") while it stays set. A first import never sets it, and a Refresh with unknown truncation records nothing. Each import advances the watermark to the newest fill it read.
+
+  The gap is sticky. A Refresh never clears it, and no successful read alone does: a check clears it only when an adapter reports complete fill history (`FillHistoryComplete`), which none does today. Gaps stored before October 19, false ones included, stay until a recovery rule exists.
 - Incomplete positions, open orders or fill windows also degrade the run. Structurally unknown discrepancy coverage does not.
+- **Current book (October 19, Phase 0 item 0.4c).** On a venue whose descriptor lacks `CurrentOrderBook` (RISEx), the order read is history only, so `OpenOrdersComplete: false` no longer degrades the run by itself: the book-dependent per-Play checks do not run and protection coverage is recorded as unsupported, "current book not read". Every other reason above still degrades it.
+- **Stop coverage.** Each evaluated check replaces the account's `monitor_coverage` rows in its unit, under the account lock: one per Open Play, `known`, `shared`, `unknown` or `unsupported`, with the check time, a reason and per-level stop evidence. Reads project `stale` after twice the interval. Failed, superseded and refresh runs leave the rows as they are. See the [monitor plan](play-monitor-plan.md#stop-coverage).
 
 ### Housekeeping invariant
 
@@ -532,7 +538,7 @@ Conditions are in the [plan](play-monitor-plan.md#discrepancies). `fill.unlinked
 - **Reduce-only** orders do not count towards `protection.excess` for a sole Open Play on the instrument.
 - **Precedence.** `protection.cancelled` supersedes `protection.missing` and `protection.short` for the same orders.
 - **Unknown is not degraded.** Structural unknowns neither open nor resolve and do not degrade the run; missing or stale evidence does.
-- **Omitted executions** make fill-derived position, protection-quantity and unlinked-fill checks unknown.
+- **Omitted executions** and a recorded fill-history gap make fill-derived position, protection-quantity and unlinked-fill checks unknown.
 
 ### Lifecycle
 
@@ -878,7 +884,8 @@ Recreate every other service that uses the same user too, for example additional
 |---|---|---|
 | `live` | Last check succeeded within twice the interval | None |
 | `idle` | Nothing to watch (no eligible Plays, watches or discrepancy work) | None |
-| `degraded` | Incomplete coverage: omitted executions, a fill-history gap, partial positions or orders, an order-read failure, or one or two consecutive failed checks | Read the monitor error; check venue status; it clears on the next complete check |
+| `degraded` | Incomplete coverage: omitted executions, a fill-history gap, partial positions or orders (on a venue that reads the current book), an order-read failure, or one or two consecutive failed checks | Read the monitor error; check venue status. Most causes clear on the next complete check; a fill-history gap stays until an adapter reports complete fill history, which none does today |
+| Stop coverage "Current book not read" (live) | The venue's order reader does not return the current book (RISEx); order-book checks (missing, short, cancelled and excess stops, orphaned exits and entries, level drift) do not run there | Not a fault. Check stops at the venue itself |
 | `stale` | Three or more consecutive failures, or no success for twice the interval | Check worker logs (types and IDs), venue reachability and `server_venue_deadlines` deadlines |
 | `credential-error` | Read-only token missing, refused or expired; scheduling stops | Save a valid token; discovery reschedules the account |
 | Worker offline (`workerOnline: false`) | Heartbeat older than `HeartbeatTimeout` | `docker compose ps worker`, `docker compose logs --tail=100 worker`; check database and broker reachability and provisioning |

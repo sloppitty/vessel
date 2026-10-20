@@ -12,7 +12,31 @@
       "nextManualAllowedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
       "error": null,
       "workerOnline": true,
-      "discrepancies": []
+      "discrepancies": [],
+      "discrepanciesTruncated": false,
+      "coverage": [
+        {
+          "playId": "00000000-0000-4000-8000-000000000003",
+          "contractId": "ETH",
+          "state": "known",
+          "recordedState": "known",
+          "covered": true,
+          "reason": "stop-orders",
+          "checkedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+          "stops": [
+            {
+              "entryId": "entry-1",
+              "levelId": "stop-1",
+              "evidence": "resting",
+              "orderId": "eth-stop",
+              "observedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+              "price": "190",
+              "plannedPrice": "190"
+            }
+          ]
+        }
+      ],
+      "uncheckedPlays": 0
     }
   },
   "accountMonitorRunning": {
@@ -26,7 +50,31 @@
     "nextManualAllowedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
     "error": null,
     "workerOnline": true,
-    "discrepancies": []
+    "discrepancies": [],
+    "discrepanciesTruncated": false,
+    "coverage": [
+      {
+        "playId": "00000000-0000-4000-8000-000000000003",
+        "contractId": "ETH",
+        "state": "known",
+        "recordedState": "known",
+        "covered": true,
+        "reason": "stop-orders",
+        "checkedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+        "stops": [
+          {
+            "entryId": "entry-1",
+            "levelId": "stop-1",
+            "evidence": "resting",
+            "orderId": "eth-stop",
+            "observedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+            "price": "190",
+            "plannedPrice": "190"
+          }
+        ]
+      }
+    ],
+    "uncheckedPlays": 0
   },
   "accountMonitorIdle": {
     "accountId": "00000000-0000-4000-8000-000000000002",
@@ -39,7 +87,31 @@
     "nextManualAllowedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
     "error": null,
     "workerOnline": true,
-    "discrepancies": []
+    "discrepancies": [],
+    "discrepanciesTruncated": false,
+    "coverage": [
+      {
+        "playId": "00000000-0000-4000-8000-000000000003",
+        "contractId": "ETH",
+        "state": "known",
+        "recordedState": "known",
+        "covered": true,
+        "reason": "stop-orders",
+        "checkedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+        "stops": [
+          {
+            "entryId": "entry-1",
+            "levelId": "stop-1",
+            "evidence": "resting",
+            "orderId": "eth-stop",
+            "observedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+            "price": "190",
+            "plannedPrice": "190"
+          }
+        ]
+      }
+    ],
+    "uncheckedPlays": 0
   },
   "summary": {
     "workerOnline": true,
@@ -56,12 +128,36 @@
         "nextManualAllowedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
         "error": null,
         "workerOnline": true,
-        "discrepancies": []
+        "discrepancies": [],
+        "discrepanciesTruncated": false,
+        "coverage": [
+          {
+            "playId": "00000000-0000-4000-8000-000000000003",
+            "contractId": "ETH",
+            "state": "known",
+            "recordedState": "known",
+            "covered": true,
+            "reason": "stop-orders",
+            "checkedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+            "stops": [
+              {
+                "entryId": "entry-1",
+                "levelId": "stop-1",
+                "evidence": "resting",
+                "orderId": "eth-stop",
+                "observedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+                "price": "190",
+                "plannedPrice": "190"
+              }
+            ]
+          }
+        ],
+        "uncheckedPlays": 0
       }
     ]
   },
   "playExecution": {
-    "playId": "00000000-0000-4000-8000-000000000003",
+    "playId": "00000000-0000-4000-8000-000000000004",
     "status": "planned",
     "tracked": true,
     "reason": null,
@@ -84,7 +180,7 @@
     ],
     "links": [
       {
-        "id": "00000000-0000-4000-8000-000000000004",
+        "id": "00000000-0000-4000-8000-000000000005",
         "role": "entry",
         "entryId": "entry-1",
         "levelId": null,
@@ -109,7 +205,7 @@
         "fills": []
       },
       {
-        "id": "00000000-0000-4000-8000-000000000005",
+        "id": "00000000-0000-4000-8000-000000000006",
         "role": "stop",
         "entryId": "entry-1",
         "levelId": "stop-1",
@@ -149,16 +245,40 @@
       "nextManualAllowedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
       "error": null,
       "workerOnline": true,
-      "discrepancies": []
+      "discrepancies": [],
+      "discrepanciesTruncated": false,
+      "coverage": [
+        {
+          "playId": "00000000-0000-4000-8000-000000000003",
+          "contractId": "ETH",
+          "state": "known",
+          "recordedState": "known",
+          "covered": true,
+          "reason": "stop-orders",
+          "checkedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+          "stops": [
+            {
+              "entryId": "entry-1",
+              "levelId": "stop-1",
+              "evidence": "resting",
+              "orderId": "eth-stop",
+              "observedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+              "price": "190",
+              "plannedPrice": "190"
+            }
+          ]
+        }
+      ],
+      "uncheckedPlays": 0
     },
     "discrepancies": [],
     "watches": []
   },
   "runCompletedEvent": {
-    "id": "00000000-0000-4000-8000-000000000006",
+    "id": "00000000-0000-4000-8000-000000000007",
     "type": "monitor.run-completed",
     "version": 1,
-    "ownerId": "00000000-0000-4000-8000-000000000007",
+    "ownerId": "00000000-0000-4000-8000-000000000008",
     "sequence": "42",
     "runId": "00000000-0000-4000-8000-000000000001",
     "dedupKey": "monitor-run:00000000-0000-4000-8000-000000000002:00000000-0000-4000-8000-000000000001",
@@ -190,9 +310,9 @@
   },
   "eventPageNextCursor": "00000000000040008000000000000000.42",
   "discrepancy": {
-    "id": "00000000-0000-4000-8000-000000000008",
+    "id": "00000000-0000-4000-8000-000000000009",
     "accountId": "00000000-0000-4000-8000-000000000002",
-    "playId": "00000000-0000-4000-8000-000000000003",
+    "playId": "00000000-0000-4000-8000-000000000004",
     "contractId": "BTC",
     "kind": "position.excess",
     "severity": "warning",
@@ -207,12 +327,13 @@
       "playQuantity": "0.1"
     },
     "outcome": null,
-    "unverifiableAtUtc": null
+    "unverifiableAtUtc": null,
+    "lastObservedAtUtc": "2026-10-14T03:20:41.1234567+00:00"
   },
   "discrepancyUnverifiable": {
-    "id": "00000000-0000-4000-8000-000000000009",
+    "id": "00000000-0000-4000-8000-000000000010",
     "accountId": "00000000-0000-4000-8000-000000000002",
-    "playId": "00000000-0000-4000-8000-000000000003",
+    "playId": "00000000-0000-4000-8000-000000000004",
     "contractId": "BTC",
     "kind": "position.missing",
     "severity": "warning",
@@ -227,15 +348,56 @@
       "playQuantity": "0.1"
     },
     "outcome": "unverifiable",
-    "unverifiableAtUtc": "2026-10-14T03:20:41.1234567+00:00"
+    "unverifiableAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "lastObservedAtUtc": "2026-10-14T03:20:41.1234567+00:00"
   },
   "watchUnverifiable": {
-    "linkId": "00000000-0000-4000-8000-000000000010",
-    "playId": "00000000-0000-4000-8000-000000000003",
+    "linkId": "00000000-0000-4000-8000-000000000011",
+    "playId": "00000000-0000-4000-8000-000000000004",
     "orderId": "exit-order",
     "role": "stop",
     "state": "unverifiable",
     "startedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
     "endedAtUtc": "2026-10-14T03:20:41.1234567+00:00"
+  },
+  "coverage": {
+    "playId": "00000000-0000-4000-8000-000000000004",
+    "contractId": "BTC",
+    "state": "known",
+    "recordedState": "known",
+    "covered": true,
+    "reason": "stop-orders",
+    "checkedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "stops": [
+      {
+        "entryId": "entry-1",
+        "levelId": "stop-1",
+        "evidence": "resting-elsewhere",
+        "orderId": "stop-order",
+        "observedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+        "price": "94.5",
+        "plannedPrice": "95"
+      }
+    ]
+  },
+  "coverageUnsupported": {
+    "playId": "00000000-0000-4000-8000-000000000004",
+    "contractId": "BTC",
+    "state": "stale",
+    "recordedState": "unsupported",
+    "covered": null,
+    "reason": "current-book-not-read",
+    "checkedAtUtc": "2026-10-14T03:20:41.1234567+00:00",
+    "stops": [
+      {
+        "entryId": "entry-1",
+        "levelId": "stop-1",
+        "evidence": "not-read",
+        "orderId": null,
+        "observedAtUtc": null,
+        "price": null,
+        "plannedPrice": "95"
+      }
+    ]
   }
 }

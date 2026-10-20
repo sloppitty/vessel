@@ -1,10 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from './workspace'
-import { isAccountMonitor, isMonitorDiscrepancy, isMonitorEvent, isMonitorSummary, isMonitorWatch, monitorFrame } from './monitor'
-import { discrepancyFixture, eventCursor, monitorEventFixture, monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
+import { isAccountMonitor, isMonitorCoverage, isMonitorDiscrepancy, isMonitorEvent, isMonitorSummary, isMonitorWatch, monitorFrame, type MonitorDiscrepancy } from './monitor'
+import { isPlayExecution, type PlayExecution } from './plays'
+import { discrepancyFacts } from '@/features/monitor/discrepancy-text'
+import { coverageAs, coverageFixture, discrepancyFixture, eventCursor, monitorEventFixture, monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
 import { accountFixture, savedPlayFixture } from '@/test/workspace-fixture'
 
 afterEach(() => vi.unstubAllGlobals())
+const executionFixture: PlayExecution = {
+  playId: savedPlayFixture.summary.id, status: 'open', tracked: true, reason: null, checkedAtUtc: null,
+  totals: { enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
+  entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: '', issues: [], monitor: monitorFixture, discrepancies: [], watches: [],
+}
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
 
 describe('monitor contract', () => {
@@ -22,6 +29,11 @@ describe('monitor contract', () => {
     expect(isAccountMonitor({ ...monitorFixture, nextManualAllowedAtUtc: '2026-10-14T10:00:00.1234567+00:00' })).toBe(true)
     expect(isAccountMonitor({ ...monitorFixture, manualState: 'unknown' })).toBe(false)
     expect(isMonitorSummary({ ...monitorSummaryFixture, accounts: [monitorFixture, monitorFixture] })).toBe(false)
+    // Truncation is an optional flag: an older server omits it.
+    expect(isAccountMonitor({ ...monitorFixture, discrepanciesTruncated: true })).toBe(true)
+    expect(isAccountMonitor({ ...monitorFixture, discrepanciesTruncated: false })).toBe(true)
+    expect(isAccountMonitor({ ...monitorFixture, discrepanciesTruncated: 'yes' })).toBe(false)
+    expect(isAccountMonitor({ ...monitorFixture, discrepanciesTruncated: null })).toBe(false)
   })
   it('requires every subject and source field as an explicit null rather than omitted', () => {
     const omitted: Record<string, unknown> = { ...monitorEventFixture.subject }
@@ -44,6 +56,53 @@ describe('monitor contract', () => {
     const older: Record<string, unknown> = { ...discrepancyFixture }
     delete older.outcome
     expect(isMonitorDiscrepancy(older)).toBe(false)
+  })
+  it('reads the last observation time as a UTC timestamp, an explicit null or, from an older server, omitted as unknown', () => {
+    expect(isMonitorDiscrepancy({ ...discrepancyFixture, lastObservedAtUtc: null })).toBe(true)
+    expect(isMonitorDiscrepancy({ ...discrepancyFixture, lastObservedAtUtc: '2026-10-14T10:00:00.1234567+00:00' })).toBe(true)
+    expect(isMonitorDiscrepancy({ ...discrepancyFixture, lastObservedAtUtc: '2026-10-14 10:00' })).toBe(false)
+    const older: Record<string, unknown> = { ...discrepancyFixture }
+    delete older.lastObservedAtUtc
+    // An API from before the field existed: the record, its account monitor, the summary and the execution all stay readable.
+    expect(isMonitorDiscrepancy(older)).toBe(true)
+    expect(isAccountMonitor({ ...monitorFixture, discrepancies: [older] })).toBe(true)
+    expect(isMonitorSummary({ ...monitorSummaryFixture, accounts: [{ ...monitorFixture, discrepancies: [older] }] })).toBe(true)
+    expect(isPlayExecution({ ...executionFixture, monitor: { ...monitorFixture, discrepancies: [older] }, discrepancies: [older] })).toBe(true)
+    // It reads as unknown, never as a time.
+    expect(discrepancyFacts(older as unknown as MonitorDiscrepancy, String).find(fact => fact.label === 'Last observed')?.value).toBe('Unknown')
+  })
+  it('accepts recorded stop coverage, projected stale, and rejects coverage that contradicts itself (Phase 0, 0.4c)', () => {
+    expect(isAccountMonitor({ ...monitorFixture, coverage: [coverageFixture] })).toBe(true)
+    // An older API without coverage, and a monitor with no Open Plays.
+    expect(isAccountMonitor(monitorFixture)).toBe(true)
+    expect(isAccountMonitor({ ...monitorFixture, coverage: [] })).toBe(true)
+    expect(isAccountMonitor({ ...monitorFixture, coverage: null })).toBe(false)
+    expect(isAccountMonitor({ ...monitorFixture, coverage: [coverageFixture, coverageFixture] })).toBe(false)
+    // The count of Open Plays without coverage: a whole number, optional for an older API.
+    expect(isAccountMonitor({ ...monitorFixture, uncheckedPlays: 2 })).toBe(true)
+    expect(isAccountMonitor({ ...monitorFixture, uncheckedPlays: -1 })).toBe(false)
+    expect(isAccountMonitor({ ...monitorFixture, uncheckedPlays: 1.5 })).toBe(false)
+    expect(isAccountMonitor({ ...monitorFixture, uncheckedPlays: null })).toBe(false)
+    for (const [state, reason] of [['shared', 'shared-whole-position-stop'], ['unknown', 'opposing-plays'], ['unsupported', 'current-book-not-read']] as const)
+      expect(isMonitorCoverage(coverageAs(state, reason))).toBe(true)
+    expect(isMonitorCoverage({ ...coverageFixture, state: 'stale' })).toBe(true)
+    // The projected state is either stale or the recorded one; only known coverage says whether it covers.
+    expect(isMonitorCoverage({ ...coverageFixture, state: 'shared' })).toBe(false)
+    expect(isMonitorCoverage({ ...coverageFixture, covered: null })).toBe(false)
+    expect(isMonitorCoverage({ ...coverageAs('shared', 'shared-whole-position-stop'), covered: true })).toBe(false)
+    expect(isMonitorCoverage({ ...coverageFixture, reason: '' })).toBe(false)
+    expect(isMonitorCoverage({ ...coverageFixture, checkedAtUtc: null })).toBe(false)
+    // A resting order is always dated; evidence words come from a fixed set.
+    const stop = coverageFixture.stops[0]!
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, observedAtUtc: null }] })).toBe(false)
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, evidence: 'seen' }] })).toBe(false)
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, evidence: 'not-seen', observedAtUtc: null, orderId: null, price: null }] })).toBe(true)
+    // Both resting kinds carry the order's exact acting price; prices are plain decimals or null.
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, evidence: 'resting-elsewhere', price: '59000' }] })).toBe(true)
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, evidence: 'resting-elsewhere', price: null }] })).toBe(false)
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, price: null }] })).toBe(false)
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, plannedPrice: null }] })).toBe(true)
+    expect(isMonitorCoverage({ ...coverageFixture, stops: [{ ...stop, plannedPrice: '6e4' }] })).toBe(false)
   })
   it('validates watched orders and keeps a watching order open-ended', () => {
     const watch = { linkId: 'link-1', playId: savedPlayFixture.summary.id, orderId: 'exit-1', role: 'stop', state: 'unverifiable',
