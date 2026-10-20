@@ -392,8 +392,18 @@ Cleanup record: `/tmp/vessel-paper-disposable-cleanup.json`.
 ## Owner-authorized PR and Claude review follow-up
 
 October 20, 2026: the owner requested a pull request and an independent Claude
-Opus evaluation of the implementation. Prepare a draft PR against `main` while
-that additional review runs; address actionable findings before marking it
-ready. This does not authorize merging, deployment, release or owner-data
-migration. The recorded Sol approvals and frozen-tree test results above remain
-the implementation baseline; the additional review is pending.
+Opus evaluation of the implementation. The verified feature was committed as
+`54be38ea5b0db0d6bff70e3e76a226733da8b9b7` and pushed on
+`t3/paper-trading-portfolio-concept`. Draft **`sloppitty/vessel#32`** targets
+`main` and is registered with this T3 thread.
+
+Two separate app-owned review requests selected provider `claudeAgent`, model
+`claude-opus-5-5`, effort `max`. Both failed before code evaluation with
+`Claude API rate limit reached. Try again later.` No Claude findings or approval
+were obtained; the service failure is not a completed code review. No further
+automatic retries are running.
+
+Keep the PR draft until the requested Opus evaluation can complete and any
+actionable findings are addressed. The recorded Sol approvals and frozen-tree
+test results above remain the implementation baseline. PR creation does not
+authorize merging, deployment, release or owner-data migration.
