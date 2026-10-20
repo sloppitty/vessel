@@ -222,6 +222,16 @@ October 20, 2026, branch `t3/phase1-preflight`, stacked on 1.4a:
   - **Check.** After the rebase onto main, `scripts/check.sh` passed: backend 3,574 passed, 5 skipped; frontend 151
     files and 3,782 tests.
 
+- **Sol (Codex) round 2.** All five round-1 findings resolved. Three new findings, all fixed:
+  - **Priced stops (medium).** The check reused the stop-coverage gap, which also requires entry shares to total 100%,
+    so a half-sized entry with its stop was recorded as missing it. It now asks only whether each priced entry has a
+    stop that resolves to a price; shares stay with the allocation check, and with no priced entry it is unknown.
+  - **Empty checklist (low).** An empty pre-flight counted as recorded in Review but not in History. The server now
+    stores and reads it as no pre-flight.
+  - **Lifecycle doc (low).** It no longer describes the withdrawn plan-at-once shortcut.
+  - **Test.** An all-clear plan now has a test that fails if Plan it skips the checklist.
+  - **Check.** `scripts/check.sh` passed: backend 3,576 passed, 5 skipped; frontend 151 files and 3,784 tests.
+
 ## 1.6 Capture friction and time consistency
 
 Not started.
