@@ -303,6 +303,6 @@ documented Plays weighing more, a toggle and a configurable threshold.
   The threshold is a browser preference (`review.preferences.v1`, per user in
   Wallet mode) in the Review section of Settings, saved when a valid value
   is completed (blur or Enter) and reread after another tab changes it.
-  Reset keeps the positions mode. Counts read "N Plays · M positions"; with
+  Reset and the asset shortcuts keep the positions mode. Counts read "N Plays · M positions"; with
   positions the breakdown's count column is "Results", and the Play-local and
   R denominators count Plays only. The scorecard says Plays weigh 2× in rates.
