@@ -101,6 +101,7 @@ namespace Vessel.Persistence.Migrations
                     table.CheckConstraint("CK_paper_execution_role", "(\"Role\"='entry' AND \"LevelId\" IS NULL AND \"PnlUsd\"=0 AND \"MarginUsd\">0) OR (\"Role\" IN ('stop','target','exit') AND \"MarginUsd\"<0)");
                     table.CheckConstraint("CK_paper_execution_time", "\"CandleCloseAtUtc\"=\"CandleOpenAtUtc\"+interval '1 minute' AND \"OccurredAtUtc\"=\"CandleCloseAtUtc\"");
                     table.CheckConstraint("CK_paper_execution_values", "\"Price\">0 AND \"Quantity\">0 AND \"PlanVersion\">=1");
+                    table.CheckConstraint("CK_paper_execution_precision", "\"Price\"<=1000000000000 AND \"Quantity\"<=1000000000000 AND \"MarginUsd\" BETWEEN -1000000000000000 AND 1000000000000000 AND \"PnlUsd\" BETWEEN -1000000000000000 AND 1000000000000000 AND scale(trim_scale(\"Price\"))<=28 AND \"Price\"*power(10::numeric,scale(trim_scale(\"Price\")))<=79228162514264337593543950335 AND trunc(\"Quantity\",12)=\"Quantity\" AND trunc(\"MarginUsd\",12)=\"MarginUsd\" AND trunc(\"PnlUsd\",12)=\"PnlUsd\"");
                     table.ForeignKey(
                         name: "FK_paper_executions_accounts_OwnerId_AccountId_TradingMode",
                         columns: x => new { x.OwnerId, x.AccountId, x.TradingMode },
@@ -202,13 +203,16 @@ namespace Vessel.Persistence.Migrations
                     NextCheckAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     CheckpointUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     PreviousClose = table.Column<decimal>(type: "numeric", nullable: true),
+                    PreviousCloseAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    DeclinedEntriesJson = table.Column<string>(type: "jsonb", nullable: false),
+                    SuspensionsJson = table.Column<string>(type: "jsonb", nullable: false),
                     IssuesJson = table.Column<string>(type: "jsonb", nullable: false)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_paper_simulations", x => x.PlayId);
                     table.CheckConstraint("CK_paper_simulation_mode", "\"TradingMode\"='paper'");
-                    table.CheckConstraint("CK_paper_simulation_state", "\"State\" IN ('waiting','ready','ambiguous','gap','disabled')");
+                    table.CheckConstraint("CK_paper_simulation_state", "\"State\" IN ('waiting','ready','ambiguous','gap','disabled','suspended')");
                     table.ForeignKey(
                         name: "FK_paper_simulations_accounts_OwnerId_AccountId_TradingMode",
                         columns: x => new { x.OwnerId, x.AccountId, x.TradingMode },

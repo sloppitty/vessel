@@ -1,8 +1,13 @@
 using Microsoft.EntityFrameworkCore;
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Npgsql;
 using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Paper;
 using Vessel.Application.Plays;
+using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Paper;
@@ -16,6 +21,333 @@ public sealed class PaperEnginePostgresTests
 {
     private static readonly DateTimeOffset At = new(2026, 10, 20, 12, 0, 5, TimeSpan.Zero);
     private static readonly DateTimeOffset FirstOpen = new(2026, 10, 20, 12, 1, 0, TimeSpan.Zero);
+
+    [PostgresFact]
+    public async Task Awkward_profit_keeps_quiet_siblings_workspace_reads_new_arming_and_disabling_healthy()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var plan = Plan("1000") with { Leverage = "10", Entries = [Entry("e", "100", "97.3")] };
+        plan = plan with { Entries = [plan.Entries[0] with { Targets = [new("t", "price", "98", "100")] }] };
+        var a = await f.ArmAsync("1000", plan);
+        var sibling = await f.ArmAsync("100", instrument: "ETH");
+        f.Clock.Now = FirstOpen.AddMinutes(3);
+        Assert.True(await f.EvaluateAccountAsync(new Dictionary<string, IReadOnlyList<PaperCandle>>
+        {
+            ["BTC"] = [Candle(0, 97.3m, 97.2m, 97.4m), Candle(1, 98, 97.4m, 98.5m), Candle(2, 98, 97.9m, 98.1m)],
+            ["ETH"] = [Candle(0, 105, 104, 106), Candle(1, 105, 104, 106), Candle(2, 105, 104, 106)]
+        }));
+        await using var db = f.Db.Context(f.Owner);
+        Assert.Equal(PlayStatus.Closed, (await db.Plays.FindAsync(a))!.Status);
+        Assert.Equal("ready", (await db.PaperSimulations.FindAsync(sibling))!.State);
+        var unit = TestUnitOfWork.For(db);
+        var workspace = new WorkspaceService(new WorkspaceStore(db, unit), new CoreOwner(f.Owner), TestVenues.With(), unit);
+        Assert.Equal("4071.942446043164", Assert.Single(await workspace.AccountsAsync(default, "paper")).BalanceUsd);
+        Assert.Equal("4071.942446043164", Assert.Single(await workspace.PortfoliosAsync(default, "paper")).BalanceUsd);
+        Assert.Equal("4071.942446043164", (await workspace.OverviewAsync(default, "paper")).Totals.TotalBalanceUsd);
+        Assert.Empty(await workspace.AccountsAsync(default));
+        _ = await new PaperStore(db, unit).TimelineCapitalAsync(f.AccountId, [], default);
+        _ = await f.ArmAsync("100", instrument: "SOL");
+        var account = (await db.Accounts.FindAsync(f.AccountId))!;
+        var disabled = await workspace.UpdateAccountAsync(f.AccountId,
+            new(account.Name, account.PortfolioId, false, account.SettingsRevision), default, "paper");
+        Assert.False(disabled.IsEnabled);
+    }
+
+    [PostgresFact]
+    public async Task Authenticated_paper_http_reads_serialize_exact_awkward_partial_profit_and_audit_fields()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var plan = Plan("1000") with { Leverage = "10", Entries = [Entry("e", "100", "97.3") with
+            { Targets = [new("t1", "price", "98", "50"), new("t2", "price", "99", "50")] }] };
+        var id = await f.ArmAsync("1000", plan);
+        f.Clock.Now = FirstOpen.AddMinutes(2);
+        Assert.True(await f.EvaluateAccountAsync(new Dictionary<string, IReadOnlyList<PaperCandle>>
+            { ["BTC"] = [Candle(0, 97.3m, 97.2m, 97.4m), Candle(1, 98, 97.4m, 98.5m)] }));
+        await using var factory = new CoreApiFactory(f.Owner, connection: f.Db.ConnectionString,
+            settings: new() { ["Vessel:Auth:OwnerId"] = f.Owner.ToString() });
+        using var client = factory.AuthorizedClient();
+        foreach (var route in new[] { "/api/accounts", "/api/portfolios" })
+        {
+            using var response = await client.GetAsync(route + "?tradingMode=paper");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("4035.971223021582", body[0].GetProperty("balanceUsd").GetString());
+            using var real = await client.GetAsync(route);
+            Assert.Equal(HttpStatusCode.OK, real.StatusCode);
+            Assert.Empty((await real.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray());
+        }
+        using var overview = await client.GetAsync("/api/overview?tradingMode=paper");
+        Assert.Equal(HttpStatusCode.OK, overview.StatusCode);
+        Assert.Equal("4035.971223021582", (await overview.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("totals").GetProperty("totalBalanceUsd").GetString());
+        using var state = await client.GetAsync($"/api/plays/{id}/paper-state?tradingMode=paper");
+        Assert.Equal(HttpStatusCode.OK, state.StatusCode);
+        var json = await state.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("51.387461459404", json.GetProperty("openQuantity").GetString());
+        Assert.Equal("35.971223021582", json.GetProperty("realizedPnlUsd").GetString());
+        Assert.Empty(json.GetProperty("declinedEntries").EnumerateArray());
+        Assert.Empty(json.GetProperty("suspensions").EnumerateArray());
+        Assert.False(json.GetProperty("hasUnscoredHistory").GetBoolean());
+        var disabled = await client.PutAsJsonAsync($"/api/accounts/{f.AccountId}?tradingMode=paper",
+            new UpdateAccountRequest("Paper", (await client.GetFromJsonAsync<AccountDto[]>("/api/accounts?tradingMode=paper"))![0].PortfolioId, false, 1));
+        Assert.Equal(HttpStatusCode.OK, disabled.StatusCode);
+    }
+
+    [PostgresFact]
+    public async Task Quantization_preflight_rejects_tiny_arm_and_retained_position_revision_atomically()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var tiny = Plan("0.0000000000001") with { SizingMode = "quantity" };
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => f.ArmAsync(tiny.Size, tiny))).StatusCode);
+        var id = await f.ArmAsync("100");
+        f.Clock.Now = FirstOpen.AddMinutes(1);
+        Assert.True(await f.EvaluateAccountAsync(new Dictionary<string, IReadOnlyList<PaperCandle>>
+            { ["BTC"] = [Candle(0, 100, 99, 101)] }));
+        long version;
+        string stored;
+        await using (var db = f.Db.Context(f.Owner))
+        {
+            var play = (await db.Plays.FindAsync(id))!;
+            version = play.Version; stored = play.Plan;
+            var revision = Plan("1000000000000") with
+            {
+                SizingMode = "quantity",
+                Entries = [Entry("e", "100", "100") with { Targets = [new("t", "price", "110", "0.000000000001")] }]
+            };
+            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => TestUnitOfWork.For(db).ExecuteAsync(async () =>
+            {
+                db.Add(play.ChangePlan(PlayDocuments.Serialize(revision), "Unsupported tiny exit", f.Clock.Now)!);
+                await f.Service(db).ActivateRevisionAsync(play, default);
+                return true;
+            }, default))).StatusCode);
+        }
+        await using var verify = f.Db.Context(f.Owner);
+        var retained = (await verify.Plays.FindAsync(id))!;
+        Assert.Equal(stored, retained.Plan);
+        Assert.Equal(version, retained.Version);
+        Assert.Equal(1, await verify.PaperPlanActivations.CountAsync());
+        Assert.Single(await verify.PaperExecutions.ToListAsync());
+        Assert.Single(await verify.Plays.ToListAsync()); // Refused arming leaves no orphan Play or reservations.
+    }
+
+    [PostgresTheory]
+    [InlineData("0.0000000000001", "100", "100")]
+    [InlineData("1000000000001", "100", "100")]
+    [InlineData("1", "1000000000001", "100")]
+    [InlineData("1", "100", "0.0000000000001")]
+    [InlineData("1", "100", "1000000000000001")]
+    [InlineData("1", "97.30000000000000000000000000001", "100")]
+    public async Task PostgreSQL_rejects_direct_simulated_facts_outside_the_model_precision(
+        string quantity, string price, string margin)
+    {
+        await using var f = await Fixture.CreateAsync();
+        var id = await f.ArmAsync("100");
+        await using var db = f.Db.Context(f.Owner);
+        var error = await Assert.ThrowsAsync<PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO paper_executions
+              ("Id","OwnerId","TradingMode","AccountId","PlayId","EntryId","Role","Price","Quantity",
+               "PnlUsd","MarginUsd","PlanVersion","OccurredAtUtc","CandleOpenAtUtc","CandleCloseAtUtc")
+            VALUES ({Guid.NewGuid()},{f.Owner},'paper',{f.AccountId},{id},'probe','entry',
+              {price}::numeric,{quantity}::numeric,0,{margin}::numeric,1,
+              {FirstOpen.AddMinutes(1)},{FirstOpen},{FirstOpen.AddMinutes(1)})
+            """));
+        Assert.Equal(PostgresErrorCodes.CheckViolation, error.SqlState);
+        Assert.Empty(await db.PaperExecutions.ToListAsync());
+    }
+
+    [PostgresFact]
+    public async Task Aggregate_capital_beyond_decimal_range_remains_exact_and_admits_new_work()
+    {
+        await using var f = await Fixture.CreateAsync(decimal.MaxValue);
+        _ = await f.ArmAsync("100");
+        f.Clock.Now = FirstOpen.AddMinutes(2);
+        Assert.True(await f.EvaluateAccountAsync(new Dictionary<string, IReadOnlyList<PaperCandle>>
+            { ["BTC"] = [Candle(0, 100, 99, 101), Candle(1, 110, 109, 111)] }));
+        const string expected = "79228162514264337593543950345";
+        await using var db = f.Db.Context(f.Owner);
+        var unit = TestUnitOfWork.For(db);
+        Assert.Equal(expected, (await new PaperStore(db, unit).TimelineCapitalAsync(f.AccountId, [], default)).CashUsd.ToString());
+        var workspace = new WorkspaceService(new WorkspaceStore(db, unit), new CoreOwner(f.Owner), TestVenues.With(), unit);
+        Assert.Equal(expected, Assert.Single(await workspace.AccountsAsync(default, "paper")).BalanceUsd);
+        Assert.Equal(expected, Assert.Single(await workspace.PortfoliosAsync(default, "paper")).BalanceUsd);
+        Assert.Equal(expected, (await workspace.OverviewAsync(default, "paper")).Totals.TotalBalanceUsd);
+        _ = await f.ArmAsync("100", instrument: "SOL");
+    }
+
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Existing_protective_levels_can_be_revised_without_admitting_capital_during_an_unresolved_window(
+        bool ownReadFailure)
+    {
+        await using var f = await Fixture.CreateAsync();
+        var plan = Plan("100") with { Entries = [Entry("a", "50", "100"), Entry("b", "50", "200")] };
+        var id = await f.ArmAsync("100", plan);
+        if (!ownReadFailure) _ = await f.ArmAsync("100", instrument: "ETH");
+        f.Clock.Now = FirstOpen.AddMinutes(2);
+        Assert.True(await f.EvaluateAccountAsync(new Dictionary<string, IReadOnlyList<PaperCandle>>
+        {
+            ["BTC"] = [Candle(0, 100, 99, 101), Candle(1, 100, 99, 101)],
+            ["ETH"] = [Candle(0, 120, 119, 121)] // No guessed missing-minute coverage.
+        }));
+        PaperAccountCandidate stale;
+        await using (var db = f.Db.Context(f.Owner))
+        {
+            var service = f.Service(db);
+            stale = await service.PrepareAccountAsync(f.AccountId, default);
+            if (ownReadFailure) await service.RecordAccountReadFailureAsync(stale, default);
+        }
+        await Assert.ThrowsAsync<ProblemException>(() => f.ArmAsync("100", instrument: "SOL"));
+        async Task Revise(PlayPlanDocument revised)
+        {
+            await using var db = f.Db.Context(f.Owner);
+            var unit = TestUnitOfWork.For(db);
+            await unit.ExecuteAsync(() => new PaperStore(db, unit).WithAccountLockAsync(f.AccountId, async () =>
+            {
+                var play = (await db.Plays.FindAsync(id))!;
+                db.Add(play.ChangePlan(PlayDocuments.Serialize(revised), "Protect existing risk", f.Clock.Now)!);
+                await f.Service(db).ActivateRevisionAsync(play, default);
+                return true;
+            }, default), default);
+        }
+        await Assert.ThrowsAsync<ProblemException>(() => Revise(plan with { Size = "200" }));
+        var protectedPlan = plan with { Entries = [plan.Entries[0] with { Stops = [new("sa", "price", "95", "100")] }, plan.Entries[1]] };
+        await Revise(protectedPlan);
+        f.Clock.Now = FirstOpen.AddMinutes(4);
+        await using (var db = f.Db.Context(f.Owner))
+        {
+            var service = f.Service(db);
+            Assert.False(await service.EvaluateAccountAsync(stale, new Dictionary<string, IReadOnlyList<PaperCandle>>
+                { ["BTC"] = [Candle(2, 100, 99, 101), Candle(3, 95, 94, 96)] }, f.Clock.Now, default));
+        }
+        Assert.True(await f.EvaluateAccountAsync(new Dictionary<string, IReadOnlyList<PaperCandle>>
+            { ["BTC"] = [Candle(2, 100, 99, 101), Candle(3, 95, 94, 96)] }));
+        await using var verify = f.Db.Context(f.Owner);
+        var stop = await verify.PaperExecutions.SingleAsync(e => e.PlayId == id && e.Role == "stop");
+        Assert.Equal(95, stop.Price);
+        Assert.Equal(2, stop.PlanVersion);
+        Assert.Equal(PlayStatus.Closed, (await verify.Plays.FindAsync(id))!.Status);
+    }
+
+    [PostgresFact]
+    public async Task Declined_entry_advances_without_freezing_open_tranche_stops_or_replaying_the_entry()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var x = await f.ArmAsync("1000", Plan("1000") with
+        {
+            Entries = [Entry("a", "50", "100") with { Targets = [] }, Entry("b", "50", "200") with { Targets = [] }]
+        });
+        _ = await f.ArmAsync("100", Plan("100") with
+        {
+            Entries = [Entry("y", "100", "50") with { Stops = [], Targets = [new("ty", "price", "60", "100")] }]
+        }, "ETH");
+        f.Clock.Now = FirstOpen.AddMinutes(2);
+        Assert.True(await f.EvaluateAccountAsync(new Dictionary<string, IReadOnlyList<PaperCandle>>
+        {
+            ["BTC"] = [Candle(0, 100, 99, 101), Candle(1, 200, 199, 201)],
+            ["ETH"] = [Candle(0, 70, 69, 71), Candle(1, 50, 49, 61)]
+        }));
+        await using (var db = f.Db.Context(f.Owner))
+        {
+            var state = await f.Service(db).StateAsync(x, default);
+            Assert.Equal("blocked", state.Status);
+            Assert.NotNull(state.NextCheckAtUtc);
+            Assert.Empty(state.Issues);
+            Assert.Equal(FirstOpen.AddMinutes(2), (await db.PaperSimulations.FindAsync(x))!.CheckpointUtc);
+            Assert.Equal(0, (await db.PaperReservations.FindAsync(x))!.AmountUsd);
+        }
+        f.Clock.Now = FirstOpen.AddMinutes(4);
+        Assert.True(await f.EvaluateAccountAsync(new Dictionary<string, IReadOnlyList<PaperCandle>>
+        {
+            ["BTC"] = [Candle(2, 200, 199, 201), Candle(3, 90, 89, 91)]
+        }));
+        await using var verify = f.Db.Context(f.Owner);
+        var facts = await verify.PaperExecutions.Where(e => e.PlayId == x).ToListAsync();
+        Assert.Single(facts, e => e.Role == "entry" && e.EntryId == "a");
+        Assert.DoesNotContain(facts, e => e.EntryId == "b");
+        Assert.Single(facts, e => e.Role == "stop");
+        Assert.Equal(PlayStatus.Closed, (await verify.Plays.FindAsync(x))!.Status);
+    }
+
+    [PostgresTheory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Suspension_resumes_only_active_plays_at_fresh_boundary_and_keeps_open_protective_exits(
+        bool accountToggle, bool opened)
+    {
+        await using var f = await Fixture.CreateAsync();
+        var id = await f.ArmAsync("100");
+        var pausedId = await f.ArmAsync("100", instrument: "ETH");
+        await using (var db = f.Db.Context(f.Owner))
+        {
+            await TestUnitOfWork.For(db).ExecuteAsync(async () =>
+            {
+                var paused = (await db.Plays.FindAsync(pausedId))!;
+                db.Add(paused.Pause(f.Clock.Now));
+                await f.Service(db).SuspendAsync(paused, default);
+                return true;
+            }, default);
+        }
+        if (opened)
+        {
+            f.Clock.Now = FirstOpen.AddMinutes(1);
+            Assert.True(await f.EvaluateAccountAsync(new Dictionary<string, IReadOnlyList<PaperCandle>>
+                { ["BTC"] = [Candle(0, 100, 99, 101)] }));
+        }
+        PaperAccountCandidate stale;
+        await using (var db = f.Db.Context(f.Owner))
+            stale = await f.Service(db).PrepareAccountAsync(f.AccountId, default);
+        async Task Toggle(bool enabled)
+        {
+            await using var db = f.Db.Context(f.Owner);
+            if (!accountToggle) await f.Service(db).UpdateSettingsAsync(new(enabled, 1), default);
+            else
+            {
+                var unit = TestUnitOfWork.For(db);
+                var workspace = new WorkspaceService(new WorkspaceStore(db, unit, f.Clock), new CoreOwner(f.Owner), TestVenues.With(), unit);
+                var account = (await db.Accounts.FindAsync(f.AccountId))!;
+                await workspace.UpdateAccountAsync(account.Id,
+                    new(account.Name, account.PortfolioId, enabled, account.SettingsRevision), default, "paper");
+            }
+        }
+        await Toggle(false);
+        f.Clock.Now = FirstOpen.AddHours(2).AddSeconds(20);
+        await Toggle(true);
+        var boundary = PaperTradingService.NextMinute(f.Clock.Now);
+        await using (var db = f.Db.Context(f.Owner))
+        {
+            var service = f.Service(db);
+            var state = await service.StateAsync(id, default);
+            Assert.Equal("waiting", state.Status);
+            Assert.True(state.HasUnscoredHistory);
+            Assert.Equal(boundary, (await db.PaperSimulations.FindAsync(id))!.CheckpointUtc);
+            Assert.Null((await db.PaperSimulations.FindAsync(id))!.PreviousClose);
+            Assert.Equal(boundary, Assert.Single(state.Suspensions).ResumedAtUtc);
+            var paused = await service.StateAsync(pausedId, default);
+            Assert.Equal("disabled", paused.Status);
+            Assert.Empty(paused.Suspensions);
+            Assert.Null(paused.NextCheckAtUtc);
+            Assert.Equal(0, (await db.PaperReservations.FindAsync(pausedId))!.AmountUsd);
+            Assert.False(await service.EvaluateAccountAsync(stale, new Dictionary<string, IReadOnlyList<PaperCandle>>
+                { ["BTC"] = [Candle(0, 110, 99, 111)] }, FirstOpen.AddMinutes(1), default));
+        }
+        if (opened)
+            await Assert.ThrowsAsync<ProblemException>(() => f.ArmAsync("100", instrument: "SOL"));
+        else
+            _ = await f.ArmAsync("100", instrument: "SOL"); // Reservations retained, flat history not an account-wide freeze.
+        f.Clock.Now = boundary.AddMinutes(1);
+        var candle = new PaperCandle(boundary, boundary.AddMinutes(1), opened ? 90 : 100,
+            opened ? 91 : 101, opened ? 89 : 99, opened ? 90 : 100);
+        Assert.True(await f.EvaluateAccountAsync(new Dictionary<string, IReadOnlyList<PaperCandle>>
+            { ["BTC"] = [candle], ["SOL"] = [candle] }));
+        await using var verify = f.Db.Context(f.Owner);
+        Assert.Equal(opened ? PlayStatus.Closed : PlayStatus.Open, (await verify.Plays.FindAsync(id))!.Status);
+        Assert.DoesNotContain(await verify.PaperExecutions.Where(e => e.PlayId == id).ToListAsync(),
+            e => e.CandleOpenAtUtc >= FirstOpen.AddMinutes(1) && e.CandleOpenAtUtc < boundary);
+        _ = await f.ArmAsync("100", instrument: "SOL"); // Post-resume entries are known; only exposure spanning suspension is uncertain.
+    }
 
     [PostgresFact]
     public async Task Atomic_execution_cash_margin_checkpoint_and_lifecycle_are_idempotent()
@@ -78,9 +410,12 @@ public sealed class PaperEnginePostgresTests
         Assert.Equal(1000, await db.PaperLedgerEntries.SumAsync(x => x.AmountUsd));
         Assert.Empty(await db.PaperExecutions.Where(x => x.PlayId == waitingId).ToListAsync());
         var state = (await db.PaperSimulations.FindAsync(waitingId))!;
-        Assert.Equal("gap", state.State);
-        Assert.Contains("Insufficient paper margin", state.IssuesJson);
-        Assert.Equal(2900, (await db.PaperReservations.FindAsync(waitingId))!.AmountUsd);
+        Assert.Equal("ready", state.State);
+        Assert.Equal("[]", state.IssuesJson);
+        Assert.Contains("Insufficient paper margin", Assert.Single(state.DeclinedEntries()).Reason);
+        Assert.Equal(FirstOpen.AddMinutes(3), state.CheckpointUtc);
+        Assert.NotNull(state.NextCheckAtUtc);
+        Assert.Equal(0, (await db.PaperReservations.FindAsync(waitingId))!.AmountUsd);
         Assert.Equal(PlayStatus.Closed, (await db.Plays.FindAsync(lossId))!.Status);
     }
 
@@ -311,7 +646,9 @@ public sealed class PaperEnginePostgresTests
             Assert.Equal(new(true, 1), await service.GetSettingsAsync(default));
             await Assert.ThrowsAsync<ProblemException>(() => service.UpdateSettingsAsync(new(true, 0), default));
             await service.UpdateSettingsAsync(new(false, 60), default);
-            Assert.Equal("disabled", (await service.StateAsync(id, default)).Status);
+            var suspended = await service.StateAsync(id, default);
+            Assert.Equal("suspended", suspended.Status);
+            Assert.Null(Assert.Single(suspended.Suspensions).ResumedAtUtc);
         }
         await using (var db = f.Db.Context(Guid.NewGuid()))
         {
@@ -326,11 +663,14 @@ public sealed class PaperEnginePostgresTests
             var service = f.Service(db);
             await service.UpdateSettingsAsync(new(true, 1), default);
             var state = await service.StateAsync(id, default);
-            Assert.Equal("gap", state.Status);
+            Assert.Equal("waiting", state.Status);
             Assert.Equal("0", state.EnteredQuantity);
-            Assert.Single(state.Issues);
+            Assert.Empty(state.Issues);
+            Assert.True(state.HasUnscoredHistory);
+            Assert.Equal(PaperTradingService.NextMinute(f.Clock.Now), Assert.Single(state.Suspensions).ResumedAtUtc);
+            Assert.Equal(PaperTradingService.NextMinute(f.Clock.Now).AddMinutes(1), state.NextCheckAtUtc);
         }
-        Assert.Empty(await f.DueAsync());
+        _ = await f.ArmAsync("100"); // Flat suspension history must not poison new account admissions.
     }
 
     [PostgresFact]
@@ -377,15 +717,15 @@ public sealed class PaperEnginePostgresTests
         public Clock Clock { get; } = new();
         public PaperTradingService Service(VesselDbContext db) => new(new PaperStore(db, TestUnitOfWork.For(db)),
             TestUnitOfWork.For(db), new ConfiguredOwnerDirectory(db.CurrentOwnerId), TestVenues.With(), Clock);
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(decimal capital = 4000)
         {
             var db = await CoreDatabase.CreateAsync();
             var owner = Guid.NewGuid();
             await using var context = db.Context(owner);
             var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
-            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper", "paper", 4000);
+            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper", "paper", capital);
             account.Configure(portfolio.Id, null, null);
-            context.AddRange(portfolio, account, PaperLedgerEntry.Seed(owner, account.Id, 4000, At),
+            context.AddRange(portfolio, account, PaperLedgerEntry.Seed(owner, account.Id, capital, At),
                 new PaperSettings { OwnerId = owner, Enabled = true, CheckIntervalMinutes = 1 });
             await context.SaveChangesAsync();
             return new(db, owner, account.Id);

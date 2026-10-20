@@ -50,6 +50,7 @@ internal sealed class PaperExecutionConfiguration : IEntityTypeConfiguration<Pap
             t.HasCheckConstraint("CK_paper_execution_mode", "\"TradingMode\"='paper'");
             t.HasCheckConstraint("CK_paper_execution_model", "\"ModelVersion\"=1");
             t.HasCheckConstraint("CK_paper_execution_values", "\"Price\">0 AND \"Quantity\">0 AND \"PlanVersion\">=1");
+            t.HasCheckConstraint("CK_paper_execution_precision", "\"Price\"<=1000000000000 AND \"Quantity\"<=1000000000000 AND \"MarginUsd\" BETWEEN -1000000000000000 AND 1000000000000000 AND \"PnlUsd\" BETWEEN -1000000000000000 AND 1000000000000000 AND scale(trim_scale(\"Price\"))<=28 AND \"Price\"*power(10::numeric,scale(trim_scale(\"Price\")))<=79228162514264337593543950335 AND trunc(\"Quantity\",12)=\"Quantity\" AND trunc(\"MarginUsd\",12)=\"MarginUsd\" AND trunc(\"PnlUsd\",12)=\"PnlUsd\"");
             t.HasCheckConstraint("CK_paper_execution_role", """("Role"='entry' AND "LevelId" IS NULL AND "PnlUsd"=0 AND "MarginUsd">0) OR ("Role" IN ('stop','target','exit') AND "MarginUsd"<0)""");
             t.HasCheckConstraint("CK_paper_execution_time", "\"CandleCloseAtUtc\"=\"CandleOpenAtUtc\"+interval '1 minute' AND \"OccurredAtUtc\"=\"CandleCloseAtUtc\"");
         });
@@ -79,12 +80,14 @@ internal sealed class PaperSimulationConfiguration : IEntityTypeConfiguration<Pa
         b.ToTable("paper_simulations", t =>
         {
             t.HasCheckConstraint("CK_paper_simulation_mode", "\"TradingMode\"='paper'");
-            t.HasCheckConstraint("CK_paper_simulation_state", "\"State\" IN ('waiting','ready','ambiguous','gap','disabled')");
+            t.HasCheckConstraint("CK_paper_simulation_state", "\"State\" IN ('waiting','ready','ambiguous','gap','disabled','suspended')");
         });
         b.HasKey(x => x.PlayId);
         b.Property(x => x.TradingMode).HasMaxLength(8);
         b.Property(x => x.State).HasMaxLength(16);
         b.Property(x => x.IssuesJson).HasColumnType("jsonb");
+        b.Property(x => x.DeclinedEntriesJson).HasColumnType("jsonb");
+        b.Property(x => x.SuspensionsJson).HasColumnType("jsonb");
         b.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId, x.TradingMode })
             .HasPrincipalKey(x => new { x.OwnerId, x.Id, x.TradingMode }).OnDelete(DeleteBehavior.Restrict);
         b.HasOne<Play>().WithOne().HasForeignKey<PaperSimulation>(x => new { x.OwnerId, x.PlayId, x.TradingMode })

@@ -92,7 +92,8 @@ export function PaperSettings({ api, onChange }: PaperSettingsProps) {
     <FlaskConical size={23} aria-hidden="true" /><h2 id={`${id}-heading`}>Paper trading</h2>
     <p>Opt in to simulated execution with virtual capital. No real orders are submitted. Paper checks use closed one-minute candles,
       with zero fees and slippage; ambiguous candle order is not guessed. These settings are independent of the real-account monitor.
-      Defaults: disabled, checked every 60 minutes. Disabling stops monitoring and blocks new paper arming; paper history stays available.</p>
+      Defaults: disabled, checked every 60 minutes. Disabling stops monitoring and blocks new paper arming; paper history stays available.
+      Re-enabling resumes suspended Plays at a fresh minute boundary without replaying disabled-period touches. Unevaluated history remains unscored.</p>
     {!current && <p role="status">Loading paper settings…</p>}
     {current?.saved && <p role="status">Saved paper monitoring: {current.saved.enabled ? 'enabled' : 'disabled'}.</p>}
     {current?.error && <div className="workspace-alert" role="alert"><span>{current.error}</span>
@@ -114,8 +115,10 @@ export function PaperSettings({ api, onChange }: PaperSettingsProps) {
     {confirming && <Dialog open onOpenChange={open => { if (!open) setConfirmingFor(null) }}>
       <DialogContent className="workspace-dialog">
         <DialogHeader><DialogTitle>Disable paper monitoring?</DialogTitle>
-          <DialogDescription>Monitoring will stop for all armed and open paper Plays. Existing capital reservations remain held.
-            Price touches while disabled are not retroactively simulated; the gap can leave results unscored. Paper history stays available.</DialogDescription></DialogHeader>
+          <DialogDescription>Monitoring will stop for all armed and open paper Plays. Existing capital reservations remain held while open exposure is unknown.
+            Re-enabling resumes suspended Plays prospectively at a fresh minute boundary; owner-paused Plays stay paused.
+            Price touches while disabled are not retroactively simulated. Unevaluated history remains unscored after resumption.
+            Paper history stays available.</DialogDescription></DialogHeader>
         <DialogFooter><Button type="button" variant="outline" onClick={() => setConfirmingFor(null)}>Cancel</Button>
           <Button type="button" variant="destructive" onClick={() => { void save(true) }}>Disable paper monitoring</Button></DialogFooter>
       </DialogContent>

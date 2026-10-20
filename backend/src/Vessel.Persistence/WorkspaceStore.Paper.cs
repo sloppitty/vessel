@@ -19,7 +19,14 @@ public sealed partial class WorkspaceStore
               reservations."ReservedUsd", positions."OpenPositionCount",
               EXISTS (SELECT 1 FROM paper_simulations s WHERE s."OwnerId"=a."OwnerId"
                 AND s."AccountId"=a."Id"
-                AND (s."State" IN ('gap','ambiguous') OR s."IssuesJson" <> '[]'::jsonb)) AS "Unresolved"
+                AND (s."State" IN ('gap','ambiguous') OR s."IssuesJson" <> '[]'::jsonb
+                  OR s."SuspensionsJson" <> '[]'::jsonb AND EXISTS (
+                    SELECT 1 FROM paper_executions se WHERE se."OwnerId"=s."OwnerId" AND se."PlayId"=s."PlayId"
+                    GROUP BY se."EntryId"
+                    HAVING SUM(CASE WHEN se."Role"='entry' THEN se."Quantity" ELSE -se."Quantity" END)>0
+                      AND MIN(se."OccurredAtUtc") <= (
+                        SELECT MAX((h->>'SuspendedAtUtc')::timestamptz)
+                        FROM jsonb_array_elements(s."SuspensionsJson") h)))) AS "Unresolved"
             FROM accounts a
             CROSS JOIN LATERAL (
               SELECT COALESCE(SUM(l."AmountUsd"),0)::text AS "CashUsd",
@@ -48,16 +55,13 @@ public sealed partial class WorkspaceStore
         foreach (var row in rows)
         {
             if (!row.HasSeed) continue; // Missing capital is unknown, never a guessed seed.
-            var cash = ExactValue(row.CashUsd);
+            var cash = ExactAmount.Parse(row.CashUsd).ToString();
             var available = ExactAmount.Parse(row.CashUsd) - ExactAmount.Parse(row.MarginUsd) - ExactAmount.Parse(row.ReservedUsd);
             result[row.Id] = new(cash, !row.Unresolved && row.OpenPositionCount == 0 ? cash : null,
-                row.Unresolved ? null : available.Units.Sign < 0 ? 0 : ExactValue(available.ToString()), row.OpenPositionCount);
+                row.Unresolved ? null : available.Units.Sign < 0 ? "0" : available.ToString(), row.OpenPositionCount);
         }
         return result;
     }
-
-    private static decimal ExactValue(string amount) => ExactDecimal.TryParseVenue(amount, out var value)
-        ? value : throw new ProblemException(409, "The virtual balance exceeds exact account precision.");
 
     private sealed class PaperBalanceRow
     {

@@ -1,10 +1,12 @@
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using Vessel.Application.MarketData;
+using Vessel.Application.Common;
 using Vessel.Application.Monitoring;
 using Vessel.Application.Ownership;
 using Vessel.Application.Paper;
@@ -82,6 +84,7 @@ public sealed class PaperScheduler(IOwnerScopeFactory scopes, IJournalOwnerDirec
         try
         {
             var now = time.GetUtcNow();
+            var settledThrough = PaperTradingService.SettledThrough(now);
             var accounts = new List<PaperAccountCandidate>();
             var seen = new HashSet<(Guid Owner, Guid Account)>();
             var playBudget = 0;
@@ -103,10 +106,19 @@ public sealed class PaperScheduler(IOwnerScopeFactory scopes, IJournalOwnerDirec
                 foreach (var candidate in candidates)
                 {
                     if (!seen.Add((owner, candidate.AccountId))) continue;
-                    var account = await scope.Services.GetRequiredService<PaperTradingService>().PrepareAccountAsync(candidate.AccountId, ct);
-                    if (account.Plays.Count == 0) continue;
-                    accounts.Add(account);
-                    playBudget += account.Plays.Count;
+                    try
+                    {
+                        var account = await scope.Services.GetRequiredService<PaperTradingService>().PrepareAccountAsync(candidate.AccountId, ct);
+                        if (account.Plays.Count == 0) continue;
+                        accounts.Add(account);
+                        playBudget += account.Plays.Count;
+                    }
+                    catch (Exception error) when (AccountDataFailure(error))
+                    {
+                        // A malformed account must not prevent other owners' work; shared database failures still escape.
+                        logger.LogWarning("Paper account preparation failed with {ErrorType}; other accounts remain eligible.", error.GetType().Name);
+                        playBudget++;
+                    }
                     if (playBudget >= options.MaxPlaysPerTick) break;
                 }
                 if (playBudget >= options.MaxPlaysPerTick) break;
@@ -119,7 +131,7 @@ public sealed class PaperScheduler(IOwnerScopeFactory scopes, IJournalOwnerDirec
             foreach (var group in accounts.SelectMany(a => a.Plays).GroupBy(x => x.ContractId, StringComparer.Ordinal))
             {
                 var from = group.Min(x => x.FromUtc);
-                var through = new[] { PaperTradingService.FloorMinute(now), from.AddMinutes(options.MaxCandlesPerRead) }.Min();
+                var through = new[] { settledThrough, from.AddMinutes(options.MaxCandlesPerRead) }.Min();
                 if (through <= from) continue;
                 await using var readScope = scopes.Create(group.First().OwnerId);
                 var reader = readScope.Services.GetRequiredService<IVenueRegistry>().Candles("hyperliquid")
@@ -137,16 +149,17 @@ public sealed class PaperScheduler(IOwnerScopeFactory scopes, IJournalOwnerDirec
                 catch (Exception error) when (error is VenueReadException or HttpRequestException or FormatException or OverflowException ||
                     error is OperationCanceledException && !ct.IsCancellationRequested)
                 {
-                    await server.DeferVenueAsync("hyperliquid", error is VenueRateLimitException limited
-                        ? limited.RetryAtUtc : now.AddMinutes(1), now, ct);
+                    // Only the venue's rate-limit signal is a server-wide deadline. A malformed/failed paper
+                    // candle read must not manufacture a cooldown for real Refresh, orders or funding.
+                    if (error is VenueRateLimitException limited)
+                        await server.DeferVenueAsync("hyperliquid", limited.RetryAtUtc, now, ct);
                     foreach (var account in accounts.Where(a => a.Plays.Any(p => p.ContractId == group.Key)))
                     {
                         failedAccounts.Add(account.AccountId);
-                        await using var scope = scopes.Create(account.OwnerId);
-                        await scope.Services.GetRequiredService<PaperTradingService>().RecordAccountReadFailureAsync(account, ct);
+                        await RecordAccountFailureAsync(account, readFailure: true, ct);
                     }
                     logger.LogWarning("Paper public candle read failed with {ErrorType}; account checkpoints were retained.", error.GetType().Name);
-                    break;
+                    if (error is VenueRateLimitException) break;
                 }
             }
             var shared = windows.ToDictionary(x => x.Key, x => x.Value.Candles, StringComparer.Ordinal);
@@ -154,15 +167,24 @@ public sealed class PaperScheduler(IOwnerScopeFactory scopes, IJournalOwnerDirec
             {
                 if (failedAccounts.Contains(account.AccountId) || await owners.StatusAsync(account.OwnerId, ct) != JournalOwnerStatus.Active) continue;
                 var from = account.Plays.Min(p => p.FromUtc);
-                var through = new[] { PaperTradingService.FloorMinute(now), from.AddMinutes(options.MaxCandlesPerRead) }.Min();
+                var through = new[] { settledThrough, from.AddMinutes(options.MaxCandlesPerRead) }.Min();
                 foreach (var play in account.Plays.Where(p => p.FromUtc < through))
                 {
                     if (!windows.TryGetValue(play.ContractId, out var window)) { through = from; break; }
                     if (window.Through < through) through = window.Through;
                 }
                 if (through <= from) continue;
-                await using var scope = scopes.Create(account.OwnerId);
-                await scope.Services.GetRequiredService<PaperTradingService>().EvaluateAccountAsync(account, shared, through, ct);
+                try
+                {
+                    await using var scope = scopes.Create(account.OwnerId);
+                    await scope.Services.GetRequiredService<PaperTradingService>().EvaluateAccountAsync(account, shared, through, ct);
+                }
+                catch (Exception error) when (AccountDataFailure(error))
+                {
+                    logger.LogWarning("Paper account evaluation failed with {ErrorType}; other accounts remain eligible.", error.GetType().Name);
+                    // The failed unit was rolled back. A fresh scope records retry health without reusing tracked mutations.
+                    await RecordAccountFailureAsync(account, readFailure: false, ct);
+                }
             }
         }
         finally
@@ -170,6 +192,24 @@ public sealed class PaperScheduler(IOwnerScopeFactory scopes, IJournalOwnerDirec
             // Explicit unlock before returning the physical connection to the pool, including cancellation.
             await using var release = new NpgsqlCommand("SELECT pg_advisory_unlock(hashtextextended('vessel-paper-scheduler',0))", connection);
             await release.ExecuteScalarAsync(CancellationToken.None);
+        }
+    }
+
+    private static bool AccountDataFailure(Exception error) =>
+        error is ArithmeticException or FormatException or JsonException or ProblemException;
+
+    private async Task RecordAccountFailureAsync(PaperAccountCandidate account, bool readFailure, CancellationToken ct)
+    {
+        try
+        {
+            await using var retry = scopes.Create(account.OwnerId);
+            var service = retry.Services.GetRequiredService<PaperTradingService>();
+            if (readFailure) await service.RecordAccountReadFailureAsync(account, ct);
+            else await service.RecordAccountEvaluationFailureAsync(account, ct);
+        }
+        catch (Exception error) when (AccountDataFailure(error))
+        {
+            logger.LogWarning("Paper account retry state could not be recorded ({ErrorType}); other accounts remain eligible.", error.GetType().Name);
         }
     }
 
@@ -206,8 +246,14 @@ public sealed class PaperScheduler(IOwnerScopeFactory scopes, IJournalOwnerDirec
         // Hyperliquid reports the inclusive millisecond end. Accept the exclusive boundary too, but nothing else.
         if (candle.CloseTime != close.ToUnixTimeMilliseconds() - 1 && candle.CloseTime != close.ToUnixTimeMilliseconds())
             throw new FormatException("A closed one-minute candle is required.");
+        if (candle.Trades is not { } trades || trades < 0)
+            throw new FormatException("An explicit Hyperliquid trade count is required.");
         decimal Number(string text) => decimal.Parse(text, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture);
-        return new(open, close, Number(candle.Open), Number(candle.High), Number(candle.Low), Number(candle.Close));
+        var result = new PaperCandle(open, close, Number(candle.Open), Number(candle.High), Number(candle.Low), Number(candle.Close), trades);
+        if (trades == 0 && (result.Open != result.High || result.Open != result.Low ||
+            result.Open != result.Close || Number(candle.Volume) != 0))
+            throw new FormatException("A reported no-trade candle must have flat carried prices and zero volume.");
+        return result;
     }
 
     private async Task WriteHeartbeatAsync(CancellationToken ct)

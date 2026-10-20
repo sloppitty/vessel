@@ -20,6 +20,7 @@ const venues = systemFixture.venues.map(v => v.id === 'hyperliquid' ? { ...v, ca
 const play: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, tradingMode: 'paper', venueId: 'hyperliquid', instrumentSource: 'venue', status: 'planned' },
   plan: { ...savedPlayFixture.plan, size: '10', entries: [{ ...savedPlayFixture.plan.entries[0]!, price: '100' }] } }
 const paperState: PaperPlayState = { playId: play.summary.id, status: 'ambiguous', checkedAtUtc: '2026-10-20T12:01:00Z', nextCheckAtUtc: null,
+  declinedEntries: [], suspensions: [], hasUnscoredHistory: true,
   enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1', realizedPnlUsd: '0', issues: ['Opposing exit touches; order unknown.'], executions: [
     { id: '12345678-1111-2222-3333-444444444444', entryId: 'entry-1', levelId: null, role: 'entry', price: '100', quantity: '1', pnlUsd: '0',
       occurredAtUtc: '2026-10-20T12:01:00Z', candleOpenAtUtc: '2026-10-20T12:00:00Z', candleCloseAtUtc: '2026-10-20T12:01:00Z' },

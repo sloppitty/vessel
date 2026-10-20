@@ -441,11 +441,16 @@ new regression cases; earlier full-suite counts are not proof of those fixes.
 
 ### Corrective work and native candle evidence
 
-- Core corrections are in progress: explicit 12-place fact quantization,
+- Core corrections are now frozen: explicit 12-place fact quantization,
   exact account sums/comparisons, exact final-exit remainders, per-entry decline
   receipts and reversible prospective suspension with retained unscored history.
   The unshipped foundation schema gains decline/suspension JSON records and an
   internal previous-close timestamp; no live database has been changed.
+  Arm/revision preflight rejects unsupported tiny allocations, including
+  retained-position exit revisions, before changing facts. Database constraints
+  also reject unsupported fact precision, bounds and nonrepresentable prices.
+  Exact aggregate-capital tests exceed `decimal.MaxValue` without converting
+  back to `decimal`.
 - Additive state wire: `blocked` / `suspended`, `declinedEntries`, `suspensions`
   and `hasUnscoredHistory`. The frontend correction passed 107 focused tests,
   typecheck/lint/build. Parent complete corrected frontend suite: **154 files /
@@ -457,13 +462,30 @@ new regression cases; earlier full-suite counts are not proof of those fixes.
   page errors or forbidden actual API calls. This remains UI-only, not backend
   E2E. Captures were visually inspected; its isolated server was stopped.
   Harness/results: `/home/ops/.cache/vessel-verification/paper-opus-ui-20261020/`.
-  Core integration and independent approval are not yet verified.
+  The frozen integrated Paper run passed **217/217, zero failed/skipped**,
+  including the parent's final 25 worker cases. A clean `Rebuild` passed with
+  zero warnings/errors. Artifacts:
+  `/home/ops/.cache/vessel-verification/core-clean-build.log`,
+  `core-paper-tests-final.log` and
+  `core-test-results/paper-core-integration-final.trx`.
+  The complete backend suite, final-schema host repeat and fresh independent
+  approval remain separate pending gates.
 - Parent worker tests reproduced both starvation/heartbeat and just-closed
   candle bugs before fixes (two failures), then passed 17 worker checks in an
   isolated baseline-plus-worker snapshot. Explicit trade-count validation
   reproduced three more failures, then all 21 worker checks passed there.
-  This is not a full integrated-core pass; that run must follow the core freeze.
+  The interrupted duplicate Opus review also exposed a shared-availability
+  defect: ordinary candle read failures set the real venue's server-wide
+  deadline and stopped other symbol reads. Three regression cases failed before
+  the correction; an actual rate-limit control already passed. Only a genuine
+  venue rate limit now sets that shared deadline. Other read failures retain
+  account-local retry state and do not stop unrelated symbols.
+  The final isolated worker run passed **25/25, zero skips**, including the
+  genuine rate-limit control. This is not a full integrated-core pass; that run
+  must follow the core freeze.
   Logs: `/tmp/vessel-paper-worker-{red,green,native-green}.log`.
+  Additional evidence: `/tmp/vessel-paper-worker-deadline-red.log`,
+  `/tmp/vessel-paper-worker-final-green.log` and corresponding TRXs.
 - Native public evidence did **not** establish ordinary zero-trade omissions:
   two quiet Hyperliquid markets returned all 360 requested minute slots,
   including 343 explicit zero-trade candles. Thus Opus F2 remains conditional,
@@ -480,4 +502,31 @@ new regression cases; earlier full-suite counts are not proof of those fixes.
   The caught-up scheduling predicate shares the settled frontier, so the delay
   does not accidentally turn hourly checks into perpetual one-minute catch-up.
 - Parent root checks remain **82/82 passed**. No corrective code commit or
-  readiness claim is made before the core snapshot is stable and tested.
+  readiness claim preceded the stable core snapshot. Corrective changes will
+  be pushed to the draft PR for a fresh fixed-commit Opus review; earlier Sol
+  approvals and pre-correction complete-suite counts do not approve this tree.
+- Additional interrupted-review probes reproduced a protective-revision
+  admission defect: unrelated sibling gaps or an own transient read issue
+  prevented tightening an already-open position's stop despite requiring no
+  additional capital. The correction must preserve known protective edits
+  without allowing new arming, pending quantity/margin increases, a raised
+  reservation or bypass of the edited Play's terminal gap/ambiguity. Persisted
+  revision/effective-time fencing and transient issues must remain intact.
+  Both sibling-gap and own-read-issue cases failed before correction and pass
+  in the frozen integrated run, including the later tightened-stop execution
+  and refusal controls. That review's probes are retained under
+  `/tmp/vessel-paper-opus-r2b-8gMuNE/`.
+- Suspension admission is exposure-specific: only still-open facts predating a
+  suspension retain that unknown-exposure hold. A new, known entry after an
+  unfilled prospective resume does not poison the account. Historical
+  suspension still excludes the affected outcome from Review and sizing.
+
+The parent is running the complete frozen backend inventory in four disjoint
+class batches (at most two testhosts concurrently, two xUnit threads each),
+with a new task-owned PostgreSQL/RabbitMQ pair. Separate synthetic databases
+isolate standalone-schema smoke and the next Opus reviewer from those tests.
+Evidence root:
+`/home/ops/.cache/vessel-verification/paper-corrective-final/`.
+The frozen combined backend/frontend production manifest has SHA-256
+`e0ad24699b2cac87edcd79f5dfda800c1338874e388ad14e7704867a33744b3b`.
+No corrected-tree complete-suite or independent review pass is claimed yet.

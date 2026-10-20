@@ -1,6 +1,7 @@
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Paper;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Numerics;
 
 namespace Vessel.Application.Paper;
 
@@ -9,9 +10,10 @@ public sealed record PaperExecutionDto(Guid Id, string EntryId, string? LevelId,
     string PnlUsd, DateTimeOffset OccurredAtUtc, DateTimeOffset CandleOpenAtUtc, DateTimeOffset CandleCloseAtUtc);
 public sealed record PaperPlayState(Guid PlayId, string Status, DateTimeOffset? CheckedAtUtc, DateTimeOffset? NextCheckAtUtc,
     string EnteredQuantity, string ExitedQuantity, string OpenQuantity, string RealizedPnlUsd, IReadOnlyList<string> Issues,
-    IReadOnlyList<PaperExecutionDto> Executions);
+    IReadOnlyList<PaperExecutionDto> Executions, IReadOnlyList<PaperDeclinedEntry> DeclinedEntries,
+    IReadOnlyList<PaperSuspension> Suspensions, bool HasUnscoredHistory);
 public sealed record PaperExecutionProof(DateTimeOffset? FirstEntryAtUtc, int? FirstEntryPlanVersion, decimal EnteredQuantity,
-    decimal ExitedQuantity, decimal OpenQuantity, decimal RealizedPnlUsd, bool HasIssues, IReadOnlySet<string> ExecutedEntryIds);
+    decimal ExitedQuantity, decimal OpenQuantity, ExactAmount RealizedPnlUsd, bool HasIssues, IReadOnlySet<string> ExecutedEntryIds);
 
 /// <summary>Lifecycle hooks join the caller's existing account transaction; they never create imported facts.</summary>
 public interface IPaperTradingService
@@ -27,7 +29,7 @@ public sealed record PaperDuePlay(Guid OwnerId, Guid AccountId, Guid PlayId, str
     DateTimeOffset FromUtc, DateTimeOffset? CheckpointUtc, DateTimeOffset? NextCheckAtUtc = null);
 /// <summary>The complete active account set, not a page of independently spendable Play windows.</summary>
 public sealed record PaperAccountCandidate(Guid OwnerId, Guid AccountId, IReadOnlyList<PaperDuePlay> Plays);
-public sealed record PaperCapital(decimal CashUsd, decimal OpenMarginUsd, decimal ReservedUsd, bool Unresolved);
+public sealed record PaperCapital(ExactAmount CashUsd, ExactAmount OpenMarginUsd, ExactAmount ReservedUsd, bool Unresolved);
 
 public interface IPaperStore
 {

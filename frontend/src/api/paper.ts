@@ -10,13 +10,16 @@ export interface PaperSettings {
 
 export interface PaperPlayState {
   playId: string
-  status: 'not-armed' | 'waiting' | 'ready' | 'ambiguous' | 'gap' | 'disabled'
+  status: 'not-armed' | 'waiting' | 'ready' | 'ambiguous' | 'gap' | 'disabled' | 'blocked' | 'suspended'
   checkedAtUtc: string | null
   nextCheckAtUtc: string | null
   enteredQuantity: string
   exitedQuantity: string
   openQuantity: string
   realizedPnlUsd: string
+  declinedEntries: Array<{ entryId: string; reason: string; declinedAtUtc: string }>
+  suspensions: Array<{ reason: string; suspendedAtUtc: string; resumedAtUtc: string | null }>
+  hasUnscoredHistory: boolean
   issues: string[]
   executions: Array<{
     id: string
@@ -38,7 +41,12 @@ export const isPaperSettings = (value: unknown): value is PaperSettings => isRec
   Number.isInteger(value.checkIntervalMinutes) && value.checkIntervalMinutes >= 1 && value.checkIntervalMinutes <= 1440
 
 const positiveDecimal = (value: unknown): value is string => isNonNegativeDecimal(value) && /[1-9]/.test(value)
-const nullableTime = (value: unknown) => value === null || isUtcTimestamp(value)
+const nullableTime = (value: unknown): value is string | null => value === null || isUtcTimestamp(value)
+const isDeclinedEntry = (value: unknown): value is PaperPlayState['declinedEntries'][number] => isRecord(value) &&
+  isNonBlankText(value.entryId, 128) && isNonBlankText(value.reason, 2000) && isUtcTimestamp(value.declinedAtUtc)
+const isSuspension = (value: unknown): value is PaperPlayState['suspensions'][number] => isRecord(value) &&
+  isNonBlankText(value.reason, 2000) && isUtcTimestamp(value.suspendedAtUtc) && nullableTime(value.resumedAtUtc) &&
+  (value.resumedAtUtc === null || Date.parse(value.resumedAtUtc) >= Date.parse(value.suspendedAtUtc))
 export const isPaperExecution = (value: unknown): value is PaperExecution => isRecord(value) &&
   isNonEmptyGuid(value.id) && isNonBlankText(value.entryId, 128) && (value.levelId === null || isNonBlankText(value.levelId, 128)) &&
   ['entry', 'stop', 'target', 'exit'].includes(value.role as string) && positiveDecimal(value.price) && positiveDecimal(value.quantity) &&
@@ -47,10 +55,12 @@ export const isPaperExecution = (value: unknown): value is PaperExecution => isR
 
 /** Explicit simulation facts only: required nulls, exact decimal strings and UTC times are never defaulted or coerced. */
 export const isPaperPlayState = (value: unknown): value is PaperPlayState => isRecord(value) && isNonEmptyGuid(value.playId) &&
-  ['not-armed', 'waiting', 'ready', 'ambiguous', 'gap', 'disabled'].includes(value.status as string) &&
+  ['not-armed', 'waiting', 'ready', 'ambiguous', 'gap', 'disabled', 'blocked', 'suspended'].includes(value.status as string) &&
   nullableTime(value.checkedAtUtc) && nullableTime(value.nextCheckAtUtc) &&
   isNonNegativeDecimal(value.enteredQuantity) && isNonNegativeDecimal(value.exitedQuantity) &&
   isNonNegativeDecimal(value.openQuantity) && isPlainDecimal(value.realizedPnlUsd) &&
+  Array.isArray(value.declinedEntries) && value.declinedEntries.every(isDeclinedEntry) &&
+  Array.isArray(value.suspensions) && value.suspensions.every(isSuspension) && typeof value.hasUnscoredHistory === 'boolean' &&
   Array.isArray(value.issues) && value.issues.every(issue => isNonBlankText(issue, 2000)) &&
   Array.isArray(value.executions) && value.executions.every(isPaperExecution) &&
   new Set(value.executions.map(execution => execution.id.toLowerCase())).size === value.executions.length

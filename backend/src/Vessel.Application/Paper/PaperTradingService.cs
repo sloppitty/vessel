@@ -31,11 +31,14 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
             if (settings.Enabled && !request.Enabled)
             {
                 foreach (var state in await store.ActiveSimulationsAsync(ct))
-                {
-                    if (state.State is "gap" or "ambiguous") continue;
-                    state.State = "gap"; state.NextCheckAtUtc = null;
-                    state.IssuesJson = JsonSerializer.Serialize(new[] { "Paper trading was suspended. The unevaluated candle window is not assumed covered; capital remains held." });
-                }
+                    state.Suspend("Paper trading was disabled; the skipped window is not simulated and this outcome remains unscored.", time.GetUtcNow());
+            }
+            else if (!settings.Enabled && request.Enabled)
+            {
+                foreach (var state in await store.ActiveSimulationsAsync(ct))
+                    if ((await store.AccountAsync(state.AccountId, ct))?.IsEnabled == true &&
+                        (await store.PlayAsync(state.PlayId, ct))?.Status is PlayStatus.Planned or PlayStatus.Open)
+                        state.Resume(NextMinute(time.GetUtcNow()), request.CheckIntervalMinutes);
             }
             else if (settings.Enabled && request.Enabled && settings.CheckIntervalMinutes != request.CheckIntervalMinutes)
             {
@@ -77,24 +80,32 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
             if (simulation?.State is "gap" or "ambiguous")
                 throw new ProblemException(409, "This simulation has unresolved coverage or ambiguous touches; its capital remains held.");
             var plan = PlayDocuments.Read(play.Plan);
-            _ = PaperEvaluator.Allocations(plan);
             var executions = await store.ExecutionsAsync(play.Id, ct);
+            _ = PaperEvaluator.Allocations(plan, executions);
             var entered = executions.Where(x => x.Role == "entry").Select(x => x.EntryId).ToHashSet(StringComparer.Ordinal);
+            if (simulation is not null) entered.UnionWith(simulation.DeclinedEntries().Select(x => x.EntryId));
             var capital = await store.CapitalAsync(play.AccountId, play.Id, true, ct);
-            if (capital.Unresolved)
-                throw new ProblemException(409, "Unresolved paper execution holds this account's capital; no new entries can be admitted.");
             var reservation = await store.ReservationAsync(play.Id, ct);
+            var activations = await store.ActivationsAsync(play.Id, ct);
             // Different tranches can execute on either side of a revision boundary. Cover each entry's largest
             // still-effective allocation, not merely the larger total of two mutually incomplete plans.
-            var plans = !arming && simulation is not null
-                ? PendingPlans(await store.ActivationsAsync(play.Id, ct), simulation.CheckpointUtc ?? time.GetUtcNow()).Append(plan)
-                : [plan];
+            var priorPlans = !arming && simulation is not null
+                ? PendingPlans(activations, simulation.CheckpointUtc ?? time.GetUtcNow()).ToArray() : [];
+            var plans = priorPlans.Append(plan).ToArray();
             var reserve = PendingReservation(plans, entered);
-            if (reserve > Math.Max(0, capital.CashUsd - capital.OpenMarginUsd - capital.ReservedUsd))
+            var prior = PendingAllocations(priorPlans, entered);
+            var nonAdmitting = !arming && simulation is not null && reservation is not null &&
+                executions.Sum(e => e.Role == "entry" ? e.Quantity : -e.Quantity) > 0 &&
+                reserve <= reservation.AmountUsd && PendingAllocations(plans, entered).All(next =>
+                    prior.TryGetValue(next.Key, out var old) && next.Value.Quantity <= old.Quantity && next.Value.Margin <= old.Margin);
+            if (capital.Unresolved && !nonAdmitting)
+                throw new ProblemException(409, "Unresolved paper execution holds this account's capital; no new entries can be admitted.");
+            var available = capital.CashUsd - capital.OpenMarginUsd - capital.ReservedUsd;
+            if (!nonAdmitting && ExactAmount.From(reserve) > (available.Units.Sign < 0 ? default : available))
                 throw new ProblemException(409, "Insufficient paper available margin for the unentered plan allocations.");
             var effective = NextMinute(time.GetUtcNow());
             // A pause/resume before the same next-minute open needs no duplicate immutable snapshot.
-            if (!(await store.ActivationsAsync(play.Id, ct)).Any(x => x.EffectiveAtUtc == effective && x.PlanVersion == play.PlanRevision))
+            if (!activations.Any(x => x.EffectiveAtUtc == effective && x.PlanVersion == play.PlanRevision))
                 store.Add(new PaperPlanActivation { Id = Guid.NewGuid(), OwnerId = store.OwnerId, AccountId = play.AccountId,
                     PlayId = play.Id, PlanVersion = play.PlanRevision, PlanJson = play.Plan, EffectiveAtUtc = effective });
             if (simulation is null)
@@ -104,6 +115,7 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
                 // A paused unfilled simulation resumes prospectively, never through its suspended candles.
                 simulation.CheckpointUtc = effective;
                 simulation.PreviousClose = null;
+                simulation.PreviousCloseAtUtc = null;
                 simulation.IssuesJson = "[]";
             }
             simulation.State = "waiting";
@@ -137,8 +149,7 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
         foreach (var state in await store.AccountSimulationsAsync(accountId, ct))
         {
             if (state.NextCheckAtUtc is null || state.State is "gap" or "ambiguous") continue;
-            state.State = "gap"; state.NextCheckAtUtc = null;
-            state.IssuesJson = JsonSerializer.Serialize(new[] { "The paper account was disabled. Its suspended candle window is not assumed covered." });
+            state.Suspend("The paper account was disabled; the skipped window is not simulated and this outcome remains unscored.", time.GetUtcNow());
         }
     }
 
@@ -150,7 +161,8 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
         var exited = executions.Where(x => x.Role != "entry").Sum(x => x.Quantity);
         var state = await store.SimulationAsync(playId, ct);
         return new(first?.OccurredAtUtc, first?.PlanVersion, entered, exited, entered - exited,
-            executions.Sum(x => x.PnlUsd), state?.State is "gap" or "ambiguous",
+            executions.Aggregate(default(ExactAmount), (sum, x) => sum + ExactAmount.From(x.PnlUsd)),
+            state?.State is "gap" or "ambiguous" || state?.Suspensions().Count > 0,
             executions.Where(x => x.Role == "entry").Select(x => x.EntryId).ToHashSet(StringComparer.Ordinal));
     }
 
@@ -177,11 +189,18 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
         var entered = executions.Where(x => x.Role == "entry").Sum(x => x.Quantity);
         var exited = executions.Where(x => x.Role != "entry").Sum(x => x.Quantity);
         var enabled = (await store.SettingsAsync(ct))?.Enabled == true && (await store.AccountAsync(play.AccountId, ct))?.IsEnabled == true;
-        return new(id, !enabled ? "disabled" : state?.State ?? "not-armed",
+        var declined = state?.DeclinedEntries() ?? [];
+        var suspensions = state?.Suspensions() ?? [];
+        var status = state?.State == "suspended" ? "suspended" : !enabled ? "disabled" :
+            declined.Count > 0 && state?.State is "ready" or "waiting" &&
+                play.Status is PlayStatus.Planned or PlayStatus.Open ? "blocked" : state?.State ?? "not-armed";
+        return new(id, status,
             state?.CheckedAtUtc, enabled ? state?.NextCheckAtUtc : null, Text(entered), Text(exited), Text(entered - exited),
-            Text(executions.Sum(x => x.PnlUsd)), state is null ? [] : JsonSerializer.Deserialize<string[]>(state.IssuesJson) ?? [],
+            executions.Aggregate(default(ExactAmount), (sum, x) => sum + ExactAmount.From(x.PnlUsd)).ToString(),
+            state is null ? [] : JsonSerializer.Deserialize<string[]>(state.IssuesJson) ?? [],
             executions.OrderBy(x => x.OccurredAtUtc).ThenBy(x => x.Id).Select(x => new PaperExecutionDto(x.Id, x.EntryId,
-                x.LevelId, x.Role, Text(x.Price), Text(x.Quantity), Text(x.PnlUsd), x.OccurredAtUtc, x.CandleOpenAtUtc, x.CandleCloseAtUtc)).ToArray());
+                x.LevelId, x.Role, Text(x.Price), Text(x.Quantity), Text(x.PnlUsd), x.OccurredAtUtc, x.CandleOpenAtUtc, x.CandleCloseAtUtc)).ToArray(),
+            declined, suspensions, suspensions.Count > 0);
     }
 
     /// <summary>Discovery uses bounded keyset reads but includes every active sibling, even when not yet due.</summary>
@@ -215,14 +234,21 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
     }
 
     public Task RecordAccountReadFailureAsync(PaperAccountCandidate candidate, CancellationToken ct) =>
+        RecordAccountFailureAsync(candidate,
+            "The complete account candle read failed. No sibling execution frontier was advanced; reserved capital is retained.", ct);
+
+    public Task RecordAccountEvaluationFailureAsync(PaperAccountCandidate candidate, CancellationToken ct) =>
+        RecordAccountFailureAsync(candidate,
+            "Simulation evaluation failed; no account frontier advanced. Reserved capital is retained; evaluation will retry.", ct);
+
+    private Task<bool> RecordAccountFailureAsync(PaperAccountCandidate candidate, string issue, CancellationToken ct) =>
         work.ExecuteAsync(() => store.WithAccountLockAsync(candidate.AccountId, () => store.WithSettingsLockAsync(async () =>
         {
             if (candidate.OwnerId != store.OwnerId || await owners.StatusAsync(store.OwnerId, ct) != JournalOwnerStatus.Active ||
                 (await store.SettingsAsync(ct)) is not { Enabled: true } ||
                 (await store.AccountAsync(candidate.AccountId, ct)) is not { IsEnabled: true, TradingMode: TradingMode.Paper } ||
                 !SameAccountSet(candidate.Plays, await AccountCandidatesAsync(candidate.AccountId, ct))) return false;
-            await store.DeferAccountAsync(candidate.AccountId, JsonSerializer.Serialize(new[] {
-                "The complete account candle read failed. No sibling execution frontier was advanced; reserved capital is retained." }), time.GetUtcNow(), ct);
+            await store.DeferAccountAsync(candidate.AccountId, JsonSerializer.Serialize(new[] { issue }), time.GetUtcNow(), ct);
             return true;
         }, ct), ct), ct);
 
@@ -268,10 +294,10 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
                 return true;
             }
             var capital = await store.TimelineCapitalAsync(candidate.AccountId, current.Select(x => x.PlayId).ToArray(), ct);
-            var externalReserved = ExactAmount.From(capital.ReservedUsd) -
+            var externalReserved = capital.ReservedUsd -
                 runs.Aggregate(default(ExactAmount), (sum, run) => sum + ExactAmount.From(run.Reservation?.AmountUsd ?? 0));
-            var cash = ExactAmount.From(capital.CashUsd);
-            var margin = ExactAmount.From(capital.OpenMarginUsd);
+            var cash = capital.CashUsd;
+            var margin = capital.OpenMarginUsd;
             var unresolved = capital.Unresolved;
             var windows = candles.ToDictionary(x => x.Key, x => x.Value.GroupBy(c => c.OpenAtUtc)
                 .ToDictionary(g => g.Key, g => g.ToArray()), StringComparer.Ordinal);
@@ -301,14 +327,16 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
                 PaperEvaluation EvaluateMinute(PaperRun run, string? reason)
                 {
                     var entered = run.Executions.Where(e => e.Role == "entry").Select(e => e.EntryId).ToHashSet(StringComparer.Ordinal);
+                    entered.UnionWith(run.State.DeclinedEntries().Select(e => e.EntryId));
                     var pending = PendingMargins(PendingPlans(run.Activations, minute), entered);
                     var rows = windows[run.Candidate.ContractId].GetValueOrDefault(minute) ?? [];
                     try
                     {
                         return PaperEvaluator.Evaluate(store.OwnerId, candidate.AccountId, run.Play.Id, run.Activations,
                             run.Executions, run.State.CheckpointUtc, run.State.PreviousClose, rows, minute.AddMinutes(1),
-                            reason is not null ? 0 : PlayOutcomeCalculator.ToDecimal(
-                                headroom + ExactAmount.From(run.Reservation?.AmountUsd ?? 0)), reason, pending);
+                            reason is not null ? default(ExactAmount) :
+                                headroom + ExactAmount.From(run.Reservation?.AmountUsd ?? 0), reason, pending,
+                            run.State.DeclinedEntries(), run.State.PreviousCloseAtUtc);
                     }
                     catch (OverflowException)
                     {
@@ -318,7 +346,7 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
                 }
             }
             foreach (var run in runs.Where(r => r.Touched && r.CanEvaluate))
-                run.State.NextCheckAtUtc = time.GetUtcNow().AddMinutes(run.State.CheckpointUtc >= FloorMinute(time.GetUtcNow())
+                run.State.NextCheckAtUtc = time.GetUtcNow().AddMinutes(run.State.CheckpointUtc >= SettledThrough(time.GetUtcNow())
                     ? settings.CheckIntervalMinutes : 1);
             return runs.Any(r => r.Touched);
         }, ct), ct), ct);
@@ -347,12 +375,15 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
         run.State.CheckedAtUtc = time.GetUtcNow();
         run.State.CheckpointUtc = result.CheckpointUtc;
         run.State.PreviousClose = result.PreviousClose;
+        run.State.PreviousCloseAtUtc = result.PreviousCloseAtUtc;
+        if (result.DeclinedEntries is not null) run.State.DeclinedEntriesJson = JsonSerializer.Serialize(result.DeclinedEntries);
         run.State.State = result.Issue is null ? "ready" : result.Ambiguous ? "ambiguous" : "gap";
         run.State.IssuesJson = JsonSerializer.Serialize(result.Issue is null ? Array.Empty<string>() : [result.Issue]);
         if (result.Issue is not null || run.Play.Status == PlayStatus.Closed) run.State.NextCheckAtUtc = null;
         if (run.Reservation is not null && result.Issue is null)
         {
             var enteredIds = run.Executions.Where(x => x.Role == "entry").Select(x => x.EntryId).ToHashSet(StringComparer.Ordinal);
+            enteredIds.UnionWith(run.State.DeclinedEntries().Select(x => x.EntryId));
             run.Reservation.AmountUsd = run.Play.Status == PlayStatus.Closed ? 0 : PendingReservation(
                 PendingPlans(run.Activations, result.CheckpointUtc ?? run.Candidate.FromUtc), enteredIds);
         }
@@ -372,6 +403,7 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
     }
 
     public static DateTimeOffset FloorMinute(DateTimeOffset value) => DateTimeOffset.FromUnixTimeSeconds(value.ToUnixTimeSeconds() / 60 * 60);
+    public static DateTimeOffset SettledThrough(DateTimeOffset value) => FloorMinute(value.AddSeconds(-10));
     public static DateTimeOffset NextMinute(DateTimeOffset value) => FloorMinute(value).AddMinutes(1);
     private static IEnumerable<PlayPlanDocument> PendingPlans(IReadOnlyList<PaperPlanActivation> activations, DateTimeOffset checkpoint)
     {
@@ -379,10 +411,18 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
         return activations.Where(x => x.EffectiveAtUtc > checkpoint).Concat(current is null ? [] : [current])
             .Select(x => PlayDocuments.Read(x.PlanJson));
     }
-    private static decimal PendingReservation(IEnumerable<PlayPlanDocument> plans, HashSet<string> entered) =>
-        PendingMargins(plans, entered).Sum(x => x.Value);
+    private static decimal PendingReservation(IEnumerable<PlayPlanDocument> plans, HashSet<string> entered)
+    {
+        var exact = PendingMargins(plans, entered).Aggregate(default(ExactAmount),
+            (sum, x) => sum + ExactAmount.From(x.Value));
+        return ExactDecimal.TryParseVenue(exact.ToString(), out var result) ? result : throw PaperPrecision.Unsupported();
+    }
     private static Dictionary<string, decimal> PendingMargins(IEnumerable<PlayPlanDocument> plans, HashSet<string> entered) =>
-        plans.SelectMany(PaperEvaluator.Allocations).Where(x => !entered.Contains(x.Key))
-            .GroupBy(x => x.Key, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Max(x => x.Value.Margin), StringComparer.Ordinal);
+        PendingAllocations(plans, entered).ToDictionary(x => x.Key, x => x.Value.Margin, StringComparer.Ordinal);
+    private static Dictionary<string, (decimal Quantity, decimal Margin)> PendingAllocations(
+        IEnumerable<PlayPlanDocument> plans, HashSet<string> entered) =>
+        plans.SelectMany(p => PaperEvaluator.Allocations(p)).Where(x => !entered.Contains(x.Key))
+            .GroupBy(x => x.Key, StringComparer.Ordinal).ToDictionary(g => g.Key,
+                g => (g.Max(x => x.Value.Quantity), g.Max(x => x.Value.Margin)), StringComparer.Ordinal);
     private static string Text(decimal value) => value.ToString(CultureInfo.InvariantCulture);
 }

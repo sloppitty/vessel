@@ -22,6 +22,9 @@ const state: PaperPlayState = {
   exitedQuantity: '0',
   openQuantity: '0.0000000000000000000000000001',
   realizedPnlUsd: '-0.0000000000000000000000000001',
+  declinedEntries: [],
+  suspensions: [],
+  hasUnscoredHistory: false,
   issues: [],
   executions: [execution],
 }
@@ -47,7 +50,7 @@ describe('paper API contract', () => {
   })
 
   it('preserves exact strings and accepts all pinned states and roles', () => {
-    for (const status of ['not-armed', 'waiting', 'ready', 'ambiguous', 'gap', 'disabled'])
+    for (const status of ['not-armed', 'waiting', 'ready', 'ambiguous', 'gap', 'disabled', 'blocked', 'suspended'])
       expect(isPaperPlayState({ ...state, status })).toBe(true)
     for (const role of ['entry', 'stop', 'target', 'exit'])
       expect(isPaperPlayState({ ...state, executions: [{ ...execution, role, levelId: execution.entryId }] })).toBe(true)
@@ -76,6 +79,51 @@ describe('paper API contract', () => {
     expect(isPaperPlayState([])).toBe(false)
     expect(isPaperPlayState({ ...state, playId: 'not-a-guid' })).toBe(false)
     expect(isPaperPlayState({ ...state, playId: '00000000-0000-0000-0000-000000000000' })).toBe(false)
+  })
+
+  it('accepts explicit declined entries and suspension receipts without changing exact money or local IDs', () => {
+    const declinedEntry = { entryId: 'local-entry-2', reason: 'Insufficient paper margin.', declinedAtUtc: '2026-10-20T12:02:00Z' }
+    const suspension = { reason: 'Paper settings disabled.', suspendedAtUtc: '2026-10-20T12:03:04.1234567+00:00', resumedAtUtc: null }
+    const blocked = { ...state, status: 'blocked', declinedEntries: [declinedEntry], hasUnscoredHistory: true }
+    expect(isPaperPlayState(blocked)).toBe(true)
+    expect(isPaperPlayState({ ...blocked, declinedEntries: [{ ...declinedEntry, entryId: 'x'.repeat(128) }] })).toBe(true)
+    expect(isPaperPlayState({ ...state, status: 'suspended', nextCheckAtUtc: null, suspensions: [suspension], hasUnscoredHistory: true })).toBe(true)
+    expect(isPaperPlayState({ ...state, suspensions: [{ ...suspension, resumedAtUtc: '2026-10-20T12:05:00Z' }], hasUnscoredHistory: true })).toBe(true)
+    expect(blocked.realizedPnlUsd).toBe('-0.0000000000000000000000000001')
+  })
+
+  it('rejects malformed audit collections, missing fields and non-boolean history flags without defaults', () => {
+    for (const hasUnscoredHistory of [null, undefined, 'true', 0, 1])
+      expect(isPaperPlayState({ ...state, hasUnscoredHistory })).toBe(false)
+    for (const field of ['declinedEntries', 'suspensions'])
+      for (const value of [null, undefined, {}, '[]', [null], [{}]])
+        expect(isPaperPlayState({ ...state, [field]: value })).toBe(false)
+    const declinedEntry = { entryId: 'entry-2', reason: 'Insufficient paper margin.', declinedAtUtc: '2026-10-20T12:02:00Z' }
+    const suspension = { reason: 'Paper account disabled.', suspendedAtUtc: '2026-10-20T12:03:00Z', resumedAtUtc: null }
+    for (const [field, row] of [['declinedEntries', declinedEntry], ['suspensions', suspension]] as const) {
+      for (const key of Object.keys(row)) {
+        const missing: Record<string, unknown> = { ...row }
+        delete missing[key]
+        expect(isPaperPlayState({ ...state, [field]: [missing] }), `${field}.${key}`).toBe(false)
+      }
+      for (const reason of ['', ' ', 42, 'x'.repeat(2001)])
+        expect(isPaperPlayState({ ...state, [field]: [{ ...row, reason }] })).toBe(false)
+    }
+    for (const entryId of ['', ' ', 42, 'x'.repeat(129)])
+      expect(isPaperPlayState({ ...state, declinedEntries: [{ ...declinedEntry, entryId }] })).toBe(false)
+  })
+
+  it('requires real UTC audit timestamps and refuses a resumption before its suspension', () => {
+    const declinedEntry = { entryId: 'entry-2', reason: 'Insufficient paper margin.', declinedAtUtc: '2026-10-20T12:02:00Z' }
+    const suspension = { reason: 'Paper account disabled.', suspendedAtUtc: '2026-10-20T12:03:00Z', resumedAtUtc: null }
+    for (const value of [undefined, '', 42, 'today', '2026-02-31T12:00:00Z', '2026-10-20T12:00:00+03:00']) {
+      expect(isPaperPlayState({ ...state, declinedEntries: [{ ...declinedEntry, declinedAtUtc: value }] })).toBe(false)
+      for (const field of ['suspendedAtUtc', 'resumedAtUtc'])
+        expect(isPaperPlayState({ ...state, suspensions: [{ ...suspension, [field]: value }] })).toBe(false)
+    }
+    expect(isPaperPlayState({ ...state, declinedEntries: [{ ...declinedEntry, declinedAtUtc: null }] })).toBe(false)
+    expect(isPaperPlayState({ ...state, suspensions: [{ ...suspension, suspendedAtUtc: null }] })).toBe(false)
+    expect(isPaperPlayState({ ...state, suspensions: [{ ...suspension, resumedAtUtc: '2026-10-20T12:02:00Z' }] })).toBe(false)
   })
 
   it('rejects numeric, malformed and negative quantity values; signed exact P&L remains valid', () => {

@@ -164,6 +164,22 @@ validation and commit must be atomic. Do not partially evaluate an account
 because a scheduler batch limit truncated its siblings, or apply a later loss
 retroactively to an earlier entry by iterating whole Play windows.
 
+Capital admission must not prevent a protective revision to known open
+exposure solely because another Play has unresolved capital or the edited
+Play has a transient read issue. Such a revision may not increase any pending
+entry's retained quantity/margin allocation or the reservation; new arming still
+requires normal admission. The edited Play's own terminal gap/ambiguity remains
+non-editable under this exception. Preserve issues and version/effective-time
+fences rather than treating a protective edit as missing-history resolution.
+
+The scheduler waits ten seconds beyond a minute boundary before consuming
+that minute. This bounded settlement delay is not a venue finality guarantee.
+Keep native zero-trade coverage distinct from touches and missing coverage.
+Account-local evaluation failures must not prevent other accounts' progress;
+shared schema/connectivity failures must still fail health. Ordinary candle
+read/validation failures have local retry consequences, not a server-wide
+real-venue deadline. Only genuine venue rate limits share that deadline.
+
 Keep existing deployment module sets immutable. Run the optional paper module
 as its own `paper` deployment; do not silently append it to a registered
 `monitor` deployment. The implementation uses a standalone paper-only host path

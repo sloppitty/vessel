@@ -25,7 +25,8 @@ public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISi
             ? await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct) : null;
         var plays = await db.Plays.Where(p => p.TradingMode == tradingMode &&
             (p.Status == PlayStatus.Closed || tradingMode == TradingMode.Paper &&
-                db.PaperSimulations.Any(s => s.PlayId == p.Id && (s.State == "ambiguous" || s.State == "gap" || s.IssuesJson != "[]"))) &&
+                db.PaperSimulations.Any(s => s.PlayId == p.Id && (s.State == "ambiguous" || s.State == "gap" ||
+                    s.IssuesJson != "[]" || s.SuspensionsJson != "[]"))) &&
             db.Accounts.Any(a => a.Id == p.AccountId && a.IsEnabled && a.TradingMode == tradingMode))
             .AsNoTracking().ToListAsync(ct);
         if (plays.Count == 0) return [];
@@ -76,8 +77,12 @@ public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISi
         return plays.Where(p => p.TradingMode == TradingMode.Paper).Select(p =>
         {
             var state = states.GetValueOrDefault(p.Id);
+            var issues = state is null ? [] : (JsonSerializer.Deserialize<string[]>(state.IssuesJson) ?? []).ToList();
+            if (state?.Suspensions().Count > 0)
+                issues.Add("Paper evaluation was suspended. Disabled-period touches were not simulated; this outcome remains unscored. " +
+                    string.Join(" ", state.Suspensions().Select(s => s.Reason)));
             return new PaperPlayFacts(p, revisions[p.Id].ToList(), executions[p.Id].ToList(), state?.State ?? "not-armed",
-                state is null ? [] : JsonSerializer.Deserialize<string[]>(state.IssuesJson) ?? []);
+                issues);
         }).ToList();
     }
 

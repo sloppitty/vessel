@@ -70,7 +70,7 @@ public sealed record OverviewDto(IReadOnlyList<PortfolioDto> Portfolios, IReadOn
 
 // Application owns this bounded use-case port; EF and transaction details stay in Persistence.
 public sealed record MarketDataAccount(bool IsEnabled, string VenueId, string TradingMode = "real");
-public sealed record PaperAccountBalance(decimal CashUsd, decimal? EquityUsd, decimal? AvailableMarginUsd, int OpenPositionCount);
+public sealed record PaperAccountBalance(string CashUsd, string? EquityUsd, string? AvailableMarginUsd, int OpenPositionCount);
 
 public interface IWorkspaceStore
 {

@@ -1,4 +1,5 @@
 using Vessel.Domain.Common;
+using System.Text.Json;
 
 namespace Vessel.Domain.Paper;
 
@@ -75,8 +76,40 @@ public sealed class PaperSimulation : IOwned
     public DateTimeOffset? NextCheckAtUtc { get; set; }
     public DateTimeOffset? CheckpointUtc { get; set; }
     public decimal? PreviousClose { get; set; }
+    public DateTimeOffset? PreviousCloseAtUtc { get; set; }
     public string IssuesJson { get; set; } = "[]";
+    public string DeclinedEntriesJson { get; set; } = "[]";
+    public string SuspensionsJson { get; set; } = "[]";
+
+    public IReadOnlyList<PaperDeclinedEntry> DeclinedEntries() =>
+        JsonSerializer.Deserialize<PaperDeclinedEntry[]>(DeclinedEntriesJson) ?? [];
+    public IReadOnlyList<PaperSuspension> Suspensions() =>
+        JsonSerializer.Deserialize<PaperSuspension[]>(SuspensionsJson) ?? [];
+
+    public void Suspend(string reason, DateTimeOffset at)
+    {
+        if (NextCheckAtUtc is null || State is not ("waiting" or "ready")) return;
+        SuspensionsJson = JsonSerializer.Serialize(Suspensions().Append(new PaperSuspension(reason, at, null)));
+        State = "suspended";
+        NextCheckAtUtc = null;
+    }
+
+    public void Resume(DateTimeOffset boundary, int interval)
+    {
+        if (State != "suspended") return;
+        SuspensionsJson = JsonSerializer.Serialize(Suspensions().Select(s =>
+            s.ResumedAtUtc is null ? s with { ResumedAtUtc = boundary } : s));
+        CheckpointUtc = boundary;
+        PreviousClose = null;
+        PreviousCloseAtUtc = null;
+        IssuesJson = "[]";
+        State = "waiting";
+        NextCheckAtUtc = boundary.AddMinutes(interval);
+    }
 }
+
+public sealed record PaperDeclinedEntry(string EntryId, string Reason, DateTimeOffset DeclinedAtUtc);
+public sealed record PaperSuspension(string Reason, DateTimeOffset SuspendedAtUtc, DateTimeOffset? ResumedAtUtc);
 
 /// <summary>A complete plan snapshot effective at a full minute open; prior snapshots remain immutable.</summary>
 public sealed class PaperPlanActivation : IOwned

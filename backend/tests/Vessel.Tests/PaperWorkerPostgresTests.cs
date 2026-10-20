@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
+using System.Reflection;
 using Vessel.Application.MarketData;
 using Vessel.Application.Monitoring;
 using Vessel.Application.Ownership;
@@ -23,6 +24,93 @@ namespace Vessel.Tests;
 public sealed class PaperWorkerPostgresTests
 {
     private static readonly DateTimeOffset Open = new(2026, 10, 20, 12, 1, 0, TimeSpan.Zero);
+
+    [PostgresFact]
+    public async Task Newly_closed_minute_waits_for_settlement_before_it_can_advance_a_frontier()
+    {
+        await using var f = await Fixture.CreateAsync();
+        f.Clock.Now = Open.AddMinutes(2).AddMilliseconds(1);
+        foreach (var owner in f.Owners)
+        {
+            await using var db = f.Database.Context(owner);
+            (await db.PaperSettings.SingleAsync()).CheckIntervalMinutes = 60;
+            await db.SaveChangesAsync();
+        }
+        await f.Scheduler.TickAsync(default);
+        Assert.Equal(Open.AddMinutes(1).ToUnixTimeMilliseconds() - 1, f.Reader.Last!.Value.To);
+        foreach (var owner in f.Owners)
+        {
+            await using var db = f.Database.Context(owner);
+            Assert.All(await db.PaperSimulations.ToListAsync(), s =>
+            {
+                Assert.Equal(Open.AddMinutes(1), s.CheckpointUtc);
+                Assert.Equal(f.Clock.GetUtcNow().AddMinutes(60), s.NextCheckAtUtc);
+            });
+        }
+    }
+
+    [PostgresFact]
+    public async Task An_account_arithmetic_failure_preserves_its_frontier_without_starving_another_owner_or_heartbeat()
+    {
+        await using var f = await Fixture.CreateAsync(failFirstOwnerCapital: true);
+        await f.Scheduler.StartAsync(default);
+        try
+        {
+            await EventuallyAsync(() => File.Exists(f.Heartbeat));
+            await using var failed = f.Database.Context(f.Owners[0]);
+            await using var healthy = f.Database.Context(f.Owners[1]);
+            Assert.Empty(await failed.PaperExecutions.ToListAsync());
+            Assert.All(await failed.PaperSimulations.ToListAsync(), s =>
+            {
+                Assert.Equal(Open, s.CheckpointUtc);
+                Assert.True(s.NextCheckAtUtc > f.Clock.GetUtcNow());
+                Assert.Contains("Simulation evaluation failed", s.IssuesJson);
+            });
+            Assert.Equal(2, await healthy.PaperExecutions.CountAsync());
+        }
+        finally { await f.Scheduler.StopAsync(default); }
+    }
+
+    [PostgresTheory]
+    [InlineData("malformed")]
+    [InlineData("transport")]
+    [InlineData("timeout")]
+    public async Task A_coin_read_failure_does_not_create_a_real_venue_cooldown_or_starve_other_symbols(string failure)
+    {
+        await using var f = await Fixture.CreateAsync(separateOwnerSymbols: true);
+        f.Reader.FailingContract = "BTC";
+        f.Reader.Failure = failure switch
+        {
+            "malformed" => new FormatException("Synthetic malformed candle."),
+            "transport" => new HttpRequestException("Synthetic coin read failure."),
+            _ => new OperationCanceledException("Synthetic public-read timeout.")
+        };
+        await f.Scheduler.TickAsync(default);
+        Assert.Null(await f.Services.GetRequiredService<IServerStateStore>().VenueRetryAtAsync("hyperliquid", default));
+        await using var failed = f.Database.Context(f.Owners[0]);
+        await using var healthy = f.Database.Context(f.Owners[1]);
+        Assert.Empty(await failed.PaperExecutions.ToListAsync());
+        Assert.All(await failed.PaperSimulations.ToListAsync(), s => Assert.Equal(Open, s.CheckpointUtc));
+        Assert.Equal(2, await healthy.PaperExecutions.CountAsync());
+        Assert.Equal(2, f.Reader.Reads);
+    }
+
+    [PostgresFact]
+    public async Task An_actual_venue_rate_limit_still_shares_its_deadline_and_stops_further_public_reads()
+    {
+        await using var f = await Fixture.CreateAsync(separateOwnerSymbols: true);
+        f.Reader.FailingContract = "BTC";
+        var retryAt = f.Clock.GetUtcNow().AddMinutes(5);
+        f.Reader.Failure = new VenueRateLimitException(retryAt);
+        await f.Scheduler.TickAsync(default);
+        Assert.Equal(retryAt, await f.Services.GetRequiredService<IServerStateStore>().VenueRetryAtAsync("hyperliquid", default));
+        Assert.Equal(1, f.Reader.Reads);
+        foreach (var owner in f.Owners)
+        {
+            await using var db = f.Database.Context(owner);
+            Assert.Empty(await db.PaperExecutions.ToListAsync());
+        }
+    }
 
     [PostgresFact]
     public async Task Replicas_share_one_bounded_instrument_read_and_never_duplicate_private_decisions()
@@ -174,7 +262,25 @@ public sealed class PaperWorkerPostgresTests
     }
     private sealed class Clock : TimeProvider
     {
-        public override DateTimeOffset GetUtcNow() => Open.AddMinutes(2);
+        public DateTimeOffset Now = Open.AddMinutes(2).AddSeconds(10);
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    // Fault injection is at the account-store boundary; all other reads/writes use real PostgreSQL.
+    public class FailingCapitalStore : DispatchProxy
+    {
+        public IPaperStore Inner = null!;
+        protected override object? Invoke(MethodInfo? method, object?[]? args)
+        {
+            if (method!.Name == nameof(IPaperStore.TimelineCapitalAsync))
+                throw new OverflowException("Synthetic account-local arithmetic failure.");
+            try { return method.Invoke(Inner, args); }
+            catch (TargetInvocationException error) when (error.InnerException is not null)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error.InnerException).Throw();
+                throw;
+            }
+        }
     }
     private sealed class Directory(Guid[] ids) : IJournalOwnerDirectory
     {
@@ -193,12 +299,16 @@ public sealed class PaperWorkerPostgresTests
         public int Reads;
         public Action? BeforeReturn;
         public bool CrossInstrumentLoss;
+        public string? FailingContract;
+        public Exception? Failure;
         public (string Contract, string Interval, long From, long To)? Last;
         public Task<IReadOnlyList<VenueCandle>> ReadCandlesAsync(string contractId, string interval, long fromMs, long toMs,
             CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref Reads);
             Last = (contractId, interval, fromMs, toMs);
+            if (contractId == FailingContract && Failure is not null)
+                return Task.FromException<IReadOnlyList<VenueCandle>>(Failure);
             BeforeReturn?.Invoke();
             return Task.FromResult<IReadOnlyList<VenueCandle>>(Enumerable.Range(0, 2).Select(i =>
             {
@@ -220,7 +330,8 @@ public sealed class PaperWorkerPostgresTests
         public string Heartbeat { get; } = heartbeat;
         public PaperScheduler Scheduler { get; } = scheduler;
 
-        public static async Task<Fixture> CreateAsync(int maxPlaysPerTick = 200, bool crossInstrumentLoss = false)
+        public static async Task<Fixture> CreateAsync(int maxPlaysPerTick = 200, bool crossInstrumentLoss = false,
+            bool failFirstOwnerCapital = false, bool separateOwnerSymbols = false)
         {
             var database = await CoreDatabase.CreateAsync();
             var owners = new[] { Guid.NewGuid(), Guid.NewGuid() }.Order().ToArray();
@@ -240,7 +351,8 @@ public sealed class PaperWorkerPostgresTests
                             crossInstrumentLoss ? i == 0 ? [new("s", "price", "70", "100")] : [] : [new("s", "price", "90", "100")],
                             crossInstrumentLoss ? [] : [new("t", "price", "110", "100")])],
                         new("", "", "", ""));
-                    var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", crossInstrumentLoss && i == 1 ? "ETH" : "BTC"),
+                    var contract = separateOwnerSymbols && owner == owners[1] || crossInstrumentLoss && i == 1 ? "ETH" : "BTC";
+                    var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", contract),
                         InstrumentSource.Venue, PlayDocuments.Serialize(plan), Open.AddMinutes(-1));
                     var planned = play.MarkPlanned(Open.AddMinutes(-1));
                     db.AddRange(play, planned.Change, planned.Revision,
@@ -265,6 +377,15 @@ public sealed class PaperWorkerPostgresTests
             services.AddScoped<IVenueRegistry>(_ => TestVenues.With(reader));
             services.AddVesselPersistence(config);
             services.AddPaperTrading();
+            if (failFirstOwnerCapital)
+                services.AddScoped<IPaperStore>(scope =>
+                {
+                    var inner = new PaperStore(scope.GetRequiredService<VesselDbContext>(), scope.GetRequiredService<UnitOfWork>());
+                    if (inner.OwnerId != owners[0]) return inner;
+                    var proxy = DispatchProxy.Create<IPaperStore, FailingCapitalStore>();
+                    ((FailingCapitalStore)proxy).Inner = inner;
+                    return proxy;
+                });
             var provider = services.BuildServiceProvider();
             var heartbeat = Path.Combine(Path.GetTempPath(), "vessel-paper-test-" + Guid.NewGuid().ToString("N"));
             var scheduler = new PaperScheduler(provider.GetRequiredService<IOwnerScopeFactory>(), directory,

@@ -14,6 +14,152 @@ public sealed class PaperEngineEvaluatorTests
     private static readonly DateTimeOffset At = new(2026, 10, 20, 0, 0, 0, TimeSpan.Zero);
 
     [Fact]
+    public void Awkward_price_quantizes_quantity_down_and_margin_up_before_it_becomes_a_fact()
+    {
+        var allocation = PaperEvaluator.Allocations(Plan(size: "1000", mode: "margin", leverage: "10",
+            entries: [Entry(price: "97.3")]))["entry"];
+        Assert.Equal(102.774922918807m, allocation.Quantity);
+        Assert.Equal(999.999999999993m, allocation.Margin);
+        var quantity = PaperEvaluator.Allocations(Plan(size: "1", leverage: "3",
+            entries: [Entry(price: "97.3")]))["entry"];
+        Assert.Equal(32.433333333334m, quantity.Margin);
+    }
+
+    [Fact]
+    public void Awkward_partial_targets_consume_the_final_exact_quantity_and_margin_without_dust()
+    {
+        var plan = Plan(size: "1000", mode: "margin", leverage: "10", entries:
+            [Entry(price: "97.3", targets: [Exit("a", "98", "33.33"), Exit("b", "99", "33.33"), Exit("c", "100", "33.34")])]);
+        var result = Evaluate([Activation(plan)],
+            [Candle(0, 97.3m, 97.4m, 97.2m, 97.3m), Candle(1, 98, 98, 97.4m, 98),
+                Candle(2, 99, 99, 98, 99), Candle(3, 100, 100, 99, 100)]);
+        Assert.Null(result.Issue);
+        var entry = result.Executions.Single(e => e.Role == "entry");
+        Assert.Equal(entry.Quantity, result.Executions.Where(e => e.Role == "target").Sum(e => e.Quantity));
+        Assert.Equal(0, result.Executions.Sum(e => e.MarginUsd));
+        Assert.All(result.Executions.Where(e => e.Role == "target"), e => Assert.True(e.MarginUsd < 0));
+        Assert.All(result.Executions, e => Assert.Equal(e.PnlUsd, decimal.Round(e.PnlUsd, 12)));
+    }
+
+    [Fact]
+    public void Zero_trade_minutes_are_covered_but_cannot_execute_carried_prices()
+    {
+        var activation = Activation(Plan());
+        var result = Evaluate([activation],
+            [Candle(0, 100, 100, 100, 100) with { Trades = 0 }, Candle(1, 101, 102, 101, 101)]);
+        Assert.Null(result.Issue);
+        Assert.Empty(result.Executions);
+        Assert.Equal(At.AddMinutes(2), result.CheckpointUtc);
+        Assert.Equal(101, result.PreviousClose);
+        var entered = Evaluate([activation], [Candle(0, 100, 101, 99, 100)]).Executions;
+        var stop = Evaluate([activation], [Candle(1, 90, 90, 90, 90) with { Trades = 0 }],
+            retained: entered, checkpoint: At.AddMinutes(1), previousClose: 100);
+        Assert.Empty(stop.Executions);
+        Assert.Equal(100, stop.PreviousClose);
+        Assert.Equal(At.AddMinutes(2), stop.CheckpointUtc);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Target_only_revision_preserves_unchanged_stop_gap_check_across_quiet_minutes(bool quiet)
+    {
+        var plan = Plan();
+        var retained = Evaluate([Activation(plan)], [Candle(0, 100, 101, 99, 100)]).Executions;
+        var revised = plan with { Entries = [Entry(targets: [Exit("target", "120")])] };
+        var candles = quiet
+            ? new[] { Candle(2, 91, 91, 91, 91) with { Trades = 0 }, Candle(3, 85, 86, 84, 85) }
+            : [Candle(2, 85, 86, 84, 85)];
+        var result = Evaluate([Activation(plan), Activation(revised, 2, 2)], candles,
+            retained: retained, checkpoint: At.AddMinutes(2), previousClose: 91);
+        Assert.Null(result.Issue);
+        Assert.Equal("stop", Assert.Single(result.Executions).Role);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Persisted_quiet_minutes_preserve_the_source_close_boundary_not_a_new_level_activation(bool unchanged)
+    {
+        var plan = Plan(entries: [Entry(stops: [Exit("stop", unchanged ? "90" : "80")])]);
+        var entered = Evaluate([Activation(plan)],
+            [Candle(0, 100, 101, 99, 100), Candle(1, 91, 92, 91, 91)]);
+        var revised = plan with { Entries = [Entry(stops: [Exit("stop", "90")], targets: [Exit("target", "120")])] };
+        var activations = new[] { Activation(plan), Activation(revised, 2, 2) };
+        var quiet = Evaluate(activations, [Candle(2, 91, 91, 91, 91) with { Trades = 0 }],
+            entered.Executions, entered.CheckpointUtc, entered.PreviousClose,
+            previousCloseAtUtc: entered.PreviousCloseAtUtc);
+        Assert.Equal(At.AddMinutes(2), quiet.PreviousCloseAtUtc);
+        var next = Evaluate(activations, [Candle(3, 85, 86, 84, 85)],
+            entered.Executions, quiet.CheckpointUtc, quiet.PreviousClose, previousCloseAtUtc: quiet.PreviousCloseAtUtc);
+        Assert.Null(next.Issue);
+        if (unchanged) Assert.Equal("stop", Assert.Single(next.Executions).Role);
+        else Assert.Empty(next.Executions);
+    }
+
+    [Fact]
+    public void Negative_trade_count_or_nonflat_zero_trade_candles_are_not_covered_market_minutes()
+    {
+        foreach (var candle in new[] { Candle(0, 100, 101, 99, 100) with { Trades = -1 },
+                     Candle(0, 100, 101, 99, 100) with { Trades = 0 } })
+        {
+            var result = Evaluate([Activation(Plan())], [candle]);
+            Assert.Empty(result.Executions);
+            Assert.Null(result.CheckpointUtc);
+            Assert.Contains("Invalid", result.Issue);
+        }
+    }
+
+    [Theory]
+    [InlineData("97.3", "3", "margin")]
+    [InlineData("0.000123", "7", "margin")]
+    [InlineData("64321.7", "10", "margin")]
+    [InlineData("0.7", "3", "quantity")]
+    [InlineData("112.37", "7", "quantity")]
+    [InlineData("1.2345", "10", "quantity")]
+    public void Awkward_prices_percentage_levels_and_partial_allocations_settle_without_phantom_dust(
+        string price, string leverage, string mode)
+    {
+        var p = decimal.Parse(price, System.Globalization.CultureInfo.InvariantCulture);
+        var lev = int.Parse(leverage, System.Globalization.CultureInfo.InvariantCulture);
+        string Percent(int multiplier) => (lev * multiplier).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var plan = Plan(size: mode == "margin" ? "333" : "3", mode: mode, leverage: leverage, entries:
+            [Entry(price: price, stops: [Exit("s", Percent(10), unit: "percent")],
+                targets: [Exit("a", Percent(10), "33.33", "percent"), Exit("b", Percent(20), "33.33", "percent"),
+                    Exit("c", Percent(30), "33.34", "percent")])]);
+        var entered = Evaluate([Activation(plan)], [Candle(0, p, p, p, p)]);
+        var first = Evaluate([Activation(plan)], [Candle(1, p * 1.1m, p * 1.1m, p * 1.1m, p * 1.1m)],
+            entered.Executions, entered.CheckpointUtc, entered.PreviousClose);
+        var rest = Evaluate([Activation(plan)],
+            [Candle(2, p * 1.2m, p * 1.2m, p * 1.2m, p * 1.2m),
+                Candle(3, p * 1.3m, p * 1.3m, p * 1.3m, p * 1.3m)],
+            entered.Executions.Concat(first.Executions).ToArray(), first.CheckpointUtc, first.PreviousClose);
+        Assert.Null(entered.Issue); Assert.Null(first.Issue); Assert.Null(rest.Issue);
+        var exits = first.Executions.Concat(rest.Executions).ToArray();
+        Assert.Equal(Assert.Single(entered.Executions).Quantity, exits.Sum(e => e.Quantity));
+        Assert.Equal(0, entered.Executions.Concat(exits).Sum(e => e.MarginUsd));
+        Assert.All(exits, e =>
+        {
+            Assert.True(e.MarginUsd < 0);
+            Assert.Equal(e.Quantity, decimal.Round(e.Quantity, 12));
+            Assert.Equal(e.PnlUsd, decimal.Round(e.PnlUsd, 12));
+        });
+    }
+
+    [Fact]
+    public void Negative_pnl_is_floored_not_rounded_up_into_fabricated_capital()
+    {
+        var plan = Plan(size: "1", leverage: "3", entries:
+            [Entry(price: "97.3", stops: [Exit("a", "97.2999999999999", "50")], targets: [])]);
+        var entered = Evaluate([Activation(plan)], [Candle(0, 97.3m, 97.3m, 97.3m, 97.3m)]);
+        var exited = Evaluate([Activation(plan)],
+            [Candle(1, 97.2999999999999m, 97.2999999999999m, 97.2999999999999m, 97.2999999999999m)],
+            entered.Executions, entered.CheckpointUtc, entered.PreviousClose);
+        Assert.Null(exited.Issue);
+        Assert.Equal(-0.000000000001m, Assert.Single(exited.Executions).PnlUsd);
+    }
+
+    [Fact]
     public void Margin_sizing_uses_quantity_weighted_average_and_does_not_normalize_entry_allocations()
     {
         var plan = Plan(size: "1500", mode: "margin", leverage: "2", entries:
@@ -687,9 +833,10 @@ public sealed class PaperEngineEvaluatorTests
 
         // The touched entry needs only 100, but all unentered allocations still require 300.
         Assert.Empty(result.Executions);
-        Assert.Contains("Insufficient paper margin", result.Issue);
+        Assert.Null(result.Issue);
+        Assert.Contains("Insufficient paper margin", Assert.Single(result.DeclinedEntries!).Reason);
         Assert.False(result.Ambiguous);
-        Assert.Null(result.CheckpointUtc);
+        Assert.Equal(At.AddMinutes(1), result.CheckpointUtc);
     }
 
     [Fact]
@@ -746,14 +893,15 @@ public sealed class PaperEngineEvaluatorTests
         Assert.Equal(new[] { "entry", "stop" }, result.Executions.Select(e => e.Role));
         Assert.Equal(-125, result.Executions[1].PnlUsd);
         Assert.Equal(-50, result.Executions[1].MarginUsd);
-        Assert.Contains("Insufficient paper margin", result.Issue);
+        Assert.Null(result.Issue);
+        Assert.Contains("Insufficient paper margin", Assert.Single(result.DeclinedEntries!).Reason);
         Assert.False(result.Ambiguous);
-        Assert.Equal(At.AddMinutes(2), result.CheckpointUtc);
-        Assert.Equal(50, result.PreviousClose);
+        Assert.Equal(At.AddMinutes(3), result.CheckpointUtc);
+        Assert.Equal(200, result.PreviousClose);
     }
 
     [Fact]
-    public void Blocked_admission_keeps_protective_exits_but_holds_the_frontier_and_replays_without_double_exit()
+    public void Blocked_admission_keeps_protective_exits_advances_frontier_and_never_replays_declined_entry()
     {
         var plan = Plan(entries:
         [
@@ -766,27 +914,28 @@ public sealed class PaperEngineEvaluatorTests
         var blocked = Evaluate(activations, [candle], entered.Executions, entered.CheckpointUtc,
             entered.PreviousClose, entryMarginBudget: 50);
         var replay = Evaluate(activations, [candle], entered.Executions.Concat(blocked.Executions).ToArray(),
-            blocked.CheckpointUtc, blocked.PreviousClose, entryMarginBudget: 75);
+            blocked.CheckpointUtc, blocked.PreviousClose, entryMarginBudget: 75, declinedEntries: blocked.DeclinedEntries);
 
         var exit = Assert.Single(blocked.Executions);
         Assert.Equal("stop", exit.Role);
         Assert.Equal(2.5m, exit.Quantity);
         Assert.Equal(-25, exit.PnlUsd);
         Assert.Equal(-50, exit.MarginUsd);
-        Assert.Contains("Insufficient paper margin", blocked.Issue);
+        Assert.Null(blocked.Issue);
+        Assert.Contains("Insufficient paper margin", Assert.Single(blocked.DeclinedEntries!).Reason);
         Assert.False(blocked.Ambiguous);
-        Assert.Equal(entered.CheckpointUtc, blocked.CheckpointUtc);
-        Assert.Equal(entered.PreviousClose, blocked.PreviousClose);
+        Assert.Equal(At.AddMinutes(2), blocked.CheckpointUtc);
+        Assert.Equal(85, blocked.PreviousClose);
         Assert.Empty(replay.Executions);
-        Assert.Contains("Insufficient paper margin", replay.Issue);
+        Assert.Null(replay.Issue);
         Assert.Equal(blocked.CheckpointUtc, replay.CheckpointUtc);
 
-        var resolved = Evaluate(activations, [candle], entered.Executions.Concat(blocked.Executions).ToArray(),
-            blocked.CheckpointUtc, blocked.PreviousClose, entryMarginBudget: 80);
-        Assert.Equal("entry", Assert.Single(resolved.Executions).Role);
-        Assert.Equal("second", resolved.Executions[0].EntryId);
+        var resolved = Evaluate(activations, [Candle(2, 80, 81, 79, 80)], entered.Executions.Concat(blocked.Executions).ToArray(),
+            blocked.CheckpointUtc, blocked.PreviousClose, entryMarginBudget: 80, declinedEntries: blocked.DeclinedEntries);
+        Assert.Empty(resolved.Executions);
         Assert.Null(resolved.Issue);
-        Assert.Equal(At.AddMinutes(2), resolved.CheckpointUtc);
+        Assert.Equal(At.AddMinutes(3), resolved.CheckpointUtc);
+        Assert.Equal(blocked.DeclinedEntries, resolved.DeclinedEntries);
     }
 
     [Fact]
@@ -805,10 +954,11 @@ public sealed class PaperEngineEvaluatorTests
             entryMarginBudget: 10000, entryBlockReason: reason);
 
         Assert.Equal("target", Assert.Single(result.Executions).Role);
-        Assert.Equal(reason, result.Issue);
+        Assert.Null(result.Issue);
+        Assert.Equal(reason, Assert.Single(result.DeclinedEntries!).Reason);
         Assert.False(result.Ambiguous);
-        Assert.Equal(entered.CheckpointUtc, result.CheckpointUtc);
-        Assert.Equal(entered.PreviousClose, result.PreviousClose);
+        Assert.Equal(At.AddMinutes(2), result.CheckpointUtc);
+        Assert.Equal(120, result.PreviousClose);
     }
 
     [Fact]
@@ -817,9 +967,10 @@ public sealed class PaperEngineEvaluatorTests
         var result = Evaluate([Activation(Plan())], [Candle(0, 100, 111, 99, 100)], entryMarginBudget: 0);
 
         Assert.Empty(result.Executions);
-        Assert.Contains("Insufficient paper margin", result.Issue);
+        Assert.Null(result.Issue);
+        Assert.Contains("Insufficient paper margin", Assert.Single(result.DeclinedEntries!).Reason);
         Assert.False(result.Ambiguous);
-        Assert.Null(result.CheckpointUtc);
+        Assert.Equal(At.AddMinutes(1), result.CheckpointUtc);
     }
 
     [Fact]
@@ -864,9 +1015,10 @@ public sealed class PaperEngineEvaluatorTests
 
         Assert.Equal(10, Assert.Single(currentOnly.Executions).MarginUsd);
         Assert.Empty(futureReserved.Executions);
-        Assert.Contains("Insufficient paper margin", futureReserved.Issue);
+        Assert.Null(futureReserved.Issue);
+        Assert.Contains("Insufficient paper margin", Assert.Single(futureReserved.DeclinedEntries!).Reason);
         Assert.False(futureReserved.Ambiguous);
-        Assert.Null(futureReserved.CheckpointUtc);
+        Assert.Equal(At.AddMinutes(1), futureReserved.CheckpointUtc);
     }
 
     [Fact]
@@ -877,7 +1029,8 @@ public sealed class PaperEngineEvaluatorTests
             reservedEntryMargins: new Dictionary<string, decimal> { ["entry"] = 10, ["future-only"] = 200 });
 
         Assert.Empty(result.Executions);
-        Assert.Contains("Insufficient paper margin", result.Issue);
+        Assert.Null(result.Issue);
+        Assert.Contains("Insufficient paper margin", Assert.Single(result.DeclinedEntries!).Reason);
     }
 
     [Fact]
@@ -924,7 +1077,8 @@ public sealed class PaperEngineEvaluatorTests
             reservedEntryMargins: new Dictionary<string, decimal>());
 
         Assert.Empty(result.Executions);
-        Assert.Contains("Insufficient paper margin", result.Issue);
+        Assert.Null(result.Issue);
+        Assert.Contains("Insufficient paper margin", Assert.Single(result.DeclinedEntries!).Reason);
         Assert.False(result.Ambiguous);
     }
 
@@ -932,10 +1086,12 @@ public sealed class PaperEngineEvaluatorTests
         IReadOnlyList<PaperCandle> candles, IReadOnlyList<PaperExecution>? retained = null,
         DateTimeOffset? checkpoint = null, decimal? previousClose = null, DateTimeOffset? through = null,
         decimal? entryMarginBudget = null, string? entryBlockReason = null,
-        IReadOnlyDictionary<string, decimal>? reservedEntryMargins = null) =>
+        IReadOnlyDictionary<string, decimal>? reservedEntryMargins = null,
+        IReadOnlyList<PaperDeclinedEntry>? declinedEntries = null, DateTimeOffset? previousCloseAtUtc = null) =>
         PaperEvaluator.Evaluate(Owner, Account, Play, activations, retained ?? [], checkpoint, previousClose, candles,
             through ?? (candles.Count == 0 ? At : candles.Max(c => c.OpenAtUtc.AddMinutes(1))),
-            entryMarginBudget, entryBlockReason, reservedEntryMargins);
+            entryMarginBudget.HasValue ? Vessel.Domain.Numerics.ExactAmount.From(entryMarginBudget.Value) : null,
+            entryBlockReason, reservedEntryMargins, declinedEntries, previousCloseAtUtc);
 
     private static PaperPlanActivation Activation(PlayPlanDocument plan, int minute = 0, int version = 1) => new()
     {

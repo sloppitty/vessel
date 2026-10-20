@@ -16,6 +16,39 @@ namespace Vessel.Tests;
 public sealed class PaperReportingPostgresTests
 {
     [PostgresFact]
+    public async Task Resumed_then_closed_simulation_stays_descriptively_excluded_from_review_and_sizing()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var paper = PaperReportingTests.Paper(owner);
+        await using var db = database.Context(owner);
+        db.AddRange(paper.Portfolio, paper.Account, paper.Facts.Play);
+        db.PlanRevisions.AddRange(paper.Facts.Revisions);
+        db.PaperExecutions.AddRange(paper.Facts.Paper!.Executions);
+        db.PaperSimulations.Add(new()
+        {
+            OwnerId = owner, AccountId = paper.Account.Id, PlayId = paper.Facts.Play.Id, State = "ready",
+            SuspensionsJson = JsonSerializer.Serialize(new[] { new PaperSuspension(
+                "Paper evaluation was suspended; the skipped window is not simulated.",
+                PaperReportingTests.At.AddHours(-2), PaperReportingTests.At.AddHours(-1)) })
+        });
+        await db.SaveChangesAsync();
+        var unit = TestUnitOfWork.For(db);
+        var store = new SizingStore(db, unit);
+        var clock = new PaperReportingTests.Clock();
+        var review = new ReviewService(new ReviewStore(db, store), clock);
+        var sizing = new SizingService(store, new CoreOwner(owner), clock, unit,
+            new ActivityService(new ActivityStore(db), new WorkspaceStore(db, unit), clock));
+        Assert.Empty((await review.GetAsync(new(Period: "all", TradingMode: "paper"), default)).Plays);
+        Assert.Contains(Assert.Single((await review.ExclusionsAsync(new(Period: "all", TradingMode: "paper"), default)).Items)
+            .Reasons, r => r.Contains("suspended", StringComparison.OrdinalIgnoreCase));
+        var sized = await sizing.GetAsync(default, "paper");
+        Assert.Equal("paper", sized.Record.Source);
+        Assert.Equal(0, sized.Record.ClosedPlays);
+        Assert.Empty(sized.Record.Recent);
+    }
+
+    [PostgresFact]
     public async Task Reports_scope_mode_before_counts_facets_paging_coverage_and_real_fallback()
     {
         await using var database = await CoreDatabase.CreateAsync();

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Common;
 using Vessel.Application.Workspace;
 using Vessel.Application.Venues;
+using Vessel.Application.Paper;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Common;
 using Vessel.Domain.Paper;
@@ -9,7 +10,7 @@ using Vessel.Domain.Workspace;
 
 namespace Vessel.Persistence;
 
-public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOfWork) : IWorkspaceStore
+public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOfWork, TimeProvider? time = null) : IWorkspaceStore
 {
     public Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct) => PortfoliosAsync(ct, TradingMode.Real);
     public Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct, string tradingMode = TradingMode.Real) =>
@@ -129,21 +130,23 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
 
     public Task AccountVisibilityChangedAsync(Guid accountId, bool enabled, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {
-        if (!enabled)
+        if (await db.Accounts.AnyAsync(a => a.Id == accountId && a.TradingMode == TradingMode.Paper, ct))
         {
-            var simulations = await db.PaperSimulations.Where(s => s.AccountId == accountId &&
-                db.Plays.Any(p => p.Id == s.PlayId && (p.Status == Vessel.Domain.Plays.PlayStatus.Planned ||
-                    p.Status == Vessel.Domain.Plays.PlayStatus.Open || p.Status == Vessel.Domain.Plays.PlayStatus.Paused))).ToListAsync(ct);
-            foreach (var simulation in simulations)
+            await new PaperStore(db, unitOfWork).WithSettingsLockAsync(async () =>
             {
-                simulation.State = "gap";
-                simulation.NextCheckAtUtc = null;
-                var issues = System.Text.Json.JsonSerializer.Deserialize<List<string>>(simulation.IssuesJson) ?? [];
-                const string issue = "Paper account was disabled; the unobserved interval is unresolved.";
-                if (!issues.Contains(issue)) issues.Add(issue);
-                simulation.IssuesJson = System.Text.Json.JsonSerializer.Serialize(issues);
-            }
-            await unitOfWork.SaveChangesAsync(ct);
+                var now = (time ?? TimeProvider.System).GetUtcNow();
+                var settings = await db.PaperSettings.SingleOrDefaultAsync(ct);
+                var simulations = await db.PaperSimulations.Where(s => s.AccountId == accountId &&
+                    db.Plays.Any(p => p.Id == s.PlayId && (p.Status == Vessel.Domain.Plays.PlayStatus.Planned ||
+                        p.Status == Vessel.Domain.Plays.PlayStatus.Open))).ToListAsync(ct);
+                foreach (var simulation in simulations)
+                    if (!enabled)
+                        simulation.Suspend("The paper account was disabled; the skipped window is not simulated and this outcome remains unscored.", now);
+                    else if (settings is { Enabled: true })
+                        simulation.Resume(PaperTradingService.NextMinute(now), settings.CheckIntervalMinutes);
+                await unitOfWork.SaveChangesAsync(ct);
+                return true;
+            }, ct);
         }
         await Notifications.NotificationStore.AccountVisibilityChangedAsync(db, accountId, enabled, DateTimeOffset.UtcNow, ct);
         return true;

@@ -59,4 +59,37 @@ public sealed class PaperWorkerTests
         Assert.Equal(at.AddMinutes(1), parsed.CloseAtUtc);
         Assert.Throws<FormatException>(() => PaperScheduler.ParseCandle(raw with { CloseTime = at.AddHours(1).ToUnixTimeMilliseconds() - 1 }));
     }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(-1)]
+    public void Paper_source_cannot_invent_whether_an_unknown_trade_count_was_empty(int? trades)
+    {
+        var at = DateTimeOffset.Parse("2026-10-20T16:17:00Z");
+        var raw = new VenueCandle(at.ToUnixTimeMilliseconds(), at.AddMinutes(1).ToUnixTimeMilliseconds() - 1,
+            "0.03224", "0.03224", "0.03224", "0.03224", "0", trades);
+        Assert.Throws<FormatException>(() => PaperScheduler.ParseCandle(raw));
+    }
+
+    [Fact]
+    public void Contradictory_empty_candle_is_not_a_proven_no_trade_minute()
+    {
+        var at = DateTimeOffset.Parse("2026-10-20T16:17:00Z");
+        var raw = new VenueCandle(at.ToUnixTimeMilliseconds(), at.AddMinutes(1).ToUnixTimeMilliseconds() - 1,
+            "0.03224", "0.03225", "0.03224", "0.03224", "0", 0);
+        Assert.Throws<FormatException>(() => PaperScheduler.ParseCandle(raw));
+        Assert.Throws<FormatException>(() => PaperScheduler.ParseCandle(raw with { High = raw.Open, Volume = "1" }));
+    }
+
+    [Fact]
+    public void Recorded_native_empty_minute_preserves_zero_trade_count_instead_of_fabricating_a_touch()
+    {
+        // Native TNSR sample, 2026-10-20 16:17 UTC; see paper-candle-coverage-research.md.
+        var raw = new VenueCandle(1792513020000, 1792513079999,
+            "0.03224", "0.03224", "0.03224", "0.03224", "0.0", 0);
+        var parsed = PaperScheduler.ParseCandle(raw);
+        Assert.Equal(0, parsed.Trades);
+        Assert.Equal(0.03224m, parsed.Close);
+        Assert.Equal(DateTimeOffset.Parse("2026-10-20T16:18:00Z"), parsed.CloseAtUtc);
+    }
 }

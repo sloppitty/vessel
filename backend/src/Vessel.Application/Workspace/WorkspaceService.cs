@@ -399,11 +399,11 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     private AccountDto ToDto(Account a, AccountSnapshot? s, PaperAccountBalance? paper = null)
     {
         if (a.TradingMode == TradingMode.Paper)
-            return new(a.Id, a.PortfolioId, a.Name, a.VenueId, null, ExactDecimal.Format(paper?.EquityUsd), null,
+            return new(a.Id, a.PortfolioId, a.Name, a.VenueId, null, paper?.EquityUsd, null,
                 "paper", null, a.IsEnabled ? paper?.OpenPositionCount ?? 0 : 0,
                 "Simulated execution; nominal virtual USD, zero fees and slippage. Open equity is unknown without fresh marks.",
-                a.IsEnabled, a.SettingsRevision, BalanceUsd: ExactDecimal.Format(paper?.CashUsd),
-                AvailableBalanceUsd: a.IsEnabled ? ExactDecimal.Format(paper?.AvailableMarginUsd) : null,
+                a.IsEnabled, a.SettingsRevision, BalanceUsd: paper?.CashUsd,
+                AvailableBalanceUsd: a.IsEnabled ? paper?.AvailableMarginUsd : null,
                 AvailableBalanceSource: "paper", TradingMode: a.TradingMode, StartingCapitalUsd: ExactDecimal.Format(a.StartingCapitalUsd));
         return new(a.Id, a.PortfolioId, a.Name, a.VenueId, a.Address,
         ExactDecimal.Format(a.VenueId == VenueDescriptor.ManualId ? a.ManualAccountValueUsd : s?.AccountValueUsd), a.LastSyncedAtUtc,

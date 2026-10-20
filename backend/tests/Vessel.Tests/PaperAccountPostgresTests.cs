@@ -192,7 +192,9 @@ public sealed class PaperAccountPostgresTests
         var after = await service.AccountAsync(dto.Id, default, "paper");
         Assert.Null(after.AvailableBalanceUsd);
         var state = await db.PaperSimulations.SingleAsync();
-        Assert.Equal("gap", state.State); Assert.Null(state.NextCheckAtUtc); Assert.Contains("disabled", state.IssuesJson);
+        Assert.Equal("suspended", state.State); Assert.Null(state.NextCheckAtUtc);
+        Assert.Empty(System.Text.Json.JsonSerializer.Deserialize<string[]>(state.IssuesJson)!);
+        Assert.Contains("disabled", Assert.Single(state.Suspensions()).Reason);
         Assert.Equal(100m, (await db.PaperReservations.SingleAsync()).AmountUsd);
         Assert.Equal(200m, (await db.PaperExecutions.SingleAsync()).MarginUsd);
     }
@@ -261,12 +263,12 @@ public sealed class PaperAccountPostgresTests
         var balances = await TestUnitOfWork.For(reader).ExecuteAsync(() =>
             new WorkspaceStore(reader, TestUnitOfWork.For(reader)).PaperBalancesAsync([accountId], default), default);
         Assert.True(interleave.Committed);
-        Assert.Equal(3800m, balances[accountId].AvailableMarginUsd);
-        Assert.Equal(4000m, balances[accountId].CashUsd);
+        Assert.Equal("3800", balances[accountId].AvailableMarginUsd);
+        Assert.Equal("4000", balances[accountId].CashUsd);
         await using var verify = database.Context(owner);
         Assert.Empty(await verify.PaperReservations.ToListAsync());
         Assert.Equal(200m, (await verify.PaperExecutions.SingleAsync()).MarginUsd);
-        Assert.Equal(3800m, (await new WorkspaceStore(verify, TestUnitOfWork.For(verify))
+        Assert.Equal("3800", (await new WorkspaceStore(verify, TestUnitOfWork.For(verify))
             .PaperBalancesAsync([accountId], default))[accountId].AvailableMarginUsd);
     }
 

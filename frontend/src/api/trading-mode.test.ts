@@ -67,7 +67,8 @@ describe('mode-bound workspace requests', () => {
     await expect(client.savePaperSettings({ enabled: true, checkIntervalMinutes: 1.5 })).rejects.toBeDefined()
     expect(fetch).not.toHaveBeenCalled()
     const state: PaperPlayState = { playId: savedPlayFixture.summary.id, status: 'gap', checkedAtUtc: null, nextCheckAtUtc: null,
-      enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', realizedPnlUsd: '0', issues: ['Candle history unavailable.'], executions: [] }
+      enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', realizedPnlUsd: '0', issues: ['Candle history unavailable.'], executions: [],
+      declinedEntries: [], suspensions: [], hasUnscoredHistory: true }
     fetch = response(state)
     expect(await client.paperState(state.playId)).toEqual(state)
     expect(fetch.mock.calls[0]![0]).toBe(`/api/plays/${state.playId}/paper-state?tradingMode=paper`)
@@ -76,6 +77,26 @@ describe('mode-bound workspace requests', () => {
     fetch.mockClear()
     await expect(createWorkspaceApi('synthetic-token').paperState(state.playId)).rejects.toBeDefined()
     expect(fetch).not.toHaveBeenCalled()
+  })
+  it.each(['blocked', 'suspended'] as const)('keeps %s audit facts strictly Paper-only and rejects malformed new wire fields', async status => {
+    const state: PaperPlayState = { playId: savedPlayFixture.summary.id, status, checkedAtUtc: '2026-10-20T12:00:00Z',
+      nextCheckAtUtc: status === 'blocked' ? '2026-10-20T13:00:00Z' : null,
+      enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1', realizedPnlUsd: '-0.000000000001', issues: [], executions: [],
+      declinedEntries: [{ entryId: 'local-entry-2', reason: 'Insufficient paper margin.', declinedAtUtc: '2026-10-20T12:00:00Z' }],
+      suspensions: [{ reason: 'Paper settings disabled.', suspendedAtUtc: '2026-10-20T12:00:01Z', resumedAtUtc: null }], hasUnscoredHistory: true }
+    const client = createWorkspaceApi('synthetic-token', undefined, 'paper')
+    const fetch = response(state)
+    expect(await client.paperState(state.playId)).toEqual(state)
+    expect(fetch.mock.calls[0]![0]).toBe(`/api/plays/${state.playId}/paper-state?tradingMode=paper`)
+    for (const body of [{ ...state, tradingMode: 'real' }, { ...state, declinedEntries: null }, { ...state, suspensions: [{}] },
+      { ...state, hasUnscoredHistory: undefined }]) {
+      response(body)
+      await expect(client.paperState(state.playId)).rejects.toMatchObject({ kind: 'invalid-response' })
+    }
+    const noReads = response(state)
+    for (const mode of [undefined, 'real'] as const)
+      await expect(createWorkspaceApi('synthetic-token', undefined, mode).paperState(state.playId)).rejects.toMatchObject({ kind: 'unavailable' })
+    expect(noReads).not.toHaveBeenCalled()
   })
   it('rejects mismatched financial entities instead of relabelling them', async () => {
     response([accountFixture])

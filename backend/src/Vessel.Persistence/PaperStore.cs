@@ -7,6 +7,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Common;
 using Vessel.Domain.Paper;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Numerics;
 
 namespace Vessel.Persistence;
 
@@ -38,7 +39,7 @@ public sealed class PaperStore(VesselDbContext db, UnitOfWork unit) : IPaperStor
     public Task<List<PaperSimulation>> AccountSimulationsAsync(Guid accountId, CancellationToken ct) =>
         db.Set<PaperSimulation>().Where(x => x.AccountId == accountId).ToListAsync(ct);
     public Task<List<PaperSimulation>> ActiveSimulationsAsync(CancellationToken ct) =>
-        db.Set<PaperSimulation>().Where(x => x.NextCheckAtUtc != null || x.State == "gap" || x.State == "ambiguous").ToListAsync(ct);
+        db.Set<PaperSimulation>().Where(x => x.NextCheckAtUtc != null || x.State == "gap" || x.State == "ambiguous" || x.State == "suspended").ToListAsync(ct);
     public Task<List<PaperExecution>> ExecutionsAsync(Guid playId, CancellationToken ct) =>
         db.Set<PaperExecution>().Where(x => x.PlayId == playId).AsNoTracking().OrderBy(x => x.OccurredAtUtc).ThenBy(x => x.Id).ToListAsync(ct);
     public Task<List<PaperPlanActivation>> ActivationsAsync(Guid playId, CancellationToken ct) =>
@@ -47,24 +48,53 @@ public sealed class PaperStore(VesselDbContext db, UnitOfWork unit) : IPaperStor
         db.Set<PaperReservation>().SingleOrDefaultAsync(x => x.PlayId == playId, ct);
     public async Task<PaperCapital> CapitalAsync(Guid accountId, Guid exceptReservationPlayId, bool includeOwnIssues, CancellationToken ct)
     {
-        var cash = await db.Set<PaperLedgerEntry>().Where(x => x.AccountId == accountId).SumAsync(x => x.AmountUsd, ct);
-        var open = await db.Set<PaperExecution>().Where(x => x.AccountId == accountId).SumAsync(x => x.MarginUsd, ct);
-        var reserved = await db.Set<PaperReservation>().Where(x => x.AccountId == accountId && x.PlayId != exceptReservationPlayId).SumAsync(x => x.AmountUsd, ct);
+        var totals = await CapitalTotalsAsync(accountId, exceptReservationPlayId, ct);
         var unresolved = await db.Set<PaperSimulation>().AnyAsync(x => x.AccountId == accountId &&
             (includeOwnIssues || x.PlayId != exceptReservationPlayId) &&
             (x.State == "gap" || x.State == "ambiguous" || x.IssuesJson != "[]"), ct);
-        return new(cash, open, reserved, unresolved);
+        unresolved |= await HasSuspendedExposureAsync(accountId, ct);
+        return new(ExactAmount.Parse(totals.Cash), ExactAmount.Parse(totals.Margin), ExactAmount.Parse(totals.Reserved), unresolved);
     }
     public async Task<PaperCapital> TimelineCapitalAsync(Guid accountId, IReadOnlyCollection<Guid> recoveringPlayIds, CancellationToken ct)
     {
-        var cash = await db.Set<PaperLedgerEntry>().Where(x => x.AccountId == accountId).SumAsync(x => x.AmountUsd, ct);
-        var open = await db.Set<PaperExecution>().Where(x => x.AccountId == accountId).SumAsync(x => x.MarginUsd, ct);
-        var reserved = await db.Set<PaperReservation>().Where(x => x.AccountId == accountId).SumAsync(x => x.AmountUsd, ct);
+        var totals = await CapitalTotalsAsync(accountId, Guid.Empty, ct);
         // Complete public windows can recover transient read errors together. Frozen frontiers never recover by guessing.
         var ids = recoveringPlayIds.ToArray();
         var unresolved = await db.Set<PaperSimulation>().AnyAsync(x => x.AccountId == accountId &&
             (x.State == "gap" || x.State == "ambiguous" || x.IssuesJson != "[]" && !ids.Contains(x.PlayId)), ct);
-        return new(cash, open, reserved, unresolved);
+        unresolved |= await HasSuspendedExposureAsync(accountId, ct);
+        return new(ExactAmount.Parse(totals.Cash), ExactAmount.Parse(totals.Margin), ExactAmount.Parse(totals.Reserved), unresolved);
+    }
+    private Task<bool> HasSuspendedExposureAsync(Guid accountId, CancellationToken ct) =>
+        db.Database.SqlQuery<bool>($"""
+            SELECT EXISTS (
+              SELECT 1 FROM paper_simulations s
+              WHERE s."OwnerId"={OwnerId} AND s."AccountId"={accountId} AND s."SuspensionsJson"<>'[]'::jsonb
+              AND EXISTS (
+                SELECT 1 FROM paper_executions e WHERE e."OwnerId"=s."OwnerId" AND e."PlayId"=s."PlayId"
+                GROUP BY e."EntryId"
+                HAVING SUM(CASE WHEN e."Role"='entry' THEN e."Quantity" ELSE -e."Quantity" END)>0
+                  AND MIN(e."OccurredAtUtc") <= (
+                    SELECT MAX((h->>'SuspendedAtUtc')::timestamptz)
+                    FROM jsonb_array_elements(s."SuspensionsJson") h)))
+            AS "Value"
+            """).SingleAsync(ct);
+    private Task<CapitalTotals> CapitalTotalsAsync(Guid accountId, Guid exceptReservation, CancellationToken ct) =>
+        db.Database.SqlQuery<CapitalTotals>($"""
+            SELECT
+              (SELECT COALESCE(SUM("AmountUsd"),0)::text FROM paper_ledger_entries
+                WHERE "OwnerId"={OwnerId} AND "AccountId"={accountId}) AS "Cash",
+              (SELECT COALESCE(SUM("MarginUsd"),0)::text FROM paper_executions
+                WHERE "OwnerId"={OwnerId} AND "AccountId"={accountId}) AS "Margin",
+              (SELECT COALESCE(SUM("AmountUsd"),0)::text FROM paper_reservations
+                WHERE "OwnerId"={OwnerId} AND "AccountId"={accountId} AND "PlayId"<>{exceptReservation}) AS "Reserved"
+            """).SingleAsync(ct);
+
+    private sealed class CapitalTotals
+    {
+        public string Cash { get; set; } = null!;
+        public string Margin { get; set; } = null!;
+        public string Reserved { get; set; } = null!;
     }
     public Task<bool> HasExecutionsAfterAsync(Guid accountId, DateTimeOffset frontier, CancellationToken ct) =>
         db.Set<PaperExecution>().AnyAsync(x => x.AccountId == accountId && x.OccurredAtUtc > frontier, ct);
