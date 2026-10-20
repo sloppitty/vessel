@@ -121,3 +121,8 @@ October 20, 2026, branch `t3/phase1-activity-journal`, stacked on the contract:
   - The warm-cache and UTC-day tests are sound.
 
   No new finding of medium severity or above.
+- **Rebased onto main** on October 20, after Phase 0 merged, with the changelog entry kept first under Unreleased.
+  `scripts/check.sh` passed on main:
+  - backend: 3,561 passed, 5 skipped;
+  - frontend: 147 files and 3,748 tests;
+  - build clean.
