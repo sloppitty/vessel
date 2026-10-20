@@ -15,7 +15,11 @@ namespace Vessel.Application.Plays;
 /// run from <paramref name="FirstEntryAtUtc"/> to <paramref name="LastExitAtUtc"/> once the Play is closed.
 /// </summary>
 public sealed record PlayReceiptDto(DateTimeOffset? FirstEntryAtUtc, DateTimeOffset? LastExitAtUtc, string? AverageEntryPrice,
-    string? AverageExitPrice, int FillCount, string? EstimatedR, string? InitialRisk, string? EstimatedRReason);
+    string? AverageExitPrice, int FillCount, string? EstimatedR, string? InitialRisk, string? EstimatedRReason)
+{
+    /// <summary>The plan was written after the Play's first execution (D-17); see <see cref="PlayReceipts.PlannedAfterExecution"/>.</summary>
+    public bool PlannedAfterExecution { get; init; }
+}
 
 /// <summary>One entry as planned, from the plan revision in force at its first fill (phase 1, 1.1a).</summary>
 public sealed record PlannedEntry(string? Price, string? Quantity, int? Revision);
@@ -36,8 +40,17 @@ public static class PlayReceipts
         var exits = facts.Fills.Where(f => f.Role != OrderLinkRole.Entry).Select(f => f.Fill).ToList();
         var (r, risk, reason) = EstimatedR(facts, now);
         return new(entries.Count == 0 ? null : entries.Min(f => f.OccurredAtUtc), exits.Count == 0 ? null : exits.Max(f => f.OccurredAtUtc),
-            Average(entries), Average(exits), facts.Fills.Count, r, risk, reason);
+            Average(entries), Average(exits), facts.Fills.Count, r, risk, reason) { PlannedAfterExecution = PlannedAfterExecution(facts) };
     }
+
+    /// <summary>
+    /// A planned-origin Play whose plan was written (<see cref="Play.PlannedAtUtc"/>) after its earliest linked or manual
+    /// execution, from stored times only. It changes nothing in Review or sizing; it is shown so the plan is not read as
+    /// written beforehand.
+    /// </summary>
+    public static bool PlannedAfterExecution(ClosedPlayFacts facts) =>
+        facts.Play is { Origin: PlayOrigin.Planned, PlannedAtUtc: { } planned } && facts.Fills.Count > 0 &&
+        planned > facts.Fills.Min(f => f.Fill.OccurredAtUtc);
 
     private static (string? R, string? Risk, string? Reason) EstimatedR(ClosedPlayFacts facts, DateTimeOffset now)
     {

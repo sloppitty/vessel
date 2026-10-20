@@ -28,6 +28,7 @@ import { noEntryFills, type EntryFills } from './position-risk-summary'
 import type { EvidenceImages } from './evidence-images'
 import { isNominalUsdQuote } from './stablecoins'
 import { defaultPlayTitle } from './default-title'
+import { PostHocBadge } from './PostHocBadge'
 import './plays-workspace.css'
 import { NativeSelect } from '@/components/ui/native-select'
 import { pickerAccounts } from '@/features/workspace/account-picker-options'
@@ -38,7 +39,7 @@ import '@/features/monitor/incidents.css'
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, revision = null,
   lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, sizingStatus = 'ready', onRetrySizing, onRiskChange,
   filledEntries, fills: entryFills, onUnits, onPriceStep, retrospective = false, incidents, stopEvidence, evidenceImages,
-  reviewReceipt, journalSave, retrospectiveReceipt }: {
+  reviewReceipt, journalSave, retrospectiveReceipt, plannedAfterExecution = false }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -93,6 +94,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   journalSave?: ReactNode
   /** A retrospective Play's trade facts, in its "No original plan" panel. */
   retrospectiveReceipt?: ReactNode
+  /** The plan was written after the Play's first execution (D-17), as the server's receipt says. */
+  plannedAfterExecution?: boolean
 }) {
   const fieldId = useId()
   const [selectedId, setSelectedId] = useState(draft.entries[0]?.id ?? '')
@@ -267,6 +270,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         {revision !== null && <span className="badge play-revision" title="Saved plan changes ask for a reason">Revision {revision}</span>}
         {retrospective && <InfoTip className="badge play-retrospective" trigger="Retrospective">
           Recorded after execution: no original plan, thesis, initial stop or initial-risk R.</InfoTip>}
+        {plannedAfterExecution && !retrospective && <PostHocBadge />}
       </span></div>
     </fieldset>
     {!retrospective && <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} lockDirection={lockDirection} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin}

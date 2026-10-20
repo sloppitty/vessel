@@ -55,6 +55,8 @@ public sealed record ReviewPlayDto(Guid Id, string Title, Guid AccountId, string
     string Origin = "planned", string ExecutionSource = "imported")
 {
     public PlayLocalResultDto? Local { get; init; }
+    /// <summary>The plan was written after the Play's first execution (D-17); it is scored like any other.</summary>
+    public bool PlannedAfterExecution { get; init; }
 }
 public sealed record ReviewExclusionDto(Guid PlayId, string Title, Guid AccountId, string AccountName, string Instrument,
     IReadOnlyList<string> Reasons);

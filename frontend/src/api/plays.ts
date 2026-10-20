@@ -325,6 +325,8 @@ export interface PlayReceipt {
   estimatedR: string | null
   initialRisk: string | null
   estimatedRReason: string | null
+  /** The plan was written after the Play's first execution (D-17); absent from servers before Phase 1.4a. */
+  plannedAfterExecution?: boolean
 }
 export interface LinkOrder { orderId: string; role: LinkRole; entryId?: string; levelId?: string }
 /**
@@ -353,6 +355,7 @@ export const isPlayReceipt = (r: unknown): r is PlayReceipt => isRecord(r) &&
   isNullOr(r.firstEntryAtUtc, x => isTimestamp(x, timeLength)) && isNullOr(r.lastExitAtUtc, x => isTimestamp(x, timeLength)) &&
   isNullOr(r.averageEntryPrice, isPlainDecimal) && isNullOr(r.averageExitPrice, isPlainDecimal) && isCount(r.fillCount) &&
   isNullOr(r.estimatedR, isPlainDecimal) && isNullOr(r.initialRisk, isPlainDecimal) && isNullOr(r.estimatedRReason, x => isText(x, 500)) &&
+  (r.plannedAfterExecution === undefined || typeof r.plannedAfterExecution === 'boolean') &&
   // R and its denominator come together, or neither comes and a reason says why.
   (r.estimatedR === null) === (r.initialRisk === null) && (r.estimatedR === null) === (r.estimatedRReason !== null)
 export const isPlayExecution = (v: unknown): v is PlayExecution => isRecord(v) && isGuid(v.playId) && playStatuses.includes(v.status as PlayStatus) &&

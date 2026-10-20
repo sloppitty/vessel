@@ -257,6 +257,46 @@ public sealed class DiaryPostgresTests
     }
 
     [PostgresFact]
+    public async Task A_plan_written_after_its_execution_is_marked_but_answered_and_scored_like_any_other()
+    {
+        // T29 (D-17): a manual Play planned today for executions recorded days earlier keeps planned origin. It is marked,
+        // and by decision 9 it may still answer "Followed" and counts in Review like any other Play.
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var account = await Account(database, owner);
+        await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
+        using var client = factory.AuthorizedClient();
+        var planned = await Planned(client, account.Id);
+        Assert.True(planned.Summary.PlannedAtUtc > At);
+        var entry = await Add(client, planned, Fact(planned.Summary.Version, "entry", "1", "100", 0));
+        Assert.True(entry.Receipt!.PlannedAfterExecution);
+        var closed = await Add(client, entry.Play, Fact(entry.Play.Summary.Version, "exit", "1", "110", 60));
+        Assert.Equal((true, PlayReceipts.PlanAfterFillReason), (closed.Receipt!.PlannedAfterExecution, closed.Receipt.EstimatedRReason));
+        var followed = new UpdatePlayRequest(closed.Play.Summary.Version, account.Id, "BTC", "manual", closed.Play.Summary.Title,
+            closed.Play.Plan, closed.Play.Drawings, "", StructuredReview: new("followed"));
+        (await client.PutAsJsonAsync($"/api/plays/{planned.Summary.Id}", followed)).EnsureSuccessStatusCode();
+        await using var verify = database.Context(owner);
+        var report = await new ReviewService(new ReviewStore(verify, new SizingStore(verify, TestUnitOfWork.For(verify))), TimeProvider.System)
+            .GetAsync(new(Period: "all"), default);
+        var row = Assert.Single(report.Plays);
+        Assert.Equal((true, "10"), (row.PlannedAfterExecution, row.Net));
+        Assert.Equal(1, report.Metrics.Wins);
+    }
+
+    [PostgresFact]
+    public async Task A_plan_written_before_its_execution_is_not_marked()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var account = await Account(database, owner);
+        await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
+        using var client = factory.AuthorizedClient();
+        var planned = await Planned(client, account.Id);
+        var now = DateTimeOffset.UtcNow;
+        var later = new DateTimeOffset(now.Ticks - now.Ticks % TimeSpan.TicksPerMicrosecond, TimeSpan.Zero);
+        var entry = await Add(client, planned, Fact(planned.Summary.Version, "entry", "1", "100", 0) with { OccurredAtUtc = later });
+        Assert.False(entry.Receipt!.PlannedAfterExecution);
+    }
+
+    [PostgresFact]
     public async Task Manual_timestamp_precision_is_rejected_before_writes_and_microsecond_ledger_survives_fresh_reads()
     {
         await using var database = await CoreDatabase.CreateAsync();

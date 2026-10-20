@@ -37,6 +37,8 @@ export interface ReviewPlay {
   executionSource?: 'imported' | 'manual'
   /** The Play-local result beside the scored `net`; absent from servers before October 19, 2026. */
   local?: PlayLocalResult
+  /** The plan was written after the Play's first execution (D-17); scored like any other. Absent from older servers. */
+  plannedAfterExecution?: boolean
 }
 export interface ReviewExclusion {
   playId: string; title: string; accountId: string; accountName: string; instrument: string; reasons: string[]
@@ -81,7 +83,8 @@ const play = (v: unknown) => isRecord(v) && isGuid(v.id) && isText(v.title, 200)
   (v.executionSource === undefined || v.executionSource === 'imported' || v.executionSource === 'manual') &&
   (v.origin !== 'retrospective' || v.rMultiple === null) &&
   isOptionalPlayLocalResult(v.local, isReviewDecimal) &&
-  (!isRecord(v.local) || v.local.basis === 'manual-ledger' === (v.executionSource === 'manual'))
+  (!isRecord(v.local) || v.local.basis === 'manual-ledger' === (v.executionSource === 'manual')) &&
+  (v.plannedAfterExecution === undefined || typeof v.plannedAfterExecution === 'boolean' && (!v.plannedAfterExecution || v.origin !== 'retrospective'))
 const account = (v: unknown) => isRecord(v) && isGuid(v.id) && isText(v.name, 200) && isNullOr(v.portfolioId, isGuid) &&
   isText(v.venueId, 64) && isNullOr(v.lastSyncedAtUtc, x => isTimestamp(x, 64)) && isText(v.syncStatus, 32) &&
   isNullOr(v.historyNotice, x => isText(x, 1000))

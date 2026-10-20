@@ -7,6 +7,7 @@ import { duration } from '@/features/workspace/activity-format'
 import { multiple, timeHeld } from './receipt-format'
 import type { DraftEntry } from './draft'
 import { LocalResultValue, SignDiffersFlag, localResultNote } from './LocalResult'
+import { PostHocBadge } from './PostHocBadge'
 
 /*
  * What happened beside what was planned (phase 1, 1.1a). Every figure comes from the server: planned values from the plan
@@ -64,7 +65,8 @@ export type ReceiptResult = { kind: 'venue'; totals: PlayExecution['totals'] }
 /** The compact receipt at the top of the Review tab, so a review is written beside the outcome. */
 export function ReviewReceipt({ receipt, result, status }: { receipt: PlayReceipt; result: ReceiptResult; status: PlayStatus }) {
   const held = timeHeld(receipt, status)
-  return <dl className="execution-totals review-receipt" aria-label="Outcome">
+  return <>{receipt.plannedAfterExecution && <p className="review-receipt-mark"><PostHocBadge /></p>}
+  <dl className="execution-totals review-receipt" aria-label="Outcome">
     {result.kind === 'venue' ? <>
       <div><dt>Venue net</dt><dd>{result.totals.venueNetUsd == null
         ? <InfoTip className="value-tag" trigger="Unknown" label="venue net">A fee is unverified or in a token outside the listed stablecoins.</InfoTip>
@@ -80,7 +82,7 @@ export function ReviewReceipt({ receipt, result, status }: { receipt: PlayReceip
     </>}
     <div><dt>Estimated R<InfoTip label="About estimated R">{estimatedRNote}</InfoTip></dt><dd><EstimatedR receipt={receipt} /></dd></div>
     {held && <div><dt>Time held</dt><dd>{held}</dd></div>}
-  </dl>
+  </dl></>
 }
 
 /** A manual ledger's known fees by currency, and how many executions have unknown costs, which are never zero. */

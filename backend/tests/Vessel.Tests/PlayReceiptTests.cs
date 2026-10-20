@@ -122,6 +122,26 @@ public sealed class PlayReceiptTests
     }
 
     [Fact]
+    public void A_plan_written_after_the_first_execution_is_marked_from_stored_times_only()
+    {
+        var (play, revisions) = Revised();
+        play.MarkOpen("Filled.", Planned.AddHours(1));
+        LinkedFill At(DateTimeOffset at, OrderLinkRole role = OrderLinkRole.Entry) =>
+            new(role, Fill(play, role == OrderLinkRole.Entry ? ExecutionFacts.Buy : ExecutionFacts.Sell,
+                role == OrderLinkRole.Entry ? ExecutionFacts.Open : ExecutionFacts.Close, 100, 1, at));
+        Assert.False(PlayReceipts.PlannedAfterExecution(new ClosedPlayFacts(play, revisions, [At(Planned.AddHours(1))])));
+        // Planned exactly at the first fill is not after it; an earlier fill of any role makes it so.
+        Assert.False(PlayReceipts.PlannedAfterExecution(new ClosedPlayFacts(play, revisions, [At(Planned)])));
+        var facts = new ClosedPlayFacts(play, revisions, [At(Planned.AddHours(1)), At(Planned.AddMinutes(-1), OrderLinkRole.Exit)]);
+        Assert.True(PlayReceipts.PlannedAfterExecution(facts));
+        Assert.True(PlayReceipts.Build(facts, Planned.AddDays(1)).PlannedAfterExecution);
+        Assert.False(PlayReceipts.PlannedAfterExecution(new ClosedPlayFacts(play, revisions, [])));
+        // A retrospective Play is recorded after execution by definition and says so by its origin instead.
+        typeof(Play).GetProperty(nameof(Play.Origin))!.SetValue(play, PlayOrigin.Retrospective);
+        Assert.False(PlayReceipts.PlannedAfterExecution(facts));
+    }
+
+    [Fact]
     public void A_plan_without_a_complete_stop_has_no_R()
     {
         var (play, _) = Revised();

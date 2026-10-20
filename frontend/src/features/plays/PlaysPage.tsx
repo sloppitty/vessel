@@ -480,6 +480,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     <Save size={14} />{saving ? 'Saving play…' : 'Save play'}</Button> : undefined
   // The outcome beside the review: a venue Play's two bases or a manual Play's ledger, with R and time held from the server.
   const shownExecution = tracking.execution?.playId === saved?.summary.id ? tracking.execution : null
+  const playReceipt = manual ? manualLedger && manualLedger !== 'unknown' ? manualLedger.receipt ?? null : null : shownExecution?.receipt ?? null
   const reviewReceipt = manual
     ? manualLedger && manualLedger !== 'unknown' && manualLedger.receipt
       ? <ReviewReceipt receipt={manualLedger.receipt} result={{ kind: 'manual', totals: manualLedger.totals, fees: manualLedger }}
@@ -501,6 +502,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       filledEntries={filledEntries} fills={fills} onUnits={onUnits} onPriceStep={setPriceStep}
       incidents={saved ? playIncidents.get(saved.summary.id) : undefined} stopEvidence={manual ? undefined : stopEvidence}
       evidenceImages={evidenceImages} reviewReceipt={reviewReceipt} journalSave={journalSave} retrospectiveReceipt={retrospectiveReceipt}
+      plannedAfterExecution={playReceipt?.plannedAfterExecution === true}
       execution={manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
         enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}
         working={busy !== null}

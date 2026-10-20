@@ -265,3 +265,7 @@ the Play never disagrees with Review.
   - time held and fill count.
 
   It shows no R and no plan.
+- **Plan written after first execution (1.4a).** The header shows this
+  badge beside the status, and the Review tab shows it above the outcome,
+  when the receipt's `plannedAfterExecution` is true. See the October 20
+  section of `portfolio-review.md`.

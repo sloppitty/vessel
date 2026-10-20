@@ -93,7 +93,10 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
                 accounts[e.Facts.Play.AccountId].Name, e.Facts.Play.VenueId, e.Facts.Play.ContractId!, e.ClosedAt,
                 ExactDecimal.Format(e.Result!.NetResult), ExactDecimal.Format(e.Result.ReturnPercent), ExactDecimal.Format(e.Result.RMultiple),
                 e.Facts.Play.HasReview, e.Facts.Play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned",
-                e.Facts.ManualSource ? "manual" : "imported") { Local = e.Local!.ToDto(e.Result.NetResult) }).ToList();
+                e.Facts.ManualSource ? "manual" : "imported")
+            {
+                Local = e.Local!.ToDto(e.Result.NetResult), PlannedAfterExecution = PlayReceipts.PlannedAfterExecution(e.Facts),
+            }).ToList();
         return new ReviewDto(now, from ?? current.FirstOrDefault()?.ClosedAt, query.Period, "USD",
             options, Periods.Select(period => {
                 var selected = accepted.Where(e => InPeriod(e.ClosedAt, From(period, now), now)).ToList();
