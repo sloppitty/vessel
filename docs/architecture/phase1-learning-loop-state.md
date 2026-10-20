@@ -165,6 +165,12 @@ October 20, 2026, branch `t3/phase1-fill-markers`, stacked on 1.4b:
   - Adapter tests cover both.
   - **Check.** `scripts/check.sh` passed again: backend 3,610 passed, 5 skipped; frontend 153 files and 3,832 tests.
 
+- **Sol (Codex) round 3.** The month fix holds. One finding, fixed:
+  - **Very long trades (medium).** At the library's half-pixel minimum per candle, a long trade's left edge left the
+    screen, so older pages stopped coming. The chart now asks for the next older page itself while the trade is not
+    covered, and candles can be as narrow as 0.05 px, so thousands fit one view. The adapter test checks the request.
+  - **Check.** `scripts/check.sh` passed again: backend 3,610 passed, 5 skipped; frontend 153 files and 3,834 tests.
+
 ## 1.2 Honest review queue and in-trade log
 
 October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
