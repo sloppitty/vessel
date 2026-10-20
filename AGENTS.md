@@ -66,6 +66,8 @@ October 19, 2026: the owner asked to deliver Phase 0 ("trust and correctness") o
 
 October 20, 2026: the owner answered the Phase 0 pull request questions. The Overview incident row stays unscoped, the sizing sign-difference line stays hidden at zero, and Lighter keeps one counted omission sentence ("Omitted executions: 1 liquidation."). Initial R follows the current first entry fill, so correcting a manual fill's time recalculates it. A stop set while planning goes below a long's entry (above a short's): a `0 %` (break-even) stop needs a fill on its entry, partial included, like a price stop at the entry, and a stop kept unchanged from the stored plan still saves. A stop that is not set is no stop, never break-even. See the 0.5b section of `phase0-trust-correctness-state.md`.
 
+October 20, 2026: the owner asked Review to include imported positions when there are no Plays. Follow the Imported positions section of `docs/architecture/portfolio-review.md`: closed unassigned Activity operations by the sizing fallback's eligibility rule, `positions=exclude|include|auto` with a `minPlays` threshold (default 5, a browser preference in Settings), auto on while the selection has fewer scored Plays, a switch with Automatic/Manual state, and a Play weighing 2 positions in batting, average gain/loss, payoff and expectancy only; dollar totals, drawdown, streaks and counts are never weighted. Positions never become Plays or links, and R, reviews and Play-local figures cover Plays only.
+
 ## Project tracking
 
 October 19, 2026: the owner restricted GitHub Actions to release tags to conserve
