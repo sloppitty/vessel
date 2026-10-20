@@ -338,7 +338,8 @@ Phase 1.1b of the [learning-loop contract](phase1-learning-loop-contract.md). It
 - **Markers, never lines.** A saved Play's fills are drawn as markers at their time and price: its linked venue fills,
   or its manual ledger's executions.
   - Buys are up arrows in the positive colour; sells are down arrows in the negative colour.
-  - Each sits on the candle its execution falls in. A fill outside the loaded candles is not drawn.
+  - Each sits on the candle its execution falls in, within that candle's own span (its interval), so a gap or a lone
+    candle never takes a fill from outside it. A fill outside the loaded candles is not drawn.
   - The pointer resting on a marker shows a tooltip: role, side, exact quantity and price, and the UTC time. A visually
     hidden list carries the same text for assistive technology.
   - Plan levels keep their lines and tags, so a fill cannot be read as a level.
@@ -347,7 +348,9 @@ Phase 1.1b of the [learning-loop contract](phase1-learning-loop-contract.md). It
 - **Trade dates.** An ended Play with fills (Closed, Unresolved or retrospective) opens on its trade: the first to the last
   fill, padded either side by a quarter of its length and at least five candles.
   - `ChartAdapter.setFocus(range)` applies the range at a reset and once per new range, so the owner can pan freely.
-  - Its candles come from an anchored cache entry: the tail ends at the padded end of the trade, never later than now,
-    and older pages load on scroll as usual.
+  - Its candles come from an anchored cache entry: the tail ends at the padded end of the trade, rounded out to whole
+    milliseconds and never later than now, and older pages load on scroll as usual.
+  - The anchor is part of the chart's view key, so the trade's candles arrive as a reset and the focus applies even
+    when today's candles loaded before the fills.
   - Live updates stay off for such a chart, since a live tail would join today onto the trade's candles. Open Plays keep
     today's view and the live tail.

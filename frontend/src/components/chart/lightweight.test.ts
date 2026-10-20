@@ -180,7 +180,7 @@ describe('adapter drawing gesture cancellation', () => {
 })
 
 describe('fill markers and trade focus (phase 1, 1.1b)', () => {
-  const marker = (id: string, time: number, side: 'buy' | 'sell' = 'buy') => ({ id, time, price: 101.5, side, tooltip: `${id} tooltip` })
+  const marker = (id: string, time: number, side: 'buy' | 'sell' = 'buy') => ({ id, time, price: 101.5, side, tooltip: `${id} tooltip`, span: 60_000 })
   it('puts each fill on the candle it falls in, as a shape at its price, and leaves out fills outside the candles', () => {
     library.markers.setMarkers.mockClear()
     // Candles open each minute from 60s to 360s; the last one spans one more minute.
@@ -191,6 +191,18 @@ describe('fill markers and trade focus (phase 1, 1.1b)', () => {
     // New candles move a fill onto the candle that now holds it.
     adapter.setCandles([...candles, { ...candles.at(-1)!, time: 420_000 }], false)
     expect((library.markers.setMarkers.mock.lastCall![0] as { id: string }[]).map(item => item.id)).toEqual(['inside', 'late', 'after'])
+  })
+
+  it('keeps a fill off a candle whose own span it is outside, across a gap or on a lone candle', () => {
+    const placed = () => (library.markers.setMarkers.mock.lastCall![0] as { id: string; time: number }[]).map(item => [item.id, item.time])
+    // One-minute candles at 60s, 120s and 360s: 240s falls in the gap, 480s after the last candle's minute.
+    adapter.setCandles([candles[0]!, candles[1]!, { ...candles[0]!, time: 360_000 }], true)
+    adapter.setMarkers([marker('gap', 240_000), marker('after', 480_000), marker('inside', 370_000)])
+    expect(placed()).toEqual([['inside', 360]])
+    // A lone candle holds only its own minute.
+    adapter.setCandles([candles[0]!], true)
+    adapter.setMarkers([marker('later', 3_600_000), marker('own', 90_000)])
+    expect(placed()).toEqual([['own', 60]])
   })
 
   it('reports the fill under the pointer for its tooltip', () => {

@@ -12,12 +12,12 @@ export interface ChartFill { id: string; atUtc: string; price: string; quantity:
 
 const fillTime = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'medium', timeZone: 'UTC' })
 
-/** Markers for the fills that can be placed: a valid time and a positive price. */
-export function fillMarkers(fills: readonly ChartFill[]): ChartMarker[] {
+/** Markers for the fills that can be placed: a valid time and a positive price, on candles of `interval`. */
+export function fillMarkers(fills: readonly ChartFill[], interval: CandleInterval): ChartMarker[] {
   return fills.flatMap(fill => {
     const time = Date.parse(fill.atUtc), price = Number(fill.price)
     if (!Number.isFinite(time) || !Number.isFinite(price) || price <= 0) return []
-    return [{ id: fill.id, time, price, side: fill.side,
+    return [{ id: fill.id, time, price, side: fill.side, span: intervalMs(interval),
       tooltip: `${fill.role === 'entry' ? 'Entry' : 'Exit'} fill · ${fill.side === 'buy' ? 'Buy' : 'Sell'} ${fill.quantity} at ${fill.price}\n${fillTime.format(time)} UTC` }]
   })
 }
@@ -27,5 +27,6 @@ export function tradeFocus(markers: readonly ChartMarker[], interval: CandleInte
   if (!markers.length) return null
   const from = Math.min(...markers.map(marker => marker.time)), to = Math.max(...markers.map(marker => marker.time))
   const pad = Math.max((to - from) / 4, 5 * intervalMs(interval))
-  return { from: from - pad, to: to + pad }
+  // Whole milliseconds: the end is a candle request's end time.
+  return { from: Math.floor(from - pad), to: Math.ceil(to + pad) }
 }

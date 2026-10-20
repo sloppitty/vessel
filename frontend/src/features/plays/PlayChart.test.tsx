@@ -1231,6 +1231,32 @@ describe('fills on the chart (phase 1, 1.1b)', () => {
     expect(stream).not.toHaveBeenCalled()
   })
 
+  it('asks for whole milliseconds when a trade has millisecond fills', async () => {
+    const { factory } = fakeAdapter()
+    const candles = vi.fn<WorkspaceApi['candles']>().mockResolvedValue(candleSeriesFixture)
+    const odd: ChartFill[] = [{ ...fills[0]!, atUtc: '2026-09-01T00:00:00.001Z' }, { ...fills[1]!, atUtc: '2026-09-02T00:00:00.002Z' }]
+    render(<ChartPanel entries={entries()} selectedId={entries()[0]!.id} instrument="BTC" onSelect={vi.fn()} fills={odd} tradeDates
+      source={{ api: chartApi(candles), accountId: accountFixture.id }} createAdapter={factory} />)
+    await vi.waitFor(() => expect(candles).toHaveBeenCalled())
+    // A day and a millisecond: a quarter of it is the padding, rounded out to a whole millisecond.
+    expect(candles.mock.lastCall![1]).toEqual({ instrument: 'BTC', interval: '1h', endTime: Math.ceil(Date.parse(odd[1]!.atUtc) + 86_400_001 / 4) })
+  })
+
+  it('opens on the trade when its fills arrive after today\'s candles', async () => {
+    const { state, factory } = fakeAdapter()
+    const candles = vi.fn<WorkspaceApi['candles']>().mockResolvedValue(candleSeriesFixture)
+    const props = { entries: entries(), selectedId: entries()[0]!.id, instrument: 'BTC', onSelect: vi.fn(), tradeDates: true,
+      source: { api: chartApi(candles), accountId: accountFixture.id }, createAdapter: factory }
+    const view = render(<ChartPanel {...props} fills={[]} />)
+    await vi.waitFor(() => expect(state.candles.length).toBeGreaterThan(0))
+    view.rerender(<ChartPanel {...props} fills={fills} />)
+    await vi.waitFor(() => expect(candles.mock.lastCall![1]).toHaveProperty('endTime'))
+    // The trade's candles arrive as a reset, so the chart opens on the trade, not on today's view.
+    await vi.waitFor(() => expect(state.resets.at(-1)).toBe(true))
+    expect(state.candles.length).toBeGreaterThan(0)
+    expect(state.focus).toEqual({ from: Date.parse(fills[0]!.atUtc) - 5 * 3_600_000, to: Date.parse(fills[1]!.atUtc) + 5 * 3_600_000 })
+  })
+
   it('stays on today for an open trade, with its fills marked', async () => {
     const { state, factory } = fakeAdapter()
     const candles = vi.fn<WorkspaceApi['candles']>().mockResolvedValue(candleSeriesFixture)

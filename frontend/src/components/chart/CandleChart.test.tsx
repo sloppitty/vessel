@@ -90,8 +90,8 @@ describe('memoized candle subtree', () => {
 describe('fill markers (phase 1, 1.1b)', () => {
   it('shows the fill under the pointer as a tooltip and lists every fill for assistive technology', () => {
     const { factory, callbacks } = fakeAdapter()
-    const markers = [{ id: 'f1', time: 1_790_000_000_000, price: 100.4, side: 'buy' as const, tooltip: 'Entry fill · Buy 0.5 at 100.4' },
-      { id: 'f2', time: 1_790_003_600_000, price: 110, side: 'sell' as const, tooltip: 'Exit fill · Sell 0.5 at 110' }]
+    const markers = [{ id: 'f1', time: 1_790_000_000_000, price: 100.4, side: 'buy' as const, tooltip: 'Entry fill · Buy 0.5 at 100.4', span: 3_600_000 },
+      { id: 'f2', time: 1_790_003_600_000, price: 110, side: 'sell' as const, tooltip: 'Exit fill · Sell 0.5 at 110', span: 3_600_000 }]
     render(<CandleChart candles={[]} overlays={[]} viewKey="BTC|1h" label="BTC" markers={markers} createAdapter={factory} />)
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
     expect(screen.getByRole('list', { name: 'Fills on the chart' })).toHaveTextContent('Entry fill · Buy 0.5 at 100.4Exit fill · Sell 0.5 at 110')

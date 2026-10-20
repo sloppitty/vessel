@@ -49,6 +49,11 @@ export interface ChartMarker {
   side: 'buy' | 'sell'
   /** Shown while the pointer rests on the marker. */
   tooltip: string
+  /**
+   * The length of the candles in milliseconds: the marker sits on a candle only when its time falls in that candle's own
+   * span, so a gap or a lone candle never takes a fill from outside it.
+   */
+  span: number
 }
 
 /** A time range to show, in UTC Unix milliseconds. */

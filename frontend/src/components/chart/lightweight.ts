@@ -334,15 +334,14 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   let hoveredMarker: string | null = null
   const placeMarkers = () => {
     const times = loaded.map(candle => candle.time)
-    const spacing = times.length > 1 ? times.at(-1)! - times.at(-2)! : Number.POSITIVE_INFINITY
     fillMarkers.setMarkers(markers.flatMap(marker => {
-      // The candle the fill falls in: the latest one at or before it, within that candle's span.
+      // The candle the fill falls in: the latest one at or before it, and only within that candle's own span.
       let low = 0, high = times.length - 1, found = -1
       while (low <= high) {
         const middle = (low + high) >> 1
         if (times[middle]! <= marker.time) { found = middle; low = middle + 1 } else high = middle - 1
       }
-      if (found < 0 || marker.time >= (found + 1 < times.length ? times[found + 1]! : times[found]! + spacing)) return []
+      if (found < 0 || !(marker.span > 0) || marker.time >= times[found]! + marker.span) return []
       return [{ id: marker.id, time: (times[found]! / 1000) as UTCTimestamp, position: 'atPriceMiddle' as const, price: marker.price,
         shape: marker.side === 'buy' ? 'arrowUp' as const : 'arrowDown' as const, color: marker.side === 'buy' ? theme.positive : theme.negative }]
     }).sort((a, b) => a.time - b.time))

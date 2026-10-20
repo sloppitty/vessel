@@ -94,7 +94,6 @@ const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute:
 export function ChartPanel({ entries, selectedId, onSelect, instrument, instrumentName = instrument, venue = null, direction = 'long', leverage = 1, liquidation = null,
   editable = true, source = null, onEntriesChange, drawings = noDrawings, onDrawingsChange, onCapture, onShowEvidence, createAdapter,
   intervals = candleIntervals, priceStep = null, streamable = true, marketContext = true, stopEvidence, fills = noFills, tradeDates = false }: ChartPanelProps) {
-  const markers = useMemo(() => fillMarkers(fills), [fills])
   const [view, setView] = useState<ChartView>('aggregate')
   const [planTool, setPlanTool] = useState<PlanTool | null>(null)
   const [preferences, setPreferences] = useChartPreferences()
@@ -191,6 +190,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   // A preferred interval the venue does not serve falls back to the hour, or the venue's first interval.
   const interval = intervals.includes(preferences.interval) ? preferences.interval
     : intervals.includes('1h') ? '1h' : intervals[0] ?? preferences.interval
+  const markers = useMemo(() => fillMarkers(fills, interval), [fills, interval])
   const [expanded, setExpanded] = useState(false)
   const expandButton = useRef<HTMLButtonElement>(null)
   const live = source !== null && instrument !== ''
@@ -444,7 +444,8 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
     {viewMenu}
   </ChartToolbar>
   const chartProps = {
-    candles: data.candles, overlays, viewKey: `${instrument}|${interval}`, markers, focus,
+    // The anchor is part of the view: candles for the trade's dates arrive as a reset, which applies the focus.
+    candles: data.candles, overlays, viewKey: `${instrument}|${interval}|${focus?.to ?? 'live'}`, markers, focus,
     label: `${instrument} ${intervalName(interval)} trade candles with planned levels. Edit levels in the entry editor.`,
     onNeedOlder,
     ...drawingProps,
