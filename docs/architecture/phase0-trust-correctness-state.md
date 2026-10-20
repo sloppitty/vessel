@@ -68,7 +68,8 @@ October 19, 2026, branch `t3/phase0-result-basis` (stacked on 0.2):
   denominator; the column is "Est. R".
 - The copy says venue P&L may include funding, which is unverified.
 - Differences from the contract wording, raised in the pull request:
-  - the sizing sign line shows only when a count is above zero;
+  - the sizing sign line shows only when a count is above zero; the owner
+    kept this on October 20;
   - the quote asset is read per venue, not per instrument.
 - Tests:
   - 31 backend cases port R3 and More.cs: A local +8 and B −2 against venue
