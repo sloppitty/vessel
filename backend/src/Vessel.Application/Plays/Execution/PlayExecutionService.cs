@@ -293,7 +293,9 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
             if (play.Version != request.ExpectedVersion) throw new ProblemException(409, StalePlay);
             if (play.Status != PlayStatus.Unresolved) throw new ProblemException(409, "Only an unresolved Play returns to open.");
-            var (change, cleared) = play.ReturnToOpen(request.Note, time.GetUtcNow());
+            // The return keeps the reason of the declaration it undoes, bound here under the Play lock.
+            var undone = PlayUnresolved.Current(await plays.StatusChangesAsync(play.Id, ct), play.EndedAtUtc)?.UnresolvedReason;
+            var (change, cleared) = play.ReturnToOpen(request.Note, time.GetUtcNow(), undone);
             plays.Add(change);
             if (cleared is not null) plays.Add(cleared);
             return PlayService.ToDto(play);

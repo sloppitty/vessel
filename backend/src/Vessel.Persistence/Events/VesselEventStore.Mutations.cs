@@ -64,9 +64,8 @@ public sealed partial class VesselEventStore
                 ? $"play:{play.Id}:closed" : $"status-change:{change.Id}";
             var account = await lookups.AccountAsync(play.AccountId, ct);
             var occurred = await LifecycleSourceTimeAsync(play, change, ct);
-            // A return to Open carries the reason the Play was declared unresolved for, as the declaration does.
-            var unresolved = change.UnresolvedReason ?? (type == "play.status-changed" && change.From == PlayStatus.Unresolved
-                ? await DeclaredReasonAsync(play.Id, ct) : null);
+            // A declaration and the return to Open that undoes it both carry its reason on the change itself.
+            var unresolved = change.UnresolvedReason;
             var data = type == "play.closed" ? await ClosedDataAsync(play, ct) : VesselEventJson.Element(new
             {
                 previous = change.From.ToString().ToLowerInvariant(), current = change.To.ToString().ToLowerInvariant(),
@@ -80,11 +79,6 @@ public sealed partial class VesselEventStore
         }
         return drafts;
     }
-
-    /// <summary>The reason of the Play's latest unresolved declaration, read from its stored history.</summary>
-    private Task<UnresolvedReason?> DeclaredReasonAsync(Guid playId, CancellationToken ct) =>
-        db.StatusChanges.Where(c => c.PlayId == playId && c.To == PlayStatus.Unresolved && c.UnresolvedReason != null)
-            .OrderByDescending(c => c.OccurredAtUtc).ThenByDescending(c => c.Id).Select(c => c.UnresolvedReason).FirstOrDefaultAsync(ct);
 
     private async Task<DateTimeOffset> LifecycleSourceTimeAsync(Play play, PlayStatusChange change, CancellationToken ct)
     {

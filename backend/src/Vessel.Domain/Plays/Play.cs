@@ -309,12 +309,16 @@ public sealed class Play : IOwned
         return change;
     }
 
-    /// <summary>The owner returns an Unresolved Play to Open, with a reason; its review is needed again once it ends.</summary>
-    public (PlayStatusChange Change, PlayReviewRevision? Cleared) ReturnToOpen(string note, DateTimeOffset now)
+    /// <summary>
+    /// The owner returns an Unresolved Play to Open, with a reason; its review is needed again once it ends. The change keeps
+    /// <paramref name="undone"/>, the reason of the declaration it undoes, so its event names it without reading history.
+    /// </summary>
+    public (PlayStatusChange Change, PlayReviewRevision? Cleared) ReturnToOpen(string note, DateTimeOffset now, UnresolvedReason? undone = null)
     {
         if (Status != PlayStatus.Unresolved) throw new DomainRuleException("Only an unresolved Play returns to open.");
         if (string.IsNullOrWhiteSpace(note)) throw new DomainValidationException("Say why the Play returns to open. The reason is kept with the change.");
         var change = Transition(PlayStatus.Open, null, note, now);
+        change.UnresolvedReason = undone;
         EndedAtUtc = null;
         return (change, ClearCompletion(now));
     }
@@ -426,7 +430,10 @@ public sealed class PlayStatusChange : IOwned
     public CancelReason? Reason { get; private set; }
     public string? Note { get; private set; }
     public StatusChangeSource Source { get; private set; }
-    /// <summary>Why the owner declared the Play unresolved; only on a change to Unresolved.</summary>
+    /// <summary>
+    /// Why the owner declared the Play unresolved: on a change to Unresolved, and on a return to Open the reason of the
+    /// declaration it undoes.
+    /// </summary>
     public UnresolvedReason? UnresolvedReason { get; internal set; }
     /// <summary>The Play's execution facts when it was declared unresolved, as JSON; only on a change to Unresolved.</summary>
     public string? Evidence { get; internal set; }

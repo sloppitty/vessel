@@ -75,10 +75,18 @@ public static class PlayUnresolved
         catch (JsonException) { return null; }
     }
 
-    /// <summary>A Play's latest declaration among its status changes, or null when it has none.</summary>
-    public static UnresolvedDeclarationDto? Latest(IEnumerable<PlayStatusChange> changes) =>
-        changes.Where(c => c.To == PlayStatus.Unresolved && c.UnresolvedReason is not null)
-            .OrderByDescending(c => c.OccurredAtUtc).ThenByDescending(c => c.Id).Select(c =>
-                new UnresolvedDeclarationDto(ReasonName(c.UnresolvedReason!.Value), c.Note, c.OccurredAtUtc, Read(c.Evidence)))
-            .FirstOrDefault();
+    /// <summary>
+    /// The declaration an Unresolved Play is in: the one at its end time, which a declaration sets to its own time, so an
+    /// earlier declaration never wins on a tied or stepped-back clock. Otherwise the latest by time. Null when it has none.
+    /// </summary>
+    public static PlayStatusChange? Current(IEnumerable<PlayStatusChange> changes, DateTimeOffset? endedAtUtc)
+    {
+        var declarations = changes.Where(c => c.To == PlayStatus.Unresolved && c.UnresolvedReason is not null).ToList();
+        return declarations.Where(c => c.OccurredAtUtc == endedAtUtc).OrderByDescending(c => c.Id).FirstOrDefault()
+            ?? declarations.OrderByDescending(c => c.OccurredAtUtc).ThenByDescending(c => c.Id).FirstOrDefault();
+    }
+
+    /// <summary>An Unresolved Play's current declaration, as Review's exclusion drill-down shows it, or null.</summary>
+    public static UnresolvedDeclarationDto? Latest(IEnumerable<PlayStatusChange> changes, DateTimeOffset? endedAtUtc) =>
+        Current(changes, endedAtUtc) is { } c ? new UnresolvedDeclarationDto(ReasonName(c.UnresolvedReason!.Value), c.Note, c.OccurredAtUtc, Read(c.Evidence)) : null;
 }

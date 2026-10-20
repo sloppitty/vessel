@@ -42,7 +42,7 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
         await transaction.CommitAsync(ct);
         return new(portfolios, accounts, closed, open, unassigned, first, incomplete)
         {
-            UnresolvedPlays = unresolvedPlays.Select(p => new UnresolvedPlayFacts(p, PlayUnresolved.Latest(declarations[p.Id]))).ToList(),
+            UnresolvedPlays = unresolvedPlays.Select(p => new UnresolvedPlayFacts(p, PlayUnresolved.Latest(declarations[p.Id], p.EndedAtUtc))).ToList(),
         };
     }
 }

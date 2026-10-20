@@ -87,6 +87,23 @@ public sealed class UnresolvedDomainTests
     }
 
     [Fact]
+    public void A_return_keeps_the_reason_it_undoes_and_the_current_declaration_follows_the_end_time_not_the_clock()
+    {
+        var play = Open();
+        List<PlayStatusChange> changes = [play.DeclareUnresolved(UnresolvedReason.SharedClose, "Shared.", "{}", At.AddHours(5))];
+        var current = PlayUnresolved.Current(changes, play.EndedAtUtc)!;
+        var (back, _) = play.ReturnToOpen("Relinked.", At.AddHours(6), current.UnresolvedReason);
+        Assert.Equal((PlayStatus.Open, UnresolvedReason.SharedClose), (back.To, back.UnresolvedReason));
+        changes.Add(back);
+        // The clock stepped back: the newer declaration has the earlier time, and it is still the current one.
+        changes.Add(play.DeclareUnresolved(UnresolvedReason.Flip, "Flipped.", "{}", At.AddHours(1)));
+        Assert.Equal(UnresolvedReason.Flip, PlayUnresolved.Current(changes, play.EndedAtUtc)!.UnresolvedReason);
+        Assert.Equal("flip", PlayUnresolved.Latest(changes, play.EndedAtUtc)!.Reason);
+        // A return is never read as a declaration.
+        Assert.Null(PlayUnresolved.Current([back], null));
+    }
+
+    [Fact]
     public void A_Play_without_a_completed_review_records_nothing_when_it_leaves_a_final_state()
     {
         var play = Open();
@@ -165,7 +182,8 @@ public sealed partial class ExecutionPostgresTests
         var reopened = await h.Execution.ReturnToOpenAsync(id, new(completed.Summary.Version, "The shared close was another play's."), default);
         Assert.Equal(("open", (DateTimeOffset?)null, (string?)null), (reopened.Summary.Status, reopened.Summary.EndedAtUtc, reopened.Summary.ReviewCompletion));
         var history = await h.Plays.HistoryAsync(id, default);
-        Assert.Equal(("unresolved", "open", "The shared close was another play's."), (history.StatusChanges.Last().From, history.StatusChanges.Last().To, history.StatusChanges.Last().Note));
+        Assert.Equal(("unresolved", "open", "The shared close was another play's.", "shared-close"), (history.StatusChanges.Last().From,
+            history.StatusChanges.Last().To, history.StatusChanges.Last().Note, history.StatusChanges.Last().UnresolvedReason));
         Assert.Equal(ReviewActions.Cleared, history.Reviews!.Last().Action);
         Assert.Equal(0, (await h.Plays.CountsAsync(null, null, default)).Unresolved);
 
@@ -319,7 +337,8 @@ public sealed class UnresolvedEventTests
             if (back) await work.ExecuteAsync(async () =>
             {
                 var stored = await db.Plays.SingleAsync();
-                var (change, cleared) = stored.ReturnToOpen("The exit fill arrived after all.", now.AddMinutes(2 * step + 2));
+                var undone = PlayUnresolved.Current(await db.StatusChanges.Where(c => c.PlayId == stored.Id).ToListAsync(), stored.EndedAtUtc)!.UnresolvedReason;
+                var (change, cleared) = stored.ReturnToOpen("The exit fill arrived after all.", now.AddMinutes(2 * step + 2), undone);
                 db.StatusChanges.Add(change);
                 if (cleared is not null) db.ReviewRevisions.Add(cleared);
                 return true;
