@@ -36,7 +36,8 @@ October 19, 2026, branch `t3/phase0-sizing-truth`:
   suggestions stay only for unfilled entries.
 - Copy reads as estimates. One over-budget message serves the editor and Save.
 - Lighter liquidations, deleverages and settlements are counted by kind. The
-  notice is one counted sentence that fits the 1,000-character column.
+  notice is one counted sentence that fits the 1,000-character column. The
+  owner accepted this wording on October 20.
 - Sizing thresholds, ladder, window and scratch rule are unchanged; the
   backend sizing code is untouched.
 - Every review probe in the contract's 0.1 rows has a test that failed
@@ -75,7 +76,7 @@ October 19, 2026, 0.5a plan-number grammar, branch
 - Unchanged stored text still saves, matched by field identity. Stored plans
   and revisions are never rewritten, and reads stay tolerant.
 - Negative percentages are refused with a pointer to a price stop; `0 %` is
-  break-even.
+  break-even. Since October 20 it needs a filled entry (0.5b).
 - The browser uses one parser and `formatPlanNumber`, so it never writes
   exponent text. Kept legacy text stays visible with a warning. Side
   pre-checks read stored text as the server does.
@@ -162,6 +163,38 @@ October 19, 2026, 0.5b managed stops, branch `t3/phase0-managed-stops`
   - Backend: 3,472 passed, 5 skipped, 0 failed.
   - Frontend: 3,621 tests, build OK.
   - Release build: 0 warnings.
+
+October 20, 2026, the owner's answers for this chain:
+- The Lighter omission sentence (0.1) is accepted.
+- Initial R follows the current first entry fill. Correcting a manual fill's
+  time recalculates it, and R is unknown when the revision then in force has
+  no loss-side stop. Kept as built.
+- A stop set while planning goes below a long's entry (above a short's).
+  Break-even comes after a fill, so a `0 %` stop on an entry without any
+  fill is refused like a price stop at the entry, priced entry or not, on
+  server and browser. Any fill, partial included, allows it, and it still
+  resolves from the planned entry. A stop kept unchanged from the stored
+  plan still saves, with a warning. No swap or direction switch is offered
+  for it. `0 %` targets are unchanged.
+- A stop that is not set is no stop, never break-even: the Summary reads
+  Unknown, sizing counts it as unpriced and `StopDistance` skips it. These
+  tests passed before the change too, because this already held.
+- Tests: 6 backend and 5 frontend tests failed before the change. They are
+  the new long/short, filled, kept and `0.00` cases, and the earlier tests
+  that saved `0 %` on an unfilled entry.
+- Sol review round 1 found one low issue. The browser read stored text such
+  as `5e-29` as non-zero through a double, while the server's decimal parse
+  rounds that midpoint to zero, so Save passed in the browser and failed on
+  the server. `serverPlanNumber` now decides zero exactly from the digits
+  and exponent. 6 frontend tests failed before the fix. A backend theory
+  confirms the server reads the same boundary texts. Round 2 found nothing
+  and matched .NET on 16,615 zero-boundary texts.
+- `scripts/check.sh` then passed on this branch with PostgreSQL 18 and
+  RabbitMQ 4.3.6 in disposable containers:
+  - Python: 78 OK. Prototype tests pass.
+  - Release build: 0 warnings.
+  - Backend: 3,482 passed, 5 skipped (live venue and S3), 0 failed.
+  - Frontend: typecheck and lint clean, 3,641 tests, build OK.
 
 ## 0.6 Journal opens without every image
 

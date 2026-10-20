@@ -5,7 +5,8 @@
 ### Added
 
 - Once an entry has filled, its stops can be moved to break-even or into
-  profit with a reason; the Summary shows the signed result if every stop is
+  profit with a reason; before any fill, a stop at the entry, `0 %`
+  included, is refused. The Summary shows the signed result if every stop is
   hit ("+5 USDC locked in" or "−5 USDC at risk") from the average fill, and
   initial R stays frozen at the first fill. A drifted linked stop or target
   can be rebound to the order resting at the venue in one version-checked
