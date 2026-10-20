@@ -171,6 +171,9 @@ October 20, 2026, branch `t3/phase1-fill-markers`, stacked on 1.4b:
     covered, and candles can be as narrow as 0.05 px, so thousands fit one view. The adapter test checks the request.
   - **Check.** `scripts/check.sh` passed again: backend 3,610 passed, 5 skipped; frontend 153 files and 3,834 tests.
 
+- **Sol (Codex) round 4.** No findings. The reviewer's real-renderer probes framed a 2,500-candle trade, stopped an
+  unreachable one at the 5,000-candle cap after ten requests, and left the owner's own zoom alone.
+
 ## 1.2 Honest review queue and in-trade log
 
 October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
