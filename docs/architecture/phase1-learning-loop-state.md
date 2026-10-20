@@ -644,3 +644,34 @@ October 20, 2026, branch `t3/phase1-capture`, stacked on 1.1b:
 
 - **Sol (Codex) round 3.** No findings: the rejection and overlap fixes hold. The reviewer also round-tripped 62,766
   times around 1,902 zone transitions from 2020 to 2026, 952 of them overlaps.
+
+### 1.6e Display time zone and formatters
+
+October 20, 2026, branch `t3/phase1-time`, stacked on 1.6b–d:
+- **Setting (F-05, G-13).** Settings has **Times**: **Local**, the browser's zone and the default, or **UTC**. It is a
+  browser preference stored like appearance (`vessel.display`, or per signed-in user), and anything unknown reads as
+  Local.
+- **One formatter.** `lib/time.ts` shows every time and date in English day-month order on a 24-hour clock, in the
+  chosen zone, and times name it ("13 Oct 2026, 12:00 CEST"). The `Time` component adds the same instant in the other
+  zone as its tooltip and re-renders when the setting changes, including on the Plays page kept mounted in the
+  background.
+- **Where.**
+  - Activity: operations and executions.
+  - Review: Play rows, drill-downs, exclusions and refresh times.
+  - The chart: axis ticks, crosshair, drawing tags, fill tooltips, stop evidence, "Updated" and capture captions.
+  - Execution, Monitor, History, the Plays list, the log, accounts, credentials and notifications.
+  - Manual entry, which types and shows times in the zone and sends UTC.
+- **UTC days.** Server filters keep UTC days. Activity's custom range says "(UTC)", and Review's period line, chart
+  buckets and as-of time stay UTC and say so. Chart ticks stay at UTC boundaries; in the local zone each is labelled
+  with its own instant's local date or time.
+- **Numbers.** `numberFormat()` is the one en-US number formatter, cached per option set; the formatters that followed
+  the browser's language use it. Money keeps its en-US formatters. Exact strings are unchanged.
+- **Not changed.** The header's greeting and today's date follow the browser.
+- **Tests.**
+  - Formatter: one instant in each zone, named, with the other zone for the tooltip; dates following the zone; winter
+    time.
+  - Store: Local by default, per signed-in user, only known values.
+  - Component: the Settings choice switching a shown time and its tooltip.
+  - U17: one fill at one time in Activity and on the chart under either setting.
+  - Updated suites for the zone-named times.
+- **Checks.** `scripts/check.sh` passed: backend 3,611 passed, 5 skipped; frontend 155 files and 3,848 tests; build clean.
