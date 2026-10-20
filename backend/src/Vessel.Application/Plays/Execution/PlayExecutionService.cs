@@ -107,6 +107,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
                 PlannedPrice = planned.Price, PlannedQuantity = planned.Quantity, PlanRevision = planned.Revision,
             };
         }).ToList();
+        // A suggestion says "another play" only when another active Play is offered the same order (1.6d).
+        var elsewhere = await store.SuggestedElsewhereAsync(play.AccountId, play.Id, suggestions.Select(l => l.ImportedOrderId).ToHashSet(), ct);
         OrderLinkDto Link(PlayOrderLink link) => new(link.Id, Name(link.Role), link.EntryId, link.LevelId, Name(link.State), Name(link.Source),
             orders.TryGetValue(link.ImportedOrderId, out var order) ? OrderDto(order) : null, ExecutionIntegrity.Quantity(fills[link.ImportedOrderId]).ToString(),
             fills[link.ImportedOrderId].OrderBy(f => f.OccurredAtUtc).Select(FillDto).ToList());
@@ -114,7 +116,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         if (reason is null && account is { IsEnabled: true } && play.Status is not (PlayStatus.Closed or PlayStatus.Cancelled))
             reason = await CredentialReasonAsync(account, ct);
         return new PlayExecutionDto(play.Id, PlayService.StatusName(play.Status), reason is null, reason, account?.LastSyncedAtUtc,
-            totals, entries, linked.Select(Link).ToList(), suggestions.Select(Link).ToList(), unlinked, Notice, settlement.Problems)
+            totals, entries, linked.Select(Link).ToList(),
+            suggestions.Select(l => Link(l) with { OtherPlay = elsewhere.Contains(l.ImportedOrderId) }).ToList(), unlinked, Notice, settlement.Problems)
         {
             Receipt = PlayReceipts.Build(new ClosedPlayFacts(play, revisions, settlement.All, settlement.Incomplete), time.GetUtcNow()),
         };

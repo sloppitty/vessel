@@ -2,12 +2,15 @@ import { useState } from 'react'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import type { ManualExecutions, ManualExecutionRecord } from '@/api/diary'
 import type { SavedPlay } from '@/api/plays'
 import { savedPlayFixture } from '@/test/workspace-fixture'
+
+const originalZone = process.env.TZ
+afterEach(() => { process.env.TZ = originalZone })
 import { ManualExecutionPanel } from './ManualExecutionPanel'
 import { emptyManualDraft, type ManualExecutionDraft } from './manual'
 import { draftFromSaved, savedState } from './saved'
@@ -43,12 +46,67 @@ function client(initial = ledger()) {
 async function enter(user: ReturnType<typeof userEvent.setup>, role: 'entry' | 'exit' = 'entry') {
   await user.selectOptions(screen.getByLabelText('Role'), role)
   if (role === 'entry') await user.selectOptions(screen.getByLabelText('Saved plan entry'), 'entry-1')
-  fireEvent.change(screen.getByLabelText('Execution time (UTC)'), { target: { value: '2026-10-13T10:00:00' } })
+  fireEvent.change(screen.getByLabelText(/^Execution time/), { target: { value: '2026-10-13T10:00:00' } })
   await user.selectOptions(screen.getByLabelText('Side'), role === 'entry' ? 'buy' : 'sell')
   await user.type(screen.getByLabelText('Execution quantity'), '1.000000000000000001')
   await user.type(screen.getByLabelText('Execution price'), '100.00')
-  await user.type(screen.getByLabelText('Source label'), 'Statement')
+  await user.type(screen.getByLabelText(/^Source label/), 'Statement')
 }
+
+describe('manual entry (phase 1, 1.6b)', () => {
+  it('puts an empty Source error on its own field and focuses it (U11)', async () => {
+    const { api, methods } = client()
+    const user = userEvent.setup()
+    render(<Harness api={api} />)
+    await enter(user)
+    await user.clear(screen.getByLabelText(/^Source label/))
+    await user.click(screen.getByRole('button', { name: 'Record execution' }))
+    const source = screen.getByLabelText(/^Source label/)
+    expect(source).toHaveAttribute('aria-invalid', 'true')
+    expect(source).toHaveAccessibleDescription('Name where this execution comes from, such as a broker statement.')
+    expect(source).toHaveFocus()
+    expect(screen.getByRole('alert')).toHaveTextContent('Check the highlighted fields.')
+    expect(screen.getByLabelText('Execution quantity')).not.toHaveAttribute('aria-invalid')
+    expect(methods.addManualExecution).not.toHaveBeenCalled()
+    // Typing in the field clears its error.
+    await user.type(source, 'Broker statement')
+    expect(source).not.toHaveAttribute('aria-invalid')
+  })
+
+  it('enters the time in the browser zone with Now, and sends it as UTC', async () => {
+    process.env.TZ = 'Europe/Madrid'
+    const { api, methods } = client()
+    const user = userEvent.setup()
+    render(<Harness api={api} />)
+    const before = Math.floor(Date.now() / 1000) * 1000
+    await user.click(screen.getByRole('button', { name: 'Now' }))
+    const time = screen.getByLabelText('Execution time (Europe/Madrid)')
+    const typed = (time as HTMLInputElement).value
+    expect(typed).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/)
+    await user.selectOptions(screen.getByLabelText('Saved plan entry'), 'entry-1')
+    await user.type(screen.getByLabelText('Execution quantity'), '1')
+    await user.type(screen.getByLabelText('Execution price'), '100')
+    await user.type(screen.getByLabelText(/^Source label/), 'Statement')
+    await user.click(screen.getByRole('button', { name: 'Record execution' }))
+    const sent = Date.parse((methods.addManualExecution.mock.calls[0] as unknown as [string, { occurredAtUtc: string }])[1].occurredAtUtc)
+    expect(sent).toBeGreaterThanOrEqual(before)
+    expect(sent).toBeLessThanOrEqual(Date.now())
+  })
+
+  it('takes the side from the role and the Play\'s direction, and keeps it editable', async () => {
+    const { api } = client()
+    const user = userEvent.setup()
+    render(<Harness api={api} />)
+    expect(screen.getByLabelText('Side')).toHaveValue('buy')
+    await user.selectOptions(screen.getByLabelText('Role'), 'exit')
+    expect(screen.getByLabelText('Side')).toHaveValue('sell')
+    await user.selectOptions(screen.getByLabelText('Side'), 'buy')
+    expect(screen.getByLabelText('Side')).toHaveValue('buy')
+    expect(screen.getByLabelText('Side')).toBeEnabled()
+    await user.selectOptions(screen.getByLabelText('Role'), 'entry')
+    expect(screen.getByLabelText('Side')).toHaveValue('buy')
+  })
+})
 
 describe('manual executions', () => {
   it('requires save then planning and does not prefill execution facts', () => {
@@ -126,14 +184,17 @@ describe('manual executions', () => {
     expect(screen.getByLabelText('Execution quantity')).toHaveValue(record.quantity)
   })
   it.each(['Z', '+00:00'])('shows and preserves all six fractional timestamp digits on a fee-only correction, suffix=%s', async suffix => {
+    // Shown in the browser's zone (UTC+2 here), sent back as the same UTC instant.
+    process.env.TZ = 'Europe/Madrid'
     const precise = { ...record, occurredAtUtc: `2026-10-13T10:00:00.123456${suffix}` }
     const initial = ledger('closed', [precise])
     const { api, methods } = client(initial)
     render(<Harness api={api} initial={initial.play} />)
     const user = userEvent.setup()
     await user.click(await screen.findByRole('button', { name: `Correct ${id}` }))
-    expect(screen.getByLabelText('Execution time (UTC)')).toHaveValue(precise.occurredAtUtc)
-    expect(screen.getByLabelText('Execution time (UTC)')).toHaveAttribute('type', 'text')
+    expect(screen.getByLabelText('Execution time (Europe/Madrid)')).toHaveValue('2026-10-13 12:00:00.123456')
+    expect(screen.getByLabelText(/^Execution time/)).toHaveAttribute('type', 'text')
+    expect(screen.getByText('Sent as 2026-10-13 10:00:00.123456 UTC')).toBeInTheDocument()
     await user.type(screen.getByLabelText('Fee amount (blank = unknown)'), '0.01')
     const currency = screen.getByLabelText('Fee currency')
     const suggestions = document.getElementById(currency.getAttribute('list') ?? '')
@@ -142,7 +203,7 @@ describe('manual executions', () => {
     await user.type(screen.getByLabelText('Correction reason'), 'Statement fee added')
     await user.click(screen.getByRole('button', { name: 'Save correction' }))
     expect(methods.correctManualExecution).toHaveBeenCalledWith(play.summary.id, id, expect.objectContaining({
-      occurredAtUtc: precise.occurredAtUtc, role: precise.role, entryId: precise.entryId, side: precise.side,
+      occurredAtUtc: '2026-10-13T10:00:00.123456Z', role: precise.role, entryId: precise.entryId, side: precise.side,
       quantity: precise.quantity, price: precise.price, source: precise.source, fee: '0.01', feeCurrency: 'USD',
       reason: 'Statement fee added',
     }))

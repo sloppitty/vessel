@@ -125,6 +125,12 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
   // The error state above shows link/unlink failures; the rejection itself needs no other handler.
   const link = useCallback((request: LinkOrder) => run((id, signal) => api.linkOrder(id, request, signal)).catch(() => undefined), [api, run])
   const unlink = useCallback((linkId: string) => run((id, signal) => api.unlinkOrder(id, linkId, signal)).catch(() => undefined), [api, run])
+  /** Turns down every suggestion of one order (1.6d): one request per link, in order, as one action; the last answer shows. */
+  const reject = useCallback((linkIds: string[]) => run(async (id, signal) => {
+    let last: PlayExecution | undefined
+    for (const linkId of linkIds) last = await api.unlinkOrder(id, linkId, signal)
+    return last
+  }).catch(() => undefined), [api, run])
   const dismiss = useCallback((id: string, note?: string) => run((play, signal) => api.dismissPlayDiscrepancy(play, id, note, signal)), [api, run])
   /** The new plan revision belongs to the Play, so the saved Play goes to `onPlay`; the execution is read again after. */
   const rebind = useCallback((linkId: string, request: RebindLevel, onPlay: (play: SavedPlay) => void) =>
@@ -138,5 +144,5 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
      * has been shown yet (a link's own answer does not count), or a read started after the facts shown has failed. Facts
      * derived from it (fills, averages) are unknown until it is fresh.
      */
-    stale: !isFresh(current), reload, link, unlink, dismiss, rebind }
+    stale: !isFresh(current), reload, link, unlink, reject, dismiss, rebind }
 }

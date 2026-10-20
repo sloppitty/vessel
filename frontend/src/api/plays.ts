@@ -343,6 +343,8 @@ export interface OrderLink {
   order: ExecutionOrder | null
   filledQuantity: string
   fills: ExecutionFill[]
+  /** On a suggestion: its order is also offered to another active Play (phase 1, 1.6d); absent from an older server. */
+  otherPlay?: boolean | null
 }
 export interface PlayExecution {
   playId: string
@@ -426,7 +428,7 @@ const executionFill = (v: unknown): v is ExecutionFill => isRecord(v) && isText(
 const orderLink = (v: unknown): v is OrderLink => isRecord(v) && isGuid(v.id) && ['entry', 'stop', 'target', 'exit'].includes(v.role as string) &&
   isNullOr(v.entryId, x => isText(x, 64)) && isNullOr(v.levelId, x => isText(x, 64)) && (v.state === 'linked' || v.state === 'suggested') &&
   (v.source === 'automatic' || v.source === 'owner') && (v.order === null || executionOrder(v.order)) && isPlainDecimal(v.filledQuantity) &&
-  Array.isArray(v.fills) && v.fills.every(executionFill)
+  Array.isArray(v.fills) && v.fills.every(executionFill) && (v.otherPlay === undefined || v.otherPlay === null || typeof v.otherPlay === 'boolean')
 export const isEntryProgress = (e: unknown): e is EntryProgress => isRecord(e) && isText(e.entryId, 64) && isPlainDecimal(e.filledQuantity) &&
   isNullOr(e.averageFillPrice, isPlainDecimal) && isCount(e.restingOrders) && (e.plannedPrice === undefined || isNullOr(e.plannedPrice, isPlainDecimal)) &&
   (e.plannedQuantity === undefined || isNullOr(e.plannedQuantity, isPlainDecimal)) && (e.planRevision === undefined || isNullOr(e.planRevision, isCount))

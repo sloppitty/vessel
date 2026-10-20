@@ -294,3 +294,20 @@ describe('stored Play execution', () => {
   })
 })
 
+
+describe('turning down an order (phase 1, 1.6d)', () => {
+  it('turns down each of its suggestions in order, as one action', async () => {
+    const api = client()
+    const first = deferred()
+    api.unlinkOrder = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValueOnce(execution)
+    const view = renderHook(() => usePlayExecution(api, execution.playId, 'open', 0))
+    await act(async () => {})
+    let done!: Promise<unknown>
+    act(() => { done = view.result.current.reject(['link-1', 'link-2']) })
+    expect(view.result.current.busy).toBe(true)
+    expect(api.unlinkOrder).toHaveBeenCalledOnce()
+    await act(async () => { first.resolve(execution); await done })
+    expect(vi.mocked(api.unlinkOrder).mock.calls.map(call => call[1])).toEqual(['link-1', 'link-2'])
+    expect(view.result.current.busy).toBe(false)
+  })
+})

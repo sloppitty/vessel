@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createDraft, createEntry } from './draft'
 import { savedPlayFixture } from '@/test/workspace-fixture'
-import { createPlaysSession, draftEvidenceFromSaved, draftFromSaved, fieldsToSave, hasDraftContent, hasUnsavedPlayWork, isDirty, loadSavedPlay, observedPlayVersion, savedState, startNewPlay, syncEvidence } from './saved'
+import { createPlaysSession, draftEvidenceFromSaved, draftFromSaved, draftSession, duplicateDraft, fieldsToSave, hasDraftContent, hasUnsavedPlayWork, isDirty, loadSavedPlay, observedPlayVersion, savedState, startNewPlay, syncEvidence } from './saved'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import type { SavedEvidence } from '@/api/plays'
@@ -71,6 +71,25 @@ describe('in-trade log drafts as unsaved work (phase 1, 1.2)', () => {
   })
   it('ignores an entry kept for a Play that is no longer open', () => {
     expect(hasUnsavedPlayWork({ ...clean, log: { playId: 'another-play', text: 'Moved my stop.', state: '' } })).toBe(false)
+  })
+})
+
+describe('Duplicate to Draft (phase 1, 1.6c)', () => {
+  it('copies the plan, notes and identity it lists and nothing else', () => {
+    const draft = draftFromSaved(savedPlayFixture, [])
+    const saved = savedState(savedPlayFixture, draft)
+    const copy = duplicateDraft(saved)
+    expect(copy).toMatchObject({ title: `${savedPlayFixture.summary.title} (copy)`, accountId: savedPlayFixture.summary.accountId,
+      direction: savedPlayFixture.plan.direction, leverage: savedPlayFixture.plan.leverage, size: '', budgetOverride: null,
+      drawings: {}, evidence: [] })
+    expect(copy.entries).toEqual(savedPlayFixture.plan.entries)
+    expect(copy.entries[0]).not.toBe(savedPlayFixture.plan.entries[0])
+    expect(copy.notes).toEqual({ ...savedPlayFixture.plan.notes, evidence: '', review: '' })
+    expect(copy.structuredReview).toBeUndefined()
+    expect(duplicateDraft({ ...saved, summary: { ...saved.summary, title: '  ' } }).title).toBe('')
+    const session = draftSession(copy)
+    expect(session).toMatchObject({ view: 'editor', saved: null, observedPlay: null, log: undefined })
+    expect(hasUnsavedPlayWork(session)).toBe(true)
   })
 })
 

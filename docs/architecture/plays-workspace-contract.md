@@ -292,3 +292,33 @@ covering G-02 and G-05.
     shows.
   - Plan it sends them with the planning request.
 
+
+## Capture friction (October 20, 2026)
+
+Phase 1.6b–d of the [learning-loop contract](phase1-learning-loop-contract.md),
+covering F-01, F-03 and F-04.
+- **Manual entry (1.6b).**
+  - Each field shows its own error under it, marked invalid and described by
+    the message. The first one takes focus, and typing in a field clears its
+    error. An empty Source highlights the Source field.
+  - The time is typed in the display time zone (the browser's own until the
+    1.6e setting), such as `2026-10-13 10:00:00.123456`, with **Now** and a
+    "Sent as … UTC" line. A trailing `Z` or offset is read as written. A time
+    the zone skips is refused, never moved. Fractions are kept digit for
+    digit, so an unchanged stored time is sent back as the same instant.
+  - The side follows the role and the Play's direction until the owner
+    chooses one; a changed role follows again.
+  - **Source label (required)** sits beside the time and side.
+- **Duplicate to Draft (1.6c).**
+  - The header of a saved planned-origin Play offers **Duplicate**. It is
+    disabled while there is unsaved work, including a manual execution or a
+    log entry, and a retrospective Play has none.
+  - It opens an unsaved Draft with the account, instrument, direction,
+    leverage, the current plan's entries with stops and targets, thesis,
+    invalidation and strategy, titled "<title> (copy)". Size, executions,
+    links, review, log, evidence, drawings, pre-flight and history are not
+    copied, and the copy has no saved or observed identity.
+  - The usual plan checks apply before its first Save, which creates it:
+    a stop kept beyond a filled entry, or legacy plan text, is flagged until
+    fixed.
+- **Confirm rows (1.6d).** See the linking section of `play-lifecycle.md`.

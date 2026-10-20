@@ -34,7 +34,14 @@ public sealed record ExecutionFillDto(string SourceFillId, string Direction, str
     string FeeToken, string ClosedPnlUsd, DateTimeOffset OccurredAtUtc, string Side, string PositionEffect, string PnlBasis);
 
 public sealed record OrderLinkDto(Guid Id, string Role, string? EntryId, string? LevelId, string State, string Source,
-    ExecutionOrderDto? Order, string FilledQuantity, IReadOnlyList<ExecutionFillDto> Fills);
+    ExecutionOrderDto? Order, string FilledQuantity, IReadOnlyList<ExecutionFillDto> Fills)
+{
+    /// <summary>
+    /// On a suggestion only: whether its order is also suggested to another Planned, Paused or Open Play of the account, so
+    /// the copy may say "another play" (phase 1, 1.6d). Null on linked orders.
+    /// </summary>
+    public bool? OtherPlay { get; init; }
+}
 
 public sealed record EntryProgressDto(string EntryId, string FilledQuantity, string? AverageFillPrice, int RestingOrders)
 {
@@ -132,6 +139,19 @@ public interface IPlayExecutionStore
     /// <summary>One link of a Play in any state, tracked for changes, or null.</summary>
     async Task<PlayOrderLink?> LinkAsync(Guid accountId, Guid playId, Guid linkId, CancellationToken ct) =>
         (await LinksAsync(accountId, ct)).FirstOrDefault(l => l.Id == linkId && l.PlayId == playId);
+
+    /// <summary>
+    /// Of <paramref name="orderIds"/>, those also suggested to another Planned, Paused or Open Play of the account than
+    /// <paramref name="playId"/> (phase 1, 1.6d).
+    /// </summary>
+    async Task<HashSet<Guid>> SuggestedElsewhereAsync(Guid accountId, Guid playId, IReadOnlyCollection<Guid> orderIds, CancellationToken ct)
+    {
+        if (orderIds.Count == 0) return [];
+        var others = (await ActivePlaysAsync(accountId, ct)).Where(p => p.Id != playId).Select(p => p.Id).ToHashSet();
+        if (others.Count == 0) return [];
+        return (await LinksAsync(accountId, orderIds, [], ct)).Where(l => l.State == OrderLinkState.Suggested && others.Contains(l.PlayId))
+            .Select(l => l.ImportedOrderId).ToHashSet();
+    }
 
     /// <summary>Internal IDs of orders linked to any Play of the account, in any status.</summary>
     async Task<HashSet<Guid>> LinkedOrderIdsAsync(Guid accountId, CancellationToken ct) =>

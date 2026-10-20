@@ -72,6 +72,17 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
     public Task<PlayOrderLink?> LinkAsync(Guid accountId, Guid playId, Guid linkId, CancellationToken ct) =>
         db.OrderLinks.SingleOrDefaultAsync(l => l.Id == linkId && l.AccountId == accountId && l.PlayId == playId, ct);
 
+    public async Task<HashSet<Guid>> SuggestedElsewhereAsync(Guid accountId, Guid playId, IReadOnlyCollection<Guid> orderIds, CancellationToken ct)
+    {
+        // A read: one query, no unit of work, and only Plays that could still take the order count.
+        var ids = orderIds.Distinct().ToArray();
+        if (ids.Length == 0) return [];
+        return (await db.OrderLinks.Where(l => l.AccountId == accountId && l.PlayId != playId && ids.Contains(l.ImportedOrderId) &&
+                l.State == OrderLinkState.Suggested && db.Plays.Any(p => p.Id == l.PlayId && p.AccountId == accountId &&
+                    (p.Status == PlayStatus.Planned || p.Status == PlayStatus.Paused || p.Status == PlayStatus.Open)))
+            .Select(l => l.ImportedOrderId).Distinct().ToListAsync(ct)).ToHashSet();
+    }
+
     public async Task<HashSet<Guid>> LinkedOrderIdsAsync(Guid accountId, CancellationToken ct) =>
         (await db.OrderLinks.Where(l => l.AccountId == accountId && l.State == OrderLinkState.Linked).Select(l => l.ImportedOrderId)
             .Distinct().ToListAsync(ct)).ToHashSet();

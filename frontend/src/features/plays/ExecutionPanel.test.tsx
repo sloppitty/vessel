@@ -7,7 +7,7 @@ import type { ExecutionOrder, PlayExecution } from '@/api/plays'
 import { ExecutionPanel } from './ExecutionPanel'
 import { createDraft } from './draft'
 import { PlayJournal } from './WorkspacePanels'
-import { fillSummary } from './execution'
+import { fillSummary, suggestionGroups } from './execution'
 
 const entry = { ...createDraft().entries[0]!, id: 'e1', name: 'Entry 1', price: '100' }
 const entries = [{ ...entry, stops: [{ ...entry.stops[0]!, id: 's1', value: '95' }], targets: [{ ...entry.targets[0]!, id: 't1', value: '110' }] }]
@@ -126,8 +126,9 @@ describe('execution panel', () => {
       .toBe('Open Long · 2 fills, average 103')
 
     const confirm = screen.getByRole('region', { name: 'Orders to confirm' })
-    expect(within(confirm).getByText('Entry 1 stop')).toBeInTheDocument()
-    await user.click(within(confirm).getByRole('button', { name: /Link here/ }))
+    // An older server says nothing about other Plays, so neither does the row.
+    expect(within(confirm).queryByText(/another play/)).not.toBeInTheDocument()
+    await user.click(within(confirm).getByRole('button', { name: 'Link as Entry 1 stop' }))
     expect(onLink).toHaveBeenCalledWith({ orderId: '12', role: 'stop', entryId: 'e1', levelId: 's1' })
     await user.click(within(confirm).getByRole('button', { name: 'Not this play' }))
     expect(onUnlink).toHaveBeenCalledWith('00000000-0000-4000-8000-0000000000a2')
@@ -207,5 +208,42 @@ describe('execution panel', () => {
     await user.selectOptions(screen.getByRole('combobox', { name: 'Level for order 13' }), 'exit')
     view.rerender(panel('00000000-0000-4000-8000-000000000002'))
     expect(screen.getByRole('combobox', { name: 'Level for order 13' })).toHaveValue('')
+  })
+})
+
+describe('confirm rows (phase 1, 1.6d)', () => {
+  const twoTargets = [{ ...entries[0]!, targets: [{ ...entries[0]!.targets[0]!, id: 't1', value: '110', share: '50' },
+    { ...entries[0]!.targets[0]!, id: 't2', value: '110', share: '50' }] }]
+  const takeProfit = (orderId: string) => order(orderId, { side: 'sell', orderType: 'Take Profit Market', triggerPrice: '110', reduceOnly: true,
+    isPositionTpsl: true })
+  const suggestion = (n: number, orderId: string, levelId: string, otherPlay = false) => ({ id: `00000000-0000-4000-8000-0000000000b${n}`,
+    role: 'target' as const, entryId: 'e1', levelId, state: 'suggested' as const, source: 'automatic' as const, order: takeProfit(orderId),
+    filledQuantity: '0', fills: [], otherPlay })
+
+  it('lists two position take-profits as two rows, each with both levels and no other play (U7)', async () => {
+    const onLink = vi.fn()
+    const onReject = vi.fn()
+    const user = userEvent.setup()
+    render(<ExecutionPanel execution={{ ...execution, suggestions: [suggestion(1, '21', 't1'), suggestion(2, '21', 't2'), suggestion(3, '22', 't1'),
+      suggestion(4, '22', 't2')] }} error={null} busy={false} entries={twoTargets} direction="long" onCheck={vi.fn()} onLink={onLink} onUnlink={vi.fn()}
+      onReject={onReject} />)
+    const confirm = screen.getByRole('region', { name: 'Orders to confirm' })
+    const rows = within(confirm).getAllByRole('listitem')
+    expect(rows).toHaveLength(2)
+    expect(within(rows[0]!).getByText(/Matches several levels of this play$/)).toBeInTheDocument()
+    expect(confirm).not.toHaveTextContent(/another play/)
+    await user.click(within(rows[1]!).getByRole('button', { name: 'Link as Entry 1 target 2' }))
+    expect(onLink).toHaveBeenCalledWith({ orderId: '22', role: 'target', entryId: 'e1', levelId: 't2' })
+    await user.click(within(rows[0]!).getByRole('button', { name: 'Not this play' }))
+    expect(onReject).toHaveBeenCalledWith(['00000000-0000-4000-8000-0000000000b1', '00000000-0000-4000-8000-0000000000b2'])
+  })
+
+  it('says "another play" only when the server reports one', () => {
+    render(<ExecutionPanel execution={{ ...execution, suggestions: [suggestion(1, '21', 't1', true), suggestion(3, '22', 't1'), suggestion(4, '22', 't2', true)] }}
+      error={null} busy={false} entries={twoTargets} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
+    const rows = within(screen.getByRole('region', { name: 'Orders to confirm' })).getAllByRole('listitem')
+    expect(rows[0]).toHaveTextContent('Also matches another play')
+    expect(rows[1]).toHaveTextContent('Matches several levels of this play and another play')
+    expect(suggestionGroups([{ ...suggestion(1, '21', 't1'), order: null }, { ...suggestion(2, '21', 't2'), order: null }])).toHaveLength(2)
   })
 })

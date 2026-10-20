@@ -50,7 +50,7 @@ function deferred<T>() {
 const planned: SavedPlay = { ...terminal, summary: { ...terminal.summary,
   status: 'planned', planRevision: 1, plannedAtUtc: at, endedAtUtc: null, cancelReason: null } }
 const readyManualSession = (): PlaysSession => ({ ...sessionFor(planned), manual: { ...emptyManualDraft(),
-  entryId: 'entry-1', occurredAtUtc: '2026-10-13T10:00:00', side: 'buy', quantity: '1', price: '100', source: 'Statement' } })
+  entryId: 'entry-1', occurredAt: '2026-10-13T10:00:00Z', side: 'buy', quantity: '1', price: '100', source: 'Statement' } })
 function client(play = terminal, more: SavedPlay[] = []) {
   let current = play
   const methods = {
@@ -1245,11 +1245,11 @@ async function enterShellManual(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('tab', { name: 'Execution' }))
   await screen.findByLabelText('Manual execution totals')
   await user.selectOptions(screen.getByLabelText('Saved plan entry'), 'entry-1')
-  fireEvent.change(screen.getByLabelText('Execution time (UTC)'), { target: { value: '2026-10-13T10:00:00' } })
+  fireEvent.change(screen.getByLabelText(/^Execution time/), { target: { value: '2026-10-13T10:00:00' } })
   await user.selectOptions(screen.getByLabelText('Side'), 'buy')
   await user.type(screen.getByLabelText('Execution quantity'), '1')
   await user.type(screen.getByLabelText('Execution price'), '100')
-  await user.type(screen.getByLabelText('Source label'), 'Statement')
+  await user.type(screen.getByLabelText(/^Source label/), 'Statement')
 }
 const openedLedger = (): ManualExecutions => {
   const after: ManualExecutions['records'][number] = { id: otherId, role: 'entry', entryId: 'entry-1',

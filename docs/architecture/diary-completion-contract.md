@@ -46,6 +46,8 @@ positive decimal-string quantity and price, and a short source label. Fee amount
 and currency may both be null for unknown. Known zero is an explicit amount
 with a currency. Never treat unknown as a known zero in totals or metrics.
 
+The browser takes the time in the display time zone and sends UTC (phase 1,
+1.6b; see the capture friction section of `plays-workspace-contract.md`).
 Manual execution timestamps must use whole microseconds or coarser precision.
 Creation and correction reject sub-microsecond values with HTTP 400 before
 ledger validation; timestamps are never rounded into a different execution

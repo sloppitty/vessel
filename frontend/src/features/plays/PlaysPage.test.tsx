@@ -18,6 +18,7 @@ import { createEvidence } from './evidence'
 import type { ImageMarkup } from '@/api/markup'
 import { createPlaysSession, describePlanChanges, draftFromSaved, planFromDraft, savedState, syncEvidence, type PlaysSession } from './saved'
 import { accountPicker, chooseInPicker } from '@/test/account-picker'
+import { retrospectiveSavedFixture } from '@/test/retrospective.fixtures'
 
 const ids = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 
@@ -1063,5 +1064,70 @@ describe('fills from the execution, independent of the saved status', () => {
     await user.clear(stop)
     await user.type(stop, '105')
     expect(stop).not.toHaveAttribute('aria-invalid')
+  })
+})
+
+describe('Duplicate to Draft (phase 1, 1.6c)', () => {
+  const venue: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}`, balanceUsd: '10000' }
+  const level = (id: string, value: string) => ({ id, unit: 'price' as const, value, share: '100' })
+  const open: SavedPlay = { ...savedPlayFixture, review: 'Held the plan.',
+    summary: { ...savedPlayFixture.summary, title: 'BTC breakout', status: 'open', planRevision: 2, venueId: 'hyperliquid',
+      instrument: 'BTC', instrumentSource: 'venue', plannedAtUtc: '2026-10-03T10:00:00.000Z', version: 6 },
+    plan: { ...savedPlayFixture.plan, sizingMode: 'quantity', size: '1', leverage: '3',
+      notes: { thesis: 'Retest holds', invalidation: 'Close below 94', strategy: 'Breakout', evidence: 'Daily chart' },
+      entries: [{ id: 'entry-1', name: 'Entry 1', color: '#b9c9e4', share: '100', price: '100', stops: [level('stop-1', '105')], targets: [level('target-1', '110')] }] } }
+  const venueApi = (server: ReturnType<typeof fakeServer>) => client(server, {
+    instruments: () => Promise.resolve(instrumentCatalogFixture), candles: () => new Promise(() => {}), marketContext: () => new Promise(() => {}),
+    sizing: vi.fn().mockResolvedValue(sizingFixture) })
+  const openSession = (play: SavedPlay): PlaysSession => {
+    const draft = draftFromSaved(play, [])
+    return { view: 'editor', draft, saved: savedState(play, draft) }
+  }
+
+  it('opens the current plan as a Draft whose managed stop beyond the entry is flagged until it is moved', async () => {
+    const server = fakeServer()
+    server.plays.set(open.summary.id, open)
+    server.history.set(open.summary.id, { revisions: [], statusChanges: [] })
+    const user = userEvent.setup()
+    render(<Page api={venueApi(server)} accounts={[venue]} initial={openSession(open)} />)
+    await user.click(await screen.findByRole('button', { name: 'Duplicate' }))
+    expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('BTC breakout (copy)')
+    expect(screen.getByRole('button', { name: 'Plan it' })).toBeInTheDocument()
+    // Nothing exists on the server yet, so there is nothing to duplicate or show the history of.
+    expect(screen.queryByRole('button', { name: 'Duplicate' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'History' })).toBeDisabled()
+    const stop = screen.getByRole('spinbutton', { name: 'Entry 1 planned stop price (quote units)' })
+    expect(stop).toHaveAttribute('aria-invalid', 'true')
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    expect(server.api.createPlay).not.toHaveBeenCalled()
+    await user.clear(stop)
+    await user.type(stop, '95')
+    expect(stop).not.toHaveAttribute('aria-invalid')
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    await waitFor(() => expect(server.api.createPlay).toHaveBeenCalledOnce())
+    const fields = server.api.createPlay.mock.calls[0]![0]
+    expect(fields).toMatchObject({ title: 'BTC breakout (copy)', accountId: open.summary.accountId, instrument: 'BTC', instrumentSource: 'venue',
+      review: '', drawings: {} })
+    expect(fields.plan).toMatchObject({ direction: 'long', leverage: '3', size: '',
+      notes: { thesis: 'Retest holds', invalidation: 'Close below 94', strategy: 'Breakout', evidence: '' } })
+    expect(fields.plan.entries).toEqual([expect.objectContaining({ price: '100', stops: [expect.objectContaining({ value: '95' })],
+      targets: [expect.objectContaining({ value: '110' })] })])
+    // The original is untouched.
+    expect(server.api.updatePlay).not.toHaveBeenCalled()
+  })
+
+  it('waits for unsaved work and is not offered on a retrospective Play', async () => {
+    const server = fakeServer()
+    server.plays.set(open.summary.id, open)
+    const user = userEvent.setup()
+    const view = render(<Page api={venueApi(server)} accounts={[venue]} initial={openSession(open)} />)
+    const duplicate = await screen.findByRole('button', { name: 'Duplicate' })
+    await user.type(screen.getByRole('textbox', { name: 'Play title' }), ' edited')
+    expect(duplicate).toBeDisabled()
+    expect(duplicate).toHaveAttribute('title', 'Save or discard your changes first')
+    view.unmount()
+    render(<Page api={venueApi(server)} accounts={[venue]} initial={openSession(retrospectiveSavedFixture)} />)
+    expect(await screen.findByRole('button', { name: 'History' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Duplicate' })).not.toBeInTheDocument()
   })
 })
