@@ -35,6 +35,17 @@ October 20, 2026:
     - Duplicate now opens an unsaved Draft that the plan checks gate.
 
   The legacy-completion migration was found sound.
+- **Sol round 2.**
+  - All five resolutions were confirmed against the code. The review notes
+    what each one changes there:
+    - Unresolved→Closed needs the reconciliation, closing and event gates
+      changed;
+    - a declaration resets the watch independently of the link revision;
+    - `Annotate` must accept unchanged stored answers on an Open Play.
+  - Two editorial points were applied: lane membership names the
+    exclusion-only remainder, and Duplicate keeps New play's single-session
+    guards.
+  - No further high-severity gap was found.
 
 ## Integration base
 

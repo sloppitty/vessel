@@ -303,7 +303,9 @@ Covers G-01, D-17 and F-08.
   - Closed: Review's close time, the latest exit.
   - Cancelled: the cancellation time.
   - Unresolved: the declaration time.
-- **Lanes.** Each Play falls in the first of these that applies:
+- **Lanes.** Each Play in the population lands in the first lane below that
+  applies. The one exception is an unscored planned Play with no answers,
+  which appears only in the exclusion list.
   1. **Retrospective:** retrospective origin, scored or not.
   2. **Unscored:** planned origin, not scored by Review (excluded, Cancelled
      or Unresolved), with at least one structured answer. Unscored Plays
@@ -472,6 +474,9 @@ Covers F-01, F-03, F-04, F-05 and G-13 (plus the F-06 preview). No decision.
 - Duplicating an Open long with a managed stop at 105 over an entry at 100
   opens a Draft whose stop is flagged until it is moved. A retrospective Play
   offers no Duplicate.
+- Duplicate keeps New play's single-session guards. Unsaved work in the
+  editor is never replaced, and the copy carries no saved or observed
+  identity.
 
 ## Probe scenarios as tests
 
