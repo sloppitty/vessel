@@ -8,14 +8,19 @@ type Context = { api: WorkspaceApi; playId: string | null }
 /**
  * The shown execution and how current it is. One counter orders the facts: a read takes its number when it starts (its
  * answer is at least as new as that moment), a mutation takes its number when it completes (its effect is committed by
- * then, whether it succeeded or failed). The shown execution came from the request numbered `applied`.
+ * then, whether it succeeded or failed). A mutation's own answer was built when it committed, at an unknown moment
+ * before it arrived, so it cannot be ordered against a read that overlapped it: it may be shown, but it never makes the
+ * execution fresh. Only a read started after the mutation completed does.
  */
 interface Shown {
   context: Context | null
   execution: PlayExecution | null
-  /** The number of the read or mutation whose execution is shown. */
+  /**
+   * The display order of the facts shown: the start number of the read they came from, or the completion number of a
+   * mutation whose own answer is shown. A read replaces them only if it started later.
+   */
   applied: number
-  /** The number of the last mutation to complete. */
+  /** The completion number of the last mutation. */
   mutated: number
   /** The newest start number of a read that failed. */
   failed: number
@@ -27,7 +32,7 @@ type ShownEvent = { context: Context } & (
   | { type: 'read'; sequence: number; execution: PlayExecution }
   | { type: 'read-failed'; sequence: number }
   | { type: 'mutation-started' }
-  | { type: 'mutation-done'; sequence: number; execution: PlayExecution | null })
+  | { type: 'mutation-done'; started: number; sequence: number; execution: PlayExecution | null })
 
 const nothingShown: Shown = { context: null, execution: null, applied: 0, mutated: 0, failed: 0, mutating: 0 }
 
@@ -39,18 +44,19 @@ function shown(state: Shown, event: ShownEvent): Shown {
     case 'read': return event.sequence > current.applied ? { ...current, execution: event.execution, applied: event.sequence } : current
     case 'read-failed': return { ...current, failed: Math.max(current.failed, event.sequence) }
     case 'mutation-started': return { ...current, mutating: current.mutating + 1 }
-    // A mutation's own answer is authoritative as of its commit.
+    // A mutation's own answer is shown only if no read started after the mutation has been shown: such a read may have
+    // seen later facts (an import after the commit) than the answer, which may have waited on the way.
     case 'mutation-done': return { ...current, mutating: Math.max(0, current.mutating - 1), mutated: Math.max(current.mutated, event.sequence),
-      ...event.execution ? { execution: event.execution, applied: event.sequence } : {} }
+      ...event.execution && current.applied <= event.started ? { execution: event.execution, applied: event.sequence } : {} }
   }
 }
 
 /**
- * Fresh when no mutation is in flight, the facts shown are at least as new as the last mutation's completion (its own
- * answer, or a read started after it), and no read started after them has failed. A read that is only pending does not
- * count, so routine refreshes never turn known facts into unknown ones.
+ * Fresh when no mutation is in flight, the facts shown come from a read started after the last mutation completed (a
+ * mutation's own answer never counts; the follow-up read is always issued), and no read started after them has failed.
+ * A read that is only pending does not count, so routine refreshes never turn known facts into unknown ones.
  */
-const isFresh = (state: Shown) => state.mutating === 0 && state.applied >= state.mutated && state.failed <= state.applied
+const isFresh = (state: Shown) => state.mutating === 0 && state.applied > state.mutated && state.failed <= state.applied
 
 /**
  * Stored execution reads only. The shell owns event-driven and disconnected fallback refreshes.
@@ -94,18 +100,20 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
     const work = session.current
     if (!work || !context.playId || work.context !== context || work.busy || work.controller.signal.aborted) return
     work.busy = true
+    // Reads numbered above this started after the mutation did.
+    const started = sequence.current
     dispatch({ context, type: 'mutation-started' })
     setWorkState({ context, signal: work.controller.signal, busy: true })
     try {
       const execution = await action(context.playId, work.controller.signal)
       if (!work.controller.signal.aborted) {
-        dispatch({ context, type: 'mutation-done', sequence: ++sequence.current, execution: execution ?? null })
+        dispatch({ context, type: 'mutation-done', started, sequence: ++sequence.current, execution: execution ?? null })
         setError(null)
       }
     } catch (cause) {
       if (!work.controller.signal.aborted) {
         // A failed mutation may still have changed something: only a read started after it is current again.
-        dispatch({ context, type: 'mutation-done', sequence: ++sequence.current, execution: null })
+        dispatch({ context, type: 'mutation-done', started, sequence: ++sequence.current, execution: null })
         setError({ context, message: errorMessage(cause, 'The change could not be completed. Try again.'), source: 'action' })
         throw cause
       }
@@ -126,8 +134,9 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
     error: error?.context === context ? error.message : null,
     busy: workState?.context === context && !workState.signal.aborted && workState.busy,
     /**
-     * The shown execution may be out of date: a mutation is in flight, its effect has not been read back yet, or a read
-     * started after the facts shown has failed. Facts derived from it (fills, averages) are unknown until it is fresh.
+     * The shown execution may be out of date: a mutation is in flight, no read started after the last mutation completed
+     * has been shown yet (a link's own answer does not count), or a read started after the facts shown has failed. Facts
+     * derived from it (fills, averages) are unknown until it is fresh.
      */
     stale: !isFresh(current), reload, link, unlink, dismiss, rebind }
 }
