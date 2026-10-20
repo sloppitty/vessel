@@ -205,6 +205,19 @@ public sealed class ManagedStopTests
         Assert.Equal(distance is null ? null : decimal.Parse(distance, CultureInfo.InvariantCulture),
             PlayOutcomeCalculator.StopDistance(Stops(direction, (stop, "100"))));
 
+    /// <summary>A stop that is not set is no stop, not break-even: its share is left out, and alone it gives no planned risk.</summary>
+    [Fact]
+    public void A_stop_that_is_not_set_is_skipped_not_break_even()
+    {
+        Assert.Equal(0.05m, PlayOutcomeCalculator.StopDistance(Stops("long", ("95", "50"), ("", "50"))));
+        Assert.Null(PlayOutcomeCalculator.StopDistance(Stops("long", ("", "100"))));
+        var percent = Stops("long", ("95", "100")) with
+        {
+            Entries = [Stops("long", ("95", "100")).Entries[0] with { Stops = [new PlanExit("stop-0", "percent", "", "100")] }]
+        };
+        Assert.Null(PlayOutcomeCalculator.StopDistance(percent));
+    }
+
     [Fact]
     public void Locked_in_stops_offset_the_loss_of_the_others()
     {

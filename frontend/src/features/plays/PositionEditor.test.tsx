@@ -461,7 +461,11 @@ describe('local-draft position editor', () => {
     fireEvent.change(stop, { target: { value: '-5' } })
     expect(stop).toHaveAttribute('aria-invalid', 'true')
     expect(stop).toHaveAttribute('title', 'Entry 1 stop 1: use a price for a stop beyond the entry; a percentage cannot be negative.')
+    // 0 % is break-even, which needs a fill on the entry: marked like a price stop at the entry.
     fireEvent.change(stop, { target: { value: '0' } })
+    expect(stop).toHaveAttribute('aria-invalid', 'true')
+    expect(stop).toHaveAttribute('title', 'A long stop goes below the entry price; 0 % (break-even) needs a fill on the entry.')
+    fireEvent.change(stop, { target: { value: '5' } })
     expect(stop).not.toHaveAttribute('aria-invalid')
     // An exponent is not read as 10% anywhere: no price-move line, and the field says why.
     fireEvent.change(stop, { target: { value: '1e1' } })

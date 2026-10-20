@@ -3,7 +3,7 @@ import { createDraft, createEntry, type DraftEntry, type DraftExit, type PlayDra
 import { exactDecimal, exactFixed, exactSignOf, type Exact } from '@/lib/decimal'
 import type { PlayExecution } from '@/api/plays'
 import { executionFills } from './entry-fills'
-import { positionRiskSummary, signedPayoffText, type EntryFills, type RiskReference } from './position-risk-summary'
+import { positionRiskSummary, signedPayoffText, stopCoverageGap, type EntryFills, type RiskReference } from './position-risk-summary'
 import type { SizeUnits } from './sizing'
 
 const units: SizeUnits = { quote: 'USDC', base: 'ETH', quantityDecimals: 4 }
@@ -494,6 +494,17 @@ describe('signed all-stops result', () => {
     const rounded = signed(one('100', { size: '3' }), { ...fills('100'), rounded: new Set(['e1']) })
     expect(rounded.stopPayoff).toMatchObject({ known: null, total: null, rounding: true })
     expect(text(signed(one('105', { size: '3' }), { ...fills('100'), rounded: new Set(['e1']) }).stopPayoff.total)).toBe('15')
+  })
+
+  it('treats a stop that is not set as no stop, never break-even (October 20, 2026)', () => {
+    for (const unit of ['price', 'percent'] as const) {
+      const blank = one('', {}, unit)
+      expect(signed(blank).stopPayoff, unit).toMatchObject({ known: null, total: null })
+      expect(signed(blank, fills('100')).stopPayoff, unit).toMatchObject({ known: null, total: null })
+      expect(signed(blank).stops.coverage, unit).toEqual({ percent: 0, status: 'partial' })
+      // The sizing gate counts it as unpriced.
+      expect(stopCoverageGap(blank), unit).toBe('100% of the position has no priced stop')
+    }
   })
 
   it('marks a size of zero as no position, not break-even', () => {

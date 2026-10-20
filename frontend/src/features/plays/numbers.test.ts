@@ -100,7 +100,7 @@ describe('plan number text shared with the server (test/contracts/plan-numbers.j
     expect(planNumber(text)).toBeNull()
     expect(planTextState(text, 'Entry 1 price')).toEqual({ status: 'invalid', reason: `Entry 1 price: ${plainDecimalRule}` })
   })
-  it('keeps unchanged stored text saveable, refuses negative percentages and keeps 0% as break-even', () => {
+  it('keeps unchanged stored text saveable, refuses negative percentages and keeps 0% valid plan text', () => {
     expect(planTextState('1e2', 'Entry 1 price', '1e2')).toEqual({ status: 'kept' })
     expect(planTextState('1E2', 'Entry 1 price', '1e2').status).toBe('invalid')
     expect(planTextState(' 95 ', 'Entry 1 stop 1')).toEqual({ status: 'valid' })
@@ -109,6 +109,7 @@ describe('plan number text shared with the server (test/contracts/plan-numbers.j
     expect(planTextState('-10', 'Entry 1 target 1', '10', 'target')).toEqual({ status: 'invalid',
       reason: 'Entry 1 target 1: a percentage cannot be negative; use a price instead.' })
     expect(planTextState('-5', 'Entry 1 stop 1', '-5', 'stop')).toEqual({ status: 'kept' })
+    // 0 % is valid plan text; that break-even needs a fill on the entry is the side rule's business (planChecks).
     expect(planTextState('0', 'Entry 1 stop 1', null, 'stop')).toEqual({ status: 'valid' })
     // The grammar decides first, as on the server: an exponent or zero after the sign is not a negative percentage.
     for (const text of ['-1e30', '-1e-30', '-1e1', '-0']) {

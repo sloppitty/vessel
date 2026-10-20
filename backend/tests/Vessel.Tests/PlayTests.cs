@@ -258,12 +258,14 @@ public sealed class PlayDocumentTests
     public void Every_plan_number_field_follows_the_shared_fixture_list()
     {
         var failures = new List<string>();
+        // A filled entry keeps the stop side check, and its 0 % rule, out of this grammar test.
+        var filled = new HashSet<string> { "entry-1" };
         foreach (var text in PlanNumberFixture.Accepted)
             foreach (var (field, plan, read, _) in PlanNumberFields(text))
             {
                 try
                 {
-                    if (read(PlayDocuments.Normalize(plan)) != text) failures.Add($"{field} changed accepted {Show(text)}");
+                    if (read(PlayDocuments.Normalize(plan, executedEntries: filled)) != text) failures.Add($"{field} changed accepted {Show(text)}");
                 }
                 catch (ProblemException e) { failures.Add($"{field} refused accepted {Show(text)}: {e.Message}"); }
             }
@@ -271,7 +273,7 @@ public sealed class PlayDocumentTests
         foreach (var text in PlanNumberFixture.Rejected)
             foreach (var (field, plan, _, refusal) in PlanNumberFields(text))
             {
-                try { PlayDocuments.Normalize(plan); failures.Add($"{field} accepted rejected {Show(text)}"); }
+                try { PlayDocuments.Normalize(plan, executedEntries: filled); failures.Add($"{field} accepted rejected {Show(text)}"); }
                 catch (ProblemException e) when (e.StatusCode == 400 && e.Message == refusal) { }
                 catch (ProblemException e) { failures.Add($"{field} refused {Show(text)} with {e.StatusCode} {Show(e.Message)}, not {Show(refusal)}"); }
             }
@@ -301,7 +303,7 @@ public sealed class PlayDocumentTests
     }
 
     [Fact]
-    public void Negative_percentages_point_to_a_price_and_zero_percent_is_break_even()
+    public void Negative_percentages_point_to_a_price_and_zero_percent_is_break_even_after_a_fill()
     {
         PlayPlanDocument Percent(string stop, string target) => TestPlays.Plan() with
         {
@@ -317,9 +319,50 @@ public sealed class PlayDocumentTests
         // The grammar decides first, as in the browser: a minus sign before an exponent or zero gets the plain-decimal reason.
         foreach (var text in new[] { "-1e30", "-1e-30", "-1e1", "-0" })
             Assert.Equal($"Entry 1 stop 1: {PlainDecimalRule}", Assert.Throws<ProblemException>(() => PlayDocuments.Normalize(Percent(text, "10"))).Message);
-        var breakEven = PlayDocuments.Normalize(Percent("0", "10"));
+        // 0 % is break-even, which needs a fill on the entry (October 20, 2026); it resolves from the planned entry.
+        Assert.Equal(400, Assert.Throws<ProblemException>(() => PlayDocuments.Normalize(Percent("0", "10"))).StatusCode);
+        var breakEven = PlayDocuments.Normalize(Percent("0", "10"), executedEntries: new HashSet<string> { "entry-1" });
         Assert.Equal("0", breakEven.Entries[0].Stops[0].Value);
         Assert.Equal(100m, ExecutionMatcher.Levels(breakEven).Single(l => l.Role == OrderLinkRole.Stop).Price);
+    }
+
+    /// <summary>
+    /// The owner's decision of October 20, 2026: a 0 % stop is break-even, which needs a fill on the entry. Before any fill
+    /// it is refused like a price stop at the entry, priced entry or not; after one it saves and resolves from the planned
+    /// entry. A stop kept unchanged from the stored plan still saves. A blank stop is not set, so it is no stop and never
+    /// refused; 0 % targets are outside this rule.
+    /// </summary>
+    [Theory]
+    [InlineData("long", "0")]
+    [InlineData("long", "0.00")]
+    [InlineData("short", "0")]
+    [InlineData("short", "00")]
+    public void A_zero_percent_stop_needs_a_filled_entry(string direction, string zero)
+    {
+        PlayPlanDocument Plan(string stop, string price = "100", string target = "10") => TestPlays.Plan() with
+        {
+            Direction = direction,
+            Entries = [TestPlays.Plan().Entries[0] with
+            {
+                Price = price, Stops = [new PlanExit("stop-1", "percent", stop, "100")], Targets = [new PlanExit("target-1", "percent", target, "100")]
+            }]
+        };
+        var message = $"Entry 1: a {direction} stop goes {(direction == "long" ? "below" : "above")} the entry price; 0 % (break-even) needs a fill on the entry.";
+        foreach (var price in new[] { "100", "" })
+        {
+            var refused = Assert.Throws<ProblemException>(() => PlayDocuments.Normalize(Plan(zero, price)));
+            Assert.Equal((400, message), (refused.StatusCode, refused.Message));
+        }
+        Assert.Throws<ProblemException>(() => PlayDocuments.Normalize(Plan(zero), executedEntries: new HashSet<string> { "entry-2" }));
+        // Any fill on the entry allows it, and it still resolves from the planned entry.
+        var filled = PlayDocuments.Normalize(Plan(zero), executedEntries: new HashSet<string> { "entry-1" });
+        Assert.Equal((zero, 100m), (filled.Entries[0].Stops[0].Value, ExecutionMatcher.Levels(filled).Single(l => l.Role == OrderLinkRole.Stop).Price));
+        // Kept unchanged from the stored plan (its fill since unlinked), it saves; in the other direction it is checked again.
+        Assert.Equal(zero, PlayDocuments.Normalize(Plan(zero), Plan(zero)).Entries[0].Stops[0].Value);
+        Assert.Throws<ProblemException>(() => PlayDocuments.Normalize(Plan(zero) with { Direction = direction == "long" ? "short" : "long" }, Plan(zero)));
+        // Not set is no stop, and a 0 % target is not this rule's business.
+        Assert.Equal("", PlayDocuments.Normalize(Plan("")).Entries[0].Stops[0].Value);
+        Assert.Equal("0", PlayDocuments.Normalize(Plan("5", target: "0")).Entries[0].Targets[0].Value);
     }
 
     internal const string PlainDecimalRule =
@@ -568,9 +611,12 @@ public sealed class PlayServiceTests
         Assert.Equal(PlayDocuments.Serialize(retargeted), play.Plan);
         // The stored text belongs to that Play: a new Play cannot start with it.
         Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Create(plan: legacy))).StatusCode);
-        // A plain value replaces the stored text, and 0% is a break-even stop.
-        dto = await service.UpdateAsync(play.Id, Update(dto, Stop("percent", "0") with { Size = "0.5" }), default);
-        Assert.Equal(("0", "0.5"), (dto.Plan.Entries[0].Stops[0].Value, dto.Plan.Size));
+        // 0% is break-even, which needs a fill on the entry (October 20, 2026); this draft has none.
+        var breakEven = await Assert.ThrowsAsync<ProblemException>(() => service.UpdateAsync(play.Id, Update(dto, Stop("percent", "0")), default));
+        Assert.Equal((400, "Entry 1: a long stop goes below the entry price; 0 % (break-even) needs a fill on the entry."), (breakEven.StatusCode, breakEven.Message));
+        // A plain value replaces the stored text.
+        dto = await service.UpdateAsync(play.Id, Update(dto, Stop("percent", "5") with { Size = "0.5" }), default);
+        Assert.Equal(("5", "0.5"), (dto.Plan.Entries[0].Stops[0].Value, dto.Plan.Size));
     }
 
     [Fact]

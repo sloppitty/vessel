@@ -150,6 +150,14 @@ describe('PositionRiskSummary after a fill (0.5b)', () => {
     expect(value('All stops')).toHaveTextContent(/^UnknownWithin the rounding of the reported average fill$/)
   })
 
+  it('never reads break-even for a stop that is not set, filled or not', () => {
+    const view = render(<PositionRiskSummary draft={filled('')} units={units} fills={fills} />)
+    expect(value('All stops')).toHaveTextContent(/^UnknownTotal unknown$/)
+    view.rerender(<PositionRiskSummary draft={filled('')} units={units} />)
+    expect(value('All stops')).toHaveTextContent(/^UnknownTotal unknown$/)
+    expect(value('All stops')).not.toHaveTextContent(/break-even/)
+  })
+
   it('does not count a stop beyond an unfilled entry', () => {
     render(<PositionRiskSummary draft={filled('105')} units={units} />)
     expect(value('All stops')).toHaveTextContent(/^UnknownTotal unknown$/)

@@ -94,6 +94,41 @@ describe('stops of a filled entry', () => {
   })
 })
 
+// The owner's decision of October 20, 2026: a 0 % stop is break-even, which needs a fill on the entry.
+describe('a 0 % stop', () => {
+  const zero = (price: string, stop: string, target = '10', unit: 'price' | 'percent' = 'percent') =>
+    ({ ...entry(price, stop, target, 'percent'), id: 'e1', stops: [{ id: 's1', unit, value: stop, share: '100' }] })
+
+  it.each([['long', 'below'], ['short', 'above']] as const)('is refused before a fill like a %s price stop at the entry', (direction, side) => {
+    for (const [price, value] of [['100', '0'], ['100', '0.00'], ['100', '00'], ['', '0']] as const) {
+      expect(planIssues([zero(price, value)], direction).map(issue => issue.message), `${price} ${value}`)
+        .toEqual([`Entry 1 stop is at the entry price; a ${direction} stop goes ${side} it. 0 % (break-even) needs a fill on the entry.`])
+    }
+    // The same as a price stop at the entry: no swap or direction switch is offered.
+    expect(planFixes({ direction, entries: [zero('100', '0')] })).toEqual({ swapped: null, reversed: null })
+    expect(planFixes({ direction, entries: [{ ...entry('100', '100', direction === 'long' ? '110' : '90'), id: 'e1' }] }))
+      .toEqual({ swapped: null, reversed: null })
+    // Any fill on the entry allows it; a fill on another entry does not.
+    expect(planIssues([zero('100', '0')], direction, new Set(['e1']))).toEqual([])
+    expect(planIssues([zero('100', '0')], direction, new Set(['e2']))).toHaveLength(1)
+  })
+
+  it('keeps a stored 0 % stop saveable as a warning, and leaves blank stops and 0 % targets alone', () => {
+    const saved = zero('100', '0')
+    const stored = storedPlanText(planFromDraft({ ...createDraft(), direction: 'long', entries: [saved] }))
+    expect(planIssues([saved], 'long', new Set(), stored)).toEqual([])
+    expect(keptStopWarnings([saved], 'long', new Set(), stored).map(issue => issue.message))
+      .toEqual(['Entry 1 stop is at the entry price, but its entry has no fill. It was saved there and still saves unchanged.'])
+    // In the other direction it is checked again.
+    expect(planIssues([saved], 'short', new Set(), stored)).toHaveLength(1)
+    // A stop that is not set is no stop, not break-even; 0 % targets are outside this rule.
+    expect(planIssues([zero('100', '')], 'long')).toEqual([])
+    expect(planIssues([zero('100', '5', '0')], 'long')).toEqual([])
+    expect(planIssues([zero('100', '5'), zero('100', '0', '10', 'price')].map((item, index) => ({ ...item, id: `e${index}` })), 'long'))
+      .toEqual([])
+  })
+})
+
 describe('stops past liquidation', () => {
   it('warns about stops that would not trigger before the estimated liquidation', () => {
     expect(stopsPastLiquidation([entry('100', '85', '120')], 'long', 10, 90)).toEqual([expect.objectContaining({ message: 'Entry 1 stop at 85 is past the estimated liquidation price of 90.' })])

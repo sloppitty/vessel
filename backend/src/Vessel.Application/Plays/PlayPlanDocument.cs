@@ -134,12 +134,16 @@ public static partial class PlayDocuments
 
     /// <summary>
     /// Price stops and targets must sit on their side of a priced entry: long stops below and targets above,
-    /// short the reverse. Percent levels are placed by direction, so they always do. Once an entry has filled, its
-    /// stops protect a position that exists: they may sit at or beyond the entry (break-even or profit). A
-    /// <paramref name="kept"/> stop, unchanged from the stored plan, is not checked again.
+    /// short the reverse. Percent levels are placed by direction, so they always do, except a 0 % stop: it sits at the
+    /// entry by definition, priced or not, so before a fill it is refused like a price stop at the entry (the owner's
+    /// decision of October 20, 2026: break-even comes after the entry fills; a stop that is not set is no stop). Once an
+    /// entry has filled, any fill, its stops protect a position that exists: they may sit at or beyond the entry
+    /// (break-even or profit). A <paramref name="kept"/> stop, unchanged from the stored plan, is not checked again.
     /// </summary>
     private static void RequireSides(PlanEntry entry, string direction, bool executed, Func<PlanExit, bool> kept)
     {
+        if (!executed && entry.Stops.Any(stop => stop.Unit == "percent" && IsZero(stop.Value) && !kept(stop)))
+            throw Invalid($"{entry.Name}: a {direction} stop goes {(direction == "long" ? "below" : "above")} the entry price; 0 % (break-even) needs a fill on the entry.");
         if (Positive(entry.Price) is not { } entryPrice) return;
         foreach (var (kind, exits) in new[] { ("stop", entry.Stops), ("target", entry.Targets) })
         {
@@ -150,6 +154,10 @@ public static partial class PlayDocuments
                 throw Invalid($"{entry.Name}: a {direction} {kind} goes {(above ? "above" : "below")} the entry price.");
         }
     }
+
+    /// <summary>Text that reads as exactly zero (0, 0.0, 0.00…), as the side check reads stored text; blank is not set.</summary>
+    private static bool IsZero(string value) =>
+        decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && number == 0;
 
     private static decimal? Positive(string value) =>
         decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && number > 0 ? number : null;

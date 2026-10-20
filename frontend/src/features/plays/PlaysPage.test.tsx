@@ -340,11 +340,16 @@ describe('saved plays', () => {
     expect(within(screen.getByRole('region', { name: 'Notifications' })).getByRole('alert'))
       .toHaveTextContent('Entry 1 stop 1: use a price for a stop beyond the entry; a percentage cannot be negative.')
 
-    // 0% is a break-even stop and saves.
+    // 0% is break-even, which needs a fill on the entry (October 20, 2026): a new plan cannot save it.
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Entry 1 planned stop return at 1× leverage (%)' }), { target: { value: '0' } })
     await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    expect(server.api.createPlay).not.toHaveBeenCalled()
+    expect(within(screen.getByRole('region', { name: 'Notifications' })).getByRole('alert'))
+      .toHaveTextContent('Fix the plan first. Entry 1 stop is at the entry price; a long stop goes below it. 0 % (break-even) needs a fill on the entry.')
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Entry 1 planned stop return at 1× leverage (%)' }), { target: { value: '5' } })
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
     await waitFor(() => expect(server.api.createPlay).toHaveBeenCalledOnce())
-    expect(server.api.createPlay.mock.lastCall![0].plan.entries[0]).toMatchObject({ price: '100', stops: [{ unit: 'percent', value: '0' }] })
+    expect(server.api.createPlay.mock.lastCall![0].plan.entries[0]).toMatchObject({ price: '100', stops: [{ unit: 'percent', value: '5' }] })
   })
 
   it('saves a stored plan whose numbers predate the plain-decimal rule without rewriting them', async () => {
