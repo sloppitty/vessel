@@ -106,6 +106,12 @@ October 20, 2026, branch `t3/phase1-receipt`, stacked on the integration base:
   - **Focus (low).** A journal save that goes through the revision-reason dialog still returns focus to the journal. A
     test fails without this fix.
   - **Check.** `scripts/check.sh` passed again: backend 3,558 passed, 5 skipped; frontend 149 files and 3,741 tests.
+- **Sol (Codex) round 2.** Three round-1 findings resolved. Two residual findings, both fixed:
+  - **Plan text (medium).** Plan numbers with more precision than a decimal holds were rounded into known planned
+    values. They are now unknown, as in the editor.
+  - **Focus (low).** A journal save whose reason dialog was dismissed no longer moves focus after a later header save.
+    A test fails without this fix.
+  - **Check.** `scripts/check.sh` passed again: backend 3,558 passed, 5 skipped; frontend 149 files and 3,742 tests.
 
 ## 1.2 Honest review queue and in-trade log
 
