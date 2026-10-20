@@ -21,6 +21,20 @@ October 20, 2026:
   and Sol reviews, and asked for a display time-zone setting.
 - The Phase 0 tips' pairwise conflicts were found with `git merge-tree`.
 - No owner database was touched.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`).** Five findings, all accepted into
+  the contract:
+  - **High:** Unresolved had no defined settlement path. It now takes no new
+    links, its existing links still settle it, and it closes through the
+    normal transition and event.
+  - **Medium:**
+    - the monitor watch now keeps the existing bounded window, which starts
+      at the declaration;
+    - completion is cleared when a Play leaves Unresolved;
+    - process lanes now have a population, period times, precedence and a
+      paginated drill-down;
+    - Duplicate now opens an unsaved Draft that the plan checks gate.
+
+  The legacy-completion migration was found sound.
 
 ## Integration base
 

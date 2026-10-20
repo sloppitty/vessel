@@ -171,6 +171,12 @@ Covers D-14 and G-04. Decision 3 was accepted as recommended.
   - They are stored in their own owner-scoped table, not in the Review text.
 - **The Review box while Open.** It stays, with a hint that the Log is for
   in-trade notes and that the review completes only after close.
+- **Leaving a final state.** When an Unresolved Play returns to Open, or
+  venue facts close it, its completion is cleared and the history says why.
+  - Its text and answers stay.
+  - While it is Open again, its stored answers save unchanged, but they
+    cannot be changed and they do not complete the review.
+  - Once it ends again, it is in Needs review until Complete review.
 - **Concurrency.** Writes are version-checked against the Play and return
   409 when it changed.
 
@@ -178,6 +184,8 @@ Covers D-14 and G-04. Decision 3 was accepted as recommended.
 - `Verify2.F8` and `More4.EarlyReview`: a note written in the Review box
   while Open, followed by a close, lands in **Needs review** until Complete
   review.
+- An Unresolved Play goes through Complete review, then return to Open, a
+  Save, and a close from venue facts. It lands in Needs review.
 - Complete review with unchanged text moves the Play to Reviewed, and Review
   again moves it back.
 - A no-fill cancellation leaves the queue with one click.
@@ -205,16 +213,24 @@ Covers D-06 and D-15.
   drill-down lists it with its reason, note and evidence. Coverage counts it.
 - **Sizing.** The record says "N unresolved not counted" beside the ladder.
   The ladder, the window and the Activity fallback rule do not change.
+- **Matching and settlement.** An Unresolved Play takes no new links and is
+  never offered order suggestions.
+  - Fills on its existing linked orders are still reconciled under the
+    account lock.
+  - If they settle the Play, it becomes Closed from venue facts. That uses
+    the same transition and closed-result event as an Open Play, and the
+    unresolved record stays in history.
+  - Linking another order needs a return to Open first.
 - **Monitor.**
   - The Play leaves the open-Play position comparison.
-  - Its linked orders stay watched under the Closed/Cancelled rule until
-    venue evidence shows they no longer rest.
+  - Its linked orders are watched under the existing Closed/Cancelled rule,
+    including its bounded window and visible "unverifiable" expiry.
+  - The window starts at the declaration time, which is the Play's end time.
+    Returning to Open ends that watch, and a later declaration starts a new
+    window.
   - A position still at the venue then shows as unexplained, never as this
     Play's.
-- **Later changes.**
-  - The owner can return it to Open, with a reason.
-  - If newly linked facts settle it, it becomes Closed from venue facts with
-    the normal outcome. Its earlier unresolved record stays in history.
+- **Return to Open.** The owner can return it to Open, with a reason.
 - **Review.** It can be reviewed like a Closed Play.
 - **Lists.** It appears in Needs review or Reviewed and in All, with an
   "Unresolved" chip. The Closed tab stays Closed only.
@@ -244,6 +260,11 @@ Covers D-06 and D-15.
 - `More4.CloseApi`, `Exec.SharedExit` and `Exec.FlipOrder`: the stuck Play
   can be declared Unresolved. It is excluded from Review with that reason,
   counted beside the ladder, and returns to Open on request.
+- A delayed exit fill on an order already linked to an Unresolved Play closes
+  it with the normal closed event. The test uses an account with no other
+  active Play.
+- An old linked stop's watch window starts at the declaration, and a second
+  declaration starts it again.
 - `Verify.F5`: a closed manual 1/1 corrected to 2/2 in one batch, with both
   rows' history under one batch ID. An invalid final ledger leaves nothing
   changed.
@@ -275,14 +296,30 @@ Covers G-01, D-17 and F-08.
 **1.4b Process cases (decision 9: allowed and counted).**
 - **The 2×2.** Review gains a Process section below the Breakdown: adherence
   (followed, deviated) × outcome (win, loss). Each row also states its
-  scratch count. Cells hold counts, and each opens the existing Play
-  drill-down.
-- **Lanes beside the 2×2:**
-  - **Unanswered:** scored, with no adherence answer;
-  - **Not applicable:** planned origin, answered not applicable;
-  - **Retrospective;**
-  - **Unscored:** answered reviews of excluded, Cancelled or Unresolved
-    Plays.
+  scratch count. Cells hold counts, and each opens its drill-down.
+- **Population.** Closed, Cancelled and Unresolved Plays in Review's scope
+  and filters.
+- **Period time.**
+  - Closed: Review's close time, the latest exit.
+  - Cancelled: the cancellation time.
+  - Unresolved: the declaration time.
+- **Lanes.** Each Play falls in the first of these that applies:
+  1. **Retrospective:** retrospective origin, scored or not.
+  2. **Unscored:** planned origin, not scored by Review (excluded, Cancelled
+     or Unresolved), with at least one structured answer. Unscored Plays
+     without answers appear only in the exclusion list.
+  3. **Unanswered:** scored, with no adherence answer.
+  4. **Not applicable:** scored, answered not applicable.
+  5. **The cells:** scored and answered followed or deviated, by win or loss.
+     Scratches are counted per row.
+- **Answers.** The lanes read the answers as stored. A completed review is
+  not required.
+- **Drill-down.** A paginated `GET /api/review/process` takes:
+  - the same filters;
+  - one cell, lane, mistake tag or skipped check.
+
+  It returns those Plays with nullable financial values. Every count equals
+  the membership of its drill-down across all pages.
 - **Post-hoc plans.** A Play whose plan was written after its first
   execution counts in its cell like any other. Its drill-down row carries
   the badge.
@@ -383,13 +420,22 @@ Covers F-01, F-03, F-04, F-05 and G-13 (plus the F-06 preview). No decision.
 - The Source label stays required, and sits visibly with the fields.
 
 **1.6c Duplicate to Draft.**
-- The Play header gets **Duplicate**. It creates a Draft through the existing
-  create endpoint with:
+- **Where.** The Play header of a planned-origin Play gets **Duplicate**. A
+  retrospective Play has no plan to copy and does not offer it.
+- **What it opens.** An unsaved Draft in the editor, as New play does, and
+  the first Save creates it through the existing create endpoint. It carries:
   - the account and instrument;
   - the direction and leverage;
-  - the current plan revision's entries, stops and targets;
+  - the current plan's entries, stops and targets;
   - thesis, invalidation and strategy;
   - the title "<title> (copy)".
+- **Plan checks.** The usual checks apply before that first Save, and the
+  owner fixes what they flag. They flag, for example:
+  - a stop that was valid only because its entry had filled, such as one
+    beyond the entry;
+  - plan text kept only because an older plan stored it.
+
+  Nothing is created on the server before that Save.
 - It copies no executions, links, review, log, evidence, drawings,
   pre-flight or history.
 - Copying actual exits into the plan, or re-splitting target shares, happens
@@ -423,6 +469,9 @@ Covers F-01, F-03, F-04, F-05 and G-13 (plus the F-06 preview). No decision.
 - U7: two position take-profits produce two rows, not four, with no
   "another play".
 - U11: an empty Source highlights its field.
+- Duplicating an Open long with a managed stop at 105 over an entry at 100
+  opens a Draft whose stop is flagged until it is moved. A retrospective Play
+  offers no Duplicate.
 
 ## Probe scenarios as tests
 
