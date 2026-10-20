@@ -25,21 +25,37 @@ export function readReviewPreferences(): ReviewPreferences {
 }
 
 let current: ReviewPreferences | undefined
+let storedText: string | null = null
 const listeners = new Set<() => void>()
-const snapshot = () => current ??= readReviewPreferences()
+const readStorage = () => {
+  try { return localStorage.getItem(preferenceKey('review.preferences.v1')) } catch { return null }
+}
+// Reread another tab's change when the first view mounts; mounted views keep one stable snapshot until notified.
+const snapshot = () => {
+  if (!current || (!listeners.size && readStorage() !== storedText)) {
+    current = readReviewPreferences()
+    storedText = readStorage()
+  }
+  return current
+}
 const subscribe = (listener: () => void) => {
   listeners.add(listener)
   return () => { listeners.delete(listener) }
 }
-onPreferenceScope(() => {
+const reset = () => {
   current = undefined
-  for (const listener of listeners) listener()
+  for (const listener of [...listeners]) listener()
+}
+onPreferenceScope(reset)
+if (typeof window !== 'undefined') window.addEventListener('storage', event => {
+  if (event.key === null || event.key === preferenceKey('review.preferences.v1')) reset()
 })
 
 function update(patch: Partial<ReviewPreferences>) {
   current = { ...snapshot(), ...patch }
   try { localStorage.setItem(preferenceKey('review.preferences.v1'), JSON.stringify(current)) } catch { /* Preferences stay in memory. */ }
-  for (const listener of listeners) listener()
+  storedText = readStorage()
+  for (const listener of [...listeners]) listener()
 }
 
 export function useReviewPreferences() {
