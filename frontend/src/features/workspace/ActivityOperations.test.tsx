@@ -211,6 +211,13 @@ describe('operation display values', () => {
   })
   it('shortens same-day UTC times while retaining dates and years across boundaries', () => {
     expect(operationDates(closed, 'utc')).toBe('12 Oct, 10:00 → 12:00 UTC')
+    // Across a daylight-saving change each end names its own offset (phase 1, 1.6e).
+    const zone = process.env.TZ
+    process.env.TZ = 'Europe/Madrid'
+    try {
+      expect(operationDates({ ...closed, openedAtUtc: '2025-10-26T00:30:00Z', closedAtUtc: '2025-10-26T01:30:00Z' }, 'local'))
+        .toBe('26 Oct, 02:30 CEST → 02:30 CET')
+    } finally { process.env.TZ = zone }
     expect(operationDates({ ...closed, closedAtUtc: '2026-10-13T12:00:00Z' }, 'utc')).toBe('12 Oct, 10:00 → 13 Oct, 12:00 UTC')
     expect(operationDates({ ...closed, closedAtUtc: '2027-01-01T12:00:00Z' }, 'utc')).toBe('12 Oct 2026, 10:00 → 1 Jan 2027, 12:00 UTC')
   })

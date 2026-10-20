@@ -13,6 +13,8 @@ import { LevelDriftAction } from './LevelDriftAction'
 import { LocalResultValue, SignDiffersFlag, localResultNote } from './LocalResult'
 import { EntryReceipts, ReceiptTotals } from './Receipt'
 import { Time } from '@/components/ui/time'
+import { useDisplayZone } from '@/lib/display-zone'
+import { formatTime } from '@/lib/time'
 
 // One shared empty object, so an untouched panel does not look like new state on every render.
 const noChoices: Record<string, string> = {}
@@ -57,6 +59,7 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
   /** Why a rebind is not available now, such as unsaved plan edits. */
   rebindBlocked?: string | undefined
 }) {
+  const zone = useDisplayZone()
   // The chosen roles belong to the journal, not to this tab: expanding the journal remounts the panel. Scoped by play.
   const [choices, setChoices] = useJournalState(`execution-choices:${execution?.playId ?? ''}`, noChoices)
   if (!execution) return <div className="execution-panel"><p className="muted" role="status">{error ?? 'Loading execution…'}</p></div>
@@ -135,7 +138,7 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
           <small>{link.order ? `${describeOrder(link.order)} · ${link.order.status}` : 'Order details unavailable'} · filled {link.filledQuantity}
             {retrospective ? ' · owner-confirmed retrospective link' : link.source === 'automatic' ? ' · linked automatically' : ' · linked by you'}</small>
           {link.fills.length > 0 && <small className="execution-fills" title={link.fills.map(fill =>
-            `${fill.direction} ${fill.quantity} at ${fill.price}`).join('\n')}>{fillSummary(link.fills)}</small>}</span>
+            `${fill.direction} ${fill.quantity} at ${fill.price} · ${formatTime(fill.occurredAtUtc, zone, 'datetime-seconds')}`).join('\n')}>{fillSummary(link.fills)}</small>}</span>
         {editable && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onUnlink(link.id)} aria-label={`Unlink ${levelName(entries, link, origin)} order`}
           title="Unlink. Vessel will not link this order to this level again."><Link2Off size={13} />Unlink</Button>}
       </li>)}</ul> : <p className="muted">{retrospective ? 'No execution links are available.' : 'No orders linked yet.'}</p>}

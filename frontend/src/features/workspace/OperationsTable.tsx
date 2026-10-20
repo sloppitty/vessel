@@ -12,6 +12,7 @@ import { amount, money } from '@/lib/format'
 import './activity-operations.css'
 import { useDisplayZone } from '@/lib/display-zone'
 import { otherZoneTime } from '@/lib/time'
+import { Time } from '@/components/ui/time'
 
 function Result({ value }: { value: string | null }) {
   return <span className={`operation-result ${resultSign(value)}`} title={value ?? 'Unknown'}>{money(value)}</span>
@@ -95,7 +96,7 @@ export function OperationsTable({ operations, accounts, compact = false, onPrevi
       </dl>
       <details className="operation-scope"><summary>About these numbers</summary>
         <p className="workspace-scope-note">Venue-reported P&amp;L {money(op.reportedClosedPnlUsd)} ({op.pnlBasis}).</p>
-        {op.fundingAsOfUtc !== null && <p className="workspace-scope-note">Funding coverage through <time dateTime={op.fundingAsOfUtc}>{op.fundingAsOfUtc}</time>.</p>}
+        {op.fundingAsOfUtc !== null && <p className="workspace-scope-note">Funding coverage through <Time at={op.fundingAsOfUtc} />.</p>}
         {op.coverage.length > 0 && <ul className="operation-coverage">{op.coverage.map(reason => <li key={reason}>{reason}</li>)}</ul>}
       </details>
       <OperationFills api={api} operation={op} accounts={accounts} onReload={onReload} refreshGeneration={refreshGeneration} />

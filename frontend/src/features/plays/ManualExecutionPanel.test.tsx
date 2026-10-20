@@ -26,13 +26,15 @@ const ledger = (status: 'planned' | 'open' | 'closed' = 'planned', records: Manu
   totals: { enteredQuantity: records.length ? record.quantity : '0', exitedQuantity: '0', openQuantity: records.length ? record.quantity : '0',
     grossResultUsd: '0', netResultUsd: null, feesComplete: false }, notice: 'Bounded owner facts.',
 })
-function Harness({ api, initial = ledger().play, enabled = true, dirty = false, onStored = vi.fn(), onForm = vi.fn() }: {
+function Harness({ api, initial = ledger().play, enabled = true, dirty = false, onStored = vi.fn(), onForm = vi.fn(), zone = 'local' }: {
   api: WorkspaceApi; initial?: SavedPlay; enabled?: boolean; dirty?: boolean; onStored?: (play: SavedPlay) => void; onForm?: (form: ManualExecutionDraft) => void
+  zone?: 'local' | 'utc'
 }) {
   const [current, setCurrent] = useState(initial)
   const [form, setForm] = useState(emptyManualDraft())
   return <ManualExecutionPanel api={api} saved={savedState(current, draftFromSaved(current, []))} entries={draftFromSaved(current, []).entries}
-    enabled={enabled} dirty={dirty} form={form} onChange={next => { setForm(next); onForm(next) }} onStored={next => { setCurrent(next); onStored(next); return true }} onBegin={() => vi.fn()} />
+    enabled={enabled} dirty={dirty} form={form} onChange={next => { setForm(next); onForm(next) }} onStored={next => { setCurrent(next); onStored(next); return true }} onBegin={() => vi.fn()}
+    zone={zone} />
 }
 function client(initial = ledger()) {
   let current = initial
@@ -85,6 +87,23 @@ describe('manual entry (phase 1, 1.6b)', () => {
     // Source sits before quantity and price.
     expect(screen.getByLabelText(/^Source label/)).toHaveFocus()
     expect(screen.getByLabelText('Execution quantity')).toHaveAttribute('aria-invalid', 'true')
+  })
+
+  it('keeps a typed time in the zone it was typed in when the display setting changes (phase 1, 1.6e)', async () => {
+    process.env.TZ = 'Europe/Madrid'
+    const { api, methods } = client()
+    const user = userEvent.setup()
+    const view = render(<Harness api={api} />)
+    await user.selectOptions(screen.getByLabelText('Saved plan entry'), 'entry-1')
+    await user.type(screen.getByLabelText('Execution time (Europe/Madrid)'), '2026-10-13 12:00:00')
+    await user.type(screen.getByLabelText('Execution quantity'), '1')
+    await user.type(screen.getByLabelText('Execution price'), '100')
+    await user.type(screen.getByLabelText(/^Source label/), 'Statement')
+    // The owner switches Times to UTC and comes back: the text still says which zone it is in, and keeps its instant.
+    view.rerender(<Harness api={api} zone="utc" />)
+    expect(screen.getByLabelText('Execution time (Europe/Madrid)')).toHaveValue('2026-10-13 12:00:00')
+    await user.click(screen.getByRole('button', { name: 'Record execution' }))
+    expect(methods.addManualExecution).toHaveBeenCalledWith(play.summary.id, expect.objectContaining({ occurredAtUtc: '2026-10-13T10:00:00Z' }))
   })
 
   it('enters the time in the browser zone with Now, and sends it as UTC', async () => {

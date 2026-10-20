@@ -54,5 +54,8 @@ export function operationDates(op: ActivityOperation, zone: DisplayZone): string
   const named = (text: string, at: string) => `${text} ${zoneLabel(at, zone)}`
   if (end === null) return named(opened, op.openedAtUtc!)
   const sameDay = op.openedAtUtc !== null && formatIn(op.openedAtUtc, zone, 'date') === formatIn(end, zone, 'date')
-  return named(`${opened} → ${op.closedAtUtc === null ? 'last fill ' : ''}${date(end, sameDay)}`, end)
+  const closed = `${op.closedAtUtc === null ? 'last fill ' : ''}${date(end, sameDay)}`
+  // Across a daylight-saving change each end names its own offset; otherwise one name serves both.
+  return op.openedAtUtc !== null && zoneLabel(op.openedAtUtc, zone) !== zoneLabel(end, zone)
+    ? `${named(opened, op.openedAtUtc)} → ${named(closed, end)}` : named(`${opened} → ${closed}`, end)
 }

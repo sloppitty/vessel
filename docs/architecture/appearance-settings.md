@@ -52,8 +52,13 @@ covering F-05 and G-13.
   drill-downs, exclusions, refresh times), the chart (axis ticks, crosshair,
   drawing tags, fill tooltips, stop evidence, "Updated", capture captions),
   Execution, Monitor, History, the Plays list, the journal log, accounts,
-  credentials, notifications and manual entry, which types and shows times in
-  the zone and sends UTC.
+  credentials, notifications, funding settlements and coverage, the manual
+  ledger's audit, Execution's fill list, and manual entry, which types and
+  shows times in the zone and sends UTC. A manual draft keeps the zone its
+  time was typed in, so changing the setting never moves it to another
+  instant; its label names that zone.
+- **Spans.** An Activity operation names one zone at its end, or each end's
+  own when a daylight-saving change falls between them.
 - **Day boundaries.** Server filters keep UTC days until Phase 2. Activity's
   custom range is labelled "(UTC)", and Review's period line, chart buckets
   and as-of time stay UTC and say so. Stored values never change.

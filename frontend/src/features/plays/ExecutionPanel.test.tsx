@@ -247,3 +247,15 @@ describe('confirm rows (phase 1, 1.6d)', () => {
     expect(suggestionGroups([{ ...suggestion(1, '21', 't1'), order: null }, { ...suggestion(2, '21', 't2'), order: null }])).toHaveLength(2)
   })
 })
+
+describe('fill times in the display zone (phase 1, 1.6e)', () => {
+  it('lists each linked fill with its time in the display zone (U17)', () => {
+    const zone = process.env.TZ
+    process.env.TZ = 'Europe/Madrid'
+    try {
+      render(<ExecutionPanel execution={execution} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
+      expect(within(screen.getByRole('region', { name: 'Linked orders' })).getByText('Open Long 0.5 at 100'))
+        .toHaveAttribute('title', 'Open Long 0.5 at 100 · 3 Oct 2026, 12:01:00 CEST')
+    } finally { process.env.TZ = zone }
+  })
+})
