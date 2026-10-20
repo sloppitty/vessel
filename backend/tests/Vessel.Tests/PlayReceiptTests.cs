@@ -51,6 +51,28 @@ public sealed class PlayReceiptTests
         Assert.Equal(new PlannedEntry(null, null, 2), PlayReceipts.Planned(play, revisions, "missing", null));
     }
 
+    [Fact]
+    public void Planned_values_read_plan_text_as_the_editor_does()
+    {
+        // Older stored text the editor reads as unknown stays unknown here, and nothing but plain decimals reaches the browser.
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Venue");
+        PlannedEntry Read(string price, string leverage)
+        {
+            var plan = Plan(price) with { Leverage = leverage };
+            var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
+                System.Text.Json.JsonSerializer.Serialize(plan, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)), Planned);
+            return PlayReceipts.Planned(play, [], "entry-1", null);
+        }
+        Assert.Equal(new PlannedEntry(null, null, null), Read("100.", "3"));
+        Assert.Equal(new PlannedEntry(null, null, null), Read(".5", "3"));
+        Assert.Equal(new PlannedEntry(null, null, null), Read("1e2", "3"));
+        Assert.Equal(new PlannedEntry("100", "7.5", null), Read(" 100 ", "3"));
+        // Leverage as leverageOf reads it: trimmed whole digits, otherwise 1.
+        Assert.Equal("7.5", Read("100", " 3 ").Quantity);
+        Assert.Equal("2.5", Read("100", "3.5").Quantity);
+        Assert.Equal("2.5", Read("100", "0").Quantity);
+    }
+
     [Theory]
     [InlineData("quantity", "2", "3", "1.2")]          // 2 units × 60% share
     [InlineData("margin", "100", "5", "3.125")]       // 500 notional over the 60/40 average entry of 96, × 60%

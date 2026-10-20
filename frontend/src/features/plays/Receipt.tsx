@@ -4,7 +4,7 @@ import { InfoTip } from '@/components/ui/info-tip'
 import { decimalDifference } from '@/lib/decimal'
 import { amount } from '@/lib/format'
 import { duration } from '@/features/workspace/activity-format'
-import { timeHeld } from './receipt-time'
+import { multiple, timeHeld } from './receipt-format'
 import type { DraftEntry } from './draft'
 import { LocalResultValue, SignDiffersFlag, localResultNote } from './LocalResult'
 
@@ -48,10 +48,6 @@ export function EstimatedR({ receipt }: { receipt: PlayReceipt }) {
     : <><span title={receipt.estimatedR}>{multiple(receipt.estimatedR)}</span> <small>÷ {receipt.initialRisk} initial risk</small></>
 }
 
-/** R to two places from its exact string, keeping the sign of a value that rounds to zero. */
-const multiple = (value: string) => `${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2, signDisplay: 'exceptZero' })
-  .format(value as Intl.StringNumericLiteral)}R`
-
 /** The receipt's own rows for an execution totals list. */
 export function ReceiptTotals({ receipt, status }: { receipt: PlayReceipt; status: PlayStatus }) {
   const held = timeHeld(receipt, status)
@@ -62,7 +58,8 @@ export function ReceiptTotals({ receipt, status }: { receipt: PlayReceipt; statu
 }
 
 /** The results a receipt sits beside: a venue Play's two bases, or a manual Play's own ledger. */
-export type ReceiptResult = { kind: 'venue'; totals: PlayExecution['totals'] } | { kind: 'manual'; totals: ManualExecutions['totals'] }
+export type ReceiptResult = { kind: 'venue'; totals: PlayExecution['totals'] }
+  | { kind: 'manual'; totals: ManualExecutions['totals']; fees: Pick<ManualExecutions, 'fees' | 'unknownFees'> }
 
 /** The compact receipt at the top of the Review tab, so a review is written beside the outcome. */
 export function ReviewReceipt({ receipt, result, status }: { receipt: PlayReceipt; result: ReceiptResult; status: PlayStatus }) {
@@ -75,12 +72,22 @@ export function ReviewReceipt({ receipt, result, status }: { receipt: PlayReceip
       {result.totals.local && <div><dt>Play-local result<InfoTip label="About the Play-local result">{localResultNote}</InfoTip></dt>
         <dd><LocalResultValue local={result.totals.local} format={value => `${value} USD`} />{result.totals.local.signDiffers && <SignDiffersFlag />}</dd></div>}
       <div><dt>Fees</dt><dd>{result.totals.fees.length ? result.totals.fees.map(fee => `${fee.amount} ${fee.token}`).join(' · ') : '0'}</dd></div>
-    </> : <div><dt>Manual ledger net</dt><dd>{result.totals.netResultUsd === null
-      ? <InfoTip className="value-tag" trigger="Unknown" label="manual ledger net">A cost is unknown or not in a supported USD currency.</InfoTip>
-      : `${result.totals.netResultUsd} USD`}</dd></div>}
+    </> : <>
+      <div><dt>Manual ledger net</dt><dd>{result.totals.netResultUsd === null
+        ? <InfoTip className="value-tag" trigger="Unknown" label="manual ledger net">A cost is unknown or not in a supported USD currency.</InfoTip>
+        : `${result.totals.netResultUsd} USD`}</dd></div>
+      <div><dt>Fees</dt><dd><ManualFees ledger={result.fees} /></dd></div>
+    </>}
     <div><dt>Estimated R<InfoTip label="About estimated R">{estimatedRNote}</InfoTip></dt><dd><EstimatedR receipt={receipt} /></dd></div>
     {held && <div><dt>Time held</dt><dd>{held}</dd></div>}
   </dl>
+}
+
+/** A manual ledger's known fees by currency, and how many executions have unknown costs, which are never zero. */
+export function ManualFees({ ledger }: { ledger: Pick<ManualExecutions, 'fees' | 'unknownFees'> }) {
+  const known = ledger.fees?.length ? ledger.fees.map(fee => `${fee.amount} ${fee.token}`).join(' · ') : ledger.fees ? '0' : null
+  const unknown = ledger.unknownFees ? `${ledger.unknownFees} unknown` : null
+  return <>{[known, unknown].filter(Boolean).join(' · ') || 'Not reported'}</>
 }
 
 /** The facts of a retrospective Play, which has no plan to compare with: what was traded, at what prices and result. */

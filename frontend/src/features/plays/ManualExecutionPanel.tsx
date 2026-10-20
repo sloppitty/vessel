@@ -10,7 +10,7 @@ import type { SavedState } from './saved'
 import type { DraftEntry } from './draft'
 import { nominalStablecoins } from './stablecoins'
 import { NativeSelect } from '@/components/ui/native-select'
-import { EntryReceipts, ReceiptTotals } from './Receipt'
+import { EntryReceipts, ManualFees, ReceiptTotals } from './Receipt'
 
 export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form, onChange, onStored, onBegin, working = false, observedVersion }: {
   api: WorkspaceApi
@@ -134,6 +134,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
         <div><dt>Open quantity</dt><dd>{ledger.totals.openQuantity}</dd></div>
         <div><dt>Gross realized USD</dt><dd>{ledger.totals.grossResultUsd ?? 'Unavailable'}</dd></div>
         <div><dt>Net realized USD<InfoTip label="About the Play-local result">The Play-local result on the manual ledger basis: sell proceeds minus buy costs at chronological average cost, less listed stablecoin fees. Review and sizing score this same figure.</InfoTip></dt><dd>{ledger.totals.netResultUsd ?? 'Unavailable — costs incomplete'}</dd></div>
+        {ledger.fees && <div><dt>Fees</dt><dd><ManualFees ledger={ledger} /></dd></div>}
         {ledger.receipt && <ReceiptTotals receipt={ledger.receipt} status={ledger.play.summary.status} />}
       </dl>
       <EntryReceipts progress={ledger.entries ?? []} entries={entries} />

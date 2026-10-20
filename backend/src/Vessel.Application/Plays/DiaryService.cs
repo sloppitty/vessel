@@ -163,6 +163,10 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
                 ManualLedger.Text(ledger.Gross), ledger.Net is { } net ? ManualLedger.Text(net) : null, ledger.FeesComplete), ManualNotice)
         {
             Entries = entries,
+            Fees = rows.Where(r => r.Fee is not null && r.FeeCurrency is not null).GroupBy(r => r.FeeCurrency!, StringComparer.Ordinal)
+                .OrderBy(g => g.Key, StringComparer.Ordinal).Select(g => new FeeTotalDto(g.Key,
+                    g.Aggregate(default(ExactAmount), (sum, r) => sum + ExactAmount.From(ManualLedger.Number(r.Fee!, false))).ToString())).ToList(),
+            UnknownFees = rows.Count(r => r.Fee is null),
             Receipt = PlayReceipts.Build(new ClosedPlayFacts(play, revisions, ledger.Projection, [], true, ledger.FeesComplete), time.GetUtcNow()),
         };
     }

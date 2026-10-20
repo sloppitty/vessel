@@ -482,7 +482,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const shownExecution = tracking.execution?.playId === saved?.summary.id ? tracking.execution : null
   const reviewReceipt = manual
     ? manualLedger && manualLedger !== 'unknown' && manualLedger.receipt
-      ? <ReviewReceipt receipt={manualLedger.receipt} result={{ kind: 'manual', totals: manualLedger.totals }} status={manualLedger.play.summary.status} /> : undefined
+      ? <ReviewReceipt receipt={manualLedger.receipt} result={{ kind: 'manual', totals: manualLedger.totals, fees: manualLedger }}
+        status={manualLedger.play.summary.status} /> : undefined
     : shownExecution?.receipt ? <ReviewReceipt receipt={shownExecution.receipt} result={{ kind: 'venue', totals: shownExecution.totals }} status={shownExecution.status} />
       : undefined
   const retrospectiveReceipt = retrospective && shownExecution ? <RetrospectiveReceipt execution={shownExecution} direction={draft.direction} /> : undefined

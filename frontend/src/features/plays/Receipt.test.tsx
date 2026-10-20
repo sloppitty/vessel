@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import type { EntryProgress, PlayExecution, PlayReceipt } from '@/api/plays'
 import { createDraft } from './draft'
 import { EntryReceipts, RetrospectiveReceipt, ReviewReceipt } from './Receipt'
-import { timeHeld } from './receipt-time'
+import { multiple, timeHeld } from './receipt-format'
 
 const entries = [{ ...createDraft().entries[0]!, id: 'e1', name: 'Breakout', price: '100' }]
 const progress: EntryProgress = { entryId: 'e1', filledQuantity: '0.5', averageFillPrice: '100.4', restingOrders: 0,
@@ -37,6 +37,18 @@ describe('actual versus plan (phase 1, 1.1a)', () => {
     expect(screen.getByText('Average fill 99.75 vs plan 100 (-0.25)')).toBeInTheDocument()
   })
 
+  it('never shows a small non-zero R as zero', () => {
+    expect(['-0.0001', '0.0001', '-0.0049', '0', '-0', '0.000', '-0.005', '1.98', '-1.25'].map(multiple))
+      .toEqual(['−<0.01R', '+<0.01R', '−<0.01R', '0.00R', '0.00R', '0.00R', '-0.01R', '+1.98R', '-1.25R'])
+  })
+
+  it('lists a manual ledger\'s known fees by currency and counts unknown costs', () => {
+    render(<ReviewReceipt receipt={closed} status="closed" result={{ kind: 'manual', totals: { enteredQuantity: '1', exitedQuantity: '1',
+      openQuantity: '0', grossResultUsd: '10', netResultUsd: null, feesComplete: false }, fees: { fees: [{ token: 'USDC', amount: '0.4' }], unknownFees: 1 } }} />)
+    const fees = screen.getByText('Fees').closest('div')!
+    expect(fees).toHaveTextContent('0.4 USDC · 1 unknown')
+  })
+
   it('measures time held to the last exit once closed and so far while open', () => {
     expect(timeHeld(closed, 'closed')).toBe('2h 5m')
     expect(timeHeld({ ...closed, lastExitAtUtc: null }, 'open', '2026-10-04T11:00:00Z')).toBe('1d 1h so far')
@@ -55,7 +67,7 @@ describe('actual versus plan (phase 1, 1.1a)', () => {
     expect(outcome).toHaveTextContent('2h 5m')
     // Unknown R names Review's reason instead of a number.
     view.rerender(<ReviewReceipt receipt={{ ...closed, estimatedR: null, initialRisk: null, estimatedRReason: 'The plan was written after the first fill.' }}
-      result={{ kind: 'manual', totals: { enteredQuantity: '1', exitedQuantity: '1', openQuantity: '0', grossResultUsd: '2', netResultUsd: null, feesComplete: false } }} status="closed" />)
+      result={{ kind: 'manual', totals: { enteredQuantity: '1', exitedQuantity: '1', openQuantity: '0', grossResultUsd: '2', netResultUsd: null, feesComplete: false }, fees: {} }} status="closed" />)
     const manual = screen.getByLabelText('Outcome')
     expect(manual).toHaveTextContent('Manual ledger net')
     expect(manual).not.toHaveTextContent('Venue net')

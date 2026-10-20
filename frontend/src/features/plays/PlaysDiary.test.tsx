@@ -600,6 +600,21 @@ describe('diary workspace integration', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Save play' })).not.toBeInTheDocument())
     expect(screen.getByRole('button', { name: 'Expand journal' })).toHaveFocus()
   })
+  it('keeps focus in the journal after a save that asked for a revision reason', async () => {
+    const { api, methods } = client(planned)
+    methods.updatePlay.mockImplementation((_id, fields) => Promise.resolve({ ...planned, plan: fields.plan,
+      summary: { ...planned.summary, version: planned.summary.version + 1, planRevision: 2 } }))
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(planned)} />)
+    await user.type(screen.getByRole('textbox', { name: 'Thesis' }), ' Retest held.')
+    await user.click(screen.getByRole('button', { name: 'Save play' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByRole('textbox'), 'Clarified the thesis')
+    await user.click(within(dialog).getByRole('button', { name: 'Save revision' }))
+    await waitFor(() => expect(methods.updatePlay).toHaveBeenCalledOnce())
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save play' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Expand journal' })).toHaveFocus())
+  })
   it('saves from the expanded journal too, keeping focus in the dialog', async () => {
     const closed: SavedPlay = { ...terminal, summary: { ...terminal.summary, status: 'closed', cancelReason: null } }
     const { api, methods } = client(closed)

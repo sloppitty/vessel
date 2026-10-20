@@ -223,7 +223,12 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
       </TabsList>
       <div className="journal-actions">
         {journalSave && <span className="journal-save" onFocus={() => { saveFocused.current = true }}
-          onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) saveFocused.current = false }}>{journalSave}</span>}
+          onBlur={event => {
+            // Focus that moves into another dialog, such as the revision reason, still belongs to this save.
+            const next = event.relatedTarget instanceof Element ? event.relatedTarget.closest('[role="dialog"]') : null
+            if (!event.currentTarget.contains(event.relatedTarget) && (next === null || next === event.currentTarget.closest('[role="dialog"]')))
+              saveFocused.current = false
+          }}>{journalSave}</span>}
         {inDialog
           ? <ChartIconButton ref={closeButton} label="Close expanded journal" icon={<Minimize2 size={15} aria-hidden="true" />} onClick={() => setExpanded(false)} />
           : <ChartIconButton ref={expandButton} label="Expand journal" icon={<Maximize2 size={15} aria-hidden="true" />} onClick={() => setExpanded(true)} />}

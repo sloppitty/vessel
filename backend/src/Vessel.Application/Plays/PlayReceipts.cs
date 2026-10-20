@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Numerics;
+using System.Text.RegularExpressions;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Review;
 using Vessel.Application.Sizing;
@@ -20,7 +21,7 @@ public sealed record PlayReceiptDto(DateTimeOffset? FirstEntryAtUtc, DateTimeOff
 /// <summary>One entry as planned, from the plan revision in force at its first fill (phase 1, 1.1a).</summary>
 public sealed record PlannedEntry(string? Price, string? Quantity, int? Revision);
 
-public static class PlayReceipts
+public static partial class PlayReceipts
 {
     public const string RetrospectiveReason = "A retrospective Play has no plan, so it has no planned risk.";
     public const string OpenReason = "Known once the Play is closed and its fills settle it.";
@@ -72,8 +73,9 @@ public static class PlayReceipts
         var number = revision?.Number ?? (play.PlanRevision > 0 ? play.PlanRevision : null);
         var entry = plan.Entries.FirstOrDefault(e => e.Id == entryId);
         if (entry is null) return new(null, null, number);
-        var price = Positive(entry.Price);
-        return new(price is null ? null : entry.Price, Quantity(plan, entry) is { } quantity ? ExactDecimal.Format(quantity) : null, number);
+        // Plain decimal text as the browser writes it; older text the editor would read as unknown stays unknown here too.
+        return new(Positive(entry.Price) is { } price ? ExactDecimal.Format(price) : null,
+            Quantity(plan, entry) is { } quantity ? ExactDecimal.Format(quantity) : null, number);
     }
 
     private static decimal? Quantity(PlayPlanDocument plan, PlanEntry entry)
@@ -88,12 +90,21 @@ public static class PlayReceipts
             var shares = weighted.Sum(e => e.Share!.Value);
             if (weighted.Count == 0 || shares <= 0) return null;
             var average = weighted.Sum(e => e.Price!.Value * e.Share!.Value) / shares;
-            var leverage = int.TryParse(plan.Leverage, NumberStyles.None, CultureInfo.InvariantCulture, out var lever) ? Math.Max(1, lever) : 1;
+            // As the editor's leverageOf reads it: trimmed whole digits of at least 1, otherwise 1.
+            var leverage = int.TryParse(plan.Leverage.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var lever) && lever >= 1 ? lever : 1;
             return average <= 0 ? null : size * leverage / average * share / 100;
         }
         catch (OverflowException) { return null; }
     }
 
-    private static decimal? Positive(string? text) =>
-        decimal.TryParse(text, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value) && value > 0 ? value : null;
+    /// <summary>A plan number as the editor's <c>positivePlanNumber</c> reads it: trimmed plain decimal text above zero.</summary>
+    private static decimal? Positive(string? text)
+    {
+        var trimmed = text?.Trim() ?? "";
+        return PlainDecimal().IsMatch(trimmed) &&
+            decimal.TryParse(trimmed, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value) && value > 0 ? value : null;
+    }
+
+    [GeneratedRegex("^[0-9]+(\\.[0-9]+)?$")]
+    private static partial Regex PlainDecimal();
 }

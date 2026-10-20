@@ -28,6 +28,9 @@ public sealed record ManualExecutionsDto(PlayDto Play, IReadOnlyList<ManualExecu
     public IReadOnlyList<EntryProgressDto> Entries { get; init; } = [];
     /// <summary>Times, averages and estimated R by Review's rules, over the ledger Review reads.</summary>
     public PlayReceiptDto? Receipt { get; init; }
+    /// <summary>Known fees by currency as entered, exactly; executions with unknown costs are counted, never added as zero.</summary>
+    public IReadOnlyList<FeeTotalDto> Fees { get; init; } = [];
+    public int UnknownFees { get; init; }
 }
 
 public sealed record RetrospectivePreviewDto(bool Eligible, IReadOnlyList<string> Reasons, string Fingerprint,

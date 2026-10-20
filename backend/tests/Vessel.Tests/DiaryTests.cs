@@ -244,6 +244,8 @@ public sealed class DiaryPostgresTests
         var closed = await Add(client, open.Play, At(open.Play.Summary.Version, "exit", "0.5", "110", exitAt));
         Assert.Equal("closed", closed.Play.Summary.Status);
         // Net 4.8 over 50.2 notional × 5% stop distance = 2.51 initial risk.
+        Assert.Equal(0, closed.UnknownFees);
+        Assert.Equal(["USDC 0"], closed.Fees.Select(f => $"{f.Token} {f.Amount}"));
         Assert.Equal((ExactDecimal.Format(4.8m / 2.51m), "2.51", "100.4", "110", exitAt, 3),
             (closed.Receipt!.EstimatedR, closed.Receipt.InitialRisk, closed.Receipt.AverageEntryPrice, closed.Receipt.AverageExitPrice,
                 closed.Receipt.LastExitAtUtc, closed.Receipt.FillCount));
@@ -327,6 +329,9 @@ public sealed class DiaryPostgresTests
         var entry = await Add(client, planned, Fact(planned.Summary.Version, "entry", "1", "100", 0, null, null));
         var closed = await Add(client, entry.Play, Fact(entry.Play.Summary.Version, "exit", "1", "110", 1));
         Assert.False(closed.Totals.FeesComplete); Assert.Null(closed.Totals.NetResultUsd);
+        // Known fees are listed by currency; the entry with unknown costs is counted, never added as zero (1.1a).
+        Assert.Equal(1, closed.UnknownFees);
+        Assert.Equal(["USDC 0"], closed.Fees.Select(f => $"{f.Token} {f.Amount}"));
         var review = premature with { ExpectedVersion = closed.Play.Summary.Version, Review = "Broker lacked cost data",
             StructuredReview = new("deviated", "late", "Wait for confirmation", "Set alert") };
         var response = await client.PutAsJsonAsync($"/api/plays/{planned.Summary.Id}", review); response.EnsureSuccessStatusCode();
