@@ -15,6 +15,7 @@ import { OperationsTable } from './OperationsTable'
 import { ActivityTable } from './ActivityTable'
 import { sideDirection, resultSign, operationPriceReturn, operationDates, operationStatus } from './activity-format'
 import { emptyFilters, filterQuery, initialActivityState, type ActivityListState } from './activity-filters'
+import { restoreZone } from '@/test/zone'
 
 const client = (activity = vi.fn().mockResolvedValue(activityFixture), activityFills = vi.fn().mockResolvedValue(activityFillsFixture)) =>
   ({ activity, activityFills }) as unknown as WorkspaceApi
@@ -217,7 +218,7 @@ describe('operation display values', () => {
     try {
       expect(operationDates({ ...closed, openedAtUtc: '2025-10-26T00:30:00Z', closedAtUtc: '2025-10-26T01:30:00Z' }, 'local'))
         .toBe('26 Oct, 02:30 CEST → 02:30 CET')
-    } finally { process.env.TZ = zone }
+    } finally { restoreZone(zone) }
     expect(operationDates({ ...closed, closedAtUtc: '2026-10-13T12:00:00Z' }, 'utc')).toBe('12 Oct, 10:00 → 13 Oct, 12:00 UTC')
     expect(operationDates({ ...closed, closedAtUtc: '2027-01-01T12:00:00Z' }, 'utc')).toBe('12 Oct 2026, 10:00 → 1 Jan 2027, 12:00 UTC')
   })

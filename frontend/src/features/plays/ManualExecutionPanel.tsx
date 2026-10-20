@@ -195,7 +195,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
       <ol className="manual-records" aria-label="Manual executions">
         {ledger.records.map(record => <li key={record.id}>
           <strong>{record.role === 'entry' ? 'Entry' : 'Exit'} · {record.side} {record.quantity} at {record.price}</strong>
-          <Time at={record.occurredAtUtc} style="datetime-seconds" />
+          <Time at={record.occurredAtUtc} style="datetime-exact" />
           <span>Source: {record.source} · Fee: {record.fee === null ? 'Unknown' : `${record.fee} ${record.feeCurrency}`}</span>
           <Button type="button" size="sm" variant="outline" disabled={!enabled || dirty || pending || !canCorrect || hasManualDraft(form)}
             aria-label={`Correct ${record.id}`} onClick={() => { if (submission.current || pending) return; setError(null); setErrors({}); onChange(manualCorrectionDraft(record, zone)) }}>Correct</Button>
@@ -206,8 +206,8 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
           <strong>{change.before ? change.batchId ? 'Correction batch' : 'Correction' : 'Recorded'} · {change.reason ?? 'Initial record'}</strong>
           {change.batchId && <small>Batch {change.batchId.slice(0, 8)}: {ledger.history.filter(item => item.batchId === change.batchId).length} executions corrected together</small>}
           <Time at={change.occurredAtUtc} style="datetime-seconds" />
-          {change.before && <p>Before: {change.before.role} · {change.before.side} {change.before.quantity} at {change.before.price} · <Time at={change.before.occurredAtUtc} style="datetime-seconds" /> · {change.before.source} · fee {change.before.fee === null ? 'unknown' : `${change.before.fee} ${change.before.feeCurrency}`}</p>}
-          <p>After: {change.after.role} · {change.after.side} {change.after.quantity} at {change.after.price} · <Time at={change.after.occurredAtUtc} style="datetime-seconds" /> · {change.after.source} · fee {change.after.fee === null ? 'unknown' : `${change.after.fee} ${change.after.feeCurrency}`}</p>
+          {change.before && <p>Before: {change.before.role} · {change.before.side} {change.before.quantity} at {change.before.price} · <Time at={change.before.occurredAtUtc} style="datetime-exact" /> · {change.before.source} · fee {change.before.fee === null ? 'unknown' : `${change.before.fee} ${change.before.feeCurrency}`}</p>}
+          <p>After: {change.after.role} · {change.after.side} {change.after.quantity} at {change.after.price} · <Time at={change.after.occurredAtUtc} style="datetime-exact" /> · {change.after.source} · fee {change.after.fee === null ? 'unknown' : `${change.after.fee} ${change.after.feeCurrency}`}</p>
         </li>)}</ol>
       </details>
     </>}
@@ -259,7 +259,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
               if (record) change({ together: [...together, manualCorrectionDraft(record, zone)] })
             }}>
             <option value="">Another execution, with the same reason…</option>
-            {addable.map(record => <option key={record.id} value={record.id}>{record.role === 'entry' ? 'Entry' : 'Exit'} · {record.side} {record.quantity} at {record.price} · {formatTime(record.occurredAtUtc, zone, 'datetime-seconds')}</option>)}
+            {addable.map(record => <option key={record.id} value={record.id}>{record.role === 'entry' ? 'Entry' : 'Exit'} · {record.side} {record.quantity} at {record.price} · {formatTime(record.occurredAtUtc, zone, 'datetime-exact')}</option>)}
           </NativeSelect></label>}
           {together.length > 0 && <p className="muted">These corrections are saved together with one reason, or not at all. Only the final ledger has to be valid.</p>}
         </div>}

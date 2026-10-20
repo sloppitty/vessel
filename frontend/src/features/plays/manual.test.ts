@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { emptyManualDraft, manualBatchRequest, manualCorrectionDraft, manualRequest, sideFor } from './manual'
 import { nowText, parseZoneText, zoneText } from './manual-time'
+import { restoreZone } from '@/test/zone'
 
 const draft = { ...emptyManualDraft(), entryId: 'entry-1', quantity: '1', price: '100', source: 'Statement' }
 const now = Date.parse('2026-10-20T12:00:00Z')
 const originalZone = process.env.TZ
-afterEach(() => { process.env.TZ = originalZone })
+afterEach(() => { restoreZone(originalZone) })
 
 describe('manual execution time in the display zone (phase 1, 1.6b)', () => {
   it.each([

@@ -13,5 +13,8 @@ export function Time({ at, style = 'datetime', fallback = '—', className }: {
   if (!at) return <>{fallback}</>
   const date = new Date(at)
   if (!Number.isFinite(date.getTime())) return <span className={className}>{at}</span>
-  return <time dateTime={at} title={otherZoneTime(date, zone)} className={className}>{formatTime(date, zone, style)}</time>
+  // The exact style reads the fraction from the stored text, which a Date would round to milliseconds.
+  const exact = style === 'datetime-exact'
+  return <time dateTime={at} title={otherZoneTime(exact ? at : date, zone, exact ? 'datetime-exact' : 'datetime-seconds')} className={className}>
+    {formatTime(exact ? at : date, zone, style)}</time>
 }

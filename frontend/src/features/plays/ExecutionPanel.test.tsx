@@ -8,6 +8,7 @@ import { ExecutionPanel } from './ExecutionPanel'
 import { createDraft } from './draft'
 import { PlayJournal } from './WorkspacePanels'
 import { fillSummary, suggestionGroups } from './execution'
+import { restoreZone } from '@/test/zone'
 
 const entry = { ...createDraft().entries[0]!, id: 'e1', name: 'Entry 1', price: '100' }
 const entries = [{ ...entry, stops: [{ ...entry.stops[0]!, id: 's1', value: '95' }], targets: [{ ...entry.targets[0]!, id: 't1', value: '110' }] }]
@@ -256,6 +257,6 @@ describe('fill times in the display zone (phase 1, 1.6e)', () => {
       render(<ExecutionPanel execution={execution} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
       expect(within(screen.getByRole('region', { name: 'Linked orders' })).getByText('Open Long 0.5 at 100'))
         .toHaveAttribute('title', 'Open Long 0.5 at 100 · 3 Oct 2026, 12:01:00 CEST')
-    } finally { process.env.TZ = zone }
+    } finally { restoreZone(zone) }
   })
 })

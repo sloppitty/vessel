@@ -10,10 +10,11 @@ import type { SavedPlay } from '@/api/plays'
 import { savedPlayFixture } from '@/test/workspace-fixture'
 
 const originalZone = process.env.TZ
-afterEach(() => { process.env.TZ = originalZone })
+afterEach(() => { restoreZone(originalZone) })
 import { ManualExecutionPanel } from './ManualExecutionPanel'
 import { emptyManualDraft, type ManualExecutionDraft } from './manual'
 import { draftFromSaved, savedState } from './saved'
+import { restoreZone } from '@/test/zone'
 
 const at = '2026-10-13T10:00:00Z'
 const id = '00000000-0000-4000-8000-000000000001'
@@ -104,6 +105,18 @@ describe('manual entry (phase 1, 1.6b)', () => {
     expect(screen.getByLabelText('Execution time (Europe/Madrid)')).toHaveValue('2026-10-13 12:00:00')
     await user.click(screen.getByRole('button', { name: 'Record execution' }))
     expect(methods.addManualExecution).toHaveBeenCalledWith(play.summary.id, expect.objectContaining({ occurredAtUtc: '2026-10-13T10:00:00Z' }))
+  })
+
+  it('keeps a sub-second correction visible in the records and the audit history (phase 1, 1.6e)', async () => {
+    const before = { ...record, occurredAtUtc: '2026-10-13T10:00:00.100000Z' }
+    const after = { ...record, occurredAtUtc: '2026-10-13T10:00:00.900000Z' }
+    const corrected: ManualExecutions = { ...ledger('open', [after]),
+      history: [{ id, executionId: id, before, after, reason: 'Statement time', occurredAtUtc: at }] }
+    const { api } = client(corrected)
+    render(<Harness api={api} initial={corrected.play} zone="utc" />)
+    expect(await screen.findByText('Before:', { exact: false })).toHaveTextContent('13 Oct 2026, 10:00:00.100000 UTC')
+    expect(screen.getByText('After:', { exact: false })).toHaveTextContent('13 Oct 2026, 10:00:00.900000 UTC')
+    expect(within(screen.getByRole('list', { name: 'Manual executions' })).getByText('13 Oct 2026, 10:00:00.900000 UTC')).toBeInTheDocument()
   })
 
   it('enters the time in the browser zone with Now, and sends it as UTC', async () => {

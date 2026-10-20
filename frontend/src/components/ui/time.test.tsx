@@ -9,10 +9,11 @@ import { ActivityTable } from '@/features/workspace/ActivityTable'
 import { fillMarkers } from '@/features/plays/chart-fills'
 import { TimeSettings } from '@/features/settings/TimeSettings'
 import { Time } from './time'
+import { restoreZone } from '@/test/zone'
 
 const originalZone = process.env.TZ
 afterEach(() => {
-  process.env.TZ = originalZone
+  restoreZone(originalZone)
   localStorage.clear()
   displayZoneStore.reload()
 })

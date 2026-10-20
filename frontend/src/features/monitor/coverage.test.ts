@@ -5,6 +5,7 @@ import { coverageAs, coverageFixture, monitorFixture } from '@/test/monitor-fixt
 import { savedPlayFixture } from '@/test/workspace-fixture'
 import { formatTime } from '@/lib/time'
 import { coverageHeading, coverageLines, stopEvidenceFor } from './coverage'
+import { restoreZone } from '@/test/zone'
 
 const execution = (coverage: MonitorCoverage[] | undefined, overrides: Partial<PlayExecution> = {}): PlayExecution => ({
   playId: savedPlayFixture.summary.id, status: 'open', tracked: true, reason: null, checkedAtUtc: null,
@@ -22,7 +23,7 @@ const level = (evidence: MonitorStopEvidence['evidence'], extra: Partial<Monitor
 const of = (coverage: MonitorCoverage[] | undefined, price = saved, overrides: Partial<PlayExecution> = {}) =>
   stopEvidenceFor(execution(coverage, overrides), stamp)!('entry-1', 'stop-1', price)
 const originalZone = process.env.TZ
-afterEach(() => { process.env.TZ = originalZone })
+afterEach(() => { restoreZone(originalZone) })
 
 describe('stop evidence for the chart (Phase 0, 0.4c)', () => {
   it('confirms only a stop the last check saw resting at its saved level, dated, and words everything else as the evidence does', () => {

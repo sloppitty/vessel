@@ -56,7 +56,9 @@ covering F-05 and G-13.
   ledger's audit, Execution's fill list, and manual entry, which types and
   shows times in the zone and sends UTC. A manual draft keeps the zone its
   time was typed in, so changing the setting never moves it to another
-  instant; its label names that zone.
+  instant; its label names that zone. Manual records and their audit
+  history show the stored fraction of a second digit for digit, so a
+  sub-second correction stays visible.
 - **Spans.** An Activity operation names one zone at its end, or each end's
   own when a daylight-saving change falls between them.
 - **Day boundaries.** Server filters keep UTC days until Phase 2. Activity's
