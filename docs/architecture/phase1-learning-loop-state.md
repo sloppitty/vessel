@@ -292,6 +292,14 @@ October 20, 2026, branch `t3/phase1-unresolved`, stacked on 1.2:
     way. A domain test steps the clock back between declarations, and History shows the reason on the return.
   - **Check.** `scripts/check.sh` passed again: backend 3,601 passed, 5 skipped; frontend 152 files and 3,810 tests.
 
+- **Sol (Codex) round 3.** Two findings, both fixed:
+  - **History (medium).** The browser's History guard refused the reason a return to Open now carries, so a returned
+    Play's History failed to load. It accepts it there, and a test reads a whole declare, return and settle history.
+  - **Tied times (low).** Declarations at one instant still fell back to random IDs. Each status change now keeps the
+    Play version it produced (`PlayVersion`, added in place to the unshipped `UnresolvedStatus` migration), and the
+    current declaration is the one with the highest. A domain test repeats tied declarations and returns.
+  - **Check.** `scripts/check.sh` passed again: backend 3,602 passed, 5 skipped; frontend 152 files and 3,811 tests.
+
 ### 1.3b Manual correction batch
 
 Not started.
