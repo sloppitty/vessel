@@ -675,3 +675,14 @@ October 20, 2026, branch `t3/phase1-time`, stacked on 1.6b–d:
   - U17: one fill at one time in Activity and on the chart under either setting.
   - Updated suites for the zone-named times.
 - **Checks.** `scripts/check.sh` passed: backend 3,611 passed, 5 skipped; frontend 155 files and 3,848 tests; build clean.
+
+- **Sol (Codex) round 1.** Four findings, all fixed:
+  - **Kept drafts (high).** Changing Times read a kept manual draft's text in the new zone, moving it to another
+    instant. A draft keeps the zone its time was typed or loaded in and is read there; its label names that zone. A
+    test switches the setting mid-entry.
+  - **DST spans (medium).** An Activity operation across a daylight-saving change named only its end's offset. Each
+    end names its own then.
+  - **Event times (medium).** Funding settlements and coverage and the manual audit history now follow the setting,
+    and Execution lists each linked fill with its time, which U17's tests cover.
+  - **Review heading (medium).** The close column no longer says UTC.
+  - **Check.** `scripts/check.sh` passed again: backend 3,612 passed, 5 skipped; frontend 155 files and 3,853 tests.
