@@ -28,10 +28,10 @@ function PlayCell({ operation: op, onOpenPlay, opening, onJournal }: {
     if (!onOpenPlay) return <span className="workspace-badge operation-play-title" title={title}>{title}</span>
     const playId = op.playId
     return <><button type="button" className="text-action operation-play-link" title={title} disabled={opening !== null}
-      aria-label={`Open Play ${title}`} onClick={() => onOpenPlay(playId)}>{title}</button>{opening === playId && <small role="status">Opening…</small>}</>
+      aria-label={`${title}, open Play`} onClick={() => onOpenPlay(playId)}>{title}</button>{opening === playId && <small role="status">Opening…</small>}</>
   }
   if (onJournal && op.status === 'closed' && op.playAssociation === 'unassigned')
-    return <button type="button" className="text-action operation-journal" aria-label={`Journal this ${op.contractId} trade`} onClick={() => onJournal(op)}>Journal this trade</button>
+    return <button type="button" className="text-action operation-journal" aria-label={`Journal this trade, ${op.contractId}`} onClick={() => onJournal(op)}>Journal this trade</button>
   return <span className="workspace-badge">{op.playAssociation === 'mixed' ? 'Mixed' : 'Unassigned'}</span>
 }
 

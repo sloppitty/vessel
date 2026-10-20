@@ -67,21 +67,26 @@ describe('operation table', () => {
       onPreview={preview} onOpenPlay={openPlay} />)
     expect(screen.queryByText(/^Play [\da-f]{8}$/)).not.toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Open Play BTC breakout' }))
+    await userEvent.click(screen.getByRole('button', { name: 'BTC breakout, open Play' }))
     expect(openPlay).toHaveBeenCalledExactlyOnceWith(playId)
-    expect(screen.getByRole('button', { name: 'Open Play Untitled play' })).toHaveAttribute('title', 'Untitled play')
+    expect(screen.getByRole('button', { name: 'Untitled play, open Play' })).toHaveAttribute('title', 'Untitled play')
     // Only the closed unassigned operation can be journalled; open and mixed ones say how they are associated.
-    await userEvent.click(screen.getByRole('button', { name: 'Journal this BTC trade' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Journal this trade, BTC' }))
     expect(preview).toHaveBeenCalledExactlyOnceWith(closed)
     expect(screen.getAllByRole('button', { name: /^Journal this/ })).toHaveLength(1)
+    // Each accessible name starts with the button's visible text.
+    for (const name of ['BTC breakout, open Play', 'Untitled play, open Play', 'Journal this trade, BTC']) {
+      const button = screen.getByRole('button', { name })
+      expect(name.startsWith(button.textContent!)).toBe(true)
+    }
     expect(screen.getAllByText('Unassigned')).toHaveLength(1)
     expect(screen.getAllByText('Mixed')).toHaveLength(1)
     // Neither action expands its row.
     for (const toggle of screen.getAllByRole('button', { name: /^Expand / })) expect(toggle).toHaveAttribute('aria-expanded', 'false')
 
     view.rerender(<OperationsTable api={client()} operations={[linked, untitled]} accounts={[accountFixture]} onOpenPlay={openPlay} opening={playId} />)
-    expect(screen.getByRole('button', { name: 'Open Play BTC breakout' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Open Play Untitled play' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'BTC breakout, open Play' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Untitled play, open Play' })).toBeDisabled()
     expect(screen.getByRole('status')).toHaveTextContent('Opening…')
     view.rerender(<OperationsTable api={client()} operations={[linked]} accounts={[accountFixture]} />)
     expect(screen.getByText('BTC breakout')).not.toHaveRole('button')
@@ -91,10 +96,10 @@ describe('operation table', () => {
     const linked: ActivityOperation = { ...closed, playId, playAssociation: 'linked', playTitle: 'BTC breakout' }
     const onOpenPlay = vi.fn().mockRejectedValueOnce(new ApiError('http', 'Play not found.', 404)).mockResolvedValueOnce(undefined)
     render(<ActivityOperations api={client(vi.fn().mockResolvedValue(activityPage([linked])))} accounts={[accountFixture]} onOpenPlay={onOpenPlay} />)
-    await userEvent.click(await screen.findByRole('button', { name: 'Open Play BTC breakout' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'BTC breakout, open Play' }))
     expect(onOpenPlay).toHaveBeenCalledWith(playId, expect.any(AbortSignal))
     expect(await screen.findByRole('alert')).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Open Play BTC breakout' }))
+    await userEvent.click(screen.getByRole('button', { name: 'BTC breakout, open Play' }))
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
     expect(onOpenPlay).toHaveBeenCalledTimes(2)
   })

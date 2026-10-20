@@ -116,6 +116,15 @@ public sealed class ActivityOperationsPostgresTests
         Assert.Equal(60, document.TotalCount); Assert.Equal(120, document.RetainedFillCount);
         var titled = document.Operations.Single(o => o.PlayAssociation == "linked");
         Assert.Equal((playId, "BTC breakout"), (titled.PlayId, titled.PlayTitle));
+        // A rename shows through the warm Activity cache at once, without flagging Activity as changed.
+        await using (var db = database.Context(owner))
+        {
+            (await db.Plays.SingleAsync(p => p.Id == playId)).Annotate("Renamed breakout", "{}", "", At.AddHours(1));
+            await db.SaveChangesAsync();
+        }
+        var renamed = (await client.GetFromJsonAsync<ActivityPageDto>("/api/activity?pageSize=100"))!;
+        Assert.Equal(("Renamed breakout", document.Version),
+            (renamed.Operations.Single(o => o.PlayAssociation == "linked").PlayTitle, renamed.Version));
         Assert.All(document.Operations.Where(o => o.PlayAssociation != "linked"), o => Assert.Null(o.PlayTitle));
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/activity?accountId={foreign.Id}")).StatusCode);
         Assert.Empty((await client.GetFromJsonAsync<ActivityPageDto>($"/api/activity?accountId={disabled.Id}"))!.Operations);

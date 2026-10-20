@@ -11,6 +11,19 @@ describe('default Play title', () => {
     expect(defaultPlayTitle({ instrument: 'BTC', direction: 'long' }, new Date(2026, 8, 30))).toBe('BTC Long · 30 Sep 2026')
   })
 
+  it('can name the UTC day instead of the local one, as Activity shows trades', () => {
+    // 02:00 UTC on 13 October is still 12 October in New York; the retrospective preview uses Activity's UTC day.
+    const zone = process.env.TZ
+    process.env.TZ = 'America/New_York'
+    try {
+      const at = new Date('2026-10-13T02:00:00Z')
+      expect(defaultPlayTitle({ instrument: 'BTC', direction: 'long' }, at)).toBe('BTC Long · 12 Oct 2026')
+      expect(defaultPlayTitle({ instrument: 'BTC', direction: 'long' }, at, 'utc')).toBe('BTC Long · 13 Oct 2026')
+    } finally {
+      if (zone === undefined) delete process.env.TZ
+      else process.env.TZ = zone
+    }
+  })
   it('uses a manual label as entered, with spaces tidied', () => {
     expect(defaultPlayTitle({ instrument: '  BTC-PERP  ', direction: 'long' }, day)).toBe('BTC-PERP Long · 15 Oct 2026')
     expect(defaultPlayTitle({ instrument: 'Gold   spot', direction: 'short' }, day)).toBe('Gold spot Short · 15 Oct 2026')

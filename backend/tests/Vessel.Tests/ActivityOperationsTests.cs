@@ -616,6 +616,20 @@ public sealed class ActivityOperationsTests
     }
 
     [Fact]
+    public async Task Play_titles_are_read_only_for_the_rows_of_the_shown_page()
+    {
+        // 30 round trips, each linked to its own Play: page 2 of 25 shows the oldest five, and only their titles are read.
+        var plays = Enumerable.Range(0, 30).Select(_ => Guid.NewGuid()).ToList();
+        var fills = Enumerable.Range(0, 30).SelectMany(n => new[] { Fill(2 * n), Fill(2 * n + 1, "sell", "close") }).ToList();
+        var links = fills.Select((f, i) => (f.Id, Play: plays[i / 2])).ToDictionary(x => x.Id, x => x.Play);
+        var store = new Store(new ActivityFacts([Account(AccountId)], fills, [], links), plays.ToDictionary(p => p, p => $"Play {plays.IndexOf(p)}"));
+        var page = await new ActivityService(store, Workspace(store.Facts), new Clock(Now)).PageAsync(new(Page: "2", PageSize: "25"), default);
+        Assert.Equal(5, page.Operations.Count);
+        Assert.Equal(plays.Take(5).Order(), store.RequestedTitles.Order());
+        Assert.All(page.Operations, o => Assert.Equal($"Play {plays.IndexOf(o.PlayId!.Value)}", o.PlayTitle));
+    }
+
+    [Fact]
     public void Distinct_orders_are_counted_once_across_partial_fills()
     {
         var op = Assert.Single(OperationAggregator.Aggregate([Fill(0, order: "entry"), Fill(1, order: "entry"),
@@ -671,6 +685,7 @@ public sealed class ActivityOperationsTests
     }
     private sealed class Store(ActivityFacts facts, IReadOnlyDictionary<Guid, string>? titles = null) : IActivityStore
     {
+        public ActivityFacts Facts => facts;
         public List<Guid> RequestedTitles { get; } = [];
         public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) => Task.FromResult(facts);
         public Task<IReadOnlyDictionary<Guid, string>> PlayTitlesAsync(IReadOnlyCollection<Guid> playIds, CancellationToken ct)
