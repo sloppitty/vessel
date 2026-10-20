@@ -72,7 +72,7 @@ public sealed class ReviewProcessTests
         Answer(excluded.Play, "followed");       // excluded by Review, but answered: unscored
         Unpriced(f.Add(5));                      // unanswered and excluded: exclusion list only
         Cancelled("deviated");                   // unscored
-        Cancelled();                             // no answers: exclusion list only
+        var unanswered = Cancelled();            // no answers: exclusion list only
         Unresolved("followed");                  // unscored
         var retrospective = Play.Retrospective(Guid.NewGuid(), f.Accounts[0], new("hyperliquid", "BTC"), EmptyPlan,
             At, At, "Imported");
@@ -94,6 +94,15 @@ public sealed class ReviewProcessTests
         var unscored = (await f.Service.ProcessAsync(new(new(Period: "all"), Lane: "unscored"), default)).Items;
         Assert.All(unscored, row => Assert.Equal(((string?)null, (string?)null), (row.Net, row.RMultiple)));
         Assert.Equal(["cancelled", "closed", "unresolved"], unscored.Select(row => row.Status).Order());
+
+        // Every unscored planned Play is in the exclusion list, answered or not, and the excluded counts add up to it.
+        var coverage = (await f.Service.GetAsync(new(Period: "all"), default)).Coverage;
+        Assert.Equal((2, 1, 2), (coverage.IncompleteFees + coverage.IncompleteExecutions, coverage.Unresolved, coverage.Cancelled));
+        var exclusions = await f.Service.ExclusionsAsync(new(Period: "all"), default);
+        Assert.Equal(5, exclusions.Total);
+        Assert.Equal(["Cancelled by the owner as missed, before any fill: it has no result."],
+            exclusions.Items.Single(item => item.PlayId == unanswered.Id).Reasons);
+        Assert.Empty((await f.Service.ExclusionsAsync(new(Period: "all", AccountId: Guid.NewGuid()), default)).Items);
     }
 
     [Fact]

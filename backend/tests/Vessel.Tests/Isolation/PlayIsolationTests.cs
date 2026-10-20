@@ -334,10 +334,13 @@ public abstract class PlayIsolationCases(IsolationHost api)
             var scored = Assert.Single(review.GetProperty("plays").EnumerateArray());
             Assert.Equal((mine.ScoredId, true), (scored.GetProperty("id").GetGuid(), scored.GetProperty("reviewed").GetBoolean()));
             Assert.Equal(1, review.GetProperty("coverage").GetProperty("incompleteFees").GetInt32());
+            // The owner's cancelled Play is listed with the exclusions too (phase 1, 1.4b), and never the other owner's.
+            Assert.Equal(1, review.GetProperty("coverage").GetProperty("cancelled").GetInt32());
             var exclusions = await owner.GetJson("/api/review/exclusions?period=all");
-            Assert.Equal(1, exclusions.GetProperty("total").GetInt32());
-            var excluded = Assert.Single(exclusions.GetProperty("items").EnumerateArray());
-            Assert.Equal(mine.Excluded, excluded.GetProperty("playId").GetGuid());
+            Assert.Equal(2, exclusions.GetProperty("total").GetInt32());
+            Assert.Equal(new[] { mine.Excluded, mine.Cancelled }.Order(),
+                exclusions.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("playId").GetGuid()).Order());
+            var excluded = exclusions.GetProperty("items").EnumerateArray().Single(item => item.GetProperty("playId").GetGuid() == mine.Excluded);
             Assert.Contains(excluded.GetProperty("reasons").EnumerateArray(), r => r.GetString()!.Contains("unknown", StringComparison.OrdinalIgnoreCase));
             // The stored review and its history are the owner's own.
             var play = await owner.GetJson($"/api/plays/{mine.ScoredId}");

@@ -13,7 +13,7 @@ import { PostHocBadge } from '@/features/plays/PostHocBadge'
 import { preflightLabels } from '@/features/plays/preflight'
 import { ReviewChart } from './ReviewChart'
 import { ReviewExclusions } from './ReviewExclusions'
-import { ProcessSection, ReviewProcessList } from './ReviewProcess'
+import { minimumRateN, ProcessSection, ReviewProcessList } from './ReviewProcess'
 import { reviewDate, reviewMoney, reviewMultiple, reviewPercent, reviewResult } from '@/lib/format'
 import { negative, tone } from './format'
 import './review.css'
@@ -39,14 +39,21 @@ const smallSample = 20
 /** The breakdown's groupings: the ranked ones, then origin and direction in a fixed order (phase 1, 1.4b). */
 const groupTabs = [['portfolios', 'Portfolios', 'Portfolio'], ['accounts', 'Accounts', 'Account'], ['assets', 'Assets', 'Asset'],
   ['origins', 'Origin', 'Origin'], ['directions', 'Direction', 'Direction']] as const
-/** Every Play the period leaves out: incomplete fees or executions, and Unresolved Plays, which have no result (1.3a). */
+/** Every Play the period leaves out: incomplete fees or executions, and Unresolved (1.3a) and Cancelled (1.4b) Plays, which
+ * have no result. */
 const excludedCount = (coverage: ReviewDocument['coverage']) =>
-  coverage.incompleteFees + coverage.incompleteExecutions + (coverage.unresolved ?? 0)
+  coverage.incompleteFees + coverage.incompleteExecutions + (coverage.unresolved ?? 0) + (coverage.cancelled ?? 0)
 
 /** A breakdown cell's mark when its own denominator is below `smallSample`: batting and profit factor count decided
  * Plays, average gain / loss the smaller of wins and losses. */
 function SampleMark({ n }: { n: number }) {
   return n < smallSample ? <small className="pr-sample">Small sample</small> : null
+}
+
+/** A breakdown rate. In the fixed Origin and Direction views it appears only where its own denominator is at least
+ * `minimumRateN`, as in the process cases (1.4b); below it the cell shows its n. */
+function Rate({ value, n, fixed }: { value: string; n: number; fixed: boolean }) {
+  return fixed && n < minimumRateN ? <><span className="pr-muted">—</span><small className="pr-sample">n = {n}</small></> : <>{value}<SampleMark n={n} /></>
 }
 
 /**
@@ -213,13 +220,13 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay, workspaceAccount
       </div>}
       <section className="pr-panel pr-breakdown"><header className="pr-panel-heading"><h2>Breakdown</h2><div className="pr-segmented" role="group" aria-label="Break down results by">{groupTabs.filter(([item]) => item in report.groups).map(([item, label]) => <button key={item} aria-pressed={group === item} onClick={() => setGroup(item)}>{label}</button>)}</div></header>
         <div className="pr-table-scroll"><table className="pr-breakdown-table"><caption className="sr-only">{fixedGroup ? `${group} in a fixed order` : `${group} ranked by net closed-play P&L`}</caption><thead><tr><th>{groupTabs.find(([item]) => item === group)?.[2]}</th><th>Plays</th><th>Batting avg.</th><th>Avg. gain / loss</th><th>Profit factor</th><th>Net P&L</th><th><span className="sr-only">Inspect</span></th></tr></thead><tbody>
-          {groups.map((row, index) => <tr key={row.id}><th scope="row">{fixedGroup ? <span className="pr-group-name"><strong>{row.name}</strong><small>{row.detail}</small></span> : <button onClick={() => inspect(row.id, row.name)}><span className="pr-rank">{String(index + 1).padStart(2, '0')}</span><span><strong>{row.name}</strong><small>{groupDetail(row)}</small></span></button>}</th><td>{row.metrics.count}<small>{row.metrics.wins}W · {row.metrics.losses}L · {row.metrics.scratches}S</small></td><td>{reviewPercent(row.metrics.batting, true)}<SampleMark n={row.metrics.wins + row.metrics.losses} /></td><td>{reviewMultiple(row.metrics.payoff)}<SampleMark n={Math.min(row.metrics.wins, row.metrics.losses)} /></td><td>{reviewMultiple(row.metrics.profitFactor)}<SampleMark n={row.metrics.wins + row.metrics.losses} /></td><td className={tone(row.metrics.net)}><strong>{reviewMoney(row.metrics.net, true)}</strong><i className="pr-pnl-bar"><b style={{ width: `${Math.abs(Number(row.metrics.net)) / Math.max(...groups.map(g => Math.abs(Number(g.metrics.net))), 1) * 100}%`, background: Number(row.metrics.net) >= 0 ? 'var(--pr-green)' : 'var(--pr-red)' }} /></i></td><td>{!fixedGroup && <button className="pr-row-open" aria-label={`Inspect ${row.name}`} onClick={() => inspect(row.id, row.name)}><ChevronRight size={16} /></button>}</td></tr>)}
+          {groups.map((row, index) => <tr key={row.id}><th scope="row">{fixedGroup ? <span className="pr-group-name"><strong>{row.name}</strong><small>{row.detail}</small></span> : <button onClick={() => inspect(row.id, row.name)}><span className="pr-rank">{String(index + 1).padStart(2, '0')}</span><span><strong>{row.name}</strong><small>{groupDetail(row)}</small></span></button>}</th><td>{row.metrics.count}<small>{row.metrics.wins}W · {row.metrics.losses}L · {row.metrics.scratches}S</small></td><td><Rate fixed={fixedGroup} value={reviewPercent(row.metrics.batting, true)} n={row.metrics.wins + row.metrics.losses} /></td><td><Rate fixed={fixedGroup} value={reviewMultiple(row.metrics.payoff)} n={Math.min(row.metrics.wins, row.metrics.losses)} /></td><td><Rate fixed={fixedGroup} value={reviewMultiple(row.metrics.profitFactor)} n={row.metrics.wins + row.metrics.losses} /></td><td className={tone(row.metrics.net)}><strong>{reviewMoney(row.metrics.net, true)}</strong><i className="pr-pnl-bar"><b style={{ width: `${Math.abs(Number(row.metrics.net)) / Math.max(...groups.map(g => Math.abs(Number(g.metrics.net))), 1) * 100}%`, background: Number(row.metrics.net) >= 0 ? 'var(--pr-green)' : 'var(--pr-red)' }} /></i></td><td>{!fixedGroup && <button className="pr-row-open" aria-label={`Inspect ${row.name}`} onClick={() => inspect(row.id, row.name)}><ChevronRight size={16} /></button>}</td></tr>)}
           {!groups.length && <tr><td colSpan={7}><div className="pr-empty"><BarChart3 size={25} /><strong>No scored closed Plays</strong>{filtered && <button className="pr-outline-button" onClick={() => setQuery(defaultReviewQuery)}>Reset view</button>}</div></td></tr>}
-        </tbody>{groups.length > 0 && <tfoot><tr><th scope="row">Combined result</th><td>{stats.count}</td><td>{reviewPercent(stats.batting, true)}<SampleMark n={decided} /></td><td>{reviewMultiple(stats.payoff)}<SampleMark n={Math.min(stats.wins, stats.losses)} /></td><td>{reviewMultiple(stats.profitFactor)}<SampleMark n={decided} /></td><td className={tone(stats.net)}>{reviewMoney(stats.net, true)}</td><td /></tr></tfoot>}</table></div>
+        </tbody>{groups.length > 0 && <tfoot><tr><th scope="row">Combined result</th><td>{stats.count}</td><td><Rate fixed={fixedGroup} value={reviewPercent(stats.batting, true)} n={decided} /></td><td><Rate fixed={fixedGroup} value={reviewMultiple(stats.payoff)} n={Math.min(stats.wins, stats.losses)} /></td><td><Rate fixed={fixedGroup} value={reviewMultiple(stats.profitFactor)} n={decided} /></td><td className={tone(stats.net)}>{reviewMoney(stats.net, true)}</td><td /></tr></tfoot>}</table></div>
       </section>
       {report.process && <ProcessSection process={report.process} onInspect={inspectProcess} />}
       <section className="pr-coverage" aria-label="Data coverage"><ShieldCheck size={16} /><details><summary>{stats.count} scored · {excludedCount(report.coverage)} excluded · {stats.reviewed} {stats.reviewed === 1 ? 'review' : 'reviews'} complete</summary>
-        <p><button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteFees} incomplete fees</button> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteExecutions} incomplete executions</button>{report.coverage.unresolved ? <> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.unresolved} unresolved</button></> : null} · {report.coverage.openPlays} currently open</p>
+        <p><button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteFees} incomplete fees</button> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteExecutions} incomplete executions</button>{report.coverage.unresolved ? <> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.unresolved} unresolved</button></> : null}{report.coverage.cancelled ? <> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.cancelled} cancelled</button></> : null} · {report.coverage.openPlays} currently open</p>
         <p>{report.coverage.unassignedFills} unassigned fills in this period.</p>
         <p>Initial planned-risk inputs for {stats.riskCount} of {stats.count} scored Plays.</p>
         {report.preflight && <PreflightCounts preflight={report.preflight} {...(report.process ? { onInspect: inspectProcess } : {})} />}

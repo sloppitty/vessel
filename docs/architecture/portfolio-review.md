@@ -345,6 +345,11 @@ decision 9. It covers G-01.
 
   An unscored planned Play with no answers is only in the exclusion list.
   Answers are read as stored; a completed review is not required.
+- **Cancelled Plays in coverage.** `coverage.cancelled` counts the period's
+  Cancelled Plays in scope, by their cancellation time, and the exclusion
+  drill-down lists each with its cancel reason: it had no fill, so it has no
+  result. The excluded total adds them to the incomplete and unresolved
+  counts.
 - **`ReviewDto.process`.** Two rows (`followed`, `deviated`) of wins, losses
   and scratches, the four lane counts, and mistake tags. Counts only: the
   browser shows a share only where its own denominator is at least 10.
@@ -363,6 +368,11 @@ decision 9. It covers G-01.
   earlier tags, newest use first, at most 100, for the review form.
 - **Breakdown.** Origin (planned, retrospective) and Direction (long, short)
   join Portfolios, Accounts and Assets, in that fixed order and without row
-  inspection, since Review has no origin or direction filter.
+  inspection, since Review has no origin or direction filter. Their batting
+  average, average gain / loss and profit factor, the combined row included,
+  appear only where their own denominator is at least 10; below it the cell
+  shows `—` and its n.
+- **Queries.** Review reads the first linked execution of every Unresolved
+  Play in scope in one grouped query, never one per Play.
 - **Plays.** Review's Play rows gain `adherence`, `mistakeTag`, `direction`
   and `reviewCompletion`.

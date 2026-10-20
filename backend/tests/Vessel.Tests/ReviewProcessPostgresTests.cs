@@ -1,7 +1,11 @@
+using System.Data.Common;
 using System.Net.Http.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Vessel.Application.Plays;
 using Vessel.Application.Review;
 using Vessel.Domain.Plays;
+using Vessel.Persistence;
 
 namespace Vessel.Tests;
 
@@ -53,5 +57,55 @@ public sealed partial class DiaryPostgresTests
         Assert.Equal(2, (await client.GetFromJsonAsync<ReviewProcessPageDto>("/api/review/process?period=all&mistakeTag=late%20plan"))!.Total);
         // The review form's autocomplete offers the latest spelling once.
         Assert.Equal(["late PLAN"], (await client.GetFromJsonAsync<string[]>("/api/review/mistake-tags"))!);
+    }
+}
+
+public sealed partial class ExecutionPostgresTests
+{
+    [PostgresFact]
+    public async Task Each_unresolved_Play_s_earliest_linked_execution_sets_its_post_hoc_flag_in_one_query()
+    {
+        // Review reads the first execution of every Unresolved Play in one grouped query (1.4b).
+        var (database, h, account) = await SetUp();
+        await using var _ = database;
+        async Task<Guid> Stuck(string price, string order, decimal at, DateTimeOffset? earliest)
+        {
+            var play = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", $"Stuck {order}", TestPlays.Plan(price)), default);
+            play = await h.Plays.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "planned"), default);
+            h.Orders.Orders.Add(Order(order, "buy", at, "filled"));
+            AddFills(h, Fill($"{order}-a", order, "Open Long", at, 0.5m, earliest), Fill($"{order}-b", order, "Open Long", at, 0.5m));
+            Assert.Equal("open", (await h.CheckAsync(play.Summary.Id)).Status);
+            var open = await h.Plays.GetAsync(play.Summary.Id, default);
+            await h.Execution.DeclareUnresolvedAsync(play.Summary.Id, new(open.Summary.Version, "flip", "Flipped."), default);
+            return play.Summary.Id;
+        }
+        async Task<int> Queries()
+        {
+            var probe = new CommandCount();
+            await using var db = new VesselDbContext(new DbContextOptionsBuilder<VesselDbContext>()
+                .UseNpgsql(database.ConnectionString).AddInterceptors(probe).Options, new CoreOwner(h.Owner));
+            await new ReviewStore(db, new SizingStore(db, TestUnitOfWork.For(db))).ReadAsync(new(Period: "all"), DateTimeOffset.UtcNow, default);
+            return probe.Count;
+        }
+        // One fill before the plan was written and one after: the earliest decides.
+        var early = await Stuck("100", "31", 100.01m, DateTimeOffset.UtcNow.AddHours(-2));
+        var one = await Queries();
+        var late = await Stuck("105", "32", 105.01m, null);
+        await Stuck("102", "33", 102.01m, null);
+        Assert.Equal(one, await Queries());
+        var page = await Review(h).ProcessAsync(new(new(Period: "all"), SkippedCheck: "not-recorded"), default);
+        Assert.Equal(3, page.Total);
+        Assert.Equal((true, false), (page.Items.Single(i => i.Id == early).PlannedAfterExecution, page.Items.Single(i => i.Id == late).PlannedAfterExecution));
+    }
+
+    private sealed class CommandCount : DbCommandInterceptor
+    {
+        public int Count { get; private set; }
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command, CommandEventData eventData,
+            InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            Count++;
+            return ValueTask.FromResult(result);
+        }
     }
 }

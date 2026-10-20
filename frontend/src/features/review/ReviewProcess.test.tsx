@@ -52,6 +52,8 @@ describe('process cases (phase 1, 1.4b)', () => {
     expect(reviewProcess).toHaveBeenCalledWith(expect.objectContaining({ period: 'month', offset: 0 }), { cell: 'followed-win' }, expect.any(AbortSignal))
     expect(await within(dialog).findByText('Plan written after first execution')).toBeInTheDocument()
     expect(within(dialog).getByText(/Followed · Review not complete/)).toBeInTheDocument()
+    // The link is named by its visible title.
+    expect(within(dialog).getByRole('button', { name: 'Late plan' })).toBeInTheDocument()
   })
 
   it('breaks results down by origin and direction in a fixed order, without inspecting their rows', async () => {
@@ -64,6 +66,23 @@ describe('process cases (phase 1, 1.4b)', () => {
     const table = screen.getByRole('table', { name: 'origins in a fixed order' })
     expect(within(table).getAllByRole('rowheader').map(cell => cell.textContent)).toEqual(['Planned1 scored', 'Retrospective1 scored', 'Combined result'])
     expect(within(table).queryByRole('button', { name: /^Inspect/ })).not.toBeInTheDocument()
+    // One win and one loss decided: no batting average, payoff or profit factor, in the rows or the combined result.
+    const [, planned] = within(table).getAllByRole('row')
+    expect(within(planned!).getAllByRole('cell').slice(1, 4).map(cell => cell.textContent)).toEqual(['—n = 2', '—n = 1', '—n = 2'])
+    expect(within(table).getByRole('rowheader', { name: 'Combined result' }).parentElement).not.toHaveTextContent('%')
+    expect(table).not.toHaveTextContent('50.0%')
+    // The ranked views keep their rates, marked as small samples.
+    await user.click(screen.getByRole('button', { name: 'Assets' }))
+    expect(screen.getByRole('table', { name: 'assets ranked by net closed-play P&L' })).toHaveTextContent('50.0%Small sample')
+  })
+
+  it('lists the period\'s cancelled Plays with the exclusions and counts them as excluded', async () => {
+    const api = { ...createWorkspaceApi('test'), review: vi.fn().mockResolvedValue({ ...reviewFixture,
+      coverage: { ...reviewFixture.coverage, unresolved: 1, cancelled: 3 } }) }
+    renderWithVenues(<ReviewPage api={api} reloadGeneration={0} onOpenPlay={vi.fn()} />)
+    // 1 incomplete fees + 1 incomplete executions + 1 unresolved + 3 cancelled.
+    expect(await screen.findByRole('button', { name: 'Inspect exclusions (6)' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '3 cancelled' })).toBeInTheDocument()
   })
 
   it('builds the drill-down path and accepts only pages whose counts add up', () => {

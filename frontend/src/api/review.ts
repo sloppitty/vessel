@@ -94,6 +94,8 @@ export interface ReviewDocument {
     unassignedFills: number; firstFillAtUtc: string | null; notice: string
     /** Unresolved Plays declared in the period, excluded with no result (phase 1, 1.3a); absent from older servers. */
     unresolved?: number
+    /** Plays cancelled in the period, listed with the exclusions (phase 1, 1.4b); absent from an older server. */
+    cancelled?: number
   }
   plays: ReviewPlay[]; offset: number; nextOffset: number | null
   /**
@@ -154,7 +156,8 @@ export const isReviewDocument = (v: unknown): v is ReviewDocument => isRecord(v)
   (v.process === undefined || isReviewProcess(v.process)) &&
   isRecord(v.coverage) && ['closedCandidates', 'incompleteFees', 'incompleteExecutions', 'openPlays', 'unassignedFills'].every(key => isCount((v.coverage as Record<string, unknown>)[key])) &&
   isNullOr(v.coverage.firstFillAtUtc, x => isTimestamp(x, 64)) && isText(v.coverage.notice, 4000) &&
-  (v.coverage.unresolved === undefined || isCount(v.coverage.unresolved)) && isListOf(v.plays, play, 50) &&
+  (v.coverage.unresolved === undefined || isCount(v.coverage.unresolved)) &&
+  (v.coverage.cancelled === undefined || isCount(v.coverage.cancelled)) && isListOf(v.plays, play, 50) &&
   isCount(v.offset) && (v.nextOffset === null || isCount(v.nextOffset) && v.nextOffset > v.offset) &&
   (v.preflight === undefined || isRecord(v.preflight) && isCount(v.preflight.recorded) && isCount(v.preflight.notRecorded) &&
     isListOf(v.preflight.skipped, s => isRecord(s) && preflightCodes.includes(s.code as PreflightCode) && isCount(s.count) &&

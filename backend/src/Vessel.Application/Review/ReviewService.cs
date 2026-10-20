@@ -28,7 +28,8 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         " Venues with different quote stablecoins are pooled nominally. Separate funding cashflows are not added; " +
         "whether RISEx reported realized P&L includes funding remains unverified. Balanced retained fills are not proof of full venue history. " +
         "Accounts use current portfolio membership; disabled accounts are excluded. Open-play counts are current, not a historical cohort. " +
-        "Unresolved Plays, declared by the owner because their executions cannot settle them, have no result and are excluded.";
+        "Unresolved Plays, declared by the owner because their executions cannot settle them, have no result and are excluded. " +
+        "Cancelled Plays had no fill, so they have no result and are listed with the exclusions.";
 
     public static DateTimeOffset? From(string period, DateTimeOffset now) => period switch
     {
@@ -71,6 +72,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         var current = accepted.Where(e => InPeriod(e.ClosedAt, from, now)).ToList();
         var candidates = evaluated.Where(e => InPeriod(e.ClosedAt, from, now)).ToList();
         var unresolved = Unresolved(facts, scoped, query.Instrument).Count(u => InPeriod(u.EndedAt, from, now));
+        var cancelled = Cancelled(facts, scoped, query.Instrument).Count(c => InPeriod(CancelledAt(c.Play), from, now));
         var portfolioNames = facts.Portfolios.ToDictionary(p => p.Id.ToString(), p => p.Name);
         var options = new ReviewOptionsDto(
             facts.Portfolios.OrderBy(p => p.Name).Select(p => new ReviewPortfolioDto(p.Id.ToString(), p.Name)).ToList(),
@@ -125,7 +127,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             Metrics(current), series.Points, series.BucketDays, groups,
             new ReviewCoverageDto(candidates.Count, candidates.Count(e => e.Exclusion == "fees"),
                 candidates.Count(e => e.Exclusion == "executions"), facts.OpenPlays, facts.UnassignedFills, facts.FirstFillAtUtc, Notice)
-            { Unresolved = unresolved },
+            { Unresolved = unresolved, Cancelled = cancelled },
             page, query.Offset, query.Offset + page.Count < current.Count ? query.Offset + page.Count : null)
         {
             Preflight = Preflight(cases),
@@ -186,8 +188,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
     private static List<ProcessCase> ProcessCases(IEnumerable<Evaluated> closed, ReviewFacts facts, HashSet<Guid> scope, string? instrument,
         DateTimeOffset? from, DateTimeOffset now) =>
         closed.Select(e => Case(e.Facts.Play, e.ClosedAt, e.Result, e.Facts.Revisions, PlayReceipts.PlannedAfterExecution(e.Facts)))
-            .Concat(facts.CancelledPlays.Where(c => scope.Contains(c.Play.AccountId) && (instrument is null || c.Play.ContractId == instrument))
-                .Select(c => Case(c.Play, c.Play.EndedAtUtc ?? c.Play.UpdatedAtUtc, null, c.Revisions, false)))
+            .Concat(Cancelled(facts, scope, instrument).Select(c => Case(c.Play, CancelledAt(c.Play), null, c.Revisions, false)))
             .Concat(Unresolved(facts, scope, instrument).Select(u => Case(u.Play, u.EndedAt, null, u.Revisions,
                 u.Play is { Origin: PlayOrigin.Planned, PlannedAtUtc: { } planned } && u.FirstExecutionAtUtc is { } first && planned > first)))
             .Where(c => InPeriod(c.At, from, now)).ToList();
@@ -271,7 +272,8 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true || f.IncompleteOrders is { Count: > 0 }))
             .Where(e => e.Exclusion is not null && InPeriod(e.ClosedAt, from, now))
             .OrderByDescending(e => e.ClosedAt).ThenBy(e => e.Facts.Play.Id).ToList();
-        // Unresolved Plays join the drill-down by their declaration time, with its reason, note and execution facts.
+        // Unresolved Plays join the drill-down by their declaration time, with its reason, note and execution facts; Cancelled
+        // Plays by their cancellation time, so an unscored Play without answers is never missing from every list (1.4b).
         var all = excluded.Select(e => (At: e.ClosedAt, e.Facts.Play, Item: (Func<ReviewExclusionDto>)(() => new ReviewExclusionDto(e.Facts.Play.Id,
                 e.Facts.Play.Title, e.Facts.Play.AccountId, accounts[e.Facts.Play.AccountId].Name,
                 e.Facts.Play.ContractId ?? "", ExclusionReasons(e.Facts, now, e.Exclusion!)))))
@@ -279,6 +281,9 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
                 .Select(u => (At: u.EndedAt, u.Play, Item: (Func<ReviewExclusionDto>)(() => new ReviewExclusionDto(u.Play.Id, u.Play.Title,
                     u.Play.AccountId, accounts[u.Play.AccountId].Name, u.Play.ContractId ?? "", [UnresolvedReason(u.Declaration)])
                     { Unresolved = u.Declaration }))))
+            .Concat(Cancelled(facts, accounts.Keys.ToHashSet(), query.Instrument).Where(c => InPeriod(CancelledAt(c.Play), from, now))
+                .Select(c => (At: CancelledAt(c.Play), c.Play, Item: (Func<ReviewExclusionDto>)(() => new ReviewExclusionDto(c.Play.Id,
+                    c.Play.Title, c.Play.AccountId, accounts[c.Play.AccountId].Name, c.Play.ContractId ?? "", [CancelledReason(c.Play)])))))
             .OrderByDescending(x => x.At).ThenBy(x => x.Play.Id).ToList();
         var items = all.Skip(query.Offset).Take(PageSize).Select(x => x.Item()).ToList();
         return new(items, all.Count, query.Offset, query.Offset + items.Count < all.Count ? query.Offset + items.Count : null, Notice);
@@ -287,6 +292,22 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
     /// <summary>Unresolved Plays in the scope's accounts and instrument; they are excluded with the reason "unresolved".</summary>
     private static IEnumerable<UnresolvedPlayFacts> Unresolved(ReviewFacts facts, HashSet<Guid> accounts, string? instrument) =>
         facts.UnresolvedPlays.Where(u => accounts.Contains(u.Play.AccountId) && (instrument is null || u.Play.ContractId == instrument));
+
+    /// <summary>Cancelled Plays in the scope's accounts and instrument; they have no fills, so Review never scores them.</summary>
+    private static IEnumerable<EndedPlayFacts> Cancelled(ReviewFacts facts, HashSet<Guid> accounts, string? instrument) =>
+        facts.CancelledPlays.Where(c => accounts.Contains(c.Play.AccountId) && (instrument is null || c.Play.ContractId == instrument));
+
+    private static DateTimeOffset CancelledAt(Play play) => play.EndedAtUtc ?? play.UpdatedAtUtc;
+
+    private static string CancelledReason(Play play) => play.CancelReason switch
+    {
+        CancelReason.Invalidated => "Cancelled by the owner as invalidated, before any fill: it has no result.",
+        CancelReason.Missed => "Cancelled by the owner as missed, before any fill: it has no result.",
+        CancelReason.ChangedMind => "Cancelled by the owner after a change of mind, before any fill: it has no result.",
+        CancelReason.Expired => "Cancelled by the owner as expired, before any fill: it has no result.",
+        CancelReason.Mistake => "Cancelled by the owner as a mistake, before any fill: it has no result.",
+        _ => "Cancelled by the owner before any fill: it has no result.",
+    };
 
     private static string UnresolvedReason(UnresolvedDeclarationDto? declaration) =>
         declaration is null || PlayUnresolved.ParseReason(declaration.Reason) is not { } reason

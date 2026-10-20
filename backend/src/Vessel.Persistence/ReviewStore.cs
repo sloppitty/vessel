@@ -39,14 +39,13 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
         var unresolvedIds = unresolvedPlays.Select(p => p.Id).ToList();
         var declarations = (await db.StatusChanges.Where(c => unresolvedIds.Contains(c.PlayId) && c.To == PlayStatus.Unresolved)
             .AsNoTracking().ToListAsync(ct)).ToLookup(c => c.PlayId);
-        // Each Unresolved Play's earliest linked execution, by the shared OrderKey rule, for the post-hoc badge.
-        var firstExecution = new Dictionary<Guid, DateTimeOffset?>();
-        foreach (var id in unresolvedIds)
-        {
-            var orders = db.Orders.Where(o => db.OrderLinks.Any(l => l.PlayId == id && l.State == OrderLinkState.Linked &&
-                l.AccountId == o.AccountId && l.ImportedOrderId == o.Id));
-            firstExecution[id] = await db.FillsOf(orders).MinAsync(f => (DateTimeOffset?)f.OccurredAtUtc, ct);
-        }
+        // The earliest linked execution of each Unresolved Play in scope, by the shared OrderKey rule, for the post-hoc badge:
+        // one grouped query, however many Plays.
+        var scopedUnresolved = unresolvedPlays.Where(p => ids.Contains(p.AccountId) && (query.Instrument == null || p.ContractId == query.Instrument))
+            .Select(p => p.Id).ToList();
+        var firstExecution = await db.LinkedFills(db.OrderLinks.Where(l => scopedUnresolved.Contains(l.PlayId) && l.State == OrderLinkState.Linked))
+            .GroupBy(r => r.Link.PlayId).Select(g => new { PlayId = g.Key, First = g.Min(r => r.Fill.OccurredAtUtc) })
+            .ToDictionaryAsync(x => x.PlayId, x => x.First, ct);
         // Cancelled Plays join the process view (1.4b); they are never scored. Only plan revision 1 is read, for its pre-flight.
         var cancelledPlays = await db.Plays.Where(p => p.Status == PlayStatus.Cancelled && enabled.Contains(p.AccountId))
             .AsNoTracking().ToListAsync(ct);
@@ -58,7 +57,7 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
         {
             UnresolvedPlays = unresolvedPlays.Select(p => new UnresolvedPlayFacts(p, PlayUnresolved.Latest(declarations[p.Id], p.EndedAtUtc))
             {
-                Revisions = firstRevisions[p.Id].ToList(), FirstExecutionAtUtc = firstExecution[p.Id],
+                Revisions = firstRevisions[p.Id].ToList(), FirstExecutionAtUtc = firstExecution.TryGetValue(p.Id, out var at) ? at : null,
             }).ToList(),
             CancelledPlays = cancelledPlays.Select(p => new EndedPlayFacts(p, firstRevisions[p.Id].ToList())).ToList(),
         };

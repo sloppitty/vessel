@@ -108,8 +108,7 @@ export function ReviewProcessList({ api, query, selection, onOpenPlay }: {
   return <>
     {openError && <p role="alert">{openError}</p>}
     <ul className="pr-exclusion-list">{page.items.map(item => <li key={item.id}>
-      <button className="pr-play-link" disabled={opening !== null} aria-label={`Open Play ${item.title || item.instrument}`}
-        onClick={() => { void open(item.id) }}>{item.title || item.instrument}{opening === item.id ? ' · Opening…' : ''}</button>
+      <button className="pr-play-link" disabled={opening !== null} onClick={() => { void open(item.id) }}>{item.title || item.instrument}{opening === item.id ? ' · Opening…' : ''}</button>
       <PlayIdentity instrument={item.instrument} accountName={item.accountName} />
       <small>{statusNames[item.status]} · {item.origin === 'retrospective' ? 'Retrospective' : 'Planned'}{item.direction ? ` · ${item.direction === 'long' ? 'Long' : 'Short'}` : ''} · {reviewDate(item.atUtc, true)}</small>
       <p>{item.net === null ? 'Not scored' : <><span className={tone(item.net)}>{reviewMoney(item.net, true)}</span> · {reviewPercent(item.returnPercent)} return{item.rMultiple !== null && <> · {reviewMultiple(item.rMultiple)}</>}</>}

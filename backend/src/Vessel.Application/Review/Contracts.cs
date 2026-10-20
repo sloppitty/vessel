@@ -132,6 +132,8 @@ public sealed record ReviewCoverageDto(int ClosedCandidates, int IncompleteFees,
 {
     /// <summary>Unresolved Plays declared in the period, excluded with the reason "unresolved" (phase 1, 1.3a).</summary>
     public int Unresolved { get; init; }
+    /// <summary>Plays cancelled in the period: they have no fills and no result, and the exclusion list shows them (phase 1, 1.4b).</summary>
+    public int Cancelled { get; init; }
 }
 public sealed record ReviewDto(DateTimeOffset AsOfUtc, DateTimeOffset? FromUtc, string Period, string Currency,
     ReviewOptionsDto Options, IReadOnlyList<ReviewPeriodDto> Periods, ReviewMetricsDto Metrics,
