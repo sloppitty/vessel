@@ -6,6 +6,9 @@ import { defaultReviewQuery, type ReviewDocument } from '@/api/review'
 import { emptyReview, reviewFixture } from '@/test/review-fixture'
 import { render as renderWithVenues } from '@/test/render'
 import { ReviewPage } from './ReviewPage'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { chooseInPicker } from '@/test/account-picker'
 
 function setup(review = vi.fn().mockResolvedValue(reviewFixture)) {
@@ -149,6 +152,17 @@ describe('Review result bases', () => {
     expect(within(breakdown).getAllByText(/Small sample/)).not.toHaveLength(0)
     // Each n is its own line, never run into the text before it.
     expect(within(card('Batting average')).getByText('n = 1 decided · Small sample')).toHaveClass('pr-sample')
+  })
+  it('names each average outcome\'s own n: 20 wins and one loss make only the losing average a small sample', async () => {
+    const lopsided = { ...reviewFixture.metrics, count: 21, wins: 20, losses: 1, scratches: 0, batting: '0.9523809524' }
+    setup(vi.fn().mockResolvedValue({ ...reviewFixture, metrics: lopsided }))
+    const card = (await screen.findByRole('heading', { name: 'Average outcome' })).closest('section')!
+    expect(within(card).getByText('Winning Play').closest('span')).toHaveTextContent('Winning Playn = 20 wins')
+    expect(within(card).getByText('Winning Play').closest('span')).not.toHaveTextContent('Small sample')
+    expect(within(card).getByText('Losing Play').closest('span')).toHaveTextContent('Losing Playn = 1 loss · Small sample')
+  })
+  it('keeps each sample label on its own line in the stylesheet', () => {
+    expect(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'review.css'), 'utf8')).toMatch(/\.pr-sample\s*\{[^}]*display:\s*block/)
   })
   it('marks each breakdown cell by its own denominator: 20 wins and one loss leave only gain / loss small', async () => {
     const lopsided = { ...reviewFixture.metrics, count: 21, wins: 20, losses: 1, scratches: 0, batting: '0.9523809524' }
