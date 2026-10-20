@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import type { SizingDocument } from '@/api/sizing'
 import { ExternalLink, PencilLine, RefreshCw, TriangleAlert } from 'lucide-react'
-import { statusLabels, type NextAction, type PlayStatus, type PreflightCheck } from '@/api/plays'
+import { isEndedStatus, statusLabels, type NextAction, type PlayStatus, type PreflightCheck } from '@/api/plays'
 import { useVenues } from '@/api/venues'
 import { AccountSelect } from '@/components/accounts/AccountSelect'
 import { Input } from '@/components/ui/input'
@@ -22,6 +22,7 @@ import type { SizingStatus } from './useSizing'
 import { PlanNotices } from './PlanNotices'
 import { PositionEditor, defaultMaxLeverage, type SuggestionMarks } from './PositionEditor'
 import { ChartPanel } from './PlayChart'
+import type { ChartFill } from './chart-fills'
 import { CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
 import { noFilledEntries } from './planChecks'
 import { noEntryFills, positionRiskSummary, type EntryFills } from './position-risk-summary'
@@ -40,7 +41,7 @@ import '@/features/monitor/incidents.css'
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, revision = null,
   lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, sizingStatus = 'ready', onRetrySizing, onRiskChange,
   filledEntries, fills: entryFills, onUnits, onPriceStep, retrospective = false, incidents, stopEvidence, evidenceImages,
-  reviewReceipt, journalSave, retrospectiveReceipt, plannedAfterExecution = false, onPreflight, nextActions, onOpenPlay, log, reviewCompletion, mistakeTags }: {
+  reviewReceipt, journalSave, retrospectiveReceipt, plannedAfterExecution = false, onPreflight, nextActions, onOpenPlay, log, reviewCompletion, mistakeTags, chartFills }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -108,6 +109,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   /** Review completion under the review. */
   reviewCompletion?: ReactNode
   mistakeTags?: readonly string[] | undefined
+  /** The Play's fills to mark on the chart (phase 1, 1.1b). */
+  chartFills?: readonly ChartFill[] | undefined
 }) {
   const fieldId = useId()
   const [selectedId, setSelectedId] = useState(draft.entries[0]?.id ?? '')
@@ -318,7 +321,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         onEntriesChange={entries => planChange({ ...draft, entries })}
         drawings={drawingKey ? draft.drawings[drawingKey] : undefined}
         onDrawingsChange={drawings => { if (drawingKey) planChange({ ...draft, drawings: { ...draft.drawings, [drawingKey]: drawings } }) }}
-        editable={!readOnly} onCapture={addCapture} onShowEvidence={showEvidence} stopEvidence={retrospective ? undefined : stopEvidence} />
+        editable={!readOnly} onCapture={addCapture} onShowEvidence={showEvidence} stopEvidence={retrospective ? undefined : stopEvidence}
+        fills={chartFills} tradeDates={isEndedStatus(status) && !!chartFills?.length} />
         <PlayJournal notes={draft.notes} onChange={notes => onChange({ ...draft, notes: readOnly ? { ...draft.notes, review: notes.review } : notes })}
           execution={execution} readOnly={readOnly} retrospective={retrospective} status={status}
           structuredReview={draft.structuredReview}

@@ -14,3 +14,10 @@ export function intervalName(interval: CandleInterval) {
   const unit = units[interval.slice(-1)]![0]
   return `${count} ${unit}${count === 1 ? '' : 's'}`
 }
+
+const unitMs: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000, M: 2_592_000_000 }
+
+/** The interval's length in milliseconds; a month counts as 30 days, enough for padding a view. */
+export function intervalMs(interval: CandleInterval) {
+  return Number(interval.slice(0, -1)) * unitMs[interval.slice(-1)]!
+}

@@ -1,5 +1,5 @@
 import {
-  CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart,
+  CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart, createSeriesMarkers,
   type AutoscaleInfo, type IChartApi, type IPrimitivePaneRenderer, type MouseEventParams, type IPrimitivePaneView, type PriceFormat, type ISeriesApi,
   type ISeriesPrimitive, type ISeriesPrimitiveAxisView, type Logical, type LogicalRange, type PrimitiveHoveredItem,
   type SeriesAttachedParameter, type Time, type UTCTimestamp,
@@ -11,7 +11,7 @@ import { createSeriesWriter } from './seriesWriter'
 import type { IndicatorPaneId, IndicatorView, PaneLayout, PaneSize } from './indicators'
 import { readableInk } from './ink'
 import { barHeight, solvePaneLayout, type SolvedLayout } from './paneLayout'
-import type { ChartAdapter, ChartAdapterFactory, ChartCandle, PriceOverlay } from './types'
+import type { ChartAdapter, ChartAdapterFactory, ChartCandle, ChartFocus, ChartMarker, PriceOverlay } from './types'
 
 type DrawTarget = Parameters<IPrimitivePaneRenderer['draw']>[0]
 
@@ -328,6 +328,30 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   const series = chart.addSeries(CandlestickSeries, { ...candleColors(), borderVisible: true })
   const levels = new LevelsPrimitive(theme, colorResolver(container))
   series.attachPrimitive(levels)
+  // Fills as buy and sell shapes at their price, never lines, so a fill cannot be read as a level (phase 1, 1.1b).
+  const fillMarkers = createSeriesMarkers(series, [])
+  let markers: readonly ChartMarker[] = []
+  let hoveredMarker: string | null = null
+  const placeMarkers = () => {
+    const times = loaded.map(candle => candle.time)
+    const spacing = times.length > 1 ? times.at(-1)! - times.at(-2)! : Number.POSITIVE_INFINITY
+    fillMarkers.setMarkers(markers.flatMap(marker => {
+      // The candle the fill falls in: the latest one at or before it, within that candle's span.
+      let low = 0, high = times.length - 1, found = -1
+      while (low <= high) {
+        const middle = (low + high) >> 1
+        if (times[middle]! <= marker.time) { found = middle; low = middle + 1 } else high = middle - 1
+      }
+      if (found < 0 || marker.time >= (found + 1 < times.length ? times[found + 1]! : times[found]! + spacing)) return []
+      return [{ id: marker.id, time: (times[found]! / 1000) as UTCTimestamp, position: 'atPriceMiddle' as const, price: marker.price,
+        shape: marker.side === 'buy' ? 'arrowUp' as const : 'arrowDown' as const, color: marker.side === 'buy' ? theme.positive : theme.negative }]
+    }).sort((a, b) => a.time - b.time))
+  }
+  let focus: ChartFocus | null = null
+  const applyFocus = () => {
+    if (!focus || !loaded.length) return
+    chart.timeScale().setVisibleRange({ from: (focus.from / 1000) as UTCTimestamp, to: (focus.to / 1000) as UTCTimestamp })
+  }
   let candleCount = 0
   let loaded: readonly ChartCandle[] = []
   let index = new TimeIndex([])
@@ -657,6 +681,11 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   chart.timeScale().subscribeVisibleLogicalRangeChange(onRange)
   let crosshairTime: number | null = null
   const onCrosshair = (event: MouseEventParams<Time>) => {
+    const hovered = typeof event.hoveredObjectId === 'string' && markers.some(marker => marker.id === event.hoveredObjectId) ? event.hoveredObjectId : null
+    if (hovered !== hoveredMarker) {
+      hoveredMarker = hovered
+      callbacks.onMarkerHover?.(hovered, hovered && event.point ? { x: event.point.x, y: event.point.y } : null)
+    }
     const time = typeof event.time === 'number' ? event.time * 1000 : null
     if (time === crosshairTime) return
     crosshairTime = time
@@ -819,6 +848,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       chart.applyOptions(chartColors())
       series.applyOptions(candleColors())
       levels.retheme()
+      placeMarkers()
       drawingsLayer.requestUpdate()
     })
   })
@@ -836,7 +866,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       levels.reference = candles.at(-1)?.close ?? null
       const timesChanged = writeCandles(candles, reset)
       loaded = candles
-      if (timesChanged) index = new TimeIndex(candles)
+      if (timesChanged) { index = new TimeIndex(candles); placeMarkers() }
       const precision = pricePrecision(candles)
       if (priceFormat.type !== 'price' || precision !== priceFormat.precision) {
         priceFormat = { type: 'price', precision, minMove: 10 ** -precision }
@@ -845,9 +875,20 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       }
       if (reset) {
         chart.priceScale('right').applyOptions({ autoScale: true })
-        // Jump, not animate, to the latest candles.
+        // Jump, not animate, to the latest candles, or to the focus, e.g. a closed trade's dates.
         chart.timeScale().scrollToPosition(openingRightOffset, false)
+        applyFocus()
       }
+    },
+    setMarkers(next) {
+      markers = next
+      placeMarkers()
+    },
+    setFocus(range) {
+      // The same range again leaves the owner's panning alone.
+      if (range?.from === focus?.from && range?.to === focus?.to) return
+      focus = range
+      applyFocus()
     },
     setOverlays(overlays) {
       levels.set(overlays)

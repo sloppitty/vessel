@@ -4,9 +4,9 @@ import type { ChartAdapter, ChartCallbacks, ChartCandle, PriceOverlay } from './
 import { testFrames } from '@/test/testFrames'
 
 vi.unmock('@/components/chart/lightweight')
-const library = vi.hoisted(() => ({ createChart: vi.fn() }))
+const library = vi.hoisted(() => ({ createChart: vi.fn(), markers: { setMarkers: vi.fn(), detach: vi.fn() } }))
 vi.mock('lightweight-charts', () => ({
-  createChart: library.createChart, CandlestickSeries: 'candles', LineSeries: 'line', HistogramSeries: 'volume',
+  createChart: library.createChart, createSeriesMarkers: () => library.markers, CandlestickSeries: 'candles', LineSeries: 'line', HistogramSeries: 'volume',
   ColorType: { Solid: 'solid' }, CrosshairMode: { Normal: 0 }, LineStyle: { Dashed: 2 },
 }))
 import { createLightweightAdapter } from './lightweight'
@@ -40,13 +40,14 @@ function makeSeries(kind: string) {
 function fakeChart() {
   const series: ReturnType<typeof makeSeries>[] = []
   const addSeries = vi.fn((kind: string) => { const current = makeSeries(kind); series.push(current); return current })
+  const timeScale = { width: () => 800, height: () => 20, logicalToCoordinate: (logical: number) => logical * 100,
+    coordinateToLogical: (x: number) => x / 100, scrollToPosition: vi.fn(), setVisibleRange: vi.fn(), subscribeVisibleLogicalRangeChange: vi.fn(), unsubscribeVisibleLogicalRangeChange: vi.fn() }
   const chart = {
     addSeries, series, applyOptions: vi.fn(), removeSeries: vi.fn(), remove: vi.fn(),
     subscribeClick: vi.fn(), subscribeCrosshairMove: vi.fn(), unsubscribeCrosshairMove: vi.fn(),
     priceScale: () => ({ applyOptions: vi.fn() }),
     panes: () => [{ getHTMLElement: () => null, setStretchFactor: vi.fn() }], paneSize: () => ({ width: 800, height: 1000 }),
-    timeScale: () => ({ width: () => 800, height: () => 20, logicalToCoordinate: (logical: number) => logical * 100,
-      coordinateToLogical: (x: number) => x / 100, scrollToPosition: vi.fn(), subscribeVisibleLogicalRangeChange: vi.fn(), unsubscribeVisibleLogicalRangeChange: vi.fn() }),
+    timeScale: () => timeScale,
   }
   library.createChart.mockReturnValue(chart)
   return chart
@@ -55,7 +56,7 @@ const candles: ChartCandle[] = Array.from({ length: 6 }, (_, index) => ({ time: 
 const settings = { ...defaultIndicators, emas: defaultIndicators.emas.map(ema => ({ ...ema, enabled: true, period: 2 })), rsi: { ...defaultIndicators.rsi, period: 2 } }
 const events = (): ChartCallbacks => ({
   onLevelDrag: vi.fn(), onLevelSelect: vi.fn(), onLevelCancel: vi.fn(), onNeedOlder: vi.fn(), onDrawingCreate: vi.fn(),
-  onDrawingChange: vi.fn(), onDrawingSelect: vi.fn(), onDrawingCancel: vi.fn(), onLevelEdit: vi.fn(), onPricePick: vi.fn(), onCrosshairMove: vi.fn(), onPaneLayout: vi.fn(),
+  onDrawingChange: vi.fn(), onDrawingSelect: vi.fn(), onDrawingCancel: vi.fn(), onLevelEdit: vi.fn(), onPricePick: vi.fn(), onCrosshairMove: vi.fn(), onPaneLayout: vi.fn(), onMarkerHover: vi.fn(),
 })
 function pointer(container: HTMLElement, type: string, price: number, x = 400) {
   const event = new MouseEvent(type, { clientX: x, clientY: 1000 - price, bubbles: true, button: 0, buttons: type === 'pointermove' ? 1 : 0 })
@@ -175,5 +176,43 @@ describe('adapter drawing gesture cancellation', () => {
     expect(callbacks.onDrawingChange).not.toHaveBeenCalled()
     expect(callbacks.onDrawingCancel).toHaveBeenCalledTimes(1)
     if (how === 'destroy') adapter = { ...adapter, destroy: vi.fn() }
+  })
+})
+
+describe('fill markers and trade focus (phase 1, 1.1b)', () => {
+  const marker = (id: string, time: number, side: 'buy' | 'sell' = 'buy') => ({ id, time, price: 101.5, side, tooltip: `${id} tooltip` })
+  it('puts each fill on the candle it falls in, as a shape at its price, and leaves out fills outside the candles', () => {
+    library.markers.setMarkers.mockClear()
+    // Candles open each minute from 60s to 360s; the last one spans one more minute.
+    adapter.setMarkers([marker('late', 395_000, 'sell'), marker('early', 30_000), marker('inside', 125_000), marker('after', 430_000)])
+    const placed = library.markers.setMarkers.mock.lastCall![0] as { id: string; time: number; price: number; shape: string; position: string }[]
+    expect(placed.map(item => [item.id, item.time, item.shape])).toEqual([['inside', 120, 'arrowUp'], ['late', 360, 'arrowDown']])
+    expect(placed.every(item => item.position === 'atPriceMiddle' && item.price === 101.5)).toBe(true)
+    // New candles move a fill onto the candle that now holds it.
+    adapter.setCandles([...candles, { ...candles.at(-1)!, time: 420_000 }], false)
+    expect((library.markers.setMarkers.mock.lastCall![0] as { id: string }[]).map(item => item.id)).toEqual(['inside', 'late', 'after'])
+  })
+
+  it('reports the fill under the pointer for its tooltip', () => {
+    adapter.setMarkers([marker('fill-1', 125_000)])
+    const crosshair = chart.subscribeCrosshairMove.mock.calls[0]![0] as (event: unknown) => void
+    crosshair({ time: 120, hoveredObjectId: 'fill-1', point: { x: 40, y: 80 } })
+    expect(callbacks.onMarkerHover).toHaveBeenLastCalledWith('fill-1', { x: 40, y: 80 })
+    crosshair({ time: 120, hoveredObjectId: 'level:entry', point: { x: 40, y: 90 } })
+    expect(callbacks.onMarkerHover).toHaveBeenLastCalledWith(null, null)
+  })
+
+  it('opens on the focus at a reset, once per range, so later panning is left alone', () => {
+    const range = chart.timeScale().setVisibleRange
+    range.mockClear()
+    adapter.setFocus({ from: 90_000, to: 300_000 })
+    expect(range).toHaveBeenLastCalledWith({ from: 90, to: 300 })
+    adapter.setFocus({ from: 90_000, to: 300_000 })
+    expect(range).toHaveBeenCalledOnce()
+    adapter.setCandles(candles, true)
+    expect(range).toHaveBeenCalledTimes(2)
+    adapter.setFocus(null)
+    adapter.setCandles(candles, true)
+    expect(range).toHaveBeenCalledTimes(2)
   })
 })

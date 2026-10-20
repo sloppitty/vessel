@@ -1,6 +1,6 @@
 import type { ChartDrawing, DrawingKind } from './drawings'
 import type { IndicatorView } from './indicators'
-import type { ChartAdapter, ChartAdapterFactory, ChartCandle, PriceOverlay } from './types'
+import type { ChartAdapter, ChartAdapterFactory, ChartCandle, ChartFocus, ChartMarker, PriceOverlay } from './types'
 
 let renderer: Promise<typeof import('./lightweight')> | null = null
 
@@ -21,10 +21,15 @@ export const createLazyLightweightAdapter: ChartAdapterFactory = (container, cal
   let tool: [DrawingKind | null, boolean] | null = null
   let picking = false
   let indicators: IndicatorView | null = null
+  let markers: readonly ChartMarker[] | null = null
+  let focus: ChartFocus | null = null
   void preloadLightweightRenderer().then(({ createLightweightAdapter }) => {
     if (destroyed) return
     adapter = createLightweightAdapter(container, callbacks)
+    // The focus first, so the replayed candles open on it.
+    if (focus) adapter.setFocus(focus)
     if (candles) adapter.setCandles(candles, true)
+    if (markers) adapter.setMarkers(markers)
     if (indicators) adapter.setIndicators(indicators)
     if (overlays) adapter.setOverlays(overlays)
     if (drawings) adapter.setDrawings(...drawings)
@@ -62,6 +67,14 @@ export const createLazyLightweightAdapter: ChartAdapterFactory = (container, cal
     setIndicators(next) {
       if (adapter) adapter.setIndicators(next)
       else indicators = next
+    },
+    setMarkers(next) {
+      if (adapter) adapter.setMarkers(next)
+      else markers = next
+    },
+    setFocus(next) {
+      if (adapter) adapter.setFocus(next)
+      else focus = next
     },
     capture(caption) {
       return adapter ? adapter.capture(caption) : Promise.resolve(null)

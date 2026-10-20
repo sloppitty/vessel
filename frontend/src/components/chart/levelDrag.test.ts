@@ -8,6 +8,8 @@ vi.unmock('./lightweight')
 vi.mock('lightweight-charts', async importOriginal => ({
   ...await importOriginal<typeof import('lightweight-charts')>(),
   createChart: vi.fn(),
+  // The fake series has no data subscriptions; fill markers are covered in lightweight.test.ts.
+  createSeriesMarkers: () => ({ setMarkers: vi.fn(), detach: vi.fn() }),
 }))
 
 let adapter: ChartAdapter | undefined
