@@ -174,7 +174,44 @@ October 20, 2026, branch `t3/phase1-post-hoc-badge`, stacked on 1.1a:
 
 ## 1.5 Lessons return and a recorded pre-flight
 
-Not started.
+October 20, 2026, branch `t3/phase1-preflight`, stacked on 1.4a:
+- **Next actions (G-02).**
+  - `GET /api/plays/next-actions` returns the owner's ten newest non-blank next actions from Closed or Cancelled Plays,
+    by review time, each with its source Play.
+  - The Thesis tab of a Draft, Planned or Paused Play lists them, collapsed. Each source opens its Play.
+  - **Copy into plan** appends `If …, then <next action> (from <title>)` only on that click. On a Planned Play it saves
+    through the revision-reason dialog as one revision.
+- **Pre-flight (G-05).**
+  - Plan it evaluates five checks from what the page shows:
+    - priced stops;
+    - shares;
+    - thesis and invalidation;
+    - risk within the setting × ladder level;
+    - liquidation beyond the stops.
+  - When all are met, it plans at once. Otherwise the checklist opens with **Plan it anyway** and **Back to the plan**.
+    It never blocks.
+  - The server validates codes and outcomes, refuses a pre-flight anywhere but Draft → Planned, and stores it on plan
+    revision 1. That uses the explicit migration `20261020085301_PlanPreflight`, a nullable `jsonb` column.
+  - History shows the recorded checks.
+  - Review counts, over the period's closed planned Plays, those recorded, those not recorded, and the skips per check.
+- **Refinement of the contract wording.** The checklist opens only when a check is not met. A plan that passes every
+  check plans in one click, and its checks are recorded all the same.
+- **Tests.**
+  - PostgreSQL: a Draft with an unpriced stop plans, its revision 1 records the skip, and Review counts it beside one
+    unrecorded Play.
+  - PostgreSQL: invalid codes, outcomes and duplicates get 400, as does a pre-flight sent when resuming.
+  - PostgreSQL: next actions come newest first, at most ten, with blank and in-progress ones left out. The two-owner
+    isolation test covers the new route.
+  - Frontend:
+    - the checks and their unknowns;
+    - the dialog and going back;
+    - copying into Draft and Planned Plays;
+    - History, Review counts and the response guards.
+  - Existing Plan it tests now go through the checklist, because their plans have no thesis.
+- **Checks.** `scripts/check.sh` passed:
+  - backend: 3,564 passed, 5 skipped;
+  - frontend: 151 files and 3,757 tests;
+  - build clean.
 
 ## 1.6 Capture friction and time consistency
 
