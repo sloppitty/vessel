@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Added
+
+- Once an entry has filled, its stops can be moved to break-even or into
+  profit with a reason; the Summary shows the signed result if every stop is
+  hit ("+5 USDC locked in" or "−5 USDC at risk") from the average fill, and
+  initial R stays frozen at the first fill. A drifted linked stop or target
+  can be rebound to the order resting at the venue in one version-checked
+  step (D-03, F-10).
+
+### Fixed
+
+- Plan numbers follow one grammar everywhere: the server refuses exponent,
+  signed and trailing-dot text on write, naming the field, while unchanged
+  stored text still saves; the browser never writes exponent text; a negative
+  percentage stop is refused instead of saving as no stop (D-03).
+- Sizing suggestions tell the truth about their inputs. A size is suggested
+  only when every part of the position has a priced stop. Nothing offers
+  Accept while the record is stale or failed. The budget is the account's
+  normalized available balance with its source and time, and a known zero
+  stays zero. The Summary's risk uses the account balance. Size and leverage
+  are no longer suggested after an entry fills. Lighter liquidations are no
+  longer counted as fee-bearing (D-04, D-07, D-11, D-12, D-13, D-24, D-25,
+  F-16).
+
 ## 0.3.1 - October 19, 2026
 
 Release notes: [docs/releases/v0.3.1.md](docs/releases/v0.3.1.md).

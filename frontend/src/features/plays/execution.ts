@@ -1,5 +1,8 @@
 import type { ExecutionFill, ExecutionOrder, LinkOrder, LinkRole, OrderLink, PlaySummary } from '@/api/plays'
+import type { MonitorDiscrepancy } from '@/api/monitor'
+import { exactDecimal } from '@/lib/decimal'
 import type { DraftEntry } from './draft'
+import { exactLevelPrice, pricesMatch } from './levels'
 
 export function describeOrder(order: ExecutionOrder) {
   const side = order.side === 'buy' ? 'Buy' : 'Sell'
@@ -50,4 +53,53 @@ export function fillSummary(fills: readonly ExecutionFill[]) {
   const average = fills.reduce((sum, fill) => sum + Number(fill.price) * Number(fill.quantity), 0) / quantity
   const directions = [...new Set(fills.map(fill => fill.direction))].join(', ')
   return `${directions} · ${fills.length} fills, average ${Number(average.toPrecision(8))}`
+}
+
+/** A linked stop or target a `level.drift` record names, and the price its order rests at. */
+export interface LevelDrift {
+  link: OrderLink
+  /** The order's acting price as Vessel stores it (trigger, else limit): what a rebind sends as observed. */
+  observed: string
+  /** The plan price the monitor compared it with. */
+  planned: string
+  /** The plan matches the order now; the monitor clears the record on its next check. */
+  applied: boolean
+  /** The level's percentage when it is one: a rebind turns it into the observed price. */
+  percent: string | null
+}
+
+/** What the plan's levels resolve against, as the server resolves and matches them. */
+export interface DriftContext {
+  direction: 'long' | 'short'
+  leverage: number
+  /** The instrument's tick; prices match within it when it is coarser than the fifth significant figure. */
+  tick: number | null
+}
+
+/**
+ * The drifted linked stops and targets of a `level.drift` record, with their resting order's price. A row matches as the
+ * monitor decides (`pricesMatch`: the fifth significant figure, or a coarser tick), so only orders it found away from
+ * their level are offered. Orders that no longer rest, entries, unplanned exits and malformed rows are left out. An order
+ * price is never a fill: a rebind only moves the plan level to it.
+ */
+export function levelDrifts(discrepancy: MonitorDiscrepancy, links: readonly OrderLink[], entries: readonly DraftEntry[],
+  context: DriftContext): LevelDrift[] {
+  const rows = discrepancy.kind === 'level.drift' && Array.isArray(discrepancy.details.levels) ? discrepancy.details.levels as unknown[] : []
+  return rows.flatMap(row => {
+    if (typeof row !== 'object' || row === null) return []
+    const { orderId, actualPrice, plannedPrice } = row as Record<string, unknown>
+    if (typeof orderId !== 'string' || typeof actualPrice !== 'string' || typeof plannedPrice !== 'string') return []
+    const [recorded, recordedPlan] = [exactDecimal(actualPrice), exactDecimal(plannedPrice)]
+    if (recorded === null || recordedPlan === null || pricesMatch(recorded, recordedPlan, context.tick)) return []
+    const link = links.find(item => (item.role === 'stop' || item.role === 'target') && item.state === 'linked' && item.order?.orderId === orderId)
+    if (!link?.order || link.order.status !== 'open' || (link.role !== 'stop' && link.role !== 'target')) return []
+    const observed = link.order.triggerPrice ?? link.order.limitPrice
+    const price = exactDecimal(observed)
+    const entry = entries.find(item => item.id === link.entryId)
+    const level = (link.role === 'stop' ? entry?.stops : entry?.targets)?.find(item => item.id === link.levelId)
+    if (price === null || !entry || !level) return []
+    const current = exactLevelPrice(entry, level, link.role, context.direction, context.leverage)
+    return [{ link, observed, planned: plannedPrice, applied: current !== null && pricesMatch(price, current, context.tick),
+      percent: level.unit === 'percent' ? level.value.trim() : null }]
+  })
 }

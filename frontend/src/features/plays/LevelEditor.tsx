@@ -3,7 +3,7 @@ import { Plus, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { DraftEntry, PlayDraft } from './draft'
 import { levelName } from './execution'
-import { planShare, positiveFinitePlanNumber } from './numbers'
+import { planShare, planTextState, positiveFinitePlanNumber } from './numbers'
 import {
   addChartExit, exitsOf, formatDraggedPrice, levelTag, overlayPrice, parseOverlayId, removeExit, setExitShare, withExits,
 } from './levels'
@@ -69,13 +69,20 @@ export function LevelEditor({ entries, entry, overlayId, anchor, direction, leve
 
   function save(event: FormEvent) {
     event.preventDefault()
-    const parsedPrice = positiveFinitePlanNumber(price)
-    if (parsedPrice === null) { setError('Enter a price above zero.'); return }
+    // Text the server would refuse gets its reason, named as the server names the field; then the range checks.
+    const label = ref?.kind === 'entry' || !ref || !exit ? `${entry.name} price` : `${entry.name} ${ref.kind} ${exitsOf(entry, ref.kind).indexOf(exit) + 1}`
+    const priceText = planTextState(price, label)
+    if (priceText.status === 'invalid') { setError(priceText.reason); return }
+    if (positiveFinitePlanNumber(price) === null) { setError('Enter a price above zero.'); return }
+    const shareText = planTextState(share, `${label} share`)
+    if (exit && shareText.status === 'invalid') { setError(shareText.reason); return }
     if (exit && share.trim() !== '' && planShare(share) === null) { setError('Share must be 0 to 100%.'); return }
     let next = entry
     if (priceEdited) {
-      next = ref?.kind === 'entry' ? { ...entry, price } : ref ? withExits(entry, ref.kind, exitsOf(entry, ref.kind).map(level =>
-        level.id === ref.levelId ? { ...level, unit: 'price', value: price } : level)) : entry
+      // The draft keeps the text as it will be saved, without surrounding whitespace.
+      const text = price.trim()
+      next = ref?.kind === 'entry' ? { ...entry, price: text } : ref ? withExits(entry, ref.kind, exitsOf(entry, ref.kind).map(level =>
+        level.id === ref.levelId ? { ...level, unit: 'price', value: text } : level)) : entry
     }
     if (exit && ref?.kind !== 'entry') next = setExitShare(next, ref!.kind, exit.id, share.trim())
     onApply(next, `Edit ${readable.toLowerCase()}`)

@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json.Nodes;
 using Vessel.Application.Venues;
 using Vessel.Domain.Workspace;
+using Vessel.Infrastructure.Venues.Lighter;
 
 namespace Vessel.Tests;
 
@@ -98,11 +99,49 @@ public sealed partial class LighterAdapterTests
         Assert.False(result.FillHistoryComplete);
         Assert.False(result.FillHistoryTruncated);
         Assert.Equal("9223372036854775806", Assert.Single(result.Fills).SourceFillId);
-        Assert.Contains("1 executions omitted because realized PnL was not reported", result.HistoryNotice);
-        Assert.Contains("1 fee-bearing or unverified-fee executions omitted", result.HistoryNotice);
-        Assert.Contains("1 self-trade executions omitted", result.HistoryNotice);
+        Assert.Contains("Omitted executions: 1 without reported PnL, 1 fee-bearing or unverified-fee, 1 self-trade.", result.HistoryNotice);
         // One missing-PnL and one fee execution. The zero-fee duplicate is valid; self-trades leave position unchanged.
         Assert.Equal(2, result.OmittedExecutions);
+    }
+
+    // Phase 0, 0.1 (D-25): review probe verify-new-dotnet/NewVerify.cs LighterNotice. A venue-forced execution
+    // with a zero fee is not a fee-bearing one: it is named for what it is and still counts as omitted.
+    [Theory]
+    [InlineData("liquidation", "Omitted executions: 1 liquidation.")]
+    [InlineData("deleverage", "Omitted executions: 1 deleverage.")]
+    [InlineData("market-settlement", "Omitted executions: 1 market settlement.")]
+    public void Coverage_a_forced_execution_with_a_zero_fee_is_named_rather_than_called_fee_bearing(string type, string notice)
+    {
+        var catalogue = new LighterReader.Catalogue([new("1", "BTC", true, new("BTC", 5, 50, "USDC"))], new HashSet<string>(), LighterExchange.Mainnet);
+        var row = Change(Change(Trade, "type", JsonValue.Create(type)), "integrator_maker_fee", JsonValue.Create(0));
+        using var document = System.Text.Json.JsonDocument.Parse(Trades(row));
+        var page = LighterReader.ReadFills(document.RootElement, catalogue, Source, Now.AddMinutes(5), true);
+        Assert.Empty(page.Fills);
+        Assert.Equal(0, page.Fees);
+        Assert.Equal(1, page.Liquidations + page.Deleverages + page.Settlements);
+        Assert.Equal(notice, LighterReader.OmissionNotice(page.MissingPnl, page.Fees, page.Liquidations, page.Deleverages, page.Settlements, page.SelfTrades));
+    }
+
+    [Fact]
+    public async Task Coverage_forced_executions_are_counted_apart_from_fee_bearing_ones_and_stay_omitted()
+    {
+        var forced = (string type, string? fee) =>
+        {
+            var row = Change(Trade, "type", JsonValue.Create(type));
+            return fee is null ? row : Change(row, "maker_fee", JsonValue.Create(int.Parse(fee)));
+        };
+        // A forced row with a nonzero fee is still forced: its type decides first.
+        var rows = new[] { Trade, forced("liquidation", null), forced("deleverage", null), forced("deleverage", "1"),
+            forced("market-settlement", null), Change(Trade, "maker_fee", JsonValue.Create(1)) };
+        using var handler = CoverageHandler();
+        var snapshotReply = handler.Reply!;
+        handler.Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/trades", StringComparison.Ordinal)
+            ? Response(Trades(string.Join(",", rows))) : snapshotReply(request);
+        var result = await Reader(handler).ReadAsync(Source, default);
+        Assert.Equal("9223372036854775806", Assert.Single(result.Fills).SourceFillId);
+        Assert.Contains("Omitted executions: 1 fee-bearing or unverified-fee, 1 liquidation, 2 deleverages, 1 market settlement.", result.HistoryNotice);
+        Assert.Equal(5, result.OmittedExecutions);
+        Assert.False(result.FillHistoryComplete);
     }
 
     [Fact]

@@ -99,9 +99,17 @@ public static partial class ExactDecimal
         return ManualFactError.None;
     }
 
-    /// <summary>Plan field text: blank, or up to 64 characters of signed decimal or scientific notation; kept as typed, never parsed here.</summary>
+    /// <summary>The longest plan field text.</summary>
+    public const int MaxPlanTextLength = 64;
+
+    /// <summary>
+    /// Plan field text on write: blank, or 1–64 ASCII digits with at most one inner '.' (no sign, exponent or
+    /// whitespace) that a decimal holds exactly. The text is kept as typed. Stored plans are read tolerantly, since
+    /// earlier plans kept text this rule now refuses.
+    /// </summary>
     public static bool IsPlanText([NotNullWhen(true)] string? text) =>
-        text is not null && (text.Length == 0 || text.Length <= 64 && PlanTextPattern().IsMatch(text));
+        text is not null && (text.Length == 0 ||
+            text.Length <= MaxPlanTextLength && PlanTextPattern().IsMatch(text) && TryParseVenue(text, out _));
 
     /// <summary>Adapter amount text: 1–128 characters, an optional '-' and ASCII digits with at most one inner '.'; no range or scale limit.</summary>
     public static bool IsSignedAmountText(string text)
@@ -117,7 +125,8 @@ public static partial class ExactDecimal
 
     [GeneratedRegex(@"^\+?\d+(?:\.\d+)?(?:[eE][+-]?\d{1,2})?$")]
     private static partial Regex ManualFactPattern();
-    [GeneratedRegex(@"^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$")]
+    // ASCII digits only ("\d" matches other scripts), and "\z" so a final newline cannot pass as "$" would let it.
+    [GeneratedRegex(@"\A[0-9]+(?:\.[0-9]+)?\z")]
     private static partial Regex PlanTextPattern();
 
     // ---- Formatting ----

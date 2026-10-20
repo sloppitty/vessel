@@ -257,7 +257,7 @@ A discrepancy is a flagged record. It never changes a status or a link. It opens
 | `protection.excess` | Resting linked stop or target quantity is above the open quantity (see reduce-only below) | warning |
 | `protection.orphaned` | A Closed or Cancelled Play still has a resting linked stop or target, which could close another Play's position on the same instrument | warning |
 | `entry.orphaned` | A Closed or Cancelled Play still has a resting linked entry order, which could open untracked exposure | critical |
-| `level.drift` | A linked order's price no longer matches its plan level, for example after an edit at the venue. Suggests a plan revision. | info |
+| `level.drift` | A linked order's price no longer matches its plan level, for example after an edit at the venue. Suggests a plan revision, which the record offers as a rebind (October 19, below). | info |
 
 Targets smaller than the position are not flagged, because scaling out is normal.
 
@@ -270,6 +270,7 @@ Whole-position orders and coverage (October 15):
 - **Reduce-only orders** cannot flip a position. They do not count towards `protection.excess` when the Play is the only Open Play on the instrument; the check stays when siblings exist.
 - **One record per cause.** For the same orders, `protection.cancelled` supersedes `protection.missing` and `protection.short`: one record, not two or three.
 - **`level.drift` is decided per order.** It is raised if any priced linked order drifts; it is unknown only for unpriced orders.
+- **Rebind (October 19, 2026, Phase 0 0.5b).** The drift record in the Execution tab lists each drifted linked stop or target with the price its order rests at. With a reason, the owner can move the level to that price: `POST /api/plays/{id}/execution/links/{linkId}/rebind` writes one plan revision (the level becomes a price) and, when the observed order is another order, replaces the link, in one unit of work under the account and Play locks. The call is checked against the Play's version and the retained order's acting price, and a stale one returns 409 and changes nothing. The browser offers it only for orders the monitor found away from their level, matched with the same tolerance, and names a percentage level that would become a price. The rebind refuses a level that another linked order still references, and the replacement of a link whose order has fills. The record itself is not touched: like every discrepancy it resolves when the next fresh check finds the order at its level. Entries and unplanned exits are not rebound, and an order's price is never treated as a fill.
 
 **Per account and instrument** (each record lists every Open Play involved and closes none):
 

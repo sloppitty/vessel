@@ -5,6 +5,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { createDraft, createEntry, type PlayDraft } from './draft'
 import { PositionEditor as Editor } from './PositionEditor'
 import { useLeverageChange } from './useLeverageChange'
+import { plainDecimalRule } from './numbers'
+import { planFromDraft } from './saved'
+import { storedPlanText, StoredPlanTextContext } from './stored-plan-text'
 
 function PositionEditor(props: Omit<ComponentProps<typeof Editor>, 'onLeverageChange'>) {
   const change = useLeverageChange(props.draft, props.onChange, props.units)
@@ -443,16 +446,82 @@ describe('local-draft position editor', () => {
     expect(field('Entry 1 planned stop price (quote units)')).toHaveAttribute('data-warning', 'true')
   })
 
+  it('marks number fields the server would refuse instead of silently leaving them out of the estimates', async () => {
+    const { user } = renderEditor(1)
+    const price = field('Entry 1 planned entry price (quote units)')
+    fireEvent.change(price, { target: { value: '1e2' } })
+    expect(price).toHaveAttribute('aria-invalid', 'true')
+    expect(price).toHaveAttribute('title', `Entry 1 price: ${plainDecimalRule}`)
+    await user.clear(price)
+    await user.type(price, '100')
+    expect(price).not.toHaveAttribute('aria-invalid')
+
+    await user.click(unitButton('Entry 1 stop units', '% return at leverage'))
+    const stop = field('Entry 1 planned stop return at 1× leverage (%)')
+    fireEvent.change(stop, { target: { value: '-5' } })
+    expect(stop).toHaveAttribute('aria-invalid', 'true')
+    expect(stop).toHaveAttribute('title', 'Entry 1 stop 1: use a price for a stop beyond the entry; a percentage cannot be negative.')
+    fireEvent.change(stop, { target: { value: '0' } })
+    expect(stop).not.toHaveAttribute('aria-invalid')
+    // An exponent is not read as 10% anywhere: no price-move line, and the field says why.
+    fireEvent.change(stop, { target: { value: '1e1' } })
+    expect(stop).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.queryByText(/price move/)).toBeNull()
+
+    const margin = screen.getByRole('spinbutton', { name: /Whole-position margin/ })
+    fireEvent.change(margin, { target: { value: '1e2' } })
+    expect(margin).toHaveAttribute('aria-invalid', 'true')
+    expect(margin).toHaveAttribute('title', `Size: ${plainDecimalRule}`)
+    expect(screen.queryByTestId('size-readout')).toBeNull()
+    fireEvent.change(field('Entry 1 planned target 1 price (quote units)'), { target: { value: '.5' } })
+    expect(field('Entry 1 planned target 1 price (quote units)')).toHaveAttribute('aria-invalid', 'true')
+  })
+
+  it('shows stored text a number input would blank, keeps its warning and checks its side as the server does', () => {
+    const base = createDraft()
+    const entry = { ...base.entries[0]!, price: '+100', stops: [{ ...base.entries[0]!.stops[0]!, value: '95', share: '1\n' }] }
+    const saved = { ...base, size: '5.', entries: [entry] }
+    function Harness() {
+      // The stop moves from the stored 95 to 105, above the stored +100 entry the server reads as 100.
+      const [draft, setDraft] = useState({ ...saved, entries: [{ ...entry, stops: [{ ...entry.stops[0]!, value: '105' }] }] })
+      return <StoredPlanTextContext.Provider value={storedPlanText(planFromDraft(saved))}>
+        <PositionEditor draft={draft} onChange={setDraft} selectedId={entry.id} onSelect={() => {}} />
+      </StoredPlanTextContext.Provider>
+    }
+    render(<Harness />)
+    const price = screen.getByRole('textbox', { name: 'Entry 1 planned entry price (quote units)' })
+    expect(price).toHaveValue('+100')
+    expect(price).toHaveAttribute('inputmode', 'decimal')
+    expect(price).toHaveAttribute('data-warning', 'true')
+    expect(price).not.toHaveAttribute('aria-invalid')
+    expect(price.getAttribute('title')).toMatch(/^Saved earlier as “\+100”/)
+    const size = screen.getByRole('textbox', { name: /Whole-position margin/ })
+    expect(size).toHaveValue('5.')
+    expect(size).toHaveAttribute('data-warning', 'true')
+    // "1\n" trims to plan text, but it is stored text a number input blanks: visible and flagged too.
+    const share = screen.getByRole('textbox', { name: 'Entry 1 stop share (%)' })
+    expect(share).toHaveAttribute('data-warning', 'true')
+    expect(share.getAttribute('title')).toMatch(/^Saved earlier as “1\\n”/)
+    expect(field('Entry 1 planned stop price (quote units)')).toHaveAttribute('aria-invalid', 'true')
+
+    // A new value that is still not plain stays visible as typed and becomes an error.
+    fireEvent.change(price, { target: { value: '+1000' } })
+    expect(screen.getByRole('textbox', { name: 'Entry 1 planned entry price (quote units)' })).toHaveAttribute('aria-invalid', 'true')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Entry 1 planned entry price (quote units)' }), { target: { value: '110' } })
+    expect(field('Entry 1 planned entry price (quote units)')).toHaveValue(110)
+    expect(field('Entry 1 planned stop price (quote units)')).not.toHaveAttribute('aria-invalid')
+  })
+
   it('holds the margin to the available amount and offers to use it', async () => {
     const onChange = vi.fn<(draft: PlayDraft) => void>()
     function Harness() {
       const [draft, setDraft] = useState(() => ({ ...createDraft(), size: '263' }))
       return <PositionEditor draft={draft} onChange={next => { onChange(next); setDraft(next) }} selectedId={draft.entries[0]!.id} onSelect={() => {}}
-        availableBudget="151.77" units={{ quote: 'USDC', base: 'SOL', quantityDecimals: 2 }} />
+        availableBudget={{ value: '151.77', source: 'wallet' }} units={{ quote: 'USDC', base: 'SOL', quantityDecimals: 2 }} />
     }
     const user = userEvent.setup()
     render(<Harness />)
-    expect(screen.getByRole('alert')).toHaveTextContent('Margin 263 USDC is above the 151.77 USDC available.')
+    expect(screen.getByRole('alert')).toHaveTextContent('Margin 263 USDC is above the 151.77 USDC budget (wallet).')
     expect(screen.getByRole('spinbutton', { name: /Whole-position margin/ })).toHaveAttribute('aria-invalid', 'true')
     await user.click(screen.getByRole('button', { name: 'Use 151.77 USDC' }))
     expect(onChange.mock.lastCall?.[0].size).toBe('151.77')
