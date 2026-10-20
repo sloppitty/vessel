@@ -134,20 +134,33 @@ October 19, 2026, 0.5b managed stops, branch `t3/phase0-managed-stops`
   - Backend: 3,471 passed, 5 skipped (live venue and S3), 0 failed.
   - Frontend: typecheck and lint clean, 2,557 tests, build OK.
 
-- Two Sol (Codex, GPT-6.1-Sol) review rounds of the 0.1/0.5a/0.5b chain
-  found nothing in 0.1 or 0.5a. In 0.5b, round 1 found:
-  - **high:** switching an unfilled long to short slipped a wrong-side
-    stop through the unchanged-stop exemption. Direction is now part of
-    it on server and browser;
-  - three medium or low freshness and exactness defects: fills tied to
-    the saved status, stale ledger averages, and a rounded venue average.
+- Six Sol (Codex, GPT-6.1-Sol) review rounds covered the 0.1/0.5a/0.5b chain
+  and found nothing in 0.1 or 0.5a. In 0.5b:
+  - **Round 1:**
+    - **high:** switching an unfilled long to short slipped a wrong-side
+      stop through the unchanged-stop exemption. Direction is now part
+      of it, on server and browser;
+    - medium: fills depended on the saved status;
+    - medium: stale manual-ledger averages;
+    - low: a rounded venue average.
+  - **Rounds 2 to 5** found freshness races, each fixed with failing-first
+    tests:
+    - a same-version ledger reread;
+    - an action error clearing read staleness;
+    - an action overlapping a failed read;
+    - a read started during a link;
+    - a delayed mutation response.
+  - The execution hook was rebuilt around one freshness model:
+    - reads are ordered by start, mutations by completion;
+    - a mutation's own answer never counts as fresh;
+    - nothing is fresh while a mutation is in flight.
 
-  Round 2 confirmed those fixes and found two more medium freshness
-  defects: a same-version ledger reread, and action errors clearing read
-  staleness. Every fix has tests that failed before it. `scripts/check.sh`
-  then passed:
+    An exhaustive test drives the real hook through 1,055 orderings of
+    commit, snapshot, delivery and external imports.
+  - **Round 6** found nothing.
+- Final `scripts/check.sh` on this branch:
   - Backend: 3,472 passed, 5 skipped, 0 failed.
-  - Frontend: 2,564 tests, build OK.
+  - Frontend: 3,621 tests, build OK.
   - Release build: 0 warnings.
 
 ## 0.6 Journal opens without every image
