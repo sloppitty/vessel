@@ -25,6 +25,7 @@ import { ChartPanel } from './PlayChart'
 import { CapitalContext, PlayJournal, PositionSummary } from './WorkspacePanels'
 import { noFilledEntries } from './planChecks'
 import { noEntryFills, type EntryFills } from './position-risk-summary'
+import type { EvidenceImages } from './evidence-images'
 import { isNominalUsdQuote } from './stablecoins'
 import { defaultPlayTitle } from './default-title'
 import './plays-workspace.css'
@@ -36,7 +37,7 @@ import '@/features/monitor/incidents.css'
 
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, revision = null,
   lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, sizingStatus = 'ready', onRetrySizing, onRiskChange,
-  filledEntries, fills: entryFills, onUnits, onPriceStep, retrospective = false, incidents, stopEvidence }: {
+  filledEntries, fills: entryFills, onUnits, onPriceStep, retrospective = false, incidents, stopEvidence, evidenceImages }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -83,6 +84,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   onUnits?: (units: SizeUnits) => void
   /** The instrument's tick, or null, so the page can match order prices as the server does. */
   onPriceStep?: (step: number | null) => void
+  /** Saved originals of the open Play, which load after it opens. */
+  evidenceImages?: EvidenceImages | undefined
 }) {
   const fieldId = useId()
   const [selectedId, setSelectedId] = useState(draft.entries[0]?.id ?? '')
@@ -286,7 +289,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           execution={execution} readOnly={readOnly} retrospective={retrospective} status={status}
           structuredReview={draft.structuredReview}
           onStructuredReviewChange={structuredReview => onChange({ ...draft, structuredReview })}
-          evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceRequest={evidenceRequest} executionRequest={executionRequest} />
+          evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceImages={evidenceImages} evidenceRequest={evidenceRequest} executionRequest={executionRequest} />
       </div>
       {retrospective ? <section className="panel retrospective-position" aria-label="No original plan"><h2>No original plan</h2></section>
         : readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>

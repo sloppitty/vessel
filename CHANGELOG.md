@@ -52,6 +52,10 @@
   by one Refresh no longer get a ladder level that depends on Play IDs; results
   that share an exit time are disclosed (D-05). Historical ladder levels can
   change on upgrade.
+- A saved Play opens even when an evidence image cannot be read. Originals load
+  one by one after the Play opens; an unavailable image offers Retry, a missing
+  one says so, and saving never deletes or re-uploads an image that has not
+  loaded (D-10).
 
 ## 0.3.2 - October 19, 2026
 

@@ -123,28 +123,33 @@ export function draftFromSaved(play: SavedPlay, evidence: DraftEvidence[]): Play
 
 const extension = (type: string) => type === 'image/jpeg' ? 'jpg' : type === 'image/webp' ? 'webp' : 'png'
 
-export function draftEvidenceFromSaved(item: SavedEvidence, image: Blob): DraftEvidence {
+/** A saved image as metadata only; its original loads separately once the Play is open. */
+export function draftEvidenceFromSaved(item: SavedEvidence): DraftEvidence {
   return {
     id: createEvidenceId(), serverId: item.id, savedState: { note: item.note, markup: item.markup },
-    source: item.source, image, name: `vessel-${item.source}-${item.createdAtUtc.slice(0, 10)}-${item.id.slice(0, 8)}.${extension(item.contentType)}`,
+    source: item.source, sizeBytes: item.sizeBytes,
+    name: `vessel-${item.source}-${item.createdAtUtc.slice(0, 10)}-${item.id.slice(0, 8)}.${extension(item.contentType)}`,
     context: '', note: item.note, markup: item.markup, addedAt: item.createdAtUtc,
   }
 }
 
-/** Loads a saved Play with its evidence images. */
+/**
+ * Loads a saved Play from the Play and its evidence metadata alone. Originals are not read here: each loads on its
+ * own afterwards (`useEvidenceImages`), so an unavailable or missing image never keeps the Play from opening.
+ */
 export async function loadSavedPlay(api: WorkspaceApi, id: string, signal?: AbortSignal) {
   const [play, items] = await Promise.all([api.play(id, signal), api.evidence(id, signal)])
   signal?.throwIfAborted()
   if (play.summary.id !== id) throw new ApiError('invalid-response', 'The API returned a different Play. Your current work was kept.')
-  const evidence = await Promise.all(items.map(async item => draftEvidenceFromSaved(item, await api.evidenceImage(item.id, signal))))
-  signal?.throwIfAborted()
-  const draft = draftFromSaved(play, evidence)
+  const draft = draftFromSaved(play, items.map(draftEvidenceFromSaved))
   return { draft, saved: savedState(play, draft) }
 }
 
 /**
  * Brings server evidence in line with the draft: removes deleted images, uploads new ones and saves
  * changed notes and marks. Stops at the first failure; what succeeded is reflected in the result.
+ * Only images the owner removed are deleted, and only local images (with their own Blob) are uploaded: a saved
+ * image whose original has not loaded keeps its server ID, so it is neither deleted nor uploaded again.
  */
 export async function syncEvidence(api: WorkspaceApi, playId: string, evidence: DraftEvidence[], savedIds: string[]) {
   const present = new Set(evidence.map(item => item.serverId))
@@ -159,6 +164,8 @@ export async function syncEvidence(api: WorkspaceApi, playId: string, evidence: 
     if (error) { result.push(item); continue }
     try {
       if (!item.serverId) {
+        // Every local image has its Blob; anything else has nothing to upload.
+        if (!item.image) { result.push(item); continue }
         const saved = await api.uploadEvidence(playId, item.image, { source: item.source, note: item.note, markup: item.markup, name: item.name })
         result.push({ ...item, serverId: saved.id, savedState: { note: saved.note, markup: saved.markup } })
         continue

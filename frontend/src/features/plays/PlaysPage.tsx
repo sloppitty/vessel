@@ -24,6 +24,7 @@ import { incidentsByPlay, monitorIncidents, type IncidentCounts } from '@/featur
 import { IncidentPill } from '@/features/monitor/IncidentBadge'
 import { stopEvidenceFor } from '@/features/monitor/coverage'
 import { usePlayExecution } from './usePlayExecution'
+import { useEvidenceImages } from './evidence-images'
 import { useSizing } from './useSizing'
 import { noFilledEntries, planIssues, planIssueSummary } from './planChecks'
 import { executionFills, useLedgerFills } from './entry-fills'
@@ -156,6 +157,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const [dialogError, setDialogError] = useState<string | null>(null)
 
   const { draft, saved } = session
+  // Saved originals load after the Play opens, outside the draft, and stay while the session holds it.
+  const evidenceImages = useEvidenceImages(api, draft.evidence)
   const venues = useVenues()
   const account = accounts.find(item => item.id === (saved?.summary.accountId ?? draft.accountId))
   const manual = !!account && venues.can(account.venueId, 'manualExecutions')
@@ -480,6 +483,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       sizing={sizing.sizing} sizingStatus={sizing.status} onRetrySizing={sizing.retry} onRiskChange={sizing.updateRisk}
       filledEntries={filledEntries} fills={fills} onUnits={onUnits} onPriceStep={setPriceStep}
       incidents={saved ? playIncidents.get(saved.summary.id) : undefined} stopEvidence={manual ? undefined : stopEvidence}
+      evidenceImages={evidenceImages}
       execution={manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
         enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}
         working={busy !== null}
