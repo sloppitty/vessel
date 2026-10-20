@@ -6,6 +6,7 @@ import { AppearanceSettings, CurrentThemeName } from '@/features/settings/Appear
 import { showAppearanceSection } from '@/features/settings/appearance'
 import type { WorkspaceApi } from '@/api/workspace'
 import { NotificationSettings } from '@/features/notifications/NotificationSettings'
+import { ReviewSettings } from '@/features/review/ReviewSettings'
 import type { InAppNotifications } from '@/features/notifications/useInAppNotifications'
 import { ProfileSettings } from '@/features/identity/ProfileSettings'
 import type { ShellIdentity } from '@/features/identity/types'
@@ -30,6 +31,7 @@ export function SettingsPage({ system, disconnectSession, onAccounts, api, inApp
   if (!identity) return <div className="settings-grid">
     <AppearanceSettings />
     <NotificationSettings api={api} inApp={inApp} />
+    <ReviewSettings />
     <section className="shell-panel settings-panel">
       <ShieldCheck size={23} /><h2>Private session</h2>
       <p>Connected as {system.owner.displayName}.</p>
@@ -43,7 +45,7 @@ export function SettingsPage({ system, disconnectSession, onAccounts, api, inApp
   </div>
   return <Tabs value={tab} onValueChange={value => onTab?.(value === 'profile' ? 'profile' : 'appearance')} className="settings-tabs">
     <TabsList aria-label="Settings sections"><TabsTrigger value="appearance">Appearance</TabsTrigger><TabsTrigger value="profile">Profile &amp; sign-in</TabsTrigger></TabsList>
-    <TabsContent value="appearance"><div className="settings-grid"><AppearanceSettings /><NotificationSettings api={api} inApp={inApp} />{venuesPanel}</div></TabsContent>
+    <TabsContent value="appearance"><div className="settings-grid"><AppearanceSettings /><NotificationSettings api={api} inApp={inApp} /><ReviewSettings />{venuesPanel}</div></TabsContent>
     <TabsContent value="profile"><ProfileSettings identity={identity} onSignOut={disconnectSession} /></TabsContent>
   </Tabs>
 }
