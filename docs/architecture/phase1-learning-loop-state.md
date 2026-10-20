@@ -208,6 +208,8 @@ October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
     entry ID in time order, since entries are append-only. A test fails without this fix.
   - **Check.** `scripts/check.sh` passed again: backend 3,591 passed, 5 skipped; frontend 152 files and 3,805 tests.
 
+- **Sol (Codex) round 6.** No findings: both round-5 fixes hold, including under StrictMode.
+
 ## 1.3 Record repair
 
 Not started.
