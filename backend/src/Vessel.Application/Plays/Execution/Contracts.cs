@@ -9,6 +9,9 @@ using Vessel.Application.Common;
 namespace Vessel.Application.Plays.Execution;
 
 /// <summary>Links an order to a plan level: role entry with its entry, stop or target with its entry and level, or exit.</summary>
+/// <summary>The owner says a venue order is not this Play's (phase 1, 1.6d).</summary>
+public sealed record RejectOrderRequest([property: JsonRequired] string OrderId);
+
 public sealed record LinkOrderRequest(
     [property: JsonRequired] string OrderId,
     [property: JsonRequired] string Role,

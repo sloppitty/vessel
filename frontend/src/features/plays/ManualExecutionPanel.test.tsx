@@ -73,6 +73,20 @@ describe('manual entry (phase 1, 1.6b)', () => {
     expect(source).not.toHaveAttribute('aria-invalid')
   })
 
+  it('focuses the first invalid field in the form, whatever order the errors were found in', async () => {
+    const { api } = client()
+    const user = userEvent.setup()
+    render(<Harness api={api} />)
+    await user.click(screen.getByRole('button', { name: 'Record execution' }))
+    expect(screen.getByLabelText('Saved plan entry')).toHaveFocus()
+    await user.selectOptions(screen.getByLabelText('Saved plan entry'), 'entry-1')
+    await user.type(screen.getByLabelText(/^Execution time/), '2026-10-13 10:00')
+    await user.click(screen.getByRole('button', { name: 'Record execution' }))
+    // Source sits before quantity and price.
+    expect(screen.getByLabelText(/^Source label/)).toHaveFocus()
+    expect(screen.getByLabelText('Execution quantity')).toHaveAttribute('aria-invalid', 'true')
+  })
+
   it('enters the time in the browser zone with Now, and sends it as UTC', async () => {
     process.env.TZ = 'Europe/Madrid'
     const { api, methods } = client()

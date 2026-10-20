@@ -36,6 +36,23 @@ describe('manual execution time in the display zone (phase 1, 1.6b)', () => {
     expect(nowText('utc', now + 999)).toBe('2026-10-20 12:00:00')
   })
 
+  it('keeps both occurrences of an autumn overlap apart, so an unchanged correction is the same instant', () => {
+    process.env.TZ = 'Europe/Madrid'
+    // 02:30 happens twice on 26 October 2025: first at +02:00, then at +01:00.
+    for (const [stored, shown] of [['2025-10-26T00:30:00.123456Z', '2025-10-26 02:30:00.123456 +02:00'],
+      ['2025-10-26T01:30:00.123456Z', '2025-10-26 02:30:00.123456 +01:00']]) {
+      expect(zoneText(stored!, 'local')).toBe(shown)
+      expect(parseZoneText(shown!, 'local')).toEqual({ utc: stored, fraction: '.123456' })
+    }
+    // Outside the overlap a time needs no offset.
+    expect(zoneText('2025-10-26T03:30:00Z', 'local')).toBe('2025-10-26 04:30:00')
+    expect(nowText('local', Date.parse('2025-10-26T01:30:00.700Z'))).toBe('2025-10-26 02:30:00 +01:00')
+    // Typed without its offset, the repeated time is the owner's to say.
+    expect(parseZoneText('2025-10-26 02:30', 'local')).toEqual({ problem: 'ambiguous' })
+    expect(manualRequest({ ...draft, occurredAt: '2025-10-26 02:30' }, 2, 'long', ['entry-1'], 'local', now))
+      .toEqual({ errors: { occurredAt: 'That time happens twice in Europe/Madrid. Add its offset, such as +01:00 or +02:00.' } })
+  })
+
   it.each([
     ['', 'Enter when it executed.'],
     ['not a time', 'Enter a date and time such as 2026-10-13 10:00:00.'],

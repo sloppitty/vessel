@@ -45,8 +45,8 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
   onCheck: () => void
   onLink: (request: LinkOrder) => void
   onUnlink: (linkId: string) => void
-  /** Turns down every suggestion of one order for this Play (1.6d); without it, each is turned down on its own. */
-  onReject?: (linkIds: string[]) => void
+  /** Turns a whole order down for this Play in one step (1.6d); without it, each suggestion is turned down on its own. */
+  onReject?: (orderId: string) => void
   /** The saved Play's version, which a rebind of a drifted level expects. */
   version?: number
   /** The plan's leverage and the instrument's tick, to resolve and match levels as the server does. */
@@ -121,8 +121,7 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
               ...(link.entryId ? { entryId: link.entryId } : {}), ...(link.levelId ? { levelId: link.levelId } : {}) })}>
               <Link2 size={13} />Link as {levelName(entries, link, origin)}</Button>)}
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => {
-              const ids = group.links.map(link => link.id)
-              if (onReject) onReject(ids); else ids.forEach(id => onUnlink(id))
+              if (onReject && order) onReject(order.orderId); else group.links.forEach(link => onUnlink(link.id))
             }}>Not this play</Button>
           </span>
         </li>

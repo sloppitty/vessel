@@ -51,6 +51,7 @@ function facts(row: ManualExecutionDraft, zone: EntryZone, now: number): { facts
   const parsed = parseZoneText(row.occurredAt, zone)
   if (!row.occurredAt.trim()) errors.occurredAt = 'Enter when it executed.'
   else if ('problem' in parsed) errors.occurredAt = parsed.problem === 'missing' ? `That time does not exist in ${zoneName(zone)}.`
+    : parsed.problem === 'ambiguous' ? `That time happens twice in ${zoneName(zone)}. Add its offset, such as +01:00 or +02:00.`
     : 'Enter a date and time such as 2026-10-13 10:00:00.'
   else if (parsed.fraction.length > 7) errors.occurredAt = 'Use whole microseconds or coarser: at most six decimal places.'
   else if (Date.parse(parsed.utc) > now) errors.occurredAt = 'An execution cannot be in the future.'

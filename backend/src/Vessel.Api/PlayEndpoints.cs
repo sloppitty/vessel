@@ -68,6 +68,10 @@ public static class PlayEndpoints
         api.MapPost("/{id:guid}/execution/links", async (Guid id, LinkOrderRequest request, PlayExecutionService service,
             MonitorExecutionView monitor, CancellationToken ct) =>
             Results.Ok(await monitor.ComposeAsync(await service.LinkAsync(id, request, ct), ct)));
+        // Phase 1.6d: "Not this play" for a whole order, in one step.
+        api.MapPost("/{id:guid}/execution/rejections", async (Guid id, RejectOrderRequest request, PlayExecutionService service,
+            MonitorExecutionView monitor, CancellationToken ct) =>
+            Results.Ok(await monitor.ComposeAsync(await service.RejectOrderAsync(id, request, ct), ct)));
         api.MapDelete("/{id:guid}/execution/links/{linkId:guid}", async (Guid id, Guid linkId, PlayExecutionService service,
             MonitorExecutionView monitor, CancellationToken ct) =>
             Results.Ok(await monitor.ComposeAsync(await service.UnlinkAsync(id, linkId, ct), ct)));

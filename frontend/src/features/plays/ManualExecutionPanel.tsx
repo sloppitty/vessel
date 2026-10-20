@@ -39,6 +39,14 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
   const [error, setError] = useState<string | null>(null)
   // Each field's own error, keyed by field, or `together-<row>-<field>` for an execution corrected together (1.6b).
   const [errors, setErrors] = useState<Record<string, string>>({})
+  // After a refused submit, the first invalid field in the form's own order takes focus once it is marked.
+  const formRef = useRef<HTMLFormElement>(null)
+  const focusError = useRef(false)
+  useEffect(() => {
+    if (!focusError.current) return
+    focusError.current = false
+    formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
+  }, [errors])
   const [busy, setBusy] = useState(false)
   const submission = useRef<(() => void) | null>(null)
   const pending = busy || working
@@ -102,13 +110,13 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
     const request = together.length ? manualBatchRequest(form, saved.summary.version, zone)
       : manualRequest(form, saved.summary.version, saved.summary.direction, entries.map(entry => entry.id), zone)
     if ('errors' in request) {
-      // Each error sits on its own field; the first one takes focus.
+      // Each error sits on its own field; the first one in the form takes focus.
       const found: Record<string, string> = { ...request.errors as Record<string, string> }
       if ('rows' in request) request.rows.forEach((row, index) => Object.entries(row).forEach(([key, message]) => { found[`together-${index}-${key}`] = message }))
+      const any = Object.keys(found).length > 0
+      focusError.current = any
       setErrors(found)
-      const first = Object.keys(found)[0]
-      setError(first ? 'Check the highlighted fields.' : 'The execution could not be read. Check every field and try again.')
-      if (first) document.getElementById(`${id}-${first}`)?.focus()
+      setError(any ? 'Check the highlighted fields.' : 'The execution could not be read. Check every field and try again.')
       return
     }
     setErrors({})
@@ -198,7 +206,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
         </li>)}</ol>
       </details>
     </>}
-    {(canAdd || hasManualDraft(form)) && <form onSubmit={event => { void submit(event) }} noValidate aria-label={form.executionId ? 'Correct manual execution' : 'Record manual execution'}>
+    {(canAdd || hasManualDraft(form)) && <form ref={formRef} onSubmit={event => { void submit(event) }} noValidate aria-label={form.executionId ? 'Correct manual execution' : 'Record manual execution'}>
       <fieldset disabled={!permitted || pending}><legend>{form.executionId ? 'Correct execution' : 'Record execution'}
         <InfoTip label="How executions are recorded">
           <span>Times are in {zoneLabel}, such as 2026-10-13 10:00:00.123456, and are sent as UTC. A time ending in Z or an offset such as +02:00 is read as written. Whole microseconds or coarser; finer precision is refused, never rounded.</span>

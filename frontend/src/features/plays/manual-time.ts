@@ -23,22 +23,40 @@ function text(date: Date, zone: EntryZone, fraction: string) {
   return `${String(year).padStart(4, '0')}-${pad(month)}-${pad(day)} ${pad(hour)}:${pad(minute)}:${pad(second)}${fraction}`
 }
 
-/** A stored UTC timestamp as the owner reads and types it in `zone`; anything else is returned unchanged. */
+/** The offset from UTC at that instant in the browser's zone, as typed: "+02:00". */
+function offsetText(date: Date) {
+  const minutes = -date.getTimezoneOffset()
+  return `${minutes < 0 ? '-' : '+'}${pad(Math.floor(Math.abs(minutes) / 60))}:${pad(Math.abs(minutes) % 60)}`
+}
+
+/** The instant as typed in `zone`, with its offset when the local time happens twice (a daylight-saving overlap). */
+function exactText(date: Date, zone: EntryZone, fraction: string) {
+  const shown = text(date, zone, fraction)
+  if (zone === 'utc') return shown
+  const back = parseZoneText(shown, zone)
+  return 'utc' in back && back.utc.slice(0, 19) === date.toISOString().slice(0, 19) ? shown : `${shown} ${offsetText(date)}`
+}
+
+/**
+ * A stored UTC timestamp as the owner reads and types it in `zone`, so that sending it back unchanged is the same instant;
+ * anything else is returned unchanged.
+ */
 export function zoneText(utc: string, zone: EntryZone) {
   const match = stored.exec(utc)
   if (!match) return utc
   const date = new Date(`${match[1]}Z`)
-  return Number.isFinite(date.getTime()) ? text(date, zone, match[2] ?? '') : utc
+  return Number.isFinite(date.getTime()) ? exactText(date, zone, match[2] ?? '') : utc
 }
 
 /** Now, to the whole second, as the owner types it in `zone`. */
-export const nowText = (zone: EntryZone, now = Date.now()) => text(new Date(Math.floor(now / 1000) * 1000), zone, '')
+export const nowText = (zone: EntryZone, now = Date.now()) => exactText(new Date(Math.floor(now / 1000) * 1000), zone, '')
 
-export type ParsedTime = { utc: string; fraction: string } | { problem: 'format' | 'missing' }
+export type ParsedTime = { utc: string; fraction: string } | { problem: 'format' | 'missing' | 'ambiguous' }
 
 /**
  * What the owner typed, read in `zone` unless it names its own (Z or ±HH:MM), as the UTC timestamp the server reads. A
- * time that does not exist, such as one in a daylight-saving gap or 30 February, is refused rather than moved.
+ * time that does not exist, such as one in a daylight-saving gap or 30 February, is refused rather than moved, and a
+ * local time that happens twice needs its offset.
  */
 export function parseZoneText(value: string, zone: EntryZone): ParsedTime {
   const input = value.trim()
@@ -62,8 +80,11 @@ export function parseZoneText(value: string, zone: EntryZone): ParsedTime {
   } else {
     date.setFullYear(year, month - 1, day)
     date.setHours(hour, minute, second, 0)
-    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day ||
-      date.getHours() !== hour || date.getMinutes() !== minute || date.getSeconds() !== second) return { problem: 'missing' }
+    const same = (other: Date) => other.getFullYear() === year && other.getMonth() === month - 1 && other.getDate() === day &&
+      other.getHours() === hour && other.getMinutes() === minute && other.getSeconds() === second
+    if (!same(date)) return { problem: 'missing' }
+    // A daylight-saving overlap repeats the local time; which one is meant is the owner's to say.
+    if ([-120, -60, -30, 30, 60, 120].some(minutes => same(new Date(date.getTime() + minutes * 60_000)))) return { problem: 'ambiguous' }
   }
   if (!Number.isFinite(date.getTime())) return { problem: 'format' }
   return { utc: `${date.toISOString().slice(0, 19)}${fraction}Z`, fraction }

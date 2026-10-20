@@ -296,18 +296,19 @@ describe('stored Play execution', () => {
 
 
 describe('turning down an order (phase 1, 1.6d)', () => {
-  it('turns down each of its suggestions in order, as one action', async () => {
+  it('turns a whole order down in one request, as one action', async () => {
     const api = client()
-    const first = deferred()
-    api.unlinkOrder = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValueOnce(execution)
+    const answer = deferred()
+    api.rejectOrder = vi.fn().mockReturnValueOnce(answer.promise)
+    api.unlinkOrder = vi.fn()
     const view = renderHook(() => usePlayExecution(api, execution.playId, 'open', 0))
     await act(async () => {})
     let done!: Promise<unknown>
-    act(() => { done = view.result.current.reject(['link-1', 'link-2']) })
+    act(() => { done = view.result.current.reject('21') })
     expect(view.result.current.busy).toBe(true)
-    expect(api.unlinkOrder).toHaveBeenCalledOnce()
-    await act(async () => { first.resolve(execution); await done })
-    expect(vi.mocked(api.unlinkOrder).mock.calls.map(call => call[1])).toEqual(['link-1', 'link-2'])
+    await act(async () => { answer.resolve(execution); await done })
+    expect(api.rejectOrder).toHaveBeenCalledExactlyOnceWith(execution.playId, '21', expect.any(AbortSignal))
+    expect(api.unlinkOrder).not.toHaveBeenCalled()
     expect(view.result.current.busy).toBe(false)
   })
 })

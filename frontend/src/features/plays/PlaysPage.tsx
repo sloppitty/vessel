@@ -646,7 +646,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         currentBookRead={currentBookRead}
         {...(onManageAccount && account ? { onManageCredential: () => onManageAccount(account.id) } : {})}
         onDismiss={tracking.dismiss} onCheck={() => { void monitorRun.check() }} onLink={request => { void tracking.link(request) }}
-        onUnlink={linkId => { void tracking.unlink(linkId) }} onReject={linkIds => { void tracking.reject(linkIds) }}
+        onUnlink={linkId => { void tracking.unlink(linkId) }} onReject={orderId => { void tracking.reject(orderId) }}
         // A rebind writes a plan revision, so it waits for unsaved edits and other Play work, and its answer is the saved Play.
         version={saved.summary.version} leverage={leverageOf(draft.leverage)} priceStep={priceStep} rebindBlocked={dirty ? 'Save or discard your plan changes first.' : busy !== null ? 'Wait for the current change to finish.' : undefined}
         onRebind={(linkId, request) => tracking.rebind(linkId, request, acceptStoredPlay)} /> : undefined} />

@@ -235,7 +235,7 @@ describe('confirm rows (phase 1, 1.6d)', () => {
     await user.click(within(rows[1]!).getByRole('button', { name: 'Link as Entry 1 target 2' }))
     expect(onLink).toHaveBeenCalledWith({ orderId: '22', role: 'target', entryId: 'e1', levelId: 't2' })
     await user.click(within(rows[0]!).getByRole('button', { name: 'Not this play' }))
-    expect(onReject).toHaveBeenCalledWith(['00000000-0000-4000-8000-0000000000b1', '00000000-0000-4000-8000-0000000000b2'])
+    expect(onReject).toHaveBeenCalledWith('21')
   })
 
   it('says "another play" only when the server reports one', () => {

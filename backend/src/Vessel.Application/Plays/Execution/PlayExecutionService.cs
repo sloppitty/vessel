@@ -171,6 +171,35 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     }
 
     /// <summary>
+    /// The owner says an order is not this Play's (phase 1, 1.6d): in one step under the account lock, every suggestion of
+    /// it to this Play is declined, and it is dismissed for each level of the current plan and as an unplanned exit, so no
+    /// reconciliation can attribute it to this Play afterwards. Other Plays keep their suggestions.
+    /// </summary>
+    public async Task<PlayExecutionDto> RejectOrderAsync(Guid playId, RejectOrderRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.OrderId)) throw new ProblemException(400, "Choose an order.");
+        var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+        await unitOfWork.ExecuteAsync(() => store.WithAccountLockAsync(play.AccountId, async () =>
+        {
+            var order = (play.ContractId is null ? null : await store.OrderAsync(play.AccountId, play.ContractId, request.OrderId, ct))
+                ?? throw new ProblemException(404, "This order is not known for the play's instrument. Check the venue first.");
+            var links = (await store.LinksAsync(play.AccountId, [order.Id], [], ct)).Where(l => l.PlayId == play.Id).ToList();
+            if (links.Any(l => l.State == OrderLinkState.Linked))
+                throw new ProblemException(409, "This order is linked to this play. Unlink it instead.");
+            var now = time.GetUtcNow();
+            foreach (var link in links.Where(l => l.State == OrderLinkState.Suggested)) link.Dismiss(now);
+            var dismissed = links.Select(l => l.LevelKey).ToHashSet(StringComparer.Ordinal);
+            var exit = new PlanLevelTarget(OrderLinkRole.Exit, null, null, null, "");
+            foreach (var level in ExecutionMatcher.Levels(PlayDocuments.Read(play.Plan)).Append(exit))
+                if (dismissed.Add(level.Key))
+                    store.Add(new PlayOrderLink(play, order, level.Role, level.EntryId, level.LevelId, OrderLinkState.Dismissed, OrderLinkSource.Owner, now));
+            await store.SaveAsync(ct);
+            return true;
+        }, ct), ct);
+        return await GetAsync(playId, ct);
+    }
+
+    /// <summary>
     /// Removes a link or declines a suggestion. It is never proposed for that level again. Closed, Cancelled and Unresolved
     /// are final, so their links stay: removing one would leave a final status its fills no longer support.
     /// </summary>

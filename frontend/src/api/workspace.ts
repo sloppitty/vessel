@@ -322,6 +322,8 @@ export interface WorkspaceApi {
   playExecution(id: string, signal?: AbortSignal): Promise<PlayExecution>
   linkOrder(id: string, link: LinkOrder, signal?: AbortSignal): Promise<PlayExecution>
   unlinkOrder(id: string, linkId: string, signal?: AbortSignal): Promise<PlayExecution>
+  /** "Not this play" for a whole venue order, in one step (phase 1, 1.6d). */
+  rejectOrder(id: string, orderId: string, signal?: AbortSignal): Promise<PlayExecution>
   /** Moves a linked stop or target to its observed order's price as one plan revision; returns the saved Play. */
   rebindLevel(id: string, linkId: string, request: RebindLevel, signal?: AbortSignal): Promise<SavedPlay>
   evidence(playId: string, signal?: AbortSignal): Promise<SavedEvidence[]>
@@ -699,6 +701,7 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
     deletePlay: id => call(playPath(id), { ...playRequest, validate: none, method: 'DELETE' }),
     playExecution: (id, signal) => call(`${playPath(id)}/execution`, { ...playRequest, validate: isPlayExecution, ...withSignal(signal) }),
     linkOrder: (id, link, signal) => call(`${playPath(id)}/execution/links`, { ...playRequest, validate: isPlayExecution, method: 'POST', body: JSON.stringify(link), ...withSignal(signal) }),
+    rejectOrder: (id, orderId, signal) => call(`${playPath(id)}/execution/rejections`, { ...playRequest, validate: isPlayExecution, method: 'POST', body: JSON.stringify({ orderId }), ...withSignal(signal) }),
     unlinkOrder: (id, linkId, signal) => {
       if (!isGuid(linkId)) return Promise.reject(new ApiError('invalid-response', 'The link identifier is invalid.'))
       return call(`${playPath(id)}/execution/links/${linkId}`, { ...playRequest, validate: isPlayExecution, method: 'DELETE', ...withSignal(signal) })
