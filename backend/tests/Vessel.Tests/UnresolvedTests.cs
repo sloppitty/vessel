@@ -306,11 +306,25 @@ public sealed class UnresolvedEventTests
             db.StatusChanges.Add((await db.Plays.SingleAsync()).MarkOpen("Entry filled", now));
             return true;
         }, default);
-        await work.ExecuteAsync(async () =>
+        // Declared, returned, declared for another reason and returned again: each return names its own declaration.
+        var steps = new (UnresolvedReason Reason, bool Return)[]
+            { (UnresolvedReason.SharedClose, true), (UnresolvedReason.Flip, true), (UnresolvedReason.SharedClose, false) };
+        foreach (var (step, (reason, back)) in steps.Index())
         {
-            db.StatusChanges.Add((await db.Plays.SingleAsync()).DeclareUnresolved(UnresolvedReason.SharedClose, "Shared close.", "{}", now));
-            return true;
-        }, default);
+            await work.ExecuteAsync(async () =>
+            {
+                db.StatusChanges.Add((await db.Plays.SingleAsync()).DeclareUnresolved(reason, "Declared.", "{}", now.AddMinutes(2 * step + 1)));
+                return true;
+            }, default);
+            if (back) await work.ExecuteAsync(async () =>
+            {
+                var stored = await db.Plays.SingleAsync();
+                var (change, cleared) = stored.ReturnToOpen("The exit fill arrived after all.", now.AddMinutes(2 * step + 2));
+                db.StatusChanges.Add(change);
+                if (cleared is not null) db.ReviewRevisions.Add(cleared);
+                return true;
+            }, default);
+        }
         await work.ExecuteAsync(async () =>
         {
             await store.SetRunAsync(Guid.CreateVersion7(), "monitor", default);
@@ -322,9 +336,12 @@ public sealed class UnresolvedEventTests
             return true;
         }, default);
         var events = (await EventReads.ReadAsync(db, 0, 200, default)).Events;
-        var declared = Assert.Single(events, e => e.Type == "play.status-changed" && e.Data.GetProperty("current").GetString() == "unresolved");
-        Assert.Equal(("open", "owner", "shared-close"), (declared.Data.GetProperty("previous").GetString(),
-            declared.Data.GetProperty("source").GetString(), declared.Data.GetProperty("reason").GetString()));
+        var changes = events.Where(e => e.Type == "play.status-changed").Select(e => (e.Data.GetProperty("previous").GetString(),
+            e.Data.GetProperty("current").GetString(), e.Data.GetProperty("source").GetString(), e.Data.GetProperty("reason").GetString()))
+            .Where(c => c.Item1 == "unresolved" || c.Item2 == "unresolved").ToList();
+        Assert.Equal([("open", "unresolved", "owner", "shared-close"), ("unresolved", "open", "owner", "shared-close"),
+            ("open", "unresolved", "owner", "flip"), ("unresolved", "open", "owner", "flip"),
+            ("open", "unresolved", "owner", "shared-close")], changes);
         var closed = Assert.Single(events, e => e.Type == "play.closed");
         Assert.Equal(($"play:{play.Id}:closed", play.Id), (closed.DedupKey, closed.Subject.PlayId));
         Assert.Equal(("0.5", "0.5"), (closed.Data.GetProperty("enteredQuantity").GetString(), closed.Data.GetProperty("exitedQuantity").GetString()));

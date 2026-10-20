@@ -169,7 +169,8 @@ decision 4. It covers D-06.
   the status change. Text and answers stay. While Open again, stored answers
   save unchanged but cannot change.
 - **Events.** The declaration and the return are `play.status-changed`, with
-  the unresolved reason as `reason`. No notification rule is added.
+  the unresolved reason as `reason`; a return carries the reason of the latest
+  declaration it undoes. No notification rule is added.
 - **Migration.** The explicit `UnresolvedStatus` migration adds the nullable
   `UnresolvedReason` and `Evidence` columns to `play_status_changes`. Rolling
   it back is refused while any Play or history row names Unresolved; restore
