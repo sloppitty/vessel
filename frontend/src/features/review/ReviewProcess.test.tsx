@@ -52,8 +52,9 @@ describe('process cases (phase 1, 1.4b)', () => {
     expect(reviewProcess).toHaveBeenCalledWith(expect.objectContaining({ period: 'month', offset: 0 }), { cell: 'followed-win' }, expect.any(AbortSignal))
     expect(await within(dialog).findByText('Plan written after first execution')).toBeInTheDocument()
     expect(within(dialog).getByText(/Followed · Review not complete/)).toBeInTheDocument()
-    // The link is named by its visible title.
+    // The link is named by its visible title, and the row names its venue.
     expect(within(dialog).getByRole('button', { name: 'Late plan' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('img', { name: /Hyperliquid/ })).toBeInTheDocument()
   })
 
   it('breaks results down by origin and direction in a fixed order, without inspecting their rows', async () => {
