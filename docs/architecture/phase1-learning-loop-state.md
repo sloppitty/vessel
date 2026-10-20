@@ -126,7 +126,35 @@ Not started.
 
 ## 1.4 Process and outcome as cases
 
-Not started.
+### 1.4a Post-hoc badge and per-metric n
+
+October 20, 2026, branch `t3/phase1-post-hoc-badge`, stacked on 1.1a:
+- **D-17 badge.** `PlayReceipts.PlannedAfterExecution` is true for a planned-origin Play whose `PlannedAtUtc` is later
+  than its earliest linked or manual execution.
+  - It reads stored times only.
+  - The receipt and Review's Play rows carry the flag.
+  - The badge "Plan written after first execution" shows in the Play header, above its review and in Review's Play
+    lists.
+  - Scoring and sizing are unchanged. By decision 9 the Play may answer "Followed".
+- **F-08.** Each metric names its own n and is marked as a small sample (below 20) by it:
+  - batting average and profit factor: decided Plays;
+  - average gain / loss: wins and losses;
+  - expectancy: scored Plays;
+  - estimated R: Plays with a complete initial stop.
+
+  The asset cards are marked by their Play counts, and breakdown rows by their decided counts.
+- **Label.** The R average is now "Estimated R expectancy (planned-stop model)". The statistic is unchanged.
+- **Tests.**
+  - PostgreSQL, T29: a manual Play planned today for an execution recorded days earlier is flagged on its receipt and
+    its Review row. Its R reason is "no plan revision in force". It answers "Followed" and is still scored as a win. A
+    plan written before its execution is not flagged.
+  - Unit: the flag's time boundaries, an exit-only early fill, and retrospective Plays.
+  - Frontend: A5 (20 scratches and one win) now reads "n = 1 decided · Small sample"; the asset-card and row markers;
+    the badge in Review rows, the header and the Review tab, and its absence otherwise.
+- **Checks.** `scripts/check.sh` passed:
+  - backend: 3,560 passed, 5 skipped;
+  - frontend: 149 files and 3,741 tests;
+  - build clean.
 
 ## 1.5 Lessons return and a recorded pre-flight
 
