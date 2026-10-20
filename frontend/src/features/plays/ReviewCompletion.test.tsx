@@ -131,12 +131,13 @@ describe('a late log write after a remount (phase 1, 1.2)', () => {
     await act(async () => finish([note]))
     expect(screen.getByLabelText('Log entry')).toHaveValue('A newer thought.')
     // The written entry's request is settled; the newer text is a new entry with its own request.
-    expect(kept).toHaveBeenLastCalledWith({ playId, text: 'A newer thought.', state: '' })
+    expect(kept).toHaveBeenLastCalledWith({ playId, text: 'A newer thought.', state: '', written: 1 })
   })
 
-  it('clears the entry once its write is confirmed, when nothing newer was typed', async () => {
+  it('clears the entry once its write is confirmed, when nothing newer was typed, and shows it in the remounted Log', async () => {
     let finish!: (notes: PlayNote[]) => void
-    const api = { playNotes: vi.fn().mockResolvedValue([]),
+    let stored: PlayNote[] = []
+    const api = { playNotes: vi.fn(() => Promise.resolve(stored)),
       addPlayNote: vi.fn(() => new Promise<PlayNote[]>(resolve => { finish = resolve })) } as unknown as WorkspaceApi
     const kept = vi.fn()
     const user = userEvent.setup()
@@ -147,9 +148,13 @@ describe('a late log write after a remount (phase 1, 1.2)', () => {
     await user.click(screen.getByRole('button', { name: 'Add to log' }))
     rerender(<KeptLog api={api} playId={playId} mounted={false} onKept={kept} />)
     rerender(<KeptLog api={api} playId={playId} mounted onKept={kept} />)
+    // The remounted Log read the list before the write landed.
+    expect(await screen.findByText('No entries yet.')).toBeInTheDocument()
+    stored = [note]
     await act(async () => finish([note]))
     expect(screen.getByLabelText('Log entry')).toHaveValue('')
-    expect(kept).toHaveBeenLastCalledWith({ playId, text: '', state: '' })
+    expect(kept).toHaveBeenLastCalledWith({ playId, text: '', state: '', written: 1 })
+    expect(await screen.findByText(note.text)).toBeInTheDocument()
   })
 })
 

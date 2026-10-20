@@ -545,7 +545,11 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       evidenceImages={evidenceImages} reviewReceipt={reviewReceipt} journalSave={journalSave} retrospectiveReceipt={retrospectiveReceipt}
       onPreflight={setPreflight} nextActions={nextActions?.api === api ? nextActions.actions : null} onOpenPlay={id => { void open(id) }}
       log={saved ? <PlayLog key={saved.summary.id} api={api} playId={saved.summary.id} draft={session.log}
-        onDraft={change => update({ log: change(latest.current.log) })} /> : undefined}
+        onDraft={change => {
+          // A page that has gone (remounted, disconnected or on another API) never publishes its outdated session.
+          if (!mounted.current || currentApi.current !== api) return
+          update({ log: change(latest.current.log) })
+        }} /> : undefined}
       reviewCompletion={saved ? <ReviewCompletionBar summary={saved.summary} dirty={dirty} busy={pending}
         filled={(playReceipt?.fillCount ?? 0) > 0} onAction={action => { void reviewAction(action) }} /> : undefined}
       plannedAfterExecution={playReceipt?.plannedAfterExecution === true}

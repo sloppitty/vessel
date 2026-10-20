@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import type { ManualExecutions } from '@/api/diary'
-import { emptyStructuredReview, preflightCodes, type PlayExecution, type PlayFields, type PlayList, type PlaySummary, type PlayView, type SavedPlay } from '@/api/plays'
+import { emptyStructuredReview, preflightCodes, type PlayExecution, type PlayFields, type PlayList, type PlayNote, type PlaySummary, type PlayView, type SavedPlay } from '@/api/plays'
 import { VenuesProvider } from '@/api/venues'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { accountFixture, idleMarketStream, instrumentCatalogFixture, overviewFixture, playApiStubs, playCountsFrom, playListPage, playsFrom, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
@@ -61,6 +61,7 @@ function client(play = terminal, more: SavedPlay[] = []) {
     evidence: vi.fn(() => Promise.resolve([])),
     nextActions: vi.fn<WorkspaceApi['nextActions']>(() => Promise.resolve([])),
     playNotes: vi.fn<WorkspaceApi['playNotes']>(() => Promise.resolve([])),
+    addPlayNote: vi.fn<WorkspaceApi['addPlayNote']>(() => Promise.resolve([])),
     completeReview: vi.fn<WorkspaceApi['completeReview']>(() => {
       current = { ...current, summary: { ...current.summary, version: current.summary.version + 1, reviewCompletion: 'completed', reviewCompletedAtUtc: at } }
       return Promise.resolve(current)
@@ -779,6 +780,26 @@ describe('diary workspace integration', () => {
     expect(await screen.findByText(/Your current work is kept/)).toBeInTheDocument()
     expect(methods.play).not.toHaveBeenCalledWith(otherId, expect.anything())
     expect(screen.getByLabelText('Log entry')).toHaveValue('Adding into strength')
+  })
+  it('never lets a write from a page that has gone change the current session (phase 1, 1.2)', async () => {
+    const open: SavedPlay = { ...planned, summary: { ...planned.summary, status: 'open' } }
+    const { api, methods } = client(open)
+    let finish!: (notes: PlayNote[]) => void
+    methods.addPlayNote.mockImplementation(() => new Promise<PlayNote[]>(resolve => { finish = resolve }))
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(open)} />)
+    await user.click(screen.getByRole('tab', { name: 'Log' }))
+    await user.type(await screen.findByLabelText('Log entry'), 'Adding into strength')
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    // The whole page goes and comes back while the write is out; the owner keeps typing in the new one.
+    await user.click(screen.getByRole('button', { name: 'Toggle Plays page' }))
+    await user.click(screen.getByRole('button', { name: 'Toggle Plays page' }))
+    await user.click(await screen.findByRole('tab', { name: 'Log' }))
+    const entry = await screen.findByLabelText('Log entry')
+    await user.clear(entry)
+    await user.type(entry, 'A newer thought')
+    await act(async () => finish([]))
+    expect(screen.getByLabelText('Log entry')).toHaveValue('A newer thought')
   })
   it('offers the log on a retrospective Play too (phase 1, 1.2)', async () => {
     const { api } = client(retrospectiveSavedFixture)

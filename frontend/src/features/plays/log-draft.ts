@@ -7,6 +7,8 @@ export interface PlayLogDraft {
   state: PlayNoteState | ''
   /** The request last sent for this entry; a retry of the same entry sends it again, so it is never written twice. */
   attempt?: { requestId: string; text: string; state: PlayNoteState | null }
+  /** Writes confirmed for this Play: a Log mounted after one started reads the list again, so it shows the entry. */
+  written?: number
 }
 
 /** Whether a log entry is being written or its write is still unconfirmed: unsaved work, like a manual execution draft. */

@@ -78,11 +78,19 @@ export function PlayLog({ api, playId, draft, onDraft }: {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [reload, setReload] = useState(0)
+  // A write confirmed while another Log was mounted counts here too: the list is read again.
+  const written = kept?.playId === playId ? kept.written ?? 0 : 0
   // Reads and writes answer out of order. A list counts only if it was read after the latest written list arrived, so an
   // older read never hides an entry that a write already showed.
   const sequence = useRef(0)
   const shown = useRef(0)
+  // The confirmed-write count this Log's own write produced: it already shows that list, so it needs no read for it.
+  const ownWrite = useRef(-1)
+  const lastRead = useRef<{ api: WorkspaceApi; playId: string; reload: number } | null>(null)
   useEffect(() => {
+    const previous = lastRead.current
+    lastRead.current = { api, playId, reload }
+    if (previous?.api === api && previous.playId === playId && previous.reload === reload && written === ownWrite.current) return
     const controller = new AbortController()
     const read = ++sequence.current
     api.playNotes(playId, controller.signal).then(value => {
@@ -91,7 +99,7 @@ export function PlayLog({ api, playId, draft, onDraft }: {
       setNotes(value); setLoadError(null)
     }).catch(cause => { if (!controller.signal.aborted && read >= shown.current) setLoadError(errorMessage(cause, 'The log could not be loaded.')) })
     return () => controller.abort()
-  }, [api, playId, reload])
+  }, [api, playId, reload, written])
 
   async function add(event: FormEvent) {
     event.preventDefault()
@@ -109,10 +117,12 @@ export function PlayLog({ api, playId, draft, onDraft }: {
       // Possibly after a remount, with newer text typed: only the entry this write sent is cleared.
       change(stored => {
         if (stored?.playId !== playId || stored.attempt?.requestId !== attempt.requestId) return stored
-        if (stored.text.trim() === attempt.text && (stored.state === '' ? null : stored.state) === attempt.state) return { playId, text: '', state: '' }
-        const { attempt: _written, ...rest } = stored
-        void _written
-        return rest
+        const count = (stored.written ?? 0) + 1
+        ownWrite.current = count
+        if (stored.text.trim() === attempt.text && (stored.state === '' ? null : stored.state) === attempt.state) return { playId, text: '', state: '', written: count }
+        const { attempt: _sent, ...rest } = stored
+        void _sent
+        return { ...rest, written: count }
       })
     } catch (cause) {
       setSaveError(errorMessage(cause, 'The entry could not be added. Try again; it will not be written twice.'))
