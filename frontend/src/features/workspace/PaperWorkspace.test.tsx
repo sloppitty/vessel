@@ -9,6 +9,7 @@ import { ApplicationShell } from './ApplicationShell'
 import { CreateAccountDialog } from './CreateDialogs'
 import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
 import { activityPage } from '@/test/activity-fixture'
+import { reviewFixture } from '@/test/review-fixture'
 
 const paperPortfolio = { ...portfolioFixture, tradingMode: 'paper' as const, name: 'Paper hypotheses' }
 const paperAccount = { ...accountFixture, tradingMode: 'paper' as const, syncStatus: 'paper' as const, venueId: 'hyperliquid', name: 'Paper hypothesis 1',
@@ -24,6 +25,43 @@ function api(overrides: Partial<WorkspaceApi> = {}) {
 beforeEach(() => { window.history.replaceState(null, '', '/#accounts') })
 
 describe('isolated Paper workspace', () => {
+  it('keeps imported-position Review controls and preferences real-only across shell mode changes', async () => {
+    window.history.replaceState(null, '', '/#review')
+    const user = userEvent.setup()
+    const paper = api({ tradingMode: 'paper', review: vi.fn().mockResolvedValue({
+      ...reviewFixture, tradingMode: 'paper',
+      plays: [{ ...reviewFixture.plays[0], executionSource: 'paper',
+        local: { netUsd: '200.123456789', basis: 'paper-simulation', reason: null, signDiffers: false } }],
+    }) })
+    const real = api()
+    const root = api({ ...real, forTradingMode: vi.fn(mode => mode === 'paper' ? paper : real) })
+    render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Trading mode' }), 'paper')
+    await waitFor(() => expect(paper.review).toHaveBeenCalled())
+    expect(paper.review).toHaveBeenLastCalledWith(expect.objectContaining({ positions: 'exclude' }), expect.any(AbortSignal))
+    expect(screen.queryByRole('switch', { name: 'Include imported positions' })).not.toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: '3 Plays' }))
+    const details = await screen.findByRole('dialog', { name: 'Closed Plays' })
+    expect(await within(details).findByText('Paper · simulated executions')).toBeVisible()
+    expect(within(details).getByText('Paper result')).toBeVisible()
+    expect(within(details).queryByText('Venue result')).not.toBeInTheDocument()
+    expect(paper.review).toHaveBeenLastCalledWith(expect.objectContaining({ positions: 'exclude' }), expect.any(AbortSignal))
+    await user.keyboard('{Escape}')
+    await user.click(screen.getByRole('button', { name: 'Definitions' }))
+    expect(screen.queryByRole('heading', { name: 'Imported positions' })).not.toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await user.click(screen.getByRole('link', { name: 'Settings' }))
+    expect(await screen.findByRole('heading', { name: 'Paper trading' })).toBeVisible()
+    expect(screen.queryByRole('spinbutton', { name: /fewer Plays than/ })).not.toBeInTheDocument()
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Trading mode' }), 'real')
+    expect(await screen.findByRole('spinbutton', { name: /fewer Plays than/ })).toBeVisible()
+    await user.click(screen.getByRole('link', { name: 'Review' }))
+    expect(await screen.findByRole('switch', { name: 'Include imported positions' })).toBeVisible()
+    expect(real.review).toHaveBeenLastCalledWith(expect.objectContaining({ positions: 'auto' }), expect.any(AbortSignal))
+    expect(paper.monitor).not.toHaveBeenCalled()
+    expect(paper.sync).not.toHaveBeenCalled()
+  })
+
   it('keeps disabled history accessible, has no real monitor/stream/refresh, and discards a late real overview', async () => {
     let finish!: (overview: Overview) => void
     const real = api({ overview: vi.fn().mockImplementation(() => new Promise<Overview>(resolve => { finish = resolve })) })

@@ -84,6 +84,8 @@ monitor/notifications module sets or generate real events from paper lifecycle.
 Reuse the existing shell/Play layout. No live migration, deployment or release
 is authorized.
 
+October 20, 2026: the owner asked Review to include imported positions when there are no Plays. Follow the Imported positions section of `docs/architecture/portfolio-review.md`: closed unassigned Activity operations by the sizing fallback's eligibility rule, `positions=exclude|include|auto` with a `minPlays` threshold (default 5, a browser preference in Settings), auto on while the selection has fewer scored Plays, a switch with Automatic/Manual state, and a Play weighing 2 positions in batting, average gain/loss, payoff and expectancy only; dollar totals, drawdown, streaks and counts are never weighted. Positions never become Plays or links, and R, reviews and Play-local figures cover Plays only.
+
 ## Project tracking
 
 October 19, 2026: the owner restricted GitHub Actions to release tags to conserve

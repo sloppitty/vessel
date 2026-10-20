@@ -86,9 +86,17 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
     /// size is left out, by the same <see cref="OrderKey"/> and <see cref="ExecutionIntegrity"/> rules Play sizing uses.
     /// Fills without a retained order record cannot prove a missing execution.
     /// </summary>
-    private async Task<List<Scored>> ActivityRecordAsync(ActivityService activity, CancellationToken ct)
+    private async Task<List<Scored>> ActivityRecordAsync(ActivityService activity, CancellationToken ct) =>
+        ActivityOutcomes((await CompleteOperationsAsync(activity, store, null, ct)).Complete);
+
+    /// <summary>
+    /// Closed operations of the given enabled accounts (all when null) that can be scored like a Play, and the closed ones
+    /// left out. Review shares this rule for its imported positions.
+    /// </summary>
+    internal static async Task<(List<ActivityOperationDto> Complete, List<ActivityOperationDto> Omitted)> CompleteOperationsAsync(
+        ActivityService activity, ISizingStore store, IReadOnlySet<Guid>? accountIds, CancellationToken ct)
     {
-        var summaries = await activity.ReadSummariesAsync(null, ct);
+        var summaries = await activity.ReadSummariesAsync(null, ct, accountIds);
         var candidates = summaries.Operations.Where(Candidate)
             .Select(o => (Operation: o, Orders: o.SourceFills.Where(f => !string.IsNullOrWhiteSpace(f.ExternalOrderId))
                 .Select(OrderKey.Of).ToHashSet())).ToList();
@@ -100,7 +108,9 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
             incomplete = (await store.OrdersAsync(keys, ct)).Where(o => keys.Contains(OrderKey.Of(o)) &&
                 ExecutionIntegrity.MissingExecutions(o, retained[OrderKey.Of(o)])).Select(OrderKey.Of).ToHashSet();
         }
-        return ActivityOutcomes(candidates.Where(c => !c.Orders.Overlaps(incomplete)).Select(c => c.Operation));
+        var complete = candidates.Where(c => !c.Orders.Overlaps(incomplete)).Select(c => c.Operation).ToList();
+        var kept = new HashSet<ActivityOperationDto>(complete, ReferenceEqualityComparer.Instance);
+        return (complete, summaries.Operations.Where(o => o.ClosedAtUtc is not null && o.Status is "closed" or "incomplete" && !kept.Contains(o)).ToList());
     }
 
     private static bool Candidate(ActivityOperationDto operation) =>

@@ -9,9 +9,10 @@ public static class ReviewEndpoints
         var api = app.MapGroup("/api/review").RequireAuthorization();
         api.MapGet("/exclusions", async (string? period, string? portfolio, Guid? accountId, string? instrument, int? offset, string? tradingMode,
             ReviewService service, CancellationToken ct) => Results.Ok(await service.ExclusionsAsync(
-                new(period ?? "month", portfolio ?? "all", accountId, instrument, offset ?? 0, tradingMode), ct)));
-        api.MapGet("", async (string? period, string? portfolio, Guid? accountId, string? instrument, int? offset, string? tradingMode,
-            ReviewService service, CancellationToken ct) =>
-            Results.Ok(await service.GetAsync(new(period ?? "month", portfolio ?? "all", accountId, instrument, offset ?? 0, tradingMode), ct)));
+                new(period ?? "month", portfolio ?? "all", accountId, instrument, offset ?? 0, TradingMode: tradingMode), ct)));
+        api.MapGet("", async (string? period, string? portfolio, Guid? accountId, string? instrument, int? offset,
+            string? positions, int? minPlays, string? tradingMode, ReviewService service, CancellationToken ct) =>
+            Results.Ok(await service.GetAsync(new(period ?? "month", portfolio ?? "all", accountId, instrument, offset ?? 0,
+                positions ?? "exclude", minPlays ?? ReviewQuery.DefaultMinPlays, tradingMode), ct)));
     }
 }

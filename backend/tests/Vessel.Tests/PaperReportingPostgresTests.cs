@@ -1,4 +1,7 @@
+using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Vessel.Application.Activity;
 using Vessel.Application.Common;
 using Vessel.Application.Overview;
@@ -15,6 +18,99 @@ namespace Vessel.Tests;
 
 public sealed class PaperReportingPostgresTests
 {
+    [PostgresFact]
+    public async Task Authenticated_paper_review_ignores_imported_positions_without_reading_activity_or_mixing_results()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var real = new ReviewFixture();
+        var actual = real.Add(10);
+        var paper = PaperReportingTests.Paper(real.Owner, 30);
+        var suspended = PaperReportingTests.Paper(real.Owner, 1000);
+        var gap = PaperReportingTests.Paper(real.Owner, 2000, state: "gap", issues: ["Missing minute."]);
+        var foreign = PaperReportingTests.Paper(Guid.NewGuid(), 3000);
+        foreach (var item in new[] { paper, suspended, gap, foreign })
+        {
+            await using var seed = database.Context(item.Account.OwnerId);
+            seed.AddRange(item.Portfolio, item.Account, item.Facts.Play);
+            seed.PlanRevisions.AddRange(item.Facts.Revisions);
+            seed.PaperExecutions.AddRange(item.Facts.Paper!.Executions);
+            seed.PaperSimulations.Add(new()
+            {
+                OwnerId = item.Account.OwnerId, AccountId = item.Account.Id, PlayId = item.Facts.Play.Id,
+                State = item.Facts.Paper.State,
+                IssuesJson = JsonSerializer.Serialize(item.Facts.Paper.Issues),
+                SuspensionsJson = JsonSerializer.Serialize(item.Account.Id == suspended.Account.Id
+                    ? new[] { new PaperSuspension("Suspended window.", PaperReportingTests.At.AddHours(-1), PaperReportingTests.At) }
+                    : [])
+            });
+            await seed.SaveChangesAsync();
+        }
+        await using (var seed = database.Context(real.Owner))
+        {
+            seed.AddRange(real.Accounts.Single(), actual.Play);
+            seed.PlanRevisions.AddRange(actual.Revisions);
+            seed.Fills.AddRange(actual.Fills.Select(f => f.Fill));
+            foreach (var linked in actual.Fills)
+            {
+                var order = TestOrders.For(actual.Play, linked.Fill.ExternalOrderId, linked.Fill.Side);
+                seed.Orders.Add(order);
+                seed.OrderLinks.Add(new PlayOrderLink(actual.Play, order, linked.Role,
+                    linked.Role == OrderLinkRole.Entry ? "e" : null, null, OrderLinkState.Linked, OrderLinkSource.Owner, ReviewClock.Now));
+            }
+            // Another actual round trip, deliberately unassigned and therefore eligible for real Review's new source.
+            seed.Fills.AddRange(
+                DiaryPostgresTests.Imported(real.Accounts.Single(), "position-open", "p1", "buy", "open", 1, 100, 10),
+                DiaryPostgresTests.Imported(real.Accounts.Single(), "position-close", "p2", "sell", "close", 1, 120, 11, 20));
+            await seed.SaveChangesAsync();
+        }
+        var positionReads = 0;
+        await using var factory = new CoreApiFactory(real.Owner, connection: database.ConnectionString, configure: services =>
+        {
+            services.AddSingleton<TimeProvider>(new PaperReportingTests.Clock());
+            services.AddScoped<IReviewPositionSource>(sp => new ObservedPositions(
+                () => sp.GetRequiredService<ActivityReviewPositions>(), () => positionReads++));
+        });
+        const string path = "/api/review?period=all&positions=include&minPlays=1000";
+        using var anonymous = factory.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(path + "&tradingMode=paper")).StatusCode);
+        using var client = factory.AuthorizedClient();
+        foreach (var positions in new[] { "include", "auto", "exclude" })
+        {
+            var report = (await client.GetFromJsonAsync<ReviewDto>(
+                $"/api/review?period=all&tradingMode=paper&positions={positions}&minPlays=1000"))!;
+            Assert.Equal(0, positionReads);
+            Assert.Equal(("paper", "30", 1, 0), (report.TradingMode, report.Metrics.Net, report.Metrics.Count, report.Metrics.Positions));
+            Assert.Equal(("exclude", false), (report.Positions!.Mode, report.Positions.Included));
+            Assert.Null(report.Positions.Positions); Assert.Null(report.Positions.Omitted);
+            var row = Assert.Single(report.Plays);
+            Assert.Equal((paper.Facts.Play.Id, "paper", "paper-simulation"), (row.Id, row.ExecutionSource, row.Local!.Basis));
+            Assert.Null(row.OperationId);
+            Assert.All(report.Periods, p => Assert.Equal(0, p.Positions));
+            Assert.Equal(2, report.Coverage.IncompleteExecutions);
+            Assert.Equal(0, report.Coverage.UnassignedFills);
+            Assert.DoesNotContain(report.Options.Accounts, a => a.Id == actual.Play.AccountId || a.Id == foreign.Account.Id);
+        }
+        var empty = (await client.GetFromJsonAsync<ReviewDto>(path + $"&tradingMode=paper&accountId={actual.Play.AccountId}"))!;
+        Assert.Equal(0, positionReads);
+        Assert.Empty(empty.Plays); Assert.Null(empty.Metrics.Net);
+        var realReport = (await client.GetFromJsonAsync<ReviewDto>(path))!;
+        Assert.Equal(1, positionReads);
+        Assert.Equal(("real", "30", 2, 1), (realReport.TradingMode, realReport.Metrics.Net, realReport.Metrics.Count, realReport.Metrics.Positions));
+        Assert.True(realReport.Positions!.Included);
+        Assert.All(realReport.Plays, p => Assert.Equal("imported", p.ExecutionSource));
+        Assert.Contains(realReport.Plays, p => p.Id == actual.Play.Id);
+        Assert.Contains(realReport.Plays, p => p.Id is null && p.Origin == "position" && p.OperationId is not null);
+    }
+
+    private sealed class ObservedPositions(Func<IReviewPositionSource> source, Action onRead) : IReviewPositionSource
+    {
+        public Task<IReadOnlyList<ReviewPosition>> ReadAsync(IReadOnlySet<Guid> accountIds, CancellationToken ct)
+        {
+            onRead();
+            return source().ReadAsync(accountIds, ct);
+        }
+    }
+
     [PostgresFact]
     public async Task Resumed_then_closed_simulation_stays_descriptively_excluded_from_review_and_sizing()
     {
