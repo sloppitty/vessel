@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Numerics;
-using System.Text.RegularExpressions;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Review;
 using Vessel.Application.Sizing;
@@ -21,7 +20,7 @@ public sealed record PlayReceiptDto(DateTimeOffset? FirstEntryAtUtc, DateTimeOff
 /// <summary>One entry as planned, from the plan revision in force at its first fill (phase 1, 1.1a).</summary>
 public sealed record PlannedEntry(string? Price, string? Quantity, int? Revision);
 
-public static partial class PlayReceipts
+public static class PlayReceipts
 {
     public const string RetrospectiveReason = "A retrospective Play has no plan, so it has no planned risk.";
     public const string OpenReason = "Known once the Play is closed and its fills settle it.";
@@ -97,14 +96,13 @@ public static partial class PlayReceipts
         catch (OverflowException) { return null; }
     }
 
-    /// <summary>A plan number as the editor's <c>positivePlanNumber</c> reads it: trimmed plain decimal text above zero.</summary>
+    /// <summary>
+    /// A plan number as the editor's <c>positivePlanNumber</c> reads it: trimmed plan text a decimal holds exactly, above
+    /// zero. Text the editor reads as unknown (legacy forms, more precision than a decimal holds) is unknown here too.
+    /// </summary>
     private static decimal? Positive(string? text)
     {
         var trimmed = text?.Trim() ?? "";
-        return PlainDecimal().IsMatch(trimmed) &&
-            decimal.TryParse(trimmed, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value) && value > 0 ? value : null;
+        return trimmed.Length > 0 && ExactDecimal.IsPlanText(trimmed) && ExactDecimal.TryParseVenue(trimmed, out var value) && value > 0 ? value : null;
     }
-
-    [GeneratedRegex("^[0-9]+(\\.[0-9]+)?$")]
-    private static partial Regex PlainDecimal();
 }

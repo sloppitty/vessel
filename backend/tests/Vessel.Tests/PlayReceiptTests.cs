@@ -66,6 +66,9 @@ public sealed class PlayReceiptTests
         Assert.Equal(new PlannedEntry(null, null, null), Read("100.", "3"));
         Assert.Equal(new PlannedEntry(null, null, null), Read(".5", "3"));
         Assert.Equal(new PlannedEntry(null, null, null), Read("1e2", "3"));
+        // More precision than a decimal holds is unknown, never rounded into a planned value.
+        Assert.Equal(new PlannedEntry(null, null, null), Read("100.00000000000000000000000000001", "3"));
+        Assert.Equal(new PlannedEntry(null, null, null), Read("0.12345678901234567890123456789", "3"));
         Assert.Equal(new PlannedEntry("100", "7.5", null), Read(" 100 ", "3"));
         // Leverage as leverageOf reads it: trimmed whole digits, otherwise 1.
         Assert.Equal("7.5", Read("100", " 3 ").Quantity);

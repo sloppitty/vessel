@@ -176,12 +176,25 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   // A save from the journal removes its button while it has focus (a blur elsewhere clears the flag); focus then moves to
   // the journal's own expand or close button rather than to the page or the dialog's frame.
   const saveFocused = useRef(false)
+  const saveSlot = useRef<HTMLSpanElement>(null)
   useEffect(() => {
     if (journalSave || !saveFocused.current) return
     saveFocused.current = false
     const target = expanded ? closeButton : expandButton
     target.current?.focus({ preventScroll: true })
   }, [journalSave, expanded])
+  // The save stays the journal's while focus is on its button or in another dialog it opened (the revision reason); focus
+  // anywhere else, including after that dialog was dismissed, means the owner moved on.
+  useEffect(() => {
+    const moved = (event: globalThis.FocusEvent) => {
+      const slot = saveSlot.current
+      if (!saveFocused.current || !slot || !(event.target instanceof Element) || slot.contains(event.target)) return
+      const dialog = event.target.closest('[role="dialog"]')
+      if (dialog === null || dialog === slot.closest('[role="dialog"]')) saveFocused.current = false
+    }
+    document.addEventListener('focusin', moved)
+    return () => document.removeEventListener('focusin', moved)
+  }, [])
   const [shownRequest, setShownRequest] = useState(evidenceRequest)
   const [shownExecution, setShownExecution] = useState(executionRequest)
   // While the owner is writing in the Review tab it stays, even if they clear the note to rewrite it.
@@ -222,13 +235,7 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
           ? [trigger, <TabsTrigger key="execution" value="execution">Execution</TabsTrigger>] : [trigger])}
       </TabsList>
       <div className="journal-actions">
-        {journalSave && <span className="journal-save" onFocus={() => { saveFocused.current = true }}
-          onBlur={event => {
-            // Focus that moves into another dialog, such as the revision reason, still belongs to this save.
-            const next = event.relatedTarget instanceof Element ? event.relatedTarget.closest('[role="dialog"]') : null
-            if (!event.currentTarget.contains(event.relatedTarget) && (next === null || next === event.currentTarget.closest('[role="dialog"]')))
-              saveFocused.current = false
-          }}>{journalSave}</span>}
+        {journalSave && <span ref={saveSlot} className="journal-save" onFocus={() => { saveFocused.current = true }}>{journalSave}</span>}
         {inDialog
           ? <ChartIconButton ref={closeButton} label="Close expanded journal" icon={<Minimize2 size={15} aria-hidden="true" />} onClick={() => setExpanded(false)} />
           : <ChartIconButton ref={expandButton} label="Expand journal" icon={<Maximize2 size={15} aria-hidden="true" />} onClick={() => setExpanded(true)} />}
