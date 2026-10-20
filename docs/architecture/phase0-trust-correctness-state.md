@@ -41,7 +41,7 @@ October 19, 2026, 0.4a monitor visibility, branch
 - A severity-toned count shows on the Plays navigation entry, on Plays list
   rows and in the Play header, where it opens the Execution tab.
 - Overview shows a conditional incident row above the metric tiles. It is not
-  scoped by the Overview scope; the pull request asks the owner.
+  scoped by the Overview scope; the owner kept it unscoped on October 20.
 - The monitor heading follows open incidents and never says "Monitored"
   beside an open record.
 - Records show a human title, a fact table and one next action:
