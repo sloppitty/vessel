@@ -49,6 +49,15 @@ describe('manual execution time in the display zone (phase 1, 1.6b)', () => {
     expect(nowText('local', Date.parse('2025-10-26T01:30:00.700Z'))).toBe('2025-10-26 02:30:00 +01:00')
     // Typed without its offset, the repeated time is the owner's to say.
     expect(parseZoneText('2025-10-26 02:30', 'local')).toEqual({ problem: 'ambiguous' })
+    // Overlaps of other lengths: three hours at Casey, half an hour at Lord Howe.
+    process.env.TZ = 'Antarctica/Casey'
+    expect(parseZoneText('2023-03-09 02:30:00', 'local')).toEqual({ problem: 'ambiguous' })
+    expect(parseZoneText('2023-03-09 02:30:00 +11:00', 'local')).toEqual({ utc: '2023-03-08T15:30:00Z', fraction: '' })
+    expect(zoneText('2023-03-08T18:30:00Z', 'local')).toBe('2023-03-09 02:30:00 +08:00')
+    process.env.TZ = 'Australia/Lord_Howe'
+    expect(parseZoneText('2026-04-05 01:45', 'local')).toEqual({ problem: 'ambiguous' })
+    expect(parseZoneText('2026-04-05 03:00', 'local')).toEqual({ utc: '2026-04-04T16:30:00Z', fraction: '' })
+    process.env.TZ = 'Europe/Madrid'
     expect(manualRequest({ ...draft, occurredAt: '2025-10-26 02:30' }, 2, 'long', ['entry-1'], 'local', now))
       .toEqual({ errors: { occurredAt: 'That time happens twice in Europe/Madrid. Add its offset, such as +01:00 or +02:00.' } })
   })

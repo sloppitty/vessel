@@ -5,7 +5,11 @@ namespace Vessel.Domain.Plays;
 
 public enum OrderLinkRole { Entry, Stop, Target, Exit }
 /// <summary>Linked counts toward the Play; Suggested waits for the owner; Dismissed is never proposed again.</summary>
-public enum OrderLinkState { Linked, Suggested, Dismissed }
+/// <summary>
+/// Where an order stands with a Play. <c>Dismissed</c> declines one level; <c>Rejected</c> means the owner said the order
+/// is not the Play's at all (phase 1, 1.6d), so automatic matching never offers it to that Play again, at any level.
+/// </summary>
+public enum OrderLinkState { Linked, Suggested, Dismissed, Rejected }
 public enum OrderLinkSource { Automatic, Owner }
 
 /// <summary>

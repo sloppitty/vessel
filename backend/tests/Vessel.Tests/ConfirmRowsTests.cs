@@ -64,8 +64,21 @@ public sealed partial class ExecutionPostgresTests
         Assert.DoesNotContain(execution.Links, l => l.Order?.OrderId == "31");
         Assert.DoesNotContain(execution.Suggestions, s => s.Order!.OrderId == "31");
         Assert.Equal("open", execution.Status);
+        // Not after a revision adds a level the order matches on its own either.
+        var current = await h.Plays.GetAsync(id, default);
+        var revised = current.Plan with { Entries = [current.Plan.Entries[0] with {
+            Targets = [.. current.Plan.Entries[0].Targets, new PlanExit("target-3", "price", "110", "0")] }] };
+        await h.Plays.UpdateAsync(id, new(current.Summary.Version, account, "BTC", "venue", current.Summary.Title, revised, current.Drawings, "",
+            "A third take-profit"), default);
+        execution = await h.CheckAsync(id);
+        Assert.DoesNotContain(execution.Links, l => l.Order?.OrderId == "31");
+        Assert.DoesNotContain(execution.Suggestions, s => s.Order!.OrderId == "31");
+        Assert.Equal("open", execution.Status);
+        // The owner can still link it by hand.
+        execution = await h.Execution.LinkAsync(id, new("31", "target", "entry-1", "target-3"), default);
+        Assert.Contains(execution.Links, l => l.Order?.OrderId == "31");
         // Turning down an order linked to this Play is refused: unlink it instead; an unknown order is not found.
         Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => h.Execution.RejectOrderAsync(id, new("99"), default))).StatusCode);
-        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.Execution.RejectOrderAsync(id, new("11"), default))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.Execution.RejectOrderAsync(id, new("31"), default))).StatusCode);
     }
 }

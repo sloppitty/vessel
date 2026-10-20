@@ -78,13 +78,18 @@ export function parseZoneText(value: string, zone: EntryZone): ParsedTime {
       date.setTime(date.getTime() - sign * (oh * 60 + om) * 60_000)
     }
   } else {
-    date.setFullYear(year, month - 1, day)
-    date.setHours(hour, minute, second, 0)
     const same = (other: Date) => other.getFullYear() === year && other.getMonth() === month - 1 && other.getDate() === day &&
       other.getHours() === hour && other.getMinutes() === minute && other.getSeconds() === second
-    if (!same(date)) return { problem: 'missing' }
-    // A daylight-saving overlap repeats the local time; which one is meant is the owner's to say.
-    if ([-120, -60, -30, 30, 60, 120].some(minutes => same(new Date(date.getTime() + minutes * 60_000)))) return { problem: 'ambiguous' }
+    // The instants these clock fields can mean: one for each offset the zone uses in the days around them. None is a
+    // time the zone skips; two are an overlap, whose choice is the owner's to say.
+    const wall = new Date(0)
+    wall.setUTCFullYear(year, month - 1, day)
+    wall.setUTCHours(hour, minute, second, 0)
+    const offsets = new Set([-2, -1, 0, 1, 2].map(days => new Date(wall.getTime() + days * 86_400_000).getTimezoneOffset()))
+    const matches = [...offsets].map(offset => wall.getTime() + offset * 60_000).filter(ms => same(new Date(ms)))
+    if (!matches.length) return { problem: 'missing' }
+    if (new Set(matches).size > 1) return { problem: 'ambiguous' }
+    date.setTime(matches[0]!)
   }
   if (!Number.isFinite(date.getTime())) return { problem: 'format' }
   return { utc: `${date.toISOString().slice(0, 19)}${fraction}Z`, fraction }
