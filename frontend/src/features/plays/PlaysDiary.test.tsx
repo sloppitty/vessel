@@ -99,7 +99,8 @@ function Harness({ api, initial = createPlaysSession(), request = null, onHandle
     <button onClick={() => setRequested(otherId)}>Request another Play</button>
     <button onClick={() => setShown(value => !value)}>Toggle Plays page</button>
     {shown && <PlaysPage accounts={[accountFixture]} portfolios={[portfolioFixture]} api={api} session={session}
-      onSession={next => { setSession(next); onSession(next) }} requestedPlayId={requested}
+      onSession={next => { setSession(next); onSession(next) }} onLogChange={change => setSession(current => ({ ...current, log: change(current.log) }))}
+      requestedPlayId={requested}
       onRequestedPlayHandled={() => { onHandled(); setRequested(null) }} />}
   </NotificationProvider></VenuesProvider>
 }
@@ -781,10 +782,12 @@ describe('diary workspace integration', () => {
     expect(methods.play).not.toHaveBeenCalledWith(otherId, expect.anything())
     expect(screen.getByLabelText('Log entry')).toHaveValue('Adding into strength')
   })
-  it('never lets a write from a page that has gone change the current session (phase 1, 1.2)', async () => {
+  it('applies a write from a page that has gone to the current session, keeping newer text and showing the entry (phase 1, 1.2)', async () => {
     const open: SavedPlay = { ...planned, summary: { ...planned.summary, status: 'open' } }
     const { api, methods } = client(open)
     let finish!: (notes: PlayNote[]) => void
+    let stored: PlayNote[] = []
+    methods.playNotes.mockImplementation(() => Promise.resolve(stored))
     methods.addPlayNote.mockImplementation(() => new Promise<PlayNote[]>(resolve => { finish = resolve }))
     const user = userEvent.setup()
     render(<Harness api={api} initial={sessionFor(open)} />)
@@ -798,8 +801,12 @@ describe('diary workspace integration', () => {
     const entry = await screen.findByLabelText('Log entry')
     await user.clear(entry)
     await user.type(entry, 'A newer thought')
-    await act(async () => finish([]))
+    const written: PlayNote = { id: '00000000-0000-4000-8000-0000000000c1', text: 'Adding into strength', state: null, createdAtUtc: at }
+    stored = [written]
+    await act(async () => finish([written]))
     expect(screen.getByLabelText('Log entry')).toHaveValue('A newer thought')
+    // The current page reads the list again and shows the entry the gone page wrote.
+    expect(await screen.findByText('Adding into strength')).toBeInTheDocument()
   })
   it('offers the log on a retrospective Play too (phase 1, 1.2)', async () => {
     const { api } = client(retrospectiveSavedFixture)

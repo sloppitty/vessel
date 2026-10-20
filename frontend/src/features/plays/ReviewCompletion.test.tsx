@@ -158,6 +158,36 @@ describe('a late log write after a remount (phase 1, 1.2)', () => {
   })
 })
 
+describe('writes answered out of order (phase 1, 1.2)', () => {
+  it('shows a delayed entry whose draft was replaced by a newer one', async () => {
+    let finishFirst!: (notes: PlayNote[]) => void
+    const first = { ...note, id: '00000000-0000-4000-8000-0000000000d1', text: 'First thought.' }
+    const second = { ...note, id: '00000000-0000-4000-8000-0000000000d2', text: 'Second thought.' }
+    let stored: PlayNote[] = []
+    const add = vi.fn().mockImplementationOnce(() => new Promise<PlayNote[]>(resolve => { finishFirst = resolve }))
+      .mockImplementationOnce(() => { stored = [second]; return Promise.resolve([second]) })
+    const api = { playNotes: vi.fn(() => Promise.resolve(stored)), addPlayNote: add } as unknown as WorkspaceApi
+    const kept = vi.fn()
+    const user = userEvent.setup()
+    const playId = savedPlayFixture.summary.id
+    const { rerender } = render(<KeptLog api={api} playId={playId} mounted onKept={kept} />)
+    await screen.findByText('No entries yet.')
+    await user.type(screen.getByLabelText('Log entry'), first.text)
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    rerender(<KeptLog api={api} playId={playId} mounted={false} onKept={kept} />)
+    rerender(<KeptLog api={api} playId={playId} mounted onKept={kept} />)
+    await user.clear(screen.getByLabelText('Log entry'))
+    await user.type(screen.getByLabelText('Log entry'), second.text)
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    expect(await screen.findByText(second.text)).toBeInTheDocument()
+    // The first write lands last: the mounted Log reads the list again and shows both.
+    stored = [first, second]
+    await act(async () => finishFirst([first]))
+    expect(await screen.findByText(first.text)).toBeInTheDocument()
+    expect(screen.getByText(second.text)).toBeInTheDocument()
+  })
+})
+
 describe('log reads and older servers (phase 1, 1.2)', () => {
   it('never lets an earlier read hide an entry a write already showed', async () => {
     let finishRead!: (notes: PlayNote[]) => void

@@ -30,6 +30,7 @@ import { noFilledEntries, planIssues, planIssueSummary } from './planChecks'
 import { executionFills, manualLedgerFills, useManualLedger } from './entry-fills'
 import { RetrospectiveReceipt, ReviewReceipt } from './Receipt'
 import { PlayLog, ReviewCompletionBar, type ReviewAction } from './ReviewCompletion'
+import type { PlayLogChange } from './log-draft'
 import { noEntryFills, type EntryFills } from './position-risk-summary'
 import { planNumberIssues, planNumberSummary, storedPlanText, StoredPlanTextContext, type StoredPlanText } from './stored-plan-text'
 import { availableOf, defaultSizeUnits, marginOverBudget, overBudgetMessage, type SizeUnits } from './sizing'
@@ -47,12 +48,17 @@ const ended: PlayStatus[] = ['closed', 'cancelled']
 type DialogKind = null | 'revision' | 'cancel' | 'delete' | 'history' | 'preflight'
 type WorkKind = 'save' | 'status' | 'open' | 'delete' | 'manual'
 
-export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef, list, onList, reloadGeneration = 0, accountMonitors = [], onManageAccount }: {
+export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef, list, onList, reloadGeneration = 0, accountMonitors = [], onManageAccount, onLogChange }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
   session: PlaysSession
   onSession: (session: PlaysSession) => void
+  /**
+   * Applies a log change to the owner's current session (phase 1, 1.2). A log write that completes after this page has
+   * gone reaches the session through it; the owner refuses it once the session was discarded.
+   */
+  onLogChange?: ((change: PlayLogChange) => void) | undefined
   onReload?: (() => void) | undefined
   reloadGeneration?: number
   accountMonitors?: AccountMonitor[]
@@ -546,9 +552,10 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       onPreflight={setPreflight} nextActions={nextActions?.api === api ? nextActions.actions : null} onOpenPlay={id => { void open(id) }}
       log={saved ? <PlayLog key={saved.summary.id} api={api} playId={saved.summary.id} draft={session.log}
         onDraft={change => {
-          // A page that has gone (remounted, disconnected or on another API) never publishes its outdated session.
-          if (!mounted.current || currentApi.current !== api) return
-          update({ log: change(latest.current.log) })
+          // A living page publishes its own session; once it has gone, the owner applies the change to its current one.
+          // An outdated page session is never published.
+          if (mounted.current && currentApi.current === api) update({ log: change(latest.current.log) })
+          else onLogChange?.(change)
         }} /> : undefined}
       reviewCompletion={saved ? <ReviewCompletionBar summary={saved.summary} dirty={dirty} busy={pending}
         filled={(playReceipt?.fillCount ?? 0) > 0} onAction={action => { void reviewAction(action) }} /> : undefined}

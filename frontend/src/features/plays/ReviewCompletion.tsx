@@ -115,12 +115,15 @@ export function PlayLog({ api, playId, draft, onDraft }: {
       shown.current = ++sequence.current
       setNotes(written); setLoadError(null)
       // Possibly after a remount, with newer text typed: only the entry this write sent is cleared.
+      // Every confirmed write counts, so whichever Log is mounted shows it; only the entry it sent is cleared.
       change(stored => {
-        if (stored?.playId !== playId || stored.attempt?.requestId !== attempt.requestId) return stored
-        const count = (stored.written ?? 0) + 1
+        if (stored !== undefined && stored.playId !== playId) return stored
+        const base = stored ?? { playId, text: '', state: '' as const }
+        const count = (base.written ?? 0) + 1
         ownWrite.current = count
-        if (stored.text.trim() === attempt.text && (stored.state === '' ? null : stored.state) === attempt.state) return { playId, text: '', state: '', written: count }
-        const { attempt: _sent, ...rest } = stored
+        if (base.attempt?.requestId !== attempt.requestId) return { ...base, written: count }
+        if (base.text.trim() === attempt.text && (base.state === '' ? null : base.state) === attempt.state) return { playId, text: '', state: '', written: count }
+        const { attempt: _sent, ...rest } = base
         void _sent
         return { ...rest, written: count }
       })
