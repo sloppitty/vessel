@@ -50,6 +50,21 @@ describe('Review API', () => {
     expect(isReviewDocument({ ...reviewFixture, plays: [{ ...play, rMultiple: '2' }] })).toBe(false)
     expect(isReviewDocument({ ...reviewFixture, plays: [{ ...play, executionSource: 'guessed' }] })).toBe(false)
   })
+  it('accepts the Play-local result and basis counts, and reports from servers before them', () => {
+    const play = reviewFixture.plays[0]!
+    const local = { netUsd: '-2', basis: 'executions', reason: null, signDiffers: true }
+    const metrics = { ...reviewFixture.metrics, signDiffers: 1, localUnknown: 1, feeOnlyLosses: 1, unknownGrossLosses: 0 }
+    expect(isReviewDocument({ ...reviewFixture, metrics, plays: [{ ...play, executionSource: 'imported', local }] })).toBe(true)
+    expect(isReviewDocument({ ...reviewFixture, plays: [{ ...play, executionSource: 'manual', local: { ...local, basis: 'manual-ledger', signDiffers: false } }] })).toBe(true)
+    expect(isReviewDocument({ ...reviewFixture, plays: [{ ...play, local: { netUsd: null, basis: 'executions', reason: 'Its linked fills do not settle the play.', signDiffers: false } }] })).toBe(true)
+    // Basis and source must agree; counts stay within their population.
+    expect(isReviewDocument({ ...reviewFixture, plays: [{ ...play, executionSource: 'manual', local }] })).toBe(false)
+    expect(isReviewDocument({ ...reviewFixture, plays: [{ ...play, local: { ...local, netUsd: 'NaN' } }] })).toBe(false)
+    expect(isReviewDocument({ ...reviewFixture, metrics: { ...metrics, signDiffers: 4 } })).toBe(false)
+    expect(isReviewDocument({ ...reviewFixture, metrics: { ...metrics, feeOnlyLosses: 2 } })).toBe(false)
+    expect(isReviewDocument({ ...reviewFixture, metrics: { ...metrics, localUnknown: -1 } })).toBe(false)
+    expect(isReviewDocument({ ...reviewFixture, metrics: { ...metrics, unknownGrossLosses: '0' } })).toBe(false)
+  })
   it('validates bounded exclusion pages and preserves exact record reasons', async () => {
     const play = reviewFixture.plays[0]!
     const page = { items: [{ playId: play.id, title: play.title, accountId: play.accountId,

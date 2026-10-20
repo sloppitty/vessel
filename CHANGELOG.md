@@ -10,6 +10,11 @@
   initial R stays frozen at the first fill. A drifted linked stop or target
   can be rebound to the order resting at the venue in one version-checked
   step (D-03, F-10).
+- Each closed Play shows a Play-local result from its own fills beside the
+  scored venue result, with basis labels and a "Sign differs by basis" flag
+  in the Execution panel and Review; Review and sizing count sign differences
+  and fee-only losses. R is labelled "Estimated R (planned-stop model)". The
+  scored basis is unchanged (D-01, F-09, I-04, I-05).
 
 ### Fixed
 
@@ -41,6 +46,11 @@
   heading that never says "Monitored" beside an open record. Discrepancies
   read as plain facts (open, stop and uncovered quantity, last observed) with
   one next action; the recorded JSON moves behind a disclosure (D-08, F-02).
+- Sizing orders closed Plays by when they actually closed, their latest linked
+  exit fill, instead of when a check or Refresh noticed. Several results found
+  by one Refresh no longer get a ladder level that depends on Play IDs; results
+  that share an exit time are disclosed (D-05). Historical ladder levels can
+  change on upgrade.
 
 ## 0.3.1 - October 19, 2026
 

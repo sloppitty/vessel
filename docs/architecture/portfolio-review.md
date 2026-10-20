@@ -110,7 +110,7 @@ within the selected time and account/asset scope.
 | Expectancy | Mean net result including scratches; descriptive, not a forecast. |
 | Drawdown | Largest drop from a prior peak in cumulative closed-Play P&L, starting at zero in the selected window. Not equity drawdown. |
 | Streaks | Consecutive positive/negative outcomes in close-time/Play-ID order. Scratches do not break them. |
-| Realized R | Net P&L / an initial planned-risk estimate, only when the plan qualifies below. |
+| Estimated R (planned-stop model) | Net P&L / an initial planned-risk estimate, only when the plan qualifies below. Shown with its denominator, "n of N with a complete initial stop". |
 | Reviewed | Saved nonblank review text or at least one answered structured field. Does not establish plan adherence or decision quality. |
 
 Missing denominators are null/N/A, not infinity. Empty performance is null,
@@ -187,3 +187,73 @@ Both Sol reviewers confirmed their findings closed on targeted recheck.
 ## Nominal stablecoin pooling (October 14, 2026)
 
 Fees in any stablecoin of the Application `NominalStablecoins` list (USDC, USDG, USDT, USDT0, USDE, USDe and USDH) are deducted one-for-one, so USDG fees from Lighter Robinhood no longer exclude a Play; other tokens remain unsupported. Results from venues settling in different listed stablecoins pool at nominal 1:1. The review notice and the Scope explanation state the caveat: no FX or depeg valuation.
+
+## Result bases (October 19, 2026)
+
+Phase 0 item 0.3 ([contract](phase0-trust-correctness-contract.md#03-result-basis-receipt);
+D-01 display, F-09, I-04, I-05). The scored basis does not change: Net P&L,
+win/loss/scratch, every metric, the chart and the groups still use the venue
+result above (owner decisions 1 and 8). Review now shows a second basis beside
+it.
+
+- **Play-local result.** Hyperliquid and Lighter realize P&L at the venue
+  position's average cost, so with concurrent Plays on one instrument, or a
+  position opened outside Vessel, a Play's venue result can take another
+  position's entry price and even the wrong sign. The Play-local result uses
+  only the Play's own linked fills: `direction sign × (Σ exit quantity × price
+  − Σ entry quantity × price) − Σ trading fees of every linked fill`, that is
+  sell proceeds minus buy costs for either direction (a short sold at 100 and
+  bought back at 90 gains 10), with exact products and both P&L bases, so a
+  RISEx fee is charged once. The browser describes it as "sell proceeds minus
+  buy costs, less every trading fee". It has no
+  funding by construction and is never called total profit. The shared
+  `PlayLocalResult` calculator in `Vessel.Application.Plays` serves Review,
+  sizing and the Execution panel.
+- **When it is known.** The Play is closed and `ExecutionIntegrity.Settled`
+  (balanced, in order, nothing contradicting, no known missing executions);
+  every fill is on the Play's account and instrument with a positive price and
+  quantity; the instrument comes from the venue catalogue and the venue
+  descriptor's `QuoteAsset` is on the `NominalStablecoins` list (every
+  registered venue module reads linear perpetuals quoted and margined in that
+  asset: Hyperliquid primary perpetuals and RISEx in USDC, Lighter in its
+  collateral USDC or USDG; Review, sizing and the execution view read no
+  venue catalogue, so they use the descriptor's quote, which every current
+  catalogue instrument shares); and every fee is verified (`reported` or
+  `standard-account-free` basis, a non-blank token, and that token listed or
+  the fee a known zero). Otherwise it is null with a short reason, and a result
+  needing more than 28 decimal places is unknown, never rounded. A manual
+  ledger is a linear USD-quoted contract by its own definition, so its
+  average-cost result is the Play-local result, labelled "Manual ledger"; it
+  equals its scored result.
+- **Rows.** `plays[].local` is `{ netUsd, basis, reason, signDiffers }`:
+  `basis` is `executions` or `manual-ledger`, `netUsd` an exact string or null
+  with `reason`. The contributing-Plays table shows Net P&L with its basis
+  ("Venue result" or "Manual ledger") and a Play-local column; an unknown one
+  reads "Unknown" with the reason in an InfoTip. Both per-Play figures use
+  adaptive precision: a non-zero value that would round to "$0" keeps its sign
+  and leading digits (−0.00001 shows as "-$0.00001"), so only an exact zero
+  reads "$0".
+- **Sign differs by basis.** Signs compare as negative, zero and positive.
+  Zero against a nonzero result counts as a difference, since scratch is
+  exactly zero and the class would change. A warning pill in the row flags it;
+  `metrics.signDiffers` counts it and `metrics.localUnknown` counts Plays
+  without a Play-local result, in every metrics block (overall and groups).
+- **Fee-only losses (I-04).** `metrics.feeOnlyLosses` counts losses whose
+  venue result before trading fees is zero or better: Σ venue closed P&L plus
+  the listed stablecoin fees already inside net-of-fee P&L (the Activity
+  before-fee rule). The sign is decided from the exact sum
+  (`PlayOutcome.GrossResult` is an exact amount), so a before-fee result beyond
+  decimal precision still counts. A net-of-fee fee in an unlisted token leaves
+  that figure unknown: such losses are counted in `metrics.unknownGrossLosses`,
+  not as fee-only. They still count as losses.
+- **Funding.** Whether venue-reported P&L includes funding is unverified for
+  every venue ([venue funding](venue-funding.md)), so a sign difference or a
+  fee-only loss can reflect funding rather than the Play's own fills. The
+  Definitions and both metric tips say so in one sentence.
+- **R.** "Avg. realized R" is now "Estimated R (planned-stop model)", with "n of
+  N with a complete initial stop" and the formula in an InfoTip; the per-Play
+  column is "Est. R" with the same tip. The plan is the revision at or before
+  the first entry fill. The arithmetic is unchanged.
+
+The Average outcome card gains the sign-differs and fee-only-loss rows; nothing
+moves. Older servers omit the new fields and the browser omits the figures.

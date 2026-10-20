@@ -253,6 +253,49 @@ describe('record and risk', () => {
     expect(screen.queryByTestId('record-source')).not.toBeInTheDocument()
   })
 
+  it('counts results that change sign under the Play-local basis and losses from fees alone', async () => {
+    const user = userEvent.setup()
+    const record = { ...reduced.record, source: 'plays' as const, closedPlays: 12, decidedPlays: 11, wins: 6, losses: 5,
+      localSignChanges: 1, localUnknown: 2, feeOnlyLosses: 1, unknownGrossLosses: 0 }
+    const view = render(<Workspace initial={plan()} sizing={{ ...reduced, record }} />)
+    await openPanel(user)
+    const basis = screen.getByTestId('record-basis')
+    expect(basis).toHaveTextContent('1 of the last 11 changes sign under the Play-local basis. 2 have no Play-local figure. 1 loss came from fees alone.')
+    expect(within(basis).getByRole('button', { name: 'About result bases' })).toHaveAccessibleDescription(/scores the venue result/)
+    expect(within(basis).getByRole('button', { name: 'About result bases' })).toHaveAccessibleDescription(/includes funding is unverified/)
+    expect(within(basis).getByRole('button', { name: 'About result bases' })).toHaveAccessibleDescription(/sell proceeds minus buy costs, less every fee/)
+    view.unmount()
+
+    // The Activity fallback has no Play-local basis; its fee-only losses still show.
+    render(<Workspace initial={plan()} sizing={{ ...reduced, record: { ...record, source: 'activity', localSignChanges: null, localUnknown: null, feeOnlyLosses: 2 } }} />)
+    await openPanel(user)
+    const fallback = screen.getByTestId('record-basis')
+    expect(fallback).toHaveTextContent(/^2 losses came from fees alone\./)
+    expect(fallback).not.toHaveTextContent(/change sign|no Play-local figure/)
+  })
+
+  it('adds no result-basis line when every count is zero or absent', async () => {
+    const user = userEvent.setup()
+    const record = { ...reduced.record, source: 'plays' as const, localSignChanges: 0, localUnknown: 0, feeOnlyLosses: 0, unknownGrossLosses: 0 }
+    const view = render(<Workspace initial={plan()} sizing={{ ...reduced, record }} />)
+    await openPanel(user)
+    expect(screen.queryByTestId('record-basis')).not.toBeInTheDocument()
+    view.unmount()
+    render(<Workspace initial={plan()} sizing={reduced} />)
+    await openPanel(user)
+    expect(screen.queryByTestId('record-basis')).not.toBeInTheDocument()
+  })
+
+  it('reads the exit-time tie disclosure as part of the exposure reason', async () => {
+    const user = userEvent.setup()
+    const reason = 'Half size after 3 losses in a row. 2 results share an exit time; their order is not known.'
+    render(<Workspace initial={plan()} sizing={{ ...reduced, exposure: { ...reduced.exposure, reason, tiedOutcomes: 2 } }} />)
+    await openPanel(user)
+    const record = screen.getByTestId('track-record')
+    expect(record).toHaveTextContent(`50% exposure · ${reason}`)
+    expect(record).toHaveTextContent('It steps back up after two wins in a row with a positive result since stepping down.')
+  })
+
   it('edits the risk in place, warns above 2.5% and refuses values outside 0.1 to 5%', async () => {
     const user = userEvent.setup()
     const onRiskChange = vi.fn<(risk: string) => Promise<void>>().mockResolvedValue()

@@ -3,6 +3,7 @@ import { isCount, isGuid, isNullOr, isPlainDecimal, isRecord, isText, isTimestam
 import { isImageMarkup, type ImageMarkup } from './markup'
 import { validOverviewScope } from './overview-summary'
 import { isAccountMonitor, isMonitorDiscrepancy, isMonitorWatch, type AccountMonitor, type MonitorDiscrepancy, type MonitorWatch } from './monitor'
+import { isOptionalPlayLocalResult, type PlayLocalResult } from './local-result'
 
 export const playStatuses = ['draft', 'planned', 'paused', 'open', 'closed', 'cancelled'] as const
 export type PlayStatus = typeof playStatuses[number]
@@ -270,7 +271,18 @@ export interface PlayExecution {
   tracked: boolean
   reason: string | null
   checkedAtUtc: string | null
-  totals: { enteredQuantity: string; exitedQuantity: string; openQuantity: string; closedPnlUsd: string; closedPnlBasis: PnlBasis | 'mixed'; fees: Array<{ token: string; amount: string }> }
+  totals: {
+    enteredQuantity: string; exitedQuantity: string; openQuantity: string; closedPnlUsd: string; closedPnlBasis: PnlBasis | 'mixed'
+    fees: Array<{ token: string; amount: string }>
+    /**
+     * Venue closed PnL less listed stablecoin fees on before-fee fills, over the counted fills, so far while open. Review and
+     * sizing score this basis only once the play is closed and settled. Null when a fee is unverified or in another token.
+     * With `local`, absent from servers before October 19, 2026.
+     */
+    venueNetUsd?: string | null
+    /** The Play-local result beside it, known once the play is closed and its fills settle it. */
+    local?: PlayLocalResult
+  }
   entries: Array<{ entryId: string; filledQuantity: string; averageFillPrice: string | null; restingOrders: number }>
   links: OrderLink[]
   suggestions: OrderLink[]
@@ -308,6 +320,7 @@ export const isPlayExecution = (v: unknown): v is PlayExecution => isRecord(v) &
   isRecord(v.totals) && ['enteredQuantity', 'exitedQuantity', 'openQuantity', 'closedPnlUsd'].every(k => isPlainDecimal((v.totals as Record<string, unknown>)[k])) &&
   ['gross', 'net-of-fee', 'mixed'].includes(v.totals.closedPnlBasis as string) &&
   Array.isArray(v.totals.fees) && v.totals.fees.every(f => isRecord(f) && isText(f.token, 64) && isPlainDecimal(f.amount)) &&
+  (v.totals.venueNetUsd === undefined || isNullOr(v.totals.venueNetUsd, isPlainDecimal)) && isOptionalPlayLocalResult(v.totals.local) &&
   Array.isArray(v.entries) && v.entries.every(e => isRecord(e) && isText(e.entryId, 64) && isPlainDecimal(e.filledQuantity) &&
     isNullOr(e.averageFillPrice, isPlainDecimal) && isCount(e.restingOrders)) &&
   Array.isArray(v.links) && v.links.every(orderLink) && Array.isArray(v.suggestions) && v.suggestions.every(orderLink) &&

@@ -99,22 +99,18 @@ public sealed partial class VesselEventStore
         var incompleteOrders = orders.Where(o => ExecutionIntegrity.MissingExecutions(o, fills[OrderKey.Of(o)])).ToList();
         var incomplete = incompleteOrders.Select(o => o.ExternalOrderId).ToHashSet(StringComparer.Ordinal);
         var incompleteIds = incompleteOrders.Select(o => o.Id).ToHashSet();
-        DateTimeOffset occurred;
         if (change.To == PlayStatus.Open)
         {
             // A partial resting order is valid evidence. Known missing executions cannot establish the first fill.
             if (links.Any(l => l.Role == OrderLinkRole.Entry && incompleteIds.Contains(l.ImportedOrderId))) return fallback;
-            occurred = entries.Min(f => f.Fill.OccurredAtUtc);
+            var opened = entries.Min(f => f.Fill.OccurredAtUtc);
+            // An implausible future source timestamp is not evidence that a mutation happened in the future.
+            return opened <= fallback ? opened : fallback;
         }
-        else
-        {
-            var entryOrders = links.Where(l => l.Role == OrderLinkRole.Entry).Select(l => l.ImportedOrderId).ToHashSet();
-            if (orders.Any(o => entryOrders.Contains(o.Id) && o.Status == "open") ||
-                !ExecutionIntegrity.Settled(new(play, [], facts, incomplete))) return fallback;
-            occurred = counted.Where(f => f.Role != OrderLinkRole.Entry).Max(f => f.Fill.OccurredAtUtc);
-        }
-        // An implausible future source timestamp is not evidence that a mutation happened in the future.
-        return occurred <= fallback ? occurred : fallback;
+        var entryOrders = links.Where(l => l.Role == OrderLinkRole.Entry).Select(l => l.ImportedOrderId).ToHashSet();
+        if (orders.Any(o => entryOrders.Contains(o.Id) && o.Status == "open")) return fallback;
+        // The same latest valid exit the outcome calculator scores, clamped to the detection time.
+        return PlayExitTime.LatestValidExit(new(play, [], facts, incomplete), fallback) ?? fallback;
     }
 
     /// <summary>

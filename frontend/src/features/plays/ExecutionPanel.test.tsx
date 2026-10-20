@@ -74,6 +74,42 @@ describe('execution panel', () => {
     render(<ExecutionPanel execution={net} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
     expect(screen.getByText('Venue closed PnL · after fees').parentElement).toHaveAttribute('title', expect.stringMatching(/fees already taken off/))
   })
+  it('shows the scored venue net beside the Play-local result and flags a sign difference', () => {
+    const closed: PlayExecution = { ...execution, status: 'closed', totals: { ...execution.totals, enteredQuantity: '1', exitedQuantity: '1', openQuantity: '0',
+      closedPnlUsd: '3', venueNetUsd: '2.9', local: { netUsd: '-2.1', basis: 'executions', reason: null, signDiffers: true } } }
+    const props = { error: null, busy: false, entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn() }
+    const view = render(<ExecutionPanel execution={closed} {...props} />)
+    const value = (term: string) => screen.getByText(term).closest('div')!.querySelector('dd')
+    expect(value('Venue net')).toHaveTextContent(/^2\.9 USD$/)
+    // Only what is true: a running figure while open, scored only once closed and settled, never for retrospective sizing.
+    const venueTip = screen.getByRole('button', { name: 'About venue net' })
+    expect(venueTip).toHaveAccessibleDescription(/so far while the play is open/)
+    expect(venueTip).toHaveAccessibleDescription(/closed play whose fills settle it/)
+    expect(venueTip).toHaveAccessibleDescription(/retrospective plays are not in sizing/)
+    expect(venueTip).not.toHaveAccessibleDescription(/score this result/)
+    expect(value('Play-local result')).toHaveTextContent(/^-2\.1 USD/)
+    expect(screen.getByRole('button', { name: 'About the Play-local result' })).toHaveAccessibleDescription(/sell proceeds minus buy costs, less every trading fee/)
+    expect(screen.getByRole('button', { name: 'Sign differs by basis' })).toBeInTheDocument()
+
+    const reason = 'The play is not closed.'
+    view.rerender(<ExecutionPanel execution={{ ...execution, totals: { ...execution.totals, venueNetUsd: null,
+      local: { netUsd: null, basis: 'executions', reason, signDiffers: false } } }} {...props} />)
+    expect(screen.getByRole('button', { name: 'Unknown Play-local result' })).toHaveAccessibleDescription(reason)
+    expect(screen.getByRole('button', { name: 'Unknown venue net' })).toHaveAccessibleDescription(/listed stablecoins/)
+    expect(screen.queryByRole('button', { name: 'Sign differs by basis' })).not.toBeInTheDocument()
+
+    // Tiny results keep their exact strings: never rounded into a zero that reads as a scratch.
+    view.rerender(<ExecutionPanel execution={{ ...closed, totals: { ...closed.totals, venueNetUsd: '-0.00001',
+      local: { netUsd: '0.00001', basis: 'executions', reason: null, signDiffers: true } } }} {...props} />)
+    expect(value('Venue net')).toHaveTextContent(/^-0\.00001 USD$/)
+    expect(value('Play-local result')).toHaveTextContent(/^0\.00001 USD/)
+
+    // Servers before October 19, 2026 send neither figure.
+    view.rerender(<ExecutionPanel execution={execution} {...props} />)
+    expect(screen.queryByText('Venue net')).not.toBeInTheDocument()
+    expect(screen.queryByText('Play-local result')).not.toBeInTheDocument()
+  })
+
   it('shows linked fills, asks about ambiguous orders and links others by hand', async () => {
     const onLink = vi.fn()
     const onUnlink = vi.fn()
