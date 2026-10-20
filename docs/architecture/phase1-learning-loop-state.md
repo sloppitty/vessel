@@ -700,3 +700,6 @@ October 20, 2026, branch `t3/phase1-time`, stacked on 1.6b–d:
     stored fraction digit for digit. A test shows a 0.1 s to 0.9 s correction. Tests now restore an unset process time
     zone by deleting it, since assigning undefined set it to "undefined".
   - **Check.** `scripts/check.sh` passed again: backend 3,612 passed, 5 skipped; frontend 155 files and 3,856 tests.
+
+- **Sol (Codex) round 4.** No findings: exact fractions hold for `Z` and `+00:00` times, zero and long fractions, and
+  both zones' tooltips (checked in Madrid, New York and Kathmandu).
