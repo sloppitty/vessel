@@ -804,6 +804,9 @@ namespace Vessel.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("jsonb");
 
+                    b.Property<DateTimeOffset?>("SourceFailureSinceUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("SuspensionsJson")
                         .IsRequired()
                         .HasColumnType("jsonb");

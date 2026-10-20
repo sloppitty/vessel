@@ -184,10 +184,12 @@ public sealed class PaperEnginePostgresTests
         var plan = Plan("100") with { Entries = [Entry("a", "50", "100"), Entry("b", "50", "200")] };
         var id = await f.ArmAsync("100", plan);
         if (!ownReadFailure) _ = await f.ArmAsync("100", instrument: "ETH");
-        f.Clock.Now = FirstOpen.AddMinutes(2);
+        // A true sibling history gap, not a recent unpublished tail covered by the publication grace.
+        var frontier = ownReadFailure ? 2 : 7;
+        f.Clock.Now = FirstOpen.AddMinutes(frontier);
         Assert.True(await f.EvaluateAccountAsync(new Dictionary<string, IReadOnlyList<PaperCandle>>
         {
-            ["BTC"] = [Candle(0, 100, 99, 101), Candle(1, 100, 99, 101)],
+            ["BTC"] = Enumerable.Range(0, frontier).Select(m => Candle(m, 100, 99, 101)).ToArray(),
             ["ETH"] = [Candle(0, 120, 119, 121)] // No guessed missing-minute coverage.
         }));
         PaperAccountCandidate stale;
@@ -213,15 +215,15 @@ public sealed class PaperEnginePostgresTests
         await Assert.ThrowsAsync<ProblemException>(() => Revise(plan with { Size = "200" }));
         var protectedPlan = plan with { Entries = [plan.Entries[0] with { Stops = [new("sa", "price", "95", "100")] }, plan.Entries[1]] };
         await Revise(protectedPlan);
-        f.Clock.Now = FirstOpen.AddMinutes(4);
+        f.Clock.Now = FirstOpen.AddMinutes(frontier + 2);
         await using (var db = f.Db.Context(f.Owner))
         {
             var service = f.Service(db);
             Assert.False(await service.EvaluateAccountAsync(stale, new Dictionary<string, IReadOnlyList<PaperCandle>>
-                { ["BTC"] = [Candle(2, 100, 99, 101), Candle(3, 95, 94, 96)] }, f.Clock.Now, default));
+                { ["BTC"] = [Candle(frontier, 100, 99, 101), Candle(frontier + 1, 95, 94, 96)] }, f.Clock.Now, default));
         }
         Assert.True(await f.EvaluateAccountAsync(new Dictionary<string, IReadOnlyList<PaperCandle>>
-            { ["BTC"] = [Candle(2, 100, 99, 101), Candle(3, 95, 94, 96)] }));
+            { ["BTC"] = [Candle(frontier, 100, 99, 101), Candle(frontier + 1, 95, 94, 96)] }));
         await using var verify = f.Db.Context(f.Owner);
         var stop = await verify.PaperExecutions.SingleAsync(e => e.PlayId == id && e.Role == "stop");
         Assert.Equal(95, stop.Price);

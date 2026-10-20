@@ -14,6 +14,10 @@ namespace Vessel.Application.Paper;
 public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJournalOwnerDirectory owners,
     IVenueRegistry venues, TimeProvider time) : IPaperTradingService
 {
+    // Product recovery tolerance, not a claim about venue publication/finality.
+    public static readonly TimeSpan SourceFailureRecoveryGrace = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan CandlePublicationGrace = TimeSpan.FromMinutes(5);
+
     public async Task<PaperSettingsDto> GetSettingsAsync(CancellationToken ct)
     {
         var s = await store.SettingsAsync(ct);
@@ -113,10 +117,12 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
             if (arming)
             {
                 // A paused unfilled simulation resumes prospectively, never through its suspended candles.
+                simulation.Resume(effective, settings.CheckIntervalMinutes);
                 simulation.CheckpointUtc = effective;
                 simulation.PreviousClose = null;
                 simulation.PreviousCloseAtUtc = null;
                 simulation.IssuesJson = "[]";
+                simulation.SourceFailureSinceUtc = null;
             }
             simulation.State = "waiting";
             var next = effective.AddMinutes(settings.CheckIntervalMinutes);
@@ -139,6 +145,10 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
         {
             if (state.State is "gap" or "ambiguous") return; // Cancelling cannot make unresolved capital spendable.
             state.State = "disabled"; state.NextCheckAtUtc = null;
+            // No open quantity remains, and terminal evidence was excluded above. A retry issue is not
+            // unresolved execution evidence once the owner has stopped this work; keep suspension history.
+            state.IssuesJson = "[]";
+            state.SourceFailureSinceUtc = null;
         }
         if (await store.ReservationAsync(play.Id, ct) is { } reserve) reserve.AmountUsd = 0;
     }
@@ -233,15 +243,18 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
             { [candidate.ContractId] = candles }, throughUtc, ct);
     }
 
-    public Task RecordAccountReadFailureAsync(PaperAccountCandidate candidate, CancellationToken ct) =>
+    public Task RecordAccountReadFailureAsync(PaperAccountCandidate candidate, CancellationToken ct,
+        IReadOnlySet<string>? deterministicContracts = null) =>
         RecordAccountFailureAsync(candidate,
-            "The complete account candle read failed. No sibling execution frontier was advanced; reserved capital is retained.", ct);
+            "The complete account candle read failed. No sibling execution frontier was advanced; reserved capital is retained.", ct,
+            deterministicContracts);
 
     public Task RecordAccountEvaluationFailureAsync(PaperAccountCandidate candidate, CancellationToken ct) =>
         RecordAccountFailureAsync(candidate,
             "Simulation evaluation failed; no account frontier advanced. Reserved capital is retained; evaluation will retry.", ct);
 
-    private Task<bool> RecordAccountFailureAsync(PaperAccountCandidate candidate, string issue, CancellationToken ct) =>
+    private Task<bool> RecordAccountFailureAsync(PaperAccountCandidate candidate, string issue, CancellationToken ct,
+        IReadOnlySet<string>? deterministicContracts = null) =>
         work.ExecuteAsync(() => store.WithAccountLockAsync(candidate.AccountId, () => store.WithSettingsLockAsync(async () =>
         {
             if (candidate.OwnerId != store.OwnerId || await owners.StatusAsync(store.OwnerId, ct) != JournalOwnerStatus.Active ||
@@ -249,6 +262,20 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
                 (await store.AccountAsync(candidate.AccountId, ct)) is not { IsEnabled: true, TradingMode: TradingMode.Paper } ||
                 !SameAccountSet(candidate.Plays, await AccountCandidatesAsync(candidate.AccountId, ct))) return false;
             await store.DeferAccountAsync(candidate.AccountId, JsonSerializer.Serialize(new[] { issue }), time.GetUtcNow(), ct);
+            foreach (var item in candidate.Plays.Where(p => deterministicContracts?.Contains(p.ContractId) == true))
+            {
+                var state = (await store.SimulationAsync(item.PlayId, ct))!;
+                state.SourceFailureSinceUtc ??= time.GetUtcNow();
+                if (time.GetUtcNow() - state.SourceFailureSinceUtc >= SourceFailureRecoveryGrace)
+                {
+                    state.State = "gap";
+                    state.NextCheckAtUtc = null;
+                    state.IssuesJson = JsonSerializer.Serialize(new[]
+                    {
+                        "The public candle source remained invalid or rejected for five minutes. Coverage is unresolved; reserved capital is retained."
+                    });
+                }
+            }
             return true;
         }, ct), ct), ct);
 
@@ -310,6 +337,28 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
                 var headroom = cash - margin - reserved;
                 var block = unresolved ? "An unresolved paper account window holds capital; new entries are suspended." :
                     headroom.Units.Sign < 0 ? "Insufficient paper margin for the remaining planned entry allocations." : null;
+                var missing = active.Where(r => !windows[r.Candidate.ContractId].ContainsKey(minute)).ToArray();
+                var awaitingPublication = missing.Where(r =>
+                    time.GetUtcNow() < minute.AddMinutes(1) + CandlePublicationGrace &&
+                    !windows[r.Candidate.ContractId].Keys.Any(open => open > minute)).ToHashSet();
+                if (awaitingPublication.Count > 0)
+                {
+                    // A recent contiguous tail may not have been published yet. Commit only the proven account
+                    // prefix, never advance a sibling across it or invent empty candles. Known interior/old holes
+                    // still become gaps now, even if another symbol has a genuinely recent trailing omission.
+                    foreach (var run in missing.Where(r => !awaitingPublication.Contains(r)))
+                        ApplyMinute(run, EvaluateMinute(run, block));
+                    foreach (var run in active.Where(r => r.CanEvaluate))
+                    {
+                        run.Touched = true;
+                        run.State.CheckedAtUtc = time.GetUtcNow();
+                        run.State.IssuesJson = JsonSerializer.Serialize(new[]
+                        {
+                            "Awaiting recent trailing candle publication. The complete account frontier is retained and will retry."
+                        });
+                    }
+                    break;
+                }
                 var results = active.Select(run => (Run: run, Result: EvaluateMinute(run, block))).ToArray();
                 // A newly missing/ambiguous source minute cannot finance another sibling's new admission. Retain
                 // unambiguous protective exits, but do not choose a cross-instrument intraminute execution order.
@@ -376,6 +425,7 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
         run.State.CheckpointUtc = result.CheckpointUtc;
         run.State.PreviousClose = result.PreviousClose;
         run.State.PreviousCloseAtUtc = result.PreviousCloseAtUtc;
+        if (result.Issue is null) run.State.SourceFailureSinceUtc = null;
         if (result.DeclinedEntries is not null) run.State.DeclinedEntriesJson = JsonSerializer.Serialize(result.DeclinedEntries);
         run.State.State = result.Issue is null ? "ready" : result.Ambiguous ? "ambiguous" : "gap";
         run.State.IssuesJson = JsonSerializer.Serialize(result.Issue is null ? Array.Empty<string>() : [result.Issue]);

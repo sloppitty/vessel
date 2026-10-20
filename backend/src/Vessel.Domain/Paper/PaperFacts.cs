@@ -77,6 +77,8 @@ public sealed class PaperSimulation : IOwned
     public DateTimeOffset? CheckpointUtc { get; set; }
     public decimal? PreviousClose { get; set; }
     public DateTimeOffset? PreviousCloseAtUtc { get; set; }
+    /// <summary>First proven source failure at the retained frontier; transport retries do not start or expire it.</summary>
+    public DateTimeOffset? SourceFailureSinceUtc { get; set; }
     public string IssuesJson { get; set; } = "[]";
     public string DeclinedEntriesJson { get; set; } = "[]";
     public string SuspensionsJson { get; set; } = "[]";
@@ -96,13 +98,14 @@ public sealed class PaperSimulation : IOwned
 
     public void Resume(DateTimeOffset boundary, int interval)
     {
-        if (State != "suspended") return;
+        if (State is not ("suspended" or "disabled")) return;
         SuspensionsJson = JsonSerializer.Serialize(Suspensions().Select(s =>
             s.ResumedAtUtc is null ? s with { ResumedAtUtc = boundary } : s));
         CheckpointUtc = boundary;
         PreviousClose = null;
         PreviousCloseAtUtc = null;
         IssuesJson = "[]";
+        SourceFailureSinceUtc = null;
         State = "waiting";
         NextCheckAtUtc = boundary.AddMinutes(interval);
     }

@@ -637,3 +637,31 @@ unshipped foundation schema; no state DTO or endpoint is added. Implementation
 and boundary regressions are in progress. These five-minute policies do not
 assert venue publication/finality guarantees and do not authorize live sampling
 or migration.
+
+### Round-three corrections frozen for final verification
+
+The backend implementer has handed the shared compiler back after a clean build
+(zero warnings/errors), **35 focused tests**, **254 Paper/owner-audit tests**
+and **1,049 selected compatibility tests**, all with zero failures/skips. These
+sets overlap and are not a complete-suite total. Actual Hyperliquid adapter
+classification, real Review/Play/isolation, migration and source-failure fences
+are included in the compatibility evidence.
+
+Implemented: safe nonterminal unexposed pause/cancel clears transient issues;
+read windows are account-relative; deterministic source recovery has its
+accepted persisted timer; recent trailing missing coverage can retry without
+crossing evidence; target remainder decisions use retained execution activation
+provenance rather than current edited shares; and explicit eligible rearm closes
+the suspension receipt without erasing its unscored history. The source-failure
+timer is internal only. No runtime SQL changed; the owner audit passes unchanged.
+
+All red runs remain available, including two test-only assertion mistakes and
+the older protective-gap fixture that used a recent trailing omission. That
+fixture now uses an explicitly old missing minute, retaining its protective
+revision/admission assertions; it did not require a production exception.
+Handoff, exact 15 backend paths, commands, logs, TRXs and frozen source hashes:
+`/home/ops/.cache/vessel-verification/paper-r3-backend-5jDuaKJ0/HANDOFF.md`.
+The parent is now running the complete disjoint backend batches and the
+final explicit synthetic schema/standalone-worker smoke under
+`/home/ops/.cache/vessel-verification/paper-recovery-final/`.
+No final complete-suite or fresh independent approval is claimed yet.

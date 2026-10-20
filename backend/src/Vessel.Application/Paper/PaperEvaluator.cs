@@ -131,6 +131,15 @@ public static class PaperEvaluator
                 return plan;
             }
             int Revision(DateTimeOffset at) => Array.FindLastIndex(revisions, a => a.EffectiveAtUtc <= at);
+            decimal ExecutedShare(PaperExecution execution)
+            {
+                var index = Array.FindLastIndex(revisions, a => a.PlanVersion == execution.PlanVersion &&
+                    a.EffectiveAtUtc <= execution.CandleOpenAtUtc);
+                var entry = index < 0 ? null : Plan(index).Entries.SingleOrDefault(e => e.Id == execution.EntryId);
+                var level = (execution.Role == "stop" ? entry?.Stops : entry?.Targets)?
+                    .SingleOrDefault(e => e.Id == execution.LevelId);
+                return level is null ? throw Incomplete("Retained paper exit allocation evidence is unavailable.") : Share(level.Share);
+            }
             var positions = new Dictionary<string, Position>(StringComparer.Ordinal);
             foreach (var entry in retained.Where(e => e.Role == "entry"))
             {
@@ -237,12 +246,12 @@ public static class PaperEvaluator
                     {
                         if (remaining == 0) break;
                         var share = Share(Exit(entry, level).Share);
-                        // The last allocation consumes the remainder, not another rounded fraction that leaves dust.
-                        var allocated = (level.Role == OrderLinkRole.Stop ? entry.Stops : entry.Targets)
-                            .Where(e => used.Contains((entry.Id, Role(level.Role), e.Id)) ||
-                                pendingExits.Any(p => p.EntryId == entry.Id && p.Role == Role(level.Role) && p.LevelId == e.Id))
-                            .Sum(e => Share(e.Share)) + share;
-                        var quantity = allocated >= 100 ? remaining :
+                        // Executed shares belong to their immutable activation, not the edited plan. Include both
+                        // stops and targets: only a fully allocated tranche consumes its exact recorded remainder.
+                        var allocated = retained.Concat(executions).Concat(pendingExits)
+                            .Where(e => e.EntryId == entry.Id && e.Role != "entry")
+                            .Aggregate(ExactAmount.From(share), (sum, e) => sum + ExactAmount.From(ExecutedShare(e)));
+                        var quantity = allocated >= ExactAmount.From(100) ? remaining :
                             Math.Min(remaining, PaperPrecision.Share(position.Entry.Quantity, share));
                         if (quantity == 0) continue;
                         var released = quantity == remaining ? margin :

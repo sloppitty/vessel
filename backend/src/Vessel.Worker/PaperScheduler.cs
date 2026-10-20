@@ -124,56 +124,63 @@ public sealed class PaperScheduler(IOwnerScopeFactory scopes, IJournalOwnerDirec
                 if (playBudget >= options.MaxPlaysPerTick) break;
             }
             if (accounts.Count == 0 || await server.VenueRetryAtAsync("hyperliquid", ct) is { } retry && retry > now) return;
-            var windows = new Dictionary<string, (IReadOnlyList<PaperCandle> Candles, DateTimeOffset Through)>(StringComparer.Ordinal);
-            var failedAccounts = new HashSet<Guid>();
-            // Fetch public windows first. Applying an instrument group here would spend that group's LATER P&L
-            // before another instrument's EARLIER entry on the same account.
-            foreach (var group in accounts.SelectMany(a => a.Plays).GroupBy(x => x.ContractId, StringComparer.Ordinal))
-            {
-                var from = group.Min(x => x.FromUtc);
-                var through = new[] { settledThrough, from.AddMinutes(options.MaxCandlesPerRead) }.Min();
-                if (through <= from) continue;
-                await using var readScope = scopes.Create(group.First().OwnerId);
-                var reader = readScope.Services.GetRequiredService<IVenueRegistry>().Candles("hyperliquid")
-                    ?? throw new InvalidOperationException("Paper public candle reader is unavailable.");
-                try
-                {
-                    var raw = await ReadWithinVenueCapacityAsync(connection, reader, group.Key, from, through, ct);
-                    if (raw is null) return;
-                    if (raw.Count > options.MaxCandlesPerRead + 1)
-                        throw new VenueReadException("Paper candle read exceeded its bound.");
-                    var parsed = raw.Where(x => x.OpenTime >= from.ToUnixTimeMilliseconds() && x.OpenTime < through.ToUnixTimeMilliseconds())
-                        .Select(ParseCandle).OrderBy(x => x.OpenAtUtc).ToArray();
-                    windows.Add(group.Key, (parsed, through));
-                }
-                catch (Exception error) when (error is VenueReadException or HttpRequestException or FormatException or OverflowException ||
-                    error is OperationCanceledException && !ct.IsCancellationRequested)
-                {
-                    // Only the venue's rate-limit signal is a server-wide deadline. A malformed/failed paper
-                    // candle read must not manufacture a cooldown for real Refresh, orders or funding.
-                    if (error is VenueRateLimitException limited)
-                        await server.DeferVenueAsync("hyperliquid", limited.RetryAtUtc, now, ct);
-                    foreach (var account in accounts.Where(a => a.Plays.Any(p => p.ContractId == group.Key)))
-                    {
-                        failedAccounts.Add(account.AccountId);
-                        await RecordAccountFailureAsync(account, readFailure: true, ct);
-                    }
-                    logger.LogWarning("Paper public candle read failed with {ErrorType}; account checkpoints were retained.", error.GetType().Name);
-                    if (error is VenueRateLimitException) break;
-                }
-            }
-            var shared = windows.ToDictionary(x => x.Key, x => x.Value.Candles, StringComparer.Ordinal);
+            // A failed account must not pin other owners to its oldest batch. Share only the same bounded
+            // request, including failures, and fetch every needed symbol before entering an account transaction.
+            var cache = new Dictionary<(string Contract, DateTimeOffset From, DateTimeOffset Through),
+                (IReadOnlyList<PaperCandle>? Candles, Exception? Failure)>();
             foreach (var account in accounts)
             {
-                if (failedAccounts.Contains(account.AccountId) || await owners.StatusAsync(account.OwnerId, ct) != JournalOwnerStatus.Active) continue;
+                if (await owners.StatusAsync(account.OwnerId, ct) != JournalOwnerStatus.Active) continue;
                 var from = account.Plays.Min(p => p.FromUtc);
                 var through = new[] { settledThrough, from.AddMinutes(options.MaxCandlesPerRead) }.Min();
-                foreach (var play in account.Plays.Where(p => p.FromUtc < through))
-                {
-                    if (!windows.TryGetValue(play.ContractId, out var window)) { through = from; break; }
-                    if (window.Through < through) through = window.Through;
-                }
                 if (through <= from) continue;
+                var shared = new Dictionary<string, IReadOnlyList<PaperCandle>>(StringComparer.Ordinal);
+                var failed = false;
+                var deterministic = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var group in account.Plays.Where(p => p.FromUtc < through).GroupBy(p => p.ContractId, StringComparer.Ordinal))
+                {
+                    var key = (Contract: group.Key, From: group.Min(p => p.FromUtc), Through: through);
+                    if (!cache.TryGetValue(key, out var window))
+                    {
+                        await using var readScope = scopes.Create(account.OwnerId);
+                        var reader = readScope.Services.GetRequiredService<IVenueRegistry>().Candles("hyperliquid")
+                            ?? throw new InvalidOperationException("Paper public candle reader is unavailable.");
+                        try
+                        {
+                            var raw = await ReadWithinVenueCapacityAsync(connection, reader, key.Contract, key.From, through, ct);
+                            if (raw is null) return;
+                            if (raw.Count > options.MaxCandlesPerRead + 1)
+                                throw new FormatException("Paper candle read exceeded its bound.");
+                            window = (raw.Where(x => x.OpenTime >= key.From.ToUnixTimeMilliseconds() &&
+                                    x.OpenTime < through.ToUnixTimeMilliseconds())
+                                .Select(ParseCandle).OrderBy(x => x.OpenAtUtc).ToArray(), null);
+                        }
+                        catch (Exception error) when (error is VenueReadException or HttpRequestException or FormatException or OverflowException ||
+                            error is OperationCanceledException && !ct.IsCancellationRequested)
+                        {
+                            window = (null, error);
+                            // Only a genuine venue rate limit changes the server-wide deadline.
+                            if (error is VenueRateLimitException limited)
+                                await server.DeferVenueAsync("hyperliquid", limited.RetryAtUtc, now, ct);
+                            logger.LogWarning("Paper public candle read failed with {ErrorType}; account checkpoints were retained.", error.GetType().Name);
+                        }
+                        cache.Add(key, window);
+                    }
+                    if (window.Candles is { } candles) shared.Add(key.Contract, candles);
+                    else
+                    {
+                        failed = true;
+                        if (window.Failure is FormatException or OverflowException or VenueReadException { IsDeterministicSourceFailure: true })
+                            deterministic.Add(key.Contract);
+                    }
+                    if (window.Failure is VenueRateLimitException) break;
+                }
+                if (failed)
+                {
+                    await RecordAccountFailureAsync(account, readFailure: true, ct, deterministic);
+                    if (await server.VenueRetryAtAsync("hyperliquid", ct) is { } deadline && deadline > now) break;
+                    continue;
+                }
                 try
                 {
                     await using var scope = scopes.Create(account.OwnerId);
@@ -198,13 +205,14 @@ public sealed class PaperScheduler(IOwnerScopeFactory scopes, IJournalOwnerDirec
     private static bool AccountDataFailure(Exception error) =>
         error is ArithmeticException or FormatException or JsonException or ProblemException;
 
-    private async Task RecordAccountFailureAsync(PaperAccountCandidate account, bool readFailure, CancellationToken ct)
+    private async Task RecordAccountFailureAsync(PaperAccountCandidate account, bool readFailure, CancellationToken ct,
+        IReadOnlySet<string>? deterministic = null)
     {
         try
         {
             await using var retry = scopes.Create(account.OwnerId);
             var service = retry.Services.GetRequiredService<PaperTradingService>();
-            if (readFailure) await service.RecordAccountReadFailureAsync(account, ct);
+            if (readFailure) await service.RecordAccountReadFailureAsync(account, ct, deterministic);
             else await service.RecordAccountEvaluationFailureAsync(account, ct);
         }
         catch (Exception error) when (AccountDataFailure(error))

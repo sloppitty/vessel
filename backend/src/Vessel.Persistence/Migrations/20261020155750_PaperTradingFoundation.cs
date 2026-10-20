@@ -206,6 +206,7 @@ namespace Vessel.Persistence.Migrations
                     PreviousCloseAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     DeclinedEntriesJson = table.Column<string>(type: "jsonb", nullable: false),
                     SuspensionsJson = table.Column<string>(type: "jsonb", nullable: false),
+                    SourceFailureSinceUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     IssuesJson = table.Column<string>(type: "jsonb", nullable: false)
                 },
                 constraints: table =>
