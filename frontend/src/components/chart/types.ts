@@ -1,3 +1,4 @@
+import type { CandleSpan } from './intervals'
 import type { ChartDrawing, DrawingKind } from './drawings'
 import type { IndicatorView, PaneLayout } from './indicators'
 
@@ -50,10 +51,10 @@ export interface ChartMarker {
   /** Shown while the pointer rests on the marker. */
   tooltip: string
   /**
-   * The length of the candles in milliseconds: the marker sits on a candle only when its time falls in that candle's own
-   * span, so a gap or a lone candle never takes a fill from outside it.
+   * The length of the candles, in milliseconds or calendar months: the marker sits on a candle only when its time falls in
+   * that candle's own span, so a gap or a lone candle never takes a fill from outside it.
    */
-  span: number
+  span: CandleSpan
 }
 
 /** A time range to show, in UTC Unix milliseconds. */

@@ -227,4 +227,35 @@ describe('fill markers and trade focus (phase 1, 1.1b)', () => {
     adapter.setCandles(candles, true)
     expect(range).toHaveBeenCalledTimes(2)
   })
+
+  it('applies a focus that starts before the loaded candles again as older pages arrive, until the owner moves the view', () => {
+    const range = chart.timeScale().setVisibleRange
+    adapter.setCandles(candles, true)
+    range.mockClear()
+    // The trade starts 30 seconds in; the first page starts at 60 seconds.
+    adapter.setFocus({ from: 30_000, to: 300_000 })
+    expect(range).toHaveBeenCalledOnce()
+    const older = (time: number) => [{ ...candles[0]!, time }, ...candles]
+    adapter.setCandles(older(0), false)
+    expect(range).toHaveBeenCalledTimes(2)
+    // Covered now: a further page leaves the view alone.
+    adapter.setCandles([{ ...candles[0]!, time: -60_000 }, ...older(0)], false)
+    expect(range).toHaveBeenCalledTimes(2)
+    // The owner moving the view first ends the wait.
+    adapter.setFocus({ from: -300_000, to: 300_000 })
+    expect(range).toHaveBeenCalledTimes(3)
+    container.dispatchEvent(new Event('wheel'))
+    adapter.setCandles([{ ...candles[0]!, time: -120_000 }, { ...candles[0]!, time: -60_000 }, ...older(0)], false)
+    expect(range).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps a fill on a monthly candle within its calendar month', () => {
+    const at = (text: string) => Date.parse(text)
+    const month = { months: 1 }
+    adapter.setCandles([{ ...candles[0]!, time: at('2026-01-01T00:00:00Z') }, { ...candles[0]!, time: at('2026-02-01T00:00:00Z') }], true)
+    adapter.setMarkers([{ ...marker('january', at('2026-01-31T12:00:00Z')), span: month }, { ...marker('march', at('2026-03-01T00:00:00Z')), span: month },
+      { ...marker('february', at('2026-02-28T23:59:59Z')), span: month }])
+    const placed = (library.markers.setMarkers.mock.lastCall![0] as { id: string; time: number }[]).map(item => [item.id, item.time])
+    expect(placed).toEqual([['january', at('2026-01-01T00:00:00Z') / 1000], ['february', at('2026-02-01T00:00:00Z') / 1000]])
+  })
 })

@@ -1,5 +1,5 @@
 import type { CandleInterval } from '@/api/candles'
-import { intervalMs } from '@/components/chart/intervals'
+import { candleSpan, intervalMs } from '@/components/chart/intervals'
 import type { ChartFocus, ChartMarker } from '@/components/chart/types'
 
 /*
@@ -17,7 +17,7 @@ export function fillMarkers(fills: readonly ChartFill[], interval: CandleInterva
   return fills.flatMap(fill => {
     const time = Date.parse(fill.atUtc), price = Number(fill.price)
     if (!Number.isFinite(time) || !Number.isFinite(price) || price <= 0) return []
-    return [{ id: fill.id, time, price, side: fill.side, span: intervalMs(interval),
+    return [{ id: fill.id, time, price, side: fill.side, span: candleSpan(interval),
       tooltip: `${fill.role === 'entry' ? 'Entry' : 'Exit'} fill · ${fill.side === 'buy' ? 'Buy' : 'Sell'} ${fill.quantity} at ${fill.price}\n${fillTime.format(time)} UTC` }]
   })
 }

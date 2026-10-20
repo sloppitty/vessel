@@ -8,6 +8,7 @@ import { DrawingController, type DrawingSpace, type DrawingTheme } from './drawi
 import { TimeIndex, snapPrice } from './drawings'
 import { FrameEdit, roundedLevelPrice } from './frameEdit'
 import { createSeriesWriter } from './seriesWriter'
+import { candleEnd } from './intervals'
 import type { IndicatorPaneId, IndicatorView, PaneLayout, PaneSize } from './indicators'
 import { readableInk } from './ink'
 import { barHeight, solvePaneLayout, type SolvedLayout } from './paneLayout'
@@ -341,16 +342,23 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
         const middle = (low + high) >> 1
         if (times[middle]! <= marker.time) { found = middle; low = middle + 1 } else high = middle - 1
       }
-      if (found < 0 || !(marker.span > 0) || marker.time >= times[found]! + marker.span) return []
+      if (found < 0 || marker.time >= candleEnd(times[found]!, marker.span) || candleEnd(times[found]!, marker.span) <= times[found]!) return []
       return [{ id: marker.id, time: (times[found]! / 1000) as UTCTimestamp, position: 'atPriceMiddle' as const, price: marker.price,
         shape: marker.side === 'buy' ? 'arrowUp' as const : 'arrowDown' as const, color: marker.side === 'buy' ? theme.positive : theme.negative }]
     }).sort((a, b) => a.time - b.time))
   }
   let focus: ChartFocus | null = null
+  // The chart can only show loaded candles: while the focus starts before them, it is applied again as older pages
+  // arrive, until it fits or the owner moves the view.
+  let focusPending = false
   const applyFocus = () => {
     if (!focus || !loaded.length) return
     chart.timeScale().setVisibleRange({ from: (focus.from / 1000) as UTCTimestamp, to: (focus.to / 1000) as UTCTimestamp })
+    focusPending = focus.from < loaded[0]!.time
   }
+  const keepView = () => { focusPending = false }
+  container.addEventListener('pointerdown', keepView, true)
+  container.addEventListener('wheel', keepView, { capture: true, passive: true })
   let candleCount = 0
   let loaded: readonly ChartCandle[] = []
   let index = new TimeIndex([])
@@ -877,7 +885,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
         // Jump, not animate, to the latest candles, or to the focus, e.g. a closed trade's dates.
         chart.timeScale().scrollToPosition(openingRightOffset, false)
         applyFocus()
-      }
+      } else if (focusPending && timesChanged) applyFocus()
     },
     setMarkers(next) {
       markers = next
@@ -960,6 +968,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       cancelAnimationFrame(rethemeFrame)
       container.removeEventListener('dblclick', onDoubleClick)
       container.removeEventListener('pointerdown', onPointerDown, true)
+      container.removeEventListener('pointerdown', keepView, true)
+      container.removeEventListener('wheel', keepView, true)
       container.removeEventListener('pointermove', onPointerMove, true)
       container.removeEventListener('pointerup', endDrag, true)
       container.removeEventListener('pointercancel', endDrag, true)
