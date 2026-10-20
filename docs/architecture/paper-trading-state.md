@@ -1,7 +1,7 @@
 # Paper trading delivery state
 
-October 20, 2026. **PR remains draft: subsequent Claude Opus review found
-confirmed simulation/accounting blockers. Earlier integration approval is
+October 20, 2026. **PR remains draft: subsequent Claude Opus reviews found
+confirmed simulation/recovery blockers. Earlier integration approval is
 superseded pending corrections and fresh review.**
 Authority: [delivery contract](paper-trading-delivery-contract.md) and
 [owner-refined plan](paper-trading-plan.md).
@@ -543,3 +543,71 @@ as a pass. These are test-only follow-ups; production remains byte-identical to
 the frozen manifest. A rebuilt audit/worker run and the affected complete batch
 must pass before handoff; final batches use separate synthetic databases to
 avoid cross-testhost advisory-lock contention.
+
+### Corrective full-suite and upstream integration checkpoints
+
+The final rebuilt `31e565c` run passed **3,776 backend tests, zero failed,
+five skipped**, across 226 classes in four disjoint batches. All 12 explicit
+broker-backed cases passed; no test IDs occur across batches. Production
+matched its frozen manifest throughout. The initial invocation remains under
+`paper-corrective-final/initial-run/`, including both test failures and the
+parent's shell-wrapper error after two completed testhosts. It is not
+substituted for the complete successful rerun.
+
+Meanwhile, `main` advanced to `cda3a4b` with imported-position Review (PR33).
+A Sol implementation sidecar resolved seven conflicts in private merge
+`e4495a09ead0fc2d074e8616514798baa1006789`, preserving real position eligibility,
+weighting and browser preferences while forcing Paper Review to `exclude`
+before any actual-position source read. Paper codecs reject position rows
+and nonzero position aggregates; the imported-position controls/preferences
+are hidden in Paper. The sidecar's red-before-green regressions and bounded
+handoff are in
+`/home/ops/.cache/vessel-verification/paper-main-merge-20261020-4bd14067/REPORT.md`.
+
+Parent full verification of that exact merge passed **3,799 backend tests,
+zero failed, five skipped** across 228 classes, including all 12 broker facts.
+Frontend passed **157 files / 3,889 tests**, typecheck, lint and production
+build. The backend clean rebuild had zero warnings/errors; source manifests
+remained unchanged and TRXs have no cross-batch duplicate test IDs. The five
+skips are still two Lighter live, one RISEx live and two isolated S3 checks.
+Evidence: `/home/ops/.cache/vessel-verification/paper-integrated-final/`.
+The parent fast-forwarded to the tested merge only after Opus finished its
+older fixed-commit review; these results do not close the new findings below.
+
+### Opus corrective round three: additional changes requested
+
+Fresh Claude Opus/max reviewed `31e565c` read-only. Its exact export and the
+shared checkout matched all 2,469 tracked files and the 790-file production
+manifest at both ends. **No outright P1 or owner/real-data leak was confirmed,
+but readiness remains withheld for three reproduced P2s:**
+
+1. A transient candle-read issue survives pause/cancel on an unfilled Play and
+   permanently poisons account admission/balances, even after other work
+   recovers. Temporary issues must not become unresolved historical exposure.
+2. A persistently failing multi-symbol account anchors the global shared
+   candle window. Once sufficiently behind, healthy owners are silently
+   skipped because the shared window ends before their checkpoint. Deterministic
+   source failures also retry indefinitely without an explicit terminal state.
+3. A missing newest candle becomes a permanent gap immediately. Recent
+   not-yet-published trailing coverage needs bounded recovery without crossing
+   missing evidence; genuine old/interior holes remain conservative gaps.
+   Quiet-minute publication latency is unverified, so the conditional P1
+   premise is not presented as established venue behavior.
+
+Related P3s: edited already-executed target shares incorrectly alter later
+exact-remainder allocation; a Closed `ready` Play without a next check keeps
+polling; disable copy omits the post-resume open-exposure admission hold; and
+explicit rearming after pausing a suspension leaves an open suspension receipt.
+Backend corrections and frontend polling/disclosure regressions are in progress
+with disjoint write scopes. No new reset, gap-resolution or actual execution
+capability is authorized.
+
+Earlier precision/entry-decline/suspension/protective-revision/settlement
+objections are independently closed in their named paths. Opus also ran 4,000
+random plans (2,763 passed preflight) without precision violations. Its own
+failed hypotheses/assertion and generator errors remain recorded. Independent
+runs included 217 control tests, 21 final probes and 399 real-mode regressions;
+one frontend one-second timeout passed unchanged on repeated one-worker runs.
+These bounded results are not a clean full-suite claim or overall approval.
+Report, original iterations and runnable probes:
+`/home/ops/.cache/vessel-verification/opus-r3-31e565c/REPORT.md`.
