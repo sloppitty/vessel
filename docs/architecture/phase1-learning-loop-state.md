@@ -641,3 +641,6 @@ October 20, 2026, branch `t3/phase1-capture`, stacked on 1.1b:
   - **Other overlaps (medium).** Ambiguity was checked at fixed steps, missing Casey's three-hour overlap. A typed time
     is now matched against every offset the zone uses around it; tests cover Casey and Lord Howe.
   - **Check.** `scripts/check.sh` passed again: backend 3,612 passed, 5 skipped; frontend 153 files and 3,848 tests.
+
+- **Sol (Codex) round 3.** No findings: the rejection and overlap fixes hold. The reviewer also round-tripped 62,766
+  times around 1,902 zone transitions from 2020 to 2026, 952 of them overlaps.
