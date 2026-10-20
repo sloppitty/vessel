@@ -34,7 +34,6 @@ import { planNumberIssues, planNumberSummary, storedPlanText, StoredPlanTextCont
 import { availableOf, defaultSizeUnits, marginOverBudget, overBudgetMessage, type SizeUnits } from './sizing'
 import { leverageOf } from './levels'
 import { CancelDialog, DeleteDialog, HistoryDialog, PreflightDialog, RevisionDialog } from './PlayDialogs'
-import { preflightClear } from './preflight'
 import { initialPlaysList, playSearchDelay, playViewTabs, type PlaysListState } from './plays-list'
 import {
   createPlaysSession, draftFromSaved, fieldsToSave, hasDraftContent, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
@@ -461,12 +460,10 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const statusBlocked = dirty ? 'Save your changes first' : undefined
   const pending = busy !== null
 
-  // Plan it never waits on the checklist: with every check met it plans at once, otherwise the owner sees it first. Either
-  // way the checks are recorded with revision 1.
+  // Plan it always shows the checklist first; it never blocks, and what the owner saw is recorded with revision 1.
   const requestPlan = () => {
     if (planBlocked()) return
-    if (!preflight || preflightClear(preflight)) void changeStatus({ status: 'planned', ...(preflight ? { preflight } : {}) })
-    else { setDialogError(null); setDialog('preflight') }
+    if (preflight) { setDialogError(null); setDialog('preflight') } else void changeStatus({ status: 'planned' })
   }
 
   // The same buttons stay in the same places whether or not the play is saved; unavailable ones are disabled.

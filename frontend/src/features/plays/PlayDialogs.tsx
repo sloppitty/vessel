@@ -60,9 +60,10 @@ export function CancelDialog({ pending, error, onCancel, onClose }: {
 
 const outcomeLabels = { passed: 'Met', skipped: 'Not met', unknown: 'Unknown' } as const
 
-/** The pre-flight kept with revision 1, one line per check; none for plans from before it was recorded. */
+/** The pre-flight kept with revision 1, one line per check, or a line saying a plan from before it has none. */
 const preflightLines = (checks: readonly PreflightCheck[] | null | undefined) =>
-  checks?.length ? [`Pre-flight: ${checks.map(check => `${preflightLabels[check.code].toLowerCase()} · ${outcomeLabels[check.outcome].toLowerCase()}`).join('; ')}.`] : []
+  [checks?.length ? `Pre-flight: ${checks.map(check => `${preflightLabels[check.code].toLowerCase()} · ${outcomeLabels[check.outcome].toLowerCase()}`).join('; ')}.`
+    : 'Pre-flight not recorded.']
 
 /**
  * The pre-flight at Plan it (phase 1, 1.5): what the plan already says, recorded with revision 1. It never blocks:
@@ -120,7 +121,7 @@ export function HistoryDialog({ api, playId, onClose }: { api: WorkspaceApi; pla
   const items: HistoryItem[] = result && 'history' in result ? [
     ...result.history.revisions.map((revision, index, all): HistoryItem => ({
       at: revision.createdAtUtc, key: `r${revision.number}`, title: `Plan revision ${revision.number} · ${revision.reason}`,
-      detail: index === 0 ? ['The plan as first committed.', ...preflightLines(revision.preflight)] : describePlanChanges(all[index - 1]!.plan, revision.plan),
+      detail: index === 0 ? ['The plan as first committed.', ...(revision.number === 1 ? preflightLines(revision.preflight) : [])] : describePlanChanges(all[index - 1]!.plan, revision.plan),
     })),
     ...result.history.statusChanges.map((change, index): HistoryItem => ({
       at: change.occurredAtUtc, key: `s${index}`, title: `${statusLabels[change.from]} → ${statusLabels[change.to]}${change.source === 'venue' ? ' · from linked venue fills' : change.source === 'manual' ? ' · from manual facts' : ''}`,

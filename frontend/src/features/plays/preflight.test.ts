@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SizingDocument } from '@/api/sizing'
 import { createDraft } from './draft'
-import { preflightChecks, preflightClear, withIfThen } from './preflight'
+import { preflightChecks, withIfThen } from './preflight'
 
 const base = createDraft()
 const entry = { ...base.entries[0]!, price: '100', share: '100',
@@ -15,7 +15,7 @@ describe('pre-flight at Plan it (phase 1, 1.5)', () => {
   it('passes a complete plan within the setting at the ladder level, with the liquidation beyond the stop', () => {
     const checks = preflightChecks({ draft: ready, risk: { riskSharePercent: 0.6 }, sizing, liquidation: 80 })
     expect(checks.map(check => check.code)).toEqual(['priced-stops', 'allocations', 'thesis', 'risk', 'liquidation'])
-    expect(preflightClear(checks)).toBe(true)
+    expect(checks.every(check => check.outcome === 'passed')).toBe(true)
   })
 
   it('marks what the plan does not say yet, and never guesses missing inputs', () => {
@@ -32,8 +32,20 @@ describe('pre-flight at Plan it (phase 1, 1.5)', () => {
     expect(outcomes(preflightChecks({ draft: shares, risk: null, sizing, liquidation: 80 })).allocations).toBe('skipped')
     const targets = { ...ready, entries: [{ ...entry, targets: [{ ...entry.targets[0]!, share: '50' }] }] }
     expect(outcomes(preflightChecks({ draft: targets, risk: null, sizing, liquidation: 80 })).allocations).toBe('skipped')
+    // No targets, or no stops, total 0%, not 100%.
+    expect(outcomes(preflightChecks({ draft: { ...ready, entries: [{ ...entry, targets: [] }] }, risk: null, sizing, liquidation: 80 })).allocations).toBe('skipped')
+    expect(outcomes(preflightChecks({ draft: { ...ready, entries: [{ ...entry, stops: [] }] }, risk: null, sizing, liquidation: 80 })).allocations).toBe('skipped')
     const thesis = { ...ready, notes: { ...ready.notes, invalidation: '  ' } }
     expect(outcomes(preflightChecks({ draft: thesis, risk: null, sizing, liquidation: 80 })).thesis).toBe('skipped')
+  })
+
+  it('meets the liquidation check only when every stop is priced, and never hides a stop past it', () => {
+    const halves = (second: string) => ({ ...ready, entries: [{ ...entry, stops: [{ ...entry.stops[0]!, share: '50' },
+      { ...entry.stops[0]!, id: 'second', value: second, share: '50' }] }] })
+    expect(outcomes(preflightChecks({ draft: halves('90'), risk: null, sizing, liquidation: 80 })).liquidation).toBe('passed')
+    expect(outcomes(preflightChecks({ draft: halves(''), risk: null, sizing, liquidation: 80 })).liquidation).toBe('unknown')
+    expect(outcomes(preflightChecks({ draft: halves(''), risk: null, sizing, liquidation: 96 })).liquidation).toBe('skipped')
+    expect(outcomes(preflightChecks({ draft: { ...ready, entries: [{ ...entry, stops: [] }] }, risk: null, sizing, liquidation: 80 })).liquidation).toBe('unknown')
   })
 
   it('appends a next action as an if-then the owner completes, naming its source', () => {

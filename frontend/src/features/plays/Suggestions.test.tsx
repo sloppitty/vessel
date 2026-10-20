@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { SizingDocument } from '@/api/sizing'
 import { ApiError } from '@/api/errors'
 import type { BrokerAccount, WorkspaceApi } from '@/api/workspace'
-import type { PlayStatus } from '@/api/plays'
+import type { PlayStatus, PreflightCheck } from '@/api/plays'
 import { accountFixture, idleMarketStream, instrumentCatalogFixture, portfolioFixture, sizingFixture } from '@/test/workspace-fixture'
 import { pickInstrument } from '@/test/instrument'
 import { createDraft, createEntry, createExit, type DraftExit, type PlayDraft } from './draft'
@@ -32,7 +32,8 @@ const reduced: SizingDocument = {
 const api = { instruments: () => new Promise(() => {}) } as unknown as WorkspaceApi
 
 function Workspace({ initial, sizing = sizingFixture, balance = '10000', available = null, availableSource = 'wallet', wallet = null, onDraft,
-  onRiskChange = () => Promise.resolve(), readOnly = false, status, sizingStatus, onRetry, filledEntries, account: base = accountFixture, workspaceApi = api }: {
+  onRiskChange = () => Promise.resolve(), readOnly = false, status, sizingStatus, onRetry, filledEntries, account: base = accountFixture, workspaceApi = api,
+  onPreflight }: {
   initial: PlayDraft
   sizing?: SizingDocument | null
   balance?: string | null
@@ -50,13 +51,15 @@ function Workspace({ initial, sizing = sizingFixture, balance = '10000', availab
   filledEntries?: ReadonlySet<string> | 'all'
   account?: BrokerAccount
   workspaceApi?: WorkspaceApi
+  onPreflight?: (checks: PreflightCheck[]) => void
 }) {
   const account = { ...base, balanceUsd: balance, availableStablecoinNominalUsd: wallet, availableBalanceUsd: available,
     availableBalanceSource: available === null ? null : availableSource }
   const [draft, setDraft] = useState({ ...initial, accountId: account.id })
   return <PlayWorkspace accounts={[account]} portfolios={[portfolioFixture]} api={workspaceApi} draft={draft} onChange={next => { onDraft?.(next); setDraft(next) }}
     sizing={sizing} onRiskChange={onRiskChange} readOnly={readOnly} status={status ?? (readOnly ? 'closed' : 'draft')}
-    {...(sizingStatus ? { sizingStatus } : {})} {...(onRetry ? { onRetrySizing: onRetry } : {})} {...(filledEntries ? { filledEntries } : {})} />
+    {...(sizingStatus ? { sizingStatus } : {})} {...(onRetry ? { onRetrySizing: onRetry } : {})} {...(filledEntries ? { filledEntries } : {})}
+    {...(onPreflight ? { onPreflight } : {})} />
 }
 
 const field = (name: string) => screen.getByRole('spinbutton', { name })
@@ -446,6 +449,27 @@ describe('sizing truth', () => {
     expect(within(panel()).queryByRole('button', { name: /^Accept/ })).not.toBeInTheDocument()
     await user.click(within(panel()).getByRole('button', { name: /^Retry/ }))
     expect(onRetry).toHaveBeenCalledOnce()
+  })
+
+  it('records the pre-flight risk as unknown from a stale record, never as met (phase 1, 1.5)', async () => {
+    const user = userEvent.setup()
+    const risk = (checks: PreflightCheck[] | undefined) => checks?.find(check => check.code === 'risk')?.outcome
+    const venueApi = { instruments: () => Promise.resolve(instrumentCatalogFixture), candles: () => new Promise(() => {}),
+      marketContext: () => new Promise(() => {}), marketStream: idleMarketStream } as unknown as WorkspaceApi
+    const venue: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', address: `0x${'a'.repeat(40)}`, accountValueUsd: '5000' }
+    const workspace = (sizingStatus: SizingStatus, onPreflight: (checks: PreflightCheck[]) => void) => <Workspace
+      initial={plan({ instrumentSource: 'venue', size: '100' })} account={venue} workspaceApi={venueApi} sizingStatus={sizingStatus} onPreflight={onPreflight} />
+    const ready = vi.fn<(checks: PreflightCheck[]) => void>()
+    const view = render(workspace('ready', ready))
+    await pickInstrument(user, 'BTC')
+    await waitFor(() => expect(risk(ready.mock.lastCall?.[0])).toBe('passed'))
+    view.unmount()
+    const stale = vi.fn<(checks: PreflightCheck[]) => void>()
+    render(workspace('stale', stale))
+    await pickInstrument(user, 'BTC')
+    // The same plan from a record that could not be reloaded: the summary still knows the risk, but not what the ladder allows.
+    expect(screen.getByText('Risk / Main account balance · nominal USD/USDC at 1:1').parentElement).not.toHaveTextContent('Unknown')
+    expect(risk(stale.mock.lastCall?.[0])).toBe('unknown')
   })
 
   it('says when the record could not be loaded at all, with Retry', async () => {

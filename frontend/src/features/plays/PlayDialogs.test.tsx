@@ -43,7 +43,7 @@ describe('history request lifetime', () => {
 })
 
 describe('pre-flight in history (phase 1, 1.5)', () => {
-  it('lists the checklist kept with revision 1, and nothing for a plan from before it was recorded', async () => {
+  it('lists the checklist kept with revision 1, and says when a plan from before it has none', async () => {
     const recorded: PlayHistory = { statusChanges: [], revisions: [{ ...history('Planned').revisions[0]!,
       preflight: [{ code: 'priced-stops', outcome: 'skipped' }, { code: 'thesis', outcome: 'passed' }] }] }
     const view = render(<HistoryDialog api={{ playHistory: vi.fn().mockResolvedValue(recorded) } as unknown as WorkspaceApi} playId="one" onClose={vi.fn()} />)
@@ -51,6 +51,6 @@ describe('pre-flight in history (phase 1, 1.5)', () => {
     view.unmount()
     render(<HistoryDialog api={{ playHistory: vi.fn().mockResolvedValue(history('Planned')) } as unknown as WorkspaceApi} playId="two" onClose={vi.fn()} />)
     expect(await screen.findByText('The plan as first committed.')).toBeInTheDocument()
-    expect(screen.queryByText(/^Pre-flight/)).not.toBeInTheDocument()
+    expect(screen.getByText('Pre-flight not recorded.')).toBeInTheDocument()
   })
 })

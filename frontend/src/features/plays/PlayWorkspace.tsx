@@ -193,7 +193,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const filled = fills === 'unknown' ? noFilledEntries : fills.filled
   // The Draft's pre-flight, from the same Summary risk and liquidation estimate the page shows. It reaches the page only
   // when a check's outcome changes, so the page's copy is never older than what the owner sees.
-  const preflight = status === 'draft' && onPreflight && !retrospective ? JSON.stringify(preflightChecks({ draft, sizing,
+  const preflight = status === 'draft' && onPreflight && !retrospective ? JSON.stringify(preflightChecks({ draft,
+    sizing: sizingStatus === 'ready' ? sizing : null,
     risk: positionRiskSummary(draft, units, riskReference, fills),
     liquidation: estimatedLiquidation(draft.entries, draft.direction, leverageOf(draft.leverage), maxLeverage, maintenanceMargin) })) : null
   useEffect(() => { if (preflight) onPreflight?.(JSON.parse(preflight) as PreflightCheck[]) }, [preflight, onPreflight])

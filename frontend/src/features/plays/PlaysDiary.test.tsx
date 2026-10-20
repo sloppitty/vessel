@@ -339,7 +339,7 @@ describe('diary workspace integration', () => {
     await user.click(screen.getByRole('button', { name: 'Plan it' }))
     const checks = within(await screen.findByRole('list', { name: 'Pre-flight checks' })).getAllByRole('listitem')
     expect(checks.map(item => item.textContent)).toEqual([
-      'A priced stop for every priced entryNot met', 'Entry, stop and target shares each total 100%Met', 'Thesis and invalidation are writtenNot met',
+      'A priced stop for every priced entryNot met', 'Entry, stop and target shares each total 100%Not met', 'Thesis and invalidation are writtenNot met',
       'Risk within the sizing setting at the current ladder levelUnknown', 'The estimated liquidation lies beyond every stopUnknown',
     ])
     await user.click(screen.getByRole('button', { name: 'Back to the plan' }))

@@ -24,6 +24,7 @@ export interface PreflightInput {
   draft: Pick<PlayDraft, 'entries' | 'direction' | 'leverage' | 'notes'>
   /** The Summary's position risk, measured from the same balance the size suggestion uses. */
   risk: Pick<PositionRisk, 'riskSharePercent'> | null
+  /** The current sizing record; a stale or failed read is no record, so the risk check is unknown. */
   sizing: SizingDocument | null
   /** The estimated liquidation price, or null when it cannot be estimated. */
   liquidation: number | null
@@ -40,18 +41,19 @@ const isHundred = (shares: readonly string[]) => { const sum = total(shares); re
 export function preflightChecks({ draft, risk, sizing, liquidation }: PreflightInput): PreflightCheck[] {
   const leverage = positivePlanNumber(draft.leverage) ?? 1
   const outcome = (code: PreflightCode, value: PreflightCheck['outcome']): PreflightCheck => ({ code, outcome: value })
+  // An entry with no stops or no targets totals 0% there, which is not 100%.
   const allocations = isHundred(draft.entries.map(entry => entry.share)) && draft.entries.every(entry =>
-    (entry.stops.length === 0 || isHundred(entry.stops.map(stop => stop.share))) &&
-    (entry.targets.length === 0 || isHundred(entry.targets.map(target => target.share))))
+    isHundred(entry.stops.map(stop => stop.share)) && isHundred(entry.targets.map(target => target.share)))
   // The risk the Summary shows against the most the setting allows at the current ladder level.
   const setting = sizing ? Number(sizing.settings.riskPercent) * Number(sizing.exposure.multiplier) : null
   const share = risk?.riskSharePercent ?? null
   const riskOutcome = setting === null || !Number.isFinite(setting) || share === null ? 'unknown' : share <= setting + 1e-9 ? 'passed' : 'skipped'
-  // Liquidation can be judged only against priced stops.
-  const pricedStops = draft.entries.some(entry => entry.stops.some(stop =>
-    levelPrice(positivePlanNumber(entry.price), stop, 'stop', draft.direction, leverage) !== null))
-  const liquidationOutcome = liquidation === null || !pricedStops ? 'unknown'
-    : stopsPastLiquidation(draft.entries, draft.direction, leverage, liquidation).length === 0 ? 'passed' : 'skipped'
+  // A priced stop past the liquidation is not met whatever the others say; it is met only when every stop is priced.
+  const stops = draft.entries.flatMap(entry => entry.stops.map(stop =>
+    levelPrice(positivePlanNumber(entry.price), stop, 'stop', draft.direction, leverage)))
+  const liquidationOutcome = liquidation === null ? 'unknown'
+    : stopsPastLiquidation(draft.entries, draft.direction, leverage, liquidation).length > 0 ? 'skipped'
+    : stops.length > 0 && stops.every(price => price !== null) ? 'passed' : 'unknown'
   return [
     outcome('priced-stops', stopCoverageGap(draft) === null ? 'passed' : 'skipped'),
     outcome('allocations', allocations ? 'passed' : 'skipped'),
@@ -69,6 +71,3 @@ export function withIfThen(thesis: string, action: Pick<NextAction, 'nextAction'
   const line = `If …, then ${action.nextAction.trim()} (from ${action.title.trim() || 'an earlier Play'})`
   return thesis.trim() ? `${thesis.trimEnd()}\n\n${line}` : line
 }
-
-/** Plan it plans at once when every check passed; otherwise the owner sees the checklist first. */
-export const preflightClear = (checks: readonly PreflightCheck[]) => checks.every(check => check.outcome === 'passed')
