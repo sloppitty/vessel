@@ -686,3 +686,10 @@ October 20, 2026, branch `t3/phase1-time`, stacked on 1.6b–d:
     and Execution lists each linked fill with its time, which U17's tests cover.
   - **Review heading (medium).** The close column no longer says UTC.
   - **Check.** `scripts/check.sh` passed again: backend 3,612 passed, 5 skipped; frontend 155 files and 3,853 tests.
+
+- **Sol (Codex) round 2.** All four round-1 findings resolved. Two new findings, both fixed:
+  - **Activity heading (medium).** Operation tables still headed the time column "UTC". The badge is gone; each row
+    names its own zone.
+  - **Overview window (low).** "About these numbers" showed the window's ends as raw ISO times. They use the shared
+    time now.
+  - **Check.** `scripts/check.sh` passed again: backend 3,612 passed, 5 skipped; frontend 155 files and 3,855 tests.
