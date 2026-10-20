@@ -15,6 +15,17 @@ public sealed record LinkOrderRequest(
     string? EntryId = null,
     string? LevelId = null);
 
+/// <summary>
+/// Rebinds a linked stop or target to the observed venue order at its acting price (<c>level.drift</c>). The Play
+/// must still be at <paramref name="ExpectedVersion"/> and the order at <paramref name="ObservedPrice"/>; the change
+/// is one plan revision with <paramref name="Reason"/>, plus the link to <paramref name="OrderId"/> when it is another order.
+/// </summary>
+public sealed record RebindLevelRequest(
+    [property: JsonRequired] long ExpectedVersion,
+    [property: JsonRequired] string OrderId,
+    [property: JsonRequired] string ObservedPrice,
+    [property: JsonRequired] string Reason);
+
 public sealed record ExecutionOrderDto(string OrderId, string Side, string OrderType, string LimitPrice, string? TriggerPrice,
     bool ReduceOnly, bool IsPositionTpsl, string OriginalSize, string RemainingSize, DateTimeOffset PlacedAtUtc,
     string Status, string VenueStatus, DateTimeOffset StatusAtUtc);

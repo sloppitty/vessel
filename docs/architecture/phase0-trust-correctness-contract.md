@@ -254,7 +254,9 @@ Covers D-03 and F-10.
 - After an entry has a linked or manual fill, its price stops may sit at or
   beyond that entry (break-even or profit) with a revision reason. Unfilled
   entries keep the wrong-side rule. Percent stops beyond entry are not
-  expressible; use a price, and `0 %` stays break-even.
+  expressible; use a price, and `0 %` stays break-even. (October 20, 2026,
+  the owner: break-even needs a fill, so before any fill a `0 %` stop is
+  refused like a price stop at the entry; a stop that is not set is no stop.)
 - The Summary's all-stops row is signed: "+5 locked in" or "−5 at risk". It is
   measured from the entry's average fill where one exists, otherwise from the
   planned entry, and says which.

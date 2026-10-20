@@ -264,8 +264,9 @@ public sealed class AccountOrderHistoryTests
     [PostgresTheory]
     [InlineData("hyperliquid", 488)]
     [InlineData("risex", 312)]
-    [InlineData("lighter", 871)]
-    [InlineData("lighter-rh", 871)]
+    // Lighter's single omission sentence names liquidations, deleverages and market settlements as well (Phase 0, D-25).
+    [InlineData("lighter", 877)]
+    [InlineData("lighter-rh", 877)]
     public async Task Optional_failure_notice_fits_with_each_venues_maximum_public_coverage(string venue, int combinedLength)
     {
         var coverage = AccountHistoryNoticeBudget.CombinedCases().Where(c => c.Venue == venue).MaxBy(c => c.Public.Length);
@@ -355,13 +356,14 @@ internal static class AccountHistoryNoticeBudget
 
     public static string Capped(LighterExchange exchange) => exchange.OrdersNotice + LighterReader.OrdersPageLimitNotice;
 
-    public static string LighterPublic(string credentialNotice, string terminalNotice, int missingPnl = 500, int fees = 500, int selfTrades = 500) =>
-        Public(LighterExchange.Mainnet, credentialNotice, terminalNotice, missingPnl, fees, selfTrades);
+    public static string LighterPublic(string credentialNotice, string terminalNotice, int missingPnl = 500, int fees = 500, int selfTrades = 500,
+        int forced = 500) =>
+        Public(LighterExchange.Mainnet, credentialNotice, terminalNotice, missingPnl, fees, selfTrades, forced);
 
     public static string Public(LighterExchange exchange, string credentialNotice, string terminalNotice,
-        int missingPnl = 500, int fees = 500, int selfTrades = 500) =>
+        int missingPnl = 500, int fees = 500, int selfTrades = 500, int forced = 500) =>
         string.Join(" ", new[] { exchange.HistoryNotice, credentialNotice, terminalNotice,
-            LighterReader.MissingPnlNotice(missingPnl), LighterReader.FeeNotice(fees), LighterReader.SelfTradeNotice(selfTrades) }
+            LighterReader.OmissionNotice(missingPnl, fees, forced, forced, forced, selfTrades) }
             .Where(text => !string.IsNullOrEmpty(text)));
 
     public static IEnumerable<(string Venue, string Public, string Orders)> CombinedCases()

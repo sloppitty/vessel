@@ -100,6 +100,14 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
         ids.AddRange(await db.ManualExecutions.Where(r => r.PlayId == playId && r.Role == "entry").Select(r => r.EntryId!).Distinct().ToListAsync(ct));
         return ids.ToHashSet(StringComparer.Ordinal);
     }
+    public async Task<List<EntryExecution>> EntryExecutionsAsync(Guid playId, CancellationToken ct)
+    {
+        var entries = db.OrderLinks.Where(l => l.PlayId == playId && l.State == OrderLinkState.Linked && l.Role == OrderLinkRole.Entry);
+        var linked = await db.LinkedFills(entries).AsNoTracking().Select(x => new { x.Link.EntryId, x.Fill }).ToListAsync(ct);
+        var manual = await db.ManualExecutions.Where(r => r.PlayId == playId && r.Role == "entry" && r.EntryId != null)
+            .Select(r => r.EntryId!).Distinct().ToListAsync(ct);
+        return [.. linked.Select(x => new EntryExecution(x.EntryId!, x.Fill)), .. manual.Select(id => new EntryExecution(id, null))];
+    }
     public void Add(Play play) { unitOfWork.RequireActive(); db.Plays.Add(play); }
     public async Task<List<LinkedPlanReference>> LinkedPlanReferencesAsync(Guid playId, CancellationToken ct) =>
         (await db.OrderLinks.Where(l => l.PlayId == playId && l.State == OrderLinkState.Linked)

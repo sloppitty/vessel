@@ -68,3 +68,24 @@ describe('Plays list API', () => {
     }
   })
 })
+
+describe('level rebind API (0.5b)', () => {
+  const link = '00000000-0000-4000-8000-0000000000d1'
+  const request = { expectedVersion: 4, orderId: 's-order', observedPrice: '101', reason: 'Trailed at the venue' }
+
+  it('posts the expected version, observed order and price with the reason, and returns the saved Play', async () => {
+    const saved = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, version: 5 } }
+    response(saved)
+    await expect(createWorkspaceApi('token').rebindLevel(base.id, link, request)).resolves.toEqual(saved)
+    expect(fetch).toHaveBeenCalledWith(`/api/plays/${base.id}/execution/links/${link}/rebind`,
+      expect.objectContaining({ method: 'POST', body: JSON.stringify(request) }))
+  })
+
+  it('refuses another Play in the answer and an invalid link ID before sending', async () => {
+    response({ ...savedPlayFixture, summary: { ...savedPlayFixture.summary, id: other } })
+    await expect(createWorkspaceApi('token').rebindLevel(base.id, link, request)).rejects.toMatchObject({ kind: 'invalid-response' })
+    vi.mocked(fetch).mockClear()
+    await expect(createWorkspaceApi('token').rebindLevel(base.id, '../links', request)).rejects.toMatchObject({ kind: 'invalid-response' })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+})
