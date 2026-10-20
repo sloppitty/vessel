@@ -214,7 +214,7 @@ Frontend (draft side):
 
 - The chart toolbar's camera button captures the chart (`ChartAdapter.capture`, Lightweight Charts `takeScreenshot(true, false)`). Planned levels and drawings are series primitives, so they are in the image; the crosshair is not. A footer adds `instrument · venue · interval · UTC time · Planned levels are not fills`. It is enabled once candles have loaded, also in the expanded view.
 - A capture is added to `PlayDraft.evidence` (Blob, name, context, note, time) and brings the journal's Evidence tab forward. Uploads accept PNG, JPEG or WebP detected by file signature, up to 10 MB and 50 images per play, mirroring the server defaults.
-- The Evidence tab lists images with an inline note each, a larger viewer with the same note, download, and removal after confirmation. The general evidence notes field stays below. Object URLs are revoked when an image is removed. Like the rest of the draft, images are discarded on reload or disconnect.
+- The Evidence tab lists images with an inline note each, a larger viewer with the same note, download, and removal after confirmation. The general evidence notes field stays below. Object URLs are revoked when an image is removed. Like the rest of the draft, images are discarded on reload or disconnect. A saved Play's originals load lazily per image, with retry, after it opens (see the October 19 section below).
 - Capture and upload finish asynchronously, so they apply to the latest draft rather than the one from the click.
 
 Backend (saved Plays):
@@ -228,6 +228,34 @@ Backend (saved Plays):
 At the original October 2 delivery, Play save, orphan cleanup, backups and S3 were not included. Saved Plays now upload evidence; October 15 adds S3 and documented backups. Automatic orphan cleanup remains out of scope. Back up image storage together with the database.
 
 Verified: backend 553 tests including real PostgreSQL (migration, owner filter, write guard, restrict, hash check); frontend 273 tests; live API upload/read/edit/delete with real files on disk, 413/415/401 paths; headless Chromium capture with levels, a drawing and the footer, uploads with a rejected file, viewer note editing, removal confirmation, and no horizontal overflow at 390 px.
+
+### Saved originals load on their own, October 19
+
+Phase 0.6 of the [trust and correctness contract](phase0-trust-correctness-contract.md)
+(D-10). A saved Play opens from the Play and its evidence metadata
+(`GET /api/plays/{id}/evidence`, database only) and no longer waits for every
+original, so one storage failure cannot keep the thesis, plan, journal or
+review closed.
+
+- Originals load afterwards through the same authenticated, API-proxied
+  `GET /api/evidence/{id}/content`, at most three at a time
+  (`useEvidenceImages`/`EvidenceImageLoader` in `features/plays/evidence-images.ts`).
+  Reads are aborted when the image leaves the open Play (another Play opens,
+  Remove, discard), on a new API identity and on unmount. Nothing is kept in the
+  browser across reloads.
+- Each image shows its own state: loading, **Image unavailable** with **Retry**
+  (503, 500, timeout or transport failure; nothing retries by itself) or
+  **Missing from storage** (404). The viewer gives the stored size from the
+  metadata. Download and markup need the loaded original; the note can still be
+  edited and saved.
+- Loaded originals stay outside the draft, keyed by server ID. Their arrival is
+  not an edit and never changes the draft's identity, so opening another Play
+  and save merging are unaffected.
+- Save never deletes or uploads an image whose original has not loaded: it keeps
+  its server ID, and its note and markup save through their own requests. Only
+  the same confirmed Remove as for any other image deletes it.
+- S3 stays fail-closed: an outage is a 503 for that image, never a Local
+  fallback.
 
 ### Chart-picked SL/TP prices, October 5
 

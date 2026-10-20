@@ -36,13 +36,19 @@ export interface DraftEvidence {
   /** Note and marks as last saved, to detect edits that still need saving. */
   savedState?: { note: string; markup: ImageMarkup | null }
   source: 'capture' | 'upload'
-  image: Blob
+  /**
+   * The original. Captures and uploads always have it. A saved image opens without it: its original loads afterwards,
+   * outside the draft (`useEvidenceImages`), so a missing or unavailable original never blocks or changes the Play.
+   */
+  image?: Blob
+  /** Stored size from the saved image's metadata, shown before its original has loaded. */
+  sizeBytes?: number
   /** Upload file name, or a generated name for captures; used when downloading. */
   name: string
   /** What a capture shows, e.g. "BTC · Hyperliquid · 1 hour"; empty for uploads. */
   context: string
   note: string
-  /** Marks drawn over the image; the original `image` is never changed. */
+  /** Marks drawn over the image; the original is never changed. */
   markup: ImageMarkup | null
   addedAt: string
 }

@@ -8,14 +8,15 @@ import { createEvidence, evidenceLimits, evidenceProblem, sniffImageType } from 
 import { EvidencePanel } from './EvidencePanel'
 import { PlayJournal } from './WorkspacePanels'
 import { createDraft } from './draft'
+import type { EvidenceImages, EvidenceImageState } from './evidence-images'
 
 const png = () => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1])], 'setup.png', { type: 'image/png' })
 const jpeg = () => new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], 'daily.jpg', { type: 'image/jpeg' })
 const webp = () => new Blob([new TextEncoder().encode('RIFF\0\0\0\0WEBP')])
 
-function Harness({ initial = [], onList }: { initial?: DraftEvidence[]; onList?: (list: DraftEvidence[]) => void }) {
+function Harness({ initial = [], onList, images }: { initial?: DraftEvidence[]; onList?: (list: DraftEvidence[]) => void; images?: EvidenceImages }) {
   const [list, setList] = useState(initial)
-  return <EvidencePanel evidence={list} onChange={update => setList(current => { const next = update(current); onList?.(next); return next })} />
+  return <EvidencePanel evidence={list} images={images} onChange={update => setList(current => { const next = update(current); onList?.(next); return next })} />
 }
 
 describe('Evidence helpers', () => {
@@ -87,6 +88,67 @@ describe('Evidence panel', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Only 1 more image fits; a play holds at most 50.')
     expect(screen.getAllByRole('listitem')).toHaveLength(50)
     expect(screen.getByRole('button', { name: 'Upload image' })).toBeDisabled()
+  })
+})
+
+describe('Saved originals that have not loaded (D-10)', () => {
+  const saved = (n: number): DraftEvidence => ({ id: `local-${n}`, serverId: `server-${n}`, savedState: { note: '', markup: null },
+    source: 'upload', name: `saved-${n}.png`, sizeBytes: 2048, context: '', note: '', markup: null, addedAt: '2026-10-14T12:00:00Z' })
+  const states: Record<string, EvidenceImageState> = {
+    'server-1': { status: 'loading' },
+    'server-2': { status: 'unavailable', message: 'The service is unavailable.' },
+    'server-3': { status: 'missing' },
+    'server-4': { status: 'loaded', image: png() },
+  }
+
+  it('shows loading, unavailable with Retry and missing placeholders, without download or markup', async () => {
+    const retry = vi.fn()
+    const onList = vi.fn()
+    render(<Harness initial={[1, 2, 3, 4].map(saved)} onList={onList} images={{ state: id => states[id]!, retry }} />)
+    const cards = within(screen.getByRole('list', { name: 'Evidence images' })).getAllByRole('listitem')
+    expect(cards[0]).toHaveTextContent('Loading image…')
+    expect(cards[1]).toHaveTextContent('Image unavailable')
+    expect(cards[2]).toHaveTextContent('Missing from storage')
+    expect(cards[3]!.querySelector('img')).toHaveAttribute('src', 'blob:test-image')
+    for (const card of cards.slice(0, 3)) expect(card.querySelector('img')).toBeNull()
+    for (const index of [1, 2, 3]) expect(screen.getByRole('button', { name: `Download image ${index}` })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Download image 4' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Open Image 2: saved-2.png' })).toHaveAccessibleDescription('Image unavailable')
+    // Only an unavailable original offers Retry; a missing one does not come back by retrying.
+    expect(screen.getAllByRole('button', { name: /^Retry/ })).toHaveLength(1)
+    await userEvent.click(within(cards[1]!).getByRole('button', { name: 'Retry image 2' }))
+    expect(retry).toHaveBeenCalledWith('server-2')
+
+    // The note of an unloaded image stays editable.
+    await userEvent.type(screen.getByRole('textbox', { name: 'Note for image 2' }), 'Breakout')
+    expect(onList.mock.lastCall![0][1]).toMatchObject({ serverId: 'server-2', note: 'Breakout' })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Open Image 2: saved-2.png' }))
+    const viewer = await screen.findByRole('dialog', { name: 'saved-2.png' })
+    expect(viewer).toHaveTextContent('2 KB')
+    expect(within(viewer).getByRole('button', { name: 'Mark up' })).toBeDisabled()
+    expect(within(viewer).getByRole('button', { name: 'Download original' })).toBeDisabled()
+    expect(viewer).toHaveTextContent('Download and markup need the original.')
+    await userEvent.click(within(viewer).getByRole('button', { name: 'Retry image 2' }))
+    expect(retry).toHaveBeenCalledTimes(2)
+    await userEvent.type(within(viewer).getByRole('textbox', { name: 'Note for image 2' }), ' retest')
+    expect(onList.mock.lastCall![0][1].note).toBe('Breakout retest')
+    await userEvent.keyboard('{Escape}')
+
+    // Removal is the same explicit, confirmed action as for any other image.
+    await userEvent.click(screen.getByRole('button', { name: 'Remove image 3' }))
+    await userEvent.click(within(screen.getByRole('group', { name: 'Remove image 3?' })).getByRole('button', { name: 'Remove' }))
+    expect(onList.mock.lastCall![0].map((item: DraftEvidence) => item.serverId)).toEqual(['server-1', 'server-2', 'server-4'])
+  })
+
+  it('uses a loaded original for the viewer, download and markup', async () => {
+    render(<Harness initial={[saved(4)]} images={{ state: id => states[id]!, retry: vi.fn() }} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Open Image 1: saved-4.png' }))
+    const viewer = await screen.findByRole('dialog', { name: 'saved-4.png' })
+    expect(within(viewer).getByRole('img', { name: 'saved-4.png' })).toHaveAttribute('src', 'blob:test-image')
+    expect(within(viewer).getByRole('button', { name: 'Download original' })).toBeEnabled()
+    await userEvent.click(within(viewer).getByRole('button', { name: 'Mark up' }))
+    expect(document.querySelector('.markup-stage > img')).toHaveAttribute('src', 'blob:test-image')
   })
 })
 

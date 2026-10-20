@@ -576,6 +576,107 @@ describe('default play title', () => {
   })
 })
 
+describe('saved originals that do not load (D-10)', () => {
+  const stored = (playId: string, n: number, note: string): SavedEvidence => ({ id: ids(2000 + n), playId, source: 'upload', contentType: 'image/png',
+    sizeBytes: 4, sha256: 'a'.repeat(64), note, createdAtUtc: '2026-10-03T10:00:00.000Z', updatedAtUtc: '2026-10-03T10:00:00.000Z', markup: null })
+  const cards = () => within(screen.getByRole('list', { name: 'Evidence images' })).getAllByRole('listitem')
+
+  it('opens a Play whose original returns 503, keeps it through Save and shows it after Retry', async () => {
+    const server = fakeServer()
+    const play: SavedPlay = { ...savedPlayFixture, plan: { ...savedPlayFixture.plan, notes: { ...savedPlayFixture.plan.notes, thesis: 'Reclaim of the range high' } } }
+    server.plays.set(play.summary.id, play)
+    server.evidence.push(stored(play.summary.id, 1, 'Loads'), stored(play.summary.id, 2, 'Storage outage'))
+    let outage = true
+    const evidenceImage = vi.fn((id: string) => id === ids(2002) && outage
+      ? Promise.reject(new ApiError('http', 'The service is unavailable. Check the database and server configuration.', 503))
+      : server.api.evidenceImage())
+    const user = userEvent.setup()
+    render(<Page api={client(server, { evidenceImage })} />)
+    await user.click(await screen.findByRole('tab', { name: /^Drafts/ }))
+    await user.click(await screen.findByRole('button', { name: 'Open Saved idea' }))
+    // The thesis, plan and journal open from the Play and evidence metadata alone.
+    expect(await screen.findByRole('textbox', { name: 'Thesis' })).toHaveValue('Reclaim of the range high')
+    await user.click(screen.getByRole('tab', { name: 'Evidence' }))
+    await waitFor(() => expect(cards()[1]).toHaveTextContent('Image unavailable'))
+    expect(cards()[0]!.querySelector('img')).toHaveAttribute('src', 'blob:test-image')
+    expect(within(cards()[1]!).getByRole('button', { name: 'Download image 2' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Saved/ })).toBeDisabled()
+
+    // Its note still saves through its own request; Save neither deletes nor uploads it.
+    await user.type(screen.getByRole('textbox', { name: 'Note for image 2' }), ', S3 was down')
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /Saved/ })).toBeDisabled())
+    expect(server.api.updateEvidenceNote).toHaveBeenCalledWith(ids(2002), 'Storage outage, S3 was down')
+    expect(server.api.deleteEvidence).not.toHaveBeenCalled()
+    expect(server.api.uploadEvidence).not.toHaveBeenCalled()
+    expect(server.evidence.map(item => item.id)).toEqual([ids(2001), ids(2002)])
+    expect(cards()).toHaveLength(2)
+    expect(cards()[1]).toHaveTextContent('Image unavailable')
+
+    outage = false
+    await user.click(within(cards()[1]!).getByRole('button', { name: 'Retry image 2' }))
+    await waitFor(() => expect(cards()[1]!.querySelector('img')).toHaveAttribute('src', 'blob:test-image'))
+    expect(cards()[1]).not.toHaveTextContent('Image unavailable')
+    expect(within(cards()[1]!).getByRole('button', { name: 'Download image 2' })).toBeEnabled()
+    // The original arriving is not an edit.
+    expect(screen.getByRole('button', { name: /Saved/ })).toBeDisabled()
+    expect(evidenceImage).toHaveBeenCalledTimes(3)
+  })
+
+  it('says a 404 original is missing from storage and never deletes it unless removed', async () => {
+    const server = fakeServer()
+    server.plays.set(savedPlayFixture.summary.id, savedPlayFixture)
+    server.evidence.push(stored(savedPlayFixture.summary.id, 1, ''))
+    const evidenceImage = vi.fn(() => Promise.reject(new ApiError('http', 'This play or image is no longer available.', 404)))
+    const user = userEvent.setup()
+    render(<Page api={client(server, { evidenceImage })} />)
+    await user.click(await screen.findByRole('tab', { name: /^Drafts/ }))
+    await user.click(await screen.findByRole('button', { name: 'Open Saved idea' }))
+    await user.click(await screen.findByRole('tab', { name: 'Evidence' }))
+    await waitFor(() => expect(cards()[0]).toHaveTextContent('Missing from storage'))
+    expect(within(cards()[0]!).queryByRole('button', { name: /Retry/ })).toBeNull()
+    await user.type(screen.getByRole('textbox', { name: 'Play title' }), ' v2')
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    await waitFor(() => expect(server.api.updatePlay).toHaveBeenCalledOnce())
+    expect(server.api.deleteEvidence).not.toHaveBeenCalled()
+    // The same explicit Remove as any other image deletes it on the next save.
+    await user.click(screen.getByRole('button', { name: 'Remove image 1' }))
+    await user.click(within(screen.getByRole('group', { name: 'Remove image 1?' })).getByRole('button', { name: 'Remove' }))
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    await waitFor(() => expect(server.api.deleteEvidence).toHaveBeenCalledWith(ids(2001)))
+    expect(evidenceImage).toHaveBeenCalledOnce()
+  })
+
+  it('aborts an unfinished original when another Play opens, and its late answer changes nothing', async () => {
+    const server = fakeServer()
+    const other: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, id: ids(77), title: 'Second idea' } }
+    server.plays.set(savedPlayFixture.summary.id, savedPlayFixture)
+    server.plays.set(other.summary.id, other)
+    server.evidence.push(stored(savedPlayFixture.summary.id, 1, ''))
+    let answer!: (image: Blob) => void
+    let signal: AbortSignal | undefined
+    const evidenceImage = vi.fn((_id: string, abort?: AbortSignal) => { signal = abort; return new Promise<Blob>(resolve => { answer = resolve }) })
+    const user = userEvent.setup()
+    render(<Page api={client(server, { evidenceImage })} />)
+    await user.click(await screen.findByRole('tab', { name: /^Drafts/ }))
+    await user.click(await screen.findByRole('button', { name: 'Open Saved idea' }))
+    await user.click(await screen.findByRole('tab', { name: 'Evidence' }))
+    expect(cards()[0]).toHaveTextContent('Loading image')
+    await waitFor(() => expect(evidenceImage).toHaveBeenCalledOnce())
+    expect(screen.getByRole('button', { name: /Saved/ })).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'All plays' }))
+    await user.click(await screen.findByRole('button', { name: 'Open Second idea' }))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Second idea'))
+    expect(signal?.aborted).toBe(true)
+    act(() => answer(new Blob(['late'], { type: 'image/png' })))
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Second idea')
+    expect(screen.getByRole('button', { name: /Saved/ })).toBeDisabled()
+    expect(screen.queryByText(/edits made while loading/)).toBeNull()
+  })
+})
+
 describe('venue tracking', () => {
   it('checks a tracked play when opened and takes the status that linked fills produced', async () => {
     const server = fakeServer()
