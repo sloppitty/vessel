@@ -402,6 +402,19 @@ October 21, 2026.
   capability guards.
 - **Check after round 1.** `scripts/check.sh` passed on `5c278dd6` (before documentation-only commits were restacked beneath it): backend 4,070 passed, 5 skipped; frontend 175 files and 4,073 tests.
 
+**8c. Link this stop, and check timing.** Implemented on `t3/phase2-link-stop`.
+- **Link this stop.** A `protection.missing` or `protection.short` record offers **Link this stop** for
+  each compatible unlinked order.
+  - The order must rest on the Play's instrument on the exit side, with stop mechanics (never a
+    take-profit) as `OrderMechanics` decides.
+  - The link goes through the existing endpoint, chosen by the owner, never automatic.
+- **Check timing (I-08).** The monitor panel's timing line explains that checks are periodic and are
+  not stop protection.
+- **Tests.**
+  - The Execution panel cases.
+  - The stop-mechanism helper.
+- **Check.** `scripts/check.sh` passed on `a8c7c85d` (before item 5a's round-1 fixes were restacked beneath it): backend 4,054 passed, 5 skipped; frontend 175 files and 4,074 tests.
+
 ## 9. Funding
 
 Not started.
