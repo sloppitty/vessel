@@ -278,6 +278,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         return unitOfWork.ExecuteAsync(() => plays.WithPlayLockAsync(playId, async () =>
         {
             var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+            if (play.TradingMode != "real")
+                throw new ProblemException(409, "A paper Play's simulation holds what it cannot settle; it is never declared unresolved.");
             if (play.Version != request.ExpectedVersion) throw new ProblemException(409, StalePlay);
             if (play.Status != PlayStatus.Open) throw new ProblemException(409, "Only an open Play can be declared unresolved.");
             var evidence = await EvidenceAsync(play, ct)
