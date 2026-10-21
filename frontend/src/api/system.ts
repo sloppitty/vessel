@@ -8,6 +8,7 @@ import { isVenueLogoKey, type VenueLogoKey } from './venue-logos'
 export const manualVenueId = 'manual'
 
 export interface VenueCapabilities {
+  paperExecution?: boolean
   sync: boolean; instruments: boolean; orders: boolean; candles: boolean
   marketContext: boolean; stream: boolean; stablecoinWallet: boolean
   accountDiscovery?: boolean; readOnlyCredential?: boolean; manualExecutions?: boolean
@@ -67,7 +68,7 @@ function isVenue(value: unknown): value is VenueInfo {
     ['planned', 'candidate', 'manual', 'read-only'].includes(String(value.status)) &&
     ['none', 'evm-address', 'account-index'].includes(String(value.source)) &&
     isRecord(value.capabilities) && capabilityNames.every(name => typeof (value.capabilities as Record<string, unknown>)[name] === 'boolean') &&
-    ['accountDiscovery', 'readOnlyCredential', 'manualExecutions', 'currentOrderBook'].every(name => {
+    ['accountDiscovery', 'readOnlyCredential', 'manualExecutions', 'currentOrderBook', 'paperExecution'].every(name => {
       const flag = (value.capabilities as Record<string, unknown>)[name]
       return flag === undefined || typeof flag === 'boolean'
     }) &&

@@ -5,11 +5,23 @@ Vessel is a trading diary for recording decisions, executions, and reflection so
 ## Language
 
 **Portfolio**:
-A collection of brokerage accounts grouped by trading purpose, such as swing trading or intraday trading.
+A collection of trading accounts grouped by purpose, such as swing trading or intraday trading.
+
+**Paper portfolio**:
+A portfolio containing only paper accounts, separate from portfolios containing real accounts.
+_Avoid_: A real portfolio with a paper label
 
 **Account**:
-A trader's account at a broker or trading venue, with manually recorded or imported activity. Portfolio assignment is optional.
+A trader's real account at a broker or trading venue, or its paper-trading counterpart. Real accounts can contain manually recorded or imported activity and need not belong to a portfolio.
 _Avoid_: User account, portfolio
+
+**Paper account**:
+An account with virtual capital and simulated executions, associated with a venue for its market context rather than a real balance or order history.
+_Avoid_: Testnet account, manual real account
+
+**Starting paper capital**:
+The fixed virtual capital chosen when creating a paper account, distinct from later simulated trading gains or losses. A different starting allocation belongs to a new paper account.
+_Avoid_: Editable current balance, deposit
 
 **Subaccount**:
 A separately identified account under a venue's main account. Each selected Lighter account index is a separate Vessel account, even when several belong to the same wallet.
@@ -27,12 +39,16 @@ _Avoid_: Default portfolio as a separate entity
 An account retained for management but excluded from normal imported activity and venue-position views. Enabling it restores retained observations rather than recreating the account.
 
 **Venue**:
-The broker or exchange where an account exists, such as Hyperliquid or Quantfury.
+The broker or exchange associated with a real account, or providing the market context for a paper account, such as Hyperliquid or Quantfury.
 _Avoid_: Account
 
 **Play**, provisional:
 One trading idea and its history, from the original thesis and intended entries through execution, outcome, and review.
 _Avoid_: Entry as a name for the whole idea; plan as a synonym once terminology is agreed
+
+**Paper Play**:
+A Play on a paper account that tests a trading hypothesis through simulated rather than real executions.
+_Avoid_: A real Play with an optional paper tag
 
 **Plan**:
 The intended actions and risk for a play, before or during execution.
@@ -51,7 +67,7 @@ The association of one venue order with one level of a play: an entry, one of it
 _Avoid_: Assigning fills by account and instrument alone
 
 **Execution progress**:
-How much of a play's entries and exits recorded executions have covered. Derived from imported or explicitly owner-recorded facts, never from price touches.
+How much of a Play's entries and exits recorded executions have covered. Real Plays use imported or explicitly owner-recorded facts; paper Plays use simulated executions, which never confirm a real trade.
 
 **Entry**:
 One planned tranche of the play's full position, with a share of its total quantity, its own entry price, stop loss, and take-profit targets. An entry is not evidence that a trade occurred.
@@ -59,7 +75,7 @@ _Avoid_: Play, fill
 
 **Fill**:
 An actual execution of all or part of an entry or exit.
-_Avoid_: Planned entry
+_Avoid_: Planned entry, simulated execution
 
 **Strategy**:
 A reusable, testable hypothesis describing conditions under which a trade may make sense. A strategy can be unproven or unsuccessful.
@@ -132,7 +148,7 @@ The planned entry price weighted by entry quantity shares, excluding zero-share 
 _Avoid_: Arithmetic mean of entry prices
 
 **Account value**:
-The equity attributed to the selected broker account, separate from an editable play budget.
+The equity attributed to the selected account, separate from an editable play budget. A paper account's value is virtual, not real capital.
 _Avoid_: Available budget, committed margin
 
 **Portfolio value**:
@@ -177,6 +193,10 @@ _Avoid_: Original trading intent, retrospective Play
 An actual entry or exit recorded by the owner, with its source, time, price,
 quantity and known or unknown costs. It is not a venue-confirmed import.
 _Avoid_: Planned entry, simulated fill
+
+**Simulated execution**:
+A paper entry or exit recorded under an explicit simulation model using market observations. It is neither a venue-confirmed fill nor an owner-recorded actual trade.
+_Avoid_: Imported execution, manual execution
 
 **Execution correction**:
 An owner-recorded amendment to a manual execution that retains the prior values

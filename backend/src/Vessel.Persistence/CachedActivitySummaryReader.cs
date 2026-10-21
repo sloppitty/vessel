@@ -4,14 +4,19 @@ using Microsoft.Extensions.DependencyInjection;
 using Vessel.Application.Activity;
 using Vessel.Application.Ownership;
 using Vessel.Application.Venues;
+using Vessel.Domain.Common;
 
 namespace Vessel.Persistence;
 
 public sealed class CachedActivitySummaryReader(IJournalOwnerContext owner, IOwnerScopeFactory scopes,
     ActivitySummaryCache cache) : IActivitySummaryReader
 {
-    public async Task<ActivitySummaries> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
+    public Task<ActivitySummaries> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) =>
+        ReadAsync(accountId, TradingMode.Real, ct, accountIds);
+
+    public async Task<ActivitySummaries> ReadAsync(Guid? accountId, string tradingMode, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
     {
+        tradingMode = TradingMode.Validate(tradingMode);
         // Copy mutable caller input before crossing a request lifetime.
         var ids = accountIds?.ToHashSet();
         var scope = scopes.Create(owner.OwnerId);
@@ -20,23 +25,31 @@ public sealed class CachedActivitySummaryReader(IJournalOwnerContext owner, IOwn
         {
             var db = scope.Services.GetRequiredService<VesselDbContext>();
             await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
+            // Paper's ledger/checkpoints are not imported-fact revisions. Read a fresh consistent snapshot instead of
+            // serving stale simulated results under an unrelated real-import revision.
+            if (tradingMode == TradingMode.Paper)
+            {
+                var facts = await scope.Services.GetRequiredService<IActivityStore>().ReadAsync(accountId, tradingMode, ct, ids);
+                await db.Database.CurrentTransaction!.CommitAsync(ct);
+                return ActivityService.Aggregate(facts, accountId, ids, tradingMode: tradingMode);
+            }
             var revision = await db.Database.SqlQuery<long>($"""
                 SELECT COALESCE((SELECT revision FROM activity_facts_revisions WHERE owner_id = {scope.OwnerId}), 0) AS "Value"
                 """).SingleAsync(ct);
             var key = new ActivitySummaryKey(scope.OwnerId, revision, accountId,
-                ids is null ? "*" : string.Join(',', ids.Order()));
+                ids is null ? "*" : string.Join(',', ids.Order()), tradingMode);
             return await cache.ReadAsync(key, async token =>
             {
                 transferred = true;
                 await using (scope)
                 {
-                    var facts = await scope.Services.GetRequiredService<IActivityStore>().ReadAsync(accountId, token, ids);
+                    var facts = await scope.Services.GetRequiredService<IActivityStore>().ReadAsync(accountId, tradingMode, token, ids);
                     var transaction = db.Database.CurrentTransaction!;
                     await transaction.CommitAsync(token);
                     await transaction.DisposeAsync();
                     await db.Database.CloseConnectionAsync();
                     token.ThrowIfCancellationRequested();
-                    var result = ActivityService.Aggregate(facts, accountId, ids, scope.Services.GetService<IVenueRegistry>());
+                    var result = ActivityService.Aggregate(facts, accountId, ids, scope.Services.GetService<IVenueRegistry>(), tradingMode);
                     token.ThrowIfCancellationRequested();
                     return result;
                 }

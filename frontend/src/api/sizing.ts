@@ -1,3 +1,4 @@
+import { isTradingMode, type TradingMode } from './paper'
 import { isCount, isNullOr, isPlainDecimal, isRecord, isText, isTimestamp } from './guards'
 
 /**
@@ -22,7 +23,7 @@ export interface SizingExposure {
   tiedOutcomes?: number
 }
 /** Where the record comes from: closed Plays, closed Activity positions while no Play has a win or loss, or neither. */
-export type RecordSource = 'plays' | 'activity' | 'none'
+export type RecordSource = 'plays' | 'activity' | 'none' | 'paper'
 export interface RecordedPlay {
   /** Null for an Activity position, which is not a Play. */
   playId: string | null
@@ -81,6 +82,7 @@ export interface SizingLimits {
   minRewardRiskSource: 'default' | 'battingAverage'
 }
 export interface SizingDocument {
+  tradingMode?: TradingMode
   settings: SizingSettings
   exposure: SizingExposure
   record: SizingRecord
@@ -97,7 +99,7 @@ const recorded = (v: unknown): v is RecordedPlay => isRecord(v) && isNullOr(v.pl
   (v.detectedAtUtc === undefined || isNullOr(v.detectedAtUtc, x => isTimestamp(x, 64))) && isPlainDecimal(v.netResultUsd) &&
   isNullOr(v.returnPercent, isPlainDecimal) && isNullOr(v.riskUsd, isPlainDecimal) && isNullOr(v.rMultiple, isPlainDecimal) &&
   ['win', 'loss', 'scratch'].includes(v.outcome as string) && typeof v.feesComplete === 'boolean'
-const record = (v: unknown): v is SizingRecord => isRecord(v) && ['plays', 'activity', 'none'].includes(v.source as string) &&
+const record = (v: unknown): v is SizingRecord => isRecord(v) && ['plays', 'activity', 'none', 'paper'].includes(v.source as string) &&
   ['closedPlays', 'decidedPlays', 'window', 'wins', 'losses', 'scratches'].every(k => isCount(v[k])) &&
   ['battingAverage', 'averageGainPercent', 'averageLossPercent', 'winLossRatio', 'breakEvenRewardRisk', 'averageWinR', 'averageLossR']
     .every(k => isNullOr(v[k], isPlainDecimal)) &&
@@ -106,11 +108,12 @@ const record = (v: unknown): v is SizingRecord => isRecord(v) && ['plays', 'acti
   ['feeOnlyLosses', 'unknownGrossLosses'].every(k => v[k] === undefined || isCount(v[k]) && (v[k] as number) <= (v.losses as number))
 
 export const isSizingDocument = (v: unknown): v is SizingDocument => isRecord(v) &&
+  (v.tradingMode === undefined || isTradingMode(v.tradingMode)) &&
   isRecord(v.settings) && isPlainDecimal(v.settings.riskPercent) &&
   isRecord(v.exposure) && ['full', 'half', 'quarter'].includes(v.exposure.level as string) && isPlainDecimal(v.exposure.multiplier) &&
   isText(v.exposure.reason, 2000) && isCount(v.exposure.lossStreak) && isCount(v.exposure.winsSinceStepDown) &&
   (v.exposure.tiedOutcomes === undefined || isCount(v.exposure.tiedOutcomes)) &&
-  record(v.record) &&
+  record(v.record) && (v.record.source === 'paper') === (v.tradingMode === 'paper') &&
   isRecord(v.limits) && ['effectiveRiskPercent', 'maxStopPercent', 'minRewardRisk'].every(k => isPlainDecimal((v.limits as Record<string, unknown>)[k])) &&
   ['default', 'averageGain'].includes(v.limits.maxStopSource as string) &&
   ['default', 'battingAverage'].includes(v.limits.minRewardRiskSource as string) &&

@@ -18,7 +18,9 @@ internal static class WorkerProgram
     {
         try
         {
-            var builder = Host.CreateApplicationBuilder(args);
+            // Keep --modules as a convenient explicit standalone selector without changing transport deployments.
+            var normalized = args.Select(x => x == "--modules" ? "--Vessel:Worker:Modules:0" : x).ToArray();
+            var builder = Host.CreateApplicationBuilder(normalized);
             WorkerHost.Configure(builder);
             await builder.Build().RunAsync();
             return 0;
@@ -61,6 +63,20 @@ public static class WorkerHost
     public static void Configure(HostApplicationBuilder builder)
     {
         var worker = WorkerSettings.From(builder.Configuration);
+        if (worker.Modules.Contains("paper", StringComparer.Ordinal))
+        {
+            if (worker.Modules.Count != 1 || worker.Deployment != "paper")
+                throw new InvalidOperationException("Paper is a standalone module and deployment; it cannot be combined with transport modules.");
+            builder.Services.AddSingleton(worker);
+            builder.Services.AddVesselInfrastructure(builder.Configuration);
+            Vessel.Identity.DependencyInjection.AddVesselIdentityDirectory(builder.Services, builder.Configuration);
+            builder.Services.AddVesselPersistence(builder.Configuration);
+            builder.Services.AddVesselApplication();
+            builder.Services.AddPaperTrading();
+            builder.Services.AddSingleton(PaperWorkerOptions.From(builder.Configuration));
+            builder.Services.AddHostedService<PaperScheduler>();
+            return;
+        }
         // An unknown module name stops startup before anything connects.
         var modules = VesselModuleRegistry.From(builder.Configuration).Select(worker.Modules);
         builder.Services.AddSingleton(worker);

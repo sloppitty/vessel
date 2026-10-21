@@ -5,7 +5,7 @@ using Vessel.Domain.Workspace;
 
 namespace Vessel.Persistence;
 
-public readonly record struct ActivitySummaryKey(Guid OwnerId, long Revision, Guid? AccountId, string Accounts);
+public readonly record struct ActivitySummaryKey(Guid OwnerId, long Revision, Guid? AccountId, string Accounts, string TradingMode = "real");
 
 /// <summary>Process-local, size-bounded LRU. Failed and abandoned computations never enter the cache.</summary>
 public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int entryLimit = 64)
