@@ -3,6 +3,7 @@ using Vessel.Application.Common;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Monitoring;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 
@@ -88,6 +89,12 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
     }
     public void Add(PlayOrderLink link) { unitOfWork.RequireActive(); db.OrderLinks.Add(link); }
     public void Add(PlayStatusChange change) { unitOfWork.RequireActive(); db.StatusChanges.Add(change); }
+    public async Task ForgetWatchesAsync(Guid playId, CancellationToken ct)
+    {
+        unitOfWork.RequireActive();
+        var watches = db.Set<MonitorExitWatch>();
+        watches.RemoveRange(await watches.Where(w => w.PlayId == playId).ToListAsync(ct));
+    }
 
     public Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset observedAt, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {
