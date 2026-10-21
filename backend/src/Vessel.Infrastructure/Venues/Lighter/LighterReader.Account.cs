@@ -201,10 +201,13 @@ public sealed partial class LighterReader
                 StrictJson.DecimalUnits(notional) * StrictJson.DecimalUnits(fraction)) throw json.Invalid();
             if (mode == 1) isolatedRequirement = ExactSum(json, isolatedRequirement, requirement);
             var leverage = 100m / fraction;
+            // The reported liquidation price when present; zero means none.
+            var liquidation = json.OptionalAmount(row, "liquidation_price");
             positions.Add(new(market.Key, quantity * sign, json.Positive(json.Property(row, "avg_entry_price")),
                 Number(json, row, "unrealized_pnl"), requirement,
                 leverage <= 1000 && leverage == decimal.Truncate(leverage) ? (int)leverage : null,
-                VenueContractId: id));
+                VenueContractId: id, LiquidationPrice: liquidation is > 0 ? liquidation : null,
+                MarginMode: mode == 1 ? MarginModes.Isolated : MarginModes.Cross));
         }
         return new(observed, exchange.SnapshotScope, Number(json, account, "total_asset_value"), null,
             ExactSum(json, Nonnegative(json, account, "cross_initial_margin_requirement"), isolatedRequirement), positions,

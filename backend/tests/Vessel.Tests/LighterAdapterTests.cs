@@ -34,7 +34,8 @@ public sealed partial class LighterAdapterTests
           "l1_address":"{{Address}}","total_asset_value":"1000.0012345678901234","available_balance":"939.9012345678901234","cross_initial_margin_requirement":"60.1",
           "assets":[{"asset_id":3,"symbol":"USDC","margin_balance":"998.0","balance":"100","locked_balance":"1"}],
           "positions":[{"market_id":1,"symbol":"BTC","position":"0.001","sign":-1,"initial_margin_fraction":"5.00",
-          "margin_mode":0,"position_value":"80","avg_entry_price":"79000.1","unrealized_pnl":"-0.9999","allocated_margin":"0"}]}]}
+          "margin_mode":0,"position_value":"80","avg_entry_price":"79000.1","unrealized_pnl":"-0.9999","allocated_margin":"0",
+          "liquidation_price":"95123.4"}]}]}
         """;
     private static readonly string Discovery = $$"""
         {"code":200,"l1_address":"{{Address}}","sub_accounts":[
@@ -221,6 +222,7 @@ public sealed partial class LighterAdapterTests
         Assert.Equal(4m, position.MarginUsedUsd);
         Assert.Equal(20, position.Leverage);
         Assert.Equal("1", position.VenueContractId);
+        Assert.Equal((95123.4m, MarginModes.Cross), (position.LiquidationPrice, position.MarginMode));
         Assert.Contains("Only fee-free", result.HistoryNotice);
     }
 

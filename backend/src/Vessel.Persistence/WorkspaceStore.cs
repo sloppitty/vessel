@@ -93,6 +93,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         await db.FundingPayments.Where(p => p.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.FundingStates.Where(s => s.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.LeverageObservations.Where(o => o.AccountId == account.Id).ExecuteDeleteAsync(ct);
+        await db.RiskObservations.Where(o => o.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.Snapshots.Where(s => s.AccountId == account.Id).ExecuteDeleteAsync(ct);
         // Event identities whose subject is this account go with it; their receipts cascade. A removed
         // sequence is a permanent hole that subscribers count as settled.
@@ -117,6 +118,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 AccountPosition p => p.OwnerId == account.OwnerId && p.AccountId == account.Id,
                 FundingPayment p => p.OwnerId == account.OwnerId && p.AccountId == account.Id,
                 LeverageObservation o => o.OwnerId == account.OwnerId && o.AccountId == account.Id,
+                RiskObservation o => o.OwnerId == account.OwnerId && o.AccountId == account.Id,
                 AccountFundingState s => s.OwnerId == account.OwnerId && s.AccountId == account.Id,
                 Vessel.Domain.Credentials.AccountCredential c => c.OwnerId == account.OwnerId && c.AccountId == account.Id,
                 _ => false
@@ -185,6 +187,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         // Leverage would be lost with the replaced positions; keep an observation when a position appears or changes,
         // or when new executions show it may have closed and reopened identically since the last refresh.
         if (replacePerps) await RecordLeverageAsync(account, observation, snapshot?.Positions ?? [], newFills, ct);
+        if (replacePerps) await RecordRiskAsync(account, observation, snapshot?.Positions ?? [], newFills, ct);
         if (snapshot is null)
         {
             snapshot = new AccountSnapshot { OwnerId = account.OwnerId, AccountId = account.Id };
@@ -225,7 +228,9 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 EntryPrice = p.EntryPrice,
                 UnrealizedPnlUsd = p.UnrealizedPnlUsd,
                 MarginUsedUsd = p.MarginUsedUsd,
-                Leverage = p.Leverage
+                Leverage = p.Leverage,
+                LiquidationPrice = p.LiquidationPrice,
+                MarginMode = p.MarginMode
             }).ToList();
         }
         if (replaceWallet)
@@ -334,6 +339,42 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 SignedQuantity = position.SignedQuantity,
                 EntryPrice = position.EntryPrice,
                 Leverage = position.Leverage!.Value
+            });
+        }
+    }
+
+    /// <summary>
+    /// Keeps the venue's reported liquidation price and margin mode (Phase 2, item 8a) when a position appears, when its
+    /// quantity, entry price or margin mode changes, or when its market has new executions since the last observation. A
+    /// cross-margin liquidation price that only drifts with the account is not kept again; the snapshot holds the latest.
+    /// Positions whose venue reports neither are skipped.
+    /// </summary>
+    private async Task RecordRiskAsync(Account account, VenueSnapshot observation, IReadOnlyCollection<AccountPosition> replaced,
+        IReadOnlyCollection<VenueFill> newFills, CancellationToken ct)
+    {
+        var reported = observation.Positions.Where(p => p.LiquidationPrice is not null || p.MarginMode is not null).ToList();
+        if (reported.Count == 0) return;
+        var contracts = reported.Select(p => p.ContractId).Distinct().ToArray();
+        var latest = (await db.RiskObservations.Where(o => o.AccountId == account.Id && contracts.Contains(o.ContractId))
+            .GroupBy(o => new { o.ContractId, o.VenueContractId })
+            .Select(g => g.OrderByDescending(o => o.ObservedAtUtc).ThenByDescending(o => o.Id).First())
+            .AsNoTracking().ToListAsync(ct)).ToDictionary(o => (o.ContractId, o.VenueContractId));
+        var observedAt = observation.ObservedAtUtc.ToUniversalTime();
+        foreach (var position in reported)
+        {
+            var previous = latest.GetValueOrDefault((position.ContractId, position.VenueContractId));
+            if (previous is not null && previous.ObservedAtUtc >= observedAt) continue;
+            var continued = replaced.Any(p => p.ContractId == position.ContractId && p.VenueContractId == position.VenueContractId &&
+                p.SignedQuantity == position.SignedQuantity && p.EntryPrice == position.EntryPrice);
+            var executed = newFills.Any(f => f.ContractId == position.ContractId &&
+                (f.VenueContractId is null || position.VenueContractId is null || f.VenueContractId == position.VenueContractId));
+            if (continued && !executed && previous is not null && previous.SignedQuantity == position.SignedQuantity &&
+                previous.EntryPrice == position.EntryPrice && previous.MarginMode == position.MarginMode) continue;
+            db.RiskObservations.Add(new RiskObservation
+            {
+                Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, ContractId = position.ContractId,
+                VenueContractId = position.VenueContractId, ObservedAtUtc = observedAt, SignedQuantity = position.SignedQuantity,
+                EntryPrice = position.EntryPrice, LiquidationPrice = position.LiquidationPrice, MarginMode = position.MarginMode,
             });
         }
     }

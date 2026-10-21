@@ -139,6 +139,9 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         {
             Receipt = PlayReceipts.Build(new ClosedPlayFacts(play, revisions, settlement.All, settlement.Incomplete), time.GetUtcNow()),
             EarlierOrders = earlier,
+            VenuePosition = play.ContractId is null ? null : await store.PositionAsync(play.AccountId, play.ContractId, ct),
+            RiskAtFirstFill = play.ContractId is not null && FirstEntryFill(linked, fills, settlement.EntrySide) is { } first
+                ? await store.RiskSinceAsync(play.AccountId, play.ContractId, first, ct) : null,
         };
     }
 
@@ -310,6 +313,11 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             return PlayService.ToDto(play);
         }, ct), ct);
     }
+
+    /// <summary>The earliest linked entry fill that does not contradict the entry side, or null before any.</summary>
+    private static DateTimeOffset? FirstEntryFill(IEnumerable<PlayOrderLink> linked, ILookup<Guid, ImportedFill> fills, string entrySide) =>
+        linked.Where(l => l.Role == OrderLinkRole.Entry).SelectMany(l => fills[l.ImportedOrderId])
+            .Where(f => !ExecutionIntegrity.Contradicts(OrderLinkRole.Entry, entrySide, f)).Select(f => (DateTimeOffset?)f.OccurredAtUtc).Min();
 
     private const string StalePlay = "This Play changed elsewhere. Reload it before saving again.";
 

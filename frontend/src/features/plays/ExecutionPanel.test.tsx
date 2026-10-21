@@ -190,6 +190,21 @@ describe('execution panel', () => {
     expect(onLink).toHaveBeenLastCalledWith({ orderId: '31', role: 'entry', entryId: 'e1' })
   })
 
+  it('shows the venue liquidation price and mode, now and at the first fill (phase 2, 8a)', () => {
+    render(<ExecutionPanel execution={{ ...execution,
+      venuePosition: { signedQuantity: '0.5', entryPrice: '100', liquidationPrice: '82.5', marginMode: 'cross', observedAtUtc: '2026-10-03T10:05:00Z' },
+      riskAtFirstFill: { signedQuantity: '0.5', entryPrice: '100', liquidationPrice: null, marginMode: 'isolated', observedAtUtc: '2026-10-03T10:01:30Z' } }}
+      error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
+    const row = screen.getByText(/^Venue liquidation/).closest('div')!
+    expect(row).toHaveTextContent('82.5 (cross) · at first fill not reported (isolated)')
+  })
+
+  it('shows no venue liquidation row without a reported position', () => {
+    render(<ExecutionPanel execution={{ ...execution, venuePosition: null }} error={null} busy={false} entries={entries} direction="long"
+      onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
+    expect(screen.queryByText(/^Venue liquidation/)).not.toBeInTheDocument()
+  })
+
   it('explains untracked and closed plays without edit controls', () => {
     const view = render(<ExecutionPanel execution={{ ...execution, tracked: false, monitor: null, status: 'planned', reason: 'Manual instruments are not tracked at a venue.',
       links: [], suggestions: [], unlinkedOrders: [] }} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)

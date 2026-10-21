@@ -82,3 +82,39 @@ Two derived results now sit beside the facts; neither changes a fact.
   `signDiffers`. The Execution panel shows "Venue net" and "Play-local result"
   with a "Sign differs by basis" pill. Gates and reasons are in
   [Review's result bases](portfolio-review.md#result-bases-october-19-2026).
+
+## Position risk context (October 21, 2026)
+
+Phase 2, item 8a (see `phase2-risk-coverage-contract.md`). `VenuePosition` carries
+the venue's own `LiquidationPrice` and `MarginMode` (`cross` or `isolated`). Both
+are null when the venue reports none, and a reported zero price is null too.
+- **What each venue reports.**
+
+  | Venue | Liquidation price | Margin mode |
+  | --- | --- | --- |
+  | Hyperliquid | `liquidationPx` | `leverage.type` |
+  | Lighter | `liquidation_price` | `margin_mode` (0 cross, 1 isolated) |
+  | RISEx | `liquidation_price` | `margin_mode` (0 cross, 1 isolated) |
+
+  An unfamiliar mode value stays null. No venue reports a per-position
+  maintenance requirement, so none is stored; Hyperliquid and RISEx report
+  account totals only.
+- **Where they are kept.**
+  - The current snapshot (`account_positions`) always holds the latest
+    report.
+  - `account_risk_observations` keeps them when a position appears, when its
+    quantity, entry price or margin mode changes, or when its market gets new
+    executions.
+  - A cross-margin liquidation price that only drifts with the account is not
+    kept again.
+  - Positions reporting neither field are skipped.
+  - Account deletion removes the observations. Migration
+    `20261021164349_RiskContext`, applied explicitly.
+- **Where they show.**
+  - Account detail lists each position's venue liquidation price and mode.
+  - The Play execution read adds `venuePosition` (the current position on its
+    contract) and `riskAtFirstFill` (the first observation kept at or after
+    its first entry fill).
+  - The Execution panel shows "Venue liquidation … (cross) · at first fill …".
+  - These are the venue's figures, never mixed with the plan's isolated
+    estimate.

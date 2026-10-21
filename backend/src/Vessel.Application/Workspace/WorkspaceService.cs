@@ -330,7 +330,8 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         return s is null ? null : new(s.ObservedAtUtc, s.ValueScope, ExactDecimal.Format(s.AccountValueUsd),
             ExactDecimal.Format(s.WithdrawableUsd), ExactDecimal.Format(s.MarginUsedUsd),
             s.Positions.OrderBy(p => p.ContractId).Select(p => new PositionDto(p.ContractId, ExactDecimal.Format(p.SignedQuantity),
-                ExactDecimal.Format(p.EntryPrice), ExactDecimal.Format(p.UnrealizedPnlUsd), ExactDecimal.Format(p.MarginUsedUsd), p.Leverage)).ToList(),
+                ExactDecimal.Format(p.EntryPrice), ExactDecimal.Format(p.UnrealizedPnlUsd), ExactDecimal.Format(p.MarginUsedUsd), p.Leverage,
+                ExactDecimal.Format(p.LiquidationPrice), p.MarginMode)).ToList(),
             WalletDto(s), ExactDecimal.Format(s.AvailableMarginUsd));
     }
 

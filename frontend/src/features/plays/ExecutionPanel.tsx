@@ -1,4 +1,4 @@
-import type { ExecutionOrder, LinkOrder, PlayExecution, PlaySummary, RebindLevel } from '@/api/plays'
+import type { ExecutionOrder, LinkOrder, PlayExecution, PlaySummary, RebindLevel, VenueRisk } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { Link2, Link2Off } from 'lucide-react'
 import { MonitorDiscrepancies, MonitorPanel, MonitorWatches } from '@/features/monitor/MonitorPanel'
@@ -15,6 +15,9 @@ import { EntryReceipts, ReceiptTotals } from './Receipt'
 import { Time } from '@/components/ui/time'
 import { useDisplayZone } from '@/lib/display-zone'
 import { formatTime } from '@/lib/time'
+
+/** A venue risk figure: its liquidation price or "not reported", and its margin mode. */
+const venueRisk = (risk: VenueRisk) => `${risk.liquidationPrice ?? 'not reported'}${risk.marginMode ? ` (${risk.marginMode})` : ''}`
 
 // One shared empty object, so an untouched panel does not look like new state on every render.
 const noChoices: Record<string, string> = {}
@@ -123,6 +126,8 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
       {totals.local && <div><dt>Play-local result<InfoTip label="About the Play-local result">{localResultNote}</InfoTip></dt>
         <dd><LocalResultValue local={totals.local} format={value => `${value} USD`} />{totals.local.signDiffers && <SignDiffersFlag />}</dd></div>}
       {execution.receipt && <ReceiptTotals receipt={execution.receipt} status={execution.status} />}
+      {execution.venuePosition && <div><dt>Venue liquidation<InfoTip label="About the venue liquidation price">The venue's own liquidation price and margin mode for the account's position on this instrument, as last read. It is not the plan's isolated estimate; under cross margin it moves with the whole account.</InfoTip></dt>
+        <dd>{venueRisk(execution.venuePosition)}{execution.riskAtFirstFill && <small> · at first fill {venueRisk(execution.riskAtFirstFill)}</small>}</dd></div>}
     </dl>
     <EntryReceipts progress={execution.entries} entries={entries} stale={stale} />
 

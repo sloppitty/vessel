@@ -1,3 +1,4 @@
+using Vessel.Domain.Numerics;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Common;
 using Vessel.Application.Plays.Execution;
@@ -170,4 +171,22 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
         var result = await action();
         return result;
     }, ct);
+
+    public async Task<VenueRiskDto?> PositionAsync(Guid accountId, string contractId, CancellationToken ct)
+    {
+        var row = await db.Snapshots.Where(s => s.AccountId == accountId)
+            .SelectMany(s => s.Positions.Where(p => p.ContractId == contractId && p.SignedQuantity != 0)
+                .Select(p => new { s.ObservedAtUtc, p.SignedQuantity, p.EntryPrice, p.LiquidationPrice, p.MarginMode }))
+            .AsNoTracking().SingleOrDefaultAsync(ct);
+        return row is null ? null : new(ExactDecimal.Format(row.SignedQuantity), ExactDecimal.Format(row.EntryPrice),
+            ExactDecimal.Format(row.LiquidationPrice), row.MarginMode, row.ObservedAtUtc);
+    }
+
+    public async Task<VenueRiskDto?> RiskSinceAsync(Guid accountId, string contractId, DateTimeOffset since, CancellationToken ct)
+    {
+        var row = await db.RiskObservations.Where(o => o.AccountId == accountId && o.ContractId == contractId && o.ObservedAtUtc >= since)
+            .OrderBy(o => o.ObservedAtUtc).ThenBy(o => o.Id).AsNoTracking().FirstOrDefaultAsync(ct);
+        return row is null ? null : new(ExactDecimal.Format(row.SignedQuantity), ExactDecimal.Format(row.EntryPrice),
+            ExactDecimal.Format(row.LiquidationPrice), row.MarginMode, row.ObservedAtUtc);
+    }
 }

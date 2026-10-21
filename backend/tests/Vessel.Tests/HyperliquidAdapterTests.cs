@@ -27,7 +27,7 @@ public sealed partial class HyperliquidAdapterTests
           "assetPositions":[
             {"type":"oneWay","position":{
               "coin":"BTC","szi":"-0.01234567890123456789","entryPx":"61234.1234567890123456",
-              "unrealizedPnl":"-12.987654321","marginUsed":"250.123456789",
+              "unrealizedPnl":"-12.987654321","marginUsed":"250.123456789","liquidationPx":"73336.0123456789",
               "leverage":{"type":"isolated","value":5,"rawUsd":"-5.1"}
             }},
             {"type":"oneWay","position":{"coin":"ETH","szi":"0","entryPx":null}},
@@ -85,8 +85,10 @@ public sealed partial class HyperliquidAdapterTests
         Assert.Equal(12345.678901234567890123m, result.Snapshot.AccountValueUsd);
         Assert.Equal(12095.555444445567890123m, result.Snapshot.WithdrawableUsd);
         Assert.Equal(250.123456789m, result.Snapshot.MarginUsedUsd);
+        // Phase 2, item 8a: the venue's own liquidation price and margin mode, exactly.
         Assert.Equal(new VenuePosition("BTC", -0.01234567890123456789m, 61234.1234567890123456m,
-            -12.987654321m, 250.123456789m, 5), Assert.Single(result.Snapshot.Positions));
+            -12.987654321m, 250.123456789m, 5, LiquidationPrice: 73336.0123456789m, MarginMode: MarginModes.Isolated),
+            Assert.Single(result.Snapshot.Positions));
 
         Assert.Equal(2, result.Fills.Count);
         var fill = result.Fills[0];
