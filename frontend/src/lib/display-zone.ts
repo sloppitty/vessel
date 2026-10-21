@@ -27,8 +27,11 @@ let current: DisplayZone = read()
 const listeners = new Set<() => void>()
 const notify = () => { for (const listener of [...listeners]) listener() }
 
-// Signing in switches to the user's key.
+// Signing in switches to the user's key, and another tab's choice (or cleared storage) applies here too.
 onPreferenceScope(() => { current = read(); notify() })
+if (typeof window !== 'undefined') window.addEventListener('storage', event => {
+  if (event.key === null || event.key === preferenceKey('display')) { current = read(); notify() }
+})
 
 export const displayZoneStore = {
   get: () => current,

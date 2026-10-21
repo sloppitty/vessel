@@ -9,6 +9,9 @@ import { ActivityTable } from '@/features/workspace/ActivityTable'
 import { fillMarkers } from '@/features/plays/chart-fills'
 import { TimeSettings } from '@/features/settings/TimeSettings'
 import { Time } from './time'
+import { ReviewPage } from '@/features/review/ReviewPage'
+import { createWorkspaceApi } from '@/api/workspace'
+import { reviewFixture } from '@/test/review-fixture'
 import { restoreZone } from '@/test/zone'
 
 const originalZone = process.env.TZ
@@ -30,6 +33,36 @@ describe('display time zone (phase 1, 1.6e)', () => {
     await user.click(screen.getByRole('radio', { name: 'UTC' }))
     expect(screen.getByText('13 Oct 2026, 10:00 UTC')).toHaveAttribute('title', '13 Oct 2026, 12:00:00 CEST')
     expect(localStorage.getItem('vessel.display')).toBe('{"timeZone":"utc"}')
+  })
+
+  it('follows the zone another tab chooses, and Local when storage is cleared', async () => {
+    const user = userEvent.setup()
+    render(<TimeSettings />)
+    const store = (text: string | null) => act(() => {
+      if (text === null) localStorage.clear(); else localStorage.setItem('vessel.display', text)
+      window.dispatchEvent(new StorageEvent('storage', { key: text === null ? null : 'vessel.display' }))
+    })
+    store('{"timeZone":"utc"}')
+    expect(screen.getByRole('radio', { name: 'UTC' })).toBeChecked()
+    store(null)
+    expect(screen.getByRole('radio', { name: /^Local/ })).toBeChecked()
+    // The choice stores again rather than matching a stale value.
+    await user.click(screen.getByRole('radio', { name: 'UTC' }))
+    expect(localStorage.getItem('vessel.display')).toBe('{"timeZone":"utc"}')
+  })
+
+  it("names Review's close-date zone beside the UTC report periods", async () => {
+    process.env.TZ = 'America/Los_Angeles'
+    const user = userEvent.setup()
+    const api = { ...createWorkspaceApi('test'), review: () => Promise.resolve(reviewFixture) }
+    render(<ReviewPage api={api} reloadGeneration={0} onOpenPlay={() => Promise.resolve()} />)
+    await user.click(await screen.findByRole('button', { name: `${reviewFixture.metrics.count} Plays` }))
+    const table = await within(await screen.findByRole('dialog')).findByRole('table', { name: 'Contributing closed Plays' })
+    const closed = within(table).getByRole('columnheader', { name: /^Closed \(local\)/ })
+    expect(within(closed).getByRole('button', { name: 'About close dates' }))
+      .toHaveAccessibleDescription(/local \(America\/Los_Angeles\).*rolling windows in UTC/)
+    act(() => displayZoneStore.set('utc'))
+    expect(within(table).getByRole('columnheader', { name: /^Closed \(UTC\)/ })).toBeInTheDocument()
   })
 
   it('shows one fill at one time in Activity and on the chart, under either setting (U17)', () => {
