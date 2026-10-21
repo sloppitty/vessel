@@ -302,6 +302,15 @@ October 20, 2026, branch `t3/phase1-unresolved`, stacked on 1.2:
 
 - **Sol (Codex) round 4.** No findings: both round-3 fixes hold, including the in-place migration change.
 
+- **Post-sync Sol review (October 21).** The merge with main (PR #33) is sound: the retry loop recomputes the scope and
+  the Unresolved count, and Open, Cancelled and Unresolved Plays keep their claims, so their operations never become
+  imported positions. One low finding is accepted as a limitation:
+  - **Watch identity.** A linked order's watch is identified by wall-clock times, the link's revision and the Play's
+    end, like the monitor's existing relink watches. If the server clock steps back between two declarations of the
+    same Play, the second keeps the first one's watch window. Binding watches to the declaration's Play version
+    needs another column in the unshipped migrations that Phase 2 now builds on, so it waits for a later monitor
+    change.
+
 ### 1.3b Manual correction batch
 
 October 20, 2026, branch `t3/phase1-correction-batch`, stacked on 1.3a:
@@ -366,7 +375,8 @@ October 20, 2026, branch `t3/phase1-post-hoc-badge`, stacked on 1.1a:
   - expectancy: scored Plays;
   - estimated R: Plays with a complete initial stop.
 
-  The asset cards are marked by their Play counts, and breakdown rows by their decided counts.
+  The asset cards are marked by their result counts. Breakdown cells are marked one by one: batting average and profit
+  factor by the row's decided count, average gain / loss by the smaller of its wins and losses.
 - **Label.** The R average is now "Estimated R expectancy (planned-stop model)". The statistic is unchanged.
 - **Tests.**
   - PostgreSQL, T29: a manual Play planned today for an execution recorded days earlier is flagged on its receipt and

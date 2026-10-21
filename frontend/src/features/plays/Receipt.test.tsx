@@ -30,6 +30,15 @@ describe('actual versus plan (phase 1, 1.1a)', () => {
     expect(second).not.toHaveTextContent('Plan revision')
   })
 
+  it('keeps the comparison unknown while the execution is stale, such as just after a plan revision', () => {
+    const { rerender } = render(<EntryReceipts progress={[progress]} entries={entries} stale />)
+    const section = screen.getByRole('region', { name: 'Entries against the plan' })
+    expect(section).toHaveTextContent('Unknown until the execution is read again.')
+    expect(section).not.toHaveTextContent('Filled 0.5 of 1')
+    rerender(<EntryReceipts progress={[progress]} entries={entries} />)
+    expect(screen.getByRole('region', { name: 'Entries against the plan' })).toHaveTextContent('Filled 0.5 of 1')
+  })
+
   it('shows nothing for an older server that sends no planned values, and signs a fill below plan', () => {
     const { container, rerender } = render(<EntryReceipts progress={[{ entryId: 'e1', filledQuantity: '0.5', averageFillPrice: '100', restingOrders: 0 }]} entries={entries} />)
     expect(container).toBeEmptyDOMElement()
