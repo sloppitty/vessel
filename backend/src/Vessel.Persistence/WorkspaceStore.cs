@@ -345,9 +345,10 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
 
     /// <summary>
     /// Keeps the venue's reported liquidation price and margin mode (Phase 2, item 8a) when a position appears, when its
-    /// quantity, entry price or margin mode changes, or when its market has new executions since the last observation. A
-    /// cross-margin liquidation price that only drifts with the account is not kept again; the snapshot holds the latest.
-    /// Positions whose venue reports neither are skipped.
+    /// quantity, entry price or margin mode changes, when an isolated position's liquidation price changes, or when its
+    /// market has executions since the last observation, newly imported or already retained (history can arrive before the
+    /// snapshot that observes a reopening, as for leverage). A cross-margin liquidation price that only drifts with the
+    /// account is not kept again; the snapshot holds the latest. Positions whose venue reports neither are skipped.
     /// </summary>
     private async Task RecordRiskAsync(Account account, VenueSnapshot observation, IReadOnlyCollection<AccountPosition> replaced,
         IReadOnlyCollection<VenueFill> newFills, CancellationToken ct)
@@ -360,16 +361,30 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
             .Select(g => g.OrderByDescending(o => o.ObservedAtUtc).ThenByDescending(o => o.Id).First())
             .AsNoTracking().ToListAsync(ct)).ToDictionary(o => (o.ContractId, o.VenueContractId));
         var observedAt = observation.ObservedAtUtc.ToUniversalTime();
+        // Sol round 1 on #41: executions already retained since the last observation count too, bounded like leverage.
+        var relevant = latest.Values.Where(o => o.ObservedAtUtc < observedAt).ToList();
+        var since = relevant.Count == 0 ? (DateTimeOffset?)null : relevant.Min(o => o.ObservedAtUtc);
+        var retainedExecutions = since is { } from
+            ? await db.Fills.Where(f => f.AccountId == account.Id && contracts.Contains(f.ContractId) &&
+                f.OccurredAtUtc >= from && f.OccurredAtUtc <= observedAt)
+                .GroupBy(f => new { f.ContractId, f.VenueContractId })
+                .Select(g => new { g.Key.ContractId, g.Key.VenueContractId, LastOccurredAtUtc = g.Max(f => f.OccurredAtUtc) })
+                .ToListAsync(ct)
+            : [];
         foreach (var position in reported)
         {
             var previous = latest.GetValueOrDefault((position.ContractId, position.VenueContractId));
             if (previous is not null && previous.ObservedAtUtc >= observedAt) continue;
             var continued = replaced.Any(p => p.ContractId == position.ContractId && p.VenueContractId == position.VenueContractId &&
                 p.SignedQuantity == position.SignedQuantity && p.EntryPrice == position.EntryPrice);
-            var executed = newFills.Any(f => f.ContractId == position.ContractId &&
-                (f.VenueContractId is null || position.VenueContractId is null || f.VenueContractId == position.VenueContractId));
+            bool Market(string contractId, string? native) => contractId == position.ContractId &&
+                (native is null || position.VenueContractId is null || native == position.VenueContractId);
+            var executed = newFills.Any(f => Market(f.ContractId, f.VenueContractId)) || previous is not null &&
+                retainedExecutions.Any(f => f.LastOccurredAtUtc >= previous.ObservedAtUtc && Market(f.ContractId, f.VenueContractId));
+            // An isolated position's liquidation price is its own; only a cross price drifts with the whole account.
+            var sameLiquidation = position.MarginMode == MarginModes.Cross || previous?.LiquidationPrice == position.LiquidationPrice;
             if (continued && !executed && previous is not null && previous.SignedQuantity == position.SignedQuantity &&
-                previous.EntryPrice == position.EntryPrice && previous.MarginMode == position.MarginMode) continue;
+                previous.EntryPrice == position.EntryPrice && previous.MarginMode == position.MarginMode && sameLiquidation) continue;
             db.RiskObservations.Add(new RiskObservation
             {
                 Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, ContractId = position.ContractId,

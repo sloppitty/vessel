@@ -206,6 +206,17 @@ public sealed partial class LighterAdapterTests
     public void Invalid_source_ids_fail_without_rounding(string index) => Assert.Throws<VenueReadException>(() => LighterReader.Index(index));
 
     [Fact]
+    public async Task A_negative_liquidation_price_is_an_invalid_response_never_unknown()
+    {
+        // Phase 2, item 8a (Sol round 1 on #41): zero means none; a negative price was silently read as unknown.
+        var handler = new Handler { Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/account", StringComparison.Ordinal)
+            ? new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                { Content = new StringContent(Snapshot.Replace("\"liquidation_price\":\"95123.4\"", "\"liquidation_price\":\"-1\""), System.Text.Encoding.UTF8, "application/json") }
+            : null };
+        await Assert.ThrowsAsync<VenueReadException>(() => Reader(handler).ReadAsync(Source, default));
+    }
+
+    [Fact]
     public async Task Public_snapshot_does_not_lookup_credentials_or_double_count_wallet()
     {
         var credentials = new Credentials(Token);

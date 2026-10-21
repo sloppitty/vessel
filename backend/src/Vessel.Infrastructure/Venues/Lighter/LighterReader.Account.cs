@@ -201,8 +201,9 @@ public sealed partial class LighterReader
                 StrictJson.DecimalUnits(notional) * StrictJson.DecimalUnits(fraction)) throw json.Invalid();
             if (mode == 1) isolatedRequirement = ExactSum(json, isolatedRequirement, requirement);
             var leverage = 100m / fraction;
-            // The reported liquidation price when present; zero means none.
+            // The reported liquidation price when present; zero means none, and a negative one is an invalid response.
             var liquidation = json.OptionalAmount(row, "liquidation_price");
+            if (liquidation < 0) throw json.Invalid();
             positions.Add(new(market.Key, quantity * sign, json.Positive(json.Property(row, "avg_entry_price")),
                 Number(json, row, "unrealized_pnl"), requirement,
                 leverage <= 1000 && leverage == decimal.Truncate(leverage) ? (int)leverage : null,

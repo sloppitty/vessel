@@ -196,12 +196,18 @@ describe('execution panel', () => {
       riskAtFirstFill: { signedQuantity: '0.5', entryPrice: '100', liquidationPrice: null, marginMode: 'isolated', observedAtUtc: '2026-10-03T10:01:30Z' } }}
       error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
     const row = screen.getByText(/^Venue liquidation/).closest('div')!
-    expect(row).toHaveTextContent('82.5 (cross) · at first fill not reported (isolated)')
+    expect(row).toHaveTextContent(/82\.5 \(cross\) read .+ · first read after entry not reported \(isolated\), .+/)
+    // Sol round 1 on #41: each value says when it was read.
+    expect(row.querySelectorAll('time')).toHaveLength(2)
   })
 
-  it('shows no venue liquidation row without a reported position', () => {
-    render(<ExecutionPanel execution={{ ...execution, venuePosition: null }} error={null} busy={false} entries={entries} direction="long"
-      onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
+  it('keeps the first-fill context once the position is flat, and shows nothing without either', () => {
+    const view = render(<ExecutionPanel execution={{ ...execution, venuePosition: null,
+      riskAtFirstFill: { signedQuantity: '0.5', entryPrice: '100', liquidationPrice: '70', marginMode: 'isolated', observedAtUtc: '2026-10-03T10:01:30Z' } }}
+      error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
+    expect(screen.getByText(/^Venue liquidation/).closest('div')!).toHaveTextContent(/Flat now · first read after entry 70 \(isolated\)/)
+    view.rerender(<ExecutionPanel execution={{ ...execution, venuePosition: null, riskAtFirstFill: null }} error={null} busy={false} entries={entries}
+      direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
     expect(screen.queryByText(/^Venue liquidation/)).not.toBeInTheDocument()
   })
 

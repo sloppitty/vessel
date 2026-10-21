@@ -126,8 +126,9 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
       {totals.local && <div><dt>Play-local result<InfoTip label="About the Play-local result">{localResultNote}</InfoTip></dt>
         <dd><LocalResultValue local={totals.local} format={value => `${value} USD`} />{totals.local.signDiffers && <SignDiffersFlag />}</dd></div>}
       {execution.receipt && <ReceiptTotals receipt={execution.receipt} status={execution.status} />}
-      {execution.venuePosition && <div><dt>Venue liquidation<InfoTip label="About the venue liquidation price">The venue's own liquidation price and margin mode for the account's position on this instrument, as last read. It is not the plan's isolated estimate; under cross margin it moves with the whole account.</InfoTip></dt>
-        <dd>{venueRisk(execution.venuePosition)}{execution.riskAtFirstFill && <small> · at first fill {venueRisk(execution.riskAtFirstFill)}</small>}</dd></div>}
+      {(execution.venuePosition || execution.riskAtFirstFill) && <div><dt>Venue liquidation<InfoTip label="About the venue liquidation price">The venue's own liquidation price and margin mode for this Play's position, each as read at the time shown. It is not the plan's isolated estimate; under cross margin it moves with the whole account. The earliest one is the first read after the first entry fill, not a value at the fill itself.</InfoTip></dt>
+        <dd>{execution.venuePosition ? <>{venueRisk(execution.venuePosition)} <small>read <Time at={execution.venuePosition.observedAtUtc} /></small></> : <>Flat now</>}
+          {execution.riskAtFirstFill && <small> · first read after entry {venueRisk(execution.riskAtFirstFill)}, <Time at={execution.riskAtFirstFill.observedAtUtc} /></small>}</dd></div>}
     </dl>
     <EntryReceipts progress={execution.entries} entries={entries} stale={stale} />
 

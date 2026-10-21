@@ -189,6 +189,8 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             var leverage = Json.Nonnegative(Json.Property(item, "leverage"));
             // The venue's liquidation price (zero means none) and margin mode (0 cross, 1 isolated); anything else stays unreported.
             var liquidation = Json.OptionalAmount(item, "liquidation_price");
+            // Zero means none; a negative price is an invalid response, never unknown.
+            if (liquidation < 0) throw Json.Invalid();
             string? mode = item.TryGetProperty("margin_mode", out var modeElement) && modeElement.ValueKind == JsonValueKind.Number &&
                 modeElement.TryGetInt32(out var modeValue) ? modeValue switch { 0 => MarginModes.Cross, 1 => MarginModes.Isolated, _ => null } : null;
             positions.Add(new(market.Key, size, Json.Positive(Json.Property(item, "avg_entry_price")),

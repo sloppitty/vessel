@@ -184,10 +184,18 @@ public interface IPlayExecutionStore
         (await LinksAsync(accountId, ct)).Where(l => l.State == OrderLinkState.Linked).Select(l => l.ImportedOrderId).ToHashSet();
     /// <summary>Read-only fills of the account belonging to one of <paramref name="orders"/>, by time then ID.</summary>
     Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<OrderKey> orders, CancellationToken ct);
-    /// <summary>The account's current snapshot position on the contract and the snapshot's time; null when flat or unknown.</summary>
-    Task<VenueRiskDto?> PositionAsync(Guid accountId, string contractId, CancellationToken ct) => Task.FromResult<VenueRiskDto?>(null);
-    /// <summary>The first kept risk observation on the contract at or after <paramref name="since"/>; null when none.</summary>
-    Task<VenueRiskDto?> RiskSinceAsync(Guid accountId, string contractId, DateTimeOffset since, CancellationToken ct) =>
+    /// <summary>
+    /// The enabled account's current snapshot position in the Play's <paramref name="direction"/> (1 long, −1 short) on its
+    /// native market, with the snapshot's time; null when flat, opposite, ambiguous or unknown.
+    /// </summary>
+    Task<VenueRiskDto?> PositionAsync(Guid accountId, string contractId, string? venueContractId, int direction, CancellationToken ct) =>
+        Task.FromResult<VenueRiskDto?>(null);
+    /// <summary>
+    /// The first kept risk observation of the Play's own position: its direction and native market, from its first entry
+    /// fill to its last exit when it has closed; null when none or when the market cannot be told apart.
+    /// </summary>
+    Task<VenueRiskDto?> RiskSinceAsync(Guid accountId, string contractId, string? venueContractId, int direction, DateTimeOffset since,
+        DateTimeOffset? until, CancellationToken ct) =>
         Task.FromResult<VenueRiskDto?>(null);
     void Add(PlayOrderLink link);
     void Add(PlayStatusChange change);

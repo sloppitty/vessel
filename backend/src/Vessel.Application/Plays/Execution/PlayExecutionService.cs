@@ -133,15 +133,17 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var reason = UntrackedReason(play, account, account is null ? null : venues.Descriptor(account.VenueId));
         if (reason is null && account is { IsEnabled: true } && play.Status is not (PlayStatus.Closed or PlayStatus.Cancelled))
             reason = await CredentialReasonAsync(account, ct);
+        var risk = RiskScope(plan, linked, fills, settlement.EntrySide, open.Units.Sign <= 0 && exited.Units.Sign > 0);
         return new PlayExecutionDto(play.Id, PlayService.StatusName(play.Status), reason is null, reason, account?.LastSyncedAtUtc,
             totals, entries, linked.Select(Link).ToList(),
             suggestions.Select(l => Link(l) with { OtherPlay = elsewhere.Contains(l.ImportedOrderId) }).ToList(), unlinked, Notice, settlement.Problems)
         {
             Receipt = PlayReceipts.Build(new ClosedPlayFacts(play, revisions, settlement.All, settlement.Incomplete), time.GetUtcNow()),
             EarlierOrders = earlier,
-            VenuePosition = play.ContractId is null ? null : await store.PositionAsync(play.AccountId, play.ContractId, ct),
-            RiskAtFirstFill = play.ContractId is not null && FirstEntryFill(linked, fills, settlement.EntrySide) is { } first
-                ? await store.RiskSinceAsync(play.AccountId, play.ContractId, first, ct) : null,
+            VenuePosition = play.ContractId is null || risk is not { } at ? null
+                : await store.PositionAsync(play.AccountId, play.ContractId, at.Native, at.Direction, ct),
+            RiskAtFirstFill = play.ContractId is not null && risk is { First: { } first } own
+                ? await store.RiskSinceAsync(play.AccountId, play.ContractId, own.Native, own.Direction, first, own.Until, ct) : null,
         };
     }
 
@@ -315,6 +317,21 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     }
 
     /// <summary>The earliest linked entry fill that does not contradict the entry side, or null before any.</summary>
+    /// <summary>
+    /// Which venue position is the Play's (Sol round 1 on #41): its direction, the one native market its linked fills name
+    /// (null when they name none), its first entry fill and, once flat, its last fill. Null when the fills name several
+    /// native markets, so attribution stays unknown.
+    /// </summary>
+    private static (int Direction, string? Native, DateTimeOffset? First, DateTimeOffset? Until)? RiskScope(PlayPlanDocument plan,
+        IEnumerable<PlayOrderLink> linked, ILookup<Guid, ImportedFill> fills, string entrySide, bool closed)
+    {
+        var own = linked.SelectMany(l => fills[l.ImportedOrderId]).ToList();
+        var natives = own.Select(f => f.VenueContractId).OfType<string>().Distinct(StringComparer.Ordinal).ToList();
+        if (natives.Count > 1) return null;
+        return (plan.Direction == "long" ? 1 : -1, natives.SingleOrDefault(), FirstEntryFill(linked, fills, entrySide),
+            closed && own.Count > 0 ? own.Max(f => f.OccurredAtUtc) : null);
+    }
+
     private static DateTimeOffset? FirstEntryFill(IEnumerable<PlayOrderLink> linked, ILookup<Guid, ImportedFill> fills, string entrySide) =>
         linked.Where(l => l.Role == OrderLinkRole.Entry).SelectMany(l => fills[l.ImportedOrderId])
             .Where(f => !ExecutionIntegrity.Contradicts(OrderLinkRole.Entry, entrySide, f)).Select(f => (DateTimeOffset?)f.OccurredAtUtc).Min();

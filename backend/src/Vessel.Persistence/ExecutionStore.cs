@@ -172,20 +172,33 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
         return result;
     }, ct);
 
-    public async Task<VenueRiskDto?> PositionAsync(Guid accountId, string contractId, CancellationToken ct)
+    public async Task<VenueRiskDto?> PositionAsync(Guid accountId, string contractId, string? venueContractId, int direction, CancellationToken ct)
     {
-        var row = await db.Snapshots.Where(s => s.AccountId == accountId)
-            .SelectMany(s => s.Positions.Where(p => p.ContractId == contractId && p.SignedQuantity != 0)
+        // A disabled account's positions stay hidden, as in the workspace (Sol round 1 on #41).
+        if (!await db.Accounts.AnyAsync(a => a.Id == accountId && a.IsEnabled, ct)) return null;
+        // Only a position in the Play's direction on its native market; two markets sharing the key are ambiguous.
+        var rows = await db.Snapshots.Where(s => s.AccountId == accountId)
+            .SelectMany(s => s.Positions.Where(p => p.ContractId == contractId && (direction > 0 ? p.SignedQuantity > 0 : p.SignedQuantity < 0) &&
+                    (venueContractId == null || p.VenueContractId == venueContractId))
                 .Select(p => new { s.ObservedAtUtc, p.SignedQuantity, p.EntryPrice, p.LiquidationPrice, p.MarginMode }))
-            .AsNoTracking().SingleOrDefaultAsync(ct);
+            .Take(2).AsNoTracking().ToListAsync(ct);
+        var row = rows.Count == 1 ? rows[0] : null;
         return row is null ? null : new(ExactDecimal.Format(row.SignedQuantity), ExactDecimal.Format(row.EntryPrice),
             ExactDecimal.Format(row.LiquidationPrice), row.MarginMode, row.ObservedAtUtc);
     }
 
-    public async Task<VenueRiskDto?> RiskSinceAsync(Guid accountId, string contractId, DateTimeOffset since, CancellationToken ct)
+    public async Task<VenueRiskDto?> RiskSinceAsync(Guid accountId, string contractId, string? venueContractId, int direction,
+        DateTimeOffset since, DateTimeOffset? until, CancellationToken ct)
     {
-        var row = await db.RiskObservations.Where(o => o.AccountId == accountId && o.ContractId == contractId && o.ObservedAtUtc >= since)
-            .OrderBy(o => o.ObservedAtUtc).ThenBy(o => o.Id).AsNoTracking().FirstOrDefaultAsync(ct);
+        if (!await db.Accounts.AnyAsync(a => a.Id == accountId && a.IsEnabled, ct)) return null;
+        // The Play's own position: its direction, within its lifetime, on its native market. With no native identity, the
+        // observations must agree on one market, or attribution stays unknown.
+        var rows = await db.RiskObservations.Where(o => o.AccountId == accountId && o.ContractId == contractId && o.ObservedAtUtc >= since &&
+                (until == null || o.ObservedAtUtc <= until) && (direction > 0 ? o.SignedQuantity > 0 : o.SignedQuantity < 0) &&
+                (venueContractId == null || o.VenueContractId == venueContractId))
+            .OrderBy(o => o.ObservedAtUtc).ThenBy(o => o.Id).Take(50).AsNoTracking().ToListAsync(ct);
+        if (venueContractId is null && rows.Select(o => o.VenueContractId).Distinct().Count() > 1) return null;
+        var row = rows.FirstOrDefault();
         return row is null ? null : new(ExactDecimal.Format(row.SignedQuantity), ExactDecimal.Format(row.EntryPrice),
             ExactDecimal.Format(row.LiquidationPrice), row.MarginMode, row.ObservedAtUtc);
     }
