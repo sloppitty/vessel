@@ -95,9 +95,20 @@ describe('fill markers (phase 1, 1.1b)', () => {
     render(<CandleChart candles={[]} overlays={[]} viewKey="BTC|1h" label="BTC" markers={markers} createAdapter={factory} />)
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
     expect(screen.getByRole('list', { name: 'Fills on the chart' })).toHaveTextContent('Entry fill · Buy 0.5 at 100.4Exit fill · Sell 0.5 at 110')
-    act(() => callbacks().onMarkerHover!('f2', { x: 120, y: 40 }))
+    act(() => callbacks().onMarkerHover!(['f2'], { x: 120, y: 40 }))
     expect(screen.getByRole('tooltip')).toHaveTextContent('Exit fill · Sell 0.5 at 110')
-    act(() => callbacks().onMarkerHover!(null, null))
+    act(() => callbacks().onMarkerHover!([], null))
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  })
+
+  it('lists fills that share one marker, the first five and a count of the rest', () => {
+    const { factory, callbacks } = fakeAdapter()
+    const markers = Array.from({ length: 7 }, (_, index) => ({ id: `f${index + 1}`, time: 1_790_000_000_000 + index * 1000, price: 100,
+      side: 'buy' as const, tooltip: `Entry fill · Buy 0.${index + 1} at 100`, span: 3_600_000 }))
+    render(<CandleChart candles={[]} overlays={[]} viewKey="BTC|1h" label="BTC" markers={markers} createAdapter={factory} />)
+    act(() => callbacks().onMarkerHover!(['f1', 'f2'], { x: 120, y: 40 }))
+    expect(screen.getByRole('tooltip').textContent).toBe('Entry fill · Buy 0.1 at 100\n\nEntry fill · Buy 0.2 at 100')
+    act(() => callbacks().onMarkerHover!(markers.map(marker => marker.id), { x: 120, y: 40 }))
+    expect(screen.getByRole('tooltip').textContent).toBe([1, 2, 3, 4, 5].map(n => `Entry fill · Buy 0.${n} at 100`).join('\n\n') + '\n\nand 2 more fills')
   })
 })
