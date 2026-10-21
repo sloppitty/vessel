@@ -1,3 +1,4 @@
+import type { CandleSpan } from './intervals'
 import type { ChartDrawing, DrawingKind } from './drawings'
 import type { IndicatorView, PaneLayout } from './indicators'
 
@@ -37,6 +38,28 @@ export interface PriceOverlay {
   unconfirmed?: boolean
 }
 
+/**
+ * A fill drawn at its time and price as a buy or sell shape, never as a line, so it cannot be read as a plan level
+ * (phase 1, 1.1b).
+ */
+export interface ChartMarker {
+  id: string
+  /** UTC Unix milliseconds of the execution; the marker sits on the candle it falls in. */
+  time: number
+  price: number
+  side: 'buy' | 'sell'
+  /** Shown while the pointer rests on the marker. */
+  tooltip: string
+  /**
+   * The length of the candles, in milliseconds or calendar months: the marker sits on a candle only when its time falls in
+   * that candle's own span, so a gap or a lone candle never takes a fill from outside it.
+   */
+  span: CandleSpan
+}
+
+/** A time range to show, in UTC Unix milliseconds. */
+export interface ChartFocus { from: number; to: number }
+
 export interface ChartCallbacks {
   onLevelSelect(id: string): void
   /** Frame-batched previews while dragging, then once with phase "end" to commit. */
@@ -59,6 +82,11 @@ export interface ChartCallbacks {
   onCrosshairMove(time: number | null): void
   /** Indicator panes moved or resized, e.g. after a layout change or a separator drag. */
   onPaneLayout(panes: PaneLayout[]): void
+  /**
+   * The pointer rests on a fill marker: the IDs of every fill drawn as that shape (one price in one candle) and the pane
+   * position; none when it left.
+   */
+  onMarkerHover?(ids: readonly string[], anchor: { x: number; y: number } | null): void
 }
 
 /** Boundary that keeps the charting library out of feature code. */
@@ -73,6 +101,13 @@ export interface ChartAdapter {
   setPricePicker(active: boolean): void
   /** Moving averages on the price pane; volume and RSI in panes below it, added and removed as needed. */
   setIndicators(view: IndicatorView): void
+  /** Fill markers on the candle series; a marker outside the loaded candles is not drawn. */
+  setMarkers(markers: readonly ChartMarker[]): void
+  /**
+   * The range a reset shows instead of the latest candles, e.g. a closed trade's dates; applied at once when candles are
+   * loaded. Null leaves later resets at the latest candles.
+   */
+  setFocus(range: ChartFocus | null): void
   /**
    * PNG of the chart as shown, including planned levels and drawings but not the crosshair, with
    * `caption` in a footer. Null until the renderer is ready.

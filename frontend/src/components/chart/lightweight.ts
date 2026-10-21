@@ -1,5 +1,5 @@
 import {
-  CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart,
+  CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart, createSeriesMarkers,
   type AutoscaleInfo, type IChartApi, type IPrimitivePaneRenderer, type MouseEventParams, type IPrimitivePaneView, type PriceFormat, type ISeriesApi,
   type ISeriesPrimitive, type ISeriesPrimitiveAxisView, type Logical, type LogicalRange, type PrimitiveHoveredItem,
   type SeriesAttachedParameter, type Time, type UTCTimestamp,
@@ -8,10 +8,11 @@ import { DrawingController, type DrawingSpace, type DrawingTheme } from './drawi
 import { TimeIndex, snapPrice } from './drawings'
 import { FrameEdit, roundedLevelPrice } from './frameEdit'
 import { createSeriesWriter } from './seriesWriter'
+import { candleEnd } from './intervals'
 import type { IndicatorPaneId, IndicatorView, PaneLayout, PaneSize } from './indicators'
 import { readableInk } from './ink'
 import { barHeight, solvePaneLayout, type SolvedLayout } from './paneLayout'
-import type { ChartAdapter, ChartAdapterFactory, ChartCandle, PriceOverlay } from './types'
+import type { ChartAdapter, ChartAdapterFactory, ChartCandle, ChartFocus, ChartMarker, PriceOverlay } from './types'
 
 type DrawTarget = Parameters<IPrimitivePaneRenderer['draw']>[0]
 
@@ -70,6 +71,22 @@ function colorResolver(element: HTMLElement) {
     return cache.get(name)!
   }
   return Object.assign(resolve, { clear: () => cache.clear() })
+}
+
+const ceiledOdd = (value: number) => { const ceiled = Math.ceil(value); return ceiled % 2 === 0 ? ceiled - 1 : ceiled }
+const ceiledEven = (value: number) => { const ceiled = Math.ceil(value); return ceiled % 2 !== 0 ? ceiled - 1 : ceiled }
+/** A default-size marker's size at a bar spacing, as lightweight-charts 5.2.1 sets it (`calculateShapeHeight`). */
+const markerSize = (barSpacing: number) => ceiledEven(ceiledOdd(Math.min(Math.max(barSpacing, 12), 30)))
+/**
+ * Whether a marker of `size` holds the point, as lightweight-charts 5.2.1's own hit test decides (`hitTestArrow`): the
+ * shaft with 2 px of tolerance and the head with 3 px, so a level gives way exactly where the fill's tooltip shows.
+ * `up` is the hit test's orientation, which for that version is the opposite of the drawn arrow (`hitTestShape`).
+ */
+function onArrow(up: boolean, centerX: number, centerY: number, size: number, x: number, y: number) {
+  const half = (ceiledOdd(Math.max(size, 12)) - 1) / 2, halfBase = (ceiledOdd(size / 2) - 1) / 2, dx = Math.abs(x - centerX)
+  if (dx <= halfBase + 2 && (up ? y >= centerY - 2 && y <= centerY + half + 2 : y >= centerY - half - 2 && y <= centerY + 2)) return true
+  if (dx > half + 3 || (up ? y < centerY - half - 3 || y > centerY : y < centerY || y > centerY + half + 3)) return false
+  return Math.abs(y - centerY) + 3 >= dx / 2
 }
 
 /** Decimal places needed to show the loaded prices without rounding them away. */
@@ -167,6 +184,8 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
 
   /** Latest close; levels far from it are left out of autoscaling so a mismatched plan cannot flatten the candles. */
   reference: number | null = null
+  /** Points on a fill marker's shape: levels give way there, so a fill at its planned price keeps its tooltip. */
+  yieldAt: (x: number, y: number) => boolean = () => false
   /** The attribution logo sits in the bottom pane, so tags avoid it only while the price pane is the only one. */
   avoidLogo = true
 
@@ -178,8 +197,8 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
     return { priceRange: { minValue: Math.min(...prices), maxValue: Math.max(...prices) } }
   }
 
-  hitTest(_x: number, y: number): PrimitiveHoveredItem | null {
-    const hit = this.levelAt(y)
+  hitTest(x: number, y: number): PrimitiveHoveredItem | null {
+    const hit = this.yieldAt(x, y) ? null : this.levelAt(y)
     return hit ? {
       externalId: hit.overlay.id, zOrder: 'top', distance: hit.distance, hitTestPriority: 1,
       cursorStyle: hit.overlay.draggable ? 'ns-resize' : 'pointer',
@@ -285,6 +304,9 @@ const magnetReach = 12
 
 const timeLabel = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })
 
+/** The narrowest a candle may be drawn, in pixels, so a trade of thousands of candles still fits a chart. */
+const minimumBarSpacing = 0.05
+
 /** Bars of space right of the last candle when a chart opens. */
 const openingRightOffset = 12
 
@@ -322,12 +344,87 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     ...chartColors(),
     layout: { ...chartColors().layout, fontFamily: theme.font, fontSize: 11, attributionLogo: true },
     // Room right of the last candle keeps it clear of the price scale labels and level tags when the chart opens.
-    timeScale: { ...chartColors().timeScale, timeVisible: true, secondsVisible: false, rightOffset: openingRightOffset },
+    // A long trade's whole range must fit: the library's default stops zooming out at half a pixel per candle.
+    timeScale: { ...chartColors().timeScale, timeVisible: true, secondsVisible: false, rightOffset: openingRightOffset, minBarSpacing: minimumBarSpacing },
     crosshair: { mode: CrosshairMode.Normal },
   })
   const series = chart.addSeries(CandlestickSeries, { ...candleColors(), borderVisible: true })
   const levels = new LevelsPrimitive(theme, colorResolver(container))
   series.attachPrimitive(levels)
+  // Fills as buy and sell shapes at their price, never lines, so a fill cannot be read as a level (phase 1, 1.1b).
+  const fillMarkers = createSeriesMarkers(series, [])
+  let markers: readonly ChartMarker[] = []
+  let hoveredMarker = ''
+  // Placed fills in candle order, and for each the fills sharing its shape: one price in one candle.
+  let placed: { id: string; index: number; price: number; up: boolean }[] = []
+  let shapes = new Map<string, readonly string[]>()
+  const placeMarkers = () => {
+    const times = loaded.map(candle => candle.time)
+    const shown = markers.flatMap(marker => {
+      // The candle the fill falls in: the latest one at or before it, and only within that candle's own span.
+      let low = 0, high = times.length - 1, found = -1
+      while (low <= high) {
+        const middle = (low + high) >> 1
+        if (times[middle]! <= marker.time) { found = middle; low = middle + 1 } else high = middle - 1
+      }
+      if (found < 0 || marker.time >= candleEnd(times[found]!, marker.span) || candleEnd(times[found]!, marker.span) <= times[found]!) return []
+      return [{ index: found, shape: { id: marker.id, time: (times[found]! / 1000) as UTCTimestamp, position: 'atPriceMiddle' as const, price: marker.price,
+        shape: marker.side === 'buy' ? 'arrowUp' as const : 'arrowDown' as const, color: marker.side === 'buy' ? theme.positive : theme.negative } }]
+    }).sort((a, b) => a.shape.time - b.shape.time)
+    placed = shown.map(({ index, shape }) => ({ id: shape.id, index, price: shape.price, up: shape.shape === 'arrowUp' }))
+    const groups = new Map<string, string[]>()
+    for (const item of placed) {
+      const key = `${item.index} ${item.price}`
+      const group = groups.get(key)
+      if (group) group.push(item.id); else groups.set(key, [item.id])
+    }
+    shapes = new Map(placed.map(item => [item.id, groups.get(`${item.index} ${item.price}`)!]))
+    fillMarkers.setMarkers(shown.map(item => item.shape))
+  }
+  /** Whether a fill marker's shape holds the point, sized as the library draws it, with its few pixels of tolerance. */
+  const onMarker = (x: number, y: number) => {
+    if (!placed.length) return false
+    const scale = chart.timeScale()
+    // The configured spacing, as the library sizes markers; a difference of coordinates can cross a rounding step.
+    const size = markerSize(scale.options().barSpacing), half = size / 2 + 3
+    // Whole bars that may hold a marker within reach (the library rounds up to a bar); each is then measured exactly.
+    const from = scale.coordinateToLogical(x - half), to = scale.coordinateToLogical(x + half), visible = scale.getVisibleLogicalRange()
+    if (from === null || to === null || visible === null) return false
+    // The first placed fill at or after (or, with `after`, past) a bar.
+    const bound = (bar: number, after = false) => {
+      let low = 0, high = placed.length
+      while (low < high) {
+        const middle = (low + high) >> 1
+        if (after ? placed[middle]!.index <= bar : placed[middle]!.index < bar) low = middle + 1; else high = middle
+      }
+      return low
+    }
+    // Only the markers the library draws: those on the visible bars and one more beyond each side.
+    let drawn = bound(Math.floor(visible.from)), end = bound(Math.ceil(visible.to), true)
+    if (drawn > 0 && drawn < placed.length) drawn--
+    if (end > 0 && end < placed.length) end++
+    for (let at = Math.max(bound(from), drawn); at < end && placed[at]!.index <= to; at++) {
+      const markerX = scale.logicalToCoordinate(placed[at]!.index as Logical), markerY = series.priceToCoordinate(placed[at]!.price)
+      if (markerX !== null && markerY !== null && onArrow(!placed[at]!.up, markerX, markerY, size, x, y)) return true
+    }
+    return false
+  }
+  levels.yieldAt = onMarker
+  let focus: ChartFocus | null = null
+  // The chart can only show loaded candles: while the focus starts before them, it is applied again as older pages
+  // arrive, until it fits or the owner moves the view.
+  let focusPending = false
+  const applyFocus = () => {
+    if (!focus || !loaded.length) return
+    chart.timeScale().setVisibleRange({ from: (focus.from / 1000) as UTCTimestamp, to: (focus.to / 1000) as UTCTimestamp })
+    focusPending = focus.from < loaded[0]!.time
+    // The trade starts before the loaded candles: ask for the older page directly, since a wide range can leave the
+    // view's left edge, which otherwise asks for it, off screen. Loading stops on its own when no older candles come.
+    if (focusPending) callbacks.onNeedOlder()
+  }
+  const keepView = () => { focusPending = false }
+  container.addEventListener('pointerdown', keepView, true)
+  container.addEventListener('wheel', keepView, { capture: true, passive: true })
   let candleCount = 0
   let loaded: readonly ChartCandle[] = []
   let index = new TimeIndex([])
@@ -657,6 +754,12 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   chart.timeScale().subscribeVisibleLogicalRangeChange(onRange)
   let crosshairTime: number | null = null
   const onCrosshair = (event: MouseEventParams<Time>) => {
+    // The library reports one marker; fills drawn as the same shape are all listed.
+    const hovered = typeof event.hoveredObjectId === 'string' ? shapes.get(event.hoveredObjectId) ?? [] : []
+    if (hovered.join('\n') !== hoveredMarker) {
+      hoveredMarker = hovered.join('\n')
+      callbacks.onMarkerHover?.(hovered, hovered.length && event.point ? { x: event.point.x, y: event.point.y } : null)
+    }
     const time = typeof event.time === 'number' ? event.time * 1000 : null
     if (time === crosshairTime) return
     crosshairTime = time
@@ -722,7 +825,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       callbacks.onLevelEdit(tag.overlay.id, { x: tag.x, y: tag.y })
       return
     }
-    const hit = levels.levelAt(y)
+    const hit = onMarker(x, y) ? null : levels.levelAt(y)
     if (!hit?.overlay.draggable) return
     consume(event)
     const { id, priceStep } = hit.overlay
@@ -792,7 +895,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     const rect = container.getBoundingClientRect()
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
-    if (x > chart.timeScale().width() || y > chart.paneSize(0).height || picking || drawings.tool || drawings.drawingAt(x, y)) return
+    if (x > chart.timeScale().width() || y > chart.paneSize(0).height || picking || drawings.tool || drawings.drawingAt(x, y) || onMarker(x, y)) return
     const hit = levels.levelAt(y)
     if (!hit || hit.overlay.kind === 'reference') return
     event.preventDefault()
@@ -819,6 +922,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       chart.applyOptions(chartColors())
       series.applyOptions(candleColors())
       levels.retheme()
+      placeMarkers()
       drawingsLayer.requestUpdate()
     })
   })
@@ -836,7 +940,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       levels.reference = candles.at(-1)?.close ?? null
       const timesChanged = writeCandles(candles, reset)
       loaded = candles
-      if (timesChanged) index = new TimeIndex(candles)
+      if (timesChanged) { index = new TimeIndex(candles); placeMarkers() }
       const precision = pricePrecision(candles)
       if (priceFormat.type !== 'price' || precision !== priceFormat.precision) {
         priceFormat = { type: 'price', precision, minMove: 10 ** -precision }
@@ -845,9 +949,20 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       }
       if (reset) {
         chart.priceScale('right').applyOptions({ autoScale: true })
-        // Jump, not animate, to the latest candles.
+        // Jump, not animate, to the latest candles, or to the focus, e.g. a closed trade's dates.
         chart.timeScale().scrollToPosition(openingRightOffset, false)
-      }
+        applyFocus()
+      } else if (focusPending && timesChanged) applyFocus()
+    },
+    setMarkers(next) {
+      markers = next
+      placeMarkers()
+    },
+    setFocus(range) {
+      // The same range again leaves the owner's panning alone.
+      if (range?.from === focus?.from && range?.to === focus?.to) return
+      focus = range
+      applyFocus()
     },
     setOverlays(overlays) {
       levels.set(overlays)
@@ -920,6 +1035,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       cancelAnimationFrame(rethemeFrame)
       container.removeEventListener('dblclick', onDoubleClick)
       container.removeEventListener('pointerdown', onPointerDown, true)
+      container.removeEventListener('pointerdown', keepView, true)
+      container.removeEventListener('wheel', keepView, true)
       container.removeEventListener('pointermove', onPointerMove, true)
       container.removeEventListener('pointerup', endDrag, true)
       container.removeEventListener('pointercancel', endDrag, true)

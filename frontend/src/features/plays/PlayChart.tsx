@@ -14,7 +14,8 @@ import { IndicatorSettingsPopover } from '@/components/chart/IndicatorControls'
 import { intervalName } from '@/components/chart/intervals'
 import { LiveIndicator } from '@/components/chart/LiveIndicator'
 import { TimeframeBar } from '@/components/chart/TimeframeBar'
-import type { ChartAdapterFactory, PriceOverlay } from '@/components/chart/types'
+import type { ChartAdapterFactory, ChartMarker, PriceOverlay } from '@/components/chart/types'
+import { fillMarkers, tradeFocus, type ChartFill } from './chart-fills'
 import { useChartHistory } from '@/components/chart/useChartHistory'
 import { useDrawingEditor } from '@/components/chart/useDrawingEditor'
 import { Button } from '@/components/ui/button'
@@ -72,9 +73,14 @@ interface ChartPanelProps {
    * and its tag says what the evidence says ("not seen at the venue", "resting as of 14:02"). Absent for drafts.
    */
   stopEvidence?: StopEvidenceOf | undefined
+  /** The Play's fills, marked at their time and price and never drawn as levels (phase 1, 1.1b). */
+  fills?: readonly ChartFill[] | undefined
+  /** Open on the trade's dates, padded either side, instead of today: an ended Play with fills. */
+  tradeDates?: boolean
 }
 
 const noDrawings: readonly ChartDrawing[] = []
+const noFills: readonly ChartFill[] = []
 
 type PlanTool = 'entry' | ExitKind
 /** The estimated liquidation price as a dashed reference line; it is derived, so it cannot be dragged. */
@@ -87,7 +93,7 @@ const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute:
 
 export function ChartPanel({ entries, selectedId, onSelect, instrument, instrumentName = instrument, venue = null, direction = 'long', leverage = 1, liquidation = null,
   editable = true, source = null, onEntriesChange, drawings = noDrawings, onDrawingsChange, onCapture, onShowEvidence, createAdapter,
-  intervals = candleIntervals, priceStep = null, streamable = true, marketContext = true, stopEvidence }: ChartPanelProps) {
+  intervals = candleIntervals, priceStep = null, streamable = true, marketContext = true, stopEvidence, fills = noFills, tradeDates = false }: ChartPanelProps) {
   const [view, setView] = useState<ChartView>('aggregate')
   const [planTool, setPlanTool] = useState<PlanTool | null>(null)
   const [preferences, setPreferences] = useChartPreferences()
@@ -184,6 +190,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   // A preferred interval the venue does not serve falls back to the hour, or the venue's first interval.
   const interval = intervals.includes(preferences.interval) ? preferences.interval
     : intervals.includes('1h') ? '1h' : intervals[0] ?? preferences.interval
+  const markers = useMemo(() => fillMarkers(fills, interval), [fills, interval])
   const [expanded, setExpanded] = useState(false)
   const expandButton = useRef<HTMLButtonElement>(null)
   const live = source !== null && instrument !== ''
@@ -291,7 +298,9 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
       instrumentName={instrumentName} caption={`${instrumentName} · ${venue ? `${venue} ` : ''}trade candles`} venue={venue} onCapture={onCapture} onShowEvidence={onShowEvidence}
       timeframes={<TimeframeBar value={interval} favorites={preferences.favorites} available={intervals}
         onChange={next => setPreferences({ interval: next })} onFavoritesChange={favorites => setPreferences({ favorites })} />}
-      liveUpdates={preferences.live && streamable} streamable={streamable} marketContext={marketContext} onLiveUpdatesChange={on => setPreferences({ live: on })}
+      // A trade-dated chart shows the trade's candles; a live tail would join today onto them.
+      liveUpdates={preferences.live && streamable && !tradeDates} streamable={streamable && !tradeDates} marketContext={marketContext} onLiveUpdatesChange={on => setPreferences({ live: on })}
+      markers={markers} tradeDates={tradeDates}
       viewMenu={<>{favoriteTools}<ChartToolbarDivider />{indicatorMenu}</>} rail={rail} drawingBar={<>{drawingBar}{levelEditor}</>} drawingProps={drawingProps} overlays={overlays} createAdapter={createAdapter} expanded={expanded} expandButton={expandButton}
       onExpandedChange={setExpanded} onDialogClosed={() => expandButton.current?.focus({ preventScroll: true })} />
       : <>
@@ -322,7 +331,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   </section>
 }
 
-function LiveChart({ source, instrument, instrumentName, interval, caption, venue, onCapture, onShowEvidence, liveUpdates, streamable, onLiveUpdatesChange, marketContext, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed }: {
+function LiveChart({ source, instrument, instrumentName, interval, caption, venue, onCapture, onShowEvidence, liveUpdates, streamable, onLiveUpdatesChange, marketContext, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed, markers, tradeDates }: {
   source: ChartSource
   instrument: string
   instrumentName: string
@@ -346,8 +355,12 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
   expandButton: RefObject<HTMLButtonElement | null>
   onExpandedChange: (open: boolean) => void
   onDialogClosed: () => void
+  markers: readonly ChartMarker[]
+  tradeDates: boolean
 }) {
-  const data = useCandles({ ...source, instrument, interval })
+  // An ended trade opens on its dates: candles end shortly after its last fill, and the view frames it.
+  const focus = useMemo(() => tradeDates ? tradeFocus(markers, interval) : null, [tradeDates, markers, interval])
+  const data = useCandles({ ...source, instrument, interval, anchor: focus?.to ?? null })
   // Market/status ticks recreate loadOlder in the current hook. Forward to the latest function
   // without changing CandleChart's props; ordinary memo still checks every callback.
   const loadOlder = useRef(data.loadOlder)
@@ -431,7 +444,8 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
     {viewMenu}
   </ChartToolbar>
   const chartProps = {
-    candles: data.candles, overlays, viewKey: `${instrument}|${interval}`,
+    // The anchor is part of the view: candles for the trade's dates arrive as a reset, which applies the focus.
+    candles: data.candles, overlays, viewKey: `${instrument}|${interval}|${focus?.to ?? 'live'}`, markers, focus,
     label: `${instrument} ${intervalName(interval)} trade candles with planned levels. Edit levels in the entry editor.`,
     onNeedOlder,
     ...drawingProps,

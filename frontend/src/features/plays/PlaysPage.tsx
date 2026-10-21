@@ -37,6 +37,7 @@ import { noEntryFills, type EntryFills } from './position-risk-summary'
 import { planNumberIssues, planNumberSummary, storedPlanText, StoredPlanTextContext, type StoredPlanText } from './stored-plan-text'
 import { availableOf, defaultSizeUnits, marginOverBudget, overBudgetMessage, type SizeUnits } from './sizing'
 import { leverageOf } from './levels'
+import type { ChartFill } from './chart-fills'
 import { CancelDialog, DeleteDialog, HistoryDialog, PauseDialog, PreflightDialog, ReturnToOpenDialog, RevisionDialog, UnresolvedDialog } from './PlayDialogs'
 import { initialPlaysList, playSearchDelay, playViewTabs, type PlaysListState } from './plays-list'
 import {
@@ -253,6 +254,16 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const fillsDirection = saved?.plan.direction ?? draft.direction
   const manualLedger = useManualLedger(api, visible && manual && saved && status !== 'draft' ? saved.summary.id : null, observedPlayVersion(session, api))
   const ledger = useMemo(() => manualLedgerFills(manualLedger), [manualLedger])
+  // The Play's fills on the chart (phase 1, 1.1b): its linked venue fills, or its manual ledger's executions.
+  const playId = saved?.summary.id
+  const chartFills = useMemo<ChartFill[] | undefined>(() => {
+    if (manual) return manualLedger && manualLedger !== 'unknown' ? manualLedger.records.map(record => ({ id: record.id, atUtc: record.occurredAtUtc,
+      price: record.price, quantity: record.quantity, side: record.side, role: record.role })) : undefined
+    const execution = tracking.execution
+    if (!execution || execution.playId !== playId) return undefined
+    return execution.links.flatMap(link => link.fills.map(fill => ({ id: `${link.id}:${fill.sourceFillId}`, atUtc: fill.occurredAtUtc,
+      price: fill.price, quantity: fill.quantity, side: fill.side, role: link.role === 'entry' ? 'entry' as const : 'exit' as const })))
+  }, [manual, manualLedger, tracking.execution, playId])
   const venueFills = useMemo(() => !manual && playExecution ? executionFills(playExecution, fillsDirection) : null,
     [manual, playExecution, fillsDirection])
   const fills: EntryFills | 'unknown' = status === 'draft' ? noEntryFills
@@ -644,6 +655,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
           else onLogChange?.(change)
         }} /> : undefined}
       mistakeTags={offersMistakeTags && mistakeTags?.api === api ? mistakeTags.tags : undefined}
+      chartFills={chartFills}
       reviewCompletion={saved ? <ReviewCompletionBar summary={saved.summary} dirty={dirty} busy={pending}
         filled={(playReceipt?.fillCount ?? 0) > 0} onAction={action => { void reviewAction(action) }} /> : undefined}
       plannedAfterExecution={playReceipt?.plannedAfterExecution === true}

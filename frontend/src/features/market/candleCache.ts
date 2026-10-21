@@ -23,6 +23,11 @@ export interface CandleEntry {
   accountId: string
   instrument: string
   interval: CandleInterval
+  /**
+   * When set, the newest candle loaded is at or before this time (UTC ms), e.g. shortly after a closed trade, so the chart
+   * opens on it instead of today; its tail never moves to now (phase 1, 1.1b).
+   */
+  anchor: number | null
   generation: number
   historyGeneration: number
   tailRequest: number
@@ -82,11 +87,11 @@ export class CandleCache {
     })
   }
 
-  entry(accountId: string, instrument: string, interval: CandleInterval) {
-    const key = JSON.stringify([accountId, instrument, interval])
+  entry(accountId: string, instrument: string, interval: CandleInterval, anchor: number | null = null) {
+    const key = JSON.stringify(anchor === null ? [accountId, instrument, interval] : [accountId, instrument, interval, anchor])
     let entry = this.entries.get(key)
     if (!entry) {
-      entry = { key, accountId, instrument, interval, generation: 0, historyGeneration: 0, tailRequest: 0,
+      entry = { key, accountId, instrument, interval, anchor, generation: 0, historyGeneration: 0, tailRequest: 0,
         viewers: 0, lastView: ++this.clock, snapshot: initial(), pages: new Map(), tailTimes: new Set(), coveredTo: null, buffer: new Map(),
         controllers: new Set(), flights: new Map(), listeners: new Set() }
       this.entries.set(key, entry)
@@ -213,7 +218,9 @@ export class CandleCache {
     if (refreshing) return refreshing.promise
     const older = mode === 'older'
     if (older && (entry.snapshot.historyExhausted || entry.snapshot.localHistoryLimit || !entry.snapshot.candles.length)) return Promise.resolve()
-    const endTime = older ? entry.snapshot.venueCandles[0]!.openTime - 1 : undefined
+    // An anchored entry's tail ends at the anchor, never later than now: the server takes at most a day ahead.
+    const endTime = older ? entry.snapshot.venueCandles[0]!.openTime - 1
+      : entry.anchor !== null ? Math.min(entry.anchor, Date.now()) : undefined
     const window = older ? `older:${endTime}` : mode
     const pending = entry.flights.get(window)
     if (pending) return pending.promise

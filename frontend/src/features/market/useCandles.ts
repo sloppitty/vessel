@@ -5,12 +5,16 @@ import { candleCache, type CandleCache, type CandleEntry } from './candleCache'
 export { mergeCandles, upsertCandle, toChartCandle } from './candleCache'
 export type { CandleState } from './candleCache'
 
-export interface CandleSource { api: WorkspaceApi; accountId: string; instrument: string; interval: CandleInterval }
+export interface CandleSource {
+  api: WorkspaceApi; accountId: string; instrument: string; interval: CandleInterval
+  /** Load candles ending at this time (UTC ms) instead of now, e.g. after a closed trade; no live tail joins them. */
+  anchor?: number | null
+}
 
 /** Cached series appear synchronously; each activation revalidates, never persisting across connections. */
-export function useCandles({ api, accountId, instrument, interval }: CandleSource) {
+export function useCandles({ api, accountId, instrument, interval, anchor = null }: CandleSource) {
   const cache = useMemo(() => candleCache(api), [api])
-  const keyed = useMemo(() => cache.entry(accountId, instrument, interval), [cache, accountId, instrument, interval])
+  const keyed = useMemo(() => cache.entry(accountId, instrument, interval, anchor), [cache, accountId, instrument, interval, anchor])
   // A dropped entry (404/409/eviction) keeps its error until the owner retries, which takes a fresh entry.
   const [retried, setRetried] = useState<{ cache: CandleCache; entry: CandleEntry } | null>(null)
   // The entry whose refresh a retry already started; the next activation consumes or discards it.
@@ -27,12 +31,12 @@ export function useCandles({ api, accountId, instrument, interval }: CandleSourc
   const refresh = useCallback(() => {
     if (cache.entries.get(entry.key) === entry) void cache.load(entry, 'refresh')
     else {
-      const fresh = cache.entry(accountId, instrument, interval)
+      const fresh = cache.entry(accountId, instrument, interval, anchor)
       retrying.current = fresh
       void cache.load(fresh, 'refresh')
       setRetried({ cache, entry: fresh })
     }
-  }, [cache, entry, accountId, instrument, interval])
+  }, [cache, entry, accountId, instrument, interval, anchor])
   const revalidate = useCallback(() => { void cache.load(entry, 'latest') }, [cache, entry])
   const upsert = useCallback((candle: VenueCandle, receivedAt: string) => cache.upsert(entry, candle, receivedAt), [cache, entry])
   const loadOlder = useCallback(() => {

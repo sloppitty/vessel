@@ -131,6 +131,77 @@ October 20, 2026, branch `t3/phase1-receipt`, stacked on the integration base:
   - Round 3 found nothing new.
   - **Check.** `scripts/check.sh` passed: backend 3,590 passed, 5 skipped; frontend 152 files and 3,804 tests.
 
+### 1.1b Fills on the chart
+
+October 20, 2026, branch `t3/phase1-fill-markers`, stacked on 1.4b:
+- **Markers (G-03, F-06).** A saved Play's fills, its linked venue fills or its manual ledger's executions, are drawn as
+  markers at their time and price.
+  - Buys are up arrows, sells down arrows, in the positive and negative theme colours.
+  - Each sits on the candle its execution falls in. A fill outside the loaded candles is not drawn.
+  - A tooltip shows the role, side, exact quantity and price, and UTC time. A visually hidden list carries the same
+    text.
+  - Plan levels keep their lines and tags, so a fill cannot be read as a level.
+- **Trade dates.** Closed, Unresolved and retrospective Plays with fills open the chart on the trade: first to last fill,
+  padded by a quarter of its length and at least five candles.
+  - The candles come from an anchored cache entry whose tail ends at the padded end, never later than now.
+  - Older pages load on scroll as usual, and live updates stay off.
+  - The focus applies at a reset and once per new range, so the owner can pan.
+  - Open Plays keep today's view and the live tail.
+- **Adapter.** `ChartAdapter` gains `setMarkers` (Lightweight Charts series markers, hover through the hovered-object ID)
+  and `setFocus`. The renderer still knows nothing of Plays.
+- **Popup over a focused field.** Not reproduced: no browser session ran for it. The notification stack is fixed at the
+  bottom right, up to 400 px wide and above the page, so it can sit over a field there on a short window. Notification
+  delivery does not change in Phase 1, so the report stays open.
+- **Tests.**
+  - Adapter: markers snap to their candle and drop outside it, move when candles arrive, report hover, and the focus
+    applies once per range and at resets.
+  - Chart panel: an ended trade requests candles ending after it, focuses on it, marks its fills (never as levels) and
+    never streams; an open trade stays live.
+  - The candle chart shows the hovered fill's tooltip and lists every fill.
+- **Checks.** `scripts/check.sh` passed: backend 3,608 passed, 5 skipped; frontend 153 files and 3,825 tests; build clean.
+
+- **Sol (Codex) round 1.** Three findings, all fixed:
+  - **Fractional end (medium).** A quarter of a trade with millisecond fills could be fractional, which the candle
+    request refuses. The focus is rounded out to whole milliseconds.
+  - **Late fills (medium).** When today's candles loaded before the Play's fills, the trade's candles arrived without a
+    reset, so the focus never applied. The anchor is now part of the chart's view key, so they arrive as a reset. A
+    test with candles before fills fails without this fix.
+  - **Gaps and lone candles (medium).** A marker took the span of the neighbouring candles, or an endless one for a lone
+    candle. Each marker now carries its interval and sits on a candle only within that candle's own span. Adapter
+    tests cover a gap, a sparse end and a lone candle.
+  - **Check.** `scripts/check.sh` passed again: backend 3,609 passed, 5 skipped; frontend 153 files and 3,829 tests.
+
+- **Sol (Codex) round 2.** All three round-1 findings resolved. Two new findings, both fixed:
+  - **Long trades (medium).** The chart shows only loaded candles, so a trade longer than the first page opened
+    clipped. A focus that starts before the loaded candles is applied again as older pages arrive, until it fits or
+    the owner moves the view.
+  - **Monthly candles (medium).** The 30-day span put a January 31 fill outside January and a March 1 fill on a lone
+    February. Monthly candles now span their calendar month.
+  - Adapter tests cover both.
+  - **Check.** `scripts/check.sh` passed again: backend 3,610 passed, 5 skipped; frontend 153 files and 3,832 tests.
+
+- **Sol (Codex) round 3.** The month fix holds. One finding, fixed:
+  - **Very long trades (medium).** At the library's half-pixel minimum per candle, a long trade's left edge left the
+    screen, so older pages stopped coming. The chart now asks for the next older page itself while the trade is not
+    covered, and candles can be as narrow as 0.05 px, so thousands fit one view. The adapter test checks the request.
+  - **Check.** `scripts/check.sh` passed again: backend 3,610 passed, 5 skipped; frontend 153 files and 3,834 tests.
+
+- **Sol (Codex) round 4.** No findings. The reviewer's real-renderer probes framed a 2,500-candle trade, stopped an
+  unreachable one at the 5,000-candle cap after ten requests, and left the owner's own zoom alone.
+
+- **Post-sync Sol review (October 21).** The merge with main (PR #33) is sound. Three earlier findings, fixed over
+  six rounds:
+  - **Long histories (medium).** The trade's dates are found in one pass, so 200,000 fills no longer overflow the stack.
+  - **Fill on its level (medium).** A planned level gives way on a fill marker, so a fill at its planned price keeps
+    its tooltip and pressing it neither drags nor selects the level. Later rounds narrowed where it gives way to
+    exactly where lightweight-charts shows the fill's tooltip: only markers it draws (the visible bars and one more on
+    each side), its arrow hit area (shaft and head with their tolerances, oriented as its hit test does) and the marker
+    size it takes from the current bar spacing. Elsewhere on the line the level keeps hover, selection and dragging.
+  - **Fills sharing a shape (low).** Fills at one price in one candle are all listed in the tooltip, the first five and
+    a count of the rest.
+  - Round 7 found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,633 passed, 5 skipped; frontend 157 files and 3,882 tests.
+
 ## 1.2 Honest review queue and in-trade log
 
 October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:

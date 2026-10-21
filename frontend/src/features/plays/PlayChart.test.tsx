@@ -7,10 +7,11 @@ import { ApiError } from '@/api/errors'
 import { createWorkspaceApi, type CandleSeries, type MarketStreamEvent, type WorkspaceApi } from '@/api/workspace'
 import type { ChartDrawing, DrawingKind } from '@/components/chart/drawings'
 import type { IndicatorView } from '@/components/chart/indicators'
-import type { ChartAdapterFactory, ChartCallbacks, ChartCandle, PriceOverlay } from '@/components/chart/types'
+import type { ChartAdapterFactory, ChartCallbacks, ChartCandle, ChartFocus, ChartMarker, PriceOverlay } from '@/components/chart/types'
 import { accountFixture, candleSeriesFixture, idleMarketStream, marketContextFixture } from '@/test/workspace-fixture'
 import { createEntry, createExit, type DraftEntry } from './draft'
 import { ChartPanel } from './PlayChart'
+import type { ChartFill } from './chart-fills'
 import { plainDecimalRule } from './numbers'
 
 function fakeAdapter() {
@@ -18,6 +19,7 @@ function fakeAdapter() {
     candles: [] as readonly ChartCandle[], resets: [] as boolean[], overlays: [] as readonly PriceOverlay[], callbacks: null as ChartCallbacks | null,
     created: 0, destroyed: 0, drawings: [] as readonly ChartDrawing[], selectedDrawingId: null as string | null, tool: null as DrawingKind | null, magnet: false,
     captions: [] as string[], picking: false, indicators: null as IndicatorView | null,
+    markers: [] as readonly ChartMarker[], focus: null as ChartFocus | null,
   }
   const factory: ChartAdapterFactory = (_container, callbacks) => {
     state.created++
@@ -29,6 +31,8 @@ function fakeAdapter() {
       setDrawingTool(tool, magnet) { state.tool = tool; state.magnet = magnet },
       setPricePicker(active) { state.picking = active },
       setIndicators(view) { state.indicators = view },
+      setMarkers(markers) { state.markers = markers },
+      setFocus(range) { state.focus = range },
       capture(caption) { state.captions.push(caption); return Promise.resolve(new Blob(['png'], { type: 'image/png' })) },
       destroy() { state.destroyed++ },
     }
@@ -1202,5 +1206,68 @@ describe('Chart indicators', () => {
     // A larger chart can make room.
     await userEvent.click(within(volumeBar).getByRole('button', { name: 'Expand chart' }))
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
+  })
+})
+
+describe('fills on the chart (phase 1, 1.1b)', () => {
+  const fills: ChartFill[] = [
+    { id: 'link-1:f1', atUtc: '2026-09-29T00:00:00.000Z', price: '100.4', quantity: '0.5', side: 'buy', role: 'entry' },
+    { id: 'link-2:f2', atUtc: '2026-09-29T08:00:00.000Z', price: '110', quantity: '0.5', side: 'sell', role: 'exit' },
+  ]
+  it('marks each fill at its time and price, never as a level, and opens an ended trade on its own dates without a live tail', async () => {
+    const { state, factory } = fakeAdapter()
+    const candles = vi.fn<WorkspaceApi['candles']>().mockResolvedValue(candleSeriesFixture)
+    const stream = vi.fn<WorkspaceApi['marketStream']>(idleMarketStream)
+    render(<ChartPanel entries={entries()} selectedId={entries()[0]!.id} instrument="BTC" onSelect={vi.fn()} fills={fills} tradeDates
+      source={{ api: chartApi(candles, undefined, stream), accountId: accountFixture.id }} createAdapter={factory} />)
+    await vi.waitFor(() => expect(candles).toHaveBeenCalled())
+    // The trade ran 8 hours on hourly candles: framed with 2 hours (a quarter) or 5 candles, the larger, either side.
+    const from = Date.parse(fills[0]!.atUtc), to = Date.parse(fills[1]!.atUtc), pad = 5 * 3_600_000
+    expect(candles.mock.lastCall![1]).toEqual({ instrument: 'BTC', interval: '1h', endTime: to + pad })
+    await vi.waitFor(() => expect(state.focus).toEqual({ from: from - pad, to: to + pad }))
+    expect(state.markers.map(marker => [marker.id, marker.side, marker.price])).toEqual([['link-1:f1', 'buy', 100.4], ['link-2:f2', 'sell', 110]])
+    expect(state.markers[0]!.tooltip).toBe('Entry fill · Buy 0.5 at 100.4\n29 Sept 2026, 00:00:00 UTC')
+    expect(state.overlays.some(overlay => overlay.price === 100.4 || overlay.price === 110)).toBe(false)
+    expect(stream).not.toHaveBeenCalled()
+  })
+
+  it('asks for whole milliseconds when a trade has millisecond fills', async () => {
+    const { factory } = fakeAdapter()
+    const candles = vi.fn<WorkspaceApi['candles']>().mockResolvedValue(candleSeriesFixture)
+    const odd: ChartFill[] = [{ ...fills[0]!, atUtc: '2026-09-01T00:00:00.001Z' }, { ...fills[1]!, atUtc: '2026-09-02T00:00:00.002Z' }]
+    render(<ChartPanel entries={entries()} selectedId={entries()[0]!.id} instrument="BTC" onSelect={vi.fn()} fills={odd} tradeDates
+      source={{ api: chartApi(candles), accountId: accountFixture.id }} createAdapter={factory} />)
+    await vi.waitFor(() => expect(candles).toHaveBeenCalled())
+    // A day and a millisecond: a quarter of it is the padding, rounded out to a whole millisecond.
+    expect(candles.mock.lastCall![1]).toEqual({ instrument: 'BTC', interval: '1h', endTime: Math.ceil(Date.parse(odd[1]!.atUtc) + 86_400_001 / 4) })
+  })
+
+  it('opens on the trade when its fills arrive after today\'s candles', async () => {
+    const { state, factory } = fakeAdapter()
+    const candles = vi.fn<WorkspaceApi['candles']>().mockResolvedValue(candleSeriesFixture)
+    const props = { entries: entries(), selectedId: entries()[0]!.id, instrument: 'BTC', onSelect: vi.fn(), tradeDates: true,
+      source: { api: chartApi(candles), accountId: accountFixture.id }, createAdapter: factory }
+    const view = render(<ChartPanel {...props} fills={[]} />)
+    await vi.waitFor(() => expect(state.candles.length).toBeGreaterThan(0))
+    view.rerender(<ChartPanel {...props} fills={fills} />)
+    await vi.waitFor(() => expect(candles.mock.lastCall![1]).toHaveProperty('endTime'))
+    // The trade's candles arrive as a reset, so the chart opens on the trade, not on today's view.
+    await vi.waitFor(() => expect(state.resets.at(-1)).toBe(true))
+    expect(state.candles.length).toBeGreaterThan(0)
+    expect(state.focus).toEqual({ from: Date.parse(fills[0]!.atUtc) - 5 * 3_600_000, to: Date.parse(fills[1]!.atUtc) + 5 * 3_600_000 })
+  })
+
+  it('stays on today for an open trade, with its fills marked', async () => {
+    const { state, factory } = fakeAdapter()
+    const candles = vi.fn<WorkspaceApi['candles']>().mockResolvedValue(candleSeriesFixture)
+    const stream = vi.fn<WorkspaceApi['marketStream']>(idleMarketStream)
+    render(<ChartPanel entries={entries()} selectedId={entries()[0]!.id} instrument="BTC" onSelect={vi.fn()} fills={fills.slice(0, 1)}
+      source={{ api: chartApi(candles, undefined, stream), accountId: accountFixture.id }} createAdapter={factory} />)
+    await vi.waitFor(() => expect(candles).toHaveBeenCalled())
+    expect(candles.mock.lastCall![1]).toEqual({ instrument: 'BTC', interval: '1h' })
+    await vi.waitFor(() => expect(state.markers).toHaveLength(1))
+    expect(state.focus).toBeNull()
+    // Live, as before: only an ended trade's chart leaves the stream off.
+    await vi.waitFor(() => expect(stream).toHaveBeenCalled())
   })
 })

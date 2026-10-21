@@ -331,3 +331,30 @@ Verified: frontend tests (indicator math against Wilder's reference values, sett
 ### October 12: stable level dragging
 
 Expanded Suggestions could change height as a stop approached entry, moving the chart beneath the pointer; autoscaling the dragged level then amplified the price jumps. Entry/SL/TP gestures now preview only in the chart, committing the editor, suggestions and notices once on release (one undo step). The price scale is held during the gesture and its previous autoscale setting restored afterwards. Pointer cancellation, lost capture, window blur, resize or chart reset discard the preview instead of saving an accidental price. This applies to both inline and expanded charts; percentage exits still switch to price units on a completed drag.
+
+## Fills on the chart (October 20, 2026)
+
+Phase 1.1b of the [learning-loop contract](phase1-learning-loop-contract.md). It covers G-03 and the F-06 chart.
+- **Markers, never lines.** A saved Play's fills are drawn as markers at their time and price: its linked venue fills,
+  or its manual ledger's executions.
+  - Buys are up arrows in the positive colour; sells are down arrows in the negative colour.
+  - Each sits on the candle its execution falls in, within that candle's own span (its interval, or its calendar month
+    for monthly candles), so a gap or a lone candle never takes a fill from outside it. A fill outside the loaded
+    candles is not drawn.
+  - The pointer resting on a marker shows a tooltip: role, side, exact quantity and price, and the UTC time. A visually
+    hidden list carries the same text for assistive technology.
+  - Plan levels keep their lines and tags, so a fill cannot be read as a level.
+- **Adapter.** `ChartAdapter.setMarkers(markers)` uses Lightweight Charts series markers (`atPriceMiddle`). The library's
+  hovered-object ID reaches `ChartCallbacks.onMarkerHover`. The renderer stays unaware of Plays.
+- **Trade dates.** An ended Play with fills (Closed, Unresolved or retrospective) opens on its trade: the first to the last
+  fill, padded either side by a quarter of its length and at least five candles.
+  - `ChartAdapter.setFocus(range)` applies the range at a reset and once per new range, so the owner can pan freely.
+    The chart can only show loaded candles, so a trade longer than the first page is framed again as older pages
+    arrive, until it fits or the owner moves the view. While it does not fit, the chart asks for the next older page
+    itself, and candles can be drawn as narrow as 0.05 px, so a trade of thousands of candles fits one view.
+  - Its candles come from an anchored cache entry: the tail ends at the padded end of the trade, rounded out to whole
+    milliseconds and never later than now, and older pages load on scroll as usual.
+  - The anchor is part of the chart's view key, so the trade's candles arrive as a reset and the focus applies even
+    when today's candles loaded before the fills.
+  - Live updates stay off for such a chart, since a live tail would join today onto the trade's candles. Open Plays keep
+    today's view and the live tail.

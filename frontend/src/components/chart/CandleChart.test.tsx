@@ -22,7 +22,7 @@ function fakeAdapter() {
   const factory: ChartAdapterFactory = (_container, next) => {
     callbacks = next
     return { setCandles: vi.fn(), setOverlays: vi.fn(), setDrawings: vi.fn(), setDrawingTool: vi.fn(), setPricePicker: vi.fn(),
-      setIndicators: vi.fn(), capture: vi.fn().mockResolvedValue(null), destroy }
+      setIndicators: vi.fn(), setMarkers: vi.fn(), setFocus: vi.fn(), capture: vi.fn().mockResolvedValue(null), destroy }
   }
   return { factory, destroy, callbacks: () => callbacks }
 }
@@ -84,5 +84,31 @@ describe('memoized candle subtree', () => {
     expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: /Redo: Move/ }))
     expect(onChange).toHaveBeenLastCalledWith([expect.objectContaining({ price: '105' })])
+  })
+})
+
+describe('fill markers (phase 1, 1.1b)', () => {
+  it('shows the fill under the pointer as a tooltip and lists every fill for assistive technology', () => {
+    const { factory, callbacks } = fakeAdapter()
+    const markers = [{ id: 'f1', time: 1_790_000_000_000, price: 100.4, side: 'buy' as const, tooltip: 'Entry fill · Buy 0.5 at 100.4', span: 3_600_000 },
+      { id: 'f2', time: 1_790_003_600_000, price: 110, side: 'sell' as const, tooltip: 'Exit fill · Sell 0.5 at 110', span: 3_600_000 }]
+    render(<CandleChart candles={[]} overlays={[]} viewKey="BTC|1h" label="BTC" markers={markers} createAdapter={factory} />)
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    expect(screen.getByRole('list', { name: 'Fills on the chart' })).toHaveTextContent('Entry fill · Buy 0.5 at 100.4Exit fill · Sell 0.5 at 110')
+    act(() => callbacks().onMarkerHover!(['f2'], { x: 120, y: 40 }))
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Exit fill · Sell 0.5 at 110')
+    act(() => callbacks().onMarkerHover!([], null))
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  })
+
+  it('lists fills that share one marker, the first five and a count of the rest', () => {
+    const { factory, callbacks } = fakeAdapter()
+    const markers = Array.from({ length: 7 }, (_, index) => ({ id: `f${index + 1}`, time: 1_790_000_000_000 + index * 1000, price: 100,
+      side: 'buy' as const, tooltip: `Entry fill · Buy 0.${index + 1} at 100`, span: 3_600_000 }))
+    render(<CandleChart candles={[]} overlays={[]} viewKey="BTC|1h" label="BTC" markers={markers} createAdapter={factory} />)
+    act(() => callbacks().onMarkerHover!(['f1', 'f2'], { x: 120, y: 40 }))
+    expect(screen.getByRole('tooltip').textContent).toBe('Entry fill · Buy 0.1 at 100\n\nEntry fill · Buy 0.2 at 100')
+    act(() => callbacks().onMarkerHover!(markers.map(marker => marker.id), { x: 120, y: 40 }))
+    expect(screen.getByRole('tooltip').textContent).toBe([1, 2, 3, 4, 5].map(n => `Entry fill · Buy 0.${n} at 100`).join('\n\n') + '\n\nand 2 more fills')
   })
 })

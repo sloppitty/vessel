@@ -138,6 +138,7 @@
 
 /* Indicators: a legend on the price pane and a control bar at the top of each indicator pane. */
 .candle-chart-frame { position: relative; width: 100%; height: 100%; min-height: 0; }
+.chart-marker-tooltip { position: absolute; z-index: 5; transform: translate(-50%, calc(-100% - 12px)); max-width: 280px; padding: 6px 9px; border: 1px solid var(--line); border-radius: var(--radius-control, 6px); color: var(--foreground); background: var(--popover, var(--card)); box-shadow: var(--shadow-overlay, 0 6px 18px color-mix(in srgb, var(--background) 60%, transparent)); font-size: var(--text-2xs); line-height: 1.35; white-space: pre-line; pointer-events: none; }
 .indicator-legend { position: absolute; top: 6px; left: 6px; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; max-width: calc(100% - 90px); pointer-events: none; }
 .indicator-legend > * { pointer-events: auto; }
 .indicator-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border: 1px solid transparent; border-radius: 4px;
