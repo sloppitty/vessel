@@ -88,6 +88,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
             throw new ProblemException(409, "Paper capital history is retained. Disable this account instead of deleting it.");
         // Explicit owner-filtered deletes run under the locked account's transaction.
         // Positions cascade from the snapshot, never from trading intent.
+        await db.FillImportConflicts.Where(c => c.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.Fills.Where(f => f.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.Orders.Where(o => o.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.FundingPayments.Where(p => p.AccountId == account.Id).ExecuteDeleteAsync(ct);
@@ -180,10 +181,11 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         var replaceWallet = wallet is not null &&
             (snapshot?.StablecoinsObservedAtUtc is null || wallet.ObservedAtUtc > snapshot.StablecoinsObservedAtUtc);
         var incomingSourceIds = result.Fills.Select(f => f.SourceFillId).Distinct().ToArray();
-        var existing = (await db.Fills.Where(f => f.AccountId == account.Id && incomingSourceIds.Contains(f.SourceFillId))
-            .Select(f => new { f.ContractId, f.SourceFillId }).ToListAsync(ct))
-            .Select(f => (f.ContractId, f.SourceFillId)).ToHashSet();
+        var retained = await db.Fills.Where(f => f.AccountId == account.Id && incomingSourceIds.Contains(f.SourceFillId))
+            .AsNoTracking().ToListAsync(ct);
+        var existing = retained.Select(f => (f.ContractId, f.SourceFillId)).ToHashSet();
         var newFills = result.Fills.Where(f => existing.Add((f.ContractId, f.SourceFillId))).ToList();
+        await RecordFillConflictsAsync(account, retained, result.Fills, observation.ObservedAtUtc, ct);
         // Leverage would be lost with the replaced positions; keep an observation when a position appears or changes,
         // or when new executions show it may have closed and reopened identically since the last refresh.
         if (replacePerps) await RecordLeverageAsync(account, observation, snapshot?.Positions ?? [], newFills, ct);
@@ -283,6 +285,78 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         await unitOfWork.SaveChangesAsync(ct);
         return true;
     }, ct);
+
+    /// <summary>
+    /// Phase 2, item 14c (F-12, probe V10): a retained fill ID reported again with different venue facts keeps its first
+    /// copy and is recorded as a conflict with the differing field names. The row is upserted per fill, never with either
+    /// payload.
+    /// </summary>
+    private async Task RecordFillConflictsAsync(Account account, List<ImportedFill> retained, IReadOnlyList<VenueFill> incoming,
+        DateTimeOffset observedAt, CancellationToken ct)
+    {
+        if (retained.Count == 0) return;
+        var byIdentity = retained.ToDictionary(f => (f.ContractId, f.SourceFillId));
+        var differing = new Dictionary<Guid, (ImportedFill Fill, HashSet<string> Fields)>();
+        foreach (var report in incoming)
+        {
+            if (!byIdentity.TryGetValue((report.ContractId, report.SourceFillId), out var stored)) continue;
+            var fields = DifferingFields(stored, report);
+            if (fields.Count == 0) continue;
+            if (differing.TryGetValue(stored.Id, out var known)) known.Fields.UnionWith(fields);
+            else differing[stored.Id] = (stored, fields);
+        }
+        if (differing.Count == 0) return;
+        var ids = differing.Keys.ToArray();
+        var recorded = await db.FillImportConflicts.Where(c => c.AccountId == account.Id && ids.Contains(c.FillId)).ToDictionaryAsync(c => c.FillId, ct);
+        var seen = observedAt.ToUniversalTime();
+        foreach (var (fillId, (fill, fields)) in differing)
+        {
+            if (recorded.TryGetValue(fillId, out var conflict))
+            {
+                fields.UnionWith(conflict.Fields.Split(','));
+                conflict.Fields = string.Join(",", FillConflictFields.All.Where(fields.Contains));
+                conflict.LastSeenAtUtc = seen > conflict.LastSeenAtUtc ? seen : conflict.LastSeenAtUtc;
+                conflict.Reports++;
+                continue;
+            }
+            db.FillImportConflicts.Add(new FillImportConflict
+            {
+                Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, FillId = fillId, ContractId = fill.ContractId,
+                SourceFillId = fill.SourceFillId, Fields = string.Join(",", FillConflictFields.All.Where(fields.Contains)),
+                FirstSeenAtUtc = seen, LastSeenAtUtc = seen, Reports = 1,
+            });
+        }
+    }
+
+    /// <summary>The venue facts that differ between the retained copy and a new report (see <see cref="FillConflictFields"/>).</summary>
+    internal static HashSet<string> DifferingFields(ImportedFill stored, VenueFill report)
+    {
+        // PostgreSQL keeps microseconds; compare the report at the precision it can be stored with.
+        static DateTimeOffset Stored(DateTimeOffset value) => value.ToUniversalTime().AddTicks(-(value.UtcTicks % 10));
+        var fields = new HashSet<string>(StringComparer.Ordinal);
+        if (stored.Side != report.Side) fields.Add(FillConflictFields.Side);
+        if (stored.Price != report.Price) fields.Add(FillConflictFields.Price);
+        if (stored.Quantity != report.Quantity) fields.Add(FillConflictFields.Quantity);
+        if (stored.Fee != report.Fee) fields.Add(FillConflictFields.Fee);
+        if (stored.FeeToken != report.FeeToken) fields.Add(FillConflictFields.FeeToken);
+        if (stored.ClosedPnlUsd != report.ClosedPnlUsd) fields.Add(FillConflictFields.ClosedPnl);
+        if (stored.OccurredAtUtc.ToUniversalTime() != Stored(report.OccurredAtUtc)) fields.Add(FillConflictFields.Time);
+        if (stored.ExternalOrderId != report.OrderId) fields.Add(FillConflictFields.OrderId);
+        if (stored.TransactionHash != report.TransactionHash) fields.Add(FillConflictFields.TransactionHash);
+        if (stored.VenueContractId is not null && report.VenueContractId is not null && stored.VenueContractId != report.VenueContractId)
+            fields.Add(FillConflictFields.VenueContract);
+        if (stored.Leverage is not null && report.Leverage is not null && stored.Leverage != report.Leverage)
+            fields.Add(FillConflictFields.Leverage);
+        return fields;
+    }
+
+    public async Task<(int Total, IReadOnlyList<FillImportConflict> Recent)> FillConflictsAsync(Guid accountId, int limit, CancellationToken ct)
+    {
+        var query = db.FillImportConflicts.AsNoTracking().Where(c => c.AccountId == accountId);
+        var total = await query.CountAsync(ct);
+        var recent = total == 0 ? [] : await query.OrderByDescending(c => c.LastSeenAtUtc).ThenBy(c => c.Id).Take(limit).ToListAsync(ct);
+        return (total, recent);
+    }
 
     /// <summary>
     /// Appends one observation per reported leverage whose position is new to the replaced snapshot, whose signed

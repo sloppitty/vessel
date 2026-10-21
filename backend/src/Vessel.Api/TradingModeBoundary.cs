@@ -67,6 +67,8 @@ public static class TradingModeBoundary
         parts is [_, "venues", _, "accounts", ..] ||
         // Phase 2, item 5b: an account's raw retained venue facts (Sol round 1 on #39: refused before any read).
         parts is [_, "accounts", _, "facts"] ||
+        // Phase 2, item 14c: retained fills reported again with different venue facts.
+        parts is [_, "accounts", _, "import-conflicts"] ||
         parts is [_, "activity" or "plays", "retrospective"];
     private static string Mode(HttpContext context)
     {

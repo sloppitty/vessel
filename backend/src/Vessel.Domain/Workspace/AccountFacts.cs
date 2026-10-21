@@ -149,6 +149,44 @@ public sealed class RiskObservation : IOwned
     public string? MarginMode { get; set; }
 }
 
+/// <summary>
+/// A retained fill that the venue later reported with different facts (Phase 2, item 14c, F-12). The first stored copy is
+/// kept and never overwritten. This records only which venue fields differed, never either payload, so Account detail can
+/// say so. There is one row per retained fill: later differing reports widen the field set and add to the count.
+/// </summary>
+public sealed class FillImportConflict : IOwned
+{
+    public Guid Id { get; set; }
+    public Guid OwnerId { get; set; }
+    public Guid AccountId { get; set; }
+    /// <summary>The retained fill whose first copy is kept.</summary>
+    public Guid FillId { get; set; }
+    public string ContractId { get; set; } = null!;
+    public string SourceFillId { get; set; } = null!;
+    /// <summary>The venue field names that differed, comma-separated in <c>FillConflictFields.All</c> order.</summary>
+    public string Fields { get; set; } = null!;
+    public DateTimeOffset FirstSeenAtUtc { get; set; }
+    public DateTimeOffset LastSeenAtUtc { get; set; }
+    /// <summary>Refreshes that reported a differing copy.</summary>
+    public int Reports { get; set; }
+}
+
+/// <summary>
+/// The venue facts compared when a retained fill ID is reported again. Vessel's own readings (canonical label, direction
+/// text, position effect, fee and P&amp;L bases) are left out: they follow Vessel's rules, not the venue's report. The
+/// venue contract and leverage count only when both copies state one; a value newly reported where none was is not a
+/// change.
+/// </summary>
+public static class FillConflictFields
+{
+    public const string Side = "side", Price = "price", Quantity = "quantity", Fee = "fee", FeeToken = "feeToken",
+        ClosedPnl = "closedPnl", Time = "time", OrderId = "orderId", TransactionHash = "transactionHash",
+        VenueContract = "venueContract", Leverage = "leverage";
+
+    public static readonly IReadOnlyList<string> All =
+        [Side, Price, Quantity, Fee, FeeToken, ClosedPnl, Time, OrderId, TransactionHash, VenueContract, Leverage];
+}
+
 // The latest known state of a venue order that could belong to a Play. A fact, not trading intent.
 public sealed class ImportedOrder : IOwned
 {

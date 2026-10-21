@@ -73,6 +73,8 @@ public static class WorkspaceEndpoints
         });
         api.MapGet("/accounts/{id:guid}/fills", async (Guid id, string? tradingMode, WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.FillsAsync(id, ct, tradingMode)));
+        api.MapGet("/accounts/{id:guid}/import-conflicts", async (Guid id, string? tradingMode, WorkspaceService service, CancellationToken ct) =>
+            Results.Ok(await service.FillConflictsAsync(id, ct, tradingMode)));
         api.MapGet("/accounts/{id:guid}/instruments", async (Guid id, string? tradingMode, WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.InstrumentsAsync(id, ct, tradingMode))).WithMetadata(new CompressMarketData());
         api.MapGet("/accounts/{id:guid}/candles", async (Guid id, string? instrument, string? interval, long? endTime,
