@@ -210,6 +210,9 @@ October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
 
 - **Sol (Codex) round 6.** No findings: both round-5 fixes hold, including under StrictMode.
 
+- **Post-sync Sol review (October 21).** No findings: completion counts cover Plays only. Round 2 confirmed the test
+  harness merge with 1.1a's staleness tests.
+
 ## 1.3 Record repair
 
 Not started.
