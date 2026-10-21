@@ -123,7 +123,7 @@ public interface IPlayStore
     /// The newest non-blank next actions of the owner's Closed or Cancelled Plays, by review time, at most
     /// <paramref name="limit"/>; only the ID, title, next action and review time are read.
     /// </summary>
-    Task<List<NextActionDto>> NextActionsAsync(int limit, CancellationToken ct);
+    Task<List<NextActionDto>> NextActionsAsync(int limit, string tradingMode, CancellationToken ct);
     /// <summary>Entries referenced by linked orders or manual facts; their price, share and existence are fixed.</summary>
     Task<IReadOnlySet<string>> FilledEntryIdsAsync(Guid playId, CancellationToken ct);
     /// <summary>
