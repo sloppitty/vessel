@@ -3,6 +3,7 @@ import { errorMessage } from '@/api/errors'
 import { isPaperPlayState, type PaperPlayState } from '@/api/paper'
 import type { WorkspaceApi } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
+import { Time } from '@/components/ui/time'
 
 type PaperExecutionApi = Pick<WorkspaceApi, 'paperState'>
 type PaperStateRequest = { api: PaperExecutionApi; playId: string; attempt: number; reloadGeneration: number }
@@ -20,7 +21,6 @@ const statusLabels: Record<PaperPlayState['status'], string> = {
 const roleLabels: Record<PaperPlayState['executions'][number]['role'], string> = {
   entry: 'Simulated entry', stop: 'Simulated stop', target: 'Simulated target', exit: 'Simulated exit',
 }
-const time = (value: string) => `${new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' })} UTC`
 
 /** Reads local paper facts only; timed observation never calls a venue, refreshes candles or starts a check. */
 export function PaperExecutionPanel({ api, playId, onState, reloadGeneration = 0 }: PaperExecutionPanelProps) {
@@ -101,15 +101,15 @@ export function PaperExecutionPanel({ api, playId, onState, reloadGeneration = 0
         <div><dt>Exited quantity</dt><dd>{state.exitedQuantity}</dd></div>
         <div><dt>Open quantity</dt><dd>{state.openQuantity}</dd></div>
         <div><dt>Realized simulated P&amp;L</dt><dd>{state.realizedPnlUsd} USD</dd></div>
-        <div><dt>Last paper check</dt><dd>{state.checkedAtUtc ? <time dateTime={state.checkedAtUtc}>{time(state.checkedAtUtc)}</time> : 'Not checked yet'}</dd></div>
-        <div><dt>Next paper check</dt><dd>{state.nextCheckAtUtc ? <time dateTime={state.nextCheckAtUtc}>{time(state.nextCheckAtUtc)}</time> : 'Not scheduled'}</dd></div>
+        <div><dt>Last paper check</dt><dd>{state.checkedAtUtc ? <Time at={state.checkedAtUtc} /> : 'Not checked yet'}</dd></div>
+        <div><dt>Next paper check</dt><dd>{state.nextCheckAtUtc ? <Time at={state.nextCheckAtUtc} /> : 'Not scheduled'}</dd></div>
       </dl>
       {state.declinedEntries.length > 0 && <section className="execution-section" aria-label="Declined entries">
         <h3>Declined entries</h3>
         <p className="muted">A declined entry is never retroactively simulated, even if capital later becomes available.</p>
         <ul className="execution-list">{state.declinedEntries.map((entry, index) => <li key={index}>
           <span><strong>Entry ID {entry.entryId}</strong><small>{entry.reason}</small>
-            <small>Declined at <time dateTime={entry.declinedAtUtc}>{time(entry.declinedAtUtc)}</time></small></span>
+            <small>Declined at <Time at={entry.declinedAtUtc} /></small></span>
         </li>)}</ul>
       </section>}
       {state.suspensions.length > 0 && <section className="execution-section" aria-label="Suspension history">
@@ -117,9 +117,9 @@ export function PaperExecutionPanel({ api, playId, onState, reloadGeneration = 0
         <p className="muted">Resumption is prospective at a fresh minute boundary. Disabled-period price touches are never replayed.</p>
         <ul className="execution-list">{state.suspensions.map((suspension, index) => <li key={index}>
           <span><strong>{suspension.reason}</strong>
-            <small>Suspended at <time dateTime={suspension.suspendedAtUtc}>{time(suspension.suspendedAtUtc)}</time></small>
+            <small>Suspended at <Time at={suspension.suspendedAtUtc} /></small>
             <small>{suspension.resumedAtUtc
-              ? <>Resumed at <time dateTime={suspension.resumedAtUtc}>{time(suspension.resumedAtUtc)}</time></>
+              ? <>Resumed at <Time at={suspension.resumedAtUtc} /></>
               : 'Not resumed'}</small></span>
         </li>)}</ul>
       </section>}
@@ -132,8 +132,8 @@ export function PaperExecutionPanel({ api, playId, onState, reloadGeneration = 0
         {state.executions.length > 0 ? <ul className="execution-list">{state.executions.map(execution => <li key={execution.id}>
           <span><strong>{roleLabels[execution.role]}</strong>
             <small>Quantity {execution.quantity} at {execution.price} · simulated P&amp;L {execution.pnlUsd} USD</small>
-            <small>Simulated at <time dateTime={execution.occurredAtUtc}>{time(execution.occurredAtUtc)}</time></small>
-            <small>Candle <time dateTime={execution.candleOpenAtUtc}>{time(execution.candleOpenAtUtc)}</time> – <time dateTime={execution.candleCloseAtUtc}>{time(execution.candleCloseAtUtc)}</time></small>
+            <small>Simulated at <Time at={execution.occurredAtUtc} /></small>
+            <small>Candle <Time at={execution.candleOpenAtUtc} /> – <Time at={execution.candleCloseAtUtc} /></small>
             <small>Entry ID {execution.entryId}{execution.levelId !== null && ` · Level ID ${execution.levelId}`}</small>
           </span>
         </li>)}</ul> : <p className="muted">No simulated executions recorded.</p>}

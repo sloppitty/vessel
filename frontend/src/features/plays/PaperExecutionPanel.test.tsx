@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/api/errors'
 import type { PaperPlayState } from '@/api/paper'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
+import { formatTime } from '@/lib/time'
 import { PaperExecutionPanel } from './PaperExecutionPanel'
 
 const playId = '30000000-0000-4000-8000-000000000001'
@@ -33,7 +34,7 @@ function deferred<T>() {
 afterEach(() => vi.useRealTimers())
 
 describe('PaperExecutionPanel', () => {
-  it('shows only explicit simulation progress and rows, preserving exact strings and UTC candle times', async () => {
+  it('shows only explicit simulation progress and rows, preserving exact strings, with candle times in the display zone', async () => {
     const api = makeApi()
     const onState = vi.fn()
     render(<PaperExecutionPanel api={api} playId={playId} onState={onState} />)
@@ -52,7 +53,7 @@ describe('PaperExecutionPanel', () => {
     expect(rows[1]).toHaveTextContent('Simulated target')
     const candleTimes = rows[0]!.querySelectorAll('time')
     expect(Array.from(candleTimes, element => element.dateTime)).toEqual([entry.occurredAtUtc, entry.candleOpenAtUtc, entry.candleCloseAtUtc])
-    expect(rows[0]).toHaveTextContent('UTC')
+    expect(rows[0]).toHaveTextContent(`Candle ${formatTime(entry.candleOpenAtUtc, 'local')} – ${formatTime(entry.candleCloseAtUtc, 'local')}`)
     expect(onState.mock.calls).toEqual([[null], [state]])
     expect(api.paperState).toHaveBeenCalledWith(playId, expect.any(AbortSignal))
     expect(screen.queryByRole('button', { name: /Link|Check|Record|Refresh/ })).not.toBeInTheDocument()
