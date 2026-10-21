@@ -402,5 +402,6 @@ public sealed class ManualLedgerPrecisionTests
         public void Add(DiaryRequest row) => requests.Add(row);
         public void Add(PlayOrderLink link) => Plays.Links.Add(link);
         public void Add(PlayStatusChange change) => Plays.Add(change);
+        public Task ForgetWatchesAsync(Guid playId, CancellationToken ct) => Task.CompletedTask;
     }
 }
