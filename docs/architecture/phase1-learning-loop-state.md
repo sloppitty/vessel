@@ -128,3 +128,6 @@ October 20, 2026, branch `t3/phase1-activity-journal`, stacked on the contract:
   - build clean.
 - **Main sync with PR #33 (imported positions).** Merged forward, not rebased. #33's two Activity test stores gain
   `PlayTitlesAsync`, which this branch added to `IActivityStore`. They return no titles.
+
+- **Post-sync Sol review (October 21).** No findings: Activity's Play links and Review's imported positions use the
+  same claim rule, and every Activity store implements the title lookup.
