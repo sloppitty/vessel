@@ -52,4 +52,13 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         if (transaction is not null) await transaction.CommitAsync(ct);
         return new(accounts, fills, snapshots, playIds) { FundingPayments = funding, FundingStates = fundingStates, LeverageObservations = leverage };
     }
+
+    public async Task<IReadOnlyDictionary<Guid, string>> PlayTitlesAsync(IReadOnlyCollection<Guid> playIds, CancellationToken ct)
+    {
+        if (playIds.Count == 0) return new Dictionary<Guid, string>();
+        var ids = playIds.ToArray();
+        // The owner filter leaves other owners' Plays out. Only the two columns are read, never plans, drawings or reviews.
+        return await db.Plays.Where(p => ids.Contains(p.Id)).Select(p => new { p.Id, p.Title })
+            .ToDictionaryAsync(p => p.Id, p => p.Title, ct);
+    }
 }

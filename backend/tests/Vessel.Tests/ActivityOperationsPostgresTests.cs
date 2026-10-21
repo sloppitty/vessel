@@ -92,6 +92,7 @@ public sealed class ActivityOperationsPostgresTests
             db.Fills.AddRange(Enumerable.Range(0, 120).Select(n => Fill(account, n)));
             db.Fills.Add(Fill(disabled, 0));
             var play = new Play(Guid.NewGuid(), account, new Vessel.Domain.Markets.PerpetualInstrument("manual", "BTC"), InstrumentSource.Manual, "{}", At);
+            play.Annotate("BTC breakout", "{}", "", At);
             playId = play.Id;
             db.Plays.Add(play);
             var (entry, exit) = (TestOrders.For(play, "0"), TestOrders.For(play, "1", "sell"));
@@ -106,11 +107,25 @@ public sealed class ActivityOperationsPostgresTests
             var facts = await new ActivityStore(db).ReadAsync(null, default);
             Assert.Single(facts.Accounts); Assert.Equal(120, facts.Fills.Count); Assert.Equal(2, facts.FillPlayIds.Count);
             Assert.All(facts.FillPlayIds.Values, id => Assert.Equal(playId, id));
+            Assert.Equal("BTC breakout", (await new ActivityStore(db).PlayTitlesAsync([playId, Guid.NewGuid()], default)).Single(t => t.Key == playId).Value);
         }
+        // Another owner's context never reads this Play's title.
+        await using (var db = database.Context(otherOwner)) Assert.Empty(await new ActivityStore(db).PlayTitlesAsync([playId], default));
         await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString); using var client = factory.AuthorizedClient();
         var document = (await client.GetFromJsonAsync<ActivityPageDto>("/api/activity?pageSize=100"))!;
         Assert.Equal(60, document.TotalCount); Assert.Equal(120, document.RetainedFillCount);
-        Assert.Equal(playId, document.Operations.Single(o => o.PlayAssociation == "linked").PlayId);
+        var titled = document.Operations.Single(o => o.PlayAssociation == "linked");
+        Assert.Equal((playId, "BTC breakout"), (titled.PlayId, titled.PlayTitle));
+        // A rename shows through the warm Activity cache at once, without flagging Activity as changed.
+        await using (var db = database.Context(owner))
+        {
+            (await db.Plays.SingleAsync(p => p.Id == playId)).Annotate("Renamed breakout", "{}", "", At.AddHours(1));
+            await db.SaveChangesAsync();
+        }
+        var renamed = (await client.GetFromJsonAsync<ActivityPageDto>("/api/activity?pageSize=100"))!;
+        Assert.Equal(("Renamed breakout", document.Version),
+            (renamed.Operations.Single(o => o.PlayAssociation == "linked").PlayTitle, renamed.Version));
+        Assert.All(document.Operations.Where(o => o.PlayAssociation != "linked"), o => Assert.Null(o.PlayTitle));
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/activity?accountId={foreign.Id}")).StatusCode);
         Assert.Empty((await client.GetFromJsonAsync<ActivityPageDto>($"/api/activity?accountId={disabled.Id}"))!.Operations);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/activity?scope=account:{foreign.Id}")).StatusCode);

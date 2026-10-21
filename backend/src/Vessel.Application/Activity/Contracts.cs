@@ -33,6 +33,11 @@ public interface IActivityStore
     Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null);
     Task<ActivityFacts> ReadAsync(Guid? accountId, string tradingMode, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) =>
         ReadAsync(accountId, ct, accountIds);
+    /// <summary>
+    /// The titles of the owner's Plays among <paramref name="playIds"/>, read for the rows of one Activity page. Other
+    /// owners' Plays, and Plays that no longer exist, are left out.
+    /// </summary>
+    Task<IReadOnlyDictionary<Guid, string>> PlayTitlesAsync(IReadOnlyCollection<Guid> playIds, CancellationToken ct);
 }
 public sealed record OperationFillDto(FillDto Fill, string Role, string Quantity, string Fee, string ClosedPnlUsd);
 public sealed record OperationFeeDto(string Token, string Amount);
@@ -111,6 +116,8 @@ public sealed record ActivityOperationSummaryDto(string Id, Guid AccountId, stri
     public int? Leverage { get; init; }
     public int? LeverageMin { get; init; }
     public int? LeverageMax { get; init; }
+    /// <summary>The linked Play's title, read for the page's rows only; null when unlinked or not readable.</summary>
+    public string? PlayTitle { get; init; }
     public static ActivityOperationSummaryDto From(ActivityOperationDto o) => new(o.Id, o.AccountId, o.ContractId, o.Direction, o.Status,
         o.OpenedAtUtc, o.ClosedAtUtc, o.LastOccurredAtUtc, o.Quantity, o.TotalEnteredQuantity, o.TotalExitedQuantity, o.OpenQuantity,
         o.AverageEntryPrice, o.AverageExitPrice, o.EntryOrderCount, o.ExitOrderCount, o.FillCount, o.ReportedClosedPnlUsd,

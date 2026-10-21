@@ -57,6 +57,8 @@ export interface ActivityOperation {
   pnlBasis: 'gross' | 'net-of-fee' | 'mixed' | 'paper-simulation'
   playId: string | null
   playAssociation: 'linked' | 'unassigned' | 'mixed' | 'paper'
+  /** The linked Play's current title on Activity pages; null when unlinked or unreadable, absent in a preview. */
+  playTitle?: string | null
   coverage: string[]
 }
 /** An operation with its constituent rows, as a retrospective preview carries it. */
@@ -224,7 +226,8 @@ export function isActivityOperation(op: unknown): op is ActivityOperation {
     !(paper ? op.playAssociation === 'paper' : ['linked', 'unassigned', 'mixed'].includes(String(op.playAssociation))) || !isListOf(op.coverage, n => isFilledText(n, 2000), 100) ||
     !Array.isArray(op.otherFees) || !op.otherFees.every(f => isRecord(f) && isFilledText(f.token, 64) && isPlainDecimal(f.amount, decimalLength)) ||
     !isCount(executionCount) || executionCount === 0 || (op.entryOrderCount as number) > executionCount || (op.exitOrderCount as number) > executionCount ||
-    (paper || op.playAssociation === 'linked') !== (op.playId !== null)) return false
+    (paper || op.playAssociation === 'linked') !== (op.playId !== null) ||
+    op.playTitle !== undefined && !isNullOr(op.playTitle, x => typeof x === 'string' && x.length <= 200) || op.playTitle != null && op.playId === null) return false
   if (paper && (!/^0(?:\.0+)?$/.test(String(op.stablecoinFeesNominalUsd)) || op.otherFees.length !== 0 || op.fundingPaymentCount !== 0 ||
     op.fundingNetUsd !== null || op.totalResultUsd !== null || op.leverage !== null || op.leverageMin !== null || op.leverageMax !== null)) return false
   if (paper && op.status === 'incomplete') return op.coverage.length > 0 && op.netResultUsd === null
