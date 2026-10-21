@@ -1,4 +1,4 @@
-import type { LinkOrder, PlayExecution, PlaySummary, RebindLevel } from '@/api/plays'
+import type { ExecutionOrder, LinkOrder, PlayExecution, PlaySummary, RebindLevel } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { Link2, Link2Off } from 'lucide-react'
 import { MonitorDiscrepancies, MonitorPanel, MonitorWatches } from '@/features/monitor/MonitorPanel'
@@ -75,6 +75,24 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
   // Monitor records and watches name this Play's levels ("Entry 1 stop") rather than only the order's role.
   const recordLevel = (key: unknown) => { const level = levelKey(key); return level ? levelName(entries, level, origin) : null }
   const watchLevel = (watch: { linkId: string }) => { const link = execution.links.find(item => item.id === watch.linkId); return link ? levelName(entries, link, origin) : null }
+  const orderList = (orders: readonly ExecutionOrder[]) => <ul className="execution-list">{orders.map(order => {
+    // Only roles the order's side and flags allow; a contradicting fill is refused by the server.
+    const allowed = options.filter(item => orderFitsRole(order, item.request.role, direction))
+    const chosen = choices[order.orderId] ?? ''
+    const option = allowed.find(item => item.value === chosen)
+    return <li key={order.orderId}>
+      <span><strong>{describeOrder(order)}</strong><small>{order.status} · placed <Time at={order.placedAtUtc} /></small></span>
+      <span className="execution-actions">
+        <NativeSelect density="compact" aria-label={`Level for order ${order.orderId}`} value={chosen} disabled={busy}
+          onChange={event => setChoices(current => ({ ...current, [order.orderId]: event.target.value }))}>
+          <option value="">Link as…</option>
+          {allowed.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
+        </NativeSelect>
+        <Button size="sm" variant="outline" disabled={busy || stale || !option} onClick={() => option && onLink({ orderId: order.orderId, ...option.request })}>
+          <Link2 size={13} />Link</Button>
+      </span>
+    </li>
+  })}</ul>
   return <div className="execution-panel">
     {!retrospective && (!execution.tracked || !shownMonitor) && <div className="execution-header">
       <p className="muted" title={execution.tracked ? 'Orders link automatically by price and side; Vessel asks only when several plays could own one.' : undefined}>
@@ -132,7 +150,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
             }}>Not this play</Button>
           </span>
         </li>
-      })}</ul>
+  })}</ul>
     </section>}
 
     <section aria-label="Linked orders" className="execution-section">
@@ -150,24 +168,11 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
 
     {editable && execution.unlinkedOrders.length > 0 && <section aria-label="Other orders on this instrument" className="execution-section">
       <h3>Other orders on this instrument<InfoTip label="About other orders">Placed since this play was created and not linked to any play. Link one by hand if it belongs here.</InfoTip></h3>
-      <ul className="execution-list">{execution.unlinkedOrders.map(order => {
-        // Only roles the order's side and flags allow; a contradicting fill is refused by the server.
-        const allowed = options.filter(item => orderFitsRole(order, item.request.role, direction))
-        const chosen = choices[order.orderId] ?? ''
-        const option = allowed.find(item => item.value === chosen)
-        return <li key={order.orderId}>
-          <span><strong>{describeOrder(order)}</strong><small>{order.status} · placed <Time at={order.placedAtUtc} /></small></span>
-          <span className="execution-actions">
-            <NativeSelect density="compact" aria-label={`Level for order ${order.orderId}`} value={chosen} disabled={busy}
-              onChange={event => setChoices(current => ({ ...current, [order.orderId]: event.target.value }))}>
-              <option value="">Link as…</option>
-              {allowed.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </NativeSelect>
-            <Button size="sm" variant="outline" disabled={busy || stale || !option} onClick={() => option && onLink({ orderId: order.orderId, ...option.request })}>
-              <Link2 size={13} />Link</Button>
-          </span>
-        </li>
-      })}</ul>
+      {orderList(execution.unlinkedOrders)}
+    </section>}
+    {editable && (execution.earlierOrders?.length ?? 0) > 0 && <section aria-label="Placed before this Play was saved" className="execution-section">
+      <h3>Placed before this Play was saved<InfoTip label="About orders placed before this Play">Placed in the day before this play was created and not linked to any play. Vessel never links them by itself. Link one by hand if it belongs here: an entry that filled before the plan was written marks the plan as written after the first execution.</InfoTip></h3>
+      {orderList(execution.earlierOrders ?? [])}
     </section>}
     {execution.notice && <details className="execution-notice"><summary>About these numbers</summary><p className="muted">{execution.notice}</p></details>}
   </div>
