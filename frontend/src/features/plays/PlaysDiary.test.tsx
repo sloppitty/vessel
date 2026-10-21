@@ -687,6 +687,11 @@ describe('diary workspace integration', () => {
     expect(await within(status).findByText('Plan written after first execution')).toBeInTheDocument()
     await user.click(screen.getByRole('tab', { name: 'Review' }))
     expect(within(screen.getByRole('tabpanel')).getByText('Plan written after first execution')).toBeInTheDocument()
+    // A failed reread leaves the flag unknown, in the header as above the review.
+    methods.playExecution.mockRejectedValue(new ApiError('unavailable', 'Execution unavailable.'))
+    view.rerender(<Harness api={api} initial={sessionFor(closed)} generation={1} />)
+    expect(await screen.findByText('The outcome could not be read again. Execution unavailable.')).toBeInTheDocument()
+    expect(screen.queryByText('Plan written after first execution')).not.toBeInTheDocument()
     view.unmount()
     methods.playExecution.mockImplementation(() => Promise.resolve({ ...execution(closed), receipt }))
     render(<Harness api={api} initial={sessionFor(closed)} />)
