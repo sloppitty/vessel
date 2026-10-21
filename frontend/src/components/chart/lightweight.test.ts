@@ -41,7 +41,8 @@ function fakeChart() {
   const series: ReturnType<typeof makeSeries>[] = []
   const addSeries = vi.fn((kind: string) => { const current = makeSeries(kind); series.push(current); return current })
   const timeScale = { width: () => 800, height: () => 20, logicalToCoordinate: (logical: number) => logical * 100,
-    coordinateToLogical: (x: number) => x / 100, scrollToPosition: vi.fn(), setVisibleRange: vi.fn(), subscribeVisibleLogicalRangeChange: vi.fn(), unsubscribeVisibleLogicalRangeChange: vi.fn() }
+    // As the library does, a coordinate rounds up to a whole bar.
+    coordinateToLogical: (x: number) => Math.ceil(x / 100 - 1e-9), scrollToPosition: vi.fn(), setVisibleRange: vi.fn(), subscribeVisibleLogicalRangeChange: vi.fn(), unsubscribeVisibleLogicalRangeChange: vi.fn() }
   const chart = {
     addSeries, series, applyOptions: vi.fn(), removeSeries: vi.fn(), remove: vi.fn(),
     subscribeClick: vi.fn(), subscribeCrosshairMove: vi.fn(), unsubscribeCrosshairMove: vi.fn(),
@@ -231,6 +232,9 @@ describe('fill markers and trade focus (phase 1, 1.1b)', () => {
     expect(primitive.hitTest(100, 1000 - 101.5)).toBeNull()
     expect(primitive.hitTest(110, 1000 - 103)).toBeNull()
     expect(primitive.hitTest(400, 1000 - 101.5)?.externalId).toBe('level')
+    // Beside the marker, even within its bar's reach at this zoom, the line is the level's again.
+    expect(primitive.hitTest(140, 1000 - 101.5)?.externalId).toBe('level')
+    expect(primitive.hitTest(60, 1000 - 101.5)?.externalId).toBe('level')
     // Pressing the marker neither drags nor selects the level; elsewhere on the line it still drags.
     pointer(container, 'pointerdown', 101.5, 100); pointer(container, 'pointerup', 101.5, 100)
     expect(callbacks.onLevelSelect).not.toHaveBeenCalled()
