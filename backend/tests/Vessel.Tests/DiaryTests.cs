@@ -11,6 +11,7 @@ using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Review;
 using Vessel.Application.Sizing;
+using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Numerics;
@@ -406,6 +407,22 @@ public sealed partial class DiaryPostgresTests
             db.Plays.Add(open);
             await db.SaveChangesAsync();
         }
+        // A paper Play's next action, the newest of all, stays in Paper mode; real ones never appear there.
+        Guid paperPlay;
+        await using (var db = database.Context(owner))
+        {
+            var workspace = new WorkspaceService(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner),
+                TestVenues.With(new FixtureReader()), TestUnitOfWork.For(db));
+            var portfolio = await workspace.CreatePortfolioAsync(new("Paper", TradingMode: "paper"), default);
+            var created = await workspace.CreateAccountAsync(new(portfolio.Id, "Paper", "hyperliquid", TradingMode: "paper"), default);
+            var play = TestPlays.Create(await db.Accounts.SingleAsync(a => a.Id == created.Id), new PerpetualInstrument("hyperliquid", "BTC"));
+            play.Annotate("Paper idea", "{}", "", At);
+            play.MarkPlanned(At);
+            play.Cancel(CancelReason.Missed, null, At);
+            play.Annotate("Paper idea", "{}", "", At.AddHours(20), new ReviewAnswers(NextAction: "Test the paper retest"));
+            db.Plays.Add(play); paperPlay = play.Id;
+            await db.SaveChangesAsync();
+        }
         await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
         using var client = factory.AuthorizedClient();
         var actions = (await client.GetFromJsonAsync<List<NextActionDto>>("/api/plays/next-actions"))!;
@@ -413,6 +430,8 @@ public sealed partial class DiaryPostgresTests
         Assert.Equal(new[] { 11, 10, 9, 8, 7, 6, 4, 2, 1, 0 }.Select(n => (ids[n], $"Play {n}", $"Wait for the retest {n}")),
             actions.Select(a => (a.PlayId, a.Title, a.NextAction)));
         Assert.Equal(At.AddHours(11), actions[0].ReviewedAtUtc);
+        var paper = Assert.Single((await client.GetFromJsonAsync<List<NextActionDto>>("/api/plays/next-actions?tradingMode=paper"))!);
+        Assert.Equal((paperPlay, "Test the paper retest"), (paper.PlayId, paper.NextAction));
     }
 
     [PostgresFact]

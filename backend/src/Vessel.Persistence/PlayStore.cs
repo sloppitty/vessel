@@ -98,9 +98,10 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
         db.PlanRevisions.Where(x => x.PlayId == playId).OrderBy(x => x.Number).AsNoTracking().ToListAsync(ct);
     public Task<List<PlayStatusChange>> StatusChangesAsync(Guid playId, CancellationToken ct) =>
         db.StatusChanges.Where(x => x.PlayId == playId).OrderBy(x => x.OccurredAtUtc).ThenBy(x => x.Id).AsNoTracking().ToListAsync(ct);
-    public Task<List<NextActionDto>> NextActionsAsync(int limit, CancellationToken ct) =>
+    public Task<List<NextActionDto>> NextActionsAsync(int limit, string tradingMode, CancellationToken ct) =>
         // Every ended Play's review can carry a lesson, an Unresolved one's too.
-        db.Plays.Where(p => (p.Status == PlayStatus.Closed || p.Status == PlayStatus.Cancelled || p.Status == PlayStatus.Unresolved) &&
+        db.Plays.Where(p => p.TradingMode == tradingMode &&
+                (p.Status == PlayStatus.Closed || p.Status == PlayStatus.Cancelled || p.Status == PlayStatus.Unresolved) &&
                 p.ReviewNextAction != "" &&
                 p.ReviewNextAction.Trim(BrowserSpace) != "")
             .OrderByDescending(p => p.ReviewedAtUtc).ThenByDescending(p => p.UpdatedAtUtc).ThenBy(p => p.Id).Take(limit)

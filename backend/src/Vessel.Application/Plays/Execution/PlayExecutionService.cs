@@ -184,6 +184,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     {
         if (string.IsNullOrWhiteSpace(request.OrderId)) throw new ProblemException(400, "Choose an order.");
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+        if (play.TradingMode != "real") throw new ProblemException(409, "Paper Plays use explicit simulated executions, not actual order linking.");
         await unitOfWork.ExecuteAsync(() => store.WithAccountLockAsync(play.AccountId, async () =>
         {
             // A Play's instrument is fixed once planned; the rejection does not read its plan, so a revision cannot escape it.
@@ -309,6 +310,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         return unitOfWork.ExecuteAsync(() => plays.WithPlayLockAsync(playId, async () =>
         {
             var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+            if (play.TradingMode != "real")
+                throw new ProblemException(409, "A paper Play's simulation holds what it cannot settle; it is never declared unresolved.");
             if (play.Version != request.ExpectedVersion) throw new ProblemException(409, StalePlay);
             if (play.Status != PlayStatus.Open) throw new ProblemException(409, "Only an open Play can be declared unresolved.");
             var evidence = await EvidenceAsync(play, ct)
