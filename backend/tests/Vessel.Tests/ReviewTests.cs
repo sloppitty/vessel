@@ -279,8 +279,13 @@ public sealed class ReviewTests
         using var anonymous = factory.CreateClient();
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/review")).StatusCode);
         using var client = factory.AuthorizedClient();
-        foreach (var query in new[] { "period=bad", "accountId=bad", "offset=-1", "portfolio=bad", "positions=bad", "positions=auto&minPlays=-1" })
-            Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/review?" + query)).StatusCode);
+        // The drill-downs validate the report's filters too, positions included.
+        foreach (var route in new[] { "/api/review?", "/api/review/exclusions?", "/api/review/process?lane=unanswered&" })
+        {
+            foreach (var query in new[] { "period=bad", "accountId=bad", "offset=-1", "portfolio=bad", "positions=bad", "positions=auto&minPlays=-1" })
+                Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync(route + query)).StatusCode);
+            (await client.GetAsync(route + "positions=exclude&minPlays=1000")).EnsureSuccessStatusCode();
+        }
         var response = await client.GetAsync("/api/review");
         response.EnsureSuccessStatusCode();
         Assert.True(response.Headers.CacheControl!.NoStore);

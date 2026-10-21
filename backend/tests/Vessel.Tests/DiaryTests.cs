@@ -392,7 +392,13 @@ public sealed partial class DiaryPostgresTests
                 play.Annotate($"Play {n}", "{}", "", At);
                 play.MarkPlanned(At);
                 play.Cancel(CancelReason.Missed, null, At);
-                play.Annotate($"Play {n}", "{}", "", At.AddHours(n), new ReviewAnswers(NextAction: n == 3 ? "  " : $"Wait for the retest {n}"));
+                play.Annotate($"Play {n}", "{}", "", At.AddHours(n), new ReviewAnswers(NextAction: n switch
+                {
+                    3 => "  ",
+                    // Blank to the browser too: SQL's plain trim keeps a no-break space and a byte order mark.
+                    5 => "\u00A0\u2003\uFEFF",
+                    _ => $"Wait for the retest {n}",
+                }));
                 db.Plays.Add(play); ids.Add(play.Id);
             }
             var open = TestPlays.Create(account, new PerpetualInstrument("manual", "BTC"));
@@ -404,7 +410,7 @@ public sealed partial class DiaryPostgresTests
         using var client = factory.AuthorizedClient();
         var actions = (await client.GetFromJsonAsync<List<NextActionDto>>("/api/plays/next-actions"))!;
         Assert.Equal(PlayService.MaxNextActions, actions.Count);
-        Assert.Equal(new[] { 11, 10, 9, 8, 7, 6, 5, 4, 2, 1 }.Select(n => (ids[n], $"Play {n}", $"Wait for the retest {n}")),
+        Assert.Equal(new[] { 11, 10, 9, 8, 7, 6, 4, 2, 1, 0 }.Select(n => (ids[n], $"Play {n}", $"Wait for the retest {n}")),
             actions.Select(a => (a.PlayId, a.Title, a.NextAction)));
         Assert.Equal(At.AddHours(11), actions[0].ReviewedAtUtc);
     }

@@ -294,6 +294,13 @@ Covers G-01, D-17 and F-08.
 
   The existing "Small sample" marker (below 20) is applied per denominator,
   including the highest and lowest asset cards.
+
+  With imported positions included in Review (see the Imported positions
+  section of `portfolio-review.md`), n counts real results, unweighted: a
+  Play counts once in n although it weighs 2 in the rates. Batting n is then
+  decided Plays plus decided positions, and the average win and loss count
+  the wins and losses of both. Estimated R stays Plays-only (owner decision,
+  October 21).
 - **"Estimated R expectancy (planned-stop model)".** This is the existing
   average with a new label. The statistic does not change.
 
@@ -338,7 +345,11 @@ Covers G-01, D-17 and F-08.
     bounded owner-scoped endpoint.
 - **Origin and Direction.** The Breakdown gains Origin (planned,
   retrospective) and Direction (long, short) groups with the existing
-  metrics.
+  metrics. With imported positions included, Origin adds a third group,
+  "Imported position" (`position`), after Planned and Retrospective, so the
+  groups add up to the combined row, and the Direction groups include
+  positions by their direction (owner decision, October 21). The process
+  cells, lanes, drill-downs, mistake tags and pre-flight stay Plays-only.
 - **Rates.** A share appears only where its own denominator is at least 10.
   Rows are listed in a fixed order, not by result.
 - **Contracts.** `ReviewPlayDto` gains:
@@ -506,6 +517,19 @@ Covers F-01, F-03, F-04, F-05 and G-13 (plus the F-06 preview). No decision.
 | Stacking | An integration base merging the Phase 0 tips, never merged itself. |
 | Verification | One adversarial Sol (Codex) review per pull request before merge. |
 | Time display | A user setting, Local by default, aligned on every page. |
+
+## Owner decisions (October 21, 2026)
+
+Main gained PR #33 (Review imported positions), and the stack took it by
+merging forward. The owner answered the two questions it raised:
+
+| Question | Answer |
+| --- | --- |
+| Per-metric n with imported positions (1.4a) | Real results, unweighted: a Play counts once in n although it weighs 2 in the rates. |
+| Origin of imported positions (1.4b) | A third Origin group, "Imported position", after Planned and Retrospective; Direction groups include positions. |
+
+The process view, its drill-downs, pre-flight, mistake tags, R, reviews and
+Play-local figures stay Plays-only.
 
 ## Delivery
 
