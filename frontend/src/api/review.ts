@@ -99,15 +99,18 @@ export const isReviewMetrics = (v: unknown): v is ReviewMetrics => isRecord(v) &
   ['net', 'batting', 'averageGain', 'averageLoss', 'payoff', 'profitFactor', 'averageWin', 'averageLossUsd', 'expectancy', 'averageR', 'drawdown']
     .every(key => isNullOr(v[key], isReviewDecimal)) &&
   (v.wins as number) + (v.losses as number) + (v.scratches as number) === v.count &&
-  (v.riskCount as number) <= (v.count as number) && (v.reviewed as number) <= (v.count as number) &&
+  (v.positions === undefined || isCount(v.positions) && v.positions <= (v.count as number)) &&
+  // Stops, reviews and Play-local results belong to Plays, never to imported positions.
+  ['riskCount', 'reviewed', 'signDiffers', 'localUnknown'].every(key => v[key] === undefined ||
+    (v[key] as number) <= (v.count as number) - ((v.positions as number | undefined) ?? 0)) &&
   (v.batting === null || Number(v.batting) >= 0 && Number(v.batting) <= 1) &&
   (v.count === 0 ? v.net === null : isReviewDecimal(v.net)) &&
-  ['signDiffers', 'localUnknown'].every(key => v[key] === undefined || isCount(v[key]) && (v[key] as number) <= (v.count as number)) &&
-  ['feeOnlyLosses', 'unknownGrossLosses'].every(key => v[key] === undefined || isCount(v[key]) && (v[key] as number) <= (v.losses as number)) &&
-  (v.positions === undefined || isCount(v.positions) && v.positions <= (v.count as number))
+  ['signDiffers', 'localUnknown'].every(key => v[key] === undefined || isCount(v[key])) &&
+  ['feeOnlyLosses', 'unknownGrossLosses'].every(key => v[key] === undefined || isCount(v[key]) && (v[key] as number) <= (v.losses as number))
 const group = (v: unknown) => isRecord(v) && isText(v.id, 128) && isText(v.name, 200) && isText(v.detail, 2000) && isReviewMetrics(v.metrics)
 const play = (v: unknown) => isRecord(v) &&
-  (v.origin === 'position' ? v.id === null && isText(v.operationId, 200) && (v.local === undefined || v.local === null) : isGuid(v.id)) && isText(v.title, 200) && isGuid(v.accountId) && isText(v.accountName, 200) &&
+  (v.origin === 'position' ? v.id === null && isNonBlankText(v.operationId, 200) && (v.local === undefined || v.local === null) &&
+    v.reviewed === false && (v.executionSource === undefined || v.executionSource === 'imported') : isGuid(v.id)) && isText(v.title, 200) && isGuid(v.accountId) && isText(v.accountName, 200) &&
   isText(v.venueId, 64) && isText(v.instrument, 128) && isTimestamp(v.closedAtUtc, 64) && isReviewDecimal(v.net) &&
   isReviewDecimal(v.returnPercent) && isNullOr(v.rMultiple, isReviewDecimal) && typeof v.reviewed === 'boolean' &&
   (v.origin === undefined || v.origin === 'planned' || v.origin === 'retrospective' || v.origin === 'position') &&
