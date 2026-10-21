@@ -1,7 +1,8 @@
 # Paper trading delivery state
 
 October 21, 2026. **Draft again: the owner's final two-Sol adversarial pass
-found two new P2 defects, now under correction and fresh closure review.
+found report-provenance and exit-order/activation defects, under correction
+and fresh closure review.
 The accepted C/N1 limitations remain accepted. The owner has authorized merge
 only once the findings and final verification are sound; no deployment,
 release or live migration is authorized.**
@@ -973,3 +974,32 @@ Handoff and all failed runs:
 under `/home/ops/.cache/vessel-verification/`.
 No schema, endpoint, raw SQL or owner-policy change. Parent final suites and
 fresh independent core/boundary closure remain mandatory before merge.
+
+### A2 activation follow-up: zero-share exits are not continuously active
+
+Independent core round A2 verified the original A1 fix: **17/17 unchanged
+review probes** and **24/24 checked-in ordering cases** passed. It then found a
+new P2 in the inherited jump proof: an exit defined at zero share could be
+revised positive and gain pre-activation crossing proof, changing cash or
+creating an exit outside the current candle range. Both directions and real
+saved-Play/revision/PostgreSQL/Workspace paths reproduce it.
+
+The parent retained the independent 44-case hardening matrix as shipping
+regressions: **28 defect failures / 16 controls** before the correction.
+The minimal guard now requires the exit's own share to remain positive in
+**every** traversed activation, not only the entry share/price/side; an
+intermediate zero share across a native-empty minute breaks continuity too.
+All **68 ordering/activation cases** then passed, zero skips. The original A2
+report and all red runs remain available:
+`/home/ops/.cache/vessel-verification/paper-review-a2-1fe768c-FucQdc/REPORT.md`
+and `paper-sol-adversarial-20261021/exit-activation-*`.
+
+The frozen earlier `ff72a7b` full backend run passed **3,905**, zero failed,
+five skipped (**3,910 total**, all 12 broker facts); full frontend passed
+**3,907 across 158 files**, plus typecheck/lint/build. That checkpoint is not
+approval of the subsequently demonstrated activation defect. The new guard
+changes backend source only; frontend hashes remain identical. Final backend
+verification will use a separate evidence root
+`/home/ops/.cache/vessel-verification/paper-sol-activation-final-20261021/`,
+without overwriting the earlier run. New independent core closure is required;
+PR stays draft until all final gates are sound.

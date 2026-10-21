@@ -220,7 +220,9 @@ public static class PaperEvaluator
                                 Direction = position?.Direction ?? old.Direction,
                                 Entries = [position is null ? oldEntry : oldEntry with { Price = Text(position.Entry.Price) }]
                             }).SingleOrDefault(l => l.Role == level.Role && l.LevelId == level.LevelId);
-                            if (prior is null || prior.Price != price || prior.Side != level.Side) return false;
+                            if (prior is null || prior.Price != price || prior.Side != level.Side ||
+                                prior.Role != OrderLinkRole.Entry && Share(Exit(oldEntry, prior).Share) == 0)
+                                return false;
                         }
                         return price >= Math.Min(close, candle.Open) && price <= Math.Max(close, candle.Open);
                     }

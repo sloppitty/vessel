@@ -35,6 +35,8 @@ independent verification. No deployment, publication or owner-database migration
   unresolved capital. Preserve revisions/effective activation boundaries.
   Same-role exits must not consume a partial remainder in editor-array order.
   Proven active-level opening-jump crossings precede intraminute touches;
+  the exit must have a positive share in every intervening activation, including
+  revisions traversed across explicit zero-trade minutes.
   a known starting side establishes nearest-first crossings. If competing
   first touches cannot be ordered from that evidence, hold the candle as
   ambiguous rather than selecting a price or level arbitrarily.
