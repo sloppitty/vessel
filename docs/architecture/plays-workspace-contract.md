@@ -355,3 +355,31 @@ is not shown for retrospective or paper Plays.
 - **The limit is flagged, never enforced.** Going over it adds "over the 3%
   limit" in the warning colour. Nothing is blocked.
 - **Failures.** A failed read says "unavailable", never a guess.
+
+## Play download (October 21, 2026)
+
+Phase 2, item 5c (see `phase2-risk-coverage-contract.md`). A saved Play's header
+has **Download** beside History.
+
+`GET /api/plays/{id}/bundle` returns a zip, in the Play's own trading mode. A
+Play of the other mode or another owner is not found.
+- **`play.json`** holds, from the API's own read models, nothing recomputed:
+  - the Play;
+  - its plan revisions, status history and review history;
+  - its executions: the linked venue orders and fills, the manual ledger and
+    its corrections, or a paper Play's simulated state through the paper
+    readers, never presented as actual fills;
+  - its log;
+  - its evidence metadata, with notes and markup;
+  - a list of which originals are included.
+- **The originals** are under `evidence/`, unchanged. They are read one at a
+  time, outside any unit of work, into an archive built in a delete-on-close
+  temporary file, then copied to the response.
+  - An original that cannot be opened is listed as unavailable and does not
+    fail the download.
+  - A failure while copying aborts the download, so no entry is half
+    written.
+- **Saved state only.** Unsaved edits are not included, and the button says
+  so while there are some.
+- **Nothing internal.** No credential, storage key or internal path is
+  included. It is not a tax report.

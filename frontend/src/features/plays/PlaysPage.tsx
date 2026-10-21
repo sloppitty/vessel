@@ -1,3 +1,4 @@
+import { PlayBundleButton } from './PlayBundleButton'
 import type { PaperPlayState, PaperSettings as PaperSettingsDocument } from '@/api/paper'
 import { PaperExecutionPanel } from './PaperExecutionPanel'
 import { errorMessage } from '@/api/errors'
@@ -605,6 +606,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const actions = <div className="play-actions" role="group" aria-label="Play actions">
     <Button variant="outline" size="sm" disabled={!saved} title={saved ? 'Plan revisions and status changes' : 'Save the play first'}
       onClick={() => setDialog('history')}><History size={14} />History</Button>
+    {saved && typeof api.playBundle === 'function' && <PlayBundleButton api={api} playId={saved.summary.id} dirty={dirty} />}
     {/* A planned Play's plan as a new Draft (1.6c); a retrospective Play has no plan to copy. */}
     {saved && !retrospective && <Button variant="outline" size="sm" disabled={pending || hasUnsavedPlayWork(session)}
       title={hasUnsavedPlayWork(session) ? 'Save or discard your changes first' : 'Open a copy of this plan as a new Draft'}
