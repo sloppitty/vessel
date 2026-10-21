@@ -231,8 +231,10 @@ describe('fill markers and trade focus (phase 1, 1.1b)', () => {
     adapter.setMarkers([marker('fill-1', 125_000)])
     const primitive = chart.series[0]!.primitives[0] as unknown as { hitTest(x: number, y: number): { externalId: string } | null }
     expect(primitive.hitTest(100, 1000 - 101.5)).toBeNull()
-    expect(primitive.hitTest(110, 1000 - 103)).toBeNull()
+    expect(primitive.hitTest(104, 1000 - 103)).toBeNull()
     expect(primitive.hitTest(400, 1000 - 101.5)?.externalId).toBe('level')
+    // Beside the buy arrow's shaft, outside the library's own marker hit area, the level keeps the pointer.
+    expect(primitive.hitTest(117, 1000 - 101.5)?.externalId).toBe('level')
     // Beside the marker, even within its bar's reach at this zoom, the line is the level's again.
     expect(primitive.hitTest(140, 1000 - 101.5)?.externalId).toBe('level')
     expect(primitive.hitTest(60, 1000 - 101.5)?.externalId).toBe('level')
