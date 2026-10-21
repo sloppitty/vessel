@@ -397,3 +397,23 @@ Play of the other mode or another owner is not found.
   so while there are some.
 - **Nothing internal.** No credential, storage key or internal path is
   included. It is not a tax report.
+
+## Link this stop and check timing (October 21, 2026)
+
+Phase 2, item 8c and finding I-08 (see `phase2-risk-coverage-contract.md`).
+- **Link this stop.** A `protection.missing` or `protection.short` record in the
+  Execution tab offers **Link this stop** for each compatible unlinked order:
+  - it rests on the Play's instrument on the exit side;
+  - it has stop mechanics: a trigger whose type names a stop, never a
+    take-profit, as `OrderMechanics` decides on the server;
+  - it is listed among the other orders or those placed before the Play was
+    saved.
+
+  With one stop level the button names it; with several the owner chooses.
+  The link goes through the existing endpoint and is never made
+  automatically. When the order's price differs from the level, the drift
+  that follows can be rebound.
+- **Check timing.** The monitor panel's timing line has an `InfoTip`: checks
+  run periodically, not continuously, so a stop removed and replaced between
+  checks is not seen. They keep the record honest; they are not stop
+  protection, and Vessel never places or changes orders.

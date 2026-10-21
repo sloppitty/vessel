@@ -85,6 +85,8 @@ export function MonitorPanel({ monitor, discrepancies, coverage = monitor.covera
           {monitor.lastSuccessAtUtc && <>Last success <Time at={monitor.lastSuccessAtUtc} /></>}
           {monitor.lastSuccessAtUtc && monitor.nextRunAtUtc && ' · '}
           {monitor.nextRunAtUtc && <>Next <Time at={monitor.nextRunAtUtc} /></>}
+          {/* I-08: the cadence is a diary check, not stop protection. */}
+          <InfoTip label="About check timing">Checks run periodically, not continuously, so a stop removed and replaced between two checks is not seen. They keep the record honest; they are not stop protection, and Vessel never places or changes orders.</InfoTip>
         </p>}
       </div>
       {/* A new cooldown remounts the button so its countdown starts from the current time. */}

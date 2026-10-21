@@ -10,6 +10,7 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { InfoTip } from '@/components/ui/info-tip'
 import { useJournalState } from './journal-state'
 import { LevelDriftAction } from './LevelDriftAction'
+import { LinkStopAction } from './LinkStopAction'
 import { LocalResultValue, SignDiffersFlag, localResultNote } from './LocalResult'
 import { EntryReceipts, ReceiptTotals } from './Receipt'
 import { Time } from '@/components/ui/time'
@@ -109,9 +110,12 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
       busy={busy || monitorBusy} error={monitorError}
       retryAtUtc={retryAtUtc} statusUnavailable={monitorUnavailable} onCheck={onCheck} onManageCredential={onManageCredential} />}
     {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss} levelName={recordLevel}
-      action={editable && onRebind && version !== undefined ? item => <LevelDriftAction discrepancy={item} links={execution.links} entries={entries}
-        context={{ direction, leverage, tick: priceStep }} origin={origin} playId={execution.playId} version={version} blocked={busy ? 'Wait for the current change to finish.' : rebindBlocked}
-        onRebind={onRebind} /> : undefined} />}
+      action={editable ? item => <>
+        {onRebind && version !== undefined && <LevelDriftAction discrepancy={item} links={execution.links} entries={entries}
+          context={{ direction, leverage, tick: priceStep }} origin={origin} playId={execution.playId} version={version} blocked={busy ? 'Wait for the current change to finish.' : rebindBlocked}
+          onRebind={onRebind} />}
+        {!stale && <LinkStopAction discrepancy={item} orders={[...execution.unlinkedOrders, ...(execution.earlierOrders ?? [])]} entries={entries}
+          direction={direction} busy={busy} onLink={onLink} />}</> : undefined} />}
     <MonitorWatches watches={execution.watches} levelName={watchLevel} />
     {/* Kept from the last read until a fresh one arrives (usePlayExecution); new links wait for it too. */}
     {stale && <p className="muted" role="status">These figures are from the last read and may be out of date until the execution is read again.</p>}
