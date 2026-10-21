@@ -174,6 +174,19 @@ October 20, 2026, branch `t3/phase1-fill-markers`, stacked on 1.4b:
 - **Sol (Codex) round 4.** No findings. The reviewer's real-renderer probes framed a 2,500-candle trade, stopped an
   unreachable one at the 5,000-candle cap after ten requests, and left the owner's own zoom alone.
 
+- **Post-sync Sol review (October 21).** The merge with main (PR #33) is sound. Three earlier findings, fixed over
+  six rounds:
+  - **Long histories (medium).** The trade's dates are found in one pass, so 200,000 fills no longer overflow the stack.
+  - **Fill on its level (medium).** A planned level gives way on a fill marker, so a fill at its planned price keeps
+    its tooltip and pressing it neither drags nor selects the level. Later rounds narrowed where it gives way to
+    exactly where lightweight-charts shows the fill's tooltip: only markers it draws (the visible bars and one more on
+    each side), its arrow hit area (shaft and head with their tolerances, oriented as its hit test does) and the marker
+    size it takes from the current bar spacing. Elsewhere on the line the level keeps hover, selection and dragging.
+  - **Fills sharing a shape (low).** Fills at one price in one candle are all listed in the tooltip, the first five and
+    a count of the rest.
+  - Round 7 found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,633 passed, 5 skipped; frontend 157 files and 3,882 tests.
+
 ## 1.2 Honest review queue and in-trade log
 
 October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
