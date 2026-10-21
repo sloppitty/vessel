@@ -26,7 +26,7 @@ public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISi
         var plays = await db.Plays.Where(p => p.TradingMode == tradingMode &&
             (p.Status == PlayStatus.Closed || tradingMode == TradingMode.Paper &&
                 db.PaperSimulations.Any(s => s.PlayId == p.Id && (s.State == "ambiguous" || s.State == "gap" ||
-                    s.IssuesJson != "[]" || s.SuspensionsJson != "[]"))) &&
+                    s.SuspensionsJson != "[]"))) &&
             db.Accounts.Any(a => a.Id == p.AccountId && a.IsEnabled && a.TradingMode == tradingMode))
             .AsNoTracking().ToListAsync(ct);
         if (plays.Count == 0) return [];

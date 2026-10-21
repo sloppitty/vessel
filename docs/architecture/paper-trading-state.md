@@ -777,4 +777,23 @@ synthetic API fixtures in an isolated incognito profile: no write before
 confirmation or after dismissing, exactly one confirmed pause, the updated
 cancel disclosure, no actual execution/monitor reads, and desktop/mobile
 dialog geometry. This is UI-only browser verification, not API/database E2E.
-Backend N1/O1 verification and fresh independent approval remain pending.
+Backend complete-suite verification and fresh independent approval remain
+pending.
+
+### N1/O1 backend correction frozen
+
+The four-file backend patch adds the existing suspension receipt when the
+retained frontier precedes the actual Pause/Cancel time, including elapsed
+partial and closed-but-unsettled minutes. No skipped execution or P&L is
+invented; resuming cannot score that Play's later result. Known-open and
+terminal evidence guards remain intact. O1 removes temporary issues alone
+from closed-outcome selection while retaining closed/gap/ambiguity/history
+exclusions. No schema, DTO, endpoint, raw SQL or five-minute-policy change.
+
+Both N1 repros and both O1 retry repros failed before the fixes. Frozen checks:
+build with zero warnings/errors; **59 focused**, **298 Paper plus owner-audit**,
+and **1,151 selected compatibility** passes, all with zero failures/skips.
+These sets overlap and are not a complete-suite claim.
+Evidence: `/home/ops/.cache/vessel-verification/paper-n1-o1-backend-J4EP0Dd2/`.
+The failed boundary setup and old disabled-plus-issue fixture runs remain
+preserved; only their disclosed test setups were corrected.

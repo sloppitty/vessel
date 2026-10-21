@@ -169,7 +169,8 @@ public sealed class PaperReportingPostgresTests
                 InstrumentSource.Venue, paper.Facts.Play.Plan, PaperReportingTests.At.AddHours(-2));
             db.Plays.Add(unresolved);
             db.PlanRevisions.Add(unresolved.MarkPlanned(PaperReportingTests.At.AddHours(-2)).Revision);
-            db.PaperSimulations.Add(new() { OwnerId = owner, AccountId = paper.Account.Id, PlayId = unresolved.Id, State = "disabled",
+            // Fatal evidence retains its terminal state; a transient issue alone is not a closed outcome.
+            db.PaperSimulations.Add(new() { OwnerId = owner, AccountId = paper.Account.Id, PlayId = unresolved.Id, State = "gap",
                 IssuesJson = "[\"A frozen unresolved window remains visible after paper is disabled.\"]" });
             db.PaperLedgerEntries.Add(PaperLedgerEntry.Seed(owner, paper.Account.Id, 4000, PaperReportingTests.At.AddDays(-1)));
             db.PaperLedgerEntries.Add(PaperLedgerEntry.Realized(paper.Facts.Paper.Executions[1]));

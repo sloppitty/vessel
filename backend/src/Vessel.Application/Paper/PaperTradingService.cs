@@ -144,6 +144,13 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
         if (await store.SimulationAsync(play.Id, ct) is { } state)
         {
             if (state.State is "gap" or "ambiguous") return; // Cancelling cannot make unresolved capital spendable.
+            var now = time.GetUtcNow();
+            var frontier = state.CheckpointUtc ?? (await store.ActivationsAsync(play.Id, ct)).FirstOrDefault()?.EffectiveAtUtc;
+            // Include unsettled/partial minutes: prospective rearming skips those too, not only settled candles.
+            if (frontier < now)
+                state.Suspend($"The owner {play.Status.ToString().ToLowerInvariant()} this paper Play; " +
+                    $"the unprocessed pre-action interval [{frontier:O}, {now:O}) was skipped and is not simulated. " +
+                    "This outcome remains unscored.", now);
             state.State = "disabled"; state.NextCheckAtUtc = null;
             // No open quantity remains, and terminal evidence was excluded above. A retry issue is not
             // unresolved execution evidence once the owner has stopped this work; keep suspension history.
