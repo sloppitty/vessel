@@ -12,6 +12,8 @@ import { Time } from './time'
 import { ReviewPage } from '@/features/review/ReviewPage'
 import { createWorkspaceApi } from '@/api/workspace'
 import { reviewFixture } from '@/test/review-fixture'
+import { defaultReviewQuery } from '@/api/review'
+import { ReviewProcessList } from '@/features/review/ReviewProcess'
 import { restoreZone } from '@/test/zone'
 
 const originalZone = process.env.TZ
@@ -63,6 +65,24 @@ describe('display time zone (phase 1, 1.6e)', () => {
       .toHaveAccessibleDescription(/local \(America\/Los_Angeles\).*rolling windows in UTC/)
     act(() => displayZoneStore.set('utc'))
     expect(within(table).getByRole('columnheader', { name: /^Closed \(UTC\)/ })).toBeInTheDocument()
+  })
+
+  it("names the zone of Review's coverage and process times, which sit beside UTC report periods", async () => {
+    process.env.TZ = 'America/Los_Angeles'
+    // 00:30 UTC on 20 October is still 19 October in Los Angeles.
+    const at = '2026-10-20T00:30:00Z'
+    const api = { ...createWorkspaceApi('test'), review: () => Promise.resolve({ ...reviewFixture, coverage: { ...reviewFixture.coverage, firstFillAtUtc: at } }) }
+    const view = render(<ReviewPage api={api} reloadGeneration={0} onOpenPlay={() => Promise.resolve()} />)
+    expect((await screen.findByText('19 Oct 2026, 17:30 GMT-7')).closest('p')).toHaveTextContent(/^Earliest retained fill in this scope/)
+    view.unmount()
+    const play = reviewFixture.plays[0]!
+    const page = { total: 1, offset: 0, nextOffset: null, items: [{ id: play.id!, title: 'Late close', accountId: play.accountId,
+      accountName: play.accountName, venueId: play.venueId, instrument: play.instrument, status: 'closed' as const, origin: 'planned' as const,
+      direction: 'long', atUtc: at, net: null, returnPercent: null, rMultiple: null, adherence: null, mistakeTag: null,
+      plannedAfterExecution: false, reviewCompletion: null }] }
+    render(<ReviewProcessList api={{ ...createWorkspaceApi('test'), reviewProcess: () => Promise.resolve(page) }} query={defaultReviewQuery}
+      selection={{ lane: 'unanswered' }} onOpenPlay={() => Promise.resolve()} />)
+    expect(await screen.findByText('19 Oct 2026, 17:30 GMT-7')).toBeInTheDocument()
   })
 
   it('shows one fill at one time in Activity and on the chart, under either setting (U17)', () => {

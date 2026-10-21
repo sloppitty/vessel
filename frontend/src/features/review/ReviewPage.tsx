@@ -255,7 +255,7 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay, workspaceAccount
         {positions?.included && <p>{positions.positions ?? 0} imported {positions.positions === 1 ? 'position' : 'positions'} included{positions.omitted ? `; ${positions.omitted} closed ${positions.omitted === 1 ? 'position' : 'positions'} could not be scored` : ''}.</p>}
         {report.preflight && <PreflightCounts preflight={report.preflight} {...(report.process ? { onInspect: inspectProcess } : {})} />}
         <p>{report.coverage.notice}</p>
-        {report.coverage.firstFillAtUtc && <p>Earliest retained fill in this scope: <Time at={report.coverage.firstFillAtUtc} style="date" />.</p>}
+        {report.coverage.firstFillAtUtc && <p>Earliest retained fill in this scope: <Time at={report.coverage.firstFillAtUtc} />.</p>}
         <ul>{activeAccounts.map(a => <li key={a.id}><strong>{a.name}</strong> · {venues.name(a.venueId)} · {a.syncStatus} · {a.lastSyncedAtUtc ? <>last refreshed <Time at={a.lastSyncedAtUtc} /></> : 'not refreshed'}{a.historyNotice && <p>{a.historyNotice}</p>}</li>)}</ul>
       </details><button className="pr-outline-button" onClick={inspectExclusions} aria-label={`Inspect exclusions (${excludedCount(report.coverage)})`}>{excludedCount(report.coverage)} excluded</button></section>
     </>}
