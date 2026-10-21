@@ -387,14 +387,22 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     if (first === null || second === null) return false
     const half = Math.min(Math.max(second - first, 12), 30) / 2 + 3
     // Whole bars that may hold a marker within reach (the library rounds up to a bar); each is then measured exactly.
-    const from = scale.coordinateToLogical(x - half), to = scale.coordinateToLogical(x + half)
-    if (from === null || to === null) return false
-    let low = 0, high = placed.length
-    while (low < high) {
-      const middle = (low + high) >> 1
-      if (placed[middle]!.index < from) low = middle + 1; else high = middle
+    const from = scale.coordinateToLogical(x - half), to = scale.coordinateToLogical(x + half), visible = scale.getVisibleLogicalRange()
+    if (from === null || to === null || visible === null) return false
+    // The first placed fill at or after (or, with `after`, past) a bar.
+    const bound = (bar: number, after = false) => {
+      let low = 0, high = placed.length
+      while (low < high) {
+        const middle = (low + high) >> 1
+        if (after ? placed[middle]!.index <= bar : placed[middle]!.index < bar) low = middle + 1; else high = middle
+      }
+      return low
     }
-    for (let at = low; at < placed.length && placed[at]!.index <= to; at++) {
+    // Only the markers the library draws: those on the visible bars and one more beyond each side.
+    let drawn = bound(Math.floor(visible.from)), end = bound(Math.ceil(visible.to), true)
+    if (drawn > 0 && drawn < placed.length) drawn--
+    if (end > 0 && end < placed.length) end++
+    for (let at = Math.max(bound(from), drawn); at < end && placed[at]!.index <= to; at++) {
       const markerX = scale.logicalToCoordinate(placed[at]!.index as Logical), markerY = series.priceToCoordinate(placed[at]!.price)
       if (markerX !== null && markerY !== null && Math.abs(markerX - x) <= half && Math.abs(markerY - y) <= half) return true
     }

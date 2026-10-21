@@ -41,6 +41,7 @@ function fakeChart() {
   const series: ReturnType<typeof makeSeries>[] = []
   const addSeries = vi.fn((kind: string) => { const current = makeSeries(kind); series.push(current); return current })
   const timeScale = { width: () => 800, height: () => 20, logicalToCoordinate: (logical: number) => logical * 100,
+    getVisibleLogicalRange: vi.fn((): { from: number; to: number } | null => ({ from: 0, to: 7 })),
     // As the library does, a coordinate rounds up to a whole bar.
     coordinateToLogical: (x: number) => Math.ceil(x / 100 - 1e-9), scrollToPosition: vi.fn(), setVisibleRange: vi.fn(), subscribeVisibleLogicalRangeChange: vi.fn(), unsubscribeVisibleLogicalRangeChange: vi.fn() }
   const chart = {
@@ -240,6 +241,16 @@ describe('fill markers and trade focus (phase 1, 1.1b)', () => {
     expect(callbacks.onLevelSelect).not.toHaveBeenCalled()
     pointer(container, 'pointerdown', 101.5, 400); pointer(container, 'pointermove', 103, 400); pointer(container, 'pointerup', 103, 400)
     expect(callbacks.onLevelDrag).toHaveBeenLastCalledWith('level', 103, 'end')
+  })
+
+  it('gives way only to markers the library draws, never to one beyond the visible bars and their neighbours', () => {
+    // Bars 3 to 7 are in view: the library draws the fill there and the one just before it, not the oldest.
+    vi.mocked(chart.timeScale().getVisibleLogicalRange).mockReturnValue({ from: 3, to: 7 })
+    adapter.setOverlays([{ id: 'level', label: 'Entry', price: 101.5, color: '#ffffff', emphasis: 'selected', kind: 'entry', draggable: true }])
+    adapter.setMarkers([marker('oldest', 65_000), { ...marker('before', 125_000), price: 50 }, { ...marker('shown', 305_000), price: 50 }])
+    const primitive = chart.series[0]!.primitives[0] as unknown as { hitTest(x: number, y: number): { externalId: string } | null }
+    expect(primitive.hitTest(0, 1000 - 101.5)?.externalId).toBe('level')
+    expect(primitive.hitTest(100, 1000 - 50)).toBeNull()
   })
 
   it('opens on the focus at a reset, once per range, so later panning is left alone', () => {
