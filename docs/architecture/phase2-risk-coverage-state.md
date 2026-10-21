@@ -199,6 +199,20 @@ October 21, 2026. Implemented on `t3/phase2-earlier-orders`.
   fixes were restacked beneath it): backend 4,027 passed, 5 skipped; frontend
   170 files and 4,057 tests. An earlier run failed only on the contract
   fixture, which was then regenerated.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `a2672af9`. Two findings,
+  both fixed in `9c1dd421`:
+  - Incompatible orders could use up the 20 places. An earlier order is now
+    offered only when some role of the plan accepts its side, reduce-only and
+    take-profit mechanics, and retained fills. This is checked before the cap,
+    over at most 200 recent orders. Price is not required to match, since a
+    fast market entry rarely fills at the planned price.
+  - The panel said "the day before" whatever the configured lookback. It now
+    says 24 hours unless the server is set otherwise.
+
+  Sol confirmed that nothing links earlier orders automatically, the matcher's
+  ambiguity is unchanged, the scoping and identity rules hold, and the
+  configuration reaches the API and the worker.
+- **Check after round 1.** `scripts/check.sh` passed on `9c1dd421`: backend 4,029 passed, 5 skipped; frontend 170 files and 4,062 tests.
 
 ## 5. Export
 
