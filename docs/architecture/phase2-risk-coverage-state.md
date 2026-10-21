@@ -252,6 +252,25 @@ October 21, 2026.
   protection, `no-store` and the safe filenames.
 - **Check after round 1.** `scripts/check.sh` passed on `62fff421`: backend 4,035 passed, 5 skipped; frontend 172 files and 4,065 tests.
 
+**5b. Raw facts CSV.** Implemented on `t3/phase2-facts-csv`.
+- **The read.** `GET /api/accounts/{id}/facts?kind=executions|funding&from=&to=` streams one
+  account's retained facts as CSV, over whole UTC days and in time order.
+  - Executions keep native IDs, the order and transaction identity, the exact price, quantity, fee and
+    fee asset apart from the closed P&L, and its basis.
+  - The manual ledger's rows follow with their Play, role and source label.
+  - Funding is its own file, with RISEx's native nanoseconds.
+- **What it is not.** Nothing is computed or inferred: there is no notice row, it is data only. A
+  disabled or paper account is refused with 409, and an unknown one is not found.
+- **The page.** Settings gains **Data export**, which states that these are retained facts only, not
+  a tax report.
+- **Tests.**
+  - `FactsExportTests` (6, one on PostgreSQL): native IDs and exact decimals, manual rows, funding
+    nanoseconds, request validation before any read, refusals, and half-open days in one account's
+    time order.
+  - The isolation case in both auth modes.
+  - The Settings panel test.
+- **Check.** `scripts/check.sh` passed on `ce60a82f`: backend 4,044 passed, 5 skipped; frontend 173 files and 4,067 tests.
+
 ## 6. Opt-in account history retention
 
 Not started.
