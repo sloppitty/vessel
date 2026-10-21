@@ -30,12 +30,44 @@ and malformed reads cannot prove a complete empty history.
 ## Refresh and storage
 
 The existing enabled-account refresh invokes the optional funding-reader port
-outside database transactions, under the account's refresh lease. Its requested window is the last
-30 days, ending at the snapshot's observation truncated to whole milliseconds,
-inclusive at both ends. The adapters widen venue request boundaries where
-necessary and locally enforce the exact requested window. Reads remain bounded
-by their existing HTTP response/deadline limits and explicit page budgets.
-There is no lifetime backfill, separate automatic job or new authorization.
+outside database transactions, under the account's refresh lease. It aims to
+cover the last 30 days, ending at the snapshot's observation truncated to whole
+milliseconds, inclusive at both ends. Each window the adapters are asked for is
+also inclusive. They widen venue request boundaries where necessary and locally
+enforce the exact requested window. Reads remain bounded by their existing HTTP
+response/deadline limits and explicit page budgets. There is no lifetime
+backfill, separate automatic job or new authorization.
+
+**Resumable windows (Phase 2, item 9a, D-23).** A venue whose page budget cannot
+hold 30 days is still covered window by window and Refresh by Refresh. One
+example is Lighter: five 100-row pages against 720 hourly rows per market.
+`FundingWindows` reads in windows (`Vessel:Funding`) as follows:
+- **The cursor.** The stored contiguous coverage is the cursor, so no
+  migration was needed.
+  - The span after it is read oldest first, and the span before it newest
+    first. Every completed window therefore extends one interval, and a
+    partial Refresh never replaces older coverage with a disjoint newer piece.
+  - Coverage that ends before the 30 days is ignored, and reading starts again
+    from the newest boundary.
+- **Recheck.** Only the last `Recheck` of the stored coverage (one day by
+  default) is read again. This keeps a settlement the venue reports late, and
+  a changed one still fails closed.
+- **Halving.** The first window is the whole span (`Window`, 30 days, so a
+  venue that fits still makes one read). It halves only when the adapter marks
+  the result `Truncated`, meaning its page or row budget alone stopped it. Any
+  other incompleteness ends the read, and the venue's own incomplete result is
+  kept when nothing completed: a missing token, excluded or unknown markets,
+  or a saturated same-millisecond group.
+- **Bounds.** A Refresh stops at `MaxReads` (8), 10,000 payments, or
+  `TimeBudget`, 20 seconds in total. That keeps the 20-second deadline of the
+  single read it replaced, so the browser's 90-second Refresh still holds.
+- **Failures.**
+  - A failure or rate limit after some windows completed keeps those windows.
+    A rate limit still defers the venue.
+  - With nothing completed, the outcome is as before: the funding read is
+    reported incomplete and the venue is deferred on a rate limit.
+- **Partial coverage says so.** The notice states the covered span and "refresh
+  again to read the rest"; missing funding is not zero.
 Browser account refresh allows 90 seconds for the sequential bounded history,
 funding and order-retention reads plus locking/persistence overhead. Play
 checks now use the monitor's asynchronous admission endpoint and retain its
@@ -60,10 +92,11 @@ the API sends that integer as a string, never a JavaScript number.
 `account_funding_states` records the latest read and one contiguous verified
 coverage window, independently of how many payments were returned. Overlapping
 complete windows merge; an unread gap is never bridged. A later disjoint complete
-window replaces the coverage window, not the retained payments. **This bounded
-first pass can therefore lose the older window's completeness certificate after
-a long refresh gap; the settlements remain visible as partial history.** Add
-multiple coverage intervals only when that limitation needs removing.
+window replaces the coverage window, not the retained payments. Since item 9a,
+this happens only when the stored coverage ends before the 30-day lookback,
+after a refresh gap longer than the lookback. **The older window's completeness
+certificate is then lost; the settlements remain visible as partial history.**
+Add multiple coverage intervals only when that limitation needs removing.
 
 Funding outages do not discard a valid ordinary snapshot/fill refresh.
 Previously retained funding facts remain and the failure is explicit. Rate limits

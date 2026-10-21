@@ -19,6 +19,8 @@ internal sealed class MonitorWorkerOnline(IMonitorStore inner, TimeProvider cloc
     public Task<IReadOnlyList<(MonitorAccount Row, string VenueId)>> SummaryAsync(IReadOnlyCollection<string> venueIds,
         DateTimeOffset now, CancellationToken ct) => inner.SummaryAsync(venueIds, now, ct);
     public Task<MonitorAccount?> FindAsync(Guid accountId, CancellationToken ct) => inner.FindAsync(accountId, ct);
+    public Task<(DateTimeOffset From, DateTimeOffset To)?> FundingCoverageAsync(Guid accountId, CancellationToken ct) =>
+        inner.FundingCoverageAsync(accountId, ct);
     public Task<DateTimeOffset?> VenueRetryAtAsync(string venueId, CancellationToken ct) => inner.VenueRetryAtAsync(venueId, ct);
     public Task<IReadOnlyDictionary<string, DateTimeOffset>> VenueRetriesAsync(CancellationToken ct) => inner.VenueRetriesAsync(ct);
     public Task DeferVenueAsync(string venueId, DateTimeOffset retryAtUtc, DateTimeOffset now, CancellationToken ct) =>

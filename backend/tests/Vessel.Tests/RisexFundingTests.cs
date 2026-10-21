@@ -210,6 +210,7 @@ public sealed class RisexFundingTests
         var result = await Reader(page => Page(page, false, Row(), Row(market: "999", transaction: 2)))
             .Reader.ReadFundingAsync(Account(), From, Now, default);
         Assert.False(result.Complete);
+        Assert.False(result.Truncated);
         Assert.Single(result.Payments);
         Assert.Contains("unrecognized native markets", result.Notice);
         Assert.Equal(From, result.FromUtc);
@@ -222,6 +223,7 @@ public sealed class RisexFundingTests
         var (reader, responses) = Reader(page => Page(page, true, Row(transaction: page)));
         var result = await reader.ReadFundingAsync(Account(), From, Now, default);
         Assert.False(result.Complete);
+        Assert.True(result.Truncated);
         Assert.Equal(10, result.Payments.Count);
         Assert.Equal(11, responses.Requests.Count); // Catalogue plus ten funding pages.
         Assert.Contains("10-page / 10,000-row", result.Notice);

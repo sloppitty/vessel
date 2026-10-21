@@ -51,6 +51,12 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
 
     public Task<MonitorAccount?> FindAsync(Guid accountId, CancellationToken ct) =>
         Rows.AsNoTracking().SingleOrDefaultAsync(m => m.AccountId == accountId, ct);
+    public async Task<(DateTimeOffset From, DateTimeOffset To)?> FundingCoverageAsync(Guid accountId, CancellationToken ct)
+    {
+        var state = await db.FundingStates.AsNoTracking().Where(s => s.AccountId == accountId)
+            .Select(s => new { s.CoveredFromUtc, s.CoveredToUtc }).SingleOrDefaultAsync(ct);
+        return state is { CoveredFromUtc: { } from, CoveredToUtc: { } to } ? (from, to) : null;
+    }
     public Task<DateTimeOffset?> VenueRetryAtAsync(string venueId, CancellationToken ct) => server.VenueRetryAtAsync(venueId, ct);
     public Task<IReadOnlyDictionary<string, DateTimeOffset>> VenueRetriesAsync(CancellationToken ct) => server.VenueRetriesAsync(ct);
     public Task DeferVenueAsync(string venueId, DateTimeOffset retryAtUtc, DateTimeOffset now, CancellationToken ct) =>

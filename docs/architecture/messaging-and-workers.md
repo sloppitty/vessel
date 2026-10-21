@@ -705,6 +705,19 @@ Settings use `:` in JSON and `__` in environment variables. The API and the work
 | `WatchLifetime` | `7.00:00:00` | 1 hour–90 days | Leftover-order watch lifetime before `unverifiable` |
 | `UnobservableLifetime` | `7.00:00:00` | 1 hour–90 days | Discrepancy lifetime without a decisive observation |
 
+### `Vessel:Funding` (`FundingOptions`)
+
+The owner Refresh reads settled funding in resumable windows (Phase 2, item 9a); see [venue funding](venue-funding.md#refresh-and-storage).
+
+| Setting | Default | Allowed | Meaning |
+|---|---|---|---|
+| `Lookback` | `30.00:00:00` | Up to 31 days | Span a Refresh tries to have covered |
+| `Window` | `30.00:00:00` | Up to `Lookback` | First window; halves only when the venue's page budget truncated it |
+| `MinimumWindow` | `01:00:00` | 1 minute to `Window` | A truncated window this short ends the read |
+| `MaxReads` | `8` | 1–100 | Venue reads per Refresh |
+| `Recheck` | `1.00:00:00` | 0 to `Lookback` | Stored coverage read again before its end, for late settlements |
+| `TimeBudget` | `00:00:20` | 1–60 seconds | All of a Refresh's funding windows together |
+
 ### `Vessel:Worker` (`WorkerSettings`)
 
 | Setting | Default | Allowed | Meaning |

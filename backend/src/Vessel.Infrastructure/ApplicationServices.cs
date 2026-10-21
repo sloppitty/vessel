@@ -70,6 +70,10 @@ public static class ApplicationServices
         configuration.GetSection(PlayExecutionOptions.Section).Bind(plays);
         plays.Validate();
         services.AddSingleton(plays);
+        var funding = new FundingOptions();
+        configuration.GetSection(FundingOptions.Section).Bind(funding);
+        funding.Validate();
+        services.AddSingleton(funding);
         services.TryAddSingleton(TimeProvider.System);
         var deployments = configuration.GetSection("Vessel:Messaging:Deployments").GetChildren().ToArray();
         services.TryAddSingleton(new MonitorDeployments(deployments.Length == 0 ? ["monitor"] : deployments

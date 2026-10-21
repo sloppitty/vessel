@@ -22,6 +22,7 @@ public sealed class FundingPostgresTests
         public DateTimeOffset Observation = At;
         public VenueFundingReadResult? Funding;
         public Func<CancellationToken, Task>? BeforeFunding;
+        public Func<DateTimeOffset, DateTimeOffset, VenueFundingReadResult>? Windowed;
         public Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<VenueInstrument>>([]);
         public Task<PerpetualVenueReadResult> ReadAsync(string source, CancellationToken ct) =>
@@ -34,8 +35,11 @@ public sealed class FundingPostgresTests
             if (CancelFunding) throw new OperationCanceledException(ct);
             if (FundingRetryAtUtc is { } retryAt) throw new VenueRateLimitException(retryAt);
             if (FailFunding) throw new VenueReadException("Provider secret must not appear.");
-            return Funding ?? new([new("funding-1", "BTC", "1", Amount, "USDC", At.AddDays(-1),
+            if (Windowed is not null) return Windowed(from, to);
+            // A venue answers the window it is asked for (Phase 2, item 9a reads in windows).
+            var result = Funding ?? new([new("funding-1", "BTC", "1", Amount, "USDC", At.AddDays(-1),
                 "Raw payload must not be stored")], from, to, true, "Synthetic settled funding.", FundingFacts.Excluded);
+            return result with { FromUtc = from, ToUtc = to, Payments = result.Payments.Where(p => p.OccurredAtUtc >= from && p.OccurredAtUtc <= to).ToList() };
         }
     }
     private static WorkspaceService Service(VesselDbContext db, Guid owner, Reader reader) =>
@@ -85,6 +89,43 @@ public sealed class FundingPostgresTests
             await Service(db, owner, reader).DeleteAccountAsync(id, default);
             Assert.Empty(await db.FundingPayments.ToListAsync()); Assert.Empty(await db.FundingStates.ToListAsync());
             Assert.Empty(await db.Accounts.ToListAsync());
+        }
+    }
+
+    [PostgresFact]
+    public async Task Refresh_resumes_funding_in_windows_until_the_30_days_are_covered()
+    {
+        // Phase 2, item 9a: a page budget that holds at most five days of this account's funding.
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); Guid id;
+        var reader = new Reader
+        {
+            Windowed = (from, to) => to - from > TimeSpan.FromDays(5)
+                ? new([], from, to, false, "Incomplete synthetic funding: the page budget was reached.") { Truncated = true }
+                : new([new($"funding-{from.ToUnixTimeMilliseconds()}", "BTC", "1", -1m, "USDC", from, "{}")], from, to, true,
+                    "Synthetic settled funding."),
+        };
+        await using (var db = database.Context(owner)) id = await Account(db, owner);
+        await using (var db = database.Context(owner)) await Refresh(db, owner, reader, id);
+        await using (var db = database.Context(owner))
+        {
+            // Three windows too long for the budget, then five 3.75-day windows before the eight-read limit.
+            Assert.Equal(8, reader.FundingReads);
+            var state = await db.FundingStates.SingleAsync();
+            Assert.Equal((At.AddDays(-18.75), At, true), (state.CoveredFromUtc, state.CoveredToUtc, state.LastReadComplete));
+            Assert.Contains("refresh again", state.Notice);
+            Assert.Equal(5, await db.FundingPayments.CountAsync());
+        }
+        reader.Observation = At.AddHours(1);
+        await using (var db = database.Context(owner)) await Refresh(db, owner, reader, id);
+        await using (var db = database.Context(owner))
+        {
+            // The new hour, then the rest of the 30 days before the stored coverage; nothing covered is read again.
+            Assert.Equal(15, reader.FundingReads);
+            var state = await db.FundingStates.SingleAsync();
+            Assert.Equal((At.AddHours(1).AddDays(-30), At.AddHours(1)), (state.CoveredFromUtc, state.CoveredToUtc));
+            Assert.Equal("Synthetic settled funding.", state.Notice);
+            Assert.Equal(10, await db.FundingPayments.CountAsync());
         }
     }
 
