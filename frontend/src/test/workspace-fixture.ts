@@ -1,6 +1,7 @@
 import { vi } from 'vitest'
 import { emptyReview } from './review-fixture'
 import type { SizingDocument } from '@/api/sizing'
+import type { OpenRisk } from '@/api/risk'
 import { pagedPlayViews, playInView, playViews, unpagedPlayLimit, type PlayCounts, type PlayList, type PlayListQuery, type PlaySummary, type SavedPlay } from '@/api/plays'
 import type { BrokerAccount, CandleSeries, InstrumentCatalog, MarketContext, Overview, Portfolio, WorkspaceApi } from '@/api/workspace'
 
@@ -98,7 +99,7 @@ export const playCountsFrom = (plays: PlaySummary[]): WorkspaceApi['playCounts']
 
 /** Saved-play API stubs: no saved plays, and every write rejects unless a test overrides it. */
 export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' | 'playCounts' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' | 'nextActions' | 'completeReview' | 'reopenReview' | 'noReviewNeeded' | 'declareUnresolved' | 'returnToOpen' | 'playNotes' | 'addPlayNote' |
-  'deletePlay' | 'playExecution' | 'monitor' | 'accountMonitor' | 'runAccountMonitor' | 'monitorEvents' | 'monitorStream' | 'dismissPlayDiscrepancy' | 'dismissAccountDiscrepancy' | 'linkOrder' | 'unlinkOrder' | 'rejectOrder' | 'rebindLevel' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'review' | 'reviewExclusions' | 'reviewProcess' | 'mistakeTags' | 'retrospectivePreview' | 'createRetrospectivePlay' | 'manualExecutions' | 'addManualExecution' | 'correctManualExecution' | 'correctManualExecutions' |
+  'deletePlay' | 'playExecution' | 'monitor' | 'accountMonitor' | 'runAccountMonitor' | 'monitorEvents' | 'monitorStream' | 'dismissPlayDiscrepancy' | 'dismissAccountDiscrepancy' | 'linkOrder' | 'unlinkOrder' | 'rejectOrder' | 'rebindLevel' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'openRisk' | 'openRiskPreview' | 'riskSettings' | 'updateRiskSettings' | 'review' | 'reviewExclusions' | 'reviewProcess' | 'mistakeTags' | 'retrospectivePreview' | 'createRetrospectivePlay' | 'manualExecutions' | 'addManualExecution' | 'correctManualExecution' | 'correctManualExecutions' |
   'notificationHead' | 'notifications' | 'claimNotifications' | 'readNotification' | 'readAllNotifications' | 'notificationPreferences' |
   'saveNotificationPreferences' | 'requestTestNotification' | 'paperSettings' | 'savePaperSettings' | 'paperState'> {
   const unexpected = () => Promise.reject(new Error('Unexpected play API call in this test.'))
@@ -121,6 +122,11 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
     linkOrder: vi.fn(unexpected), unlinkOrder: vi.fn(unexpected), rejectOrder: vi.fn(unexpected), rebindLevel: vi.fn(unexpected), evidence: vi.fn().mockResolvedValue([]), evidenceImage: vi.fn(unexpected),
     uploadEvidence: vi.fn(unexpected), updateEvidenceNote: vi.fn(unexpected), updateEvidenceMarkup: vi.fn(unexpected), deleteEvidence: vi.fn(unexpected),
     sizing: vi.fn().mockResolvedValue(sizingFixture), updateSizingSettings: vi.fn(unexpected),
+    // Open risk: nothing planned or open, no limit; a preview is unknown until a test supplies one.
+    openRisk: vi.fn().mockImplementation((scope: string) => Promise.resolve(emptyOpenRisk(scope))),
+    openRiskPreview: vi.fn().mockImplementation((request: { playId: string | null; plan: { direction: 'long' | 'short' } }) => Promise.resolve({
+      playId: request.playId, direction: request.plan.direction, riskUsd: null, reason: 'An entry has no stop.', rounded: false })),
+    riskSettings: vi.fn().mockResolvedValue({ openRiskLimitPercent: null }), updateRiskSettings: vi.fn(unexpected),
     review: vi.fn().mockResolvedValue(emptyReview),
     reviewExclusions: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, nextOffset: null, notice: 'Fixture exclusions.' }),
     reviewProcess: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, nextOffset: null }),
@@ -138,6 +144,13 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
     saveNotificationPreferences: vi.fn(unexpected), requestTestNotification: vi.fn(unexpected),
   }
 }
+
+/** Open risk with nothing planned or open in the scope and no limit set. */
+export const emptyOpenRisk = (scope: string): OpenRisk => ({
+  asOfUtc: '2026-10-21T10:00:00.000Z', scope, balance: { amountUsd: null, contributingAccountCount: 0, totalAccountCount: 0 },
+  long: { knownUsd: '0', knownCount: 0, unknownCount: 0, rounded: false }, short: { knownUsd: '0', knownCount: 0, unknownCount: 0, rounded: false },
+  notIncluded: [], protection: { notCovered: 0, unverified: 0 }, plays: [], limitPercent: null, notice: 'Fixture open risk.',
+})
 
 /** A sizing document with no closed plays, full exposure and the default limits. */
 export const sizingFixture: SizingDocument = {

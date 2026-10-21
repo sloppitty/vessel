@@ -103,6 +103,7 @@
 .metric > .coverage-badge { margin-top: 6px; }
 .metric > small + .coverage-badge { margin-top: 6px; }
 .overview-metrics[aria-busy="true"] .metric > strong { opacity: .6; transition: opacity .2s var(--ease-out); }
+.overview-metrics .overview-open-risk-over { color: var(--warning); }
 /* The headline figure carries the signature light. */
 .overview-metrics > .metric:first-child {
   border-color: var(--brand-line);
