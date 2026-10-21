@@ -4,6 +4,13 @@
 
 ### Added
 
+- A Play shows what happened beside its plan. Each entry shows its average
+  fill against the planned price and its filled against planned quantity,
+  from the plan in force at its first fill. The Review tab opens with the
+  result on both bases, fees, estimated R over its initial risk (or why it is
+  unknown, by Review's own rule) and time held. The journal and its expanded
+  view gain Save play, and a retrospective Play's panel lists its trade facts
+  (G-03, F-06).
 - Activity names each linked Play by its title, as a link that opens it,
   instead of a UUID prefix. A closed, unassigned operation offers "Journal
   this trade". The retrospective preview leads with the trade in plain terms,

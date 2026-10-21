@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Vessel.Application.Activity;
 using Vessel.Application.Common;
+using Vessel.Application.Plays.Execution;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 
@@ -21,7 +22,16 @@ public sealed record ManualHistoryDto(Guid Id, Guid ExecutionId, string? Reason,
 public sealed record ManualTotalsDto(string EnteredQuantity, string ExitedQuantity, string OpenQuantity,
     string GrossResultUsd, string? NetResultUsd, bool FeesComplete);
 public sealed record ManualExecutionsDto(PlayDto Play, IReadOnlyList<ManualExecutionDto> Records,
-    IReadOnlyList<ManualHistoryDto> History, ManualTotalsDto Totals, string Notice);
+    IReadOnlyList<ManualHistoryDto> History, ManualTotalsDto Totals, string Notice)
+{
+    /// <summary>Each planned entry's ledger fills beside its plan, as the venue execution read gives them.</summary>
+    public IReadOnlyList<EntryProgressDto> Entries { get; init; } = [];
+    /// <summary>Times, averages and estimated R by Review's rules, over the ledger Review reads.</summary>
+    public PlayReceiptDto? Receipt { get; init; }
+    /// <summary>Known fees by currency as entered, exactly; executions with unknown costs are counted, never added as zero.</summary>
+    public IReadOnlyList<FeeTotalDto> Fees { get; init; } = [];
+    public int UnknownFees { get; init; }
+}
 
 public sealed record RetrospectivePreviewDto(bool Eligible, IReadOnlyList<string> Reasons, string Fingerprint,
     ActivityOperationDto Operation, string Notice);

@@ -37,7 +37,8 @@ import '@/features/monitor/incidents.css'
 
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, revision = null,
   lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, sizingStatus = 'ready', onRetrySizing, onRiskChange,
-  filledEntries, fills: entryFills, onUnits, onPriceStep, retrospective = false, incidents, stopEvidence, evidenceImages }: {
+  filledEntries, fills: entryFills, onUnits, onPriceStep, retrospective = false, incidents, stopEvidence, evidenceImages,
+  reviewReceipt, journalSave, retrospectiveReceipt }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -86,6 +87,12 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   onPriceStep?: (step: number | null) => void
   /** Saved originals of the open Play, which load after it opens. */
   evidenceImages?: EvidenceImages | undefined
+  /** The outcome at the top of the journal's Review tab. */
+  reviewReceipt?: ReactNode
+  /** A Save inside the journal while there is something to save. */
+  journalSave?: ReactNode
+  /** A retrospective Play's trade facts, in its "No original plan" panel. */
+  retrospectiveReceipt?: ReactNode
 }) {
   const paper = api.tradingMode === 'paper'
   const fieldId = useId()
@@ -291,9 +298,10 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           execution={execution} keepExecutionMounted={paper} readOnly={readOnly} retrospective={retrospective} status={status}
           structuredReview={draft.structuredReview}
           onStructuredReviewChange={structuredReview => onChange({ ...draft, structuredReview })}
-          evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceImages={evidenceImages} evidenceRequest={evidenceRequest} executionRequest={executionRequest} />
+          evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceImages={evidenceImages} evidenceRequest={evidenceRequest} executionRequest={executionRequest}
+          reviewReceipt={reviewReceipt} journalSave={journalSave} />
       </div>
-      {retrospective ? <section className="panel retrospective-position" aria-label="No original plan"><h2>No original plan</h2></section>
+      {retrospective ? <section className="panel retrospective-position" aria-label="No original plan"><h2>No original plan</h2>{retrospectiveReceipt}</section>
         : readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>
         <PositionEditor onLeverageChange={leverageChange.request} draft={draft} onChange={planChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} units={units} availableBudget={available} checkBudget={false} filledEntries={filled} />
       </fieldset> : <PositionEditor onLeverageChange={leverageChange.request} draft={draft} onChange={onChange} selectedId={selectedId} selectionRequest={selectionRequest} onSelect={setSelectedId}

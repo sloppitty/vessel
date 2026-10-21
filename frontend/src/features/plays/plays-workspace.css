@@ -842,5 +842,14 @@
 .journal-tabs .structured-review:disabled :is(input, select, textarea) { opacity: .6; cursor: not-allowed; }
 .evidence-state { display: block; color: var(--muted-foreground); font-size: var(--text-xs); }
 .retrospective-position { padding: 16px; }
+/* Receipt (phase 1, 1.1a): planned against filled per entry, the outcome above the review, a retrospective trade's facts. */
+.journal-tabs .receipt-figures { display: grid; gap: 2px; text-align: right; font-feature-settings: var(--figures); }
+.journal-tabs .execution-totals dd small { color: var(--muted-foreground); font-size: var(--text-2xs); font-weight: 500; }
+.journal-tabs .review-receipt { margin-bottom: 10px; }
+.journal-save { display: inline-flex; margin-right: 4px; }
+.retrospective-receipt { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin: 12px 0 0; }
+.retrospective-receipt div { padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-sunken); }
+.retrospective-receipt dt { color: var(--muted-foreground); font-size: var(--text-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: var(--tracking-label); }
+.retrospective-receipt dd { margin: 4px 0 0; font-size: var(--text-sm); font-weight: 650; font-feature-settings: var(--figures); overflow-wrap: anywhere; }
 .plays-request { flex-wrap: wrap; }
 @media (max-width: 600px) { .manual-fields { grid-template-columns: minmax(0, 1fr); } }

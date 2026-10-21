@@ -11,6 +11,7 @@ import { InfoTip } from '@/components/ui/info-tip'
 import { useJournalState } from './journal-state'
 import { LevelDriftAction } from './LevelDriftAction'
 import { LocalResultValue, SignDiffersFlag, localResultNote } from './LocalResult'
+import { EntryReceipts, ReceiptTotals } from './Receipt'
 
 // One shared empty object, so an untouched panel does not look like new state on every render.
 const noChoices: Record<string, string> = {}
@@ -24,11 +25,13 @@ const pnlBasisNote = {
   mixed: 'Some fills report closed PnL before fees and some after.',
 } as const
 
-export function ExecutionPanel({ execution, error, busy, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, currentBookRead = true, onDismiss, onManageCredential,
+export function ExecutionPanel({ execution, error, busy, stale = false, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, currentBookRead = true, onDismiss, onManageCredential,
   version, leverage = 1, priceStep = null, onRebind, rebindBlocked }: {
   execution: PlayExecution | null
   error: string | null
   busy: boolean
+  /** The execution may be out of date (`usePlayExecution`): its plan comparison is unknown and confirmations wait. */
+  stale?: boolean
   entries: readonly DraftEntry[]
   direction: 'long' | 'short'
   origin?: PlaySummary['origin']
@@ -84,6 +87,8 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
         context={{ direction, leverage, tick: priceStep }} origin={origin} playId={execution.playId} version={version} blocked={busy ? 'Wait for the current change to finish.' : rebindBlocked}
         onRebind={onRebind} /> : undefined} />}
     <MonitorWatches watches={execution.watches} levelName={watchLevel} />
+    {/* Kept from the last read until a fresh one arrives (usePlayExecution); new links wait for it too. */}
+    {stale && <p className="muted" role="status">These figures are from the last read and may be out of date until the execution is read again.</p>}
     <dl className="execution-totals">
       <div><dt>Entered</dt><dd>{totals.enteredQuantity}</dd></div>
       <div><dt>Exited</dt><dd>{totals.exitedQuantity}</dd></div>
@@ -94,7 +99,9 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
         <dd>{totals.venueNetUsd === null ? <InfoTip className="value-tag" trigger="Unknown" label="venue net">A fee is unverified or in a token outside the listed stablecoins.</InfoTip> : `${totals.venueNetUsd} USD`}</dd></div>}
       {totals.local && <div><dt>Play-local result<InfoTip label="About the Play-local result">{localResultNote}</InfoTip></dt>
         <dd><LocalResultValue local={totals.local} format={value => `${value} USD`} />{totals.local.signDiffers && <SignDiffersFlag />}</dd></div>}
+      {execution.receipt && <ReceiptTotals receipt={execution.receipt} status={execution.status} />}
     </dl>
+    <EntryReceipts progress={execution.entries} entries={entries} stale={stale} />
 
     {execution.issues.length > 0 && <section aria-label="Not reconciled" className="execution-section execution-issues">
       <h3>Not reconciled<InfoTip label="About unreconciled executions">Vessel neither closes nor scores a play while these remain. Fills that contradict their link are left out of the totals.</InfoTip></h3>
@@ -106,10 +113,10 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
       <ul className="execution-list">{execution.suggestions.map(link => <li key={link.id}>
         <span><strong>{levelName(entries, link, origin)}</strong>{link.order && <small>{describeOrder(link.order)} · {link.order.status}</small>}</span>
         <span className="execution-actions">
-          <Button size="sm" disabled={busy || !editable || !link.order} onClick={() => onLink({ orderId: link.order?.orderId ?? '', role: link.role,
+          <Button size="sm" disabled={busy || stale || !editable || !link.order} onClick={() => onLink({ orderId: link.order?.orderId ?? '', role: link.role,
             ...(link.entryId ? { entryId: link.entryId } : {}), ...(link.levelId ? { levelId: link.levelId } : {}) })}>
             <Link2 size={13} />Link here</Button>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => onUnlink(link.id)}>Not this play</Button>
+          <Button size="sm" variant="ghost" disabled={busy || stale} onClick={() => onUnlink(link.id)}>Not this play</Button>
         </span>
       </li>)}</ul>
     </section>}
@@ -142,7 +149,7 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
               <option value="">Link as…</option>
               {allowed.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
             </NativeSelect>
-            <Button size="sm" variant="outline" disabled={busy || !option} onClick={() => option && onLink({ orderId: order.orderId, ...option.request })}>
+            <Button size="sm" variant="outline" disabled={busy || stale || !option} onClick={() => option && onLink({ orderId: order.orderId, ...option.request })}>
               <Link2 size={13} />Link</Button>
           </span>
         </li>

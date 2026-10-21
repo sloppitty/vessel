@@ -1,6 +1,6 @@
 import type { PaperPlayState } from '@/api/paper'
-import { useEffect, useState } from 'react'
-import type { ManualExecutionRecord } from '@/api/diary'
+import { useEffect, useMemo, useState } from 'react'
+import type { ManualExecutionRecord, ManualExecutions } from '@/api/diary'
 import type { PlayExecution } from '@/api/plays'
 import type { WorkspaceApi } from '@/api/workspace'
 import { exactAdd, exactCompare, exactDecimal, exactDiv, exactMul, exactScientific, exactSignOf, exactZero, type Exact } from '@/lib/decimal'
@@ -71,27 +71,38 @@ export function ledgerFills(records: readonly ManualExecutionRecord[]): EntryFil
 }
 
 /**
- * The manual ledger's entry fills for a saved Play, read again whenever its known version moves (a manual write, a
- * correction or a rebind) and whenever the page shows the Play again. Only the answer of the current read attempt counts,
- * and only for the version it was read at: every attempt drops the previous answer as it starts, so while it is pending
- * or after it fails the fills are `'unknown'`, never earlier figures shown as current (another tab may have corrected an
- * entry at the same version). Null without a Play to read.
+ * The manual ledger of a saved Play, read again whenever its known version moves (a manual write, a correction or a
+ * rebind) and whenever the page shows the Play again. Only the answer of the current read attempt counts, and only for the
+ * version it was read at: every attempt drops the previous answer as it starts, so while it is pending or after it fails
+ * the ledger is `'unknown'`, never earlier figures shown as current (another tab may have corrected an entry at the same
+ * version). Null without a Play to read.
  */
-export function useLedgerFills(api: WorkspaceApi, playId: string | null, version: number): EntryFills | 'unknown' | null {
-  const [state, setState] = useState<{ api: WorkspaceApi; playId: string; version: number; fills: EntryFills } | null>(null)
+export function useManualLedger(api: WorkspaceApi, playId: string | null, version: number): ManualExecutions | 'unknown' | null {
+  const [state, setState] = useState<{ api: WorkspaceApi; playId: string; version: number; ledger: ManualExecutions } | null>(null)
   useEffect(() => {
     if (!playId) return
     const controller = new AbortController()
     api.manualExecutions(playId, controller.signal).then(ledger => {
       // An answer older than the version that asked for it does not describe that version.
       if (!controller.signal.aborted && ledger.play.summary.id === playId && ledger.play.summary.version >= version)
-        setState({ api, playId, version, fills: ledgerFills(ledger.records) })
+        setState({ api, playId, version, ledger })
     }).catch(() => { /* Unknown stays unknown; the Execution tab shows the ledger's own error. */ })
     // The next attempt, for any version, starts from unknown: this answer is not reused.
     return () => { controller.abort(); setState(null) }
   }, [api, playId, version])
   if (!playId) return null
-  return state?.api === api && state.playId === playId && state.version === version ? state.fills : 'unknown'
+  return state?.api === api && state.playId === playId && state.version === version ? state.ledger : 'unknown'
+}
+
+/** The manual ledger's entry fills for a saved Play, as `useManualLedger` reads it. */
+export function useLedgerFills(api: WorkspaceApi, playId: string | null, version: number): EntryFills | 'unknown' | null {
+  const ledger = useManualLedger(api, playId, version)
+  return useMemo(() => manualLedgerFills(ledger), [ledger])
+}
+
+/** Entry fills of a ledger read: unknown while it is, none without a Play. */
+export function manualLedgerFills(ledger: ManualExecutions | 'unknown' | null): EntryFills | 'unknown' | null {
+  return ledger === null || ledger === 'unknown' ? ledger : ledgerFills(ledger.records)
 }
 
 /** Explicit paper entry facts share only the weighted-average math, never imported venue execution DTOs. */

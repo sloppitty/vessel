@@ -36,7 +36,16 @@ public sealed record ExecutionFillDto(string SourceFillId, string Direction, str
 public sealed record OrderLinkDto(Guid Id, string Role, string? EntryId, string? LevelId, string State, string Source,
     ExecutionOrderDto? Order, string FilledQuantity, IReadOnlyList<ExecutionFillDto> Fills);
 
-public sealed record EntryProgressDto(string EntryId, string FilledQuantity, string? AverageFillPrice, int RestingOrders);
+public sealed record EntryProgressDto(string EntryId, string FilledQuantity, string? AverageFillPrice, int RestingOrders)
+{
+    /// <summary>
+    /// The entry as planned, from the plan revision in force at its first fill (<see cref="PlanRevision"/>, null for a Draft
+    /// or a retrospective Play); before any fill, the current plan. Null when the plan cannot give it.
+    /// </summary>
+    public string? PlannedPrice { get; init; }
+    public string? PlannedQuantity { get; init; }
+    public int? PlanRevision { get; init; }
+}
 
 public sealed record FeeTotalDto(string Token, string Amount);
 
@@ -67,6 +76,8 @@ public sealed record PlayExecutionDto(Guid PlayId, string Status, bool Tracked, 
     public IReadOnlyList<MonitorDiscrepancyDto> Discrepancies { get; init; } = [];
     /// <summary>Linked exit and entry orders watched after the Play ended: watching, resolved or a persistent unverifiable.</summary>
     public IReadOnlyList<MonitorWatchDto> Watches { get; init; } = [];
+    /// <summary>Times, averages and estimated R by Review's rules, over the facts Review reads.</summary>
+    public PlayReceiptDto? Receipt { get; init; }
 }
 
 // Application owns this bounded port; EF details stay in Persistence. Reads are owner-filtered.

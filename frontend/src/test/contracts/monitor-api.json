@@ -182,7 +182,10 @@
         "entryId": "entry-1",
         "filledQuantity": "0",
         "averageFillPrice": null,
-        "restingOrders": 1
+        "restingOrders": 1,
+        "plannedPrice": "100",
+        "plannedQuantity": "7.5",
+        "planRevision": 1
       }
     ],
     "links": [
@@ -279,7 +282,17 @@
       "uncheckedPlays": 0
     },
     "discrepancies": [],
-    "watches": []
+    "watches": [],
+    "receipt": {
+      "firstEntryAtUtc": null,
+      "lastExitAtUtc": null,
+      "averageEntryPrice": null,
+      "averageExitPrice": null,
+      "fillCount": 0,
+      "estimatedR": null,
+      "initialRisk": null,
+      "estimatedRReason": "Known once the Play is closed and its fills settle it."
+    }
   },
   "runCompletedEvent": {
     "id": "00000000-0000-4000-8000-000000000007",

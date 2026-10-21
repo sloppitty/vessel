@@ -6,11 +6,13 @@ using Npgsql;
 using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
+using Vessel.Application.Review;
 using Vessel.Application.Sizing;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Infrastructure.Venues.Hyperliquid;
@@ -333,6 +335,34 @@ public sealed class ExecutionPostgresTests
         Assert.Equal("planned", tinyExecution.Status);
         Assert.Equal("0", tinyExecution.Totals.EnteredQuantity);
         Assert.Equal("0.0000000000000000000000001", tiny.Plan.Entries[0].Price);
+    }
+
+    [PostgresFact]
+    public async Task Execution_receipt_sets_each_entry_beside_its_plan_and_scores_R_as_Review_does()
+    {
+        // Phase 1.1a (G-03): entry planned at 100 for 7.5 (margin 250 at 3x) fills 0.5 at an average of 100.4.
+        var (database, h, account) = await SetUp();
+        await using var _ = database;
+        var play = await PlannedPlay(h, account);
+        h.Orders.Orders.AddRange([Order("21", "buy", 100.01m, "filled", size: 0.5m), Order("23", "sell", 110m, reduceOnly: true, size: 0.5m)]);
+        var at = DateTimeOffset.UtcNow;
+        AddFills(h, Fill("r1", "21", "Open Long", 100.2m, 0.25m, at), Fill("r2", "21", "Open Long", 100.6m, 0.25m, at));
+        var execution = await h.CheckAsync(play.Summary.Id);
+        var entry = execution.Entries.Single();
+        Assert.Equal(("open", "100", "7.5", 1), (execution.Status, entry.PlannedPrice, entry.PlannedQuantity, entry.PlanRevision));
+        Assert.Equal(("0.5", "100.4"), (entry.FilledQuantity, entry.AverageFillPrice));
+        Assert.Equal((null, PlayReceipts.OpenReason), (execution.Receipt!.EstimatedR, execution.Receipt.EstimatedRReason));
+
+        h.Orders.Orders[1] = Order("23", "sell", 110m, "filled", reduceOnly: true, size: 0.5m);
+        AddFills(h, Fill("r3", "23", "Close Long", 110m, 0.5m, at.AddSeconds(1)));
+        execution = await h.CheckAsync(play.Summary.Id);
+        // Net 5 − 0.03 fees over 50.2 notional × 5% stop distance = 2.51 initial risk.
+        Assert.Equal(("closed", ExactDecimal.Format(4.97m / 2.51m), "2.51", "100.4", "110", 3),
+            (execution.Status, execution.Receipt!.EstimatedR, execution.Receipt.InitialRisk, execution.Receipt.AverageEntryPrice,
+                execution.Receipt.AverageExitPrice, execution.Receipt.FillCount));
+        var report = await new ReviewService(new ReviewStore(h.Db, new SizingStore(h.Db, TestUnitOfWork.For(h.Db))), TimeProvider.System)
+            .GetAsync(new(Period: "all"), default);
+        Assert.Equal(execution.Receipt.EstimatedR, Assert.Single(report.Plays).RMultiple);
     }
 
     [PostgresFact]

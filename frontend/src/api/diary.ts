@@ -1,8 +1,8 @@
 import {
-  hasNoControlCharacters, isDiaryDecimal, isDiaryNonNegativeDecimal, isDiaryPositiveDecimal, isFilledText, isGuid, isNonBlankText,
+  hasNoControlCharacters, isCount, isDiaryDecimal, isDiaryNonNegativeDecimal, isDiaryPositiveDecimal, isFilledText, isGuid, isNonBlankText,
   isPositiveCount, isRecord, isText, isUtcTimestamp,
 } from './guards'
-import { isSavedPlay, type SavedPlay } from './plays'
+import { isEntryProgress, isPlayReceipt, isSavedPlay, type EntryProgress, type PlayReceipt, type SavedPlay } from './plays'
 
 export interface ManualExecutionInput {
   requestId: string
@@ -35,7 +35,15 @@ export interface ManualExecutions {
     netResultUsd: string | null
     feesComplete: boolean
   }
+  /** Known fees by currency as entered, exactly; absent from servers before Phase 1.1a. */
+  fees?: Array<{ token: string; amount: string }>
+  /** Executions whose cost is unknown, never counted as zero. */
+  unknownFees?: number
   notice: string
+  /** Each planned entry's ledger fills beside its plan; absent from servers before Phase 1. */
+  entries?: EntryProgress[]
+  /** Times, averages and estimated R by Review's rules; absent from servers before Phase 1. */
+  receipt?: PlayReceipt | null
 }
 
 const facts = (v: Record<string, unknown>) => ['entry', 'exit'].includes(v.role as string) &&
@@ -55,7 +63,12 @@ export const isManualExecutions = (v: unknown): v is ManualExecutions => isRecor
     (h.before === null || isManualExecutionRecord(h.before)) && isManualExecutionRecord(h.after)) && isRecord(v.totals) &&
   ['enteredQuantity', 'exitedQuantity', 'openQuantity'].every(key => isDiaryNonNegativeDecimal((v.totals as Record<string, unknown>)[key])) &&
   (v.totals.grossResultUsd === null || isDiaryDecimal(v.totals.grossResultUsd)) &&
-  (v.totals.netResultUsd === null || isDiaryDecimal(v.totals.netResultUsd)) && typeof v.totals.feesComplete === 'boolean' && isText(v.notice, 4000)
+  (v.totals.netResultUsd === null || isDiaryDecimal(v.totals.netResultUsd)) && typeof v.totals.feesComplete === 'boolean' && isText(v.notice, 4000) &&
+  (v.fees === undefined || Array.isArray(v.fees) && v.fees.length <= 200 &&
+    v.fees.every(f => isRecord(f) && isText(f.token, 32) && isDiaryDecimal(f.amount))) &&
+  (v.unknownFees === undefined || isCount(v.unknownFees)) &&
+  (v.entries === undefined || Array.isArray(v.entries) && v.entries.length <= 20 && v.entries.every(isEntryProgress)) &&
+  (v.receipt === undefined || v.receipt === null || isPlayReceipt(v.receipt))
 
 /** GUID request identities also work on LAN HTTP where randomUUID is unavailable. */
 export function newDiaryRequestId() {

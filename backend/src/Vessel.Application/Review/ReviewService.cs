@@ -231,6 +231,9 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         return DiaryService.BoundedReasons(reasons);
     }
 
+    /// <summary>Review's verdict on one Play: placed at <paramref name="ClosedAt"/>, scored, or excluded with a reason code.</summary>
+    public sealed record PlayScore(DateTimeOffset ClosedAt, PlayOutcome? Result, string? Exclusion);
+
     /// <summary>
     /// One closed Play or imported position; an accepted Play also has its Play-local result beside the scored venue result.
     /// </summary>
@@ -247,14 +250,30 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
 
     private Evaluated Evaluate(ClosedPlayFacts facts, DateTimeOffset now, bool incompleteOrders)
     {
+        var score = Score(facts, now, incompleteOrders);
+        return new Evaluated(facts, score.ClosedAt, score.Result, score.Exclusion)
+        {
+            Local = score.Exclusion is not null ? null : facts.Play.TradingMode == TradingMode.Paper
+                ? PaperPlayFacts.Local(score.Result!)
+                : PlayLocalResult.From(facts, venues?.Descriptor(facts.Play.VenueId)?.QuoteAsset),
+        };
+    }
+
+    /// <summary>
+    /// Review's verdict on one Play, shared with the Play's own receipt: its scored outcome, whose R is known only with a
+    /// complete initial stop, or why it is excluded (<c>executions</c> or <c>fees</c>). <paramref name="incompleteOrders"/>
+    /// says a linked order is known to miss executions. A paper Play is scored from its simulated executions only.
+    /// </summary>
+    public static PlayScore Score(ClosedPlayFacts facts, DateTimeOffset now, bool incompleteOrders)
+    {
         if (facts.Play.TradingMode == TradingMode.Paper)
         {
             var paper = facts.Paper;
             var outcome = paper?.Outcome(now, out _);
             if (outcome is not null && !HasCompleteInitialRisk(facts, default, ""))
                 outcome = outcome with { PlannedRisk = null };
-            return new(facts, paper?.ClosedAt ?? facts.Play.EndedAtUtc ?? facts.Play.UpdatedAtUtc, outcome,
-                outcome is null ? "executions" : null) { Local = outcome is null ? null : PaperPlayFacts.Local(outcome) };
+            return new PlayScore(paper?.ClosedAt ?? facts.Play.EndedAtUtc ?? facts.Play.UpdatedAtUtc, outcome,
+                outcome is null ? "executions" : null);
         }
         var fills = facts.Fills;
         var entries = fills.Where(f => f.Role == OrderLinkRole.Entry).ToList();
@@ -262,7 +281,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         // EndedAtUtc records when sync detected closure, not necessarily when it happened. Review places every Play, excluded
         // ones too, at its unvalidated latest exit without the detection clamp sizing applies (PlayExitTime.LatestValidExit).
         var close = PlayExitTime.LatestExit(fills) ?? facts.Play.EndedAtUtc ?? facts.Play.UpdatedAtUtc;
-        var incomplete = new Evaluated(facts, close, null, "executions");
+        var incomplete = new PlayScore(close, null, "executions");
         if (incompleteOrders || facts.Play.Status != PlayStatus.Closed || facts.Play.ContractId is null || entries.Count == 0 || exits.Count == 0 ||
             fills.Select(f => f.Fill.Id).Distinct().Count() != fills.Count ||
             fills.Any(f => f.Fill.AccountId != facts.Play.AccountId || f.Fill.ContractId != facts.Play.ContractId ||
@@ -275,8 +294,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         var result = PlayOutcomeCalculator.Outcome(facts);
         if (result is not null && !HasCompleteInitialRisk(facts, entries.Min(f => f.Fill.OccurredAtUtc), side))
             result = result with { PlannedRisk = null };
-        return result is null ? incomplete : !result.FeesComplete ? incomplete with { Exclusion = "fees" }
-            : new Evaluated(facts, close, result, null) { Local = PlayLocalResult.From(facts, venues?.Descriptor(facts.Play.VenueId)?.QuoteAsset) };
+        return result is null ? incomplete : !result.FeesComplete ? incomplete with { Exclusion = "fees" } : new PlayScore(close, result, null);
     }
 
     private static bool HasCompleteInitialRisk(ClosedPlayFacts facts, DateTimeOffset entryAt, string side)

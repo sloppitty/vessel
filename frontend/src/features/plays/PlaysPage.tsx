@@ -29,7 +29,8 @@ import { usePlayExecution } from './usePlayExecution'
 import { useEvidenceImages } from './evidence-images'
 import { useSizing } from './useSizing'
 import { noFilledEntries, planIssues, planIssueSummary } from './planChecks'
-import { executionFills, paperEntryFills, useLedgerFills } from './entry-fills'
+import { executionFills, manualLedgerFills, paperEntryFills, useManualLedger } from './entry-fills'
+import { RetrospectiveReceipt, ReviewReceipt } from './Receipt'
 import { noEntryFills, type EntryFills } from './position-risk-summary'
 import { planNumberIssues, planNumberSummary, storedPlanText, StoredPlanTextContext, type StoredPlanText } from './stored-plan-text'
 import { availableOf, defaultSizeUnits, marginOverBudget, overBudgetMessage, type SizeUnits } from './sizing'
@@ -192,7 +193,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const retrospective = saved?.summary.origin === 'retrospective'
   // Record-based suggestions also follow accepted stored-state reloads.
   const sizing = useSizing(api, reloadGeneration, visible)
-  const tracking = usePlayExecution(api, visible && session.view === 'editor' && saved && !manual && !paper ? saved.summary.id : null, saved?.summary.status, reloadGeneration)
+  const tracking = usePlayExecution(api, visible && session.view === 'editor' && saved && !manual && !paper ? saved.summary.id : null, saved?.summary.status, reloadGeneration, saved?.summary.planRevision)
   const { reload: reloadExecution } = tracking
   // A shell reload already rereads the execution through its generation; reload it directly only without one.
   const monitorChanged = useCallback(() => { if (onReload) onReload(); else reloadExecution() }, [reloadExecution, onReload])
@@ -235,7 +236,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   // Play can fail after the execution moved it to Open). Until they load, or after a failed reread, they are unknown.
   const playExecution = venueStatus !== undefined ? tracking.execution : null
   const fillsDirection = saved?.plan.direction ?? draft.direction
-  const ledger = useLedgerFills(api, visible && manual && saved && status !== 'draft' ? saved.summary.id : null, observedPlayVersion(session, api))
+  const manualLedger = useManualLedger(api, visible && manual && saved && status !== 'draft' ? saved.summary.id : null, observedPlayVersion(session, api))
+  const ledger = useMemo(() => manualLedgerFills(manualLedger), [manualLedger])
   const venueFills = useMemo(() => !manual && playExecution ? executionFills(playExecution, fillsDirection) : null,
     [manual, playExecution, fillsDirection])
   const fills: EntryFills | 'unknown' = status === 'draft' ? noEntryFills
@@ -483,12 +485,13 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       onClick={() => { void changeStatus({ status: 'planned' }) }}><Play size={14} />Resume</Button>
     : null
   const cancellable = status === 'planned' || status === 'paused'
+  const requestSave = () => { if (planBlocked()) return; if (needsReason) { setDialogError(null); setDialog('revision') } else void save() }
   const actions = <div className="play-actions" role="group" aria-label="Play actions">
     <Button variant="outline" size="sm" disabled={!saved} title={saved ? 'Plan revisions and status changes' : 'Save the play first'}
       onClick={() => setDialog('history')}><History size={14} />History</Button>
     <Button size="sm" variant="outline" className="play-save" disabled={!dirty || pending || !draft.accountId}
       title={!draft.accountId ? 'Choose an account to save' : undefined}
-      onClick={() => { if (planBlocked()) return; if (needsReason) { setDialogError(null); setDialog('revision') } else void save() }}>
+      onClick={requestSave}>
       <Save size={14} />{saving ? 'Saving…' : !dirty && saved ? 'Saved' : 'Save'}</Button>
     {statusAction}
     {cancellable
@@ -497,6 +500,24 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       : status === 'draft' && <Button size="sm" variant="outline" className="danger-action" disabled={pending || !saved}
         title={saved ? 'Delete this draft' : 'Nothing saved yet'} onClick={() => { setDialogError(null); setDialog('delete') }}><Trash2 size={14} />Delete</Button>}
   </div>
+
+  // The same Save inside the journal, so a review is not saved from the top of the page; shown only with something to save.
+  const journalSave = dirty || saving ? <Button size="sm" variant="outline" className="play-save" disabled={!dirty || pending || !draft.accountId}
+    title={!draft.accountId ? 'Choose an account to save' : undefined} onClick={requestSave}>
+    <Save size={14} />{saving ? 'Saving play…' : 'Save play'}</Button> : undefined
+  // The outcome beside the review: a venue Play's two bases or a manual Play's ledger, with R and time held from the server.
+  const shownExecution = tracking.execution?.playId === saved?.summary.id ? tracking.execution : null
+  // Figures kept from an earlier read are not shown as current: after a failed or pending reread the receipt waits for it.
+  const staleOutcome = tracking.stale ? tracking.error
+    ? <p className="error" role="alert">The outcome could not be read again. {tracking.error}</p>
+    : <p className="muted" role="status">Reading the outcome…</p> : undefined
+  const reviewReceipt = manual
+    ? manualLedger && manualLedger !== 'unknown' && manualLedger.receipt
+      ? <ReviewReceipt receipt={manualLedger.receipt} result={{ kind: 'manual', totals: manualLedger.totals, fees: manualLedger }}
+        status={manualLedger.play.summary.status} /> : undefined
+    : shownExecution?.receipt ? staleOutcome ?? <ReviewReceipt receipt={shownExecution.receipt} result={{ kind: 'venue', totals: shownExecution.totals }} status={shownExecution.status} />
+      : undefined
+  const retrospectiveReceipt = retrospective && shownExecution ? staleOutcome ?? <RetrospectiveReceipt execution={shownExecution} direction={draft.direction} /> : undefined
 
   // The status badge, a revision pill and the buttons say what the owner can do; no banner restates them.
   const revision = saved && locked && !retrospective && saved.summary.planRevision > 1 ? saved.summary.planRevision : null
@@ -510,14 +531,14 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       sizing={sizing.sizing} sizingStatus={sizing.status} onRetrySizing={sizing.retry} onRiskChange={sizing.updateRisk}
       filledEntries={filledEntries} fills={fills} onUnits={onUnits} onPriceStep={setPriceStep}
       incidents={saved ? playIncidents.get(saved.summary.id) : undefined} stopEvidence={manual ? undefined : stopEvidence}
-      evidenceImages={evidenceImages}
+      evidenceImages={evidenceImages} reviewReceipt={reviewReceipt} journalSave={journalSave} retrospectiveReceipt={retrospectiveReceipt}
       execution={paper ? saved ? <PaperExecutionPanel key={saved.summary.id} api={api} playId={saved.summary.id} reloadGeneration={reloadGeneration + saved.summary.version} onState={onPaperState} /> : <p className="workspace-scope-note">Save this Paper play to see simulated execution progress. Planning arms evaluation; a draft never monitors.</p> : manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
         enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}
         working={busy !== null}
         observedVersion={observedPlayVersion(session, api)}
         onChange={form => { if (mounted.current && currentApi.current === api && latest.current.saved?.summary.id === saved?.summary.id) update({ manual: form }) }}
         onStored={acceptStoredPlay} onBegin={() => latest.current.saved?.summary.id === saved?.summary.id ? beginWork('manual') : null} />
-        : saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy}
+        : saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy} stale={tracking.stale}
         entries={draft.entries} direction={draft.direction} origin={saved.summary.origin} monitor={monitorRun.monitor} monitorBusy={monitorRun.busy} monitorError={monitorRun.error} retryAtUtc={monitorRun.retryAtUtc} monitorUnavailable={monitorRun.statusUnavailable}
         currentBookRead={currentBookRead}
         {...(onManageAccount && account ? { onManageCredential: () => onManageAccount(account.id) } : {})}

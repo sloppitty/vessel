@@ -221,3 +221,47 @@ Phase 0, item 0.5b of the [trust and correctness contract](phase0-trust-correctn
 - **Signed Summary row.** The first Summary metric is now "All stops". It reads what every stop filling would do to the position: "+5 USDC locked in", "−5 USDC at risk" or "0 USDC break-even", in the quote unit. A small line says what it is measured from: "From the average fill" for entries whose average fill is known (the quantity × price of the linked entry fills over their quantity, exactly, or the manual ledger's quantity-weighted entry price), "From the planned entry" otherwise, or both. While the fills load it reads "Unknown · Waiting for the entries' fills", never a figure from the planned entry. With a size of zero there is no position, so it reads "0 USDC", not "break-even". If an older server's execution lists fills that do not add up to the entry's filled quantity, its 28-place average is used, and a result within that rounding of zero reads "Unknown · Within the rounding of the reported average fill" rather than claim a sign. It uses the planned full-position quantity, entry and stop shares, and exact fractions over the plan text and the exact average fill (`lib/decimal.ts`), rounded once for display. A small non-zero result reads "< 0.01" with its sign. A partial plan shows "Known …" with "Total unknown", and unknown stays "Unknown". Stop coverage counts a filled entry's priced stops wherever they sit. A result that is not a loss sets the risk share to a known 0% and Planned R:R to "None" ("No loss at the stops"). Percent stops resolve from the planned entry at the leverage, as order matching does.
 - **Rebind from the drift record.** In the Execution tab, a `level.drift` record lists each drifted linked stop or target ("Entry 1 stop: order 123 rests at 101; the plan said 95.") with a reason field and "Use 101". Rows are shown only where the monitor found the order away from its level, matched as the server matches (one step of the fifth significant figure, or the instrument's tick when coarser). A percentage level says so on the button, for example "Use 101.5 (changes 5 % to a price)". It sends the saved version and the order's price as Vessel stores it. The answer is the saved Play, which the editor adopts, and the execution is read again. The record then says the plan matches the order until the monitor's next check clears it. The action waits while plan edits are unsaved or other Play work runs. A 409 (the Play or the order changed) is shown on the record.
 
+
+## Actual versus plan (October 20, 2026)
+
+Phase 1.1a of the [learning-loop contract](phase1-learning-loop-contract.md),
+covering G-03 and the F-06 receipt. Every figure comes from the server, so
+the Play never disagrees with Review.
+- **Per entry.** The execution read (`PlayExecutionDto.entries`) and the
+  manual ledger read (`ManualExecutionsDto.entries`) give each entry's
+  `plannedPrice`, `plannedQuantity` and `planRevision`.
+  - The values come from the plan revision in force at the entry's first
+    fill. That is the latest revision at or before the fill, or the first
+    revision when the plan was written after it. Before any fill, the current
+    plan is used.
+  - The quantity follows the editor's sizing.
+  - Anything the plan cannot give is null.
+  - The Execution tab lists "Average fill X vs plan Y (±d)", with an exact
+    difference, and "Filled q of Q".
+- **Receipt.** Both reads carry `receipt`:
+  - the first entry and last exit fill times, and from them the time held,
+    shown "so far" while Open;
+  - average entry and exit, and the fill count;
+  - estimated R with the initial risk it divides by.
+
+  R comes from `ReviewService.Score`, Review's own rule. Otherwise R is null
+  with a reason: not closed, retrospective, excluded for fees or executions,
+  no complete stop, or no plan in force at the first fill.
+- **Review tab.** The Review tab opens with the outcome:
+  - a venue Play shows the venue net, the Play-local result with its
+    sign-differs flag, and fees;
+  - a manual Play shows its ledger net;
+  - both show estimated R and time held.
+- **Journal Save.** While there is something to save, the journal and its
+  Expand dialog show **Save play**. It is the header Save, with its plan
+  checks and revision-reason dialog. After the save, focus moves to the
+  journal's own expand or close button.
+- **Retrospective Plays.** The "No original plan" panel lists the trade's
+  facts:
+  - direction;
+  - entered and exited quantity;
+  - average entry and exit;
+  - both results and fees;
+  - time held and fill count.
+
+  It shows no R and no plan.
