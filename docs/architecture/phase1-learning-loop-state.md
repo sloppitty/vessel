@@ -333,7 +333,8 @@ October 20, 2026, branch `t3/phase1-post-hoc-badge`, stacked on 1.1a:
   - expectancy: scored Plays;
   - estimated R: Plays with a complete initial stop.
 
-  The asset cards are marked by their Play counts, and breakdown rows by their decided counts.
+  The asset cards are marked by their result counts. Breakdown cells are marked one by one: batting average and profit
+  factor by the row's decided count, average gain / loss by the smaller of its wins and losses.
 - **Label.** The R average is now "Estimated R expectancy (planned-stop model)". The statistic is unchanged.
 - **Tests.**
   - PostgreSQL, T29: a manual Play planned today for an execution recorded days earlier is flagged on its receipt and
