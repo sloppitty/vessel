@@ -21,6 +21,7 @@ import { isPlanText, keptPlanTextTitle, planNumber, planTextLength } from './num
 import { availableLabel, availableOf, budgetSourceLabel, defaultSizeUnits, formatMoney, formatQuantity, playBudget, positionSize, type AvailableBalance, type SizeUnits } from './sizing'
 import './plays-workspace.css'
 import { NativeSelect } from '@/components/ui/native-select'
+import { useDisplayZone } from '@/lib/display-zone'
 
 const displayMoney = (value: string | null | undefined) => value == null ? 'Unavailable' : money(value)
 // Placeholder values stay readable but recede, so real figures carry the visual weight.
@@ -37,6 +38,7 @@ export function AvailableBudget({ draft, onChange, available = null }: {
   /** The account's normalized available balance in nominal USD and its source, or null when unknown. */
   available?: AvailableBalance | null
 }) {
+  const zone = useDisplayZone()
   const [editing, setEditing] = useState(false)
   const [budget, setBudget] = useState('')
   const [error, setError] = useState('')
@@ -75,7 +77,7 @@ export function AvailableBudget({ draft, onChange, available = null }: {
   </div>
 
   // The available balance names its source and snapshot time, and says when the latest refresh failed.
-  const source = current.source === 'manual' || !available ? budgetSourceLabel(current) : availableLabel(available)
+  const source = current.source === 'manual' || !available ? budgetSourceLabel(current) : availableLabel(available, zone)
   return <div className="available-budget" role="group" aria-label="Budget">
     <span className="budget-label">Budget</span>
     {kept ? <strong title={keptPlanTextTitle(current.value)} data-warning="true">{current.value}</strong>
@@ -94,6 +96,7 @@ export function CapitalContext({ accounts, portfolios, draft, retrospective = fa
   draft: PlayDraft
   retrospective?: boolean
 }) {
+  const zone = useDisplayZone()
   const account = accounts.find(item => item.id === draft.accountId && item.isEnabled !== false)
   const portfolio = portfolios.find(item => item.id === account?.portfolioId)
   const venues = useVenues()
@@ -124,7 +127,7 @@ export function CapitalContext({ accounts, portfolios, draft, retrospective = fa
         {wallet && metric('Wallet total', account.totalStablecoinNominalUsd,
           `${account.stablecoinScope ?? 'Supported stablecoin wallet'}${account.accountMode ? ` · ${account.accountMode}` : ''}. Nominal 1 token = 1 USD.`)}
         {account && (paper || venues.can(account.venueId, 'sync')) && metric('Available', available?.value, paper ? 'Virtual available margin for this paper account. Not real funds.' : 'Nominal USD the venue reports as available: wallet funds of unified accounts, otherwise available margin or else the withdrawable amount.',
-          available ? availableLabel(available) : undefined)}
+          available ? availableLabel(available, zone) : undefined)}
         {wallet && !unified && metric('Perps equity', account.accountValueUsd, 'Perpetual account value at the venue.')}
         {!wallet && account && metric(paper ? 'Virtual equity' : 'Account value', account.accountValueUsd)}
         {!retrospective && <><div title={`Committed margin as a share of the ${reference}`}><dt>Margin / {reference}</dt><dd data-placeholder={share(sized.margin) === '—'}>{share(sized.margin)}</dd></div>

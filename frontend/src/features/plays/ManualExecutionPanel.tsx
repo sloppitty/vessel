@@ -12,6 +12,8 @@ import type { DraftEntry } from './draft'
 import { nominalStablecoins } from './stablecoins'
 import { NativeSelect } from '@/components/ui/native-select'
 import { EntryReceipts, ManualFees, ReceiptTotals } from './Receipt'
+import { Time } from '@/components/ui/time'
+import { formatTime } from '@/lib/time'
 
 export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form, onChange, onStored, onBegin, working = false, observedVersion, zone = 'local' }: {
   api: WorkspaceApi
@@ -27,7 +29,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
   onBegin: () => (() => void) | null
   working?: boolean
   observedVersion?: number
-  /** The display time zone times are typed and shown in (phase 1, 1.6b); the browser's own until 1.6e adds the setting. */
+  /** The display time zone times are typed and shown in (phase 1, 1.6b and 1.6e). */
   zone?: EntryZone
 }) {
   const id = useId()
@@ -92,14 +94,15 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
     if (submission.current || pending) return
     const { attempt: _attempt, ...current } = form
     void _attempt
-    onChange({ ...current, ...patch })
+    // Typed text belongs to the zone it was typed in, even if the display setting changes later (1.6e).
+    onChange({ ...current, ...'occurredAt' in patch && !('zone' in patch) ? { zone: form.zone ?? zone } : {}, ...patch })
     setError(null)
     forget(Object.keys(patch).filter(key => key !== 'together'))
   }
   // Other executions corrected with this one (phase 1, 1.3b); any edit drops the frozen attempt, as above.
   const together = form.executionId ? form.together ?? [] : []
   const changeRow = (index: number, patch: Partial<ManualExecutionDraft>) => {
-    change({ together: together.map((row, at) => at === index ? { ...row, ...patch } : row) })
+    change({ together: together.map((row, at) => at === index ? { ...row, ...'occurredAt' in patch ? { zone: row.zone ?? zone } : {}, ...patch } : row) })
     forget(Object.keys(patch).map(key => `together-${index}-${key}`))
   }
   const addable = form.executionId ? (ledger?.records ?? []).filter(record => record.id !== form.executionId &&
@@ -162,8 +165,10 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
   const field = (key: Exclude<ManualField, 'entryId' | 'occurredAt' | 'side'>, label: string, max: number, decimal = false, list?: string, required = false) =>
     shell(key, label, <input id={`${id}-${key}`} type="text" inputMode={decimal ? 'decimal' : 'text'} aria-required={required || undefined}
       maxLength={max} value={form[key]} list={list} onChange={event => change({ [key]: event.target.value })} {...invalid(key)} />)
-  const zoneLabel = zoneName(zone)
-  const typed = form.occurredAt.trim() ? parseZoneText(form.occurredAt, zone) : null
+  // The zone the time is in: where it was typed or loaded, else the display setting.
+  const timeZone = form.zone ?? zone
+  const zoneLabel = zoneName(timeZone)
+  const typed = form.occurredAt.trim() ? parseZoneText(form.occurredAt, timeZone) : null
   const expectedSide = sideFor(form.role, direction)
 
   return <div className="manual-executions">
@@ -190,7 +195,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
       <ol className="manual-records" aria-label="Manual executions">
         {ledger.records.map(record => <li key={record.id}>
           <strong>{record.role === 'entry' ? 'Entry' : 'Exit'} · {record.side} {record.quantity} at {record.price}</strong>
-          <time dateTime={record.occurredAtUtc}>{record.occurredAtUtc}</time>
+          <Time at={record.occurredAtUtc} style="datetime-exact" />
           <span>Source: {record.source} · Fee: {record.fee === null ? 'Unknown' : `${record.fee} ${record.feeCurrency}`}</span>
           <Button type="button" size="sm" variant="outline" disabled={!enabled || dirty || pending || !canCorrect || hasManualDraft(form)}
             aria-label={`Correct ${record.id}`} onClick={() => { if (submission.current || pending) return; setError(null); setErrors({}); onChange(manualCorrectionDraft(record, zone)) }}>Correct</Button>
@@ -200,9 +205,9 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
         <ol>{ledger.history.map(change => <li key={change.id}>
           <strong>{change.before ? change.batchId ? 'Correction batch' : 'Correction' : 'Recorded'} · {change.reason ?? 'Initial record'}</strong>
           {change.batchId && <small>Batch {change.batchId.slice(0, 8)}: {ledger.history.filter(item => item.batchId === change.batchId).length} executions corrected together</small>}
-          <time dateTime={change.occurredAtUtc}>{change.occurredAtUtc}</time>
-          {change.before && <p>Before: {change.before.role} · {change.before.side} {change.before.quantity} at {change.before.price} · {change.before.occurredAtUtc} · {change.before.source} · fee {change.before.fee === null ? 'unknown' : `${change.before.fee} ${change.before.feeCurrency}`}</p>}
-          <p>After: {change.after.role} · {change.after.side} {change.after.quantity} at {change.after.price} · {change.after.occurredAtUtc} · {change.after.source} · fee {change.after.fee === null ? 'unknown' : `${change.after.fee} ${change.after.feeCurrency}`}</p>
+          <Time at={change.occurredAtUtc} style="datetime-seconds" />
+          {change.before && <p>Before: {change.before.role} · {change.before.side} {change.before.quantity} at {change.before.price} · <Time at={change.before.occurredAtUtc} style="datetime-exact" /> · {change.before.source} · fee {change.before.fee === null ? 'unknown' : `${change.before.fee} ${change.before.feeCurrency}`}</p>}
+          <p>After: {change.after.role} · {change.after.side} {change.after.quantity} at {change.after.price} · <Time at={change.after.occurredAtUtc} style="datetime-exact" /> · {change.after.source} · fee {change.after.fee === null ? 'unknown' : `${change.after.fee} ${change.after.feeCurrency}`}</p>
         </li>)}</ol>
       </details>
     </>}
@@ -220,9 +225,9 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
             onChange={event => change({ entryId: event.target.value })} {...invalid('entryId')}><option value="">Choose entry</option>{entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</NativeSelect>)}
           {shell('occurredAt', `Execution time (${zoneLabel})`, <div className="manual-time"><input id={`${id}-occurredAt`} type="text" maxLength={64}
             placeholder="YYYY-MM-DD HH:mm:ss" value={form.occurredAt} onChange={event => change({ occurredAt: event.target.value })}
-            {...invalid('occurredAt', `${id}-time-help`, zone !== 'utc' && !!typed && 'utc' in typed && `${id}-time-utc`)} />
-            <Button type="button" size="sm" variant="outline" onClick={() => change({ occurredAt: nowText(zone) })}>Now</Button></div>,
-            zone !== 'utc' && typed && 'utc' in typed && <small id={`${id}-time-utc`} className="muted">Sent as {typed.utc.slice(0, -1).replace('T', ' ')} UTC</small>)}
+            {...invalid('occurredAt', `${id}-time-help`, timeZone !== 'utc' && !!typed && 'utc' in typed && `${id}-time-utc`)} />
+            <Button type="button" size="sm" variant="outline" onClick={() => change({ occurredAt: nowText(zone), zone })}>Now</Button></div>,
+            timeZone !== 'utc' && typed && 'utc' in typed && <small id={`${id}-time-utc`} className="muted">Sent as {typed.utc.slice(0, -1).replace('T', ' ')} UTC</small>)}
           {shell('side', 'Side', <NativeSelect id={`${id}-side`} value={form.side || expectedSide} disabled={!!form.executionId}
             onChange={event => change({ side: event.target.value as ManualExecutionDraft['side'] })} {...invalid('side')}><option value="buy">Buy</option><option value="sell">Sell</option></NativeSelect>)}
           {field('source', 'Source label (required)', 100, false, undefined, true)}
@@ -240,7 +245,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
             return <fieldset key={row.executionId} className="manual-together-row">
               <legend>Also correct: {name}</legend>
               <div className="manual-fields">
-                {rowField('occurredAt', `${name} time (${zoneLabel})`, 64)}{rowField('quantity', `${name} quantity`, 96, true)}
+                {rowField('occurredAt', `${name} time (${zoneName(row.zone ?? zone)})`, 64)}{rowField('quantity', `${name} quantity`, 96, true)}
                 {rowField('price', `${name} price`, 96, true)}{rowField('fee', `${name} fee (blank = unknown)`, 96, true)}
                 {rowField('feeCurrency', `${name} fee currency`, 32)}{rowField('source', `${name} source label`, 100)}
               </div>
@@ -254,7 +259,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
               if (record) change({ together: [...together, manualCorrectionDraft(record, zone)] })
             }}>
             <option value="">Another execution, with the same reason…</option>
-            {addable.map(record => <option key={record.id} value={record.id}>{record.role === 'entry' ? 'Entry' : 'Exit'} · {record.side} {record.quantity} at {record.price} · {record.occurredAtUtc}</option>)}
+            {addable.map(record => <option key={record.id} value={record.id}>{record.role === 'entry' ? 'Entry' : 'Exit'} · {record.side} {record.quantity} at {record.price} · {formatTime(record.occurredAtUtc, zone, 'datetime-exact')}</option>)}
           </NativeSelect></label>}
           {together.length > 0 && <p className="muted">These corrections are saved together with one reason, or not at all. Only the final ledger has to be valid.</p>}
         </div>}

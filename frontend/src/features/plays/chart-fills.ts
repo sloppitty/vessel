@@ -1,6 +1,8 @@
 import type { CandleInterval } from '@/api/candles'
 import { candleSpan, intervalMs } from '@/components/chart/intervals'
 import type { ChartFocus, ChartMarker } from '@/components/chart/types'
+import type { DisplayZone } from '@/lib/display-zone'
+import { formatTime } from '@/lib/time'
 
 /*
  * Fills on the chart (phase 1, 1.1b): each linked or manual fill as a buy or sell marker at its time and price, never a
@@ -10,15 +12,16 @@ import type { ChartFocus, ChartMarker } from '@/components/chart/types'
 /** One fill to mark on the chart: exact decimal text as the venue or the ledger reports it. */
 export interface ChartFill { id: string; atUtc: string; price: string; quantity: string; side: 'buy' | 'sell'; role: 'entry' | 'exit' }
 
-const fillTime = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'medium', timeZone: 'UTC' })
-
-/** Markers for the fills that can be placed: a valid time and a positive price, on candles of `interval`. */
-export function fillMarkers(fills: readonly ChartFill[], interval: CandleInterval): ChartMarker[] {
+/**
+ * Markers for the fills that can be placed: a valid time and a positive price, on candles of `interval`. Tooltips read
+ * in the display zone (1.6e).
+ */
+export function fillMarkers(fills: readonly ChartFill[], interval: CandleInterval, zone: DisplayZone): ChartMarker[] {
   return fills.flatMap(fill => {
     const time = Date.parse(fill.atUtc), price = Number(fill.price)
     if (!Number.isFinite(time) || !Number.isFinite(price) || price <= 0) return []
     return [{ id: fill.id, time, price, side: fill.side, span: candleSpan(interval),
-      tooltip: `${fill.role === 'entry' ? 'Entry' : 'Exit'} fill · ${fill.side === 'buy' ? 'Buy' : 'Sell'} ${fill.quantity} at ${fill.price}\n${fillTime.format(time)} UTC` }]
+      tooltip: `${fill.role === 'entry' ? 'Entry' : 'Exit'} fill · ${fill.side === 'buy' ? 'Buy' : 'Sell'} ${fill.quantity} at ${fill.price}\n${formatTime(time, zone, 'datetime-seconds')}` }]
   })
 }
 

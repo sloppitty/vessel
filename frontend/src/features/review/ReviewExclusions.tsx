@@ -5,7 +5,7 @@ import { errorMessage } from '@/api/errors'
 import { PlayIdentity } from '@/features/plays/PlayIdentity'
 import { evidenceLines } from '@/features/plays/unresolved'
 import { unresolvedReasonLabels } from '@/api/plays'
-import { time } from '@/lib/format'
+import { Time } from '@/components/ui/time'
 
 export function ReviewExclusions({ api, initialQuery, onOpenPlay }: {
   api: WorkspaceApi; initialQuery: ReviewQuery; onOpenPlay: (id: string, signal: AbortSignal) => Promise<void>
@@ -51,7 +51,7 @@ export function ReviewExclusions({ api, initialQuery, onOpenPlay }: {
       <ul>{item.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>
       {item.unresolved && <dl className="pr-unresolved" aria-label="Unresolved declaration">
         <div><dt>Reason</dt><dd>{unresolvedReasonLabels[item.unresolved.reason]}</dd></div>
-        <div><dt>Declared</dt><dd><time dateTime={item.unresolved.declaredAtUtc}>{time(item.unresolved.declaredAtUtc)}</time></dd></div>
+        <div><dt>Declared</dt><dd><Time at={item.unresolved.declaredAtUtc} /></dd></div>
         {item.unresolved.note && <div><dt>Note</dt><dd>{item.unresolved.note}</dd></div>}
         {item.unresolved.evidence && <div><dt>Execution facts</dt><dd><ul>{evidenceLines(item.unresolved.evidence).map((line, index) =>
           <li key={index}>{line}</li>)}</ul></dd></div>}

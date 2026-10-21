@@ -87,10 +87,6 @@ export function coverageLines(rows: readonly MonitorCoverage[], time: (value: st
   return [...lines.values()].map(line => line.count > 1 ? `${line.count} Plays · ${line.text}` : line.text)
 }
 
-// The chart's own time format (axis, "Updated … UTC", capture stamp): UTC and said so, since the label is drawn on the canvas.
-const utcFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' })
-/** A chart label time such as "Oct 14, 14:02 UTC", whatever the browser's zone. */
-export const chartUtcTime = (value: string) => `${utcFormat.format(new Date(value))} UTC`
 const unknown: LevelEvidence = { text: 'unknown', confirmed: false }
 const notRead: LevelEvidence = { text: 'not read', confirmed: false }
 /** The drawn level still stands at the saved price the check compared (both come from the same plan text). */
@@ -108,7 +104,8 @@ const atSavedPrice = (drawn: number, saved: string | null) => {
  * evidence's own words: "not seen at the venue", "unknown", or "not read" where nothing reads the venue's current book.
  * Undefined where the plan makes no venue claim (drafts, plans before an entry fills, untracked Plays).
  */
-export function stopEvidenceFor(execution: PlayExecution | null | undefined, time: (value: string) => string = chartUtcTime): StopEvidenceOf | undefined {
+/** `time` writes a time for the chart's tags, in the display zone and naming it (1.6e). */
+export function stopEvidenceFor(execution: PlayExecution | null | undefined, time: (value: string) => string): StopEvidenceOf | undefined {
   if (!execution || execution.status !== 'open' || !execution.tracked) return undefined
   if (!execution.monitor) return () => notRead
   const coverage = execution.monitor.coverage?.find(row => row.playId === execution.playId)

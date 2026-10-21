@@ -7,8 +7,8 @@ import { Skeleton, SkeletonStatus } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PlayIdentity } from '@/features/plays/PlayIdentity'
 import { errorMessage } from '@/api/errors'
-import { time } from '@/lib/format'
 import { useDelayedFlag } from '@/lib/use-delayed-flag'
+import { Time } from '@/components/ui/time'
 
 const filters = [
   { id: 'drafts', label: 'Drafts', description: 'Saved drafts, most recently updated first', empty: 'No drafts' },
@@ -105,7 +105,7 @@ export function OverviewPlays({ api, accounts, reloadGeneration, onBrowse, onOpe
               </span>
               <span className="overview-play-state">
                 <span className={`workspace-badge ${play.status === 'open' ? 'positive-badge' : ended(play) && !isReviewed(play) ? 'warning-badge' : ''}`}>{statusLabels[play.status]}</span>
-                <small>{opening === play.id ? 'Opening…' : time(play.updatedAtUtc)}</small>
+                <small>{opening === play.id ? 'Opening…' : <Time at={play.updatedAtUtc} />}</small>
               </span>
             </button>
           </li>)}

@@ -15,6 +15,7 @@ import { OperationsTable } from './OperationsTable'
 import { ActivityTable } from './ActivityTable'
 import { sideDirection, resultSign, operationPriceReturn, operationDates, operationStatus } from './activity-format'
 import { emptyFilters, filterQuery, initialActivityState, type ActivityListState } from './activity-filters'
+import { restoreZone } from '@/test/zone'
 
 const client = (activity = vi.fn().mockResolvedValue(activityFixture), activityFills = vi.fn().mockResolvedValue(activityFillsFixture)) =>
   ({ activity, activityFills }) as unknown as WorkspaceApi
@@ -256,9 +257,16 @@ describe('operation display values', () => {
     expect(operationStatus({ ...partial, status: 'incomplete' }).label).toBe('Incomplete')
   })
   it('shortens same-day UTC times while retaining dates and years across boundaries', () => {
-    expect(operationDates(closed)).toBe('12 Oct, 10:00 → 12:00')
-    expect(operationDates({ ...closed, closedAtUtc: '2026-10-13T12:00:00Z' })).toBe('12 Oct, 10:00 → 13 Oct, 12:00')
-    expect(operationDates({ ...closed, closedAtUtc: '2027-01-01T12:00:00Z' })).toBe('12 Oct 2026, 10:00 → 1 Jan 2027, 12:00')
+    expect(operationDates(closed, 'utc')).toBe('12 Oct, 10:00 → 12:00 UTC')
+    // Across a daylight-saving change each end names its own offset (phase 1, 1.6e).
+    const zone = process.env.TZ
+    process.env.TZ = 'Europe/Madrid'
+    try {
+      expect(operationDates({ ...closed, openedAtUtc: '2025-10-26T00:30:00Z', closedAtUtc: '2025-10-26T01:30:00Z' }, 'local'))
+        .toBe('26 Oct, 02:30 CEST → 02:30 CET')
+    } finally { restoreZone(zone) }
+    expect(operationDates({ ...closed, closedAtUtc: '2026-10-13T12:00:00Z' }, 'utc')).toBe('12 Oct, 10:00 → 13 Oct, 12:00 UTC')
+    expect(operationDates({ ...closed, closedAtUtc: '2027-01-01T12:00:00Z' }, 'utc')).toBe('12 Oct 2026, 10:00 → 1 Jan 2027, 12:00 UTC')
   })
   it('turns filters into request parameters, with dates only for a custom period', () => {
     expect(filterQuery(emptyFilters)).toEqual({})
@@ -291,6 +299,8 @@ describe('activity loading, filters and pages', () => {
     else await waitFor(() => expect(screen.getByRole('combobox', { name: label })).toHaveValue(''))
     await waitFor(() => expect(lastQuery(activity)).toEqual({ page: 1, pageSize: 25 }))
     expect(await within(await screen.findByRole('table')).findByText('BTC')).toBeInTheDocument()
+    // Each row names its own zone, so the column claims none (phase 1, 1.6e).
+    expect(screen.getByRole('columnheader', { name: 'Account / time' })).toBeInTheDocument()
   })
   it('sends every filter to the server, returns to page 1 and resets', async () => {
     const activity = vi.fn().mockImplementation((query: ActivityQuery) => Promise.resolve(activityPage(numbered(25), { totalCount: 60, scopeCount: 80, page: query.page, facets: { accountIds: [accountFixture.id], contracts: ['ETH', ...numbered(25).map(op => op.contractId)] } })))
@@ -305,7 +315,7 @@ describe('activity loading, filters and pages', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Reset filters' }))
     // Dates kept behind "All retained activity" are not sent, so they do not count as a filter.
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Period' }), 'custom')
-    fireEvent.change(screen.getByLabelText('From date'), { target: { value: '2026-10-01' } })
+    fireEvent.change(screen.getByLabelText('From date (UTC)'), { target: { value: '2026-10-01' } })
     expect(await screen.findByText('60 of 80 operations match the filters.')).toBeInTheDocument()
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Period' }), 'all')
     await waitFor(() => expect(screen.queryByText(/operations match the filters/)).not.toBeInTheDocument())
@@ -320,9 +330,9 @@ describe('activity loading, filters and pages', () => {
       await waitFor(() => expect(lastQuery(activity)).toEqual({ page: 1, pageSize: 25 }))
     }
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Period' }), 'custom')
-    await userEvent.type(screen.getByLabelText('From date'), '2026-10-01')
+    await userEvent.type(screen.getByLabelText('From date (UTC)'), '2026-10-01')
     await waitFor(() => expect(lastQuery(activity)).toEqual({ period: 'custom', from: '2026-10-01', page: 1, pageSize: 25 }))
-    expect(screen.getByLabelText('Through date')).toHaveAttribute('min', '2026-10-01')
+    expect(screen.getByLabelText('Through date (UTC)')).toHaveAttribute('min', '2026-10-01')
     expect(states.every(state => state.page === 1)).toBe(true)
   })
   it('keeps the previous rows dimmed and the pager disabled while another page loads, then scrolls to the table', async () => {

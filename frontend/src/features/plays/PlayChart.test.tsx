@@ -33,6 +33,7 @@ function fakeAdapter() {
       setIndicators(view) { state.indicators = view },
       setMarkers(markers) { state.markers = markers },
       setFocus(range) { state.focus = range },
+      setTimeZone() {},
       capture(caption) { state.captions.push(caption); return Promise.resolve(new Blob(['png'], { type: 'image/png' })) },
       destroy() { state.destroyed++ },
     }
@@ -1026,7 +1027,7 @@ describe('Chart captures', () => {
 
     await userEvent.click(button)
     expect(onCapture).toHaveBeenCalledWith(expect.any(Blob), 'BTC · Hyperliquid · 1 hour')
-    expect(state.captions[0]).toMatch(/^BTC · Hyperliquid · 1 hour · \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC · EMA 9\/50\/100\/200 · Volume · RSI 14 · Planned levels are not fills$/)
+    expect(state.captions[0]).toMatch(/^BTC · Hyperliquid · 1 hour · \d{1,2} [A-Z][a-z]{2} \d{4}, \d{2}:\d{2} UTC · EMA 9\/50\/100\/200 · Volume · RSI 14 · Planned levels are not fills$/)
     expect(await screen.findByText(/Capture added to the Evidence tab/)).toHaveAttribute('role', 'status')
 
     await userEvent.click(button)

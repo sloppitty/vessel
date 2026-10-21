@@ -5,15 +5,18 @@ import { ApiError, errorMessage } from '@/api/errors'
 import { newDiaryRequestId } from '@/api/diary'
 import { Button } from '@/components/ui/button'
 import { amount, money } from '@/lib/format'
+import { useDisplayZone, type DisplayZone } from '@/lib/display-zone'
 import { defaultPlayTitle, maxPlayTitleLength } from '@/features/plays/default-title'
 import { OperationDirection } from './OperationDirection'
 import { duration, operationDates } from './activity-format'
+import { Time } from '@/components/ui/time'
 
 export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, onCreated }: {
   api: WorkspaceApi; accountId: string; operationId: string
   onOpenPlay?: (id: string, signal: AbortSignal) => Promise<void>
   onCreated?: () => void
 }) {
+  const zone = useDisplayZone()
   const [generation, setGeneration] = useState(0)
   const [state, setState] = useState<{ generation: number; value: Preview | null; error: string | null } | null>(null)
   // Null until the owner edits it: the field then shows the default title, which is also what a blank title saves.
@@ -54,7 +57,7 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
     // Keep the complete payload and key after an uncertain response. A retry must not create a second Play.
     const body = attempt ?? {
       requestId: newDiaryRequestId(), accountId, operationId, expectedFingerprint: preview.fingerprint,
-      title: title?.trim() || defaultTitle(preview.operation), ...(review.trim() ? { review: review.trim() } : {}),
+      title: title?.trim() || defaultTitle(preview.operation, zone), ...(review.trim() ? { review: review.trim() } : {}),
     }
     setAttempt(body); setSaving(true); setSaveError(null)
     const controller = new AbortController()
@@ -78,7 +81,7 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
   if (state.error) return <div role="alert"><p>{state.error}</p><Button variant="outline" onClick={refresh}>Retry preview</Button></div>
   const preview = state.value!
   const op = preview.operation
-  const fallbackTitle = defaultTitle(op)
+  const fallbackTitle = defaultTitle(op, zone)
   // The trade in plain terms first; the original records and their identifiers follow, collapsed.
   return <div className="retrospective-preview">
     <div className="retrospective-summary" title={`Operation ${op.id} · Account ${op.accountId}`}><strong>{op.contractId}</strong><OperationDirection direction={op.direction} /><span className="workspace-badge">{op.status} · {op.playAssociation}</span></div>
@@ -87,7 +90,7 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
       <div><dt>Average entry</dt><dd title={op.averageEntryPrice ?? 'Unknown'}>{money(op.averageEntryPrice)}</dd></div>
       <div><dt>Average exit</dt><dd title={op.averageExitPrice ?? 'Unknown'}>{money(op.averageExitPrice)}</dd></div>
       <div><dt>Net execution result</dt><dd title={op.netResultUsd ?? 'Unknown'}>{money(op.netResultUsd)}</dd></div>
-      <div><dt>Dates <span className="operation-timezone">UTC</span></dt><dd>{operationDates(op)}{op.openedAtUtc !== null && op.closedAtUtc !== null && <small> · {duration(op.openedAtUtc, op.closedAtUtc)}</small>}</dd></div>
+      <div><dt>Dates</dt><dd>{operationDates(op, zone)}{op.openedAtUtc !== null && op.closedAtUtc !== null && <small> · {duration(op.openedAtUtc, op.closedAtUtc)}</small>}</dd></div>
     </dl>
     <p className="workspace-scope-note">{preview.notice}</p>
     <details className="operation-scope"><summary>Basis</summary><p className="workspace-scope-note">P&amp;L basis: {op.pnlBasis}. Fees follow the reported basis, with no second deduction from net-of-fee P&amp;L. Separate funding cashflows are not added; RISEx funding inclusion is unverified.</p></details>
@@ -96,7 +99,7 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
     <details className="operation-scope retrospective-records"><summary>Original imported fills and associations ({op.fills.length})</summary>
     <div className="workspace-table-wrap retrospective-fills"><table className="workspace-table"><caption className="sr-only">Original imported fills and associations</caption><thead><tr><th>Record / time</th><th>Side / effect / role</th><th>Original quantity / price</th><th>Original fee / P&amp;L</th><th>Order / Play</th></tr></thead><tbody>{op.fills.map((part, index) => {
       const fill = part.fill
-      return <tr key={`${fill.id}-${index}`}><td><strong>{fill.id}</strong><small>{fill.occurredAtUtc}</small><small>Source fill {fill.sourceFillId}</small><small>Transaction {fill.transactionHash || 'Not reported'}</small></td>
+      return <tr key={`${fill.id}-${index}`}><td><strong>{fill.id}</strong><small><Time at={fill.occurredAtUtc} style="datetime-seconds" /></small><small>Source fill {fill.sourceFillId}</small><small>Transaction {fill.transactionHash || 'Not reported'}</small></td>
         <td>{fill.side}<small>Effect {fill.positionEffect}</small><small>Operation role {part.role}</small></td>
         <td>{fill.quantity}<small>Price {fill.price}</small><small>Allocated quantity {part.quantity}</small></td>
         <td>{fill.fee} {fill.feeToken}<small>{fill.feeBasis}</small><small>Closed P&amp;L {fill.closedPnlUsd}</small><small>{fill.pnlBasis}</small><small>Allocated fee {part.fee} · P&amp;L {part.closedPnlUsd}</small></td>
@@ -122,8 +125,8 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
   </div>
 }
 
-/** The blank-title rule on the trade's own opening day in UTC, as Activity shows it: `BTC Long · 12 Oct 2026`. */
-function defaultTitle(op: Preview['operation']) {
+/** The blank-title rule on the trade's own opening day in the display zone, as Activity shows it: `BTC Long · 12 Oct 2026`. */
+function defaultTitle(op: Preview['operation'], zone: DisplayZone) {
   const at = op.openedAtUtc ?? op.closedAtUtc ?? op.lastOccurredAtUtc
-  return defaultPlayTitle({ instrument: op.contractId, direction: op.direction }, new Date(at), 'utc')
+  return defaultPlayTitle({ instrument: op.contractId, direction: op.direction }, new Date(at), zone)
 }

@@ -9,7 +9,7 @@ import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { InfoTip } from '@/components/ui/info-tip'
-import { time } from '@/lib/format'
+import { Time } from '@/components/ui/time'
 
 export function ReadOnlyTokenInput({ venueId, value, onChange, disabled = false }: {
   venueId: string; value: string; onChange: (value: string) => void; disabled?: boolean
@@ -91,8 +91,8 @@ export function AccountCredential({ accountId, venueId, enabled, api, onBusy }: 
     {metadata && !metadata.storageConfigured && <p className="credential-notice">{credentialStorageMessage}</p>}
     {stored && <dl className="credential-metadata">
       <div><dt>Scope</dt><dd>{stored.scope === 'all' ? 'All accounts · verified for this account' : 'This account'}</dd></div>
-      <div><dt>Expires</dt><dd>{time(stored.expiresAt)}</dd></div>
-      <div><dt>Last verified</dt><dd>{stored.lastVerifiedAt ? time(stored.lastVerifiedAt) : 'Unavailable'}</dd></div>
+      <div><dt>Expires</dt><dd><Time at={stored.expiresAt} /></dd></div>
+      <div><dt>Last verified</dt><dd><Time at={stored.lastVerifiedAt} fallback="Unavailable" /></dd></div>
     </dl>}
     {stored?.status === 'expiring' && <p className="credential-notice">Expires soon; replace it to keep order reads.</p>}
     {stored?.status === 'expired' && <p className="credential-notice">Expired; replace it to restore order reads. Public reads are unaffected.</p>}

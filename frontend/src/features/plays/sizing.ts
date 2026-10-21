@@ -1,8 +1,9 @@
 import type { BrokerAccount } from '@/api/workspace'
-import { asOf, availableSourceLabels } from '@/lib/format'
+import { asOf, availableSourceLabels, numberFormat } from '@/lib/format'
 import type { DraftEntry, DraftExit, PlayDraft } from './draft'
 import { averageEntryPrice, exitsOf, levelPrice, type ExitKind } from './levels'
 import { formatPlanNumber, planNumber, planShare, positivePlanNumber as positive } from './numbers'
+import type { DisplayZone } from '@/lib/display-zone'
 
 /**
  * Whole-position size at a leverage, before fees. Margin sizing fixes the margin, so leverage changes
@@ -65,7 +66,7 @@ export interface SizeUnits {
 /** Without a venue contract the units are generic. */
 export const defaultSizeUnits: SizeUnits = { quote: 'quote units', base: 'units', quantityDecimals: null }
 
-const money = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
+const money = numberFormat({ maximumFractionDigits: 2 })
 
 export function formatMoney(value: number, units: SizeUnits) {
   return `${money.format(value)} ${units.quote}`
@@ -73,7 +74,7 @@ export function formatMoney(value: number, units: SizeUnits) {
 
 export function formatQuantity(value: number, units: SizeUnits) {
   const digits = units.quantityDecimals ?? Math.min(8, Math.max(0, 4 - Math.floor(Math.log10(Math.abs(value) || 1))))
-  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: digits }).format(value)} ${units.base}`
+  return `${numberFormat({ maximumFractionDigits: digits }).format(value)} ${units.base}`
 }
 
 /** What a leverage change does to the position size, in one sentence. Null when the size is not known. */
@@ -128,9 +129,9 @@ export function availableOf(account: BrokerAccount | null | undefined): Availabl
     asOfUtc: account.lastSyncedAtUtc, refreshFailed: account.syncStatus === 'error' }
 }
 
-/** "reported margin · as of 14:02", with "last refresh failed" when the latest refresh did not succeed. */
-export const availableLabel = (available: AvailableBalance) => [available.source ? availableSourceLabels[available.source] : 'available',
-  available.asOfUtc ? asOf(available.asOfUtc) : null, available.refreshFailed ? 'last refresh failed' : null].filter(Boolean).join(' · ')
+/** "reported margin · as of 14:02 CEST", with "last refresh failed" when the latest refresh did not succeed. */
+export const availableLabel = (available: AvailableBalance, zone: DisplayZone) => [available.source ? availableSourceLabels[available.source] : 'available',
+  available.asOfUtc ? asOf(available.asOfUtc, zone) : null, available.refreshFailed ? 'last refresh failed' : null].filter(Boolean).join(' · ')
 
 export interface PlayBudget {
   /** Exact decimal string. */
@@ -225,7 +226,7 @@ export function rewardToRisk(entry: DraftEntry, direction: PlayDraft['direction'
 }
 
 /** "1:2.5" with at most two decimals. */
-export const formatRewardToRisk = (ratio: number) => `1:${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(ratio)}`
+export const formatRewardToRisk = (ratio: number) => `1:${numberFormat({ maximumFractionDigits: 2 }).format(ratio)}`
 
 /**
  * Estimated liquidation price of the whole plan, assuming every entry fills at its planned price

@@ -7,8 +7,13 @@ export interface ManualExecutionDraft {
   executionId: string | null
   role: 'entry' | 'exit'
   entryId: string
-  /** As the owner typed it, in the display time zone (phase 1, 1.6b); sent as UTC. */
+  /** As the owner typed it, in `zone` (phase 1, 1.6b); sent as UTC. */
   occurredAt: string
+  /**
+   * The zone `occurredAt` was typed or shown in (phase 1, 1.6e). It is read there even after the display setting changes,
+   * so a kept draft never moves to another instant; absent, the current display zone.
+   */
+  zone?: EntryZone
   /** Blank follows the role and the Play's direction; the owner may still choose (phase 1, 1.6b). */
   side: 'buy' | 'sell' | ''
   quantity: string
@@ -30,7 +35,7 @@ export const hasManualDraft = (draft?: ManualExecutionDraft) => !!draft &&
     draft.together?.length)
 export function manualCorrectionDraft(record: ManualExecutionRecord, zone: EntryZone = 'local'): ManualExecutionDraft {
   return { ...emptyManualDraft(), executionId: record.id, role: record.role, entryId: record.entryId ?? '',
-    occurredAt: zoneText(record.occurredAtUtc, zone), side: record.side, quantity: record.quantity, price: record.price,
+    occurredAt: zoneText(record.occurredAtUtc, zone), zone, side: record.side, quantity: record.quantity, price: record.price,
     fee: record.fee ?? '', feeCurrency: record.feeCurrency ?? '', source: record.source }
 }
 
@@ -45,7 +50,8 @@ export type ManualErrors = Partial<Record<ManualField, string>>
 type Facts = { occurredAtUtc: string; quantity: string; price: string; fee: string | null; feeCurrency: string | null; source: string }
 
 /** One execution's facts as the server reads them, or the errors of each field that is wrong. */
-function facts(row: ManualExecutionDraft, zone: EntryZone, now: number): { facts: Facts } | { errors: ManualErrors } {
+function facts(row: ManualExecutionDraft, display: EntryZone, now: number): { facts: Facts } | { errors: ManualErrors } {
+  const zone = row.zone ?? display
   const errors: ManualErrors = {}
   let occurredAtUtc = ''
   const parsed = parseZoneText(row.occurredAt, zone)

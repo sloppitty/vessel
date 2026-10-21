@@ -12,11 +12,13 @@ import { useJournalState } from './journal-state'
 import { LevelDriftAction } from './LevelDriftAction'
 import { LocalResultValue, SignDiffersFlag, localResultNote } from './LocalResult'
 import { EntryReceipts, ReceiptTotals } from './Receipt'
+import { Time } from '@/components/ui/time'
+import { useDisplayZone } from '@/lib/display-zone'
+import { formatTime } from '@/lib/time'
 
 // One shared empty object, so an untouched panel does not look like new state on every render.
 const noChoices: Record<string, string> = {}
 
-const time = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
 /** Venue orders and fills linked to the play, suggestions to confirm and orders that could be linked by hand. */
 const pnlBasisNote = {
@@ -59,6 +61,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
   /** Why a rebind is not available now, such as unsaved plan edits. */
   rebindBlocked?: string | undefined
 }) {
+  const zone = useDisplayZone()
   // The chosen roles belong to the journal, not to this tab: expanding the journal remounts the panel. Scoped by play.
   const [choices, setChoices] = useJournalState(`execution-choices:${execution?.playId ?? ''}`, noChoices)
   if (!execution) return <div className="execution-panel"><p className="muted" role="status">{error ?? 'Loading execution…'}</p></div>
@@ -75,7 +78,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
   return <div className="execution-panel">
     {!retrospective && (!execution.tracked || !shownMonitor) && <div className="execution-header">
       <p className="muted" title={execution.tracked ? 'Orders link automatically by price and side; Vessel asks only when several plays could own one.' : undefined}>
-        {execution.tracked ? execution.checkedAtUtc ? `Checked ${time(execution.checkedAtUtc)}` : 'Not checked yet'
+        {execution.tracked ? execution.checkedAtUtc ? <>Checked <Time at={execution.checkedAtUtc} /></> : 'Not checked yet'
           : execution.reason ?? 'Execution is not tracked for this play.'}</p>
     </div>}
     {error && <p className="error" role="alert">{error}</p>}
@@ -139,7 +142,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
           <small>{link.order ? `${describeOrder(link.order)} · ${link.order.status}` : 'Order details unavailable'} · filled {link.filledQuantity}
             {retrospective ? ' · owner-confirmed retrospective link' : link.source === 'automatic' ? ' · linked automatically' : ' · linked by you'}</small>
           {link.fills.length > 0 && <small className="execution-fills" title={link.fills.map(fill =>
-            `${fill.direction} ${fill.quantity} at ${fill.price}`).join('\n')}>{fillSummary(link.fills)}</small>}</span>
+            `${fill.direction} ${fill.quantity} at ${fill.price} · ${formatTime(fill.occurredAtUtc, zone, 'datetime-seconds')}`).join('\n')}>{fillSummary(link.fills)}</small>}</span>
         {editable && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onUnlink(link.id)} aria-label={`Unlink ${levelName(entries, link, origin)} order`}
           title="Unlink. Vessel will not link this order to this level again."><Link2Off size={13} />Unlink</Button>}
       </li>)}</ul> : <p className="muted">{retrospective ? 'No execution links are available.' : 'No orders linked yet.'}</p>}
@@ -153,7 +156,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
         const chosen = choices[order.orderId] ?? ''
         const option = allowed.find(item => item.value === chosen)
         return <li key={order.orderId}>
-          <span><strong>{describeOrder(order)}</strong><small>{order.status} · placed {time(order.placedAtUtc)}</small></span>
+          <span><strong>{describeOrder(order)}</strong><small>{order.status} · placed <Time at={order.placedAtUtc} /></small></span>
           <span className="execution-actions">
             <NativeSelect density="compact" aria-label={`Level for order ${order.orderId}`} value={chosen} disabled={busy}
               onChange={event => setChoices(current => ({ ...current, [order.orderId]: event.target.value }))}>

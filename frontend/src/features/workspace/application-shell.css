@@ -282,6 +282,10 @@ span.value-tag { width: fit-content; }
 .workspace-page-content > .workspace-stat-grid { margin: 0; }
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .settings-panel { padding: 24px; }
+.settings-choice { display: grid; gap: 8px; margin: 0 0 14px; padding: 0; border: 0; font-size: var(--text-sm); }
+.settings-choice legend { margin-bottom: 6px; color: var(--muted-foreground); font-size: var(--text-xs); font-weight: 600; }
+.settings-choice label { display: flex; align-items: center; gap: 8px; }
+.settings-choice input { accent-color: var(--brand); }
 .settings-panel > svg { color: var(--brand); }
 .settings-panel h2 { margin: 16px 0 10px; font-size: var(--text-lg); font-weight: 600; letter-spacing: var(--tracking-title); }
 .settings-panel > p { margin: 0; font-size: var(--text-sm); line-height: 1.7; color: var(--muted-foreground); }

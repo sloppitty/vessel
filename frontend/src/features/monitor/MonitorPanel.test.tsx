@@ -1,3 +1,4 @@
+import { formatTime } from '@/lib/time'
 import { act, fireEvent, render, renderHook, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceApi } from '@/api/workspace'
@@ -223,7 +224,7 @@ describe('monitor controls', () => {
     expect(screen.getByRole('button', { name: 'Check' })).toBeEnabled()
     view.rerender(<MonitorPanel monitor={{ ...monitorFixture, state: 'degraded', lastSuccessAtUtc: null }}
       busy={false} error={null} onCheck={vi.fn()} />)
-    expect(screen.getByText(/^Next /)).toBeVisible()
+    expect(screen.getByText(/^Next/)).toBeVisible()
     expect(screen.queryByText(/Last success/)).not.toBeInTheDocument()
     expect(screen.getByText('Incomplete venue coverage.')).toBeVisible()
   })
@@ -370,7 +371,7 @@ describe('incident visibility (Phase 0, 0.4a)', () => {
     expect(fact(item, 'Open quantity')).toBe('1.25')
     expect(fact(item, 'Stop quantity')).toBe('0.5')
     expect(fact(item, 'Uncovered')).toBe('0.75')
-    expect(fact(item, 'Last observed')).toBe(new Date('2026-10-14T10:05:00Z').toLocaleString())
+    expect(fact(item, 'Last observed')).toBe(formatTime('2026-10-14T10:05:00Z', 'local'))
     expect(within(item).getByText('Order 900000029 · stop · resting')).toBeInTheDocument()
     expect(within(item).getAllByText(/^Next: /)).toHaveLength(1)
     // The recorded JSON stays available, closed, behind a disclosure.

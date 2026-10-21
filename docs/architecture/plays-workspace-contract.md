@@ -301,12 +301,12 @@ covering F-01, F-03 and F-04.
   - Each field shows its own error under it, marked invalid and described by
     the message. The first one in the form takes focus, and typing in a field
     clears its error. An empty Source highlights the Source field.
-  - The time is typed in the display time zone (the browser's own until the
-    1.6e setting), such as `2026-10-13 10:00:00.123456`, with **Now** and a
-    "Sent as … UTC" line. A trailing `Z` or offset is read as written. A time
-    the zone skips is refused, never moved. A local time that happens twice
-    (an autumn overlap) is shown with its offset, and typed without one it
-    asks for it. Fractions are kept digit for
+  - The time is typed in the display time zone (the 1.6e setting in
+    `appearance-settings.md`), such as `2026-10-13 10:00:00.123456`, with
+    **Now** and a "Sent as … UTC" line in the local zone. A trailing `Z` or
+    offset is read as written. A time the zone skips is refused, never moved.
+    A local time that happens twice (an autumn overlap) is shown with its
+    offset, and typed without one it asks for it. Fractions are kept digit for
     digit, so an unchanged stored time is sent back as the same instant.
   - The side follows the role and the Play's direction until the owner
     chooses one; a changed role follows again.

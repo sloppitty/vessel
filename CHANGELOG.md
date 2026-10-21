@@ -4,6 +4,10 @@
 
 ### Added
 
+- Settings has a Times choice: Local (your browser's zone, the default) or
+  UTC. Every page shows times in that zone and names it, with the other zone
+  in each time's tooltip; Activity and Review still filter by UTC days and
+  say so. Numbers use one en-US format (F-05, G-13).
 - Recording a manual execution is quicker and clearer: each error sits on
   its own field, the time is typed in your zone with a Now button and sent
   as UTC, the side follows the role, and the Source stays required beside the

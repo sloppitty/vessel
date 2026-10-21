@@ -16,8 +16,8 @@ import type { ShellIdentity } from './types'
 import { WalletSignFlow } from './WalletSignFlow'
 import type { BrowserWallet } from './wallets/discovery'
 import { sameAddress } from './wallets/provider'
+import { Time } from '@/components/ui/time'
 
-const day = (at: string) => new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 function ago(at: string, now = Date.now()) {
   const minutes = Math.round((now - Date.parse(at)) / 60_000)
   if (!Number.isFinite(minutes) || minutes < 2) return 'now'
@@ -151,7 +151,7 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
           : <ul className="profile-rows">{(sessions ?? []).map(row => <li key={row.id} className="profile-row">
             <span className="profile-device" aria-hidden="true">{mobile(row.userAgent) ? <Smartphone size={16} /> : <Monitor size={16} />}</span>
             <span className="profile-row-meta"><strong>{row.userAgent ?? 'Unknown browser'}</strong>
-              <small>Signed in {day(row.createdAt)} · active {ago(row.lastSeenAt)}{row.remember ? ' · kept signed in' : ''}</small></span>
+              <small>Signed in <Time at={row.createdAt} style="date" /> · active {ago(row.lastSeenAt)}{row.remember ? ' · kept signed in' : ''}</small></span>
             {row.current ? <span className="identity-pill is-brand">This browser</span>
               : <Button variant="ghost" size="sm" disabled={stale} aria-label={`Sign out ${row.userAgent ?? 'unknown browser'} session`} onClick={() => {
                 auth.revokeSession(row.id).then(() => { notify({ tone: 'success', message: 'Session signed out.' }); reload() },
@@ -253,7 +253,7 @@ function WalletRow({ wallet, only, stale, auth, onRemove, onChanged }: {
         <Button type="submit" size="sm">Save</Button><Button type="button" size="sm" variant="ghost" onClick={cancel}>Cancel</Button>
       </form> : <strong>{name} <SourceChip source={wallet.address} /></strong>}
       {error && <span id={`label-error-${wallet.id}`} className="error" role="alert">{error}</span>}
-      <small>Added {day(wallet.addedAt)} · {wallet.current ? 'used for this session' : wallet.lastUsedAt ? `last used ${ago(wallet.lastUsedAt)}` : 'not used yet'}</small>
+      <small>Added <Time at={wallet.addedAt} style="date" /> · {wallet.current ? 'used for this session' : wallet.lastUsedAt ? `last used ${ago(wallet.lastUsedAt)}` : 'not used yet'}</small>
     </span>
     {wallet.current && <span className="identity-pill is-brand">This session</span>}
     {!editing && <span className="profile-row-actions">

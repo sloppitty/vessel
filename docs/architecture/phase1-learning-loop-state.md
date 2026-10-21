@@ -790,3 +790,109 @@ October 20, 2026, branch `t3/phase1-capture`, stacked on 1.1b:
   "Link as" and "Not this play" buttons still active while the execution was stale. They now wait for a fresh read,
   like the other confirmations, and round 3 confirmed it.
   - **Check.** `scripts/check.sh` passed: backend 3,635 passed, 5 skipped; frontend 157 files and 3,898 tests.
+
+### 1.6e Display time zone and formatters
+
+October 20, 2026, branch `t3/phase1-time`, stacked on 1.6b–d:
+- **Setting (F-05, G-13).** Settings has **Times**: **Local**, the browser's zone and the default, or **UTC**. It is a
+  browser preference stored like appearance (`vessel.display`, or per signed-in user), and anything unknown reads as
+  Local.
+- **One formatter.** `lib/time.ts` shows every time and date in English day-month order on a 24-hour clock, in the
+  chosen zone, and times name it ("13 Oct 2026, 12:00 CEST"). The `Time` component adds the same instant in the other
+  zone as its tooltip and re-renders when the setting changes, including on the Plays page kept mounted in the
+  background.
+- **Where.**
+  - Activity: operations and executions.
+  - Review: Play rows, drill-downs, exclusions and refresh times.
+  - The chart: axis ticks, crosshair, drawing tags, fill tooltips, stop evidence, "Updated" and capture captions.
+  - Execution, Monitor, History, the Plays list, the log, accounts, credentials and notifications.
+  - Manual entry, which types and shows times in the zone and sends UTC.
+- **UTC days.** Server filters keep UTC days. Activity's custom range says "(UTC)", and Review's period line, chart
+  buckets and as-of time stay UTC and say so. Chart ticks stay at UTC boundaries; in the local zone each is labelled
+  with its own instant's local date or time.
+- **Numbers.** `numberFormat()` is the one en-US number formatter, cached per option set; the formatters that followed
+  the browser's language use it. Money keeps its en-US formatters. Exact strings are unchanged.
+- **Not changed.** The header's greeting and today's date follow the browser.
+- **Tests.**
+  - Formatter: one instant in each zone, named, with the other zone for the tooltip; dates following the zone; winter
+    time.
+  - Store: Local by default, per signed-in user, only known values.
+  - Component: the Settings choice switching a shown time and its tooltip.
+  - U17: one fill at one time in Activity and on the chart under either setting.
+  - Updated suites for the zone-named times.
+- **Checks.** `scripts/check.sh` passed: backend 3,611 passed, 5 skipped; frontend 155 files and 3,848 tests; build clean.
+
+- **Sol (Codex) round 1.** Four findings, all fixed:
+  - **Kept drafts (high).** Changing Times read a kept manual draft's text in the new zone, moving it to another
+    instant. A draft keeps the zone its time was typed or loaded in and is read there; its label names that zone. A
+    test switches the setting mid-entry.
+  - **DST spans (medium).** An Activity operation across a daylight-saving change named only its end's offset. Each
+    end names its own then.
+  - **Event times (medium).** Funding settlements and coverage and the manual audit history now follow the setting,
+    and Execution lists each linked fill with its time, which U17's tests cover.
+  - **Review heading (medium).** The close column no longer says UTC.
+  - **Check.** `scripts/check.sh` passed again: backend 3,612 passed, 5 skipped; frontend 155 files and 3,853 tests.
+
+- **Sol (Codex) round 2.** All four round-1 findings resolved. Two new findings, both fixed:
+  - **Activity heading (medium).** Operation tables still headed the time column "UTC". The badge is gone; each row
+    names its own zone.
+  - **Overview window (low).** "About these numbers" showed the window's ends as raw ISO times. They use the shared
+    time now.
+  - **Check.** `scripts/check.sh` passed again: backend 3,612 passed, 5 skipped; frontend 155 files and 3,855 tests.
+
+- **Sol (Codex) round 3.** Both round-2 fixes confirmed. One new finding, fixed:
+  - **Sub-second corrections (medium).** The audit history showed times to the second, so a correction of a fraction
+    looked unchanged. Manual records, their audit and the correction choices now use an exact style that keeps the
+    stored fraction digit for digit. A test shows a 0.1 s to 0.9 s correction. Tests now restore an unset process time
+    zone by deleting it, since assigning undefined set it to "undefined".
+  - **Check.** `scripts/check.sh` passed again: backend 3,612 passed, 5 skipped; frontend 155 files and 3,856 tests.
+
+- **Sol (Codex) round 4.** No findings: exact fractions hold for `Z` and `+00:00` times, zero and long fractions, and
+  both zones' tooltips (checked in Madrid, New York and Kathmandu).
+- **Main sync with PR #33 (imported positions).** Merged forward, not rebased.
+  - Settings shows the Times panel beside #33's Review panel. Both preferences are scoped per user (`display`,
+    `review.preferences.v1`).
+  - Review's contributing-Plays list keeps the "Closed" column in the display zone, positions included. The period
+    range stays UTC, matching the server's day boundaries.
+
+- **Post-sync Sol review (October 21).** The merge is sound. Three findings over two rounds, all fixed:
+  - **Close dates (medium).** Review's Closed column names the display zone, with a tip that report periods are rolling
+    UTC windows, so a close near midnight can show another day.
+  - **Other tabs (low).** The display zone follows a choice made in another tab, or cleared storage.
+  - **Coverage and process times (medium, round 2).** The earliest retained fill and the process rows show
+    zone-named times instead of a bare day.
+  - Round 3 found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,635 passed, 5 skipped; frontend 159 files and 3,907 tests.
+
+## Main sync with PR #32 (paper trading)
+
+October 21, 2026. Main gained PR #32, an opt-in paper playground: a `tradingMode` (`real` or `paper`) on accounts,
+portfolios and Plays, simulated paper executions, and isolated paper Activity, Review, Overview and sizing. The owner
+asked to check the stack against it and merge the stack once confident.
+- **Merged forward, not rebased.** Main went into the contract and up through every branch. #22 (1.6a) is now merged
+  into #23 (1.1a), so the stack is one chain and the PRs merge into main in order; #22 and 1.6e had conflicted in the
+  retrospective preview.
+- **Migrations.** Phase 1's four migrations sort before main's `20261020155750_PaperTradingFoundation`. A database
+  migrated with main first, holding real and paper Plays, applies them and ends identical to a fresh one (columns,
+  constraints, indexes, triggers and functions compared), with no pending model changes; the reviewed Play's completion
+  backfills to `legacy`.
+- **Paper isolation fixes.**
+  - 1.5: recent next actions read only the requested mode. A real Play's Thesis tab offered a paper Play's next action,
+    and opening it hit the other mode's 404.
+  - 1.3a: a paper Play is never declared Unresolved (409, and the domain refuses it); its simulation holds what it
+    cannot settle as ambiguous or a gap.
+  - 1.4b: the process view, its drill-downs, exclusions and the cancelled and unresolved sets are scoped by mode, and
+    `/api/review/exclusions` and `/process` forward `tradingMode`. A test checks that a paper Review holds no real case.
+  - 1.6b–d: "Not this play" refuses a paper Play with the same 409 as the other order-linking routes.
+  - 1.6e: paper check, execution, candle and suspension times, the paper Activity execution table and the skipped
+    interval named in a suspension reason follow the display zone.
+  - In the merges: 1.3a's sizing Unresolved count is real-only, the settling lock keeps `"TradingMode" = 'real'` with
+    the Unresolved status list, and paper Plays keep #32's provenance in Review's rows and history.
+- **Not added, by design.** Paper Plays show no 1.1a receipt and no 1.1b fill markers: simulated facts are never shown
+  as venue fills. Paper Review keeps #32's rule that only a receipted paper cancellation is an exclusion.
+- **Sol (Codex) review.** Three parallel reviews (backend isolation, persistence and migrations, frontend) found
+  nothing of medium severity or above. The frontend review's one low finding, the suspension interval's zone, is fixed
+  (above); a second round confirmed it.
+- **Checks.** `scripts/check.sh` passed on every code branch, each with 5 backend tests skipped (S3 and live venues):
+  #22 3,951 backend and 3,913 frontend tests; #23 3,960 and 3,938; #24 3,963 and 3,944; #25 3,968 and 3,960; #26 3,983
+  and 3,981; #27 3,995 and 3,989; #28 3,996 and 3,992; #29 4,005 and 3,999; #30 4,005 and 4,016; #31 4,008 and 4,032; #34 4,008 and 4,042.

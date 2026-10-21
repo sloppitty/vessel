@@ -12,6 +12,7 @@ import type { InAppNotifications } from './useInAppNotifications'
 import { categoryLabels, severityLabels } from './notification-list'
 import { workerStatus } from './unread'
 import './notification-settings.css'
+import { useDisplayZone } from '@/lib/display-zone'
 
 const sameFields = (a: NotificationPreferenceFields, b: NotificationPreferenceFields) => a.enabled === b.enabled &&
   a.minimumSeverity === b.minimumSeverity && a.categories.length === b.categories.length && a.categories.every(item => b.categories.includes(item))
@@ -22,6 +23,7 @@ const sameFields = (a: NotificationPreferenceFields, b: NotificationPreferenceFi
  */
 export function NotificationSettings({ api, inApp }: { api: WorkspaceApi; inApp: InAppNotifications }) {
   const { notify } = useNotifications()
+  const zone = useDisplayZone()
   const [loaded, setLoaded] = useState<{ api: WorkspaceApi; preferences: NotificationPreferences | null; error: string | null } | null>(null)
   const [draft, setDraft] = useState<NotificationPreferenceFields | null>(null)
   const [reload, setReload] = useState(0)
@@ -132,7 +134,7 @@ export function NotificationSettings({ api, inApp }: { api: WorkspaceApi; inApp:
           </fieldset>
         </fieldset>
         <dl>
-          <div><dt>Status</dt><dd role="status">{workerStatus(online, heartbeat)}</dd></div>
+          <div><dt>Status</dt><dd role="status">{workerStatus(online, heartbeat, zone)}</dd></div>
           {preferences.subscriptionStatus === 'lagging' &&
             <div><dt>Gap</dt><dd>Some events aged out before they could become notifications.</dd></div>}
           {preferences.failedDeliveries > 0 &&

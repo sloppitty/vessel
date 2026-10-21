@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { exactTime } from './notification-list'
+import type { DisplayZone } from '@/lib/display-zone'
 
 /** The badge text: the count, or `99+` above 99. */
 export const badgeText = (count: number) => count > 99 ? '99+' : String(count)
@@ -31,7 +32,7 @@ export function useCountAnnouncement(count: number, known: boolean) {
 }
 
 /** Whether the notifications worker is delivering, from the newest of the stream's head and the preferences read. */
-export function workerStatus(online: boolean, heartbeatAtUtc: string | null) {
+export function workerStatus(online: boolean, heartbeatAtUtc: string | null, zone: DisplayZone) {
   if (online) return 'Delivering'
-  return heartbeatAtUtc ? `Notification worker offline since ${exactTime(heartbeatAtUtc)}` : 'Notification worker offline; it has not reported yet'
+  return heartbeatAtUtc ? `Notification worker offline since ${exactTime(heartbeatAtUtc, zone)}` : 'Notification worker offline; it has not reported yet'
 }

@@ -5,8 +5,8 @@ import { isEndedStatus, playNoteStateLabels, playNoteStates, type PlayNote, type
 import type { WorkspaceApi } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
-import { time } from '@/lib/format'
 import { mergeNotes, type PlayLogChange, type PlayLogDraft } from './log-draft'
+import { Time } from '@/components/ui/time'
 
 /*
  * Review completion and the in-trade log (phase 1, 1.2, decision 3). A review is complete only when the owner says so:
@@ -22,7 +22,6 @@ const completedLabels = {
   legacy: 'Reviewed before completion was recorded',
 } as const
 
-const day = (at: string) => new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 
 /**
  * Where the review stands, with the action that changes it; it waits until unsaved edits are saved. No review needed is
@@ -43,7 +42,7 @@ export function ReviewCompletionBar({ summary, dirty, busy, filled = false, onAc
   if (summary.reviewCompletion) {
     return <div className="review-completion" role="group" aria-label="Review completion">
       <span><strong>{completedLabels[summary.reviewCompletion]}</strong>
-        {summary.reviewCompletedAtUtc && <small> · {day(summary.reviewCompletedAtUtc)}</small>}</span>
+        {summary.reviewCompletedAtUtc && <small> · <Time at={summary.reviewCompletedAtUtc} style="date" /></small>}</span>
       <Button type="button" size="sm" variant="outline" disabled={busy || dirty} title={blocked} onClick={() => onAction('reopen')}>Review again</Button>
     </div>
   }
@@ -139,7 +138,7 @@ export function PlayLog({ api, playId, draft, onDraft }: {
       : notes === null ? <p className="muted" role="status">Loading the log…</p>
       : notes.length === 0 ? <p className="muted">No entries yet.</p>
       : <ol className="play-log-entries">{notes.map(note => <li key={note.id}>
-        <span className="play-log-meta"><time dateTime={note.createdAtUtc}>{time(note.createdAtUtc)}</time>
+        <span className="play-log-meta"><Time at={note.createdAtUtc} />
           {note.state && <span className="badge play-log-state">{playNoteStateLabels[note.state]}</span>}</span>
         <p>{note.text}</p>
       </li>)}</ol>}

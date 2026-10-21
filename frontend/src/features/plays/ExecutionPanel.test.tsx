@@ -8,6 +8,7 @@ import { ExecutionPanel } from './ExecutionPanel'
 import { createDraft } from './draft'
 import { PlayJournal } from './WorkspacePanels'
 import { fillSummary, suggestionGroups } from './execution'
+import { restoreZone } from '@/test/zone'
 
 const entry = { ...createDraft().entries[0]!, id: 'e1', name: 'Entry 1', price: '100' }
 const entries = [{ ...entry, stops: [{ ...entry.stops[0]!, id: 's1', value: '95' }], targets: [{ ...entry.targets[0]!, id: 't1', value: '110' }] }]
@@ -73,10 +74,10 @@ describe('execution panel', () => {
   it('shows the check timestamp only once, retaining the fallback and untracked reason', () => {
     const props = { execution, error: null, busy: false, entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn() }
     const view = render(<ExecutionPanel {...props} />)
-    expect(screen.queryByText(/^Checked /)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^Checked/)).not.toBeInTheDocument()
     expect(screen.getByText(/^Last success /)).toBeVisible()
     view.rerender(<ExecutionPanel {...props} monitor={null} />)
-    expect(screen.getByText(/^Checked /)).toBeVisible()
+    expect(screen.getByText(/^Checked/)).toBeVisible()
     view.rerender(<ExecutionPanel {...props} execution={{ ...execution, tracked: false, reason: 'This venue does not track orders.' }} />)
     expect(screen.getByText('This venue does not track orders.')).toBeVisible()
   })
@@ -260,5 +261,17 @@ describe('confirm rows (phase 1, 1.6d)', () => {
     expect(rows[0]).toHaveTextContent('Also matches another play')
     expect(rows[1]).toHaveTextContent('Matches several levels of this play and another play')
     expect(suggestionGroups([{ ...suggestion(1, '21', 't1'), order: null }, { ...suggestion(2, '21', 't2'), order: null }])).toHaveLength(2)
+  })
+})
+
+describe('fill times in the display zone (phase 1, 1.6e)', () => {
+  it('lists each linked fill with its time in the display zone (U17)', () => {
+    const zone = process.env.TZ
+    process.env.TZ = 'Europe/Madrid'
+    try {
+      render(<ExecutionPanel execution={execution} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
+      expect(within(screen.getByRole('region', { name: 'Linked orders' })).getByText('Open Long 0.5 at 100'))
+        .toHaveAttribute('title', 'Open Long 0.5 at 100 · 3 Oct 2026, 12:01:00 CEST')
+    } finally { restoreZone(zone) }
   })
 })

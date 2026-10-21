@@ -1,3 +1,4 @@
+import { zoneLabel } from '@/lib/time'
 import { describe, expect, it } from 'vitest'
 import { createEntry, type DraftEntry, type DraftExit } from './draft'
 import type { BrokerAccount } from '@/api/workspace'
@@ -131,12 +132,12 @@ describe('margin budget', () => {
     const account: BrokerAccount = { ...accountFixture, venueId: 'lighter-rh', availableBalanceUsd: '25', availableBalanceSource: 'margin',
       lastSyncedAtUtc: at.toISOString(), syncStatus: 'error', lastSyncError: 'Lighter is unavailable.' }
     expect(availableOf(account)).toEqual({ value: '25', source: 'margin', asOfUtc: at.toISOString(), refreshFailed: true })
-    expect(availableLabel(availableOf(account)!)).toBe('reported margin · as of 14:02 · last refresh failed')
-    expect(availableLabel({ value: '25', source: 'withdrawable' })).toBe('reported withdrawal')
+    expect(availableLabel(availableOf(account)!, 'local')).toBe(`reported margin · as of 14:02 ${zoneLabel(at, 'local')} · last refresh failed`)
+    expect(availableLabel({ value: '25', source: 'withdrawable' }, 'local')).toBe('reported withdrawal')
     const earlier = new Date(at)
     earlier.setDate(earlier.getDate() - 1)
-    expect(availableLabel({ value: '25', source: 'wallet', asOfUtc: earlier.toISOString() }))
-      .toBe(`wallet · as of ${earlier.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} 14:02`)
+    expect(availableLabel({ value: '25', source: 'wallet', asOfUtc: earlier.toISOString() }, 'local'))
+      .toBe(`wallet · as of ${earlier.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} 14:02 ${zoneLabel(earlier, 'local')}`)
   })
 
   it('names the budget and its source in the quote unit of the instrument', () => {

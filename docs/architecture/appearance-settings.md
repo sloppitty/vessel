@@ -33,3 +33,42 @@ The owner then asked for a builder that randomizes colour combinations and saves
 
 - Entry colours, drawing palette and image markup colours are fixed pastel or saturated values chosen for dark backgrounds; pale entries are faint on light themes.
 - No "follow system light/dark" option yet, no import/export of custom themes and no renaming (save under a new name, then delete the old one).
+
+## Display time zone (October 20, 2026)
+
+Phase 1.6e of the [learning-loop contract](phase1-learning-loop-contract.md),
+covering F-05 and G-13.
+- **Setting.** Settings has **Times**: **Local**, the browser's zone and the
+  default, or **UTC**. It is a browser preference stored like appearance
+  (`vessel.display`, or `vessel:u:{userId}:display` for a signed-in user),
+  holding `{ "timeZone": "local" | "utc" }`. Anything else reads as Local.
+- **One formatter.** `lib/time.ts` formats every displayed time and date in
+  English day-month order on a 24-hour clock, in the chosen zone. Times name
+  their zone ("13 Oct 2026, 12:00 CEST", "… 10:00 UTC"). `components/ui/time.tsx`
+  renders one with the same instant in the other zone, to the second, as its
+  tooltip, and re-renders when the setting changes, including on the Plays
+  page kept mounted in the background.
+- **Where.** Activity (operations and executions), Review (Play rows,
+  drill-downs, exclusions, refresh times), the chart (axis ticks, crosshair,
+  drawing tags, fill tooltips, stop evidence, "Updated", capture captions),
+  Execution, Monitor, History, the Plays list, the journal log, accounts,
+  credentials, notifications, funding settlements and coverage, the manual
+  ledger's audit, Execution's fill list, and manual entry, which types and
+  shows times in the zone and sends UTC. A manual draft keeps the zone its
+  time was typed in, so changing the setting never moves it to another
+  instant; its label names that zone. Manual records and their audit
+  history show the stored fraction of a second digit for digit, so a
+  sub-second correction stays visible.
+- **Spans.** An Activity operation names one zone at its end, or each end's
+  own when a daylight-saving change falls between them.
+- **Day boundaries.** Server filters keep UTC days until Phase 2. Activity's
+  custom range is labelled "(UTC)", and Review's period line, chart buckets
+  and as-of time stay UTC and say so. Stored values never change.
+- **Chart ticks.** Lightweight Charts places ticks at UTC boundaries; in the
+  local zone each tick is labelled with its own instant's local date or time.
+- **Numbers.** `numberFormat()` in `lib/format.ts` is the one en-US number
+  formatter, cached per option set; the formatters that followed the
+  browser's language now use it. Money keeps its en-US formatters. Exact
+  strings are unchanged.
+- **Not changed.** The header's greeting and today's date follow the browser.
+

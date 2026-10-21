@@ -6,10 +6,11 @@ import {
   defaultIndicators, emaLabel, emaPeriodLimits, indicatorColors, resizePane, rsiLabel, rsiPeriodLimits,
   type IndicatorPaneId, type IndicatorSettings, type IndicatorView, type PaneLayout, type PaneSize,
 } from './indicators'
+import { numberFormat } from '@/lib/format'
 
-const priceValue = new Intl.NumberFormat(undefined, { maximumSignificantDigits: 6 })
-const volumeValue = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 2 })
-const rsiValue = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const priceValue = numberFormat({ maximumSignificantDigits: 6 })
+const volumeValue = numberFormat({ notation: 'compact', maximumFractionDigits: 2 })
+const rsiValue = numberFormat({ minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const icon = { size: 13, 'aria-hidden': true } as const
 
 /** A whole-number period, applied on Enter or blur; invalid text returns to the current period. */

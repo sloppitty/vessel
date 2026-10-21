@@ -2,8 +2,10 @@ import {
   CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, createChart, createSeriesMarkers,
   type AutoscaleInfo, type IChartApi, type IPrimitivePaneRenderer, type MouseEventParams, type IPrimitivePaneView, type PriceFormat, type ISeriesApi,
   type ISeriesPrimitive, type ISeriesPrimitiveAxisView, type Logical, type LogicalRange, type PrimitiveHoveredItem,
-  type SeriesAttachedParameter, type Time, type UTCTimestamp,
+  type SeriesAttachedParameter, type Time, type UTCTimestamp, TickMarkType,
 } from 'lightweight-charts'
+import type { DisplayZone } from '@/lib/display-zone'
+import { formatIn, formatTime } from '@/lib/time'
 import { DrawingController, type DrawingSpace, type DrawingTheme } from './drawingController'
 import { TimeIndex, snapPrice } from './drawings'
 import { FrameEdit, roundedLevelPrice } from './frameEdit'
@@ -302,7 +304,12 @@ class DrawingsPrimitive implements ISeriesPrimitive<Time> {
 /** Pixels within which the magnet pulls an anchor to a candle's open, high, low or close. */
 const magnetReach = 12
 
-const timeLabel = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' })
+/** An axis tick in the display zone: the tick's own instant, read there (phase 1, 1.6e). */
+function tickLabel(ms: number, type: TickMarkType, zone: DisplayZone) {
+  return formatIn(ms, zone, type === TickMarkType.Year ? 'year' : type === TickMarkType.Month ? 'month'
+    : type === TickMarkType.DayOfMonth ? 'day-of-month' : type === TickMarkType.TimeWithSeconds ? 'time-seconds' : 'time')
+}
+const seconds = (time: Time) => typeof time === 'number' ? time * 1000 : null
 
 /** The narrowest a candle may be drawn, in pixels, so a trade of thousands of candles still fits a chart. */
 const minimumBarSpacing = 0.05
@@ -348,6 +355,13 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     timeScale: { ...chartColors().timeScale, timeVisible: true, secondsVisible: false, rightOffset: openingRightOffset, minBarSpacing: minimumBarSpacing },
     crosshair: { mode: CrosshairMode.Normal },
   })
+  // Times read in the display zone and name it; UTC until the page says otherwise (1.6e).
+  let zone: DisplayZone = 'utc'
+  const applyZone = () => chart.applyOptions({
+    localization: { timeFormatter: (time: Time) => { const ms = seconds(time); return ms === null ? '' : formatTime(ms, zone, 'day-time') } },
+    timeScale: { tickMarkFormatter: (time: Time, type: TickMarkType) => { const ms = seconds(time); return ms === null ? null : tickLabel(ms, type, zone) } },
+  })
+  applyZone()
   const series = chart.addSeries(CandlestickSeries, { ...candleColors(), borderVisible: true })
   const levels = new LevelsPrimitive(theme, colorResolver(container))
   series.attachPrimitive(levels)
@@ -471,7 +485,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     width: () => chart.timeScale().width(),
     height: () => chart.paneSize().height,
     formatPrice: price => series.priceFormatter().format(price),
-    formatTime: time => timeLabel.format(new Date(time)),
+    formatTime: time => formatTime(time, zone, 'day-time'),
     bars: (from, to) => {
       const start = index.logical(from)
       const end = index.logical(to)
@@ -957,6 +971,12 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     setMarkers(next) {
       markers = next
       placeMarkers()
+    },
+    setTimeZone(next) {
+      if (next === zone) return
+      zone = next
+      applyZone()
+      drawingsLayer.requestUpdate()
     },
     setFocus(range) {
       // The same range again leaves the owner's panning alone.

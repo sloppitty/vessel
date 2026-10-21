@@ -61,7 +61,7 @@ describe('Activity retrospective inspection', () => {
       ['Average exit', money(op.averageExitPrice)], ['Net execution result', money(op.netResultUsd)]] as const)
       expect(within(facts).getByText(label).nextElementSibling).toHaveTextContent(value)
     expect(within(facts).getByText('Dates', { exact: false }).nextElementSibling)
-      .toHaveTextContent(`${operationDates(op)} · ${duration(op.openedAtUtc!, op.closedAtUtc!)}`)
+      .toHaveTextContent(`${operationDates(op, 'local')} · ${duration(op.openedAtUtc!, op.closedAtUtc!)}`)
     // Fill IDs and transaction hashes come after the summary, inside a closed disclosure.
     const records = within(dialog).getByText(retrospectiveFixture.operation.fills[0]!.fill.id).closest('details')!
     expect(records).not.toHaveAttribute('open')

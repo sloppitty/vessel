@@ -31,6 +31,9 @@ describe('Overview summary', () => {
     expect(screen.getAllByText('$2.00 unrealized').every(e => e.classList.contains('overview-positive'))).toBe(true)
     expect(screen.getAllByText(/\$0\.0000000000000000000000000001/).every(e => e.classList.contains('overview-negative'))).toBe(true)
     expect(screen.getByText('balance: 1 · Balance unavailable.')).toBeInTheDocument()
+    // The window's ends follow the display setting (UTC here) and name it (phase 1, 1.6e).
+    expect(screen.getByText('13 Oct 2026, 12:00:00 UTC')).toHaveAttribute('datetime', '2026-10-13T12:00:00.000Z')
+    expect(screen.getByText('13 Sept 2026, 12:00:00 UTC')).toBeInTheDocument()
     // Pooled balances add venue quote stablecoins (USDC, USDG…) at nominal 1:1.
     expect(screen.getByText('Nominal USD')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Nominal USD' })).toHaveAccessibleDescription('Listed stablecoins at 1:1.')

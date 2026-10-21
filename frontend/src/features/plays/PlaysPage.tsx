@@ -40,6 +40,9 @@ import { leverageOf } from './levels'
 import type { ChartFill } from './chart-fills'
 import { CancelDialog, DeleteDialog, HistoryDialog, PauseDialog, PreflightDialog, ReturnToOpenDialog, RevisionDialog, UnresolvedDialog } from './PlayDialogs'
 import { initialPlaysList, playSearchDelay, playViewTabs, type PlaysListState } from './plays-list'
+import { useDisplayZone } from '@/lib/display-zone'
+import { formatTime } from '@/lib/time'
+import { Time } from '@/components/ui/time'
 import {
   createPlaysSession, draftFromSaved, draftSession, duplicateDraft, fieldsToSave, hasDraftContent, hasPlayLogDraft, hasUnsavedPlayWork, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
   observedPlayVersion, startNewPlay, syncEvidence,
@@ -219,8 +222,10 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const monitorRun = useMonitorRun(api, executionMonitor ? accountMonitors.find(item => item.accountId === executionMonitor.accountId) ?? executionMonitor : null, monitorChanged)
   // The chart labels this Play's planned stops with the venue evidence of the newest stored monitor read.
   const trackedExecution = tracking.execution?.playId === saved?.summary.id ? tracking.execution : null
+  const zone = useDisplayZone()
   const stopEvidence = useMemo(() => stopEvidenceFor(trackedExecution && monitorRun.monitor?.accountId === trackedExecution.monitor?.accountId
-    ? { ...trackedExecution, monitor: monitorRun.monitor } : trackedExecution), [trackedExecution, monitorRun.monitor])
+    ? { ...trackedExecution, monitor: monitorRun.monitor } : trackedExecution, value => formatTime(value, zone, 'day-time')),
+  [trackedExecution, monitorRun.monitor, zone])
 
   // Linked fills move a play to Open or Closed on the server; take the new status and version.
   const venueStatus = tracking.execution?.playId === saved?.summary.id ? tracking.execution?.status : undefined
@@ -668,7 +673,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       reviewCompletion={saved ? <ReviewCompletionBar summary={saved.summary} dirty={dirty} busy={pending}
         filled={(playReceipt?.fillCount ?? 0) > 0} onAction={action => { void reviewAction(action) }} /> : undefined}
       plannedAfterExecution={playReceipt?.plannedAfterExecution === true}
-      execution={paper ? saved ? <PaperExecutionPanel key={saved.summary.id} api={api} playId={saved.summary.id} reloadGeneration={reloadGeneration + saved.summary.version} onState={onPaperState} /> : <p className="workspace-scope-note">Save this Paper play to see simulated execution progress. Planning arms evaluation; a draft never monitors.</p> : manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
+      execution={paper ? saved ? <PaperExecutionPanel key={saved.summary.id} api={api} playId={saved.summary.id} reloadGeneration={reloadGeneration + saved.summary.version} onState={onPaperState} /> : <p className="workspace-scope-note">Save this Paper play to see simulated execution progress. Planning arms evaluation; a draft never monitors.</p> : manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries} zone={zone}
         enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}
         working={busy !== null}
         observedVersion={observedPlayVersion(session, api)}
@@ -829,7 +834,7 @@ function PlayList({ api, accounts, busy, reloadGeneration, unsaved, list, onList
                   {play.tradingMode === 'paper' && <span className="workspace-badge">Paper</span>}<PlayIdentity id={`plays-list-identity-${play.id}`} instrument={play.instrument} source={play.instrumentSource} venueId={play.venueId} accountName={accountName(play.accountId)} /></span>
                 <span className={`direction-chip ${play.direction}`}>{play.direction === 'long' ? 'Long' : 'Short'}</span>
                 <span className={`badge play-status-${play.status}`}>{statusLabels[play.status]}</span>
-                <small className="plays-list-meta">{ended.includes(play.status) && (isReviewed(play) ? 'Reviewed · ' : 'Pending review · ')}{play.origin !== 'retrospective' && play.planRevision > 1 ? `${play.planRevision} revisions · ` : ''}Updated {new Date(play.updatedAtUtc).toLocaleDateString()}</small>
+                <small className="plays-list-meta">{ended.includes(play.status) && (isReviewed(play) ? 'Reviewed · ' : 'Pending review · ')}{play.origin !== 'retrospective' && play.planRevision > 1 ? `${play.planRevision} revisions · ` : ''}Updated <Time at={play.updatedAtUtc} style="date" /></small>
               </button>
             </li>)}
           </ul> : <div className={pending ? 'plays-list-empty list-refetching' : 'plays-list-empty'} aria-busy={pending || undefined}>

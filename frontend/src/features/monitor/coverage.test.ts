@@ -3,7 +3,9 @@ import type { PlayExecution } from '@/api/plays'
 import type { MonitorCoverage, MonitorStopEvidence } from '@/api/monitor'
 import { coverageAs, coverageFixture, monitorFixture } from '@/test/monitor-fixture'
 import { savedPlayFixture } from '@/test/workspace-fixture'
-import { chartUtcTime, coverageHeading, coverageLines, stopEvidenceFor } from './coverage'
+import { formatTime } from '@/lib/time'
+import { coverageHeading, coverageLines, stopEvidenceFor } from './coverage'
+import { restoreZone } from '@/test/zone'
 
 const execution = (coverage: MonitorCoverage[] | undefined, overrides: Partial<PlayExecution> = {}): PlayExecution => ({
   playId: savedPlayFixture.summary.id, status: 'open', tracked: true, reason: null, checkedAtUtc: null,
@@ -21,7 +23,7 @@ const level = (evidence: MonitorStopEvidence['evidence'], extra: Partial<Monitor
 const of = (coverage: MonitorCoverage[] | undefined, price = saved, overrides: Partial<PlayExecution> = {}) =>
   stopEvidenceFor(execution(coverage, overrides), stamp)!('entry-1', 'stop-1', price)
 const originalZone = process.env.TZ
-afterEach(() => { process.env.TZ = originalZone })
+afterEach(() => { restoreZone(originalZone) })
 
 describe('stop evidence for the chart (Phase 0, 0.4c)', () => {
   it('confirms only a stop the last check saw resting at its saved level, dated, and words everything else as the evidence does', () => {
@@ -49,17 +51,20 @@ describe('stop evidence for the chart (Phase 0, 0.4c)', () => {
     expect(of([level('not-seen', { state: 'stale' })])).toEqual({ text: 'unknown', confirmed: false })
   })
   it('leaves the plan unlabelled where it claims nothing about the venue', () => {
-    expect(stopEvidenceFor(null)).toBeUndefined()
-    expect(stopEvidenceFor(execution([level('resting')], { status: 'planned' }))).toBeUndefined()
-    expect(stopEvidenceFor(execution([level('resting')], { tracked: false }))).toBeUndefined()
+    const time = (value: string) => value
+    expect(stopEvidenceFor(null, time)).toBeUndefined()
+    expect(stopEvidenceFor(execution([level('resting')], { status: 'planned' }), time)).toBeUndefined()
+    expect(stopEvidenceFor(execution([level('resting')], { tracked: false }), time)).toBeUndefined()
   })
-  it('stamps the canvas label in UTC, as the chart axis and captures do, whatever the browser zone', () => {
+  it('stamps the canvas label in the display zone and names it (phase 1, 1.6e)', () => {
     process.env.TZ = 'Europe/Madrid'
     // The zone took effect: 14:02 UTC is 16:02 in Madrid on this date.
     expect(new Date('2026-10-14T14:02:00Z').getHours()).toBe(16)
-    expect(chartUtcTime('2026-10-14T14:02:00Z')).toMatch(/^Oct 14, 14:02 UTC$/)
-    const label = stopEvidenceFor(execution([level('resting', {}, { observedAtUtc: '2026-10-14T14:02:00Z' })]))!('entry-1', 'stop-1', saved)
-    expect(label).toEqual({ text: 'resting as of Oct 14, 14:02 UTC', confirmed: true })
+    const resting = execution([level('resting', {}, { observedAtUtc: '2026-10-14T14:02:00Z' })])
+    expect(stopEvidenceFor(resting, value => formatTime(value, 'utc', 'day-time'))!('entry-1', 'stop-1', saved))
+      .toEqual({ text: 'resting as of 14 Oct, 14:02 UTC', confirmed: true })
+    expect(stopEvidenceFor(resting, value => formatTime(value, 'local', 'day-time'))!('entry-1', 'stop-1', saved))
+      .toEqual({ text: 'resting as of 14 Oct, 16:02 CEST', confirmed: true })
   })
 })
 

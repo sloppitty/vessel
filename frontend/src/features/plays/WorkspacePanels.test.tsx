@@ -1,3 +1,4 @@
+import { zoneLabel } from '@/lib/time'
 import { useState } from 'react'
 import { screen, within } from '@testing-library/react'
 import { render } from '@/test/render'
@@ -161,7 +162,7 @@ describe('Budget', () => {
     const at = new Date()
     at.setHours(14, 2, 0, 0)
     render(<Budget available={{ value: '25', source: 'margin', asOfUtc: at.toISOString(), refreshFailed: true }} />)
-    expect(budget()).toHaveTextContent('Budget$25.00reported margin · as of 14:02 · last refresh failed')
+    expect(budget()).toHaveTextContent(`Budget$25.00reported margin · as of 14:02 ${zoneLabel(at, 'local')} · last refresh failed`)
   })
 
   it.each([

@@ -40,7 +40,9 @@ describe('settled funding', () => {
     await userEvent.click(screen.getByText('About these numbers', { selector: 'summary' }))
     expect(notice).toBeVisible()
     expect(screen.getByText('Execution P&L funding inclusion is unverified.')).toBeVisible()
-    expect(screen.getByText(operation.fundingAsOfUtc)).toBeVisible()
+    // Coverage time and settlement time in the display zone (UTC here), naming it (phase 1, 1.6e).
+    expect(screen.getByText('12 Oct 2026, 12:00 UTC')).toBeVisible()
+    expect(within(funding).getByText('12 Oct 2026, 11:00:00 UTC')).toHaveAttribute('datetime', '2026-10-12T11:00:00.001234Z')
     expect(client.activityFills).toHaveBeenCalledWith(accountFixture.id, operation.id, expect.any(AbortSignal))
   })
 

@@ -22,7 +22,7 @@ function fakeAdapter() {
   const factory: ChartAdapterFactory = (_container, next) => {
     callbacks = next
     return { setCandles: vi.fn(), setOverlays: vi.fn(), setDrawings: vi.fn(), setDrawingTool: vi.fn(), setPricePicker: vi.fn(),
-      setIndicators: vi.fn(), setMarkers: vi.fn(), setFocus: vi.fn(), capture: vi.fn().mockResolvedValue(null), destroy }
+      setIndicators: vi.fn(), setMarkers: vi.fn(), setFocus: vi.fn(), setTimeZone: vi.fn(), capture: vi.fn().mockResolvedValue(null), destroy }
   }
   return { factory, destroy, callbacks: () => callbacks }
 }

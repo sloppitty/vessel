@@ -1,4 +1,5 @@
 import type { CandleSpan } from './intervals'
+import type { DisplayZone } from '@/lib/display-zone'
 import type { ChartDrawing, DrawingKind } from './drawings'
 import type { IndicatorView, PaneLayout } from './indicators'
 
@@ -108,6 +109,8 @@ export interface ChartAdapter {
    * loaded. Null leaves later resets at the latest candles.
    */
   setFocus(range: ChartFocus | null): void
+  /** The zone the time axis, crosshair and time tags read in (phase 1, 1.6e); UTC until set. */
+  setTimeZone(zone: DisplayZone): void
   /**
    * PNG of the chart as shown, including planned levels and drawings but not the crosshair, with
    * `caption` in a footer. Null until the renderer is ready.

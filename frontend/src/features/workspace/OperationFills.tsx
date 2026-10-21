@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Skeleton, SkeletonStatus } from '@/components/ui/skeleton'
 import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { ActivityTable } from './ActivityTable'
-import { amount, money, time } from '@/lib/format'
+import { amount, money } from '@/lib/format'
+import { Time } from '@/components/ui/time'
 import { FundingPaymentsTable } from './FundingPaymentsTable'
 
 /** An expanded operation's executions, read on demand. A 404 means the history changed under the page. */
@@ -42,8 +43,8 @@ export function OperationFills({ api, operation, accounts, onReload, refreshGene
     <Button variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>Retry executions</Button></div>
   if (result.fills.tradingMode === 'paper') return <>
     <p className="workspace-scope-note"><span className="workspace-badge">Paper</span> Simulated executions at defined levels. Zero fees and slippage. Candle windows do not prove intrabar ordering.</p>
-    <div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Role</th><th>Price</th><th>Quantity</th><th>Simulated P&amp;L</th><th>Time</th><th>Candle window · UTC</th></tr></thead>
-      <tbody>{result.fills.paperExecutions?.map(execution => <tr key={execution.id}><td>{execution.role}</td><td title={execution.price}>{money(execution.price)}</td><td title={execution.quantity}>{amount(execution.quantity)}</td><td title={execution.pnlUsd}>{money(execution.pnlUsd)}</td><td><time dateTime={execution.occurredAtUtc}>{time(execution.occurredAtUtc)}</time></td><td>{execution.candleOpenAtUtc} – {execution.candleCloseAtUtc}</td></tr>)}</tbody></table></div>
+    <div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Role</th><th>Price</th><th>Quantity</th><th>Simulated P&amp;L</th><th>Time</th><th>Candle window</th></tr></thead>
+      <tbody>{result.fills.paperExecutions?.map(execution => <tr key={execution.id}><td>{execution.role}</td><td title={execution.price}>{money(execution.price)}</td><td title={execution.quantity}>{amount(execution.quantity)}</td><td title={execution.pnlUsd}>{money(execution.pnlUsd)}</td><td><Time at={execution.occurredAtUtc} /></td><td><Time at={execution.candleOpenAtUtc} /> – <Time at={execution.candleCloseAtUtc} /></td></tr>)}</tbody></table></div>
     {!!result.fills.omittedPaperExecutionCount && <p className="operation-incomplete">{result.fills.omittedPaperExecutionCount} simulated execution rows omitted. Totals include all paper executions.</p>}
   </>
   const { fills, omittedFillCount } = result.fills

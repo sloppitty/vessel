@@ -7,9 +7,11 @@ import { countIncidents, incidentSummary, incidentTone, incidentsBeyondCap, inci
 import { discrepancyAction, discrepancyFacts, discrepancyOrders, discrepancyTitle, unverifiableAction } from './discrepancy-text'
 import { coverageHeading, coverageLines, coverageTone } from './coverage'
 import './monitor.css'
+import { Time } from '@/components/ui/time'
+import { useDisplayZone } from '@/lib/display-zone'
+import { formatTime } from '@/lib/time'
 
 const labels = { live: 'Monitored', stale: 'Monitor stale', degraded: 'Monitor degraded', 'credential-error': 'Monitor credential error', idle: 'Monitor idle' }
-const time = (value: string | null) => value ? new Date(value).toLocaleString() : 'not recorded'
 
 export function MonitorBadge({ monitor }: { monitor?: AccountMonitor | null }) {
   return monitor && monitor.state !== 'live' && monitor.state !== 'idle'
@@ -62,6 +64,8 @@ export function MonitorPanel({ monitor, discrepancies, coverage = monitor.covera
   onCheck: () => void; onManageCredential?: (() => void) | undefined
   statusUnavailable?: boolean
 }) {
+  const zone = useDisplayZone()
+  const time = (value: string) => formatTime(value, zone)
   const until = Math.max(Date.parse(monitor.nextManualAllowedAtUtc ?? '') || 0, Date.parse(retryAtUtc ?? '') || 0)
   // The account's own records may be cut by the server's cap; a Play's list (the Execution tab) carries no such flag.
   const counts = discrepancies ? countIncidents(incidentsOf(discrepancies))
@@ -78,9 +82,9 @@ export function MonitorPanel({ monitor, discrepancies, coverage = monitor.covera
           <ShieldQuestion size={14} aria-hidden="true" />{coverageTitle}</strong>
         : <strong>{labels[monitor.state]}</strong>}
         {(monitor.lastSuccessAtUtc || monitor.nextRunAtUtc) && <p className="muted">
-          {monitor.lastSuccessAtUtc && <>Last success {time(monitor.lastSuccessAtUtc)}</>}
+          {monitor.lastSuccessAtUtc && <>Last success <Time at={monitor.lastSuccessAtUtc} /></>}
           {monitor.lastSuccessAtUtc && monitor.nextRunAtUtc && ' · '}
-          {monitor.nextRunAtUtc && <>Next {time(monitor.nextRunAtUtc)}</>}
+          {monitor.nextRunAtUtc && <>Next <Time at={monitor.nextRunAtUtc} /></>}
         </p>}
       </div>
       {/* A new cooldown remounts the button so its countdown starts from the current time. */}
@@ -88,7 +92,7 @@ export function MonitorPanel({ monitor, discrepancies, coverage = monitor.covera
     </div>
     {lines.map(line => <p key={line} className="monitor-coverage">{line}</p>)}
     {!monitor.workerOnline && <p className="monitor-warning">Worker offline. Scheduled checks and requested runs may be delayed.</p>}
-    {monitor.state === 'stale' && <p className="monitor-warning">Fills may be missing. Last attempt {time(monitor.lastAttemptAtUtc)}.</p>}
+    {monitor.state === 'stale' && <p className="monitor-warning">Fills may be missing. Last attempt <Time at={monitor.lastAttemptAtUtc} fallback="not recorded" />.</p>}
     {monitor.state === 'degraded' && <p className="monitor-warning">Incomplete venue coverage.</p>}
     {monitor.error && <p className="monitor-warning">{monitor.error}</p>}
     {monitor.state === 'credential-error' && (onManageCredential
@@ -108,6 +112,8 @@ export function MonitorDiscrepancies({ discrepancies, busy, onDismiss, action, l
   levelName?: ((key: unknown) => string | null) | undefined
   truncated?: boolean
 }) {
+  const zone = useDisplayZone()
+  const time = (value: string) => formatTime(value, zone)
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -132,14 +138,14 @@ export function MonitorDiscrepancies({ discrepancies, busy, onDismiss, action, l
         <div><strong>{title}<span className="monitor-contract"> · {item.contractId}</span></strong>
           <span className="monitor-badge" data-severity={item.severity} data-outcome={unverifiable ? 'unverifiable' : undefined}>
             {item.severity} · {unverifiable ? 'unverifiable' : item.state}</span></div>
-        <small>Opened {time(item.openedAtUtc)}{item.confirmedAtUtc ? ` · confirmed ${time(item.confirmedAtUtc)}` : ''}</small>
+        <small>Opened <Time at={item.openedAtUtc} fallback="not recorded" />{item.confirmedAtUtc && <> · confirmed <Time at={item.confirmedAtUtc} /></>}</small>
         <dl className="monitor-facts">
           {discrepancyFacts(item, time).map(fact => <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}
           {orders.length > 0 && <div className="monitor-orders"><dt>Orders</dt><dd>{orders.map((order, index) => <span key={index}>{order}</span>)}</dd></div>}
         </dl>
         {incident && <p className="monitor-next">Next: {unverifiable && item.state !== 'open' ? unverifiableAction : discrepancyAction(item.kind)}</p>}
         {unverifiable && <p className="monitor-unverifiable">
-          Unverifiable since {time(item.unverifiableAtUtc)}: the venue could not confirm or clear this within the monitor lifetime.
+          Unverifiable since <Time at={item.unverifiableAtUtc} fallback="not recorded" />: the venue could not confirm or clear this within the monitor lifetime.
           It is not resolved and is no longer checked; a later fresh observation can still decide it.</p>}
         {Object.keys(item.details).length > 0 && <details><summary>Recorded details</summary><pre>{JSON.stringify(item.details, null, 2)}</pre></details>}
         {item.note && <p>{item.note}</p>}
@@ -170,7 +176,7 @@ export function MonitorWatches({ watches, levelName }: { watches: MonitorWatch[]
     <ul>{watches.map(watch => <li key={watch.linkId}>
       <div><strong>Order {watch.orderId} · {levelName?.(watch) ?? watch.role}</strong>
         <span className="monitor-badge" data-watch={watch.state}>{watchStates[watch.state]}</span></div>
-      <small>Watched since {time(watch.startedAtUtc)}{watch.endedAtUtc ? ` · ended ${time(watch.endedAtUtc)}` : ''}</small>
+      <small>Watched since <Time at={watch.startedAtUtc} fallback="not recorded" />{watch.endedAtUtc && <> · ended <Time at={watch.endedAtUtc} /></>}</small>
       {watch.state === 'unverifiable' && <p className="monitor-unverifiable">
         The watch lifetime passed without venue proof. The order may still rest at the venue; check it there.</p>}
     </li>)}</ul>

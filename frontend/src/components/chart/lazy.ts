@@ -1,3 +1,4 @@
+import type { DisplayZone } from '@/lib/display-zone'
 import type { ChartDrawing, DrawingKind } from './drawings'
 import type { IndicatorView } from './indicators'
 import type { ChartAdapter, ChartAdapterFactory, ChartCandle, ChartFocus, ChartMarker, PriceOverlay } from './types'
@@ -23,9 +24,11 @@ export const createLazyLightweightAdapter: ChartAdapterFactory = (container, cal
   let indicators: IndicatorView | null = null
   let markers: readonly ChartMarker[] | null = null
   let focus: ChartFocus | null = null
+  let zone: DisplayZone | null = null
   void preloadLightweightRenderer().then(({ createLightweightAdapter }) => {
     if (destroyed) return
     adapter = createLightweightAdapter(container, callbacks)
+    if (zone) adapter.setTimeZone(zone)
     // The focus first, so the replayed candles open on it.
     if (focus) adapter.setFocus(focus)
     if (candles) adapter.setCandles(candles, true)
@@ -75,6 +78,10 @@ export const createLazyLightweightAdapter: ChartAdapterFactory = (container, cal
     setFocus(next) {
       if (adapter) adapter.setFocus(next)
       else focus = next
+    },
+    setTimeZone(next) {
+      if (adapter) adapter.setTimeZone(next)
+      else zone = next
     },
     capture(caption) {
       return adapter ? adapter.capture(caption) : Promise.resolve(null)

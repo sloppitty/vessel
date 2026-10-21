@@ -1,4 +1,6 @@
 import type { BrokerAccount } from '@/api/workspace'
+import type { DisplayZone } from './display-zone'
+import { formatIn, zoneLabel } from './time'
 // Formatting only. Authoritative amounts and aggregates arrive as decimal strings.
 // Intl formats the original decimal string exactly; Number only estimates magnitude
 // so tiny prices keep a few significant digits instead of rounding to zero.
@@ -7,17 +9,24 @@ const fractionDigits = (value: string, standard: number) => {
   return magnitude !== 0 && magnitude < 10 ** -standard ? Math.min(100, Math.ceil(-Math.log10(magnitude)) + 4) : standard
 }
 const decimalString = (value: string) => value as Intl.StringNumericLiteral
+
+const numberFormats = new Map<string, Intl.NumberFormat>()
+/**
+ * The one number formatter (phase 1, 1.6e): en-US grouping and decimals whatever the browser's language, cached per
+ * option set. Display only; exact strings are never rewritten.
+ */
+export function numberFormat(options: Intl.NumberFormatOptions = {}) {
+  const key = JSON.stringify(options)
+  let found = numberFormats.get(key)
+  if (!found) { found = new Intl.NumberFormat('en-US', options); numberFormats.set(key, found) }
+  return found
+}
 export function money(value: string | null): string {
   if (value === null) return '—'
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: fractionDigits(value, 2) }).format(decimalString(value))
 }
 export function amount(value: string): string {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: fractionDigits(value, 8) }).format(decimalString(value))
-}
-export function time(value: string | null): string {
-  return value === null ? 'Not refreshed yet' : new Date(value).toLocaleString(undefined, {
-    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  })
 }
 export const shortAddress = (value: string | null) => value === null ? 'Manual record' : `${value.slice(0, 6)}…${value.slice(-4)}`
 
@@ -58,11 +67,10 @@ export function shortSource(value: string | null | undefined): string | null {
 }
 /** Where an account's normalized available balance comes from, in the words account pages use. */
 export const availableSourceLabels = { paper: 'paper · virtual', wallet: 'wallet', margin: 'reported margin', withdrawable: 'reported withdrawal' } as const
-/** When a reported figure was read: "as of 14:02", or "as of 18 Oct 14:02" on an earlier day. */
-export function asOf(value: string, now = new Date()): string {
-  const at = new Date(value)
-  const clock = at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-  return `as of ${at.toDateString() === now.toDateString() ? clock : `${at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} ${clock}`}`
+/** When a reported figure was read, in the display zone: "as of 14:02 CEST", or "as of 18 Oct 14:02 CEST" on an earlier day. */
+export function asOf(value: string, zone: DisplayZone, now = new Date()): string {
+  const clock = `${formatIn(value, zone, 'time')} ${zoneLabel(value, zone)}`
+  return `as of ${formatIn(value, zone, 'date') === formatIn(now, zone, 'date') ? clock : `${formatIn(value, zone, 'day')} ${clock}`}`
 }
 /** The account state shown in rows and detail. */
 export const accountStatus = (account: BrokerAccount) => account.isEnabled === false ? 'Disabled' : account.tradingMode === 'paper' ? 'Paper' : account.syncStatus === 'manual' ? 'Manual' :
