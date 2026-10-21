@@ -141,7 +141,7 @@ public interface IPlayStore
     /// The newest non-blank next actions of the owner's Closed or Cancelled Plays, by review time, at most
     /// <paramref name="limit"/>; only the ID, title, next action and review time are read.
     /// </summary>
-    Task<List<NextActionDto>> NextActionsAsync(int limit, CancellationToken ct);
+    Task<List<NextActionDto>> NextActionsAsync(int limit, string tradingMode, CancellationToken ct);
     /// <summary>A Play's log, oldest first.</summary>
     Task<List<PlayNote>> NotesAsync(Guid playId, CancellationToken ct);
     /// <summary>The owner's log entry written for <paramref name="requestId"/>, if any.</summary>

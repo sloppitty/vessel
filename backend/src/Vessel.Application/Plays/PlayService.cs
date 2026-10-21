@@ -229,7 +229,8 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     /// <summary>At most this many recent next actions are offered at planning (phase 1, 1.5).</summary>
     public const int MaxNextActions = 10;
 
-    public Task<List<NextActionDto>> NextActionsAsync(CancellationToken ct) => store.NextActionsAsync(MaxNextActions, ct);
+    public Task<List<NextActionDto>> NextActionsAsync(CancellationToken ct, string? tradingMode = "real") =>
+        store.NextActionsAsync(MaxNextActions, Mode(tradingMode), ct);
 
     public async Task<PlayHistoryDto> HistoryAsync(Guid id, CancellationToken ct)
     {
