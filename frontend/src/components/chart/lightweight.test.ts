@@ -42,6 +42,7 @@ function fakeChart() {
   const addSeries = vi.fn((kind: string) => { const current = makeSeries(kind); series.push(current); return current })
   const timeScale = { width: () => 800, height: () => 20, logicalToCoordinate: (logical: number) => logical * 100,
     getVisibleLogicalRange: vi.fn((): { from: number; to: number } | null => ({ from: 0, to: 7 })),
+    options: vi.fn(() => ({ barSpacing: 100 })),
     // As the library does, a coordinate rounds up to a whole bar.
     coordinateToLogical: (x: number) => Math.ceil(x / 100 - 1e-9), scrollToPosition: vi.fn(), setVisibleRange: vi.fn(), subscribeVisibleLogicalRangeChange: vi.fn(), unsubscribeVisibleLogicalRangeChange: vi.fn() }
   const chart = {
@@ -252,6 +253,16 @@ describe('fill markers and trade focus (phase 1, 1.1b)', () => {
     expect(callbacks.onLevelSelect).not.toHaveBeenCalled()
     pointer(container, 'pointerdown', 101.5, 400); pointer(container, 'pointermove', 103, 400); pointer(container, 'pointerup', 103, 400)
     expect(callbacks.onLevelDrag).toHaveBeenLastCalledWith('level', 103, 'end')
+  })
+
+  it('sizes the marker hit area from the configured bar spacing, as the library does', () => {
+    // Coordinates still sit 100 px apart, but the library sizes markers from its option: at 12 px the arrow is small.
+    vi.mocked(chart.timeScale().options).mockReturnValue({ barSpacing: 12 })
+    adapter.setOverlays([{ id: 'level', label: 'Entry', price: 101.5, color: '#ffffff', emphasis: 'selected', kind: 'entry', draggable: true }])
+    adapter.setMarkers([marker('fill-1', 125_000)])
+    const primitive = chart.series[0]!.primitives[0] as unknown as { hitTest(x: number, y: number): { externalId: string } | null }
+    expect(primitive.hitTest(100, 1000 - 101.5)).toBeNull()
+    expect(primitive.hitTest(112, 1000 - 101.5 + 4)?.externalId).toBe('level')
   })
 
   it('gives way only to markers the library draws, never to one beyond the visible bars and their neighbours', () => {

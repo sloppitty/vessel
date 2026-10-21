@@ -385,9 +385,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   const onMarker = (x: number, y: number) => {
     if (!placed.length) return false
     const scale = chart.timeScale()
-    const first = scale.logicalToCoordinate(0 as Logical), second = scale.logicalToCoordinate(1 as Logical)
-    if (first === null || second === null) return false
-    const size = markerSize(second - first), half = size / 2 + 3
+    // The configured spacing, as the library sizes markers; a difference of coordinates can cross a rounding step.
+    const size = markerSize(scale.options().barSpacing), half = size / 2 + 3
     // Whole bars that may hold a marker within reach (the library rounds up to a bar); each is then measured exactly.
     const from = scale.coordinateToLogical(x - half), to = scale.coordinateToLogical(x + half), visible = scale.getVisibleLogicalRange()
     if (from === null || to === null || visible === null) return false
