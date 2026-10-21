@@ -1,8 +1,8 @@
 # Paper trading delivery state
 
-October 21, 2026. **Draft again: the owner's final two-Sol adversarial pass
-found report-provenance and exit-order/activation defects, under correction
-and fresh closure review.
+October 21, 2026. **Integration verified for the owner-authorized merge:
+the two-Sol adversarial findings are corrected, both independent scoped
+closure reviews approve, and final parent verification passed.
 The accepted C/N1 limitations remain accepted. The owner has authorized merge
 only once the findings and final verification are sound; no deployment,
 release or live migration is authorized.**
@@ -1003,3 +1003,88 @@ verification will use a separate evidence root
 `/home/ops/.cache/vessel-verification/paper-sol-activation-final-20261021/`,
 without overwriting the earlier run. New independent core closure is required;
 PR stays draft until all final gates are sound.
+
+### Final activation snapshot parent verification (`6b53b2f`)
+
+The separate final run rebuilt the frozen activation correction from clean
+source with SDK 10.0.302: **zero warnings/errors**. Four disjoint bounded
+backend batches covered all **233 discovered classes**:
+
+| Batch | Passed | Failed | Skipped |
+| --- | ---: | ---: | ---: |
+| 1 | 1,048 | 0 | 1 |
+| 2 | 703 | 0 | 3 |
+| 3 | 780 | 0 | 1 |
+| 4 | 1,418 | 0 | 0 |
+| **Total** | **3,949** | **0** | **5** |
+
+All **12 broker-backed facts passed** within that total. The five skips are two
+Lighter live checks, one RISEx live check and two S3 integration/copy checks;
+they are not passes. TRX reconciliation found no cross-batch duplicate test
+IDs. Explicit migration to the disposable smoke database, no-pending-model
+verification and **four standalone schema/worker/health checks** passed.
+These host checks are not browser-to-API E2E or live-candle verification.
+
+All **430 frontend source/test inputs** remain byte-identical to the complete
+**3,907-test / 158-file** frontend run, including typecheck, full lint and
+production build. Root Python checks remain **82/82 passed**, with no subsequent
+root-script changes. These applicable unchanged-input runs are not presented
+as freshly rerun frontend or root checks.
+
+Final evidence:
+`/home/ops/.cache/vessel-verification/paper-sol-activation-final-20261021/`,
+including `summary.json`, all four TRXs, build/schema/host logs and
+`verification.status`. Frozen manifests were rechecked after testing:
+
+- Production inputs, **798 files**:
+  `2ad6c39e4c4e1d909dc1a21126d013218ba99aeba6656fc08e8ff7558cd009bb`.
+- Test inputs, **663 files**:
+  `30cfb97a0335dde03809b3ba56776fa3e6fa48bdea30dd38a08f49cde97de9cb`.
+
+Independent **B2** gives bounded approval of B1 and the reporting P3 on
+`ff72a7b`: **64/64 backend**, **321/321 affected frontend**, typecheck and scoped
+lint passed. Private mutation controls restored the six original B1 failures
+and seven reporting-population failures. Every reviewed boundary/reporting
+input remains unchanged in `6b53b2f`; only the later evaluator guard, its new
+test file and documentation differ. This is not B2 approval of the evaluator.
+Report:
+`/home/ops/.cache/vessel-verification/paper-sol-adversarial-20261021/closure-b2-ff72a7b-C9rv3L/REPORT.md`.
+
+The optional Overview-row codec-hardening probe remains visibly red and
+nonblocking: it supplies a malformed Paper group row with an actual-fill
+count, without demonstrating any current backend emission of that document.
+It is not counted as a passing probe or conflated with B1's fixed omitted-root
+bypass. No owner-policy change is implied.
+
+### Final independent core closure and parent integration decision
+
+Independent **A3** now gives bounded core approval on exact production commit
+`6b53b2f36644574089492528938203f683aa90fb`. A1 and A2-1 are closed; no remaining
+P1/P2 core finding was demonstrated. Its **334 distinct tests passed**, zero
+failures/skips: unchanged A1 probes 17, exact A2/shipping activation matrix 44,
+shipping ordering cases 24, existing core selection 221 and new adversarial
+controls 28. A further **113-case no-build repeat** passed with all nine
+principal assembly hashes unchanged; it adds no distinct tests to 334.
+Both independent builds had zero warnings/errors.
+
+A3 checked positive-share continuity, intervening zero-share/price activations
+across empty minutes, checkpoint splits, partial remainders, multi-entry atomic
+rollback and entry-level short-circuit safety. All 2,491 archived tracked files
+remained unchanged, and its independently recomputed production/test manifests
+match the final parent manifests above. Report, raw runs and count reconciliation:
+`/home/ops/.cache/vessel-verification/paper-review-a3-6b53b2f-GCj6eU/REPORT.md`.
+
+A3 is core-only and B2 is boundary/reporting-only; neither is misrepresented as
+whole-PR approval. The parent combines those complementary verdicts with the
+complete final checks and unchanged-input frontend/root evidence for
+**integration sign-off within the accepted v1 scope**. The accepted C/N1 limits
+and the explicitly nonblocking codec-hardening observation remain disclosed.
+Earlier adverse verdicts and failed probes remain as written.
+
+Remote `main` still matches the validated base `cda3a4b`, and PR #32 has no
+outstanding external review/comment or required branch check. The repository's
+release-tag-only CI policy is unchanged; these local checks are the merge
+gate, not a claim of PR CI execution. Final documentation changes do not alter
+the reviewed production/tests. The owner explicitly authorized merge after
+this verification; mark ready and merge only the exact final pushed head.
+No deployment, release or owner-database migration is included.
