@@ -286,6 +286,24 @@ October 21, 2026.
   formatting, empty unknowns and formula neutralization.
 - **Check after round 1.** `scripts/check.sh` passed on `7790a4d3` (before documentation-only commits were restacked beneath it): backend 4,048 passed, 5 skipped; frontend 173 files and 4,067 tests.
 
+**5c. Play bundle.** Implemented on `t3/phase2-play-bundle`.
+- **The read.** `GET /api/plays/{id}/bundle` returns a zip in the Play's own trading mode.
+  - `play.json` holds, from the API's own read models: the Play; its plan revisions, status and review
+    history; its executions (linked orders and fills, the manual ledger, or paper's simulated state);
+    its log; and its evidence with markup and notes.
+  - Each evidence original sits under `evidence/`, unchanged.
+- **What it leaves out.** It holds no storage key, path or credential. An original that cannot be read
+  is listed as unavailable rather than failing the download.
+- **How it is built.** The archive is built in a delete-on-close temporary file and then copied, so no
+  synchronous write reaches the response.
+- **The page.** A saved Play's header gains **Download** beside History.
+- **Tests.**
+  - `PlayBundleTests` (2, PostgreSQL): the record and an unchanged original; an unreadable original
+    listed, not hidden; another owner's Play and the other mode not found.
+  - The isolation case in both auth modes.
+  - The button test.
+- **Check.** `scripts/check.sh` passed on `75371a37`: backend 4,048 passed, 5 skipped; frontend 174 files and 4,069 tests.
+
 ## 6. Opt-in account history retention
 
 Not started.
