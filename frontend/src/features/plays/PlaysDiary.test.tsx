@@ -73,9 +73,9 @@ function serve(methods: ReturnType<typeof client>['methods'], plays: PlaySummary
 /** List reads, optionally of one view. */
 const reads = (methods: ReturnType<typeof client>['methods'], view?: PlayView) =>
   methods.plays.mock.calls.filter(([query]) => view === undefined || query.view === view).length
-function Harness({ api, initial = createPlaysSession(), request = null, onHandled = vi.fn(), onSession = vi.fn(), manual = false }: {
+function Harness({ api, initial = createPlaysSession(), request = null, onHandled = vi.fn(), onSession = vi.fn(), manual = false, generation = 0 }: {
   api: WorkspaceApi; initial?: PlaysSession; request?: string | null; onHandled?: () => void;
-  onSession?: (session: PlaysSession) => void; manual?: boolean
+  onSession?: (session: PlaysSession) => void; manual?: boolean; generation?: number
 }) {
   const [session, setSession] = useState(initial)
   const [requested, setRequested] = useState(request)
@@ -87,7 +87,7 @@ function Harness({ api, initial = createPlaysSession(), request = null, onHandle
     <button onClick={() => setShown(value => !value)}>Toggle Plays page</button>
     {shown && <PlaysPage accounts={[accountFixture]} portfolios={[portfolioFixture]} api={api} session={session}
       onSession={next => { setSession(next); onSession(next) }} requestedPlayId={requested}
-      onRequestedPlayHandled={() => { onHandled(); setRequested(null) }} />}
+      onRequestedPlayHandled={() => { onHandled(); setRequested(null) }} reloadGeneration={generation} />}
   </NotificationProvider></VenuesProvider>
 }
 
@@ -599,6 +599,48 @@ describe('diary workspace integration', () => {
     // Saved: the journal's Save leaves, and focus stays in the journal instead of falling to the page.
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Save play' })).not.toBeInTheDocument())
     expect(screen.getByRole('button', { name: 'Expand journal' })).toHaveFocus()
+  })
+  it('withholds the outcome when a reread fails instead of showing the earlier figures as current (phase 1, 1.1a)', async () => {
+    const closed: SavedPlay = { ...terminal, summary: { ...terminal.summary, status: 'closed', cancelReason: null } }
+    const { api, methods } = client(closed)
+    methods.playExecution.mockImplementation(() => Promise.resolve({ ...execution(closed), tracked: true, reason: null,
+      totals: { ...execution(closed).totals, venueNetUsd: '4.97' },
+      receipt: { firstEntryAtUtc: '2026-10-13T08:00:00Z', lastExitAtUtc: '2026-10-13T09:30:00Z', averageEntryPrice: '100.4', averageExitPrice: '110',
+        fillCount: 3, estimatedR: '1.98', initialRisk: '2.51', estimatedRReason: null } }))
+    const user = userEvent.setup()
+    const view = render(<Harness api={api} initial={sessionFor(closed)} />)
+    await user.click(screen.getByRole('tab', { name: 'Review' }))
+    expect(await screen.findByLabelText('Outcome')).toHaveTextContent('4.97 USD')
+    // Newer facts arrived and their reread failed: the earlier net is no longer shown as the outcome.
+    methods.playExecution.mockRejectedValue(new ApiError('unavailable', 'Execution unavailable.'))
+    view.rerender(<Harness api={api} initial={sessionFor(closed)} generation={1} />)
+    expect(await screen.findByText('The outcome could not be read again. Execution unavailable.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Outcome')).not.toBeInTheDocument()
+    expect(screen.queryByText('4.97 USD')).not.toBeInTheDocument()
+  })
+  it('compares entries with a newly saved plan revision, not the one before it (phase 1, 1.1a)', async () => {
+    const { api, methods } = client(planned)
+    const progress = (plannedQuantity: string) => ({ ...execution(planned), tracked: true, reason: null,
+      entries: [{ entryId: 'entry-1', filledQuantity: '0', averageFillPrice: null, restingOrders: 0, plannedPrice: '100', plannedQuantity, planRevision: null }] })
+    methods.playExecution.mockImplementation(() => Promise.resolve(progress('1')))
+    methods.updatePlay.mockImplementation((_id, fields) => {
+      methods.playExecution.mockImplementation(() => Promise.resolve(progress('2')))
+      return Promise.resolve({ ...planned, plan: fields.plan, summary: { ...planned.summary, version: planned.summary.version + 1, planRevision: 2 } })
+    })
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(planned)} />)
+    await user.click(screen.getByRole('tab', { name: 'Execution' }))
+    expect(await screen.findByText('Filled 0 of 1')).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Thesis' }))
+    await user.type(screen.getByRole('textbox', { name: 'Thesis' }), ' Doubled the size.')
+    await user.click(screen.getByRole('button', { name: 'Save play' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByRole('textbox'), 'Doubled the size')
+    await user.click(within(dialog).getByRole('button', { name: 'Save revision' }))
+    await waitFor(() => expect(methods.updatePlay).toHaveBeenCalledOnce())
+    await user.click(screen.getByRole('tab', { name: 'Execution' }))
+    expect(await screen.findByText('Filled 0 of 2')).toBeInTheDocument()
+    expect(screen.queryByText('Filled 0 of 1')).not.toBeInTheDocument()
   })
   it('keeps focus in the journal after a save that asked for a revision reason', async () => {
     const { api, methods } = client(planned)
