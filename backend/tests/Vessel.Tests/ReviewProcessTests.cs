@@ -62,6 +62,22 @@ public sealed class ReviewProcessTests
         (await f.Service.ProcessAsync(new(new(Period: "all"), cell, lane, tag, check), default)).Total;
 
     [Fact]
+    public async Task A_paper_Review_holds_no_real_process_case_or_exclusion()
+    {
+        // Main's paper trading never pools real and paper: Paper's process view and drill-downs, cancelled and unresolved
+        // Plays included, hold no real Play, while the real Review keeps them.
+        Scored(5, "followed"); Cancelled("deviated"); Unresolved("followed");
+        var paper = new ReviewQuery(Period: "all", TradingMode: "paper");
+        var report = await f.Service.GetAsync(paper, default);
+        Assert.Equal((new ReviewProcessRowDto(0, 0, 0), 0, 0, 0), (report.Process!.Followed, report.Process.Unscored,
+            report.Coverage.Unresolved, report.Coverage.Cancelled));
+        Assert.Equal((0, 0), ((await f.Service.ProcessAsync(new(paper, Cell: "followed-win"), default)).Total,
+            (await f.Service.ProcessAsync(new(paper, Lane: "unscored"), default)).Total));
+        Assert.Empty((await f.Service.ExclusionsAsync(paper, default)).Items);
+        Assert.Equal((1, 2), (await Total(cell: "followed-win"), await Total(lane: "unscored")));
+    }
+
+    [Fact]
     public async Task Each_ended_Play_lands_in_the_first_lane_that_applies_and_every_count_equals_its_drill_down()
     {
         Scored(5, "followed"); Scored(-5, "followed"); Scored(0, "followed");
