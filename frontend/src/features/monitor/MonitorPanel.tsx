@@ -81,13 +81,15 @@ export function MonitorPanel({ monitor, discrepancies, coverage = monitor.covera
         : coverageTitle ? <strong className="monitor-coverage-heading" data-tone={coverageTone(coverage, unchecked) ?? 'info'}>
           <ShieldQuestion size={14} aria-hidden="true" />{coverageTitle}</strong>
         : <strong>{labels[monitor.state]}</strong>}
-        {(monitor.lastSuccessAtUtc || monitor.nextRunAtUtc) && <p className="muted">
+        <p className="muted">
           {monitor.lastSuccessAtUtc && <>Last success <Time at={monitor.lastSuccessAtUtc} /></>}
           {monitor.lastSuccessAtUtc && monitor.nextRunAtUtc && ' · '}
           {monitor.nextRunAtUtc && <>Next <Time at={monitor.nextRunAtUtc} /></>}
-          {/* I-08: the cadence is a diary check, not stop protection. */}
+          {(monitor.lastSuccessAtUtc || monitor.nextRunAtUtc) && ' · '}
+          {/* I-08: the cadence is a diary check, not stop protection; always stated (Sol round 1 on #43). */}
+          {monitor.intervalMinutes ? `Checked about every ${monitor.intervalMinutes} minute${monitor.intervalMinutes === 1 ? '' : 's'}; not stop protection` : 'Checked periodically; not stop protection'}
           <InfoTip label="About check timing">Checks run periodically, not continuously, so a stop removed and replaced between two checks is not seen. They keep the record honest; they are not stop protection, and Vessel never places or changes orders.</InfoTip>
-        </p>}
+        </p>
       </div>
       {/* A new cooldown remounts the button so its countdown starts from the current time. */}
       <CheckButton key={until} until={until} monitor={monitor} busy={busy} blocked={statusUnavailable} onCheck={onCheck} />

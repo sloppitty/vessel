@@ -81,7 +81,8 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
   const watchLevel = (watch: { linkId: string }) => { const link = execution.links.find(item => item.id === watch.linkId); return link ? levelName(entries, link, origin) : null }
   const orderList = (orders: readonly ExecutionOrder[]) => <ul className="execution-list">{orders.map(order => {
     // Only roles the order's side and flags allow; a contradicting fill is refused by the server.
-    const allowed = options.filter(item => orderFitsRole(order, item.request.role, direction))
+    const allowed = options.filter(item => orderFitsRole(order, item.request.role, direction) &&
+      (order.roles?.includes(item.request.role) ?? true))
     const chosen = choices[order.orderId] ?? ''
     const option = allowed.find(item => item.value === chosen)
     return <li key={order.orderId}>
@@ -115,7 +116,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
           context={{ direction, leverage, tick: priceStep }} origin={origin} playId={execution.playId} version={version} blocked={busy ? 'Wait for the current change to finish.' : rebindBlocked}
           onRebind={onRebind} />}
         {!stale && <LinkStopAction discrepancy={item} orders={[...execution.unlinkedOrders, ...(execution.earlierOrders ?? [])]} entries={entries}
-          direction={direction} busy={busy} onLink={onLink} />}</> : undefined} />}
+          direction={direction} busy={busy} blocked={rebindBlocked} onLink={onLink} />}</> : undefined} />}
     <MonitorWatches watches={execution.watches} levelName={watchLevel} />
     {/* Kept from the last read until a fresh one arrives (usePlayExecution); new links wait for it too. */}
     {stale && <p className="muted" role="status">These figures are from the last read and may be out of date until the execution is read again.</p>}

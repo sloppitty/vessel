@@ -23,7 +23,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     private const int MaxUnlinkedOrders = 20;
     /// <summary>Earlier orders checked for compatibility, newest first, bounding the fills read for them.</summary>
     private const int MaxEarlierScan = 200;
-    private static readonly OrderLinkRole[] EarlierRoles = [OrderLinkRole.Entry, OrderLinkRole.Stop, OrderLinkRole.Target];
+    private static readonly OrderLinkRole[] OfferedRoles = [OrderLinkRole.Entry, OrderLinkRole.Stop, OrderLinkRole.Target, OrderLinkRole.Exit];
     private static readonly PlayExecutionOptions DefaultOptions = new();
     private const string Notice = "Orders and fills come from the venue and link to this play by order ID. " +
         "Price touches are never treated as fills. Quantities are base units from linked fills; closed PnL and fees are as the venue reports them.";
@@ -82,16 +82,21 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var offered = play.ContractId is null ? [] : loaded
             .Where(o => o.ContractId == play.ContractId && o.PlacedAtUtc >= earliest && !linkedOrders.Contains(o.Id) &&
                 o.Status is "open" or "filled" or "triggered").OrderByDescending(o => o.PlacedAtUtc).ToList();
-        var unlinked = offered.Where(o => o.PlacedAtUtc >= play.CreatedAtUtc).Take(MaxUnlinkedOrders).Select(OrderDto).ToList();
         var plan = PlayDocuments.Read(play.Plan);
-        // Sol round 1 on #37: an earlier order is offered only when some role of this plan accepts its side, mechanics and
-        // retained fills, before the cap, so unusable orders cannot crowd out the fast entry. Its price is not required to
+        // Each offered order states the roles the link endpoint would accept (Sol round 1 on #43), so the panel never offers
+        // one that a retained fill contradicts. Sol round 1 on #37: an earlier order is offered only when some role accepts
+        // it, checked before the cap, so unusable orders cannot crowd out the fast entry. Its price is not required to
         // match: a market entry rarely fills at the planned price, and the owner decides.
+        var after = offered.Where(o => o.PlacedAtUtc >= play.CreatedAtUtc).Take(MaxUnlinkedOrders).ToList();
         var before = offered.Where(o => o.PlacedAtUtc < play.CreatedAtUtc).Take(MaxEarlierScan).ToList();
-        var beforeFills = before.Count == 0 ? [] : await store.FillsAsync(play.AccountId, before.Select(OrderKey.Of).ToList(), ct);
-        var fillsBefore = beforeFills.ToLookup(OrderKey.Of);
-        var earlier = before.Where(o => EarlierRoles.Any(role => ExecutionIntegrity.RoleConflict(role, plan, o, fillsBefore[OrderKey.Of(o)]) is null))
-            .Take(MaxUnlinkedOrders).Select(OrderDto).ToList();
+        var candidates = after.Concat(before).ToList();
+        var candidateFills = (candidates.Count == 0 ? [] : await store.FillsAsync(play.AccountId, candidates.Select(OrderKey.Of).ToList(), ct))
+            .ToLookup(OrderKey.Of);
+        List<string> Roles(ImportedOrder o, IEnumerable<OrderLinkRole> roles) =>
+            roles.Where(role => ExecutionIntegrity.RoleConflict(role, plan, o, candidateFills[OrderKey.Of(o)]) is null).Select(Name).ToList();
+        var unlinked = after.Select(o => OrderDto(o) with { Roles = Roles(o, OfferedRoles) }).ToList();
+        var earlier = before.Select(o => (Order: o, Roles: Roles(o, OfferedRoles))).Where(x => x.Roles.Any(role => role != "exit"))
+            .Take(MaxUnlinkedOrders).Select(x => OrderDto(x.Order) with { Roles = x.Roles }).ToList();
 
         var revisions = await plays.RevisionsAsync(play.Id, ct);
         var settlement = Settle(plan, linked, orders, fills, play.Origin == PlayOrigin.Retrospective);

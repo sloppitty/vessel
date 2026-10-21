@@ -669,7 +669,10 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         return new(row.AccountId, state, row.LastAttemptAtUtc, row.LastSuccessAtUtc,
             row.NextRunAtUtc is null ? null : Later(row.NextRunAtUtc, venueDeadline),
             row.ManualState, RunTrigger(row), Later(row.NextManualAllowedAtUtc, venueDeadline), row.Error, online,
-            records.Records, records.Truncated, coverage.Where(x => x.AccountId == row.AccountId).Select(Coverage).ToArray(), uncheckedPlays);
+            records.Records, records.Truncated, coverage.Where(x => x.AccountId == row.AccountId).Select(Coverage).ToArray(), uncheckedPlays)
+        {
+            IntervalMinutes = (int)Math.Round(options.Interval.TotalMinutes),
+        };
     }
 
     private static readonly JsonSerializerOptions CoverageJson = new(JsonSerializerDefaults.Web);
