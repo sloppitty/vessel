@@ -170,6 +170,8 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
 
   /** Latest close; levels far from it are left out of autoscaling so a mismatched plan cannot flatten the candles. */
   reference: number | null = null
+  /** Points on a fill marker's shape: levels give way there, so a fill at its planned price keeps its tooltip. */
+  yieldAt: (x: number, y: number) => boolean = () => false
   /** The attribution logo sits in the bottom pane, so tags avoid it only while the price pane is the only one. */
   avoidLogo = true
 
@@ -181,8 +183,8 @@ class LevelsPrimitive implements ISeriesPrimitive<Time> {
     return { priceRange: { minValue: Math.min(...prices), maxValue: Math.max(...prices) } }
   }
 
-  hitTest(_x: number, y: number): PrimitiveHoveredItem | null {
-    const hit = this.levelAt(y)
+  hitTest(x: number, y: number): PrimitiveHoveredItem | null {
+    const hit = this.yieldAt(x, y) ? null : this.levelAt(y)
     return hit ? {
       externalId: hit.overlay.id, zOrder: 'top', distance: hit.distance, hitTestPriority: 1,
       cursorStyle: hit.overlay.draggable ? 'ns-resize' : 'pointer',
@@ -350,10 +352,13 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   // Fills as buy and sell shapes at their price, never lines, so a fill cannot be read as a level (phase 1, 1.1b).
   const fillMarkers = createSeriesMarkers(series, [])
   let markers: readonly ChartMarker[] = []
-  let hoveredMarker: string | null = null
+  let hoveredMarker = ''
+  // Placed fills in candle order, and for each the fills sharing its shape: one price in one candle.
+  let placed: { id: string; index: number; price: number }[] = []
+  let shapes = new Map<string, readonly string[]>()
   const placeMarkers = () => {
     const times = loaded.map(candle => candle.time)
-    fillMarkers.setMarkers(markers.flatMap(marker => {
+    const shown = markers.flatMap(marker => {
       // The candle the fill falls in: the latest one at or before it, and only within that candle's own span.
       let low = 0, high = times.length - 1, found = -1
       while (low <= high) {
@@ -361,10 +366,40 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
         if (times[middle]! <= marker.time) { found = middle; low = middle + 1 } else high = middle - 1
       }
       if (found < 0 || marker.time >= candleEnd(times[found]!, marker.span) || candleEnd(times[found]!, marker.span) <= times[found]!) return []
-      return [{ id: marker.id, time: (times[found]! / 1000) as UTCTimestamp, position: 'atPriceMiddle' as const, price: marker.price,
-        shape: marker.side === 'buy' ? 'arrowUp' as const : 'arrowDown' as const, color: marker.side === 'buy' ? theme.positive : theme.negative }]
-    }).sort((a, b) => a.time - b.time))
+      return [{ index: found, shape: { id: marker.id, time: (times[found]! / 1000) as UTCTimestamp, position: 'atPriceMiddle' as const, price: marker.price,
+        shape: marker.side === 'buy' ? 'arrowUp' as const : 'arrowDown' as const, color: marker.side === 'buy' ? theme.positive : theme.negative } }]
+    }).sort((a, b) => a.shape.time - b.shape.time)
+    placed = shown.map(({ index, shape }) => ({ id: shape.id, index, price: shape.price }))
+    const groups = new Map<string, string[]>()
+    for (const item of placed) {
+      const key = `${item.index} ${item.price}`
+      const group = groups.get(key)
+      if (group) group.push(item.id); else groups.set(key, [item.id])
+    }
+    shapes = new Map(placed.map(item => [item.id, groups.get(`${item.index} ${item.price}`)!]))
+    fillMarkers.setMarkers(shown.map(item => item.shape))
   }
+  /** Whether a fill marker's shape holds the point, sized as the library draws it, with its few pixels of tolerance. */
+  const onMarker = (x: number, y: number) => {
+    if (!placed.length) return false
+    const scale = chart.timeScale()
+    const first = scale.logicalToCoordinate(0 as Logical), second = scale.logicalToCoordinate(1 as Logical)
+    if (first === null || second === null) return false
+    const half = Math.min(Math.max(second - first, 12), 30) / 2 + 3
+    const from = scale.coordinateToLogical(x - half), to = scale.coordinateToLogical(x + half)
+    if (from === null || to === null) return false
+    let low = 0, high = placed.length
+    while (low < high) {
+      const middle = (low + high) >> 1
+      if (placed[middle]!.index < from) low = middle + 1; else high = middle
+    }
+    for (let at = low; at < placed.length && placed[at]!.index <= to; at++) {
+      const markerY = series.priceToCoordinate(placed[at]!.price)
+      if (markerY !== null && Math.abs(markerY - y) <= half) return true
+    }
+    return false
+  }
+  levels.yieldAt = onMarker
   let focus: ChartFocus | null = null
   // The chart can only show loaded candles: while the focus starts before them, it is applied again as older pages
   // arrive, until it fits or the owner moves the view.
@@ -709,10 +744,11 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   chart.timeScale().subscribeVisibleLogicalRangeChange(onRange)
   let crosshairTime: number | null = null
   const onCrosshair = (event: MouseEventParams<Time>) => {
-    const hovered = typeof event.hoveredObjectId === 'string' && markers.some(marker => marker.id === event.hoveredObjectId) ? event.hoveredObjectId : null
-    if (hovered !== hoveredMarker) {
-      hoveredMarker = hovered
-      callbacks.onMarkerHover?.(hovered, hovered && event.point ? { x: event.point.x, y: event.point.y } : null)
+    // The library reports one marker; fills drawn as the same shape are all listed.
+    const hovered = typeof event.hoveredObjectId === 'string' ? shapes.get(event.hoveredObjectId) ?? [] : []
+    if (hovered.join('\n') !== hoveredMarker) {
+      hoveredMarker = hovered.join('\n')
+      callbacks.onMarkerHover?.(hovered, hovered.length && event.point ? { x: event.point.x, y: event.point.y } : null)
     }
     const time = typeof event.time === 'number' ? event.time * 1000 : null
     if (time === crosshairTime) return
@@ -779,7 +815,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       callbacks.onLevelEdit(tag.overlay.id, { x: tag.x, y: tag.y })
       return
     }
-    const hit = levels.levelAt(y)
+    const hit = onMarker(x, y) ? null : levels.levelAt(y)
     if (!hit?.overlay.draggable) return
     consume(event)
     const { id, priceStep } = hit.overlay
@@ -849,7 +885,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     const rect = container.getBoundingClientRect()
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
-    if (x > chart.timeScale().width() || y > chart.paneSize(0).height || picking || drawings.tool || drawings.drawingAt(x, y)) return
+    if (x > chart.timeScale().width() || y > chart.paneSize(0).height || picking || drawings.tool || drawings.drawingAt(x, y) || onMarker(x, y)) return
     const hit = levels.levelAt(y)
     if (!hit || hit.overlay.kind === 'reference') return
     event.preventDefault()

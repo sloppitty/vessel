@@ -93,6 +93,13 @@ describe('process cases (phase 1, 1.4b)', () => {
     expect(isReviewProcessPage({ ...page, total: 2 })).toBe(false)
     expect(isReviewProcessPage({ ...page, items: [{ ...page.items[0]!, status: 'open' }] })).toBe(false)
     expect(isReviewProcessPage({ ...page, items: [{ ...page.items[0]!, net: null, returnPercent: null }] })).toBe(true)
+    expect(isReviewProcessPage({ ...page, items: [{ ...page.items[0]!, status: 'unresolved', net: null, returnPercent: null }] })).toBe(true)
+    // Unscored Plays have no result, a result has its return, retrospective Plays have no R or post-hoc badge, and a
+    // direction is long, short or none.
+    for (const change of [{ status: 'unresolved' }, { status: 'cancelled' }, { returnPercent: null }, { net: null },
+      { net: null, returnPercent: null, rMultiple: '1' }, { origin: 'retrospective', plannedAfterExecution: false, rMultiple: '1' },
+      { origin: 'retrospective' }, { direction: 'sideways' }])
+      expect(isReviewProcessPage({ ...page, items: [{ ...page.items[0]!, ...change }] })).toBe(false)
   })
 })
 

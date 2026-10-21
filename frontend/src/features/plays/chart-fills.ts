@@ -28,7 +28,9 @@ export function fillMarkers(fills: readonly ChartFill[], interval: CandleInterva
 /** The trade's dates with room either side: a quarter of its length, and at least five candles. */
 export function tradeFocus(markers: readonly ChartMarker[], interval: CandleInterval): ChartFocus | null {
   if (!markers.length) return null
-  const from = Math.min(...markers.map(marker => marker.time)), to = Math.max(...markers.map(marker => marker.time))
+  // One pass, not spread arguments: a long history has more fills than a call can take.
+  let from = Infinity, to = -Infinity
+  for (const marker of markers) { from = Math.min(from, marker.time); to = Math.max(to, marker.time) }
   const pad = Math.max((to - from) / 4, 5 * intervalMs(interval))
   // Whole milliseconds: the end is a candle request's end time.
   return { from: Math.floor(from - pad), to: Math.ceil(to + pad) }

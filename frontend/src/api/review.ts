@@ -133,15 +133,18 @@ export const isReviewMetrics = (v: unknown): v is ReviewMetrics => isRecord(v) &
   ['net', 'batting', 'averageGain', 'averageLoss', 'payoff', 'profitFactor', 'averageWin', 'averageLossUsd', 'expectancy', 'averageR', 'drawdown']
     .every(key => isNullOr(v[key], isReviewDecimal)) &&
   (v.wins as number) + (v.losses as number) + (v.scratches as number) === v.count &&
-  (v.riskCount as number) <= (v.count as number) && (v.reviewed as number) <= (v.count as number) &&
+  (v.positions === undefined || isCount(v.positions) && v.positions <= (v.count as number)) &&
+  // Stops, reviews and Play-local results belong to Plays, never to imported positions.
+  ['riskCount', 'reviewed', 'signDiffers', 'localUnknown'].every(key => v[key] === undefined ||
+    (v[key] as number) <= (v.count as number) - ((v.positions as number | undefined) ?? 0)) &&
   (v.batting === null || Number(v.batting) >= 0 && Number(v.batting) <= 1) &&
   (v.count === 0 ? v.net === null : isReviewDecimal(v.net)) &&
-  ['signDiffers', 'localUnknown'].every(key => v[key] === undefined || isCount(v[key]) && (v[key] as number) <= (v.count as number)) &&
-  ['feeOnlyLosses', 'unknownGrossLosses'].every(key => v[key] === undefined || isCount(v[key]) && (v[key] as number) <= (v.losses as number)) &&
-  (v.positions === undefined || isCount(v.positions) && v.positions <= (v.count as number))
+  ['signDiffers', 'localUnknown'].every(key => v[key] === undefined || isCount(v[key])) &&
+  ['feeOnlyLosses', 'unknownGrossLosses'].every(key => v[key] === undefined || isCount(v[key]) && (v[key] as number) <= (v.losses as number))
 const group = (v: unknown) => isRecord(v) && isText(v.id, 128) && isText(v.name, 200) && isText(v.detail, 2000) && isReviewMetrics(v.metrics)
 const play = (v: unknown) => isRecord(v) &&
-  (v.origin === 'position' ? v.id === null && isText(v.operationId, 200) && (v.local === undefined || v.local === null) : isGuid(v.id)) && isText(v.title, 200) && isGuid(v.accountId) && isText(v.accountName, 200) &&
+  (v.origin === 'position' ? v.id === null && isNonBlankText(v.operationId, 200) && (v.local === undefined || v.local === null) &&
+    v.reviewed === false && (v.executionSource === undefined || v.executionSource === 'imported') : isGuid(v.id)) && isText(v.title, 200) && isGuid(v.accountId) && isText(v.accountName, 200) &&
   isText(v.venueId, 64) && isText(v.instrument, 128) && isTimestamp(v.closedAtUtc, 64) && isReviewDecimal(v.net) &&
   isReviewDecimal(v.returnPercent) && isNullOr(v.rMultiple, isReviewDecimal) && typeof v.reviewed === 'boolean' &&
   (v.origin === undefined || v.origin === 'planned' || v.origin === 'retrospective' || v.origin === 'position') &&
@@ -151,9 +154,11 @@ const play = (v: unknown) => isRecord(v) &&
   (!isRecord(v.local) || v.local.basis === 'manual-ledger' === (v.executionSource === 'manual')) &&
   (v.plannedAfterExecution === undefined || typeof v.plannedAfterExecution === 'boolean' &&
     (!v.plannedAfterExecution || v.origin !== 'retrospective' && v.origin !== 'position')) &&
-  answers(v) && (v.direction === undefined || isText(v.direction, 16)) &&
+  answers(v) && (v.direction === undefined || directions.includes(v.direction as string)) &&
   (v.reviewCompletion === undefined || isNullOr(v.reviewCompletion, x => ['completed', 'not-needed', 'legacy'].includes(x as string))) &&
   (v.origin !== 'position' || !v.adherence && !v.mistakeTag && !v.reviewCompletion)
+/** A Play's plan direction, or none; an imported position's direction, or none when its side is unknown. */
+const directions = ['', 'long', 'short']
 const answers = (v: Record<string, unknown>) =>
   (v.adherence === undefined || isNullOr(v.adherence, x => ['followed', 'deviated', 'not-applicable'].includes(x as string))) &&
   (v.mistakeTag === undefined || isNullOr(v.mistakeTag, x => isText(x, 100)))
@@ -230,9 +235,12 @@ export const isReviewProcessPage = (v: unknown): v is ReviewProcessPage => isRec
   isListOf(v.items, item => isRecord(item) && isGuid(item.id) && isText(item.title, 200) && isGuid(item.accountId) &&
     isText(item.accountName, 200) && isText(item.venueId, 64) && isText(item.instrument, 128) &&
     ['closed', 'cancelled', 'unresolved'].includes(item.status as string) && ['planned', 'retrospective'].includes(item.origin as string) &&
-    isText(item.direction, 16) && isTimestamp(item.atUtc, 64) &&
+    directions.includes(item.direction as string) && isTimestamp(item.atUtc, 64) &&
     ['net', 'returnPercent', 'rMultiple'].every(k => isNullOr(item[k], isReviewDecimal)) && answers(item) &&
-    typeof item.plannedAfterExecution === 'boolean' && isNullOr(item.reviewCompletion, x => ['completed', 'not-needed', 'legacy'].includes(x as string)), 50) &&
+    // Only a scored Closed Play has a result, and a result always has its return; retrospective Plays have no plan R.
+    (item.net === null ? item.returnPercent === null && item.rMultiple === null : item.status === 'closed' && item.returnPercent !== null) &&
+    typeof item.plannedAfterExecution === 'boolean' && (item.origin === 'planned' || item.rMultiple === null && !item.plannedAfterExecution) &&
+    isNullOr(item.reviewCompletion, x => ['completed', 'not-needed', 'legacy'].includes(x as string)), 50) &&
   isCount(v.total) && isCount(v.offset) && (v.items as unknown[]).length === Math.min(50, Math.max(0, v.total - v.offset)) &&
   new Set((v.items as ReviewProcessPlay[]).map(item => item.id)).size === (v.items as unknown[]).length &&
   (v.nextOffset === null ? v.offset + (v.items as unknown[]).length >= v.total :

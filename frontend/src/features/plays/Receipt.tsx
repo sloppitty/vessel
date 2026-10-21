@@ -20,14 +20,17 @@ export const estimatedRNote = 'Estimated R (planned-stop model): net result ÷ i
 
 const signed = (value: string) => value.startsWith('-') ? value : `+${value}`
 
-/** Each planned entry beside its plan: average fill against the planned price, filled against the planned quantity. */
-export function EntryReceipts({ progress, entries }: { progress: readonly EntryProgress[]; entries: readonly DraftEntry[] }) {
+/**
+ * Each planned entry beside its plan: average fill against the planned price, filled against the planned quantity. While the
+ * execution is stale (just after a plan revision is saved, say) its figures may compare with an earlier plan, so they wait.
+ */
+export function EntryReceipts({ progress, entries, stale = false }: { progress: readonly EntryProgress[]; entries: readonly DraftEntry[]; stale?: boolean }) {
   // An older server sends no planned values; nothing is guessed from the current plan in their place.
   const shown = progress.filter(entry => entry.plannedPrice !== undefined)
   if (!shown.length) return null
   return <section aria-label="Entries against the plan" className="execution-section receipt-entries">
     <h3>Against the plan<InfoTip label="About the plan comparison">Each entry beside the plan revision in force at its first fill, or the current plan before it fills.</InfoTip></h3>
-    <ul className="execution-list">{shown.map(entry => {
+    {stale ? <p className="muted" role="status">Unknown until the execution is read again.</p> : <ul className="execution-list">{shown.map(entry => {
       const index = entries.findIndex(item => item.id === entry.entryId)
       const difference = entry.averageFillPrice && entry.plannedPrice ? decimalDifference(entry.averageFillPrice, entry.plannedPrice) : null
       return <li key={entry.entryId}>
@@ -38,7 +41,7 @@ export function EntryReceipts({ progress, entries }: { progress: readonly EntryP
           <span title={entry.plannedQuantity ?? undefined}>Filled {entry.filledQuantity} of {entry.plannedQuantity == null ? 'unknown' : amount(entry.plannedQuantity)}</span>
         </span>
       </li>
-    })}</ul>
+    })}</ul>}
   </section>
 }
 
