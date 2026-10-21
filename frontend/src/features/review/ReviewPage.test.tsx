@@ -60,11 +60,11 @@ describe('Production portfolio review', () => {
     await chooseInPicker('Account', reviewFixture.options.accounts[0]!.name, user)
     await waitFor(() => expect(review).toHaveBeenLastCalledWith(expect.objectContaining({ accountId: reviewFixture.options.accounts[0]!.id }), expect.any(AbortSignal)))
     await user.selectOptions(screen.getByLabelText('Portfolio'), 'unassigned')
-    await waitFor(() => expect(review).toHaveBeenLastCalledWith({ period: 'month', portfolio: 'unassigned' }, expect.any(AbortSignal)))
+    await waitFor(() => expect(review).toHaveBeenLastCalledWith({ period: 'month', portfolio: 'unassigned', positions: 'auto', minPlays: 5 }, expect.any(AbortSignal)))
     await user.click(await screen.findByRole('button', { name: 'Last 7 days' }))
-    await waitFor(() => expect(review).toHaveBeenLastCalledWith({ period: 'week', portfolio: 'unassigned' }, expect.any(AbortSignal)))
+    await waitFor(() => expect(review).toHaveBeenLastCalledWith({ period: 'week', portfolio: 'unassigned', positions: 'auto', minPlays: 5 }, expect.any(AbortSignal)))
     await user.click(screen.getByRole('button', { name: 'Reset' }))
-    await waitFor(() => expect(review).toHaveBeenLastCalledWith({ period: 'week', portfolio: 'all' }, expect.any(AbortSignal)))
+    await waitFor(() => expect(review).toHaveBeenLastCalledWith({ period: 'week', portfolio: 'all', positions: 'auto', minPlays: 5 }, expect.any(AbortSignal)))
   })
   it('aborts superseded requests and never displays a late old report as current', async () => {
     let oldResolve!: (report: ReviewDocument) => void
@@ -109,7 +109,7 @@ describe('Production portfolio review', () => {
     await user.click(screen.getByRole('button', { name: 'Inspect Swing trading' }))
     const dialog = screen.getByRole('dialog')
     await within(dialog).findByRole('button', { name: 'Open Play BTC breakout' })
-    expect(review).toHaveBeenLastCalledWith({ ...defaultReviewQuery, portfolio: reviewFixture.options.portfolios[0]!.id, offset: 0 }, expect.any(AbortSignal))
+    expect(review).toHaveBeenLastCalledWith({ ...defaultReviewQuery, positions: 'auto', minPlays: 5, portfolio: reviewFixture.options.portfolios[0]!.id, offset: 0 }, expect.any(AbortSignal))
     await user.click(within(dialog).getByRole('button', { name: 'Next' }))
     await waitFor(() => expect(review).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 50 }), expect.any(AbortSignal)))
     await user.click(await within(dialog).findByRole('button', { name: 'Open Play BTC breakout' }))
@@ -292,5 +292,46 @@ describe('Review venue names', () => {
     const row = within(dialog).getByRole('button', { name: `Open Play ${first.title || first.instrument}` }).closest('th')!
     expect(row.querySelector('.play-asset')).toHaveTextContent(first.instrument)
     expect(row.querySelector('.play-account-name')).toHaveTextContent(first.accountName)
+  })
+})
+
+describe('Review imported positions', () => {
+  const position = { ...reviewFixture.plays[0]!, id: null, operationId: 'fill-1:long', title: 'SOL Long', instrument: 'SOL',
+    origin: 'position' as const, executionSource: 'imported' as const, rMultiple: null, reviewed: false, local: null }
+  const included: ReviewDocument = {
+    ...reviewFixture,
+    metrics: { ...reviewFixture.metrics, positions: 1 },
+    positions: { mode: 'auto', included: true, minPlays: 5, plays: 2, positions: 1, omitted: 2, playWeight: '2' },
+    plays: [...reviewFixture.plays, position],
+  }
+
+  it('shows the automatic decision, lets the owner override it and return to automatic', async () => {
+    const { user, review } = setup(vi.fn().mockResolvedValue(included))
+    const toggle = await screen.findByRole('switch', { name: 'Include imported positions' })
+    expect(toggle).toBeChecked()
+    expect(screen.getByText('Automatic')).toBeVisible()
+    expect(screen.getByText('Plays weigh 2× a position in rates')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'About imported positions' })).toHaveAccessibleDescription(/fewer than 5 scored Plays/)
+    await user.click(toggle)
+    await waitFor(() => expect(review).toHaveBeenLastCalledWith(expect.objectContaining({ positions: 'exclude', minPlays: 5 }), expect.any(AbortSignal)))
+    await user.click(await screen.findByRole('button', { name: 'Use automatic' }))
+    await waitFor(() => expect(review).toHaveBeenLastCalledWith(expect.objectContaining({ positions: 'auto' }), expect.any(AbortSignal)))
+  })
+
+  it('lists positions as results that cannot open a Play and pins the decision in drill-downs', async () => {
+    const { user, review } = setup(vi.fn().mockResolvedValue(included))
+    await user.click(await screen.findByRole('button', { name: /Plays · 1 position/ }))
+    expect(review).toHaveBeenLastCalledWith(expect.objectContaining({ positions: 'include', offset: 0 }), expect.any(AbortSignal))
+    const dialog = await screen.findByRole('dialog')
+    const row = (await within(dialog).findByText('SOL Long')).closest('tr')!
+    expect(within(row).queryByRole('button')).not.toBeInTheDocument()
+    expect(within(row).getByText('Imported position · no plan')).toBeVisible()
+    expect(within(row).getAllByText('Not a Play')).toHaveLength(2)
+  })
+
+  it('discloses positions that could not be scored', async () => {
+    const { user } = setup(vi.fn().mockResolvedValue(included))
+    await user.click(await screen.findByText(/scored · 2 excluded/))
+    expect(screen.getByText('1 imported position included; 2 closed positions could not be scored.')).toBeVisible()
   })
 })

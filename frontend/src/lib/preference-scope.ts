@@ -4,12 +4,13 @@
  * shows a familiar theme before anyone signs in. A user change always reloads the page, so the scope moves at most
  * once per page, from none to one user.
  */
-export type PreferenceName = 'appearance' | 'chart.preferences.v1' | 'display'
+export type PreferenceName = 'appearance' | 'chart.preferences.v1' | 'display' | 'review.preferences.v1'
 
 export const legacyPreferenceKeys: Record<PreferenceName, string> = {
   appearance: 'vessel.appearance',
   'chart.preferences.v1': 'vessel.chart.preferences.v1',
   display: 'vessel.display',
+  'review.preferences.v1': 'vessel.review.preferences.v1',
 }
 export const deviceThemeKey = 'vessel:device:theme'
 

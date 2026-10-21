@@ -342,7 +342,7 @@ public sealed class ResultBasisReviewTests
         var unknown = Add("long", (OrderLinkRole.Entry, "buy", 1, 100, -0.05m, 0.05m, "HYPE", Net), (OrderLinkRole.Exit, "sell", 1, 99, -1.05m, 0.05m, "HYPE", Net));
 
         var report = await f.Service.GetAsync(new(), default);
-        var rows = report.Plays.ToDictionary(p => p.Id);
+        var rows = report.Plays.ToDictionary(p => p.Id!.Value);
         Assert.Equal(new PlayLocalResultDto("8", PlayLocalResult.Executions, null, false), rows[a.Play.Id].Local);
         Assert.Equal(("3", new PlayLocalResultDto("-2", PlayLocalResult.Executions, null, true)), (rows[b.Play.Id].Net, rows[b.Play.Id].Local));
         Assert.Equal(("-0.1", "-0.1"), (rows[fees.Play.Id].Net, rows[fees.Play.Id].Local!.NetUsd));

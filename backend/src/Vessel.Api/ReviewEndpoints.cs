@@ -17,7 +17,8 @@ public static class ReviewEndpoints
                 cell, lane, mistakeTag, skippedCheck), ct)));
         api.MapGet("/mistake-tags", async (ReviewService service, CancellationToken ct) => Results.Ok(await service.MistakeTagsAsync(ct)));
         api.MapGet("", async (string? period, string? portfolio, Guid? accountId, string? instrument, int? offset,
-            ReviewService service, CancellationToken ct) =>
-            Results.Ok(await service.GetAsync(new(period ?? "month", portfolio ?? "all", accountId, instrument, offset ?? 0), ct)));
+            string? positions, int? minPlays, ReviewService service, CancellationToken ct) =>
+            Results.Ok(await service.GetAsync(new(period ?? "month", portfolio ?? "all", accountId, instrument, offset ?? 0,
+                positions ?? "exclude", minPlays ?? ReviewQuery.DefaultMinPlays), ct)));
     }
 }

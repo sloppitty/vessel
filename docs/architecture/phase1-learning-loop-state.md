@@ -453,6 +453,12 @@ October 20, 2026, branch `t3/phase1-post-hoc-badge`, stacked on 1.1a:
   - **Spacing test.** A stylesheet test now fails if the sample label's own-line rule is removed.
   - **Check.** After the rebase onto main, `scripts/check.sh` passed: backend 3,571 passed, 5 skipped; frontend 149
     files and 3,768 tests.
+- **Main sync with PR #33 (imported positions).** Merged forward, not rebased.
+  - Each n counts real results, unweighted, like every count in #33. A Play counts once in n although it weighs 2 in
+    the rates.
+  - Expectancy and the asset cards read "n = 3 Plays · 2 positions" when positions are included.
+  - Estimated R and sign-differs denominators count Plays only.
+  - Position rows never carry the badge.
 
 ### 1.4b Process cases
 
@@ -515,6 +521,13 @@ October 20, 2026, branch `t3/phase1-process-cases`, stacked on 1.3b:
   - **Check.** After the rebase onto the fixed 1.3a, `scripts/check.sh` passed: backend 3,609 passed, 5 skipped; frontend 153 files and 3,820 tests.
 
 - **Sol (Codex) round 3.** No findings: the venue fix and the rebase onto 1.3a's change hold.
+- **Main sync with PR #33 (imported positions).** Merged forward, not rebased.
+  - The process view, its drill-downs, pre-flight and mistake tags stay Plays-only.
+  - With positions included, the Origin breakdown adds "Imported position" after Planned and Retrospective. Direction
+    groups include positions.
+  - Review validates the positions mode and threshold with the other filters, so the process and exclusion drill-downs
+    accept the same query.
+  - A new test covers the groups. The Review tests pass against PostgreSQL (308).
 
 ## 1.5 Lessons return and a recorded pre-flight
 
@@ -703,3 +716,8 @@ October 20, 2026, branch `t3/phase1-time`, stacked on 1.6b–d:
 
 - **Sol (Codex) round 4.** No findings: exact fractions hold for `Z` and `+00:00` times, zero and long fractions, and
   both zones' tooltips (checked in Madrid, New York and Kathmandu).
+- **Main sync with PR #33 (imported positions).** Merged forward, not rebased.
+  - Settings shows the Times panel beside #33's Review panel. Both preferences are scoped per user (`display`,
+    `review.preferences.v1`).
+  - Review's contributing-Plays list keeps the "Closed" column in the display zone, positions included. The period
+    range stays UTC, matching the server's day boundaries.
