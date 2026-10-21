@@ -75,23 +75,33 @@ Covers G-06 and M3. No decision; the limit value is the owner's.
 - Drafts are not counted.
 
 **The risk of one Play** is the loss if every current stop of the current plan
-fills, in the instrument's quote asset:
-- **Open part.** For each entry with fills, the quantity still open, measured
-  from the entry's average fill. The fills are linked fills for venue Plays,
-  or the manual ledger.
-- **Planned part.** For each entry without fills, its planned quantity at its
-  planned price, as the editor derives it.
-- **Per stop.** Each stop's share of what remains open of its entry, times the
-  distance from the reference price to the stop on the loss side. A stop at or
-  beyond the reference adds zero.
-- **Unknown.** The Play is unknown when any part cannot be measured:
+fills, in the instrument's quote asset. It has two separate parts.
+- **Open part.** For each entry with fills (linked fills for venue Plays, the
+  manual ledger otherwise):
+  - its remaining open quantity is its filled quantity minus the exits
+    attributed to it, measured from the entry's exact average fill;
+  - an exit linked to one of the entry's stops or targets is the entry's;
+  - a position-level exit (an unplanned venue exit, or any manual exit)
+    belongs to the entry only when it is the Play's only filled entry;
+  - the remaining quantity is shared by the entry's stops whose linked
+    orders have not executed, in proportion to their shares. A stop that has
+    already filled has done its part and is not counted again.
+- **Planned part.** For each entry, its planned quantity not yet filled, at
+  its planned price, against every stop of the entry. That is the whole entry
+  before its first fill, and the remainder after a partial fill. The planned
+  quantity is derived as the editor derives it.
+- **Per stop.** Each stop's quantity times the distance from the reference
+  price to the stop on the loss side. A stop at or beyond the reference adds
+  zero.
+- **Unknown.** The whole Play is unknown when any part cannot be measured:
   - a stop share without a price;
   - stop shares that do not total 100%;
   - a quantity the plan cannot derive;
-  - an exit that cannot be attributed to its entry (a position-level exit on a
-    Play with more than one open entry);
+  - an exit that cannot be attributed to one entry;
+  - exits that exceed their entry;
+  - a linked fill that contradicts its role;
   - a quote asset that is not a listed nominal USD stablecoin;
-  - fills that have not loaded.
+  - a manual execution that cannot be read.
 
   An unknown Play is counted by direction and never partly summed.
 
@@ -99,8 +109,9 @@ fills, in the instrument's quote asset:
 - By direction, the known risk in nominal USD and as a share of the scope's
   balance, plus the unknown count.
 - The total is long plus short: a sum of risks, never a net.
-- The figures are labelled as "at your plan's stops". The count of stops not
-  seen resting at the venue comes from 0.4c's coverage.
+- The figures are labelled as "at your plan's stops". The count of Open
+  Plays with open quantity whose remaining stops have no linked stop order
+  resting at the venue, as last read, is shown beside them.
 - **The scope** is the Overview scope (All, portfolio, Unassigned or account).
   For a Play, it is its portfolio, or the account itself when unassigned. The
   balance is the workspace's exact enabled-account balance for that scope,
@@ -109,9 +120,11 @@ fills, in the instrument's quote asset:
 **This Play's increment.**
 - Capital context gains one line, for example "Open risk: long 1.8% · short
   0.6% of Main balance · 1 unknown — this Play +1.0% (limit 3%)".
-- The increment is this Play's own risk by the same rule, from the draft being
-  edited. It replaces the saved Play's own contribution, so an edited stop
-  shows at once. Both runtimes share one fixture list.
+- The increment is this Play's own risk by the same rule, computed by the
+  server from the plan being edited (`POST /api/risk/open/preview`) against
+  the saved Play's executions, or none for a new Draft. It replaces the saved
+  Play's own contribution, so an edited stop shows at once. The browser only
+  adds and divides exact figures; it never computes risk itself.
 - When an owner limit is set, the line says whether the total with this Play
   would exceed it. Nothing is blocked.
 
@@ -132,6 +145,8 @@ limit shows no limit line. This needs a migration.
 
 **Acceptance.**
 - Three 1.25% longs on BTC, ETH and SOL show long 3.75% and short 0%.
+- A planned 10-unit entry at 100 with its stop at 90, filled 1 unit, risks 10
+  on the open unit plus 90 on the 9 still planned.
 - A long with a managed stop at 105 over an entry at 100 adds 0, never −5.
 - A long and a short of equal risk show both, never zero.
 - A Play with a 50% unpriced stop is unknown and not summed.
@@ -183,21 +198,24 @@ Covers G-02 step 2. Builds on 1.5's list and copy.
 
 Covers D-20. No decision.
 
-- **Retention.**
-  - Today an order is stored only if it was placed at or after the earliest
-    active Play on its contract was created.
-  - The window now starts a bounded lookback before that:
-    `Vessel:Plays:EarlierOrderLookback`, 24 hours by default.
-  - It still applies only to contracts with a Planned, Paused or Open venue
-    Play.
+- **Retention is unchanged.** Every order an order read returns is already
+  retained (`PlayExecutionService.RetainAsync`). The cut at the Play's
+  creation is in the reconciliation, matching and Execution-panel reads,
+  which load and offer only orders placed at or after it. Nothing narrows the
+  existing retention.
 - **Candidates, never matches.** The automatic matcher keeps its rule (placed
-  at or after the Play's creation). The Execution panel lists compatible
-  earlier orders as "Placed before this Play was saved". They are on the same
-  contract, open, filled or triggered, and not linked to any Play. The owner
-  may link one to a level through the existing link endpoint.
-- **Consequences.** Linking such an entry produces 1.4a's "plan written after
-  first execution" badge. Estimated R stays unknown, with the reason "the plan
-  was written after the first entry fill".
+  at or after the Play's creation). The Execution panel also lists compatible
+  orders placed in a bounded lookback before the Play was created
+  (`Vessel:Plays:EarlierOrderLookback`, 24 hours by default) as "Placed before
+  this Play was saved". They are on the same contract, open, filled or
+  triggered, and not linked to any Play. The owner may link one to a level
+  through the existing link endpoint.
+- **Consequences.** The existing badge and R rules apply to the actual
+  execution times; an early placement alone changes neither. When the first
+  entry fill precedes the plan, 1.4a's "plan written after first execution"
+  badge appears and estimated R stays unknown for its existing reason. An
+  order placed before the Play but filled after it was planned has a
+  contemporaneous plan and keeps its R.
 - No migration.
 
 ## 5. Export
@@ -232,6 +250,9 @@ Covers G-07, X9 and I11. Not a tax report.
   - `play.json`: the plan revisions, status history, links, linked fills or
     the manual ledger and its history, the review and its history, the log,
     the pre-flight and the rule snapshot;
+  - for a paper Play, its typed simulated executions and simulation history
+    (model version, gaps, declined entries, suspensions), read through the
+    paper readers and never presented as actual fills;
   - each evidence original with its markup and note.
 
   It is streamed, and object-storage reads run outside any unit of work. It
@@ -273,9 +294,16 @@ Covers I-01, V1, D-16 and D-25. **Decision 11 accepted.**
   They are never fills, links or scored results. Ordinary fee-bearing Lighter
   trades stay omitted, so the Standard-account fee policy is unchanged for
   them.
-- **Activity becomes gap-aware.** An account partition with known omitted
-  executions or forced events after its earliest retained fill is not
-  anchored across the gap. Affected operations read "direction unknown:
+- **Omission markers.** Every row an import omits (forced, fee-bearing or
+  missing reported P&L) leaves a durable, deduplicated marker: its native
+  trade and market IDs, time and omission kind, with no money. A later read
+  that no longer returns the row cannot erase the evidence. When a venue
+  gives no time or market for an omission, the marker records an explicit
+  uncertainty range instead.
+- **Activity becomes gap-aware.** An account partition with omission
+  markers or forced events after its earliest retained fill is not anchored
+  across them; markers feed the aggregation, the detail reads and the
+  version token. Affected operations read "direction unknown:
   executions omitted" instead of a phantom opposite operation. Forced events
   show as visible rows with their exclusion. Review, sizing and the ladder
   are unchanged.
@@ -322,14 +350,17 @@ Covers D-23 and I-06.
   that fit the venue's page budget, with a persisted per-account cursor. Each
   Refresh resumes until the 30-day window is covered. Coverage stays partial,
   and says so, until then. This needs a migration.
-- **9b. Beside a Play (no decision).** Settled funding is shown on a Play
-  only with proven sole exposure. That requires, over the Play's holding
-  window:
-  - every retained fill on that account and native contract belongs to the
-    Play;
-  - the position is flat before its first entry and, once closed, after its
-    last exit, by the operation walk;
-  - no history gap or omitted execution;
+- **9b. Beside a Play (no decision; after item 6).** Settled funding is shown
+  on a Play only with proven sole exposure. That requires, over the Play's
+  holding window:
+  - affirmative execution coverage from item 6's coverage ledger: the window
+    is covered, with no gap;
+  - every retained fill on that account and resolved native contract belongs
+    to the Play, and none of its orders has known missing executions;
+  - no omission marker or forced event (item 7);
+  - an evidenced flat boundary before the first entry and, once closed,
+    after the last exit, anchored to a snapshot or to covered history.
+    Activity's unanchored zero start is never proof;
   - complete funding coverage;
   - no ambiguous timestamp bucket.
 
@@ -387,8 +418,12 @@ The owner deferred it on October 21. Nothing is built.
 
 Covers G-12. **Owner decision accepted:** a separate projection.
 
-- **The projection.** An owner-scoped search projection, updated in the same
-  unit of work as the Play's saves, over:
+- **The projection.** An owner-scoped search projection over the fields
+  below. It is written in the same unit of work as every change to them:
+  Play saves and reviews, log appends, evidence note edits and deletions,
+  lifecycle changes from venue facts, manual corrections and paper
+  evaluation. A one-time initialization fills it for existing Plays. Results
+  and outcomes reuse the current eligibility rules. The fields are:
   - title, thesis, invalidation, strategy and evidence notes;
   - the review note, lesson, mistake tag and next action;
   - log entries;
@@ -410,8 +445,10 @@ No decision.
     reason, and the snapshot still applies. It is never zero.
   - F-13: paging uses a fixed end-time cut with overlap.
 - **14b. Hyperliquid.**
-  - F-11: prices follow the venue rule, at most 5 significant figures and at
-    most `6 − szDecimals` decimals, in instruments, rounding and matching.
+  - F-11: prices follow the venue rule through a venue-provided price rule,
+    in instruments, rounding and matching. The rule is at most 5 significant
+    figures (integer prices are always allowed, whatever their length) and
+    at most `6 − szDecimals` decimals. Typed prices keep today's policy.
   - F-14: a wallet-read failure degrades only the wallet, and only on
     default-mode accounts. Unified and portfolio-margin accounts still need
     it.
@@ -421,8 +458,8 @@ No decision.
   shows it. This needs a migration.
 - **14d. Benchmark.** A script generating a multi-year synthetic dataset in a
   disposable database. It times Activity, Review, the Plays list, Overview,
-  open risk and search. Results are recorded in the state document; nothing
-  runs in CI.
+  open risk and search, so it is delivered last, after item 13. Results are
+  recorded in the state document; nothing runs in CI.
 - **D-19.** Accepted as its own pull request. A persistent undersized-stop
   condition confirms on a condition invariant that survives changing
   quantities, and keeps the changing evidence. Severity and re-announcing are
@@ -473,12 +510,12 @@ request's diff stays within its own item.
 main (Phase 1 merged October 21) → contract + state (this document)
   2a: 1 open risk (migration) → 4 earlier orders → 5a Review CSV → 5b raw facts
       → 5c bundle → 8a risk observations (migration) → 8b beyond liquidation
-      → 8c link this stop → 9a funding cursor (migration) → 9b funding beside a Play
-      → 10a assumptions → 14a RISEx → 14b Hyperliquid → 14c fill conflicts (migration)
-      → 14d benchmark
+      → 8c link this stop → 9a funding cursor (migration) → 10a assumptions
+      → 14a RISEx → 14b Hyperliquid → 14c fill conflicts (migration)
   2b: 2 week page (migration) → 10b loss limits (migration) → 3 if-then rule (migration)
-      → 6 retention (migration) → 7 forced events (migration) → 9c funding schedule
-      → D-19 confirmation → 13 search (migration) → 11 allocation (migration)
+      → 6 retention (migration) → 7 forced events and omission markers (migration)
+      → 9b funding beside a Play → 9c funding schedule → D-19 confirmation
+      → 13 search (migration) → 11 allocation (migration) → 14d benchmark
 ```
 
 Progress is recorded in
