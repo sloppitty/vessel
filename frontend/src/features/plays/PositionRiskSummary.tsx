@@ -5,7 +5,8 @@ import {
 } from './position-risk-summary'
 import { defaultSizeUnits, formatMoney, formatQuantity, formatRewardToRisk, type SizeUnits } from './sizing'
 import { InfoTip } from '@/components/ui/info-tip'
-import { exactSignOf } from '@/lib/decimal'
+import { exactFixed, exactNumber, exactSignOf } from '@/lib/decimal'
+import { assumedCosts, type AssumedCosts, type CostAssumption } from './cost-assumptions'
 import './position-risk-summary.css'
 import { numberFormat } from '@/lib/format'
 
@@ -16,6 +17,8 @@ export interface PositionRiskSummaryProps {
   riskReference?: RiskReference | null
   /** Filled entries and their average fills, or `'unknown'` while they load; the all-stops result is measured from them. */
   fills?: EntryFills | 'unknown'
+  /** The owner's cost assumption for this Play's venue (Phase 2, item 10a); nothing shows without one. */
+  costs?: CostAssumption | null
 }
 
 const percent = numberFormat({ maximumFractionDigits: 2 })
@@ -50,9 +53,25 @@ function Outcome({ value, units }: { value: PlannedExitSummary; units: SizeUnits
     <small>Total unknown</small></>
 }
 
+const assumedPercent = ({ feePercent, slippagePercent }: CostAssumption) =>
+  `fees ${feePercent === null ? 'not set' : `${feePercent}%`}, slippage ${slippagePercent === null ? 'not set' : `${slippagePercent}%`}`
+
+/** The owner's assumed costs, beside the gross figures and never inside them. */
+function AssumedCostsLine({ value, units }: { value: AssumedCosts; units: SizeUnits }) {
+  const r = value.r === null ? null : exactSignOf(value.r) > 0 && exactFixed(value.r, 2) === '0' ? '< 0.01' : exactFixed(value.r, 2)
+  const money = value.cost === null ? null : moneyText(exactNumber(value.cost), units)
+  return <p className="position-risk-costs" data-testid="assumed-costs">
+    {r !== null ? <>Assumed costs ≈ −{r}R</> : money !== null ? <>Assumed costs ≈ −{money}</> : <>Assumed costs unknown</>}
+    <span> ({assumedPercent(value.assumption)})</span>
+    <small>{r !== null ? `About ${money} for this position size. ` : money !== null ? 'Not in R: the stops show no loss to measure it against. '
+      : 'Needs a size and priced entries. '}Your Settings assumption, not part of the planned figures.</small>
+  </p>
+}
+
 /** Append inside the approved bottom PositionSummary. This component owns no account/API reads. */
-export function PositionRiskSummary({ draft, units = defaultSizeUnits, riskReference, fills = noEntryFills }: PositionRiskSummaryProps) {
+export function PositionRiskSummary({ draft, units = defaultSizeUnits, riskReference, fills = noEntryFills, costs }: PositionRiskSummaryProps) {
   const summary = positionRiskSummary(draft, units, riskReference, fills)
+  const assumed = assumedCosts(draft, costs, summary.stopPayoff.total)
   const payoff = summary.stopPayoff.total ?? summary.stopPayoff.known
   const tone = payoff === null || summary.stopPayoff.empty ? undefined : exactSignOf(payoff) > 0 ? 'gain' : exactSignOf(payoff) < 0 ? 'loss' : undefined
   // Stops that lock in a result or break even on a sized position: there is no risk to measure reward against.
@@ -86,6 +105,7 @@ export function PositionRiskSummary({ draft, units = defaultSizeUnits, riskRefer
         </dd>
       </div>
     </dl>
+    {assumed && <AssumedCostsLine value={assumed} units={units} />}
     <dl className="position-risk-coverage">
       <div><dt>Priced quantity</dt><dd>
         {summary.pricedQuantity === null ? 'Unknown' : formatQuantity(summary.pricedQuantity, units)}

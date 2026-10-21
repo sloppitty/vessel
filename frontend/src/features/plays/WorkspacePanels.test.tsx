@@ -396,6 +396,23 @@ describe('Position summary', () => {
     expect(value('Position size')).toHaveAttribute('data-placeholder', 'false')
   })
 
+  it('shows the owner\'s assumed costs beside the planned figures only when they are set (Phase 2, item 10a)', () => {
+    const draft = { ...createDraft(), size: '1000', leverage: '5' }
+    draft.entries[0]!.price = '2000'
+    draft.entries[0]!.stops[0]!.value = '1900'
+    const units = { quote: 'USDC', base: 'ETH', quantityDecimals: 4 }
+    const view = render(<PositionSummary draft={draft} units={units} />)
+    expect(screen.queryByTestId('assumed-costs')).toBeNull()
+    view.rerender(<PositionSummary draft={draft} units={units} costs={{ feePercent: '0.09', slippagePercent: '0.05' }} />)
+    // 0.14% of 5,000 USDC is 7 USDC against a 250 USDC loss at the stop.
+    const line = screen.getByTestId('assumed-costs')
+    expect(line).toHaveTextContent('Assumed costs ≈ −0.03R (fees 0.09%, slippage 0.05%)')
+    expect(line).toHaveTextContent('About 7 USDC for this position size.')
+    expect(screen.getByText('All stops').nextElementSibling).toHaveTextContent('−250 USDC')
+    view.rerender(<PositionSummary draft={{ ...draft, size: '' }} units={units} costs={{ feePercent: null, slippagePercent: '0.05' }} />)
+    expect(screen.getByTestId('assumed-costs')).toHaveTextContent('Assumed costs unknown (fees not set, slippage 0.05%)')
+  })
+
   it('derives margin from a quantity once an entry is priced', () => {
     const draft = { ...createDraft(), sizingMode: 'quantity' as const, size: '0.125', leverage: '4' }
     const view = render(<PositionSummary draft={draft} />)

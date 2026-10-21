@@ -428,3 +428,25 @@ Phase 2, item 8c and finding I-08 (see `phase2-risk-coverage-contract.md`).
   continuously, so a stop removed and replaced between
   checks is not seen. They keep the record honest; they are not stop
   protection, and Vessel never places or changes orders.
+
+## Assumed costs (October 21, 2026)
+
+Phase 2, item 10a (G-10; see `phase2-risk-coverage-contract.md`).
+- **The setting.** Settings gains **Cost assumptions**: for each venue, a
+  round-trip fee and a slippage percentage of the position size.
+  - Each is 0 to 10 with up to four decimals, and blank is not set.
+  - There are no defaults.
+  - They are kept in this browser, per user, like the Review threshold
+    (`costs.assumptions.v1`). They are hidden in paper mode, where simulated
+    fees and slippage are zero.
+- **The summary.** A real Play whose venue has an assumption shows one line
+  below the planned metrics, beside the gross figures and never inside them,
+  for example "Assumed costs ≈ −0.03R (fees 0.09%, slippage 0.05%)".
+  - The cost is the planned position size (margin × leverage, or quantity ×
+    the share-weighted planned entry) times the two percentages.
+  - It is stated in R only against a known loss at the stops, otherwise in
+    the quote asset, otherwise as unknown.
+  - A part that is not set adds nothing and reads "not set", never zero.
+- **Unchanged.** Sizing suggestions, Review, open risk and every stored
+  result never read the assumptions. A venue with neither value set shows
+  nothing.
