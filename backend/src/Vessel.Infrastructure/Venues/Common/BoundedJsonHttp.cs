@@ -70,7 +70,11 @@ public sealed class BoundedJsonHttp(HttpClient httpClient, TimeProvider timeProv
             throw new VenueRateLimitException(VenueRateLimitException.Clamp(deadline, now));
         }
         if (!response.IsSuccessStatusCode)
-            throw new VenueReadException(unavailable);
+            throw new VenueReadException(unavailable)
+            {
+                IsDeterministicSourceFailure = response.StatusCode is System.Net.HttpStatusCode.BadRequest or
+                    System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.UnprocessableEntity
+            };
         if (response.Content.Headers.ContentLength > maxResponseBytes)
             throw json.Invalid();
 

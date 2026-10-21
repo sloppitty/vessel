@@ -1,3 +1,4 @@
+import { isPaperSettings, isPaperPlayState, type PaperSettings, type PaperPlayState, type TradingMode } from './paper'
 import { overviewSummaryPath, isOverviewSummary, type OverviewQuery, type OverviewSummaryDocument } from './overview-summary'
 import { activityFillsPath, activityPath, isActivityFills, isActivityPage, type ActivityFills, type ActivityPage, type ActivityQuery } from './activity'
 import { readSseStream, SseOverflowError, SseParser } from './sse'
@@ -40,6 +41,7 @@ import {
 import type { ImageMarkup } from './markup'
 
 export interface Portfolio {
+  tradingMode?: TradingMode
   id: string
   name: string
   accountCount: number
@@ -139,6 +141,8 @@ export interface MarketStreamQuery {
   interval: CandleInterval
 }
 export interface BrokerAccount {
+  tradingMode?: TradingMode
+  startingCapitalUsd?: string | null
   id: string
   portfolioId: string | null
   name: string
@@ -148,7 +152,7 @@ export interface BrokerAccount {
   sourceId?: string | null
   accountValueUsd: string | null
   lastSyncedAtUtc: string | null
-  syncStatus: 'manual' | 'not-synced' | 'synced' | 'error'
+  syncStatus: 'manual' | 'not-synced' | 'synced' | 'error' | 'paper'
   lastSyncError: string | null
   positionCount: number
   historyNotice: string | null
@@ -163,7 +167,7 @@ export interface BrokerAccount {
   balanceUsd?: string | null
   /** Exactly one availability source selected by the server, never summed with another ledger. */
   availableBalanceUsd?: string | null
-  availableBalanceSource?: 'wallet' | 'margin' | 'withdrawable' | null
+  availableBalanceSource?: 'wallet' | 'margin' | 'withdrawable' | 'paper' | null
   settingsRevision?: number
 }
 export interface AccountSettingsExpectation {
@@ -221,6 +225,8 @@ export interface Overview {
   scopeNote: string
 }
 export interface CreateAccount {
+  tradingMode?: TradingMode
+  startingCapitalUsd?: string
   portfolioId: string | null
   name: string
   venueId: string
@@ -229,6 +235,11 @@ export interface CreateAccount {
   manualAccountValueUsd?: string
 }
 export interface WorkspaceApi {
+  readonly tradingMode?: TradingMode
+  forTradingMode?(mode: TradingMode): WorkspaceApi
+  paperSettings(signal?: AbortSignal): Promise<PaperSettings>
+  savePaperSettings(settings: PaperSettings): Promise<PaperSettings>
+  paperState(id: string, signal?: AbortSignal): Promise<PaperPlayState>
   monitor(signal?: AbortSignal): Promise<MonitorSummary>
   accountMonitor(id: string, signal?: AbortSignal): Promise<AccountMonitor>
   runAccountMonitor(id: string, signal?: AbortSignal): Promise<MonitorRunAccepted>
@@ -336,6 +347,7 @@ export interface WorkspaceApi {
   updateSizingSettings(settings: { riskPercent: string }): Promise<SizingDocument>
 }
 
+const optionalTradingMode = (v: Record<string, unknown>) => v.tradingMode === undefined || v.tradingMode === 'real' || v.tradingMode === 'paper'
 const coverages = ['complete', 'partial', 'unavailable']
 const validExpected = (ids: string[] | undefined, expected: AccountSettingsExpectation[] | undefined) =>
   expected === undefined || Array.isArray(expected) && !!ids?.length && expected.length === ids.length &&
@@ -372,7 +384,7 @@ const streamStatus = (v: unknown): v is MarketStreamStatus => isRecord(v) &&
   ['live', 'reconnecting', 'stale'].includes(String(v.state)) && isTimestamp(v.observedAt, 40)
 const streamLimit = 1024 * 1024
 const instrumentPattern = /^[A-Za-z0-9_-]{1,32}$/
-const portfolio = (v: unknown): v is Portfolio => isRecord(v) && isGuid(v.id) && isText(v.name) &&
+const portfolio = (v: unknown): v is Portfolio => isRecord(v) && optionalTradingMode(v) && isGuid(v.id) && isText(v.name) &&
   isCount(v.accountCount) && isNullOr(v.totalValueUsd, isPlainDecimal) &&
   coverages.includes(String(v.valueCoverage)) &&
   (v.balanceUsd === undefined || isNullOr(v.balanceUsd, isPlainDecimal)) &&
@@ -382,12 +394,13 @@ const portfolio = (v: unknown): v is Portfolio => isRecord(v) && isGuid(v.id) &&
   (v.enabledAccountCount === undefined || isCount(v.enabledAccountCount)) &&
   (v.availableBalanceCoverage === undefined || isText(v.availableBalanceCoverage) && coverages.includes(v.availableBalanceCoverage)) &&
   (v.icon === undefined || isText(v.icon, 40))
-const account = (v: unknown): v is BrokerAccount => isRecord(v) && isGuid(v.id) &&
+const account = (v: unknown): v is BrokerAccount => isRecord(v) && optionalTradingMode(v) &&
+  (v.startingCapitalUsd === undefined || isNullOr(v.startingCapitalUsd, isNonNegativeDecimal)) && isGuid(v.id) &&
   isNullOr(v.portfolioId, isGuid) && isText(v.name) && isText(v.venueId) &&
   isNullOr(v.address, isText) && isNullOr(v.accountValueUsd, isPlainDecimal) &&
   (v.sourceId === undefined || isNullOr(v.sourceId, isText)) &&
   isNullOr(v.lastSyncedAtUtc, isTimestamp) &&
-  ['manual', 'not-synced', 'synced', 'error'].includes(String(v.syncStatus)) &&
+  (v.tradingMode === 'paper' ? v.syncStatus === 'paper' : ['manual', 'not-synced', 'synced', 'error'].includes(String(v.syncStatus))) &&
   isNullOr(v.lastSyncError, isText) && isCount(v.positionCount) && isNullOr(v.historyNotice, isText) &&
   (v.isEnabled === undefined || typeof v.isEnabled === 'boolean') &&
   (v.availableStablecoinNominalUsd === undefined || isNullOr(v.availableStablecoinNominalUsd, isPlainDecimal)) &&
@@ -397,7 +410,7 @@ const account = (v: unknown): v is BrokerAccount => isRecord(v) && isGuid(v.id) 
   (v.balanceUsd === undefined || isNullOr(v.balanceUsd, isPlainDecimal)) &&
   (v.availableBalanceUsd === undefined || isNullOr(v.availableBalanceUsd, isPlainDecimal)) &&
   (v.availableBalanceSource === undefined || v.availableBalanceSource === null ||
-    isText(v.availableBalanceSource) && ['wallet', 'margin', 'withdrawable'].includes(v.availableBalanceSource)) &&
+    isText(v.availableBalanceSource) && ['wallet', 'margin', 'withdrawable', 'paper'].includes(v.availableBalanceSource)) &&
   (v.settingsRevision === undefined || isPositiveCount(v.settingsRevision))
 const discovery = (venueId: string, address: string) => (v: unknown): v is AccountDiscovery => isRecord(v) &&
   v.venueId === venueId && isText(v.address) && v.address.toLowerCase() === address.toLowerCase() &&
@@ -442,6 +455,18 @@ const overview = (v: unknown): v is Overview => isRecord(v) && Array.isArray(v.p
     (v.totals[k] === undefined || coverages.includes(String(v.totals[k])))) &&
   Array.isArray(v.recentActivity) && v.recentActivity.every(isImportedFill) && isText(v.scopeNote)
 
+function assertResponseMode(value: unknown, mode: TradingMode, requireMode = false): void {
+  if (Array.isArray(value)) { value.forEach(item => assertResponseMode(item, mode)); return }
+  if (!isRecord(value)) return
+  const entity = typeof value.id === 'string' && ('accountValueUsd' in value && 'venueId' in value || 'planRevision' in value && 'accountId' in value || 'valueCoverage' in value && 'accountCount' in value)
+  if ((requireMode || entity || value.tradingMode !== undefined) && (value.tradingMode ?? 'real') !== mode) {
+    throw new ApiError('invalid-response', 'The API returned data for a different trading mode. Reload this workspace.')
+  }
+  for (const key of ['summary', 'play', 'accounts', 'portfolios', 'plays', 'items']) {
+    if (value[key] !== undefined) assertResponseMode(value[key], mode)
+  }
+}
+
 /**
  * A 401 on a session call ends the session. A 403 never does, except `user-suspended`; other refusals only explain
  * themselves. Token mode keeps treating both as a rejected token.
@@ -451,11 +476,25 @@ export function endsSession(credentials: string | ApiCredentials, failure: AuthF
 }
 
 /** `onAuthFailure` hears every 401 and 403 of this client, so the session owner can tear down or open a dialog. */
-export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthFailure?: (failure: AuthFailure) => void): WorkspaceApi {
-  const call = createApiCall(credentials, failure => {
+export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthFailure?: (failure: AuthFailure) => void, tradingMode?: TradingMode): WorkspaceApi {
+  const rawCall = createApiCall(credentials, failure => {
     if (endsSession(credentials, failure)) emitApiEvent(api, { type: 'unauthorized' })
     onAuthFailure?.(failure)
   }, () => emitApiEvent(api, { type: 'session-changed' }))
+  // Bind a mode to the client, not mutable global state: late responses can only return to their original shell.
+  const call: typeof rawCall = async (path, options) => {
+    if (tradingMode === 'paper' && /^\/api\/(?:accounts\/[^/?]+\/(?:sync|fills|credential|monitor|discrepancies|market-context|market-stream|stream)|plays\/[^/?]+\/(?:manual-executions|execution|discrepancies)|plays\/retrospective|monitor|events|venues)(?:[/?]|$)/.test(path)) {
+      throw new ApiError('unavailable', 'This real-account feature is unavailable in Paper mode.')
+    }
+    const scoped = /^\/api\/(?:overview|accounts|portfolios|plays|activity|review|sizing|evidence)(?:[/?]|$)/.test(path)
+    const url = new URL(path, 'http://vessel.local')
+    if (scoped && tradingMode) url.searchParams.set('tradingMode', tradingMode)
+    const value = await rawCall(`${url.pathname}${url.search}`, options)
+    // Mode-bearing report roots must explicitly identify Paper; omitted modes remain legacy Real.
+    const report = ['/api/review', '/api/sizing', '/api/activity', '/api/overview/summary'].includes(url.pathname)
+    if (scoped) assertResponseMode(value, tradingMode ?? 'real', report)
+    return value
+  }
   const generation = typeof credentials !== 'string' && credentials.kind === 'session' ? credentials.generation : undefined
   /**
    * Runs one stream under the current session generation. A newer generation aborts it, so no frame read under the
@@ -577,6 +616,17 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
   })
   const withSignal = (signal?: AbortSignal) => signal ? { signal } : {}
   const api: WorkspaceApi = {
+    tradingMode: tradingMode ?? 'real',
+    forTradingMode: mode => createWorkspaceApi(credentials, onAuthFailure, mode),
+    paperSettings: signal => call('/api/paper/settings', { ...workspaceRequest, validate: isPaperSettings, ...withSignal(signal) }),
+    savePaperSettings: settings => {
+      if (!isPaperSettings(settings)) return Promise.reject(new ApiError('invalid-response', 'Use a whole paper check interval from 1 to 1440 minutes.'))
+      return call('/api/paper/settings', { ...workspaceRequest, validate: isPaperSettings, method: 'PUT', body: JSON.stringify(settings) })
+    },
+    paperState: (id, signal) => {
+      if (tradingMode !== 'paper') return Promise.reject(new ApiError('unavailable', 'Simulated executions are only available in Paper mode.'))
+      return call(`${playPath(id)}/paper-state`, { ...playRequest, validate: (v): v is PaperPlayState => isPaperPlayState(v) && v.playId === id, ...withSignal(signal) })
+    },
     monitor: signal => call('/api/monitor', { ...workspaceRequest, validate: isMonitorSummary, ...withSignal(signal) }),
     accountMonitor: (id, signal) => call(`${accountPath(id)}/monitor`, { ...workspaceRequest,
       validate: (v): v is AccountMonitor => isAccountMonitor(v) && v.accountId === id, ...withSignal(signal) }),
@@ -666,7 +716,10 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
     updatePlay: (id, fields) => call(playPath(id), { ...playRequest, validate: isSavedPlay, method: 'PUT', body: JSON.stringify(fields) }),
     changePlayStatus: (id, expectedVersion, request) =>
       call(`${playPath(id)}/status`, { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify({ expectedVersion, ...request }) }),
-    playHistory: (id, signal) => call(`${playPath(id)}/history`, { ...playRequest, validate: isPlayHistory, ...withSignal(signal) }),
+    playHistory: (id, signal) => call(`${playPath(id)}/history`, { ...playRequest,
+      validate: (v): v is PlayHistory => isPlayHistory(v) && v.statusChanges.every(change => tradingMode === 'paper'
+        ? change.source === undefined || change.source === 'owner' || change.source === 'paper' : change.source !== 'paper'),
+      ...withSignal(signal) }),
     completeReview: (id, expectedVersion) => call(`${playPath(id)}/review/complete`,
       { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify({ expectedVersion }) }),
     reopenReview: (id, expectedVersion) => call(`${playPath(id)}/review/reopen`,
@@ -735,9 +788,9 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
       return call(retrospectivePlayPath(), { ...playRequest, validate: (v): v is SavedPlay => isSavedPlay(v) &&
         v.summary.accountId === input.accountId && v.summary.origin === 'retrospective', method: 'POST', body: JSON.stringify(input), ...withSignal(signal) })
     },
-    updateSizingSettings: settings => call('/api/sizing/settings', { ...playRequest, validate: isSizingDocument, method: 'PUT', body: JSON.stringify({ riskPercent: settings.riskPercent }) }),
+    updateSizingSettings: settings => tradingMode === 'paper' ? Promise.reject(new ApiError('http', 'Paper uses the shared risk preference read-only. Edit it in Real mode.', 409)) : call('/api/sizing/settings', { ...playRequest, validate: isSizingDocument, method: 'PUT', body: JSON.stringify({ riskPercent: settings.riskPercent }) }),
     activity: (query, signal) => call(activityPath(query), { ...workspaceRequest, validate: (v): v is ActivityPage => isActivityPage(v, query), ...withSignal(signal) }),
-    activityFills: (accountId, operationId, signal) => call(activityFillsPath(accountId, operationId), { ...workspaceRequest,
+    activityFills: (accountId, operationId, signal) => call(activityFillsPath(accountId, operationId, tradingMode ?? 'real'), { ...workspaceRequest,
       notFound: 'This operation changed. Reload Activity to see its current executions.',
       validate: (v): v is ActivityFills => isActivityFills(v, accountId, operationId), ...withSignal(signal) }),
     overviewSummary: (query, signal) => call(overviewSummaryPath(query), { ...workspaceRequest, validate: (v): v is OverviewSummaryDocument => isOverviewSummary(v, query), ...withSignal(signal) }),
@@ -763,7 +816,7 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
     marketStream,
     createPortfolio: (name, icon, accountIds, expected) => {
       if (!validExpected(accountIds, expected)) return Promise.reject(new ApiError('invalid-response', 'Reload accounts and provide one positive settings revision per selected account.'))
-      return call('/api/portfolios', { ...workspaceRequest, validate: portfolio, method: 'POST', body: JSON.stringify({ name, icon, accountIds, expected }) })
+      return call('/api/portfolios', { ...workspaceRequest, validate: portfolio, method: 'POST', body: JSON.stringify({ name, icon, accountIds, expected, ...(tradingMode ? { tradingMode } : {}) }) })
     },
     moveAccounts: (accountIds, portfolioId, expected) => {
       if (!accountIds.length || accountIds.length > 200 || !accountIds.every(isGuid) || new Set(accountIds).size !== accountIds.length ||
@@ -773,7 +826,14 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
         v.every(a => account(a) && accountIds.includes(a.id) && a.portfolioId === portfolioId && isPositiveCount(a.settingsRevision)) &&
         new Set(v.map(a => a.id)).size === v.length, method: 'POST', body: JSON.stringify({ accountIds, portfolioId, expected }) })
     },
-    createAccount: body => call('/api/accounts', { ...workspaceRequest, validate: account, method: 'POST', body: JSON.stringify(body) }),
+    createAccount: body => {
+      if (body.tradingMode !== undefined && body.tradingMode !== (tradingMode ?? 'real')) return Promise.reject(new ApiError('invalid-response', 'The account must match this workspace mode.'))
+      if (tradingMode === 'paper' && (!body.portfolioId || !isGuid(body.portfolioId) || !isNonNegativeDecimal(body.startingCapitalUsd) ||
+        body.address !== undefined || body.sourceId !== undefined || body.manualAccountValueUsd !== undefined)) {
+        return Promise.reject(new ApiError('invalid-response', 'Choose a paper portfolio and valid starting capital. Real account identities are not accepted.'))
+      }
+      return call('/api/accounts', { ...workspaceRequest, validate: account, method: 'POST', body: JSON.stringify({ ...body, ...(tradingMode ? { tradingMode } : {}) }) })
+    },
     discoverAccounts: (venueId, address, signal, token) => {
       if (!/^[a-z][a-z\d-]{0,63}$/.test(venueId) || !/^0x[\da-f]{40}$/i.test(address)) {
         return Promise.reject(new ApiError('invalid-response', 'Use a valid venue and public wallet address.'))

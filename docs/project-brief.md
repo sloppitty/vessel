@@ -23,6 +23,24 @@ manual executions, safe retrospective review, actionable data-quality
 explanations, whole-position estimates and structured review. P2/P3 remain
 proposals.
 
+Paper-trading discovery and refinement, October 20, 2026: the owner requested
+an opt-in hypothesis playground with paper-only portfolios and **Hyperliquid-only**
+virtual accounts. Starting capital defaults to 4,000 nominal USD, is chosen
+when adding the account and cannot change afterward; separate accounts support
+different starting allocations. A touched entry/TP/SL level counts as fully
+simulated at its defined price, with no fees or slippage. Paper balances and
+statistics stay isolated from real accounts. The worker checks paper Plays
+hourly by default, with a configurable interval to limit Hyperliquid load;
+the proposed implementation reads the intervening candle window, not only the
+latest price. See the
+[paper-trading proposal](architecture/paper-trading-plan.md) for the code review,
+confirmed product choices, recommended technical boundary and simulation
+limitations. The owner subsequently authorized implementation, including the
+ambiguous-touch flag, delegated Sol implementation and independent Sol
+verification; follow the [delivery contract](architecture/paper-trading-delivery-contract.md)
+and [verified state](architecture/paper-trading-state.md). No owner's database
+migration, deployment or publication is authorized.
+
 Make it easy to document trades, preserve the reasoning behind them, and discover repeated mistakes. The diary should help distinguish a poor decision from an unfavorable outcome, and a sound process from a lucky result.
 
 Vessel is a diary and planning tool. Order execution, investment recommendations, and a promise that any strategy works are not part of the current request.

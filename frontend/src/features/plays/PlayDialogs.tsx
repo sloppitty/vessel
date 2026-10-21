@@ -88,8 +88,23 @@ export function ReturnToOpenDialog({ pending, error, onReturn, onClose }: {
   </Dialog>
 }
 
-export function CancelDialog({ pending, error, onCancel, onClose }: {
-  pending: boolean; error: string | null; onCancel: (reason: CancelReason, note: string) => void; onClose: () => void
+const paperStopDisclosure = 'Unevaluated time before this action is skipped, not replayed. A retained receipt keeps this Play unscored, even after resuming. Recorded executions and virtual cash are kept.'
+
+export function PauseDialog({ pending, error, onPause, onClose }: {
+  pending: boolean; error: string | null; onPause: () => void; onClose: () => void
+}) {
+  return <Dialog open onOpenChange={next => { if (!next && !pending) onClose() }}>
+    <DialogContent className="workspace-dialog">
+      <DialogHeader><DialogTitle>Pause paper play?</DialogTitle><DialogDescription>{paperStopDisclosure}</DialogDescription></DialogHeader>
+      {error && <p className="error" role="alert">{error}</p>}
+      <div className="management-actions"><Button type="button" variant="outline" onClick={onClose} disabled={pending}>Keep running</Button>
+        <Button type="button" onClick={onPause} disabled={pending}>{pending ? 'Pausing…' : 'Pause paper play'}</Button></div>
+    </DialogContent>
+  </Dialog>
+}
+
+export function CancelDialog({ pending, error, onCancel, onClose, paper = false }: {
+  pending: boolean; error: string | null; onCancel: (reason: CancelReason, note: string) => void; onClose: () => void; paper?: boolean
 }) {
   const [reason, setReason] = useState<CancelReason | ''>('')
   const [note, setNote] = useState('')
@@ -97,7 +112,7 @@ export function CancelDialog({ pending, error, onCancel, onClose }: {
   return <Dialog open onOpenChange={next => { if (!next && !pending) onClose() }}>
     <DialogContent className="workspace-dialog">
       <DialogHeader><DialogTitle>Cancel this play?</DialogTitle><DialogDescription>
-        Its plan and history are kept. Remove resting venue orders yourself.
+        {paper ? paperStopDisclosure : 'Its plan and history are kept. Remove resting venue orders yourself.'}
       </DialogDescription></DialogHeader>
       <form className="workspace-form" onSubmit={submit} aria-busy={pending}>
         <label htmlFor="cancel-reason">Reason</label>
@@ -184,7 +199,7 @@ export function HistoryDialog({ api, playId, onClose }: { api: WorkspaceApi; pla
       detail: index === 0 ? ['The plan as first committed.', ...(revision.number === 1 ? preflightLines(revision.preflight) : [])] : describePlanChanges(all[index - 1]!.plan, revision.plan),
     })),
     ...result.history.statusChanges.map((change, index): HistoryItem => ({
-      at: change.occurredAtUtc, key: `s${index}`, title: `${statusLabels[change.from]} → ${statusLabels[change.to]}${change.source === 'venue' ? ' · from linked venue fills' : change.source === 'manual' ? ' · from manual facts' : ''}`,
+      at: change.occurredAtUtc, key: `s${index}`, title: `${statusLabels[change.from]} → ${statusLabels[change.to]}${change.source === 'paper' ? ' · from simulated paper executions' : change.source === 'venue' ? ' · from linked venue fills' : change.source === 'manual' ? ' · from manual facts' : ''}`,
       detail: [change.reason ? cancelReasonLabels[change.reason] : '', change.unresolvedReason ? unresolvedReasonLabels[change.unresolvedReason] : '',
         change.note ?? '', ...(change.evidence ? evidenceLines(change.evidence) : [])].filter(Boolean),
     })),

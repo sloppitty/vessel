@@ -18,6 +18,7 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
                 "Vessel__Credentials__KeyFile=/private/key-ring.json\n"
                 "Vessel__Evidence__Storage__S3__SecretAccessKey=test-s3-secret\n"
                 "Vessel__Evidence__Storage__Provider=S3\n"
+                "Vessel__Paper__HeartbeatFile=/private/paper-heartbeat\n"
             )
             with patch.object(dev, "ROOT", root), patch.dict(os.environ, {}, clear=True):
                 api = dev.configuration()
@@ -25,6 +26,7 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
                 self.assertEqual("/private/key-ring.json", api["Vessel__Credentials__KeyFile"])
                 self.assertEqual("test-s3-secret", api["Vessel__Evidence__Storage__S3__SecretAccessKey"])
                 self.assertEqual("S3", api["Vessel__Evidence__Storage__Provider"])
+                self.assertEqual("/private/paper-heartbeat", api["Vessel__Paper__HeartbeatFile"])
                 self.assertEqual({}, dev.frontend_environment())
 
     def test_explicit_environment_wins_without_leaking_to_vite(self):
@@ -170,6 +172,23 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
                 self.assertEqual(("notifications", "notifications"), (started[1][1]["Vessel__Worker__Modules__0"],
                                                                       started[1][1]["Vessel__Worker__Deployment"]))
                 self.assertEqual("/tmp/vessel-dev-notifications-heartbeat", started[1][1]["Vessel__Notifications__HeartbeatFile"])
+            started.clear()
+            with patch.object(dev, "ROOT", root), \
+                    patch.dict(os.environ, {"Vessel_DEV_PAPER": "1",
+                                            "Vessel__Worker__Modules__1": "verification"}, clear=True), \
+                    patch.object(dev.sys, "argv", ["dev.py", "worker"]), \
+                    patch.object(dev.subprocess, "run"), \
+                    patch.object(dev.subprocess, "Popen", side_effect=popen), \
+                    patch.object(dev.signal, "signal"):
+                with self.assertRaises(SystemExit):
+                    dev.main()
+                self.assertEqual([worker, worker, worker], [command for command, _ in started])
+                paper = started[2][1]
+                self.assertEqual("paper", paper["Vessel__Worker__Modules__0"])
+                self.assertEqual("paper", paper["Vessel__Worker__Deployment"])
+                self.assertNotIn("Vessel__Worker__Modules__1", paper)
+                self.assertNotIn("Vessel__Messaging__RabbitMqUri", paper)
+                self.assertEqual("/tmp/vessel-dev-paper-heartbeat", paper["Vessel__Paper__HeartbeatFile"])
 
 
 if __name__ == "__main__":

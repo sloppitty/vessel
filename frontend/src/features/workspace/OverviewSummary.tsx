@@ -54,7 +54,7 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
       <div className="shell-panel metric"><span className="metric-label">Perpetual positions</span><strong>{totals?.openPositionCount ?? (loadingAll ? fallback.totals.openPositionCount : '—')}</strong>
         <small className={signClass(totals?.unrealizedPnl.amountUsd ?? null)}>{money(totals?.unrealizedPnl.amountUsd ?? null)} unrealized</small>
         {totals && <SummaryCoverageBadge value={totals.unrealizedPnl} label="Unrealized" />}</div>
-      <div className="shell-panel metric"><span className="metric-label">Imported executions</span><strong>{totals?.importedFillCount ?? (loadingAll ? fallback.totals.importedFillCount : '—')}</strong></div>
+      <div className="shell-panel metric"><span className="metric-label">{api.tradingMode === 'paper' ? 'Simulated executions' : 'Imported executions'}</span><strong>{api.tradingMode === 'paper' ? totals?.paperExecutionCount ?? '—' : totals?.importedFillCount ?? (loadingAll ? fallback.totals.importedFillCount : '—')}</strong></div>
     </section>
     {beforeSummary}
     <section className="shell-panel overview-summary" aria-label="Overview summary">

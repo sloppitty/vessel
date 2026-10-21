@@ -112,6 +112,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   /** The Play's fills to mark on the chart (phase 1, 1.1b). */
   chartFills?: readonly ChartFill[] | undefined
 }) {
+  const paper = api.tradingMode === 'paper'
   const fieldId = useId()
   const [selectedId, setSelectedId] = useState(draft.entries[0]?.id ?? '')
   const [selectionRequest, setSelectionRequest] = useState(0)
@@ -167,7 +168,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
     ? 'Manual label, not venue-validated. Manual plans assume a linear USD quote and one base unit per quantity. Other quote currencies, inverse contracts and implicit multipliers are unsupported.'
     : undefined
 
-  const tradeUrl = account ? venues.tradeUrl(account.venueId, draft.instrument, draft.instrumentSource, instrumentInfo?.venueContractId) : null
+  const tradeUrl = account && account.tradingMode !== 'paper' ? venues.tradeUrl(account.venueId, draft.instrument, draft.instrumentSource, instrumentInfo?.venueContractId) : null
   // In a read-only Play, the chart can still be viewed but not edited.
   const planChange = readOnly ? () => {} : onChange
 
@@ -280,7 +281,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
       {lockInstrument ? <div className="plays-instrument-field"><div className="plays-field-heading"><label htmlFor="plays-fixed-instrument">Instrument</label>
           {manualNote && <InfoTip label="About manual instruments">{manualNote}</InfoTip>}</div>
         <Input id="plays-fixed-instrument" aria-label="Perpetual instrument" value={instrumentName} readOnly title="Fixed once planned" />
-      </div> : <InstrumentPicker key={accountId} catalog={catalog} value={draft.instrument} source={draft.instrumentSource} manualNote={manualNote}
+      </div> : <InstrumentPicker key={accountId} allowManual={!paper} catalog={catalog} value={draft.instrument} source={draft.instrumentSource} manualNote={manualNote}
         onChange={(instrument, instrumentSource) => {
           // A new contract can allow less leverage than the plan uses; keep the plan within the venue maximum.
           const max = instrumentSource === 'venue' ? catalog.catalog?.instruments.find(item => item.contractId === instrument)?.maxLeverage : undefined
@@ -292,6 +293,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           title={lockDirection ? 'An entry has filled, so the direction stays. Start a new play for the opposite idea.' : undefined} />
       </div>
       <div className="plays-context-status"><span className="field-label">Status</span><span className="plays-status-pills">
+        {paper && <span className="badge">Paper · simulated</span>}
         <span className={`badge play-status-${status}`} title={readOnly && !retrospective ? 'The plan is kept as it was; review and images can change' : undefined}>{statusLabels[status]}</span>
         {revision !== null && <span className="badge play-revision" title="Saved plan changes ask for a reason">Revision {revision}</span>}
         {retrospective && <InfoTip className="badge play-retrospective" trigger="Retrospective">
@@ -302,9 +304,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
     {!retrospective && <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} lockDirection={lockDirection} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin}
       filledEntries={filled} />}
     <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} retrospective={retrospective} />
-    {!readOnly && onRiskChange && (suggestions || sizingStatus === 'failed') && <SuggestionsPanel plan={suggestions} sizing={sizing}
+    {!readOnly && (onRiskChange || paper) && (suggestions || sizingStatus === 'failed') && <SuggestionsPanel plan={suggestions} sizing={sizing}
       status={sizingStatus} onRetry={onRetrySizing} draft={draft} leverage={leverage} units={units}
-      onSize={size => onChange({ ...draft, size })} onLevel={acceptLevel} onRiskChange={onRiskChange}
+      onSize={size => onChange({ ...draft, size })} onLevel={acceptLevel} {...(onRiskChange && !paper ? { onRiskChange } : {})}
       onLeverage={next => leverageChange.request(String(next))} />}
     {leverageChange.dialog}
     <div className="workspace" data-testid="workspace">
@@ -314,8 +316,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           setSelectionRequest(current => current + 1)
         }} instrument={draft.instrument} instrumentName={instrumentName} venue={account ? venues.name(account.venueId) : null} direction={draft.direction}
         intervals={account ? venues.find(account.venueId)?.intervals : undefined} priceStep={priceStep}
-        streamable={account ? venues.can(account.venueId, 'stream') : false}
-        marketContext={account ? venues.can(account.venueId, 'marketContext') : false}
+        streamable={!paper && account ? venues.can(account.venueId, 'stream') : false}
+        marketContext={!paper && account ? venues.can(account.venueId, 'marketContext') : false}
         leverage={retrospective ? 1 : leverageOf(draft.leverage)} liquidation={retrospective ? null : estimatedLiquidation(draft.entries, draft.direction, leverageOf(draft.leverage), maxLeverage, maintenanceMargin)}
         source={account && venues.can(account.venueId, 'candles') && draft.instrumentSource === 'venue' ? { api, accountId: account.id } : null}
         onEntriesChange={entries => planChange({ ...draft, entries })}
@@ -324,7 +326,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         editable={!readOnly} onCapture={addCapture} onShowEvidence={showEvidence} stopEvidence={retrospective ? undefined : stopEvidence}
         fills={chartFills} tradeDates={isEndedStatus(status) && !!chartFills?.length} />
         <PlayJournal notes={draft.notes} onChange={notes => onChange({ ...draft, notes: readOnly ? { ...draft.notes, review: notes.review } : notes })}
-          execution={execution} readOnly={readOnly} retrospective={retrospective} status={status}
+          execution={execution} keepExecutionMounted={paper} readOnly={readOnly} retrospective={retrospective} status={status}
           structuredReview={draft.structuredReview}
           onStructuredReviewChange={structuredReview => onChange({ ...draft, structuredReview })}
           evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceImages={evidenceImages} evidenceRequest={evidenceRequest} executionRequest={executionRequest}

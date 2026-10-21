@@ -99,8 +99,18 @@ public sealed class MonitorDiscrepancyRound6Tests
     public async Task Migration_backfills_confirmed_records_without_revealing_hidden_history()
     {
         await using var database = await DiscrepancyDatabase.Create("20261018100000_ServerEventSubscriptions");
-        var f = Untracked(); await database.Seed(f);
+        var f = Untracked();
         await using var scope = database.Scope(f);
+        // This pinned historical schema predates paper account columns. Seed the same account facts explicitly,
+        // rather than asking the latest EF Account mapping to write columns the migration has not introduced.
+        var account = f.Account;
+        await scope.Db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO accounts ("Id","OwnerId","VenueId","Name","PortfolioId","Address","SourceId",
+              "ManualAccountValueUsd","LastSyncedAtUtc","SyncStatus","LastSyncError","HistoryNotice","IsEnabled","SettingsRevision")
+            VALUES ({account.Id},{account.OwnerId},{account.VenueId},{account.Name},{account.PortfolioId},{account.Address},{account.SourceId},
+              {account.ManualAccountValueUsd},{account.LastSyncedAtUtc},{account.SyncStatus},{account.LastSyncError},
+              {account.HistoryNotice},{account.IsEnabled},{account.SettingsRevision})
+            """);
         var shapes = new[] { ("open", true), ("resolved", true), ("dismissed", true), ("candidate", false), ("resolved", false) };
         for (var i = 0; i < shapes.Length; i++)
             scope.Db.Add(new PlayDiscrepancy { OwnerId = f.Account.OwnerId, AccountId = f.Account.Id,

@@ -110,6 +110,7 @@ public sealed class AccountCredentialService(
 
     private void Guard(Account account, bool requireEnabled)
     {
+        if (account.TradingMode != "real") throw new ProblemException(400, "Paper accounts do not accept venue credentials.");
         if (account.OwnerId != owner.OwnerId) throw new ProblemException(404, "Account not found.");
         if (requireEnabled && !account.IsEnabled) throw new ProblemException(409, "Enable the account before reading or changing its credential.");
         if (venues.Descriptor(account.VenueId)?.Capabilities.ReadOnlyCredential != true || account.SourceId is null)
