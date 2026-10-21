@@ -129,6 +129,25 @@ October 21, 2026. Implemented on `t3/phase2-open-risk`.
   5 skipped; frontend 170 files and 4,056 tests. An earlier run found 42
   frontend failures from test doubles without `openRisk`, which the guard
   fixed.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `f2bcce35`. Nine
+  findings, all fixed in `bc500cd1`:
+  - A linked order with known missing executions (the shared
+    `OrderKey`/`MissingExecutions` rule) now makes the Play unknown, never a
+    partial sum.
+  - The editor's preview is read again on every reload, so new fills count.
+  - Every plan must allocate 100% of the position across its entries,
+    quantity sizing included; otherwise the Play is unknown.
+  - Exits beyond the filled quantity are checked before zero-share entries
+    are skipped.
+  - Protection comes from 0.4c's recorded coverage. Only a confirmed absence
+    counts as not covered. Unknown, unsupported, stale and unchecked coverage
+    is unverified (this also settles the contract's round-2 finding).
+  - Preview rejects duplicate entry or stop IDs (400). A Play ID that is not
+    this owner's real Play on the account is 404, never a Draft fallback.
+  - Shares say when the scope's balance covers only some accounts.
+  - Overview lists the Plays not included.
+- **Check after round 1.** `scripts/check.sh` passed on `bc500cd1`: backend
+  4,024 passed, 5 skipped; frontend 170 files and 4,060 tests.
 - The migration is applied explicitly, never to the owner's database.
 
 ## 2. Weekly review page
