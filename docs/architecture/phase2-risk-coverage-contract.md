@@ -109,9 +109,13 @@ fills, in the instrument's quote asset. It has two separate parts.
 - By direction, the known risk in nominal USD and as a share of the scope's
   balance, plus the unknown count.
 - The total is long plus short: a sum of risks, never a net.
-- The figures are labelled as "at your plan's stops". The count of Open
-  Plays with open quantity whose remaining stops have no linked stop order
-  resting at the venue, as last read, is shown beside them.
+- The figures are labelled as "at your plan's stops". Beside them, Open venue
+  Plays are counted from 0.4c's recorded coverage evidence:
+  - only confirmed absence (a fresh known "not covered") counts as not
+    covered;
+  - shared protection counts as covered;
+  - unknown, unsupported (such as "current book not read"), stale and
+    not-yet-checked coverage are counted separately as unverified.
 - **The scope** is the Overview scope (All, portfolio, Unassigned or account).
   For a Play, it is its portfolio, or the account itself when unassigned. The
   balance is the workspace's exact enabled-account balance for that scope,
@@ -471,7 +475,7 @@ No decision.
 | --- | --- | --- |
 | G-06 | Three 1.25% longs: nothing shows the combined risk | Long 3.75%, short 0% |
 | Round 3, managed stop | A stop at 105 on a 100 long counted as a $5 loss | Adds 0 risk |
-| D-20, `PlayExecutionService.cs:376` | An entry placed before the Play was saved is never stored | Offered as an earlier-order candidate |
+| D-20, `PlayExecutionService.cs:376` | An entry placed before the Play was saved is retained but excluded from automatic matching and the Execution panel's candidate reads | Offered as an earlier-order candidate |
 | `correctness-dotnet/Activity.cs` C6 | Buy, omitted liquidation, buy 2, sell 2 → phantom short | "Direction unknown: executions omitted" |
 | `verify-new-dotnet/NewVerify.cs` (Lighter) | A liquidation is only counted | Kept as an unscored forced event |
 | V4 | 720 hourly funding rows against a 500-row budget | Resumed over Refreshes until covered |

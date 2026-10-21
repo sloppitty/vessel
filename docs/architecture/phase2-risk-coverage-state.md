@@ -60,6 +60,14 @@ October 21, 2026:
   - the unchanged funding basis and scoring;
   - the item 14 defects still present on main;
   - the migration order.
+- **Sol round 2,** on `a1339ff1`. All nine round-1 resolutions were confirmed,
+  and the delivery order (6, then 7, then 9b) was found sound. Two findings,
+  both accepted:
+  - **Medium:** the "without a resting stop" count must come from 0.4c's
+    coverage evidence. It now counts confirmed absence only, keeps shared
+    protection, and reports unknown, unsupported, stale and unchecked
+    coverage as unverified.
+  - **Low:** the probe table still said an earlier order "is never stored".
 
 ## 1. Open risk
 
