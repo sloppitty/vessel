@@ -42,6 +42,7 @@ public sealed class ExecutionNarrowedReadsTests
             inner.FillsAsync(accountId, orders, ct);
         public void Add(PlayOrderLink link) => inner.Add(link);
         public void Add(PlayStatusChange change) => inner.Add(change);
+        public Task ForgetWatchesAsync(Guid playId, CancellationToken ct) => inner.ForgetWatchesAsync(playId, ct);
         public Task SaveAsync(CancellationToken ct) => inner.SaveAsync(ct);
         public Task<T> WithAccountLockAsync<T>(Guid accountId, Func<Task<T>> action, CancellationToken ct) =>
             inner.WithAccountLockAsync(accountId, action, ct);
@@ -88,6 +89,7 @@ public sealed class ExecutionNarrowedReadsTests
         }
         public void Add(PlayOrderLink link) => inner.Add(link);
         public void Add(PlayStatusChange change) => inner.Add(change);
+        public Task ForgetWatchesAsync(Guid playId, CancellationToken ct) => inner.ForgetWatchesAsync(playId, ct);
         public Task SaveAsync(CancellationToken ct) => inner.SaveAsync(ct);
         public Task<T> WithAccountLockAsync<T>(Guid accountId, Func<Task<T>> action, CancellationToken ct) =>
             inner.WithAccountLockAsync(accountId, action, ct);

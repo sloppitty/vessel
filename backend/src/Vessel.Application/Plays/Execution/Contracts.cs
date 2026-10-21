@@ -163,6 +163,11 @@ public interface IPlayExecutionStore
     Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<OrderKey> orders, CancellationToken ct);
     void Add(PlayOrderLink link);
     void Add(PlayStatusChange change);
+    /// <summary>
+    /// Removes the monitor's watches of a Play's linked orders, so the Play's next end starts new ones from that end even
+    /// when the clock stepped back or two ends share a time (1.3a, a return to Open).
+    /// </summary>
+    Task ForgetWatchesAsync(Guid playId, CancellationToken ct);
     /// <summary>Persists through the active unit of work, without committing.</summary>
     Task SaveAsync(CancellationToken ct);
     /// <summary>Requires an active unit of work; serializes reconciliation across requests and processes until it completes.</summary>

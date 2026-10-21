@@ -28,6 +28,7 @@ internal sealed class MemoryExecutionStore(MemoryPlayStore plays) : IPlayExecuti
     public ImportedOrder Order(string externalOrderId) => Orders.Single(o => o.ExternalOrderId == externalOrderId);
     public void Add(PlayOrderLink link) => Links.Add(link);
     public void Add(PlayStatusChange change) => plays.Add(change);
+    public Task ForgetWatchesAsync(Guid playId, CancellationToken ct) => Task.CompletedTask;
     public Task SaveAsync(CancellationToken ct) => Task.CompletedTask;
     public Task<T> WithAccountLockAsync<T>(Guid accountId, Func<Task<T>> action, CancellationToken ct) => action();
 }
