@@ -172,7 +172,33 @@ Not started.
 
 ## 4. Earlier-order link candidates
 
-Not started.
+October 21, 2026. Implemented on `t3/phase2-earlier-orders`.
+- **The panel's read.** `PlayExecutionService.GetAsync` loads the contract's
+  orders from `Vessel:Plays:EarlierOrderLookback` (24 hours by default, 0 to
+  7 days, validated at start-up) before the Play's creation. It lists the
+  compatible ones placed before creation as `earlierOrders`, at most 20: open,
+  filled or triggered, and not linked to any Play.
+- **What is unchanged.** Retention (`RetainAsync` keeps every returned order)
+  and the automatic matcher's rule (placed at or after creation).
+- **The panel.** The Execution panel shows them under "Placed before this Play
+  was saved", with the same Link controls as other orders.
+- **Linking** uses the existing endpoint. The badge follows the actual fill
+  times:
+  - a fast entry that filled before the plan shows "plan written after first
+    execution";
+  - an order placed before the Play but filled after planning keeps a
+    contemporaneous plan.
+- **Tests.**
+  - `EarlierOrderCandidateTests` (4, three on PostgreSQL): a check offers but
+    never links an earlier order, a zero lookback offers none, linking a fast
+    entry opens the Play with the badge, a contemporaneous plan stays one, and
+    the lookback is bounded.
+  - The Execution panel test.
+  - The monitor contract fixture regenerated with `earlierOrders`.
+- **Check.** `scripts/check.sh` passed on `b18f6db8` (before item 1's round-1
+  fixes were restacked beneath it): backend 4,027 passed, 5 skipped; frontend
+  170 files and 4,057 tests. An earlier run failed only on the contract
+  fixture, which was then regenerated.
 
 ## 5. Export
 

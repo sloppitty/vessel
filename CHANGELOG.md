@@ -4,6 +4,10 @@
 
 ### Added
 
+- A Play's Execution tab also lists orders placed in the day before you
+  saved it, under "Placed before this Play was saved", so a fast entry you
+  journaled afterwards can be linked by hand. Vessel never links them by
+  itself (D-20).
 - Open risk: the loss if every current stop fills across your Planned and
   Open Plays, long and short shown apart and never netted. A stop at or
   beyond its entry adds nothing, and a Play that cannot be measured is
