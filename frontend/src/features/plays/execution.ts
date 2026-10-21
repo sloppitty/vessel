@@ -11,6 +11,22 @@ export function describeOrder(order: ExecutionOrder) {
   return `${side} ${order.orderType.toLowerCase()} ${price} · ${size}`
 }
 
+/**
+ * Suggestions grouped by order, in first-seen order: each order once, with every level of this Play it matches, and
+ * whether another active Play is also offered it (phase 1, 1.6d). A suggestion without order details stands alone.
+ */
+export function suggestionGroups(suggestions: readonly OrderLink[]) {
+  const groups = new Map<string, { key: string; links: OrderLink[]; otherPlay: boolean }>()
+  for (const link of suggestions) {
+    const key = link.order ? `order:${link.order.orderId}` : `link:${link.id}`
+    const group = groups.get(key) ?? { key, links: [], otherPlay: false }
+    group.links.push(link)
+    group.otherPlay ||= link.otherPlay === true
+    groups.set(key, group)
+  }
+  return [...groups.values()]
+}
+
 /** Targets are always numbered; a single stop is just "stop", like the chart tags. */
 const exitName = (entry: DraftEntry, kind: 'stop' | 'target', index: number) =>
   kind === 'target' || entry.stops.length > 1 ? `${entry.name} ${kind} ${index + 1}` : `${entry.name} ${kind}`

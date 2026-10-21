@@ -32,6 +32,8 @@ public sealed class ExecutionNarrowedReadsTests
     {
         public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => inner.AccountAsync(id, ct);
         public Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct, bool settling = false) => inner.ActivePlaysAsync(accountId, ct, settling);
+        public Task<HashSet<Guid>> SuggestedElsewhereAsync(Guid accountId, Guid playId, IReadOnlyCollection<Guid> orderIds, CancellationToken ct) =>
+            inner.SuggestedElsewhereAsync(accountId, playId, orderIds, ct);
         public Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct) => inner.OrdersAsync(accountId, ct);
         public Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset observedAt, CancellationToken ct) =>
             inner.UpsertOrdersAsync(account, orders, observedAt, ct);
@@ -55,6 +57,8 @@ public sealed class ExecutionNarrowedReadsTests
         public bool FullReads { get; private set; }
         public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => inner.AccountAsync(id, ct);
         public Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct, bool settling = false) => inner.ActivePlaysAsync(accountId, ct, settling);
+        public Task<HashSet<Guid>> SuggestedElsewhereAsync(Guid accountId, Guid playId, IReadOnlyCollection<Guid> orderIds, CancellationToken ct) =>
+            inner.SuggestedElsewhereAsync(accountId, playId, orderIds, ct);
         public Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct) { FullReads = true; return inner.OrdersAsync(accountId, ct); }
         public async Task<List<ImportedOrder>> OrdersAsync(Guid accountId, IReadOnlyCollection<Guid> orderIds,
             IReadOnlyDictionary<string, DateTimeOffset> placedSince, CancellationToken ct)

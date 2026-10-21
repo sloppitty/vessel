@@ -4,6 +4,16 @@
 
 ### Added
 
+- Recording a manual execution is quicker and clearer: each error sits on
+  its own field, the time is typed in your zone with a Now button and sent
+  as UTC, the side follows the role, and the Source stays required beside the
+  time (F-01).
+- Duplicate opens a planned Play's plan as a new Draft, with its account,
+  instrument, direction, leverage, levels and notes, checked like any new plan
+  before its first Save (F-04).
+- Orders to confirm are listed once each with every level they match, and say
+  "another play" only when another active Play is offered the same order
+  (F-03).
 - A Play's fills appear on its chart as buy and sell markers at their time
   and price, with a tooltip, never as a level line. Closed, unresolved and
   retrospective Plays open the chart on the trade's own dates instead of

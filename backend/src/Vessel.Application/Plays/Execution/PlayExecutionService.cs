@@ -55,7 +55,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
         if (play.TradingMode != "real") throw new ProblemException(409, "Paper Plays use explicit simulated executions, not actual order linking.");
         var account = await store.AccountAsync(play.AccountId, ct);
-        var mine = (await store.PlayLinksAsync(play.AccountId, play.Id, ct)).Where(l => l.State != OrderLinkState.Dismissed).ToList();
+        var mine = (await store.PlayLinksAsync(play.AccountId, play.Id, ct)).Where(l => l.State is not (OrderLinkState.Dismissed or OrderLinkState.Rejected)).ToList();
         // Linked to any Play of the account, also closed ones: such an order is never offered again.
         var linkedOrders = await store.LinkedOrderIdsAsync(play.AccountId, ct);
         var mineOrders = mine.Select(l => l.ImportedOrderId).ToHashSet();
@@ -110,6 +110,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
                 PlannedPrice = planned.Price, PlannedQuantity = planned.Quantity, PlanRevision = planned.Revision,
             };
         }).ToList();
+        // A suggestion says "another play" only when another active Play is offered the same order (1.6d).
+        var elsewhere = await store.SuggestedElsewhereAsync(play.AccountId, play.Id, suggestions.Select(l => l.ImportedOrderId).ToHashSet(), ct);
         OrderLinkDto Link(PlayOrderLink link) => new(link.Id, Name(link.Role), link.EntryId, link.LevelId, Name(link.State), Name(link.Source),
             orders.TryGetValue(link.ImportedOrderId, out var order) ? OrderDto(order) : null, ExecutionIntegrity.Quantity(fills[link.ImportedOrderId]).ToString(),
             fills[link.ImportedOrderId].OrderBy(f => f.OccurredAtUtc).Select(FillDto).ToList());
@@ -117,7 +119,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         if (reason is null && account is { IsEnabled: true } && play.Status is not (PlayStatus.Closed or PlayStatus.Cancelled))
             reason = await CredentialReasonAsync(account, ct);
         return new PlayExecutionDto(play.Id, PlayService.StatusName(play.Status), reason is null, reason, account?.LastSyncedAtUtc,
-            totals, entries, linked.Select(Link).ToList(), suggestions.Select(Link).ToList(), unlinked, Notice, settlement.Problems)
+            totals, entries, linked.Select(Link).ToList(),
+            suggestions.Select(l => Link(l) with { OtherPlay = elsewhere.Contains(l.ImportedOrderId) }).ToList(), unlinked, Notice, settlement.Problems)
         {
             Receipt = PlayReceipts.Build(new ClosedPlayFacts(play, revisions, settlement.All, settlement.Incomplete), time.GetUtcNow()),
         };
@@ -159,12 +162,41 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
                 throw new ProblemException(409, conflict);
             var now = time.GetUtcNow();
             var key = PlayOrderLink.Key(role, entry?.Id, levelId);
-            var existing = links.FirstOrDefault(l => l.PlayId == play.Id && l.ImportedOrderId == order.Id && l.LevelKey == key);
+            var existing = links.FirstOrDefault(l => l.PlayId == play.Id && l.ImportedOrderId == order.Id && l.LevelKey == key &&
+                l.State != OrderLinkState.Rejected);
             if (existing is not null) existing.Confirm(now);
             else store.Add(new PlayOrderLink(play, order, role, entry?.Id, levelId, OrderLinkState.Linked, OrderLinkSource.Owner, now));
             // Other suggestions for this order stay hidden while it is linked and return if it is unlinked.
             await store.SaveAsync(ct);
             await ApplyTransitionsAsync(play.AccountId, [play], ct);
+            await store.SaveAsync(ct);
+            return true;
+        }, ct), ct);
+        return await GetAsync(playId, ct);
+    }
+
+    /// <summary>
+    /// The owner says an order is not this Play's (phase 1, 1.6d): in one step under the account lock, every suggestion of
+    /// it to this Play is declined and one <see cref="OrderLinkState.Rejected"/> record is kept, so no reconciliation offers
+    /// it to this Play again, at a level of any plan revision or as an unplanned exit. Other Plays keep their suggestions.
+    /// </summary>
+    public async Task<PlayExecutionDto> RejectOrderAsync(Guid playId, RejectOrderRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.OrderId)) throw new ProblemException(400, "Choose an order.");
+        var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+        if (play.TradingMode != "real") throw new ProblemException(409, "Paper Plays use explicit simulated executions, not actual order linking.");
+        await unitOfWork.ExecuteAsync(() => store.WithAccountLockAsync(play.AccountId, async () =>
+        {
+            // A Play's instrument is fixed once planned; the rejection does not read its plan, so a revision cannot escape it.
+            var order = (play.ContractId is null ? null : await store.OrderAsync(play.AccountId, play.ContractId, request.OrderId, ct))
+                ?? throw new ProblemException(404, "This order is not known for the play's instrument. Check the venue first.");
+            var links = (await store.LinksAsync(play.AccountId, [order.Id], [], ct)).Where(l => l.PlayId == play.Id).ToList();
+            if (links.Any(l => l.State == OrderLinkState.Linked))
+                throw new ProblemException(409, "This order is linked to this play. Unlink it instead.");
+            var now = time.GetUtcNow();
+            foreach (var link in links.Where(l => l.State == OrderLinkState.Suggested)) link.Dismiss(now);
+            if (!links.Any(l => l.State == OrderLinkState.Rejected))
+                store.Add(new PlayOrderLink(play, order, OrderLinkRole.Exit, null, null, OrderLinkState.Rejected, OrderLinkSource.Owner, now));
             await store.SaveAsync(ct);
             return true;
         }, ct), ct);
@@ -181,7 +213,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         if (play.TradingMode != "real") throw new ProblemException(409, "Paper Plays use explicit simulated executions, not actual order linking.");
         await unitOfWork.ExecuteAsync(() => store.WithAccountLockAsync(play.AccountId, async () =>
         {
-            var link = await store.LinkAsync(play.AccountId, play.Id, linkId, ct) is { State: not OrderLinkState.Dismissed } found
+            var link = await store.LinkAsync(play.AccountId, play.Id, linkId, ct) is { State: not (OrderLinkState.Dismissed or OrderLinkState.Rejected) } found
                 ? found : throw new ProblemException(404, "Link not found.");
             if (link.State == OrderLinkState.Linked) await RequireActiveAsync(play, "Closed, cancelled and unresolved plays keep their linked orders.", ct);
             link.Dismiss(time.GetUtcNow());
@@ -440,6 +472,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         private readonly HashSet<Guid> linked = [];
         private readonly Dictionary<(Guid PlayId, Guid ImportedOrderId, string LevelKey), PlayOrderLink> first = [];
         private readonly HashSet<(Guid PlayId, Guid ImportedOrderId, string LevelKey)> dismissed = [];
+        private readonly HashSet<(Guid PlayId, Guid ImportedOrderId)> rejected = [];
 
         public LinkIndex(IEnumerable<PlayOrderLink> links)
         {
@@ -452,11 +485,14 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             first.TryAdd(key, link);
             if (link.State == OrderLinkState.Linked) linked.Add(link.ImportedOrderId);
             if (link.State == OrderLinkState.Dismissed) dismissed.Add(key);
+            if (link.State == OrderLinkState.Rejected) rejected.Add((link.PlayId, link.ImportedOrderId));
         }
 
         public void MarkLinked(PlayOrderLink link) => linked.Add(link.ImportedOrderId);
         public bool IsLinked(Guid orderId) => linked.Contains(orderId);
-        public bool IsDismissed(Guid playId, Guid orderId, string levelKey) => dismissed.Contains((playId, orderId, levelKey));
+        /// <summary>Declined for that level, or rejected for the whole Play.</summary>
+        public bool IsDismissed(Guid playId, Guid orderId, string levelKey) =>
+            dismissed.Contains((playId, orderId, levelKey)) || rejected.Contains((playId, orderId));
         public PlayOrderLink? Existing(Guid playId, Guid orderId, string levelKey) => first.GetValueOrDefault((playId, orderId, levelKey));
     }
 

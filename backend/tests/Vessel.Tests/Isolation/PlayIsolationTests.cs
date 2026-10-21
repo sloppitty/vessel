@@ -115,6 +115,7 @@ public abstract class PlayIsolationCases(IsolationHost api)
     [Covers("POST", "/api/plays/{id:guid}/execution/check")]
     [Covers("POST", "/api/plays/{id:guid}/execution/links")]
     [Covers("DELETE", "/api/plays/{id:guid}/execution/links/{linkId:guid}")]
+    [Covers("POST", "/api/plays/{id:guid}/execution/rejections")]
     [Covers("POST", "/api/plays/{id:guid}/execution/links/{linkId:guid}/rebind")]
     [Covers("POST", "/api/plays/{id:guid}/unresolved")]
     [Covers("POST", "/api/plays/{id:guid}/return-to-open")]
@@ -150,6 +151,9 @@ public abstract class PlayIsolationCases(IsolationHost api)
                 _ => new LinkOrderRequest("exit", "exit")), PlayNotFound));
             await state.After(() => Isolated.NotFound(b, play, Isolated.Request(HttpMethod.Delete, id => $"/api/plays/{id}/execution/links/{link}"),
                 PlayNotFound));
+            // Turning down an order for A's Play answers like an unknown Play (phase 1, 1.6d).
+            await state.After(() => Isolated.NotFound(b, play, Isolated.Request(HttpMethod.Post, id => $"/api/plays/{id}/execution/rejections",
+                _ => new RejectOrderRequest("entry")), PlayNotFound));
             // A's link ID under B's own Play reaches the link lookup: it unlinks nothing.
             await state.After(() => Isolated.NotFound(b, link, Isolated.Request(HttpMethod.Delete, id => $"/api/plays/{bPlay}/execution/links/{id}"),
                 "Link not found."));
@@ -179,6 +183,8 @@ public abstract class PlayIsolationCases(IsolationHost api)
             Assert.Equal(("pending", aAccount), (check.GetProperty("monitor").GetProperty("manualState").GetString(),
                 check.GetProperty("monitor").GetProperty("accountId").GetGuid()));
             await a.Send(HttpMethod.Delete, $"/api/plays/{play}/execution/links/{link}");
+            // Positive control: A turns its own order down for its own Play.
+            Assert.Empty((await a.Post($"/api/plays/{play}/execution/rejections", new RejectOrderRequest("entry"))).GetProperty("links").EnumerateArray());
             // Positive control: A's own rebind reaches its Play, whose version moved on: a conflict, not an unknown Play.
             await a.Post($"/api/plays/{play}/execution/links/{link}/rebind", new RebindLevelRequest(0, "entry", "100", "Moved at the venue"),
                 HttpStatusCode.Conflict);

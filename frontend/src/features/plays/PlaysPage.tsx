@@ -14,7 +14,7 @@ import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { useNotifications } from '@/components/notifications/notifications'
 import { preloadLightweightRenderer } from '@/components/chart/lazy'
 import { useVenues } from '@/api/venues'
-import { ArrowLeft, CircleHelp, History, Pause, Play, Plus, RotateCcw, Save, Search, Trash2, X } from 'lucide-react'
+import { ArrowLeft, CircleHelp, Copy, History, Pause, Play, Plus, RotateCcw, Save, Search, Trash2, X } from 'lucide-react'
 import type { PlayDraft } from './draft'
 import { PlayWorkspace } from './PlayWorkspace'
 import { PlayIdentity } from './PlayIdentity'
@@ -41,7 +41,7 @@ import type { ChartFill } from './chart-fills'
 import { CancelDialog, DeleteDialog, HistoryDialog, PauseDialog, PreflightDialog, ReturnToOpenDialog, RevisionDialog, UnresolvedDialog } from './PlayDialogs'
 import { initialPlaysList, playSearchDelay, playViewTabs, type PlaysListState } from './plays-list'
 import {
-  createPlaysSession, draftFromSaved, fieldsToSave, hasDraftContent, hasPlayLogDraft, hasUnsavedPlayWork, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
+  createPlaysSession, draftFromSaved, draftSession, duplicateDraft, fieldsToSave, hasDraftContent, hasPlayLogDraft, hasUnsavedPlayWork, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
   observedPlayVersion, startNewPlay, syncEvidence,
   type PlaysSession, type SavedState,
 } from './saved'
@@ -600,6 +600,15 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const actions = <div className="play-actions" role="group" aria-label="Play actions">
     <Button variant="outline" size="sm" disabled={!saved} title={saved ? 'Plan revisions and status changes' : 'Save the play first'}
       onClick={() => setDialog('history')}><History size={14} />History</Button>
+    {/* A planned Play's plan as a new Draft (1.6c); a retrospective Play has no plan to copy. */}
+    {saved && !retrospective && <Button variant="outline" size="sm" disabled={pending || hasUnsavedPlayWork(session)}
+      title={hasUnsavedPlayWork(session) ? 'Save or discard your changes first' : 'Open a copy of this plan as a new Draft'}
+      onClick={() => {
+        const current = latest.current
+        if (activeWork.current.current || !current.saved || hasUnsavedPlayWork(current)) return
+        setError(null)
+        update(draftSession(duplicateDraft(current.saved)))
+      }}><Copy size={14} />Duplicate</Button>}
     <Button size="sm" variant="outline" className="play-save" disabled={!dirty || pending || !draft.accountId}
       title={!draft.accountId ? 'Choose an account to save' : undefined}
       onClick={requestSave}>
@@ -670,7 +679,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         currentBookRead={currentBookRead}
         {...(onManageAccount && account ? { onManageCredential: () => onManageAccount(account.id) } : {})}
         onDismiss={tracking.dismiss} onCheck={() => { void monitorRun.check() }} onLink={request => { void tracking.link(request) }}
-        onUnlink={linkId => { void tracking.unlink(linkId) }}
+        onUnlink={linkId => { void tracking.unlink(linkId) }} onReject={orderId => { void tracking.reject(orderId) }}
         // A rebind writes a plan revision, so it waits for unsaved edits and other Play work, and its answer is the saved Play.
         version={saved.summary.version} leverage={leverageOf(draft.leverage)} priceStep={priceStep} rebindBlocked={dirty ? 'Save or discard your plan changes first.' : busy !== null ? 'Wait for the current change to finish.' : undefined}
         onRebind={(linkId, request) => tracking.rebind(linkId, request, acceptStoredPlay)} /> : undefined} />

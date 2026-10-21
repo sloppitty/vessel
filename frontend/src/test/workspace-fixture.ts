@@ -98,7 +98,7 @@ export const playCountsFrom = (plays: PlaySummary[]): WorkspaceApi['playCounts']
 
 /** Saved-play API stubs: no saved plays, and every write rejects unless a test overrides it. */
 export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' | 'playCounts' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' | 'nextActions' | 'completeReview' | 'reopenReview' | 'noReviewNeeded' | 'declareUnresolved' | 'returnToOpen' | 'playNotes' | 'addPlayNote' |
-  'deletePlay' | 'playExecution' | 'monitor' | 'accountMonitor' | 'runAccountMonitor' | 'monitorEvents' | 'monitorStream' | 'dismissPlayDiscrepancy' | 'dismissAccountDiscrepancy' | 'linkOrder' | 'unlinkOrder' | 'rebindLevel' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'review' | 'reviewExclusions' | 'reviewProcess' | 'mistakeTags' | 'retrospectivePreview' | 'createRetrospectivePlay' | 'manualExecutions' | 'addManualExecution' | 'correctManualExecution' | 'correctManualExecutions' |
+  'deletePlay' | 'playExecution' | 'monitor' | 'accountMonitor' | 'runAccountMonitor' | 'monitorEvents' | 'monitorStream' | 'dismissPlayDiscrepancy' | 'dismissAccountDiscrepancy' | 'linkOrder' | 'unlinkOrder' | 'rejectOrder' | 'rebindLevel' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'review' | 'reviewExclusions' | 'reviewProcess' | 'mistakeTags' | 'retrospectivePreview' | 'createRetrospectivePlay' | 'manualExecutions' | 'addManualExecution' | 'correctManualExecution' | 'correctManualExecutions' |
   'notificationHead' | 'notifications' | 'claimNotifications' | 'readNotification' | 'readAllNotifications' | 'notificationPreferences' |
   'saveNotificationPreferences' | 'requestTestNotification' | 'paperSettings' | 'savePaperSettings' | 'paperState'> {
   const unexpected = () => Promise.reject(new Error('Unexpected play API call in this test.'))
@@ -118,7 +118,7 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
     monitorEvents: vi.fn().mockResolvedValue({ events: [], nextCursor: '0', resetRequired: true }),
     monitorStream: vi.fn((_after, signal) => new Promise<void>(resolve => { signal.addEventListener('abort', () => resolve(), { once: true }) })),
     dismissPlayDiscrepancy: vi.fn(unexpected), dismissAccountDiscrepancy: vi.fn(unexpected),
-    linkOrder: vi.fn(unexpected), unlinkOrder: vi.fn(unexpected), rebindLevel: vi.fn(unexpected), evidence: vi.fn().mockResolvedValue([]), evidenceImage: vi.fn(unexpected),
+    linkOrder: vi.fn(unexpected), unlinkOrder: vi.fn(unexpected), rejectOrder: vi.fn(unexpected), rebindLevel: vi.fn(unexpected), evidence: vi.fn().mockResolvedValue([]), evidenceImage: vi.fn(unexpected),
     uploadEvidence: vi.fn(unexpected), updateEvidenceNote: vi.fn(unexpected), updateEvidenceMarkup: vi.fn(unexpected), deleteEvidence: vi.fn(unexpected),
     sizing: vi.fn().mockResolvedValue(sizingFixture), updateSizingSettings: vi.fn(unexpected),
     review: vi.fn().mockResolvedValue(emptyReview),

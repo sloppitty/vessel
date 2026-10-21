@@ -1,18 +1,19 @@
 import { ApiError, errorMessage } from '@/api/errors'
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { WorkspaceApi } from '@/api/workspace'
 import type { SavedPlay } from '@/api/plays'
 import type { ManualExecutionCorrection, ManualExecutions } from '@/api/diary'
 import { Button } from '@/components/ui/button'
 import { InfoTip } from '@/components/ui/info-tip'
-import { emptyManualDraft, hasManualDraft, manualBatchRequest, manualCorrectionDraft, manualRequest, type ManualExecutionDraft } from './manual'
+import { emptyManualDraft, hasManualDraft, manualBatchRequest, manualCorrectionDraft, manualRequest, sideFor, type ManualExecutionDraft, type ManualField } from './manual'
+import { nowText, parseZoneText, zoneName, type EntryZone } from './manual-time'
 import type { SavedState } from './saved'
 import type { DraftEntry } from './draft'
 import { nominalStablecoins } from './stablecoins'
 import { NativeSelect } from '@/components/ui/native-select'
 import { EntryReceipts, ManualFees, ReceiptTotals } from './Receipt'
 
-export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form, onChange, onStored, onBegin, working = false, observedVersion }: {
+export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form, onChange, onStored, onBegin, working = false, observedVersion, zone = 'local' }: {
   api: WorkspaceApi
   saved: SavedState | null
   entries: DraftEntry[]
@@ -26,6 +27,8 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
   onBegin: () => (() => void) | null
   working?: boolean
   observedVersion?: number
+  /** The display time zone times are typed and shown in (phase 1, 1.6b); the browser's own until 1.6e adds the setting. */
+  zone?: EntryZone
 }) {
   const id = useId()
   const playId = saved?.summary.id
@@ -34,6 +37,16 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
   const ledger = loaded?.api === api && loaded.ledger.play.summary.id === playId && loaded.ledger.play.summary.version >= version
     ? loaded.ledger : null
   const [error, setError] = useState<string | null>(null)
+  // Each field's own error, keyed by field, or `together-<row>-<field>` for an execution corrected together (1.6b).
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  // After a refused submit, the first invalid field in the form's own order takes focus once it is marked.
+  const formRef = useRef<HTMLFormElement>(null)
+  const focusError = useRef(false)
+  useEffect(() => {
+    if (!focusError.current) return
+    focusError.current = false
+    formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
+  }, [errors])
   const [busy, setBusy] = useState(false)
   const submission = useRef<(() => void) | null>(null)
   const pending = busy || working
@@ -72,25 +85,41 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
   const canAdd = !!summary && ['planned', 'open'].includes(summary.status)
   const canCorrect = !!summary && ['open', 'closed'].includes(summary.status)
   const permitted = enabled && !dirty && (form.executionId ? canCorrect : canAdd)
+  const direction = saved?.summary.direction ?? 'long'
+  const forget = (keys: string[]) => setErrors(current => keys.some(key => key in current)
+    ? Object.fromEntries(Object.entries(current).filter(([key]) => !keys.includes(key))) : current)
   const change = (patch: Partial<ManualExecutionDraft>) => {
     if (submission.current || pending) return
     const { attempt: _attempt, ...current } = form
     void _attempt
     onChange({ ...current, ...patch })
     setError(null)
+    forget(Object.keys(patch).filter(key => key !== 'together'))
   }
   // Other executions corrected with this one (phase 1, 1.3b); any edit drops the frozen attempt, as above.
   const together = form.executionId ? form.together ?? [] : []
-  const changeRow = (index: number, patch: Partial<ManualExecutionDraft>) =>
+  const changeRow = (index: number, patch: Partial<ManualExecutionDraft>) => {
     change({ together: together.map((row, at) => at === index ? { ...row, ...patch } : row) })
+    forget(Object.keys(patch).map(key => `together-${index}-${key}`))
+  }
   const addable = form.executionId ? (ledger?.records ?? []).filter(record => record.id !== form.executionId &&
     !together.some(row => row.executionId === record.id)) : []
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (!saved || !permitted || pending || submission.current) return
-    const request = together.length ? manualBatchRequest(form, saved.summary.version)
-      : manualRequest(form, saved.summary.version, saved.summary.direction, entries.map(entry => entry.id))
-    if ('error' in request) { setError(request.error); return }
+    const request = together.length ? manualBatchRequest(form, saved.summary.version, zone)
+      : manualRequest(form, saved.summary.version, saved.summary.direction, entries.map(entry => entry.id), zone)
+    if ('errors' in request) {
+      // Each error sits on its own field; the first one in the form takes focus.
+      const found: Record<string, string> = { ...request.errors as Record<string, string> }
+      if ('rows' in request) request.rows.forEach((row, index) => Object.entries(row).forEach(([key, message]) => { found[`together-${index}-${key}`] = message }))
+      const any = Object.keys(found).length > 0
+      focusError.current = any
+      setErrors(found)
+      setError(any ? 'Check the highlighted fields.' : 'The execution could not be read. Check every field and try again.')
+      return
+    }
+    setErrors({})
     const finish = onBegin()
     if (!finish) return
     submission.current = finish
@@ -121,9 +150,21 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
       }
     }
   }
-  const field = (key: 'quantity' | 'price' | 'fee' | 'feeCurrency' | 'source' | 'reason', label: string, max: number, decimal = false, list?: string) =>
-    <label htmlFor={`${id}-${key}`}>{label}<input id={`${id}-${key}`} type="text" inputMode={decimal ? 'decimal' : 'text'}
-      maxLength={max} value={form[key]} list={list} onChange={event => change({ [key]: event.target.value })} /></label>
+  // A field's error is its own: the control says it is invalid and is described by the message under it (1.6b).
+  const invalid = (key: string, ...described: (string | false)[]) => {
+    const ids = [errors[key] ? `${id}-${key}-error` : false, ...described].filter(Boolean)
+    return { 'aria-invalid': errors[key] ? true : undefined, 'aria-describedby': ids.length ? ids.join(' ') : undefined }
+  }
+  const shell = (key: string, label: string, control: ReactNode, after?: ReactNode) => <div className="manual-field">
+    <label htmlFor={`${id}-${key}`}>{label}</label>{control}{after}
+    {errors[key] && <span id={`${id}-${key}-error`} className="manual-field-error">{errors[key]}</span>}
+  </div>
+  const field = (key: Exclude<ManualField, 'entryId' | 'occurredAt' | 'side'>, label: string, max: number, decimal = false, list?: string, required = false) =>
+    shell(key, label, <input id={`${id}-${key}`} type="text" inputMode={decimal ? 'decimal' : 'text'} aria-required={required || undefined}
+      maxLength={max} value={form[key]} list={list} onChange={event => change({ [key]: event.target.value })} {...invalid(key)} />)
+  const zoneLabel = zoneName(zone)
+  const typed = form.occurredAt.trim() ? parseZoneText(form.occurredAt, zone) : null
+  const expectedSide = sideFor(form.role, direction)
 
   return <div className="manual-executions">
     <p className="muted" title="Inverse contracts, other quote currencies and implicit contract multipliers are unsupported.">Linear USD-quoted contracts only, one base unit per quantity.</p>
@@ -152,7 +193,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
           <time dateTime={record.occurredAtUtc}>{record.occurredAtUtc}</time>
           <span>Source: {record.source} · Fee: {record.fee === null ? 'Unknown' : `${record.fee} ${record.feeCurrency}`}</span>
           <Button type="button" size="sm" variant="outline" disabled={!enabled || dirty || pending || !canCorrect || hasManualDraft(form)}
-            aria-label={`Correct ${record.id}`} onClick={() => { if (submission.current || pending) return; setError(null); onChange(manualCorrectionDraft(record)) }}>Correct</Button>
+            aria-label={`Correct ${record.id}`} onClick={() => { if (submission.current || pending) return; setError(null); setErrors({}); onChange(manualCorrectionDraft(record, zone)) }}>Correct</Button>
         </li>)}
       </ol>
       <details className="manual-history"><summary>Execution audit history ({ledger.history.length})</summary>
@@ -165,38 +206,41 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
         </li>)}</ol>
       </details>
     </>}
-    {(canAdd || hasManualDraft(form)) && <form onSubmit={event => { void submit(event) }} noValidate aria-label={form.executionId ? 'Correct manual execution' : 'Record manual execution'}>
+    {(canAdd || hasManualDraft(form)) && <form ref={formRef} onSubmit={event => { void submit(event) }} noValidate aria-label={form.executionId ? 'Correct manual execution' : 'Record manual execution'}>
       <fieldset disabled={!permitted || pending}><legend>{form.executionId ? 'Correct execution' : 'Record execution'}
         <InfoTip label="How executions are recorded">
-          <span>Times are UTC, such as 2026-10-13T10:00:00.123456Z; Z or +00:00 is optional. Whole microseconds or coarser; finer precision is rejected by the server, never rounded.</span>
+          <span>Times are in {zoneLabel}, such as 2026-10-13 10:00:00.123456, and are sent as UTC. A time ending in Z or an offset such as +02:00 is read as written. Whole microseconds or coarser; finer precision is refused, never rounded.</span>
           <span>Decimal or scientific text is kept exactly. Leave both fee fields blank for unknown; known zero needs 0 and a currency. Fees in {nominalStablecoins.join(', ')} are deducted at nominal 1:1, without FX or depeg valuation; other currencies are kept but leave the net result unknown.</span>
           <span>The server validates precision, chronology and over-exits; a Closed correction must remain a closed round trip.</span>
         </InfoTip></legend>
         <div className="manual-fields">
-          <label htmlFor={`${id}-role`}>Role<NativeSelect id={`${id}-role`} value={form.role} disabled={!!form.executionId}
-            onChange={event => change({ role: event.target.value as 'entry' | 'exit', entryId: '' })}><option value="entry">Entry</option><option value="exit">Exit</option></NativeSelect></label>
-          {form.role === 'entry' && <label htmlFor={`${id}-entry`}>Saved plan entry<NativeSelect id={`${id}-entry`} value={form.entryId} disabled={!!form.executionId}
-            onChange={event => change({ entryId: event.target.value })}><option value="">Choose entry</option>{entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</NativeSelect></label>}
-          <label htmlFor={`${id}-time`}>Execution time (UTC)<input id={`${id}-time`} type="text" maxLength={64}
-            placeholder="YYYY-MM-DDTHH:mm:ss.ffffffZ" aria-describedby={`${id}-time-help`} value={form.occurredAtUtc}
-            onChange={event => change({ occurredAtUtc: event.target.value })} /></label>
-          <label htmlFor={`${id}-side`}>Side<NativeSelect id={`${id}-side`} value={form.side} disabled={!!form.executionId}
-            onChange={event => change({ side: event.target.value as ManualExecutionDraft['side'] })}><option value="">Choose side</option><option value="buy">Buy</option><option value="sell">Sell</option></NativeSelect></label>
+          {shell('role', 'Role', <NativeSelect id={`${id}-role`} value={form.role} disabled={!!form.executionId}
+            onChange={event => change({ role: event.target.value as 'entry' | 'exit', entryId: '', side: '' })}><option value="entry">Entry</option><option value="exit">Exit</option></NativeSelect>)}
+          {form.role === 'entry' && shell('entryId', 'Saved plan entry', <NativeSelect id={`${id}-entryId`} value={form.entryId} disabled={!!form.executionId}
+            onChange={event => change({ entryId: event.target.value })} {...invalid('entryId')}><option value="">Choose entry</option>{entries.map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</NativeSelect>)}
+          {shell('occurredAt', `Execution time (${zoneLabel})`, <div className="manual-time"><input id={`${id}-occurredAt`} type="text" maxLength={64}
+            placeholder="YYYY-MM-DD HH:mm:ss" value={form.occurredAt} onChange={event => change({ occurredAt: event.target.value })}
+            {...invalid('occurredAt', `${id}-time-help`, zone !== 'utc' && !!typed && 'utc' in typed && `${id}-time-utc`)} />
+            <Button type="button" size="sm" variant="outline" onClick={() => change({ occurredAt: nowText(zone) })}>Now</Button></div>,
+            zone !== 'utc' && typed && 'utc' in typed && <small id={`${id}-time-utc`} className="muted">Sent as {typed.utc.slice(0, -1).replace('T', ' ')} UTC</small>)}
+          {shell('side', 'Side', <NativeSelect id={`${id}-side`} value={form.side || expectedSide} disabled={!!form.executionId}
+            onChange={event => change({ side: event.target.value as ManualExecutionDraft['side'] })} {...invalid('side')}><option value="buy">Buy</option><option value="sell">Sell</option></NativeSelect>)}
+          {field('source', 'Source label (required)', 100, false, undefined, true)}
           {field('quantity', 'Execution quantity', 96, true)}{field('price', 'Execution price', 96, true)}
           {field('fee', 'Fee amount (blank = unknown)', 96, true)}{field('feeCurrency', 'Fee currency', 32, false, `${id}-fee-currencies`)}
           <datalist id={`${id}-fee-currencies`}>{nominalStablecoins.map(symbol => <option key={symbol} value={symbol} />)}</datalist>
-          {field('source', 'Source label', 100)}{form.executionId && field('reason', together.length ? 'Correction reason (for every execution)' : 'Correction reason', 2000)}
+          {form.executionId && field('reason', together.length ? 'Correction reason (for every execution)' : 'Correction reason', 2000)}
         </div>
         {form.executionId && <div className="manual-together" aria-label="Corrected together">
           {together.map((row, index) => {
-            const rowField = (key: 'occurredAtUtc' | 'quantity' | 'price' | 'fee' | 'feeCurrency' | 'source', label: string, max: number, decimal = false) =>
-              <label htmlFor={`${id}-together-${index}-${key}`}>{label}<input id={`${id}-together-${index}-${key}`} type="text"
-                inputMode={decimal ? 'decimal' : 'text'} maxLength={max} value={row[key]} onChange={event => changeRow(index, { [key]: event.target.value })} /></label>
+            const rowField = (key: 'occurredAt' | 'quantity' | 'price' | 'fee' | 'feeCurrency' | 'source', label: string, max: number, decimal = false) =>
+              shell(`together-${index}-${key}`, label, <input id={`${id}-together-${index}-${key}`} type="text" inputMode={decimal ? 'decimal' : 'text'}
+                maxLength={max} value={row[key]} onChange={event => changeRow(index, { [key]: event.target.value })} {...invalid(`together-${index}-${key}`)} />)
             const name = `${row.role === 'entry' ? 'Entry' : 'Exit'} · ${row.side}`
             return <fieldset key={row.executionId} className="manual-together-row">
               <legend>Also correct: {name}</legend>
               <div className="manual-fields">
-                {rowField('occurredAtUtc', `${name} time (UTC)`, 64)}{rowField('quantity', `${name} quantity`, 96, true)}
+                {rowField('occurredAt', `${name} time (${zoneLabel})`, 64)}{rowField('quantity', `${name} quantity`, 96, true)}
                 {rowField('price', `${name} price`, 96, true)}{rowField('fee', `${name} fee (blank = unknown)`, 96, true)}
                 {rowField('feeCurrency', `${name} fee currency`, 32)}{rowField('source', `${name} source label`, 100)}
               </div>
@@ -207,18 +251,18 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
           {addable.length > 0 && <label htmlFor={`${id}-together-add`}>Also correct<NativeSelect id={`${id}-together-add`} value=""
             onChange={event => {
               const record = addable.find(item => item.id === event.target.value)
-              if (record) change({ together: [...together, manualCorrectionDraft(record)] })
+              if (record) change({ together: [...together, manualCorrectionDraft(record, zone)] })
             }}>
             <option value="">Another execution, with the same reason…</option>
             {addable.map(record => <option key={record.id} value={record.id}>{record.role === 'entry' ? 'Entry' : 'Exit'} · {record.side} {record.quantity} at {record.price} · {record.occurredAtUtc}</option>)}
           </NativeSelect></label>}
           {together.length > 0 && <p className="muted">These corrections are saved together with one reason, or not at all. Only the final ledger has to be valid.</p>}
         </div>}
-        <p id={`${id}-time-help`} className="sr-only">UTC date and time, such as 2026-10-13T10:00:00.123456Z. Whole microseconds or coarser.</p>
+        <p id={`${id}-time-help`} className="sr-only">Date and time in {zoneLabel}, such as 2026-10-13 10:00:00.123456. Whole microseconds or coarser.</p>
         <Button type="submit" size="sm">{busy ? 'Recording…' : form.executionId ? together.length ? 'Save corrections' : 'Save correction' : form.attempt ? 'Retry same execution' : 'Record execution'}</Button>
       </fieldset>
       {hasManualDraft(form) && <Button type="button" variant="ghost" size="sm" disabled={pending}
-        onClick={() => { if (submission.current || pending) return; onChange(emptyManualDraft()); setError(null) }}>Discard execution edit</Button>}
+        onClick={() => { if (submission.current || pending) return; onChange(emptyManualDraft()); setError(null); setErrors({}) }}>Discard execution edit</Button>}
     </form>}
   </div>
 }

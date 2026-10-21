@@ -3,7 +3,7 @@ import { ApiError } from '@/api/errors'
 import { emptyStructuredReview, hasStructuredReview, type PlanEntry, type PlayFields, type PlayPlan, type PlayStatus, type PlaySummary, type SavedEvidence, type SavedPlay } from '@/api/plays'
 import { isChartDrawing, type ChartDrawing } from '@/components/chart/drawings'
 import { createDraft, createEvidenceId, type DraftEvidence, type PlayDraft } from './draft'
-import { hasManualDraft, type ManualExecutionDraft } from './manual'
+import { emptyManualDraft, hasManualDraft, type ManualExecutionDraft } from './manual'
 import { titleForSave } from './default-title'
 import { hasLogDraft, type PlayLogDraft } from './log-draft'
 import { storedPlanText, trimPlanNumbers } from './stored-plan-text'
@@ -38,6 +38,27 @@ export function observedPlayVersion(session: PlaysSession, api: WorkspaceApi) {
   return Math.max(saved?.summary.version ?? 0, observedPlay?.api === api && observedPlay.id === saved?.summary.id &&
     observedPlay.accountId === saved.summary.accountId ? observedPlay.version : 0)
 }
+
+/**
+ * A planned Play's current plan as a new, unsaved Draft (phase 1, 1.6c): its account, instrument, direction, leverage,
+ * entries with their stops and targets, thesis, invalidation and strategy, titled "<title> (copy)". Nothing else is
+ * copied: no size, executions, links, review, log, evidence, drawings, pre-flight or history, and no saved or observed
+ * identity. The usual plan checks apply before its first Save.
+ */
+export function duplicateDraft(saved: SavedState): PlayDraft {
+  const { summary, plan } = saved
+  const blank = createDraft()
+  return {
+    ...blank, title: summary.title.trim() ? `${summary.title.trim()} (copy)` : '', accountId: summary.accountId,
+    instrument: summary.instrument ?? '', instrumentSource: summary.instrumentSource, direction: plan.direction, leverage: plan.leverage,
+    entries: plan.entries.map(entry => ({ ...entry, stops: entry.stops.map(stop => ({ ...stop })), targets: entry.targets.map(target => ({ ...target })) })),
+    notes: { ...blank.notes, thesis: plan.notes.thesis, invalidation: plan.notes.invalidation, strategy: plan.notes.strategy },
+  }
+}
+
+/** The editor showing `draft` as a new Play: no saved or observed identity, manual execution or log entry. */
+export const draftSession = (draft: PlayDraft): PlaysSession =>
+  ({ ...createPlaysSession(), view: 'editor', draft, manual: emptyManualDraft(), log: undefined })
 
 /** A new editor must never replace unsaved work, including changes to a saved Play. */
 export function startNewPlay(session: PlaysSession): PlaysSession {

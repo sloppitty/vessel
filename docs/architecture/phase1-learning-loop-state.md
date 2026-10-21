@@ -720,3 +720,73 @@ October 20, 2026, branch `t3/phase1-activity-journal`, stacked on the contract:
 
 - **Post-sync Sol review (October 21).** No findings: Activity's Play links and Review's imported positions use the
   same claim rule, and every Activity store implements the title lookup.
+
+### 1.6b–d Manual entry, Duplicate and Confirm rows
+
+October 20, 2026, branch `t3/phase1-capture`, stacked on 1.1b:
+- **Manual entry (1.6b, F-01).**
+  - Each field shows its own error under it, marked invalid and described by the message. The first takes focus, and
+    typing clears it. An empty Source highlights the Source field (U11).
+  - The time is typed in the browser's zone (1.6e makes it the display zone) with **Now** and a "Sent as … UTC"
+    line. A trailing `Z` or an offset is read as written. A time the zone skips, or 30 February, is refused, never
+    moved. Fractions are kept digit for digit, so an unchanged correction sends the same instant.
+  - The side follows the role and the Play's direction until the owner chooses one, and follows again when the role
+    changes.
+  - **Source label (required)** sits beside the time and side. Text fields are sent trimmed.
+- **Duplicate to Draft (1.6c, F-04).**
+  - The header of a saved planned-origin Play has **Duplicate**. Unsaved work (edits, a manual execution or a log
+    entry) disables it, and a retrospective Play does not offer it.
+  - It opens an unsaved Draft with the account, instrument, direction, leverage, the current plan's entries, stops and
+    targets, thesis, invalidation and strategy, titled "<title> (copy)". Nothing else is copied, and the copy has no
+    saved or observed identity.
+  - The usual plan checks apply before the first Save creates it. An Open long's managed stop at 105 over an entry at
+    100 is flagged in the copy until moved.
+- **Confirm rows (1.6d, F-03).**
+  - Suggestions are grouped by order: one row per order, a **Link as <level>** button per level it matches, and
+    **Not this play** turning all of them down in one action.
+  - The execution's suggestions carry `otherPlay`: whether the same order is also suggested to another Planned,
+    Paused or Open Play of the account, read in one query. Only then does a row say "another play"; several levels of
+    one Play read "Matches several levels of this play" (U7). Linked orders carry null.
+- **Tests.**
+  - Unit: the time in each zone (offsets, the spring-forward gap, microseconds, Now), per-field errors, the side rule,
+    trimmed corrections and per-row batch errors; Duplicate's copy and session.
+  - Panel: U11's Source error and focus, Now in Europe/Madrid sent as UTC, the side following the role, a stored
+    microsecond time shown in Europe/Madrid and sent back unchanged.
+  - Page: Duplicate's flagged stop, its created fields and untouched original; disabled with unsaved work and absent
+    on a retrospective Play.
+  - Confirm rows: U7's two orders in two rows with both levels and no "another play", the other-play wording, one
+    action turning an order down; PostgreSQL: four suggestions for two take-profits, `otherPlay` on an entry two
+    Plays match, false once the other Play is cancelled.
+- **Checks.** `scripts/check.sh` passed: backend 3,609 passed, 5 skipped; frontend 153 files and 3,839 tests; build clean. A
+  first run found the monitor contract fixture without the new `otherPlay` field; it was regenerated.
+
+- **Sol (Codex) round 1.** Three findings, all fixed:
+  - **Not this play (high).** Turning an order down sent one request per level, so a check between them could link the
+    remaining level, and turning every level down still let the order link as an unplanned exit and close the Play.
+    It is now one request, `POST /api/plays/{id}/execution/rejections`: under the account lock it declines every
+    suggestion of that order to this Play and dismisses it for each level of the current plan and as an unplanned exit.
+    An order linked to this Play is refused. A PostgreSQL test reproduces the reviewer's case; the two-owner isolation
+    test covers the route.
+  - **Autumn overlap (high).** A stored time in the repeated hour, shown and sent back unchanged, moved by an hour. Such
+    a time is now shown with its offset, and Now does the same; a repeated local time typed without an offset asks
+    for one. Tests cover both occurrences.
+  - **Focus order (low).** A refused submit focuses the first invalid field in the form's order. A test fails without
+    this fix.
+  - **Check.** `scripts/check.sh` passed again: backend 3,611 passed, 5 skipped; frontend 153 files and 3,845 tests.
+
+- **Sol (Codex) round 2.** Two findings, both fixed:
+  - **Rejection and revisions (high).** A revision adding a level the rejected order matched let the next check link
+    it. "Not this play" now keeps one `Rejected` link record for the Play and order; matching treats it as declined at
+    every level and as an unplanned exit. The rejection reads no plan, so a concurrent revision cannot escape it. The
+    owner can still link the order by hand. The PostgreSQL test adds a matching target after the rejection.
+  - **Other overlaps (medium).** Ambiguity was checked at fixed steps, missing Casey's three-hour overlap. A typed time
+    is now matched against every offset the zone uses around it; tests cover Casey and Lord Howe.
+  - **Check.** `scripts/check.sh` passed again: backend 3,612 passed, 5 skipped; frontend 153 files and 3,848 tests.
+
+- **Sol (Codex) round 3.** No findings: the rejection and overlap fixes hold. The reviewer also round-tripped 62,766
+  times around 1,902 zone transitions from 2020 to 2026, 952 of them overlaps.
+
+- **Post-sync Sol review (October 21).** Round 1 found nothing. After 1.1a's staleness fix, round 2 found the grouped
+  "Link as" and "Not this play" buttons still active while the execution was stale. They now wait for a fresh read,
+  like the other confirmations, and round 3 confirmed it.
+  - **Check.** `scripts/check.sh` passed: backend 3,635 passed, 5 skipped; frontend 157 files and 3,898 tests.

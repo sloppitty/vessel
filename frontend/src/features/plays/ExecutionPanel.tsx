@@ -5,7 +5,7 @@ import { MonitorDiscrepancies, MonitorPanel, MonitorWatches } from '@/features/m
 import { levelKey } from '@/features/monitor/discrepancy-text'
 import type { AccountMonitor } from '@/api/monitor'
 import type { DraftEntry } from './draft'
-import { describeOrder, fillSummary, levelName, levelOptions, orderFitsRole } from './execution'
+import { describeOrder, fillSummary, levelName, levelOptions, orderFitsRole, suggestionGroups } from './execution'
 import { NativeSelect } from '@/components/ui/native-select'
 import { InfoTip } from '@/components/ui/info-tip'
 import { useJournalState } from './journal-state'
@@ -25,7 +25,7 @@ const pnlBasisNote = {
   mixed: 'Some fills report closed PnL before fees and some after.',
 } as const
 
-export function ExecutionPanel({ execution, error, busy, stale = false, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, currentBookRead = true, onDismiss, onManageCredential,
+export function ExecutionPanel({ execution, error, busy, stale = false, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, onReject, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, currentBookRead = true, onDismiss, onManageCredential,
   version, leverage = 1, priceStep = null, onRebind, rebindBlocked }: {
   execution: PlayExecution | null
   error: string | null
@@ -47,6 +47,8 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
   onCheck: () => void
   onLink: (request: LinkOrder) => void
   onUnlink: (linkId: string) => void
+  /** Turns a whole order down for this Play in one step (1.6d); without it, each suggestion is turned down on its own. */
+  onReject?: (orderId: string) => void
   /** The saved Play's version, which a rebind of a drifted level expects. */
   version?: number
   /** The plan's leverage and the instrument's tick, to resolve and match levels as the server does. */
@@ -109,16 +111,25 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
     </section>}
 
     {execution.suggestions.length > 0 && <section aria-label="Orders to confirm" className="execution-section">
-      <h3>Confirm these orders<InfoTip label="Why confirm these orders">Each also matches another play on this instrument, so Vessel does not assign it on its own.</InfoTip></h3>
-      <ul className="execution-list">{execution.suggestions.map(link => <li key={link.id}>
-        <span><strong>{levelName(entries, link, origin)}</strong>{link.order && <small>{describeOrder(link.order)} · {link.order.status}</small>}</span>
-        <span className="execution-actions">
-          <Button size="sm" disabled={busy || stale || !editable || !link.order} onClick={() => onLink({ orderId: link.order?.orderId ?? '', role: link.role,
-            ...(link.entryId ? { entryId: link.entryId } : {}), ...(link.levelId ? { levelId: link.levelId } : {}) })}>
-            <Link2 size={13} />Link here</Button>
-          <Button size="sm" variant="ghost" disabled={busy || stale} onClick={() => onUnlink(link.id)}>Not this play</Button>
-        </span>
-      </li>)}</ul>
+      <h3>Confirm these orders<InfoTip label="Why confirm these orders">Each matches more than one level, of this play or another, so Vessel does not assign it on its own.</InfoTip></h3>
+      {/* One row per order, with every level it matches (1.6d). */}
+      <ul className="execution-list">{suggestionGroups(execution.suggestions).map(group => {
+        const levels = group.links.length > 1
+        const order = group.links[0]!.order
+        return <li key={group.key}>
+          <span><strong>{order ? describeOrder(order) : 'Order details unavailable'}</strong>
+            <small>{order ? `${order.status} · ` : ''}{group.otherPlay ? levels ? 'Matches several levels of this play and another play' : 'Also matches another play'
+              : levels ? 'Matches several levels of this play' : 'Not assigned automatically'}</small></span>
+          <span className="execution-actions">
+            {group.links.map(link => <Button key={link.id} size="sm" disabled={busy || stale || !editable || !link.order} onClick={() => onLink({ orderId: link.order?.orderId ?? '', role: link.role,
+              ...(link.entryId ? { entryId: link.entryId } : {}), ...(link.levelId ? { levelId: link.levelId } : {}) })}>
+              <Link2 size={13} />Link as {levelName(entries, link, origin)}</Button>)}
+            <Button size="sm" variant="ghost" disabled={busy || stale} onClick={() => {
+              if (onReject && order) onReject(order.orderId); else group.links.forEach(link => onUnlink(link.id))
+            }}>Not this play</Button>
+          </span>
+        </li>
+      })}</ul>
     </section>}
 
     <section aria-label="Linked orders" className="execution-section">
