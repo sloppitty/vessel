@@ -670,6 +670,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         }} /> : undefined}
       mistakeTags={offersMistakeTags && mistakeTags?.api === api ? mistakeTags.tags : undefined}
       chartFills={chartFills}
+      playId={saved?.summary.id ?? null} openRiskKey={[saved?.summary.version ?? 0, reloadGeneration]}
       reviewCompletion={saved ? <ReviewCompletionBar summary={saved.summary} dirty={dirty} busy={pending}
         filled={(playReceipt?.fillCount ?? 0) > 0} onAction={action => { void reviewAction(action) }} /> : undefined}
       plannedAfterExecution={playReceipt?.plannedAfterExecution === true}

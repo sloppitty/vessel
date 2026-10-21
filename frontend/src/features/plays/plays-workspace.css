@@ -143,6 +143,10 @@
 .plays-page .capital-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 18px; margin: 0; padding: 0 8px; }
 .plays-page .capital-metrics > div { min-width: 0; padding: 4px 12px 4px 0; border-right: 1px solid var(--line); }
 .plays-page .capital-metrics > div:last-child { border: 0; }
+/* Phase 2, item 1: one open-risk line under the capital figures. */
+.capital-open-risk { margin: 8px 0 0; padding: 0 8px; color: var(--muted-foreground); font-size: var(--text-xs); line-height: 1.5; }
+.capital-open-risk-label { margin-right: 6px; color: var(--foreground); font-weight: 600; }
+.capital-open-risk-unknown, .capital-open-risk-over { color: var(--warning); }
 .plays-page .capital-metrics dt { color: var(--muted-foreground); font-size: var(--text-xs); }
 .plays-page .capital-metrics dd { margin: 6px 0; font-size: 19px; font-weight: 620; letter-spacing: var(--tracking-title); font-feature-settings: var(--figures); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .plays-page .capital-metrics small { display: block; color: var(--muted-foreground); font-size: var(--text-2xs); line-height: 1.6; overflow-wrap: anywhere; }

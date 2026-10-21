@@ -29,6 +29,7 @@ import {
   type LinkOrder, type NextAction, type PlayNote, type PlayNoteState, type RebindLevel, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest, type UnresolvedReason,
 } from './plays'
 import { isSizingDocument, type SizingDocument } from './sizing'
+import { isOpenRisk, isOpenRiskPreview, isRiskSettings, openRiskPath, type OpenRisk, type OpenRiskPreview, type OpenRiskPreviewRequest, type RiskSettings } from './risk'
 import { isReviewDocument, reviewPath, isReviewExclusions, reviewExclusionsPath, isReviewProcessPage, reviewProcessPath, type ReviewDocument, type ReviewQuery, type ReviewExclusions, type ReviewProcessPage, type ReviewProcessSelection } from './review'
 import {
   isRetrospectivePreview, isCreateRetrospectivePlayRequest, retrospectivePreviewPath, retrospectivePlayPath,
@@ -347,6 +348,14 @@ export interface WorkspaceApi {
   sizing(signal?: AbortSignal): Promise<SizingDocument>
   /** Saves the risk per trade (0.1 to 5 percent, a decimal string) and returns the new sizing document. */
   updateSizingSettings(settings: { riskPercent: string }): Promise<SizingDocument>
+  /** Open risk across the scope's Planned and Open real Plays (Phase 2, item 1). Real accounts only. */
+  openRisk(scope: string, signal?: AbortSignal): Promise<OpenRisk>
+  /** The edited plan's own open risk, by the server's rule, against the saved Play's executions when it has an ID. */
+  openRiskPreview(request: OpenRiskPreviewRequest, signal?: AbortSignal): Promise<OpenRiskPreview>
+  /** The owner's soft risk limits; null is unset. */
+  riskSettings(signal?: AbortSignal): Promise<RiskSettings>
+  /** Saves the open-risk soft limit (a decimal percentage above 0 and at most 100), or clears it with null. */
+  updateRiskSettings(settings: RiskSettings): Promise<RiskSettings>
 }
 
 const optionalTradingMode = (v: Record<string, unknown>) => v.tradingMode === undefined || v.tradingMode === 'real' || v.tradingMode === 'paper'
@@ -485,7 +494,7 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
   }, () => emitApiEvent(api, { type: 'session-changed' }))
   // Bind a mode to the client, not mutable global state: late responses can only return to their original shell.
   const call: typeof rawCall = async (path, options) => {
-    if (tradingMode === 'paper' && /^\/api\/(?:accounts\/[^/?]+\/(?:sync|fills|credential|monitor|discrepancies|market-context|market-stream|stream)|plays\/[^/?]+\/(?:manual-executions|execution|discrepancies)|plays\/retrospective|monitor|events|venues)(?:[/?]|$)/.test(path)) {
+    if (tradingMode === 'paper' && /^\/api\/(?:accounts\/[^/?]+\/(?:sync|fills|credential|monitor|discrepancies|market-context|market-stream|stream)|plays\/[^/?]+\/(?:manual-executions|execution|discrepancies)|plays\/retrospective|monitor|events|venues|risk)(?:[/?]|$)/.test(path)) {
       throw new ApiError('unavailable', 'This real-account feature is unavailable in Paper mode.')
     }
     const scoped = /^\/api\/(?:overview|accounts|portfolios|plays|activity|review|sizing|evidence)(?:[/?]|$)/.test(path)
@@ -791,6 +800,12 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
       return call(retrospectivePlayPath(), { ...playRequest, validate: (v): v is SavedPlay => isSavedPlay(v) &&
         v.summary.accountId === input.accountId && v.summary.origin === 'retrospective', method: 'POST', body: JSON.stringify(input), ...withSignal(signal) })
     },
+    openRisk: (scope, signal) => call(openRiskPath(scope), { ...playRequest, validate: (v): v is OpenRisk => isOpenRisk(v, scope), ...withSignal(signal) }),
+    openRiskPreview: (request, signal) => call('/api/risk/open/preview', { ...playRequest, validate: (v): v is OpenRiskPreview => isOpenRiskPreview(v, request),
+      method: 'POST', body: JSON.stringify(request), ...withSignal(signal) }),
+    riskSettings: signal => call('/api/risk/settings', { ...playRequest, validate: isRiskSettings, ...withSignal(signal) }),
+    updateRiskSettings: settings => call('/api/risk/settings', { ...playRequest, validate: isRiskSettings, method: 'PUT',
+      body: JSON.stringify({ openRiskLimitPercent: settings.openRiskLimitPercent }) }),
     updateSizingSettings: settings => tradingMode === 'paper' ? Promise.reject(new ApiError('http', 'Paper uses the shared risk preference read-only. Edit it in Real mode.', 409)) : call('/api/sizing/settings', { ...playRequest, validate: isSizingDocument, method: 'PUT', body: JSON.stringify({ riskPercent: settings.riskPercent }) }),
     activity: (query, signal) => call(activityPath(query), { ...workspaceRequest, validate: (v): v is ActivityPage => isActivityPage(v, query), ...withSignal(signal) }),
     activityFills: (accountId, operationId, signal) => call(activityFillsPath(accountId, operationId, tradingMode ?? 'real'), { ...workspaceRequest,

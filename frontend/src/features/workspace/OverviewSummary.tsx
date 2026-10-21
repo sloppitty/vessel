@@ -22,9 +22,11 @@ const signClass = (value: string | null) => {
 }
 /** `beforeSummary` renders between the metric tiles and the Summary table. `workspaceNote` is the workspace API's scope note,
  * shown verbatim in the Summary's one disclosure. */
-export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallback, accountCount, beforeSummary, workspaceNote }: {
+export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallback, accountCount, beforeSummary, workspaceNote, extraMetric }: {
   api: WorkspaceApi; query: OverviewQuery; onQuery: (query: OverviewQuery) => void; reloadGeneration: number; fallback: Overview; accountCount: number
   beforeSummary?: ReactNode; workspaceNote?: string
+  /** One more tile after the metric tiles, such as open risk. */
+  extraMetric?: ReactNode
 }) {
   const venues = useVenues()
   const [retry, setRetry] = useState(0)
@@ -56,6 +58,7 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
         <small className={signClass(totals?.unrealizedPnl.amountUsd ?? null)}>{money(totals?.unrealizedPnl.amountUsd ?? null)} unrealized</small>
         {totals && <SummaryCoverageBadge value={totals.unrealizedPnl} label="Unrealized" />}</div>
       <div className="shell-panel metric"><span className="metric-label">{api.tradingMode === 'paper' ? 'Simulated executions' : 'Imported executions'}</span><strong>{api.tradingMode === 'paper' ? totals?.paperExecutionCount ?? '—' : totals?.importedFillCount ?? (loadingAll ? fallback.totals.importedFillCount : '—')}</strong></div>
+      {extraMetric}
     </section>
     {beforeSummary}
     <section className="shell-panel overview-summary" aria-label="Overview summary">
