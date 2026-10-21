@@ -4,6 +4,9 @@
 
 ### Added
 
+- Funding history now fills in window by window: a venue whose page budget cannot
+  hold 30 days (such as Lighter) is covered over successive Refreshes. Coverage says when
+  it is partial, and missing funding is never shown as zero.
 - A missing-stop warning offers "Link this stop" for a compatible resting stop order, and
   the monitor panel explains that checks are periodic, not stop protection.
 - The monitor flags a stop beyond the venue's reported liquidation price as critical:

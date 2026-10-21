@@ -432,7 +432,29 @@ October 21, 2026.
 
 ## 9. Funding
 
-Not started.
+October 21, 2026.
+
+**9a. Resumable windows.** Implemented on `t3/phase2-funding-windows`.
+- **The cursor.** Refresh reads settled funding in windows (`FundingWindows`, `Vessel:Funding`)
+  that extend the account's stored contiguous coverage.
+  - The stored coverage is the cursor, so **no migration** was needed. The contract's "needs a
+    migration" is corrected here.
+  - The span after it is read oldest first, and the span before it newest first.
+  - The last day of stored coverage is re-read (`Recheck`), so a late settlement is kept and a changed
+    one still fails closed.
+- **Halving.** A window halves only when an adapter marks the result `Truncated`, meaning its page or
+  row budget alone stopped it. Other incompleteness ends the read.
+- **Bounds.** At most 8 reads, 10,000 payments and 20 seconds per Refresh. The single read it replaces
+  had the same 20-second deadline, so the browser's Refresh keeps its time.
+- **Failures.** Completed windows survive a later failure or rate limit, and the rate limit still
+  defers the venue.
+- **The notice.** Partial coverage says "refresh again to read the rest"; missing funding is not zero.
+- **Tests.**
+  - `FundingWindowsTests` (12), including the probe's case: 720 hourly rows against Lighter's
+    500-row budget, covered over two Refreshes.
+  - A PostgreSQL resume test.
+  - Truncation flags in the Hyperliquid, Lighter and RISEx reader tests.
+- **Check.** `scripts/check.sh` passed on `8aa3f35c` (before item 5a's round-1 fixes were restacked beneath it): backend 4,074 passed, 5 skipped; frontend 175 files and 4,074 tests.
 
 ## 10. Planning assumptions and soft limits
 
