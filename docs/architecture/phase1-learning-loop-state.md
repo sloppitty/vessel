@@ -126,3 +126,5 @@ October 20, 2026, branch `t3/phase1-activity-journal`, stacked on the contract:
   - backend: 3,561 passed, 5 skipped;
   - frontend: 147 files and 3,748 tests;
   - build clean.
+- **Main sync with PR #33 (imported positions).** Merged forward, not rebased. #33's two Activity test stores gain
+  `PlayTitlesAsync`, which this branch added to `IActivityStore`. They return no titles.
