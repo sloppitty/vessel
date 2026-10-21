@@ -92,6 +92,36 @@ public sealed class EarlierOrderCandidateTests
     }
 
     [PostgresFact]
+    public async Task Orders_no_level_could_take_never_crowd_out_the_fast_entry()
+    {
+        // Sol round 1 on #37: 20 newer reduce-only buys fit no level of a long, so they must not use up the 20 places.
+        var (database, owner, account, playId) = await Seed();
+        await using var _ = database;
+        await using (var db = database.Context(owner))
+        {
+            for (var i = 0; i < 20; i++)
+            {
+                var unusable = Order(account, "reduce-" + i, 100, Created.AddSeconds(-30 + i), "open");
+                unusable.ReduceOnly = true;
+                db.Orders.Add(unusable);
+            }
+            // A sell that already opened a short contradicts every role of this long through its fill.
+            var shortEntry = Order(account, "short-entry", 100, Created.AddSeconds(-10));
+            shortEntry.Side = "sell";
+            db.Orders.Add(shortEntry);
+            var fill = Fill(account, "short-entry", Created.AddSeconds(-10));
+            fill.Side = "sell";
+            db.Fills.Add(fill);
+            await db.SaveChangesAsync();
+        }
+        await using (var db = database.Context(owner))
+        {
+            var execution = await Service(db).GetAsync(playId, default);
+            Assert.Equal(["fast", "resting"], execution.EarlierOrders.Select(o => o.OrderId));
+        }
+    }
+
+    [PostgresFact]
     public async Task Linking_a_fast_entry_opens_the_play_and_marks_its_plan_as_written_after()
     {
         var (database, owner, _, playId) = await Seed();

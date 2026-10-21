@@ -171,7 +171,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
       {orderList(execution.unlinkedOrders)}
     </section>}
     {editable && (execution.earlierOrders?.length ?? 0) > 0 && <section aria-label="Placed before this Play was saved" className="execution-section">
-      <h3>Placed before this Play was saved<InfoTip label="About orders placed before this Play">Placed in the day before this play was created and not linked to any play. Vessel never links them by itself. Link one by hand if it belongs here: an entry that filled before the plan was written marks the plan as written after the first execution.</InfoTip></h3>
+      <h3>Placed before this Play was saved<InfoTip label="About orders placed before this Play">Placed shortly before this play was created (within 24 hours unless the server is set otherwise), fitting one of its levels by side and kind, and not linked to any play. Vessel never links them by itself. Link one by hand if it belongs here: an entry that filled before the plan was written marks the plan as written after the first execution.</InfoTip></h3>
       {orderList(execution.earlierOrders ?? [])}
     </section>}
     {execution.notice && <details className="execution-notice"><summary>About these numbers</summary><p className="muted">{execution.notice}</p></details>}
