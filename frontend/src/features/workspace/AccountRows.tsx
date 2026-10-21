@@ -16,15 +16,17 @@ import { Time } from '@/components/ui/time'
 /** One balance figure per row with its unit; what each venue reports is explained once, on the Balance header. */
 function BalanceCell({ account }: { account: BrokerAccount }) {
   const venues = useVenues()
-  const wallet = venues.can(account.venueId, 'stablecoinWallet')
-  const value = wallet ? account.availableStablecoinNominalUsd ?? null : account.accountValueUsd
-  const [unit, title] = wallet ? ['stablecoins', 'Wallet stablecoins available · nominal']
+  const paper = account.tradingMode === 'paper'
+  const wallet = !paper && venues.can(account.venueId, 'stablecoinWallet')
+  const value = paper ? account.balanceUsd ?? null : wallet ? account.availableStablecoinNominalUsd ?? null : account.accountValueUsd
+  const [unit, title] = paper ? ['virtual USD', 'Paper cash balance · simulated, not real funds'] : wallet ? ['stablecoins', 'Wallet stablecoins available · nominal']
     : venues.can(account.venueId, 'sync') ? [venues.valueUnit(account.venueId), `Venue-reported account value · nominal ${venues.valueUnit(account.venueId)}`]
     : ['USD', 'Manual value in USD']
   const available = account.isEnabled === false ? null : account.availableBalanceUsd ?? null
   const source = account.availableBalanceSource ? availableSources[account.availableBalanceSource] ?? 'unknown' : 'unknown'
   return <>
     <span className="account-balance"><strong>{money(value)}</strong>{value !== null && <small className="account-balance-unit" title={title}>{unit}</small>}</span>
+    {paper && <small>Virtual equity {money(account.accountValueUsd)}</small>}
     {wallet && <small>Perps equity {money(account.accountValueUsd)}</small>}
     <small className="account-available">Available balance {money(available)}<span className="account-available-source">{source}</span></small>
   </>
@@ -55,10 +57,10 @@ export function AccountRows({ accounts, groups, portfolioNames, refreshing, sele
       </button></td>
       <td><span className={`account-portfolio${portfolio ? '' : ' is-unassigned'}`}>{portfolio ?? 'Unassigned'}</span></td>
       <td className="numeric"><BalanceCell account={account} /></td>
-      <td><span className={`workspace-badge ${accountStatusTone(account)}`}>{accountStatus(account)}</span><small><Time at={account.lastSyncedAtUtc} fallback="Not refreshed yet" /></small><small>{account.positionCount} reported positions</small></td>
+      <td><span className={`workspace-badge ${accountStatusTone(account)}`}>{accountStatus(account)}</span><small><Time at={account.lastSyncedAtUtc} fallback="Not refreshed yet" /></small><small>{account.positionCount} {account.tradingMode === 'paper' ? 'simulated positions' : 'reported positions'}</small></td>
       <td><div className="row-actions"><Button disabled={selection?.disabled} variant="ghost" size="sm" onClick={() => onDetail(account.id)} aria-label={`View ${account.name}`}>View<ArrowUpRight size={14} /></Button>
         <button disabled={selection?.disabled} className="icon-button" onClick={() => onManage(account)} aria-label={`Manage ${account.name}`} title="Rename, move, disable or delete"><Pencil size={14} /></button>
-        {venues.can(account.venueId, 'sync') && <button className="icon-button" disabled={selection?.disabled || refreshing !== null || account.isEnabled === false} aria-busy={refreshing === account.id} onClick={() => onSync(account.id)} aria-label={`Refresh ${account.name}`} title={account.isEnabled === false ? 'Enable this account before refreshing' : 'Refresh current state and recent executions'}><RefreshCw size={15} className={refreshing === account.id ? 'is-spinning' : ''} /></button>}</div></td>
+        {account.tradingMode !== 'paper' && venues.can(account.venueId, 'sync') && <button className="icon-button" disabled={selection?.disabled || refreshing !== null || account.isEnabled === false} aria-busy={refreshing === account.id} onClick={() => onSync(account.id)} aria-label={`Refresh ${account.name}`} title={account.isEnabled === false ? 'Enable this account before refreshing' : 'Refresh current state and recent executions'}><RefreshCw size={15} className={refreshing === account.id ? 'is-spinning' : ''} /></button>}</div></td>
     </tr>
   }
   return <div className="workspace-table-wrap"><table className="workspace-table account-table"><thead><tr>{selection && <th className="account-select-cell"><input type="checkbox" aria-label="Select all visible accounts" disabled={selection.disabled}

@@ -21,7 +21,7 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
         string[] statuses = settling ? ["Planned", "Paused", "Open", "Unresolved"] : ["Planned", "Paused", "Open"];
         var plays = await db.Plays.FromSqlInterpolated($"""
             SELECT * FROM plays WHERE "AccountId" = {accountId} AND "OwnerId" = {db.CurrentOwnerId}
-            AND "Status" = ANY({statuses}) FOR NO KEY UPDATE
+            AND "TradingMode" = 'real' AND "Status" = ANY({statuses}) FOR NO KEY UPDATE
             """).OrderBy(p => p.CreatedAtUtc).ThenBy(p => p.Id).ToListAsync(ct);
         // A scoped context could already track a Play read before waiting on the lock.
         foreach (var play in plays) await db.Entry(play).ReloadAsync(ct);
@@ -109,6 +109,7 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
 
     public Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset observedAt, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {
+        if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts cannot import venue orders.");
         // External identity is (contract, venue order ID): the same venue ID on another contract is another order.
         var ids = orders.Select(o => o.OrderId).Distinct(StringComparer.Ordinal).ToList();
         var known = (await db.Orders.Where(o => o.AccountId == account.Id && ids.Contains(o.ExternalOrderId)).ToListAsync(ct))

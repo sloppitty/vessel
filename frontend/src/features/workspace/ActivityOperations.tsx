@@ -43,6 +43,20 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
   // The version of the first page read for these filters; a later page with another version means Activity changed.
   const [baseline, setBaseline] = useState<{ api: WorkspaceApi; key: string; version: string; changed: boolean } | null>(null)
   const [selection, setSelection] = useState<{ accountId: string; operationId: string } | null>(null)
+  const [opening, setOpening] = useState<string | null>(null)
+  const [openError, setOpenError] = useState<string | null>(null)
+  const openingRequest = useRef<AbortController | null>(null)
+  useEffect(() => () => openingRequest.current?.abort(), [api])
+  async function openPlay(id: string) {
+    if (!onOpenPlay) return
+    openingRequest.current?.abort()
+    const controller = new AbortController()
+    openingRequest.current = controller
+    setOpening(id); setOpenError(null)
+    try { await onOpenPlay(id, controller.signal) }
+    catch (cause) { if (!controller.signal.aborted) setOpenError(errorMessage(cause, 'The Play could not be opened.')) }
+    finally { if (!controller.signal.aborted) setOpening(null) }
+  }
   const trigger = useRef<HTMLElement | null>(null)
   const top = useRef<HTMLDivElement | null>(null)
   const enabled = accounts.filter(a => a.isEnabled !== false)
@@ -133,7 +147,9 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
         ? `Showing ${count.format(shown.operations.length)} of ${count.format(shown.totalCount)} operations.`
         : `${count.format(shown.totalCount)} of ${count.format(shown.scopeCount)} operations match the filters.`}</p>}
       <div className={pending ? 'operations-results list-refetching' : 'operations-results'} aria-busy={pending || undefined}>
-        <OperationsTable api={api} operations={shown.operations} accounts={accounts} compact={compact} refreshGeneration={result?.generation ?? 0} onReload={reloadActivity} onPreview={operation => {
+        {openError && <p className="workspace-alert" role="alert">{openError}</p>}
+        <OperationsTable api={api} operations={shown.operations} accounts={accounts} compact={compact} refreshGeneration={result?.generation ?? 0} onReload={reloadActivity}
+          {...(onOpenPlay ? { onOpenPlay: (id: string) => { void openPlay(id) } } : {})} opening={opening} onPreview={operation => {
           trigger.current = window.document.activeElement instanceof HTMLElement ? window.document.activeElement : null
           setSelection({ accountId: operation.accountId, operationId: operation.id })
         }} />

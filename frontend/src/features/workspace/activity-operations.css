@@ -29,6 +29,10 @@
 .operation-pnl { display: flex; align-items: center; gap: 8px; }
 .operation-return { font-size: var(--text-2xs); white-space: nowrap; padding: 3px 5px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
 .operation-net { font-weight: 650; }
+/* A long Play title shortens with an ellipsis instead of widening the table; the full title is its tooltip. */
+.operation-play { max-width: 14rem; }
+.operation-play-link, .operation-play-title { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.operation-play-link:disabled { cursor: progress; opacity: .7; }
 .workspace-table .operation-details { margin: 10px 0 14px; white-space: normal; }
 .operation-expanded { background: var(--background); padding: 16px !important; }
 .operation-coverage { margin: 0 0 12px; padding-left: 20px; font-size: var(--text-xs); }

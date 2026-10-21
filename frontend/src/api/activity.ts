@@ -1,3 +1,4 @@
+import { isPaperExecution, isTradingMode, type PaperPlayState, type TradingMode } from './paper'
 import { ApiError } from './errors'
 import { isImportedFill, type ImportedFill } from './fills'
 import { isCount, isFilledText, isGuid, isIsoTimestamp, isListOf, isNonNegativeDecimal, isNullOr, isPlainDecimal, isRecord } from './guards'
@@ -13,6 +14,9 @@ export interface OperationFill {
 }
 /** One signed-position round trip as a page row. Its executions load separately on expand. */
 export interface ActivityOperation {
+  tradingMode?: TradingMode
+  executionSource?: 'imported' | 'paper'
+  paperExecutionCount?: number
   id: string
   accountId: string
   contractId: string
@@ -38,7 +42,7 @@ export interface ActivityOperation {
   /** Combined result only when funding coverage and the execution P&L funding basis are verified. */
   totalResultUsd: string | null
   fundingNetUsd: string | null
-  fundingStatus: 'complete' | 'partial' | 'unavailable'
+  fundingStatus: 'complete' | 'partial' | 'unavailable' | 'not-applicable'
   fundingPnlBasis: 'included' | 'excluded' | 'unknown'
   fundingAsOfUtc: string | null
   fundingPaymentCount: number
@@ -50,9 +54,11 @@ export interface ActivityOperation {
   leverage: number | null
   leverageMin: number | null
   leverageMax: number | null
-  pnlBasis: 'gross' | 'net-of-fee' | 'mixed'
+  pnlBasis: 'gross' | 'net-of-fee' | 'mixed' | 'paper-simulation'
   playId: string | null
-  playAssociation: 'linked' | 'unassigned' | 'mixed'
+  playAssociation: 'linked' | 'unassigned' | 'mixed' | 'paper'
+  /** The linked Play's current title on Activity pages; null when unlinked or unreadable, absent in a preview. */
+  playTitle?: string | null
   coverage: string[]
 }
 /** An operation with its constituent rows, as a retrospective preview carries it. */
@@ -74,6 +80,8 @@ export interface FundingPayment {
   asset: string
 }
 export interface ActivityPage {
+  tradingMode?: TradingMode
+  paperExecutionCount?: number
   operations: ActivityOperation[]
   page: number
   pageSize: number
@@ -93,6 +101,9 @@ export interface ActivityPage {
   omittedUnassignedFundingPaymentCount: number
 }
 export interface ActivityFills {
+  tradingMode?: TradingMode
+  paperExecutions?: PaperPlayState['executions']
+  omittedPaperExecutionCount?: number
   operationId: string
   fills: OperationFill[]
   omittedFillCount: number
@@ -138,8 +149,8 @@ export const isFundingPayment = (v: unknown): v is FundingPayment =>
   isPlainDecimal(v.amount, decimalLength) && isFilledText(v.asset, 64)
 
 /** `{GUID}:long` or `:short`, as Activity and retrospective previews identify an operation. */
-export const isOperationId = (v: unknown): v is string =>
-  isFilledText(v, 48) && /^[\da-f-]{36}:(long|short)$/.test(v) && isGuid(v.slice(0, 36))
+export const isOperationId = (v: unknown, mode: TradingMode = 'real'): v is string =>
+  mode === 'paper' ? isGuid(v) : isFilledText(v, 48) && /^[\da-f-]{36}:(long|short)$/.test(v) && isGuid(v.slice(0, 36))
 const isDay = (v: unknown): v is string => {
   if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false
   const day = new Date(`${v}T00:00:00Z`)
@@ -176,8 +187,8 @@ export function activityPath(query: ActivityQuery): string {
   params.set('pageSize', String(query.pageSize))
   return `/api/activity?${params}`
 }
-export function activityFillsPath(accountId: string, operationId: string): string {
-  if (!isGuid(accountId) || !isOperationId(operationId)) throw new ApiError('invalid-response', 'The operation request is invalid.')
+export function activityFillsPath(accountId: string, operationId: string, tradingMode: TradingMode = 'real'): string {
+  if (!isGuid(accountId) || !isOperationId(operationId, tradingMode)) throw new ApiError('invalid-response', 'The operation request is invalid.')
   return `/api/activity/fills?${new URLSearchParams({ accountId, operationId })}`
 }
 
@@ -193,7 +204,12 @@ const isCoverage = (c: unknown): c is ActivityCoverage => isRecord(c) && isGuid(
 
 /** One operation row: its facts and the invariants between them, without execution rows. */
 export function isActivityOperation(op: unknown): op is ActivityOperation {
-  if (!isRecord(op) || !isOperationId(op.id) ||
+  if (!isRecord(op)) return false
+  const paper = op.tradingMode === 'paper'
+  const executionCount = paper ? op.paperExecutionCount : op.fillCount
+  if (op.tradingMode !== undefined && !isTradingMode(op.tradingMode) || !isOperationId(op.id, paper ? 'paper' : 'real') ||
+    paper && (op.executionSource !== 'paper' || !isCount(op.paperExecutionCount) || op.fillCount !== 0) ||
+    !paper && (op.executionSource !== undefined && op.executionSource !== 'imported' || op.paperExecutionCount !== undefined && op.paperExecutionCount !== 0) ||
     !isGuid(op.accountId) || !isFilledText(op.contractId, 128) || !['long', 'short', null].includes(op.direction as string | null) ||
     !['open', 'closed', 'incomplete'].includes(String(op.status)) || !isIsoTimestamp(op.lastOccurredAtUtc) ||
     !isNullOr(op.openedAtUtc, isIsoTimestamp) || !isNullOr(op.closedAtUtc, isIsoTimestamp) ||
@@ -202,15 +218,19 @@ export function isActivityOperation(op: unknown): op is ActivityOperation {
     !isPlainDecimal(op.reportedClosedPnlUsd, decimalLength) || !isNullOr(op.grossClosedPnlUsd, x => isPlainDecimal(x, decimalLength)) ||
     !isPlainDecimal(op.stablecoinFeesNominalUsd, decimalLength) || !isNullOr(op.netResultUsd, x => isPlainDecimal(x, decimalLength)) ||
     !isNullOr(op.totalResultUsd, x => isPlainDecimal(x, decimalLength)) || !isNullOr(op.fundingNetUsd, x => isPlainDecimal(x, decimalLength)) ||
-    !['complete', 'partial', 'unavailable'].includes(String(op.fundingStatus)) ||
+    !(paper ? op.fundingStatus === 'not-applicable' : ['complete', 'partial', 'unavailable'].includes(String(op.fundingStatus))) ||
     !['included', 'excluded', 'unknown'].includes(String(op.fundingPnlBasis)) ||
     !isNullOr(op.fundingAsOfUtc, isIsoTimestamp) || !isCount(op.fundingPaymentCount) || !validLeverage(op) ||
     op.totalResultUsd !== null && (op.fundingPnlBasis === 'unknown' || op.fundingStatus !== 'complete') ||
-    !['gross', 'net-of-fee', 'mixed'].includes(String(op.pnlBasis)) || !isNullOr(op.playId, isGuid) ||
-    !['linked', 'unassigned', 'mixed'].includes(String(op.playAssociation)) || !isListOf(op.coverage, n => isFilledText(n, 2000), 100) ||
+    !(paper ? op.pnlBasis === 'paper-simulation' : ['gross', 'net-of-fee', 'mixed'].includes(String(op.pnlBasis))) || !isNullOr(op.playId, isGuid) ||
+    !(paper ? op.playAssociation === 'paper' : ['linked', 'unassigned', 'mixed'].includes(String(op.playAssociation))) || !isListOf(op.coverage, n => isFilledText(n, 2000), 100) ||
     !Array.isArray(op.otherFees) || !op.otherFees.every(f => isRecord(f) && isFilledText(f.token, 64) && isPlainDecimal(f.amount, decimalLength)) ||
-    (op.fillCount as number) === 0 || (op.entryOrderCount as number) > (op.fillCount as number) || (op.exitOrderCount as number) > (op.fillCount as number) ||
-    (op.playAssociation === 'linked') !== (op.playId !== null)) return false
+    !isCount(executionCount) || executionCount === 0 || (op.entryOrderCount as number) > executionCount || (op.exitOrderCount as number) > executionCount ||
+    (paper || op.playAssociation === 'linked') !== (op.playId !== null) ||
+    op.playTitle !== undefined && !isNullOr(op.playTitle, x => typeof x === 'string' && x.length <= 200) || op.playTitle != null && op.playId === null) return false
+  if (paper && (!/^0(?:\.0+)?$/.test(String(op.stablecoinFeesNominalUsd)) || op.otherFees.length !== 0 || op.fundingPaymentCount !== 0 ||
+    op.fundingNetUsd !== null || op.totalResultUsd !== null || op.leverage !== null || op.leverageMin !== null || op.leverageMax !== null)) return false
+  if (paper && op.status === 'incomplete') return op.coverage.length > 0 && op.netResultUsd === null
   if (op.status === 'incomplete') {
     if (!op.coverage.length) return false
     if (op.direction === null) {
@@ -252,7 +272,8 @@ const matchesQuery = (op: ActivityOperation, query: ActivityQuery) =>
 
 /** A page of Activity: exact counts, deterministic order and rows that satisfy the request's filters. */
 export function isActivityPage(value: unknown, query?: ActivityQuery): value is ActivityPage {
-  if (!isRecord(value) || !Array.isArray(value.operations) || !isPageNumber(value.page) || !isPageSizeValue(value.pageSize) ||
+  if (!isRecord(value) || value.tradingMode !== undefined && !isTradingMode(value.tradingMode) ||
+    value.paperExecutionCount !== undefined && !isCount(value.paperExecutionCount) || !Array.isArray(value.operations) || !isPageNumber(value.page) || !isPageSizeValue(value.pageSize) ||
     query !== undefined && value.pageSize !== query.pageSize ||
     !isCount(value.totalCount) || !isCount(value.scopeCount) || value.totalCount > value.scopeCount || !isCount(value.retainedFillCount) ||
     !isIsoTimestamp(value.asOfUtc) || !isFilledText(value.version, 256) || !isFilledText(value.scopeNote, 4000) ||
@@ -268,7 +289,7 @@ export function isActivityPage(value: unknown, query?: ActivityQuery): value is 
   const ids = new Set<string>()
   let previous = Number.POSITIVE_INFINITY
   for (const op of value.operations) {
-    if (!isActivityOperation(op) || ids.has(op.id) || !accounts.has(op.accountId.toLowerCase()) || !contracts.has(op.contractId) ||
+    if (!isActivityOperation(op) || (op.tradingMode ?? 'real') !== (value.tradingMode ?? 'real') || ids.has(op.id) || !accounts.has(op.accountId.toLowerCase()) || !contracts.has(op.contractId) ||
       query !== undefined && !matchesQuery(op, query)) return false
     const at = Date.parse(op.lastOccurredAtUtc)
     if (at > previous) return false
@@ -282,10 +303,16 @@ export function isActivityPage(value: unknown, query?: ActivityQuery): value is 
 
 /** One operation's rows on expand: chronological, from the requested account, at most 1,000. */
 export function isActivityFills(value: unknown, accountId: string, operationId: string): value is ActivityFills {
-  if (!isRecord(value) || value.operationId !== operationId || !isCount(value.omittedFillCount) ||
+  if (!isRecord(value) || value.tradingMode !== undefined && !isTradingMode(value.tradingMode) || value.operationId !== operationId || !isCount(value.omittedFillCount) ||
     !isListOf(value.fundingPayments, p => isFundingPayment(p) && same(p.accountId, accountId), operationFillLimit) ||
     !isCount(value.omittedFundingPaymentCount) ||
-    !areOperationFills(value.fills, accountId, null, operationFillLimit) || value.fills.length + value.omittedFillCount === 0) return false
+    !areOperationFills(value.fills, accountId, null, operationFillLimit)) return false
+  if (value.tradingMode === 'paper') return value.fills.length === 0 && value.omittedFillCount === 0 &&
+    isGuid(operationId) && Array.isArray(value.paperExecutions) && value.paperExecutions.length <= operationFillLimit && value.paperExecutions.every(isPaperExecution) && isCount(value.omittedPaperExecutionCount) &&
+    value.paperExecutions.length + value.omittedPaperExecutionCount > 0 && value.fundingPayments.length === 0 && value.omittedFundingPaymentCount === 0 &&
+    new Set(value.paperExecutions.map(e => e.id)).size === value.paperExecutions.length
+  if (value.fills.length + value.omittedFillCount === 0 || value.paperExecutions !== undefined && (!Array.isArray(value.paperExecutions) || value.paperExecutions.length !== 0) ||
+    value.omittedPaperExecutionCount !== undefined && value.omittedPaperExecutionCount !== 0) return false
   let previous = Number.NEGATIVE_INFINITY
   for (const part of value.fills) {
     const at = Date.parse(part.fill.occurredAtUtc)

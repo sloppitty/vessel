@@ -7,6 +7,8 @@ public sealed class Account : IOwned
     private const string OrderHistorySection = "\nOrder history: ";
     public Guid Id { get; private set; }
     public Guid OwnerId { get; private set; }
+    public string TradingMode { get; private set; } = Common.TradingMode.Real;
+    public decimal? StartingCapitalUsd { get; private set; }
     public string VenueId { get; private set; } = null!;
     public string Name { get; private set; } = null!;
     public Guid? PortfolioId { get; private set; }
@@ -25,15 +27,18 @@ public sealed class Account : IOwned
     {
         if (portfolioId == Guid.Empty || manualAccountValueUsd < 0)
             throw new DomainValidationException("Invalid account configuration.");
+        if (TradingMode == Common.TradingMode.Paper &&
+            (portfolioId is null || address is not null || sourceId is not null || manualAccountValueUsd is not null))
+            throw new DomainValidationException("Paper accounts require a paper portfolio and cannot use real identities or manual balances.");
         PortfolioId = portfolioId; Address = address?.ToLowerInvariant(); ManualAccountValueUsd = manualAccountValueUsd;
         SourceId = sourceId ?? Address;
-        SyncStatus = VenueId == ManualVenue.Id ? "manual" : "not-synced";
+        SyncStatus = TradingMode == Common.TradingMode.Paper ? "paper" : VenueId == ManualVenue.Id ? "manual" : "not-synced";
     }
 
     public void UpdateSettings(string name, Guid? portfolioId, bool isEnabled)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        if (name.Length > 200 || portfolioId == Guid.Empty)
+        if (name.Length > 200 || portfolioId == Guid.Empty || TradingMode == Common.TradingMode.Paper && portfolioId is null)
             throw new DomainValidationException("Invalid account settings.");
         var nextRevision = checked(SettingsRevision + 1);
         Name = name.Trim(); PortfolioId = portfolioId; IsEnabled = isEnabled;
@@ -42,6 +47,7 @@ public sealed class Account : IOwned
 
     public void RecordSync(DateTimeOffset observedAtUtc, string historyNotice)
     {
+        RequireReal();
         if (LastSyncedAtUtc is null || observedAtUtc > LastSyncedAtUtc)
             LastSyncedAtUtc = observedAtUtc;
         var orderSection = HistoryNotice?.IndexOf(OrderHistorySection, StringComparison.Ordinal) ?? -1;
@@ -52,6 +58,7 @@ public sealed class Account : IOwned
     /// <summary>Replaces only order coverage, keeping the latest public coverage and sync/settings state.</summary>
     public void RecordOrderHistoryNotice(string? notice)
     {
+        RequireReal();
         var orderSection = HistoryNotice?.IndexOf(OrderHistorySection, StringComparison.Ordinal) ?? -1;
         var publicNotice = orderSection < 0 ? HistoryNotice : HistoryNotice![..orderSection];
         HistoryNotice = string.IsNullOrWhiteSpace(notice) ? publicNotice : publicNotice + OrderHistorySection + notice;
@@ -59,10 +66,12 @@ public sealed class Account : IOwned
 
     public void RecordSyncFailure()
     {
+        RequireReal();
         SyncStatus = "error"; LastSyncError = "The venue refresh failed. Try again later.";
     }
 
-    public Account(Guid id, Guid ownerId, string venueId, string name)
+    public Account(Guid id, Guid ownerId, string venueId, string name,
+        string tradingMode = Common.TradingMode.Real, decimal? startingCapitalUsd = null)
     {
         if (id == Guid.Empty || ownerId == Guid.Empty)
             throw new ArgumentException("Account and owner IDs must be nonempty.");
@@ -72,8 +81,18 @@ public sealed class Account : IOwned
             throw new DomainValidationException("Account text exceeds storage limits.");
         Id = id;
         OwnerId = ownerId;
+        TradingMode = Common.TradingMode.Validate(tradingMode);
+        if (startingCapitalUsd < 0 || tradingMode == Common.TradingMode.Real && startingCapitalUsd is not null)
+            throw new DomainValidationException("Starting capital is a nonnegative paper-account creation value only.");
+        StartingCapitalUsd = tradingMode == Common.TradingMode.Paper ? startingCapitalUsd ?? 4000m : null;
         VenueId = venueId;
         Name = name.Trim();
-        SyncStatus = venueId == ManualVenue.Id ? "manual" : "not-synced";
+        SyncStatus = tradingMode == Common.TradingMode.Paper ? "paper" : venueId == ManualVenue.Id ? "manual" : "not-synced";
+    }
+
+    private void RequireReal()
+    {
+        if (TradingMode != Common.TradingMode.Real)
+            throw new DomainValidationException("Paper accounts cannot import real venue facts.");
     }
 }

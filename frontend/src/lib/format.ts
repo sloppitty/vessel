@@ -66,14 +66,14 @@ export function shortSource(value: string | null | undefined): string | null {
   return value.length > 16 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value
 }
 /** Where an account's normalized available balance comes from, in the words account pages use. */
-export const availableSourceLabels = { wallet: 'wallet', margin: 'reported margin', withdrawable: 'reported withdrawal' } as const
+export const availableSourceLabels = { paper: 'paper · virtual', wallet: 'wallet', margin: 'reported margin', withdrawable: 'reported withdrawal' } as const
 /** When a reported figure was read, in the display zone: "as of 14:02 CEST", or "as of 18 Oct 14:02 CEST" on an earlier day. */
 export function asOf(value: string, zone: DisplayZone, now = new Date()): string {
   const clock = `${formatIn(value, zone, 'time')} ${zoneLabel(value, zone)}`
   return `as of ${formatIn(value, zone, 'date') === formatIn(now, zone, 'date') ? clock : `${formatIn(value, zone, 'day')} ${clock}`}`
 }
 /** The account state shown in rows and detail. */
-export const accountStatus = (account: BrokerAccount) => account.isEnabled === false ? 'Disabled' : account.syncStatus === 'manual' ? 'Manual' :
+export const accountStatus = (account: BrokerAccount) => account.isEnabled === false ? 'Disabled' : account.tradingMode === 'paper' ? 'Paper' : account.syncStatus === 'manual' ? 'Manual' :
   account.syncStatus === 'synced' ? 'Read-only' : account.syncStatus === 'error' ? 'Refresh failed' : 'Not refreshed'
 
 export const accountStatusTone = (account: BrokerAccount) => account.isEnabled === false || account.syncStatus === 'error' ? 'warning-badge' :

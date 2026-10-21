@@ -8,6 +8,8 @@ import { accountFixture } from '@/test/workspace-fixture'
 import { activityPage } from '@/test/activity-fixture'
 import { retrospectiveFixture, retrospectiveSavedFixture as savedPlayFixture } from '@/test/retrospective.fixtures'
 import { ActivityOperations } from './ActivityOperations'
+import { duration, operationDates } from './activity-format'
+import { amount, money } from '@/lib/format'
 
 function setup(preview: RetrospectivePreview = retrospectiveFixture, overrides: Partial<WorkspaceApi> = {}) {
   const api = {
@@ -30,13 +32,13 @@ describe('Activity retrospective inspection', () => {
   it('requests authoritative preview, shows exact originals, and confirms only identity/fingerprint and owner text', async () => {
     const { api, open, created, user } = setup()
     const dialog = await inspect()
-    await within(dialog).findByText('Original imported fills and associations', { selector: 'h3' })
+    await within(dialog).findByText('Original imported fills and associations (2)', { selector: 'summary' })
     expect(api.retrospectivePreview).toHaveBeenCalledWith(accountFixture.id, retrospectiveFixture.operation.id, expect.any(AbortSignal))
     expect(within(dialog).getByText('100.123456789123456789', { exact: false })).toBeInTheDocument()
     expect(within(dialog).getByText(retrospectiveFixture.operation.fills[0]!.fill.id)).toBeInTheDocument()
     expect(within(dialog).getByText('Source fill 1')).toBeInTheDocument()
     expect(within(dialog).getAllByText('Unassigned')).toHaveLength(2)
-    await user.type(within(dialog).getByLabelText('Retrospective title'), 'After-the-fact record')
+    await user.clear(within(dialog).getByLabelText('Retrospective title')); await user.type(within(dialog).getByLabelText('Retrospective title'), 'After-the-fact record')
     await user.type(within(dialog).getByLabelText('Review note, optional'), 'My review')
     await user.click(within(dialog).getByRole('button', { name: 'Confirm retrospective Play' }))
     await waitFor(() => expect(open).toHaveBeenCalledWith(savedPlayFixture.summary.id, expect.any(AbortSignal)))
@@ -50,6 +52,35 @@ describe('Activity retrospective inspection', () => {
       'accountId', 'expectedFingerprint', 'operationId', 'requestId', 'review', 'title',
     ])
   })
+  it('leads with the trade in plain terms, keeps raw records collapsed and saves the default title when untouched (F-06)', async () => {
+    const { api, user } = setup()
+    const dialog = await inspect()
+    const facts = await within(dialog).findByLabelText('Trade summary')
+    const op = retrospectiveFixture.operation
+    for (const [label, value] of [['Quantity', amount(op.totalEnteredQuantity!)], ['Average entry', money(op.averageEntryPrice)],
+      ['Average exit', money(op.averageExitPrice)], ['Net execution result', money(op.netResultUsd)]] as const)
+      expect(within(facts).getByText(label).nextElementSibling).toHaveTextContent(value)
+    expect(within(facts).getByText('Dates', { exact: false }).nextElementSibling)
+      .toHaveTextContent(`${operationDates(op, 'local')} · ${duration(op.openedAtUtc!, op.closedAtUtc!)}`)
+    // Fill IDs and transaction hashes come after the summary, inside a closed disclosure.
+    const records = within(dialog).getByText(retrospectiveFixture.operation.fills[0]!.fill.id).closest('details')!
+    expect(records).not.toHaveAttribute('open')
+    expect(facts.compareDocumentPosition(records) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    expect(within(dialog).getByLabelText('Retrospective title')).toHaveValue('BTC Long · 12 Oct 2026')
+    await user.click(within(dialog).getByRole('button', { name: 'Confirm retrospective Play' }))
+    await waitFor(() => expect(api.createRetrospectivePlay).toHaveBeenCalledOnce())
+    expect(vi.mocked(api.createRetrospectivePlay!).mock.calls[0]![0].title).toBe('BTC Long · 12 Oct 2026')
+  })
+  it('saves the default title when the owner clears the field', async () => {
+    const { api, user } = setup()
+    const dialog = await inspect()
+    await user.clear(await within(dialog).findByLabelText('Retrospective title'))
+    expect(within(dialog).getByLabelText('Retrospective title')).toHaveAttribute('placeholder', 'BTC Long · 12 Oct 2026')
+    await user.click(within(dialog).getByRole('button', { name: 'Confirm retrospective Play' }))
+    await waitFor(() => expect(api.createRetrospectivePlay).toHaveBeenCalledOnce())
+    expect(vi.mocked(api.createRetrospectivePlay!).mock.calls[0]![0].title).toBe('BTC Long · 12 Oct 2026')
+  })
   it.each(['mixed', 'linked', 'flip', 'incomplete'] as const)('keeps %s records inspectable without offering creation', async kind => {
     const preview: RetrospectivePreview = { ...retrospectiveFixture, eligible: false, reasons: ['Order 2 cannot be attributed to one role.'],
       operation: { ...retrospectiveFixture.operation,
@@ -61,7 +92,7 @@ describe('Activity retrospective inspection', () => {
     const { api, open, user } = setup(preview)
     const dialog = await inspect()
     expect(await within(dialog).findByText('Order 2 cannot be attributed to one role.')).toBeInTheDocument()
-    expect(within(dialog).getByText('Original imported fills and associations', { selector: 'h3' })).toBeInTheDocument()
+    expect(within(dialog).getByText('Original imported fills and associations (2)', { selector: 'summary' })).toBeInTheDocument()
     expect(within(dialog).queryByLabelText('Retrospective title')).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: 'Confirm retrospective Play' })).not.toBeInTheDocument()
     expect(api.createRetrospectivePlay).not.toHaveBeenCalled()
@@ -74,7 +105,7 @@ describe('Activity retrospective inspection', () => {
     const create = vi.fn().mockRejectedValueOnce(new Error('raw transport secret')).mockResolvedValue(savedPlayFixture)
     const { open, user } = setup(retrospectiveFixture, { createRetrospectivePlay: create })
     const dialog = await inspect()
-    await user.type(await within(dialog).findByLabelText('Retrospective title'), 'Retry safely')
+    await user.clear(await within(dialog).findByLabelText('Retrospective title')); await user.type(within(dialog).getByLabelText('Retrospective title'), 'Retry safely')
     await user.click(within(dialog).getByRole('button', { name: 'Confirm retrospective Play' }))
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Retry the same request')
     expect(screen.queryByText('raw transport secret')).not.toBeInTheDocument()
@@ -88,7 +119,7 @@ describe('Activity retrospective inspection', () => {
     const { user } = setup(retrospectiveFixture, { retrospectivePreview: preview })
     const dialog = await inspect()
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('The operation preview could not be loaded.')
-    expect(within(dialog).queryByText('Original imported fills and associations', { selector: 'h3' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('Original imported fills and associations (2)', { selector: 'summary' })).not.toBeInTheDocument()
     expect(within(dialog).queryByLabelText('Retrospective title')).not.toBeInTheDocument()
     expect(screen.queryByText('private transport detail')).not.toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: 'Retry preview' }))
@@ -98,7 +129,7 @@ describe('Activity retrospective inspection', () => {
     const { api, open, user } = setup()
     open.mockRejectedValueOnce(new Error('private loader failure'))
     const dialog = await inspect()
-    await user.type(await within(dialog).findByLabelText('Retrospective title'), 'Created once')
+    await user.clear(await within(dialog).findByLabelText('Retrospective title')); await user.type(within(dialog).getByLabelText('Retrospective title'), 'Created once')
     await user.click(within(dialog).getByRole('button', { name: 'Confirm retrospective Play' }))
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('no new creation is needed')
     expect(within(dialog).getByText('Retrospective Play saved. Its original facts remain intact.')).toBeInTheDocument()
@@ -112,7 +143,7 @@ describe('Activity retrospective inspection', () => {
     const preview = vi.fn().mockResolvedValueOnce(retrospectiveFixture).mockResolvedValue({ ...retrospectiveFixture, fingerprint: 'verified-facts-v2' })
     const { user } = setup(retrospectiveFixture, { createRetrospectivePlay: create, retrospectivePreview: preview })
     const dialog = await inspect()
-    await user.type(await within(dialog).findByLabelText('Retrospective title'), 'Conflict inspection')
+    await user.clear(await within(dialog).findByLabelText('Retrospective title')); await user.type(within(dialog).getByLabelText('Retrospective title'), 'Conflict inspection')
     await user.click(within(dialog).getByRole('button', { name: 'Confirm retrospective Play' }))
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Refresh the preview')
     expect(within(dialog).getByRole('button', { name: 'Retry same creation' })).toBeDisabled()
@@ -139,7 +170,7 @@ describe('Activity retrospective inspection', () => {
     const create = vi.fn().mockImplementation(() => new Promise<typeof savedPlayFixture>(resolve => { finish = resolve }))
     const { api, view, open, created, user } = setup(retrospectiveFixture, { createRetrospectivePlay: create })
     const dialog = await inspect()
-    await user.type(await within(dialog).findByLabelText('Retrospective title'), 'Cancelled wait')
+    await user.clear(await within(dialog).findByLabelText('Retrospective title')); await user.type(within(dialog).getByLabelText('Retrospective title'), 'Cancelled wait')
     await user.click(within(dialog).getByRole('button', { name: 'Confirm retrospective Play' }))
     if (action === 'close') await user.keyboard('{Escape}')
     else if (action === 'unmount') view.unmount()

@@ -55,7 +55,8 @@ public sealed record TrackRecordDto(int ClosedPlays, int DecidedPlays, int Windo
     /// <summary>
     /// <see cref="SizingService.SourcePlays"/> when closed Plays have a win or loss, <see cref="SizingService.SourceActivity"/>
     /// when the record falls back to closed Activity operations, <see cref="SizingService.SourceNone"/> when neither has one.
-    /// The counts above describe the source's outcomes.
+    /// <see cref="SizingService.SourcePaper"/> identifies only explicit simulated paper outcomes.
+    /// The counts above describe the source's outcomes; sources and trading modes are never pooled.
     /// </summary>
     public string Source { get; init; } = SizingService.SourcePlays;
 
@@ -69,7 +70,8 @@ public sealed record TrackRecordDto(int ClosedPlays, int DecidedPlays, int Windo
 public sealed record SizingLimitsDto(string EffectiveRiskPercent, string MaxStopPercent, string MinRewardRisk, string MaxStopSource,
     string MinRewardRiskSource);
 
-public sealed record SizingDto(SizingSettingsDto Settings, ExposureDto Exposure, TrackRecordDto Record, SizingLimitsDto Limits, string Notice);
+public sealed record SizingDto(SizingSettingsDto Settings, ExposureDto Exposure, TrackRecordDto Record, SizingLimitsDto Limits, string Notice,
+    string TradingMode = "real");
 
 /// <summary>
 /// A closed Play with its plan revisions, the fills of its linked orders and the linked orders known to be filled
@@ -78,6 +80,7 @@ public sealed record SizingDto(SizingSettingsDto Settings, ExposureDto Exposure,
 public sealed record ClosedPlayFacts(Play Play, IReadOnlyList<PlayPlanRevision> Revisions, IReadOnlyList<LinkedFill> Fills,
     IReadOnlyCollection<string>? IncompleteOrders = null, bool ManualSource = false, bool ManualFeesComplete = true)
 {
+    public PaperPlayFacts? Paper { get; init; }
     private readonly ParsedPlans plans = new();
 
     /// <summary>The Play's current plan, parsed once per stored document.</summary>
@@ -118,7 +121,9 @@ public interface ISizingStore
     Task<SizingSettings?> SettingsAsync(CancellationToken ct);
     /// <summary>Closed Plays on enabled accounts with their revisions, linked fills and incompletely retained orders.</summary>
     Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct);
-    /// <summary>How many Unresolved Plays the owner has on enabled accounts; they are never counted in the record.</summary>
+    async Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, CancellationToken ct) =>
+        (await ClosedPlaysAsync(ct)).Where(f => f.Play.TradingMode == tradingMode).ToList();
+    /// <summary>How many real Unresolved Plays the owner has on enabled accounts; they are never counted in the record.</summary>
     Task<int> UnresolvedPlaysAsync(CancellationToken ct);
     /// <summary>
     /// The owner's retained venue orders with these keys (any account state), for the Activity fallback's missing-execution
