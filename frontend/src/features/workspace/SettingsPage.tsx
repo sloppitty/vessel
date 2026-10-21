@@ -1,3 +1,4 @@
+import { PaperSettings } from '@/features/settings/PaperSettings'
 import type { SystemInfo } from '@/api/system'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -17,21 +18,21 @@ export type SettingsTab = 'appearance' | 'profile'
 export const venueSigningStatement = 'Vessel never signs, sends or approves anything at a venue.'
 
 /** Token mode stacks its panels as before; Wallet mode adds a Profile & sign-in tab in place of Private session. */
-export function SettingsPage({ system, disconnectSession, onAccounts, api, inApp, identity, tab = 'appearance', onTab }: {
+export function SettingsPage({ system, disconnectSession, onAccounts, api, inApp, identity, tab = 'appearance', onTab, onPaperSettingsChange }: {
   system: SystemInfo; disconnectSession: () => void; onAccounts: () => void; api: WorkspaceApi; inApp: InAppNotifications
-  identity?: ShellIdentity; tab?: SettingsTab; onTab?: (tab: SettingsTab) => void
+  identity?: ShellIdentity; tab?: SettingsTab; onTab?: (tab: SettingsTab) => void; onPaperSettingsChange?: () => void
 }) {
+  const paper = api.tradingMode === 'paper'
   const venuesPanel = <section className="shell-panel settings-panel">
-    <Database size={23} /><h2>Venue capabilities</h2>
-    <div className="venue-capability-list">{system.venues.map(venue => <div key={venue.id}>
-      <VenueBadge venueId={venue.id} /><span className="workspace-badge">import {venue.capabilities.sync ? 'available' : 'unavailable'} · orders {venue.capabilities.orders ? 'read-only' : 'unavailable'}</span>
+    <Database size={23} /><h2>{paper ? 'Paper capabilities' : 'Venue capabilities'}</h2>
+    <div className="venue-capability-list">{system.venues.filter(venue => !paper || venue.capabilities.paperExecution).map(venue => <div key={venue.id}>
+      <VenueBadge venueId={venue.id} /><span className="workspace-badge">{paper ? 'Paper · simulated execution; no imports or real orders' : <>import {venue.capabilities.sync ? 'available' : 'unavailable'} · orders {venue.capabilities.orders ? 'read-only' : 'unavailable'}</>}</span>
     </div>)}</div>
-    <Button variant="outline" onClick={onAccounts}>Manage account access and refresh</Button>
+    <Button variant="outline" onClick={onAccounts}>{paper ? 'Manage paper accounts' : 'Manage account access and refresh'}</Button>
   </section>
   if (!identity) return <div className="settings-grid">
-    <AppearanceSettings />
-    <NotificationSettings api={api} inApp={inApp} />
-    <ReviewSettings />
+    <AppearanceSettings /><PaperSettings api={api} {...(onPaperSettingsChange ? { onChange: onPaperSettingsChange } : {})} />
+    {!paper && <NotificationSettings api={api} inApp={inApp} />}{!paper && <ReviewSettings />}
     <section className="shell-panel settings-panel">
       <ShieldCheck size={23} /><h2>Private session</h2>
       <p>Connected as {system.owner.displayName}.</p>
@@ -45,7 +46,7 @@ export function SettingsPage({ system, disconnectSession, onAccounts, api, inApp
   </div>
   return <Tabs value={tab} onValueChange={value => onTab?.(value === 'profile' ? 'profile' : 'appearance')} className="settings-tabs">
     <TabsList aria-label="Settings sections"><TabsTrigger value="appearance">Appearance</TabsTrigger><TabsTrigger value="profile">Profile &amp; sign-in</TabsTrigger></TabsList>
-    <TabsContent value="appearance"><div className="settings-grid"><AppearanceSettings /><NotificationSettings api={api} inApp={inApp} /><ReviewSettings />{venuesPanel}</div></TabsContent>
+    <TabsContent value="appearance"><div className="settings-grid"><AppearanceSettings /><PaperSettings api={api} {...(onPaperSettingsChange ? { onChange: onPaperSettingsChange } : {})} />{!paper && <NotificationSettings api={api} inApp={inApp} />}{!paper && <ReviewSettings />}{venuesPanel}</div></TabsContent>
     <TabsContent value="profile"><ProfileSettings identity={identity} onSignOut={disconnectSession} /></TabsContent>
   </Tabs>
 }

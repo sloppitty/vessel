@@ -27,6 +27,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     public Task RetainAsync(Account account, VenueOrderReadResult orders, CancellationToken ct) =>
         store.WithAccountLockAsync(account.Id, async () =>
         {
+            if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts cannot import actual orders.");
             await store.UpsertOrdersAsync(account, orders.Orders, orders.ObservedAtUtc, ct);
             return true;
         }, ct);
@@ -36,6 +37,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         IReadOnlyList<VenueInstrument> instruments, CancellationToken ct) =>
         store.WithAccountLockAsync(account.Id, async () =>
         {
+            if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts cannot reconcile actual orders.");
             var ticks = venues.Descriptor(account.VenueId)?.PriceRule == PriceRules.TickSize
                 ? instruments.Where(i => i.PriceStep is > 0).GroupBy(i => i.ContractId, StringComparer.Ordinal)
                     .ToDictionary(g => g.Key, g => g.First().PriceStep!.Value, StringComparer.Ordinal)
@@ -51,6 +53,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     public async Task<PlayExecutionDto> GetAsync(Guid playId, CancellationToken ct)
     {
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+        if (play.TradingMode != "real") throw new ProblemException(409, "Paper Plays use explicit simulated executions, not actual order linking.");
         var account = await store.AccountAsync(play.AccountId, ct);
         var mine = (await store.PlayLinksAsync(play.AccountId, play.Id, ct)).Where(l => l.State is not (OrderLinkState.Dismissed or OrderLinkState.Rejected)).ToList();
         // Linked to any Play of the account, also closed ones: such an order is never offered again.
@@ -127,6 +130,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     public async Task<PlayExecutionDto> LinkAsync(Guid playId, LinkOrderRequest request, CancellationToken ct)
     {
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+        if (play.TradingMode != "real") throw new ProblemException(409, "Paper Plays use explicit simulated executions, not actual order linking.");
         if (play.Status == PlayStatus.Unresolved) throw new ProblemException(409, "Return this Play to Open before linking another order.");
         if (!ExecutionMatcher.IsActive(play)) throw new ProblemException(409, NotLinkable);
         var role = request.Role switch
@@ -205,6 +209,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     public async Task<PlayExecutionDto> UnlinkAsync(Guid playId, Guid linkId, CancellationToken ct)
     {
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+        if (play.TradingMode != "real") throw new ProblemException(409, "Paper Plays use explicit simulated executions, not actual order linking.");
         await unitOfWork.ExecuteAsync(() => store.WithAccountLockAsync(play.AccountId, async () =>
         {
             var link = await store.LinkAsync(play.AccountId, play.Id, linkId, ct) is { State: not (OrderLinkState.Dismissed or OrderLinkState.Rejected) } found
@@ -233,6 +238,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         return unitOfWork.ExecuteAsync(() => plays.WithPlayLockAsync(playId, async () =>
         {
             var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+            if (play.TradingMode != "real") throw new ProblemException(409, "Paper Plays use explicit simulated executions, not actual order linking.");
             if (play.Version != request.ExpectedVersion) throw new ProblemException(409, StalePlay);
             if (!ExecutionMatcher.IsActive(play) || play.Origin == PlayOrigin.Retrospective || play.ContractId is null)
                 throw new ProblemException(409, "Only planned, paused or open plays rebind their levels.");

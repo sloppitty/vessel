@@ -37,7 +37,7 @@ public sealed class MonitorExecutionView(IPlayStore plays, IWorkspaceStore works
         await plays.FindAsync(id, ct) ?? throw new ProblemException(404, "Play not found.");
 
     private bool CanMonitor(Play play, Account? account) =>
-        account is { IsEnabled: true, SourceId: not null } &&
+        account is { TradingMode: "real", IsEnabled: true, SourceId: not null } &&
         play.Origin == PlayOrigin.Planned && play.InstrumentSource == InstrumentSource.Venue &&
         play.Status != PlayStatus.Draft &&
         venues.Descriptor(account.VenueId) is { Capabilities.Sync: true, Capabilities.Orders: true };
