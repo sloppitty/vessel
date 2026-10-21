@@ -90,6 +90,19 @@ describe('PaperExecutionPanel', () => {
     expect(screen.queryByRole('button', { name: /Undo|Reset|Resolve|Close simulated/i })).not.toBeInTheDocument()
   })
 
+  it('shows the instants a suspension reason names in the display zone', async () => {
+    // The server writes the skipped interval of a paused or cancelled paper Play as round-trip UTC instants.
+    const [from, to] = ['2026-10-20T12:00:00.0000000+00:00', '2026-10-20T12:03:12.5000000+00:00']
+    const suspension = { reason: `The owner paused this paper Play; the unprocessed pre-action interval [${from}, ${to}) was skipped and is not simulated.`,
+      suspendedAtUtc: '2026-10-20T12:03:12Z', resumedAtUtc: null }
+    render(<PaperExecutionPanel api={makeApi({ ...state, status: 'suspended', suspensions: [suspension], hasUnscoredHistory: true,
+      nextCheckAtUtc: null })} playId={playId} />)
+    const section = await screen.findByRole('region', { name: 'Suspension history' })
+    expect(section).toHaveTextContent(`interval [${formatTime(from, 'local', 'datetime-seconds')}, ${formatTime(to, 'local', 'datetime-seconds')}) was skipped`)
+    expect(section).not.toHaveTextContent(from)
+    expect(Array.from(section.querySelectorAll('strong time'), element => element.getAttribute('datetime'))).toEqual([from, to])
+  })
+
   it.each([null, '2026-10-20T12:06:00Z'])('shows suspension receipts with retained unscored history when resumed at %s', async resumedAtUtc => {
     const suspension = { reason: 'Paper account disabled.', suspendedAtUtc: '2026-10-20T12:03:12Z', resumedAtUtc }
     render(<PaperExecutionPanel api={makeApi({ ...state, status: resumedAtUtc ? 'waiting' : 'suspended', suspensions: [suspension],

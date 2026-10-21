@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { errorMessage } from '@/api/errors'
 import { isPaperPlayState, type PaperPlayState } from '@/api/paper'
 import type { WorkspaceApi } from '@/api/workspace'
@@ -6,6 +6,21 @@ import { Button } from '@/components/ui/button'
 import { Time } from '@/components/ui/time'
 
 type PaperExecutionApi = Pick<WorkspaceApi, 'paperState'>
+
+/** An ISO-8601 instant inside stored text, such as the skipped interval a suspension reason names. */
+const instant = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/g
+
+/** Stored text with each instant it names shown in the display zone, like every other time (phase 1, 1.6e). */
+function ZonedText({ text }: { text: string }) {
+  const parts: ReactNode[] = []
+  let last = 0
+  for (const match of text.matchAll(instant)) {
+    parts.push(text.slice(last, match.index), <Time key={match.index} at={match[0]} style="datetime-seconds" />)
+    last = match.index + match[0].length
+  }
+  parts.push(text.slice(last))
+  return <>{parts}</>
+}
 type PaperStateRequest = { api: PaperExecutionApi; playId: string; attempt: number; reloadGeneration: number }
 export interface PaperExecutionPanelProps {
   api: PaperExecutionApi
@@ -116,7 +131,7 @@ export function PaperExecutionPanel({ api, playId, onState, reloadGeneration = 0
         <h3>Suspension history</h3>
         <p className="muted">Resumption is prospective at a fresh minute boundary. Disabled-period price touches are never replayed.</p>
         <ul className="execution-list">{state.suspensions.map((suspension, index) => <li key={index}>
-          <span><strong>{suspension.reason}</strong>
+          <span><strong><ZonedText text={suspension.reason} /></strong>
             <small>Suspended at <Time at={suspension.suspendedAtUtc} /></small>
             <small>{suspension.resumedAtUtc
               ? <>Resumed at <Time at={suspension.resumedAtUtc} /></>
