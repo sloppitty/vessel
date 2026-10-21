@@ -90,6 +90,18 @@ reported to the parent before a dependent implementation is changed.
   Both global and account disable controls must disclose that still-open
   pre-suspension exposure continues to block new entries after re-enabling
   until it closes, and entries touched during that hold are declined, not replayed.
+  Their disclosure also covers unevaluated time before the disable action,
+  not only the disabled period.
+- Owner pause/cancel of an armed, unexposed, nonterminal Play must not silently
+  discard elapsed unevaluated coverage. Retain a suspension receipt for that
+  skipped pre-action window and keep the Play's eventual result unscored,
+  including after explicit resumption. This includes a closed-but-unsettled or
+  partial minute that cannot safely be reconstructed at the action boundary.
+  Do not invent a skipped interval before the first effective activation.
+  Paper Pause asks for confirmation; Paper Cancel and global/account disable
+  disclose the same pre-action limitation. The action does not force a venue
+  read, fabricate executions or rewrite recorded cash. Known open simulated
+  quantity and genuine terminal gap/ambiguity retain their existing guards.
 - GET sizing in paper may read the existing owner risk preference read-only.
   PUT sizing settings in paper returns 409, never modifies the real preference.
   The paper record/window/ladder/limits use only paper outcomes. No separate

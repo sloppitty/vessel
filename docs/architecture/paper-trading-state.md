@@ -1,6 +1,6 @@
 # Paper trading delivery state
 
-October 20, 2026. **PR remains draft: subsequent Claude Opus reviews found
+October 21, 2026. **PR remains draft: subsequent Claude Opus reviews found
 confirmed simulation/recovery blockers. Earlier integration approval is
 superseded pending corrections and fresh review.**
 Authority: [delivery contract](paper-trading-delivery-contract.md) and
@@ -719,3 +719,37 @@ The parent has not launched a duplicate retry. Review task:
 data or production service is involved. **PR stays draft pending final
 independent review**, despite the complete green verification above. No merge,
 deployment, release or owner-database migration has been performed.
+
+### Round four automatically resumed and completed: narrow changes requested
+
+On October 21, 2026, the same rate-limited task automatically resumed and
+completed. It independently confirms **every round-three A–F correction and
+the upstream Review integration** on `9c66d65`, with no observed real-code-path
+regression. Its final verdict still requests changes for one new **P2 N1**:
+owner pause/cancel between checks silently skips an unchecked pre-action
+entry/loss window, and a resumed later win can be scored without the skipped
+loss. A new **P3 O1** counts an active temporary retry issue as an excluded
+closed paper outcome until recovery.
+
+The selected minimal N1 policy retains a suspension receipt for elapsed
+unevaluated pre-action coverage and keeps that Play unscored after resumption.
+Pause/Cancel and disable copy must disclose the skipped pre-action window;
+there is no forced synchronous venue read or guessed ledger correction.
+Known open/terminal evidence guards remain intact. A Sol implementer owns the
+bounded backend N1/O1 changes; the parent owns confirmation/disclosure UI and
+verification. No new schema/endpoint/DTO is planned.
+
+The conditional quiet-minute publication concern remains unverified by that
+review: it did not make live reads. A separate bounded public-only research
+task may use up to 12 unauthenticated requests to observe newly closed quiet
+minutes and their relation to later trades, with exact timing/raw evidence.
+It cannot claim universal finality or change the five-minute policy without
+further evidence/decision. This is research, not a production polling change.
+
+Independent round-four results: clean builds; 21 final probes stable over two
+runs; 1,197 backend regression passes with three unconfigured live checks
+skipped; 15 frontend files/196 tests plus typecheck/lint. Its failed probe
+iterations and fixture correction remain retained. Report and runnable evidence:
+`/home/ops/.cache/vessel-verification/opus-r4-9c66d65-wCgj14/REPORT.md`.
+The earlier provider-limit paragraph is historical, not the current final
+review status. **PR remains draft; no final readiness approval is claimed.**
