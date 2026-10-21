@@ -668,3 +668,8 @@ October 20, 2026, branch `t3/phase1-capture`, stacked on 1.1b:
 
 - **Sol (Codex) round 3.** No findings: the rejection and overlap fixes hold. The reviewer also round-tripped 62,766
   times around 1,902 zone transitions from 2020 to 2026, 952 of them overlaps.
+
+- **Post-sync Sol review (October 21).** Round 1 found nothing. After 1.1a's staleness fix, round 2 found the grouped
+  "Link as" and "Not this play" buttons still active while the execution was stale. They now wait for a fresh read,
+  like the other confirmations, and round 3 confirmed it.
+  - **Check.** `scripts/check.sh` passed: backend 3,635 passed, 5 skipped; frontend 157 files and 3,898 tests.
