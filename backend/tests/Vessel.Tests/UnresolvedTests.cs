@@ -56,6 +56,21 @@ public sealed class UnresolvedDomainTests
     }
 
     [Fact]
+    public void A_paper_Play_is_never_declared_unresolved()
+    {
+        // Main's paper trading: a simulation holds what it cannot settle as ambiguous or a gap, never as Unresolved.
+        var paper = new Account(Guid.NewGuid(), account.OwnerId, "hyperliquid", "Hypotheses", "paper", 4000);
+        paper.Configure(Guid.NewGuid(), null, null);
+        var play = new Play(Guid.NewGuid(), paper, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
+            PlayDocuments.Serialize(TestPlays.Plan()), At);
+        play.MarkPlanned(At);
+        play.ApplyPaperExecutionState(hasEntry: true, fullyClosed: false, At.AddMinutes(1));
+        Assert.Equal(PlayStatus.Open, play.Status);
+        Assert.Throws<DomainRuleException>(() => play.DeclareUnresolved(UnresolvedReason.Other, "Stuck.", "{}", At.AddHours(1)));
+        Assert.Equal((PlayStatus.Open, (DateTimeOffset?)null), (play.Status, play.EndedAtUtc));
+    }
+
+    [Fact]
     public void Leaving_a_final_state_clears_a_completed_review_and_keeps_its_text_and_answers()
     {
         var play = Open();
