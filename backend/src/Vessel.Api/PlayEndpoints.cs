@@ -39,7 +39,8 @@ public static class PlayEndpoints
             Results.Ok(await service.UpdateAsync(id, request, ct)));
         api.MapPost("/{id:guid}/status", async (Guid id, ChangePlayStatusRequest request, PlayService service, CancellationToken ct) =>
             Results.Ok(await service.ChangeStatusAsync(id, request, ct)));
-        api.MapGet("/next-actions", async (PlayService service, CancellationToken ct) => Results.Ok(await service.NextActionsAsync(ct)));
+        api.MapGet("/next-actions", async (string? tradingMode, PlayService service, CancellationToken ct) =>
+            Results.Ok(await service.NextActionsAsync(ct, tradingMode)));
         // Review completion and the in-trade log (phase 1, 1.2).
         api.MapPost("/{id:guid}/review/complete", async (Guid id, ReviewCompletionRequest request, PlayService service, CancellationToken ct) =>
             Results.Ok(await service.CompleteReviewAsync(id, request, ct)));
