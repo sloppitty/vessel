@@ -11,7 +11,7 @@ public static class EvidenceEndpoints
 
     public static void MapEvidence(this WebApplication app)
     {
-        var api = app.MapGroup("/api").RequireAuthorization();
+        var api = app.MapGroup("/api").RequireAuthorization().WithTradingModeBoundary();
         api.MapGet("/plays/{playId:guid}/evidence", async (Guid playId, EvidenceService service, CancellationToken ct) =>
             Results.Ok(await service.ListAsync(playId, ct)));
         api.MapPost("/plays/{playId:guid}/evidence", UploadAsync);

@@ -73,21 +73,25 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
   const [name, setName] = useState('')
   const destination = usePortfolioDestination(portfolios, api, onCreated)
   const venues = useVenues()
-  const choices = venues.creatable()
+  const paper = api.tradingMode === 'paper'
+  const choices = paper ? venues.list.filter(venue => venue.capabilities.paperExecution) : venues.creatable()
   const [venueChoice, setVenue] = useState('')
   // The first venue that can read an account, until the owner chooses.
   const venue = choices.some(v => v.id === venueChoice) ? venueChoice : (choices.find(v => !venues.isManual(v.id)) ?? choices[0])?.id ?? manualVenueId
   const venueInfo = venues.find(venue)
-  const needsAddress = venueInfo?.source === 'evm-address'
-  const needsIndex = venueInfo?.source === 'account-index'
+  const needsAddress = !paper && venueInfo?.source === 'evm-address'
+  const needsIndex = !paper && venueInfo?.source === 'account-index'
   const canDiscover = needsIndex && venues.can(venue, 'accountDiscovery')
   const [address, setAddress] = useState('')
   const [manualValue, setManualValue] = useState('')
+  const [startingCapital, setStartingCapital] = useState('4000')
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   async function submit(event: FormEvent) {
     event.preventDefault(); setError(null)
-    if (!name.trim()) { setError('Name the account. A portfolio is optional.'); return }
+    if (!name.trim()) { setError('Name the account.'); return }
+    if (paper && !choices.some(choice => choice.id === venue)) { setError('Paper execution is not available for this venue.'); return }
+    if (paper && !/^\d+(\.\d+)?$/.test(startingCapital.trim())) { setError('Use an exact nonnegative starting capital amount.'); return }
     if (needsAddress && !/^0x[\da-f]{40}$/i.test(address.trim())) { setError('Use a valid public wallet address, starting with 0x.'); return }
     if (needsIndex && !accountIndex(address.trim())) { setError('Use the exact nonnegative account index.'); return }
     if (needsIndex && accounts.some(a => a.venueId === venue && (a.sourceId ?? a.address) === address.trim())) {
@@ -100,36 +104,37 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
       const target = await destination.resolve(); portfolioCreated = target.created
       const account = await api.createAccount({
         portfolioId: target.portfolioId, name: name.trim(), venueId: venue,
-        ...(needsAddress ? { address: address.trim().toLowerCase() } : needsIndex ? { sourceId: address.trim() } : manualValue.trim() ? { manualAccountValueUsd: manualValue.trim() } : {}),
+        ...(paper ? { tradingMode: 'paper' as const, startingCapitalUsd: startingCapital.trim() } : needsAddress ? { address: address.trim().toLowerCase() } : needsIndex ? { sourceId: address.trim() } : manualValue.trim() ? { manualAccountValueUsd: manualValue.trim() } : {}),
       })
-      setName(''); setAddress(''); setManualValue(''); onOpenChange(false); onCreated(account)
+      setName(''); setAddress(''); setManualValue(''); setStartingCapital('4000'); onOpenChange(false); onCreated(account)
     } catch (cause) { setError((portfolioCreated ? 'The new portfolio was created and kept. Retry adding the account into it; a duplicate portfolio will not be created. ' : '') + (errorMessage(cause, 'Could not create this account.'))) }
     finally { setPending(false) }
   }
   return <Dialog open={open} onOpenChange={next => { if (!pending) { onOpenChange(next); setError(null) } }}>
     <DialogContent className={`workspace-dialog${canDiscover ? ' account-import-dialog' : ''}`}>
-      <DialogHeader><DialogTitle>Add an account</DialogTitle><DialogDescription className="sr-only">Import read-only venue accounts or keep a manual record.</DialogDescription></DialogHeader>
+      <DialogHeader><DialogTitle>{paper ? 'Add a paper account' : 'Add an account'}</DialogTitle><DialogDescription className="sr-only">{paper ? 'Simulated capital only. Starting capital is fixed immediately after creation.' : 'Import read-only venue accounts or keep a manual record.'}</DialogDescription></DialogHeader>
       <fieldset className="venue-picker" disabled={pending}>
         <legend>Venue</legend>
         <div className="venue-picker-grid">{choices.map(v => <label key={v.id} className="venue-card">
           <input type="radio" className="sr-only" name="account-venue" value={v.id} checked={venue === v.id}
-            aria-label={venues.isManual(v.id) ? 'Manual account' : `${v.name} · read-only perps`}
+            aria-label={paper ? `${v.name} · Paper simulated` : venues.isManual(v.id) ? 'Manual account' : `${v.name} · read-only perps`}
             onChange={() => { setVenue(v.id); setAddress(''); setError(null) }} />
           <VenueLogo venueId={v.id} size="lg" />
           <span><strong>{venues.isManual(v.id) ? 'Manual account' : v.name}</strong>
-            {!venues.isManual(v.id) && <small>{`Read-only perps${v.quoteAsset ? ` · ${v.quoteAsset}` : ''}`}</small>}</span>
+            {!venues.isManual(v.id) && <small>{paper ? 'Paper · simulated' : `Read-only perps${v.quoteAsset ? ` · ${v.quoteAsset}` : ''}`}</small>}</span>
         </label>)}</div>
       </fieldset>
       {canDiscover ? <WalletAccountImport key={venue} venueId={venue} api={api} portfolios={portfolios} accounts={accounts}
         onCreated={onCreated} onBusy={setPending} onClose={() => onOpenChange(false)} /> :
         <form onSubmit={event => { void submit(event) }} className="workspace-form" aria-busy={pending}>
-          <PortfolioDestination destination={destination} inputId="account-portfolio" label="Portfolio · optional" disabled={pending} />
+          <PortfolioDestination destination={destination} inputId="account-portfolio" label={paper ? 'Paper portfolio · required' : 'Portfolio · optional'} required={paper} disabled={pending} />
           <label htmlFor="account-name">Account name</label><Input id="account-name" value={name} onChange={event => setName(event.target.value)} placeholder="e.g. Main account" maxLength={200} disabled={pending} />
-          {needsAddress ? <><label htmlFor="account-address">Public wallet address</label><Input id="account-address" value={address} onChange={event => setAddress(event.target.value)} placeholder="0x…" maxLength={128} spellCheck={false} autoComplete="off" disabled={pending} /><p className="field-help">Never enter a private key or seed phrase.</p></> :
+          {paper ? <><label htmlFor="paper-starting-capital">Starting capital · virtual USD</label><Input id="paper-starting-capital" value={startingCapital} onChange={event => setStartingCapital(event.target.value)} inputMode="decimal" disabled={pending} required />
+            <p className="field-help">Default 4000 nominal virtual USD. Fixed immediately after creation: no later edits, deposits, withdrawals or reset. Zero capital cannot fund entries. No real wallet, credentials or history import.</p></> : needsAddress ? <><label htmlFor="account-address">Public wallet address</label><Input id="account-address" value={address} onChange={event => setAddress(event.target.value)} placeholder="0x…" maxLength={128} spellCheck={false} autoComplete="off" disabled={pending} /><p className="field-help">Never enter a private key or seed phrase.</p></> :
             needsIndex ? <><label htmlFor="account-source">Account index</label><Input id="account-source" value={address} onChange={event => setAddress(event.target.value)} inputMode="numeric" autoComplete="off" disabled={pending} /></> :
             <><label htmlFor="manual-balance">Known account value · USD <span className="optional">optional</span></label><Input id="manual-balance" value={manualValue} onChange={event => setManualValue(event.target.value)} placeholder="Leave blank if unavailable" inputMode="decimal" disabled={pending} /></>}
           {error && <p role="alert" className="error">{error}</p>}
-          <Button type="submit" disabled={pending}>{pending ? 'Adding…' : 'Add account'}</Button>
+          <Button type="submit" disabled={pending || paper && !choices.length}>{pending ? 'Adding…' : paper ? 'Create paper account' : 'Add account'}</Button>
         </form>}
     </DialogContent>
   </Dialog>

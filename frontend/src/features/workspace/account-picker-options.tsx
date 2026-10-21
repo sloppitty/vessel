@@ -7,8 +7,8 @@ import { money } from '@/lib/format'
 export function pickerAccounts(accounts: readonly BrokerAccount[], portfolios: readonly Portfolio[], value?: (a: BrokerAccount) => string): PickerAccount[] {
   const names = new Map(portfolios.map(p => [p.id, p.name]))
   return accounts.map(a => ({
-    id: a.id, name: a.name, venueId: a.venueId, source: a.sourceId ?? a.address,
-    detail: a.portfolioId ? names.get(a.portfolioId) ?? 'Portfolio' : 'Unassigned',
+    id: a.id, name: a.name, venueId: a.venueId, source: a.tradingMode === 'paper' ? undefined : a.sourceId ?? a.address,
+    detail: `${a.tradingMode === 'paper' ? 'Paper · ' : ''}${a.portfolioId ? names.get(a.portfolioId) ?? 'Portfolio' : 'Unassigned'}`,
     balance: a.balanceUsd ? money(a.balanceUsd) : null,
     ...(value ? { value: value(a) } : {}),
   }))

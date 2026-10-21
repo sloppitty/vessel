@@ -40,7 +40,7 @@ public sealed record ChangePlayStatusRequest(
 public sealed record PlaySummaryDto(Guid Id, string Title, string Status, Guid AccountId, string VenueId, string? Instrument,
     string InstrumentSource, string Direction, int PlanRevision, long Version, string? CancelReason,
     DateTimeOffset CreatedAtUtc, DateTimeOffset UpdatedAtUtc, DateTimeOffset? PlannedAtUtc, DateTimeOffset? EndedAtUtc,
-    bool HasReview, string Origin = "planned", DateTimeOffset? ReviewedAtUtc = null)
+    bool HasReview, string Origin = "planned", DateTimeOffset? ReviewedAtUtc = null, string TradingMode = "real")
 {
     /// <summary>completed, not-needed or legacy once the review is complete; null while it still needs review (phase 1, 1.2).</summary>
     public string? ReviewCompletion { get; init; }
@@ -73,7 +73,7 @@ public sealed record PlayListPage(int TotalCount, int Page, List<PlayListRow> Ro
 /// Search is a trimmed, case-insensitive substring of title or instrument. A scope keeps its enabled accounts only;
 /// a null scope is the Plays page: every owner Play, including those on disabled accounts.
 /// </summary>
-public sealed record PlayListFilter(string? Search, ListScope? Scope);
+public sealed record PlayListFilter(string? Search, ListScope? Scope, string TradingMode = "real");
 
 /// <summary>Summary columns only. Plan, drawings and review text are never read for a list.</summary>
 public sealed record PlayListRow
@@ -82,6 +82,7 @@ public sealed record PlayListRow
     public string Title { get; init; } = "";
     public PlayStatus Status { get; init; }
     public Guid AccountId { get; init; }
+    public string TradingMode { get; init; } = "real";
     public string VenueId { get; init; } = "";
     public string? ContractId { get; init; }
     public InstrumentSource InstrumentSource { get; init; }
@@ -134,6 +135,7 @@ public interface IPlayStore
 {
     /// <summary>Whether the scope's portfolio or account exists for this owner; <c>all</c> and <c>unassigned</c> always do.</summary>
     Task<bool> ScopeExistsAsync(ListScope scope, CancellationToken ct);
+    Task<bool> ScopeExistsAsync(ListScope scope, string tradingMode, CancellationToken ct) => ScopeExistsAsync(scope, ct);
     /// <summary>
     /// One consistent page of a view: the exact total, the requested page clamped to it and its ordered summary rows
     /// (updated desc for Drafts, In progress and All; ended desc, updated desc otherwise; then ID), read from one snapshot.

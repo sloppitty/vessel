@@ -8,17 +8,23 @@ using Vessel.Application.Venues;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Sizing;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Common;
 
 namespace Vessel.Application.Sizing;
 
 /// <summary>
 /// The owner's track record from closed Plays, the exposure level it implies and the limits the editor's
-/// sizing suggestions use. Outcomes come only from linked venue fills; nothing is inferred from prices.
+/// sizing suggestions use. Real execution outcomes and explicit paper simulations have isolated sources;
+/// neither mode borrows the other's record or exposure ladder.
 /// </summary>
 public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner, TimeProvider time, IUnitOfWork unitOfWork,
     ActivityService? activity = null, IVenueRegistry? venues = null)
 {
-    public const string SourcePlays = "plays", SourceActivity = "activity", SourceNone = "none";
+    public const string SourcePlays = "plays", SourceActivity = "activity", SourceNone = "none", SourcePaper = "paper";
+    private const string PaperNotice = "Simulated paper Plays only. Full touched allocations at their defined price, zero fees and zero slippage. " +
+        "Unresolved or incomplete simulations are excluded. Starting capital is never profit. " +
+        "Real Plays, imported Activity and manual actual executions are not used. The risk percentage is the owner's read-only shared preference. " +
+        "Suggestions are estimates, not advice.";
     private const string Notice = "Results come from each closed play's linked fills: venue closed PnL less fees paid in listed USD stablecoins. " +
         NominalStablecoins.Caveat + " Plays on venues with different quote stablecoins are pooled nominally. " +
         "Suggestions are mechanical estimates from your risk setting and record, not advice.";
@@ -30,14 +36,18 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
     private const string ActivityReason = " Counted from closed Activity positions until a play closes with a win or loss.";
     private const string RatioNotice = " The win/loss ratio exceeds the supported decimal range and is unknown.";
 
-    public async Task<SizingDto> GetAsync(CancellationToken ct)
+    public async Task<SizingDto> GetAsync(CancellationToken ct, string? tradingMode = "real")
     {
+        tradingMode = TradingMode.Validate(tradingMode ?? TradingMode.Real);
         var settings = await store.SettingsAsync(ct);
-        return await BuildAsync(settings?.RiskPercent ?? SizingSettings.DefaultRiskPercent, ct);
+        return await BuildAsync(settings?.RiskPercent ?? SizingSettings.DefaultRiskPercent, tradingMode, ct);
     }
 
-    public async Task<SizingDto> UpdateSettingsAsync(UpdateSizingSettingsRequest request, CancellationToken ct)
+    public async Task<SizingDto> UpdateSettingsAsync(UpdateSizingSettingsRequest request, CancellationToken ct, string? tradingMode = "real")
     {
+        tradingMode = TradingMode.Validate(tradingMode ?? TradingMode.Real);
+        if (tradingMode == TradingMode.Paper)
+            throw new ProblemException(409, "Paper sizing reads the risk preference; it cannot change real sizing settings.");
         if (!ExactDecimal.TryParseRiskPercent(request.RiskPercent, out var risk))
             throw new ProblemException(400, "Risk per trade must be a decimal percentage.");
         var now = time.GetUtcNow();
@@ -49,19 +59,30 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
             await store.SaveAsync(ct);
             return true;
         }, ct);
-        return await BuildAsync(risk, ct);
+        return await BuildAsync(risk, tradingMode, ct);
     }
 
-    private async Task<SizingDto> BuildAsync(decimal risk, CancellationToken ct)
+    private async Task<SizingDto> BuildAsync(decimal risk, string tradingMode, CancellationToken ct)
     {
-        var dto = await RecordAsync(risk, ct);
+        var dto = await RecordAsync(risk, tradingMode, ct);
         // Unresolved Plays have no result: they stay out of the record and the ladder, and are only counted beside it.
-        return dto with { Record = dto.Record with { Unresolved = await store.UnresolvedPlaysAsync(ct) } };
+        // A paper Play is never declared Unresolved: its simulation holds what it cannot settle.
+        return tradingMode == TradingMode.Paper ? dto
+            : dto with { Record = dto.Record with { Unresolved = await store.UnresolvedPlaysAsync(ct) } };
     }
 
-    private async Task<SizingDto> RecordAsync(decimal risk, CancellationToken ct)
+    private async Task<SizingDto> RecordAsync(decimal risk, string tradingMode, CancellationToken ct)
     {
-        var plays = PlayOutcomes(await store.ClosedPlaysAsync(ct), venues);
+        var closed = (await store.ClosedPlaysAsync(tradingMode, ct)).Where(f => f.Play.TradingMode == tradingMode).ToList();
+        if (tradingMode == TradingMode.Paper)
+        {
+            var paper = closed.Where(f => f.Paper is not null).Select(f => (Facts: f.Paper!, Outcome: f.Paper!.Outcome(time.GetUtcNow(), out _)))
+                .Where(x => x.Outcome is not null).Select(x => new Scored(x.Outcome!,
+                    Row(x.Facts.Play.Id, x.Facts.Play.Title, x.Facts.Play.ContractId, x.Outcome!))
+                { Local = PaperPlayFacts.Local(x.Outcome!) }).ToList();
+            return ToDto(risk, paper, SourcePaper) with { TradingMode = TradingMode.Paper };
+        }
+        var plays = PlayOutcomes(closed, venues);
         if (plays.Any(x => x.Outcome.Kind != PlayOutcomeKind.Scratch) || activity is null) return ToDto(risk, plays, SourcePlays);
         // Only with no decided Play outcome; the two sources are never mixed.
         var operations = await ActivityRecordAsync(activity, ct);
@@ -180,7 +201,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
         var window = outcomes.Where(x => x.Outcome.Kind != PlayOutcomeKind.Scratch).OrderByDescending(x => x.Outcome.ClosedAtUtc)
             .ThenBy(x => x.Outcome.PlayId).Take(record.Window).ToList();
         var activitySource = source == SourceActivity;
-        var notice = activitySource ? ActivityNotice : Notice;
+        var notice = source == SourcePaper ? PaperNotice : activitySource ? ActivityNotice : Notice;
         var reason = exposure.Reason + (ties.Reason is { } tie ? " " + tie : "") + (activitySource ? ActivityReason : "");
         return new SizingDto(new SizingSettingsDto(ExactDecimal.FormatEightPlaces(risk)),
             new ExposureDto(Name(exposure.Level), ExactDecimal.FormatEightPlaces(exposure.Multiplier),

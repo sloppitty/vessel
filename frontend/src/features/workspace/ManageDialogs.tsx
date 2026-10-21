@@ -51,6 +51,7 @@ export function ManagePortfolioDialog({ portfolio, accounts = noAccounts, portfo
     if (!name.trim()) { setError('Give the portfolio a name.'); return }
     const added = selected.filter(id => !baseline.includes(id) && currentAccounts.some(a => a.id === id))
     const removed = baseline.filter(id => !selected.includes(id))
+    if ((portfolio.tradingMode === 'paper' || api.tradingMode === 'paper') && removed.length) { setError('Paper accounts must remain in a paper portfolio. Move existing members to another paper portfolio through Manage account or the Accounts bulk move. No changes were saved.'); return }
     if (added.length > 200 || removed.length > 200) { setError('Add or remove up to 200 accounts at a time.'); return }
     setPending(true)
     try {
@@ -94,7 +95,7 @@ export function ManagePortfolioDialog({ portfolio, accounts = noAccounts, portfo
   return <Dialog open onOpenChange={next => { if (!next && !pending) onClose() }}>
     <DialogContent className="workspace-dialog">
       <DialogHeader><DialogTitle>{deleting ? 'Delete portfolio?' : 'Manage portfolio'}</DialogTitle><DialogDescription className={deleting ? undefined : 'sr-only'}>{deleting ?
-        `Delete ${portfolio.name}? Its accounts, executions, snapshots and plays are kept; the accounts become Unassigned.` :
+        portfolio.tradingMode === 'paper' ? `Delete ${portfolio.name}? Move all accounts into another paper portfolio first. Paper history is kept.` : `Delete ${portfolio.name}? Its accounts, executions, snapshots and plays are kept; the accounts become Unassigned.` :
         'Change the name, icon and accounts, or remove the grouping without deleting its history.'}</DialogDescription></DialogHeader>
       {deleting ? <div className="workspace-form">
         {error && <p className="error" role="alert">{error}</p>}
@@ -103,7 +104,7 @@ export function ManagePortfolioDialog({ portfolio, accounts = noAccounts, portfo
         <label htmlFor="rename-portfolio">Portfolio name</label><Input id="rename-portfolio" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={pending} autoFocus={!focusAccounts} />
         <PortfolioIconPicker name="manage-portfolio-icon" value={icon ?? portfolio.icon ?? defaultPortfolioIcon} onChange={setIcon} disabled={pending} />
         <PortfolioAccounts accounts={currentAccounts} portfolios={currentPortfolios} selected={selected.filter(id => currentAccounts.some(a => a.id === id))}
-          onChange={setSelected} disabled={pending || needsReload} autoFocus={focusAccounts} maxSelected={currentAccounts.length} portfolioId={portfolio.id} />
+          onChange={setSelected} disabled={pending || needsReload} autoFocus={focusAccounts} maxSelected={currentAccounts.length} portfolioId={portfolio.id} allowUnassign={portfolio.tradingMode !== 'paper' && api.tradingMode !== 'paper'} />
         {needsReload && <Button type="button" variant="outline" disabled={pending} onClick={() => { void reloadAccounts() }}>Reload accounts</Button>}
         {error && <p className="error" role="alert">{error}</p>}
         <div className="management-actions"><Button type="button" variant="ghost" className="danger-action" onClick={() => { setDeleting(true); setError(null) }} disabled={pending}><Trash2 size={14} />Delete</Button><Button type="submit" disabled={pending || needsReload}>{pending ? 'Saving…' : 'Save changes'}</Button></div>
@@ -172,20 +173,23 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
       {deleting ? <div className="workspace-form">
         {error && <p className="error" role="alert">{error}</p>}
         <div className="management-actions"><Button variant="outline" onClick={() => { setDeleting(false); setError(null) }} disabled={pending}>Keep account</Button><Button variant="destructive" onClick={() => { void remove() }} disabled={pending}>{pending ? 'Deleting…' : 'Delete account'}</Button></div>
-      </div> : <><p className="account-source"><span>Source</span> <VenueBadge venueId={account.venueId} size="xs" /> · {account.sourceId ?? account.address ?? 'Manual record'}</p>
+      </div> : <><p className="account-source"><span>Source</span> <VenueBadge venueId={account.venueId} size="xs" /> · {account.tradingMode === 'paper' ? 'Paper · simulated' : account.sourceId ?? account.address ?? 'Manual record'}</p>
+      {account.tradingMode === 'paper' && <p className="field-help"><span className="workspace-badge">Paper</span> Starting capital: {account.startingCapitalUsd ?? 'Unknown'} virtual USD · fixed at creation, not editable.</p>}
       <form className="workspace-form" onSubmit={event => { void save(event) }} aria-busy={pending}>
         <label htmlFor="rename-account">Account name</label><Input id="rename-account" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={pending} autoFocus />
         <label htmlFor="move-account">Portfolio</label><NativeSelect id="move-account" value={portfolioId} onChange={event => setPortfolioId(event.target.value)} disabled={pending}>
-          <option value="">No portfolio</option>{portfolioOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          {account.tradingMode !== 'paper' && <option value="">No portfolio</option>}{portfolioOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           {portfolioId && !portfolioOptions.some(p => p.id === portfolioId) && <option value={portfolioId}>Current portfolio</option>}
         </NativeSelect>
         <label className="account-enabled-control"><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} disabled={pending} />Account enabled</label>
-        {!enabled && <p className="field-help">Records are kept; history and positions are hidden and excluded from totals, and refresh is blocked.</p>}
+        {!enabled && <p className="field-help">{account.tradingMode === 'paper' ?
+          'Disabling suspends this account’s paper checks; re-enabling resumes at a fresh minute boundary without replaying disabled touches. Unevaluated time before disabling is also skipped and remains unscored. Any position open at suspension keeps new entries blocked after re-enabling until that exposure closes. Touches during the hold are declined, not replayed. The affected history remains unscored. Records are kept but hidden and excluded from totals while disabled.' :
+          'Records are kept; history and positions are hidden and excluded from totals, and refresh is blocked.'}</p>}
         {conflict && <div className="workspace-form"><p className="field-help">These settings may be outdated. Reload the latest saved values and review them; your changes are not replayed.</p><Button type="button" variant="outline" onClick={() => { void reloadSettings() }} disabled={pending}>Reload current settings</Button></div>}
         {error && <p className="error" role="alert">{error}</p>}
         <div className="management-actions"><Button type="button" variant="ghost" className="danger-action" onClick={() => { setDeleting(true); setError(null) }} disabled={pending || credentialPending}><Trash2 size={14} />Delete</Button><Button type="submit" disabled={pending || credentialPending || conflict}>{pending ? 'Saving…' : 'Save settings'}</Button></div>
       </form>
-      {venues.can(account.venueId, 'readOnlyCredential') && <fieldset className="credential-fieldset" disabled={pending}>
+      {account.tradingMode !== 'paper' && venues.can(account.venueId, 'readOnlyCredential') && <fieldset className="credential-fieldset" disabled={pending}>
         <AccountCredential accountId={account.id} venueId={account.venueId} enabled={account.isEnabled !== false} api={api} onBusy={setCredentialPending} />
       </fieldset>}</>}
     </DialogContent>

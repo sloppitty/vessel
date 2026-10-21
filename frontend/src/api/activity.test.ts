@@ -105,6 +105,18 @@ describe('activity API', () => {
     response(activityPage([operationFixture, operationFixture]))
     await expect(createWorkspaceApi('token').activity(first)).rejects.toMatchObject({ kind: 'invalid-response' })
   })
+  it('accepts a linked Play title and refuses one on an unlinked row or beyond the title limit', async () => {
+    const playId = '33345678-1234-1234-1234-123456789abc'
+    const linked = { ...operationFixture, playId, playAssociation: 'linked' as const }
+    for (const operation of [{ ...linked, playTitle: 'BTC breakout' }, { ...linked, playTitle: '' }, { ...linked, playTitle: null }, linked]) {
+      response(activityPage([operation]))
+      await expect(createWorkspaceApi('token').activity(first)).resolves.toMatchObject({ operations: { length: 1 } })
+    }
+    for (const operation of [{ ...operationFixture, playTitle: 'Not linked' }, { ...linked, playTitle: 'x'.repeat(201) }, { ...linked, playTitle: 7 }]) {
+      response(activityPage([operation as typeof operationFixture]))
+      await expect(createWorkspaceApi('token').activity(first)).rejects.toMatchObject({ kind: 'invalid-response' })
+    }
+  })
   it('accepts a later page with exact counts and checks paging arithmetic', async () => {
     const rows = [at(1), at(2)]
     response(activityPage(rows, { page: 3, pageSize: 2, totalCount: 6, scopeCount: 9 }))
