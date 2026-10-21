@@ -81,4 +81,17 @@ public sealed partial class ExecutionPostgresTests
         Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => h.Execution.RejectOrderAsync(id, new("99"), default))).StatusCode);
         Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => h.Execution.RejectOrderAsync(id, new("31"), default))).StatusCode);
     }
+
+    [PostgresFact]
+    public async Task Not_this_play_is_refused_for_a_paper_Play()
+    {
+        // Main's paper trading: a paper Play has simulated executions only, never venue orders to turn down.
+        var (database, h, _) = await SetUp();
+        await using var _ = database;
+        var portfolio = await h.Workspace.CreatePortfolioAsync(new("Paper", TradingMode: "paper"), default);
+        var paper = await h.Workspace.CreateAccountAsync(new(portfolio.Id, "Paper", "hyperliquid", TradingMode: "paper"), default);
+        var play = await h.Plays.CreateAsync(new CreatePlayRequest(paper.Id, "BTC", "venue", "Paper idea", TestPlays.Plan()), default, "paper");
+        var refused = await Assert.ThrowsAsync<ProblemException>(() => h.Execution.RejectOrderAsync(play.Summary.Id, new("31"), default));
+        Assert.Equal((409, "Paper Plays use explicit simulated executions, not actual order linking."), (refused.StatusCode, refused.Message));
+    }
 }
