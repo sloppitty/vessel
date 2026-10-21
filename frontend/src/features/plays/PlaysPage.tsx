@@ -507,6 +507,9 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     <Save size={14} />{saving ? 'Saving play…' : 'Save play'}</Button> : undefined
   // The outcome beside the review: a venue Play's two bases or a manual Play's ledger, with R and time held from the server.
   const shownExecution = tracking.execution?.playId === saved?.summary.id ? tracking.execution : null
+  // Like the outcome, the header's post-hoc badge waits for a fresh read rather than keeping an earlier one's flag.
+  const playReceipt = manual ? manualLedger && manualLedger !== 'unknown' ? manualLedger.receipt ?? null : null
+    : tracking.stale ? null : shownExecution?.receipt ?? null
   // Figures kept from an earlier read are not shown as current: after a failed or pending reread the receipt waits for it.
   const staleOutcome = tracking.stale ? tracking.error
     ? <p className="error" role="alert">The outcome could not be read again. {tracking.error}</p>
@@ -532,6 +535,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       filledEntries={filledEntries} fills={fills} onUnits={onUnits} onPriceStep={setPriceStep}
       incidents={saved ? playIncidents.get(saved.summary.id) : undefined} stopEvidence={manual ? undefined : stopEvidence}
       evidenceImages={evidenceImages} reviewReceipt={reviewReceipt} journalSave={journalSave} retrospectiveReceipt={retrospectiveReceipt}
+      plannedAfterExecution={playReceipt?.plannedAfterExecution === true}
       execution={paper ? saved ? <PaperExecutionPanel key={saved.summary.id} api={api} playId={saved.summary.id} reloadGeneration={reloadGeneration + saved.summary.version} onState={onPaperState} /> : <p className="workspace-scope-note">Save this Paper play to see simulated execution progress. Planning arms evaluation; a draft never monitors.</p> : manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
         enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}
         working={busy !== null}

@@ -154,7 +154,7 @@ describe('Review positions verified behaviour (Sol review)', () => {
   it('uses Play-only R and review denominators with mixed outcomes', async () => {
     const { user } = setup()
     await screen.findByRole('region', { name: 'Performance scorecard' })
-    expect(screen.getByText('1 of 1 with a complete initial stop')).toBeVisible()
+    expect(screen.getByText('1 of 1 with a complete initial stop · Small sample')).toBeVisible()
     await user.click(screen.getByRole('button', { name: '1 Play · 2 positions' }))
     const dialog = await screen.findByRole('dialog')
     await within(dialog).findByRole('table', { name: 'Contributing closed Plays' })

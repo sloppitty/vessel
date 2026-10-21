@@ -306,3 +306,44 @@ documented Plays weighing more, a toggle and a configurable threshold.
   Reset and the asset shortcuts keep the positions mode. Counts read "N Plays · M positions"; with
   positions the breakdown's count column is "Results", and the Play-local and
   R denominators count Plays only. The scorecard says Plays weigh 2× in rates.
+
+## Sample sizes and plans written after execution (October 20, 2026)
+
+Phase 1.4a of the [learning-loop contract](phase1-learning-loop-contract.md),
+covering F-08 and the first part of D-17. No statistic changes.
+- **Each metric names its own n.** The "Small sample" marker (below 20)
+  follows that denominator rather than the Play count. The A5 case, 20
+  scratches and one win, now reads "n = 1 decided · Small sample" under a
+  100% batting average.
+
+  | Metric | n |
+  | --- | --- |
+  | Batting average and profit factor | decided Plays (wins + losses) |
+  | Average gain / loss | the wins and the losses |
+  | Expectancy per Play | all scored Plays |
+  | Estimated R | Plays with a complete initial stop |
+
+  - The highest and lowest asset cards are marked by their result counts.
+  - Breakdown cells are marked one by one: batting average and profit
+    factor by the row's decided count, average gain / loss by the smaller
+    of its wins and losses.
+- **With imported positions.** Each n counts real results, unweighted, as
+  every count does. A Play counts once in n although it weighs
+  `PlayWeight` in the rates. Expectancy reads "n = 3 Plays · 2 positions",
+  and the asset cards use the same count. Estimated R, sign-differs and
+  review denominators count Plays only.
+- **"Estimated R expectancy (planned-stop model)"** is the existing average
+  of estimated R under a clearer name. Its formula and eligibility are
+  unchanged.
+- **"Plan written after first execution."** A planned-origin Play whose
+  `PlannedAtUtc` is later than its earliest linked or manual execution is
+  marked.
+  - Review's Play rows carry `plannedAfterExecution`, and the Play's receipt
+    carries the same flag.
+  - The badge shows in the Play header, above its review, and in Review's
+    Play lists. The flag uses stored times only.
+  - The Play is scored, counted and sized like any other. Decision 9 allows
+    it to answer "Followed".
+  - Its estimated R is unknown with "No plan revision was in force at the
+    first entry fill", because Review already requires a revision written at
+    or before that fill.

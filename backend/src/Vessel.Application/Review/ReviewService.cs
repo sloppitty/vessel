@@ -141,7 +141,10 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
                     accounts[play.Play.AccountId].Name, play.Play.VenueId, play.Play.ContractId!, e.ClosedAt,
                     ExactDecimal.Format(e.Result!.NetResult), ExactDecimal.Format(e.Result.ReturnPercent), ExactDecimal.Format(e.Result.RMultiple),
                     play.Play.HasReview, play.Play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned",
-                    play.Paper is not null ? "paper" : play.ManualSource ? "manual" : "imported") { Local = e.Local!.ToDto(e.Result.NetResult) }
+                    play.Paper is not null ? "paper" : play.ManualSource ? "manual" : "imported")
+                {
+                    Local = e.Local!.ToDto(e.Result.NetResult), PlannedAfterExecution = PlayReceipts.PlannedAfterExecution(play),
+                }
                 : new ReviewPlayDto(null, $"{e.ContractId} {(e.Position!.Direction == "short" ? "Short" : "Long")}", e.AccountId,
                     accounts[e.AccountId].Name, e.VenueId, e.ContractId, e.ClosedAt, ExactDecimal.Format(e.Result!.NetResult),
                     ExactDecimal.Format(e.Result.ReturnPercent), null, false, "position", "imported") { OperationId = e.Position.OperationId })

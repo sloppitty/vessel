@@ -291,7 +291,8 @@
       "fillCount": 0,
       "estimatedR": null,
       "initialRisk": null,
-      "estimatedRReason": "Known once the Play is closed and its fills settle it."
+      "estimatedRReason": "Known once the Play is closed and its fills settle it.",
+      "plannedAfterExecution": false
     }
   },
   "runCompletedEvent": {

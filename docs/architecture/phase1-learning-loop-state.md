@@ -141,7 +141,66 @@ Not started.
 
 ## 1.4 Process and outcome as cases
 
-Not started.
+### 1.4a Post-hoc badge and per-metric n
+
+October 20, 2026, branch `t3/phase1-post-hoc-badge`, stacked on 1.1a:
+- **D-17 badge.** `PlayReceipts.PlannedAfterExecution` is true for a planned-origin Play whose `PlannedAtUtc` is later
+  than its earliest linked or manual execution.
+  - It reads stored times only.
+  - The receipt and Review's Play rows carry the flag.
+  - The badge "Plan written after first execution" shows in the Play header, above its review and in Review's Play
+    lists.
+  - Scoring and sizing are unchanged. By decision 9 the Play may answer "Followed".
+- **F-08.** Each metric names its own n and is marked as a small sample (below 20) by it:
+  - batting average and profit factor: decided Plays;
+  - average gain / loss: wins and losses;
+  - expectancy: scored Plays;
+  - estimated R: Plays with a complete initial stop.
+
+  The asset cards are marked by their result counts. Breakdown cells are marked one by one: batting average and profit
+  factor by the row's decided count, average gain / loss by the smaller of its wins and losses.
+- **Label.** The R average is now "Estimated R expectancy (planned-stop model)". The statistic is unchanged.
+- **Tests.**
+  - PostgreSQL, T29: a manual Play planned today for an execution recorded days earlier is flagged on its receipt and
+    its Review row. Its R reason is "no plan revision in force". It answers "Followed" and is still scored as a win. A
+    plan written before its execution is not flagged.
+  - Unit: the flag's time boundaries, an exit-only early fill, and retrospective Plays.
+  - Frontend: A5 (20 scratches and one win) now reads "n = 1 decided · Small sample"; the asset-card and row markers;
+    the badge in Review rows, the header and the Review tab, and its absence otherwise.
+- **Checks.** `scripts/check.sh` passed:
+  - backend: 3,560 passed, 5 skipped;
+  - frontend: 149 files and 3,741 tests;
+  - build clean.
+- **Sol (Codex) round 1.** Two findings, both fixed:
+  - **Breakdown markers.** Breakdown rows and the combined footer now mark each cell by its own n:
+    - batting average and profit factor by decided Plays;
+    - average gain / loss by the smaller of wins and losses.
+
+    So 20 wins and one loss flags only the gain / loss cell.
+  - **Spacing.** Each metric's n sits on its own line instead of running into the text before it.
+  - **Rebase.** The branch was rebased onto the fixed 1.1a. `scripts/check.sh` passed again: backend 3,561 passed, 5
+    skipped; frontend 149 files and 3,745 tests.
+
+- **Sol (Codex) round 2.** Both round-1 findings resolved. One new finding and a test gap, both fixed:
+  - **Average outcome (medium).** The Winning Play and Losing Play averages each show their own n, with the small-sample
+    mark below 20.
+  - **Spacing test.** A stylesheet test now fails if the sample label's own-line rule is removed.
+  - **Check.** After the rebase onto main, `scripts/check.sh` passed: backend 3,571 passed, 5 skipped; frontend 149
+    files and 3,768 tests.
+- **Main sync with PR #33 (imported positions).** Merged forward, not rebased.
+  - Each n counts real results, unweighted, like every count in #33. A Play counts once in n although it weighs 2 in
+    the rates. The owner chose this on October 21, 2026, over weighted units or showing both.
+  - Expectancy and the asset cards read "n = 3 Plays · 2 positions" when positions are included.
+  - Estimated R and sign-differs denominators count Plays only.
+  - Position rows never carry the badge.
+
+- **Post-sync Sol review (October 21).** No medium or high findings. Three low ones, all fixed:
+  - **Validator.** Position rows need an operation ID, are never reviewed and are imported, and stop, review and
+    Play-local counts are bounded by the Plays in the count.
+  - **Docs.** Breakdown cells are marked one by one, as described above.
+  - **Header badge (round 2).** The post-hoc badge in the header waits for a fresh read, like the Review tab.
+  - Round 3 found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,593 passed, 5 skipped; frontend 152 files and 3,810 tests.
 
 ## 1.5 Lessons return and a recorded pre-flight
 

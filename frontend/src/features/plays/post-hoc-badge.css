@@ -1,0 +1,5 @@
+/* "Plan written after first execution" (D-17): a quiet warning pill, on the Play header, its Review tab and Review rows. */
+.badge.play-post-hoc { display: inline-flex; flex-shrink: 0; align-items: center; width: fit-content; padding: 3px 9px; border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--line)); border-radius: 999px; background: var(--surface-sunken); color: var(--warning); font-size: var(--text-2xs); font-weight: 550; letter-spacing: .02em; line-height: 1.4; }
+.badge.play-post-hoc.info-tip-trigger { text-decoration: underline dotted color-mix(in srgb, var(--warning) 55%, transparent); text-underline-offset: 2px; }
+.badge.play-post-hoc:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.review-receipt-mark { margin: 0 0 8px; }

@@ -4,6 +4,13 @@
 
 ### Added
 
+- A Play whose plan was written after its first execution is marked "Plan
+  written after first execution" in its header, above its review and in
+  Review's lists. It is still scored and sized like any other (D-17). Review
+  names each metric's own sample size: 20 scratches and one win reads
+  "n = 1 decided · Small sample" rather than a confident 100% batting
+  average. The R average is labelled "Estimated R expectancy (planned-stop
+  model)" (F-08).
 - A Play shows what happened beside its plan. Each entry shows its average
   fill against the planned price and its filled against planned quantity,
   from the plan in force at its first fill. The Review tab opens with the

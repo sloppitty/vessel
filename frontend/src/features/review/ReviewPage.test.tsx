@@ -6,6 +6,9 @@ import { defaultReviewQuery, type ReviewDocument } from '@/api/review'
 import { emptyReview, reviewFixture } from '@/test/review-fixture'
 import { render as renderWithVenues } from '@/test/render'
 import { ReviewPage } from './ReviewPage'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { chooseInPicker } from '@/test/account-picker'
 
 function setup(review = vi.fn().mockResolvedValue(reviewFixture)) {
@@ -129,12 +132,65 @@ describe('Review result bases', () => {
     ],
   }
 
+  it('gives each metric its own n, so 20 scratches and one win is a small sample of 1 decided (A5, F-08)', async () => {
+    const a5 = { ...reviewFixture.metrics, count: 21, wins: 1, losses: 0, scratches: 20, batting: '1', riskCount: 21 }
+    setup(vi.fn().mockResolvedValue({ ...reviewFixture, metrics: a5,
+      groups: { ...reviewFixture.groups, assets: [{ ...reviewFixture.groups.assets[0]!, metrics: a5 },
+        { id: 'ETH', name: 'ETH', detail: 'hyperliquid', metrics: { ...a5, count: 3, scratches: 2, net: '-3' } }] } }))
+    const scorecard = await screen.findByRole('region', { name: 'Performance scorecard' })
+    const card = (name: string) => within(scorecard).getByText(name).closest('article')!
+    // Before, the 21-Play count hid that the 100% batting average rests on one decided Play.
+    expect(card('Batting average')).toHaveTextContent('n = 1 decided · Small sample')
+    expect(card('Profit factor')).toHaveTextContent('n = 1 decided · Small sample')
+    expect(card('Avg. gain / loss')).toHaveTextContent('n = 1 win · 0 losses · Small sample')
+    expect(card('Expectancy per Play')).toHaveTextContent('n = 21 Plays')
+    expect(card('Expectancy per Play')).not.toHaveTextContent('Small sample')
+    // The highest and lowest asset cards (net P&L over their Plays) and the breakdown rows are marked by their own counts.
+    expect(screen.getByText('HIGHEST ASSET P&L').closest('button')).not.toHaveTextContent('Small sample')
+    expect(screen.getByText('LOWEST ASSET P&L').closest('button')).toHaveTextContent('3 PlaysSmall sample')
+    const breakdown = screen.getByRole('table', { name: /ranked by net/ })
+    expect(within(breakdown).getAllByText(/Small sample/)).not.toHaveLength(0)
+    // Each n is its own line, never run into the text before it.
+    expect(within(card('Batting average')).getByText('n = 1 decided · Small sample')).toHaveClass('pr-sample')
+  })
+  it('names each average outcome\'s own n: 20 wins and one loss make only the losing average a small sample', async () => {
+    const lopsided = { ...reviewFixture.metrics, count: 21, wins: 20, losses: 1, scratches: 0, batting: '0.9523809524' }
+    setup(vi.fn().mockResolvedValue({ ...reviewFixture, metrics: lopsided }))
+    const card = (await screen.findByRole('heading', { name: 'Average outcome' })).closest('section')!
+    expect(within(card).getByText('Winning Play').closest('span')).toHaveTextContent('Winning Playn = 20 wins')
+    expect(within(card).getByText('Winning Play').closest('span')).not.toHaveTextContent('Small sample')
+    expect(within(card).getByText('Losing Play').closest('span')).toHaveTextContent('Losing Playn = 1 loss · Small sample')
+  })
+  it('keeps each sample label on its own line in the stylesheet', () => {
+    expect(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'review.css'), 'utf8')).toMatch(/\.pr-sample\s*\{[^}]*display:\s*block/)
+  })
+  it('marks each breakdown cell by its own denominator: 20 wins and one loss leave only gain / loss small', async () => {
+    const lopsided = { ...reviewFixture.metrics, count: 21, wins: 20, losses: 1, scratches: 0, batting: '0.9523809524' }
+    setup(vi.fn().mockResolvedValue({ ...reviewFixture, metrics: lopsided,
+      groups: { ...reviewFixture.groups, portfolios: [{ ...reviewFixture.groups.portfolios[0]!, metrics: lopsided }] } }))
+    const breakdown = await screen.findByRole('table', { name: /ranked by net/ })
+    const [batting, payoff, profitFactor] = within(breakdown).getAllByRole('row')[1]!.querySelectorAll('td:nth-child(3), td:nth-child(4), td:nth-child(5)')
+    expect(batting).not.toHaveTextContent('Small sample')
+    expect(payoff).toHaveTextContent('Small sample')
+    expect(profitFactor).not.toHaveTextContent('Small sample')
+    const footer = within(breakdown).getAllByRole('row').at(-1)!
+    expect(footer.querySelectorAll('td')[2]).toHaveTextContent('Small sample')
+  })
+  it('marks a Play whose plan was written after its first execution, and only that one (D-17)', async () => {
+    const { user } = setup(vi.fn().mockResolvedValue({ ...reviewFixture, plays: [
+      { ...reviewFixture.plays[0]!, plannedAfterExecution: true },
+      { ...reviewFixture.plays[0]!, id: '22222222-3333-4444-5555-888888888888', title: 'ETH fade', plannedAfterExecution: false }] }))
+    await user.click(await screen.findByRole('button', { name: '3 Plays' }))
+    const rows = within(await screen.findByRole('table', { name: 'Contributing closed Plays' })).getAllByRole('row').slice(1)
+    expect(within(rows[0]!).getByText('Plan written after first execution')).toBeInTheDocument()
+    expect(within(rows[1]!).queryByText('Plan written after first execution')).not.toBeInTheDocument()
+  })
   it('names the R estimate with its denominator and counts sign differences and fee-only losses', async () => {
     setup(vi.fn().mockResolvedValue(report))
     const card = (await screen.findByRole('heading', { name: 'Average outcome' })).closest('section')!
     expect(within(card).queryByText('Avg. realized R')).not.toBeInTheDocument()
-    expect(within(card).getByText('Estimated R (planned-stop model)')).toBeVisible()
-    expect(within(card).getByText('2 of 3 with a complete initial stop')).toBeVisible()
+    expect(within(card).getByText('Estimated R expectancy (planned-stop model)')).toBeVisible()
+    expect(within(card).getByText('2 of 3 with a complete initial stop · Small sample')).toBeVisible()
     const estimate = within(card).getByRole('button', { name: 'About estimated R' })
     expect(estimate).toHaveAccessibleDescription(/entry notional × share-weighted stop distance/)
     expect(estimate).toHaveAccessibleDescription(/at or before the first entry fill/)

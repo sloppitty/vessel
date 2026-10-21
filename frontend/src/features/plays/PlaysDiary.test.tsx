@@ -674,6 +674,32 @@ describe('diary workspace integration', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Save play' })).not.toBeInTheDocument())
     expect(screen.getByRole('button', { name: 'Expand journal' })).not.toHaveFocus()
   })
+  it('marks a plan written after the first execution in the header and above the review (D-17)', async () => {
+    const closed: SavedPlay = { ...terminal, summary: { ...terminal.summary, status: 'closed', cancelReason: null } }
+    const { api, methods } = client(closed)
+    const receipt = { firstEntryAtUtc: '2026-10-10T08:00:00Z', lastExitAtUtc: '2026-10-10T09:00:00Z', averageEntryPrice: '100',
+      averageExitPrice: '110', fillCount: 2, estimatedR: null, initialRisk: null,
+      estimatedRReason: 'No plan revision was in force at the first entry fill: the plan was written after it.' }
+    methods.playExecution.mockImplementation(() => Promise.resolve({ ...execution(closed), receipt: { ...receipt, plannedAfterExecution: true } }))
+    const user = userEvent.setup()
+    const view = render(<Harness api={api} initial={sessionFor(closed)} />)
+    const status = screen.getByText('Status').closest('div')!
+    expect(await within(status).findByText('Plan written after first execution')).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Review' }))
+    expect(within(screen.getByRole('tabpanel')).getByText('Plan written after first execution')).toBeInTheDocument()
+    // A failed reread leaves the flag unknown, in the header as above the review.
+    methods.playExecution.mockRejectedValue(new ApiError('unavailable', 'Execution unavailable.'))
+    view.rerender(<Harness api={api} initial={sessionFor(closed)} generation={1} />)
+    expect(await screen.findByText('The outcome could not be read again. Execution unavailable.')).toBeInTheDocument()
+    expect(screen.queryByText('Plan written after first execution')).not.toBeInTheDocument()
+    view.unmount()
+    methods.playExecution.mockImplementation(() => Promise.resolve({ ...execution(closed), receipt }))
+    render(<Harness api={api} initial={sessionFor(closed)} />)
+    await user.click(screen.getByRole('tab', { name: 'Review' }))
+    // The receipt has arrived, without the mark.
+    expect(await screen.findByLabelText('Outcome')).toBeInTheDocument()
+    expect(screen.queryByText('Plan written after first execution')).not.toBeInTheDocument()
+  })
   it('saves from the expanded journal too, keeping focus in the dialog', async () => {
     const closed: SavedPlay = { ...terminal, summary: { ...terminal.summary, status: 'closed', cancelReason: null } }
     const { api, methods } = client(closed)
