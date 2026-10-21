@@ -49,7 +49,8 @@ public sealed class MultipleStopsMigrationTests
         Assert.Equal([new PlanExit("stop-1", "percent", "5", "100")], plan.Entries[0].Stops);
         Assert.Equal([new PlanExit("stop-2", "price", "", "100")], plan.Entries[1].Stops);
         Assert.Equal("110", plan.Entries[0].Targets.Single().Value);
-        var revision = PlayDocuments.Read((await db.PlanRevisions.SingleAsync()).Plan);
+        // Only the plan: later migrations add revision columns (1.5's Preflight) this schema does not have yet.
+        var revision = PlayDocuments.Read(await db.PlanRevisions.Select(r => r.Plan).SingleAsync());
         Assert.Equal("stop-1", revision.Entries[0].Stops.Single().Id);
 
         var links = await db.Database.SqlQueryRaw<MigratedLink>("""SELECT "Id", "Role", "EntryId", "LevelId" FROM play_order_links""")

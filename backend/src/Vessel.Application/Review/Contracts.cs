@@ -92,4 +92,12 @@ public sealed record ReviewDto(DateTimeOffset AsOfUtc, DateTimeOffset? FromUtc, 
     IReadOnlyList<ReviewPlayDto> Plays, int Offset, int? NextOffset, string TradingMode = "real")
 {
     public ReviewPositionsDto? Positions { get; init; }
+    /// <summary>The pre-flight recorded at Plan it, over the period's closed planned Plays, scored or excluded (phase 1, 1.5).</summary>
+    public ReviewPreflightDto? Preflight { get; init; }
 }
+/// <summary>
+/// <paramref name="Recorded"/> Plays have a pre-flight on revision 1 and <paramref name="NotRecorded"/> were planned before
+/// it existed; <paramref name="Skipped"/> counts, per check, the recorded Plays that went ahead without it.
+/// </summary>
+public sealed record ReviewPreflightDto(int Recorded, int NotRecorded, IReadOnlyList<ReviewPreflightCountDto> Skipped);
+public sealed record ReviewPreflightCountDto(string Code, int Count);

@@ -4,6 +4,13 @@
 
 ### Added
 
+- Planning brings your own lessons back: the Thesis tab lists your recent next
+  actions with their source Plays, and Copy into plan adds one as an if-then
+  you complete. Plan it first shows a short checklist (priced stops, shares,
+  thesis and invalidation, risk within your setting at the ladder level,
+  liquidation beyond the stops). It never blocks, keeps the checklist with the
+  plan and is counted in Review (G-02, G-05). New migration
+  `PlanPreflight`; apply it explicitly.
 - A Play whose plan was written after its first execution is marked "Plan
   written after first execution" in its header, above its review and in
   Review's lists. It is still scored and sized like any other (D-17). Review

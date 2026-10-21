@@ -164,10 +164,22 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
                 query.TradingMode == TradingMode.Paper ? PaperNotice : include ? Notice + PositionNotice : Notice),
             page, query.Offset, query.Offset + page.Count < current.Count ? query.Offset + page.Count : null, query.TradingMode)
         {
+            Preflight = Preflight(candidates.Select(e => e.Facts!)),
             Positions = new ReviewPositionsDto(query.Positions, include, query.MinPlays, playCount,
                 include ? current.Count(e => e.Position is not null) : null,
-                include ? positions.Count(e => e.Result is null && InPeriod(e.ClosedAt, from, now)) : null, PlayWeight.ToString(CultureInfo.InvariantCulture))
+                include ? positions.Count(e => e.Result is null && InPeriod(e.ClosedAt, from, now)) : null, PlayWeight.ToString(CultureInfo.InvariantCulture)),
         };
+    }
+
+    /// <summary>Pre-flights of planned-origin Plays; a retrospective Play has no plan and is left out.</summary>
+    private static ReviewPreflightDto Preflight(IEnumerable<ClosedPlayFacts> plays)
+    {
+        var planned = plays.Where(f => f.Play.Origin == PlayOrigin.Planned)
+            .Select(f => PlayPreflight.Read(f.Revisions.SingleOrDefault(r => r.Number == 1)?.Preflight)).ToList();
+        var recorded = planned.OfType<IReadOnlyList<PreflightCheckDto>>().ToList();
+        return new(recorded.Count, planned.Count - recorded.Count, PlayPreflight.Codes
+            .Select(code => new ReviewPreflightCountDto(code, recorded.Count(checks => checks.Any(c => c.Code == code && c.Outcome == "skipped"))))
+            .ToList());
     }
 
     public async Task<ReviewExclusionsDto> ExclusionsAsync(ReviewQuery query, CancellationToken ct)

@@ -34,7 +34,8 @@ public sealed record ChangePlayStatusRequest(
     [property: JsonRequired] long ExpectedVersion,
     [property: JsonRequired] string Status,
     string? Reason = null,
-    string? Note = null);
+    string? Note = null,
+    IReadOnlyList<PreflightCheckDto>? Preflight = null);
 
 public sealed record PlaySummaryDto(Guid Id, string Title, string Status, Guid AccountId, string VenueId, string? Instrument,
     string InstrumentSource, string Direction, int PlanRevision, long Version, string? CancelReason,
@@ -88,7 +89,14 @@ public sealed record PlayCountRow(PlayStatus Status, bool Reviewed, int Count);
 public sealed record PlayDto(PlaySummaryDto Summary, PlayPlanDocument Plan, JsonElement Drawings, string Review,
     ReviewAnswers? StructuredReview = null);
 
-public sealed record PlanRevisionDto(int Number, string Status, string Reason, DateTimeOffset CreatedAtUtc, PlayPlanDocument Plan);
+public sealed record PlanRevisionDto(int Number, string Status, string Reason, DateTimeOffset CreatedAtUtc, PlayPlanDocument Plan)
+{
+    /// <summary>The pre-flight recorded at Plan it, on revision 1 only; null for older plans and later revisions.</summary>
+    public IReadOnlyList<PreflightCheckDto>? Preflight { get; init; }
+}
+
+/// <summary>One of the owner's recent next actions, with the Play it was written for (phase 1, 1.5).</summary>
+public sealed record NextActionDto(Guid PlayId, string Title, string NextAction, DateTimeOffset? ReviewedAtUtc);
 public sealed record StatusChangeDto(string From, string To, string? Reason, string? Note, DateTimeOffset OccurredAtUtc, string Source = "owner");
 public sealed record ReviewRevisionDto(int Number, DateTimeOffset OccurredAtUtc, string Review, ReviewAnswers StructuredReview);
 public sealed record PlayHistoryDto(IReadOnlyList<PlanRevisionDto> Revisions, IReadOnlyList<StatusChangeDto> StatusChanges,
@@ -111,6 +119,11 @@ public interface IPlayStore
     Task<List<PlayPlanRevision>> RevisionsAsync(Guid playId, CancellationToken ct);
     Task<List<PlayStatusChange>> StatusChangesAsync(Guid playId, CancellationToken ct);
     Task<List<PlayReviewRevision>> ReviewsAsync(Guid playId, CancellationToken ct);
+    /// <summary>
+    /// The newest non-blank next actions of the owner's Closed or Cancelled Plays, by review time, at most
+    /// <paramref name="limit"/>; only the ID, title, next action and review time are read.
+    /// </summary>
+    Task<List<NextActionDto>> NextActionsAsync(int limit, string tradingMode, CancellationToken ct);
     /// <summary>Entries referenced by linked orders or manual facts; their price, share and existence are fixed.</summary>
     Task<IReadOnlySet<string>> FilledEntryIdsAsync(Guid playId, CancellationToken ct);
     /// <summary>

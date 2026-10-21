@@ -347,3 +347,17 @@ covering F-08 and the first part of D-17. No statistic changes.
   - Its estimated R is unknown with "No plan revision was in force at the
     first entry fill", because Review already requires a revision written at
     or before that fill.
+
+## Pre-flight counts (October 20, 2026)
+
+Phase 1.5 of the [learning-loop contract](phase1-learning-loop-contract.md):
+- `ReviewDto.preflight` counts the period's closed planned-origin Plays in
+  scope, scored or excluded, in three ways:
+  - those with a recorded pre-flight;
+  - those without one, mostly planned before it existed;
+  - per check, the recorded Plays that went ahead without it.
+- Retrospective Plays have no plan and are left out.
+- The coverage disclosure shows the counts only, with no rate.
+- Cancelled and Unresolved Plays join with the process view (1.4b), where the
+  drill-down by skipped check lives.
+

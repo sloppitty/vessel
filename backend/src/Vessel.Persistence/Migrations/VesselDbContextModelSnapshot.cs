@@ -1194,6 +1194,9 @@ namespace Vessel.Persistence.Migrations
                     b.Property<Guid>("PlayId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Preflight")
+                        .HasColumnType("jsonb");
+
                     b.Property<string>("Reason")
                         .IsRequired()
                         .HasMaxLength(2000)

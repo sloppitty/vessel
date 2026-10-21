@@ -105,6 +105,10 @@ internal sealed class MemoryPlayStore(Guid owner) : IPlayStore
     public Task<List<PlayPlanRevision>> RevisionsAsync(Guid playId, CancellationToken ct) => Task.FromResult(Revisions.Where(r => r.PlayId == playId).ToList());
     public Task<List<PlayStatusChange>> StatusChangesAsync(Guid playId, CancellationToken ct) => Task.FromResult(Changes.Where(c => c.PlayId == playId).ToList());
     public Task<List<PlayReviewRevision>> ReviewsAsync(Guid playId, CancellationToken ct) => Task.FromResult(Reviews.Where(c => c.PlayId == playId).ToList());
+    public Task<List<NextActionDto>> NextActionsAsync(int limit, string tradingMode, CancellationToken ct) => Task.FromResult(Plays
+        .Where(p => p.OwnerId == owner && p.TradingMode == tradingMode && p.Status is PlayStatus.Closed or PlayStatus.Cancelled && !string.IsNullOrWhiteSpace(p.ReviewNextAction))
+        .OrderByDescending(p => p.ReviewedAtUtc).ThenByDescending(p => p.UpdatedAtUtc).ThenBy(p => p.Id).Take(limit)
+        .Select(p => new NextActionDto(p.Id, p.Title, p.ReviewNextAction, p.ReviewedAtUtc)).ToList());
     /// <summary>Venue order IDs of linked orders, by internal ID; a link without one shows its internal ID.</summary>
     public Dictionary<Guid, string> ExternalOrderIds { get; } = [];
     public Task<List<LinkedPlanReference>> LinkedPlanReferencesAsync(Guid playId, CancellationToken ct) => Task.FromResult(Links

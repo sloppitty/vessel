@@ -193,14 +193,18 @@ public sealed class Play : IOwned
         return new PlayPlanRevision(this, checked(++PlanRevision), reason, now);
     }
 
-    public (PlayStatusChange Change, PlayPlanRevision Revision) MarkPlanned(DateTimeOffset now)
+    /// <summary>
+    /// Plans a Draft as revision 1. <paramref name="preflight"/> is the checklist the owner saw at Plan it, as validated
+    /// JSON; it never blocks planning (phase 1, 1.5).
+    /// </summary>
+    public (PlayStatusChange Change, PlayPlanRevision Revision) MarkPlanned(DateTimeOffset now, string? preflight = null)
     {
         if (Status != PlayStatus.Draft) throw new DomainRuleException("Only a Draft can be planned.");
         if (ContractId is null) throw new DomainRuleException("Choose an instrument before planning.");
         var change = Transition(PlayStatus.Planned, null, null, now);
         PlannedAtUtc = now;
         PlanRevision = 1;
-        return (change, new PlayPlanRevision(this, 1, "Planned", now));
+        return (change, new PlayPlanRevision(this, 1, "Planned", now) { Preflight = preflight });
     }
 
     public PlayStatusChange Pause(DateTimeOffset now) => Status == PlayStatus.Planned
@@ -310,6 +314,8 @@ public sealed class PlayPlanRevision : IOwned
     public string Plan { get; private set; } = null!;
     public string Reason { get; private set; } = null!;
     public DateTimeOffset CreatedAtUtc { get; private set; }
+    /// <summary>The pre-flight checklist recorded with revision 1 at Plan it, as JSON; null on later revisions and older plans.</summary>
+    public string? Preflight { get; internal init; }
     private PlayPlanRevision() { }
 
     internal PlayPlanRevision(Play play, int number, string reason, DateTimeOffset now)

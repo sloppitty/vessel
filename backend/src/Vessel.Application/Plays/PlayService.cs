@@ -125,13 +125,15 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     {
         var play = await Find(id, ct);
         RequireVersion(play, request.ExpectedVersion);
+        if (request.Preflight is not null && (request.Status, play.Status) is not ("planned", PlayStatus.Draft))
+            throw new ProblemException(400, "A pre-flight is recorded only when a Draft is planned.");
         var now = time.GetUtcNow();
         switch (request.Status, play.Status)
         {
             case ("planned", PlayStatus.Draft):
                 await EnabledAccount(play.AccountId, ct);
                 PlayDocuments.RequirePlannable(PlayDocuments.Read(play.Plan));
-                var (change, revision) = play.MarkPlanned(now);
+                var (change, revision) = play.MarkPlanned(now, PlayPreflight.Serialize(PlayPreflight.Normalize(request.Preflight)));
                 store.Add(change);
                 store.Add(revision);
                 break;
@@ -165,13 +167,20 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         return ToDto(play);
     }, ct), ct);
 
+    /// <summary>At most this many recent next actions are offered at planning (phase 1, 1.5).</summary>
+    public const int MaxNextActions = 10;
+
+    public Task<List<NextActionDto>> NextActionsAsync(CancellationToken ct, string? tradingMode = "real") =>
+        store.NextActionsAsync(MaxNextActions, Mode(tradingMode), ct);
+
     public async Task<PlayHistoryDto> HistoryAsync(Guid id, CancellationToken ct)
     {
         var play = await Find(id, ct);
         var revisions = await store.RevisionsAsync(play.Id, ct);
         var changes = await store.StatusChangesAsync(play.Id, ct);
         var reviews = await store.ReviewsAsync(play.Id, ct);
-        return new(revisions.Select(r => new PlanRevisionDto(r.Number, StatusName(r.Status), r.Reason, r.CreatedAtUtc, PlayDocuments.Read(r.Plan))).ToList(),
+        return new(revisions.Select(r => new PlanRevisionDto(r.Number, StatusName(r.Status), r.Reason, r.CreatedAtUtc, PlayDocuments.Read(r.Plan))
+            { Preflight = PlayPreflight.Read(r.Preflight) }).ToList(),
             changes.Select(c => new StatusChangeDto(StatusName(c.From), StatusName(c.To), c.Reason is { } reason ? ReasonName(reason) : null,
                 c.Note, c.OccurredAtUtc, c.Source.ToString().ToLowerInvariant())).ToList(),
             reviews.Select(r => new ReviewRevisionDto(r.Number, r.OccurredAtUtc, r.Review,

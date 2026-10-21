@@ -1,6 +1,7 @@
 import { isTradingMode, type TradingMode } from './paper'
 import { isCount, isGuid, isListOf, isNonBlankText, isNullOr, isRecord, isReviewDecimal, isText, isTimestamp } from './guards'
 import { isOptionalPlayLocalResult, type PlayLocalResult } from './local-result'
+import { preflightCodes, type PreflightCode } from './plays'
 
 export const reviewPeriods = [
   { id: 'day', label: 'Last 24 hours' }, { id: 'week', label: 'Last 7 days' },
@@ -71,6 +72,11 @@ export interface ReviewDocument {
     unassignedFills: number; firstFillAtUtc: string | null; notice: string
   }
   plays: ReviewPlay[]; offset: number; nextOffset: number | null
+  /**
+   * The pre-flight recorded at Plan it over the period's closed planned Plays, scored or excluded: how many have one, how
+   * many were planned before it existed, and per check how many went ahead without it. Absent from older servers.
+   */
+  preflight?: { recorded: number; notRecorded: number; skipped: Array<{ code: PreflightCode; count: number }> }
   /** Whether imported positions are in this report; absent from servers before October 20, 2026. */
   positions?: ReviewPositions
 }
@@ -132,6 +138,9 @@ export const isReviewDocument = (v: unknown): v is ReviewDocument => isRecord(v)
   isNullOr(v.coverage.firstFillAtUtc, x => isTimestamp(x, 64)) && isText(v.coverage.notice, 4000) && isListOf(v.plays, play, 50) &&
   (v.plays as ReviewPlay[]).every(p => (p.executionSource === 'paper') === (v.tradingMode === 'paper')) &&
   isCount(v.offset) && (v.nextOffset === null || isCount(v.nextOffset) && v.nextOffset > v.offset) &&
+  (v.preflight === undefined || isRecord(v.preflight) && isCount(v.preflight.recorded) && isCount(v.preflight.notRecorded) &&
+    isListOf(v.preflight.skipped, s => isRecord(s) && preflightCodes.includes(s.code as PreflightCode) && isCount(s.count) &&
+      s.count <= ((v.preflight as Record<string, unknown>).recorded as number), preflightCodes.length)) &&
   (v.positions === undefined || isReviewPositions(v.positions)) &&
   (v.tradingMode !== 'paper' ||
     (v.positions === undefined || v.positions.mode === 'exclude' && !v.positions.included) &&

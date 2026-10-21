@@ -3,7 +3,7 @@ import { PaperExecutionPanel } from './PaperExecutionPanel'
 import { errorMessage } from '@/api/errors'
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
-import { isReviewed, pagedPlayViews, playSearchLength, statusLabels, type PlayCounts, type PlayList as PlayListPage, type PlayListQuery, type PlayStatus, type PlayView, type SavedPlay, type StatusRequest } from '@/api/plays'
+import { isReviewed, pagedPlayViews, playSearchLength, statusLabels, type NextAction, type PlayCounts, type PlayList as PlayListPage, type PreflightCheck, type PlayListQuery, type PlayStatus, type PlayView, type SavedPlay, type StatusRequest } from '@/api/plays'
 import type { AccountMonitor } from '@/api/monitor'
 import { Button } from '@/components/ui/button'
 import { Pager } from '@/components/ui/pager'
@@ -35,7 +35,7 @@ import { noEntryFills, type EntryFills } from './position-risk-summary'
 import { planNumberIssues, planNumberSummary, storedPlanText, StoredPlanTextContext, type StoredPlanText } from './stored-plan-text'
 import { availableOf, defaultSizeUnits, marginOverBudget, overBudgetMessage, type SizeUnits } from './sizing'
 import { leverageOf } from './levels'
-import { CancelDialog, DeleteDialog, HistoryDialog, PauseDialog, RevisionDialog } from './PlayDialogs'
+import { CancelDialog, DeleteDialog, HistoryDialog, PauseDialog, PreflightDialog, RevisionDialog } from './PlayDialogs'
 import { initialPlaysList, playSearchDelay, playViewTabs, type PlaysListState } from './plays-list'
 import {
   createPlaysSession, draftFromSaved, fieldsToSave, hasDraftContent, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
@@ -45,7 +45,7 @@ import {
 
 
 const ended: PlayStatus[] = ['closed', 'cancelled']
-type DialogKind = null | 'revision' | 'pause' | 'cancel' | 'delete' | 'history'
+type DialogKind = null | 'revision' | 'pause' | 'cancel' | 'delete' | 'history' | 'preflight'
 type WorkKind = 'save' | 'status' | 'open' | 'delete' | 'manual'
 
 export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef, list, onList, reloadGeneration = 0, accountMonitors = [], onManageAccount }: {
@@ -247,6 +247,19 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const opened = status === 'open' || venueStatus === 'open'
   const filledEntries: ReadonlySet<string> | 'all' = fills === 'unknown' ? opened ? 'all' : noFilledEntries : fills.filled
   const [priceStep, setPriceStep] = useState<number | null>(null)
+  // The Draft's pre-flight as the workspace last evaluated it; Plan it records it with revision 1 (phase 1, 1.5).
+  const [preflight, setPreflight] = useState<PreflightCheck[] | null>(null)
+  // The owner's recent next actions, offered while a Play is not yet under way. They are context, so a failed read shows none.
+  const [nextActions, setNextActions] = useState<{ api: WorkspaceApi; actions: NextAction[] } | null>(null)
+  const offersNextActions = visible && session.view === 'editor' && (saved?.summary.status ?? 'draft') !== 'open' &&
+    saved?.summary.status !== 'closed' && saved?.summary.status !== 'cancelled' && saved?.summary.origin !== 'retrospective'
+  useEffect(() => {
+    if (!offersNextActions) return
+    const controller = new AbortController()
+    api.nextActions(controller.signal).then(actions => { if (!controller.signal.aborted) setNextActions({ api, actions }) })
+      .catch(() => { /* No suggestions on failure; planning does not depend on them. */ })
+    return () => controller.abort()
+  }, [api, offersNextActions])
   // The workspace knows the instrument's units; page messages such as the blocked-save reason use them.
   const [units, setUnits] = useState<SizeUnits>(defaultSizeUnits)
   const onUnits = useCallback((next: SizeUnits) => setUnits(current => current.quote === next.quote && current.base === next.base &&
@@ -474,11 +487,17 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const statusBlocked = dirty ? 'Save your changes first' : undefined
   const pending = busy !== null
 
+  // Plan it always shows the checklist first; it never blocks, and what the owner saw is recorded with revision 1.
+  const requestPlan = () => {
+    if (planBlocked()) return
+    if (preflight) { setDialogError(null); setDialog('preflight') } else void changeStatus({ status: 'planned' })
+  }
+
   // The same buttons stay in the same places whether or not the play is saved; unavailable ones are disabled.
   const statusAction = status === 'draft'
     ? <Button size="sm" className="play-primary" disabled={pending || !draft.accountId || !draft.instrument || !paperArming}
       title={!paperArming ? 'Enable Paper trading in Settings before arming a play' : !draft.instrument ? 'Choose an instrument and price an entry to plan' : 'Commit to this plan. Later changes become revisions.'}
-      onClick={() => { void changeStatus({ status: 'planned' }) }}><Play size={14} />Plan it</Button>
+      onClick={requestPlan}><Play size={14} />Plan it</Button>
     : status === 'planned' ? <Button size="sm" variant="outline" disabled={pending || dirty} title={statusBlocked ?? (paper ? 'Pause simulation; unchecked time remains unscored' : 'Orders withdrawn, idea still valid')}
       onClick={() => { if (paper) { setDialogError(null); setDialog('pause') } else { void changeStatus({ status: 'paused' }) } }}><Pause size={14} />Pause</Button>
     : status === 'paused' ? <Button size="sm" className="play-primary" disabled={pending || dirty || !paperArming} title={statusBlocked}
@@ -535,6 +554,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       filledEntries={filledEntries} fills={fills} onUnits={onUnits} onPriceStep={setPriceStep}
       incidents={saved ? playIncidents.get(saved.summary.id) : undefined} stopEvidence={manual ? undefined : stopEvidence}
       evidenceImages={evidenceImages} reviewReceipt={reviewReceipt} journalSave={journalSave} retrospectiveReceipt={retrospectiveReceipt}
+      onPreflight={setPreflight} nextActions={nextActions?.api === api ? nextActions.actions : null} onOpenPlay={id => { void open(id) }}
       plannedAfterExecution={playReceipt?.plannedAfterExecution === true}
       execution={paper ? saved ? <PaperExecutionPanel key={saved.summary.id} api={api} playId={saved.summary.id} reloadGeneration={reloadGeneration + saved.summary.version} onState={onPaperState} /> : <p className="workspace-scope-note">Save this Paper play to see simulated execution progress. Planning arms evaluation; a draft never monitors.</p> : manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
         enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}
@@ -558,6 +578,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       onPause={() => { void changeStatus({ status: 'paused' }) }} onClose={() => setDialog(null)} />}
     {dialog === 'cancel' && <CancelDialog paper={paper} pending={busy === 'status'} error={dialogError}
       onCancel={(reason, note) => { void changeStatus({ status: 'cancelled', reason, ...(note ? { note } : {}) }) }} onClose={() => setDialog(null)} />}
+    {dialog === 'preflight' && preflight && <PreflightDialog checks={preflight} pending={busy === 'status'} error={dialogError}
+      onPlan={() => { void changeStatus({ status: 'planned', preflight }) }} onClose={() => setDialog(null)} />}
     {dialog === 'delete' && <DeleteDialog pending={busy === 'delete'} error={dialogError} onDelete={() => { void remove() }} onClose={() => setDialog(null)} />}
     {dialog === 'history' && saved && <HistoryDialog api={api} playId={saved.summary.id} onClose={() => setDialog(null)} />}
   </>

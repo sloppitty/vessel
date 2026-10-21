@@ -204,7 +204,71 @@ October 20, 2026, branch `t3/phase1-post-hoc-badge`, stacked on 1.1a:
 
 ## 1.5 Lessons return and a recorded pre-flight
 
-Not started.
+October 20, 2026, branch `t3/phase1-preflight`, stacked on 1.4a:
+- **Next actions (G-02).**
+  - `GET /api/plays/next-actions` returns the owner's ten newest non-blank next actions from Closed or Cancelled Plays,
+    by review time, each with its source Play.
+  - The Thesis tab of a Draft, Planned or Paused Play lists them, collapsed. Each source opens its Play.
+  - **Copy into plan** appends `If …, then <next action> (from <title>)` only on that click. On a Planned Play it saves
+    through the revision-reason dialog as one revision.
+- **Pre-flight (G-05).**
+  - Plan it evaluates five checks from what the page shows:
+    - priced stops;
+    - shares;
+    - thesis and invalidation;
+    - risk within the setting × ladder level;
+    - liquidation beyond the stops.
+  - The checklist always opens, with **Plan it anyway** and **Back to the plan**. It never blocks.
+  - The server validates codes and outcomes, refuses a pre-flight anywhere but Draft → Planned, and stores it on plan
+    revision 1. That uses the explicit migration `20261020085301_PlanPreflight`, a nullable `jsonb` column.
+  - History shows the recorded checks, or says "Pre-flight not recorded" for a plan from before them.
+  - Review counts, over the period's closed planned Plays, those recorded, those not recorded, and the skips per check.
+- **Tests.**
+  - PostgreSQL: a Draft with an unpriced stop plans, its revision 1 records the skip, and Review counts it beside one
+    unrecorded Play.
+  - PostgreSQL: invalid codes, outcomes and duplicates get 400, as does a pre-flight sent when resuming.
+  - PostgreSQL: next actions come newest first, at most ten, with blank and in-progress ones left out. The two-owner
+    isolation test covers the new route.
+  - Frontend:
+    - the checks and their unknowns;
+    - the dialog and going back;
+    - copying into Draft and Planned Plays;
+    - History, Review counts and the response guards.
+  - Existing Plan it tests now go through the checklist.
+- **Checks.** `scripts/check.sh` passed:
+  - backend: 3,564 passed, 5 skipped;
+  - frontend: 151 files and 3,757 tests;
+  - build clean.
+
+- **Sol (Codex) round 1.** Five findings, all fixed:
+  - **Stale sizing (medium).** A sizing record that could not be reloaded is no record, so the risk check is unknown
+    rather than met against an old ladder level. A test fails without this fix.
+  - **Liquidation (medium).** The check is met only when every stop is priced. A priced stop past the liquidation is not
+    met, and anything else is unknown.
+  - **Allocations (medium).** An entry with no stops or no targets totals 0% there, which is not met.
+  - **Dialog (low).** The checklist opens at every Plan it, as the contract says, including when every check is met. The
+    earlier refinement is withdrawn.
+  - **History (low).** A plan from before the pre-flight says "Pre-flight not recorded".
+  - **Check.** After the rebase onto main, `scripts/check.sh` passed: backend 3,574 passed, 5 skipped; frontend 151
+    files and 3,782 tests.
+
+- **Sol (Codex) round 2.** All five round-1 findings resolved. Three new findings, all fixed:
+  - **Priced stops (medium).** The check reused the stop-coverage gap, which also requires entry shares to total 100%,
+    so a half-sized entry with its stop was recorded as missing it. It now asks only whether each priced entry has a
+    stop that resolves to a price; shares stay with the allocation check, and with no priced entry it is unknown.
+  - **Empty checklist (low).** An empty pre-flight counted as recorded in Review but not in History. The server now
+    stores and reads it as no pre-flight.
+  - **Lifecycle doc (low).** It no longer describes the withdrawn plan-at-once shortcut.
+  - **Test.** An all-clear plan now has a test that fails if Plan it skips the checklist.
+  - **Check.** `scripts/check.sh` passed: backend 3,576 passed, 5 skipped; frontend 151 files and 3,784 tests.
+
+- **Post-sync Sol review (October 21).** The merge is sound: pre-flight counts never see a position row. One low
+  finding, fixed:
+  - **Blank next actions.** The query trimmed only ASCII spaces, so a next action of no-break spaces reached the
+    browser, which then rejected the whole list. It now trims every character the browser trims. The PostgreSQL test
+    adds such an action and fails without the fix.
+  - Round 2 found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,598 passed, 5 skipped; frontend 154 files and 3,826 tests.
 
 ## 1.6 Capture friction and time consistency
 

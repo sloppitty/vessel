@@ -1,10 +1,11 @@
 import { errorMessage } from '@/api/errors'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { WorkspaceApi } from '@/api/workspace'
-import { cancelReasonLabels, cancelReasons, statusLabels, type CancelReason, type PlayHistory } from '@/api/plays'
+import { cancelReasonLabels, cancelReasons, statusLabels, type CancelReason, type PlayHistory, type PreflightCheck } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { describePlanChanges } from './saved'
+import { preflightLabels } from './preflight'
 import { NativeSelect } from '@/components/ui/native-select'
 
 /** Asks why a planned Play's plan changed; the reason is kept with the revision. */
@@ -72,6 +73,34 @@ export function CancelDialog({ pending, error, onCancel, onClose, paper = false 
   </Dialog>
 }
 
+const outcomeLabels = { passed: 'Met', skipped: 'Not met', unknown: 'Unknown' } as const
+
+/** The pre-flight kept with revision 1, one line per check, or a line saying a plan from before it has none. */
+const preflightLines = (checks: readonly PreflightCheck[] | null | undefined) =>
+  [checks?.length ? `Pre-flight: ${checks.map(check => `${preflightLabels[check.code].toLowerCase()} · ${outcomeLabels[check.outcome].toLowerCase()}`).join('; ')}.`
+    : 'Pre-flight not recorded.']
+
+/**
+ * The pre-flight at Plan it (phase 1, 1.5): what the plan already says, recorded with revision 1. It never blocks:
+ * Plan it anyway is always available, and so is going back to the plan.
+ */
+export function PreflightDialog({ checks, pending, error, onPlan, onClose }: {
+  checks: readonly PreflightCheck[]; pending: boolean; error: string | null; onPlan: () => void; onClose: () => void
+}) {
+  return <Dialog open onOpenChange={next => { if (!next && !pending) onClose() }}>
+    <DialogContent className="workspace-dialog">
+      <DialogHeader><DialogTitle>Before planning</DialogTitle><DialogDescription>
+        What this plan already says. You can plan it as it is; the checklist is kept with the plan.
+      </DialogDescription></DialogHeader>
+      <ul className="preflight-checks" aria-label="Pre-flight checks">{checks.map(check => <li key={check.code} data-outcome={check.outcome}>
+        <span>{preflightLabels[check.code]}</span><strong>{outcomeLabels[check.outcome]}</strong></li>)}</ul>
+      {error && <p className="error" role="alert">{error}</p>}
+      <div className="management-actions"><Button type="button" variant="outline" onClick={onClose} disabled={pending}>Back to the plan</Button>
+        <Button type="button" className="play-primary" onClick={onPlan} disabled={pending}>{pending ? 'Planning…' : 'Plan it anyway'}</Button></div>
+    </DialogContent>
+  </Dialog>
+}
+
 export function DeleteDialog({ pending, error, onDelete, onClose }: {
   pending: boolean; error: string | null; onDelete: () => void; onClose: () => void
 }) {
@@ -107,7 +136,7 @@ export function HistoryDialog({ api, playId, onClose }: { api: WorkspaceApi; pla
   const items: HistoryItem[] = result && 'history' in result ? [
     ...result.history.revisions.map((revision, index, all): HistoryItem => ({
       at: revision.createdAtUtc, key: `r${revision.number}`, title: `Plan revision ${revision.number} · ${revision.reason}`,
-      detail: index === 0 ? ['The plan as first committed.'] : describePlanChanges(all[index - 1]!.plan, revision.plan),
+      detail: index === 0 ? ['The plan as first committed.', ...(revision.number === 1 ? preflightLines(revision.preflight) : [])] : describePlanChanges(all[index - 1]!.plan, revision.plan),
     })),
     ...result.history.statusChanges.map((change, index): HistoryItem => ({
       at: change.occurredAtUtc, key: `s${index}`, title: `${statusLabels[change.from]} → ${statusLabels[change.to]}${change.source === 'paper' ? ' · from simulated paper executions' : change.source === 'venue' ? ' · from linked venue fills' : change.source === 'manual' ? ' · from manual facts' : ''}`,

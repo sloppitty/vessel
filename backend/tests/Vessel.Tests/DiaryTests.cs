@@ -8,6 +8,7 @@ using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Review;
 using Vessel.Application.Sizing;
+using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Numerics;
@@ -294,6 +295,140 @@ public sealed class DiaryPostgresTests
         var later = new DateTimeOffset(now.Ticks - now.Ticks % TimeSpan.TicksPerMicrosecond, TimeSpan.Zero);
         var entry = await Add(client, planned, Fact(planned.Summary.Version, "entry", "1", "100", 0) with { OccurredAtUtc = later });
         Assert.False(entry.Receipt!.PlannedAfterExecution);
+    }
+
+    private static readonly PreflightCheckDto[] SkippedStops =
+    [
+        new("liquidation", "unknown"), new("priced-stops", "skipped"), new("allocations", "passed"), new("thesis", "passed"), new("risk", "unknown"),
+    ];
+
+    [PostgresFact]
+    public async Task Planning_records_the_pre_flight_with_revision_1_and_Review_counts_skipped_checks()
+    {
+        // Phase 1.5 (G-05): an unpriced stop never blocks Plan it; the skipped check is kept with revision 1 and counted.
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var account = await Account(database, owner);
+        await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
+        using var client = factory.AuthorizedClient();
+        var plan = TestPlays.Plan() with { Entries = [TestPlays.Plan().Entries[0] with { Stops = [new PlanExit("stop-1", "price", "", "100")] }] };
+        var created = await client.PostAsJsonAsync("/api/plays", new CreatePlayRequest(account.Id, "BTC", "manual", "Unpriced stop", plan));
+        created.EnsureSuccessStatusCode();
+        var draft = (await created.Content.ReadFromJsonAsync<PlayDto>())!;
+        var planning = await client.PostAsJsonAsync($"/api/plays/{draft.Summary.Id}/status",
+            new ChangePlayStatusRequest(draft.Summary.Version, "planned", Preflight: SkippedStops));
+        planning.EnsureSuccessStatusCode();
+        var planned = (await planning.Content.ReadFromJsonAsync<PlayDto>())!;
+        var history = (await client.GetFromJsonAsync<PlayHistoryDto>($"/api/plays/{draft.Summary.Id}/history"))!;
+        var first = Assert.Single(history.Revisions);
+        Assert.Equal(1, first.Number);
+        Assert.Equal(["priced-stops:skipped", "allocations:passed", "thesis:passed", "risk:unknown", "liquidation:unknown"],
+            first.Preflight!.Select(c => $"{c.Code}:{c.Outcome}"));
+
+        var entry = await Add(client, planned, Fact(planned.Summary.Version, "entry", "1", "100", 0));
+        await Add(client, entry.Play, Fact(entry.Play.Summary.Version, "exit", "1", "110", 1));
+        // A Play planned without a recorded pre-flight, as every Play before this change was.
+        var older = await Planned(client, account.Id);
+        var olderEntry = await Add(client, older, Fact(older.Summary.Version, "entry", "1", "100", 2));
+        await Add(client, olderEntry.Play, Fact(olderEntry.Play.Summary.Version, "exit", "1", "90", 3));
+        Assert.Null(Assert.Single((await client.GetFromJsonAsync<PlayHistoryDto>($"/api/plays/{older.Summary.Id}/history"))!.Revisions).Preflight);
+
+        await using var verify = database.Context(owner);
+        var report = await new ReviewService(new ReviewStore(verify, new SizingStore(verify, TestUnitOfWork.For(verify))), TimeProvider.System)
+            .GetAsync(new(Period: "all"), default);
+        Assert.Equal((1, 1), (report.Preflight!.Recorded, report.Preflight.NotRecorded));
+        Assert.Equal(["priced-stops:1", "allocations:0", "thesis:0", "risk:0", "liquidation:0"],
+            report.Preflight.Skipped.Select(c => $"{c.Code}:{c.Count}"));
+    }
+
+    [PostgresFact]
+    public async Task A_pre_flight_is_validated_and_accepted_only_when_a_Draft_is_planned()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var account = await Account(database, owner);
+        await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
+        using var client = factory.AuthorizedClient();
+        var created = await client.PostAsJsonAsync("/api/plays", new CreatePlayRequest(account.Id, "BTC", "manual", "Checks", TestPlays.Plan()));
+        var draft = (await created.Content.ReadFromJsonAsync<PlayDto>())!;
+        foreach (var invalid in new PreflightCheckDto[][]
+        {
+            [new("priced-stops", "skipped"), new("priced-stops", "passed")],
+            [new("stop-loss", "passed")],
+            [new("thesis", "ignored")],
+        })
+        {
+            var refused = await client.PostAsJsonAsync($"/api/plays/{draft.Summary.Id}/status",
+                new ChangePlayStatusRequest(draft.Summary.Version, "planned", Preflight: invalid));
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        }
+        var planned = (await (await client.PostAsJsonAsync($"/api/plays/{draft.Summary.Id}/status",
+            new ChangePlayStatusRequest(draft.Summary.Version, "planned", Preflight: [new("thesis", "passed")]))).Content.ReadFromJsonAsync<PlayDto>())!;
+        Assert.Equal("planned", planned.Summary.Status);
+        var paused = (await (await client.PostAsJsonAsync($"/api/plays/{draft.Summary.Id}/status",
+            new ChangePlayStatusRequest(planned.Summary.Version, "paused"))).Content.ReadFromJsonAsync<PlayDto>())!;
+        // Resuming is not planning a Draft: no pre-flight is taken, and revision 1 keeps the original one.
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync($"/api/plays/{draft.Summary.Id}/status",
+            new ChangePlayStatusRequest(paused.Summary.Version, "planned", Preflight: SkippedStops))).StatusCode);
+        (await client.PostAsJsonAsync($"/api/plays/{draft.Summary.Id}/status", new ChangePlayStatusRequest(paused.Summary.Version, "planned")))
+            .EnsureSuccessStatusCode();
+        var revision = Assert.Single((await client.GetFromJsonAsync<PlayHistoryDto>($"/api/plays/{draft.Summary.Id}/history"))!.Revisions);
+        var kept = Assert.Single(revision.Preflight!);
+        Assert.Equal(("thesis", "passed"), (kept.Code, kept.Outcome));
+    }
+
+    [PostgresFact]
+    public async Task Recent_next_actions_are_the_newest_on_ended_Plays_with_their_source()
+    {
+        // Phase 1.5 (G-02): at most ten, newest review first; blank ones and Plays still in progress are left out.
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var account = await Account(database, owner);
+        var ids = new List<Guid>();
+        await using (var db = database.Context(owner))
+        {
+            for (var n = 0; n < 12; n++)
+            {
+                var play = TestPlays.Create(account, new PerpetualInstrument("manual", "BTC"));
+                play.Annotate($"Play {n}", "{}", "", At);
+                play.MarkPlanned(At);
+                play.Cancel(CancelReason.Missed, null, At);
+                play.Annotate($"Play {n}", "{}", "", At.AddHours(n), new ReviewAnswers(NextAction: n switch
+                {
+                    3 => "  ",
+                    // Blank to the browser too: SQL's plain trim keeps a no-break space and a byte order mark.
+                    5 => "\u00A0\u2003\uFEFF",
+                    _ => $"Wait for the retest {n}",
+                }));
+                db.Plays.Add(play); ids.Add(play.Id);
+            }
+            var open = TestPlays.Create(account, new PerpetualInstrument("manual", "BTC"));
+            open.MarkPlanned(At);
+            db.Plays.Add(open);
+            await db.SaveChangesAsync();
+        }
+        // A paper Play's next action, the newest of all, stays in Paper mode; real ones never appear there.
+        Guid paperPlay;
+        await using (var db = database.Context(owner))
+        {
+            var workspace = new WorkspaceService(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner),
+                TestVenues.With(new FixtureReader()), TestUnitOfWork.For(db));
+            var portfolio = await workspace.CreatePortfolioAsync(new("Paper", TradingMode: "paper"), default);
+            var created = await workspace.CreateAccountAsync(new(portfolio.Id, "Paper", "hyperliquid", TradingMode: "paper"), default);
+            var play = TestPlays.Create(await db.Accounts.SingleAsync(a => a.Id == created.Id), new PerpetualInstrument("hyperliquid", "BTC"));
+            play.Annotate("Paper idea", "{}", "", At);
+            play.MarkPlanned(At);
+            play.Cancel(CancelReason.Missed, null, At);
+            play.Annotate("Paper idea", "{}", "", At.AddHours(20), new ReviewAnswers(NextAction: "Test the paper retest"));
+            db.Plays.Add(play); paperPlay = play.Id;
+            await db.SaveChangesAsync();
+        }
+        await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
+        using var client = factory.AuthorizedClient();
+        var actions = (await client.GetFromJsonAsync<List<NextActionDto>>("/api/plays/next-actions"))!;
+        Assert.Equal(PlayService.MaxNextActions, actions.Count);
+        Assert.Equal(new[] { 11, 10, 9, 8, 7, 6, 4, 2, 1, 0 }.Select(n => (ids[n], $"Play {n}", $"Wait for the retest {n}")),
+            actions.Select(a => (a.PlayId, a.Title, a.NextAction)));
+        Assert.Equal(At.AddHours(11), actions[0].ReviewedAtUtc);
+        var paper = Assert.Single((await client.GetFromJsonAsync<List<NextActionDto>>("/api/plays/next-actions?tradingMode=paper"))!);
+        Assert.Equal((paperPlay, "Test the paper retest"), (paper.PlayId, paper.NextAction));
     }
 
     [PostgresFact]
