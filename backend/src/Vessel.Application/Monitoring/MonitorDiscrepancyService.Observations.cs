@@ -15,7 +15,7 @@ namespace Vessel.Application.Monitoring;
 public sealed partial class MonitorDiscrepancyService
 {
     private static readonly string[] PlayKinds = ["protection.missing", "protection.cancelled", "protection.short", "protection.excess",
-        "protection.orphaned", "entry.orphaned", "level.drift"];
+        "protection.beyond-liquidation", "protection.orphaned", "entry.orphaned", "level.drift"];
     private static readonly string[] PositionKinds = ["position.missing", "position.opposite", "position.short", "position.excess", "fill.unlinked"];
     /// <summary>Unlinked fills listed in details. The count, total and fingerprint always cover all of them.</summary>
     internal const int MaxListedFills = 20;
@@ -287,6 +287,24 @@ public sealed partial class MonitorDiscrepancyService
             Add("protection.short", !open ? completeOrders ? false : null : !stopPresenceKnown ? null :
                 superseded || stops.Length == 0 ? false : stopCoverageKnown ? Compare(stopQuantity, p.Quantity, p.Instrument) < 0 : null,
                 stopPresenceKnown && mechanicsKnown && structural);
+            // Phase 2, item 8b: a resting linked stop at or beyond the venue's own liquidation price on the loss side cannot act
+            // before liquidation. Only the venue's reported price counts, from this read's fresh snapshot; when the venue
+            // reports none the check is undecidable by design. Under cross margin the price moves with the whole account.
+            var venuePosition = positionsFresh ? sync.Snapshot.Positions.FirstOrDefault(x => x.SignedQuantity != 0 &&
+                Same(p.Instrument, x.ContractId, x.VenueContractId)) : null;
+            var liquidation = venuePosition?.LiquidationPrice;
+            var beyond = liquidation is { } limit ? stops.Where(x => exitSide == ExecutionFacts.Sell
+                ? x.Order!.ActingPrice <= limit : x.Order!.ActingPrice >= limit).ToArray() : [];
+            Add("protection.beyond-liquidation", !open ? completeOrders ? false : null : !positionsFresh || !knownOrders ? null :
+                    venuePosition is null || stops.Length == 0 ? false : liquidation is null ? null : beyond.Length > 0,
+                undecidable: positionsFresh && knownOrders && venuePosition is not null && stops.Length > 0 && liquidation is null,
+                data: new { playIds = new[] { play.Id }, nativeContractId = Native(p.Instrument),
+                    liquidationPrice = liquidation is { } price ? ExactAmount.From(price).ToString() : null, marginMode = venuePosition?.MarginMode,
+                    stops = stops.Select(x => new { orderId = External(x.Link), level = x.Link.LevelKey,
+                        price = ExactAmount.From(x.Order!.ActingPrice).ToString(), beyond = beyond.Contains(x) }).ToArray() },
+                // Which stops sit beyond liquidation, not the price itself: a cross price that drifts each read must not
+                // restart confirmation while the condition holds.
+                identity: new { beyond = beyond.Select(x => External(x.Link)).Order(StringComparer.Ordinal).ToArray() });
             var excess = Compare(Covered(stops, ownWholeStop, true), p.Quantity, p.Instrument) > 0 ||
                 Compare(Covered(targets, ownWholeTarget, true), p.Quantity, p.Instrument) > 0;
             Add("protection.excess", !open ? completeOrders ? false : null :
@@ -377,8 +395,9 @@ public sealed partial class MonitorDiscrepancyService
         order.VenueStatus, order.StatusAtUtc, order.VenueContractId);
     private static string Subject(VenueInstrument i) => JsonSerializer.Serialize(new[] { i.ContractId, Native(i) });
     private static bool Same(VenueInstrument i, string contract, string? native) => i.ContractId == contract && Native(i) == (native ?? contract);
-    private static string Severity(string kind) => kind is "protection.missing" or "protection.cancelled" or "entry.orphaned" or
-        "position.missing" or "position.opposite" ? "critical" : kind == "level.drift" ? "info" : "warning";
+    // protection.beyond-liquidation is critical (owner, October 21): the stop cannot act before liquidation.
+    private static string Severity(string kind) => kind is "protection.missing" or "protection.cancelled" or "protection.beyond-liquidation" or
+        "entry.orphaned" or "position.missing" or "position.opposite" ? "critical" : kind == "level.drift" ? "info" : "warning";
     private static int Compare(ExactAmount a, ExactAmount b, VenueInstrument i) => Rounded(a, i.QuantityDecimals).CompareTo(Rounded(b, i.QuantityDecimals));
     private static BigInteger Rounded(ExactAmount value, int decimals)
     {
