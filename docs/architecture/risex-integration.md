@@ -183,3 +183,28 @@ The existing `/v1/portfolio/details` response includes summary `free_collateral`
 The adapter now stores summary `free_collateral` as nullable exact `AvailableMarginUsd`, exposed as snapshot `availableMarginUsd`. Missing, null and empty string remain unknown; explicit zero and signed decimals are retained. Invalid or unrepresentable decimals reject the observation. `WithdrawableUsd` remains null. No equity-minus-initial-margin calculation is substituted, and collateral, unsettled funds and position-level isolated balances are never added to free collateral.
 
 Overview and portfolios select this reported amount once per enabled RISEx account with known-account coverage. Account rows and detail show reported margin availability, not withdrawable funds. Migration `20261012192227_AvailableMargin` leaves older snapshots unknown until explicit refresh. Fixture and disposable PostgreSQL tests cover parsing, exact persistence, unknown/zero replacement, owner isolation and retained observations after failed refresh. No live owner venue read or owner database migration was performed.
+
+## October 21, 2026: robustness (Phase 2, item 14a)
+
+See `phase2-risk-coverage-contract.md`, item 14a.
+- **A trade without reported PnL (D-22, probe V5)** is set aside and counted,
+  never imported with a zero result. It used to abort the whole read, so
+  balances and positions froze until the row aged out of the latest 2,000.
+  - The snapshot and every other fill still apply.
+  - `OmittedExecutions` counts it beside trades on unrecognized markets.
+  - The history notice ends with one sentence, for example "Omitted
+    executions: 1 without reported PnL, 1 on an unrecognized market."
+  - A Play linked to its order sees known missing executions through the
+    shared `OrderKey`/`MissingExecutions` rule, so its result is unknown.
+  - A missing or empty fee is still an invalid response.
+- **A fixed end cut (F-13, probe V9).** Every `/v1/trade-history` page carries
+  the same `end_time`: the snapshot's observation time in nanoseconds,
+  truncated to whole milliseconds. A trade arriving between page requests
+  therefore cannot shift page 2 and push a row out of the bounded read.
+  - A row after the cut, if the venue returns one anyway, is skipped. It is
+    neither imported nor counted as omitted.
+  - That trade is read by the next refresh, whose own cut is later and whose
+    window overlaps this one.
+  - Fills are bounded by the same instant as the snapshot's positions. A
+    trade whose venue time runs slightly ahead of Vessel's clock waits for
+    the next refresh.

@@ -156,23 +156,55 @@ public sealed partial class RisexAdapterTests
     }
 
     [Theory]
-    [InlineData("fee", "missing")]
-    [InlineData("fee", "null")]
-    [InlineData("fee", "empty")]
-    [InlineData("realized_pnl", "missing")]
-    [InlineData("realized_pnl", "null")]
-    [InlineData("realized_pnl", "empty")]
-    public async Task Missing_execution_money_is_not_zeroed_even_on_an_opening_trade(string field, string value)
+    [InlineData("missing")]
+    [InlineData("null")]
+    [InlineData("empty")]
+    public async Task A_missing_fee_is_an_invalid_response_never_zero(string value)
     {
         var history = JsonNode.Parse(Trades)!;
         var trade = history["data"]!["trades"]![0]!.AsObject();
-        if (value == "missing") trade.Remove(field);
-        else trade[field] = value == "null" ? null : JsonValue.Create("");
+        if (value == "missing") trade.Remove("fee");
+        else trade["fee"] = value == "null" ? null : JsonValue.Create("");
         var reader = Reader(new() { ["/v1/trade-history"] = history.ToJsonString() }).Reader;
         var error = await Assert.ThrowsAsync<VenueReadException>(() => reader.ReadAsync(Address, default));
-        Assert.Equal(field == "realized_pnl"
-            ? "RISEx omitted realized PnL for an execution. Its net-of-fee result is unknown; this refresh was not imported."
-            : "RISEx returned an invalid or unsupported response.", error.Message);
+        Assert.Equal("RISEx returned an invalid or unsupported response.", error.Message);
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("null")]
+    [InlineData("empty")]
+    public async Task A_trade_without_reported_PnL_is_set_aside_and_counted_and_the_snapshot_still_applies(string value)
+    {
+        // Phase 2, item 14a (D-22, probe V5): one such trade used to abort the whole read, freezing balances and positions.
+        var history = JsonNode.Parse(Trades)!;
+        var trade = history["data"]!["trades"]![0]!.AsObject();
+        if (value == "missing") trade.Remove("realized_pnl");
+        else trade["realized_pnl"] = value == "null" ? null : JsonValue.Create("");
+        var result = await Reader(new() { ["/v1/trade-history"] = history.ToJsonString() }).Reader.ReadAsync(Address, default);
+        Assert.Equal(12183.268781664941504325m, result.Snapshot.AccountValueUsd);
+        Assert.DoesNotContain(result.Fills, f => f.SourceFillId == "0xopen");
+        Assert.Contains(result.Fills, f => f.SourceFillId == "0xclose");
+        // The set-aside trade and the trade on an unrecognized market are both known omissions, never zero.
+        Assert.Equal(2, result.OmittedExecutions);
+        Assert.EndsWith("Omitted executions: 1 without reported PnL, 1 on an unrecognized market.", result.HistoryNotice);
+    }
+
+    [Fact]
+    public async Task Every_history_page_shares_one_end_cut_and_a_later_trade_waits_for_the_next_refresh()
+    {
+        // Phase 2, item 14a (F-13, probe V9): a trade arriving between pages can no longer shift page 2.
+        var history = JsonNode.Parse(Trades)!;
+        history["data"]!["has_next_page"] = true;
+        var late = JsonNode.Parse(Trade("0xlate", "1", "BUY", "BUY", "0.01", "-0.01", Now.AddMinutes(2), "0xorder6"))!;
+        history["data"]!["trades"]!.AsArray().Add(late);
+        var (reader, routes) = Reader(new() { ["/v1/trade-history"] = history.ToJsonString() });
+        var result = await reader.ReadAsync(Address, default);
+        var cut = Now.ToUnixTimeMilliseconds() * 1_000_000;
+        Assert.Equal([$"GET /v1/trade-history?account={Address}&end_time={cut}&limit=1000&page=1",
+            $"GET /v1/trade-history?account={Address}&end_time={cut}&limit=1000&page=2"], routes.Requests.Where(r => r.Contains("trade-history")));
+        Assert.DoesNotContain(result.Fills, f => f.SourceFillId == "0xlate");
+        Assert.Equal(1, result.OmittedExecutions); // Only the unrecognized market: the later trade is not an omission.
     }
 
     [Theory]
@@ -238,7 +270,7 @@ public sealed partial class RisexAdapterTests
         var (reader, routes) = Reader();
         var result = await reader.ReadAsync(Address.ToUpperInvariant().Replace("0X", "0x"), default);
         Assert.Contains($"GET /v1/portfolio/details?account={Address}", routes.Requests);
-        Assert.Contains($"GET /v1/trade-history?account={Address}&limit=1000&page=1", routes.Requests);
+        Assert.Contains($"GET /v1/trade-history?account={Address}&end_time={Now.ToUnixTimeMilliseconds() * 1_000_000}&limit=1000&page=1", routes.Requests);
         Assert.All(routes.Requests, request => Assert.StartsWith("GET ", request));
 
         var snapshot = result.Snapshot;

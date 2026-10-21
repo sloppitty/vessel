@@ -143,13 +143,17 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             var snapshot = ReadSnapshot(Data(portfolio), catalogue, timeProvider.GetUtcNow(), out var positionsComplete);
             var fills = new List<VenueFill>();
             var omitted = new HashSet<(string Market, string Trade)>();
+            var missingPnl = new HashSet<(string Market, string Trade)>();
             var fillCoverage = new RawFillReadCoverage();
             var hasNextPage = false;
+            // Phase 2, item 14a (F-13): every page shares one end cut taken before the first, so a trade arriving between
+            // pages cannot shift page 2. Later trades are read by the next refresh, whose cut overlaps this one's window.
+            var cut = snapshot.ObservedAtUtc.ToUnixTimeMilliseconds() * 1_000_000;
             for (var page = 1; page <= MaxFillPages; page++)
             {
-                using var history = await GetAsync($"/v1/trade-history?account={address}&limit={PageSize}&page={page}", token);
+                using var history = await GetAsync($"/v1/trade-history?account={address}&end_time={cut}&limit={PageSize}&page={page}", token);
                 var data = Data(history);
-                fills.AddRange(ReadFills(data, catalogue, latest, omitted));
+                fills.AddRange(ReadFills(data, catalogue, latest, omitted, missingPnl, cut));
                 fillCoverage.Observe(Json.Property(data, "trades"), row => Nanoseconds(Json.Property(row, "time"), latest));
                 hasNextPage = Json.Boolean(Json.Property(data, "has_next_page"));
                 if (!hasNextPage) break;
@@ -157,9 +161,10 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             return new PerpetualVenueReadResult(snapshot,
                 catalogue.Markets.Where(m => m.Active).Select(m => m.Instrument).ToList(),
                 fills.GroupBy(f => (f.ContractId, f.SourceFillId)).Select(g => g.First()).OrderByDescending(f => f.OccurredAtUtc).ToList(),
-                HistoryNotice, PositionsComplete: positionsComplete,
+                OmissionNotice(missingPnl.Count, omitted.Count) is { } omission ? HistoryNotice + " " + omission : HistoryNotice,
+                PositionsComplete: positionsComplete,
                 FillHistoryTruncated: hasNextPage || fillCoverage.Count == MaxFillPages * PageSize,
-                OldestRawFillAtUtc: fillCoverage.OldestAtUtc, OmittedExecutions: omitted.Count);
+                OldestRawFillAtUtc: fillCoverage.OldestAtUtc, OmittedExecutions: omitted.Count + missingPnl.Count);
         }, cancellationToken);
     }
 
@@ -207,11 +212,15 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
     /// <summary>Unix nanoseconds as a decimal string, to millisecond precision, no later than <paramref name="latest"/>.</summary>
     internal static DateTimeOffset Nanoseconds(JsonElement element, DateTimeOffset latest)
     {
-        var text = Json.Text(element, 20);
-        if (!text.All(char.IsAsciiDigit) || !long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var ns))
-            throw Json.Invalid();
-        var at = DateTimeOffset.FromUnixTimeMilliseconds(ns / 1_000_000);
+        var at = DateTimeOffset.FromUnixTimeMilliseconds(RawNanoseconds(element) / 1_000_000);
         return at > latest ? throw Json.Invalid() : at;
+    }
+
+    private static long RawNanoseconds(JsonElement element)
+    {
+        var text = Json.Text(element, 20);
+        return text.All(char.IsAsciiDigit) && long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var ns)
+            ? ns : throw Json.Invalid();
     }
 
     private static string Side(JsonElement element) => Json.Text(element, 8) switch
@@ -241,11 +250,28 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
         };
 
     internal static List<VenueFill> ReadFills(JsonElement data, RisexCatalogue catalogue, DateTimeOffset latest) =>
-        ReadFills(data, catalogue, latest, new HashSet<(string, string)>());
+        ReadFills(data, catalogue, latest, new HashSet<(string, string)>(), new HashSet<(string, string)>());
+
+    /// <summary>
+    /// One sentence counting the in-scope executions left out, by reason, for example "Omitted executions: 1 without
+    /// reported PnL, 2 on unrecognized markets." Null when nothing was left out.
+    /// </summary>
+    internal static string? OmissionNotice(int missingPnl, int unrecognized)
+    {
+        static string? Count(int count, string text) => count > 0 ? $"{count} {text}" : null;
+        var parts = new[] { Count(missingPnl, "without reported PnL"), Count(unrecognized, unrecognized == 1 ? "on an unrecognized market" : "on unrecognized markets") }
+            .OfType<string>().ToArray();
+        return parts.Length == 0 ? null : $"Omitted executions: {string.Join(", ", parts)}.";
+    }
 
     /// <param name="omitted">Receives (market, trade) of fills on a market the catalogue neither lists nor proves out of scope.</param>
+    /// <param name="missingPnl">
+    /// Receives (market, trade) of fills without a reported realized PnL (Phase 2, item 14a, D-22). They are set aside and
+    /// counted, never zeroed, so the rest of the read, the snapshot included, still applies.
+    /// </param>
+    /// <param name="cut">The read's end cut in nanoseconds; a row after it belongs to the next refresh and is skipped.</param>
     internal static List<VenueFill> ReadFills(JsonElement data, RisexCatalogue catalogue, DateTimeOffset latest,
-        ISet<(string Market, string Trade)> omitted)
+        ISet<(string Market, string Trade)> omitted, ISet<(string Market, string Trade)> missingPnl, long? cut = null)
     {
         var trades = Json.Array(Json.Property(data, "trades"));
         if (trades.GetArrayLength() > PageSize) throw Json.Invalid();
@@ -255,15 +281,23 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             var marketId = Json.Text(Json.Property(trade, "market_id"), 20);
             if (catalogue.ById(marketId) is not { } market)
             {
-                if (!catalogue.OutOfScope(marketId)) omitted.Add((marketId, Json.Text(Json.Property(trade, "id"))));
+                // A row of an excluded market is not otherwise validated; its time only decides whether it is past the cut.
+                var later = cut is { } bound && trade.TryGetProperty("time", out var time) && time.ValueKind == JsonValueKind.String &&
+                    long.TryParse(time.GetString(), NumberStyles.None, CultureInfo.InvariantCulture, out var at) && at > bound;
+                if (!later && !catalogue.OutOfScope(marketId)) omitted.Add((marketId, Json.Text(Json.Property(trade, "id"))));
                 continue;
             }
+            if (cut is { } end && RawNanoseconds(Json.Property(trade, "time")) > end) continue;
             var side = Side(Json.Property(trade, "side"));
             var positionSide = Side(Json.Property(trade, "position_side"));
             var fee = Json.Nonnegative(Json.Property(trade, "fee"));
-            // Unlike Lighter's non-reducing fills, an empty RISEx PnL has no verified net-of-fee zero meaning.
-            var pnl = Json.OptionalAmount(trade, "realized_pnl") ?? throw new VenueReadException(
-                "RISEx omitted realized PnL for an execution. Its net-of-fee result is unknown; this refresh was not imported.");
+            // Unlike Lighter's non-reducing fills, an empty RISEx PnL has no verified net-of-fee zero meaning: the trade is
+            // set aside and counted, never imported with a zero result.
+            if (Json.OptionalAmount(trade, "realized_pnl") is not { } pnl)
+            {
+                missingPnl.Add((marketId, Json.Text(Json.Property(trade, "id"))));
+                continue;
+            }
             var effect = Effect(side, positionSide, pnl, fee);
             var liquidation = Json.Boolean(Json.Property(trade, "is_liquidation"));
             var chain = Json.Property(trade, "blockchain_data");
