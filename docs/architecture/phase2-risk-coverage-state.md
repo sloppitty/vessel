@@ -336,7 +336,27 @@ Not started.
 
 ## 8. Venue-reported risk context
 
-Not started.
+October 21, 2026.
+
+**8a. Liquidation price and margin mode.** Implemented on `t3/phase2-risk-context`.
+- **The facts.** Each venue's reported liquidation price and margin mode are kept with the
+  snapshot's positions.
+  - A reported zero liquidation price means none, so it reads null.
+  - Nothing is estimated.
+- **Observations.** `account_risk_observations` (migration `20261021164349_RiskContext`) records them
+  when a position appears or changes, or when its market receives new executions. A cross-margin
+  price that only drifts with the account is not kept again.
+- **Where it shows.**
+  - The Execution panel shows "Venue liquidation" now and at the first entry fill.
+  - Account detail adds the column.
+- **Tests.**
+  - `RiskObservationPostgresTests` (2): when observations are kept, and the current and first-fill
+    reads.
+  - The adapter mappings.
+  - The Execution panel test.
+  - A regenerated monitor contract fixture.
+- **Migration.** It is applied explicitly, never to the owner's database.
+- **Check.** `scripts/check.sh` passed on `42010626`: backend 4,050 passed, 5 skipped; frontend 174 files and 4,071 tests.
 
 ## 9. Funding
 
