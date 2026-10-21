@@ -386,6 +386,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     const first = scale.logicalToCoordinate(0 as Logical), second = scale.logicalToCoordinate(1 as Logical)
     if (first === null || second === null) return false
     const half = Math.min(Math.max(second - first, 12), 30) / 2 + 3
+    // Whole bars that may hold a marker within reach (the library rounds up to a bar); each is then measured exactly.
     const from = scale.coordinateToLogical(x - half), to = scale.coordinateToLogical(x + half)
     if (from === null || to === null) return false
     let low = 0, high = placed.length
@@ -394,8 +395,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       if (placed[middle]!.index < from) low = middle + 1; else high = middle
     }
     for (let at = low; at < placed.length && placed[at]!.index <= to; at++) {
-      const markerY = series.priceToCoordinate(placed[at]!.price)
-      if (markerY !== null && Math.abs(markerY - y) <= half) return true
+      const markerX = scale.logicalToCoordinate(placed[at]!.index as Logical), markerY = series.priceToCoordinate(placed[at]!.price)
+      if (markerX !== null && markerY !== null && Math.abs(markerX - x) <= half && Math.abs(markerY - y) <= half) return true
     }
     return false
   }
