@@ -127,8 +127,16 @@ public sealed class OrderIdentityTests
         await using var db = database.Context(owner);
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Main");
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
-        db.Accounts.Add(account); db.Plays.Add(play);
-        await db.SaveChangesAsync();
+        // The intentionally historical schema has no paper-mode columns; keep its fixture historical too.
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO accounts ("Id","OwnerId","VenueId","Name","SyncStatus")
+            VALUES ({account.Id},{owner},{account.VenueId},{account.Name},{account.SyncStatus})
+            """);
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO plays ("Id","OwnerId","AccountId","VenueId","ContractId","InstrumentSource","Status","Plan","Direction")
+            VALUES ({play.Id},{owner},{account.Id},{play.VenueId},{play.ContractId},
+                {play.InstrumentSource.ToString()},{play.Status.ToString()},{play.Plan}::jsonb,{play.Direction})
+            """);
         // Historical columns: "OrderId" before the change.
         switch (table)
         {

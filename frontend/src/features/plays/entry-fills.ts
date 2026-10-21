@@ -1,3 +1,4 @@
+import type { PaperPlayState } from '@/api/paper'
 import { useEffect, useMemo, useState } from 'react'
 import type { ManualExecutionRecord, ManualExecutions } from '@/api/diary'
 import type { PlayExecution } from '@/api/plays'
@@ -102,4 +103,19 @@ export function useLedgerFills(api: WorkspaceApi, playId: string | null, version
 /** Entry fills of a ledger read: unknown while it is, none without a Play. */
 export function manualLedgerFills(ledger: ManualExecutions | 'unknown' | null): EntryFills | 'unknown' | null {
   return ledger === null || ledger === 'unknown' ? ledger : ledgerFills(ledger.records)
+}
+
+/** Explicit paper entry facts share only the weighted-average math, never imported venue execution DTOs. */
+export function paperEntryFills(state: PaperPlayState): EntryFills {
+  const sums = new Map<string, { quantity: Exact; notional: Exact }>()
+  for (const execution of state.executions) {
+    if (execution.role !== 'entry') continue
+    const quantity = exactDecimal(execution.quantity), price = exactDecimal(execution.price)
+    if (quantity === null || price === null || exactSignOf(quantity) <= 0) continue
+    const sum = sums.get(execution.entryId) ?? { quantity: exactZero, notional: exactZero }
+    sums.set(execution.entryId, { quantity: exactAdd(sum.quantity, quantity), notional: exactAdd(sum.notional, exactMul(quantity, price)) })
+  }
+  const averages = new Map<string, Exact>()
+  for (const [id, sum] of sums) { const average = exactDiv(sum.notional, sum.quantity); if (average !== null) averages.set(id, average) }
+  return { filled: new Set(sums.keys()), averages }
 }

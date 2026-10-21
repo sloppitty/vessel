@@ -55,7 +55,8 @@ public sealed partial class VesselEventStore
         foreach (var change in mutations.StatusChanges)
         {
             var play = await lookups.PlayAsync(change.PlayId, ct);
-            if (play is null) continue;
+            // Paper lifecycle/status history is retained, but actual-account events and notifications are not its transport.
+            if (play is null || play.TradingMode != "real") continue;
             var type = change.To == PlayStatus.Open && change.From is PlayStatus.Planned or PlayStatus.Paused
                 ? "play.opened" : change.From == PlayStatus.Open && change.To == PlayStatus.Closed
                     ? "play.closed" : "play.status-changed";
