@@ -179,6 +179,14 @@ October 20, 2026, branch `t3/phase1-post-hoc-badge`, stacked on 1.1a:
   - Estimated R and sign-differs denominators count Plays only.
   - Position rows never carry the badge.
 
+- **Post-sync Sol review (October 21).** No medium or high findings. Three low ones, all fixed:
+  - **Validator.** Position rows need an operation ID, are never reviewed and are imported, and stop, review and
+    Play-local counts are bounded by the Plays in the count.
+  - **Docs.** Breakdown cells are marked one by one, as described above.
+  - **Header badge (round 2).** The post-hoc badge in the header waits for a fresh read, like the Review tab.
+  - Round 3 found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,593 passed, 5 skipped; frontend 152 files and 3,810 tests.
+
 ## 1.5 Lessons return and a recorded pre-flight
 
 Not started.
