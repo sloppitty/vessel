@@ -116,6 +116,17 @@ October 20, 2026, branch `t3/phase1-receipt`, stacked on the integration base:
     A test fails without this fix.
   - **Check.** `scripts/check.sh` passed again: backend 3,558 passed, 5 skipped; frontend 149 files and 3,742 tests.
 
+- **Post-sync Sol review (October 21).** The merge with main (PR #33) is sound: scoring never sees a position row.
+  Three findings over two rounds, all fixed:
+  - **Plan comparison (medium).** Saving a plan revision rereads the execution, and "Against the plan" stays unknown
+    until that read is shown, instead of comparing fills with the previous revision.
+  - **Stale receipt (medium).** After a failed reread, the Review tab's receipt and the retrospective receipt show the
+    failure instead of the earlier figures; while a reread is pending they say so.
+  - **Execution tab (medium, round 2).** While the execution is stale, its figures say they come from the last read,
+    and Link here, Not this play and a manual Link wait for a fresh read. An existing link can still be unlinked.
+  - Round 3 found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,590 passed, 5 skipped; frontend 152 files and 3,804 tests.
+
 ## 1.2 Honest review queue and in-trade log
 
 Not started.
