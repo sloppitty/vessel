@@ -1,9 +1,10 @@
 # Paper trading delivery state
 
-October 21, 2026. **PR remains draft: Claude Opus round five independently
-closed N1/O1, found no P1/P2, and requires explicit owner decisions on quiet
-coverage holds and the N1 pause/scoring policy. Earlier integration approval
-is superseded; the green code verdict is not overall readiness approval.**
+October 21, 2026. **Ready for review under explicitly accepted v1 limitations:
+Claude Opus round five independently closed N1/O1 and found no P1/P2; the owner
+then accepted both quiet-coverage account holds and ordinary Pause forfeiting
+scoring. The final acceptance/handoff below supersedes earlier draft holds.
+No merge, deployment, release or live migration is authorized.**
 Authority: [delivery contract](paper-trading-delivery-contract.md) and
 [owner-refined plan](paper-trading-plan.md).
 
@@ -884,3 +885,33 @@ their anonymous volumes. Disk evidence is retained; no other services or
 owner data were touched. Cleanup receipt: `paper-ownerstop-final/cleanup.json`.
 **The requested PR and Opus evaluation are delivered. PR stays draft pending
 the two owner decisions; no merge, deployment, release or live migration.**
+
+### Owner acceptance and ready-for-review handoff — October 21, 2026
+
+After the parent explicitly asked whether both policies were acceptable as
+v1 limitations, the owner replied **"I am okay with it"**. This records
+acceptance of both:
+
+1. **C:** a missing candle beyond the five-minute policy can permanently hold
+   the whole paper account against new arming, make available balance unknown
+   and remain unresolved after cancellation, with no v1 resolution endpoint.
+   Publication behavior is still unproved; acceptance does not establish
+   prompt publication or turn missing rows into zero-trade coverage.
+2. **N1:** ordinary Pause after the first effective boundary permanently
+   forfeits that Play's scoring, even with a caught-up one-minute worker.
+   Resuming does not restore scoring; receipted cancels remain exclusions.
+
+These explicit decisions resolve the two readiness holds, not the underlying
+limitations. The nonblocking P3 about live suspension-history Plays appearing
+among Review exclusions and the optional copy nits remain recorded; no code
+change or additional owner decision about that presentation is inferred.
+
+Parent integration sign-off is restored for **ready-for-review handoff within
+this accepted v1 scope**, based on the final complete parent suites and Opus's
+independent code verdict. PR #32 can leave draft; this is not merge authority.
+The Opus report remains unchanged rather than relabelled unconditional approval.
+
+This update changes documentation only. The final production/test manifests
+still match the independently reviewed `cce069b` snapshot; scoped whitespace
+checks pass. No redundant full-suite rerun is claimed for this documentation
+change. No merge, deployment, release or owner-database migration was performed.
