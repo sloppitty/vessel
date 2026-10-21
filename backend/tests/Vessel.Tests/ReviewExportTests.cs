@@ -52,6 +52,9 @@ public sealed class ReviewExportTests
         // A plain decimal is written as is; anything else is refused, never rewritten.
         Assert.Throws<InvalidOperationException>(() => new Csv(["n"]).Number("1e2"));
         Assert.Throws<InvalidOperationException>(() => new Csv(["n"]).Number("=1"));
+        // Sol round 1 on #38: no trailing newline and no other scripts' digits.
+        Assert.Throws<InvalidOperationException>(() => new Csv(["n"]).Number("1\n"));
+        Assert.Throws<InvalidOperationException>(() => new Csv(["n"]).Number("\u0661"));
         // Unknown is an empty cell, never zero; a short row is refused.
         Assert.Equal(["", ""], Rows(new Csv(["a", "b"]).Number(null).Text(null).End().ToString())[1]);
         Assert.Throws<InvalidOperationException>(() => new Csv(["a", "b"]).Text("x").End());
@@ -84,6 +87,33 @@ public sealed class ReviewExportTests
         Assert.Equal("4", scored[1]["estimated_r"]);
         Assert.Equal("'=cmd|' /C calc'!A0", scored[1]["account"]);
         Assert.Equal(loss.Play.Id.ToString(), scored[0]["play_id"]);
+    }
+
+    private sealed class Positions(params ReviewPosition[] items) : IReviewPositionSource
+    {
+        public Task<IReadOnlyList<ReviewPosition>> ReadAsync(IReadOnlySet<Guid> accountIds, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<ReviewPosition>>(items.Where(p => accountIds.Contains(p.AccountId)).ToList());
+    }
+
+    [Fact]
+    public async Task Imported_positions_keep_their_fees_and_unscorable_ones_are_listed_with_their_reason()
+    {
+        // Sol round 1 on #38: a scored position's fees were empty, and an unscorable one was missing altogether.
+        var account = f.Account();
+        var at = ReviewClock.Now.AddHours(-2);
+        var scored = new ReviewPosition($"{Guid.NewGuid()}:long", account.Id, "BTC", "long", at,
+            new Vessel.Domain.Sizing.PlayOutcome(Guid.NewGuid(), at, 9.7m, 100, null, true)) { Fees = "stablecoins (nominal USD)=0.3" };
+        var omitted = new ReviewPosition($"{Guid.NewGuid()}:short", account.Id, "ETH", "short", at.AddMinutes(-5), null)
+            { Omission = "Its execution history is incomplete." };
+        var service = new ReviewService(f, new ReviewClock(), TestVenues.With(), new Positions(scored, omitted));
+        var report = await service.GetAsync(new(Positions: "include"), default);
+        Assert.Equal(1, report.Positions!.Omitted);
+        var rows = Rows((await service.ExportAsync(new(Positions: "include"), default)).Content);
+        var named = rows.Skip(2).Select(r => Named(rows[0], r)).ToList();
+        Assert.Equal(["position", "excluded"], named.Select(r => r["kind"]));
+        Assert.Equal(("9.7", "stablecoins (nominal USD)=0.3"), (named[0]["net_usd"], named[0]["fees"]));
+        Assert.Equal((omitted.OperationId, "ETH Short", "", "", "Its execution history is incomplete."),
+            (named[1]["operation_id"], named[1]["title"], named[1]["net_usd"], named[1]["fees"], named[1]["exclusion_reasons"]));
     }
 
     [Fact]

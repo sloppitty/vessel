@@ -426,7 +426,8 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             {
                 var play = facts.Play;
                 var paper = facts.Paper is not null;
-                var fees = paper ? null : string.Join("; ", facts.Fills.GroupBy(f => f.Fill.FeeToken, StringComparer.Ordinal).OrderBy(g => g.Key, StringComparer.Ordinal)
+                // Paper executions are simulated without fees (the paper contract): a known zero, never unknown.
+                var fees = paper ? "0 (simulated, no fees)" : string.Join("; ", facts.Fills.GroupBy(f => f.Fill.FeeToken, StringComparer.Ordinal).OrderBy(g => g.Key, StringComparer.Ordinal)
                     .Select(g => $"{g.Key}={g.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Fill.Fee))}"));
                 Row("scored", play.Id, null, play.Title, play.AccountId, play.VenueId, play.ContractId!, play.Direction, OriginName(play),
                     paper ? "paper" : facts.ManualSource ? "manual" : "imported", "closed", e.ClosedAt, ExactDecimal.Format(e.Result!.NetResult),
@@ -437,7 +438,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             else
                 Row("position", null, e.Position!.OperationId, $"{e.ContractId} {(e.Position.Direction == "short" ? "Short" : "Long")}", e.AccountId,
                     e.VenueId, e.ContractId, e.Position.Direction, "position", "imported", "closed", e.ClosedAt,
-                    ExactDecimal.Format(e.Result!.NetResult), ExactDecimal.Format(e.Result.ReturnPercent), null, null, null, null, null, null, null);
+                    ExactDecimal.Format(e.Result!.NetResult), ExactDecimal.Format(e.Result.ReturnPercent), null, e.Position.Fees, null, null, null, null, null);
         }
         foreach (var x in Excluded(selection.Facts, scoped, query, from, now))
         {
@@ -446,6 +447,13 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
                 OriginName(x.Play), x.Play.TradingMode == TradingMode.Paper ? "paper" : "", x.Status, x.At, null, null, null, null, null, null,
                 null, x.Play, string.Join("; ", item.Reasons));
         }
+        // Sol round 1 on #38: closed positions Review cannot score are listed too, by their close time, with no amounts.
+        foreach (var e in selection.Positions.Where(p => p.Result is null && InPeriod(p.ClosedAt, from, now))
+                     .OrderByDescending(p => p.ClosedAt).ThenBy(p => p.Position!.OperationId, StringComparer.Ordinal))
+            Row("excluded", null, e.Position!.OperationId, e.Position.Direction is null ? $"{e.ContractId} position"
+                    : $"{e.ContractId} {(e.Position.Direction == "short" ? "Short" : "Long")}", e.AccountId,
+                e.VenueId, e.ContractId, e.Position.Direction, "position", "imported", "closed", e.ClosedAt, null, null, null, null, null, null,
+                null, null, e.Position.Omission ?? "Review cannot score this closed position.");
         var mode = query.TradingMode == TradingMode.Paper ? "paper-" : "";
         return new($"vessel-review-{mode}{query.Period}-{now.UtcDateTime:yyyyMMdd}.csv", csv.ToString());
     }

@@ -452,14 +452,17 @@ pages nothing. Review has a **Download CSV** button beside Definitions.
     time.
   - The period's scored Plays and imported positions, newest first, as on
     the report.
-  - Then the exclusions: closed, unresolved and cancelled, with their
-    reasons.
+  - Then the exclusions: closed, unresolved and cancelled Plays, and closed
+    imported positions Review cannot score (by their close time, when
+    positions are read), with their reasons.
 - **Columns:** kind, Play ID, operation ID, title, account, venue,
   instrument, direction, origin, execution source, status and time (UTC
   ISO-8601). Then:
   - the scored venue net and return;
   - the Play-local net with its basis, reason and "sign differs";
-  - fees by token;
+  - fees by token (an imported position's as Activity totals them, with
+    stablecoins at nominal USD; a paper Play's simulated zero is written as
+    such);
   - estimated R with its reason when unknown;
   - "plan written after first execution";
   - adherence, mistake tag and review completion;
@@ -469,6 +472,8 @@ pages nothing. Review has a **Download CSV** button beside Definitions.
   - An empty cell is unknown, never zero.
   - Text cells starting with `=`, `+`, `-`, `@`, tab or carriage return get a
     leading `'`.
+  - Numbers must be plain ASCII decimals; anything else is refused, never
+    rewritten.
 - **What it leaves out.** Excluded rows carry no amounts, and imported
   positions carry no plan, R or review. Separate funding is not added. Owner
   data is never cached (`no-store`). Both auth modes isolate it by owner.

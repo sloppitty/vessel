@@ -61,6 +61,7 @@ public sealed partial class Csv
         return this;
     }
 
-    [GeneratedRegex(@"^-?\d+(\.\d+)?$")]
+    // ASCII digits only, anchored at the very end: no trailing newline, no other scripts' digits (Sol round 1 on #38).
+    [GeneratedRegex(@"\A-?[0-9]+(?:\.[0-9]+)?\z")]
     private static partial Regex PlainDecimal();
 }
