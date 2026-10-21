@@ -310,6 +310,8 @@ October 20, 2026, branch `t3/phase1-unresolved`, stacked on 1.2:
     the Play's watches in its locked transaction, and its next end starts new ones; no migration is needed. The watch
     test steps the clock back before a third declaration and fails without the fix. A settlement of an Unresolved Play
     still compares times, so a backward step at that moment keeps the declaration's window; that window still ends.
+  - Round 3 confirmed the fix and found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,624 passed, 5 skipped; frontend 155 files and 3,855 tests.
 
 ### 1.3b Manual correction batch
 
