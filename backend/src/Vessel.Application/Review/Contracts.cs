@@ -10,7 +10,7 @@ namespace Vessel.Application.Review;
 /// while the selection has fewer than <paramref name="MinPlays"/> scored Plays.
 /// </summary>
 public sealed record ReviewQuery(string Period = "month", string Portfolio = "all", Guid? AccountId = null,
-    string? Instrument = null, int Offset = 0, string Positions = "exclude", int MinPlays = ReviewQuery.DefaultMinPlays)
+    string? Instrument = null, int Offset = 0, string Positions = "exclude", int MinPlays = ReviewQuery.DefaultMinPlays, string? TradingMode = "real")
 {
     public const int DefaultMinPlays = 5, MaxMinPlays = 1000;
 }
@@ -89,7 +89,7 @@ public sealed record ReviewPositionsDto(string Mode, bool Included, int MinPlays
 public sealed record ReviewDto(DateTimeOffset AsOfUtc, DateTimeOffset? FromUtc, string Period, string Currency,
     ReviewOptionsDto Options, IReadOnlyList<ReviewPeriodDto> Periods, ReviewMetricsDto Metrics,
     IReadOnlyList<ReviewPointDto> Series, int BucketDays, ReviewGroupsDto Groups, ReviewCoverageDto Coverage,
-    IReadOnlyList<ReviewPlayDto> Plays, int Offset, int? NextOffset)
+    IReadOnlyList<ReviewPlayDto> Plays, int Offset, int? NextOffset, string TradingMode = "real")
 {
     public ReviewPositionsDto? Positions { get; init; }
     /// <summary>The pre-flight recorded at Plan it, over the period's closed planned Plays, scored or excluded (phase 1, 1.5).</summary>

@@ -22,7 +22,7 @@ public sealed record ReviewAnswers(string? Adherence = null, string? MistakeTag 
 public enum CancelReason { Invalidated, Missed, ChangedMind, Expired, Mistake, Other }
 
 /// <summary>Who changed the status: the owner, or linked venue fills.</summary>
-public enum StatusChangeSource { Owner, Venue }
+public enum StatusChangeSource { Owner, Venue, Paper }
 
 // One trading idea. The plan is an application-validated JSON document; after planning, every plan
 // change is an append-only revision. It contains neither inferred executions nor an invented thesis.
@@ -35,6 +35,7 @@ public sealed class Play : IOwned
     public Guid Id { get; private set; }
     public Guid OwnerId { get; private set; }
     public Guid AccountId { get; private set; }
+    public string TradingMode { get; private set; } = Common.TradingMode.Real;
     public string VenueId { get; private set; } = null!;
     /// <summary>Venue contract ID or manual label; null while a Draft has no instrument.</summary>
     public string? ContractId { get; private set; }
@@ -75,6 +76,7 @@ public sealed class Play : IOwned
         Id = id;
         OwnerId = account.OwnerId;
         AccountId = account.Id;
+        TradingMode = account.TradingMode;
         VenueId = account.VenueId;
         SetInstrument(instrument, source);
         Status = PlayStatus.Draft;
@@ -91,6 +93,7 @@ public sealed class Play : IOwned
     {
         ArgumentNullException.ThrowIfNull(account);
         if (account.OwnerId != OwnerId) throw new ArgumentException("Account belongs to another owner.");
+        if (account.TradingMode != TradingMode) throw new DomainRuleException("A Play cannot change its trading mode.");
         if (account.Id == AccountId && instrument == Instrument && source == InstrumentSource) return;
         if (Status != PlayStatus.Draft) throw new DomainRuleException("The account and instrument are fixed once a Play is planned.");
         AccountId = account.Id;
@@ -139,6 +142,8 @@ public sealed class Play : IOwned
     public static Play Retrospective(Guid id, Account account, PerpetualInstrument instrument, string emptyPlan,
         DateTimeOffset closedAt, DateTimeOffset now, string title)
     {
+        if (account.TradingMode != Common.TradingMode.Real)
+            throw new DomainRuleException("Simulated executions cannot become retrospective actual executions.");
         var play = new Play(id, account, instrument, InstrumentSource.Venue, emptyPlan, now);
         play.Origin = PlayOrigin.Retrospective;
         play.Status = PlayStatus.Closed;
@@ -150,12 +155,13 @@ public sealed class Play : IOwned
         return play;
     }
 
-    public PlayStatusChange RecordManualOpen(DateTimeOffset now) => Status == PlayStatus.Planned
+    public PlayStatusChange RecordManualOpen(DateTimeOffset now) => TradingMode == Common.TradingMode.Real && Status == PlayStatus.Planned
         ? Transition(PlayStatus.Open, null, "Owner-recorded manual entry, not a venue observation.", now)
         : throw new DomainRuleException("Only a planned Play can open from manual facts.");
 
     public PlayStatusChange RecordManualClose(DateTimeOffset closedAt, DateTimeOffset now)
     {
+        if (TradingMode != Common.TradingMode.Real) throw new DomainRuleException("Paper Plays cannot contain actual manual executions.");
         if (Status != PlayStatus.Open) throw new DomainRuleException("Only an open Play can close from manual facts.");
         var change = Transition(PlayStatus.Closed, null, "Owner-recorded manual ledger is flat.", now);
         EndedAtUtc = closedAt;
@@ -164,6 +170,7 @@ public sealed class Play : IOwned
 
     public void RecordManualCorrection(DateTimeOffset? closedAt, DateTimeOffset now)
     {
+        if (TradingMode != Common.TradingMode.Real) throw new DomainRuleException("Paper Plays cannot contain actual manual executions.");
         if (Status == PlayStatus.Closed) EndedAtUtc = closedAt ?? throw new DomainRuleException("A closed manual ledger must stay closed.");
         Touch(now);
     }
@@ -222,6 +229,22 @@ public sealed class Play : IOwned
         return change;
     }
 
+    /// <summary>Only explicit paper facts can advance a simulated Play; no venue or manual provenance is assigned.</summary>
+    public PlayStatusChange? ApplyPaperExecutionState(bool hasEntry, bool fullyClosed, DateTimeOffset now)
+    {
+        if (TradingMode != Common.TradingMode.Paper)
+            throw new DomainRuleException("Paper execution state is only valid for paper Plays.");
+        if (fullyClosed && hasEntry && Status == PlayStatus.Open)
+        {
+            var change = Transition(PlayStatus.Closed, null, "Simulated plan result; no fees or slippage.", now, StatusChangeSource.Paper);
+            EndedAtUtc = now;
+            return change;
+        }
+        return hasEntry && Status is PlayStatus.Planned or PlayStatus.Paused
+            ? Transition(PlayStatus.Open, null, "Simulated entry; not an actual execution.", now, StatusChangeSource.Paper)
+            : null;
+    }
+
     public PlayStatusChange Cancel(CancelReason reason, string? note, DateTimeOffset now)
     {
         if (Status is not (PlayStatus.Draft or PlayStatus.Planned or PlayStatus.Paused))
@@ -236,6 +259,9 @@ public sealed class Play : IOwned
     private PlayStatusChange Transition(PlayStatus to, CancelReason? reason, string? note, DateTimeOffset now,
         StatusChangeSource source = StatusChangeSource.Owner)
     {
+        if (source == StatusChangeSource.Paper && TradingMode != Common.TradingMode.Paper ||
+            source == StatusChangeSource.Venue && TradingMode != Common.TradingMode.Real)
+            throw new DomainRuleException("Execution provenance must match the Play's trading mode.");
         var change = new PlayStatusChange(this, Status, to, reason, note, now, source);
         Status = to;
         Touch(now);

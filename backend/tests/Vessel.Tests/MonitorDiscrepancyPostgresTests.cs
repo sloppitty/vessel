@@ -154,8 +154,17 @@ public sealed class MonitorDiscrepancyPostgresTests
         var f = new DiscrepancyFixture();
         var fill = f.Store.Fills[0];
         await using var scope = database.Scope(f);
-        scope.Db.Add(f.Account); scope.Db.Add(f.Play);
-        await scope.Db.SaveChangesAsync();
+        // This deliberately predates paper columns. Seed/read through that historical shape, not today's EF model.
+        await scope.Db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO accounts ("Id","OwnerId","VenueId","Name","Address","SourceId","SyncStatus")
+            VALUES ({f.Account.Id},{f.Account.OwnerId},{f.Account.VenueId},{f.Account.Name},
+                {f.Account.Address},{f.Account.SourceId},{f.Account.SyncStatus})
+            """);
+        await scope.Db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO plays ("Id","OwnerId","AccountId","VenueId","ContractId","InstrumentSource","Status","Plan","Direction")
+            VALUES ({f.Play.Id},{f.Play.OwnerId},{f.Play.AccountId},{f.Play.VenueId},{f.Play.ContractId},
+                {f.Play.InstrumentSource.ToString()},{f.Play.Status.ToString()},{f.Play.Plan}::jsonb,{f.Play.Direction})
+            """);
         // Imported facts in this historical schema's columns ("OrderId" before the order identity change).
         await scope.Db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO imported_fills ("Id", "OwnerId", "AccountId", "ContractId", "SourceFillId", "Side", "Direction", "PositionEffect",
@@ -168,7 +177,8 @@ public sealed class MonitorDiscrepancyPostgresTests
         await scope.Db.GetService<IMigrator>().MigrateAsync("20261016110400_PlayDiscrepancyUnverifiable");
         Assert.Empty(await scope.Db.Set<PlayDiscrepancy>().ToListAsync());
         Assert.Equal(fill.Quantity, await scope.Db.Database.SqlQueryRaw<decimal>("""SELECT "Quantity" AS "Value" FROM imported_fills""").SingleAsync());
-        Assert.Equal(f.Play.Status, (await scope.Db.Plays.SingleAsync()).Status);
+        Assert.Equal(f.Play.Status.ToString(), await scope.Db.Database.SqlQueryRaw<string>(
+            """SELECT "Status" AS "Value" FROM plays""").SingleAsync());
         await scope.Db.GetService<IMigrator>().MigrateAsync("20261016174509_FundingPayments");
         // The order identity change has no backfill: it refuses a database that still holds imported facts.
         Assert.Equal("20261017091636_OrderIdentity", (await scope.Db.Database.GetPendingMigrationsAsync()).First());

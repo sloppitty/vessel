@@ -6,7 +6,7 @@ public static class MonitorEndpoints
 {
     public static void MapMonitor(this WebApplication app)
     {
-        var api = app.MapGroup("/api").RequireAuthorization();
+        var api = app.MapGroup("/api").RequireAuthorization().WithTradingModeBoundary();
         api.MapGet("/monitor", async (MonitorCoordinator monitor, CancellationToken ct) =>
             Results.Ok(await monitor.SummaryAsync(ct)));
         api.MapGet("/accounts/{id:guid}/monitor", async (Guid id, MonitorCoordinator monitor, CancellationToken ct) =>

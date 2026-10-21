@@ -129,7 +129,11 @@ public sealed record PerpetualVenueReadResult(
     public VenueFundingReadResult? Funding { get; init; }
 }
 
-public class VenueReadException(string message) : Exception(message);
+public class VenueReadException(string message) : Exception(message)
+{
+    /// <summary>Proven malformed source data or an explicit request rejection, never an inferred outage category.</summary>
+    public bool IsDeterministicSourceFailure { get; init; }
+}
 
 /// <summary>A safe rate-limit category; the deadline comes from Retry-After, never the response body.</summary>
 public sealed class VenueRateLimitException(DateTimeOffset retryAtUtc) : VenueReadException("The venue rate limit requires a later retry.")

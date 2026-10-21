@@ -1,3 +1,4 @@
+import { isTradingMode, type TradingMode } from './paper'
 import { isCount, isGuid, isListOf, isNonBlankText, isNullOr, isRecord, isReviewDecimal, isText, isTimestamp } from './guards'
 import { isOptionalPlayLocalResult, type PlayLocalResult } from './local-result'
 import { preflightCodes, type PreflightCode } from './plays'
@@ -43,7 +44,7 @@ export interface ReviewPlay {
   id: string | null; operationId?: string | null; title: string; accountId: string; accountName: string; venueId: string; instrument: string
   closedAtUtc: string; net: string; returnPercent: string; rMultiple: string | null; reviewed: boolean
   origin?: 'planned' | 'retrospective' | 'position'
-  executionSource?: 'imported' | 'manual'
+  executionSource?: 'imported' | 'manual' | 'paper'
   /** The Play-local result beside the scored `net`; absent from servers before October 19, 2026. */
   local?: PlayLocalResult | null
   /** The plan was written after the Play's first execution (D-17); scored like any other. Absent from older servers. */
@@ -60,6 +61,7 @@ export interface ReviewAccount {
   lastSyncedAtUtc: string | null; syncStatus: string; historyNotice: string | null
 }
 export interface ReviewDocument {
+  tradingMode?: TradingMode
   asOfUtc: string; fromUtc: string | null; period: ReviewPeriod; currency: 'USD'
   options: { portfolios: Array<{ id: string; name: string }>; accounts: ReviewAccount[]; instruments: string[] }
   periods: Array<{ id: ReviewPeriod; count: number; net: string | null; positions?: number }>
@@ -110,16 +112,18 @@ const play = (v: unknown) => isRecord(v) &&
   isText(v.venueId, 64) && isText(v.instrument, 128) && isTimestamp(v.closedAtUtc, 64) && isReviewDecimal(v.net) &&
   isReviewDecimal(v.returnPercent) && isNullOr(v.rMultiple, isReviewDecimal) && typeof v.reviewed === 'boolean' &&
   (v.origin === undefined || v.origin === 'planned' || v.origin === 'retrospective' || v.origin === 'position') &&
-  (v.executionSource === undefined || v.executionSource === 'imported' || v.executionSource === 'manual') &&
+  (v.executionSource === undefined || v.executionSource === 'imported' || v.executionSource === 'manual' || v.executionSource === 'paper') &&
   (v.origin !== 'retrospective' && v.origin !== 'position' || v.rMultiple === null) &&
   (v.origin === 'position' || isOptionalPlayLocalResult(v.local, isReviewDecimal)) &&
-  (!isRecord(v.local) || v.local.basis === 'manual-ledger' === (v.executionSource === 'manual')) &&
+  (!isRecord(v.local) || v.local.basis === 'manual-ledger' === (v.executionSource === 'manual') &&
+    (v.local.basis === 'paper-simulation') === (v.executionSource === 'paper')) &&
   (v.plannedAfterExecution === undefined || typeof v.plannedAfterExecution === 'boolean' &&
     (!v.plannedAfterExecution || v.origin !== 'retrospective' && v.origin !== 'position'))
 const account = (v: unknown) => isRecord(v) && isGuid(v.id) && isText(v.name, 200) && isNullOr(v.portfolioId, isGuid) &&
   isText(v.venueId, 64) && isNullOr(v.lastSyncedAtUtc, x => isTimestamp(x, 64)) && isText(v.syncStatus, 32) &&
   isNullOr(v.historyNotice, x => isText(x, 1000))
 export const isReviewDocument = (v: unknown): v is ReviewDocument => isRecord(v) &&
+  (v.tradingMode === undefined || isTradingMode(v.tradingMode)) &&
   isTimestamp(v.asOfUtc, 64) && isNullOr(v.fromUtc, x => isTimestamp(x, 64)) && period(v.period) && v.currency === 'USD' &&
   isRecord(v.options) && isListOf(v.options.portfolios, p => isRecord(p) && isGuid(p.id) && isText(p.name, 200), listLimit) &&
   isListOf(v.options.accounts, account, listLimit) && isListOf(v.options.instruments, i => isText(i, 128), listLimit) &&
@@ -132,11 +136,17 @@ export const isReviewDocument = (v: unknown): v is ReviewDocument => isRecord(v)
   isRecord(v.groups) && isListOf(v.groups.portfolios, group, listLimit) && isListOf(v.groups.accounts, group, listLimit) && isListOf(v.groups.assets, group, listLimit) &&
   isRecord(v.coverage) && ['closedCandidates', 'incompleteFees', 'incompleteExecutions', 'openPlays', 'unassignedFills'].every(key => isCount((v.coverage as Record<string, unknown>)[key])) &&
   isNullOr(v.coverage.firstFillAtUtc, x => isTimestamp(x, 64)) && isText(v.coverage.notice, 4000) && isListOf(v.plays, play, 50) &&
+  (v.plays as ReviewPlay[]).every(p => (p.executionSource === 'paper') === (v.tradingMode === 'paper')) &&
   isCount(v.offset) && (v.nextOffset === null || isCount(v.nextOffset) && v.nextOffset > v.offset) &&
   (v.preflight === undefined || isRecord(v.preflight) && isCount(v.preflight.recorded) && isCount(v.preflight.notRecorded) &&
     isListOf(v.preflight.skipped, s => isRecord(s) && preflightCodes.includes(s.code as PreflightCode) && isCount(s.count) &&
       s.count <= ((v.preflight as Record<string, unknown>).recorded as number), preflightCodes.length)) &&
-  (v.positions === undefined || isReviewPositions(v.positions))
+  (v.positions === undefined || isReviewPositions(v.positions)) &&
+  (v.tradingMode !== 'paper' ||
+    (v.positions === undefined || v.positions.mode === 'exclude' && !v.positions.included) &&
+    !(v.metrics as ReviewMetrics).positions &&
+    (v.periods as ReviewDocument['periods']).every(p => !p.positions) &&
+    Object.values(v.groups as ReviewDocument['groups']).every(rows => rows.every(row => !row.metrics.positions)))
 const isReviewPositions = (v: unknown): v is ReviewPositions => isRecord(v) &&
   (v.mode === 'auto' || v.mode === 'include' || v.mode === 'exclude') && typeof v.included === 'boolean' &&
   isCount(v.minPlays) && isCount(v.plays) && isNullOr(v.positions, isCount) && isNullOr(v.omitted, isCount) &&

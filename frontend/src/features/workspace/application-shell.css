@@ -525,3 +525,7 @@ span.value-tag { width: fit-content; }
 .bulk-error { padding: 12px 22px; color: var(--negative); font-size: var(--text-sm); }
 
 .portfolio-account-choice input, .workspace-table input[type="checkbox"] { accent-color: var(--primary); }
+
+.trading-mode-picker { display: grid; gap: .4rem; padding: .75rem; color: var(--muted-foreground); font-size: .75rem; }
+.navigation-collapsed .trading-mode-picker { padding-inline: .25rem; }
+.paper-mode-banner { margin-bottom: 1rem; color: var(--foreground); border-color: var(--warning); }

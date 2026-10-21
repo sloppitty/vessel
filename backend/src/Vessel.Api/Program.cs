@@ -26,6 +26,7 @@ builder.Services.AddVesselIdentityDirectory(builder.Configuration);
 builder.Services.AddVesselIdentityApi(builder.Configuration);
 builder.Services.AddVesselPersistence(builder.Configuration);
 builder.Services.AddVesselApplication();
+builder.Services.AddPaperTrading();
 // The API publishes events and module commands; it runs no module and never provisions at startup.
 builder.AddVesselMessaging(MessagingHosting.ApiDeployment);
 builder.Services.AddVesselMonitoring(builder.Configuration);
@@ -115,6 +116,7 @@ app.UseVesselIdentity();
 app.UseAuthorization();
 // Credential HTTPS, no-store and body limits come from endpoint metadata (CredentialEndpoint, RequestBodyLimit).
 app.UseEndpointTransport();
+app.UseTradingModeBoundary();
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "healthy" })).AllowAnonymous();
 // Readiness for a proxy or orchestrator: the database answers and every migration is applied. No details.
@@ -146,6 +148,7 @@ app.MapSystem();
 app.MapWorkspace();
 app.MapEvidence();
 app.MapPlays();
+app.MapPaperEndpoints();
 app.MapSizing();
 app.MapReview();
 app.MapVesselEvents();

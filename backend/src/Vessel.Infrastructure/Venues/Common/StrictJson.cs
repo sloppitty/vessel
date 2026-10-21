@@ -14,7 +14,7 @@ public sealed class StrictJson(string invalidResponse)
 {
     public string InvalidResponse { get; } = invalidResponse;
 
-    public VenueReadException Invalid() => new(InvalidResponse);
+    public VenueReadException Invalid() => new(InvalidResponse) { IsDeterministicSourceFailure = true };
 
     public JsonElement Property(JsonElement element, string name)
     {

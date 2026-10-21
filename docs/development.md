@@ -135,6 +135,18 @@ The development service binds **only `127.0.0.1:55432`**. It uses PostgreSQL 18 
 
 `pnpm dev`, `pnpm dev:api`, `pnpm dev:worker` and `pnpm db:migrate` start both services with `docker compose up --wait` first (set `Vessel_DEV_SKIP_SERVICES=1` to manage them yourself), and stop early when the broker credentials are missing, because the API and worker cannot start without the broker. `pnpm dev` runs the API, two workers built once (the `monitor` module, and the `notifications` module in its own deployment with the heartbeat file `/tmp/vessel-dev-notifications-heartbeat`) and the frontend; `pnpm dev:worker` runs both workers; `pnpm dev:api` runs the API alone, so the monitor and notifications show as offline.
 
+To include the optional standalone paper scheduler, use
+`Vessel_DEV_PAPER=1 pnpm dev` (or `pnpm dev:worker` with the same environment
+flag), **after explicitly applying the paper schema migration to your chosen
+development database**. This creates a separate `paper` worker, never changes
+the monitor/notifications module sets, and uses
+`/tmp/vessel-dev-paper-heartbeat` by default. Paper remains disabled for each
+owner until enabled in Settings; its check interval defaults to 60 minutes.
+The standalone paper host reads public Hyperliquid candles and the journal,
+not venue credentials, evidence storage or RabbitMQ. The normal API/monitor/
+notifications hosts in `pnpm dev` still need the existing broker setup.
+The paper runner does not apply migrations or access a real venue account.
+
 RabbitMQ binds AMQP to `127.0.0.1:55672` and management to `127.0.0.1:55673`. Its credentials stay in the API/worker environment, never Vite. The development runner constructs the connection from `RABBITMQ_USER` and `RABBITMQ_PASSWORD`; an explicit `Vessel__Messaging__RabbitMqUri` overrides it. The production Compose file does not publish AMQP.
 
 Set the backend connection in your process environment or secret manager:

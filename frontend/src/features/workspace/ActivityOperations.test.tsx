@@ -57,6 +57,52 @@ describe('operation table', () => {
     await userEvent.keyboard(' ')
     expect(button).toHaveAttribute('aria-expanded', 'false')
   })
+  it('names a linked Play by its title and offers to journal a closed unassigned trade, never a UUID prefix (F-05)', async () => {
+    const preview = vi.fn(), openPlay = vi.fn()
+    const playId = '33345678-1234-1234-1234-123456789abc', otherPlay = '43345678-1234-1234-1234-123456789abc'
+    const linked: ActivityOperation = { ...closed, id: '32345678-1234-1234-1234-123456789abc:short', playId, playAssociation: 'linked', playTitle: 'BTC breakout' }
+    const untitled: ActivityOperation = { ...closed, id: '42345678-1234-1234-1234-123456789abc:short', playId: otherPlay, playAssociation: 'linked', playTitle: null }
+    const mixed: ActivityOperation = { ...closed, id: '52345678-1234-1234-1234-123456789abc:short', playAssociation: 'mixed' }
+    const view = render(<OperationsTable api={client()} operations={[linked, untitled, closed, operationFixture, mixed]} accounts={[accountFixture]}
+      onPreview={preview} onOpenPlay={openPlay} />)
+    expect(screen.queryByText(/^Play [\da-f]{8}$/)).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'BTC breakout, open Play' }))
+    expect(openPlay).toHaveBeenCalledExactlyOnceWith(playId)
+    expect(screen.getByRole('button', { name: 'Untitled play, open Play' })).toHaveAttribute('title', 'Untitled play')
+    // Only the closed unassigned operation can be journalled; open and mixed ones say how they are associated.
+    await userEvent.click(screen.getByRole('button', { name: 'Journal this trade, BTC' }))
+    expect(preview).toHaveBeenCalledExactlyOnceWith(closed)
+    expect(screen.getAllByRole('button', { name: /^Journal this/ })).toHaveLength(1)
+    // Each accessible name starts with the button's visible text.
+    for (const name of ['BTC breakout, open Play', 'Untitled play, open Play', 'Journal this trade, BTC']) {
+      const button = screen.getByRole('button', { name })
+      expect(name.startsWith(button.textContent!)).toBe(true)
+    }
+    expect(screen.getAllByText('Unassigned')).toHaveLength(1)
+    expect(screen.getAllByText('Mixed')).toHaveLength(1)
+    // Neither action expands its row.
+    for (const toggle of screen.getAllByRole('button', { name: /^Expand / })) expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    view.rerender(<OperationsTable api={client()} operations={[linked, untitled]} accounts={[accountFixture]} onOpenPlay={openPlay} opening={playId} />)
+    expect(screen.getByRole('button', { name: 'BTC breakout, open Play' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Untitled play, open Play' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('Opening…')
+    view.rerender(<OperationsTable api={client()} operations={[linked]} accounts={[accountFixture]} />)
+    expect(screen.getByText('BTC breakout')).not.toHaveRole('button')
+  })
+  it('opens a linked Play from the Activity page and reports a failed open', async () => {
+    const playId = '33345678-1234-1234-1234-123456789abc'
+    const linked: ActivityOperation = { ...closed, playId, playAssociation: 'linked', playTitle: 'BTC breakout' }
+    const onOpenPlay = vi.fn().mockRejectedValueOnce(new ApiError('http', 'Play not found.', 404)).mockResolvedValueOnce(undefined)
+    render(<ActivityOperations api={client(vi.fn().mockResolvedValue(activityPage([linked])))} accounts={[accountFixture]} onOpenPlay={onOpenPlay} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'BTC breakout, open Play' }))
+    expect(onOpenPlay).toHaveBeenCalledWith(playId, expect.any(AbortSignal))
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'BTC breakout, open Play' }))
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+    expect(onOpenPlay).toHaveBeenCalledTimes(2)
+  })
   it('keeps only the size and nonzero remaining quantity in the summary', () => {
     const api = client()
     const view = render(<OperationsTable api={api} operations={[closed]} accounts={[accountFixture]} />)
