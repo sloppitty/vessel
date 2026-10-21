@@ -797,3 +797,34 @@ These sets overlap and are not a complete-suite claim.
 Evidence: `/home/ops/.cache/vessel-verification/paper-n1-o1-backend-J4EP0Dd2/`.
 The failed boundary setup and old disabled-plus-issue fixture runs remain
 preserved; only their disclosed test setups were corrected.
+
+### Complete N1/O1 snapshot verification (`cce069b`)
+
+All four disjoint bounded backend batches finished with exit zero:
+**3,876 passed, zero failed, five skipped; 3,881 total**, across all 231
+discovered classes. Per-batch pass/skip counts: **963/1, 790/2, 841/1, 1,282/1**.
+All **12 broker-backed facts passed**; no test IDs crossed batch boundaries.
+The five skips remain the two Lighter live checks, the RISEx live check and
+the two S3 integration/copy checks. They are not passes.
+
+Only the supplied disposable PostgreSQL/RabbitMQ services were used, with
+separate databases per batch and at most two testhosts/two xUnit threads each.
+The 797-file combined production manifest and tested DLL remained unchanged;
+manifest SHA-256:
+`5a7f50427ea38c4f419804e816ffc3e41c0ddc298c34b735be43b47979c53304`.
+Root Python checks passed **82/82**.
+
+Explicit migration to a new synthetic smoke database and the no-pending-model
+check passed. **Four standalone worker checks** passed: Production Token startup
+and productive heartbeat without Wallet origin/bearer/broker/credentials/evidence;
+schema-loss health failure without host crash; recovery after schema restoration;
+and final audit columns/ModelVersion 1 without messaging provisioning or executions.
+This smoke used no active simulations, venue reads or browser/API E2E.
+
+Logs, per-batch TRXs, discovery, exact skip names, source/binary manifests and
+the reconciled summary are under
+`/home/ops/.cache/vessel-verification/paper-ownerstop-final/`.
+Frontend N1 verification above applies to the same unchanged production tree.
+Fresh Claude Opus/max round five is evaluating this snapshot independently.
+**No final independent approval or readiness is claimed; PR remains draft,
+including the unresolved quiet-publication decision above.**
