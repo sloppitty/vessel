@@ -32,6 +32,21 @@ const execution: PlayExecution = {
 }
 
 describe('execution panel', () => {
+  it('marks figures kept from the last read and holds confirmations until a fresh one (phase 1, 1.1a)', () => {
+    const props = { execution, error: null, busy: false, entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn() }
+    const view = render(<ExecutionPanel {...props} stale />)
+    expect(screen.getByText(/These figures are from the last read/)).toBeInTheDocument()
+    const confirm = screen.getByRole('region', { name: 'Orders to confirm' })
+    expect(within(confirm).getByRole('button', { name: /^Link as/ })).toBeDisabled()
+    expect(within(confirm).getByRole('button', { name: 'Not this play' })).toBeDisabled()
+    expect(within(screen.getByRole('region', { name: 'Other orders on this instrument' })).getByRole('button', { name: 'Link' })).toBeDisabled()
+    // An existing link can still be undone.
+    expect(screen.getByRole('button', { name: 'Unlink Entry 1 order' })).toBeEnabled()
+    view.rerender(<ExecutionPanel {...props} />)
+    expect(screen.queryByText(/These figures are from the last read/)).not.toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Orders to confirm' })).getByRole('button', { name: /^Link as/ })).toBeEnabled()
+  })
+
   it('heads the monitor with this Play\'s own stop coverage, never Monitored beside an unknown (Phase 0, 0.4c)', () => {
     const props = { error: null, busy: false, entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn() }
     const monitor = { ...monitorFixture, coverage: [coverageAs('unknown', 'opposing-plays', execution.playId),

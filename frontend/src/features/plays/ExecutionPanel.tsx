@@ -32,7 +32,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
   execution: PlayExecution | null
   error: string | null
   busy: boolean
-  /** The execution may be out of date (`usePlayExecution`), so its plan comparison is unknown. */
+  /** The execution may be out of date (`usePlayExecution`): its plan comparison is unknown and confirmations wait. */
   stale?: boolean
   entries: readonly DraftEntry[]
   direction: 'long' | 'short'
@@ -92,6 +92,8 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
         context={{ direction, leverage, tick: priceStep }} origin={origin} playId={execution.playId} version={version} blocked={busy ? 'Wait for the current change to finish.' : rebindBlocked}
         onRebind={onRebind} /> : undefined} />}
     <MonitorWatches watches={execution.watches} levelName={watchLevel} />
+    {/* Kept from the last read until a fresh one arrives (usePlayExecution); new links wait for it too. */}
+    {stale && <p className="muted" role="status">These figures are from the last read and may be out of date until the execution is read again.</p>}
     <dl className="execution-totals">
       <div><dt>Entered</dt><dd>{totals.enteredQuantity}</dd></div>
       <div><dt>Exited</dt><dd>{totals.exitedQuantity}</dd></div>
@@ -122,10 +124,10 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
             <small>{order ? `${order.status} · ` : ''}{group.otherPlay ? levels ? 'Matches several levels of this play and another play' : 'Also matches another play'
               : levels ? 'Matches several levels of this play' : 'Not assigned automatically'}</small></span>
           <span className="execution-actions">
-            {group.links.map(link => <Button key={link.id} size="sm" disabled={busy || !editable || !link.order} onClick={() => onLink({ orderId: link.order?.orderId ?? '', role: link.role,
+            {group.links.map(link => <Button key={link.id} size="sm" disabled={busy || stale || !editable || !link.order} onClick={() => onLink({ orderId: link.order?.orderId ?? '', role: link.role,
               ...(link.entryId ? { entryId: link.entryId } : {}), ...(link.levelId ? { levelId: link.levelId } : {}) })}>
               <Link2 size={13} />Link as {levelName(entries, link, origin)}</Button>)}
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => {
+            <Button size="sm" variant="ghost" disabled={busy || stale} onClick={() => {
               if (onReject && order) onReject(order.orderId); else group.links.forEach(link => onUnlink(link.id))
             }}>Not this play</Button>
           </span>
@@ -161,7 +163,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
               <option value="">Link as…</option>
               {allowed.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
             </NativeSelect>
-            <Button size="sm" variant="outline" disabled={busy || !option} onClick={() => option && onLink({ orderId: order.orderId, ...option.request })}>
+            <Button size="sm" variant="outline" disabled={busy || stale || !option} onClick={() => option && onLink({ orderId: order.orderId, ...option.request })}>
               <Link2 size={13} />Link</Button>
           </span>
         </li>

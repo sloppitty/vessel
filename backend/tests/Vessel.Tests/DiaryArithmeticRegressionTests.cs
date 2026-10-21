@@ -500,5 +500,6 @@ public sealed class DiaryArithmeticRegressionTests
         public void Add(DiaryRequest request) => Requests.Add(request);
         public void Add(PlayOrderLink link) => Plays.Links.Add(link);
         public void Add(PlayStatusChange change) => Plays.Add(change);
+        public Task ForgetWatchesAsync(Guid playId, CancellationToken ct) => Task.CompletedTask;
     }
 }
