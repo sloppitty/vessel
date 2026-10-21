@@ -302,6 +302,15 @@ October 20, 2026, branch `t3/phase1-unresolved`, stacked on 1.2:
 
 - **Sol (Codex) round 4.** No findings: both round-3 fixes hold, including the in-place migration change.
 
+- **Post-sync Sol review (October 21).** The merge with main (PR #33) is sound: the retry loop recomputes the scope and
+  the Unresolved count, and Open, Cancelled and Unresolved Plays keep their claims, so their operations never become
+  imported positions. One low finding is accepted as a limitation:
+  - **Watch identity.** A linked order's watch is identified by wall-clock times, the link's revision and the Play's
+    end, like the monitor's existing relink watches. If the server clock steps back between two declarations of the
+    same Play, the second keeps the first one's watch window. Binding watches to the declaration's Play version
+    needs another column in the unshipped migrations that Phase 2 now builds on, so it waits for a later monitor
+    change.
+
 ### 1.3b Manual correction batch
 
 Not started.
