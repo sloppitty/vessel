@@ -8,6 +8,8 @@ import './chart.css'
 
 const noDrawings: readonly ChartDrawing[] = []
 const noMarkers: readonly ChartMarker[] = []
+/** Fills listed in one marker's tooltip before the rest are counted. */
+const markerTipLimit = 5
 
 /** Imperative actions for the feature that owns the chart. */
 export interface CandleChartControl {
@@ -56,7 +58,7 @@ export const CandleChart = memo(function CandleChart({
   useEffect(() => { callbacks.current = handlers })
   const [panes, setPanes] = useState<PaneLayout[]>([])
   const [hoverTime, setHoverTime] = useState<number | null>(null)
-  const [hoverMarker, setHoverMarker] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [hoverMarker, setHoverMarker] = useState<{ ids: readonly string[]; x: number; y: number } | null>(null)
   const shown = useRef({ indicators, panes })
   useEffect(() => { shown.current = { indicators, panes } })
   useImperativeHandle(controlRef, () => ({
@@ -81,7 +83,7 @@ export const CandleChart = memo(function CandleChart({
       onPricePick: price => callbacks.current.onPricePick?.(price),
       onCrosshairMove: setHoverTime,
       onPaneLayout: setPanes,
-      onMarkerHover: (id, anchor) => setHoverMarker(id && anchor ? { id, ...anchor } : null),
+      onMarkerHover: (ids, anchor) => setHoverMarker(ids.length && anchor ? { ids, ...anchor } : null),
     })
     adapter.current = created
     shownKey.current = null
@@ -101,7 +103,11 @@ export const CandleChart = memo(function CandleChart({
 
   useEffect(() => { adapter.current?.setOverlays(overlays) }, [overlays, createAdapter])
   useEffect(() => { adapter.current?.setMarkers(markers) }, [markers, createAdapter])
-  const tooltip = hoverMarker && markers.find(marker => marker.id === hoverMarker.id)
+  const markerById = useMemo(() => new Map(markers.map(marker => [marker.id, marker])), [markers])
+  // Fills sharing one shape are listed together, a few at most.
+  const hovered = hoverMarker?.ids.flatMap(id => markerById.get(id) ?? []) ?? []
+  const tooltip = hovered.length ? [...hovered.slice(0, markerTipLimit).map(marker => marker.tooltip),
+    ...hovered.length > markerTipLimit ? [`and ${hovered.length - markerTipLimit} more ${hovered.length - markerTipLimit === 1 ? 'fill' : 'fills'}`] : []].join('\n\n') : null
   useEffect(() => { adapter.current?.setDrawings(drawings, selectedDrawingId) }, [drawings, selectedDrawingId, createAdapter])
   useEffect(() => { adapter.current?.setDrawingTool(tool, magnet) }, [tool, magnet, createAdapter])
   useEffect(() => { adapter.current?.setPricePicker(pricePicker) }, [pricePicker, createAdapter])
@@ -114,7 +120,7 @@ export const CandleChart = memo(function CandleChart({
   return <div className="candle-chart-frame">
     <div ref={container} className="candle-chart" role="application" aria-roledescription="chart" aria-label={label}
       tabIndex={0} onKeyDown={onKeyDown} />
-    {tooltip && hoverMarker && <div className="chart-marker-tooltip" role="tooltip" style={{ left: hoverMarker.x, top: hoverMarker.y }}>{tooltip.tooltip}</div>}
+    {tooltip && hoverMarker && <div className="chart-marker-tooltip" role="tooltip" style={{ left: hoverMarker.x, top: hoverMarker.y }}>{tooltip}</div>}
     {markers.length > 0 && <ul className="sr-only" aria-label="Fills on the chart">{markers.map(marker => <li key={marker.id}>{marker.tooltip}</li>)}</ul>}
     {indicators && indicatorView && onIndicatorsChange && candles.length > 0 &&
       <IndicatorOverlay settings={indicators} view={indicatorView} panes={panes} hoverIndex={hoverIndex} onChange={onIndicatorsChange} onExpand={onExpand} />}

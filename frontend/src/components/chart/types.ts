@@ -82,8 +82,11 @@ export interface ChartCallbacks {
   onCrosshairMove(time: number | null): void
   /** Indicator panes moved or resized, e.g. after a layout change or a separator drag. */
   onPaneLayout(panes: PaneLayout[]): void
-  /** The pointer rests on a fill marker (its ID and pane position), or left it (null). */
-  onMarkerHover?(id: string | null, anchor: { x: number; y: number } | null): void
+  /**
+   * The pointer rests on a fill marker: the IDs of every fill drawn as that shape (one price in one candle) and the pane
+   * position; none when it left.
+   */
+  onMarkerHover?(ids: readonly string[], anchor: { x: number; y: number } | null): void
 }
 
 /** Boundary that keeps the charting library out of feature code. */

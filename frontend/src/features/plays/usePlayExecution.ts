@@ -26,10 +26,12 @@ interface Shown {
   failed: number
   /** Mutations sent and not yet answered. */
   mutating: number
+  /** The stored plan revision the shown read was started for: its comparison is against that plan. */
+  basis?: number | undefined
 }
 
 type ShownEvent = { context: Context } & (
-  | { type: 'read'; sequence: number; execution: PlayExecution }
+  | { type: 'read'; sequence: number; execution: PlayExecution; basis: number | undefined }
   | { type: 'read-failed'; sequence: number }
   | { type: 'mutation-started' }
   | { type: 'mutation-done'; started: number; sequence: number; execution: PlayExecution | null })
@@ -41,7 +43,7 @@ function shown(state: Shown, event: ShownEvent): Shown {
   switch (event.type) {
     // A read applies only if it started after the facts shown: an earlier one, even if it answers later, cannot replace
     // a mutation's own answer or a newer read.
-    case 'read': return event.sequence > current.applied ? { ...current, execution: event.execution, applied: event.sequence } : current
+    case 'read': return event.sequence > current.applied ? { ...current, execution: event.execution, applied: event.sequence, basis: event.basis } : current
     case 'read-failed': return { ...current, failed: Math.max(current.failed, event.sequence) }
     case 'mutation-started': return { ...current, mutating: current.mutating + 1 }
     // A mutation's own answer is shown only if no read started after the mutation has been shown: such a read may have
@@ -53,17 +55,20 @@ function shown(state: Shown, event: ShownEvent): Shown {
 
 /**
  * Fresh when no mutation is in flight, the facts shown come from a read started after the last mutation completed (a
- * mutation's own answer never counts; the follow-up read is always issued), and no read started after them has failed.
- * A read that is only pending does not count, so routine refreshes never turn known facts into unknown ones.
+ * mutation's own answer never counts; the follow-up read is always issued), no read started after them has failed, and
+ * they were read for the current plan revision. A read that is only pending does not count, so routine refreshes never
+ * turn known facts into unknown ones; a saved plan revision does, until a read started after it is shown.
  */
-const isFresh = (state: Shown) => state.mutating === 0 && state.applied > state.mutated && state.failed <= state.applied
+const isFresh = (state: Shown, basis: number | undefined) =>
+  state.mutating === 0 && state.applied > state.mutated && state.failed <= state.applied && state.basis === basis
 
 /**
  * Stored execution reads only. The shell owns event-driven and disconnected fallback refreshes.
  * Writes belong to the API and Play, not its status: a status change (often caused by the write's own
- * fills) re-reads the execution but never aborts a link or unlink already sent.
+ * fills) re-reads the execution but never aborts a link or unlink already sent. `basis` is the saved plan revision: the
+ * comparison is against the plan, so a new revision re-reads it and leaves it stale until that read is shown.
  */
-export function usePlayExecution(api: WorkspaceApi, playId: string | null, status?: string, generation = 0) {
+export function usePlayExecution(api: WorkspaceApi, playId: string | null, status?: string, generation = 0, basis?: number) {
   const context = useMemo<Context>(() => ({ api, playId }), [api, playId])
   const [state, dispatch] = useReducer(shown, nothingShown)
   const [error, setError] = useState<{ context: Context; message: string; source: 'read' | 'action' } | null>(null)
@@ -85,7 +90,7 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
     const started = ++sequence.current
     api.playExecution(playId, controller.signal).then(execution => {
       if (controller.signal.aborted) return
-      dispatch({ context, type: 'read', sequence: started, execution })
+      dispatch({ context, type: 'read', sequence: started, execution, basis })
       setError(current => current?.context === context && current.source === 'action' ? current : null)
     }).catch(cause => {
       if (controller.signal.aborted) return
@@ -94,7 +99,7 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
       if (sequence.current === started) setError({ context, message: errorMessage(cause, 'The change could not be completed. Try again.'), source: 'read' })
     })
     return () => controller.abort()
-  }, [api, playId, context, status, generation, revision])
+  }, [api, playId, context, status, generation, revision, basis])
 
   const run = useCallback(async (action: (id: string, signal: AbortSignal) => Promise<PlayExecution | void>) => {
     const work = session.current
@@ -140,5 +145,5 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
      * has been shown yet (a link's own answer does not count), or a read started after the facts shown has failed. Facts
      * derived from it (fills, averages) are unknown until it is fresh.
      */
-    stale: !isFresh(current), reload, link, unlink, reject, dismiss, rebind }
+    stale: !isFresh(current, basis), reload, link, unlink, reject, dismiss, rebind }
 }

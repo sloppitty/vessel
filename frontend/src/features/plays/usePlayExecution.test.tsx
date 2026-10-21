@@ -41,6 +41,27 @@ describe('stored Play execution', () => {
     expect(api.sync).not.toHaveBeenCalled()
     expect(view.result.current.execution?.issues).toEqual(execution.issues)
   })
+  it('rereads the plan comparison for a newly saved plan revision and keeps it stale until that read is shown', async () => {
+    const api = client()
+    const second = deferred()
+    const view = renderHook(({ basis }) => usePlayExecution(api, execution.playId, 'planned', 0, basis), { initialProps: { basis: 1 } })
+    await act(async () => {})
+    expect(view.result.current.stale).toBe(false)
+    vi.mocked(api.playExecution).mockReturnValueOnce(second.promise).mockRejectedValueOnce(new ApiError('unavailable', 'Read failed.'))
+    view.rerender({ basis: 2 })
+    expect(api.playExecution).toHaveBeenCalledTimes(2)
+    // Retained, but read against revision 1: not current until revision 2's read is shown.
+    expect(view.result.current.execution).toBe(execution)
+    expect(view.result.current.stale).toBe(true)
+    await act(async () => { second.resolve({ ...execution, entries: [{ entryId: 'entry-1', filledQuantity: '0', averageFillPrice: null, restingOrders: 0, plannedQuantity: '2' }] }) })
+    expect(view.result.current.stale).toBe(false)
+    expect(view.result.current.execution?.entries[0]?.plannedQuantity).toBe('2')
+    // A revision whose read fails stays stale, with the failure.
+    view.rerender({ basis: 3 })
+    await act(async () => {})
+    expect(view.result.current.stale).toBe(true)
+    expect(view.result.current.error).toBe('Read failed.')
+  })
   it('dismisses a Play discrepancy, reloads stored facts and keeps execution issues', async () => {
     const api = client()
     const view = renderHook(() => usePlayExecution(api, execution.playId, 'open'))

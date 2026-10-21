@@ -25,11 +25,13 @@ const pnlBasisNote = {
   mixed: 'Some fills report closed PnL before fees and some after.',
 } as const
 
-export function ExecutionPanel({ execution, error, busy, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, onReject, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, currentBookRead = true, onDismiss, onManageCredential,
+export function ExecutionPanel({ execution, error, busy, stale = false, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, onReject, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, currentBookRead = true, onDismiss, onManageCredential,
   version, leverage = 1, priceStep = null, onRebind, rebindBlocked }: {
   execution: PlayExecution | null
   error: string | null
   busy: boolean
+  /** The execution may be out of date (`usePlayExecution`), so its plan comparison is unknown. */
+  stale?: boolean
   entries: readonly DraftEntry[]
   direction: 'long' | 'short'
   origin?: PlaySummary['origin']
@@ -99,7 +101,7 @@ export function ExecutionPanel({ execution, error, busy, entries, direction, ori
         <dd><LocalResultValue local={totals.local} format={value => `${value} USD`} />{totals.local.signDiffers && <SignDiffersFlag />}</dd></div>}
       {execution.receipt && <ReceiptTotals receipt={execution.receipt} status={execution.status} />}
     </dl>
-    <EntryReceipts progress={execution.entries} entries={entries} />
+    <EntryReceipts progress={execution.entries} entries={entries} stale={stale} />
 
     {execution.issues.length > 0 && <section aria-label="Not reconciled" className="execution-section execution-issues">
       <h3>Not reconciled<InfoTip label="About unreconciled executions">Vessel neither closes nor scores a play while these remain. Fills that contradict their link are left out of the totals.</InfoTip></h3>

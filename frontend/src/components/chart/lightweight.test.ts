@@ -209,9 +209,33 @@ describe('fill markers and trade focus (phase 1, 1.1b)', () => {
     adapter.setMarkers([marker('fill-1', 125_000)])
     const crosshair = chart.subscribeCrosshairMove.mock.calls[0]![0] as (event: unknown) => void
     crosshair({ time: 120, hoveredObjectId: 'fill-1', point: { x: 40, y: 80 } })
-    expect(callbacks.onMarkerHover).toHaveBeenLastCalledWith('fill-1', { x: 40, y: 80 })
+    expect(callbacks.onMarkerHover).toHaveBeenLastCalledWith(['fill-1'], { x: 40, y: 80 })
     crosshair({ time: 120, hoveredObjectId: 'level:entry', point: { x: 40, y: 90 } })
-    expect(callbacks.onMarkerHover).toHaveBeenLastCalledWith(null, null)
+    expect(callbacks.onMarkerHover).toHaveBeenLastCalledWith([], null)
+  })
+
+  it('lists every fill drawn as the one shape, at one price in one candle', () => {
+    adapter.setMarkers([marker('first', 125_000), marker('second', 150_000, 'sell'), { ...marker('other price', 130_000), price: 99 }, marker('next candle', 185_000)])
+    const crosshair = chart.subscribeCrosshairMove.mock.calls[0]![0] as (event: unknown) => void
+    crosshair({ time: 120, hoveredObjectId: 'second', point: { x: 100, y: 898 } })
+    expect(callbacks.onMarkerHover).toHaveBeenLastCalledWith(['first', 'second'], { x: 100, y: 898 })
+    crosshair({ time: 120, hoveredObjectId: 'other price', point: { x: 100, y: 901 } })
+    expect(callbacks.onMarkerHover).toHaveBeenLastCalledWith(['other price'], { x: 100, y: 901 })
+  })
+
+  it('lets a fill at its planned price keep its tooltip: the level gives way only on the marker', () => {
+    // Bars are 100 px apart, so the fill in the 120s candle is drawn at x 100, on the entry level's y.
+    adapter.setOverlays([{ id: 'level', label: 'Entry', price: 101.5, color: '#ffffff', emphasis: 'selected', kind: 'entry', draggable: true }])
+    adapter.setMarkers([marker('fill-1', 125_000)])
+    const primitive = chart.series[0]!.primitives[0] as unknown as { hitTest(x: number, y: number): { externalId: string } | null }
+    expect(primitive.hitTest(100, 1000 - 101.5)).toBeNull()
+    expect(primitive.hitTest(110, 1000 - 103)).toBeNull()
+    expect(primitive.hitTest(400, 1000 - 101.5)?.externalId).toBe('level')
+    // Pressing the marker neither drags nor selects the level; elsewhere on the line it still drags.
+    pointer(container, 'pointerdown', 101.5, 100); pointer(container, 'pointerup', 101.5, 100)
+    expect(callbacks.onLevelSelect).not.toHaveBeenCalled()
+    pointer(container, 'pointerdown', 101.5, 400); pointer(container, 'pointermove', 103, 400); pointer(container, 'pointerup', 103, 400)
+    expect(callbacks.onLevelDrag).toHaveBeenLastCalledWith('level', 103, 'end')
   })
 
   it('opens on the focus at a reset, once per range, so later panning is left alone', () => {

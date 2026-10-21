@@ -42,8 +42,13 @@ describe('Review API', () => {
   it('accepts imported positions only without a Play ID, R or Play-local result', () => {
     expect(isReviewDocument(positionReport)).toBe(true)
     const position = positionReport.plays.at(-1)!
-    for (const change of [{ id: reviewFixture.plays[0]!.id }, { operationId: null }, { rMultiple: '1' }, { local: reviewFixture.plays[0]!.local ?? { netUsd: '1', basis: 'executions', reason: null, signDiffers: false } }])
+    for (const change of [{ id: reviewFixture.plays[0]!.id }, { operationId: null }, { operationId: ' ' }, { rMultiple: '1' }, { reviewed: true },
+      { executionSource: 'manual' }, { local: reviewFixture.plays[0]!.local ?? { netUsd: '1', basis: 'executions', reason: null, signDiffers: false } }])
       expect(isReviewDocument({ ...positionReport, plays: [{ ...position, ...change }] })).toBe(false)
+    // Stops, reviews and Play-local results count Plays only: 3 results with 1 position leave 2 Plays.
+    for (const change of [{ riskCount: 3 }, { reviewed: 3 }, { signDiffers: 3 }, { localUnknown: 3 }, { positions: 2 }])
+      expect(isReviewDocument({ ...positionReport, metrics: { ...positionReport.metrics, ...change } })).toBe(false)
+    expect(isReviewDocument({ ...positionReport, metrics: { ...positionReport.metrics, signDiffers: 2, localUnknown: 2 } })).toBe(true)
     expect(isReviewDocument({ ...positionReport, plays: [{ ...reviewFixture.plays[0], id: null }] })).toBe(false)
     expect(isReviewDocument({ ...positionReport, metrics: { ...positionReport.metrics, positions: 99 } })).toBe(false)
     expect(isReviewDocument({ ...positionReport, positions: { ...positionReport.positions, positions: null } })).toBe(false)
