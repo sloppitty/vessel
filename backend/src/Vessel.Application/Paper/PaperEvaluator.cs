@@ -204,10 +204,9 @@ public static class PaperEvaluator
                         Entries = [position is null ? entry : entry with { Price = Text(position.Entry.Price) }]
                     };
                     var levels = ExecutionMatcher.Levels(levelPlan).ToArray();
-                    bool Touched(PlanLevelTarget level)
+                    bool CrossedBeforeOpen(PlanLevelTarget level)
                     {
                         if (level.Price is not { } price) return false;
-                        if (price >= candle.Low && price <= candle.High) return true;
                         if (previousClose is not { } close || previousCloseAtUtc is not { } at) return false;
                         var first = Revision(at.AddTicks(-1));
                         if (first < 0) return false;
@@ -225,6 +224,8 @@ public static class PaperEvaluator
                         }
                         return price >= Math.Min(close, candle.Open) && price <= Math.Max(close, candle.Open);
                     }
+                    bool Touched(PlanLevelTarget level) =>
+                        level.Price is { } price && (price >= candle.Low && price <= candle.High || CrossedBeforeOpen(level));
                     var enters = position is null && Touched(levels[0]);
                     var exits = levels.Where(l => l.Role != OrderLinkRole.Entry && l.Price is > 0 &&
                             !used.Contains((entry.Id, Role(l.Role), l.LevelId)))
@@ -240,6 +241,19 @@ public static class PaperEvaluator
                             allocation.Quantity, 0, allocation.Margin));
                     }
                     if (position is null) continue;
+                    if (exits.Length > 1)
+                    {
+                        // Stable active levels crossed on the opening jump precede all intraminute touches.
+                        // Within either path, only a known starting side establishes first-crossing order.
+                        var beforeOpen = exits.Where(CrossedBeforeOpen).ToHashSet();
+                        var withinCandle = exits.Where(l => !beforeOpen.Contains(l)).ToArray();
+                        if (withinCandle.Any(l => l.Price < candle.Open) && withinCandle.Any(l => l.Price > candle.Open) ||
+                            beforeOpen.GroupBy(l => l.Price).Any(g => g.Count() > 1) ||
+                            withinCandle.GroupBy(l => l.Price).Any(g => g.Count() > 1))
+                            return Result($"Ambiguous paper exit order at {open:O}; no execution from this candle was applied.", true);
+                        exits = beforeOpen.OrderBy(l => Math.Abs(l.Price!.Value - previousClose.GetValueOrDefault()))
+                            .Concat(withinCandle.OrderBy(l => Math.Abs(l.Price!.Value - candle.Open))).ToArray();
+                    }
                     var remaining = position.Quantity;
                     var margin = position.Margin;
                     foreach (var level in exits)

@@ -1,10 +1,10 @@
 # Paper trading delivery state
 
-October 21, 2026. **Ready for review under explicitly accepted v1 limitations:
-Claude Opus round five independently closed N1/O1 and found no P1/P2; the owner
-then accepted both quiet-coverage account holds and ordinary Pause forfeiting
-scoring. The final acceptance/handoff below supersedes earlier draft holds.
-No merge, deployment, release or live migration is authorized.**
+October 21, 2026. **Draft again: the owner's final two-Sol adversarial pass
+found two new P2 defects, now under correction and fresh closure review.
+The accepted C/N1 limitations remain accepted. The owner has authorized merge
+only once the findings and final verification are sound; no deployment,
+release or live migration is authorized.**
 Authority: [delivery contract](paper-trading-delivery-contract.md) and
 [owner-refined plan](paper-trading-plan.md).
 
@@ -915,3 +915,36 @@ This update changes documentation only. The final production/test manifests
 still match the independently reviewed `cce069b` snapshot; scoped whitespace
 checks pass. No redundant full-suite rerun is claimed for this documentation
 change. No merge, deployment, release or owner-database migration was performed.
+
+### Owner-authorized final two-Sol adversarial pass — October 21, 2026
+
+The owner requested two new independent Sol reviews, corrections for their
+findings and merge once sound. Both reviewed `848e351`, whose production
+still matched `cce069b`. They did not reopen the accepted C/N1 limitations.
+
+- **Review A, core P2:** after a partial exit, same-role touched exits consumed
+  the remainder in saved-array order. Reversing targets changed a scratch to
+  a 50 USD win/cash 4,050; reversing stops changed 25 USD to a scratch. The
+  evaluator and real PostgreSQL services reproduce both directions.
+  Existing core checks: 216 passes. Final independent probes: 11 passes /
+  six defect failures, repeated twice.
+- **Review B, frontend P2:** a Paper-bound client accepted legacy Real financial
+  report roots without `tradingMode`, including actual imported-position
+  Review rows and aggregates. A rendered probe showed Real Plays/P&L/fills.
+  Omitted mode must remain legacy Real, not silently become Paper.
+- Review B also independently reproduced the known **P3**: live Plays with
+  suspension history entered Review's closed/excluded population.
+
+PR #32 was returned to draft; neither original review approves this snapshot.
+Parent exit-order regressions first produced **11 failures / nine controls
+passing**, then **20/20 passed** after a narrow evaluator correction. Proven
+opening-jump crossings are processed before intraminute touches; only known
+starting-side evidence orders competing exits. Unknown order is held as
+ambiguity. Additional revision-boundary cases and final combined checks remain
+pending. The boundary implementer owns the disjoint report-mode and reporting
+population corrections, not an independent approval of its own changes.
+
+Reports and retained red runs:
+`/home/ops/.cache/vessel-verification/paper-review-a-848e351-qCA26B/REPORT.md`,
+`/home/ops/.cache/vessel-verification/paper-sol-adversarial-20261021/boundaries-848e351-vCroel/REPORT.md`,
+and the parent `paper-sol-adversarial-20261021/` evidence directory.

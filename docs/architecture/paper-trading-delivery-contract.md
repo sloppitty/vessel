@@ -33,6 +33,11 @@ independent verification. No deployment, publication or owner-database migration
 - Same-candle entry/exit or opposing exit ambiguity is flagged, not guessed,
   and does not become a scored result. No new capital admissions against
   unresolved capital. Preserve revisions/effective activation boundaries.
+  Same-role exits must not consume a partial remainder in editor-array order.
+  Proven active-level opening-jump crossings precede intraminute touches;
+  a known starting side establishes nearest-first crossings. If competing
+  first touches cannot be ordered from that evidence, hold the candle as
+  ambiguous rather than selecting a price or level arbitrarily.
 - Reuse current Play layout, evidence, review, metric formulas and owner scope.
   Existing real behavior, Activity fallback, counts/coverage and sizing stay real.
 
