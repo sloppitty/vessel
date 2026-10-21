@@ -49,6 +49,8 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
 
     // Every character char.IsWhiteSpace accepts, so SQL "has a review" matches Play.HasReview exactly.
     private static readonly char[] Space = "\t\n\v\f\r \u0085\u00A0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000".ToCharArray();
+    // Space plus U+FEFF, which JavaScript's trim also removes: the browser rejects a blank next action, so none is sent.
+    private static readonly char[] BrowserSpace = [.. Space, '\uFEFF'];
 
     // Owner-filtered Plays, projected to summary columns only. A scope keeps enabled accounts in it; no scope keeps every Play.
     private IQueryable<PlayListRow> Rows(PlayListFilter filter)
@@ -94,7 +96,7 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
         db.StatusChanges.Where(x => x.PlayId == playId).OrderBy(x => x.OccurredAtUtc).ThenBy(x => x.Id).AsNoTracking().ToListAsync(ct);
     public Task<List<NextActionDto>> NextActionsAsync(int limit, CancellationToken ct) =>
         db.Plays.Where(p => (p.Status == PlayStatus.Closed || p.Status == PlayStatus.Cancelled) && p.ReviewNextAction != "" &&
-                p.ReviewNextAction.Trim() != "")
+                p.ReviewNextAction.Trim(BrowserSpace) != "")
             .OrderByDescending(p => p.ReviewedAtUtc).ThenByDescending(p => p.UpdatedAtUtc).ThenBy(p => p.Id).Take(limit)
             .Select(p => new NextActionDto(p.Id, p.Title, p.ReviewNextAction, p.ReviewedAtUtc)).ToListAsync(ct);
 
