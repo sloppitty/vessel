@@ -487,7 +487,7 @@ public sealed class DiaryArithmeticRegressionTests
             return Task.FromResult(Plays.Links.ToList());
         }
         public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => Plays.AccountAsync(id, ct);
-        public Task<List<Play>> ActivePlaysAsync(Guid id, CancellationToken ct) => Task.FromResult(Plays.Plays.Where(p => p.AccountId == id).ToList());
+        public Task<List<Play>> ActivePlaysAsync(Guid id, CancellationToken ct, bool settling = false) => Task.FromResult(Plays.Plays.Where(p => p.AccountId == id).ToList());
         public Task<List<ImportedFill>> FillsAsync(Guid id, IReadOnlyCollection<OrderKey> orders, CancellationToken ct) =>
             Task.FromResult(Fills.Where(f => f.AccountId == id && orders.Contains(OrderKey.Of(f))).ToList());
         public Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
@@ -499,5 +499,6 @@ public sealed class DiaryArithmeticRegressionTests
         public void Add(DiaryRequest request) => Requests.Add(request);
         public void Add(PlayOrderLink link) => Plays.Links.Add(link);
         public void Add(PlayStatusChange change) => Plays.Add(change);
+        public Task ForgetWatchesAsync(Guid playId, CancellationToken ct) => Task.CompletedTask;
     }
 }

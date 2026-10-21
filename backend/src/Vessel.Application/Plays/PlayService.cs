@@ -38,10 +38,10 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     {
         var rows = await store.CountsAsync(await Filter(search, scope, Mode(tradingMode), ct), ct);
         int Count(Func<PlayCountRow, bool> where) => rows.Where(where).Sum(r => r.Count);
-        static bool Ended(PlayCountRow r) => r.Status is PlayStatus.Closed or PlayStatus.Cancelled;
+        static bool Ended(PlayCountRow r) => r.Status is PlayStatus.Closed or PlayStatus.Cancelled or PlayStatus.Unresolved;
         return new(Count(r => r.Status == PlayStatus.Draft), Count(r => r.Status is PlayStatus.Planned or PlayStatus.Paused or PlayStatus.Open),
             Count(r => Ended(r) && !r.Reviewed), Count(r => Ended(r) && r.Reviewed), Count(r => r.Status == PlayStatus.Closed),
-            Count(r => r.Status == PlayStatus.Cancelled), Count(_ => true));
+            Count(r => r.Status == PlayStatus.Cancelled), Count(_ => true)) { Unresolved = Count(r => r.Status == PlayStatus.Unresolved) };
     }
 
     private async Task<PlayListFilter> Filter(string? search, string? scope, string tradingMode, CancellationToken ct)
@@ -241,7 +241,11 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         return new(revisions.Select(r => new PlanRevisionDto(r.Number, StatusName(r.Status), r.Reason, r.CreatedAtUtc, PlayDocuments.Read(r.Plan))
             { Preflight = PlayPreflight.Read(r.Preflight) }).ToList(),
             changes.Select(c => new StatusChangeDto(StatusName(c.From), StatusName(c.To), c.Reason is { } reason ? ReasonName(reason) : null,
-                c.Note, c.OccurredAtUtc, c.Source.ToString().ToLowerInvariant())).ToList(),
+                c.Note, c.OccurredAtUtc, c.Source.ToString().ToLowerInvariant())
+            {
+                UnresolvedReason = c.UnresolvedReason is { } unresolved ? PlayUnresolved.ReasonName(unresolved) : null,
+                Evidence = PlayUnresolved.Read(c.Evidence),
+            }).ToList(),
             reviews.Select(r => new ReviewRevisionDto(r.Number, r.OccurredAtUtc, r.Review,
                 JsonSerializer.Deserialize<ReviewAnswers>(r.StructuredReview)!) { Action = r.Action }).ToList());
     }

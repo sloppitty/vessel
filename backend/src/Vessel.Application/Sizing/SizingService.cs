@@ -64,6 +64,15 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
 
     private async Task<SizingDto> BuildAsync(decimal risk, string tradingMode, CancellationToken ct)
     {
+        var dto = await RecordAsync(risk, tradingMode, ct);
+        // Unresolved Plays have no result: they stay out of the record and the ladder, and are only counted beside it.
+        // A paper Play is never declared Unresolved: its simulation holds what it cannot settle.
+        return tradingMode == TradingMode.Paper ? dto
+            : dto with { Record = dto.Record with { Unresolved = await store.UnresolvedPlaysAsync(ct) } };
+    }
+
+    private async Task<SizingDto> RecordAsync(decimal risk, string tradingMode, CancellationToken ct)
+    {
         var closed = (await store.ClosedPlaysAsync(tradingMode, ct)).Where(f => f.Play.TradingMode == tradingMode).ToList();
         if (tradingMode == TradingMode.Paper)
         {

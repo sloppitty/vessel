@@ -200,3 +200,13 @@ entries)), less every trading fee.
   above for partial plans. Review's figure has the same name but a stricter
   plan rule. Neither is actual risk, and sizing's R is not shown in the
   browser.
+
+## Unresolved Plays (October 20, 2026)
+
+Phase 1.3a of the [learning-loop contract](phase1-learning-loop-contract.md),
+decision 4. An Unresolved Play has no result, so it is never in the record,
+the window or the ladder. `record.unresolved` counts the owner's Unresolved
+Plays on enabled accounts, and the Suggestions record column shows "N
+unresolved not counted" beside the exposure line when it is above zero. The
+ladder thresholds, the window and the Activity fallback rule are unchanged:
+the fallback still depends only on decided closed Plays.

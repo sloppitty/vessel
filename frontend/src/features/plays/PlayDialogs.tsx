@@ -1,11 +1,12 @@
 import { errorMessage } from '@/api/errors'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { WorkspaceApi } from '@/api/workspace'
-import { cancelReasonLabels, cancelReasons, statusLabels, type CancelReason, type PlayHistory, type PreflightCheck } from '@/api/plays'
+import { cancelReasonLabels, cancelReasons, statusLabels, unresolvedReasonLabels, unresolvedReasons, type CancelReason, type PlayHistory, type PreflightCheck, type UnresolvedReason } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { describePlanChanges } from './saved'
 import { preflightLabels } from './preflight'
+import { evidenceLines } from './unresolved'
 import { NativeSelect } from '@/components/ui/native-select'
 
 /** Asks why a planned Play's plan changed; the reason is kept with the revision. */
@@ -26,6 +27,62 @@ export function RevisionDialog({ revision, pending, error, onSave, onClose }: {
         {error && <p className="error" role="alert">{error}</p>}
         <div className="management-actions"><Button type="button" variant="outline" onClick={onClose} disabled={pending}>Keep editing</Button>
           <Button type="submit" disabled={pending || !reason.trim()}>{pending ? 'Saving…' : 'Save revision'}</Button></div>
+      </form>
+    </DialogContent>
+  </Dialog>
+}
+
+/**
+ * Declare an Open Play unresolved (phase 1, 1.3a): the owner says its executions can never settle it. Never offered from
+ * account flatness or the monitor; the server keeps a snapshot of its execution facts with the declaration.
+ */
+export function UnresolvedDialog({ pending, error, onDeclare, onClose }: {
+  pending: boolean; error: string | null; onDeclare: (reason: UnresolvedReason, note: string) => void; onClose: () => void
+}) {
+  const [reason, setReason] = useState<UnresolvedReason | ''>('')
+  const [note, setNote] = useState('')
+  const submit = (event: FormEvent) => { event.preventDefault(); if (reason && note.trim()) onDeclare(reason, note.trim()) }
+  return <Dialog open onOpenChange={next => { if (!next && !pending) onClose() }}>
+    <DialogContent className="workspace-dialog">
+      <DialogHeader><DialogTitle>Declare this play unresolved?</DialogTitle><DialogDescription>
+        Use this when its venue executions can never settle it. It ends with no result and is left out of Review scores and
+        sizing. Its linked orders still count: if their fills settle it, it closes. It takes no new orders unless you return
+        it to Open.
+      </DialogDescription></DialogHeader>
+      <form className="workspace-form" onSubmit={submit} aria-busy={pending}>
+        <label htmlFor="unresolved-reason">Reason</label>
+        <NativeSelect id="unresolved-reason" value={reason} disabled={pending} onChange={event => setReason(event.target.value as UnresolvedReason | '')}>
+          <option value="">Choose a reason</option>
+          {unresolvedReasons.map(value => <option key={value} value={value}>{unresolvedReasonLabels[value]}</option>)}
+        </NativeSelect>
+        <label htmlFor="unresolved-note">What happened</label>
+        <textarea id="unresolved-note" value={note} maxLength={2000} rows={3} disabled={pending} onChange={event => setNote(event.target.value)} />
+        {error && <p className="error" role="alert">{error}</p>}
+        <div className="management-actions"><Button type="button" variant="outline" onClick={onClose} disabled={pending}>Keep it open</Button>
+          <Button type="submit" disabled={pending || !reason || !note.trim()}>{pending ? 'Declaring…' : 'Declare unresolved'}</Button></div>
+      </form>
+    </DialogContent>
+  </Dialog>
+}
+
+/** Return an Unresolved Play to Open, with a reason; its review is needed again once it ends. */
+export function ReturnToOpenDialog({ pending, error, onReturn, onClose }: {
+  pending: boolean; error: string | null; onReturn: (note: string) => void; onClose: () => void
+}) {
+  const [note, setNote] = useState('')
+  const submit = (event: FormEvent) => { event.preventDefault(); if (note.trim()) onReturn(note.trim()) }
+  return <Dialog open onOpenChange={next => { if (!next && !pending) onClose() }}>
+    <DialogContent className="workspace-dialog">
+      <DialogHeader><DialogTitle>Return this play to Open?</DialogTitle><DialogDescription>
+        It can link orders again and its fills settle it as usual. The declaration stays in its history, and its review is
+        needed again once it ends.
+      </DialogDescription></DialogHeader>
+      <form className="workspace-form" onSubmit={submit} aria-busy={pending}>
+        <label htmlFor="return-open-note">Reason</label>
+        <textarea id="return-open-note" value={note} maxLength={2000} rows={3} disabled={pending} onChange={event => setNote(event.target.value)} />
+        {error && <p className="error" role="alert">{error}</p>}
+        <div className="management-actions"><Button type="button" variant="outline" onClick={onClose} disabled={pending}>Keep it unresolved</Button>
+          <Button type="submit" disabled={pending || !note.trim()}>{pending ? 'Returning…' : 'Return to Open'}</Button></div>
       </form>
     </DialogContent>
   </Dialog>
@@ -118,7 +175,8 @@ export function DeleteDialog({ pending, error, onDelete, onClose }: {
   </Dialog>
 }
 
-const reviewActionLabels = { completed: 'review completed', reopened: 'reviewed again', 'not-needed': 'no review needed' } as const
+const reviewActionLabels = { completed: 'review completed', reopened: 'reviewed again', 'not-needed': 'no review needed',
+  cleared: 'completion cleared: the Play left its final state' } as const
 
 const when = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
@@ -142,13 +200,14 @@ export function HistoryDialog({ api, playId, onClose }: { api: WorkspaceApi; pla
     })),
     ...result.history.statusChanges.map((change, index): HistoryItem => ({
       at: change.occurredAtUtc, key: `s${index}`, title: `${statusLabels[change.from]} → ${statusLabels[change.to]}${change.source === 'paper' ? ' · from simulated paper executions' : change.source === 'venue' ? ' · from linked venue fills' : change.source === 'manual' ? ' · from manual facts' : ''}`,
-      detail: [change.reason ? cancelReasonLabels[change.reason] : '', change.note ?? ''].filter(Boolean),
+      detail: [change.reason ? cancelReasonLabels[change.reason] : '', change.unresolvedReason ? unresolvedReasonLabels[change.unresolvedReason] : '',
+        change.note ?? '', ...(change.evidence ? evidenceLines(change.evidence) : [])].filter(Boolean),
     })),
     ...(result.history.reviews ?? []).map(review => ({
       at: review.occurredAtUtc, key: `review${review.number}`,
       title: `Review revision ${review.number}${review.action && review.action !== 'edited' ? ` · ${reviewActionLabels[review.action]}` : ''}`,
-      // Review again and No review needed change only the completion; the text they keep is already listed.
-      detail: review.action === 'reopened' || review.action === 'not-needed' ? [] : [review.review, review.structuredReview.adherence ? `Adherence: ${review.structuredReview.adherence}` : '',
+      // Review again, No review needed and a cleared completion change only the completion; the text they keep is already listed.
+      detail: review.action === 'reopened' || review.action === 'not-needed' || review.action === 'cleared' ? [] : [review.review, review.structuredReview.adherence ? `Adherence: ${review.structuredReview.adherence}` : '',
         review.structuredReview.mistakeTag ? `Mistake: ${review.structuredReview.mistakeTag}` : '',
         review.structuredReview.lesson ? `Lesson: ${review.structuredReview.lesson}` : '',
         review.structuredReview.nextAction ? `Next action: ${review.structuredReview.nextAction}` : ''].filter(Boolean),

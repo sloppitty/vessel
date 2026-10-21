@@ -368,3 +368,15 @@ the explicit review completion. Review text, answers and review times no
 longer count. See the review completion section of `play-lifecycle.md`. The
 upgrade keeps Plays that were already counted as `legacy` completions.
 
+## Unresolved Plays (October 20, 2026)
+
+Phase 1.3a of the [learning-loop contract](phase1-learning-loop-contract.md),
+decision 4. An Unresolved Play was declared by its owner because its
+executions can never settle it ([play lifecycle](play-lifecycle.md)).
+- It has no result and is never scored, and no sign is inferred.
+- `coverage.unresolved` counts those in scope whose declaration falls in the
+  period. The excluded count and the coverage line include it.
+- The exclusion drill-down lists each with the reason "unresolved", placed by
+  its declaration time, and an `unresolved` block: the reason, the note, the
+  declaration time and the execution facts kept with it.
+- If its fills later settle it, it is Closed and scored like any other.

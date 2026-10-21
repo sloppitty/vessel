@@ -51,7 +51,7 @@ public sealed class MonitorDiscrepancyStore(VesselDbContext db, UnitOfWork work)
                     // Same terminal watch as MonitorStore: a linked order whose current watch has not ended. Its run
                     // records lifetime expiry before evaluation; positive resting evidence still admits it below.
                     db.OrderLinks.Any(l => l.PlayId == p.Id && l.State == OrderLinkState.Linked && !watches.Any(e =>
-                        e.LinkId == l.Id && e.EndedAtUtc != null && e.LinkRevisionAtUtc >= l.UpdatedAtUtc)) ||
+                        e.LinkId == l.Id && e.EndedAtUtc != null && e.LinkRevisionAtUtc >= l.UpdatedAtUtc && (p.EndedAtUtc == null || p.EndedAtUtc <= e.StartedAtUtc))) ||
                     // Evaluation membership, independent of scheduling: tracked records, even unverifiable ones.
                     records.Any(d => d.AccountId == accountId && d.PlayId == p.Id && (d.State == DiscrepancyLifecycle.Candidate ||
                         d.State == DiscrepancyLifecycle.Open || d.PendingFingerprint != null ||

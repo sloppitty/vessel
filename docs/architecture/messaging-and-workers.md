@@ -482,7 +482,7 @@ October 19 (owner decision 10, Phase 0 item 0.4b): Refresh used to leave gap evi
 
 ### Watches
 
-Linked exits (stops, targets, exits) and entries of Closed or Cancelled Plays are watched in `monitor_exit_watches`, from the later of the Play's end and the link change; a relinked order starts a new watch.
+Linked exits (stops, targets, exits) and entries of Closed, Cancelled or Unresolved Plays are watched in `monitor_exit_watches`, from the later of the Play's end and the link change; a relinked order starts a new watch, and so does a Play that ends again (an Unresolved Play declared a second time after a return to Open). An Unresolved Play's end is its declaration.
 
 - A read that reports the specific order filled, cancelled or rejected ends the watch (`terminal`), whether or not the read covers the whole book.
 - Absence ends it (`absent`) only on a complete current open-order read. Only a current-book row (status time equal to the read time) proves the order still rests; historical `Open` rows do not.

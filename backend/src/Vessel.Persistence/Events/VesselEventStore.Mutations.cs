@@ -57,17 +57,21 @@ public sealed partial class VesselEventStore
             var play = await lookups.PlayAsync(change.PlayId, ct);
             // Paper lifecycle/status history is retained, but actual-account events and notifications are not its transport.
             if (play is null || play.TradingMode != "real") continue;
+            // An Unresolved Play that its fills settle closes with the same closed-result event as an Open one (1.3a).
             var type = change.To == PlayStatus.Open && change.From is PlayStatus.Planned or PlayStatus.Paused
-                ? "play.opened" : change.From == PlayStatus.Open && change.To == PlayStatus.Closed
+                ? "play.opened" : change.From is PlayStatus.Open or PlayStatus.Unresolved && change.To == PlayStatus.Closed
                     ? "play.closed" : "play.status-changed";
             var key = type == "play.opened" ? $"play:{play.Id}:opened" : type == "play.closed"
                 ? $"play:{play.Id}:closed" : $"status-change:{change.Id}";
             var account = await lookups.AccountAsync(play.AccountId, ct);
             var occurred = await LifecycleSourceTimeAsync(play, change, ct);
+            // A declaration and the return to Open that undoes it both carry its reason on the change itself.
+            var unresolved = change.UnresolvedReason;
             var data = type == "play.closed" ? await ClosedDataAsync(play, ct) : VesselEventJson.Element(new
             {
                 previous = change.From.ToString().ToLowerInvariant(), current = change.To.ToString().ToLowerInvariant(),
-                source = change.Source.ToString().ToLowerInvariant(), reason = change.Reason?.ToString().ToLowerInvariant()
+                source = change.Source.ToString().ToLowerInvariant(),
+                reason = unresolved is { } declared ? PlayUnresolved.ReasonName(declared) : change.Reason?.ToString().ToLowerInvariant()
             });
             drafts.Add(new(type, runId, key, change.From == PlayStatus.Paused && change.To == PlayStatus.Open
                 ? "warning" : "info", occurred, detected,

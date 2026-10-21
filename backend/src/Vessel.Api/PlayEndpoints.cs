@@ -71,6 +71,11 @@ public static class PlayEndpoints
         // Answers level.drift: one plan revision moves the linked level to the observed order's price. Returns the Play.
         api.MapPost("/{id:guid}/execution/links/{linkId:guid}/rebind", async (Guid id, Guid linkId, RebindLevelRequest request,
             PlayExecutionService service, CancellationToken ct) => Results.Ok(await service.RebindAsync(id, linkId, request, ct)));
+        // Phase 1.3a: the owner declares a stuck Open Play unresolved, or returns it to Open. Returns the Play.
+        api.MapPost("/{id:guid}/unresolved", async (Guid id, DeclareUnresolvedRequest request, PlayExecutionService service,
+            CancellationToken ct) => Results.Ok(await service.DeclareUnresolvedAsync(id, request, ct)));
+        api.MapPost("/{id:guid}/return-to-open", async (Guid id, ReturnToOpenRequest request, PlayExecutionService service,
+            CancellationToken ct) => Results.Ok(await service.ReturnToOpenAsync(id, request, ct)));
         api.MapDelete("/{id:guid}", async (Guid id, PlayService service, CancellationToken ct) =>
         {
             await service.DeleteAsync(id, ct);

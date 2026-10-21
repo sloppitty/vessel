@@ -116,6 +116,8 @@ public abstract class PlayIsolationCases(IsolationHost api)
     [Covers("POST", "/api/plays/{id:guid}/execution/links")]
     [Covers("DELETE", "/api/plays/{id:guid}/execution/links/{linkId:guid}")]
     [Covers("POST", "/api/plays/{id:guid}/execution/links/{linkId:guid}/rebind")]
+    [Covers("POST", "/api/plays/{id:guid}/unresolved")]
+    [Covers("POST", "/api/plays/{id:guid}/return-to-open")]
     public async Task Order_links_of_another_owner_answer_like_unknown_ones_and_stay_unchanged()
     {
         var (a, b) = await api.Owners();
@@ -156,6 +158,12 @@ public abstract class PlayIsolationCases(IsolationHost api)
                 _ => new RebindLevelRequest(1, "entry", "100", "Moved at the venue")), PlayNotFound));
             await state.After(() => Isolated.NotFound(b, link, Isolated.Request(HttpMethod.Post, id => $"/api/plays/{bPlay}/execution/links/{id}/rebind",
                 _ => new RebindLevelRequest(Version(bPlanned), "entry", "100", "Moved at the venue")), "Linked stop or target not found."));
+            // Declaring A's Play unresolved or returning it to Open answers like an unknown Play (phase 1, 1.3a).
+            var aPlay = await a.GetJson($"/api/plays/{play}");
+            await state.After(() => Isolated.NotFound(b, play, Isolated.Request(HttpMethod.Post, id => $"/api/plays/{id}/unresolved",
+                _ => new DeclareUnresolvedRequest(Version(aPlay), "other", "taken-by-b")), PlayNotFound));
+            await state.After(() => Isolated.NotFound(b, play, Isolated.Request(HttpMethod.Post, id => $"/api/plays/{id}/return-to-open",
+                _ => new ReturnToOpenRequest(Version(aPlay), "taken-by-b")), PlayNotFound));
 
             // B links the same native order ID in its own account: a separate link that leaves A's untouched.
             var aState = await Snapshot.Of(a, paths);
@@ -174,6 +182,9 @@ public abstract class PlayIsolationCases(IsolationHost api)
             // Positive control: A's own rebind reaches its Play, whose version moved on: a conflict, not an unknown Play.
             await a.Post($"/api/plays/{play}/execution/links/{link}/rebind", new RebindLevelRequest(0, "entry", "100", "Moved at the venue"),
                 HttpStatusCode.Conflict);
+            // Positive controls: A's own declaration and return reach its Play: a stale version is a conflict, not an unknown Play.
+            await a.Post($"/api/plays/{play}/unresolved", new DeclareUnresolvedRequest(0, "other", "Stuck."), HttpStatusCode.Conflict);
+            await a.Post($"/api/plays/{play}/return-to-open", new ReturnToOpenRequest(0, "Back."), HttpStatusCode.Conflict);
         }
         finally { api.Clock.Now = now; }
     }

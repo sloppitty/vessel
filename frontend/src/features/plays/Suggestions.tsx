@@ -221,6 +221,8 @@ function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRisk
       <InfoTip label="About result bases">The record scores the venue result. The Play-local basis uses each play’s own fills: sell proceeds minus buy costs, less every fee. Fee-only losses were zero or better before fees and still count as losses. {fundingNote}, so a sign change or a fee-only loss can reflect funding.</InfoTip></p>}
     <p className="record-exposure" data-reduced={exposure.level !== 'full' || undefined}>
       <strong>{exposure.level === 'full' ? 'Full size' : exposureLabels[exposure.level]}</strong> · {exposure.reason}
+      {/* Unresolved Plays have no result, so the ladder never counts them; the count sits beside it (phase 1, 1.3a). */}
+      {record.unresolved ? <span className="record-unresolved" data-testid="record-unresolved"> · {record.unresolved} unresolved not counted</span> : null}
     </p>
     <div className="record-limits">
       {onRiskChange ? <RiskSetting sizing={sizing} onRiskChange={onRiskChange} /> : <span>Risk {decimal(sizing.settings.riskPercent)}% · shared preference, read-only in Paper. Edit in Real mode.</span>}

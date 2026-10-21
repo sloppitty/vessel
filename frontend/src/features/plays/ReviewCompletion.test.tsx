@@ -240,3 +240,14 @@ describe('log reads and older servers (phase 1, 1.2)', () => {
     expect(screen.queryByText('This review is not complete yet.')).not.toBeInTheDocument()
   })
 })
+
+describe('review completion of an Unresolved Play (phase 1, 1.3a)', () => {
+  it('is completed like a Closed Play, never marked as needing no review', async () => {
+    const onAction = vi.fn()
+    render(<ReviewCompletionBar summary={summary({ status: 'unresolved', reviewCompletion: null })} dirty={false} busy={false} onAction={onAction} />)
+    expect(screen.getByText('This review is not complete yet.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'No review needed' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Complete review' }))
+    expect(onAction).toHaveBeenLastCalledWith('complete')
+  })
+})

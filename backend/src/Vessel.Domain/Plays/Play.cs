@@ -6,8 +6,9 @@ using System.Text.Json.Serialization;
 
 namespace Vessel.Domain.Plays;
 
-// Open and Closed are reached from linked venue fills, which arrive with order linking.
-public enum PlayStatus { Draft, Planned, Paused, Open, Closed, Cancelled }
+// Open and Closed are reached from linked venue fills, which arrive with order linking. Unresolved is only ever declared by
+// the owner, for an Open Play whose venue executions can never settle it (phase 1, 1.3a, decision 4).
+public enum PlayStatus { Draft, Planned, Paused, Open, Closed, Cancelled, Unresolved }
 
 public enum InstrumentSource { Venue, Manual }
 public enum PlayOrigin { Planned, Retrospective }
@@ -25,6 +26,9 @@ public sealed record ReviewAnswers(string? Adherence = null, string? MistakeTag 
 }
 
 public enum CancelReason { Invalidated, Missed, ChangedMind, Expired, Mistake, Other }
+
+/// <summary>Why the owner declared an Open Play unresolved: its executions can never settle it.</summary>
+public enum UnresolvedReason { SharedClose, Flip, ForcedExitNotRetained, Other }
 
 /// <summary>Who changed the status: the owner, or linked venue fills.</summary>
 public enum StatusChangeSource { Owner, Venue, Paper }
@@ -66,8 +70,8 @@ public sealed class Play : IOwned
     public DateTimeOffset? ReviewCompletedAtUtc { get; private set; }
     public ReviewAnswers Answers => new(ReviewAdherence, ReviewMistakeTag, ReviewLesson, ReviewNextAction);
     public bool HasReview => !string.IsNullOrWhiteSpace(Review) || Answers.IsAnswered;
-    /// <summary>A Play whose review can be completed: it has ended.</summary>
-    public bool IsReviewable => Status is PlayStatus.Closed or PlayStatus.Cancelled;
+    /// <summary>A Play whose review can be completed: it has ended, as Closed, Cancelled or Unresolved.</summary>
+    public bool IsReviewable => Status is PlayStatus.Closed or PlayStatus.Cancelled or PlayStatus.Unresolved;
     /// <summary>The latest plan revision number; zero while the Play is a Draft.</summary>
     public int PlanRevision { get; private set; }
     /// <summary>Increases on every change, for optimistic concurrency.</summary>
@@ -128,8 +132,10 @@ public sealed class Play : IOwned
             answers.MistakeTag?.Any(char.IsControl) == true ||
             new[] { answers.Lesson, answers.NextAction }.Any(s => s.Any(c => char.IsControl(c) && c is not ('\r' or '\n'))))
             throw new DomainValidationException("Review answers must be bounded plain text with a valid adherence.");
-        if (answers.IsAnswered && Status is not (PlayStatus.Closed or PlayStatus.Cancelled))
-            throw new DomainRuleException("Structured review answers are only available for closed or cancelled Plays.");
+        // Stored answers save unchanged while a Play is not ended, also after an Unresolved Play returns to Open; they
+        // change only once it has ended.
+        if (answers != Answers && (answers.IsAnswered || Answers.IsAnswered) && !IsReviewable)
+            throw new DomainRuleException("Structured review answers are only available for closed, cancelled or unresolved Plays.");
         if (Origin == PlayOrigin.Retrospective && answers.Adherence is not (null or "not-applicable"))
             throw new DomainRuleException("A retrospective Play has no contemporaneous plan to assess adherence against.");
         var previousAnswers = Answers;
@@ -137,7 +143,7 @@ public sealed class Play : IOwned
         var sameDrawings = SameDocument(drawings, Drawings);
         if (title == Title && sameDrawings && !changedReview) return null;
         if (!IsEditable && (title != Title || !sameDrawings))
-            throw new DomainRuleException("Closed and cancelled Plays keep their plan; only the review can change.");
+            throw new DomainRuleException("Closed, cancelled and unresolved Plays keep their plan; only the review can change.");
         Title = title;
         Drawings = drawings;
         Review = review;
@@ -157,7 +163,7 @@ public sealed class Play : IOwned
     /// <summary>The owner completes the review of an ended Play, whether or not its text changed.</summary>
     public PlayReviewRevision CompleteReview(DateTimeOffset now)
     {
-        if (!IsReviewable) throw new DomainRuleException("A review is completed once the Play is closed or cancelled.");
+        if (!IsReviewable) throw new DomainRuleException("A review is completed once the Play is closed, cancelled or unresolved.");
         if (ReviewCompletion is not null) throw new DomainRuleException("This review is already complete.");
         Complete(ReviewCompletionKind.Completed, now);
         Touch(now);
@@ -188,6 +194,18 @@ public sealed class Play : IOwned
     {
         ReviewCompletion = kind;
         ReviewCompletedAtUtc = now;
+    }
+
+    /// <summary>
+    /// A Play leaving a final state needs its review again (phase 1, 1.2): the completion is cleared and a review revision
+    /// records it beside the status change. Text and answers stay. Null when there was no completion to clear.
+    /// </summary>
+    private PlayReviewRevision? ClearCompletion(DateTimeOffset now)
+    {
+        if (ReviewCompletion is null) return null;
+        ReviewCompletion = null;
+        ReviewCompletedAtUtc = null;
+        return new PlayReviewRevision(this, checked(++ReviewRevision), now, ReviewActions.Cleared);
     }
 
     public static Play Retrospective(Guid id, Account account, PerpetualInstrument instrument, string emptyPlan,
@@ -280,6 +298,52 @@ public sealed class Play : IOwned
         return change;
     }
 
+    /// <summary>
+    /// The owner declares an Open Play unresolved: its venue executions can never settle it (decision 4). It ends now with
+    /// no result. <paramref name="evidence"/> is the snapshot of its execution facts at this moment, as JSON; the caller
+    /// has checked that it has imported executions. Never set by the monitor or from account flatness.
+    /// </summary>
+    public PlayStatusChange DeclareUnresolved(UnresolvedReason reason, string note, string evidence, DateTimeOffset now)
+    {
+        if (Status != PlayStatus.Open) throw new DomainRuleException("Only an open Play can be declared unresolved.");
+        if (TradingMode == Common.TradingMode.Paper)
+            throw new DomainRuleException("A paper Play's simulation holds what it cannot settle; it is never declared unresolved.");
+        if (!Enum.IsDefined(reason)) throw new DomainValidationException("Unknown unresolved reason.");
+        if (string.IsNullOrWhiteSpace(note)) throw new DomainValidationException("Say what happened. The note is kept with the declaration.");
+        ArgumentException.ThrowIfNullOrWhiteSpace(evidence);
+        var change = Transition(PlayStatus.Unresolved, null, note, now);
+        change.UnresolvedReason = reason;
+        change.Evidence = evidence;
+        EndedAtUtc = now;
+        return change;
+    }
+
+    /// <summary>
+    /// The owner returns an Unresolved Play to Open, with a reason; its review is needed again once it ends. The change keeps
+    /// <paramref name="undone"/>, the reason of the declaration it undoes, so its event names it without reading history.
+    /// </summary>
+    public (PlayStatusChange Change, PlayReviewRevision? Cleared) ReturnToOpen(string note, DateTimeOffset now, UnresolvedReason? undone = null)
+    {
+        if (Status != PlayStatus.Unresolved) throw new DomainRuleException("Only an unresolved Play returns to open.");
+        if (string.IsNullOrWhiteSpace(note)) throw new DomainValidationException("Say why the Play returns to open. The reason is kept with the change.");
+        var change = Transition(PlayStatus.Open, null, note, now);
+        change.UnresolvedReason = undone;
+        EndedAtUtc = null;
+        return (change, ClearCompletion(now));
+    }
+
+    /// <summary>
+    /// Fills on an Unresolved Play's existing linked orders settled it: it closes from venue facts, by the same rule as an
+    /// Open Play. The declaration stays in history, and a completed review is needed again.
+    /// </summary>
+    public (PlayStatusChange Change, PlayReviewRevision? Cleared) SettleUnresolved(string note, DateTimeOffset now)
+    {
+        if (Status != PlayStatus.Unresolved) throw new DomainRuleException("Only an unresolved Play settles from venue facts this way.");
+        var change = Transition(PlayStatus.Closed, null, note, now, StatusChangeSource.Venue);
+        EndedAtUtc = now;
+        return (change, ClearCompletion(now));
+    }
+
     /// <summary>Only explicit paper facts can advance a simulated Play; no venue or manual provenance is assigned.</summary>
     public PlayStatusChange? ApplyPaperExecutionState(bool hasEntry, bool fullyClosed, DateTimeOffset now)
     {
@@ -316,6 +380,7 @@ public sealed class Play : IOwned
         var change = new PlayStatusChange(this, Status, to, reason, note, now, source);
         Status = to;
         Touch(now);
+        change.PlayVersion = Version;
         return change;
     }
 
@@ -394,6 +459,18 @@ public sealed class PlayStatusChange : IOwned
     public CancelReason? Reason { get; private set; }
     public string? Note { get; private set; }
     public StatusChangeSource Source { get; private set; }
+    /// <summary>
+    /// Why the owner declared the Play unresolved: on a change to Unresolved, and on a return to Open the reason of the
+    /// declaration it undoes.
+    /// </summary>
+    public UnresolvedReason? UnresolvedReason { get; internal set; }
+    /// <summary>The Play's execution facts when it was declared unresolved, as JSON; only on a change to Unresolved.</summary>
+    public string? Evidence { get; internal set; }
+    /// <summary>
+    /// The Play's version this change produced: a strict order of the Play's transitions, whatever the clock says (phase 1,
+    /// 1.3a). Null on changes recorded before it was kept.
+    /// </summary>
+    public long? PlayVersion { get; internal set; }
     public DateTimeOffset OccurredAtUtc { get; private set; }
     private PlayStatusChange() { }
 

@@ -105,7 +105,7 @@ public sealed partial class MonitorDiscrepancyService
             if (instruments.Length != 1 || instruments[0].QuantityDecimals is < 0 or > 28)
             {
                 // A terminal Play's subject cannot be identified without its instrument: its records age as unobservable.
-                if (play.Status is PlayStatus.Closed or PlayStatus.Cancelled) continue;
+                if (play.Status is PlayStatus.Closed or PlayStatus.Cancelled or PlayStatus.Unresolved) continue;
                 foreach (var kind in PlayKinds) scan.Add(new(kind, "play:" + play.Id, play.Id, play.ContractId ?? "", "", Severity(kind), null, snapshotAt, [play.Id], new { }));
                 if (play.Status == PlayStatus.Open && play.ContractId is not null)
                     scan.Coverage.Add(new(play.Id, play.ContractId, MonitorCoverageStates.Unknown, null, "instrument-unknown", []));
@@ -220,7 +220,8 @@ public sealed partial class MonitorDiscrepancyService
             var targets = resting.Where(x => x.Link.Role == OrderLinkRole.Target).ToArray();
             var entries = resting.Where(x => x.Link.Role == OrderLinkRole.Entry).ToArray();
             var open = play.Status == PlayStatus.Open;
-            var terminal = play.Status is PlayStatus.Closed or PlayStatus.Cancelled;
+            // An Unresolved Play's linked orders are watched as a Closed one's; its position is never expected (1.3a).
+            var terminal = play.Status is PlayStatus.Closed or PlayStatus.Cancelled or PlayStatus.Unresolved;
             var involved = position?.Open ?? [];
             var single = open && involved.Length == 1 && involved[0].Play.Id == play.Id;
             var agrees = position?.Agrees;

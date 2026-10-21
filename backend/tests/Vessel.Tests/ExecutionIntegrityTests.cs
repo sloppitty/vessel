@@ -16,8 +16,8 @@ internal sealed class MemoryExecutionStore(MemoryPlayStore plays) : IPlayExecuti
     public List<ImportedFill> Fills { get; } = [];
     public List<PlayOrderLink> Links { get; } = [];
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => plays.AccountAsync(id, ct);
-    public Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct) =>
-        Task.FromResult(plays.Plays.Where(p => p.AccountId == accountId && ExecutionMatcher.IsActive(p)).ToList());
+    public Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct, bool settling = false) =>
+        Task.FromResult(plays.Plays.Where(p => p.AccountId == accountId && (ExecutionMatcher.IsActive(p) || settling && p.Status == PlayStatus.Unresolved)).ToList());
     public Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct) => Task.FromResult(Orders.Where(o => o.AccountId == accountId).ToList());
     public Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset observedAt, CancellationToken ct) =>
         throw new NotSupportedException();
@@ -28,6 +28,7 @@ internal sealed class MemoryExecutionStore(MemoryPlayStore plays) : IPlayExecuti
     public ImportedOrder Order(string externalOrderId) => Orders.Single(o => o.ExternalOrderId == externalOrderId);
     public void Add(PlayOrderLink link) => Links.Add(link);
     public void Add(PlayStatusChange change) => plays.Add(change);
+    public Task ForgetWatchesAsync(Guid playId, CancellationToken ct) => Task.CompletedTask;
     public Task SaveAsync(CancellationToken ct) => Task.CompletedTask;
     public Task<T> WithAccountLockAsync<T>(Guid accountId, Func<Task<T>> action, CancellationToken ct) => action();
 }

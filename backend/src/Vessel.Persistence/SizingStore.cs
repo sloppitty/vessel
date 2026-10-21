@@ -54,6 +54,10 @@ public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISi
                 ExecutionIntegrity.MissingExecutions(order, FillsOf(l))).Select(l => known[l.ImportedOrderId].ExternalOrderId).ToList())).ToList();
     }
 
+    public Task<int> UnresolvedPlaysAsync(CancellationToken ct) =>
+        db.Plays.CountAsync(p => p.Status == PlayStatus.Unresolved && p.TradingMode == TradingMode.Real &&
+            db.Accounts.Any(a => a.Id == p.AccountId && a.IsEnabled), ct);
+
     public async Task<List<ImportedOrder>> OrdersAsync(IReadOnlyCollection<OrderKey> orders, CancellationToken ct)
     {
         if (orders.Count == 0) return [];

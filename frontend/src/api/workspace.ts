@@ -26,7 +26,7 @@ import {
 } from './account-access'
 import {
   isNextAction, isPlayCounts, isPlayNote, isPlayExecution, isPlayHistory, isPlayList, isSavedEvidence, isSavedPlay, playCountsPath, playListPath,
-  type LinkOrder, type NextAction, type PlayNote, type PlayNoteState, type RebindLevel, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest,
+  type LinkOrder, type NextAction, type PlayNote, type PlayNoteState, type RebindLevel, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest, type UnresolvedReason,
 } from './plays'
 import { isSizingDocument, type SizingDocument } from './sizing'
 import { isReviewDocument, reviewPath, isReviewExclusions, reviewExclusionsPath, type ReviewDocument, type ReviewQuery, type ReviewExclusions } from './review'
@@ -312,6 +312,9 @@ export interface WorkspaceApi {
   completeReview(id: string, expectedVersion: number): Promise<SavedPlay>
   reopenReview(id: string, expectedVersion: number): Promise<SavedPlay>
   noReviewNeeded(id: string, expectedVersion: number): Promise<SavedPlay>
+  /** Declare an Open Play with imported executions unresolved, or return an Unresolved one to Open (phase 1, 1.3a). */
+  declareUnresolved(id: string, expectedVersion: number, reason: UnresolvedReason, note: string): Promise<SavedPlay>
+  returnToOpen(id: string, expectedVersion: number, note: string): Promise<SavedPlay>
   /** A Play's append-only in-trade log, oldest first. */
   playNotes(id: string, signal?: AbortSignal): Promise<PlayNote[]>
   addPlayNote(id: string, request: { requestId: string; text: string; state: PlayNoteState | null }): Promise<PlayNote[]>
@@ -717,6 +720,10 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
       { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify({ expectedVersion }) }),
     noReviewNeeded: (id, expectedVersion) => call(`${playPath(id)}/review/not-needed`,
       { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify({ expectedVersion }) }),
+    declareUnresolved: (id, expectedVersion, reason, note) => call(`${playPath(id)}/unresolved`,
+      { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify({ expectedVersion, reason, note }) }),
+    returnToOpen: (id, expectedVersion, note) => call(`${playPath(id)}/return-to-open`,
+      { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify({ expectedVersion, note }) }),
     playNotes: (id, signal) => call(`${playPath(id)}/notes`, { ...playRequest,
       validate: (v): v is PlayNote[] => Array.isArray(v) && v.length <= 500 && v.every(isPlayNote), ...withSignal(signal) }),
     addPlayNote: (id, request) => call(`${playPath(id)}/notes`, { ...playRequest, method: 'POST', body: JSON.stringify(request),

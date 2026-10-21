@@ -3,7 +3,7 @@ import { PaperExecutionPanel } from './PaperExecutionPanel'
 import { errorMessage } from '@/api/errors'
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
-import { isReviewed, pagedPlayViews, playSearchLength, statusLabels, type NextAction, type PlayCounts, type PlayList as PlayListPage, type PreflightCheck, type PlayListQuery, type PlayStatus, type PlayView, type SavedPlay, type StatusRequest } from '@/api/plays'
+import { isEndedStatus, isReviewed, pagedPlayViews, playSearchLength, statusLabels, type NextAction, type PlayCounts, type PlayList as PlayListPage, type PreflightCheck, type PlayListQuery, type PlayStatus, type UnresolvedReason, type PlayView, type SavedPlay, type StatusRequest } from '@/api/plays'
 import type { AccountMonitor } from '@/api/monitor'
 import { Button } from '@/components/ui/button'
 import { Pager } from '@/components/ui/pager'
@@ -14,7 +14,7 @@ import { useDelayedFlag } from '@/lib/use-delayed-flag'
 import { useNotifications } from '@/components/notifications/notifications'
 import { preloadLightweightRenderer } from '@/components/chart/lazy'
 import { useVenues } from '@/api/venues'
-import { ArrowLeft, History, Pause, Play, Plus, Save, Search, Trash2, X } from 'lucide-react'
+import { ArrowLeft, CircleHelp, History, Pause, Play, Plus, RotateCcw, Save, Search, Trash2, X } from 'lucide-react'
 import type { PlayDraft } from './draft'
 import { PlayWorkspace } from './PlayWorkspace'
 import { PlayIdentity } from './PlayIdentity'
@@ -37,7 +37,7 @@ import { noEntryFills, type EntryFills } from './position-risk-summary'
 import { planNumberIssues, planNumberSummary, storedPlanText, StoredPlanTextContext, type StoredPlanText } from './stored-plan-text'
 import { availableOf, defaultSizeUnits, marginOverBudget, overBudgetMessage, type SizeUnits } from './sizing'
 import { leverageOf } from './levels'
-import { CancelDialog, DeleteDialog, HistoryDialog, PauseDialog, PreflightDialog, RevisionDialog } from './PlayDialogs'
+import { CancelDialog, DeleteDialog, HistoryDialog, PauseDialog, PreflightDialog, ReturnToOpenDialog, RevisionDialog, UnresolvedDialog } from './PlayDialogs'
 import { initialPlaysList, playSearchDelay, playViewTabs, type PlaysListState } from './plays-list'
 import {
   createPlaysSession, draftFromSaved, fieldsToSave, hasDraftContent, hasPlayLogDraft, hasUnsavedPlayWork, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
@@ -46,8 +46,8 @@ import {
 } from './saved'
 
 
-const ended: PlayStatus[] = ['closed', 'cancelled']
-type DialogKind = null | 'revision' | 'pause' | 'cancel' | 'delete' | 'history' | 'preflight'
+const ended: PlayStatus[] = ['closed', 'cancelled', 'unresolved']
+type DialogKind = null | 'revision' | 'pause' | 'cancel' | 'delete' | 'history' | 'preflight' | 'unresolved' | 'return-open'
 type WorkKind = 'save' | 'status' | 'open' | 'delete' | 'manual'
 
 export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef, list, onList, reloadGeneration = 0, accountMonitors = [], onManageAccount, onLogChange, onLogApplier }: {
@@ -267,7 +267,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   // The owner's recent next actions, offered while a Play is not yet under way. They are context, so a failed read shows none.
   const [nextActions, setNextActions] = useState<{ api: WorkspaceApi; actions: NextAction[] } | null>(null)
   const offersNextActions = visible && session.view === 'editor' && (saved?.summary.status ?? 'draft') !== 'open' &&
-    saved?.summary.status !== 'closed' && saved?.summary.status !== 'cancelled' && saved?.summary.origin !== 'retrospective'
+    !(saved && isEndedStatus(saved.summary.status)) && saved?.summary.origin !== 'retrospective'
   useEffect(() => {
     if (!offersNextActions) return
     const controller = new AbortController()
@@ -416,6 +416,33 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     }
   }
 
+  /**
+   * Declare an Open Play unresolved, or return an Unresolved one to Open (phase 1, 1.3a), on the version the owner sees.
+   * Only the owner does this; nothing here reads account flatness or the monitor.
+   */
+  async function resolution(request: { kind: 'declare'; reason: UnresolvedReason; note: string } | { kind: 'return'; note: string }) {
+    const intendedDialog = currentDialog.current
+    const state = latest.current.saved
+    if (!state) return
+    const finish = beginWork('status')
+    if (!finish) return
+    const started = epoch.current
+    try {
+      setError(null); setDialogError(null)
+      const play = request.kind === 'declare'
+        ? await api.declareUnresolved(state.summary.id, state.summary.version, request.reason, request.note)
+        : await api.returnToOpen(state.summary.id, state.summary.version, request.note)
+      if (started !== epoch.current) return
+      acceptStoredPlay(play)
+      closeDialog(intendedDialog)
+    } catch (cause) {
+      if (started !== epoch.current) return
+      actionError(cause, intendedDialog)
+    } finally {
+      finish()
+    }
+  }
+
   async function remove() {
     const started = epoch.current
     if (!saved) return
@@ -529,6 +556,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     if (preflight) { setDialogError(null); setDialog('preflight') } else void changeStatus({ status: 'planned' })
   }
 
+  // Imported executions on the Play's own linked orders; only they make an Open Play declarable as unresolved (1.3a).
+  const importedFills = !manual && tracking.execution?.playId === saved?.summary.id && !!tracking.execution?.links.some(link => link.fills.length > 0)
   // The same buttons stay in the same places whether or not the play is saved; unavailable ones are disabled.
   const statusAction = status === 'draft'
     ? <Button size="sm" className="play-primary" disabled={pending || !draft.accountId || !draft.instrument || !paperArming}
@@ -538,6 +567,12 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       onClick={() => { if (paper) { setDialogError(null); setDialog('pause') } else { void changeStatus({ status: 'paused' }) } }}><Pause size={14} />Pause</Button>
     : status === 'paused' ? <Button size="sm" className="play-primary" disabled={pending || dirty || !paperArming} title={statusBlocked}
       onClick={() => { void changeStatus({ status: 'planned' }) }}><Play size={14} />Resume</Button>
+    // An Open venue Play with imported executions can be declared unresolved; an Unresolved one can return to Open (1.3a).
+    : status === 'open' && importedFills ? <Button size="sm" variant="outline" disabled={pending || dirty}
+      title={statusBlocked ?? 'Its executions can never settle it'} onClick={() => { setDialogError(null); setDialog('unresolved') }}>
+      <CircleHelp size={14} />Declare unresolved</Button>
+    : status === 'unresolved' ? <Button size="sm" variant="outline" disabled={pending || dirty} title={statusBlocked}
+      onClick={() => { setDialogError(null); setDialog('return-open') }}><RotateCcw size={14} />Return to Open</Button>
     : null
   const cancellable = status === 'planned' || status === 'paused'
   const requestSave = () => { if (planBlocked()) return; if (needsReason) { setDialogError(null); setDialog('revision') } else void save() }
@@ -625,6 +660,10 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       onCancel={(reason, note) => { void changeStatus({ status: 'cancelled', reason, ...(note ? { note } : {}) }) }} onClose={() => setDialog(null)} />}
     {dialog === 'preflight' && preflight && <PreflightDialog checks={preflight} pending={busy === 'status'} error={dialogError}
       onPlan={() => { void changeStatus({ status: 'planned', preflight }) }} onClose={() => setDialog(null)} />}
+    {dialog === 'unresolved' && <UnresolvedDialog pending={busy === 'status'} error={dialogError}
+      onDeclare={(reason, note) => { void resolution({ kind: 'declare', reason, note }) }} onClose={() => setDialog(null)} />}
+    {dialog === 'return-open' && <ReturnToOpenDialog pending={busy === 'status'} error={dialogError}
+      onReturn={note => { void resolution({ kind: 'return', note }) }} onClose={() => setDialog(null)} />}
     {dialog === 'delete' && <DeleteDialog pending={busy === 'delete'} error={dialogError} onDelete={() => { void remove() }} onClose={() => setDialog(null)} />}
     {dialog === 'history' && saved && <HistoryDialog api={api} playId={saved.summary.id} onClose={() => setDialog(null)} />}
   </>

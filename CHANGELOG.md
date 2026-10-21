@@ -4,6 +4,15 @@
 
 ### Added
 
+- An open Play whose venue executions can never settle it (a shared close, a
+  flip, a forced exit that was not retained) can be declared Unresolved, with
+  a reason and a note. Vessel keeps a snapshot of its execution facts, gives
+  it no result and never sets it on its own. It is reviewed like a closed
+  Play, Review lists it among the excluded with its declaration, and sizing
+  shows how many are not counted. It takes no new orders until returned to
+  Open; if fills on its linked orders settle it later, it closes as usual
+  (D-06). New migration `UnresolvedStatus`; apply it explicitly. Rolling it
+  back is refused once an Unresolved Play exists.
 - A review is complete only when you say so. Complete review works on a
   closed or cancelled Play with or without new text, saving changed review
   answers completes it too, and Review again reopens it; a cancellation that

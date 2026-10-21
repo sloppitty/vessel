@@ -3,6 +3,9 @@ import type { ReviewExclusions as Exclusions, ReviewQuery } from '@/api/review'
 import type { WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
 import { PlayIdentity } from '@/features/plays/PlayIdentity'
+import { evidenceLines } from '@/features/plays/unresolved'
+import { unresolvedReasonLabels } from '@/api/plays'
+import { time } from '@/lib/format'
 
 export function ReviewExclusions({ api, initialQuery, onOpenPlay }: {
   api: WorkspaceApi; initialQuery: ReviewQuery; onOpenPlay: (id: string, signal: AbortSignal) => Promise<void>
@@ -46,6 +49,13 @@ export function ReviewExclusions({ api, initialQuery, onOpenPlay }: {
       <PlayIdentity instrument={item.instrument} accountName={item.accountName} />
       <small>Play {item.playId} · Account {item.accountId}</small>
       <ul>{item.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>
+      {item.unresolved && <dl className="pr-unresolved" aria-label="Unresolved declaration">
+        <div><dt>Reason</dt><dd>{unresolvedReasonLabels[item.unresolved.reason]}</dd></div>
+        <div><dt>Declared</dt><dd><time dateTime={item.unresolved.declaredAtUtc}>{time(item.unresolved.declaredAtUtc)}</time></dd></div>
+        {item.unresolved.note && <div><dt>Note</dt><dd>{item.unresolved.note}</dd></div>}
+        {item.unresolved.evidence && <div><dt>Execution facts</dt><dd><ul>{evidenceLines(item.unresolved.evidence).map((line, index) =>
+          <li key={index}>{line}</li>)}</ul></dd></div>}
+      </dl>}
     </li>)}</ul>
     {!page.items.length && <p>No excluded Plays in this selection.</p>}
     <div className="pr-pagination pr-exclusion-pagination"><button className="pr-outline-button" disabled={page.offset === 0} onClick={() => setOffset(Math.max(0, page.offset - 50))}>Previous exclusions</button>

@@ -8,8 +8,8 @@ export const initialPlaysList: PlaysListState = { view: 'progress', q: '', page:
 export const playViewTabs: readonly { view: PlayView; label: string; description: string }[] = [
   { view: 'drafts', label: 'Drafts', description: 'Saved drafts, most recently updated first' },
   { view: 'progress', label: 'In progress', description: 'Planned, paused and open plays, most recently updated first' },
-  { view: 'review', label: 'Needs review', description: 'Closed or cancelled plays without a review, most recently ended first' },
-  { view: 'reviewed', label: 'Reviewed', description: 'Closed or cancelled plays with a review, most recently ended first' },
+  { view: 'review', label: 'Needs review', description: 'Closed, cancelled or unresolved plays whose review is not complete, most recently ended first' },
+  { view: 'reviewed', label: 'Reviewed', description: 'Closed, cancelled or unresolved plays with a completed review, most recently ended first' },
   { view: 'closed', label: 'Closed', description: 'Closed plays, most recently ended first' },
   { view: 'cancelled', label: 'Cancelled', description: 'Cancelled plays, most recently ended first' },
   { view: 'all', label: 'All', description: 'Every saved play, most recently updated first' },

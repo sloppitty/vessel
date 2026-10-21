@@ -77,5 +77,7 @@ internal sealed class PlayStatusChangeConfiguration : IEntityTypeConfiguration<P
         builder.Property(x => x.Note).HasMaxLength(Play.MaxCancelNoteLength);
         builder.Property(x => x.Source).HasConversion<string>().HasMaxLength(16).HasDefaultValue(StatusChangeSource.Owner)
             .HasSentinel(StatusChangeSource.Owner);
+        builder.Property(x => x.UnresolvedReason).HasConversion<string>().HasMaxLength(32);
+        builder.Property(x => x.Evidence).HasColumnType("jsonb");
     }
 }

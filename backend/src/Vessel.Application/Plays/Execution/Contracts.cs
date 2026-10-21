@@ -86,9 +86,10 @@ public interface IPlayExecutionStore
     Task<Account?> AccountAsync(Guid id, CancellationToken ct);
     /// <summary>
     /// Planned, paused and open Plays of the account, tracked for status changes with their committed values and locked
-    /// until the transaction ends, so owner status and plan changes take turns with linking.
+    /// until the transaction ends, so owner status and plan changes take turns with linking. <paramref name="settling"/>
+    /// adds Unresolved Plays, which take no new links but whose existing linked orders still settle them.
     /// </summary>
-    Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct);
+    Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct, bool settling = false);
     /// <summary>Every retained order of the account, read-only, by placement time then external order ID.</summary>
     Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct);
 
@@ -139,6 +140,11 @@ public interface IPlayExecutionStore
     Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<OrderKey> orders, CancellationToken ct);
     void Add(PlayOrderLink link);
     void Add(PlayStatusChange change);
+    /// <summary>
+    /// Removes the monitor's watches of a Play's linked orders, so the Play's next end starts new ones from that end even
+    /// when the clock stepped back or two ends share a time (1.3a, a return to Open).
+    /// </summary>
+    Task ForgetWatchesAsync(Guid playId, CancellationToken ct);
     /// <summary>Persists through the active unit of work, without committing.</summary>
     Task SaveAsync(CancellationToken ct);
     /// <summary>Requires an active unit of work; serializes reconciliation across requests and processes until it completes.</summary>

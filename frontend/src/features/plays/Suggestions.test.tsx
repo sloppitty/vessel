@@ -84,6 +84,18 @@ describe('suggestions panel', () => {
     expect(screen.getByTestId('size-suggestion')).toBeInTheDocument()
   })
 
+  it('counts unresolved Plays beside the ladder, never in the record (phase 1, 1.3a)', async () => {
+    const user = userEvent.setup()
+    const view = render(<Workspace initial={plan()} sizing={{ ...sizingFixture, record: { ...sizingFixture.record, unresolved: 2 } }} />)
+    await openPanel(user)
+    const exposure = screen.getByTestId('record-unresolved').closest('p')!
+    expect(exposure).toHaveTextContent(/Full size · .* · 2 unresolved not counted$/)
+    view.unmount()
+    render(<Workspace initial={plan()} />)
+    await openPanel(user)
+    expect(screen.queryByTestId('record-unresolved')).not.toBeInTheDocument()
+  })
+
   it('suggests the risk-based size with its reasoning and applies it only on Accept', async () => {
     const user = userEvent.setup()
     const onDraft = vi.fn<(draft: PlayDraft) => void>()

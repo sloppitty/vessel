@@ -390,7 +390,7 @@ public sealed class ManualLedgerPrecisionTests
         public Task<List<ManualExecution>> ManualAsync(Guid id, CancellationToken ct) => Task.FromResult(Rows.ToList());
         public Task<List<ManualExecutionHistory>> ManualHistoryAsync(Guid id, CancellationToken ct) => Task.FromResult(history.ToList());
         public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => Plays.AccountAsync(id, ct);
-        public Task<List<Play>> ActivePlaysAsync(Guid id, CancellationToken ct) => Task.FromResult(Plays.Plays.ToList());
+        public Task<List<Play>> ActivePlaysAsync(Guid id, CancellationToken ct, bool settling = false) => Task.FromResult(Plays.Plays.ToList());
         public Task<List<ImportedOrder>> OrdersAsync(Guid id, CancellationToken ct) => Task.FromResult(new List<ImportedOrder>());
         public Task<List<PlayOrderLink>> LinksAsync(Guid id, CancellationToken ct) => Task.FromResult(Plays.Links.ToList());
         public Task<List<ImportedFill>> FillsAsync(Guid id, IReadOnlyCollection<OrderKey> orders, CancellationToken ct) => Task.FromResult(new List<ImportedFill>());
@@ -402,5 +402,6 @@ public sealed class ManualLedgerPrecisionTests
         public void Add(DiaryRequest row) => requests.Add(row);
         public void Add(PlayOrderLink link) => Plays.Links.Add(link);
         public void Add(PlayStatusChange change) => Plays.Add(change);
+        public Task ForgetWatchesAsync(Guid playId, CancellationToken ct) => Task.CompletedTask;
     }
 }

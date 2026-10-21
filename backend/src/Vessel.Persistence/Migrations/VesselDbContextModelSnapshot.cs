@@ -1313,6 +1313,9 @@ namespace Vessel.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Evidence")
+                        .HasColumnType("jsonb");
+
                     b.Property<string>("From")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -1331,6 +1334,9 @@ namespace Vessel.Persistence.Migrations
                     b.Property<Guid>("PlayId")
                         .HasColumnType("uuid");
 
+                    b.Property<long?>("PlayVersion")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("Reason")
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
@@ -1346,6 +1352,10 @@ namespace Vessel.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
+
+                    b.Property<string>("UnresolvedReason")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
 
                     b.HasKey("Id");
 

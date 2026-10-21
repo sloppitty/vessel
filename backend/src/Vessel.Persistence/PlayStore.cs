@@ -40,9 +40,12 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
     {
         PlayListView.Drafts => rows.Where(x => x.Status == PlayStatus.Draft),
         PlayListView.Progress => rows.Where(x => x.Status == PlayStatus.Planned || x.Status == PlayStatus.Paused || x.Status == PlayStatus.Open),
-        // Completion is explicit (decision 3): an edit, a note or a timestamp never moves a Play out of Needs review.
-        PlayListView.Review => rows.Where(x => (x.Status == PlayStatus.Closed || x.Status == PlayStatus.Cancelled) && x.ReviewCompletion == null),
-        PlayListView.Reviewed => rows.Where(x => (x.Status == PlayStatus.Closed || x.Status == PlayStatus.Cancelled) && x.ReviewCompletion != null),
+        // Completion is explicit (decision 3): an edit, a note or a timestamp never moves a Play out of Needs review. An
+        // Unresolved Play is ended too, so it is reviewed like a Closed one; the Closed view stays Closed only.
+        PlayListView.Review => rows.Where(x => (x.Status == PlayStatus.Closed || x.Status == PlayStatus.Cancelled || x.Status == PlayStatus.Unresolved) &&
+            x.ReviewCompletion == null),
+        PlayListView.Reviewed => rows.Where(x => (x.Status == PlayStatus.Closed || x.Status == PlayStatus.Cancelled || x.Status == PlayStatus.Unresolved) &&
+            x.ReviewCompletion != null),
         PlayListView.Closed => rows.Where(x => x.Status == PlayStatus.Closed),
         PlayListView.Cancelled => rows.Where(x => x.Status == PlayStatus.Cancelled),
         _ => rows
@@ -96,7 +99,10 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
     public Task<List<PlayStatusChange>> StatusChangesAsync(Guid playId, CancellationToken ct) =>
         db.StatusChanges.Where(x => x.PlayId == playId).OrderBy(x => x.OccurredAtUtc).ThenBy(x => x.Id).AsNoTracking().ToListAsync(ct);
     public Task<List<NextActionDto>> NextActionsAsync(int limit, string tradingMode, CancellationToken ct) =>
-        db.Plays.Where(p => p.TradingMode == tradingMode && (p.Status == PlayStatus.Closed || p.Status == PlayStatus.Cancelled) && p.ReviewNextAction != "" &&
+        // Every ended Play's review can carry a lesson, an Unresolved one's too.
+        db.Plays.Where(p => p.TradingMode == tradingMode &&
+                (p.Status == PlayStatus.Closed || p.Status == PlayStatus.Cancelled || p.Status == PlayStatus.Unresolved) &&
+                p.ReviewNextAction != "" &&
                 p.ReviewNextAction.Trim(BrowserSpace) != "")
             .OrderByDescending(p => p.ReviewedAtUtc).ThenByDescending(p => p.UpdatedAtUtc).ThenBy(p => p.Id).Take(limit)
             .Select(p => new NextActionDto(p.Id, p.Title, p.ReviewNextAction, p.ReviewedAtUtc)).ToListAsync(ct);

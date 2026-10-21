@@ -71,7 +71,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
 
     /// <summary>
     /// Linked orders of terminal planned venue Plays, exits and entries alike (a resting entry on a Cancelled Play is an
-    /// orphan too), with the Play's end for the watch start.
+    /// orphan too), with the Play's end for the watch start. An Unresolved Play is terminal from its declaration (1.3a).
     /// </summary>
     private IQueryable<TerminalExit> TerminalLinks =>
         from l in db.OrderLinks
@@ -79,12 +79,15 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         join o in db.Orders on new { l.OwnerId, l.AccountId, Id = l.ImportedOrderId } equals new { o.OwnerId, o.AccountId, o.Id }
         where l.State == OrderLinkState.Linked &&
             p.InstrumentSource == InstrumentSource.Venue && p.Origin == PlayOrigin.Planned &&
-            (p.Status == PlayStatus.Closed || p.Status == PlayStatus.Cancelled)
+            (p.Status == PlayStatus.Closed || p.Status == PlayStatus.Cancelled || p.Status == PlayStatus.Unresolved)
         select new TerminalExit { Link = l, Order = o, EndedAtUtc = p.EndedAtUtc };
 
-    /// <summary>Terminal Plays' linked orders whose current link revision has no ended watch.</summary>
+    /// <summary>
+    /// Terminal Plays' linked orders whose current watch has not ended. A watch is current for the link's revision and the
+    /// Play's end: a relinked order, or a Play that ended again (an Unresolved Play declared a second time), is a new watch.
+    /// </summary>
     private IQueryable<TerminalExit> Watching => TerminalLinks.Where(x => !Exits.Any(e => e.LinkId == x.Link.Id &&
-        e.EndedAtUtc != null && e.LinkRevisionAtUtc >= x.Link.UpdatedAtUtc));
+        e.EndedAtUtc != null && e.LinkRevisionAtUtc >= x.Link.UpdatedAtUtc && (x.EndedAtUtc == null || x.EndedAtUtc <= e.StartedAtUtc)));
 
     public async Task<bool> EligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct)
     {
@@ -264,9 +267,10 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
                     LinkRevisionAtUtc = link.UpdatedAtUtc, StartedAtUtc = started };
                 db.Add(watch);
             }
-            if (watch.LinkRevisionAtUtc < link.UpdatedAtUtc)
+            if (watch.LinkRevisionAtUtc < link.UpdatedAtUtc || ended > watch.StartedAtUtc)
             {
-                // A relinked order is a new watch with its own lifetime.
+                // A relinked order is a new watch with its own lifetime, and so is a Play that ended again: a later
+                // declaration of an Unresolved Play starts a new window from it.
                 watch.LinkRevisionAtUtc = link.UpdatedAtUtc;
                 watch.StartedAtUtc = started;
                 watch.EndedAtUtc = null;
@@ -356,7 +360,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         {
             var started = x.EndedAtUtc > x.Link.UpdatedAtUtc ? x.EndedAtUtc.Value : x.Link.UpdatedAtUtc;
             var watch = watches.GetValueOrDefault(x.Link.Id);
-            if (watch is not null && watch.LinkRevisionAtUtc < x.Link.UpdatedAtUtc) watch = null;
+            if (watch is not null && (watch.LinkRevisionAtUtc < x.Link.UpdatedAtUtc || x.EndedAtUtc > watch.StartedAtUtc)) watch = null;
             var state = watch?.Outcome switch
             {
                 MonitorWatchOutcomes.Unverifiable => "unverifiable",

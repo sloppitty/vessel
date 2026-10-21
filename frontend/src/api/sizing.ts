@@ -72,6 +72,8 @@ export interface SizingRecord {
   feeOnlyLosses?: number
   /** Losses in the window whose scored result before fees is unknown; not counted as fee-only. */
   unknownGrossLosses?: number
+  /** Unresolved Plays on enabled accounts: no result, so never in the record or the ladder (phase 1, 1.3a). */
+  unresolved?: number
 }
 export interface SizingLimits {
   effectiveRiskPercent: string
@@ -105,7 +107,8 @@ const record = (v: unknown): v is SizingRecord => isRecord(v) && ['plays', 'acti
     .every(k => isNullOr(v[k], isPlainDecimal)) &&
   Array.isArray(v.recent) && v.recent.length <= 100 && v.recent.every(recorded) &&
   ['localSignChanges', 'localUnknown'].every(k => v[k] === undefined || isNullOr(v[k], x => isCount(x) && x <= (v.decidedPlays as number))) &&
-  ['feeOnlyLosses', 'unknownGrossLosses'].every(k => v[k] === undefined || isCount(v[k]) && (v[k] as number) <= (v.losses as number))
+  ['feeOnlyLosses', 'unknownGrossLosses'].every(k => v[k] === undefined || isCount(v[k]) && (v[k] as number) <= (v.losses as number)) &&
+  (v.unresolved === undefined || isCount(v.unresolved))
 
 export const isSizingDocument = (v: unknown): v is SizingDocument => isRecord(v) &&
   (v.tradingMode === undefined || isTradingMode(v.tradingMode)) &&

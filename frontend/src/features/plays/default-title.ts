@@ -1,4 +1,4 @@
-import type { PlayStatus } from '@/api/plays'
+import { isEndedStatus, type PlayStatus } from '@/api/plays'
 
 /** The API and the title input both limit a Play title to this many characters. */
 export const maxPlayTitleLength = 200
@@ -38,8 +38,8 @@ export function defaultPlayTitle(play: { instrument?: string | null; direction?:
   return [head, date].filter(Boolean).join(' · ')
 }
 
-/** Closed and cancelled Plays keep their title; the API rejects a changed one. */
-const keepsTitle = (status: PlayStatus | undefined) => status === 'closed' || status === 'cancelled'
+/** Ended Plays (Closed, Cancelled, Unresolved) keep their title; the API rejects a changed one. */
+const keepsTitle = (status: PlayStatus | undefined) => status !== undefined && isEndedStatus(status)
 
 /**
  * The title to send when saving: what the owner typed (the API trims it), or the default when it is

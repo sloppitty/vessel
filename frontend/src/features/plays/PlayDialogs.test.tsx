@@ -81,3 +81,23 @@ describe('review completion in history (phase 1, 1.2)', () => {
     expect(screen.getAllByText('Held the plan.')).toHaveLength(2)
   })
 })
+
+describe('Unresolved in history (phase 1, 1.3a)', () => {
+  it('shows a declaration with its reason, note and facts, and a completion cleared by leaving a final state', async () => {
+    const recorded: PlayHistory = { ...history('Planned'), statusChanges: [{ from: 'open', to: 'unresolved', reason: null, note: 'Shared close.',
+      occurredAtUtc: '2026-10-20T10:00:00Z', source: 'owner', unresolvedReason: 'shared-close',
+      evidence: { entered: '1', exited: '0', open: '1', orderCount: 12, problems: [],
+        orders: Array.from({ length: 12 }, (_, i) => ({ orderId: String(20 + i), role: 'exit', entryId: null, levelId: null, status: 'filled', filled: '0' })) } }],
+      reviews: [{ number: 1, occurredAtUtc: '2026-10-20T11:00:00Z', review: 'Held the plan.', action: 'cleared',
+        structuredReview: { adherence: null, mistakeTag: null, lesson: '', nextAction: '' } }] }
+    render(<HistoryDialog api={{ playHistory: vi.fn().mockResolvedValue(recorded) } as unknown as WorkspaceApi} playId="one" onClose={vi.fn()} />)
+    expect(await screen.findByText('Open → Unresolved')).toBeInTheDocument()
+    expect(screen.getByText('Shared close')).toBeInTheDocument()
+    expect(screen.getByText('Shared close.')).toBeInTheDocument()
+    expect(screen.getByText('When declared: entered 1, exited 0, entered minus exited 1.')).toBeInTheDocument()
+    // Ten orders by name, the rest counted.
+    expect(screen.getByText(/^Linked orders: exit order 20 .*exit order 29 \(filled, filled 0\); and 2 more\.$/)).toBeInTheDocument()
+    expect(screen.getByText('Review revision 1 · completion cleared: the Play left its final state')).toBeInTheDocument()
+    expect(screen.queryByText('Held the plan.')).not.toBeInTheDocument()
+  })
+})

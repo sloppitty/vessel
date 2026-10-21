@@ -310,7 +310,7 @@ public sealed class PlayListPostgresTests
         using var counts = await client.GetAsync("/api/plays/counts?q=breakout&scope=all");
         Assert.True(counts.Headers.CacheControl?.NoStore);
         var countJson = await counts.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(["drafts", "progress", "review", "reviewed", "closed", "cancelled", "all"], countJson.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(["drafts", "progress", "review", "reviewed", "closed", "cancelled", "all", "unresolved"], countJson.EnumerateObject().Select(p => p.Name));
         Assert.Equal(2, countJson.GetProperty("all").GetInt32());
         foreach (var bad in new[] { "/api/plays?view=open", "/api/plays?view=Drafts", "/api/plays?page=0", "/api/plays?pageSize=101",
             "/api/plays?scope=everything", "/api/plays?q=" + new string('q', 101), "/api/plays/counts?scope=account:nope" })

@@ -31,7 +31,7 @@ public sealed class ExecutionNarrowedReadsTests
     private sealed class FullReadStore(ExecutionStore inner) : IPlayExecutionStore
     {
         public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => inner.AccountAsync(id, ct);
-        public Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct) => inner.ActivePlaysAsync(accountId, ct);
+        public Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct, bool settling = false) => inner.ActivePlaysAsync(accountId, ct, settling);
         public Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct) => inner.OrdersAsync(accountId, ct);
         public Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset observedAt, CancellationToken ct) =>
             inner.UpsertOrdersAsync(account, orders, observedAt, ct);
@@ -40,6 +40,7 @@ public sealed class ExecutionNarrowedReadsTests
             inner.FillsAsync(accountId, orders, ct);
         public void Add(PlayOrderLink link) => inner.Add(link);
         public void Add(PlayStatusChange change) => inner.Add(change);
+        public Task ForgetWatchesAsync(Guid playId, CancellationToken ct) => inner.ForgetWatchesAsync(playId, ct);
         public Task SaveAsync(CancellationToken ct) => inner.SaveAsync(ct);
         public Task<T> WithAccountLockAsync<T>(Guid accountId, Func<Task<T>> action, CancellationToken ct) =>
             inner.WithAccountLockAsync(accountId, action, ct);
@@ -53,7 +54,7 @@ public sealed class ExecutionNarrowedReadsTests
         public int FillOrderIds { get; private set; }
         public bool FullReads { get; private set; }
         public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => inner.AccountAsync(id, ct);
-        public Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct) => inner.ActivePlaysAsync(accountId, ct);
+        public Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct, bool settling = false) => inner.ActivePlaysAsync(accountId, ct, settling);
         public Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct) { FullReads = true; return inner.OrdersAsync(accountId, ct); }
         public async Task<List<ImportedOrder>> OrdersAsync(Guid accountId, IReadOnlyCollection<Guid> orderIds,
             IReadOnlyDictionary<string, DateTimeOffset> placedSince, CancellationToken ct)
@@ -84,6 +85,7 @@ public sealed class ExecutionNarrowedReadsTests
         }
         public void Add(PlayOrderLink link) => inner.Add(link);
         public void Add(PlayStatusChange change) => inner.Add(change);
+        public Task ForgetWatchesAsync(Guid playId, CancellationToken ct) => inner.ForgetWatchesAsync(playId, ct);
         public Task SaveAsync(CancellationToken ct) => inner.SaveAsync(ct);
         public Task<T> WithAccountLockAsync<T>(Guid accountId, Func<Task<T>> action, CancellationToken ct) =>
             inner.WithAccountLockAsync(accountId, action, ct);
