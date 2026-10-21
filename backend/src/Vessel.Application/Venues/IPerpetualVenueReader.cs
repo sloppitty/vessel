@@ -21,9 +21,13 @@ public interface IPerpetualVenueReader
 /// tick when the venue has one; <paramref name="Category"/> labels non-crypto markets (stocks, commodities, indices).
 /// <paramref name="MaintenanceMarginFraction"/> is the maintenance margin as a fraction of notional (0.0125 at 40×
 /// on Hyperliquid) when the venue states it; liquidation estimates otherwise assume one.
+/// <paramref name="MaxPriceDecimals"/> caps a significant-figure venue's price decimals (Phase 2, item 14b, F-11):
+/// Hyperliquid perpetuals take at most five significant figures, integers whatever their length, and at most
+/// <c>6 − szDecimals</c> decimals. Null when the venue states no cap.
 /// </summary>
 public sealed record VenueInstrument(string ContractId, int QuantityDecimals, int MaxLeverage, string QuoteAsset,
-    decimal? PriceStep = null, string? Category = null, string? VenueContractId = null, decimal? MaintenanceMarginFraction = null);
+    decimal? PriceStep = null, string? Category = null, string? VenueContractId = null, decimal? MaintenanceMarginFraction = null,
+    int? MaxPriceDecimals = null);
 
 /// <summary>
 /// One open position as the venue reports it. <paramref name="LiquidationPrice"/> and <paramref name="MarginMode"/>

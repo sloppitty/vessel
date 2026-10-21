@@ -340,7 +340,7 @@ public sealed partial class MonitorDiscrepancyService
             var levelRows = priced.Select(x => new { orderId = External(x.Link), actualPrice = ExactAmount.From(x.Order.ActingPrice).ToString(),
                 plannedPrice = x.Planned is { } price ? ExactAmount.From(price).ToString() : null,
                 remainingQuantity = ExactAmount.From(x.Order.RemainingSize).ToString() }).ToArray();
-            var drift = priced.Any(x => x.Planned is { } price && !ExecutionMatcher.Near(x.Order.ActingPrice, price, p.Instrument.PriceStep));
+            var drift = priced.Any(x => x.Planned is { } price && !ExecutionMatcher.Near(x.Order.ActingPrice, price, PriceRules.MinimumStep(p.Instrument)));
             var undecided = priced.Any(x => x.Planned is null);
             Add("level.drift", knownOrders && drift ? true : completeOrders && !undecided ? false : null, completeOrders && undecided,
                 // A partial close changes the quantities involved, so a dismissed drift re-arms.
@@ -387,7 +387,7 @@ public sealed partial class MonitorDiscrepancyService
                     var linked = scoped.Where(x => x.Link.Role == OrderLinkRole.Stop && x.Link.LevelKey == level.Key).ToArray();
                     var resting = knownOrders ? linked.Where(x => Resting(x.Order)).ToArray() : [];
                     var protective = resting.Where(x => x.Order!.Side == exitSide && OrderMechanics.Classify(x.Order) == OrderMechanism.Stop).ToArray();
-                    var atLevel = protective.Where(x => level.Price is { } planned && ExecutionMatcher.Near(x.Order!.ActingPrice, planned, p.Instrument.PriceStep)).ToArray();
+                    var atLevel = protective.Where(x => level.Price is { } planned && ExecutionMatcher.Near(x.Order!.ActingPrice, planned, PriceRules.MinimumStep(p.Instrument))).ToArray();
                     return atLevel.Length > 0 ? Evidence(MonitorStopEvidence.Resting, atLevel[0], at) :
                         protective.Length > 0 ? Evidence(MonitorStopEvidence.RestingElsewhere, protective[0], at) :
                         resting.Length > 0 ? Evidence(MonitorStopEvidence.Unknown, resting[0]) :

@@ -26,8 +26,10 @@ public sealed partial class HyperliquidAdapterTests
         var instruments = await new HyperliquidPerpetualReader(client, new TestClock())
             .ReadInstrumentsAsync(CancellationToken.None);
         // Maintenance margin is half the initial margin at the maximum leverage.
-        Assert.Equal(new[] { new VenueInstrument("BTC", 5, 40, "USDC", MaintenanceMarginFraction: 0.0125m),
-            new("MiXeD", 0, 3, "USDC", MaintenanceMarginFraction: 1m / 6), new("btc", 28, 1, "USDC", MaintenanceMarginFraction: 0.5m) }, instruments);
+        // 6 − szDecimals price decimals (Phase 2, item 14b), never below zero.
+        Assert.Equal(new[] { new VenueInstrument("BTC", 5, 40, "USDC", MaintenanceMarginFraction: 0.0125m, MaxPriceDecimals: 1),
+            new("MiXeD", 0, 3, "USDC", MaintenanceMarginFraction: 1m / 6, MaxPriceDecimals: 6),
+            new("btc", 28, 1, "USDC", MaintenanceMarginFraction: 0.5m, MaxPriceDecimals: 0) }, instruments);
         var request = Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal("https://api.hyperliquid.xyz/info", request.Uri);
@@ -49,7 +51,7 @@ public sealed partial class HyperliquidAdapterTests
     {
         var fill = Mutate(Fill, node => node["coin"] = "ETH");
         var result = await Read(fills: $"[{fill}]");
-        Assert.Contains(new VenueInstrument("ETH", 4, 20, "USDC", MaintenanceMarginFraction: 0.025m), result.Instruments);
+        Assert.Contains(new VenueInstrument("ETH", 4, 20, "USDC", MaintenanceMarginFraction: 0.025m, MaxPriceDecimals: 2), result.Instruments);
         Assert.Equal("ETH", Assert.Single(result.Fills).ContractId);
         Assert.DoesNotContain(await ReadCatalogue(Meta), instrument => instrument.ContractId == "ETH");
     }

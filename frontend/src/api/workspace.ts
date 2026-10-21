@@ -73,6 +73,8 @@ export interface VenueInstrument {
   venueContractId?: string | null
   /** Maintenance margin as a fraction of notional when the venue states it; liquidation estimates otherwise assume one. */
   maintenanceMarginFraction?: number | null
+  /** A significant-figure venue's price decimal cap (Hyperliquid: 6 − szDecimals; Phase 2, item 14b). */
+  maxPriceDecimals?: number | null
 }
 export interface InstrumentCatalog {
   venueId: string
@@ -385,7 +387,8 @@ const instrumentCatalog = (v: unknown): v is InstrumentCatalog => isRecord(v) &&
     (i.category == null || isText(i.category, 32)) &&
     (i.venueContractId == null || isText(i.venueContractId, 128)) &&
     (i.maintenanceMarginFraction == null || typeof i.maintenanceMarginFraction === 'number' && i.maintenanceMarginFraction > 0 &&
-      i.maintenanceMarginFraction < 1)) &&
+      i.maintenanceMarginFraction < 1) &&
+    (i.maxPriceDecimals == null || isCount(i.maxPriceDecimals) && i.maxPriceDecimals <= 28)) &&
   new Set(v.instruments.map((i: VenueInstrument) => i.contractId)).size === v.instruments.length &&
   (v.scope !== 'manual' || v.instruments.length === 0) && isText(v.notice, 1000)
 const candle = (v: unknown): v is VenueCandle => isRecord(v) && isPositiveCount(v.openTime) && isPositiveCount(v.closeTime) &&

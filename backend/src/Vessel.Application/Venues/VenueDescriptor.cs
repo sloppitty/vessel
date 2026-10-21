@@ -15,6 +15,17 @@ public static class PriceRules
 {
     public const string SignificantFigures = "significant-figures";
     public const string TickSize = "tick-size";
+
+    /// <summary>
+    /// The smallest price difference the venue distinguishes on an instrument, for matching: its tick, otherwise one unit
+    /// of its last allowed decimal (Phase 2, item 14b). Null when it states neither, so the fifth significant figure decides.
+    /// </summary>
+    public static decimal? MinimumStep(VenueInstrument instrument) =>
+        instrument.PriceStep is > 0 ? instrument.PriceStep : DecimalStep(instrument.MaxPriceDecimals);
+
+    /// <summary>One unit of the last allowed decimal (0.00001 for five decimals); null without a cap.</summary>
+    public static decimal? DecimalStep(int? decimals) =>
+        decimals is >= 0 and <= 28 ? new decimal(1, 0, 0, false, (byte)decimals.Value) : null;
 }
 
 /// <summary>

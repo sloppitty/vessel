@@ -55,3 +55,19 @@ Primary sources: [account modes](https://hyperliquid.gitbook.io/hyperliquid-docs
 ## Nominal fee and result list (October 14, 2026)
 
 Execution fees and pooled results use a separate Application list, `NominalStablecoins` (USDC, USDG, USDT, USDT0, USDE, USDe and USDH), which adds USDG (Lighter Robinhood collateral) and USDT. It applies to normalized fee-token labels, not to wallet token identities: wallet reads still validate the curated token IDs above and do not gain new assets from it. Both count at nominal 1:1 with no FX or depeg valuation.
+
+## Wallet failures on separate ledgers (October 21, 2026)
+
+Phase 2, item 14b (F-14, probe V6). In the `default`, `disabled` and
+`dexAbstraction` modes the perps and spot ledgers are separate, so the wallet
+is not the perps balance. A failed or invalid `spotMeta` or
+`spotClearinghouseState` read on these accounts now degrades the wallet alone.
+- The perps snapshot, positions and fills still apply.
+- The read reports no wallet, so the store keeps the last observed wallet with
+  its own observation time; it is never read as empty.
+- The history notice adds "The stablecoin wallet could not be refreshed; its
+  last observed balances and their time are kept."
+
+Unified and portfolio-margin accounts hold every balance in the wallet, so a
+wallet failure still fails their read. A rate limit, a missing account mode or
+the shared read deadline still stops the whole read on every mode.

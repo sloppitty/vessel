@@ -78,8 +78,8 @@ public sealed partial class HyperliquidAdapterTests
 
         Assert.Equal("hyperliquid", reader.VenueId);
         Assert.Collection(result.Instruments,
-            instrument => Assert.Equal(new VenueInstrument("BTC", 5, 40, "USDC", MaintenanceMarginFraction: 0.0125m), instrument),
-            instrument => Assert.Equal(new VenueInstrument("ETH", 4, 20, "USDC", MaintenanceMarginFraction: 0.025m), instrument));
+            instrument => Assert.Equal(new VenueInstrument("BTC", 5, 40, "USDC", MaintenanceMarginFraction: 0.0125m, MaxPriceDecimals: 1), instrument),
+            instrument => Assert.Equal(new VenueInstrument("ETH", 4, 20, "USDC", MaintenanceMarginFraction: 0.025m, MaxPriceDecimals: 2), instrument));
         Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(StateTime), result.Snapshot.ObservedAtUtc);
         Assert.Equal("primary-perpetual-dex", result.Snapshot.ValueScope);
         Assert.Equal(12345.678901234567890123m, result.Snapshot.AccountValueUsd);
@@ -417,6 +417,14 @@ public sealed partial class HyperliquidAdapterTests
                 : Json(DefaultResponses()[index])));
         using var client = Client(handler);
         Func<Task> read = () => new HyperliquidPerpetualReader(client, new TestClock()).ReadAsync(Address, CancellationToken.None);
+        if (stage >= 4 && status != HttpStatusCode.TooManyRequests)
+        {
+            // Phase 2, item 14b (F-14): on a default-mode account a wallet failure degrades only the wallet.
+            var degraded = await new HyperliquidPerpetualReader(client, new TestClock()).ReadAsync(Address, CancellationToken.None);
+            Assert.Null(degraded.Snapshot.StablecoinWallet);
+            Assert.DoesNotContain("private-secret", degraded.HistoryNotice);
+            return;
+        }
         var exception = status == HttpStatusCode.TooManyRequests
             ? await Assert.ThrowsAsync<VenueRateLimitException>(read)
             : await Assert.ThrowsAsync<VenueReadException>(read);
