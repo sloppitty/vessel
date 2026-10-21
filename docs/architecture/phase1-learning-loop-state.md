@@ -47,6 +47,10 @@ October 20, 2026:
     guards.
   - No further high-severity gap was found.
 
+- **Post-sync Sol review (October 21).** Two findings, both fixed: the contract now records the owner's October 21
+  answers, unweighted n in 1.4a, the "Imported position" Origin group in 1.4b and a decisions table. Round 2 found
+  nothing new.
+
 ## Integration base
 
 October 20, 2026: `t3/phase1-base`, the draft "Phase 0 integration — do not merge" pull request:
@@ -115,6 +119,17 @@ October 20, 2026, branch `t3/phase1-receipt`, stacked on the integration base:
   - **Focus (low).** A journal save whose reason dialog was dismissed no longer moves focus after a later header save.
     A test fails without this fix.
   - **Check.** `scripts/check.sh` passed again: backend 3,558 passed, 5 skipped; frontend 149 files and 3,742 tests.
+
+- **Post-sync Sol review (October 21).** The merge with main (PR #33) is sound: scoring never sees a position row.
+  Three findings over two rounds, all fixed:
+  - **Plan comparison (medium).** Saving a plan revision rereads the execution, and "Against the plan" stays unknown
+    until that read is shown, instead of comparing fills with the previous revision.
+  - **Stale receipt (medium).** After a failed reread, the Review tab's receipt and the retrospective receipt show the
+    failure instead of the earlier figures; while a reread is pending they say so.
+  - **Execution tab (medium, round 2).** While the execution is stale, its figures say they come from the last read,
+    and Link here, Not this play and a manual Link wait for a fresh read. An existing link can still be unlinked.
+  - Round 3 found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,590 passed, 5 skipped; frontend 152 files and 3,804 tests.
 
 ### 1.1b Fills on the chart
 
@@ -281,6 +296,9 @@ October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
 
 - **Sol (Codex) round 6.** No findings: both round-5 fixes hold, including under StrictMode.
 
+- **Post-sync Sol review (October 21).** No findings: completion counts cover Plays only. Round 2 confirmed the test
+  harness merge with 1.1a's staleness tests.
+
 ## 1.3 Record repair
 
 ### 1.3a Unresolved
@@ -381,6 +399,8 @@ October 20, 2026, branch `t3/phase1-unresolved`, stacked on 1.2:
     the Play's watches in its locked transaction, and its next end starts new ones; no migration is needed. The watch
     test steps the clock back before a third declaration and fails without the fix. A settlement of an Unresolved Play
     still compares times, so a backward step at that moment keeps the declaration's window; that window still ends.
+  - Round 3 confirmed the fix and found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,624 passed, 5 skipped; frontend 155 files and 3,855 tests.
 
 ### 1.3b Manual correction batch
 
@@ -427,6 +447,9 @@ October 20, 2026, branch `t3/phase1-correction-batch`, stacked on 1.3a:
 
 - **Rebase.** 1.3a's migration now adds `PlayVersion` to `play_status_changes`, so the `ManualCorrectionBatch` target
   model includes it; EF reports no pending model changes. `scripts/check.sh` passed: backend 3,603 passed, 5 skipped; frontend 152 files and 3,814 tests.
+
+- **Post-sync Sol review (October 21).** No findings: corrections change no Activity claims, and the migration order
+  still holds.
 
 ## 1.4 Process and outcome as cases
 
@@ -482,6 +505,14 @@ October 20, 2026, branch `t3/phase1-post-hoc-badge`, stacked on 1.1a:
   - Expectancy and the asset cards read "n = 3 Plays · 2 positions" when positions are included.
   - Estimated R and sign-differs denominators count Plays only.
   - Position rows never carry the badge.
+
+- **Post-sync Sol review (October 21).** No medium or high findings. Three low ones, all fixed:
+  - **Validator.** Position rows need an operation ID, are never reviewed and are imported, and stop, review and
+    Play-local counts are bounded by the Plays in the count.
+  - **Docs.** Breakdown cells are marked one by one, as described above.
+  - **Header badge (round 2).** The post-hoc badge in the header waits for a fresh read, like the Review tab.
+  - Round 3 found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,593 passed, 5 skipped; frontend 152 files and 3,810 tests.
 
 ### 1.4b Process cases
 
@@ -553,6 +584,14 @@ October 20, 2026, branch `t3/phase1-process-cases`, stacked on 1.3b:
     accept the same query.
   - A new test covers the groups. The Review tests pass against PostgreSQL (308).
 
+- **Post-sync Sol review (October 21).** The Origin and Direction groups add up to the combined row in every positions
+  mode, and the process views stay Plays-only. Two low findings, both fixed:
+  - **Drill-down filters.** The exclusions and process routes take and validate positions and minPlays like the report.
+  - **Process rows.** The browser rejects a result on an unscored Play, a result without its return, R or the post-hoc
+    badge on a retrospective Play, and a direction other than long, short or none.
+  - Round 2 found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,633 passed, 5 skipped; frontend 156 files and 3,865 tests.
+
 ## 1.5 Lessons return and a recorded pre-flight
 
 October 20, 2026, branch `t3/phase1-preflight`, stacked on 1.4a:
@@ -612,6 +651,14 @@ October 20, 2026, branch `t3/phase1-preflight`, stacked on 1.4a:
   - **Lifecycle doc (low).** It no longer describes the withdrawn plan-at-once shortcut.
   - **Test.** An all-clear plan now has a test that fails if Plan it skips the checklist.
   - **Check.** `scripts/check.sh` passed: backend 3,576 passed, 5 skipped; frontend 151 files and 3,784 tests.
+
+- **Post-sync Sol review (October 21).** The merge is sound: pre-flight counts never see a position row. One low
+  finding, fixed:
+  - **Blank next actions.** The query trimmed only ASCII spaces, so a next action of no-break spaces reached the
+    browser, which then rejected the whole list. It now trims every character the browser trims. The PostgreSQL test
+    adds such an action and fails without the fix.
+  - Round 2 found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,598 passed, 5 skipped; frontend 154 files and 3,826 tests.
 
 ## 1.6 Capture friction and time consistency
 
