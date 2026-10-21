@@ -74,12 +74,16 @@ function colorResolver(element: HTMLElement) {
 }
 
 const ceiledOdd = (value: number) => { const ceiled = Math.ceil(value); return ceiled % 2 === 0 ? ceiled - 1 : ceiled }
+const ceiledEven = (value: number) => { const ceiled = Math.ceil(value); return ceiled % 2 !== 0 ? ceiled - 1 : ceiled }
+/** A default-size marker's size at a bar spacing, as lightweight-charts 5.2.1 sets it (`calculateShapeHeight`). */
+const markerSize = (barSpacing: number) => ceiledEven(ceiledOdd(Math.min(Math.max(barSpacing, 12), 30)))
 /**
- * Whether a fill arrow holds the point, as lightweight-charts 5.2.1's own marker hit test decides (`hitTestArrow`): the
+ * Whether a marker of `size` holds the point, as lightweight-charts 5.2.1's own hit test decides (`hitTestArrow`): the
  * shaft with 2 px of tolerance and the head with 3 px, so a level gives way exactly where the fill's tooltip shows.
+ * `up` is the hit test's orientation, which for that version is the opposite of the drawn arrow (`hitTestShape`).
  */
 function onArrow(up: boolean, centerX: number, centerY: number, size: number, x: number, y: number) {
-  const half = (size - 1) / 2, halfBase = (ceiledOdd(size / 2) - 1) / 2, dx = Math.abs(x - centerX)
+  const half = (ceiledOdd(Math.max(size, 12)) - 1) / 2, halfBase = (ceiledOdd(size / 2) - 1) / 2, dx = Math.abs(x - centerX)
   if (dx <= halfBase + 2 && (up ? y >= centerY - 2 && y <= centerY + half + 2 : y >= centerY - half - 2 && y <= centerY + 2)) return true
   if (dx > half + 3 || (up ? y < centerY - half - 3 || y > centerY : y < centerY || y > centerY + half + 3)) return false
   return Math.abs(y - centerY) + 3 >= dx / 2
@@ -383,7 +387,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     const scale = chart.timeScale()
     const first = scale.logicalToCoordinate(0 as Logical), second = scale.logicalToCoordinate(1 as Logical)
     if (first === null || second === null) return false
-    const size = ceiledOdd(Math.min(Math.max(second - first, 12), 30)), half = size / 2 + 3
+    const size = markerSize(second - first), half = size / 2 + 3
     // Whole bars that may hold a marker within reach (the library rounds up to a bar); each is then measured exactly.
     const from = scale.coordinateToLogical(x - half), to = scale.coordinateToLogical(x + half), visible = scale.getVisibleLogicalRange()
     if (from === null || to === null || visible === null) return false
@@ -402,7 +406,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     if (end > 0 && end < placed.length) end++
     for (let at = Math.max(bound(from), drawn); at < end && placed[at]!.index <= to; at++) {
       const markerX = scale.logicalToCoordinate(placed[at]!.index as Logical), markerY = series.priceToCoordinate(placed[at]!.price)
-      if (markerX !== null && markerY !== null && onArrow(placed[at]!.up, markerX, markerY, size, x, y)) return true
+      if (markerX !== null && markerY !== null && onArrow(!placed[at]!.up, markerX, markerY, size, x, y)) return true
     }
     return false
   }

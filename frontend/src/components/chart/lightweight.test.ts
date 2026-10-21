@@ -233,8 +233,17 @@ describe('fill markers and trade focus (phase 1, 1.1b)', () => {
     expect(primitive.hitTest(100, 1000 - 101.5)).toBeNull()
     expect(primitive.hitTest(104, 1000 - 103)).toBeNull()
     expect(primitive.hitTest(400, 1000 - 101.5)?.externalId).toBe('level')
-    // Beside the buy arrow's shaft, outside the library's own marker hit area, the level keeps the pointer.
+    // Outside the library's own hit area for the buy marker (size 28 at this spacing, tested pointing down), the level
+    // keeps the pointer; inside it, the marker's tooltip wins.
     expect(primitive.hitTest(117, 1000 - 101.5)?.externalId).toBe('level')
+    expect(primitive.hitTest(109, 1000 - 101.5)?.externalId).toBe('level')
+    expect(primitive.hitTest(112, 1000 - 101.5 - 4)?.externalId).toBe('level')
+    expect(primitive.hitTest(112, 1000 - 101.5 + 4)).toBeNull()
+    // A sell marker's area is the mirror image.
+    adapter.setMarkers([marker('fill-2', 125_000, 'sell')])
+    expect(primitive.hitTest(112, 1000 - 101.5 + 4)?.externalId).toBe('level')
+    expect(primitive.hitTest(112, 1000 - 101.5 - 4)).toBeNull()
+    adapter.setMarkers([marker('fill-1', 125_000)])
     // Beside the marker, even within its bar's reach at this zoom, the line is the level's again.
     expect(primitive.hitTest(140, 1000 - 101.5)?.externalId).toBe('level')
     expect(primitive.hitTest(60, 1000 - 101.5)?.externalId).toBe('level')
