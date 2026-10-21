@@ -29,6 +29,7 @@ import {
   type LinkOrder, type NextAction, type PlayNote, type PlayNoteState, type RebindLevel, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest, type UnresolvedReason,
 } from './plays'
 import { isSizingDocument, type SizingDocument } from './sizing'
+import { attachmentName, type DownloadedFile } from '@/lib/download'
 import { isOpenRisk, isOpenRiskPreview, isRiskSettings, openRiskPath, type OpenRisk, type OpenRiskPreview, type OpenRiskPreviewRequest, type RiskSettings } from './risk'
 import { isReviewDocument, reviewPath, isReviewExclusions, reviewExclusionsPath, isReviewProcessPage, reviewProcessPath, type ReviewDocument, type ReviewQuery, type ReviewExclusions, type ReviewProcessPage, type ReviewProcessSelection } from './review'
 import {
@@ -271,6 +272,8 @@ export interface WorkspaceApi {
   activityFills(accountId: string, operationId: string, signal?: AbortSignal): Promise<ActivityFills>
   review(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewDocument>
   reviewExclusions(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewExclusions>
+  /** Review's selection as a CSV file (Phase 2, item 5a): the report's rows and exclusions; not a tax report. */
+  reviewExport(query: ReviewQuery, signal?: AbortSignal): Promise<DownloadedFile>
   /** One process cell, lane, mistake tag or skipped check, paged (phase 1, 1.4b). */
   reviewProcess(query: ReviewQuery, selection: ReviewProcessSelection, signal?: AbortSignal): Promise<ReviewProcessPage>
   /** The owner's earlier mistake tags for the review form, newest use first, at most 100. */
@@ -487,6 +490,13 @@ export function endsSession(credentials: string | ApiCredentials, failure: AuthF
 }
 
 /** `onAuthFailure` hears every 401 and 403 of this client, so the session owner can tear down or open a dialog. */
+/** The report's filters without its page: an export holds every row. */
+function withoutOffset(query: ReviewQuery): ReviewQuery {
+  const rest = { ...query }
+  delete rest.offset
+  return rest
+}
+
 export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthFailure?: (failure: AuthFailure) => void, tradingMode?: TradingMode): WorkspaceApi {
   const rawCall = createApiCall(credentials, failure => {
     if (endsSession(credentials, failure)) emitApiEvent(api, { type: 'unauthorized' })
@@ -789,6 +799,9 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
     deleteEvidence: id => call(evidencePath(id), { ...playRequest, validate: none, method: 'DELETE' }),
     sizing: signal => call('/api/sizing', { ...playRequest, validate: isSizingDocument, ...withSignal(signal) }),
     review: (query, signal) => call(reviewPath(query), { ...playRequest, validate: isReviewDocument, ...withSignal(signal) }),
+    reviewExport: (query, signal) => call(reviewPath(withoutOffset(query)).replace('/api/review?', '/api/review/export?'), { ...playRequest,
+      ...withSignal(signal), timeout: 60_000, accept: 'text/csv', read: async response => ({
+        fileName: attachmentName(response.headers.get('content-disposition'), 'vessel-review.csv'), blob: await response.blob() }) }),
     reviewExclusions: (query, signal) => call(reviewExclusionsPath(query), { ...playRequest, validate: isReviewExclusions, ...withSignal(signal) }),
     reviewProcess: (query, selection, signal) => call(reviewProcessPath(query, selection), { ...playRequest, validate: isReviewProcessPage, ...withSignal(signal) }),
     mistakeTags: signal => call('/api/review/mistake-tags', { ...playRequest,

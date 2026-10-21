@@ -18,6 +18,14 @@ public static class ReviewEndpoints
             ReviewService service, CancellationToken ct) =>
             Results.Ok(await service.ProcessAsync(new(new(period ?? "month", portfolio ?? "all", accountId, instrument, offset ?? 0,
                 positions ?? "exclude", minPlays ?? ReviewQuery.DefaultMinPlays, tradingMode), cell, lane, mistakeTag, skippedCheck), ct)));
+        // Phase 2, item 5a: the report's own rows as CSV, from one snapshot. Owner data, so never cached (the API default).
+        api.MapGet("/export", async (string? period, string? portfolio, Guid? accountId, string? instrument,
+            string? positions, int? minPlays, string? tradingMode, ReviewService service, CancellationToken ct) =>
+        {
+            var export = await service.ExportAsync(new(period ?? "month", portfolio ?? "all", accountId, instrument, 0, positions ?? "exclude",
+                minPlays ?? ReviewQuery.DefaultMinPlays, tradingMode), ct);
+            return Results.File(System.Text.Encoding.UTF8.GetBytes(export.Content), "text/csv; charset=utf-8", export.FileName);
+        });
         api.MapGet("/mistake-tags", async (ReviewService service, CancellationToken ct) => Results.Ok(await service.MistakeTagsAsync(ct)));
         api.MapGet("", async (string? period, string? portfolio, Guid? accountId, string? instrument, int? offset,
             string? positions, int? minPlays, string? tradingMode, ReviewService service, CancellationToken ct) =>
