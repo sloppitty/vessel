@@ -24,6 +24,8 @@ public static class EndpointTransport
 {
     public const long CredentialBodyBytes = 4096;
     internal const long ManualExecutionBodyBytes = 16_384;
+    /// <summary>A correction batch holds up to 200 full rows and one reason (phase 1, 1.3b).</summary>
+    internal const long ManualCorrectionBatchBodyBytes = 262_144;
     internal const long RetrospectiveBodyBytes = 131_072;
     internal const string DiaryTooLarge = "Diary request is too large.";
 

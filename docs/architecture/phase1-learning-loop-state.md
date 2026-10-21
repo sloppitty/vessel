@@ -333,7 +333,52 @@ October 20, 2026, branch `t3/phase1-unresolved`, stacked on 1.2:
 
 ### 1.3b Manual correction batch
 
-Not started.
+October 20, 2026, branch `t3/phase1-correction-batch`, stacked on 1.3a:
+- **The request (D-15, decision 5).** `POST /api/plays/{id}/manual-executions/corrections` takes `requestId`,
+  `expectedVersion`, one reason and 1–200 corrections. Each correction is an existing execution's full corrected row,
+  as the single-row PUT sends it.
+- **Validation.**
+  - Each row is validated as a single correction is: role, entry and side stay, and a Closed ledger keeps each source
+    label.
+  - Only the final ledger is checked as a whole, so a closed 1/1 ledger becomes 2/2 in one batch.
+  - Single corrections and the batch share one apply path, so they keep the same ledger rules.
+- **Atomicity.** The batch applies all or nothing under the account and Play locks in one unit of work. A retry with
+  the same `requestId` returns the first result, and another payload conflicts.
+- **History.** Each row's before and after are kept with the reason and a shared `batchId`; single-row writes have
+  none.
+- **Limits.**
+  - A Closed ledger stays closed, and an Open one may close.
+  - The batch never adds, deletes or reopens rows, and counts toward the record and history limits.
+  - Its body limit is 262,144 bytes.
+- **Browser.**
+  - A correction gains **Also correct**, which adds another execution with its own fields under the one reason.
+  - With more than one row it is saved as a batch, and a failed batch is retried with the same request.
+  - The audit history labels batch entries and counts the executions corrected together.
+- **Migration.** The explicit `ManualCorrectionBatch` migration adds the nullable `BatchId` column to
+  `manual_execution_history`.
+- **Tests.**
+  - PostgreSQL (`Verify.F5`):
+    - a closed 1/1 ledger becomes 2/2 in one batch, with both rows' history under one batch ID;
+    - the same change one row at a time is refused;
+    - an invalid final ledger leaves the version, history and totals unchanged;
+    - duplicates, an empty batch, a blank reason, a stale version and a changed side are refused;
+    - a retry returns the first result, and the request ID with another payload conflicts;
+    - single corrections still work.
+  - The two-owner isolation test covers the new route, including another owner's execution ID inside a batch.
+  - Frontend: the batch request and its single reason, Remove back to one correction, each execution offered once,
+    and the same request on retry.
+- **Checks.** `scripts/check.sh` passed: backend 3,601 passed, 5 skipped; frontend 152 files and 3,807 tests; build clean. A first
+  run found the body-limit inventory missing the new route, now listed at its 262,144-byte limit.
+
+- **Sol (Codex) round 1.** No findings. The reviewer named test gaps that are not defects and are not addressed
+  here: a batch replayed after a later change, a request ID reused on another Play, the history-limit boundaries, an
+  Open-to-Closed batch, and chunked, case-changed or trailing-slash requests against the body limit.
+
+- **Rebase.** 1.3a's migration now adds `PlayVersion` to `play_status_changes`, so the `ManualCorrectionBatch` target
+  model includes it; EF reports no pending model changes. `scripts/check.sh` passed: backend 3,603 passed, 5 skipped; frontend 152 files and 3,814 tests.
+
+- **Post-sync Sol review (October 21).** No findings: corrections change no Activity claims, and the migration order
+  still holds.
 
 ## 1.4 Process and outcome as cases
 

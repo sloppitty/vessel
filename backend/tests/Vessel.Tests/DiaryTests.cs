@@ -149,7 +149,7 @@ public sealed class ManualLedgerTests
     }
 }
 
-public sealed class DiaryPostgresTests
+public sealed partial class DiaryPostgresTests
 {
     private static readonly DateTimeOffset At = DateTimeOffset.UnixEpoch.AddDays(1);
     private static ManualExecutionRequest Fact(long version, string role, string quantity, string price, int seconds,

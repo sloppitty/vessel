@@ -5,7 +5,7 @@ import type { SavedPlay } from '@/api/plays'
 import type { ManualExecutionCorrection, ManualExecutions } from '@/api/diary'
 import { Button } from '@/components/ui/button'
 import { InfoTip } from '@/components/ui/info-tip'
-import { emptyManualDraft, hasManualDraft, manualCorrectionDraft, manualRequest, type ManualExecutionDraft } from './manual'
+import { emptyManualDraft, hasManualDraft, manualBatchRequest, manualCorrectionDraft, manualRequest, type ManualExecutionDraft } from './manual'
 import type { SavedState } from './saved'
 import type { DraftEntry } from './draft'
 import { nominalStablecoins } from './stablecoins'
@@ -79,20 +79,27 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
     onChange({ ...current, ...patch })
     setError(null)
   }
+  // Other executions corrected with this one (phase 1, 1.3b); any edit drops the frozen attempt, as above.
+  const together = form.executionId ? form.together ?? [] : []
+  const changeRow = (index: number, patch: Partial<ManualExecutionDraft>) =>
+    change({ together: together.map((row, at) => at === index ? { ...row, ...patch } : row) })
+  const addable = form.executionId ? (ledger?.records ?? []).filter(record => record.id !== form.executionId &&
+    !together.some(row => row.executionId === record.id)) : []
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (!saved || !permitted || pending || submission.current) return
-    const request = manualRequest(form, saved.summary.version, saved.summary.direction, entries.map(entry => entry.id))
+    const request = together.length ? manualBatchRequest(form, saved.summary.version)
+      : manualRequest(form, saved.summary.version, saved.summary.direction, entries.map(entry => entry.id))
     if ('error' in request) { setError(request.error); return }
     const finish = onBegin()
     if (!finish) return
     submission.current = finish
     // Freeze both request identity and expectedVersion. An uncertain retry sends the exact same payload.
-    onChange({ ...form, attempt: request.input })
+    onChange({ ...form, attempt: 'batch' in request ? request.batch : request.input })
     setBusy(true); setError(null)
     try {
-      const result = form.executionId
-        ? await api.correctManualExecution(saved.summary.id, form.executionId, request.input as ManualExecutionCorrection)
+      const result = 'batch' in request ? await api.correctManualExecutions(saved.summary.id, request.batch)
+        : form.executionId ? await api.correctManualExecution(saved.summary.id, form.executionId, request.input as ManualExecutionCorrection)
         : await api.addManualExecution(saved.summary.id, request.input)
       if (latest.current.api !== api || latest.current.playId !== saved.summary.id) return
       // The shell guards these callbacks by Play identity and mount lifetime.
@@ -150,7 +157,8 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
       </ol>
       <details className="manual-history"><summary>Execution audit history ({ledger.history.length})</summary>
         <ol>{ledger.history.map(change => <li key={change.id}>
-          <strong>{change.before ? 'Correction' : 'Recorded'} · {change.reason ?? 'Initial record'}</strong>
+          <strong>{change.before ? change.batchId ? 'Correction batch' : 'Correction' : 'Recorded'} · {change.reason ?? 'Initial record'}</strong>
+          {change.batchId && <small>Batch {change.batchId.slice(0, 8)}: {ledger.history.filter(item => item.batchId === change.batchId).length} executions corrected together</small>}
           <time dateTime={change.occurredAtUtc}>{change.occurredAtUtc}</time>
           {change.before && <p>Before: {change.before.role} · {change.before.side} {change.before.quantity} at {change.before.price} · {change.before.occurredAtUtc} · {change.before.source} · fee {change.before.fee === null ? 'unknown' : `${change.before.fee} ${change.before.feeCurrency}`}</p>}
           <p>After: {change.after.role} · {change.after.side} {change.after.quantity} at {change.after.price} · {change.after.occurredAtUtc} · {change.after.source} · fee {change.after.fee === null ? 'unknown' : `${change.after.fee} ${change.after.feeCurrency}`}</p>
@@ -177,10 +185,37 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
           {field('quantity', 'Execution quantity', 96, true)}{field('price', 'Execution price', 96, true)}
           {field('fee', 'Fee amount (blank = unknown)', 96, true)}{field('feeCurrency', 'Fee currency', 32, false, `${id}-fee-currencies`)}
           <datalist id={`${id}-fee-currencies`}>{nominalStablecoins.map(symbol => <option key={symbol} value={symbol} />)}</datalist>
-          {field('source', 'Source label', 100)}{form.executionId && field('reason', 'Correction reason', 2000)}
+          {field('source', 'Source label', 100)}{form.executionId && field('reason', together.length ? 'Correction reason (for every execution)' : 'Correction reason', 2000)}
         </div>
+        {form.executionId && <div className="manual-together" aria-label="Corrected together">
+          {together.map((row, index) => {
+            const rowField = (key: 'occurredAtUtc' | 'quantity' | 'price' | 'fee' | 'feeCurrency' | 'source', label: string, max: number, decimal = false) =>
+              <label htmlFor={`${id}-together-${index}-${key}`}>{label}<input id={`${id}-together-${index}-${key}`} type="text"
+                inputMode={decimal ? 'decimal' : 'text'} maxLength={max} value={row[key]} onChange={event => changeRow(index, { [key]: event.target.value })} /></label>
+            const name = `${row.role === 'entry' ? 'Entry' : 'Exit'} · ${row.side}`
+            return <fieldset key={row.executionId} className="manual-together-row">
+              <legend>Also correct: {name}</legend>
+              <div className="manual-fields">
+                {rowField('occurredAtUtc', `${name} time (UTC)`, 64)}{rowField('quantity', `${name} quantity`, 96, true)}
+                {rowField('price', `${name} price`, 96, true)}{rowField('fee', `${name} fee (blank = unknown)`, 96, true)}
+                {rowField('feeCurrency', `${name} fee currency`, 32)}{rowField('source', `${name} source label`, 100)}
+              </div>
+              <Button type="button" size="sm" variant="ghost" onClick={() => change({ together: together.filter((_, at) => at !== index) })}>
+                Remove {name.toLowerCase()} from this correction</Button>
+            </fieldset>
+          })}
+          {addable.length > 0 && <label htmlFor={`${id}-together-add`}>Also correct<NativeSelect id={`${id}-together-add`} value=""
+            onChange={event => {
+              const record = addable.find(item => item.id === event.target.value)
+              if (record) change({ together: [...together, manualCorrectionDraft(record)] })
+            }}>
+            <option value="">Another execution, with the same reason…</option>
+            {addable.map(record => <option key={record.id} value={record.id}>{record.role === 'entry' ? 'Entry' : 'Exit'} · {record.side} {record.quantity} at {record.price} · {record.occurredAtUtc}</option>)}
+          </NativeSelect></label>}
+          {together.length > 0 && <p className="muted">These corrections are saved together with one reason, or not at all. Only the final ledger has to be valid.</p>}
+        </div>}
         <p id={`${id}-time-help`} className="sr-only">UTC date and time, such as 2026-10-13T10:00:00.123456Z. Whole microseconds or coarser.</p>
-        <Button type="submit" size="sm">{busy ? 'Recording…' : form.executionId ? 'Save correction' : form.attempt ? 'Retry same execution' : 'Record execution'}</Button>
+        <Button type="submit" size="sm">{busy ? 'Recording…' : form.executionId ? together.length ? 'Save corrections' : 'Save correction' : form.attempt ? 'Retry same execution' : 'Record execution'}</Button>
       </fieldset>
       {hasManualDraft(form) && <Button type="button" variant="ghost" size="sm" disabled={pending}
         onClick={() => { if (submission.current || pending) return; onChange(emptyManualDraft()); setError(null) }}>Discard execution edit</Button>}

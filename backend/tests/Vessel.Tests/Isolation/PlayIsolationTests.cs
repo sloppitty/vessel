@@ -195,6 +195,7 @@ public abstract class PlayIsolationCases(IsolationHost api)
     [Covers("GET", "/api/plays/{id:guid}/manual-executions")]
     [Covers("POST", "/api/plays/{id:guid}/manual-executions")]
     [Covers("PUT", "/api/plays/{id:guid}/manual-executions/{executionId:guid}")]
+    [Covers("POST", "/api/plays/{id:guid}/manual-executions/corrections")]
     public async Task Manual_diary_of_another_owner_answers_like_unknown_and_request_ids_are_per_owner()
     {
         var (a, b) = await api.Owners();
@@ -224,6 +225,9 @@ public abstract class PlayIsolationCases(IsolationHost api)
             PlayNotFound));
         await state.After(() => Isolated.NotFound(b, aPlay, Isolated.Request(HttpMethod.Put, id => $"/api/plays/{id}/manual-executions/{execution}",
             _ => Fact(Guid.NewGuid(), aVersion, "1", "80") with { Reason = "Taken" }), PlayNotFound));
+        // A correction batch on A's Play answers like an unknown Play (phase 1, 1.3b).
+        await state.After(() => Isolated.NotFound(b, aPlay, Isolated.Request(HttpMethod.Post, id => $"/api/plays/{id}/manual-executions/corrections",
+            _ => Batch(Guid.NewGuid(), aVersion, execution, "80")), PlayNotFound));
 
         // B reuses A's request ID with different facts on its own Play: it records B's own entry, neither replaying
         // A's result nor conflicting with it. The entry opens B's Play, so B's corrections reach the execution lookup.
@@ -248,10 +252,16 @@ public abstract class PlayIsolationCases(IsolationHost api)
         var both = await Snapshot.Of((a, paths), (b, [$"/api/plays/{bPlay}/manual-executions", $"/api/plays/{bPlay}", $"/api/plays/{bPlay}/history"]));
         await both.After(() => Isolated.NotFound(b, execution, Isolated.Request(HttpMethod.Put, id => $"/api/plays/{bPlay}/manual-executions/{id}",
             _ => Fact(Guid.NewGuid(), bVersion, "1", "80") with { Reason = "Taken" }), "Manual execution not found."));
+        // So is A's execution ID inside a batch on B's own Play.
+        await both.After(() => Isolated.NotFound(b, execution, Isolated.Request(HttpMethod.Post, _ => $"/api/plays/{bPlay}/manual-executions/corrections",
+            id => Batch(Guid.NewGuid(), bVersion, id, "80")), "Manual execution not found."));
         // A's retry of its own request still replays A's result.
         var replay = await a.Post($"/api/plays/{aPlay}/manual-executions", entry);
         Assert.Equal(execution, Assert.Single(replay.GetProperty("records").EnumerateArray()).GetProperty("id").GetGuid());
         await both.Unchanged();
+        // Positive control: B corrects its own execution in a batch.
+        var bBatch = await b.Post($"/api/plays/{bPlay}/manual-executions/corrections", Batch(Guid.NewGuid(), bVersion, bExecution, "202", "2"));
+        Assert.Equal("202", Assert.Single(bBatch.GetProperty("records").EnumerateArray()).GetProperty("price").GetString());
     }
 
     /// <summary>One owner's ended Plays: scored and reviewed, excluded for unknown costs, and cancelled.</summary>
@@ -412,6 +422,8 @@ public abstract class PlayIsolationCases(IsolationHost api)
 
     private static ManualExecutionRequest Fact(Guid requestId, long version, string quantity, string price) =>
         new(requestId, version, "entry", "entry-1", AccountHistoryOrders.At, "buy", quantity, price, "0", "USDC", "Paper broker");
+    private static ManualCorrectionBatchRequest Batch(Guid requestId, long version, Guid execution, string price, string quantity = "1") =>
+        new(requestId, version, "Taken", [new(execution, "entry", "entry-1", AccountHistoryOrders.At, "buy", quantity, price, "0", "USDC", "Paper broker")]);
 }
 
 /// <summary>The cases above in Token mode, with the suite's test scheme selecting the owner.</summary>

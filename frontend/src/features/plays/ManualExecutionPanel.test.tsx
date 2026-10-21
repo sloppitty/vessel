@@ -171,3 +171,64 @@ describe('manual executions', () => {
     expect(screen.getByRole('button', { name: 'Record execution' })).toBeDisabled()
   })
 })
+
+describe('correction batch (phase 1, 1.3b)', () => {
+  const exit: ManualExecutionRecord = { ...record, id: '00000000-0000-4000-8000-000000000002', role: 'exit', entryId: null, side: 'sell',
+    occurredAtUtc: '2026-10-13T11:00:00Z', price: '110' }
+  it('corrects an entry and an exit together with one reason, as one all-or-nothing request', async () => {
+    const initial = ledger('closed', [record, exit])
+    const { api } = client(initial)
+    const batch = vi.fn<WorkspaceApi['correctManualExecutions']>(() => Promise.resolve(initial))
+    const single = vi.fn()
+    Object.assign(api, { correctManualExecutions: batch, correctManualExecution: single })
+    render(<Harness api={api} initial={initial.play} />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: `Correct ${id}` }))
+    const quantity = screen.getByLabelText('Execution quantity')
+    await user.clear(quantity); await user.type(quantity, '2')
+    await user.selectOptions(screen.getByLabelText('Also correct'), exit.id)
+    const exitQuantity = screen.getByLabelText('Exit · sell quantity')
+    await user.clear(exitQuantity); await user.type(exitQuantity, '2')
+    // Once a second execution joins, the one reason covers both and the batch is saved as a whole.
+    await user.type(screen.getByLabelText('Correction reason (for every execution)'), 'Statement shows two contracts')
+    await user.click(screen.getByRole('button', { name: 'Save corrections' }))
+    await waitFor(() => expect(batch).toHaveBeenCalledOnce())
+    expect(single).not.toHaveBeenCalled()
+    const [playId, request] = batch.mock.calls[0]!
+    expect(playId).toBe(play.summary.id)
+    expect(request).toMatchObject({ expectedVersion: 3, reason: 'Statement shows two contracts', corrections: [
+      { executionId: id, role: 'entry', entryId: 'entry-1', side: 'buy', quantity: '2', price: '100.00', source: 'Statement' },
+      { executionId: exit.id, role: 'exit', entryId: null, side: 'sell', quantity: '2', price: '110', source: 'Statement' },
+    ] })
+  })
+  it('retries a failed batch with the same request, and goes back to one correction when the other row is removed', async () => {
+    const initial = ledger('closed', [record, exit])
+    const { api } = client(initial)
+    const batch = vi.fn<WorkspaceApi['correctManualExecutions']>().mockRejectedValueOnce(new ApiError('unavailable', 'Network lost.'))
+      .mockResolvedValueOnce(initial)
+    Object.assign(api, { correctManualExecutions: batch })
+    render(<Harness api={api} initial={initial.play} />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: `Correct ${id}` }))
+    await user.selectOptions(screen.getByLabelText('Also correct'), exit.id)
+    await user.type(screen.getByLabelText('Correction reason (for every execution)'), 'Statement amended')
+    await user.click(screen.getByRole('button', { name: 'Save corrections' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Network lost.')
+    await user.click(screen.getByRole('button', { name: 'Save corrections' }))
+    await waitFor(() => expect(batch).toHaveBeenCalledTimes(2))
+    expect(batch.mock.calls[1]![1]).toEqual(batch.mock.calls[0]![1])
+  })
+  it('offers each other execution once, and Remove returns to a single correction', async () => {
+    const initial = ledger('closed', [record, exit])
+    const { api } = client(initial)
+    render(<Harness api={api} initial={initial.play} />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: `Correct ${id}` }))
+    expect(within(screen.getByLabelText('Also correct')).getAllByRole('option').map(option => option.getAttribute('value'))).toEqual(['', exit.id])
+    await user.selectOptions(screen.getByLabelText('Also correct'), exit.id)
+    expect(screen.queryByLabelText('Also correct')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Remove exit · sell from this correction' }))
+    expect(screen.getByRole('button', { name: 'Save correction' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Correction reason')).toBeInTheDocument()
+  })
+})

@@ -94,6 +94,8 @@ public sealed class ManualExecutionHistory : IOwned
     public DateTimeOffset OccurredAtUtc { get; set; }
     public string? Before { get; set; }
     public string After { get; set; } = null!;
+    /// <summary>Shared by every row a correction batch changed together (phase 1, 1.3b); null for single-row writes.</summary>
+    public Guid? BatchId { get; set; }
 }
 
 // The response snapshot makes a retry return the original result, even after later mutations.
