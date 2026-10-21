@@ -323,8 +323,10 @@ covering F-08 and the first part of D-17. No statistic changes.
   | Expectancy per Play | all scored Plays |
   | Estimated R | Plays with a complete initial stop |
 
-  - The highest and lowest asset cards are marked by their Play counts.
-  - Breakdown rows are marked by their decided counts.
+  - The highest and lowest asset cards are marked by their result counts.
+  - Breakdown cells are marked one by one: batting average and profit
+    factor by the row's decided count, average gain / loss by the smaller
+    of its wins and losses.
 - **With imported positions.** Each n counts real results, unweighted, as
   every count does. A Play counts once in n although it weighs
   `PlayWeight` in the rates. Expectancy reads "n = 3 Plays · 2 positions",

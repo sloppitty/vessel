@@ -167,7 +167,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const retrospective = saved?.summary.origin === 'retrospective'
   // Record-based suggestions also follow accepted stored-state reloads.
   const sizing = useSizing(api, reloadGeneration, visible)
-  const tracking = usePlayExecution(api, visible && session.view === 'editor' && saved && !manual ? saved.summary.id : null, saved?.summary.status, reloadGeneration)
+  const tracking = usePlayExecution(api, visible && session.view === 'editor' && saved && !manual ? saved.summary.id : null, saved?.summary.status, reloadGeneration, saved?.summary.planRevision)
   const { reload: reloadExecution } = tracking
   // A shell reload already rereads the execution through its generation; reload it directly only without one.
   const monitorChanged = useCallback(() => { if (onReload) onReload(); else reloadExecution() }, [reloadExecution, onReload])
@@ -500,13 +500,17 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   // The outcome beside the review: a venue Play's two bases or a manual Play's ledger, with R and time held from the server.
   const shownExecution = tracking.execution?.playId === saved?.summary.id ? tracking.execution : null
   const playReceipt = manual ? manualLedger && manualLedger !== 'unknown' ? manualLedger.receipt ?? null : null : shownExecution?.receipt ?? null
+  // Figures kept from an earlier read are not shown as current: after a failed or pending reread the receipt waits for it.
+  const staleOutcome = tracking.stale ? tracking.error
+    ? <p className="error" role="alert">The outcome could not be read again. {tracking.error}</p>
+    : <p className="muted" role="status">Reading the outcome…</p> : undefined
   const reviewReceipt = manual
     ? manualLedger && manualLedger !== 'unknown' && manualLedger.receipt
       ? <ReviewReceipt receipt={manualLedger.receipt} result={{ kind: 'manual', totals: manualLedger.totals, fees: manualLedger }}
         status={manualLedger.play.summary.status} /> : undefined
-    : shownExecution?.receipt ? <ReviewReceipt receipt={shownExecution.receipt} result={{ kind: 'venue', totals: shownExecution.totals }} status={shownExecution.status} />
+    : shownExecution?.receipt ? staleOutcome ?? <ReviewReceipt receipt={shownExecution.receipt} result={{ kind: 'venue', totals: shownExecution.totals }} status={shownExecution.status} />
       : undefined
-  const retrospectiveReceipt = retrospective && shownExecution ? <RetrospectiveReceipt execution={shownExecution} direction={draft.direction} /> : undefined
+  const retrospectiveReceipt = retrospective && shownExecution ? staleOutcome ?? <RetrospectiveReceipt execution={shownExecution} direction={draft.direction} /> : undefined
 
   // The status badge, a revision pill and the buttons say what the owner can do; no banner restates them.
   const revision = saved && locked && !retrospective && saved.summary.planRevision > 1 ? saved.summary.planRevision : null
@@ -529,7 +533,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         observedVersion={observedPlayVersion(session, api)}
         onChange={form => { if (mounted.current && currentApi.current === api && latest.current.saved?.summary.id === saved?.summary.id) update({ manual: form }) }}
         onStored={acceptStoredPlay} onBegin={() => latest.current.saved?.summary.id === saved?.summary.id ? beginWork('manual') : null} />
-        : saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy}
+        : saved && status !== 'draft' ? <ExecutionPanel execution={tracking.execution} error={tracking.error} busy={tracking.busy} stale={tracking.stale}
         entries={draft.entries} direction={draft.direction} origin={saved.summary.origin} monitor={monitorRun.monitor} monitorBusy={monitorRun.busy} monitorError={monitorRun.error} retryAtUtc={monitorRun.retryAtUtc} monitorUnavailable={monitorRun.statusUnavailable}
         currentBookRead={currentBookRead}
         {...(onManageAccount && account ? { onManageCredential: () => onManageAccount(account.id) } : {})}
