@@ -68,6 +68,24 @@ October 20, 2026: the owner answered the Phase 0 pull request questions. The Ove
 
 October 20, 2026: the owner asked to deliver Phase 1 ("close the learning loop") of the same review, built on the open Phase 0 PRs. Follow `docs/architecture/phase1-learning-loop-contract.md` and record verified progress in `phase1-learning-loop-state.md`. The owner accepted: an explicit post-close Complete review, Review again and No review needed, with structured answers counting, append-only in-trade log entries never counting, and Plays already listed as Reviewed kept (decision 3); an owner-declared `Unresolved` status for stuck Open Plays with a reason, note and execution-facts snapshot, a null result and no inferred sign, independent of the monitor and never set from account flatness (decision 4); an atomic, reasoned, version-checked manual correction batch that validates only the final closed ledger (decision 5); and post-hoc plans answering "Followed" and counting in the process cells, marked only by the "plan written after first execution" badge (decision 9). Process views show cases and counts, no rate below its own n = 10, no ranking, labels or cost of a mistake, and nothing AI-written. Plan it is never blocked. Times follow one display time-zone setting (Local by default, or UTC) while server day boundaries stay UTC until Phase 2. Phase 0 merged into main the same day, so Phase 1 code stacks on this contract on main; never push to or rebase Phase 0 branches. Every PR gets one adversarial Sol (Codex) review. The scored basis, decision 8, the ladder thresholds, pooled ladder, 20-decided window and exact-zero scratch rule are unchanged.
 
+October 20, 2026: the owner authorized an opt-in, Hyperliquid-only paper
+playground, with Sol implementation and independent verification. Follow
+`docs/architecture/paper-trading-delivery-contract.md`, the refined
+`paper-trading-plan.md` and current `paper-trading-state.md`; integration is not
+signed off until that state records it. Paper-only portfolios/accounts have
+creation-only immutable virtual capital (default 4,000), separate typed
+simulated executions and no effect on real financial readers or actual facts.
+Only this explicit simulation counts full eligible allocations at touched
+planned prices, with zero fees/slippage; a touch is still never an actual fill.
+Check closed minute candles hourly by default, independently configurable.
+Keep shared-account decisions chronological across all active sibling Plays.
+Ambiguities/gaps are held and unscored, not guessed; v1 has no resolution or
+manual simulated-close endpoint and open/unresolved equity is unknown.
+The standalone optional `paper` worker is broker-free; never add it to existing
+monitor/notifications module sets or generate real events from paper lifecycle.
+Reuse the existing shell/Play layout. No live migration, deployment or release
+is authorized.
+
 October 20, 2026: the owner asked Review to include imported positions when there are no Plays. Follow the Imported positions section of `docs/architecture/portfolio-review.md`: closed unassigned Activity operations by the sizing fallback's eligibility rule, `positions=exclude|include|auto` with a `minPlays` threshold (default 5, a browser preference in Settings), auto on while the selection has fewer scored Plays, a switch with Automatic/Manual state, and a Play weighing 2 positions in batting, average gain/loss, payoff and expectancy only; dollar totals, drawdown, streaks and counts are never weighted. Positions never become Plays or links, and R, reviews and Play-local figures cover Plays only.
 
 ## Project tracking

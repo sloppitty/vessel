@@ -149,7 +149,7 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
     private async Task<Vessel.Domain.Accounts.Account> RequireSubject(Guid accountId, Guid? playId, CancellationToken ct)
     {
         var account = await store.AccountAsync(accountId, ct);
-        if (account?.OwnerId != owner.OwnerId) throw new ProblemException(404, "Account not found.");
+        if (account?.OwnerId != owner.OwnerId || account.TradingMode != "real") throw new ProblemException(404, "Account not found.");
         if (playId is { } id)
         {
             var play = await store.PlayAsync(id, ct);

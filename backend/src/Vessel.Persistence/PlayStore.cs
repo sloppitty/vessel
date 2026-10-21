@@ -9,10 +9,11 @@ namespace Vessel.Persistence;
 
 public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlayStore
 {
-    public Task<bool> ScopeExistsAsync(ListScope scope, CancellationToken ct) => scope.Kind switch
+    public Task<bool> ScopeExistsAsync(ListScope scope, CancellationToken ct) => ScopeExistsAsync(scope, "real", ct);
+    public Task<bool> ScopeExistsAsync(ListScope scope, string tradingMode, CancellationToken ct) => scope.Kind switch
     {
-        "portfolio" => db.Portfolios.AnyAsync(p => p.Id == scope.Id, ct),
-        "account" => db.Accounts.AnyAsync(a => a.Id == scope.Id, ct),
+        "portfolio" => db.Portfolios.AnyAsync(p => p.Id == scope.Id && p.TradingMode == tradingMode, ct),
+        "account" => db.Accounts.AnyAsync(a => a.Id == scope.Id && a.TradingMode == tradingMode, ct),
         _ => Task.FromResult(true)
     };
 
@@ -55,7 +56,7 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
     // Owner-filtered Plays, projected to summary columns only. A scope keeps enabled accounts in it; no scope keeps every Play.
     private IQueryable<PlayListRow> Rows(PlayListFilter filter)
     {
-        var plays = db.Plays.AsQueryable();
+        var plays = db.Plays.Where(p => p.TradingMode == filter.TradingMode);
         if (filter.Scope is { } scope)
         {
             var accounts = db.Accounts.Where(a => a.IsEnabled);
@@ -77,7 +78,7 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
         }
         return plays.Select(p => new PlayListRow
         {
-            Id = p.Id, Title = p.Title, Status = p.Status, AccountId = p.AccountId, VenueId = p.VenueId, ContractId = p.ContractId,
+            Id = p.Id, Title = p.Title, Status = p.Status, AccountId = p.AccountId, TradingMode = p.TradingMode, VenueId = p.VenueId, ContractId = p.ContractId,
             InstrumentSource = p.InstrumentSource, Direction = p.Direction, PlanRevision = p.PlanRevision, Version = p.Version,
             CancelReason = p.CancelReason, CreatedAtUtc = p.CreatedAtUtc, UpdatedAtUtc = p.UpdatedAtUtc, PlannedAtUtc = p.PlannedAtUtc,
             EndedAtUtc = p.EndedAtUtc, Origin = p.Origin, ReviewedAtUtc = p.ReviewedAtUtc,

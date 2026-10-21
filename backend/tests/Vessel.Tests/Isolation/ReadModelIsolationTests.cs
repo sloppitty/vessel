@@ -13,7 +13,7 @@ namespace Vessel.Tests.Isolation;
 /// </summary>
 public abstract class ReadModelIsolationCases(IsolationHost api)
 {
-    private sealed record Journal(Owner Owner, Guid Portfolio, Guid Account, string Operation, Guid Play, string? Fingerprint = null);
+    private sealed record Journal(Owner Owner, Guid Portfolio, Guid Account, string Operation, Guid Play, string Title, string? Fingerprint = null);
 
     /// <summary>
     /// A portfolio, a synced account on the shared address and a Play over its one operation: a planned Play closed by
@@ -27,8 +27,9 @@ public abstract class ReadModelIsolationCases(IsolationHost api)
         var operation = Assert.Single((await owner.GetJson("/api/activity")).GetProperty("operations").EnumerateArray()).GetProperty("id").GetString()!;
         if (requestId is null)
         {
-            var id = await owner.ClosedPlay(account, Isolated.Marker("planned"));
-            return new(owner, portfolio, account, operation, id);
+            var title = Isolated.Marker("planned");
+            var id = await owner.ClosedPlay(account, title);
+            return new(owner, portfolio, account, operation, id, title);
         }
         var preview = await owner.GetJson($"/api/activity/retrospective?accountId={account}&operationId={Uri.EscapeDataString(operation)}");
         Assert.True(preview.GetProperty("eligible").GetBoolean(), preview.GetRawText());
@@ -36,7 +37,8 @@ public abstract class ReadModelIsolationCases(IsolationHost api)
         var play = await owner.Post("/api/plays/retrospective", new CreateRetrospectiveRequest(requestId.Value, account, operation,
             fingerprint, RetrospectiveTitle(requestId.Value)));
         Assert.Equal("retrospective", play.GetProperty("summary").GetProperty("origin").GetString());
-        return new(owner, portfolio, account, operation, play.GetProperty("summary").GetProperty("id").GetGuid(), fingerprint);
+        return new(owner, portfolio, account, operation, play.GetProperty("summary").GetProperty("id").GetGuid(), RetrospectiveTitle(requestId.Value),
+            fingerprint);
     }
 
     private static string RetrospectiveTitle(Guid requestId) => $"Retrospective {requestId:N}";
@@ -83,7 +85,7 @@ public abstract class ReadModelIsolationCases(IsolationHost api)
         {
             var owner = mine.Owner;
             foreach (var path in Reads(mine))
-                Isolated.NoLeak(await owner.GetText(path), theirs.Account, theirs.Portfolio, theirs.Play);
+                Isolated.NoLeak(await owner.GetText(path), theirs.Account, theirs.Portfolio, theirs.Play, theirs.Title);
 
             var overview = await owner.GetJson("/api/overview");
             Assert.Equal([mine.Account], overview.GetProperty("accounts").EnumerateArray().Select(x => x.GetProperty("id").GetGuid()));
@@ -100,6 +102,8 @@ public abstract class ReadModelIsolationCases(IsolationHost api)
             var operation = Assert.Single(activity.GetProperty("operations").EnumerateArray());
             Assert.Equal(mine.Account, operation.GetProperty("accountId").GetGuid());
             Assert.Equal(mine.Play, operation.GetProperty("playId").GetGuid());
+            // Each owner reads its own Play's title, never the other owner's.
+            Assert.Equal(mine.Title, operation.GetProperty("playTitle").GetString());
             Assert.Equal("10", operation.GetProperty("reportedClosedPnlUsd").GetString());
             Assert.Equal(2, operation.GetProperty("fillCount").GetInt32());
             Assert.Equal(2, activity.GetProperty("retainedFillCount").GetInt32());
@@ -126,7 +130,8 @@ public abstract class ReadModelIsolationCases(IsolationHost api)
         .Replace(journal.Operation, "{operation}", StringComparison.OrdinalIgnoreCase)
         .Replace(journal.Account.ToString("D"), "{account}", StringComparison.OrdinalIgnoreCase)
         .Replace(journal.Portfolio.ToString("D"), "{portfolio}", StringComparison.OrdinalIgnoreCase)
-        .Replace(journal.Play.ToString("D"), "{play}", StringComparison.OrdinalIgnoreCase);
+        .Replace(journal.Play.ToString("D"), "{play}", StringComparison.OrdinalIgnoreCase)
+        .Replace(journal.Title, "{title}", StringComparison.Ordinal);
 
     [PostgresFact]
     [Covers("GET", "/api/activity/retrospective")]

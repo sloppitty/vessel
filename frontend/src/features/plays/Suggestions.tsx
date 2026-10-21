@@ -63,7 +63,7 @@ export function SuggestionsPanel({ plan, sizing, status = 'ready', onRetry, draf
   onSize: (value: string) => void
   onLevel: (entryId: string, kind: 'stop' | 'target', levelId: string, value: string) => void
   onLeverage: (leverage: number) => void
-  onRiskChange: (riskPercent: string) => Promise<void>
+  onRiskChange?: ((riskPercent: string) => Promise<void>) | undefined
   defaultOpen?: boolean
 }) {
   const id = useId()
@@ -194,7 +194,7 @@ function recordBasisNotes(record: SizingRecord, decided: number) {
 }
 
 /** The record and rules behind the suggestions, with the risk per trade editable in place. */
-function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRiskChange: (riskPercent: string) => Promise<void> }) {
+function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRiskChange?: ((riskPercent: string) => Promise<void>) | undefined }) {
   const { record, exposure, limits } = sizing
   const decided = Math.min(record.decidedPlays, record.window)
   const activity = record.source === 'activity'
@@ -202,6 +202,7 @@ function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRisk
   const basisNotes = recordBasisNotes(record, decided)
   return <div className="sizing-suggestions-record" data-testid="track-record">
     <h3>Your record</h3>
+    {record.source === 'paper' && <p className="record-source-note" data-testid="record-source"><span className="record-source">Paper · simulated</span><span>Closed paper Plays only. Real outcomes and capital are excluded.</span></p>}
     {activity && <p className="record-source-note" data-testid="record-source">
       <span className="record-source">From Activity</span>
       <span>Based on {record.closedPlays} closed {positions} from Activity — no closed play with a win or loss yet.</span>
@@ -222,7 +223,7 @@ function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRisk
       <strong>{exposure.level === 'full' ? 'Full size' : exposureLabels[exposure.level]}</strong> · {exposure.reason}
     </p>
     <div className="record-limits">
-      <RiskSetting sizing={sizing} onRiskChange={onRiskChange} />
+      {onRiskChange ? <RiskSetting sizing={sizing} onRiskChange={onRiskChange} /> : <span>Risk {decimal(sizing.settings.riskPercent)}% · shared preference, read-only in Paper. Edit in Real mode.</span>}
       <span>Effective <strong>{riskNumber.format(Number(limits.effectiveRiskPercent))}%</strong></span>
       <span>Max stop <strong>{decimal(limits.maxStopPercent)}%</strong></span>
       <span>Min R:R <strong>{formatRewardToRisk(Number(limits.minRewardRisk))}</strong></span>
@@ -234,15 +235,15 @@ function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRisk
         <li><strong>Stops</strong>: never more than 10% from the entry; once you have five wins, no more than half your average gain.</li>
         <li><strong>Targets</strong>: at least 2:1, or the break-even R:R of your win rate once you have ten wins and losses, whichever is higher.</li>
         <li><strong>Exposure</strong>: size halves after three losses in a row and halves again after two more. It steps back up after two wins in a row with a positive result since stepping down. Minervini gives no fixed counts; these are Vessel's.</li>
-        <li><strong>Record</strong>: your last {record.window} closed plays with wins or losses by exit time, all enabled accounts, from linked fills: venue closed PnL less fees.
-          Until a play has a win or loss, closed positions from Activity stand in, scored the same way without R multiples.</li>
+        <li><strong>Record</strong>: {record.source === 'paper' ? <>your last {record.window} decided paper Plays by simulated exit time, enabled paper accounts only. No real results or Activity fallback; zero fees and slippage.</> : <>your last {record.window} closed plays with wins or losses by exit time, all enabled accounts, from linked fills: venue closed PnL less fees.
+          Until a play has a win or loss, closed positions from Activity stand in, scored the same way without R multiples.</>}</li>
       </ul>
       <p>Mechanical estimates before fees, funding and slippage, not advice.</p>
     </details>
   </div>
 }
 
-function RiskSetting({ sizing, onRiskChange }: { sizing: SizingDocument; onRiskChange: (riskPercent: string) => Promise<void> }) {
+function RiskSetting({ sizing, onRiskChange }: { sizing: SizingDocument; onRiskChange?: ((riskPercent: string) => Promise<void>) | undefined }) {
   const id = useId()
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState('')
@@ -257,7 +258,7 @@ function RiskSetting({ sizing, onRiskChange }: { sizing: SizingDocument; onRiskC
     if (!valid) { setError(`${riskPercentRange.min} to ${riskPercentRange.max}%`); return }
     setSaving(true)
     try {
-      await onRiskChange(value.trim())
+      await onRiskChange?.(value.trim())
       setEditing(false)
       setError('')
     } catch (cause) {

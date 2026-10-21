@@ -9,8 +9,9 @@ internal sealed class PlayConfiguration : IEntityTypeConfiguration<Play>
 {
     public void Configure(EntityTypeBuilder<Play> builder)
     {
-        builder.ToTable("plays");
+        builder.ToTable("plays", t => t.HasCheckConstraint("CK_plays_trading_mode", "\"TradingMode\" IN ('real', 'paper')"));
         builder.HasKey(x => x.Id);
+        builder.Property(x => x.TradingMode).HasMaxLength(8).HasDefaultValue("real");
         builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
         builder.Property(x => x.InstrumentSource).HasConversion<string>().HasMaxLength(16);
         builder.Property(x => x.CancelReason).HasConversion<string>().HasMaxLength(16);
@@ -31,14 +32,16 @@ internal sealed class PlayConfiguration : IEntityTypeConfiguration<Play>
         // List views filter by status and order by last update or end time, newest first.
         builder.HasIndex(x => new { x.OwnerId, x.Status, x.UpdatedAtUtc, x.Id }).IsDescending(false, false, true, false);
         builder.HasIndex(x => new { x.OwnerId, x.Status, x.EndedAtUtc, x.UpdatedAtUtc }).IsDescending(false, false, true, true);
-        builder.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId })
-            .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<Account>().WithMany().HasForeignKey(x => new { x.OwnerId, x.AccountId, x.TradingMode })
+            .HasPrincipalKey(x => new { x.OwnerId, x.Id, x.TradingMode }).OnDelete(DeleteBehavior.Restrict);
         builder.Ignore(x => x.Instrument);
         builder.Property(x => x.VenueId).HasMaxLength(64);
         builder.Property(x => x.ContractId).HasMaxLength(128);
         // Deliberately non-unique. Distinct active ideas can share a venue position.
         builder.HasIndex(x => new { x.OwnerId, x.AccountId, x.VenueId, x.ContractId });
         builder.HasAlternateKey(x => new { x.OwnerId, x.Id });
+        builder.HasAlternateKey(x => new { x.OwnerId, x.Id, x.TradingMode });
+        // AccountId stays mutable for saved Draft moves; migration guards enforce paper fact/account compatibility.
     }
 }
 

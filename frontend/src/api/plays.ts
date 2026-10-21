@@ -1,3 +1,4 @@
+import { type TradingMode } from './paper'
 import { ApiError } from './errors'
 import { isCount, isGuid, isNullOr, isPlainDecimal, isRecord, isText, isTimestamp } from './guards'
 import { isImageMarkup, type ImageMarkup } from './markup'
@@ -33,6 +34,7 @@ export interface PlayPlan {
   notes: { thesis: string; invalidation: string; strategy: string; evidence: string }
 }
 export interface PlaySummary {
+  tradingMode?: TradingMode
   id: string
   title: string
   status: PlayStatus
@@ -95,7 +97,7 @@ export type PreflightCode = typeof preflightCodes[number]
 export interface PreflightCheck { code: PreflightCode; outcome: 'passed' | 'skipped' | 'unknown' }
 /** One of the owner's recent next actions and the Play it was written for. */
 export interface NextAction { playId: string; title: string; nextAction: string; reviewedAtUtc: string | null }
-export interface StatusChange { from: PlayStatus; to: PlayStatus; reason: CancelReason | null; note: string | null; occurredAtUtc: string; source?: 'owner' | 'venue' | 'manual' }
+export interface StatusChange { from: PlayStatus; to: PlayStatus; reason: CancelReason | null; note: string | null; occurredAtUtc: string; source?: 'owner' | 'venue' | 'manual' | 'paper' }
 export interface ReviewRevision {
   number: number; occurredAtUtc: string; review: string; structuredReview: StructuredReview
   /** What happened: edited, completed, reopened or not-needed; absent from older servers. */
@@ -130,7 +132,8 @@ export const isPlayPlan = (v: unknown): v is PlayPlan => isRecord(v) && (v.direc
   (v.sizingMode === 'margin' || v.sizingMode === 'quantity') && isText(v.size, 64) && isText(v.leverage, 8) &&
   isNullOr(v.budgetOverride, x => isText(x, 64)) && Array.isArray(v.entries) && v.entries.length > 0 && v.entries.every(entry) &&
   isRecord(v.notes) && ['thesis', 'invalidation', 'strategy', 'evidence'].every(k => isText((v.notes as Record<string, unknown>)[k], noteLength))
-export const isPlaySummary = (v: unknown): v is PlaySummary => isRecord(v) && isGuid(v.id) && isText(v.title, 200) &&
+export const isPlaySummary = (v: unknown): v is PlaySummary => isRecord(v) &&
+  (v.tradingMode === undefined || v.tradingMode === 'real' || v.tradingMode === 'paper') && isGuid(v.id) && isText(v.title, 200) &&
   playStatuses.includes(v.status as PlayStatus) && isGuid(v.accountId) && isText(v.venueId, 64) && isNullOr(v.instrument, x => isText(x, 128)) &&
   (v.instrumentSource === 'venue' || v.instrumentSource === 'manual') && (v.direction === 'long' || v.direction === 'short') &&
   isCount(v.planRevision) && isCount(v.version) && isNullOr(v.cancelReason, x => cancelReasons.includes(x as CancelReason)) &&
@@ -162,7 +165,7 @@ export const isPlayHistory = (v: unknown): v is PlayHistory => isRecord(v) && Ar
     (r.preflight == null || Array.isArray(r.preflight) && r.preflight.length <= preflightCodes.length && r.preflight.every(isPreflightCheck))) &&
   v.statusChanges.every(c => isRecord(c) && playStatuses.includes(c.from as PlayStatus) && playStatuses.includes(c.to as PlayStatus) &&
     isNullOr(c.reason, x => cancelReasons.includes(x as CancelReason)) && isNullOr(c.note, x => isText(x, 2000)) && isTimestamp(c.occurredAtUtc, timeLength) &&
-    (c.source === undefined || c.source === 'owner' || c.source === 'venue' || c.source === 'manual')) &&
+    (c.source === undefined || c.source === 'owner' || c.source === 'venue' || c.source === 'manual' || c.source === 'paper')) &&
   (v.reviews == null || Array.isArray(v.reviews) && v.reviews.every(r => isRecord(r) && isCount(r.number) &&
     isTimestamp(r.occurredAtUtc, timeLength) && isText(r.review, noteLength) && isStructuredReview(r.structuredReview) &&
     (r.action === undefined || ['edited', 'completed', 'reopened', 'not-needed'].includes(r.action as string))))
