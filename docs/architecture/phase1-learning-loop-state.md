@@ -732,3 +732,12 @@ October 20, 2026, branch `t3/phase1-time`, stacked on 1.6b–d:
     `review.preferences.v1`).
   - Review's contributing-Plays list keeps the "Closed" column in the display zone, positions included. The period
     range stays UTC, matching the server's day boundaries.
+
+- **Post-sync Sol review (October 21).** The merge is sound. Three findings over two rounds, all fixed:
+  - **Close dates (medium).** Review's Closed column names the display zone, with a tip that report periods are rolling
+    UTC windows, so a close near midnight can show another day.
+  - **Other tabs (low).** The display zone follows a choice made in another tab, or cleared storage.
+  - **Coverage and process times (medium, round 2).** The earliest retained fill and the process rows show
+    zone-named times instead of a bare day.
+  - Round 3 found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,635 passed, 5 skipped; frontend 159 files and 3,907 tests.
