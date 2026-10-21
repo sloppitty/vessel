@@ -371,6 +371,11 @@ export interface PlayExecution {
   links: OrderLink[]
   suggestions: OrderLink[]
   unlinkedOrders: ExecutionOrder[]
+  /**
+   * Compatible orders placed in the lookback before the Play was created and not linked to any Play (Phase 2, item 4), for
+   * the owner to link by hand; the automatic matcher never reaches back. Absent from older servers.
+   */
+  earlierOrders?: ExecutionOrder[]
   notice: string
   /** Why linked fills cannot settle the play: missing executions, contradicting fills, or exits before or beyond the entries. */
   issues: string[]
@@ -450,7 +455,9 @@ export const isPlayExecution = (v: unknown): v is PlayExecution => isRecord(v) &
   (v.totals.venueNetUsd === undefined || isNullOr(v.totals.venueNetUsd, isPlainDecimal)) && isOptionalPlayLocalResult(v.totals.local) &&
   Array.isArray(v.entries) && v.entries.every(isEntryProgress) && (v.receipt === undefined || isNullOr(v.receipt, isPlayReceipt)) &&
   Array.isArray(v.links) && v.links.every(orderLink) && Array.isArray(v.suggestions) && v.suggestions.every(orderLink) &&
-  Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(executionOrder) && isText(v.notice, 1000) &&
+  Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(executionOrder) &&
+  (v.earlierOrders === undefined || Array.isArray(v.earlierOrders) && v.earlierOrders.length <= 20 && v.earlierOrders.every(executionOrder)) &&
+  isText(v.notice, 1000) &&
   Array.isArray(v.issues) && v.issues.every(issue => isText(issue, 1000)) &&
   (v.monitor === null || isAccountMonitor(v.monitor)) && Array.isArray(v.discrepancies) && v.discrepancies.every(isMonitorDiscrepancy) &&
   Array.isArray(v.watches) && v.watches.every(w => isMonitorWatch(w) && w.playId === v.playId)

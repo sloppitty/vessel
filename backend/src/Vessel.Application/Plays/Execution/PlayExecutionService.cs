@@ -17,9 +17,14 @@ namespace Vessel.Application.Plays.Execution;
 /// Unambiguous orders link automatically; ambiguous ones become suggestions for the owner. Read-only at the venue.
 /// </summary>
 public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore store,
-    IVenueRegistry venues, TimeProvider time, IUnitOfWork unitOfWork, IAccountCredentialReader? credentials = null) : IMonitorImporter
+    IVenueRegistry venues, TimeProvider time, IUnitOfWork unitOfWork, IAccountCredentialReader? credentials = null,
+    PlayExecutionOptions? executionOptions = null) : IMonitorImporter
 {
     private const int MaxUnlinkedOrders = 20;
+    /// <summary>Earlier orders checked for compatibility, newest first, bounding the fills read for them.</summary>
+    private const int MaxEarlierScan = 200;
+    private static readonly OrderLinkRole[] EarlierRoles = [OrderLinkRole.Entry, OrderLinkRole.Stop, OrderLinkRole.Target];
+    private static readonly PlayExecutionOptions DefaultOptions = new();
     private const string Notice = "Orders and fills come from the venue and link to this play by order ID. " +
         "Price touches are never treated as fills. Quantities are base units from linked fills; closed PnL and fees are as the venue reports them.";
 
@@ -59,10 +64,12 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         // Linked to any Play of the account, also closed ones: such an order is never offered again.
         var linkedOrders = await store.LinkedOrderIdsAsync(play.AccountId, ct);
         var mineOrders = mine.Select(l => l.ImportedOrderId).ToHashSet();
-        // This Play's linked and suggested orders (on any contract), plus its contract's orders placed since it was created.
+        // This Play's linked and suggested orders (on any contract), plus its contract's orders placed since a bounded lookback
+        // before it was created: the earlier ones are only offered to the owner (Phase 2, item 4), never matched.
+        var earliest = play.CreatedAtUtc - (executionOptions ?? DefaultOptions).EarlierOrderLookback;
         var loaded = await store.OrdersAsync(play.AccountId, mineOrders, play.ContractId is null
             ? new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal)
-            : new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal) { [play.ContractId] = play.CreatedAtUtc }, ct);
+            : new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal) { [play.ContractId] = earliest }, ct);
         var orders = loaded.ToDictionary(o => o.Id);
         var mineLoaded = mineOrders.Where(orders.ContainsKey).Select(id => orders[id]).ToList();
         var fills = FillsByOrder(mineLoaded, await store.FillsAsync(play.AccountId, mineLoaded.Select(OrderKey.Of).ToList(), ct));
@@ -72,12 +79,20 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var suggestions = play.Status == PlayStatus.Unresolved ? [] :
             mine.Where(l => l.State == OrderLinkState.Suggested && !linkedOrders.Contains(l.ImportedOrderId)).ToList();
         // Cancelled orders that never filled cannot be part of the play, so only live or filled ones are offered.
-        var unlinked = play.ContractId is null ? [] : loaded
-            .Where(o => o.ContractId == play.ContractId && o.PlacedAtUtc >= play.CreatedAtUtc && !linkedOrders.Contains(o.Id) &&
-                o.Status is "open" or "filled" or "triggered")
-            .OrderByDescending(o => o.PlacedAtUtc).Take(MaxUnlinkedOrders).Select(OrderDto).ToList();
-
+        var offered = play.ContractId is null ? [] : loaded
+            .Where(o => o.ContractId == play.ContractId && o.PlacedAtUtc >= earliest && !linkedOrders.Contains(o.Id) &&
+                o.Status is "open" or "filled" or "triggered").OrderByDescending(o => o.PlacedAtUtc).ToList();
+        var unlinked = offered.Where(o => o.PlacedAtUtc >= play.CreatedAtUtc).Take(MaxUnlinkedOrders).Select(OrderDto).ToList();
         var plan = PlayDocuments.Read(play.Plan);
+        // Sol round 1 on #37: an earlier order is offered only when some role of this plan accepts its side, mechanics and
+        // retained fills, before the cap, so unusable orders cannot crowd out the fast entry. Its price is not required to
+        // match: a market entry rarely fills at the planned price, and the owner decides.
+        var before = offered.Where(o => o.PlacedAtUtc < play.CreatedAtUtc).Take(MaxEarlierScan).ToList();
+        var beforeFills = before.Count == 0 ? [] : await store.FillsAsync(play.AccountId, before.Select(OrderKey.Of).ToList(), ct);
+        var fillsBefore = beforeFills.ToLookup(OrderKey.Of);
+        var earlier = before.Where(o => EarlierRoles.Any(role => ExecutionIntegrity.RoleConflict(role, plan, o, fillsBefore[OrderKey.Of(o)]) is null))
+            .Take(MaxUnlinkedOrders).Select(OrderDto).ToList();
+
         var revisions = await plays.RevisionsAsync(play.Id, ct);
         var settlement = Settle(plan, linked, orders, fills, play.Origin == PlayOrigin.Retrospective);
         var entered = settlement.Entered;
@@ -123,6 +138,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             suggestions.Select(l => Link(l) with { OtherPlay = elsewhere.Contains(l.ImportedOrderId) }).ToList(), unlinked, Notice, settlement.Problems)
         {
             Receipt = PlayReceipts.Build(new ClosedPlayFacts(play, revisions, settlement.All, settlement.Incomplete), time.GetUtcNow()),
+            EarlierOrders = earlier,
         };
     }
 
