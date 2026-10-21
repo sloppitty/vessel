@@ -309,6 +309,8 @@ public abstract class PlayIsolationCases(IsolationHost api)
     [PostgresFact]
     [Covers("GET", "/api/review")]
     [Covers("GET", "/api/review/exclusions")]
+    [Covers("GET", "/api/review/process")]
+    [Covers("GET", "/api/review/mistake-tags")]
     [Covers("PUT", "/api/plays/{id:guid}")]
     [Covers("GET", "/api/plays/{id:guid}/history")]
     [Covers("GET", "/api/plays/next-actions")]
@@ -332,10 +334,13 @@ public abstract class PlayIsolationCases(IsolationHost api)
             var scored = Assert.Single(review.GetProperty("plays").EnumerateArray());
             Assert.Equal((mine.ScoredId, true), (scored.GetProperty("id").GetGuid(), scored.GetProperty("reviewed").GetBoolean()));
             Assert.Equal(1, review.GetProperty("coverage").GetProperty("incompleteFees").GetInt32());
+            // The owner's cancelled Play is listed with the exclusions too (phase 1, 1.4b), and never the other owner's.
+            Assert.Equal(1, review.GetProperty("coverage").GetProperty("cancelled").GetInt32());
             var exclusions = await owner.GetJson("/api/review/exclusions?period=all");
-            Assert.Equal(1, exclusions.GetProperty("total").GetInt32());
-            var excluded = Assert.Single(exclusions.GetProperty("items").EnumerateArray());
-            Assert.Equal(mine.Excluded, excluded.GetProperty("playId").GetGuid());
+            Assert.Equal(2, exclusions.GetProperty("total").GetInt32());
+            Assert.Equal(new[] { mine.Excluded, mine.Cancelled }.Order(),
+                exclusions.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("playId").GetGuid()).Order());
+            var excluded = exclusions.GetProperty("items").EnumerateArray().Single(item => item.GetProperty("playId").GetGuid() == mine.Excluded);
             Assert.Contains(excluded.GetProperty("reasons").EnumerateArray(), r => r.GetString()!.Contains("unknown", StringComparison.OrdinalIgnoreCase));
             // The stored review and its history are the owner's own.
             var play = await owner.GetJson($"/api/plays/{mine.ScoredId}");
@@ -348,6 +353,17 @@ public abstract class PlayIsolationCases(IsolationHost api)
             var history = await owner.GetJson($"/api/plays/{mine.ScoredId}/history");
             Assert.Equal(mine.Answers.NextAction, Assert.Single(history.GetProperty("reviews").EnumerateArray())
                 .GetProperty("structuredReview").GetProperty("nextAction").GetString());
+            // Process cases, their drill-downs and the mistake tags offered for autocomplete are the owner's own (phase 1, 1.4b).
+            var process = review.GetProperty("process");
+            Assert.Equal(1, process.GetProperty("deviated").GetProperty("wins").GetInt32());
+            Assert.Equal(mine.Answers.MistakeTag, Assert.Single(process.GetProperty("mistakeTags").EnumerateArray()).GetProperty("tag").GetString());
+            var cell = await owner.GetJson("/api/review/process?period=all&cell=deviated-win");
+            Assert.Equal(mine.ScoredId, Assert.Single(cell.GetProperty("items").EnumerateArray()).GetProperty("id").GetGuid());
+            var byTag = await owner.GetJson($"/api/review/process?period=all&mistakeTag={Uri.EscapeDataString(mine.Answers.MistakeTag!)}");
+            Assert.Equal(mine.ScoredId, Assert.Single(byTag.GetProperty("items").EnumerateArray()).GetProperty("id").GetGuid());
+            var foreignTag = await owner.GetJson($"/api/review/process?period=all&mistakeTag={Uri.EscapeDataString(theirs.Answers.MistakeTag!)}");
+            Assert.Equal(0, foreignTag.GetProperty("total").GetInt32());
+            Assert.Equal([mine.Answers.MistakeTag], (await owner.GetJson("/api/review/mistake-tags")).EnumerateArray().Select(t => t.GetString()));
             // Each ended tab and count holds exactly the owner's own Plays.
             var tabs = new Dictionary<string, Guid[]>
             {

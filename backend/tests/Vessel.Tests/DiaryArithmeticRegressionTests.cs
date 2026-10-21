@@ -492,6 +492,7 @@ public sealed class DiaryArithmeticRegressionTests
             Task.FromResult(Fills.Where(f => f.AccountId == id && orders.Contains(OrderKey.Of(f))).ToList());
         public Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset at, CancellationToken ct) => Task.CompletedTask;
         public Task SaveAsync(CancellationToken ct) => Plays.SaveAsync(ct);
+        public Task<IReadOnlyList<string>> MistakeTagsAsync(int limit, CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([]);
         public Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct) =>
             Task.FromResult(new ReviewFacts([], [Account], Closed, 0, 0, null));
         public void Add(ManualExecution row) => Rows.Add(row);

@@ -29,7 +29,7 @@ import {
   type LinkOrder, type NextAction, type PlayNote, type PlayNoteState, type RebindLevel, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest, type UnresolvedReason,
 } from './plays'
 import { isSizingDocument, type SizingDocument } from './sizing'
-import { isReviewDocument, reviewPath, isReviewExclusions, reviewExclusionsPath, type ReviewDocument, type ReviewQuery, type ReviewExclusions } from './review'
+import { isReviewDocument, reviewPath, isReviewExclusions, reviewExclusionsPath, isReviewProcessPage, reviewProcessPath, type ReviewDocument, type ReviewQuery, type ReviewExclusions, type ReviewProcessPage, type ReviewProcessSelection } from './review'
 import {
   isRetrospectivePreview, isCreateRetrospectivePlayRequest, retrospectivePreviewPath, retrospectivePlayPath,
   type RetrospectivePreview, type CreateRetrospectivePlayRequest,
@@ -270,6 +270,10 @@ export interface WorkspaceApi {
   activityFills(accountId: string, operationId: string, signal?: AbortSignal): Promise<ActivityFills>
   review(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewDocument>
   reviewExclusions(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewExclusions>
+  /** One process cell, lane, mistake tag or skipped check, paged (phase 1, 1.4b). */
+  reviewProcess(query: ReviewQuery, selection: ReviewProcessSelection, signal?: AbortSignal): Promise<ReviewProcessPage>
+  /** The owner's earlier mistake tags for the review form, newest use first, at most 100. */
+  mistakeTags(signal?: AbortSignal): Promise<string[]>
   retrospectivePreview(accountId: string, operationId: string, signal?: AbortSignal): Promise<RetrospectivePreview>
   createRetrospectivePlay(body: CreateRetrospectivePlayRequest, signal?: AbortSignal): Promise<SavedPlay>
   overview(signal?: AbortSignal): Promise<Overview>
@@ -774,6 +778,10 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
     sizing: signal => call('/api/sizing', { ...playRequest, validate: isSizingDocument, ...withSignal(signal) }),
     review: (query, signal) => call(reviewPath(query), { ...playRequest, validate: isReviewDocument, ...withSignal(signal) }),
     reviewExclusions: (query, signal) => call(reviewExclusionsPath(query), { ...playRequest, validate: isReviewExclusions, ...withSignal(signal) }),
+    reviewProcess: (query, selection, signal) => call(reviewProcessPath(query, selection), { ...playRequest, validate: isReviewProcessPage, ...withSignal(signal) }),
+    mistakeTags: signal => call('/api/review/mistake-tags', { ...playRequest,
+      validate: (v): v is string[] => Array.isArray(v) && v.length <= 100 && v.every(tag => typeof tag === 'string' && tag.trim() !== '' && tag.length <= 100),
+      ...withSignal(signal) }),
     retrospectivePreview: (accountId, operationId, signal) => call(retrospectivePreviewPath(resourceId(accountId), operationId), { ...playRequest, validate: (v): v is RetrospectivePreview => isRetrospectivePreview(v) && v.operation.accountId === accountId && v.operation.id === operationId, ...withSignal(signal) }),
     createRetrospectivePlay: (input, signal) => {
       if (!isCreateRetrospectivePlayRequest(input)) return Promise.reject(new ApiError('invalid-response', 'Provide a valid retrospective request and preview fingerprint.'))

@@ -943,6 +943,20 @@ describe('diary workspace integration', () => {
     render(<Harness api={api} initial={sessionFor(retrospectiveSavedFixture)} />)
     expect(await screen.findByRole('tab', { name: 'Log' })).toBeInTheDocument()
   })
+  it('offers the owner\'s earlier mistake tags while reviewing an ended Play (phase 1, 1.4b)', async () => {
+    const closed: SavedPlay = { ...terminal, summary: { ...terminal.summary, status: 'closed', cancelReason: null } }
+    const { api } = client(closed)
+    const tags = vi.fn<WorkspaceApi['mistakeTags']>().mockResolvedValue(['Chased the entry', 'Sized too big'])
+    api.mistakeTags = tags
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(closed)} />)
+    await user.click(screen.getByRole('tab', { name: 'Review' }))
+    const field = screen.getByRole('combobox', { name: 'Mistake tag' })
+    await waitFor(() => expect(field).toHaveAttribute('list'))
+    const options = [...document.getElementById(field.getAttribute('list')!)!.querySelectorAll('option')].map(option => option.value)
+    expect(options).toEqual(['Chased the entry', 'Sized too big'])
+    expect(tags).toHaveBeenCalledOnce()
+  })
   it('saves from the expanded journal too, keeping focus in the dialog', async () => {
     const closed: SavedPlay = { ...terminal, summary: { ...terminal.summary, status: 'closed', cancelReason: null } }
     const { api, methods } = client(closed)

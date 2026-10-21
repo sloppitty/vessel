@@ -32,6 +32,7 @@ public sealed class ReviewPositionRegressionTests
             if (!committed) { committed = true; await commit(); }
             return facts;
         }
+        public Task<IReadOnlyList<string>> MistakeTagsAsync(int limit, CancellationToken ct) => inner.MistakeTagsAsync(limit, ct);
     }
 
     private static ReviewService Service(ReviewFixture f, ActivityFacts facts, MemorySizingStore? sizing = null) =>

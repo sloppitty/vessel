@@ -9,7 +9,7 @@ export const reviewPeriods = [
   { id: 'all', label: 'All recorded' },
 ] as const
 export type ReviewPeriod = typeof reviewPeriods[number]['id']
-export type ReviewGroupBy = 'portfolios' | 'accounts' | 'assets'
+export type ReviewGroupBy = 'portfolios' | 'accounts' | 'assets' | 'origins' | 'directions'
 /** `auto` adds imported positions while the selection has fewer than `minPlays` scored Plays. */
 export type ReviewPositionsMode = 'auto' | 'include' | 'exclude'
 export interface ReviewQuery {
@@ -49,7 +49,36 @@ export interface ReviewPlay {
   local?: PlayLocalResult | null
   /** The plan was written after the Play's first execution (D-17); scored like any other. Absent from older servers. */
   plannedAfterExecution?: boolean
+  /** The stored answers and completion (phase 1, 1.4b); absent from older servers. */
+  adherence?: 'followed' | 'deviated' | 'not-applicable' | null
+  mistakeTag?: string | null
+  direction?: string
+  reviewCompletion?: 'completed' | 'not-needed' | 'legacy' | null
 }
+/** Process and outcome as cases (phase 1, 1.4b): counts only; a rate is shown only where its own n is at least 10. */
+export interface ReviewProcess {
+  followed: { wins: number; losses: number; scratches: number }
+  deviated: { wins: number; losses: number; scratches: number }
+  retrospective: number; unscored: number; unanswered: number; notApplicable: number
+  mistakeTags: Array<{ tag: string; wins: number; losses: number; scratches: number; unscored: number }>
+  /** Every tag in the period; at most 200 are listed. */
+  mistakeTagCount: number
+}
+export const processCells = ['followed-win', 'followed-loss', 'followed-scratch', 'deviated-win', 'deviated-loss', 'deviated-scratch'] as const
+export const processLanes = ['retrospective', 'unscored', 'unanswered', 'not-applicable'] as const
+/** One drill-down: exactly one cell, lane, mistake tag or skipped pre-flight check. */
+export type ReviewProcessSelection =
+  | { cell: typeof processCells[number] } | { lane: typeof processLanes[number] } | { mistakeTag: string }
+  | { skippedCheck: PreflightCode | 'not-recorded' }
+export interface ReviewProcessPlay {
+  id: string; title: string; accountId: string; accountName: string; venueId: string; instrument: string
+  status: 'closed' | 'cancelled' | 'unresolved'; origin: 'planned' | 'retrospective'; direction: string; atUtc: string
+  /** Null where Review does not score the Play. */
+  net: string | null; returnPercent: string | null; rMultiple: string | null
+  adherence: 'followed' | 'deviated' | 'not-applicable' | null; mistakeTag: string | null
+  plannedAfterExecution: boolean; reviewCompletion: 'completed' | 'not-needed' | 'legacy' | null
+}
+export interface ReviewProcessPage { items: ReviewProcessPlay[]; total: number; offset: number; nextOffset: number | null }
 export interface ReviewExclusion {
   playId: string; title: string; accountId: string; accountName: string; instrument: string; reasons: string[]
   /** An Unresolved Play's declaration: reason, note, time and execution facts (phase 1, 1.3a). */
@@ -68,12 +97,15 @@ export interface ReviewDocument {
   options: { portfolios: Array<{ id: string; name: string }>; accounts: ReviewAccount[]; instruments: string[] }
   periods: Array<{ id: ReviewPeriod; count: number; net: string | null; positions?: number }>
   metrics: ReviewMetrics; series: ReviewPoint[]; bucketDays: number
-  groups: Record<ReviewGroupBy, ReviewGroup[]>
+  /** Origins and directions are in a fixed order and absent from servers before phase 1.4b. */
+  groups: Record<'portfolios' | 'accounts' | 'assets', ReviewGroup[]> & Partial<Record<'origins' | 'directions', ReviewGroup[]>>
   coverage: {
     closedCandidates: number; incompleteFees: number; incompleteExecutions: number; openPlays: number
     unassignedFills: number; firstFillAtUtc: string | null; notice: string
     /** Unresolved Plays declared in the period, excluded with no result (phase 1, 1.3a); absent from older servers. */
     unresolved?: number
+    /** Plays cancelled in the period, listed with the exclusions (phase 1, 1.4b); absent from an older server. */
+    cancelled?: number
   }
   plays: ReviewPlay[]; offset: number; nextOffset: number | null
   /**
@@ -81,6 +113,8 @@ export interface ReviewDocument {
    * many were planned before it existed, and per check how many went ahead without it. Absent from older servers.
    */
   preflight?: { recorded: number; notRecorded: number; skipped: Array<{ code: PreflightCode; count: number }> }
+  /** Absent from servers before phase 1.4b. */
+  process?: ReviewProcess
   /** Whether imported positions are in this report; absent from servers before October 20, 2026. */
   positions?: ReviewPositions
 }
@@ -122,7 +156,20 @@ const play = (v: unknown) => isRecord(v) &&
   (!isRecord(v.local) || v.local.basis === 'manual-ledger' === (v.executionSource === 'manual') &&
     (v.local.basis === 'paper-simulation') === (v.executionSource === 'paper')) &&
   (v.plannedAfterExecution === undefined || typeof v.plannedAfterExecution === 'boolean' &&
-    (!v.plannedAfterExecution || v.origin !== 'retrospective' && v.origin !== 'position'))
+    (!v.plannedAfterExecution || v.origin !== 'retrospective' && v.origin !== 'position')) &&
+  answers(v) && (v.direction === undefined || directions.includes(v.direction as string)) &&
+  (v.reviewCompletion === undefined || isNullOr(v.reviewCompletion, x => ['completed', 'not-needed', 'legacy'].includes(x as string))) &&
+  (v.origin !== 'position' || !v.adherence && !v.mistakeTag && !v.reviewCompletion)
+/** A Play's plan direction, or none; an imported position's direction, or none when its side is unknown. */
+const directions = ['', 'long', 'short']
+const answers = (v: Record<string, unknown>) =>
+  (v.adherence === undefined || isNullOr(v.adherence, x => ['followed', 'deviated', 'not-applicable'].includes(x as string))) &&
+  (v.mistakeTag === undefined || isNullOr(v.mistakeTag, x => isText(x, 100)))
+const processRow = (v: unknown) => isRecord(v) && ['wins', 'losses', 'scratches'].every(k => isCount(v[k]))
+const isReviewProcess = (v: unknown): v is ReviewProcess => isRecord(v) && processRow(v.followed) && processRow(v.deviated) &&
+  ['retrospective', 'unscored', 'unanswered', 'notApplicable', 'mistakeTagCount'].every(k => isCount(v[k])) &&
+  isListOf(v.mistakeTags, t => isRecord(t) && isNonBlankText(t.tag, 100) && ['wins', 'losses', 'scratches', 'unscored'].every(k => isCount(t[k])), 200) &&
+  (v.mistakeTags as unknown[]).length <= (v.mistakeTagCount as number)
 const account = (v: unknown) => isRecord(v) && isGuid(v.id) && isText(v.name, 200) && isNullOr(v.portfolioId, isGuid) &&
   isText(v.venueId, 64) && isNullOr(v.lastSyncedAtUtc, x => isTimestamp(x, 64)) && isText(v.syncStatus, 32) &&
   isNullOr(v.historyNotice, x => isText(x, 1000))
@@ -138,9 +185,12 @@ export const isReviewDocument = (v: unknown): v is ReviewDocument => isRecord(v)
   isListOf(v.series, p => isRecord(p) && isTimestamp(p.atUtc, 64) && isReviewDecimal(p.net) && isReviewDecimal(p.cumulative) && isReviewDecimal(p.drawdown) && isCount(p.count), 366) &&
   isCount(v.bucketDays) && v.bucketDays > 0 &&
   isRecord(v.groups) && isListOf(v.groups.portfolios, group, listLimit) && isListOf(v.groups.accounts, group, listLimit) && isListOf(v.groups.assets, group, listLimit) &&
+  (v.groups.origins === undefined || isListOf(v.groups.origins, group, 3)) && (v.groups.directions === undefined || isListOf(v.groups.directions, group, 2)) &&
+  (v.process === undefined || isReviewProcess(v.process)) &&
   isRecord(v.coverage) && ['closedCandidates', 'incompleteFees', 'incompleteExecutions', 'openPlays', 'unassignedFills'].every(key => isCount((v.coverage as Record<string, unknown>)[key])) &&
   isNullOr(v.coverage.firstFillAtUtc, x => isTimestamp(x, 64)) && isText(v.coverage.notice, 4000) &&
-  (v.coverage.unresolved === undefined || isCount(v.coverage.unresolved)) && isListOf(v.plays, play, 50) &&
+  (v.coverage.unresolved === undefined || isCount(v.coverage.unresolved)) &&
+  (v.coverage.cancelled === undefined || isCount(v.coverage.cancelled)) && isListOf(v.plays, play, 50) &&
   (v.plays as ReviewPlay[]).every(p => (p.executionSource === 'paper') === (v.tradingMode === 'paper')) &&
   isCount(v.offset) && (v.nextOffset === null || isCount(v.nextOffset) && v.nextOffset > v.offset) &&
   (v.preflight === undefined || isRecord(v.preflight) && isCount(v.preflight.recorded) && isCount(v.preflight.notRecorded) &&
@@ -183,3 +233,25 @@ export const isReviewExclusions = (v: unknown): v is ReviewExclusions => isRecor
 export function reviewExclusionsPath(query: ReviewQuery): string {
   return reviewPath(query).replace('/api/review?', '/api/review/exclusions?')
 }
+
+export function reviewProcessPath(query: ReviewQuery, selection: ReviewProcessSelection): string {
+  const params = new URLSearchParams(reviewPath(query).slice('/api/review?'.length))
+  const [key, value] = Object.entries(selection)[0]!
+  params.set(key, value)
+  return `/api/review/process?${params}`
+}
+
+export const isReviewProcessPage = (v: unknown): v is ReviewProcessPage => isRecord(v) &&
+  isListOf(v.items, item => isRecord(item) && isGuid(item.id) && isText(item.title, 200) && isGuid(item.accountId) &&
+    isText(item.accountName, 200) && isText(item.venueId, 64) && isText(item.instrument, 128) &&
+    ['closed', 'cancelled', 'unresolved'].includes(item.status as string) && ['planned', 'retrospective'].includes(item.origin as string) &&
+    directions.includes(item.direction as string) && isTimestamp(item.atUtc, 64) &&
+    ['net', 'returnPercent', 'rMultiple'].every(k => isNullOr(item[k], isReviewDecimal)) && answers(item) &&
+    // Only a scored Closed Play has a result, and a result always has its return; retrospective Plays have no plan R.
+    (item.net === null ? item.returnPercent === null && item.rMultiple === null : item.status === 'closed' && item.returnPercent !== null) &&
+    typeof item.plannedAfterExecution === 'boolean' && (item.origin === 'planned' || item.rMultiple === null && !item.plannedAfterExecution) &&
+    isNullOr(item.reviewCompletion, x => ['completed', 'not-needed', 'legacy'].includes(x as string)), 50) &&
+  isCount(v.total) && isCount(v.offset) && (v.items as unknown[]).length === Math.min(50, Math.max(0, v.total - v.offset)) &&
+  new Set((v.items as ReviewProcessPlay[]).map(item => item.id)).size === (v.items as unknown[]).length &&
+  (v.nextOffset === null ? v.offset + (v.items as unknown[]).length >= v.total :
+    isCount(v.nextOffset) && v.nextOffset === v.offset + (v.items as unknown[]).length && v.nextOffset < v.total)

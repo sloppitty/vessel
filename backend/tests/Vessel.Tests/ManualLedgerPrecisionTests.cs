@@ -371,6 +371,8 @@ public sealed class ManualLedgerPrecisionTests
             Rows, history, requests, Plays.Plays, Plays.Revisions, Plays.Changes, Plays.Links, Plays.Saves
         });
 
+        public Task<IReadOnlyList<string>> MistakeTagsAsync(int limit, CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([]);
+
         public Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct)
         {
             List<ClosedPlayFacts> closed = [];

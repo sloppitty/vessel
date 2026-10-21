@@ -50,10 +50,36 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
         var unresolvedIds = unresolvedPlays.Select(p => p.Id).ToList();
         var declarations = (await db.StatusChanges.Where(c => unresolvedIds.Contains(c.PlayId) && c.To == PlayStatus.Unresolved)
             .AsNoTracking().ToListAsync(ct)).ToLookup(c => c.PlayId);
+        // The earliest linked execution of each Unresolved Play in scope, by the shared OrderKey rule, for the post-hoc badge:
+        // one grouped query, however many Plays.
+        var scopedUnresolved = unresolvedPlays.Where(p => ids.Contains(p.AccountId) && (query.Instrument == null || p.ContractId == query.Instrument))
+            .Select(p => p.Id).ToList();
+        var firstExecution = await db.LinkedFills(db.OrderLinks.Where(l => scopedUnresolved.Contains(l.PlayId) && l.State == OrderLinkState.Linked))
+            .GroupBy(r => r.Link.PlayId).Select(g => new { PlayId = g.Key, First = g.Min(r => r.Fill.OccurredAtUtc) })
+            .ToDictionaryAsync(x => x.PlayId, x => x.First, ct);
+        // Cancelled Plays join the process view (1.4b); they are never scored. Only plan revision 1 is read, for its pre-flight.
+        var cancelledPlays = await db.Plays.Where(p => p.Status == PlayStatus.Cancelled && enabled.Contains(p.AccountId))
+            .AsNoTracking().ToListAsync(ct);
+        var endedIds = unresolvedIds.Concat(cancelledPlays.Select(p => p.Id)).ToList();
+        var firstRevisions = (await db.PlanRevisions.Where(r => endedIds.Contains(r.PlayId) && r.Number == 1).AsNoTracking().ToListAsync(ct))
+            .ToLookup(r => r.PlayId);
         await transaction.CommitAsync(ct);
         return new(portfolios, accounts, closed, open, unassigned, first, incomplete)
         {
-            UnresolvedPlays = unresolvedPlays.Select(p => new UnresolvedPlayFacts(p, PlayUnresolved.Latest(declarations[p.Id], p.EndedAtUtc))).ToList(),
+            UnresolvedPlays = unresolvedPlays.Select(p => new UnresolvedPlayFacts(p, PlayUnresolved.Latest(declarations[p.Id], p.EndedAtUtc))
+            {
+                Revisions = firstRevisions[p.Id].ToList(), FirstExecutionAtUtc = firstExecution.TryGetValue(p.Id, out var at) ? at : null,
+            }).ToList(),
+            CancelledPlays = cancelledPlays.Select(p => new EndedPlayFacts(p, firstRevisions[p.Id].ToList())).ToList(),
         };
+    }
+
+    public async Task<IReadOnlyList<string>> MistakeTagsAsync(int limit, CancellationToken ct)
+    {
+        // The owner's own vocabulary: every Play of theirs, newest review first; grouping and spelling follow ReviewService.
+        var rows = await db.Plays.Where(p => p.ReviewMistakeTag != null && p.ReviewMistakeTag.Trim() != "")
+            .OrderByDescending(p => p.ReviewedAtUtc).ThenByDescending(p => p.UpdatedAtUtc).ThenBy(p => p.Id)
+            .Select(p => p.ReviewMistakeTag!).Take(5000).AsNoTracking().ToListAsync(ct);
+        return rows.Select(t => t.Trim()).DistinctBy(ReviewService.TagKey).Take(limit).ToList();
     }
 }

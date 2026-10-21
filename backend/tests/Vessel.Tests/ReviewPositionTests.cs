@@ -45,6 +45,27 @@ public sealed class ReviewPositionTests
     }
 
     [Fact]
+    public async Task Positions_form_their_own_origin_and_join_the_direction_groups()
+    {
+        // Phase 1.4b groups by origin and direction in a fixed order; a position has no plan, so it is its own origin.
+        f.Add(10);
+        Position(-5);
+        var at = ReviewClock.Now.AddHours(-3);
+        source.Items.Add(new ReviewPosition($"{Guid.NewGuid()}:short", f.Accounts[0].Id, "BTC", "short", at,
+            new PlayOutcome(Guid.NewGuid(), at, 3, 100, null, true)));
+        var report = await Read(new(Positions: "include"));
+        Assert.Equal([("planned", 1), ("position", 2)], report.Groups.Origins.Select(g => (g.Id, g.Metrics.Count)));
+        Assert.Equal("Imported position", report.Groups.Origins[1].Name);
+        Assert.Equal([("long", 2, 1), ("short", 1, 1)],
+            report.Groups.Directions.Select(g => (g.Id, g.Metrics.Count, g.Metrics.Positions)));
+        var row = Assert.Single(report.Plays, p => p.Origin == "position" && p.Direction == "short");
+        Assert.Equal((null, null, null), (row.Adherence, row.MistakeTag, row.ReviewCompletion));
+        // The process view stays Plays-only: a position has no answers to count.
+        Assert.Equal((1, 0, 0, 0), (report.Process!.Unanswered, report.Process.Unscored, report.Process.Retrospective,
+            report.Process.Followed.Wins + report.Process.Followed.Losses + report.Process.Deviated.Wins + report.Process.Deviated.Losses));
+    }
+
+    [Fact]
     public async Task Exclude_never_reads_positions_and_reports_plays_only()
     {
         f.Add(10);

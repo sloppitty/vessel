@@ -443,6 +443,84 @@ October 20, 2026, branch `t3/phase1-post-hoc-badge`, stacked on 1.1a:
   - Round 3 found nothing new.
   - **Check.** `scripts/check.sh` passed: backend 3,593 passed, 5 skipped; frontend 152 files and 3,810 tests.
 
+### 1.4b Process cases
+
+October 20, 2026, branch `t3/phase1-process-cases`, stacked on 1.3b:
+- **Process section (G-01, decision 9).** Below the Breakdown, over the period's Closed, Cancelled and Unresolved Plays
+  in scope:
+  - followed and deviated, by win and loss, with each row's scratches;
+  - lanes for retrospective, unscored but answered, unanswered, and not-applicable Plays.
+
+  Each Play is in the first lane that applies, and an unscored planned Play with no answers is only in the exclusion
+  list. Answers are read as stored.
+- **Times.** Closed Plays by Review's close time, Cancelled ones by their cancellation, Unresolved ones by their
+  declaration.
+- **Mistake tags.**
+  - Counted per tag, trimmed and case-insensitive, shown in the latest spelling.
+  - Each tag has its wins, losses, scratches and unscored Plays, with no money.
+  - The review form autocompletes from `GET /api/review/mistake-tags` (at most 100, newest first).
+- **Rates.** A win share appears only where its own decided count is at least 10. Rows keep a fixed order, with no
+  ranking or labels.
+- **Drill-down.** `GET /api/review/process` takes Review's filters and exactly one cell, lane, mistake tag or skipped
+  pre-flight check (or `not-recorded`). It returns those Plays newest first, with nullable money, the stored answers,
+  the post-hoc flag and the completion. Every count equals its drill-down.
+- **Pre-flight counts (1.5).** They now cover the same population's planned Plays that were planned, and each skipped
+  count and "not recorded" opens its Plays.
+- **Breakdown.** Origin and Direction join in a fixed order, without row inspection, since Review has no such filter.
+- **Contracts.** Review's Play rows gain adherence, mistake tag, direction and completion.
+- **Tests.**
+  - Service:
+    - every lane, cell and exclusion-only case, with each count equal to its drill-down total;
+    - tag grouping and latest spelling;
+    - pre-flight counts and drill-downs across Closed, Cancelled and Unresolved Plays;
+    - selection validation;
+    - the fixed-order groups and row fields.
+  - PostgreSQL (T29): a manual Play planned after its executions counts in its followed cell with the badge, a cancelled
+    answered Play is unscored, and tags, pre-flight counts and drill-downs agree. The two-owner isolation test covers
+    both routes.
+  - Frontend: the shares at n ≥ 10, counts opening their Plays, the pre-flight drill-downs, the Origin/Direction tabs,
+    the tag suggestions and the response guards.
+- **Checks.** `scripts/check.sh` passed: backend 3,607 passed, 5 skipped; frontend 153 files and 3,813 tests; build clean.
+
+- **Sol (Codex) round 1.** Four findings, all fixed:
+  - **Cancelled Plays (medium).** An unanswered Cancelled Play was in neither the lanes nor the exclusion list. The
+    exclusion drill-down now lists the period's Cancelled Plays with their cancel reason, `coverage.cancelled` counts
+    them, and the excluded total includes them. The lane test checks the exclusion list and coverage add up; it fails
+    without this fix. The two-owner isolation test expects the owner's own cancelled Play there.
+  - **Rates (medium).** Origin and Direction rows and their combined row show batting average, average gain / loss and
+    profit factor only where their own denominator is at least 10, otherwise `—` with the n. A test fails without
+    this fix.
+  - **Queries (medium).** Review read one query per Unresolved Play for the post-hoc flag. It now reads the first
+    linked execution of every Unresolved Play in scope in one grouped query. A PostgreSQL test counts Review's queries
+    with one and three Unresolved Plays (it fails on the old loop) and checks the earliest of two fills decides the
+    flag.
+  - **Link names (low).** Process drill-down links are named by their visible title.
+  - **Check.** After the rebase onto the fixed 1.3a, `scripts/check.sh` passed: backend 3,608 passed, 5 skipped;
+    frontend 153 files and 3,819 tests.
+
+- **Sol (Codex) round 2.** All four round-1 findings resolved. One new finding, fixed:
+  - **Venue (low).** Process drill-down rows now show the venue logo beside the instrument and account, as other Play
+    lists do.
+  - **Check.** After the rebase onto the fixed 1.3a, `scripts/check.sh` passed: backend 3,609 passed, 5 skipped; frontend 153 files and 3,820 tests.
+
+- **Sol (Codex) round 3.** No findings: the venue fix and the rebase onto 1.3a's change hold.
+- **Main sync with PR #33 (imported positions).** Merged forward, not rebased.
+  - The process view, its drill-downs, pre-flight and mistake tags stay Plays-only.
+  - With positions included, the Origin breakdown adds "Imported position" after Planned and Retrospective, so the
+    groups add up to the combined row. The owner chose this on October 21, 2026, over leaving positions out. Direction
+    groups include positions.
+  - Review validates the positions mode and threshold with the other filters, so the process and exclusion drill-downs
+    accept the same query.
+  - A new test covers the groups. The Review tests pass against PostgreSQL (308).
+
+- **Post-sync Sol review (October 21).** The Origin and Direction groups add up to the combined row in every positions
+  mode, and the process views stay Plays-only. Two low findings, both fixed:
+  - **Drill-down filters.** The exclusions and process routes take and validate positions and minPlays like the report.
+  - **Process rows.** The browser rejects a result on an unscored Play, a result without its return, R or the post-hoc
+    badge on a retrospective Play, and a direction other than long, short or none.
+  - Round 2 found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,633 passed, 5 skipped; frontend 156 files and 3,865 tests.
+
 ## 1.5 Lessons return and a recorded pre-flight
 
 October 20, 2026, branch `t3/phase1-preflight`, stacked on 1.4a:

@@ -144,7 +144,7 @@ const journalSections = [
 
 export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceImages, evidenceRequest = 0, executionRequest = 0, readOnly = false, execution,
   structuredReview, onStructuredReviewChange, status = 'draft', retrospective = false, reviewReceipt, journalSave, nextActions,
-  log, reviewCompletion, keepExecutionMounted = false }: {
+  log, reviewCompletion, mistakeTags, keepExecutionMounted = false }: {
   notes: PlayDraft['notes']
   onChange: (notes: PlayDraft['notes']) => void
   evidence?: DraftEvidence[]
@@ -172,6 +172,8 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   log?: ReactNode
   /** Where the review stands and the action that completes or reopens it, under the review. */
   reviewCompletion?: ReactNode
+  /** The owner's earlier mistake tags, offered while typing one (phase 1, 1.4b). */
+  mistakeTags?: readonly string[] | undefined
   /** The owner's recent next actions, shown in the Thesis tab with a way to copy one into it (phase 1, 1.5). */
   nextActions?: { actions: readonly NextAction[]; onCopy: (action: NextAction) => void; onOpen?: (id: string) => void } | undefined
   keepExecutionMounted?: boolean
@@ -287,7 +289,8 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
           <div className="structured-review-field">
             <label htmlFor={`${id}-mistake`}>Mistake tag</label>
             <input id={`${id}-mistake`} maxLength={100} value={review.mistakeTag ?? ''} placeholder="e.g. Chased the entry"
-              onChange={event => changeReview({ mistakeTag: event.target.value || null })} />
+              list={mistakeTags?.length ? `${id}-mistake-tags` : undefined} onChange={event => changeReview({ mistakeTag: event.target.value || null })} />
+            {mistakeTags?.length ? <datalist id={`${id}-mistake-tags`}>{mistakeTags.map(tag => <option key={tag} value={tag} />)}</datalist> : null}
           </div>
           <div className="structured-review-field">
             <label htmlFor={`${id}-lesson`}>Lesson</label>

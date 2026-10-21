@@ -275,6 +275,16 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       .catch(() => { /* No suggestions on failure; planning does not depend on them. */ })
     return () => controller.abort()
   }, [api, offersNextActions])
+  // The owner's earlier mistake tags, offered while reviewing an ended Play (phase 1, 1.4b). A failed read offers none.
+  const [mistakeTags, setMistakeTags] = useState<{ api: WorkspaceApi; tags: string[] } | null>(null)
+  const offersMistakeTags = visible && session.view === 'editor' && !!saved && isEndedStatus(saved.summary.status)
+  useEffect(() => {
+    if (!offersMistakeTags) return
+    const controller = new AbortController()
+    api.mistakeTags(controller.signal).then(tags => { if (!controller.signal.aborted) setMistakeTags({ api, tags }) })
+      .catch(() => { /* Autocomplete only; the field still takes any tag. */ })
+    return () => controller.abort()
+  }, [api, offersMistakeTags])
   // The workspace knows the instrument's units; page messages such as the blocked-save reason use them.
   const [units, setUnits] = useState<SizeUnits>(defaultSizeUnits)
   const onUnits = useCallback((next: SizeUnits) => setUnits(current => current.quote === next.quote && current.base === next.base &&
@@ -633,6 +643,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
           if (mounted.current && currentApi.current === api) update({ log: change(latest.current.log) })
           else onLogChange?.(change)
         }} /> : undefined}
+      mistakeTags={offersMistakeTags && mistakeTags?.api === api ? mistakeTags.tags : undefined}
       reviewCompletion={saved ? <ReviewCompletionBar summary={saved.summary} dirty={dirty} busy={pending}
         filled={(playReceipt?.fillCount ?? 0) > 0} onAction={action => { void reviewAction(action) }} /> : undefined}
       plannedAfterExecution={playReceipt?.plannedAfterExecution === true}
