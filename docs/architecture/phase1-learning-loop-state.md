@@ -482,6 +482,14 @@ October 20, 2026, branch `t3/phase1-process-cases`, stacked on 1.3b:
     accept the same query.
   - A new test covers the groups. The Review tests pass against PostgreSQL (308).
 
+- **Post-sync Sol review (October 21).** The Origin and Direction groups add up to the combined row in every positions
+  mode, and the process views stay Plays-only. Two low findings, both fixed:
+  - **Drill-down filters.** The exclusions and process routes take and validate positions and minPlays like the report.
+  - **Process rows.** The browser rejects a result on an unscored Play, a result without its return, R or the post-hoc
+    badge on a retrospective Play, and a direction other than long, short or none.
+  - Round 2 found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,633 passed, 5 skipped; frontend 156 files and 3,865 tests.
+
 ## 1.5 Lessons return and a recorded pre-flight
 
 October 20, 2026, branch `t3/phase1-preflight`, stacked on 1.4a:
