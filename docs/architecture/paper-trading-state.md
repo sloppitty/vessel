@@ -739,12 +739,17 @@ Known open/terminal evidence guards remain intact. A Sol implementer owns the
 bounded backend N1/O1 changes; the parent owns confirmation/disclosure UI and
 verification. No new schema/endpoint/DTO is planned.
 
-The conditional quiet-minute publication concern remains unverified by that
-review: it did not make live reads. A separate bounded public-only research
-task may use up to 12 unauthenticated requests to observe newly closed quiet
-minutes and their relation to later trades, with exact timing/raw evidence.
-It cannot claim universal finality or change the five-minute policy without
-further evidence/decision. This is research, not a production polling change.
+The conditional quiet-minute publication concern remains unresolved after
+bounded public-only research on October 21. The freshly closed 00:31 UTC
+TNSR/HMSTR minute was absent about 10 and 75 seconds after close. Older HMSTR
+zero-trade rows were present, but no subsequent-trade/backfill transition was
+observed. This neither proves lazy publication nor falsifies it. The eight
+public API requests and exact timestamps/raw checksums are documented in
+[the publication research note](paper-candle-publication-research.md).
+The five-minute policy is unchanged; it is recovery tolerance, not a venue
+finality guarantee. A quiet tail still missing beyond that tolerance becomes
+a held, unscored gap without a resolution endpoint. This residual needs an
+explicit readiness decision; the sample is not a pass.
 
 Independent round-four results: clean builds; 21 final probes stable over two
 runs; 1,197 backend regression passes with three unconfigured live checks
@@ -753,3 +758,23 @@ iterations and fixture correction remain retained. Report and runnable evidence:
 `/home/ops/.cache/vessel-verification/opus-r4-9c66d65-wCgj14/REPORT.md`.
 The earlier provider-limit paragraph is historical, not the current final
 review status. **PR remains draft; no final readiness approval is claimed.**
+
+### N1 confirmation UI verification
+
+Paper Pause now asks for confirmation before any lifecycle write. Paper Cancel,
+global disable and account disable disclose skipped **pre-action** unevaluated
+time, retained recorded cash/executions and unscored history after resumption.
+Real Pause remains direct and Real Cancel retains its venue-order warning.
+
+Red-before-green checks reproduced both the immediate paper pause and missing
+pre-action disclosures. The final five-file focused run passed **69/69**;
+the complete frontend passed **3,894 tests across 157 files**, with normal
+timeouts and at most two workers. Typecheck, lint and production build passed.
+Evidence: `/home/ops/.cache/vessel-verification/paper-n1-ui/`.
+
+The T3 browser also checked the production shell/dialog components with
+synthetic API fixtures in an isolated incognito profile: no write before
+confirmation or after dismissing, exactly one confirmed pause, the updated
+cancel disclosure, no actual execution/monitor reads, and desktop/mobile
+dialog geometry. This is UI-only browser verification, not API/database E2E.
+Backend N1/O1 verification and fresh independent approval remain pending.

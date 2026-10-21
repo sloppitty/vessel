@@ -34,7 +34,7 @@ import { noEntryFills, type EntryFills } from './position-risk-summary'
 import { planNumberIssues, planNumberSummary, storedPlanText, StoredPlanTextContext, type StoredPlanText } from './stored-plan-text'
 import { availableOf, defaultSizeUnits, marginOverBudget, overBudgetMessage, type SizeUnits } from './sizing'
 import { leverageOf } from './levels'
-import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
+import { CancelDialog, DeleteDialog, HistoryDialog, PauseDialog, RevisionDialog } from './PlayDialogs'
 import { initialPlaysList, playSearchDelay, playViewTabs, type PlaysListState } from './plays-list'
 import {
   createPlaysSession, draftFromSaved, fieldsToSave, hasDraftContent, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
@@ -44,7 +44,7 @@ import {
 
 
 const ended: PlayStatus[] = ['closed', 'cancelled']
-type DialogKind = null | 'revision' | 'cancel' | 'delete' | 'history'
+type DialogKind = null | 'revision' | 'pause' | 'cancel' | 'delete' | 'history'
 type WorkKind = 'save' | 'status' | 'open' | 'delete' | 'manual'
 
 export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef, list, onList, reloadGeneration = 0, accountMonitors = [], onManageAccount }: {
@@ -477,8 +477,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     ? <Button size="sm" className="play-primary" disabled={pending || !draft.accountId || !draft.instrument || !paperArming}
       title={!paperArming ? 'Enable Paper trading in Settings before arming a play' : !draft.instrument ? 'Choose an instrument and price an entry to plan' : 'Commit to this plan. Later changes become revisions.'}
       onClick={() => { void changeStatus({ status: 'planned' }) }}><Play size={14} />Plan it</Button>
-    : status === 'planned' ? <Button size="sm" variant="outline" disabled={pending || dirty} title={statusBlocked ?? 'Orders withdrawn, idea still valid'}
-      onClick={() => { void changeStatus({ status: 'paused' }) }}><Pause size={14} />Pause</Button>
+    : status === 'planned' ? <Button size="sm" variant="outline" disabled={pending || dirty} title={statusBlocked ?? (paper ? 'Pause simulation; unchecked time remains unscored' : 'Orders withdrawn, idea still valid')}
+      onClick={() => { if (paper) { setDialogError(null); setDialog('pause') } else { void changeStatus({ status: 'paused' }) } }}><Pause size={14} />Pause</Button>
     : status === 'paused' ? <Button size="sm" className="play-primary" disabled={pending || dirty || !paperArming} title={statusBlocked}
       onClick={() => { void changeStatus({ status: 'planned' }) }}><Play size={14} />Resume</Button>
     : null
@@ -529,7 +529,9 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     </StoredPlanTextContext.Provider>
     {dialog === 'revision' && saved && <RevisionDialog revision={saved.summary.planRevision} pending={saving} error={dialogError}
       onSave={reason => { void save(reason) }} onClose={() => setDialog(null)} />}
-    {dialog === 'cancel' && <CancelDialog pending={busy === 'status'} error={dialogError}
+    {dialog === 'pause' && <PauseDialog pending={busy === 'status'} error={dialogError}
+      onPause={() => { void changeStatus({ status: 'paused' }) }} onClose={() => setDialog(null)} />}
+    {dialog === 'cancel' && <CancelDialog paper={paper} pending={busy === 'status'} error={dialogError}
       onCancel={(reason, note) => { void changeStatus({ status: 'cancelled', reason, ...(note ? { note } : {}) }) }} onClose={() => setDialog(null)} />}
     {dialog === 'delete' && <DeleteDialog pending={busy === 'delete'} error={dialogError} onDelete={() => { void remove() }} onClose={() => setDialog(null)} />}
     {dialog === 'history' && saved && <HistoryDialog api={api} playId={saved.summary.id} onClose={() => setDialog(null)} />}

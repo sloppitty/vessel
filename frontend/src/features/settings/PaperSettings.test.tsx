@@ -240,6 +240,7 @@ describe('PaperSettings', () => {
     expect(dialog).toHaveTextContent('Re-enabling resumes suspended Plays prospectively at a fresh minute boundary')
     expect(dialog).toHaveTextContent('owner-paused Plays stay paused')
     expect(dialog).toHaveTextContent('Unevaluated history remains unscored after resumption')
+    expect(dialog).toHaveTextContent('Unevaluated time before disabling is also skipped and remains unscored.')
     expect(dialog).toHaveTextContent('Any position open at suspension keeps new entries on that account blocked after re-enabling until that exposure closes.')
     expect(dialog).toHaveTextContent('Entries touched during the hold are declined, not replayed.')
     expect(dialog).toHaveTextContent('Paper history stays available.')

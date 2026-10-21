@@ -160,6 +160,7 @@ describe('paper account creation and immutable capital', () => {
     expect(screen.getByText(/Disabling suspends this account/)).toHaveTextContent('Any position open at suspension keeps new entries blocked after re-enabling until that exposure closes')
     expect(screen.getByText(/Disabling suspends this account/)).toHaveTextContent('Touches during the hold are declined, not replayed')
     expect(screen.getByText(/Disabling suspends this account/)).toHaveTextContent('unscored')
+    expect(screen.getByText(/Disabling suspends this account/)).toHaveTextContent('Unevaluated time before disabling is also skipped and remains unscored.')
   })
 })
 

@@ -1,6 +1,6 @@
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { useState } from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Tooltip } from 'radix-ui'
 import { describe, expect, it, vi } from 'vitest'
@@ -36,6 +36,37 @@ function Workspace({ api, initial = play }: { api: WorkspaceApi; initial?: Saved
   return <Tooltip.Provider><NotificationProvider><VenuesProvider venues={venues}><PlaysPage api={api} accounts={[account]} portfolios={[portfolioFixture]} session={session} onSession={onSession} /></VenuesProvider></NotificationProvider></Tooltip.Provider>
 }
 describe('Paper Play integration in the existing editor', () => {
+  it('confirms paper pause with a skipped-window disclosure before any lifecycle write', async () => {
+    const user = userEvent.setup()
+    const api = makeApi()
+    vi.mocked(api.changePlayStatus).mockResolvedValue({ ...play, summary: { ...play.summary, status: 'paused', version: 2 } })
+    render(<Workspace api={api} />)
+    await user.click(screen.getByRole('button', { name: 'Pause' }))
+    expect(api.changePlayStatus).not.toHaveBeenCalled()
+    const dialog = screen.getByRole('dialog', { name: 'Pause paper play?' })
+    expect(dialog).toHaveTextContent('Unevaluated time before this action is skipped, not replayed.')
+    expect(dialog).toHaveTextContent('A retained receipt keeps this Play unscored, even after resuming.')
+    await user.click(within(dialog).getByRole('button', { name: 'Keep running' }))
+    expect(api.changePlayStatus).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Pause' }))
+    await user.click(within(screen.getByRole('dialog', { name: 'Pause paper play?' })).getByRole('button', { name: 'Pause paper play' }))
+    expect(api.changePlayStatus).toHaveBeenCalledExactlyOnceWith(play.summary.id, play.summary.version, { status: 'paused' })
+    expect(await screen.findByRole('button', { name: 'Resume' })).toBeInTheDocument()
+  })
+
+  it('discloses unchecked pre-cancel time without referring to actual venue orders', async () => {
+    const user = userEvent.setup()
+    const api = makeApi()
+    render(<Workspace api={api} />)
+    await user.click(screen.getByRole('button', { name: 'Cancel play' }))
+    const dialog = screen.getByRole('dialog', { name: 'Cancel this play?' })
+    expect(dialog).toHaveTextContent('Unevaluated time before this action is skipped, not replayed.')
+    expect(dialog).toHaveTextContent('A retained receipt keeps this Play unscored')
+    expect(dialog).not.toHaveTextContent('Remove resting venue orders yourself')
+    await user.click(within(dialog).getByRole('button', { name: 'Keep the play' }))
+    expect(api.changePlayStatus).not.toHaveBeenCalled()
+  })
+
   it('observes paper facts even before opening Execution and never reads actual/manual executions or monitor health', async () => {
     const api = makeApi()
     render(<Workspace api={api} />)
