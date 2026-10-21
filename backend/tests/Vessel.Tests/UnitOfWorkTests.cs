@@ -20,6 +20,22 @@ namespace Vessel.Tests;
 public sealed class UnitOfWorkTests
 {
     [PostgresFact]
+    public async Task A_read_snapshot_is_one_repeatable_read_transaction_and_only_outermost()
+    {
+        // Phase 2, item 5c (Sol round 1 on #40): a Play bundle's parts come from one snapshot.
+        await using var database = await CoreDatabase.CreateAsync();
+        await using var db = database.Context(Guid.NewGuid());
+        var work = TestUnitOfWork.For(db);
+        var isolation = await work.ReadSnapshotAsync(async () =>
+            await db.Database.SqlQueryRaw<string>("SELECT current_setting('transaction_isolation') AS \"Value\"").SingleAsync(), default);
+        Assert.Equal("repeatable read", isolation);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            work.ExecuteAsync(() => work.ReadSnapshotAsync(() => Task.FromResult(1), default), default));
+        Assert.Equal("read committed", await work.ExecuteAsync(async () =>
+            await db.Database.SqlQueryRaw<string>("SELECT current_setting('transaction_isolation') AS \"Value\"").SingleAsync(), default));
+    }
+
+    [PostgresFact]
     public async Task DI_shares_one_owner_context_and_boundary_per_scope()
     {
         await using var database = await CoreDatabase.CreateAsync();

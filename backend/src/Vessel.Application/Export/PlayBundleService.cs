@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Vessel.Application.Common;
 using Vessel.Application.Evidence;
+using Vessel.Application.Ownership;
 using Vessel.Application.Paper;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
@@ -13,16 +14,23 @@ namespace Vessel.Application.Export;
 
 /// <summary>
 /// One Play as a zip (Phase 2, item 5c): <c>play.json</c> with the Play, its plan revisions and status history, its
-/// executions (linked venue orders and fills, the manual ledger and its corrections, or a paper Play's simulated
-/// executions through the paper readers), its review and history, its log and its evidence metadata with markup and
-/// notes; then each evidence original under <c>evidence/</c>. It reuses the API's own read models, so nothing is
-/// recomputed, and it holds no credential, storage key or internal path. Originals are read one at a time, outside any
-/// unit of work, into an archive built in a delete-on-close temporary file; one that cannot be opened is listed as
-/// unavailable rather than failing the bundle, and <c>play.json</c>, written last, says which.
+/// executions (linked venue orders and fills with every retained link, the manual ledger and its corrections, or a paper
+/// Play's simulation record through the paper readers), its review and history, its log and its evidence metadata with
+/// markup and notes; then each evidence original under <c>evidence/</c>. It reuses the API's own read models, so nothing is
+/// recomputed, and it holds no credential, storage key or internal path.
+/// <para>
+/// Every database read comes from one repeatable-read snapshot, so the parts agree (Sol round 1 on #40). The snapshot closes
+/// before originals are read one at a time into an owner-only, delete-on-close temporary file; at most two bundles are built
+/// at once and each original is cut off at its recorded size, so temporary storage stays bounded. An original that cannot
+/// be opened is listed as unavailable rather than failing the bundle, and <c>play.json</c>, written last, says which.
+/// </para>
 /// </summary>
 public sealed partial class PlayBundleService(PlayService plays, PlayExecutionService executions, DiaryService diary, EvidenceService evidence,
-    IVenueRegistry venues, TimeProvider time, PaperTradingService? paper = null)
+    IVenueRegistry venues, TimeProvider time, IUnitOfWork unitOfWork, PaperTradingService? paper = null)
 {
+    /// <summary>Bundles built at once in this process; later downloads wait their turn.</summary>
+    private static readonly SemaphoreSlim Builds = new(2, 2);
+
     public const string Notice = "A copy of one Play as Vessel holds it: plan revisions, status history, executions, review, log and evidence. " +
         "Not a tax report. Amounts are exact decimal strings; null is unknown. Evidence originals are under evidence/, unchanged.";
 
@@ -31,27 +39,37 @@ public sealed partial class PlayBundleService(PlayService plays, PlayExecutionSe
     public async Task<ExportFile> PrepareAsync(Guid playId, CancellationToken ct)
     {
         // Each read is owner-scoped and mode-checked by its service; a foreign or unknown Play is not found.
-        var play = await plays.GetAsync(playId, ct);
+        var (play, history, log, images, isPaper, manual, executionFacts) = await unitOfWork.ReadSnapshotAsync(async () =>
+        {
+            var play = await plays.GetAsync(playId, ct);
+            var summary = play.Summary;
+            var manual = venues.Descriptor(summary.VenueId)?.Capabilities.ManualExecutions == true;
+            var isPaper = summary.TradingMode == TradingMode.Paper;
+            object? facts = isPaper ? paper is null ? null : await paper.ExportAsync(playId, ct)
+                : manual ? await diary.ManualRecordAsync(playId, ct)
+                : new { Execution = await executions.GetAsync(playId, ct), Links = await executions.LinkRecordAsync(playId, ct) };
+            return (play, await plays.HistoryAsync(playId, ct), await plays.NotesAsync(playId, ct), await evidence.ListAsync(playId, ct),
+                isPaper, manual, facts);
+        }, ct);
         var summary = play.Summary;
-        var history = await plays.HistoryAsync(playId, ct);
-        var log = await plays.NotesAsync(playId, ct);
-        var images = await evidence.ListAsync(playId, ct);
-        var manual = venues.Descriptor(summary.VenueId)?.Capabilities.ManualExecutions == true;
-        var isPaper = summary.TradingMode == TradingMode.Paper;
-        object? executionFacts = isPaper ? paper is null ? null : await paper.StateAsync(playId, ct)
-            : manual ? await diary.ManualAsync(playId, ct)
-            : await executions.GetAsync(playId, ct);
         var exportedAt = time.GetUtcNow();
         var name = $"vessel-play-{Slug(summary.Title)}{summary.Id.ToString("N")[..8]}-{exportedAt.UtcDateTime:yyyyMMdd}.zip";
         return new(name, "application/zip", async (stream, token) =>
         {
-            // The archive is built in a private temporary file that is deleted when closed, then copied to the response
-            // asynchronously: a zip written straight to a non-seekable response would need synchronous writes.
-            await using var buffer = new FileStream(Path.Combine(Path.GetTempPath(), $"vessel-bundle-{Guid.NewGuid():N}.zip"), FileMode.CreateNew,
-                FileAccess.ReadWrite, FileShare.None, 81_920, FileOptions.Asynchronous | FileOptions.DeleteOnClose);
-            await WriteAsync(buffer, images, play, history, log, executionFacts, isPaper, manual, exportedAt, token);
-            buffer.Position = 0;
-            await buffer.CopyToAsync(stream, token);
+            // The archive is built in a temporary file only this user can read, deleted when closed, then copied to the
+            // response asynchronously: a zip written straight to a non-seekable response would need synchronous writes.
+            await Builds.WaitAsync(token);
+            try
+            {
+                await using var buffer = CreateBuffer(Path.GetTempPath());
+                await WriteAsync(buffer, images, play, history, log, executionFacts, isPaper, manual, exportedAt, token);
+                buffer.Position = 0;
+                await buffer.CopyToAsync(stream, token);
+            }
+            finally
+            {
+                Builds.Release();
+            }
         });
     }
 
@@ -77,7 +95,7 @@ public sealed partial class PlayBundleService(PlayService plays, PlayExecutionSe
             {
                 var entry = zip.CreateEntry(file, CompressionLevel.NoCompression);
                 await using var target = await entry.OpenAsync(token);
-                await content.Content.CopyToAsync(target, token);
+                await CopyBoundedAsync(content.Content, target, image.SizeBytes, token);
             }
             originals.Add(new { image.Id, File = file, Included = true, Reason = (string?)null });
         }
@@ -89,6 +107,35 @@ public sealed partial class PlayBundleService(PlayService plays, PlayExecutionSe
         var json = zip.CreateEntry("play.json", CompressionLevel.Optimal);
         await using var writer = await json.OpenAsync(token);
         await JsonSerializer.SerializeAsync(writer, document, Json, token);
+    }
+
+    /// <summary>
+    /// A new delete-on-close temporary archive only this user can read or write (Sol round 1 on #40: the default umask left
+    /// it readable by other local users).
+    /// </summary>
+    public static FileStream CreateBuffer(string directory)
+    {
+        var options = new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew, Access = FileAccess.ReadWrite, Share = FileShare.None, BufferSize = 81_920,
+            Options = FileOptions.Asynchronous | FileOptions.DeleteOnClose,
+        };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        return new FileStream(Path.Combine(directory, $"vessel-bundle-{Guid.NewGuid():N}.zip"), options);
+    }
+
+    /// <summary>Copies an original, failing the download if storage returns more than its recorded size.</summary>
+    public static async Task CopyBoundedAsync(Stream source, Stream target, long recorded, CancellationToken token)
+    {
+        var buffer = new byte[81_920];
+        long copied = 0;
+        int read;
+        while ((read = await source.ReadAsync(buffer, token)) > 0)
+        {
+            copied += read;
+            if (copied > recorded) throw new InvalidOperationException("An evidence original is larger than its recorded size.");
+            await target.WriteAsync(buffer.AsMemory(0, read), token);
+        }
     }
 
     private static string Extension(string contentType) => contentType switch

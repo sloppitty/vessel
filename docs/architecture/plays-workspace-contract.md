@@ -366,15 +366,29 @@ Play of the other mode or another owner is not found.
 - **`play.json`** holds, from the API's own read models, nothing recomputed:
   - the Play;
   - its plan revisions, status history and review history;
-  - its executions: the linked venue orders and fills, the manual ledger and
-    its corrections, or a paper Play's simulated state through the paper
-    readers, never presented as actual fills;
+  - its executions:
+    - for a venue Play, the linked orders and fills and every retained link
+      in any state (removed and rejected ones too), with when each was made
+      and last changed;
+    - for a manual Play, the manual ledger and its corrections, also when the
+      account is now disabled;
+    - for a paper Play, its simulation record through the paper readers: its
+      state, each typed simulated execution with the model and plan version
+      that produced it, and the plan activations. It is never presented as
+      actual fills;
   - its log;
   - its evidence metadata, with notes and markup;
   - a list of which originals are included.
+- **One snapshot.** Every database read comes from one repeatable-read
+  snapshot, so the parts agree even while the Play changes.
 - **The originals** are under `evidence/`, unchanged. They are read one at a
-  time, outside any unit of work, into an archive built in a delete-on-close
-  temporary file, then copied to the response.
+  time after the snapshot closes, outside any unit of work, into an archive
+  built in a delete-on-close temporary file only the API's user can read
+  (mode 0600), then copied to the response.
+  - At most two bundles are built at once per API process. Later downloads
+    wait their turn.
+  - Each original is cut off at its recorded size, so temporary storage
+    stays within the Play's evidence limits.
   - An original that cannot be opened is listed as unavailable and does not
     fail the download.
   - A failure while copying aborts the download, so no entry is half
