@@ -9,7 +9,8 @@ import { pairLabel, searchInstruments, type InstrumentCatalogState } from './ins
 /** Tags for non-crypto perpetuals, so a stock or commodity is never mistaken for a token. */
 const categoryLabels: Record<string, string> = { stocks: 'Stock', commodity: 'Commodity', index_etf: 'Index/ETF' }
 
-export function InstrumentPicker({ catalog: state, value, source, onChange, manualNote = 'Manual label, not venue-validated.' }: {
+export function InstrumentPicker({ catalog: state, value, source, onChange, manualNote = 'Manual label, not venue-validated.', allowManual = true }: {
+  allowManual?: boolean
   catalog: InstrumentCatalogState
   value: string
   source: PlayDraft['instrumentSource']
@@ -19,12 +20,12 @@ export function InstrumentPicker({ catalog: state, value, source, onChange, manu
 }) {
   const id = useId()
   const { accountId, catalog, error, loading } = state
-  const manual = accountId === null || source === 'manual'
+  const manual = allowManual && (accountId === null || source === 'manual')
   const choices = useMemo(() => catalog?.instruments ?? [], [catalog])
   const selected = choices.find(instrument => instrument.contractId === value)
 
   // Switching between the venue catalogue and a manual label sits beside the field label.
-  const sourceSwitch = accountId !== null && (manual
+  const sourceSwitch = allowManual && accountId !== null && (manual
     ? <Button type="button" variant="ghost" size="sm" onClick={() => { onChange(value, 'venue'); state.retry() }}>Use venue catalogue</Button>
     : <Button type="button" variant="ghost" size="sm" aria-label="Enter manually" onClick={() => onChange(value, 'manual')}>Manual</Button>)
 

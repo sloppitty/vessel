@@ -6,6 +6,7 @@ using Vessel.Domain.Common;
 using Vessel.Domain.Credentials;
 using Vessel.Domain.Evidence;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Paper;
 using Vessel.Domain.Sizing;
 using Vessel.Domain.Workspace;
 
@@ -19,6 +20,12 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<AccountCredential> AccountCredentials => Set<AccountCredential>();
     public DbSet<Play> Plays => Set<Play>();
     public DbSet<Portfolio> Portfolios => Set<Portfolio>();
+    public DbSet<PaperSettings> PaperSettings => Set<PaperSettings>();
+    public DbSet<PaperLedgerEntry> PaperLedgerEntries => Set<PaperLedgerEntry>();
+    public DbSet<PaperExecution> PaperExecutions => Set<PaperExecution>();
+    public DbSet<PaperSimulation> PaperSimulations => Set<PaperSimulation>();
+    public DbSet<PaperPlanActivation> PaperPlanActivations => Set<PaperPlanActivation>();
+    public DbSet<PaperReservation> PaperReservations => Set<PaperReservation>();
     public DbSet<AccountSnapshot> Snapshots => Set<AccountSnapshot>();
     public DbSet<AccountPosition> Positions => Set<AccountPosition>();
     public DbSet<AccountStablecoin> Stablecoins => Set<AccountStablecoin>();

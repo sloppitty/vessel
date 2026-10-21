@@ -36,6 +36,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     public async Task<AccountMonitorDto> AccountAsync(Guid id, CancellationToken ct)
     {
         var capture = await store.CaptureAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
+        if (capture.Account.TradingMode != "real") throw new ProblemException(409, "Paper accounts use the paper scheduler, not the actual-account monitor.");
         var row = await store.FindAsync(id, ct) ?? new() { AccountId = id, OwnerId = owner.OwnerId };
         return await ToDto(row, await store.VenueRetryAtAsync(capture.Account.VenueId, ct),
             IsOnline((await store.HeartbeatAsync(ct))?.HeartbeatAtUtc), await store.CoverageAsync([id], ct),
@@ -74,7 +75,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             if (await unitOfWork.ExecuteAsync(() => store.LockedAsync(candidate.AccountId, async (account, row) =>
                 {
                     var old = row.State;
-                    var monitorable = account.IsEnabled && account.SourceId is not null && venueIds.Contains(account.VenueId);
+                    var monitorable = account.TradingMode == "real" && account.IsEnabled && account.SourceId is not null && venueIds.Contains(account.VenueId);
                     if (row.ManualState != "idle")
                     {
                         // A live run settles itself (it sees the same changes); a monitorable account's pending work
@@ -151,7 +152,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         await unitOfWork.ExecuteAsync(() => store.LockedAsync(accountId, async (account, row) =>
         {
             var now = time.GetUtcNow();
-            if (!account.IsEnabled || account.SourceId is null || !EligibleVenue(account.VenueId) ||
+            if (account.TradingMode != "real" || !account.IsEnabled || account.SourceId is null || !EligibleVenue(account.VenueId) ||
                 !await store.EligibleAsync(accountId, now, ct))
                 throw new ProblemException(409, "This account has no eligible venue Plays, pending linked orders or discrepancy work.");
             row.ReleaseAbandonedRefresh(now);
@@ -174,6 +175,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     public Task<MonitorLease> AdmitRefreshAsync(Guid accountId, string readerId, CancellationToken ct) =>
         unitOfWork.ExecuteAsync(() => store.LockedAsync(accountId, async (account, row) =>
         {
+            if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts cannot import venue history.");
             if (!account.IsEnabled) throw new ProblemException(400, "Enable the account before refreshing it.");
             if (account.SourceId is null || venues.Descriptor(account.VenueId)?.Capabilities.Sync != true)
                 throw new ProblemException(400, "This account cannot be refreshed.");
@@ -219,7 +221,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 if (deferred > 0 && refresh) throw new MonitorAdmissionException(deferred);
                 return false;
             }
-            if (!capture.Account.IsEnabled || capture.Account.SourceId is null) return await SupersedeAsync(lease, ct, attempted: false);
+            if (capture.Account.TradingMode != "real" || !capture.Account.IsEnabled || capture.Account.SourceId is null) return await SupersedeAsync(lease, ct, attempted: false);
             if (!refresh && venues.Descriptor(capture.Account.VenueId)?.Capabilities.ReadOnlyCredential == true &&
                 !await credentials.IsUsableAsync(capture.Account, ct))
                 return await FailAsync(lease, capture, true, "A usable read-only credential is required. Update it to resume monitoring.", ct);

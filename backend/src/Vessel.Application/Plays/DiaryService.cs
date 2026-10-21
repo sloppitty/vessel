@@ -105,6 +105,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
     {
         var play = await plays.FindAsync(id, ct) ?? throw new ProblemException(404, "Play not found.");
         var account = await plays.AccountAsync(play.AccountId, ct) ?? throw new ProblemException(404, "Account not found.");
+        if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts use simulated executions, not actual execution facts.");
         if (!account.IsEnabled) throw new ProblemException(409, "Enable the account before using manual execution facts.");
         if (venues.Descriptor(account.VenueId)?.Capabilities.ManualExecutions != true || play.Origin != PlayOrigin.Planned)
             throw new ProblemException(409, "This account does not support owner-entered manual execution facts.");
@@ -181,6 +182,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
         if (accountId == Guid.Empty || string.IsNullOrWhiteSpace(operationId) || operationId.Length > 200)
             throw new ProblemException(400, "Choose a valid account and retained operation.");
         var account = await plays.AccountAsync(accountId, ct) ?? throw new ProblemException(404, "Account not found.");
+        if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts use simulated executions, not actual execution facts.");
         if (!account.IsEnabled) throw new ProblemException(409, "Enable the account before reviewing imported operations.");
         var facts = await diary.ActivityAsync(accountId, ct);
         var operation = OperationAggregator.Aggregate(facts.Fills, facts.FillPlayIds, facts.Snapshots, facts.FundingPayments).SingleOrDefault(o => o.Id == operationId)
@@ -295,6 +297,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
                 return await executions.WithAccountLockAsync(accountId, async () =>
                 {
                     var account = await plays.AccountAsync(accountId, ct) ?? throw new ProblemException(404, "Account not found.");
+                    if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts use simulated executions, not actual execution facts.");
                     if (!account.IsEnabled) throw new ProblemException(409, "Enable the account before accessing diary execution facts.");
                     return cached;
                 }, ct);

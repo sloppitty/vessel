@@ -588,6 +588,48 @@ public sealed class ActivityOperationsTests
     }
 
     [Fact]
+    public async Task Page_rows_name_their_linked_play_by_its_current_title()
+    {
+        // F-05: the Play column showed only a UUID prefix. Titles are read for the shown linked rows, never for unlinked
+        // or mixed ones, and a Play the owner cannot read keeps a null title.
+        var named = Guid.NewGuid(); var unreadable = Guid.NewGuid();
+        var fills = new[] { Fill(0), Fill(1, "sell", "close"), Fill(2), Fill(3, "sell", "close"), Fill(4), Fill(5, "sell", "close"), Fill(6), Fill(7, "sell", "close") };
+        var facts = new ActivityFacts([Account(AccountId)], fills, [], new Dictionary<Guid, Guid>
+        {
+            [fills[0].Id] = named, [fills[1].Id] = named, [fills[2].Id] = unreadable, [fills[3].Id] = unreadable, [fills[4].Id] = named,
+        });
+        var store = new Store(facts, new Dictionary<Guid, string> { [named] = "BTC breakout" });
+        var page = await new ActivityService(store, Workspace(facts), new Clock(Now)).PageAsync(new(), default);
+
+        var rows = page.Operations.OrderBy(o => o.OpenedAtUtc).ToList();
+        Assert.Equal(4, rows.Count);
+        Assert.Equal((named, "BTC breakout"), (rows[0].PlayId!.Value, rows[0].PlayTitle));
+        Assert.Equal(unreadable, rows[1].PlayId); Assert.Null(rows[1].PlayTitle);
+        Assert.Equal("mixed", rows[2].PlayAssociation); Assert.Null(rows[2].PlayTitle);
+        Assert.Equal("unassigned", rows[3].PlayAssociation); Assert.Null(rows[3].PlayTitle);
+        Assert.Equal(new[] { named, unreadable }.Order(), store.RequestedTitles.Order());
+        // The version identifies operation facts, not titles: renaming a Play does not flag Activity as changed.
+        var renamed = await new ActivityService(new Store(facts, new Dictionary<Guid, string> { [named] = "Renamed" }), Workspace(facts),
+            new Clock(Now)).PageAsync(new(), default);
+        Assert.Equal("Renamed", renamed.Operations.Single(o => o.PlayId == named && o.PlayAssociation == "linked").PlayTitle);
+        Assert.Equal(page.Version, renamed.Version);
+    }
+
+    [Fact]
+    public async Task Play_titles_are_read_only_for_the_rows_of_the_shown_page()
+    {
+        // 30 round trips, each linked to its own Play: page 2 of 25 shows the oldest five, and only their titles are read.
+        var plays = Enumerable.Range(0, 30).Select(_ => Guid.NewGuid()).ToList();
+        var fills = Enumerable.Range(0, 30).SelectMany(n => new[] { Fill(2 * n), Fill(2 * n + 1, "sell", "close") }).ToList();
+        var links = fills.Select((f, i) => (f.Id, Play: plays[i / 2])).ToDictionary(x => x.Id, x => x.Play);
+        var store = new Store(new ActivityFacts([Account(AccountId)], fills, [], links), plays.ToDictionary(p => p, p => $"Play {plays.IndexOf(p)}"));
+        var page = await new ActivityService(store, Workspace(store.Facts), new Clock(Now)).PageAsync(new(Page: "2", PageSize: "25"), default);
+        Assert.Equal(5, page.Operations.Count);
+        Assert.Equal(plays.Take(5).Order(), store.RequestedTitles.Order());
+        Assert.All(page.Operations, o => Assert.Equal($"Play {plays.IndexOf(o.PlayId!.Value)}", o.PlayTitle));
+    }
+
+    [Fact]
     public void Distinct_orders_are_counted_once_across_partial_fills()
     {
         var op = Assert.Single(OperationAggregator.Aggregate([Fill(0, order: "entry"), Fill(1, order: "entry"),
@@ -641,9 +683,17 @@ public sealed class ActivityOperationsTests
         account.UpdateSettings(account.Name, portfolio, enabled);
         return account;
     }
-    private sealed class Store(ActivityFacts facts) : IActivityStore
+    private sealed class Store(ActivityFacts facts, IReadOnlyDictionary<Guid, string>? titles = null) : IActivityStore
     {
+        public ActivityFacts Facts => facts;
+        public List<Guid> RequestedTitles { get; } = [];
         public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) => Task.FromResult(facts);
+        public Task<IReadOnlyDictionary<Guid, string>> PlayTitlesAsync(IReadOnlyCollection<Guid> playIds, CancellationToken ct)
+        {
+            RequestedTitles.AddRange(playIds);
+            return Task.FromResult<IReadOnlyDictionary<Guid, string>>((titles ?? new Dictionary<Guid, string>())
+                .Where(t => playIds.Contains(t.Key)).ToDictionary());
+        }
     }
     private static readonly DateTimeOffset Now = Start.AddDays(10);
     private sealed class Clock(DateTimeOffset now) : TimeProvider { public override DateTimeOffset GetUtcNow() => now; }
@@ -971,6 +1021,9 @@ public sealed class ActivityOperationsTests
             json.EnumerateObject().Select(p => p.Name));
         Assert.Equal(["accountIds", "contracts"], json.GetProperty("facets").EnumerateObject().Select(p => p.Name));
         var row = Assert.Single(json.GetProperty("operations").EnumerateArray());
+        // Paper provenance is optional and paper-only: the default real wire remains byte-contract compatible.
+        Assert.False(json.TryGetProperty("tradingMode", out _)); Assert.False(json.TryGetProperty("paperExecutionCount", out _));
+        Assert.False(row.TryGetProperty("tradingMode", out _)); Assert.False(row.TryGetProperty("paperExecutionCount", out _));
         Assert.False(row.TryGetProperty("fills", out _)); Assert.False(row.TryGetProperty("omittedFillCount", out _));
         Assert.Equal("0.0000000000000000000000000001", row.GetProperty("netResultUsd").GetString());
         Assert.Equal("0.0000000000000000000000000001", row.GetProperty("grossClosedPnlUsd").GetString());
@@ -980,6 +1033,7 @@ public sealed class ActivityOperationsTests
         var expanded = await fills.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(["operationId", "fills", "omittedFillCount", "fundingPayments", "omittedFundingPaymentCount"], expanded.EnumerateObject().Select(p => p.Name));
         Assert.Equal(2, expanded.GetProperty("fills").GetArrayLength());
+        Assert.False(expanded.TryGetProperty("paperExecutions", out _));
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/activity/fills?accountId={AccountId}&operationId=gone")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/activity/fills?operationId=gone")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/activity?accountId={Guid.NewGuid()}")).StatusCode);

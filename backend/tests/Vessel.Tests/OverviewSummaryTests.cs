@@ -37,6 +37,8 @@ public sealed class OverviewSummaryTests
             return Task.FromResult(new ActivityFacts(accounts, store.Fills.Where(f => f.OwnerId == owner && ids.Contains(f.AccountId)).ToList(),
                 store.Snapshots.Where(s => s.OwnerId == owner && ids.Contains(s.AccountId)).ToList(), new Dictionary<Guid, Guid>()));
         }
+        public Task<IReadOnlyDictionary<Guid, string>> PlayTitlesAsync(IReadOnlyCollection<Guid> playIds, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyDictionary<Guid, string>>(new Dictionary<Guid, string>());
     }
     private Portfolio Portfolio(string name = "Swing")
     {
