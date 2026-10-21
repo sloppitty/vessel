@@ -151,9 +151,11 @@ const play = (v: unknown) => isRecord(v) &&
   (!isRecord(v.local) || v.local.basis === 'manual-ledger' === (v.executionSource === 'manual')) &&
   (v.plannedAfterExecution === undefined || typeof v.plannedAfterExecution === 'boolean' &&
     (!v.plannedAfterExecution || v.origin !== 'retrospective' && v.origin !== 'position')) &&
-  answers(v) && (v.direction === undefined || isText(v.direction, 16)) &&
+  answers(v) && (v.direction === undefined || directions.includes(v.direction as string)) &&
   (v.reviewCompletion === undefined || isNullOr(v.reviewCompletion, x => ['completed', 'not-needed', 'legacy'].includes(x as string))) &&
   (v.origin !== 'position' || !v.adherence && !v.mistakeTag && !v.reviewCompletion)
+/** A Play's plan direction, or none; an imported position's direction, or none when its side is unknown. */
+const directions = ['', 'long', 'short']
 const answers = (v: Record<string, unknown>) =>
   (v.adherence === undefined || isNullOr(v.adherence, x => ['followed', 'deviated', 'not-applicable'].includes(x as string))) &&
   (v.mistakeTag === undefined || isNullOr(v.mistakeTag, x => isText(x, 100)))
@@ -230,9 +232,12 @@ export const isReviewProcessPage = (v: unknown): v is ReviewProcessPage => isRec
   isListOf(v.items, item => isRecord(item) && isGuid(item.id) && isText(item.title, 200) && isGuid(item.accountId) &&
     isText(item.accountName, 200) && isText(item.venueId, 64) && isText(item.instrument, 128) &&
     ['closed', 'cancelled', 'unresolved'].includes(item.status as string) && ['planned', 'retrospective'].includes(item.origin as string) &&
-    isText(item.direction, 16) && isTimestamp(item.atUtc, 64) &&
+    directions.includes(item.direction as string) && isTimestamp(item.atUtc, 64) &&
     ['net', 'returnPercent', 'rMultiple'].every(k => isNullOr(item[k], isReviewDecimal)) && answers(item) &&
-    typeof item.plannedAfterExecution === 'boolean' && isNullOr(item.reviewCompletion, x => ['completed', 'not-needed', 'legacy'].includes(x as string)), 50) &&
+    // Only a scored Closed Play has a result, and a result always has its return; retrospective Plays have no plan R.
+    (item.net === null ? item.returnPercent === null && item.rMultiple === null : item.status === 'closed' && item.returnPercent !== null) &&
+    typeof item.plannedAfterExecution === 'boolean' && (item.origin === 'planned' || item.rMultiple === null && !item.plannedAfterExecution) &&
+    isNullOr(item.reviewCompletion, x => ['completed', 'not-needed', 'legacy'].includes(x as string)), 50) &&
   isCount(v.total) && isCount(v.offset) && (v.items as unknown[]).length === Math.min(50, Math.max(0, v.total - v.offset)) &&
   new Set((v.items as ReviewProcessPlay[]).map(item => item.id)).size === (v.items as unknown[]).length &&
   (v.nextOffset === null ? v.offset + (v.items as unknown[]).length >= v.total :
