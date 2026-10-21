@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
@@ -6,16 +6,18 @@ import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import type { ManualExecutions } from '@/api/diary'
-import { emptyStructuredReview, preflightCodes, type PlayExecution, type PlayFields, type PlayList, type PlaySummary, type PlayView, type SavedPlay } from '@/api/plays'
+import { emptyStructuredReview, preflightCodes, type PlayExecution, type PlayFields, type PlayList, type PlayNote, type PlaySummary, type PlayView, type SavedPlay } from '@/api/plays'
 import { VenuesProvider } from '@/api/venues'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { accountFixture, idleMarketStream, instrumentCatalogFixture, overviewFixture, playApiStubs, playCountsFrom, playListPage, playsFrom, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { systemFixture } from '@/test/system-fixture'
+import { retrospectiveSavedFixture } from '@/test/retrospective.fixtures'
 import { PlaysPage } from './PlaysPage'
 import { PlayWorkspace } from './PlayWorkspace'
 import { createDraft } from './draft'
 import { emptyManualDraft } from './manual'
-import { createPlaysSession, draftFromSaved, savedState, type PlaysSession } from './saved'
+import { createPlaysSession, draftFromSaved, hasUnsavedPlayWork, savedState, type PlaysSession } from './saved'
+import type { PlayLogChange } from './log-draft'
 import { ApplicationShell } from '@/features/workspace/ApplicationShell'
 import * as overviewActions from '@/features/workspace/OverviewActions'
 import * as savedChecks from './saved'
@@ -59,6 +61,16 @@ function client(play = terminal, more: SavedPlay[] = []) {
     sizing: vi.fn(() => Promise.reject(new ApiError('unavailable', 'No sizing.'))),
     evidence: vi.fn(() => Promise.resolve([])),
     nextActions: vi.fn<WorkspaceApi['nextActions']>(() => Promise.resolve([])),
+    playNotes: vi.fn<WorkspaceApi['playNotes']>(() => Promise.resolve([])),
+    addPlayNote: vi.fn<WorkspaceApi['addPlayNote']>(() => Promise.resolve([])),
+    completeReview: vi.fn<WorkspaceApi['completeReview']>(() => {
+      current = { ...current, summary: { ...current.summary, version: current.summary.version + 1, reviewCompletion: 'completed', reviewCompletedAtUtc: at } }
+      return Promise.resolve(current)
+    }),
+    reopenReview: vi.fn<WorkspaceApi['reopenReview']>(() => {
+      current = { ...current, summary: { ...current.summary, version: current.summary.version + 1, reviewCompletion: null, reviewCompletedAtUtc: null } }
+      return Promise.resolve(current)
+    }),
     updatePlay: vi.fn((_id: string, fields: PlayFields & { expectedVersion: number }) => {
       current = { ...current, review: fields.review, structuredReview: fields.structuredReview ?? emptyStructuredReview(),
         summary: { ...current.summary, version: current.summary.version + 1, hasReview: true, reviewedAtUtc: at } }
@@ -82,13 +94,21 @@ function Harness({ api, initial = createPlaysSession(), request = null, onHandle
   const [session, setSession] = useState(initial)
   const [requested, setRequested] = useState(request)
   const [shown, setShown] = useState(true)
+  // As the shell does: a mounted page applies log changes; without one, they go to the current session.
+  const applier = useRef<((change: PlayLogChange) => void) | null>(null)
+  const onLogApplier = useCallback((apply: (change: PlayLogChange) => void) => {
+    applier.current = apply
+    return () => { if (applier.current === apply) applier.current = null }
+  }, [])
   const venues = systemFixture.venues.map(venue => venue.id === accountFixture.venueId
     ? { ...venue, capabilities: { ...venue.capabilities, manualExecutions: manual } } : venue)
   return <VenuesProvider venues={venues}><NotificationProvider>
     <button onClick={() => setRequested(otherId)}>Request another Play</button>
     <button onClick={() => setShown(value => !value)}>Toggle Plays page</button>
     {shown && <PlaysPage accounts={[accountFixture]} portfolios={[portfolioFixture]} api={api} session={session}
-      onSession={next => { setSession(next); onSession(next) }} requestedPlayId={requested}
+      onSession={next => { setSession(next); onSession(next) }} onLogApplier={onLogApplier}
+      onLogChange={change => { if (applier.current) applier.current(change); else setSession(current => ({ ...current, log: change(current.log) })) }}
+      requestedPlayId={requested}
       onRequestedPlayHandled={() => { onHandled(); setRequested(null) }} reloadGeneration={generation} />}
   </NotificationProvider></VenuesProvider>
 }
@@ -770,6 +790,109 @@ describe('diary workspace integration', () => {
     // The receipt has arrived, without the mark.
     expect(await screen.findByLabelText('Outcome')).toBeInTheDocument()
     expect(screen.queryByText('Plan written after first execution')).not.toBeInTheDocument()
+  })
+  it('completes a review explicitly, with unchanged text, and reopens it (phase 1, 1.2)', async () => {
+    const closed: SavedPlay = { ...terminal, summary: { ...terminal.summary, status: 'closed', cancelReason: null, reviewCompletion: null, reviewCompletedAtUtc: null } }
+    const { api, methods } = client(closed)
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(closed)} />)
+    await user.click(screen.getByRole('tab', { name: 'Review' }))
+    expect(screen.getByRole('textbox', { name: 'Review' })).toHaveValue('Existing free text')
+    await user.click(screen.getByRole('button', { name: 'Complete review' }))
+    expect(methods.completeReview).toHaveBeenCalledWith(closed.summary.id, closed.summary.version)
+    expect(await screen.findByRole('button', { name: 'Review again' })).toBeInTheDocument()
+    expect(methods.updatePlay).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Review again' }))
+    expect(methods.reopenReview).toHaveBeenCalledWith(closed.summary.id, closed.summary.version + 1)
+    expect(await screen.findByRole('button', { name: 'Complete review' })).toBeInTheDocument()
+    // The in-trade log is its own tab.
+    await user.click(screen.getByRole('tab', { name: 'Log' }))
+    expect(await screen.findByText('No entries yet.')).toBeInTheDocument()
+    expect(methods.playNotes).toHaveBeenCalledWith(closed.summary.id, expect.any(AbortSignal))
+  })
+  it('keeps an unfinished log entry across journal tabs and the expanded journal (phase 1, 1.2)', async () => {
+    const open: SavedPlay = { ...planned, summary: { ...planned.summary, status: 'open' } }
+    const { api } = client(open)
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(open)} />)
+    await user.click(screen.getByRole('tab', { name: 'Log' }))
+    await user.type(await screen.findByLabelText('Log entry'), 'Adding into strength')
+    await user.selectOptions(screen.getByLabelText(/^State/), 'fomo')
+    await user.click(screen.getByRole('tab', { name: 'Thesis' }))
+    await user.click(screen.getByRole('tab', { name: 'Log' }))
+    expect(screen.getByLabelText('Log entry')).toHaveValue('Adding into strength')
+    expect(screen.getByLabelText(/^State/)).toHaveValue('fomo')
+    await user.click(screen.getByRole('button', { name: 'Expand journal' }))
+    expect(within(await screen.findByRole('dialog')).getByLabelText('Log entry')).toHaveValue('Adding into strength')
+  })
+  it('keeps an unfinished log entry when another Play is requested (phase 1, 1.2)', async () => {
+    const open: SavedPlay = { ...planned, summary: { ...planned.summary, status: 'open' } }
+    const { api, methods } = client(open)
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(open)} />)
+    await user.click(screen.getByRole('tab', { name: 'Log' }))
+    await user.type(await screen.findByLabelText('Log entry'), 'Adding into strength')
+    await user.click(screen.getByRole('button', { name: 'Request another Play' }))
+    expect(await screen.findByText(/Your current work is kept/)).toBeInTheDocument()
+    expect(methods.play).not.toHaveBeenCalledWith(otherId, expect.anything())
+    expect(screen.getByLabelText('Log entry')).toHaveValue('Adding into strength')
+  })
+  it('applies a write from a page that has gone to the current session, keeping newer text and showing the entry (phase 1, 1.2)', async () => {
+    const open: SavedPlay = { ...planned, summary: { ...planned.summary, status: 'open' } }
+    const { api, methods } = client(open)
+    let finish!: (notes: PlayNote[]) => void
+    let stored: PlayNote[] = []
+    methods.playNotes.mockImplementation(() => Promise.resolve(stored))
+    methods.addPlayNote.mockImplementation(() => new Promise<PlayNote[]>(resolve => { finish = resolve }))
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(open)} />)
+    await user.click(screen.getByRole('tab', { name: 'Log' }))
+    await user.type(await screen.findByLabelText('Log entry'), 'Adding into strength')
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    // The whole page goes and comes back while the write is out; the owner keeps typing in the new one.
+    await user.click(screen.getByRole('button', { name: 'Toggle Plays page' }))
+    await user.click(screen.getByRole('button', { name: 'Toggle Plays page' }))
+    await user.click(await screen.findByRole('tab', { name: 'Log' }))
+    const entry = await screen.findByLabelText('Log entry')
+    await user.clear(entry)
+    await user.type(entry, 'A newer thought')
+    const written: PlayNote = { id: '00000000-0000-4000-8000-0000000000c1', text: 'Adding into strength', state: null, createdAtUtc: at }
+    stored = [written]
+    await act(async () => finish([written]))
+    expect(screen.getByLabelText('Log entry')).toHaveValue('A newer thought')
+    // The current page reads the list again and shows the entry the gone page wrote.
+    expect(await screen.findByText('Adding into strength')).toBeInTheDocument()
+  })
+  it('applies a gone page\'s acknowledgement through the mounted page, so an edit before it renders keeps it (phase 1, 1.2)', async () => {
+    const open: SavedPlay = { ...planned, summary: { ...planned.summary, status: 'open' } }
+    const { api, methods } = client(open)
+    let finish!: (notes: PlayNote[]) => void
+    methods.addPlayNote.mockImplementation(() => new Promise<PlayNote[]>(resolve => { finish = resolve }))
+    const sessions = vi.fn()
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(open)} onSession={sessions} />)
+    await user.click(screen.getByRole('tab', { name: 'Log' }))
+    await user.type(await screen.findByLabelText('Log entry'), 'Adding into strength')
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    await user.click(screen.getByRole('button', { name: 'Toggle Plays page' }))
+    await user.click(screen.getByRole('button', { name: 'Toggle Plays page' }))
+    await user.click(await screen.findByRole('tab', { name: 'Log' }))
+    const entry = await screen.findByLabelText('Log entry')
+    const written: PlayNote = { id: '00000000-0000-4000-8000-0000000000c1', text: 'Adding into strength', state: null, createdAtUtc: at }
+    // The write lands, and the owner clears the field before the page renders the acknowledgement.
+    await act(async () => {
+      finish([written])
+      await new Promise(resolve => setTimeout(resolve, 0))
+      fireEvent.change(entry, { target: { value: '' } })
+    })
+    const last = sessions.mock.lastCall![0] as PlaysSession
+    expect(last.log?.attempt).toBeUndefined()
+    expect(hasUnsavedPlayWork(last)).toBe(false)
+  })
+  it('offers the log on a retrospective Play too (phase 1, 1.2)', async () => {
+    const { api } = client(retrospectiveSavedFixture)
+    render(<Harness api={api} initial={sessionFor(retrospectiveSavedFixture)} />)
+    expect(await screen.findByRole('tab', { name: 'Log' })).toBeInTheDocument()
   })
   it('saves from the expanded journal too, keeping focus in the dialog', async () => {
     const closed: SavedPlay = { ...terminal, summary: { ...terminal.summary, status: 'closed', cancelReason: null } }

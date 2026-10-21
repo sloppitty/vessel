@@ -291,6 +291,11 @@ public abstract class PlayIsolationCases(IsolationHost api)
     [Covers("PUT", "/api/plays/{id:guid}")]
     [Covers("GET", "/api/plays/{id:guid}/history")]
     [Covers("GET", "/api/plays/next-actions")]
+    [Covers("POST", "/api/plays/{id:guid}/review/complete")]
+    [Covers("POST", "/api/plays/{id:guid}/review/reopen")]
+    [Covers("POST", "/api/plays/{id:guid}/review/not-needed")]
+    [Covers("GET", "/api/plays/{id:guid}/notes")]
+    [Covers("POST", "/api/plays/{id:guid}/notes")]
     public async Task Reviews_exclusions_and_ended_tabs_stay_separate_and_foreign_reviews_answer_like_unknown_ones()
     {
         var (aOwner, bOwner) = await api.Owners();
@@ -367,6 +372,31 @@ public abstract class PlayIsolationCases(IsolationHost api)
         var revised = await a.Owner.Send(HttpMethod.Put, $"/api/plays/{a.ScoredId}", ReviewOf(a.Scored, a.Account, a.Text + " revised", a.Answers));
         Assert.Equal(a.Text + " revised", revised.GetProperty("review").GetString());
         Assert.Equal(2, (await a.Owner.GetJson($"/api/plays/{a.ScoredId}/history")).GetProperty("reviews").GetArrayLength());
+        // Review completion and the log (phase 1, 1.2): B's requests on A's ended Plays answer like unknown Plays, and A's
+        // completion, reviews and log stay as they were.
+        var reviewPaths = new[] { $"/api/plays/{a.ScoredId}", $"/api/plays/{a.Cancelled}", $"/api/plays/{a.ScoredId}/notes",
+            $"/api/plays/{a.ScoredId}/history", "/api/plays/counts" };
+        var reviewState = await Snapshot.Of(a.Owner, reviewPaths);
+        foreach (var target in new[] { a.ScoredId, a.Cancelled })
+        {
+            var current = await a.Owner.GetJson($"/api/plays/{target}");
+            foreach (var action in new[] { "complete", "reopen", "not-needed" })
+                await reviewState.After(() => Isolated.NotFound(b.Owner, target, Isolated.Request(HttpMethod.Post, id => $"/api/plays/{id}/review/{action}",
+                    _ => new ReviewCompletionRequest(Version(current))), PlayNotFound));
+            await reviewState.After(() => Isolated.NotFound(b.Owner, target, Isolated.Request(HttpMethod.Get, id => $"/api/plays/{id}/notes"), PlayNotFound));
+            await reviewState.After(() => Isolated.NotFound(b.Owner, target, Isolated.Request(HttpMethod.Post, id => $"/api/plays/{id}/notes",
+                _ => new AddPlayNoteRequest(Guid.NewGuid(), "taken-by-b")), PlayNotFound));
+        }
+        // Positive control: A marks its cancelled Play as needing no review and logs on its scored Play; B reusing A's log
+        // request ID on its own Play writes B's entry, never reads A's.
+        var aCancelled = await a.Owner.GetJson($"/api/plays/{a.Cancelled}");
+        var marked = await a.Owner.Post($"/api/plays/{a.Cancelled}/review/not-needed", new ReviewCompletionRequest(Version(aCancelled)));
+        Assert.Equal("not-needed", marked.GetProperty("summary").GetProperty("reviewCompletion").GetString());
+        var request = new AddPlayNoteRequest(Guid.NewGuid(), Isolated.Marker("note-a"), "calm");
+        Assert.Single((await a.Owner.Post($"/api/plays/{a.ScoredId}/notes", request)).EnumerateArray());
+        var bNotes = await b.Owner.Post($"/api/plays/{b.ScoredId}/notes", request with { Text = Isolated.Marker("note-b") });
+        Isolated.NoLeak(bNotes.GetRawText(), request.Text);
+        Assert.Single(bNotes.EnumerateArray());
     }
 
     private static ManualExecutionRequest Fact(Guid requestId, long version, string quantity, string price) =>

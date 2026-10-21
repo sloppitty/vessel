@@ -12,12 +12,54 @@ public sealed class PlayReviewRevision : IOwned
     public DateTimeOffset OccurredAtUtc { get; private set; }
     public string Review { get; private set; } = "";
     public string StructuredReview { get; private set; } = "{}";
+    /// <summary>What happened to the review: edited, completed, reopened or not-needed (<see cref="ReviewActions"/>).</summary>
+    public string Action { get; private set; } = ReviewActions.Edited;
     private PlayReviewRevision() { }
-    internal PlayReviewRevision(Play play, int number, DateTimeOffset now)
+    internal PlayReviewRevision(Play play, int number, DateTimeOffset now, string action = ReviewActions.Edited)
     {
         Id = Guid.NewGuid(); OwnerId = play.OwnerId; PlayId = play.Id; Number = number;
         OccurredAtUtc = now; Review = play.Review;
         StructuredReview = JsonSerializer.Serialize(play.Answers);
+        Action = action;
+    }
+}
+
+/// <summary>Review history actions. Completion, reopening and no-review-needed are kept with the text they applied to.</summary>
+public static class ReviewActions
+{
+    public const string Edited = "edited", Completed = "completed", Reopened = "reopened", NotNeeded = "not-needed";
+}
+
+/// <summary>
+/// An append-only in-trade log entry (phase 1, 1.2): timestamped text with an optional state. It is never edited or
+/// deleted, never counts as a review and never feeds Review metrics; a correction is a new entry.
+/// </summary>
+public sealed class PlayNote : IOwned
+{
+    public const int MaxTextLength = 2000;
+    public static readonly IReadOnlyList<string> States = ["calm", "rushed", "fomo", "tired", "after-loss"];
+
+    public Guid Id { get; private set; }
+    public Guid OwnerId { get; private set; }
+    public Guid PlayId { get; private set; }
+    /// <summary>The client's request identity; a retry with the same one returns the entry already written.</summary>
+    public Guid RequestId { get; private set; }
+    public string Text { get; private set; } = "";
+    public string? State { get; private set; }
+    public DateTimeOffset CreatedAtUtc { get; private set; }
+    private PlayNote() { }
+
+    public PlayNote(Play play, Guid requestId, string text, string? state, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(play);
+        ArgumentNullException.ThrowIfNull(text);
+        text = text.Trim();
+        if (requestId == Guid.Empty || text.Length is 0 or > MaxTextLength || text.Any(c => char.IsControl(c) && c is not ('\r' or '\n' or '\t')))
+            throw new DomainValidationException($"A log entry is 1 to {MaxTextLength} characters of plain text with a request identity.");
+        if (state is not null && !States.Contains(state))
+            throw new DomainValidationException("A log entry's state is calm, rushed, fomo, tired or after-loss.");
+        Id = Guid.NewGuid(); OwnerId = play.OwnerId; PlayId = play.Id; RequestId = requestId;
+        Text = text; State = state; CreatedAtUtc = now;
     }
 }
 

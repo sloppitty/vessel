@@ -133,7 +133,100 @@ October 20, 2026, branch `t3/phase1-receipt`, stacked on the integration base:
 
 ## 1.2 Honest review queue and in-trade log
 
-Not started.
+October 20, 2026, branch `t3/phase1-review-completion`, stacked on 1.5:
+- **Completion (D-14, decision 3).**
+  - A Play records a review completion kind (`completed`, `not-needed` or `legacy`) and its time.
+  - **Complete review** works on a Closed or Cancelled Play with unchanged text or none. A save of changed structured
+    answers on an ended Play completes it too. **No review needed** is offered on a Cancelled Play unless its receipt
+    shows fills, and the server refuses it with 409 when the Play has a linked fill or a manual execution.
+  - **Review again** clears the completion. Text and answers stay.
+  - Writing text never completes a review. `ReviewedAtUtc` still means "review last edited".
+  - Each action is a review revision with its action and time. History names it: "review completed", "reviewed
+    again" or "no review needed".
+  - The three actions are version-checked against the Play and return 409 when it changed.
+- **Lists and Review.** Needs review and Reviewed read the completion. Review's count is "Completed reviews".
+- **Legacy.** The explicit migration `20261020093407_ReviewCompletion` records a `legacy` completion for every Closed
+  or Cancelled Play the Reviewed view listed before, at its `ReviewedAtUtc`, else its end time. Nothing else changes, and
+  saved text is never moved or rewritten.
+- **In-trade log (G-04).**
+  - The journal's Log tab, after Evidence, takes append-only, timestamped entries of up to 2,000 characters on any
+    saved Play, each with an optional state: calm, rushed, FOMO, tired or after a loss.
+  - Entries live in their own owner-scoped `play_notes` table. They cannot be edited or deleted, and they never count
+    as a review or feed Review.
+  - An entry is written idempotently by its request ID, so a retried request never writes it twice, and the same ID
+    with different content gets 409. Appending never changes the Play, so it is not version-checked. A Play holds at
+    most 500 entries.
+- **Open Plays.** The Review box stays, with a hint that the Log is for in-trade notes and that the review completes
+  after the Play ends.
+- **Not in this pull request.** Leaving a final state (an Unresolved Play returning to Open, or venue facts closing
+  it) arrives with Unresolved in 1.3a. Today no Play leaves Closed or Cancelled.
+- **Tests.**
+  - Domain and service: completion paths, Review again, No review needed with and without fills, unchanged and changed
+    answers, versions, and the log's idempotency and text bounds.
+  - PostgreSQL: `Verify2.F8` and `More4.EarlyReview` (a note written while Open lands in Needs review after the close
+    until Complete review), Complete review with unchanged text and Review again, a no-fill cancellation leaving the
+    queue in one step, a log entry changing neither list, and the migration's legacy backfill down to `PlanPreflight`
+    and back up. The two-owner isolation test covers the five new routes.
+  - Older-schema migration tests insert Plays through `LegacyPlayRows`, because EF now maps the new columns.
+  - Frontend: the completion bar, the log, History's actions, the Plays page's Complete review and the response
+    guards.
+- **Checks.** `scripts/check.sh` passed on main: backend 3,588 passed, 5 skipped; frontend 152 files and 3,790 tests;
+  build clean. A first run had one isolation test time out under a load average near 60 from other work; it passed
+  alone, and the full rerun passed.
+
+- **Sol (Codex) round 1.** Five findings, all fixed:
+  - **Unfinished entry (medium).** The entry being written, with its request identity, now lives in the Plays session
+    for its Play, so switching journal tabs or expanding the journal never loses it. A test fails without this fix.
+  - **Late read (medium).** A log read that started before a write arrived no longer replaces the list the write
+    returned. A test fails without this fix.
+  - **Request IDs across accounts (medium).** Log writes take an owner-wide request-ID lock before the Play lock, so the
+    same ID sent at once on two accounts is one entry and a 409, not a 500. A PostgreSQL test sends both at once.
+  - **Retrospective Plays (medium).** They get the log, as the contract says; the lifecycle doc no longer narrows it.
+  - **Older servers (low).** Without a completion field, the journal shows no completion actions the server lacks.
+  - **Check.** `scripts/check.sh` passed again: backend 3,591 passed, 5 skipped; frontend 152 files and 3,796 tests.
+
+- **Sol (Codex) round 2.** All five round-1 findings resolved. Two new findings, both fixed:
+  - **Late write after a remount (medium).** A log write that finishes after the Log remounts now changes the kept
+    draft as it is then. It clears the entry only while the draft still holds that request with the same text and
+    state. Otherwise it settles the request and keeps the newer text. A test fails without this fix.
+  - **Unsaved log entries (medium).** The open Play's typed entry, or one whose write is unconfirmed, counts as unsaved
+    work for New play, opening or requesting another Play, and the shell's disconnect guard. A page test fails without
+    this fix.
+  - **Check.** `scripts/check.sh` passed again: backend 3,591 passed, 5 skipped; frontend 152 files and 3,801 tests.
+
+- **Sol (Codex) round 3.** Both round-2 findings resolved. Two new findings, both fixed:
+  - **A page that has gone (medium).** A log write that finished after the whole Plays page remounted, or after
+    disconnecting, published that page's outdated session, erasing newer text or bringing back a discarded session. A
+    page that has unmounted, or whose API changed, now never publishes from a log write. A page test that remounts the
+    page during a write fails without this fix.
+  - **Entry after a remount (medium).** A Log mounted while a write was out showed "No entries yet" after the write
+    landed. A confirmed write now counts on the kept draft, so a mounted Log that did not send it reads the list
+    again; the Log that sent it already shows the returned list. A test fails without this fix.
+  - **Check.** `scripts/check.sh` passed again: backend 3,591 passed, 5 skipped; frontend 152 files and 3,802 tests.
+
+- **Sol (Codex) round 4.** Two new findings, both fixed:
+  - **A page that has gone (medium).** Round 3 stopped a gone page from publishing, but that dropped its write's
+    acknowledgement. The shell now takes the change through `onLogChange` and applies it to its current session under
+    its API and work checks, so newer text survives, the entry shows and a discarded session is never changed. The
+    page test checks the entry appears.
+  - **A replaced attempt (medium).** A delayed write whose draft had moved on to another entry did not refresh the
+    list. Every confirmed write for the Play now counts, whichever request owns the draft; only the entry a write sent
+    is cleared. A test fails without this fix.
+  - **Check.** `scripts/check.sh` passed again: backend 3,591 passed, 5 skipped; frontend 152 files and 3,803 tests.
+
+- **Sol (Codex) round 5.** Two new findings, both fixed:
+  - **Edits before a render (medium).** The shell applied a departed page's acknowledgement to its own session, and a
+    mounted page's edit made before it rendered could overwrite it with an older copy, leaving a written entry as
+    unsaved work. A mounted page now registers as the one that applies log changes, so acknowledgements land in its
+    current session. A test clears the field in the same tick as the acknowledgement; it fails without this fix.
+  - **A late own answer (medium).** A delayed answer could replace a newer list and hide an entry. Log answers merge by
+    entry ID in time order, since entries are append-only. A test fails without this fix.
+  - **Check.** `scripts/check.sh` passed again: backend 3,591 passed, 5 skipped; frontend 152 files and 3,805 tests.
+
+- **Sol (Codex) round 6.** No findings: both round-5 fixes hold, including under StrictMode.
+
+- **Post-sync Sol review (October 21).** No findings: completion counts cover Plays only. Round 2 confirmed the test
+  harness merge with 1.1a's staleness tests.
 
 ## 1.3 Record repair
 

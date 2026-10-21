@@ -361,3 +361,10 @@ Phase 1.5 of the [learning-loop contract](phase1-learning-loop-contract.md):
 - Cancelled and Unresolved Plays join with the process view (1.4b), where the
   drill-down by skipped check lives.
 
+## Completed reviews (October 20, 2026)
+
+Phase 1.2: Review's reviewed count and each Play row's `reviewed` now read
+the explicit review completion. Review text, answers and review times no
+longer count. See the review completion section of `play-lifecycle.md`. The
+upgrade keeps Plays that were already counted as `legacy` completions.
+

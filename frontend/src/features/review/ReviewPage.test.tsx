@@ -42,7 +42,7 @@ describe('Production portfolio review', () => {
     expect(await screen.findByRole('region', { name: 'Performance scorecard' })).toBeVisible()
     expect(screen.getByText('Batting average')).toBeVisible()
     expect(screen.queryByLabelText('Play origin')).not.toBeInTheDocument()
-    await user.click(screen.getByText('3 scored · 2 excluded · 1 reviewed'))
+    await user.click(screen.getByText('3 scored · 2 excluded · 1 review complete'))
     expect(screen.getByText(/12 unassigned fills/)).toBeVisible()
     expect(screen.getByText('Recent history only.')).toBeVisible()
     await user.click(screen.getByText('Chart data'))
@@ -189,7 +189,7 @@ describe('Review result bases', () => {
     const { user } = setup(vi.fn().mockResolvedValue({ ...reviewFixture, preflight: { recorded: 3, notRecorded: 2,
       skipped: [{ code: 'priced-stops', count: 2 }, { code: 'allocations', count: 0 }, { code: 'thesis', count: 1 },
         { code: 'risk', count: 0 }, { code: 'liquidation', count: 0 }] } }))
-    await user.click(await screen.findByText('3 scored · 2 excluded · 1 reviewed'))
+    await user.click(await screen.findByText('3 scored · 2 excluded · 1 review complete'))
     expect(screen.getByText(/^Pre-flight at Plan it: 3 recorded · 2 not recorded\./)).toHaveTextContent(
       'Planned without: a priced stop for every priced entry (2) · thesis and invalidation are written (1).')
   })

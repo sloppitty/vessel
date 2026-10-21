@@ -32,7 +32,7 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
     }
 
     public async Task<List<PlayCountRow>> CountsAsync(PlayListFilter filter, CancellationToken ct) =>
-        (await Rows(filter).GroupBy(x => new { x.Status, Reviewed = x.HasReview || x.ReviewedAtUtc != null })
+        (await Rows(filter).GroupBy(x => new { x.Status, Reviewed = x.ReviewCompletion != null })
             .Select(g => new { g.Key.Status, g.Key.Reviewed, Count = g.Count() }).ToListAsync(ct))
         .Select(g => new PlayCountRow(g.Status, g.Reviewed, g.Count)).ToList();
 
@@ -40,8 +40,9 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
     {
         PlayListView.Drafts => rows.Where(x => x.Status == PlayStatus.Draft),
         PlayListView.Progress => rows.Where(x => x.Status == PlayStatus.Planned || x.Status == PlayStatus.Paused || x.Status == PlayStatus.Open),
-        PlayListView.Review => rows.Where(x => (x.Status == PlayStatus.Closed || x.Status == PlayStatus.Cancelled) && !(x.HasReview || x.ReviewedAtUtc != null)),
-        PlayListView.Reviewed => rows.Where(x => (x.Status == PlayStatus.Closed || x.Status == PlayStatus.Cancelled) && (x.HasReview || x.ReviewedAtUtc != null)),
+        // Completion is explicit (decision 3): an edit, a note or a timestamp never moves a Play out of Needs review.
+        PlayListView.Review => rows.Where(x => (x.Status == PlayStatus.Closed || x.Status == PlayStatus.Cancelled) && x.ReviewCompletion == null),
+        PlayListView.Reviewed => rows.Where(x => (x.Status == PlayStatus.Closed || x.Status == PlayStatus.Cancelled) && x.ReviewCompletion != null),
         PlayListView.Closed => rows.Where(x => x.Status == PlayStatus.Closed),
         PlayListView.Cancelled => rows.Where(x => x.Status == PlayStatus.Cancelled),
         _ => rows
@@ -81,6 +82,7 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
             InstrumentSource = p.InstrumentSource, Direction = p.Direction, PlanRevision = p.PlanRevision, Version = p.Version,
             CancelReason = p.CancelReason, CreatedAtUtc = p.CreatedAtUtc, UpdatedAtUtc = p.UpdatedAtUtc, PlannedAtUtc = p.PlannedAtUtc,
             EndedAtUtc = p.EndedAtUtc, Origin = p.Origin, ReviewedAtUtc = p.ReviewedAtUtc,
+            ReviewCompletion = p.ReviewCompletion, ReviewCompletedAtUtc = p.ReviewCompletedAtUtc,
             HasReview = p.Review.Trim(Space) != "" || p.ReviewAdherence != null ||
                 p.ReviewMistakeTag != null && p.ReviewMistakeTag.Trim(Space) != "" ||
                 p.ReviewLesson.Trim(Space) != "" || p.ReviewNextAction.Trim(Space) != ""
@@ -98,6 +100,18 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
                 p.ReviewNextAction.Trim(BrowserSpace) != "")
             .OrderByDescending(p => p.ReviewedAtUtc).ThenByDescending(p => p.UpdatedAtUtc).ThenBy(p => p.Id).Take(limit)
             .Select(p => new NextActionDto(p.Id, p.Title, p.ReviewNextAction, p.ReviewedAtUtc)).ToListAsync(ct);
+
+    public Task<List<PlayNote>> NotesAsync(Guid playId, CancellationToken ct) =>
+        db.PlayNotes.Where(x => x.PlayId == playId).OrderBy(x => x.CreatedAtUtc).ThenBy(x => x.Id).AsNoTracking().ToListAsync(ct);
+    public Task<PlayNote?> NoteAsync(Guid requestId, CancellationToken ct) =>
+        db.PlayNotes.AsNoTracking().SingleOrDefaultAsync(x => x.RequestId == requestId, ct);
+    public void Add(PlayNote note) { unitOfWork.RequireActive(); db.PlayNotes.Add(note); }
+    public async Task<bool> HasLinkedFillsAsync(Guid playId, CancellationToken ct)
+    {
+        var orders = db.Orders.Where(o => db.OrderLinks.Any(l => l.PlayId == playId && l.State == OrderLinkState.Linked &&
+            l.AccountId == o.AccountId && l.ImportedOrderId == o.Id));
+        return await db.FillsOf(orders).AnyAsync(ct) || await db.ManualExecutions.AnyAsync(r => r.PlayId == playId, ct);
+    }
 
     public Task<List<PlayReviewRevision>> ReviewsAsync(Guid playId, CancellationToken ct) =>
         db.ReviewRevisions.Where(x => x.PlayId == playId).OrderBy(x => x.Number).AsNoTracking().ToListAsync(ct);
@@ -152,6 +166,13 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
             throw new ProblemException(409, "The Play moved to another account. Reload before editing.");
         var result = await action();
         return result;
+    }, ct);
+
+    public Task<T> WithNoteRequestLockAsync<T>(Guid requestId, Func<Task<T>> action, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
+    {
+        var key = $"vessel-play-note-request:{db.CurrentOwnerId}:{requestId}";
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", ct);
+        return await action();
     }, ct);
 
     public Task<IReadOnlyList<string>> DeleteAsync(Play play, CancellationToken ct) => unitOfWork.ParticipateAsync<IReadOnlyList<string>>(async () =>

@@ -11,6 +11,11 @@ public enum PlayStatus { Draft, Planned, Paused, Open, Closed, Cancelled }
 
 public enum InstrumentSource { Venue, Manual }
 public enum PlayOrigin { Planned, Retrospective }
+/// <summary>
+/// How a review was completed (phase 1, 1.2): by the owner's Complete review or a save of changed answers, by No review
+/// needed on a Cancelled Play, or by the migration that kept Plays already listed as Reviewed.
+/// </summary>
+public enum ReviewCompletionKind { Completed, NotNeeded, Legacy }
 
 public sealed record ReviewAnswers(string? Adherence = null, string? MistakeTag = null, string Lesson = "", string NextAction = "")
 {
@@ -54,9 +59,15 @@ public sealed class Play : IOwned
     public string ReviewLesson { get; private set; } = "";
     public string ReviewNextAction { get; private set; } = "";
     public int ReviewRevision { get; private set; }
+    /// <summary>When the review text or answers last changed; it never completes the review.</summary>
     public DateTimeOffset? ReviewedAtUtc { get; private set; }
+    /// <summary>The review's completion, only ever set explicitly; null means it still needs review once the Play ends.</summary>
+    public ReviewCompletionKind? ReviewCompletion { get; private set; }
+    public DateTimeOffset? ReviewCompletedAtUtc { get; private set; }
     public ReviewAnswers Answers => new(ReviewAdherence, ReviewMistakeTag, ReviewLesson, ReviewNextAction);
     public bool HasReview => !string.IsNullOrWhiteSpace(Review) || Answers.IsAnswered;
+    /// <summary>A Play whose review can be completed: it has ended.</summary>
+    public bool IsReviewable => Status is PlayStatus.Closed or PlayStatus.Cancelled;
     /// <summary>The latest plan revision number; zero while the Play is a Draft.</summary>
     public int PlanRevision { get; private set; }
     /// <summary>Increases on every change, for optimistic concurrency.</summary>
@@ -121,7 +132,8 @@ public sealed class Play : IOwned
             throw new DomainRuleException("Structured review answers are only available for closed or cancelled Plays.");
         if (Origin == PlayOrigin.Retrospective && answers.Adherence is not (null or "not-applicable"))
             throw new DomainRuleException("A retrospective Play has no contemporaneous plan to assess adherence against.");
-        var changedReview = review != Review || answers != Answers;
+        var previousAnswers = Answers;
+        var changedReview = review != Review || answers != previousAnswers;
         var sameDrawings = SameDocument(drawings, Drawings);
         if (title == Title && sameDrawings && !changedReview) return null;
         if (!IsEditable && (title != Title || !sameDrawings))
@@ -133,10 +145,49 @@ public sealed class Play : IOwned
         ReviewMistakeTag = answers.MistakeTag;
         ReviewLesson = answers.Lesson;
         ReviewNextAction = answers.NextAction;
+        var completes = answers != previousAnswers && answers.IsAnswered && IsReviewable && ReviewCompletion is null;
         Touch(now);
         if (!changedReview) return null;
         ReviewedAtUtc = HasReview ? now : null;
-        return new PlayReviewRevision(this, checked(++ReviewRevision), now);
+        // Saving changed answers on an ended Play completes its review (decision 3); text alone never does.
+        if (completes) Complete(ReviewCompletionKind.Completed, now);
+        return new PlayReviewRevision(this, checked(++ReviewRevision), now, completes ? ReviewActions.Completed : ReviewActions.Edited);
+    }
+
+    /// <summary>The owner completes the review of an ended Play, whether or not its text changed.</summary>
+    public PlayReviewRevision CompleteReview(DateTimeOffset now)
+    {
+        if (!IsReviewable) throw new DomainRuleException("A review is completed once the Play is closed or cancelled.");
+        if (ReviewCompletion is not null) throw new DomainRuleException("This review is already complete.");
+        Complete(ReviewCompletionKind.Completed, now);
+        Touch(now);
+        return new PlayReviewRevision(this, checked(++ReviewRevision), now, ReviewActions.Completed);
+    }
+
+    /// <summary>Review again: the completion is cleared and the Play needs review; text, answers and history stay.</summary>
+    public PlayReviewRevision ReopenReview(DateTimeOffset now)
+    {
+        if (ReviewCompletion is null) throw new DomainRuleException("This review is not complete.");
+        ReviewCompletion = null;
+        ReviewCompletedAtUtc = null;
+        Touch(now);
+        return new PlayReviewRevision(this, checked(++ReviewRevision), now, ReviewActions.Reopened);
+    }
+
+    /// <summary>A Cancelled Play that never filled leaves the queue in one step; the caller has checked it has no fills.</summary>
+    public PlayReviewRevision MarkNoReviewNeeded(DateTimeOffset now)
+    {
+        if (Status != PlayStatus.Cancelled) throw new DomainRuleException("Only a cancelled Play can be marked as needing no review.");
+        if (ReviewCompletion is not null) throw new DomainRuleException("This review is already complete.");
+        Complete(ReviewCompletionKind.NotNeeded, now);
+        Touch(now);
+        return new PlayReviewRevision(this, checked(++ReviewRevision), now, ReviewActions.NotNeeded);
+    }
+
+    private void Complete(ReviewCompletionKind kind, DateTimeOffset now)
+    {
+        ReviewCompletion = kind;
+        ReviewCompletedAtUtc = now;
     }
 
     public static Play Retrospective(Guid id, Account account, PerpetualInstrument instrument, string emptyPlan,

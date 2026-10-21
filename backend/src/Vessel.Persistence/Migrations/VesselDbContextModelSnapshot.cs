@@ -1040,6 +1040,13 @@ namespace Vessel.Persistence.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
+                    b.Property<DateTimeOffset?>("ReviewCompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReviewCompletion")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<string>("ReviewLesson")
                         .IsRequired()
                         .HasMaxLength(4000)
@@ -1108,6 +1115,46 @@ namespace Vessel.Persistence.Migrations
                     b.ToTable("plays", null, t =>
                         {
                             t.HasCheckConstraint("CK_plays_trading_mode", "\"TradingMode\" IN ('real', 'paper')");
+                        });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.PlayNote", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PlayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("State")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "RequestId")
+                        .IsUnique();
+
+                    b.HasIndex("OwnerId", "PlayId", "CreatedAtUtc");
+
+                    b.ToTable("play_notes", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_play_notes_state", "\"State\" IS NULL OR \"State\" IN ('calm','rushed','fomo','tired','after-loss')");
                         });
                 });
 
@@ -1223,6 +1270,13 @@ namespace Vessel.Persistence.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("edited");
 
                     b.Property<int>("Number")
                         .HasColumnType("integer");
@@ -2005,6 +2059,16 @@ namespace Vessel.Persistence.Migrations
                         .HasForeignKey("OwnerId", "AccountId", "TradingMode")
                         .HasPrincipalKey("OwnerId", "Id", "TradingMode")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.PlayNote", b =>
+                {
+                    b.HasOne("Vessel.Domain.Plays.Play", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "PlayId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

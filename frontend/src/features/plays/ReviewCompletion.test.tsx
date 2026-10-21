@@ -1,0 +1,242 @@
+import { useRef, useState } from 'react'
+import { act, screen, within, waitFor } from '@testing-library/react'
+import { render } from '@/test/render'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it, vi } from 'vitest'
+import { ApiError } from '@/api/errors'
+import { isPlayNote, isPlaySummary, isReviewed, type PlayNote, type PlaySummary } from '@/api/plays'
+import type { WorkspaceApi } from '@/api/workspace'
+import { savedPlayFixture } from '@/test/workspace-fixture'
+import { PlayLog, ReviewCompletionBar } from './ReviewCompletion'
+import type { PlayLogChange, PlayLogDraft } from './log-draft'
+
+const summary = (patch: Partial<PlaySummary>): PlaySummary => ({ ...savedPlayFixture.summary, ...patch })
+const note: PlayNote = { id: '00000000-0000-4000-8000-0000000000c1', text: 'Felt rushed adding.', state: 'fomo', createdAtUtc: '2026-10-20T10:00:00Z' }
+
+describe('review completion (phase 1, 1.2)', () => {
+  it('offers Complete review once a Play has ended, and No review needed only for a cancellation', async () => {
+    const onAction = vi.fn()
+    const view = render(<ReviewCompletionBar summary={summary({ status: 'closed', reviewCompletion: null })} dirty={false} busy={false} onAction={onAction} />)
+    expect(screen.getByText('This review is not complete yet.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'No review needed' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Complete review' }))
+    expect(onAction).toHaveBeenLastCalledWith('complete')
+    view.rerender(<ReviewCompletionBar summary={summary({ status: 'cancelled', reviewCompletion: null })} dirty={false} busy={false} onAction={onAction} />)
+    await userEvent.click(screen.getByRole('button', { name: 'No review needed' }))
+    expect(onAction).toHaveBeenLastCalledWith('not-needed')
+    // A cancellation known to have filled needs its review.
+    view.rerender(<ReviewCompletionBar summary={summary({ status: 'cancelled', reviewCompletion: null })} dirty={false} busy={false} filled onAction={onAction} />)
+    expect(screen.queryByRole('button', { name: 'No review needed' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Complete review' })).toBeEnabled()
+    // Unsaved edits are saved first.
+    view.rerender(<ReviewCompletionBar summary={summary({ status: 'closed', reviewCompletion: null })} dirty busy={false} onAction={onAction} />)
+    expect(screen.getByRole('button', { name: 'Complete review' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Complete review' })).toHaveAttribute('title', 'Save your changes first')
+  })
+
+  it('names how a review was completed and offers Review again', async () => {
+    const onAction = vi.fn()
+    const view = render(<ReviewCompletionBar summary={summary({ status: 'closed', reviewCompletion: 'completed', reviewCompletedAtUtc: '2026-10-20T10:00:00Z' })}
+      dirty={false} busy={false} onAction={onAction} />)
+    expect(screen.getByRole('group', { name: 'Review completion' })).toHaveTextContent('Review completed · 20 Oct 2026')
+    await userEvent.click(screen.getByRole('button', { name: 'Review again' }))
+    expect(onAction).toHaveBeenCalledWith('reopen')
+    view.rerender(<ReviewCompletionBar summary={summary({ status: 'cancelled', reviewCompletion: 'not-needed', reviewCompletedAtUtc: '2026-10-20T10:00:00Z' })}
+      dirty={false} busy={false} onAction={onAction} />)
+    expect(screen.getByText('No review needed')).toBeInTheDocument()
+    view.rerender(<ReviewCompletionBar summary={summary({ status: 'closed', reviewCompletion: 'legacy', reviewCompletedAtUtc: '2026-10-01T10:00:00Z' })}
+      dirty={false} busy={false} onAction={onAction} />)
+    expect(screen.getByText('Reviewed before completion was recorded')).toBeInTheDocument()
+  })
+
+  it('tells an Open Play\'s owner that in-trade notes belong in the Log, with no completion yet', () => {
+    render(<ReviewCompletionBar summary={summary({ status: 'open', reviewCompletion: null })} dirty={false} busy={false} onAction={vi.fn()} />)
+    expect(screen.getByText(/Notes during the trade belong in the Log/)).toBeInTheDocument()
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('reads reviewed from the explicit completion, and from the old rule only for a server without it', () => {
+    expect(isReviewed(summary({ status: 'closed', hasReview: true, reviewedAtUtc: '2026-10-20T10:00:00Z', reviewCompletion: null }))).toBe(false)
+    expect(isReviewed(summary({ status: 'closed', hasReview: false, reviewCompletion: 'not-needed', reviewCompletedAtUtc: '2026-10-20T10:00:00Z' }))).toBe(true)
+    expect(isReviewed(summary({ status: 'closed', hasReview: true }))).toBe(true)
+    expect(isPlaySummary(summary({ reviewCompletion: 'completed', reviewCompletedAtUtc: null }))).toBe(false)
+    expect(isPlaySummary(summary({ reviewCompletion: 'reviewed' as never, reviewCompletedAtUtc: '2026-10-20T10:00:00Z' }))).toBe(false)
+    expect(isPlayNote(note)).toBe(true)
+    expect(isPlayNote({ ...note, state: 'anxious' })).toBe(false)
+    expect(isPlayNote({ ...note, text: '  ' })).toBe(false)
+  })
+})
+
+describe('in-trade log (phase 1, 1.2)', () => {
+  it('lists entries in order and appends one with its state', async () => {
+    const added = { ...note, id: '00000000-0000-4000-8000-0000000000c2', text: 'Calmer now.', state: 'calm' as const }
+    const api = { playNotes: vi.fn().mockResolvedValue([note]), addPlayNote: vi.fn().mockResolvedValue([note, added]) } as unknown as WorkspaceApi
+    const user = userEvent.setup()
+    render(<PlayLog api={api} playId={savedPlayFixture.summary.id} />)
+    const entries = await screen.findByRole('list')
+    expect(within(entries).getByText('Felt rushed adding.')).toBeInTheDocument()
+    expect(within(entries).getByText('FOMO')).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Log entry'), 'Calmer now.')
+    await user.selectOptions(screen.getByLabelText(/^State/), 'calm')
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    expect(api.addPlayNote).toHaveBeenCalledWith(savedPlayFixture.summary.id, { requestId: expect.any(String), text: 'Calmer now.', state: 'calm' })
+    expect(await screen.findByText('Calmer now.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Log entry')).toHaveValue('')
+    expect(screen.queryByRole('button', { name: /edit|delete/i })).not.toBeInTheDocument()
+  })
+
+  it('retries a failed entry with the same request ID, so it is never written twice', async () => {
+    const add = vi.fn().mockRejectedValueOnce(new ApiError('unavailable', 'The API is unavailable.')).mockResolvedValueOnce([note])
+    const api = { playNotes: vi.fn().mockResolvedValue([]), addPlayNote: add } as unknown as WorkspaceApi
+    const user = userEvent.setup()
+    render(<PlayLog api={api} playId={savedPlayFixture.summary.id} />)
+    await screen.findByText('No entries yet.')
+    await user.type(screen.getByLabelText('Log entry'), 'Felt rushed adding.')
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    await waitFor(() => expect(add).toHaveBeenCalledTimes(2))
+    expect(add.mock.calls[1]![1].requestId).toBe(add.mock.calls[0]![1].requestId)
+    await act(async () => {})
+    expect(await screen.findByText('Felt rushed adding.')).toBeInTheDocument()
+  })
+})
+
+/** The page's keeping of the log draft: it outlives the Log, so a remount reads it back. */
+function KeptLog({ api, playId, mounted, onKept }: { api: WorkspaceApi; playId: string; mounted: boolean; onKept: (draft: PlayLogDraft | undefined) => void }) {
+  const [draft, setDraft] = useState<PlayLogDraft | undefined>(undefined)
+  const latest = useRef<PlayLogDraft | undefined>(undefined)
+  const onDraft = (change: PlayLogChange) => { latest.current = change(latest.current); onKept(latest.current); setDraft(latest.current) }
+  return mounted ? <PlayLog api={api} playId={playId} draft={draft} onDraft={onDraft} /> : null
+}
+
+describe('a late log write after a remount (phase 1, 1.2)', () => {
+  it('clears only the entry it wrote, never newer text typed since', async () => {
+    let finish!: (notes: PlayNote[]) => void
+    const api = { playNotes: vi.fn().mockResolvedValue([]),
+      addPlayNote: vi.fn(() => new Promise<PlayNote[]>(resolve => { finish = resolve })) } as unknown as WorkspaceApi
+    const kept = vi.fn()
+    const user = userEvent.setup()
+    const playId = savedPlayFixture.summary.id
+    const { rerender } = render(<KeptLog api={api} playId={playId} mounted onKept={kept} />)
+    await screen.findByText('No entries yet.')
+    await user.type(screen.getByLabelText('Log entry'), note.text)
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    // The journal tab changes and comes back while the write is still out.
+    rerender(<KeptLog api={api} playId={playId} mounted={false} onKept={kept} />)
+    rerender(<KeptLog api={api} playId={playId} mounted onKept={kept} />)
+    expect(screen.getByLabelText('Log entry')).toHaveValue(note.text)
+    await user.clear(screen.getByLabelText('Log entry'))
+    await user.type(screen.getByLabelText('Log entry'), 'A newer thought.')
+    await act(async () => finish([note]))
+    expect(screen.getByLabelText('Log entry')).toHaveValue('A newer thought.')
+    // The written entry's request is settled; the newer text is a new entry with its own request.
+    expect(kept).toHaveBeenLastCalledWith({ playId, text: 'A newer thought.', state: '', written: 1 })
+  })
+
+  it('clears the entry once its write is confirmed, when nothing newer was typed, and shows it in the remounted Log', async () => {
+    let finish!: (notes: PlayNote[]) => void
+    let stored: PlayNote[] = []
+    const api = { playNotes: vi.fn(() => Promise.resolve(stored)),
+      addPlayNote: vi.fn(() => new Promise<PlayNote[]>(resolve => { finish = resolve })) } as unknown as WorkspaceApi
+    const kept = vi.fn()
+    const user = userEvent.setup()
+    const playId = savedPlayFixture.summary.id
+    const { rerender } = render(<KeptLog api={api} playId={playId} mounted onKept={kept} />)
+    await screen.findByText('No entries yet.')
+    await user.type(screen.getByLabelText('Log entry'), note.text)
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    rerender(<KeptLog api={api} playId={playId} mounted={false} onKept={kept} />)
+    rerender(<KeptLog api={api} playId={playId} mounted onKept={kept} />)
+    // The remounted Log read the list before the write landed.
+    expect(await screen.findByText('No entries yet.')).toBeInTheDocument()
+    stored = [note]
+    await act(async () => finish([note]))
+    expect(screen.getByLabelText('Log entry')).toHaveValue('')
+    expect(kept).toHaveBeenLastCalledWith({ playId, text: '', state: '', written: 1 })
+    expect(await screen.findByText(note.text)).toBeInTheDocument()
+  })
+})
+
+describe('writes answered out of order (phase 1, 1.2)', () => {
+  it('shows a delayed entry whose draft was replaced by a newer one', async () => {
+    let finishFirst!: (notes: PlayNote[]) => void
+    const first = { ...note, id: '00000000-0000-4000-8000-0000000000d1', text: 'First thought.' }
+    const second = { ...note, id: '00000000-0000-4000-8000-0000000000d2', text: 'Second thought.' }
+    let stored: PlayNote[] = []
+    const add = vi.fn().mockImplementationOnce(() => new Promise<PlayNote[]>(resolve => { finishFirst = resolve }))
+      .mockImplementationOnce(() => { stored = [second]; return Promise.resolve([second]) })
+    const api = { playNotes: vi.fn(() => Promise.resolve(stored)), addPlayNote: add } as unknown as WorkspaceApi
+    const kept = vi.fn()
+    const user = userEvent.setup()
+    const playId = savedPlayFixture.summary.id
+    const { rerender } = render(<KeptLog api={api} playId={playId} mounted onKept={kept} />)
+    await screen.findByText('No entries yet.')
+    await user.type(screen.getByLabelText('Log entry'), first.text)
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    rerender(<KeptLog api={api} playId={playId} mounted={false} onKept={kept} />)
+    rerender(<KeptLog api={api} playId={playId} mounted onKept={kept} />)
+    await user.clear(screen.getByLabelText('Log entry'))
+    await user.type(screen.getByLabelText('Log entry'), second.text)
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    expect(await screen.findByText(second.text)).toBeInTheDocument()
+    // The first write lands last: the mounted Log reads the list again and shows both.
+    stored = [first, second]
+    await act(async () => finishFirst([first]))
+    expect(await screen.findByText(first.text)).toBeInTheDocument()
+    expect(screen.getByText(second.text)).toBeInTheDocument()
+  })
+})
+
+describe('a delayed answer of the mounted Log (phase 1, 1.2)', () => {
+  it('never hides an entry another answer already showed', async () => {
+    let finishFirst!: (notes: PlayNote[]) => void
+    let finishSecond!: (notes: PlayNote[]) => void
+    const first = { ...note, id: '00000000-0000-4000-8000-0000000000e1', text: 'First thought.', createdAtUtc: '2026-10-20T10:02:00Z' }
+    const second = { ...note, id: '00000000-0000-4000-8000-0000000000e2', text: 'Second thought.', createdAtUtc: '2026-10-20T10:01:00Z' }
+    let stored: PlayNote[] = []
+    const add = vi.fn().mockImplementationOnce(() => new Promise<PlayNote[]>(resolve => { finishFirst = resolve }))
+      .mockImplementationOnce(() => new Promise<PlayNote[]>(resolve => { finishSecond = resolve }))
+    const api = { playNotes: vi.fn(() => Promise.resolve(stored)), addPlayNote: add } as unknown as WorkspaceApi
+    const user = userEvent.setup()
+    const playId = savedPlayFixture.summary.id
+    const { rerender } = render(<KeptLog api={api} playId={playId} mounted onKept={vi.fn()} />)
+    await screen.findByText('No entries yet.')
+    await user.type(screen.getByLabelText('Log entry'), first.text)
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    rerender(<KeptLog api={api} playId={playId} mounted={false} onKept={vi.fn()} />)
+    rerender(<KeptLog api={api} playId={playId} mounted onKept={vi.fn()} />)
+    await user.clear(screen.getByLabelText('Log entry'))
+    await user.type(screen.getByLabelText('Log entry'), second.text)
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    // The second entry was stored first, but its answer is late; the first write's answer and the read it prompts show both.
+    stored = [second, first]
+    await act(async () => finishFirst([second, first]))
+    expect(await screen.findByText(first.text)).toBeInTheDocument()
+    await act(async () => finishSecond([second]))
+    expect(screen.getByText(first.text)).toBeInTheDocument()
+    expect(screen.getByText(second.text)).toBeInTheDocument()
+  })
+})
+
+describe('log reads and older servers (phase 1, 1.2)', () => {
+  it('never lets an earlier read hide an entry a write already showed', async () => {
+    let finishRead!: (notes: PlayNote[]) => void
+    const api = { playNotes: vi.fn(() => new Promise<PlayNote[]>(resolve => { finishRead = resolve })),
+      addPlayNote: vi.fn().mockResolvedValue([note]) } as unknown as WorkspaceApi
+    const user = userEvent.setup()
+    render(<PlayLog api={api} playId={note.id} />)
+    await user.type(screen.getByLabelText('Log entry'), note.text)
+    await user.click(screen.getByRole('button', { name: 'Add to log' }))
+    expect(await screen.findByText(note.text)).toBeInTheDocument()
+    await act(async () => finishRead([]))
+    expect(screen.getByText(note.text)).toBeInTheDocument()
+  })
+  it('offers no completion action when the server reports no completion field', () => {
+    const { reviewCompletion: _, reviewCompletedAtUtc: __, ...older } = summary({ status: 'closed' })
+    void _; void __
+    render(<ReviewCompletionBar summary={older} dirty={false} busy={false} onAction={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'Complete review' })).not.toBeInTheDocument()
+    expect(screen.queryByText('This review is not complete yet.')).not.toBeInTheDocument()
+  })
+})

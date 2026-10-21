@@ -143,7 +143,8 @@ const journalSections = [
 ] as const
 
 export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceImages, evidenceRequest = 0, executionRequest = 0, readOnly = false, execution,
-  structuredReview, onStructuredReviewChange, status = 'draft', retrospective = false, reviewReceipt, journalSave, nextActions, keepExecutionMounted = false }: {
+  structuredReview, onStructuredReviewChange, status = 'draft', retrospective = false, reviewReceipt, journalSave, nextActions,
+  log, reviewCompletion, keepExecutionMounted = false }: {
   notes: PlayDraft['notes']
   onChange: (notes: PlayDraft['notes']) => void
   evidence?: DraftEvidence[]
@@ -167,6 +168,10 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   reviewReceipt?: ReactNode
   /** Saves the Play from the journal and its expanded view; present only while there is something to save. */
   journalSave?: ReactNode
+  /** The in-trade log, shown as a Log tab after Evidence (phase 1, 1.2). */
+  log?: ReactNode
+  /** Where the review stands and the action that completes or reopens it, under the review. */
+  reviewCompletion?: ReactNode
   /** The owner's recent next actions, shown in the Thesis tab with a way to copy one into it (phase 1, 1.5). */
   nextActions?: { actions: readonly NextAction[]; onCopy: (action: NextAction) => void; onOpen?: (id: string) => void } | undefined
   keepExecutionMounted?: boolean
@@ -216,7 +221,7 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   const showReview = writingReview || journalReviewVisible({ status, retrospective, review: notes.review, structuredReview })
   const sections = journalSections.filter(([key]) => (key !== 'review' || showReview) && (!retrospective || key === 'evidence' || key === 'review'))
   const fallback = retrospective ? 'review' : 'thesis'
-  const currentTab = sections.some(([key]) => key === tab) || execution && tab === 'execution' ? tab : fallback
+  const currentTab = sections.some(([key]) => key === tab) || execution && tab === 'execution' || log && tab === 'log' ? tab : fallback
   // A Review tab that is no longer offered falls back for good, so it never reappears selected later.
   if (tab === 'review' && !showReview) setTab(fallback)
   const review = structuredReview ?? emptyStructuredReview()
@@ -235,8 +240,9 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
       <TabsList variant="line" className="journal-tab-list" aria-label="Journal sections">
         {sections.map(([key, label]) => <TabsTrigger key={key} value={key}>{label}
           {key === 'evidence' && evidence.length > 0 && <span className="journal-tab-count" aria-hidden="true">{evidence.length}</span>}
-        </TabsTrigger>).flatMap((trigger, index) => execution && sections[index]![0] === 'evidence'
-          ? [trigger, <TabsTrigger key="execution" value="execution">Execution</TabsTrigger>] : [trigger])}
+        </TabsTrigger>).flatMap((trigger, index) => sections[index]![0] === 'evidence' ? [trigger,
+          ...log ? [<TabsTrigger key="log" value="log">Log</TabsTrigger>] : [],
+          ...execution ? [<TabsTrigger key="execution" value="execution">Execution</TabsTrigger>] : []] : [trigger])}
       </TabsList>
       <div className="journal-actions">
         {journalSave && <span ref={saveSlot} className="journal-save" onFocus={() => { saveFocused.current = true }}>{journalSave}</span>}
@@ -295,7 +301,9 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
           </div>
         </div>
       </fieldset>}
+      {key === 'review' && reviewCompletion}
     </TabsContent>)}
+    {log && <TabsContent value="log" className="journal-tab-content" data-section="log">{log}</TabsContent>}
     {execution && <TabsContent value="execution" className="journal-tab-content" data-section="execution" {...(keepExecutionMounted ? { forceMount: true, hidden: currentTab !== 'execution' } : {})}>{execution}</TabsContent>}
   </Tabs>
 

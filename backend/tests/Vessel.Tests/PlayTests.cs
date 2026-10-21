@@ -78,8 +78,8 @@ internal sealed class MemoryPlayStore(Guid owner) : IPlayStore
         {
             PlayListView.Drafts => p.Status == PlayStatus.Draft,
             PlayListView.Progress => p.Status is PlayStatus.Planned or PlayStatus.Paused or PlayStatus.Open,
-            PlayListView.Review => p.Status is PlayStatus.Closed or PlayStatus.Cancelled && !(p.HasReview || p.ReviewedAtUtc != null),
-            PlayListView.Reviewed => p.Status is PlayStatus.Closed or PlayStatus.Cancelled && (p.HasReview || p.ReviewedAtUtc != null),
+            PlayListView.Review => p.Status is PlayStatus.Closed or PlayStatus.Cancelled && p.ReviewCompletion is null,
+            PlayListView.Reviewed => p.Status is PlayStatus.Closed or PlayStatus.Cancelled && p.ReviewCompletion is not null,
             PlayListView.Closed => p.Status == PlayStatus.Closed,
             PlayListView.Cancelled => p.Status == PlayStatus.Cancelled,
             _ => true
@@ -96,15 +96,23 @@ internal sealed class MemoryPlayStore(Guid owner) : IPlayStore
             Id = p.Id, Title = p.Title, Status = p.Status, AccountId = p.AccountId, VenueId = p.VenueId, ContractId = p.ContractId,
             InstrumentSource = p.InstrumentSource, Direction = p.Direction, PlanRevision = p.PlanRevision, Version = p.Version,
             CancelReason = p.CancelReason, CreatedAtUtc = p.CreatedAtUtc, UpdatedAtUtc = p.UpdatedAtUtc, PlannedAtUtc = p.PlannedAtUtc,
-            EndedAtUtc = p.EndedAtUtc, HasReview = p.HasReview, Origin = p.Origin, ReviewedAtUtc = p.ReviewedAtUtc
+            EndedAtUtc = p.EndedAtUtc, HasReview = p.HasReview, Origin = p.Origin, ReviewedAtUtc = p.ReviewedAtUtc,
+            ReviewCompletion = p.ReviewCompletion, ReviewCompletedAtUtc = p.ReviewCompletedAtUtc,
         }).ToList();
     public Task<List<PlayCountRow>> CountsAsync(PlayListFilter filter, CancellationToken ct) => Task.FromResult(Listed(PlayListView.All, filter)
-        .GroupBy(p => (p.Status, Reviewed: p.HasReview || p.ReviewedAtUtc != null)).Select(g => new PlayCountRow(g.Key.Status, g.Key.Reviewed, g.Count())).ToList());
+        .GroupBy(p => (p.Status, Reviewed: p.ReviewCompletion is not null)).Select(g => new PlayCountRow(g.Key.Status, g.Key.Reviewed, g.Count())).ToList());
     public Task<Play?> FindAsync(Guid id, CancellationToken ct) => Task.FromResult(Plays.SingleOrDefault(p => p.Id == id && p.OwnerId == owner));
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => Task.FromResult(Accounts.SingleOrDefault(a => a.Id == id && a.OwnerId == owner));
     public Task<List<PlayPlanRevision>> RevisionsAsync(Guid playId, CancellationToken ct) => Task.FromResult(Revisions.Where(r => r.PlayId == playId).ToList());
     public Task<List<PlayStatusChange>> StatusChangesAsync(Guid playId, CancellationToken ct) => Task.FromResult(Changes.Where(c => c.PlayId == playId).ToList());
     public Task<List<PlayReviewRevision>> ReviewsAsync(Guid playId, CancellationToken ct) => Task.FromResult(Reviews.Where(c => c.PlayId == playId).ToList());
+    public List<PlayNote> Notes { get; } = [];
+    public Task<List<PlayNote>> NotesAsync(Guid playId, CancellationToken ct) =>
+        Task.FromResult(Notes.Where(n => n.PlayId == playId).OrderBy(n => n.CreatedAtUtc).ToList());
+    public Task<PlayNote?> NoteAsync(Guid requestId, CancellationToken ct) => Task.FromResult(Notes.SingleOrDefault(n => n.RequestId == requestId));
+    public void Add(PlayNote note) => Notes.Add(note);
+    public bool LinkedFills { get; set; }
+    public Task<bool> HasLinkedFillsAsync(Guid playId, CancellationToken ct) => Task.FromResult(LinkedFills);
     public Task<List<NextActionDto>> NextActionsAsync(int limit, string tradingMode, CancellationToken ct) => Task.FromResult(Plays
         .Where(p => p.OwnerId == owner && p.TradingMode == tradingMode && p.Status is PlayStatus.Closed or PlayStatus.Cancelled && !string.IsNullOrWhiteSpace(p.ReviewNextAction))
         .OrderByDescending(p => p.ReviewedAtUtc).ThenByDescending(p => p.UpdatedAtUtc).ThenBy(p => p.Id).Take(limit)
@@ -125,6 +133,7 @@ internal sealed class MemoryPlayStore(Guid owner) : IPlayStore
     public Task<List<EntryExecution>> EntryExecutionsAsync(Guid playId, CancellationToken ct) => Task.FromResult(EntryExecutions.ToList());
     public Task SaveAsync(CancellationToken ct) { Saves++; return Task.CompletedTask; }
     public Task<T> WithPlayLockAsync<T>(Guid id, Func<Task<T>> action, CancellationToken ct, Guid? destinationAccountId = null) => action();
+    public Task<T> WithNoteRequestLockAsync<T>(Guid requestId, Func<Task<T>> action, CancellationToken ct) => action();
     public Task<IReadOnlyList<string>> DeleteAsync(Play play, CancellationToken ct)
     {
         Plays.Remove(play);

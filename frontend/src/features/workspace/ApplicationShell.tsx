@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { useNotifications } from '@/components/notifications/notifications'
 import { createPlaysSession, hasUnsavedPlayWork, startNewPlay, type PlaysSession } from '@/features/plays/saved'
+import type { PlayLogChange } from '@/features/plays/log-draft'
 import { initialPlaysList } from '@/features/plays/plays-list'
 import type { PlayView } from '@/api/plays'
 import { useMonitorEvents } from './useMonitorEvents'
@@ -173,6 +174,21 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
   const acceptPlaysSession = useCallback((next: PlaysSession) => {
     const current = exitState.current
     if (current?.api !== api || current.work !== playsLifetime.work) return
+    current.session = next
+    setPlaysSession(next)
+  }, [api, playsLifetime.work])
+  // A log write that completes after its Plays page has gone changes the session as it is now, never a discarded one.
+  // A mounted Plays page applies it to its own current session, so its edits and the acknowledgement never race.
+  const logApplier = useRef<((change: PlayLogChange) => void) | null>(null)
+  const registerLogApplier = useCallback((apply: (change: PlayLogChange) => void) => {
+    logApplier.current = apply
+    return () => { if (logApplier.current === apply) logApplier.current = null }
+  }, [])
+  const changePlaysLog = useCallback((change: PlayLogChange) => {
+    const current = exitState.current
+    if (current?.api !== api || current.work !== playsLifetime.work) return
+    if (logApplier.current) { logApplier.current(change); return }
+    const next = { ...current.session, log: change(current.session.log) }
     current.session = next
     setPlaysSession(next)
   }, [api, playsLifetime.work])
@@ -416,7 +432,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
                   const account = accounts.find(item => item.id === id)
                   if (account) manageAccount(account)
                 }}
-                api={api} session={playsSession} onSession={acceptPlaysSession} onReload={reload} loading={loading}
+                api={api} session={playsSession} onSession={acceptPlaysSession} onLogChange={changePlaysLog} onLogApplier={registerLogApplier} onReload={reload} loading={loading}
                 requestedPlayId={requestedPlay?.api === api ? requestedPlay.id : null} onRequestedPlayHandled={() => setRequestedPlay(null)}
                 list={playsList} onList={setPlaysList} />
             </Suspense>

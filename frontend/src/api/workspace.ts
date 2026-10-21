@@ -25,8 +25,8 @@ import {
   type AccountCredential, type AccountDiscovery,
 } from './account-access'
 import {
-  isNextAction, isPlayCounts, isPlayExecution, isPlayHistory, isPlayList, isSavedEvidence, isSavedPlay, playCountsPath, playListPath,
-  type LinkOrder, type NextAction, type RebindLevel, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest,
+  isNextAction, isPlayCounts, isPlayNote, isPlayExecution, isPlayHistory, isPlayList, isSavedEvidence, isSavedPlay, playCountsPath, playListPath,
+  type LinkOrder, type NextAction, type PlayNote, type PlayNoteState, type RebindLevel, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest,
 } from './plays'
 import { isSizingDocument, type SizingDocument } from './sizing'
 import { isReviewDocument, reviewPath, isReviewExclusions, reviewExclusionsPath, type ReviewDocument, type ReviewQuery, type ReviewExclusions } from './review'
@@ -308,6 +308,13 @@ export interface WorkspaceApi {
   updatePlay(id: string, fields: PlayFields & { expectedVersion: number; revisionReason?: string }): Promise<SavedPlay>
   changePlayStatus(id: string, expectedVersion: number, request: StatusRequest): Promise<SavedPlay>
   playHistory(id: string, signal?: AbortSignal): Promise<PlayHistory>
+  /** Complete review, Review again and No review needed on a Play the owner last saw at `expectedVersion` (phase 1, 1.2). */
+  completeReview(id: string, expectedVersion: number): Promise<SavedPlay>
+  reopenReview(id: string, expectedVersion: number): Promise<SavedPlay>
+  noReviewNeeded(id: string, expectedVersion: number): Promise<SavedPlay>
+  /** A Play's append-only in-trade log, oldest first. */
+  playNotes(id: string, signal?: AbortSignal): Promise<PlayNote[]>
+  addPlayNote(id: string, request: { requestId: string; text: string; state: PlayNoteState | null }): Promise<PlayNote[]>
   /** The owner's most recent next actions from ended Plays, newest first, at most ten (phase 1, 1.5). */
   nextActions(signal?: AbortSignal): Promise<NextAction[]>
   manualExecutions(id: string, signal?: AbortSignal): Promise<ManualExecutions>
@@ -704,6 +711,16 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
       validate: (v): v is PlayHistory => isPlayHistory(v) && v.statusChanges.every(change => tradingMode === 'paper'
         ? change.source === undefined || change.source === 'owner' || change.source === 'paper' : change.source !== 'paper'),
       ...withSignal(signal) }),
+    completeReview: (id, expectedVersion) => call(`${playPath(id)}/review/complete`,
+      { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify({ expectedVersion }) }),
+    reopenReview: (id, expectedVersion) => call(`${playPath(id)}/review/reopen`,
+      { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify({ expectedVersion }) }),
+    noReviewNeeded: (id, expectedVersion) => call(`${playPath(id)}/review/not-needed`,
+      { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify({ expectedVersion }) }),
+    playNotes: (id, signal) => call(`${playPath(id)}/notes`, { ...playRequest,
+      validate: (v): v is PlayNote[] => Array.isArray(v) && v.length <= 500 && v.every(isPlayNote), ...withSignal(signal) }),
+    addPlayNote: (id, request) => call(`${playPath(id)}/notes`, { ...playRequest, method: 'POST', body: JSON.stringify(request),
+      validate: (v): v is PlayNote[] => Array.isArray(v) && v.length <= 500 && v.every(isPlayNote) }),
     nextActions: signal => call('/api/plays/next-actions', { ...playRequest,
       validate: (v): v is NextAction[] => Array.isArray(v) && v.length <= 10 && v.every(isNextAction), ...withSignal(signal) }),
     manualExecutions: (id, signal) => call(`${playPath(id)}/manual-executions`, { ...playRequest, validate: (v): v is ManualExecutions => isManualExecutions(v) && v.play.summary.id === id, ...withSignal(signal) }),

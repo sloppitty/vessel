@@ -158,7 +158,7 @@ describe('Review positions verified behaviour (Sol review)', () => {
     await user.click(screen.getByRole('button', { name: '1 Play · 2 positions' }))
     const dialog = await screen.findByRole('dialog')
     await within(dialog).findByRole('table', { name: 'Contributing closed Plays' })
-    for (const term of ['Planned risk', 'Written reviews']) {
+    for (const term of ['Planned risk', 'Completed reviews']) {
       expect(within(dialog).getByText(term).querySelector('strong')).toHaveTextContent('1 / 1')
     }
     const positionRow = within(dialog).getAllByText('BTC Long')[0]!.closest('tr')!

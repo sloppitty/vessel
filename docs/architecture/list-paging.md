@@ -92,8 +92,11 @@ Views:
 | `cancelled` | Cancelled | ended desc, updated desc, id | yes |
 | `all` | every Play | updated desc, id | yes |
 
-"With a review" is `hasReview || reviewedAtUtc != null`, as the Plays page
-already defines it, evaluated in SQL. Unpaged views return one page of at most
+"With a review" means an explicit review completion (`reviewCompletion` is
+set) since October 20, 2026; see the review completion section of
+`play-lifecycle.md`. Until then it was `hasReview || reviewedAtUtc != null`.
+The upgrade keeps exactly those Plays as `legacy` completions. It is
+evaluated in SQL. Unpaged views return one page of at most
 200 rows, or of an explicit smaller `pageSize` such as Overview's 5; `totalCount`
 stays exact so the UI can say the list was cut.
 

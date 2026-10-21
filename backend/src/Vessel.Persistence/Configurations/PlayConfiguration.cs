@@ -20,6 +20,7 @@ internal sealed class PlayConfiguration : IEntityTypeConfiguration<Play>
         builder.Property(x => x.Drawings).HasColumnType("jsonb");
         builder.Property(x => x.Review).HasMaxLength(Play.MaxReviewLength);
         builder.Property(x => x.Origin).HasConversion<string>().HasMaxLength(16);
+        builder.Property(x => x.ReviewCompletion).HasConversion<string>().HasMaxLength(16);
         builder.Property(x => x.ReviewAdherence).HasMaxLength(32);
         builder.Property(x => x.ReviewMistakeTag).HasMaxLength(100);
         builder.Property(x => x.ReviewLesson).HasMaxLength(4000);

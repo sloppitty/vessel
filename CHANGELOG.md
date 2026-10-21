@@ -4,6 +4,17 @@
 
 ### Added
 
+- A review is complete only when you say so. Complete review works on a
+  closed or cancelled Play with or without new text, saving changed review
+  answers completes it too, and Review again reopens it; a cancellation that
+  never filled can be marked "No review needed" in one step. Writing in the
+  Review box no longer moves a Play to Reviewed, so a note written while it
+  was open waits in Needs review after it closes. History names each step,
+  and Review counts completed reviews. The journal gains an append-only Log
+  for timestamped notes during the trade, each with an optional state (calm,
+  rushed, FOMO, tired, after a loss); log entries never count as a review
+  (D-14, G-04). New migration `ReviewCompletion`; apply it explicitly. It
+  keeps every Play the Reviewed tab listed before as reviewed.
 - Planning brings your own lessons back: the Thesis tab lists your recent next
   actions with their source Plays, and Copy into plan adds one as an if-then
   you complete. Plan it first shows a short checklist (priced stops, shares,

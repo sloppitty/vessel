@@ -55,7 +55,19 @@ export interface PlaySummary {
   /** Absent on older servers: those records were planned, never retrospective. */
   origin?: 'planned' | 'retrospective'
   reviewedAtUtc?: string | null
+  /**
+   * How the review was completed, explicitly (phase 1, 1.2): Complete review or changed answers, No review needed, or kept
+   * from before completion existed. Null while it needs review; absent from older servers.
+   */
+  reviewCompletion?: ReviewCompletion | null
+  reviewCompletedAtUtc?: string | null
 }
+export type ReviewCompletion = 'completed' | 'not-needed' | 'legacy'
+/** An append-only in-trade log entry with an optional state; it never counts as a review. */
+export interface PlayNote { id: string; text: string; state: PlayNoteState | null; createdAtUtc: string }
+export const playNoteStates = ['calm', 'rushed', 'fomo', 'tired', 'after-loss'] as const
+export type PlayNoteState = typeof playNoteStates[number]
+export const playNoteStateLabels: Record<PlayNoteState, string> = { calm: 'Calm', rushed: 'Rushed', fomo: 'FOMO', tired: 'Tired', 'after-loss': 'After a loss' }
 export interface SavedPlay {
   summary: PlaySummary
   plan: PlayPlan
@@ -86,7 +98,11 @@ export interface PreflightCheck { code: PreflightCode; outcome: 'passed' | 'skip
 /** One of the owner's recent next actions and the Play it was written for. */
 export interface NextAction { playId: string; title: string; nextAction: string; reviewedAtUtc: string | null }
 export interface StatusChange { from: PlayStatus; to: PlayStatus; reason: CancelReason | null; note: string | null; occurredAtUtc: string; source?: 'owner' | 'venue' | 'manual' | 'paper' }
-export interface ReviewRevision { number: number; occurredAtUtc: string; review: string; structuredReview: StructuredReview }
+export interface ReviewRevision {
+  number: number; occurredAtUtc: string; review: string; structuredReview: StructuredReview
+  /** What happened: edited, completed, reopened or not-needed; absent from older servers. */
+  action?: 'edited' | 'completed' | 'reopened' | 'not-needed'
+}
 export interface PlayHistory { revisions: PlanRevision[]; statusChanges: StatusChange[]; reviews?: ReviewRevision[] | null }
 export type StatusRequest =
   | { status: 'planned'; preflight?: PreflightCheck[] }
@@ -124,7 +140,10 @@ export const isPlaySummary = (v: unknown): v is PlaySummary => isRecord(v) &&
   isTimestamp(v.createdAtUtc, timeLength) && isTimestamp(v.updatedAtUtc, timeLength) &&
   isNullOr(v.plannedAtUtc, x => isTimestamp(x, timeLength)) && isNullOr(v.endedAtUtc, x => isTimestamp(x, timeLength)) &&
   typeof v.hasReview === 'boolean' && (v.origin === undefined || v.origin === 'planned' || v.origin === 'retrospective') &&
-  (v.reviewedAtUtc === undefined || isNullOr(v.reviewedAtUtc, x => isTimestamp(x, timeLength)))
+  (v.reviewedAtUtc === undefined || isNullOr(v.reviewedAtUtc, x => isTimestamp(x, timeLength))) &&
+  (v.reviewCompletion === undefined || isNullOr(v.reviewCompletion, x => ['completed', 'not-needed', 'legacy'].includes(x as string))) &&
+  (v.reviewCompletedAtUtc === undefined || isNullOr(v.reviewCompletedAtUtc, x => isTimestamp(x, timeLength))) &&
+  (v.reviewCompletion == null) === (v.reviewCompletedAtUtc == null)
 export const isStructuredReview = (v: unknown): v is StructuredReview => isRecord(v) &&
   (v.adherence === null || ['followed', 'deviated', 'not-applicable'].includes(v.adherence as string)) &&
   isNullOr(v.mistakeTag, x => isText(x, 100)) && isText(v.lesson, 4000) && isText(v.nextAction, 4000)
@@ -148,7 +167,10 @@ export const isPlayHistory = (v: unknown): v is PlayHistory => isRecord(v) && Ar
     isNullOr(c.reason, x => cancelReasons.includes(x as CancelReason)) && isNullOr(c.note, x => isText(x, 2000)) && isTimestamp(c.occurredAtUtc, timeLength) &&
     (c.source === undefined || c.source === 'owner' || c.source === 'venue' || c.source === 'manual' || c.source === 'paper')) &&
   (v.reviews == null || Array.isArray(v.reviews) && v.reviews.every(r => isRecord(r) && isCount(r.number) &&
-    isTimestamp(r.occurredAtUtc, timeLength) && isText(r.review, noteLength) && isStructuredReview(r.structuredReview)))
+    isTimestamp(r.occurredAtUtc, timeLength) && isText(r.review, noteLength) && isStructuredReview(r.structuredReview) &&
+    (r.action === undefined || ['edited', 'completed', 'reopened', 'not-needed'].includes(r.action as string))))
+export const isPlayNote = (v: unknown): v is PlayNote => isRecord(v) && isGuid(v.id) && isText(v.text, 2000) && v.text.trim() !== '' &&
+  (v.state === null || playNoteStates.includes(v.state as PlayNoteState)) && isTimestamp(v.createdAtUtc, timeLength)
 export const isSavedEvidence = (v: unknown): v is SavedEvidence => isRecord(v) && isGuid(v.id) && isGuid(v.playId) &&
   (v.source === 'capture' || v.source === 'upload') && isText(v.contentType, 64) && isCount(v.sizeBytes) && isText(v.sha256, 64) &&
   isText(v.note, 4000) && isTimestamp(v.createdAtUtc, timeLength) && isTimestamp(v.updatedAtUtc, timeLength) && isNullOr(v.markup, isImageMarkup)
@@ -172,7 +194,12 @@ export interface PlayList { plays: PlaySummary[]; view: PlayView; page: number; 
 export type PlayCounts = Record<'drafts' | 'progress' | 'review' | 'reviewed' | 'closed' | 'cancelled' | 'all', number>
 
 /** Whether a closed or cancelled Play counts as reviewed, as the list views define it. */
-export const isReviewed = (play: PlaySummary) => play.hasReview || !!play.reviewedAtUtc
+/**
+ * Whether a Play's review is complete. Completion is explicit (decision 3); a server from before it existed still listed a
+ * Play with review text, answers or a review time as reviewed.
+ */
+export const isReviewed = (play: PlaySummary) => play.reviewCompletion !== undefined ? play.reviewCompletion !== null
+  : play.hasReview || !!play.reviewedAtUtc
 const endedStatus = (status: PlayStatus) => status === 'closed' || status === 'cancelled'
 /** Whether a Play belongs to a list view, as the server selects it. */
 export const playInView = (play: PlaySummary, view: PlayView) => {
