@@ -76,6 +76,31 @@ public sealed class MonitorDiscrepancyTests
         Assert.True(row.Details.GetProperty("stops")[0].GetProperty("beyond").GetBoolean());
     }
 
+    [Fact]
+    public async Task An_incomplete_book_never_resolves_a_stop_beyond_liquidation()
+    {
+        // Sol round 1 on #42: a fresh but incomplete book omitting the stop proved nothing, yet resolved the critical incident.
+        var f = new DiscrepancyFixture { Liquidation = 95 };
+        await f.Evaluate();
+        f.Advance(60); await f.Evaluate();
+        Assert.Equal("open", Assert.Single(await f.Service.ReadAsync(f.Account.Id, null, default), x => x.Kind == "protection.beyond-liquidation").State);
+        f.OrdersComplete = false;
+        f.VenueOrders.RemoveAll(o => o.OrderId == "stop");
+        f.Advance(60); await f.Evaluate();
+        Assert.Equal("open", Assert.Single(await f.Service.ReadAsync(f.Account.Id, null, default), x => x.Kind == "protection.beyond-liquidation").State);
+        Assert.DoesNotContain(f.Events.Items, x => x.Type == "discrepancy.resolved");
+    }
+
+    [Fact]
+    public async Task An_opposite_position_never_stands_for_the_plays_exposure()
+    {
+        // Sol round 1 on #42: a long Play's sell-stop at 90 was compared with a short position's liquidation at 105.
+        var f = new DiscrepancyFixture { Liquidation = 105, Position = -1 };
+        await f.Evaluate();
+        f.Advance(60); await f.Evaluate();
+        Assert.DoesNotContain(await f.Service.ReadAsync(f.Account.Id, null, default), x => x.Kind == "protection.beyond-liquidation");
+    }
+
     [Theory]
     [InlineData(80, false)]   // the stop at 90 acts first
     [InlineData(null, true)]  // the venue reports no liquidation price: undecidable by design, never missing

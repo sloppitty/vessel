@@ -290,14 +290,24 @@ public sealed partial class MonitorDiscrepancyService
             // Phase 2, item 8b: a resting linked stop at or beyond the venue's own liquidation price on the loss side cannot act
             // before liquidation. Only the venue's reported price counts, from this read's fresh snapshot; when the venue
             // reports none the check is undecidable by design. Under cross margin the price moves with the whole account.
-            var venuePosition = positionsFresh ? sync.Snapshot.Positions.FirstOrDefault(x => x.SignedQuantity != 0 &&
-                Same(p.Instrument, x.ContractId, x.VenueContractId)) : null;
+            // Sol round 1 on #42: only the position in the Play's direction describes its exposure. An opposite one leaves this
+            // check undecided (position.opposite reports it); a fresh read with neither proves the Play's position is gone.
+            var onInstrument = positionsFresh ? sync.Snapshot.Positions.Where(x => x.SignedQuantity != 0 &&
+                Same(p.Instrument, x.ContractId, x.VenueContractId)).ToArray() : [];
+            var playLong = exitSide == ExecutionFacts.Sell;
+            var venuePosition = onInstrument.FirstOrDefault(x => playLong ? x.SignedQuantity > 0 : x.SignedQuantity < 0);
+            var opposite = venuePosition is null && onInstrument.Length > 0;
             var liquidation = venuePosition?.LiquidationPrice;
-            var beyond = liquidation is { } limit ? stops.Where(x => exitSide == ExecutionFacts.Sell
+            var beyond = liquidation is { } limit ? stops.Where(x => playLong
                 ? x.Order!.ActingPrice <= limit : x.Order!.ActingPrice >= limit).ToArray() : [];
-            Add("protection.beyond-liquidation", !open ? completeOrders ? false : null : !positionsFresh || !knownOrders ? null :
-                    venuePosition is null || stops.Length == 0 ? false : liquidation is null ? null : beyond.Length > 0,
-                undecidable: positionsFresh && knownOrders && venuePosition is not null && stops.Length > 0 && liquidation is null,
+            // A stop beyond liquidation is positive evidence from any known order read; its absence needs the complete book
+            // (Sol round 1 on #42: an incomplete book omitting the stop resolved a critical incident).
+            Add("protection.beyond-liquidation", !open ? completeOrders ? false : null : !positionsFresh ? null : opposite ? null :
+                    venuePosition is null ? false : !knownOrders ? null : stops.Length == 0 ? completeOrders ? false : null :
+                    liquidation is null ? null : beyond.Length > 0 ? true : completeOrders ? false : null,
+                // Undecidable by design: an opposite position says nothing about this Play's exposure, and a venue may report
+                // no liquidation price.
+                undecidable: positionsFresh && (opposite || knownOrders && venuePosition is not null && stops.Length > 0 && liquidation is null),
                 data: new { playIds = new[] { play.Id }, nativeContractId = Native(p.Instrument),
                     liquidationPrice = liquidation is { } price ? ExactAmount.From(price).ToString() : null, marginMode = venuePosition?.MarginMode,
                     stops = stops.Select(x => new { orderId = External(x.Link), level = x.Link.LevelKey,
