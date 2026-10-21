@@ -132,3 +132,31 @@ The page `version` hash includes the three fields. The scope note says leverage 
 ## Verification follow-up (October 19, 2026)
 
 Independent Sol review found and regression-tested the snapshot/history timing gap described above. Open-operation leverage is now determined solely by retained observations, so reusing an aggregate does not depend on a request clock; closed-operation bounds are unchanged. The Activity sizing tooltip uses the backend notice verbatim to preserve net-of-fee and nominal-stablecoin qualifications. The API performance PR is tested on top of this change, including observation cache invalidation and memory accounting.
+
+## Play column and journalling (October 20, 2026)
+
+Phase 1.6a of the [learning-loop contract](phase1-learning-loop-contract.md),
+covering F-05 and the F-06 preview:
+- **Play column.** A linked operation shows its Play's title as a link that
+  opens the Play.
+  - Page rows carry `playTitle`. It is read with the owner filter for the shown
+    linked rows only, after the cached aggregate, so a renamed Play shows its
+    current title.
+  - `version` does not hash titles: renaming a Play does not flag Activity as
+    changed.
+  - A title the owner cannot read stays null, and the browser shows "Untitled
+    play".
+  - Long titles are shortened with an ellipsis, with the full title as the
+    tooltip.
+- **Journal this trade.** A closed, unassigned operation offers this button in
+  its Play cell. It opens the same server preview, which still decides
+  eligibility. Open and incomplete operations still say "Unassigned", and mixed
+  ones say "Mixed". The expanded row keeps "Inspect retrospective
+  eligibility".
+- **Retrospective preview.** It leads with the trade in plain terms:
+  quantity, average entry and exit, net execution result, and the dates in UTC
+  with the duration. The original fills, with their IDs and transaction hashes,
+  follow in a collapsed disclosure.
+- **Default title.** The title field starts with the blank-title rule on the
+  operation's opening day in UTC, for example `BTC Long · 12 Oct 2026`. A
+  cleared field saves that default.

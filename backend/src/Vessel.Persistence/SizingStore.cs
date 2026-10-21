@@ -6,6 +6,9 @@ using Vessel.Application.Plays;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
 using Vessel.Domain.Workspace;
+using System.Text.Json;
+using Vessel.Domain.Common;
+using System.Data;
 
 namespace Vessel.Persistence;
 
@@ -13,11 +16,26 @@ public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISi
 {
     public Task<SizingSettings?> SettingsAsync(CancellationToken ct) => db.SizingSettings.SingleOrDefaultAsync(ct);
 
-    public async Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct)
+    public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct) => ClosedPlaysAsync(TradingMode.Real, ct);
+
+    public async Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, CancellationToken ct)
     {
-        var plays = await db.Plays.Where(p => p.Status == PlayStatus.Closed && db.Accounts.Any(a => a.Id == p.AccountId && a.IsEnabled))
+        tradingMode = TradingMode.Validate(tradingMode);
+        await using var transaction = tradingMode == TradingMode.Paper && db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct) : null;
+        var plays = await db.Plays.Where(p => p.TradingMode == tradingMode &&
+            (p.Status == PlayStatus.Closed || tradingMode == TradingMode.Paper &&
+                db.PaperSimulations.Any(s => s.PlayId == p.Id && (s.State == "ambiguous" || s.State == "gap" ||
+                    s.SuspensionsJson != "[]" && p.Status == PlayStatus.Cancelled))) &&
+            db.Accounts.Any(a => a.Id == p.AccountId && a.IsEnabled && a.TradingMode == tradingMode))
             .AsNoTracking().ToListAsync(ct);
         if (plays.Count == 0) return [];
+        if (tradingMode == TradingMode.Paper)
+        {
+            var facts = (await PaperFactsAsync(db, plays, ct)).Select(f => new ClosedPlayFacts(f.Play, f.Revisions, []) { Paper = f }).ToList();
+            if (transaction is not null) await transaction.CommitAsync(ct);
+            return facts;
+        }
         var ids = plays.Select(p => p.Id).ToList();
         var revisions = (await db.PlanRevisions.Where(r => ids.Contains(r.PlayId)).AsNoTracking().ToListAsync(ct)).ToLookup(r => r.PlayId);
         var links = await db.OrderLinks.Where(l => ids.Contains(l.PlayId) && l.State == OrderLinkState.Linked).AsNoTracking().ToListAsync(ct);
@@ -43,8 +61,29 @@ public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISi
         var accounts = keys.Select(k => k.AccountId).Distinct().ToArray();
         var ids = keys.Select(k => k.ExternalOrderId).Distinct(StringComparer.Ordinal).ToArray();
         // SQL narrows by account and external ID; the shared OrderKey rule keeps only each key's own contract.
-        return (await db.Orders.Where(o => accounts.Contains(o.AccountId) && ids.Contains(o.ExternalOrderId)).AsNoTracking().ToListAsync(ct))
+        return (await db.Orders.Where(o => accounts.Contains(o.AccountId) && ids.Contains(o.ExternalOrderId) &&
+            db.Accounts.Any(a => a.Id == o.AccountId && a.TradingMode == TradingMode.Real)).AsNoTracking().ToListAsync(ct))
             .Where(o => keys.Contains(OrderKey.Of(o))).ToList();
+    }
+
+    internal static async Task<List<PaperPlayFacts>> PaperFactsAsync(VesselDbContext db, IReadOnlyList<Play> plays, CancellationToken ct)
+    {
+        var ids = plays.Where(p => p.TradingMode == TradingMode.Paper).Select(p => p.Id).ToArray();
+        var executions = (await db.PaperExecutions.Where(e => ids.Contains(e.PlayId) && e.TradingMode == TradingMode.Paper)
+            .AsNoTracking().ToListAsync(ct)).ToLookup(e => e.PlayId);
+        var states = (await db.PaperSimulations.Where(s => ids.Contains(s.PlayId) && s.TradingMode == TradingMode.Paper)
+            .AsNoTracking().ToListAsync(ct)).ToDictionary(s => s.PlayId);
+        var revisions = (await db.PlanRevisions.Where(r => ids.Contains(r.PlayId)).AsNoTracking().ToListAsync(ct)).ToLookup(r => r.PlayId);
+        return plays.Where(p => p.TradingMode == TradingMode.Paper).Select(p =>
+        {
+            var state = states.GetValueOrDefault(p.Id);
+            var issues = state is null ? [] : (JsonSerializer.Deserialize<string[]>(state.IssuesJson) ?? []).ToList();
+            if (state?.Suspensions().Count > 0)
+                issues.Add("Paper evaluation was suspended. Disabled-period touches were not simulated; this outcome remains unscored. " +
+                    string.Join(" ", state.Suspensions().Select(s => s.Reason)));
+            return new PaperPlayFacts(p, revisions[p.Id].ToList(), executions[p.Id].ToList(), state?.State ?? "not-armed",
+                issues);
+        }).ToList();
     }
 
     private static ClosedPlayFacts ManualFacts(Play play, IReadOnlyList<PlayPlanRevision> revisions, IEnumerable<ManualExecution> rows)

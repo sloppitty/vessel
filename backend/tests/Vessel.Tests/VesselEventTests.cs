@@ -27,6 +27,42 @@ public sealed class VesselEventPostgresFactAttribute : FactAttribute
 
 public sealed class VesselEventTests
 {
+    [VesselEventPostgresFact]
+    public async Task Paper_owner_and_simulated_lifecycle_history_does_not_emit_actual_account_events()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        await using var scope = new EventScope(database, owner);
+        await scope.ExecuteAsync(async () =>
+        {
+            var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
+            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Virtual", "paper");
+            account.Configure(portfolio.Id, null, null);
+            scope.Db.Portfolios.Add(portfolio);
+            scope.Db.Accounts.Add(account);
+            scope.Db.PaperLedgerEntries.Add(Vessel.Domain.Paper.PaperLedgerEntry.Seed(owner, account.Id, 4000, DateTimeOffset.UtcNow));
+            var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
+            scope.Db.Plays.Add(play);
+            var planned = play.MarkPlanned(DateTimeOffset.UtcNow);
+            scope.Db.PlanRevisions.Add(planned.Revision);
+            scope.Db.StatusChanges.Add(planned.Change);
+            await scope.Db.SaveChangesAsync();
+            scope.Db.StatusChanges.Add(play.Pause(DateTimeOffset.UtcNow));
+            await scope.Db.SaveChangesAsync();
+            scope.Db.StatusChanges.Add(play.Resume(DateTimeOffset.UtcNow));
+            scope.Db.StatusChanges.Add(play.ApplyPaperExecutionState(true, false, DateTimeOffset.UtcNow)!);
+            scope.Db.StatusChanges.Add(play.ApplyPaperExecutionState(true, true, DateTimeOffset.UtcNow)!);
+            await scope.Db.SaveChangesAsync();
+            var cancelled = TestPlays.Create(account, new("hyperliquid", "ETH"));
+            scope.Db.Plays.Add(cancelled);
+            scope.Db.StatusChanges.Add(cancelled.Cancel(CancelReason.ChangedMind, null, DateTimeOffset.UtcNow));
+            return true;
+        }, default);
+        Assert.Equal(6, await scope.Db.StatusChanges.CountAsync());
+        Assert.Empty((await EventReads.ReadAsync(scope.Db, 0, 200, default)).Events);
+        Assert.Empty(scope.Outbox.Staged);
+    }
+
     [Theory]
     [InlineData(10)]
     [InlineData(20)]

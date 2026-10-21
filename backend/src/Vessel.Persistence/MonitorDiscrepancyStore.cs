@@ -44,7 +44,7 @@ public sealed class MonitorDiscrepancyStore(VesselDbContext db, UnitOfWork work)
                 .Select(o => new { o.Id, o.AccountId, o.ContractId, o.ExternalOrderId }).ToListAsync(ct))
             .Where(o => restingKeys.Contains(new OrderKey(o.AccountId, o.ContractId, o.ExternalOrderId))).Select(o => o.Id).ToArray();
         var records = db.Set<PlayDiscrepancy>();
-        var plays = await db.Plays.Where(p => p.AccountId == accountId && p.InstrumentSource == InstrumentSource.Venue &&
+        var plays = await db.Plays.Where(p => p.TradingMode == "real" && p.AccountId == accountId && p.InstrumentSource == InstrumentSource.Venue &&
                 p.Origin == PlayOrigin.Planned && p.Status != PlayStatus.Draft &&
                 (p.Status == PlayStatus.Planned || p.Status == PlayStatus.Paused || p.Status == PlayStatus.Open ||
                     p.EndedAtUtc >= recentSince ||

@@ -38,7 +38,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         var cutoff = now - settings.WatchLifetime;
         var rows = await (from m in Rows.AsNoTracking()
                           join a in db.Accounts on m.AccountId equals a.Id
-                          where a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) &&
+                          where a.TradingMode == "real" && a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) &&
                               (ActivePlays.Any(p => p.AccountId == a.Id) ||
                                Watching.Any(x => x.Link.AccountId == a.Id && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)) ||
                                AwaitingDiscrepancies.Any(d => d.AccountId == a.Id) ||
@@ -57,7 +57,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         server.DeferVenueAsync(venueId, retryAtUtc, now, ct);
     public Task<ServerMonitorHeartbeat?> HeartbeatAsync(CancellationToken ct) => server.HeartbeatAsync(ct);
 
-    private IQueryable<Play> ActivePlays => db.Plays.Where(p => p.InstrumentSource == InstrumentSource.Venue && p.ContractId != null &&
+    private IQueryable<Play> ActivePlays => db.Plays.Where(p => p.TradingMode == "real" && p.InstrumentSource == InstrumentSource.Venue && p.ContractId != null &&
         p.Origin == PlayOrigin.Planned && (p.Status == PlayStatus.Planned || p.Status == PlayStatus.Paused || p.Status == PlayStatus.Open));
 
     // Member initialization, not a constructor, so the projection stays translatable when it is composed further.
@@ -126,7 +126,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         var cutoff = now - settings.WatchLifetime;
         // Keyset page: the filter applies before the limit, so every candidate is reached by a later page.
         var rows = await db.Accounts.AsNoTracking()
-            .Where(a => a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) ||
+            .Where(a => a.TradingMode == "real" && a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) ||
                 Rows.Any(m => m.AccountId == a.Id && (m.State != "idle" || m.NextRunAtUtc != null || m.ManualState != "idle")))
             .Where(a => after == null || a.Id.CompareTo(after.Value) > 0)
             .OrderBy(a => a.Id).Take(Math.Clamp(limit, 1, 1000))

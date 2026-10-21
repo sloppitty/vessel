@@ -82,7 +82,7 @@ function allocate(id: string, name: string, scope: string, parts: Part[], icon?:
   return { id, name, icon, scope, totalUsd, accountCount, slices, missingCount, notDrawn, shares }
 }
 
-const accountPart = (a: BrokerAccount): Part => ({ id: a.id, name: a.name, balanceUsd: a.balanceUsd ?? null, accountCount: 1, scope: `account:${a.id}`, venueId: a.venueId, source: a.sourceId ?? a.address })
+const accountPart = (a: BrokerAccount): Part => ({ id: a.id, name: a.name, balanceUsd: a.balanceUsd ?? null, accountCount: 1, scope: `account:${a.id}`, venueId: a.venueId, source: a.tradingMode === 'paper' ? undefined : a.sourceId ?? a.address })
 
 /** One pie per portfolio (plus Unassigned) of each enabled account's share of that portfolio's balance. */
 export function portfolioAllocations(accounts: BrokerAccount[], portfolios: Portfolio[]): Allocation[] {
