@@ -304,12 +304,12 @@ October 20, 2026, branch `t3/phase1-unresolved`, stacked on 1.2:
 
 - **Post-sync Sol review (October 21).** The merge with main (PR #33) is sound: the retry loop recomputes the scope and
   the Unresolved count, and Open, Cancelled and Unresolved Plays keep their claims, so their operations never become
-  imported positions. One low finding is accepted as a limitation:
-  - **Watch identity.** A linked order's watch is identified by wall-clock times, the link's revision and the Play's
-    end, like the monitor's existing relink watches. If the server clock steps back between two declarations of the
-    same Play, the second keeps the first one's watch window. Binding watches to the declaration's Play version
-    needs another column in the unshipped migrations that Phase 2 now builds on, so it waits for a later monitor
-    change.
+  imported positions. One low finding, fixed in round 2:
+  - **Watch identity.** A linked order's watch was identified by wall-clock times, so if the clock stepped back (or two
+    declarations shared a time) a second declaration kept the first one's watch window. A return to Open now removes
+    the Play's watches in its locked transaction, and its next end starts new ones; no migration is needed. The watch
+    test steps the clock back before a third declaration and fails without the fix. A settlement of an Unresolved Play
+    still compares times, so a backward step at that moment keeps the declaration's window; that window still ends.
 
 ### 1.3b Manual correction batch
 

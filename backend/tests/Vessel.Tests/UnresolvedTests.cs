@@ -260,10 +260,10 @@ public sealed partial class ExecutionPostgresTests
         var stop = Assert.Single(execution.Links, l => l.Role == "stop");
         Assert.Equal("22", stop.Order!.OrderId);
 
-        async Task<(DateTimeOffset Ended, MonitorExitWatch Watch)> DeclareAndCheck(string note)
+        async Task<(DateTimeOffset Ended, MonitorExitWatch Watch)> DeclareAndCheck(string note, PlayExecutionService? service = null)
         {
             var current = await h.Plays.GetAsync(id, default);
-            var declared = await h.Execution.DeclareUnresolvedAsync(id, new(current.Summary.Version, "other", note), default);
+            var declared = await (service ?? h.Execution).DeclareUnresolvedAsync(id, new(current.Summary.Version, "other", note), default);
             await h.CheckAsync(id);
             // The filled entry order is watched too; this is the stop's watch.
             var watch = await h.Db.Set<MonitorExitWatch>().AsNoTracking().SingleAsync(w => w.LinkId == stop.Id);
@@ -280,7 +280,19 @@ public sealed partial class ExecutionPostgresTests
         var (second, secondWatch) = await DeclareAndCheck("Stuck again.");
         Assert.True(second > first);
         Assert.Equal((second, (string?)null), (secondWatch.StartedAtUtc, secondWatch.Outcome));
+
+        // The clock steps back before a third declaration: the return to Open dropped the earlier watch, so the third
+        // still starts its own rather than keeping the second's window.
+        current = await h.Plays.GetAsync(id, default);
+        await h.Execution.ReturnToOpenAsync(id, new(current.Summary.Version, "Relinking again."), default);
+        var stepped = new SteppedBack(second.AddTicks(-10));
+        var (third, thirdWatch) = await DeclareAndCheck("Stuck a third time.", new(new PlayStore(h.Db, TestUnitOfWork.For(h.Db)),
+            new ExecutionStore(h.Db, TestUnitOfWork.For(h.Db)), TestVenues.With(h.Orders), stepped, TestUnitOfWork.For(h.Db)));
+        Assert.True(third < second);
+        Assert.Equal((third, (string?)null), (thirdWatch.StartedAtUtc, thirdWatch.Outcome));
     }
+
+    private sealed class SteppedBack(DateTimeOffset now) : TimeProvider { public override DateTimeOffset GetUtcNow() => now; }
 
     [PostgresFact]
     public async Task Rolling_back_the_UnresolvedStatus_migration_is_refused_while_an_unresolved_history_exists()

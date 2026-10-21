@@ -298,6 +298,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             var (change, cleared) = play.ReturnToOpen(request.Note, time.GetUtcNow(), undone);
             plays.Add(change);
             if (cleared is not null) plays.Add(cleared);
+            // Its linked orders are watched again from its next end, never under the declaration it leaves.
+            await store.ForgetWatchesAsync(play.Id, ct);
             return PlayService.ToDto(play);
         }, ct), ct);
     }
