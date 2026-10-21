@@ -102,6 +102,12 @@ reported to the parent before a dependent implementation is changed.
   disclose the same pre-action limitation. The action does not force a venue
   read, fabricate executions or rewrite recorded cash. Known open simulated
   quantity and genuine terminal gap/ambiguity retain their existing guards.
+  **Readiness caveat (Opus round five, October 21):** this implemented minimum
+  policy needs explicit owner acceptance. Since a closed-minute checkpoint
+  cannot include the current partial minute, an ordinary Pause after the first
+  effective boundary forfeits scoring even with a caught-up one-minute worker.
+  A receipted Cancel is also listed as an exclusion. Disclosure is not recorded
+  owner approval; an exact/deferred-stop policy would be a separate decision.
 - GET sizing in paper may read the existing owner risk preference read-only.
   PUT sizing settings in paper returns 409, never modifies the real preference.
   The paper record/window/ladder/limits use only paper outcomes. No separate
@@ -209,6 +215,14 @@ and a one-minute retry. An interior hole, or missing coverage at least five
 minutes old, is a conservative gap. This is a bounded simulation policy,
 not a claim that Hyperliquid publishes or finalizes every candle within five
 minutes.
+
+**Readiness caveat (Opus round five, October 21):** absent requested TNSR slots
+already 310–436 seconds past close were observed offline in the bounded public
+research. Their cause is unproved, but absence beyond the tolerance is observed.
+A terminal gap holds the whole paper account against new arming, makes available
+balance unknown and cannot be released by cancelling. With no v1 resolution
+path, keeping this policy needs explicit owner acceptance; it is not approved
+merely because the uncertainty is disclosed.
 
 Proven malformed candle responses and explicit source/request rejection get
 five minutes of recovery from their first deterministic failure, retained in

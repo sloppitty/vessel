@@ -1,8 +1,9 @@
 # Paper trading delivery state
 
-October 21, 2026. **PR remains draft: subsequent Claude Opus reviews found
-confirmed simulation/recovery blockers. Earlier integration approval is
-superseded pending corrections and fresh review.**
+October 21, 2026. **PR remains draft: Claude Opus round five independently
+closed N1/O1, found no P1/P2, and requires explicit owner decisions on quiet
+coverage holds and the N1 pause/scoring policy. Earlier integration approval
+is superseded; the green code verdict is not overall readiness approval.**
 Authority: [delivery contract](paper-trading-delivery-contract.md) and
 [owner-refined plan](paper-trading-plan.md).
 
@@ -828,3 +829,58 @@ Frontend N1 verification above applies to the same unchanged production tree.
 Fresh Claude Opus/max round five is evaluating this snapshot independently.
 **No final independent approval or readiness is claimed; PR remains draft,
 including the unresolved quiet-publication decision above.**
+
+### Claude Opus round five complete: code verified, owner decisions pending
+
+Claude Opus 5.5/max independently reviewed `cce069b`; the subsequent `2bbf1ee`
+changed docs only. Its 797 production files and 660-file test manifest match
+the parent exactly. **N1 and O1 are closed, no regression and no P1/P2 found.**
+Earlier A–F, actual/paper event separation and upstream Review isolation remain
+verified.
+
+Two final **34/34** PostgreSQL probe runs cover receipts, resumed unscored wins,
+partial/unsettled/preeffective boundaries, retained activation fallback,
+revision/re-pause/cancel cases, stale/owner/open/terminal guards and real/event
+controls. All five transient-issue sources stay out of closed candidates;
+expired deterministic gaps remain excluded. Reverting only the fixes in a
+separate sensitivity copy fails **20/34** probes, while controls stay intact.
+Five reviewer probe mistakes and all intentionally failing old-bug/mutant runs
+remain preserved, not labelled product passes.
+
+Independent complete suites:
+- Backend: **3,864 passed, zero failed, 17 skipped; 3,881 total**. Its 17 skips
+  are the parent's five live/S3 checks plus 12 RabbitMQ-backed tests because the
+  reviewer had no broker. The parent's separate final run executed all 12.
+- Frontend: **3,894 passed across 157 files**, plus typecheck, full lint and
+  production build. These are independent runs, not additional distinct tests.
+
+**Readiness still requires owner decisions; neither is silently accepted:**
+1. **C — permanent account-wide holds.** Offline TNSR evidence includes absent
+   requested slots already **310–436 seconds past close**, beyond the 300-second
+   tolerance, regardless of their cause. Lazy publication is not proved, but
+   the practical risk is not merely hypothetical timing below the grace.
+   A terminal gap blocks new arming for the entire paper account, makes its
+   available balance unknown and cannot be cleared by cancelling. v1 has no
+   resolution path. Keep that rule only with explicit acceptance or revise it.
+2. **N1 — ordinary Pause forfeits scoring.** A closed-minute checkpoint cannot
+   reach the action's current partial minute. Therefore a normal Pause/Cancel
+   after the first effective boundary creates unscored history even with a
+   caught-up one-minute worker. A resumed Play never scores; a receipted cancel
+   is listed as an exclusion. This broader consequence needs explicit acceptance,
+   not just agreement that a missed hourly loss must not disappear.
+
+One nonblocking **P3** remains: history-only selection puts a still-paused or
+resumed live Play in paper Review's excluded closed population; an Open resumed
+Play can count as both open and excluded. Optional wording nits include the
+disabled-period prefix on owner receipts, resume wording on Cancel and the
+receipt promise before first activation. No further code/contract-policy change
+was made to hide these observations.
+
+Full report, runnable probes, source/binary hashes and TRXs:
+`/home/ops/.cache/vessel-verification/opus-r5-cce069b-rlikih/REPORT.md`.
+After all tests/reviews ended, the parent verified the ownership labels and
+removed only `vessel-paper-fix-pg-20261020`, `vessel-paper-fix-rmq-20261020` and
+their anonymous volumes. Disk evidence is retained; no other services or
+owner data were touched. Cleanup receipt: `paper-ownerstop-final/cleanup.json`.
+**The requested PR and Opus evaluation are delivered. PR stays draft pending
+the two owner decisions; no merge, deployment, release or live migration.**
