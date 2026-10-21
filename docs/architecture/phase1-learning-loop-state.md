@@ -357,6 +357,9 @@ October 20, 2026, branch `t3/phase1-correction-batch`, stacked on 1.3a:
 - **Rebase.** 1.3a's migration now adds `PlayVersion` to `play_status_changes`, so the `ManualCorrectionBatch` target
   model includes it; EF reports no pending model changes. `scripts/check.sh` passed: backend 3,603 passed, 5 skipped; frontend 152 files and 3,814 tests.
 
+- **Post-sync Sol review (October 21).** No findings: corrections change no Activity claims, and the migration order
+  still holds.
+
 ## 1.4 Process and outcome as cases
 
 ### 1.4a Post-hoc badge and per-metric n
