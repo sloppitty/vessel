@@ -148,6 +148,18 @@ October 21, 2026. Implemented on `t3/phase2-open-risk`.
   - Overview lists the Plays not included.
 - **Check after round 1.** `scripts/check.sh` passed on `bc500cd1`: backend
   4,024 passed, 5 skipped; frontend 170 files and 4,060 tests.
+- **Sol round 2 (`gpt-6.1-sol`, high),** on `a74a0b47`. It confirmed round 1's
+  fixes 2, 3, 4 and 6 to 9, and completed 1 and 5 with four findings, all fixed
+  in `43eeaa53`:
+  - A preview reads its named Play's facts in any status and account state.
+    On a disabled account, missing executions still make it unknown.
+  - A retained fill contradicts its role by the plan being measured. An
+    edited short with the saved long's buy fill is unknown.
+  - The preview carries the edited instrument source. A manual instrument on
+    a venue account is unknown as a Draft as well as once planned.
+  - A coverage check time ahead of the clock, beyond a minute's skew,
+    verifies nothing.
+- **Check after round 2.** `scripts/check.sh` passed on `43eeaa53`: backend 4,024 passed, 5 skipped; frontend 170 files and 4,061 tests.
 - The migration is applied explicitly, never to the owner's database.
 
 ## 2. Weekly review page
