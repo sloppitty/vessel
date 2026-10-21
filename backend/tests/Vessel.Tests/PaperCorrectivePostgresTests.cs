@@ -504,11 +504,69 @@ public sealed class PaperCorrectivePostgresTests
             Assert.Equal(1, sizing.Record.ClosedPlays);
             var review = new ReviewService(new ReviewStore(db, sizingStore), f.Clock);
             var query = new ReviewQuery(Period: "all", TradingMode: "paper");
-            Assert.Equal(2, (await review.GetAsync(query, default)).Coverage.ClosedCandidates);
-            Assert.Equal(b, Assert.Single((await review.ExclusionsAsync(query, default)).Items).PlayId);
+            Assert.Equal(status == "cancelled" ? 2 : 1, (await review.GetAsync(query, default)).Coverage.ClosedCandidates);
+            var exclusions = (await review.ExclusionsAsync(query, default)).Items;
+            if (status == "cancelled") Assert.Equal(b, Assert.Single(exclusions).PlayId);
+            else Assert.Empty(exclusions);
         }
         if (status == "paused") await f.StatusAsync(b, "planned");
         _ = await f.PlanAsync(Btc, "SOL");
+    }
+
+    [PostgresTheory]
+    [InlineData("paused", 0, 0)]
+    [InlineData("resumed", 0, 0)]
+    [InlineData("open", 0, 1)]
+    [InlineData("closed", 1, 0)]
+    [InlineData("cancelled", 1, 0)]
+    public async Task Suspension_history_enters_closed_reporting_only_after_the_play_ends(
+        string stage, int closedCandidates, int openPlays)
+    {
+        await using var f = await Engine.CreateAsync();
+        var id = await f.PlanAsync(Btc, "BTC");
+        f.Clock.Now = FirstOpen.AddMinutes(1).AddSeconds(15);
+        await f.StatusAsync(id, stage == "cancelled" ? "cancelled" : "paused",
+            stage == "cancelled" ? "changed-mind" : null);
+        Assert.True((await f.StateAsync(id)).HasUnscoredHistory);
+
+        if (stage is "resumed" or "open" or "closed")
+        {
+            await f.StatusAsync(id, "planned");
+            if (stage is "open" or "closed")
+            {
+                f.Clock.Now = FirstOpen.AddMinutes(3).AddSeconds(15);
+                Assert.True(await f.EvaluateAccountAsync(new Dictionary<string, IReadOnlyList<PaperCandle>>
+                    { ["BTC"] = [Candle(2, 100, 99, 101)] }));
+            }
+            if (stage == "closed")
+            {
+                f.Clock.Now = FirstOpen.AddMinutes(4).AddSeconds(15);
+                Assert.True(await f.EvaluateAccountAsync(new Dictionary<string, IReadOnlyList<PaperCandle>>
+                    { ["BTC"] = [Candle(3, 110, 109, 111)] }));
+                Assert.Equal("4010", (await f.PaperAccountAsync()).BalanceUsd);
+            }
+        }
+
+        await using var db = f.Db.Context(f.Owner);
+        var unit = TestUnitOfWork.For(db);
+        var store = new SizingStore(db, unit);
+        var review = new ReviewService(new ReviewStore(db, store), f.Clock);
+        var query = new ReviewQuery(Period: "all", TradingMode: "paper");
+        var report = await review.GetAsync(query, default);
+        Assert.Equal((closedCandidates, openPlays, closedCandidates),
+            (report.Coverage.ClosedCandidates, report.Coverage.OpenPlays, report.Coverage.IncompleteExecutions));
+        Assert.Empty(report.Plays);
+        Assert.Equal(0, report.Metrics.Count);
+        Assert.Null(report.Metrics.Net);
+        var exclusions = (await review.ExclusionsAsync(query, default)).Items;
+        if (closedCandidates == 0) Assert.Empty(exclusions);
+        else Assert.Equal(id, Assert.Single(exclusions).PlayId);
+        var sized = await new SizingService(store, new CoreOwner(f.Owner), f.Clock, unit).GetAsync(default, "paper");
+        Assert.Equal(("paper", 0), (sized.Record.Source, sized.Record.ClosedPlays));
+        Assert.Empty(sized.Record.Recent);
+        var retained = await f.StateAsync(id);
+        Assert.True(retained.HasUnscoredHistory);
+        Assert.Single(retained.Suspensions);
     }
 
     [PostgresFact]

@@ -3,9 +3,9 @@ import { accountFixture, emptyOverview, portfolioFixture, savedPlayFixture, sizi
 import { activityPage, operationFixture } from '@/test/activity-fixture'
 import { emptyReview, reviewFixture } from '@/test/review-fixture'
 import { overviewSummaryFixture } from '@/test/overview-summary-fixture'
-import { createWorkspaceApi } from './workspace'
+import { createWorkspaceApi, type WorkspaceApi } from './workspace'
 import { isActivityFills, isActivityOperation } from './activity'
-import { isReviewDocument } from './review'
+import { isReviewDocument, type ReviewDocument } from './review'
 import { isSizingDocument } from './sizing'
 import type { PaperPlayState } from './paper'
 import { isPlayHistory, type PlayHistory, type StatusChange } from './plays'
@@ -24,6 +24,71 @@ function response(body: unknown) {
   vi.stubGlobal('fetch', fetch)
   return fetch
 }
+
+describe('financial report mode boundaries', () => {
+  const reports: Array<{ name: string; body: unknown; read: (api: WorkspaceApi) => Promise<unknown> }> = [
+    { name: 'Review', body: reviewFixture, read: api => api.review({ period: 'month', portfolio: 'all' }) },
+    { name: 'Sizing', body: sizingFixture, read: api => api.sizing() },
+    { name: 'Activity', body: activityPage([operationFixture]), read: api => api.activity({ page: 1, pageSize: 25 }) },
+    { name: 'Overview summary', body: overviewSummaryFixture(),
+      read: api => api.overviewSummary({ groupBy: 'portfolio', period: '30', scope: 'all' }) },
+  ]
+
+  it.each(reports)('rejects an omitted $name discriminator on a Paper client', async ({ body, read }) => {
+    response(body)
+    await expect(read(createWorkspaceApi('synthetic-token', undefined, 'paper'))).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+
+  it.each(reports)('preserves omitted-mode $name responses for default and explicit Real clients', async ({ body, read }) => {
+    for (const mode of [undefined, 'real'] as const) {
+      response(body)
+      await expect(read(createWorkspaceApi('synthetic-token', undefined, mode))).resolves.toEqual(body)
+    }
+  })
+
+  it('rejects unlabelled actual imported positions and aggregates even when Paper requests exclusion', async () => {
+    const actual: ReviewDocument = JSON.parse(JSON.stringify(reviewFixture))
+    Object.assign(actual.plays[0]!, { id: null, origin: 'position', executionSource: 'imported',
+      operationId: `${accountFixture.id}:long`, rMultiple: null, reviewed: false, local: null })
+    actual.metrics.positions = 1
+    actual.periods[0]!.positions = 1
+    actual.groups.accounts[0]!.metrics.positions = 1
+    actual.positions = { mode: 'include', included: true, minPlays: 5, plays: 2, positions: 1, omitted: 0, playWeight: '2' }
+    expect(isReviewDocument(actual)).toBe(true)
+    expect(isReviewDocument({ ...actual, tradingMode: 'paper' })).toBe(false)
+    response(actual)
+    await expect(createWorkspaceApi('synthetic-token').review({ period: 'month', portfolio: 'all', positions: 'include' })).resolves.toEqual(actual)
+    response(actual)
+    await expect(createWorkspaceApi('synthetic-token', undefined, 'paper')
+      .review({ period: 'month', portfolio: 'all', positions: 'exclude' })).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+
+  it('preserves the current unlabelled Overview root but checks any supplied root discriminator', async () => {
+    const body = { ...emptyOverview, accounts: [paperAccount], portfolios: [paperPortfolio] }
+    const paper = createWorkspaceApi('synthetic-token', undefined, 'paper')
+    response(body)
+    await expect(paper.overview()).resolves.toEqual(body)
+    response({ ...body, tradingMode: 'paper' })
+    await expect(paper.overview()).resolves.toMatchObject({ tradingMode: 'paper' })
+    response({ ...emptyOverview, tradingMode: 'real' })
+    await expect(paper.overview()).rejects.toMatchObject({ kind: 'invalid-response' })
+    response({ ...emptyOverview, tradingMode: 'paper' })
+    await expect(createWorkspaceApi('synthetic-token').overview()).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+
+  it('does not require a discriminator on mode-neutral counts, exclusions or settings', async () => {
+    const paper = createWorkspaceApi('synthetic-token', undefined, 'paper')
+    const counts = { drafts: 0, progress: 0, review: 0, reviewed: 0, closed: 0, cancelled: 0, all: 0 }
+    response(counts)
+    await expect(paper.playCounts({})).resolves.toEqual(counts)
+    const exclusions = { items: [], total: 0, offset: 0, nextOffset: null, notice: 'No excluded paper outcomes.' }
+    response(exclusions)
+    await expect(paper.reviewExclusions({ period: 'all', portfolio: 'all' })).resolves.toEqual(exclusions)
+    const settings = { enabled: false, checkIntervalMinutes: 60 }
+    response(settings)
+    await expect(paper.paperSettings()).resolves.toEqual(settings)
+  })
+})
 
 describe('mode-bound workspace requests', () => {
   it('keeps old requests real by default, and explicitly binds independent clients', async () => {

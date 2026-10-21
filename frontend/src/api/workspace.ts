@@ -437,11 +437,11 @@ const overview = (v: unknown): v is Overview => isRecord(v) && Array.isArray(v.p
     (v.totals[k] === undefined || coverages.includes(String(v.totals[k])))) &&
   Array.isArray(v.recentActivity) && v.recentActivity.every(isImportedFill) && isText(v.scopeNote)
 
-function assertResponseMode(value: unknown, mode: TradingMode): void {
+function assertResponseMode(value: unknown, mode: TradingMode, requireMode = false): void {
   if (Array.isArray(value)) { value.forEach(item => assertResponseMode(item, mode)); return }
   if (!isRecord(value)) return
   const entity = typeof value.id === 'string' && ('accountValueUsd' in value && 'venueId' in value || 'planRevision' in value && 'accountId' in value || 'valueCoverage' in value && 'accountCount' in value)
-  if ((entity || value.tradingMode !== undefined) && (value.tradingMode ?? 'real') !== mode) {
+  if ((requireMode || entity || value.tradingMode !== undefined) && (value.tradingMode ?? 'real') !== mode) {
     throw new ApiError('invalid-response', 'The API returned data for a different trading mode. Reload this workspace.')
   }
   for (const key of ['summary', 'play', 'accounts', 'portfolios', 'plays', 'items']) {
@@ -472,7 +472,9 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
     const url = new URL(path, 'http://vessel.local')
     if (scoped && tradingMode) url.searchParams.set('tradingMode', tradingMode)
     const value = await rawCall(`${url.pathname}${url.search}`, options)
-    if (scoped) assertResponseMode(value, tradingMode ?? 'real')
+    // Mode-bearing report roots must explicitly identify Paper; omitted modes remain legacy Real.
+    const report = ['/api/review', '/api/sizing', '/api/activity', '/api/overview/summary'].includes(url.pathname)
+    if (scoped) assertResponseMode(value, tradingMode ?? 'real', report)
     return value
   }
   const generation = typeof credentials !== 'string' && credentials.kind === 'session' ? credentials.generation : undefined

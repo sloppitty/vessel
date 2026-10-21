@@ -948,3 +948,28 @@ Reports and retained red runs:
 `/home/ops/.cache/vessel-verification/paper-review-a-848e351-qCA26B/REPORT.md`,
 `/home/ops/.cache/vessel-verification/paper-sol-adversarial-20261021/boundaries-848e351-vCroel/REPORT.md`,
 and the parent `paper-sol-adversarial-20261021/` evidence directory.
+
+### Boundary correction frozen; final combined verification pending
+
+The five-file B1/P3 patch now requires explicit `paper` on mode-bearing Review,
+Sizing, Activity and Overview-summary roots. Omitted mode remains legacy Real;
+the intentionally unlabelled base Overview DTO, counts, exclusions and settings
+remain compatible, and any supplied discriminator is checked.
+
+Suspension history alone selects ended outcomes, not live Paused/Planned/Open
+Plays. Later-Closed results stay unscored, receipted Cancel exclusions remain,
+and terminal gap/ambiguity membership is unchanged. This resolves the previously
+recorded P3 rather than changing the accepted N1 scoring policy.
+
+Red-before-green: frontend **29 passes/six failures → 35/35 passes**; backend
+**nine passes/five failures → 14/14 passes**. Final affected cohorts passed
+**338 frontend** and **98 backend** cases, with typecheck and scoped lint.
+These are implementation checks, not independent approval or a new full-suite
+claim. The unchanged original boundary probes passed **16/16** with only their
+separate optional hardening probe deferred.
+
+Handoff and all failed runs:
+`paper-sol-adversarial-20261021/boundary-fix-848e351-jokctt/HANDOFF.md`
+under `/home/ops/.cache/vessel-verification/`.
+No schema, endpoint, raw SQL or owner-policy change. Parent final suites and
+fresh independent core/boundary closure remain mandatory before merge.
