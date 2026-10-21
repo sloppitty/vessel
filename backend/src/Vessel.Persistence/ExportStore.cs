@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Export;
 using Vessel.Domain.Accounts;
@@ -10,16 +11,27 @@ public sealed class ExportStore(VesselDbContext db) : IFactsExportStore
 {
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => db.Accounts.AsNoTracking().SingleOrDefaultAsync(a => a.Id == id, ct);
 
+    // Each stream passes the token to the database enumeration, so an abandoned download stops its query (Sol round 1 on #39).
     public IAsyncEnumerable<ImportedFill> FillsAsync(Guid accountId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct) =>
-        db.Fills.Where(f => f.AccountId == accountId && (from == null || f.OccurredAtUtc >= from) && (to == null || f.OccurredAtUtc < to))
-            .OrderBy(f => f.OccurredAtUtc).ThenBy(f => f.ContractId).ThenBy(f => f.SourceFillId).AsNoTracking().AsAsyncEnumerable();
+        Stream(db.Fills.Where(f => f.AccountId == accountId && (from == null || f.OccurredAtUtc >= from) && (to == null || f.OccurredAtUtc < to))
+            .OrderBy(f => f.OccurredAtUtc).ThenBy(f => f.ContractId).ThenBy(f => f.SourceFillId).AsNoTracking(), ct);
 
-    public IAsyncEnumerable<ManualExecution> ManualExecutionsAsync(Guid accountId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct) =>
-        db.ManualExecutions.Where(m => db.Plays.Any(p => p.Id == m.PlayId && p.AccountId == accountId) &&
-                (from == null || m.OccurredAtUtc >= from) && (to == null || m.OccurredAtUtc < to))
-            .OrderBy(m => m.OccurredAtUtc).ThenBy(m => m.Id).AsNoTracking().AsAsyncEnumerable();
+    public async IAsyncEnumerable<(ManualExecution Row, string? Instrument)> ManualExecutionsAsync(Guid accountId, DateTimeOffset? from,
+        DateTimeOffset? to, [EnumeratorCancellation] CancellationToken ct)
+    {
+        var rows = db.ManualExecutions.Join(db.Plays, m => m.PlayId, p => p.Id, (m, p) => new { Row = m, p.AccountId, p.ContractId })
+            .Where(x => x.AccountId == accountId && (from == null || x.Row.OccurredAtUtc >= from) && (to == null || x.Row.OccurredAtUtc < to))
+            .OrderBy(x => x.Row.OccurredAtUtc).ThenBy(x => x.Row.Id);
+        await foreach (var row in rows.AsNoTracking().AsAsyncEnumerable().WithCancellation(ct)) yield return (row.Row, row.ContractId);
+    }
 
+    // RISEx settlements within one microsecond share OccurredAtUtc; their native nanoseconds keep them in order.
     public IAsyncEnumerable<FundingPayment> FundingAsync(Guid accountId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct) =>
-        db.FundingPayments.Where(p => p.AccountId == accountId && (from == null || p.OccurredAtUtc >= from) && (to == null || p.OccurredAtUtc < to))
-            .OrderBy(p => p.OccurredAtUtc).ThenBy(p => p.ContractId).ThenBy(p => p.SourceId).AsNoTracking().AsAsyncEnumerable();
+        Stream(db.FundingPayments.Where(p => p.AccountId == accountId && (from == null || p.OccurredAtUtc >= from) && (to == null || p.OccurredAtUtc < to))
+            .OrderBy(p => p.OccurredAtUtc).ThenBy(p => p.OccurredAtUnixNanoseconds).ThenBy(p => p.ContractId).ThenBy(p => p.SourceId).AsNoTracking(), ct);
+
+    private static async IAsyncEnumerable<T> Stream<T>(IQueryable<T> query, [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var item in query.AsAsyncEnumerable().WithCancellation(ct)) yield return item;
+    }
 }

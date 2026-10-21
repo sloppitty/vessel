@@ -28,11 +28,12 @@ public sealed class FactsExportService(IFactsExportStore store, IVenueRegistry v
         if (kind is not ("executions" or "funding")) throw new ProblemException(400, "Choose executions or funding.");
         var (start, end) = (Day(from, "from"), Day(to, "to"));
         if (start is not null && end is not null && start > end) throw new ProblemException(400, "The start date is after the end date.");
+        // Half-open UTC days: the end date is included in full. The last representable day has no next day.
+        DateTimeOffset? until = end is null ? null : end.Value.Date == DateTime.MaxValue.Date
+            ? throw new ProblemException(400, "The end date is out of range.") : end.Value.AddDays(1);
         var account = await store.AccountAsync(accountId, ct) ?? throw new ProblemException(404, "Account not found.");
         if (account.TradingMode != TradingMode.Real) throw new ProblemException(409, "Paper accounts have no retained venue facts to export.");
         if (!account.IsEnabled) throw new ProblemException(409, "Enable the account to export its facts.");
-        // Half-open UTC days: the end date is included in full.
-        DateTimeOffset? until = end?.AddDays(1);
         var venue = venues.Descriptor(account.VenueId)?.Name ?? account.VenueId;
         var source = account.SourceId ?? account.Address;
         var name = $"vessel-{kind}-{account.Id.ToString("N")[..8]}-{(start ?? time.GetUtcNow()).UtcDateTime:yyyyMMdd}" +
@@ -62,9 +63,9 @@ public sealed class FactsExportService(IFactsExportStore store, IVenueRegistry v
                     .Text(fill.PnlBasis).Number(fill.Leverage?.ToString(CultureInfo.InvariantCulture)).Text(null).Text(null).Text(null).End();
                 await writer.FlushAsync(token);
             }
-            await foreach (var row in store.ManualExecutionsAsync(account.Id, start, until, token))
+            await foreach (var (row, instrument) in store.ManualExecutionsAsync(account.Id, start, until, token))
             {
-                rows.Text("manual").Text(account.Name).Text(venue).Text(source).Text(null).Text(null).Text(null).Text(null).Text(null)
+                rows.Text("manual").Text(account.Name).Text(venue).Text(source).Text(instrument).Text(null).Text(null).Text(null).Text(null)
                     .Time(row.OccurredAtUtc).Text(row.Side).Text(null).Text(row.Role == "entry" ? ExecutionFacts.Open : ExecutionFacts.Close).Number(Manual(row.Price))
                     .Number(Manual(row.Quantity)).Number(row.Fee is null ? null : Manual(row.Fee)).Text(row.FeeCurrency).Text(null).Text(null).Text(null)
                     .Number(null).Text(row.PlayId.ToString()).Text(row.Role).Text(row.Source).End();

@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using Vessel.Application.Common;
 using Vessel.Application.Export;
+using Vessel.Application.Plays;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
@@ -26,7 +27,9 @@ public sealed class FactsExportTests
         public List<FundingPayment> Funding { get; } = [];
         public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => Task.FromResult(account?.Id == id ? account : null);
         public IAsyncEnumerable<ImportedFill> FillsAsync(Guid accountId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct) => Each(Fills);
-        public IAsyncEnumerable<ManualExecution> ManualExecutionsAsync(Guid accountId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct) => Each(Manual);
+        public string? Instrument { get; set; } = "BTC";
+        public IAsyncEnumerable<(ManualExecution Row, string? Instrument)> ManualExecutionsAsync(Guid accountId, DateTimeOffset? from, DateTimeOffset? to,
+            CancellationToken ct) => Each(Manual.Select(m => (m, Instrument)));
         public IAsyncEnumerable<FundingPayment> FundingAsync(Guid accountId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct) => Each(Funding);
         private static async IAsyncEnumerable<T> Each<T>(IEnumerable<T> items, [EnumeratorCancellation] CancellationToken ct = default)
         {
@@ -81,7 +84,8 @@ public sealed class FactsExportTests
         var lines = Lines(await Read(await new FactsExportService(store, TestVenues.With(), TimeProvider.System)
             .PrepareAsync(account.Id, "executions", null, null, default)));
         // Owner-entered numbers as exact plain decimals; an unrecorded fee is empty, never zero.
-        Assert.Equal($"manual,Broker,Manual,,,,,,,2026-10-01T10:00:00.0000000Z,buy,,open,1.5,2000,,,,,,,{play},entry,Broker statement", lines[1]);
+        // Sol round 1 on #39: the Play's instrument says what was traded.
+        Assert.Equal($"manual,Broker,Manual,,BTC,,,,,2026-10-01T10:00:00.0000000Z,buy,,open,1.5,2000,,,,,,,{play},entry,Broker statement", lines[1]);
     }
 
     [Fact]
@@ -105,6 +109,7 @@ public sealed class FactsExportTests
     [InlineData("orders", null, null, 400)]
     [InlineData("executions", "2026-10-1", null, 400)]
     [InlineData("executions", "2026-10-02", "2026-10-01", 400)]
+    [InlineData("executions", null, "9999-12-31", 400)] // Sol round 1 on #39: no next day to end on, so not a 500.
     public async Task Requests_are_checked_before_anything_is_read(string kind, string? from, string? to, int status)
     {
         var account = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Main");
@@ -147,9 +152,60 @@ public sealed class FactsExportTests
             var day = await store.FillsAsync(account.Id, Day, Day.AddDays(1), default).Select(f => f.SourceFillId).ToListAsync();
             Assert.Equal(["early", "late"], day);
             Assert.Equal(["early", "late", "next-day"], await store.FillsAsync(account.Id, null, null, default).Select(f => f.SourceFillId).ToListAsync());
+            // Sol round 1 on #39: cancelling the download stops the database read.
+            using var cancelled = new CancellationTokenSource();
+            cancelled.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+                await store.FillsAsync(account.Id, null, null, cancelled.Token).ToListAsync());
         }
         // Another owner reads nothing of this owner's account.
         await using (var foreign = database.Context(Guid.NewGuid()))
             Assert.Empty(await new ExportStore(foreign).FillsAsync(account.Id, null, null, default).ToListAsync());
+    }
+
+    [PostgresFact]
+    public async Task Manual_rows_carry_their_plays_instrument_and_funding_follows_native_nanoseconds()
+    {
+        // Sol round 1 on #39: the manual instrument was empty, and two settlements within one microsecond could swap.
+        await using var database = await CoreDatabase.CreateAsync();
+        var account = new Account(Guid.NewGuid(), Owner, "risex", "Rise");
+        var manual = new Account(Guid.NewGuid(), Owner, "manual", "Broker");
+        await using (var db = database.Context(Owner))
+        {
+            db.Accounts.AddRange(account, manual);
+            var play = new Play(Guid.NewGuid(), manual, new Vessel.Domain.Markets.PerpetualInstrument("manual", "ETH"), InstrumentSource.Manual,
+                PlayDocuments.Serialize(TestPlays.Plan()), T0);
+            db.Plays.Add(play);
+            db.ManualExecutions.Add(new ManualExecution
+            {
+                Id = Guid.NewGuid(), OwnerId = Owner, PlayId = play.Id, Role = "entry", EntryId = "entry-1", OccurredAtUtc = T0, Side = "buy",
+                Quantity = "1", Price = "100", Source = "Broker statement", CreatedAtUtc = T0, UpdatedAtUtc = T0,
+            });
+            FundingPayment Pay(string id, long ns) => new()
+            {
+                Id = Guid.NewGuid(), OwnerId = Owner, AccountId = account.Id, SourceId = id, ContractId = "ETH", VenueContractId = "2", Amount = -1,
+                Asset = "USDC", OccurredAtUtc = DateTimeOffset.UnixEpoch.AddTicks(ns / 1000 * 10), OccurredAtUnixNanoseconds = ns,
+            };
+            // Same microsecond; the later nanosecond has the lexically smaller ID.
+            db.FundingPayments.AddRange(Pay("b-first", 1759312800000000101), Pay("a-second", 1759312800000000102));
+            await db.SaveChangesAsync();
+        }
+        await using (var db = database.Context(Owner))
+        {
+            var store = new ExportStore(db);
+            Assert.Equal("ETH", (await store.ManualExecutionsAsync(manual.Id, null, null, default).SingleAsync()).Instrument);
+            Assert.Equal(["b-first", "a-second"], await store.FundingAsync(account.Id, null, null, default).Select(p => p.SourceId).ToListAsync());
+        }
+    }
+
+    [PostgresFact]
+    public async Task A_paper_request_is_refused_before_any_read()
+    {
+        // Sol round 1 on #39: a real account read in paper mode returned the CSV.
+        await using var database = await CoreDatabase.CreateAsync();
+        await using var factory = new CoreApiFactory(Owner, connection: database.ConnectionString);
+        using var client = factory.AuthorizedClient();
+        Assert.Equal(System.Net.HttpStatusCode.Conflict,
+            (await client.GetAsync($"/api/accounts/{Guid.NewGuid()}/facts?kind=executions&tradingMode=paper")).StatusCode);
     }
 }

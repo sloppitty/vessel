@@ -108,6 +108,11 @@ and both ends are included; leaving them out exports everything retained.
 - **Which accounts.** Enabled real accounts only, as Activity shows them. A
   disabled or paper account is refused with 409, and another owner's account
   reads as not found.
+- **Requests.**
+  - The route is actual-only, so a `tradingMode=paper` request gets 409
+    before any read.
+  - An end date with no following day (9999-12-31) is a 400.
+  - A cancelled download stops its database reads.
 - **Executions** are imported fills, then owner-entered manual executions.
   Each has:
   - its provenance;
@@ -116,9 +121,11 @@ and both ends are included; leaving them out exports everything retained.
   - exact price, quantity, fee and fee token, with the fee basis;
   - the venue's P&L and its basis;
   - the venue-reported leverage;
-  - for a manual row, its Play, role and source label.
+  - for a manual row, its Play's instrument, and its Play, role and source
+    label.
 - **Funding** is its own file. Each settlement keeps its native source ID,
-  exact signed amount, asset, and RISEx's native nanoseconds.
+  exact signed amount, asset, and RISEx's native nanoseconds. Settlements
+  within one microsecond follow their native nanoseconds.
 - **No notice row.** The files have none, so other tools can ingest them.
   Settings → Data export states that they are retained facts only, not a tax
   report.
