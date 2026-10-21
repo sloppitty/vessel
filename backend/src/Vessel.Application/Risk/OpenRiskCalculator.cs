@@ -12,10 +12,10 @@ public sealed record RiskExecution(OrderLinkRole Role, string? EntryId, string? 
     bool Contradicts = false);
 
 /// <summary>
-/// A Play's risk at its plan's stops, or null with the reason it is unknown. <paramref name="Unprotected"/> says that some
-/// open quantity has no linked stop order resting at the venue as last read (venue Plays only).
+/// A Play's risk at its plan's stops, or null with the reason it is unknown. Whether its stops rest at the venue is not
+/// decided here: that is the monitor's recorded coverage.
 /// </summary>
-public sealed record PlayRisk(Ratio? Risk, string? Reason, bool Unprotected = false);
+public sealed record PlayRisk(Ratio? Risk, string? Reason);
 
 /// <summary>
 /// Open risk of one Planned or Open Play (Phase 2, item 1): the loss if every current stop of the current plan fills.
@@ -39,11 +39,11 @@ public static class OpenRiskCalculator
     public const string ExitsExceed = "The exits exceed the entries.";
     public const string Contradicting = "A linked fill contradicts its role.";
     public const string Units = "The quote asset is not a listed USD stablecoin.";
+    public const string MissingExecutions = "A linked order is missing executions, so its fills are not all known.";
 
     private static readonly Ratio Hundred = Ratio.Of(100);
 
-    public static PlayRisk Calculate(PlayPlanDocument plan, IReadOnlyList<RiskExecution> executions, bool usdQuoted,
-        IReadOnlySet<string>? restingStops = null)
+    public static PlayRisk Calculate(PlayPlanDocument plan, IReadOnlyList<RiskExecution> executions, bool usdQuoted)
     {
         if (!usdQuoted) return new(null, Units);
         if (executions.Any(e => e.Contradicts)) return new(null, Contradicting);
@@ -88,10 +88,15 @@ public static class OpenRiskCalculator
             exited[open[0]] = exited.GetValueOrDefault(open[0], Ratio.Zero) + unattributed;
         }
 
+        // The plan must allocate the whole position: entry shares total exactly 100%, as the editor's coverage requires.
+        if (entries.Aggregate(Ratio.Zero, (sum, e) => sum + e.Share) != Hundred) return new(null, EntryShares);
+        // Integrity before anything is skipped: an entry, with or without a share, may never exit more than it entered.
+        foreach (var (entry, _, _) in entries)
+            if (exited.GetValueOrDefault(entry.Id, Ratio.Zero) > filled.GetValueOrDefault(entry.Id, (Ratio.Zero, Ratio.Zero)).Item1)
+                return new(null, ExitsExceed);
         var planned = PlannedQuantities(plan, entries, leverage);
         var levels = ExecutionLevels(plan, entries, leverage);
         var risk = Ratio.Zero;
-        var unprotected = false;
         foreach (var (entry, share, price) in entries)
         {
             if (share.Sign == 0 && !filled.ContainsKey(entry.Id)) continue;
@@ -122,7 +127,6 @@ public static class OpenRiskCalculator
                 var total = left.Aggregate(Ratio.Zero, (sum, s) => sum + s.Share!.Value);
                 foreach (var stop in left)
                     risk += remaining * Ratio.Divide(stop.Share!.Value, total)!.Value * Loss(average, stop.Price!.Value, sign);
-                if (restingStops is not null && left.Any(s => !restingStops.Contains(Key(entry.Id, s.Id)))) unprotected = true;
             }
 
             // Planned part: the planned quantity not yet filled, at the planned price, against every stop.
@@ -133,7 +137,7 @@ public static class OpenRiskCalculator
                     risk += unfilled * Ratio.Divide(stop.Share!.Value, Hundred)!.Value * Loss(price.Value, stop.Price!.Value, sign);
             }
         }
-        return new(risk, null, unprotected);
+        return new(risk, null);
     }
 
     private static string Key(string entryId, string levelId) => entryId + "\u001f" + levelId;

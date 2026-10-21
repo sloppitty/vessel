@@ -127,18 +127,22 @@ public sealed class OpenRiskCalculatorTests
             OpenRiskCalculator.Calculate(Plan(), [Fill(OrderLinkRole.Entry, 1, 100), Fill(OrderLinkRole.Stop, 2, 95, level: "s1")], true).Reason);
         Assert.Equal(OpenRiskCalculator.Contradicting,
             OpenRiskCalculator.Calculate(Plan(), [new(OrderLinkRole.Entry, "e1", null, 1, 100, Contradicts: true)], true).Reason);
-        // Margin sizing needs every entry priced and the shares to total 100%.
-        Assert.Equal(OpenRiskCalculator.NoQuantity,
+        // Every plan must allocate the whole position (Sol round 1 on #36): half an entry is unknown, not half the risk.
+        Assert.Equal(OpenRiskCalculator.EntryShares,
             OpenRiskCalculator.Calculate(Plan(sizing: "margin", size: "100", entries: Entry("e1", "50", "100", Stop("95"))), [], true).Reason);
+        Assert.Equal(OpenRiskCalculator.EntryShares,
+            OpenRiskCalculator.Calculate(Plan(size: "10", entries: Entry("e1", "50", "100", Stop("90"))), [], true).Reason);
+        // Margin sizing also needs every entry priced.
+        Assert.Equal(OpenRiskCalculator.NoQuantity, OpenRiskCalculator.Calculate(Plan(sizing: "margin", size: "100",
+            entries: [Entry("e1", "50", "100", Stop("95")), Entry("e2", "50", "", Stop("90", id: "s2"))]), [], true).Reason);
     }
 
     [Fact]
-    public void Open_quantity_without_a_resting_linked_stop_is_flagged()
+    public void A_zero_share_entry_cannot_hide_exits_beyond_its_fills()
     {
-        var resting = new HashSet<string> { "e1\u001fs1" };
-        Assert.False(OpenRiskCalculator.Calculate(Plan(), [Fill(OrderLinkRole.Entry, 1, 100)], true, resting).Unprotected);
-        Assert.True(OpenRiskCalculator.Calculate(Plan(), [Fill(OrderLinkRole.Entry, 1, 100)], true, new HashSet<string>()).Unprotected);
-        // Nothing open, nothing to protect.
-        Assert.False(OpenRiskCalculator.Calculate(Plan(), [], true, new HashSet<string>()).Unprotected);
+        // Sol round 1 on #36: entry A has no share and no fill, but a linked stop of A executed one unit.
+        var plan = Plan(entries: [Entry("a", "0", "100", Stop("95", id: "sa")), Entry("b", "100", "100", Stop("95", id: "sb"))]);
+        var result = OpenRiskCalculator.Calculate(plan, [Fill(OrderLinkRole.Stop, 1, 95, entry: "a", level: "sa")], true);
+        Assert.Equal((null, OpenRiskCalculator.ExitsExceed), (result.Risk, result.Reason));
     }
 }

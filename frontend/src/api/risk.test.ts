@@ -4,7 +4,7 @@ import { isOpenRisk, isOpenRiskPreview, isRiskSettings, type OpenRisk } from './
 import { createWorkspaceApi } from './workspace'
 
 const play = { playId: '11111111-1111-1111-1111-111111111111', title: 'BTC long', direction: 'long', status: 'planned',
-  accountId: '22222222-2222-2222-2222-222222222222', riskUsd: '12.5', reason: null, rounded: false, unprotected: false } as const
+  accountId: '22222222-2222-2222-2222-222222222222', riskUsd: '12.5', reason: null, rounded: false, protection: null } as const
 const document: OpenRisk = { ...emptyOpenRisk('all'), long: { knownUsd: '12.5', knownCount: 1, unknownCount: 0, rounded: false }, plays: [play] }
 
 afterEach(() => vi.unstubAllGlobals())
@@ -23,13 +23,15 @@ describe('open risk documents', () => {
     expect(isOpenRisk({ ...document, long: { ...document.long, knownCount: 2 } }, 'all')).toBe(false)
     // Unknown is null with a reason, never both and never neither.
     expect(isOpenRisk({ ...document, plays: [{ ...play, riskUsd: null }] }, 'all')).toBe(false)
-    expect(isOpenRisk({ ...document, unprotectedCount: 1 }, 'all')).toBe(false)
+    // Protection counts must match the Plays' recorded coverage.
+    expect(isOpenRisk({ ...document, protection: { notCovered: 1, unverified: 0 } }, 'all')).toBe(false)
+    expect(isOpenRisk({ ...document, plays: [{ ...play, protection: 'blocked' }] }, 'all')).toBe(false)
   })
 
   it('checks previews against their request and settings as decimal or null', () => {
     const request = { playId: null, accountId: play.accountId, plan: { direction: 'short' as const, sizingMode: 'quantity' as const, size: '1', leverage: '1', entries: [] } }
-    expect(isOpenRiskPreview({ playId: null, direction: 'short', riskUsd: '2', reason: null, rounded: false, unprotected: false }, request)).toBe(true)
-    expect(isOpenRiskPreview({ playId: null, direction: 'long', riskUsd: '2', reason: null, rounded: false, unprotected: false }, request)).toBe(false)
+    expect(isOpenRiskPreview({ playId: null, direction: 'short', riskUsd: '2', reason: null, rounded: false }, request)).toBe(true)
+    expect(isOpenRiskPreview({ playId: null, direction: 'long', riskUsd: '2', reason: null, rounded: false }, request)).toBe(false)
     expect(isRiskSettings({ openRiskLimitPercent: null })).toBe(true)
     expect(isRiskSettings({ openRiskLimitPercent: '3.5' })).toBe(true)
     expect(isRiskSettings({ openRiskLimitPercent: 3.5 })).toBe(false)

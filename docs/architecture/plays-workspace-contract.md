@@ -345,6 +345,13 @@ is not shown for retrospective or paper Plays.
   `POST /api/risk/open/preview`, a moment after the last keystroke, against
   the saved Play's executions. The browser only replaces the saved Play's
   own contribution with the preview and forms exact shares.
+- **Coverage and freshness.**
+  - The line also counts Open venue Plays not covered at the venue (confirmed
+    absence only) and those with unverified stops, from the monitor's
+    recorded coverage.
+  - When only some accounts report a balance, it names the known balances.
+  - The preview is read again whenever the saved Play reloads, so new fills
+    count.
 - **The limit is flagged, never enforced.** Going over it adds "over the 3%
   limit" in the warning colour. Nothing is blocked.
 - **Failures.** A failed read says "unavailable", never a guess.

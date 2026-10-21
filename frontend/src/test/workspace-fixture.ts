@@ -125,7 +125,7 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
     // Open risk: nothing planned or open, no limit; a preview is unknown until a test supplies one.
     openRisk: vi.fn().mockImplementation((scope: string) => Promise.resolve(emptyOpenRisk(scope))),
     openRiskPreview: vi.fn().mockImplementation((request: { playId: string | null; plan: { direction: 'long' | 'short' } }) => Promise.resolve({
-      playId: request.playId, direction: request.plan.direction, riskUsd: null, reason: 'An entry has no stop.', rounded: false, unprotected: false })),
+      playId: request.playId, direction: request.plan.direction, riskUsd: null, reason: 'An entry has no stop.', rounded: false })),
     riskSettings: vi.fn().mockResolvedValue({ openRiskLimitPercent: null }), updateRiskSettings: vi.fn(unexpected),
     review: vi.fn().mockResolvedValue(emptyReview),
     reviewExclusions: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, nextOffset: null, notice: 'Fixture exclusions.' }),
@@ -149,7 +149,7 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
 export const emptyOpenRisk = (scope: string): OpenRisk => ({
   asOfUtc: '2026-10-21T10:00:00.000Z', scope, balance: { amountUsd: null, contributingAccountCount: 0, totalAccountCount: 0 },
   long: { knownUsd: '0', knownCount: 0, unknownCount: 0, rounded: false }, short: { knownUsd: '0', knownCount: 0, unknownCount: 0, rounded: false },
-  notIncluded: [], unprotectedCount: 0, plays: [], limitPercent: null, notice: 'Fixture open risk.',
+  notIncluded: [], protection: { notCovered: 0, unverified: 0 }, plays: [], limitPercent: null, notice: 'Fixture open risk.',
 })
 
 /** A sizing document with no closed plays, full exposure and the default limits. */

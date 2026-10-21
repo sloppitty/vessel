@@ -44,8 +44,10 @@ public abstract class RiskIsolationCases(IsolationHost api)
         foreach (var (caller, foreign) in new[] { (a, bAccount), (b, aAccount) })
             await Isolated.NotFound(caller, foreign, id => new HttpRequestMessage(HttpMethod.Post, "/api/risk/open/preview")
             { Content = JsonContent.Create(new OpenRiskPreviewRequest(null, id, Edited)) }, "Account not found.");
-        var foreignPlay = await a.Post("/api/risk/open/preview", new OpenRiskPreviewRequest(bPlay, aAccount, Edited));
-        Assert.Equal("10", foreignPlay.GetProperty("riskUsd").GetString());
+        // Another owner's Play reads as unknown too: no fallback to a Draft, nothing of theirs measured.
+        foreach (var (caller, account, foreign) in new[] { (a, aAccount, bPlay), (b, bAccount, aPlay) })
+            await Isolated.NotFound(caller, foreign, id => new HttpRequestMessage(HttpMethod.Post, "/api/risk/open/preview")
+            { Content = JsonContent.Create(new OpenRiskPreviewRequest(id, account, Edited)) }, "Play not found.");
         // A scope naming another owner's account is not found, like an unknown one.
         foreach (var (caller, foreign) in new[] { (a, bAccount), (b, aAccount) })
             await Isolated.NotFound(caller, foreign, id => new HttpRequestMessage(HttpMethod.Get, $"/api/risk/open?scope=account:{id}"), "Account not found.");

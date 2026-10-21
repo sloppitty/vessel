@@ -5,7 +5,7 @@ import { exactAdd, exactDiv, exactFixed, exactInteger, exactMul, exactSignOf, ex
 import { money } from '@/lib/format'
 import { InfoTip } from '@/components/ui/info-tip'
 import type { PlayDraft } from './draft'
-import { exact, riskPlanOf, riskShare, useOpenRisk, useOpenRiskPreview, withThisPlay } from './open-risk'
+import { exact, partialBalance, riskPlanOf, riskShare, useOpenRisk, useOpenRiskPreview, withThisPlay } from './open-risk'
 
 /**
  * One line in capital context (Phase 2, item 1): open risk at the plan's stops across the scope's Planned and Open Plays,
@@ -19,7 +19,7 @@ export function OpenRiskLine({ api, scope, reference, playId, accountId, draft, 
   const plan = useMemo(() => riskPlanOf(draft), [draft])
   const request = useMemo<OpenRiskPreviewRequest>(() => ({ playId, accountId, plan }), [playId, accountId, plan])
   const risk = useOpenRisk(api, scope, reloadKey)
-  const preview = useOpenRiskPreview(api, request)
+  const preview = useOpenRiskPreview(api, request, reloadKey)
   if (risk?.failed || preview?.failed) return <p className="capital-open-risk" data-testid="open-risk-line">
     <span className="capital-open-risk-label">Open risk</span> unavailable</p>
   if (!risk?.value || !preview?.value) return <p className="capital-open-risk" data-testid="open-risk-line" aria-busy="true">
@@ -33,11 +33,14 @@ export function OpenRiskLine({ api, scope, reference, playId, accountId, draft, 
   const totalPercent = balance && exactSignOf(balance) > 0 ? exactMul(exactDiv(total, balance)!, exactInteger(100)) : null
   const over = limit !== null && totalPercent !== null && exactSignOf(exactSub(totalPercent, limit)) > 0
   const notIncluded = document.notIncluded.reduce((sum, item) => sum + item.count, 0)
+  const { notCovered, unverified } = document.protection
   return <p className="capital-open-risk" data-testid="open-risk-line">
     <InfoTip className="capital-open-risk-label" trigger="Open risk">{document.notice}</InfoTip>
-    <span>long {show(totals.long)} · short {show(totals.short)}{balance ? ` of ${reference}` : ''}</span>
+    <span>long {show(totals.long)} · short {show(totals.short)}{balance ? ` of ${reference}${partialBalance(document)}` : ''}</span>
     {totals.unknown > 0 && <span className="capital-open-risk-unknown"> · {totals.unknown} unknown</span>}
     {notIncluded > 0 && <span> · {notIncluded} not included</span>}
+    {notCovered > 0 && <span className="capital-open-risk-over"> · {notCovered} not covered at the venue</span>}
+    {unverified > 0 && <span> · {unverified} with unverified stops</span>}
     <span> — this Play {own === null ? `unknown (${preview.value.reason})` : `+${show(own)}`}</span>
     {limit !== null && <span className={over ? 'capital-open-risk-over' : undefined}>
       {` (${over ? 'over the' : 'limit'} ${exactFixed(limit, 4)}%${over ? ' limit' : ''})`}</span>}

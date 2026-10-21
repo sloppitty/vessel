@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Vessel.Domain.Monitoring;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Risk;
 
@@ -15,11 +16,19 @@ public sealed record OpenRiskDirectionDto(string KnownUsd, int KnownCount, int U
 public sealed record OpenRiskExcludedDto(string Reason, int Count);
 
 /// <summary>
-/// One Planned or Open Play's risk at its plan's stops, or null with the reason it is unknown. <paramref name="Unprotected"/>
-/// says that some of its open quantity has no linked stop order resting at the venue, as last read.
+/// One Planned or Open Play's risk at its plan's stops, or null with the reason it is unknown. <paramref name="Protection"/>
+/// is the monitor's last recorded stop coverage of an Open venue Play (0.4c): <c>covered</c>, <c>shared</c>,
+/// <c>not-covered</c>, <c>unknown</c>, <c>unsupported</c>, <c>stale</c> or <c>not-checked</c>; null for Planned and manual Plays.
 /// </summary>
 public sealed record OpenRiskPlayDto(Guid PlayId, string Title, string Direction, string Status, Guid AccountId,
-    string? RiskUsd, string? Reason, bool Rounded, bool Unprotected);
+    string? RiskUsd, string? Reason, bool Rounded, string? Protection);
+
+/// <summary>
+/// Open venue Plays by recorded stop coverage: <paramref name="NotCovered"/> counts only confirmed absence;
+/// <paramref name="Unverified"/> counts unknown, unsupported (such as a current book that is not read), stale and
+/// not yet checked coverage. Covered and shared protection count in neither.
+/// </summary>
+public sealed record OpenRiskProtectionDto(int NotCovered, int Unverified);
 
 /// <summary>The scope's enabled-account balance, an exact sum of the known balances, with how many accounts it covers.</summary>
 public sealed record OpenRiskBalanceDto(string? AmountUsd, int ContributingAccountCount, int TotalAccountCount);
@@ -31,7 +40,7 @@ public sealed record OpenRiskBalanceDto(string? AmountUsd, int ContributingAccou
 /// </summary>
 public sealed record OpenRiskDto(DateTimeOffset AsOfUtc, string Scope, OpenRiskBalanceDto Balance,
     OpenRiskDirectionDto Long, OpenRiskDirectionDto Short, IReadOnlyList<OpenRiskExcludedDto> NotIncluded,
-    int UnprotectedCount, IReadOnlyList<OpenRiskPlayDto> Plays, string? LimitPercent, string Notice);
+    OpenRiskProtectionDto Protection, IReadOnlyList<OpenRiskPlayDto> Plays, string? LimitPercent, string Notice);
 
 /// <summary>The owner's soft risk limits; null is unset.</summary>
 public sealed record RiskSettingsDto(string? OpenRiskLimitPercent);
@@ -48,13 +57,13 @@ public sealed record RiskPlanDto(string Direction, string SizingMode, string Siz
 /// <paramref name="PlayId"/> is the saved Play whose executions count, or null for a new Draft.
 /// </summary>
 public sealed record OpenRiskPreviewRequest(Guid? PlayId, [property: JsonRequired] Guid AccountId, [property: JsonRequired] RiskPlanDto Plan);
-public sealed record OpenRiskPreviewDto(Guid? PlayId, string Direction, string? RiskUsd, string? Reason, bool Rounded, bool Unprotected);
+public sealed record OpenRiskPreviewDto(Guid? PlayId, string Direction, string? RiskUsd, string? Reason, bool Rounded);
 
 /// <summary>
-/// One active real Play with what open risk reads: its executions as linked fills or the manual ledger, the stop levels
-/// whose linked order rests at the venue as last read, and a problem that makes its executions unreadable.
+/// One active real Play with what open risk reads: its executions as linked fills or the manual ledger, the monitor's last
+/// recorded stop coverage, and a problem that makes its executions unreadable or incomplete.
 /// </summary>
-public sealed record OpenRiskFacts(Play Play, IReadOnlyList<RiskExecution> Executions, IReadOnlySet<string> RestingStops,
+public sealed record OpenRiskFacts(Play Play, IReadOnlyList<RiskExecution> Executions, MonitorCoverage? Coverage,
     bool ManualLedger, string? Problem = null);
 
 // Application owns this bounded port; EF details stay in Persistence. Reads are owner-filtered.
@@ -65,6 +74,8 @@ public interface IOpenRiskStore
     /// when given, with their linked executions or manual ledger.
     /// </summary>
     Task<List<OpenRiskFacts>> ActivePlaysAsync(IReadOnlyCollection<Guid>? playIds, CancellationToken ct);
+    /// <summary>The owner's Play by ID, in any status and mode; null when unknown.</summary>
+    Task<Play?> PlayAsync(Guid id, CancellationToken ct);
     Task<RiskSettings?> SettingsAsync(CancellationToken ct);
     /// <summary>Inside a unit of work: the owner's settings row, created when absent, locked for update.</summary>
     Task<RiskSettings> SettingsForUpdateAsync(RiskSettings initial, CancellationToken ct);

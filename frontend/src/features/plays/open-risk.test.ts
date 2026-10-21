@@ -7,13 +7,13 @@ import { createDraft } from './draft'
 
 const id = (n: number) => `0000000${n}-0000-0000-0000-000000000000`
 const play = (n: number, direction: 'long' | 'short', riskUsd: string | null) => ({ playId: id(n), title: `P${n}`, direction, status: 'planned' as const,
-  accountId: id(9), riskUsd, reason: riskUsd === null ? 'An entry has no stop.' : null, rounded: false, unprotected: false })
+  accountId: id(9), riskUsd, reason: riskUsd === null ? 'An entry has no stop.' : null, rounded: false, protection: null })
 // G-06: three 12.5 longs on a 1,000 balance and one 10 short, plus one unknown long.
 const risk: OpenRisk = { ...emptyOpenRisk('all'), balance: { amountUsd: '1000', contributingAccountCount: 1, totalAccountCount: 1 },
   long: { knownUsd: '37.5', knownCount: 3, unknownCount: 1, rounded: false }, short: { knownUsd: '10', knownCount: 1, unknownCount: 0, rounded: false },
   plays: [play(1, 'long', '12.5'), play(2, 'long', '12.5'), play(3, 'long', '12.5'), play(4, 'short', '10'), play(5, 'long', null)] }
 const preview = (riskUsd: string | null, direction: 'long' | 'short' = 'long'): OpenRiskPreview =>
-  ({ playId: null, direction, riskUsd, reason: riskUsd === null ? 'A stop has no price.' : null, rounded: false, unprotected: false })
+  ({ playId: null, direction, riskUsd, reason: riskUsd === null ? 'A stop has no price.' : null, rounded: false })
 const fixed = (value: ReturnType<typeof exactDecimal>) => exactFixed(value!, 28)
 
 describe('open risk in capital context', () => {

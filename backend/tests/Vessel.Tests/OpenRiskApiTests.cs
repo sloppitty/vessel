@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using System.Net;
 using System.Net.Http.Json;
 using Vessel.Application.Plays;
@@ -92,10 +93,12 @@ public sealed class OpenRiskApiTests
         Assert.Equal(("37.5", 4, 1), (all.Long.KnownUsd, all.Long.KnownCount, all.Long.UnknownCount));
         Assert.Equal(("10", 1, 0), (all.Short.KnownUsd, all.Short.KnownCount, all.Short.UnknownCount));
         Assert.Equal([("paused", 1), ("unresolved", 1)], all.NotIncluded.Select(x => (x.Reason, x.Count)));
-        Assert.Equal(1, all.UnprotectedCount);
+        // The Open Play has no recorded coverage yet: unverified, never counted as not covered.
+        Assert.Equal(new OpenRiskProtectionDto(0, 1), all.Protection);
         Assert.Null(all.LimitPercent);
         var managed = all.Plays.Single(p => p.PlayId == open);
-        Assert.Equal(("0", null, true, "open"), (managed.RiskUsd, managed.Reason, managed.Unprotected, managed.Status));
+        Assert.Equal(("0", null, "not-checked", "open"), (managed.RiskUsd, managed.Reason, managed.Protection, managed.Status));
+        Assert.All(all.Plays.Where(p => p.Status == "planned"), p => Assert.Null(p.Protection));
         Assert.Equal(OpenRiskCalculator.UnpricedStop, all.Plays.Single(p => p.RiskUsd is null).Reason);
         // The disabled account's Play and the Draft are not in the population at all.
         Assert.Equal(6, all.Plays.Count);
@@ -115,7 +118,7 @@ public sealed class OpenRiskApiTests
     [PostgresFact]
     public async Task The_preview_measures_the_edited_plan_against_the_saved_executions()
     {
-        var (database, owner, account, _, open) = await Seed();
+        var (database, owner, account, other, open) = await Seed();
         await using var _ = database;
         await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
         using var client = factory.AuthorizedClient();
@@ -123,16 +126,71 @@ public sealed class OpenRiskApiTests
 
         // Moving the managed stop back below the fill shows its risk at once, from the saved fill at 100.
         var saved = await Preview(client, new(open, account.Id, Edited("90")));
-        Assert.Equal(("10", (string?)null, true), (saved.RiskUsd, saved.Reason, saved.Unprotected));
+        Assert.Equal(("10", (string?)null), (saved.RiskUsd, saved.Reason));
         // A new Draft has no executions: its planned quantity at its planned price.
         var draft = await Preview(client, new(null, account.Id, Edited("97.5")));
-        Assert.Equal(("2.5", false), (draft.RiskUsd, draft.Unprotected));
+        Assert.Equal("2.5", draft.RiskUsd);
         // A blank stop in a Draft is unknown, never an error.
         Assert.Equal(OpenRiskCalculator.UnpricedStop, (await Preview(client, new(null, account.Id, Edited("")))).Reason);
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync("/api/risk/open/preview",
             new OpenRiskPreviewRequest(null, Guid.NewGuid(), Edited("90")))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/risk/open/preview",
             new OpenRiskPreviewRequest(null, account.Id, Edited("90") with { Entries = [] }))).StatusCode);
+        // Sol round 1 on #36: a saved Play must be this account's; an unknown or mismatched one is not found, never a Draft.
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync("/api/risk/open/preview",
+            new OpenRiskPreviewRequest(open, other.Id, Edited("90")))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync("/api/risk/open/preview",
+            new OpenRiskPreviewRequest(Guid.NewGuid(), account.Id, Edited("90")))).StatusCode);
+        // Two stops sharing an ID cannot stand for one another.
+        var duplicate = new RiskPlanDto("long", "quantity", "10", "1", [new("e1", "100", "100",
+            [new("s", "price", "90", "50"), new("s", "price", "105", "50")])]);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/risk/open/preview",
+            new OpenRiskPreviewRequest(null, account.Id, duplicate))).StatusCode);
+    }
+
+    [PostgresFact]
+    public async Task Protection_comes_from_the_monitors_recorded_coverage_and_missing_executions_are_unknown()
+    {
+        var (database, owner, account, _, open) = await Seed();
+        await using var _ = database;
+        await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
+        using var client = factory.AuthorizedClient();
+        async Task<(OpenRiskProtectionDto, string?)> Read()
+        {
+            var risk = (await client.GetFromJsonAsync<OpenRiskDto>("/api/risk/open"))!;
+            return (risk.Protection, risk.Plays.Single(p => p.PlayId == open).Protection);
+        }
+        async Task Coverage(string state, bool? covered, DateTimeOffset checkedAt)
+        {
+            await using var db = database.Context(owner);
+            db.Set<Vessel.Domain.Monitoring.MonitorCoverage>().RemoveRange(db.Set<Vessel.Domain.Monitoring.MonitorCoverage>());
+            db.Add(new Vessel.Domain.Monitoring.MonitorCoverage { PlayId = open, OwnerId = owner, AccountId = account.Id, ContractId = "BTC",
+                State = state, Covered = covered, Reason = "stop-orders", CheckedAtUtc = checkedAt });
+            await db.SaveChangesAsync();
+        }
+        var now = DateTimeOffset.UtcNow;
+        await Coverage("known", false, now);
+        Assert.Equal((new OpenRiskProtectionDto(1, 0), "not-covered"), await Read());
+        await Coverage("known", true, now);
+        Assert.Equal((new OpenRiskProtectionDto(0, 0), "covered"), await Read());
+        await Coverage("shared", null, now);
+        Assert.Equal((new OpenRiskProtectionDto(0, 0), "shared"), await Read());
+        // A current book that is not read is unsupported: unverified, never "not covered".
+        await Coverage("unsupported", null, now);
+        Assert.Equal((new OpenRiskProtectionDto(0, 1), "unsupported"), await Read());
+        // An old record is stale, like the monitor's own read.
+        await Coverage("known", false, now.AddHours(-1));
+        Assert.Equal((new OpenRiskProtectionDto(0, 1), "stale"), await Read());
+
+        // Sol round 1 on #36: a filled entry order whose retained executions fall short makes the whole Play unknown.
+        await using (var db = database.Context(owner))
+        {
+            var order = await db.Orders.SingleAsync(o => o.ExternalOrderId == "entry");
+            order.OriginalSize = 10;
+            await db.SaveChangesAsync();
+        }
+        var risk = (await client.GetFromJsonAsync<OpenRiskDto>("/api/risk/open"))!;
+        Assert.Equal((null, OpenRiskCalculator.MissingExecutions), (risk.Plays.Single(p => p.PlayId == open).RiskUsd, risk.Plays.Single(p => p.PlayId == open).Reason));
     }
 
     private static async Task<OpenRiskPreviewDto> Preview(HttpClient client, OpenRiskPreviewRequest request)

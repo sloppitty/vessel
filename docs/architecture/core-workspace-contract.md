@@ -220,8 +220,13 @@ risk" tile follows the existing metric tiles for the selected scope, so
 Allocation stays between the tiles and Summary.
 - It shows long and short open risk as shares of the scope's balance, or in
   nominal USD without one. They are never netted.
-- It shows the unknown count, and the count of Open Plays without a linked
-  resting stop.
+- It shows the unknown count, and the Plays not included (Paused,
+  Unresolved).
+- Open venue Plays are counted from 0.4c's recorded coverage: only confirmed
+  absence is "not covered at the venue"; unknown, unsupported, stale and
+  unchecked coverage are "unverified".
+- When only some accounts report a balance, shares say they divide by the
+  known balances of N of M accounts.
 - With an owner soft limit set, it says whether the total (long plus short)
   is over it.
 - Its notice, in an `InfoTip`, states the rule.

@@ -37,9 +37,12 @@ export function useOpenRisk(api: WorkspaceApi, scope: string | null, reloadKey: 
   return state?.api === api && state.key === key ? state : null
 }
 
-/** This plan's own risk by the server's rule, read a moment after the owner stops editing. */
-export function useOpenRiskPreview(api: WorkspaceApi, request: OpenRiskPreviewRequest | null) {
-  const key = JSON.stringify(request)
+/**
+ * This plan's own risk by the server's rule, read a moment after the owner stops editing, and again whenever `reloadKey`
+ * changes, so new fills of the saved Play are counted and an older preview never replaces a fresh total.
+ */
+export function useOpenRiskPreview(api: WorkspaceApi, request: OpenRiskPreviewRequest | null, reloadKey: unknown) {
+  const key = JSON.stringify([request, reloadKey])
   const [state, setState] = useState<Load<OpenRiskPreview> & { api: WorkspaceApi } | null>(null)
   useEffect(() => {
     if (request === null) return
@@ -54,6 +57,13 @@ export function useOpenRiskPreview(api: WorkspaceApi, request: OpenRiskPreviewRe
 }
 
 export const exact = (value: string | null) => value === null ? null : exactDecimal(value)
+
+/**
+ * When only some of the scope's accounts report a balance, shares divide by their known total: say so, never imply the
+ * whole scope.
+ */
+export const partialBalance = (risk: OpenRisk) => risk.balance.contributingAccountCount < risk.balance.totalAccountCount
+  ? ` (known balances of ${risk.balance.contributingAccountCount} of ${risk.balance.totalAccountCount} accounts)` : ''
 
 /** A share of the balance in percent with two decimals; a nonzero share that rounds to zero is "<0.01%". */
 export function riskShare(amount: Exact, balance: Exact | null): string | null {

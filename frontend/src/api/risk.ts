@@ -22,9 +22,12 @@ export interface OpenRiskPlay {
   riskUsd: string | null
   reason: string | null
   rounded: boolean
-  /** Some open quantity has no linked stop order resting at the venue, as last read. */
-  unprotected: boolean
+  /** The monitor's last recorded stop coverage of an Open venue Play; null for Planned and manual Plays. */
+  protection: OpenRiskProtectionState | null
 }
+export type OpenRiskProtectionState = 'covered' | 'shared' | 'not-covered' | 'unknown' | 'unsupported' | 'stale' | 'not-checked'
+const protectionStates: readonly string[] = ['covered', 'shared', 'not-covered', 'unknown', 'unsupported', 'stale', 'not-checked']
+const unverifiedStates: readonly string[] = ['unknown', 'unsupported', 'stale', 'not-checked']
 export interface OpenRisk {
   asOfUtc: string
   scope: string
@@ -32,7 +35,8 @@ export interface OpenRisk {
   long: OpenRiskDirection
   short: OpenRiskDirection
   notIncluded: { reason: 'paused' | 'unresolved'; count: number }[]
-  unprotectedCount: number
+  /** Open venue Plays whose recorded coverage confirms no covering stop, and those whose coverage is not verified. */
+  protection: { notCovered: number; unverified: number }
   plays: OpenRiskPlay[]
   limitPercent: string | null
   notice: string
@@ -54,7 +58,6 @@ export interface OpenRiskPreview {
   riskUsd: string | null
   reason: string | null
   rounded: boolean
-  unprotected: boolean
 }
 
 const direction = (v: unknown): v is OpenRiskDirection => isRecord(v) && isSummaryDecimal(v.knownUsd) && !v.knownUsd.startsWith('-') &&
@@ -64,22 +67,23 @@ const reason = (v: unknown) => isNullOr(v, x => isText(x, 500))
 const play = (v: unknown): v is OpenRiskPlay => isRecord(v) && isGuid(v.playId) && isText(v.title, 200) &&
   (v.direction === 'long' || v.direction === 'short') && (v.status === 'planned' || v.status === 'open') && isGuid(v.accountId) &&
   risk(v.riskUsd) && reason(v.reason) && (v.riskUsd === null) !== (v.reason === null) && typeof v.rounded === 'boolean' &&
-  typeof v.unprotected === 'boolean'
+  (v.protection === null || protectionStates.includes(v.protection as string))
 
 export const isOpenRisk = (v: unknown, scope: string): v is OpenRisk => isRecord(v) && isIsoTimestamp(v.asOfUtc) && v.scope === scope &&
   isRecord(v.balance) && isNullOr(v.balance.amountUsd, isSummaryDecimal) && isCount(v.balance.contributingAccountCount) &&
   isCount(v.balance.totalAccountCount) && v.balance.contributingAccountCount <= v.balance.totalAccountCount &&
   direction(v.long) && direction(v.short) &&
   isListOf(v.notIncluded, x => isRecord(x) && (x.reason === 'paused' || x.reason === 'unresolved') && isCount(x.count) && x.count > 0, 2) &&
-  isCount(v.unprotectedCount) && isListOf(v.plays, play, 10_000) &&
+  isRecord(v.protection) && isCount(v.protection.notCovered) && isCount(v.protection.unverified) && isListOf(v.plays, play, 10_000) &&
   v.long.knownCount + v.long.unknownCount + v.short.knownCount + v.short.unknownCount === v.plays.length &&
-  v.unprotectedCount === v.plays.filter(p => (p as OpenRiskPlay).unprotected).length &&
+  v.protection.notCovered === v.plays.filter(p => (p as OpenRiskPlay).protection === 'not-covered').length &&
+  v.protection.unverified === v.plays.filter(p => unverifiedStates.includes((p as OpenRiskPlay).protection ?? '')).length &&
   isNullOr(v.limitPercent, isSummaryDecimal) && isText(v.notice, 4000)
 
 export const isRiskSettings = (v: unknown): v is RiskSettings => isRecord(v) && isNullOr(v.openRiskLimitPercent, isSummaryDecimal)
 
 export const isOpenRiskPreview = (v: unknown, request: OpenRiskPreviewRequest): v is OpenRiskPreview => isRecord(v) &&
   v.playId === request.playId && v.direction === request.plan.direction && risk(v.riskUsd) && reason(v.reason) &&
-  (v.riskUsd === null) !== (v.reason === null) && typeof v.rounded === 'boolean' && typeof v.unprotected === 'boolean'
+  (v.riskUsd === null) !== (v.reason === null) && typeof v.rounded === 'boolean'
 
 export const openRiskPath = (scope: string) => `/api/risk/open?scope=${encodeURIComponent(scope)}`
