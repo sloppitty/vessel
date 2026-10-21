@@ -8,9 +8,12 @@ internal sealed class PortfolioConfiguration : IEntityTypeConfiguration<Portfoli
 {
     public void Configure(EntityTypeBuilder<Portfolio> builder)
     {
-        builder.ToTable("portfolios");
+        builder.ToTable("portfolios", table =>
+            table.HasCheckConstraint("CK_portfolios_trading_mode", "\"TradingMode\" IN ('real','paper')"));
         builder.HasKey(x => x.Id);
         builder.HasAlternateKey(x => new { x.OwnerId, x.Id });
+        builder.HasAlternateKey(x => new { x.OwnerId, x.Id, x.TradingMode });
+        builder.Property(x => x.TradingMode).HasMaxLength(8).HasDefaultValue("real");
         builder.Property(x => x.Name).HasMaxLength(200);
         builder.Property(x => x.Icon).HasMaxLength(PortfolioIcons.MaxLength).HasDefaultValue(PortfolioIcons.Default);
     }

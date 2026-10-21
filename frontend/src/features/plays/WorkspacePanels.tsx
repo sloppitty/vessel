@@ -97,7 +97,8 @@ export function CapitalContext({ accounts, portfolios, draft, retrospective = fa
   const account = accounts.find(item => item.id === draft.accountId && item.isEnabled !== false)
   const portfolio = portfolios.find(item => item.id === account?.portfolioId)
   const venues = useVenues()
-  const wallet = !!account && venues.can(account.venueId, 'stablecoinWallet')
+  const paper = account?.tradingMode === 'paper'
+  const wallet = !paper && !!account && venues.can(account.venueId, 'stablecoinWallet')
   // Unified and portfolio-margin accounts keep all balances in the wallet; their perps state is not meaningful.
   const unified = account?.accountMode === 'unifiedAccount' || account?.accountMode === 'portfolioMargin'
   const sized = positionSize(draft, leverageOf(draft.leverage))
@@ -118,14 +119,14 @@ export function CapitalContext({ accounts, portfolios, draft, retrospective = fa
     <div className="capital-values">
       <h2 className="capital-title sr-only">Capital context</h2>
       <dl className="capital-metrics">
-        {metric(portfolio ? `${portfolio.name} balance` : 'Account balance', balance,
-          `Nominal USD${coverage ? `; coverage ${coverage}` : ''}. Perps equity plus supported stablecoins, or the wallet alone in unified accounts.`)}
+        {metric(paper ? 'Paper cash balance' : portfolio ? `${portfolio.name} balance` : 'Account balance', balance,
+          paper ? 'Simulated cash only, isolated from real funds.' : `Nominal USD${coverage ? `; coverage ${coverage}` : ''}. Perps equity plus supported stablecoins, or the wallet alone in unified accounts.`)}
         {wallet && metric('Wallet total', account.totalStablecoinNominalUsd,
           `${account.stablecoinScope ?? 'Supported stablecoin wallet'}${account.accountMode ? ` · ${account.accountMode}` : ''}. Nominal 1 token = 1 USD.`)}
-        {account && venues.can(account.venueId, 'sync') && metric('Available', available?.value, 'Nominal USD the venue reports as available: wallet funds of unified accounts, otherwise available margin or else the withdrawable amount.',
+        {account && (paper || venues.can(account.venueId, 'sync')) && metric('Available', available?.value, paper ? 'Virtual available margin for this paper account. Not real funds.' : 'Nominal USD the venue reports as available: wallet funds of unified accounts, otherwise available margin or else the withdrawable amount.',
           available ? availableLabel(available) : undefined)}
         {wallet && !unified && metric('Perps equity', account.accountValueUsd, 'Perpetual account value at the venue.')}
-        {!wallet && account && metric('Account value', account.accountValueUsd)}
+        {!wallet && account && metric(paper ? 'Virtual equity' : 'Account value', account.accountValueUsd)}
         {!retrospective && <><div title={`Committed margin as a share of the ${reference}`}><dt>Margin / {reference}</dt><dd data-placeholder={share(sized.margin) === '—'}>{share(sized.margin)}</dd></div>
           <div title={`Position size (notional) as a share of the ${reference}`}><dt>Exposure / {reference}</dt><dd data-placeholder={share(sized.notional) === '—'}>{share(sized.notional)}</dd></div></>}
       </dl>
@@ -142,7 +143,7 @@ const journalSections = [
 ] as const
 
 export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceImages, evidenceRequest = 0, executionRequest = 0, readOnly = false, execution,
-  structuredReview, onStructuredReviewChange, status = 'draft', retrospective = false }: {
+  structuredReview, onStructuredReviewChange, status = 'draft', retrospective = false, keepExecutionMounted = false }: {
   notes: PlayDraft['notes']
   onChange: (notes: PlayDraft['notes']) => void
   evidence?: DraftEvidence[]
@@ -162,6 +163,7 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   /** Decides whether the Review tab is offered and whether structured answers can be given. */
   status?: PlayStatus
   retrospective?: boolean
+  keepExecutionMounted?: boolean
 }) {
   const id = useId()
   const state = useJournalStore()
@@ -253,7 +255,7 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
         </div>
       </fieldset>}
     </TabsContent>)}
-    {execution && <TabsContent value="execution" className="journal-tab-content" data-section="execution">{execution}</TabsContent>}
+    {execution && <TabsContent value="execution" className="journal-tab-content" data-section="execution" {...(keepExecutionMounted ? { forceMount: true, hidden: currentTab !== 'execution' } : {})}>{execution}</TabsContent>}
   </Tabs>
 
   // The dialog is portaled but still inside this provider, so both views share the tabs' working state.

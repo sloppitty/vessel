@@ -71,10 +71,20 @@ namespace Vessel.Persistence.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<decimal?>("StartingCapitalUsd")
+                        .HasColumnType("numeric");
+
                     b.Property<string>("SyncStatus")
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
+
+                    b.Property<string>("TradingMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasDefaultValue("real");
 
                     b.Property<string>("VenueId")
                         .IsRequired()
@@ -83,7 +93,7 @@ namespace Vessel.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("OwnerId", "PortfolioId");
+                    b.HasIndex("OwnerId", "PortfolioId", "TradingMode");
 
                     b.HasIndex("OwnerId", "VenueId", "SourceId")
                         .IsUnique()
@@ -94,9 +104,13 @@ namespace Vessel.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_accounts_normalized_address", "\"Address\" IS NULL OR \"Address\" = lower(\"Address\")");
 
+                            t.HasCheckConstraint("CK_accounts_paper", "(\"TradingMode\"='real' AND \"StartingCapitalUsd\" IS NULL) OR (\"TradingMode\"='paper' AND \"PortfolioId\" IS NOT NULL AND \"VenueId\"='hyperliquid' AND \"Address\" IS NULL AND \"SourceId\" IS NULL AND \"ManualAccountValueUsd\" IS NULL AND \"StartingCapitalUsd\" IS NOT NULL AND \"StartingCapitalUsd\">=0)");
+
                             t.HasCheckConstraint("CK_accounts_settings_revision", "\"SettingsRevision\" >= 1");
 
                             t.HasCheckConstraint("CK_accounts_source_identity", "(\"Address\" IS NULL OR \"SourceId\" IS NOT NULL AND \"SourceId\" = \"Address\") AND CASE WHEN \"SourceId\" IS NULL OR \"Address\" IS NOT NULL THEN true WHEN \"SourceId\" ~ '^(0|[1-9][0-9]{0,18})$' THEN \"SourceId\"::numeric <= 9223372036854775807 ELSE false END");
+
+                            t.HasCheckConstraint("CK_accounts_trading_mode", "\"TradingMode\" IN ('real','paper')");
                         });
                 });
 
@@ -520,6 +534,326 @@ namespace Vessel.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Vessel.Domain.Paper.PaperExecution", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CandleCloseAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CandleOpenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EntryId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("LevelId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<decimal>("MarginUsd")
+                        .HasColumnType("numeric");
+
+                    b.Property<int>("ModelVersion")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.Property<DateTimeOffset>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("PlanVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("PlayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("PnlUsd")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("Price")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
+
+                    b.Property<string>("TradingMode")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "AccountId", "OccurredAtUtc");
+
+                    b.HasIndex("OwnerId", "AccountId", "TradingMode");
+
+                    b.HasIndex("OwnerId", "PlayId", "EntryId")
+                        .IsUnique()
+                        .HasFilter("\"Role\"='entry'");
+
+                    b.HasIndex("OwnerId", "PlayId", "TradingMode");
+
+                    b.HasIndex("OwnerId", "PlayId", "EntryId", "LevelId", "Role")
+                        .IsUnique()
+                        .HasFilter("\"Role\"<>'entry'");
+
+                    b.ToTable("paper_executions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_paper_execution_mode", "\"TradingMode\"='paper'");
+
+                            t.HasCheckConstraint("CK_paper_execution_model", "\"ModelVersion\"=1");
+
+                            t.HasCheckConstraint("CK_paper_execution_precision", "\"Price\"<=1000000000000 AND \"Quantity\"<=1000000000000 AND \"MarginUsd\" BETWEEN -1000000000000000 AND 1000000000000000 AND \"PnlUsd\" BETWEEN -1000000000000000 AND 1000000000000000 AND scale(trim_scale(\"Price\"))<=28 AND \"Price\"*power(10::numeric,scale(trim_scale(\"Price\")))<=79228162514264337593543950335 AND trunc(\"Quantity\",12)=\"Quantity\" AND trunc(\"MarginUsd\",12)=\"MarginUsd\" AND trunc(\"PnlUsd\",12)=\"PnlUsd\"");
+
+                            t.HasCheckConstraint("CK_paper_execution_role", "(\"Role\"='entry' AND \"LevelId\" IS NULL AND \"PnlUsd\"=0 AND \"MarginUsd\">0) OR (\"Role\" IN ('stop','target','exit') AND \"MarginUsd\"<0)");
+
+                            t.HasCheckConstraint("CK_paper_execution_time", "\"CandleCloseAtUtc\"=\"CandleOpenAtUtc\"+interval '1 minute' AND \"OccurredAtUtc\"=\"CandleCloseAtUtc\"");
+
+                            t.HasCheckConstraint("CK_paper_execution_values", "\"Price\">0 AND \"Quantity\">0 AND \"PlanVersion\">=1");
+                        });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Paper.PaperLedgerEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("AmountUsd")
+                        .HasColumnType("numeric");
+
+                    b.Property<Guid?>("ExecutionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<DateTimeOffset>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PlayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TradingMode")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "AccountId")
+                        .IsUnique()
+                        .HasFilter("\"Kind\"='seed'");
+
+                    b.HasIndex("OwnerId", "ExecutionId")
+                        .IsUnique()
+                        .HasFilter("\"ExecutionId\" IS NOT NULL");
+
+                    b.HasIndex("OwnerId", "AccountId", "TradingMode");
+
+                    b.HasIndex("OwnerId", "ExecutionId", "AccountId", "PlayId");
+
+                    b.HasIndex("OwnerId", "PlayId", "TradingMode");
+
+                    b.ToTable("paper_ledger_entries", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_paper_ledger_kind", "(\"Kind\"='seed' AND \"PlayId\" IS NULL AND \"ExecutionId\" IS NULL AND \"AmountUsd\">=0) OR (\"Kind\"='realized-pnl' AND \"PlayId\" IS NOT NULL AND \"ExecutionId\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_paper_ledger_mode", "\"TradingMode\" = 'paper'");
+                        });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Paper.PaperPlanActivation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("EffectiveAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PlanJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<int>("PlanVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("PlayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TradingMode")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "AccountId", "TradingMode");
+
+                    b.HasIndex("OwnerId", "PlayId", "TradingMode");
+
+                    b.HasIndex("OwnerId", "PlayId", "EffectiveAtUtc", "PlanVersion")
+                        .IsUnique();
+
+                    b.ToTable("paper_plan_activations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_paper_activation_mode", "\"TradingMode\"='paper'");
+                        });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Paper.PaperReservation", b =>
+                {
+                    b.Property<Guid>("PlayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("AmountUsd")
+                        .HasColumnType("numeric");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TradingMode")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.HasKey("PlayId");
+
+                    b.HasIndex("OwnerId", "AccountId", "TradingMode");
+
+                    b.HasIndex("OwnerId", "PlayId", "TradingMode")
+                        .IsUnique();
+
+                    b.ToTable("paper_reservations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_paper_reservation_amount", "\"AmountUsd\">=0");
+
+                            t.HasCheckConstraint("CK_paper_reservation_mode", "\"TradingMode\"='paper'");
+                        });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Paper.PaperSettings", b =>
+                {
+                    b.Property<Guid>("OwnerId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("CheckIntervalMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("OwnerId");
+
+                    b.ToTable("paper_settings", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_paper_settings_interval", "\"CheckIntervalMinutes\" BETWEEN 1 AND 1440");
+                        });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Paper.PaperSimulation", b =>
+                {
+                    b.Property<Guid>("PlayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("CheckedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("CheckpointUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DeclinedEntriesJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTimeOffset?>("SourceFailureSinceUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SuspensionsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTimeOffset?>("PreviousCloseAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("IssuesJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTimeOffset?>("NextCheckAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("PreviousClose")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("TradingMode")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.HasKey("PlayId");
+
+                    b.HasIndex("OwnerId", "AccountId", "TradingMode");
+
+                    b.HasIndex("OwnerId", "NextCheckAtUtc", "PlayId");
+
+                    b.HasIndex("OwnerId", "PlayId", "TradingMode")
+                        .IsUnique();
+
+                    b.ToTable("paper_simulations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_paper_simulation_mode", "\"TradingMode\"='paper'");
+
+                            t.HasCheckConstraint("CK_paper_simulation_state", "\"State\" IN ('waiting','ready','ambiguous','gap','disabled','suspended')");
+                        });
+                });
+
             modelBuilder.Entity("Vessel.Domain.Plays.DiaryRequest", b =>
                 {
                     b.Property<Guid>("OwnerId")
@@ -736,6 +1070,13 @@ namespace Vessel.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("TradingMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasDefaultValue("real");
+
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -750,7 +1091,11 @@ namespace Vessel.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasAlternateKey("OwnerId", "Id", "TradingMode");
+
                     b.HasIndex("OwnerId", "UpdatedAtUtc");
+
+                    b.HasIndex("OwnerId", "AccountId", "TradingMode");
 
                     b.HasIndex("OwnerId", "AccountId", "VenueId", "ContractId");
 
@@ -760,7 +1105,10 @@ namespace Vessel.Persistence.Migrations
                     b.HasIndex("OwnerId", "Status", "UpdatedAtUtc", "Id")
                         .IsDescending(false, false, true, false);
 
-                    b.ToTable("plays", (string)null);
+                    b.ToTable("plays", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_plays_trading_mode", "\"TradingMode\" IN ('real', 'paper')");
+                        });
                 });
 
             modelBuilder.Entity("Vessel.Domain.Plays.PlayOrderLink", b =>
@@ -1432,17 +1780,29 @@ namespace Vessel.Persistence.Migrations
                     b.Property<Guid>("OwnerId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("TradingMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasDefaultValue("real");
+
                     b.HasKey("Id");
 
-                    b.ToTable("portfolios", (string)null);
+                    b.HasAlternateKey("OwnerId", "Id");
+
+                    b.ToTable("portfolios", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_portfolios_trading_mode", "\"TradingMode\" IN ('real','paper')");
+                        });
                 });
 
             modelBuilder.Entity("Vessel.Domain.Accounts.Account", b =>
                 {
                     b.HasOne("Vessel.Domain.Workspace.Portfolio", null)
                         .WithMany()
-                        .HasForeignKey("OwnerId", "PortfolioId")
-                        .HasPrincipalKey("OwnerId", "Id")
+                        .HasForeignKey("OwnerId", "PortfolioId", "TradingMode")
+                        .HasPrincipalKey("OwnerId", "Id", "TradingMode")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
@@ -1525,6 +1885,96 @@ namespace Vessel.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade);
                 });
 
+            modelBuilder.Entity("Vessel.Domain.Paper.PaperExecution", b =>
+                {
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId", "TradingMode")
+                        .HasPrincipalKey("OwnerId", "Id", "TradingMode")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Vessel.Domain.Plays.Play", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "PlayId", "TradingMode")
+                        .HasPrincipalKey("OwnerId", "Id", "TradingMode")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Paper.PaperLedgerEntry", b =>
+                {
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId", "TradingMode")
+                        .HasPrincipalKey("OwnerId", "Id", "TradingMode")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Vessel.Domain.Paper.PaperExecution", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "ExecutionId", "AccountId", "PlayId")
+                        .HasPrincipalKey("OwnerId", "Id", "AccountId", "PlayId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Vessel.Domain.Plays.Play", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "PlayId", "TradingMode")
+                        .HasPrincipalKey("OwnerId", "Id", "TradingMode")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Paper.PaperPlanActivation", b =>
+                {
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId", "TradingMode")
+                        .HasPrincipalKey("OwnerId", "Id", "TradingMode")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Vessel.Domain.Plays.Play", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "PlayId", "TradingMode")
+                        .HasPrincipalKey("OwnerId", "Id", "TradingMode")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Paper.PaperReservation", b =>
+                {
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId", "TradingMode")
+                        .HasPrincipalKey("OwnerId", "Id", "TradingMode")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Vessel.Domain.Plays.Play", null)
+                        .WithOne()
+                        .HasForeignKey("Vessel.Domain.Paper.PaperReservation", "OwnerId", "PlayId", "TradingMode")
+                        .HasPrincipalKey("Vessel.Domain.Plays.Play", "OwnerId", "Id", "TradingMode")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Paper.PaperSimulation", b =>
+                {
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId", "TradingMode")
+                        .HasPrincipalKey("OwnerId", "Id", "TradingMode")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Vessel.Domain.Plays.Play", null)
+                        .WithOne()
+                        .HasForeignKey("Vessel.Domain.Paper.PaperSimulation", "OwnerId", "PlayId", "TradingMode")
+                        .HasPrincipalKey("Vessel.Domain.Plays.Play", "OwnerId", "Id", "TradingMode")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Vessel.Domain.Plays.ManualExecution", b =>
                 {
                     b.HasOne("Vessel.Domain.Plays.Play", null)
@@ -1549,8 +1999,8 @@ namespace Vessel.Persistence.Migrations
                 {
                     b.HasOne("Vessel.Domain.Accounts.Account", null)
                         .WithMany()
-                        .HasForeignKey("OwnerId", "AccountId")
-                        .HasPrincipalKey("OwnerId", "Id")
+                        .HasForeignKey("OwnerId", "AccountId", "TradingMode")
+                        .HasPrincipalKey("OwnerId", "Id", "TradingMode")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

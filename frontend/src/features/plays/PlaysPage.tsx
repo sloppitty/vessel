@@ -1,3 +1,5 @@
+import type { PaperPlayState, PaperSettings as PaperSettingsDocument } from '@/api/paper'
+import { PaperExecutionPanel } from './PaperExecutionPanel'
 import { errorMessage } from '@/api/errors'
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
@@ -27,12 +29,12 @@ import { usePlayExecution } from './usePlayExecution'
 import { useEvidenceImages } from './evidence-images'
 import { useSizing } from './useSizing'
 import { noFilledEntries, planIssues, planIssueSummary } from './planChecks'
-import { executionFills, useLedgerFills } from './entry-fills'
+import { executionFills, paperEntryFills, useLedgerFills } from './entry-fills'
 import { noEntryFills, type EntryFills } from './position-risk-summary'
 import { planNumberIssues, planNumberSummary, storedPlanText, StoredPlanTextContext, type StoredPlanText } from './stored-plan-text'
 import { availableOf, defaultSizeUnits, marginOverBudget, overBudgetMessage, type SizeUnits } from './sizing'
 import { leverageOf } from './levels'
-import { CancelDialog, DeleteDialog, HistoryDialog, RevisionDialog } from './PlayDialogs'
+import { CancelDialog, DeleteDialog, HistoryDialog, PauseDialog, RevisionDialog } from './PlayDialogs'
 import { initialPlaysList, playSearchDelay, playViewTabs, type PlaysListState } from './plays-list'
 import {
   createPlaysSession, draftFromSaved, fieldsToSave, hasDraftContent, isDirty, loadSavedPlay, mergeSavedEvidence, planChanged, savedState,
@@ -42,7 +44,7 @@ import {
 
 
 const ended: PlayStatus[] = ['closed', 'cancelled']
-type DialogKind = null | 'revision' | 'cancel' | 'delete' | 'history'
+type DialogKind = null | 'revision' | 'pause' | 'cancel' | 'delete' | 'history'
 type WorkKind = 'save' | 'status' | 'open' | 'delete' | 'manual'
 
 export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef, list, onList, reloadGeneration = 0, accountMonitors = [], onManageAccount }: {
@@ -161,12 +163,36 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const evidenceImages = useEvidenceImages(api, draft.evidence)
   const venues = useVenues()
   const account = accounts.find(item => item.id === (saved?.summary.accountId ?? draft.accountId))
-  const manual = !!account && venues.can(account.venueId, 'manualExecutions')
+  const paper = api.tradingMode === 'paper'
+  const [paperSettings, setPaperSettings] = useState<{ api: WorkspaceApi; settings: PaperSettingsDocument } | null>(null)
+  useEffect(() => {
+    if (!paper) return
+    const controller = new AbortController()
+    api.paperSettings(controller.signal).then(settings => { if (!controller.signal.aborted) setPaperSettings({ api, settings }) }).catch(() => { /* Unknown settings cannot arm. */ })
+    return () => controller.abort()
+  }, [api, paper, reloadGeneration, visible])
+  const paperArming = !paper || paperSettings?.api === api && paperSettings.settings.enabled && !!account && venues.can(account.venueId, 'paperExecution')
+  const [paperResult, setPaperResult] = useState<{ api: WorkspaceApi; id: string; version: number; state: PaperPlayState } | null>(null)
+  const paperState = paperResult?.api === api && paperResult.id === saved?.summary.id && paperResult.version === saved.summary.version ? paperResult.state : null
+  const lastPaperCheck = useRef<{ api: WorkspaceApi; id: string; signature: string } | null>(null)
+  const onPaperState = useCallback((state: PaperPlayState | null) => {
+    setPaperResult(state && saved ? { api, id: saved.summary.id, version: saved.summary.version, state } : null)
+    if (state && saved) {
+      const previous = lastPaperCheck.current
+      const signature = JSON.stringify([state.status, state.checkedAtUtc, state.enteredQuantity, state.exitedQuantity, state.openQuantity, state.realizedPnlUsd, state.issues])
+      if (previous?.api !== api || previous.id !== state.playId || previous.signature !== signature) {
+        lastPaperCheck.current = { api, id: state.playId, signature }
+        onReload?.()
+      }
+    }
+  }, [api, saved, onReload])
+  const paperFills = useMemo(() => paperState ? paperEntryFills(paperState) : null, [paperState])
+  const manual = !paper && !!account && venues.can(account.venueId, 'manualExecutions')
   const currentBookRead = !account || venues.readsCurrentBook(account.venueId)
   const retrospective = saved?.summary.origin === 'retrospective'
   // Record-based suggestions also follow accepted stored-state reloads.
   const sizing = useSizing(api, reloadGeneration, visible)
-  const tracking = usePlayExecution(api, visible && session.view === 'editor' && saved && !manual ? saved.summary.id : null, saved?.summary.status, reloadGeneration)
+  const tracking = usePlayExecution(api, visible && session.view === 'editor' && saved && !manual && !paper ? saved.summary.id : null, saved?.summary.status, reloadGeneration)
   const { reload: reloadExecution } = tracking
   // A shell reload already rereads the execution through its generation; reload it directly only without one.
   const monitorChanged = useCallback(() => { if (onReload) onReload(); else reloadExecution() }, [reloadExecution, onReload])
@@ -202,7 +228,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     return () => controller.abort()
   }, [visible, api, venueStatus, reloadGeneration, saved?.summary.id])
   // The server keeps the direction once an entry has filled: it decides which side closes the position.
-  const filled = venueStatus !== undefined && !!tracking.execution?.links.some(link => link.role === 'entry' && link.fills.length > 0)
+  const filled = paperFills ? paperFills.filled.size > 0 : venueStatus !== undefined && !!tracking.execution?.links.some(link => link.role === 'entry' && link.fills.length > 0)
   const status = saved?.summary.status ?? 'draft'
   // Which entries have filled, per entry, as the server decides it: the execution's linked entry fills for a venue Play,
   // the manual ledger for a manual one. Whatever facts are loaded count, whatever the saved status says (a reread of the
@@ -213,7 +239,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const venueFills = useMemo(() => !manual && playExecution ? executionFills(playExecution, fillsDirection) : null,
     [manual, playExecution, fillsDirection])
   const fills: EntryFills | 'unknown' = status === 'draft' ? noEntryFills
-    : manual ? ledger ?? 'unknown' : venueFills && !tracking.stale ? venueFills : 'unknown'
+    : paper ? paperFills ?? 'unknown' : manual ? ledger ?? 'unknown' : venueFills && !tracking.stale ? venueFills : 'unknown'
   // Entries with a fill get no size, leverage, stop or target suggestions (D-11). An Open Play has a fill somewhere, so
   // until the facts say which entry, none gets one.
   const opened = status === 'open' || venueStatus === 'open'
@@ -269,6 +295,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     const intendedDialog = currentDialog.current
     const { draft: sent, saved: before } = latest.current
     if (!sent.accountId) { setError('Choose an account before saving.'); return null }
+    if (paper && sent.instrumentSource !== 'venue') { setError('Paper plays require a supported venue instrument. Manual labels cannot be simulated.'); return null }
     if (planBlocked()) return null
     setError(null); setDialogError(null)
     try {
@@ -429,7 +456,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     session.observedPlay.accountId === saved.summary.accountId && session.observedPlay.conflict
     ? <div className="workspace-alert" role="alert">The saved Play changed elsewhere. Your edits and their original version were kept. Copy any edits you want to keep, then discard the local copy from All plays and reopen the latest saved Play before saving.</div> : null
   if (session.view === 'list') {
-    return <>{requested}{conflict}{storedReadError && <p className="error" role="status">{storedReadError}</p>}<PlayList reloadGeneration={reloadGeneration} api={api} accounts={accounts} busy={busy !== null} list={listState} onList={setListState}
+    return <>{requested}{conflict}{paper && !paperArming && <p className="workspace-scope-note" role="status">Paper evaluation is disabled or settings are unavailable. History and editing remain accessible; enable Paper trading in Settings to arm or resume.</p>}{storedReadError && <p className="error" role="status">{storedReadError}</p>}<PlayList reloadGeneration={reloadGeneration} api={api} accounts={accounts} busy={busy !== null} list={listState} onList={setListState}
       incidents={playIncidents}
       unsaved={unsaved ? draft.title.trim() || 'Untitled play' : null}
       onOpen={id => { void open(id) }}
@@ -447,12 +474,12 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
 
   // The same buttons stay in the same places whether or not the play is saved; unavailable ones are disabled.
   const statusAction = status === 'draft'
-    ? <Button size="sm" className="play-primary" disabled={pending || !draft.accountId || !draft.instrument}
-      title={!draft.instrument ? 'Choose an instrument and price an entry to plan' : 'Commit to this plan. Later changes become revisions.'}
+    ? <Button size="sm" className="play-primary" disabled={pending || !draft.accountId || !draft.instrument || !paperArming}
+      title={!paperArming ? 'Enable Paper trading in Settings before arming a play' : !draft.instrument ? 'Choose an instrument and price an entry to plan' : 'Commit to this plan. Later changes become revisions.'}
       onClick={() => { void changeStatus({ status: 'planned' }) }}><Play size={14} />Plan it</Button>
-    : status === 'planned' ? <Button size="sm" variant="outline" disabled={pending || dirty} title={statusBlocked ?? 'Orders withdrawn, idea still valid'}
-      onClick={() => { void changeStatus({ status: 'paused' }) }}><Pause size={14} />Pause</Button>
-    : status === 'paused' ? <Button size="sm" className="play-primary" disabled={pending || dirty} title={statusBlocked}
+    : status === 'planned' ? <Button size="sm" variant="outline" disabled={pending || dirty} title={statusBlocked ?? (paper ? 'Pause simulation; unchecked time remains unscored' : 'Orders withdrawn, idea still valid')}
+      onClick={() => { if (paper) { setDialogError(null); setDialog('pause') } else { void changeStatus({ status: 'paused' }) } }}><Pause size={14} />Pause</Button>
+    : status === 'paused' ? <Button size="sm" className="play-primary" disabled={pending || dirty || !paperArming} title={statusBlocked}
       onClick={() => { void changeStatus({ status: 'planned' }) }}><Play size={14} />Resume</Button>
     : null
   const cancellable = status === 'planned' || status === 'paused'
@@ -474,7 +501,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   // The status badge, a revision pill and the buttons say what the owner can do; no banner restates them.
   const revision = saved && locked && !retrospective && saved.summary.planRevision > 1 ? saved.summary.planRevision : null
 
-  return <>{requested}{conflict}{storedReadError && <p className="error" role="status">{storedReadError}</p>}
+  return <>{requested}{conflict}{paper && !paperArming && <p className="workspace-scope-note" role="status">Paper evaluation is disabled or settings are unavailable. History and editing remain accessible; enable Paper trading in Settings to arm or resume.</p>}{storedReadError && <p className="error" role="status">{storedReadError}</p>}
     <Button variant="ghost" size="sm" className="plays-back" onClick={() => update({ view: 'list' })}><ArrowLeft size={14} />All plays</Button>
     <StoredPlanTextContext.Provider value={storedText}>
     <PlayWorkspace accounts={accounts} portfolios={portfolios} api={api} draft={draft} onChange={next => update({ draft: next })}
@@ -484,7 +511,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       filledEntries={filledEntries} fills={fills} onUnits={onUnits} onPriceStep={setPriceStep}
       incidents={saved ? playIncidents.get(saved.summary.id) : undefined} stopEvidence={manual ? undefined : stopEvidence}
       evidenceImages={evidenceImages}
-      execution={manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
+      execution={paper ? saved ? <PaperExecutionPanel key={saved.summary.id} api={api} playId={saved.summary.id} reloadGeneration={reloadGeneration + saved.summary.version} onState={onPaperState} /> : <p className="workspace-scope-note">Save this Paper play to see simulated execution progress. Planning arms evaluation; a draft never monitors.</p> : manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries}
         enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}
         working={busy !== null}
         observedVersion={observedPlayVersion(session, api)}
@@ -502,7 +529,9 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     </StoredPlanTextContext.Provider>
     {dialog === 'revision' && saved && <RevisionDialog revision={saved.summary.planRevision} pending={saving} error={dialogError}
       onSave={reason => { void save(reason) }} onClose={() => setDialog(null)} />}
-    {dialog === 'cancel' && <CancelDialog pending={busy === 'status'} error={dialogError}
+    {dialog === 'pause' && <PauseDialog pending={busy === 'status'} error={dialogError}
+      onPause={() => { void changeStatus({ status: 'paused' }) }} onClose={() => setDialog(null)} />}
+    {dialog === 'cancel' && <CancelDialog paper={paper} pending={busy === 'status'} error={dialogError}
       onCancel={(reason, note) => { void changeStatus({ status: 'cancelled', reason, ...(note ? { note } : {}) }) }} onClose={() => setDialog(null)} />}
     {dialog === 'delete' && <DeleteDialog pending={busy === 'delete'} error={dialogError} onDelete={() => { void remove() }} onClose={() => setDialog(null)} />}
     {dialog === 'history' && saved && <HistoryDialog api={api} playId={saved.summary.id} onClose={() => setDialog(null)} />}
@@ -634,7 +663,7 @@ function PlayList({ api, accounts, busy, reloadGeneration, unsaved, list, onList
                 aria-describedby={incidents.has(play.id) ? `plays-list-identity-${play.id} plays-list-incidents-${play.id}` : `plays-list-identity-${play.id}`}>
                 <span className="plays-list-title"><span className="plays-list-heading"><strong>{play.title || 'Untitled play'}</strong>{play.origin === 'retrospective' && <span className="badge play-retrospective">Retrospective</span>}
                   <IncidentPill id={`plays-list-incidents-${play.id}`} counts={incidents.get(play.id)} /></span>
-                  <PlayIdentity id={`plays-list-identity-${play.id}`} instrument={play.instrument} source={play.instrumentSource} venueId={play.venueId} accountName={accountName(play.accountId)} /></span>
+                  {play.tradingMode === 'paper' && <span className="workspace-badge">Paper</span>}<PlayIdentity id={`plays-list-identity-${play.id}`} instrument={play.instrument} source={play.instrumentSource} venueId={play.venueId} accountName={accountName(play.accountId)} /></span>
                 <span className={`direction-chip ${play.direction}`}>{play.direction === 'long' ? 'Long' : 'Short'}</span>
                 <span className={`badge play-status-${play.status}`}>{statusLabels[play.status]}</span>
                 <small className="plays-list-meta">{ended.includes(play.status) && (isReviewed(play) ? 'Reviewed · ' : 'Pending review · ')}{play.origin !== 'retrospective' && play.planRevision > 1 ? `${play.planRevision} revisions · ` : ''}Updated {new Date(play.updatedAtUtc).toLocaleDateString()}</small>

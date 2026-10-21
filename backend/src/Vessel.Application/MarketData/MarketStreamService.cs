@@ -61,6 +61,8 @@ public sealed class MarketStreamService(IWorkspaceStore store, IVenueRegistry ve
     public async Task<MarketStreamSession> OpenAsync(Guid accountId, string? instrument, string? interval, CancellationToken ct)
     {
         var account = await MarketDataGuard.AccountAsync(store, accountId, ct);
+        if (account.TradingMode == "paper")
+            throw new ProblemException(409, "Paper accounts use scheduled closed-candle checks, not a continuous price stream.");
         instrument = MarketDataGuard.Instrument(instrument);
         var venue = venues.Descriptor(account.VenueId);
         var (validInterval, _) = MarketDataGuard.Interval(interval, venue);

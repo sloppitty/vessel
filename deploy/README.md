@@ -661,6 +661,58 @@ start it again, or stop it for good with
 explicit `Vessel__Messaging__Deployments` configuration needs a `notifications`
 entry.
 
+### Optional paper worker
+
+The paper playground requires a **paper-capable API/web build and its explicit
+journal migration**. No published older image gains this feature by adding an
+overlay. Set `VESSEL_VERSION` explicitly to the matching build and
+`VESSEL_AUTH_MODE` explicitly to the API's `Token` or `Wallet` mode, keep the
+same database/project, and include `compose.paper.yaml` plus `--profile paper`
+alongside your existing storage, TLS, Wallet and credential overlays. For
+example, adding `-f compose.paper.yaml --profile paper` to your established
+Compose command enables the private `worker-paper` service.
+
+It runs the same `/app/worker` binary with only the `paper` module and deployment
+`paper`. This standalone scheduler does not use command queues, messaging
+envelope schemas or RabbitMQ; it needs no paper messaging provisioning, HTTP
+bearer, credential key ring, evidence mount or exposed port. Existing
+monitor/notifications deployments and their immutable module sets stay unchanged.
+Their normal migrations/provisioning requirements still apply to the full app.
+
+Paper is off by default per owner. Settings enables it and sets a paper-only
+check interval (default 60 minutes). The worker reads bounded closed minute
+candles for the unevaluated period and shares instrument reads; it does not
+stream prices or refresh a real account. Both modes retain their own results.
+The scheduler's productive-pass file is
+`Vessel:Paper:HeartbeatFile` (default `/tmp/vessel-paper-heartbeat`);
+`/app/worker-health` selects it for the `paper` module. A configured paper check
+is not a promise of real-time execution or a venue fill.
+
+Evaluation waits ten seconds after a minute closes. Explicit native zero-trade
+minutes carry coverage but do not simulate a touch; unknown missing minutes are
+not invented. An account-local arithmetic/validation failure is retained for
+retry without stopping other owners, while shared database/schema failures still
+fail worker health.
+
+This first version cannot manually resolve a candle gap/ambiguity or manually
+close a simulated position. Affected reservations may remain held indefinitely
+and unresolved results stay unscored; normal closes use planned exits. Virtual
+equity stays unknown while open/unresolved rather than using stale candle marks.
+Changing the shared sizing risk preference remains a Real-only action.
+Owner suspension is different from a genuine source gap: enabling monitoring
+again resumes previously active Plays at a fresh minute boundary, skips
+disabled-period touches and retains unscored history. Owner-paused Plays stay
+paused. A declined capital admission does not stop protective exits on already
+open tranches.
+
+**Include `worker-paper` when stopping all writers for any migration, backup,
+restore, identity reconciliation or event-epoch operation.** In paper-enabled
+installs, run `docker compose stop worker-paper` using the complete overlay/profile
+command before the stop/backup examples below. Do not leave another paper
+replica running. The paper worker still needs the same authentication mode and
+identity directory as the API; retain `VESSEL_AUTH_MODE=Wallet` and your complete
+Wallet/TLS overlays on every command in a Wallet installation.
+
 ### Monitor and broker settings
 
 `VESSEL_MONITOR_INTERVAL`, `VESSEL_MONITOR_PROTECTION_GRACE` and

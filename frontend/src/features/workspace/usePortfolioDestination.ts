@@ -19,6 +19,7 @@ export function usePortfolioDestination(portfolios: Portfolio[], api: WorkspaceA
       return { portfolioId: portfolio.id, created: true }
     }
     if (id && !options.some(p => p.id === id)) throw new ApiError('http', 'The selected portfolio is no longer available. Choose another portfolio.')
+    if (!id && api.tradingMode === 'paper') throw new ApiError('http', 'Choose or create a paper portfolio.')
     return { portfolioId: id || null, created: false }
   }
   return { id, setId, name, setName, options, resolve }
