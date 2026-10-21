@@ -15,7 +15,7 @@ public sealed partial class HyperliquidPerpetualReader
         string contractId, string interval, long fromMs, long toMs, CancellationToken cancellationToken)
     {
         if (!IsPrimaryContract(contractId) || fromMs < 0 || toMs < fromMs)
-            throw new VenueReadException("A primary perpetual contract and valid window are required.");
+            throw new VenueReadException("A primary perpetual contract and valid window are required.") { IsDeterministicSourceFailure = true };
         var venueContractId = HyperliquidInstruments.Native(contractId);
         return ReadBoundedAsync<IReadOnlyList<VenueCandle>>(async token =>
         {
@@ -32,12 +32,12 @@ public sealed partial class HyperliquidPerpetualReader
     {
         var array = Array(root);
         if (array.GetArrayLength() > MaxCandles)
-            throw new VenueReadException(InvalidResponse);
+            throw new VenueReadException(InvalidResponse) { IsDeterministicSourceFailure = true };
         var candles = new List<VenueCandle>();
         foreach (var item in array.EnumerateArray())
         {
             if (Text(Property(item, "s")) != contractId || Text(Property(item, "i")) != interval)
-                throw new VenueReadException(InvalidResponse);
+                throw new VenueReadException(InvalidResponse) { IsDeterministicSourceFailure = true };
             candles.Add(ReadCandle(item, numbers: false));
         }
         return candles;
@@ -57,7 +57,7 @@ public sealed partial class HyperliquidPerpetualReader
             closeTime.ValueKind != JsonValueKind.Number || !closeTime.TryGetInt64(out var closedAt) || closedAt < t ||
             high.Value < Math.Max(Math.Max(open.Value, close.Value), low.Value) ||
             low.Value > Math.Min(open.Value, close.Value))
-            throw new VenueReadException(InvalidResponse);
+            throw new VenueReadException(InvalidResponse) { IsDeterministicSourceFailure = true };
         return new(t, closedAt, open.Text, high.Text, low.Text, close.Text, volume.Text, count);
     }
 
@@ -67,7 +67,7 @@ public sealed partial class HyperliquidPerpetualReader
         var text = DecimalText(element, numbers);
         var value = ParseDecimal(text);
         if (value < 0)
-            throw new VenueReadException(InvalidResponse);
+            throw new VenueReadException(InvalidResponse) { IsDeterministicSourceFailure = true };
         return (text, value);
     }
 

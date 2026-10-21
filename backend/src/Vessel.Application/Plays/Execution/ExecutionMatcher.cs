@@ -20,7 +20,7 @@ public sealed record MatchCandidate(Play Play, PlanLevelTarget Level);
 public static class ExecutionMatcher
 {
 
-    public static bool IsActive(Play play) => play.Status is PlayStatus.Planned or PlayStatus.Paused or PlayStatus.Open;
+    public static bool IsActive(Play play) => play.TradingMode == "real" && play.Status is PlayStatus.Planned or PlayStatus.Paused or PlayStatus.Open;
 
     /// <summary>
     /// Entries, stops and targets with prices resolved. A percent level is a return on margin, so its price

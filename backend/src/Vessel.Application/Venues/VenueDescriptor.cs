@@ -43,7 +43,8 @@ public static class VenueLogos
 /// run, and the history-only read alone does not degrade a check. Defaults to false, so a venue opts in.
 /// </param>
 public sealed record VenueCapabilities(bool Sync, bool Instruments, bool Orders, bool Candles, bool MarketContext, bool Stream, bool StablecoinWallet,
-    bool AccountDiscovery = false, bool ReadOnlyCredential = false, bool ManualExecutions = false, bool CurrentOrderBook = false)
+    bool AccountDiscovery = false, bool ReadOnlyCredential = false, bool ManualExecutions = false, bool CurrentOrderBook = false,
+    bool PaperExecution = false)
 {
     public static readonly VenueCapabilities None = new(false, false, false, false, false, false, false);
 }

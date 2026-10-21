@@ -1021,6 +1021,9 @@ public sealed class ActivityOperationsTests
             json.EnumerateObject().Select(p => p.Name));
         Assert.Equal(["accountIds", "contracts"], json.GetProperty("facets").EnumerateObject().Select(p => p.Name));
         var row = Assert.Single(json.GetProperty("operations").EnumerateArray());
+        // Paper provenance is optional and paper-only: the default real wire remains byte-contract compatible.
+        Assert.False(json.TryGetProperty("tradingMode", out _)); Assert.False(json.TryGetProperty("paperExecutionCount", out _));
+        Assert.False(row.TryGetProperty("tradingMode", out _)); Assert.False(row.TryGetProperty("paperExecutionCount", out _));
         Assert.False(row.TryGetProperty("fills", out _)); Assert.False(row.TryGetProperty("omittedFillCount", out _));
         Assert.Equal("0.0000000000000000000000000001", row.GetProperty("netResultUsd").GetString());
         Assert.Equal("0.0000000000000000000000000001", row.GetProperty("grossClosedPnlUsd").GetString());
@@ -1030,6 +1033,7 @@ public sealed class ActivityOperationsTests
         var expanded = await fills.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(["operationId", "fills", "omittedFillCount", "fundingPayments", "omittedFundingPaymentCount"], expanded.EnumerateObject().Select(p => p.Name));
         Assert.Equal(2, expanded.GetProperty("fills").GetArrayLength());
+        Assert.False(expanded.TryGetProperty("paperExecutions", out _));
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/activity/fills?accountId={AccountId}&operationId=gone")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/activity/fills?operationId=gone")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/activity?accountId={Guid.NewGuid()}")).StatusCode);

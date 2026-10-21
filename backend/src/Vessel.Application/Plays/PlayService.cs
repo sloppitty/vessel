@@ -5,6 +5,7 @@ using Vessel.Application.Evidence;
 using Vessel.Application.Ownership;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
+using Vessel.Application.Paper;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
@@ -15,25 +16,27 @@ namespace Vessel.Application.Plays;
 /// Saved Plays and their lifecycle. Open and Closed come from linked venue fills, so this service
 /// only performs the owner's transitions: plan, pause, resume and cancel. Nothing is sent to a venue.
 /// </summary>
-public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore objects, TimeProvider time, IUnitOfWork unitOfWork)
+public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore objects, TimeProvider time, IUnitOfWork unitOfWork,
+    IPaperTradingService? paper = null)
 {
     public const int MaxUnpagedPlays = 200, MaxSearchLength = 100;
 
     /// <summary>One view of saved Plays. Drafts and In progress return one page of at most 200 rows (or an explicit size); <c>TotalCount</c> stays exact.</summary>
-    public async Task<PlayListDto> ListAsync(string? view, string? search, string? scope, string? page, string? pageSize, CancellationToken ct)
+    public async Task<PlayListDto> ListAsync(string? view, string? search, string? scope, string? page, string? pageSize, CancellationToken ct,
+        string? tradingMode = "real")
     {
         var listView = View(view);
         var (requested, size) = ListPaging.Parse(page, pageSize);
-        var filter = await Filter(search, scope, ct);
+        var filter = await Filter(search, scope, Mode(tradingMode), ct);
         // Unpaged views are one page: the whole view up to 200 rows, or an explicit smaller size such as Overview's 5.
         if (listView is PlayListView.Drafts or PlayListView.Progress) (requested, size) = (1, string.IsNullOrEmpty(pageSize) ? MaxUnpagedPlays : size);
         var result = await store.PageAsync(listView, filter, requested, size, ct);
         return new(result.Rows.Select(Summary).ToList(), ViewName(listView), result.Page, size, result.TotalCount);
     }
 
-    public async Task<PlayCountsDto> CountsAsync(string? search, string? scope, CancellationToken ct)
+    public async Task<PlayCountsDto> CountsAsync(string? search, string? scope, CancellationToken ct, string? tradingMode = "real")
     {
-        var rows = await store.CountsAsync(await Filter(search, scope, ct), ct);
+        var rows = await store.CountsAsync(await Filter(search, scope, Mode(tradingMode), ct), ct);
         int Count(Func<PlayCountRow, bool> where) => rows.Where(where).Sum(r => r.Count);
         static bool Ended(PlayCountRow r) => r.Status is PlayStatus.Closed or PlayStatus.Cancelled;
         return new(Count(r => r.Status == PlayStatus.Draft), Count(r => r.Status is PlayStatus.Planned or PlayStatus.Paused or PlayStatus.Open),
@@ -41,17 +44,17 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             Count(r => r.Status == PlayStatus.Cancelled), Count(_ => true));
     }
 
-    private async Task<PlayListFilter> Filter(string? search, string? scope, CancellationToken ct)
+    private async Task<PlayListFilter> Filter(string? search, string? scope, string tradingMode, CancellationToken ct)
     {
         search = search?.Trim();
         if (search?.Length > MaxSearchLength) throw new ProblemException(400, $"Search is limited to {MaxSearchLength} characters.");
         search = string.IsNullOrEmpty(search) ? null : search;
         // Without a scope the Plays page lists every saved Play; Overview scopes follow enabled accounts only.
-        if (scope is null) return new(search, null);
+        if (scope is null) return new(search, null, tradingMode);
         var listScope = ListScope.Parse(scope);
-        if (!await store.ScopeExistsAsync(listScope, ct))
+        if (!await store.ScopeExistsAsync(listScope, tradingMode, ct))
             throw new ProblemException(404, listScope.Kind == "portfolio" ? "Portfolio not found." : "Account not found.");
-        return new(search, listScope);
+        return new(search, listScope, tradingMode);
     }
 
     private static PlayListView View(string? view) => view switch
@@ -69,9 +72,10 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
 
     public async Task<PlayDto> GetAsync(Guid id, CancellationToken ct) => ToDto(await Find(id, ct));
 
-    public Task<PlayDto> CreateAsync(CreatePlayRequest request, CancellationToken ct) => unitOfWork.ExecuteAsync(async () =>
+    public Task<PlayDto> CreateAsync(CreatePlayRequest request, CancellationToken ct, string? tradingMode = "real") => unitOfWork.ExecuteAsync(async () =>
     {
         var account = await EnabledAccount(request.AccountId, ct);
+        if (account.TradingMode != Mode(tradingMode)) throw new ProblemException(404, "Account not found.");
         var (instrument, source) = Instrument(account, request.Instrument, request.InstrumentSource);
         var plan = PlayDocuments.Serialize(PlayDocuments.Normalize(request.Plan));
         var now = time.GetUtcNow();
@@ -93,7 +97,9 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         // the stored plan still saves, even where it predates the plain-decimal rule. Stops of filled entries may sit
         // at or beyond the entry; the fills are read under the Play lock, so none arrives in between.
         var plan = play.Origin == PlayOrigin.Retrospective ? PlayDocuments.Serialize(request.Plan)
-            : PlayDocuments.Serialize(PlayDocuments.Normalize(request.Plan, PlayDocuments.Read(play.Plan), await ExecutedEntriesAsync(store, play, ct)));
+            : PlayDocuments.Serialize(PlayDocuments.Normalize(request.Plan, PlayDocuments.Read(play.Plan),
+                play.TradingMode == "paper" ? (await RequirePaper().GetExecutionProofAsync(play.Id, ct)).ExecutedEntryIds
+                    : await ExecutedEntriesAsync(store, play, ct)));
         var drawings = PlayDocuments.NormalizeDrawings(request.Drawings);
         var now = time.GetUtcNow();
         if (request.AccountId != play.AccountId || request.Instrument != play.ContractId ||
@@ -108,6 +114,8 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         var revision = play.ChangePlan(plan, request.RevisionReason, now);
         var review = play.Annotate(request.Title ?? "", drawings, request.Review ?? "", now, request.StructuredReview);
         if (revision is not null) store.Add(revision);
+        if (revision is not null && play.TradingMode == "paper")
+            await RequirePaper().ActivateRevisionAsync(play, ct);
         if (review is not null) store.Add(review);
         return ToDto(play);
     }, ct, destinationAccountId: request.AccountId), ct);
@@ -149,6 +157,11 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             default:
                 throw new ProblemException(400, "Status must be planned, paused or cancelled.");
         }
+        if (play.TradingMode == "paper")
+        {
+            if (play.Status == PlayStatus.Planned) await RequirePaper().ArmAsync(play, ct);
+            else if (play.Status is PlayStatus.Paused or PlayStatus.Cancelled) await RequirePaper().SuspendAsync(play, ct);
+        }
         return ToDto(play);
     }, ct), ct);
 
@@ -160,7 +173,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         var reviews = await store.ReviewsAsync(play.Id, ct);
         return new(revisions.Select(r => new PlanRevisionDto(r.Number, StatusName(r.Status), r.Reason, r.CreatedAtUtc, PlayDocuments.Read(r.Plan))).ToList(),
             changes.Select(c => new StatusChangeDto(StatusName(c.From), StatusName(c.To), c.Reason is { } reason ? ReasonName(reason) : null,
-                c.Note, c.OccurredAtUtc, c.Source == StatusChangeSource.Venue ? "venue" : "owner")).ToList(),
+                c.Note, c.OccurredAtUtc, c.Source.ToString().ToLowerInvariant())).ToList(),
             reviews.Select(r => new ReviewRevisionDto(r.Number, r.OccurredAtUtc, r.Review,
                 JsonSerializer.Deserialize<ReviewAnswers>(r.StructuredReview)!)).ToList());
     }
@@ -189,7 +202,8 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     /// </summary>
     private async Task RequireFilledEntriesKept(Play play, PlayPlanDocument next, CancellationToken ct)
     {
-        var filled = await store.FilledEntryIdsAsync(play.Id, ct);
+        var filled = play.TradingMode == "paper" ? (await RequirePaper().GetExecutionProofAsync(play.Id, ct)).ExecutedEntryIds
+            : await store.FilledEntryIdsAsync(play.Id, ct);
         var current = PlayDocuments.Read(play.Plan);
         var linked = await store.LinkedPlanReferencesAsync(play.Id, ct);
         if ((filled.Count > 0 || linked.Count > 0) && next.Direction != current.Direction)
@@ -248,6 +262,8 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
 
     private static (PerpetualInstrument?, InstrumentSource) Instrument(Account account, string? instrument, string? source)
     {
+        if (account.TradingMode == "paper" && source != "venue")
+            throw new ProblemException(400, "Paper Plays use the venue's perpetual catalogue.");
         var kind = source switch
         {
             "venue" when account.VenueId != VenueDescriptor.ManualId => InstrumentSource.Venue,
@@ -272,12 +288,19 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     private static PlaySummaryDto Summary(Play play, string direction) => new(play.Id, play.Title, StatusName(play.Status), play.AccountId, play.VenueId,
         play.ContractId, SourceName(play.InstrumentSource), direction, play.PlanRevision, play.Version,
         play.CancelReason is { } reason ? ReasonName(reason) : null, play.CreatedAtUtc, play.UpdatedAtUtc, play.PlannedAtUtc, play.EndedAtUtc,
-        play.HasReview, play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned", play.ReviewedAtUtc);
+        play.HasReview, play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned", play.ReviewedAtUtc, play.TradingMode);
 
     private static PlaySummaryDto Summary(PlayListRow play) => new(play.Id, play.Title, StatusName(play.Status), play.AccountId, play.VenueId,
         play.ContractId, SourceName(play.InstrumentSource), play.Direction, play.PlanRevision, play.Version,
         play.CancelReason is { } reason ? ReasonName(reason) : null, play.CreatedAtUtc, play.UpdatedAtUtc, play.PlannedAtUtc, play.EndedAtUtc,
-        play.HasReview, play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned", play.ReviewedAtUtc);
+        play.HasReview, play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned", play.ReviewedAtUtc, play.TradingMode);
+
+    private IPaperTradingService RequirePaper() => paper ?? throw new ProblemException(503, "Paper execution is unavailable.");
+    private static string Mode(string? mode) => mode switch
+    {
+        null or "real" => "real", "paper" => "paper",
+        _ => throw new ProblemException(400, "Trading mode must be real or paper.")
+    };
 
     public static PlayDto ToDto(Play play)
     {

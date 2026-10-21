@@ -90,7 +90,7 @@ export function OperationsTable({ operations, accounts, compact = false, onPrevi
   })
   // Defense in depth: a management reload may disable an account while an earlier activity read is still visible.
   const visible = operations.filter(op => accounts.some(a => a.id === op.accountId && a.isEnabled !== false))
-  if (!visible.length) return <div className="workspace-empty small-empty"><Inbox size={27} /><strong>No operations in this view</strong><p>Refresh an enabled exchange account to retrieve fills, or reset the filters.</p></div>
+  if (!visible.length) return <div className="workspace-empty small-empty"><Inbox size={27} /><strong>No operations in this view</strong><p>{api.tradingMode === 'paper' ? 'Plan a paper Play to begin simulation, or reset the filters.' : 'Refresh an enabled exchange account to retrieve fills, or reset the filters.'}</p></div>
   return <div className="workspace-table-wrap"><table className="workspace-table operations-table"><OperationsHead compact={compact} /><tbody>{visible.map(op => {
     const open = expanded.has(op.id)
     const status = operationStatus(op)
@@ -99,23 +99,23 @@ export function OperationsTable({ operations, accounts, compact = false, onPrevi
     return <Fragment key={op.id}><tr className="operation-row" data-expanded={open} onClick={event => {
       if (!(event.target as Element).closest('button, a, input, select, textarea') && !window.getSelection()?.toString()) toggle(op.id)
     }}>
-      <td><div className="operation-heading"><button type="button" className="operation-toggle" aria-label={`${open ? 'Collapse' : 'Expand'} ${op.contractId} operation`} aria-expanded={open} aria-controls={open ? `operation-${op.id}` : undefined} onClick={() => toggle(op.id)}>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button><div><strong className="operation-asset">{op.contractId}</strong><div className="operation-tags"><OperationDirection direction={op.direction} /><OperationLeverage operation={op} /><span className={`operation-status ${status.tone}`}>{status.label}</span></div></div></div></td>
+      <td><div className="operation-heading"><button type="button" className="operation-toggle" aria-label={`${open ? 'Collapse' : 'Expand'} ${op.contractId} operation`} aria-expanded={open} aria-controls={open ? `operation-${op.id}` : undefined} onClick={() => toggle(op.id)}>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button><div><strong className="operation-asset">{op.contractId}</strong><div className="operation-tags"><OperationDirection direction={op.direction} />{op.tradingMode === 'paper' ? <span className="workspace-badge">Paper · simulated</span> : <OperationLeverage operation={op} />}<span className={`operation-status ${status.tone}`}>{status.label}</span></div></div></div></td>
       <td><strong>{accounts.find(a => a.id === op.accountId)?.name ?? 'Account'}</strong><small className="operation-dates" title={`Opened: ${op.openedAtUtc ?? 'unknown'}; ${op.closedAtUtc ? `Closed: ${op.closedAtUtc}` : `Last execution: ${op.lastOccurredAtUtc}`}`}>{operationDates(op)}</small>{op.openedAtUtc !== null && op.closedAtUtc !== null && <small>{duration(op.openedAtUtc, op.closedAtUtc)}</small>}</td>
       <td className="numeric"><strong title={op.quantity === null ? 'Peak quantity unknown' : `Peak quantity: ${op.quantity}`}>{op.quantity === null ? '—' : amount(op.quantity)}</strong>{resultSign(op.openQuantity) === 'positive' && <small>Remaining {amount(op.openQuantity!)}</small>}</td>
       {!compact && <><td className="numeric operation-entry"><span title={op.averageEntryPrice ?? 'Unknown'}>{money(op.averageEntryPrice)}</span></td><td className={`numeric operation-result ${priceTone}`}><span title={op.averageExitPrice ?? 'Unknown'}>{money(op.averageExitPrice)}</span></td><td className="numeric"><div className="operation-pnl"><Result value={op.grossClosedPnlUsd} />{priceReturn !== null && <span className={`operation-return operation-result ${priceTone}`} title="Average entry-to-exit price return, direction-adjusted, before fees and leverage. Not an account or margin return.">{priceReturn}</span>}</div></td>
       <td className="numeric operation-fees"><span title={op.stablecoinFeesNominalUsd}>{money(op.stablecoinFeesNominalUsd)}</span>{op.otherFees.map(f => <small key={f.token}>{amount(f.amount)} {f.token}</small>)}</td>
-      <td className="numeric"><Result value={op.fundingNetUsd} />{op.fundingStatus !== 'complete' && <small>{op.fundingStatus === 'partial' ? 'Partial' : 'Unavailable'}</small>}</td></>}
+      <td className="numeric"><Result value={op.fundingNetUsd} />{op.fundingStatus !== 'complete' && <small>{op.fundingStatus === 'not-applicable' ? 'Not simulated' : op.fundingStatus === 'partial' ? 'Partial' : 'Unavailable'}</small>}</td></>}
       <td className="numeric operation-net"><Result value={op.netResultUsd} /></td>
       {!compact && <td className="operation-play"><PlayCell operation={op} onOpenPlay={onOpenPlay} opening={opening} onJournal={onPreview} /></td>}
     </tr>{open && <tr id={`operation-${op.id}`}><td colSpan={compact ? 4 : 10} className="operation-expanded">
-      {onPreview && <button className="text-action" aria-label={`Inspect ${op.contractId} retrospective eligibility`} onClick={() => onPreview(op)}>Inspect retrospective eligibility</button>}
+      {api.tradingMode !== 'paper' && onPreview && <button className="text-action" aria-label={`Inspect ${op.contractId} retrospective eligibility`} onClick={() => onPreview(op)}>Inspect retrospective eligibility</button>}
       <p className="workspace-scope-note operation-details">Entered {op.totalEnteredQuantity === null ? 'unknown' : amount(op.totalEnteredQuantity)} · Exited {op.totalExitedQuantity === null ? 'unknown' : amount(op.totalExitedQuantity)} · Remaining {op.openQuantity === null ? 'unknown' : amount(op.openQuantity)}</p>
-      <dl className="operation-funding-summary">
+      {op.tradingMode !== 'paper' && <dl className="operation-funding-summary">
         <div><dt>{op.fundingStatus === 'complete' ? 'Settled funding' : 'Known settled funding'}</dt><dd><Result value={op.fundingNetUsd} /> <NominalUsdTag detail="Stablecoins at 1:1, with no FX/depeg valuation." /></dd></div>
         <div><dt>Total incl. funding</dt><dd>{op.totalResultUsd === null ? 'Unverified' : <Result value={op.totalResultUsd} />}</dd></div>
-      </dl>
+      </dl>}
       <details className="operation-scope"><summary>About these numbers</summary>
-        <p className="workspace-scope-note">Venue-reported P&amp;L {money(op.reportedClosedPnlUsd)} ({op.pnlBasis}).</p>
+        <p className="workspace-scope-note">{op.tradingMode === 'paper' ? 'Simulated P&L' : 'Venue-reported P&L'} {money(op.reportedClosedPnlUsd)} ({op.pnlBasis}).</p>
         {op.fundingAsOfUtc !== null && <p className="workspace-scope-note">Funding coverage through <time dateTime={op.fundingAsOfUtc}>{op.fundingAsOfUtc}</time>.</p>}
         {op.coverage.length > 0 && <ul className="operation-coverage">{op.coverage.map(reason => <li key={reason}>{reason}</li>)}</ul>}
       </details>

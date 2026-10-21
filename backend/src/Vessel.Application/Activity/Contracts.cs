@@ -1,8 +1,10 @@
 using System.Numerics;
+using System.Text.Json.Serialization;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Workspace;
+using Vessel.Application.Sizing;
 
 namespace Vessel.Application.Activity;
 
@@ -12,10 +14,16 @@ public sealed record ActivityFacts(IReadOnlyList<Account> Accounts, IReadOnlyLis
     public IReadOnlyList<FundingPayment> FundingPayments { get; init; } = [];
     public IReadOnlyList<AccountFundingState> FundingStates { get; init; } = [];
     public IReadOnlyList<LeverageObservation> LeverageObservations { get; init; } = [];
+    public IReadOnlyList<PaperPlayFacts> PaperPlays { get; init; } = [];
 }
 public interface IActivitySummaryReader
 {
     Task<ActivitySummaries> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null);
+    async Task<ActivitySummaries> ReadAsync(Guid? accountId, string tradingMode, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
+    {
+        var value = await ReadAsync(accountId, ct, accountIds);
+        return tradingMode == "real" ? value : ActivityService.Aggregate(value.Facts, accountId, accountIds, tradingMode: tradingMode);
+    }
 }
 
 public interface IActivityStore
@@ -23,6 +31,8 @@ public interface IActivityStore
     // All retained facts, not the overview's most recent 100; owner-scoped and enabled accounts only.
     // An optional account set restricts every fact query; an empty set reads no facts.
     Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null);
+    Task<ActivityFacts> ReadAsync(Guid? accountId, string tradingMode, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) =>
+        ReadAsync(accountId, ct, accountIds);
     /// <summary>
     /// The titles of the owner's Plays among <paramref name="playIds"/>, read for the rows of one Activity page. Other
     /// owners' Plays, and Plays that no longer exist, are left out.
@@ -41,6 +51,14 @@ public sealed record ActivityOperationDto(string Id, Guid AccountId, string Cont
     string? NetResultUsd, string PnlBasis, Guid? PlayId, string PlayAssociation,
     IReadOnlyList<string> Coverage, IReadOnlyList<OperationFillDto> Fills, int OmittedFillCount = 0)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TradingMode { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExecutionSource { get; init; }
+    [JsonIgnore]
+    public IReadOnlyList<PaperExecutionDto> PaperExecutions { get; init; } = [];
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int PaperExecutionCount { get; init; }
     // Comparable before-fee P&L for display. The venue-reported facts above remain unchanged.
     public string? GrossClosedPnlUsd { get; init; }
     public string? TotalResultUsd { get; init; }
@@ -71,6 +89,8 @@ public sealed record ActivityOperationDto(string Id, Guid AccountId, string Cont
     internal ActivityContractKey ContractKey { get; init; }
 }
 public sealed record ActivityCoverageDto(Guid AccountId, string? ContractId, string Notice);
+public sealed record PaperExecutionDto(Guid Id, string EntryId, string? LevelId, string Role, string Price, string Quantity,
+    string PnlUsd, DateTimeOffset OccurredAtUtc, DateTimeOffset CandleOpenAtUtc, DateTimeOffset CandleCloseAtUtc);
 
 /// <summary>An Activity list row: every operation metric, without its constituent execution rows.</summary>
 public sealed record ActivityOperationSummaryDto(string Id, Guid AccountId, string ContractId, string? Direction, string Status,
@@ -81,6 +101,12 @@ public sealed record ActivityOperationSummaryDto(string Id, Guid AccountId, stri
     string? NetResultUsd, string PnlBasis, Guid? PlayId, string PlayAssociation,
     IReadOnlyList<string> Coverage, string? GrossClosedPnlUsd)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TradingMode { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExecutionSource { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int PaperExecutionCount { get; init; }
     public string? TotalResultUsd { get; init; }
     public string? FundingNetUsd { get; init; }
     public string FundingStatus { get; init; } = "unavailable";
@@ -99,7 +125,8 @@ public sealed record ActivityOperationSummaryDto(string Id, Guid AccountId, stri
     {
         TotalResultUsd = o.TotalResultUsd, FundingNetUsd = o.FundingNetUsd, FundingStatus = o.FundingStatus,
         FundingPnlBasis = o.FundingPnlBasis, FundingAsOfUtc = o.FundingAsOfUtc, FundingPaymentCount = o.FundingPaymentCount,
-        Leverage = o.Leverage, LeverageMin = o.LeverageMin, LeverageMax = o.LeverageMax
+        Leverage = o.Leverage, LeverageMin = o.LeverageMin, LeverageMax = o.LeverageMax,
+        TradingMode = o.TradingMode, ExecutionSource = o.ExecutionSource, PaperExecutionCount = o.PaperExecutionCount
     };
 }
 public sealed record ActivityFacetsDto(IReadOnlyList<Guid> AccountIds, IReadOnlyList<string> Contracts);
@@ -111,16 +138,26 @@ public sealed record ActivityPageDto(IReadOnlyList<ActivityOperationSummaryDto> 
     int ScopeCount, int RetainedFillCount, DateTimeOffset AsOfUtc, string Version, ActivityFacetsDto Facets,
     IReadOnlyList<ActivityCoverageDto> Coverage, string ScopeNote)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TradingMode { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int PaperExecutionCount { get; init; }
     public IReadOnlyList<OperationFundingDto> UnassignedFundingPayments { get; init; } = [];
     public int OmittedUnassignedFundingPaymentCount { get; init; }
 }
 /// <summary>Query-string values exactly as sent; <see cref="ActivityService"/> validates them.</summary>
 public sealed record ActivityQuery(Guid? AccountId = null, string? Scope = null, string? Account = null, string? Portfolio = null,
     string? Contract = null, string? Direction = null, string? Status = null, string? Period = null, string? From = null,
-    string? To = null, string? Page = null, string? PageSize = null);
+    string? To = null, string? Page = null, string? PageSize = null, string? TradingMode = "real");
 /// <summary>One operation's constituent rows, chronological, earliest kept when capped.</summary>
 public sealed record OperationFillsDto(string OperationId, IReadOnlyList<OperationFillDto> Fills, int OmittedFillCount)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TradingMode { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PaperExecutionDto>? PaperExecutions { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int OmittedPaperExecutionCount { get; init; }
     public IReadOnlyList<OperationFundingDto> FundingPayments { get; init; } = [];
     public int OmittedFundingPaymentCount { get; init; }
 }

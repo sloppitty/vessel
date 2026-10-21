@@ -428,7 +428,15 @@ public sealed class ActivityCachePostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync("20261018120000_ServerNotificationState");
         var owner = Guid.NewGuid(); var account = new Account(Guid.NewGuid(), owner, "manual", "Existing");
-        await using (var db = database.Context(owner)) { db.Accounts.Add(account); await db.SaveChangesAsync(); await db.Database.MigrateAsync(); }
+        await using (var db = database.Context(owner))
+        {
+            // This is deliberately the pre-ActivityFactsRevision schema, not the current Account EF model.
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO accounts ("Id", "OwnerId", "VenueId", "Name", "SyncStatus", "IsEnabled", "SettingsRevision")
+                VALUES ({account.Id}, {owner}, 'manual', 'Existing', 'manual', TRUE, 1)
+                """);
+            await db.Database.MigrateAsync();
+        }
         await using var observer = database.Context(owner); Assert.Equal(1, await Revision(observer, owner));
         await using (var db = database.Context(owner))
         {

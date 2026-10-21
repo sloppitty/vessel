@@ -53,6 +53,32 @@ describe('Review API', () => {
     const query = new URL(reviewPath({ ...defaultReviewQuery, positions: 'auto', minPlays: 5 }), 'http://localhost').searchParams
     expect([query.get('positions'), query.get('minPlays')]).toEqual(['auto', '5'])
   })
+  it('keeps paper Review typed and rejects imported-position rows or aggregates even if relabelled paper', async () => {
+    const paper = {
+      ...reviewFixture, tradingMode: 'paper' as const,
+      plays: [{ ...reviewFixture.plays[0]!, executionSource: 'paper' as const,
+        local: { netUsd: '200.123456789', basis: 'paper-simulation' as const, reason: null, signDiffers: false } }],
+      positions: { mode: 'exclude' as const, included: false, minPlays: 5, plays: 3, positions: null, omitted: null, playWeight: '2' },
+    }
+    expect(isReviewDocument(paper)).toBe(true)
+    const mixed = [
+      { ...paper, plays: [{ ...positionReport.plays.at(-1), executionSource: 'paper' }] },
+      { ...paper, positions: positionReport.positions },
+      { ...paper, metrics: { ...paper.metrics, positions: 1 } },
+      { ...paper, periods: paper.periods.map(p => ({ ...p, positions: 1 })) },
+      { ...paper, groups: { ...paper.groups, accounts: paper.groups.accounts.map(g => ({ ...g, metrics: { ...g.metrics, positions: 1 } })) } },
+    ]
+    for (const report of mixed) expect.soft(isReviewDocument(report)).toBe(false)
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(paper)))
+    vi.stubGlobal('fetch', fetch)
+    const api = createWorkspaceApi('token').forTradingMode!('paper')
+    expect(await api.review({ ...defaultReviewQuery, positions: 'exclude' })).toEqual(paper)
+    expect(fetch).toHaveBeenLastCalledWith('/api/review?period=month&portfolio=all&positions=exclude&tradingMode=paper', expect.anything())
+    fetch.mockResolvedValue(new Response(JSON.stringify(mixed[0])))
+    await expect(api.review(defaultReviewQuery)).rejects.toThrow()
+    fetch.mockResolvedValue(new Response(JSON.stringify(paper)))
+    await expect(createWorkspaceApi('token').review(defaultReviewQuery)).rejects.toThrow(/different trading mode/)
+  })
   it('encodes asset identifiers without changing scope', () => {
     const path = reviewPath({ ...defaultReviewQuery, instrument: 'A&B/#', offset: 50 })
     const query = new URL(path, 'http://localhost').searchParams
