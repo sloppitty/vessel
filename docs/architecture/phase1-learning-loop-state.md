@@ -47,6 +47,10 @@ October 20, 2026:
     guards.
   - No further high-severity gap was found.
 
+- **Post-sync Sol review (October 21).** Two findings, both fixed: the contract now records the owner's October 21
+  answers, unweighted n in 1.4a, the "Imported position" Origin group in 1.4b and a decisions table. Round 2 found
+  nothing new.
+
 ## Integration base
 
 Not started.
