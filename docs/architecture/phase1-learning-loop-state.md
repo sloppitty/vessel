@@ -863,3 +863,36 @@ October 20, 2026, branch `t3/phase1-time`, stacked on 1.6b–d:
     zone-named times instead of a bare day.
   - Round 3 found nothing new.
   - **Check.** `scripts/check.sh` passed: backend 3,635 passed, 5 skipped; frontend 159 files and 3,907 tests.
+
+## Main sync with PR #32 (paper trading)
+
+October 21, 2026. Main gained PR #32, an opt-in paper playground: a `tradingMode` (`real` or `paper`) on accounts,
+portfolios and Plays, simulated paper executions, and isolated paper Activity, Review, Overview and sizing. The owner
+asked to check the stack against it and merge the stack once confident.
+- **Merged forward, not rebased.** Main went into the contract and up through every branch. #22 (1.6a) is now merged
+  into #23 (1.1a), so the stack is one chain and the PRs merge into main in order; #22 and 1.6e had conflicted in the
+  retrospective preview.
+- **Migrations.** Phase 1's four migrations sort before main's `20261020155750_PaperTradingFoundation`. A database
+  migrated with main first, holding real and paper Plays, applies them and ends identical to a fresh one (columns,
+  constraints, indexes, triggers and functions compared), with no pending model changes; the reviewed Play's completion
+  backfills to `legacy`.
+- **Paper isolation fixes.**
+  - 1.5: recent next actions read only the requested mode. A real Play's Thesis tab offered a paper Play's next action,
+    and opening it hit the other mode's 404.
+  - 1.3a: a paper Play is never declared Unresolved (409, and the domain refuses it); its simulation holds what it
+    cannot settle as ambiguous or a gap.
+  - 1.4b: the process view, its drill-downs, exclusions and the cancelled and unresolved sets are scoped by mode, and
+    `/api/review/exclusions` and `/process` forward `tradingMode`. A test checks that a paper Review holds no real case.
+  - 1.6b–d: "Not this play" refuses a paper Play with the same 409 as the other order-linking routes.
+  - 1.6e: paper check, execution, candle and suspension times, the paper Activity execution table and the skipped
+    interval named in a suspension reason follow the display zone.
+  - In the merges: 1.3a's sizing Unresolved count is real-only, the settling lock keeps `"TradingMode" = 'real'` with
+    the Unresolved status list, and paper Plays keep #32's provenance in Review's rows and history.
+- **Not added, by design.** Paper Plays show no 1.1a receipt and no 1.1b fill markers: simulated facts are never shown
+  as venue fills. Paper Review keeps #32's rule that only a receipted paper cancellation is an exclusion.
+- **Sol (Codex) review.** Three parallel reviews (backend isolation, persistence and migrations, frontend) found
+  nothing of medium severity or above. The frontend review's one low finding, the suspension interval's zone, is fixed
+  (above); a second round confirmed it.
+- **Checks.** `scripts/check.sh` passed on every code branch, each with 5 backend tests skipped (S3 and live venues):
+  #22 3,951 backend and 3,913 frontend tests; #23 3,960 and 3,938; #24 3,963 and 3,944; #25 3,968 and 3,960; #26 3,983
+  and 3,981; #27 3,995 and 3,989; #28 3,996 and 3,992; #29 4,005 and 3,999; #30 4,005 and 4,016; #31 4,008 and 4,032; #34 4,008 and 4,042.
