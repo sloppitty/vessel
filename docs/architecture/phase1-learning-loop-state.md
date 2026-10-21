@@ -239,6 +239,14 @@ October 20, 2026, branch `t3/phase1-preflight`, stacked on 1.4a:
   - **Test.** An all-clear plan now has a test that fails if Plan it skips the checklist.
   - **Check.** `scripts/check.sh` passed: backend 3,576 passed, 5 skipped; frontend 151 files and 3,784 tests.
 
+- **Post-sync Sol review (October 21).** The merge is sound: pre-flight counts never see a position row. One low
+  finding, fixed:
+  - **Blank next actions.** The query trimmed only ASCII spaces, so a next action of no-break spaces reached the
+    browser, which then rejected the whole list. It now trims every character the browser trims. The PostgreSQL test
+    adds such an action and fails without the fix.
+  - Round 2 found nothing new.
+  - **Check.** `scripts/check.sh` passed: backend 3,598 passed, 5 skipped; frontend 154 files and 3,826 tests.
+
 ## 1.6 Capture friction and time consistency
 
 Not started.
