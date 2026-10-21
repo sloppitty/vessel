@@ -17,9 +17,12 @@ public sealed class RiskStore(VesselDbContext db, UnitOfWork unitOfWork) : IOpen
 
     public async Task<List<OpenRiskFacts>> ActivePlaysAsync(IReadOnlyCollection<Guid>? playIds, CancellationToken ct)
     {
-        var query = db.Plays.Where(p => p.TradingMode == TradingMode.Real && Active.Contains(p.Status) &&
-            db.Accounts.Any(a => a.Id == p.AccountId && a.IsEnabled && a.TradingMode == TradingMode.Real));
-        if (playIds is not null) query = query.Where(p => playIds.Contains(p.Id));
+        // Named Plays (the editor's preview) are read whatever their status or account state, so their executions always
+        // count; only the aggregate keeps to active Plays on enabled accounts.
+        var query = playIds is not null
+            ? db.Plays.Where(p => p.TradingMode == TradingMode.Real && playIds.Contains(p.Id))
+            : db.Plays.Where(p => p.TradingMode == TradingMode.Real && Active.Contains(p.Status) &&
+                db.Accounts.Any(a => a.Id == p.AccountId && a.IsEnabled && a.TradingMode == TradingMode.Real));
         var plays = await query.AsNoTracking().ToListAsync(ct);
         if (plays.Count == 0) return [];
         var ids = plays.Select(p => p.Id).ToList();
@@ -33,9 +36,7 @@ public sealed class RiskStore(VesselDbContext db, UnitOfWork unitOfWork) : IOpen
         var coverage = (await db.Set<MonitorCoverage>().Where(c => ids.Contains(c.PlayId)).AsNoTracking().ToListAsync(ct)).ToDictionary(c => c.PlayId);
         return plays.Select(play =>
         {
-            var plan = PlayDocuments.Read(play.Plan);
             if (manual[play.Id].Any()) return Manual(play, manual[play.Id]);
-            var entrySide = ExecutionIntegrity.EntrySide(plan);
             var executions = new List<RiskExecution>();
             string? problem = null;
             foreach (var link in linked[play.Id])
@@ -44,9 +45,10 @@ public sealed class RiskStore(VesselDbContext db, UnitOfWork unitOfWork) : IOpen
                 var own = fills[OrderKey.Of(order)].ToList();
                 // A filled order whose retained executions fall short leaves its prices and quantity unknown.
                 if (ExecutionIntegrity.MissingExecutions(order, own)) problem = OpenRiskCalculator.MissingExecutions;
+                // Whether a fill contradicts its role depends on the plan measured, saved or edited: the service decides.
                 foreach (var fill in own)
-                    executions.Add(new(link.Role, link.Role == OrderLinkRole.Exit ? null : link.EntryId, link.LevelId, fill.Quantity, fill.Price,
-                        ExecutionIntegrity.Contradicts(link.Role, entrySide, fill)));
+                    executions.Add(new(link.Role, link.Role == OrderLinkRole.Exit ? null : link.EntryId, link.LevelId, fill.Quantity, fill.Price)
+                        { Fill = fill });
             }
             return new OpenRiskFacts(play, executions, coverage.GetValueOrDefault(play.Id), false, problem);
         }).ToList();

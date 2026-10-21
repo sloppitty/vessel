@@ -29,7 +29,7 @@ describe('open risk documents', () => {
   })
 
   it('checks previews against their request and settings as decimal or null', () => {
-    const request = { playId: null, accountId: play.accountId, plan: { direction: 'short' as const, sizingMode: 'quantity' as const, size: '1', leverage: '1', entries: [] } }
+    const request = { playId: null, accountId: play.accountId, plan: { direction: 'short' as const, sizingMode: 'quantity' as const, size: '1', leverage: '1', entries: [] }, instrumentSource: 'venue' as const }
     expect(isOpenRiskPreview({ playId: null, direction: 'short', riskUsd: '2', reason: null, rounded: false }, request)).toBe(true)
     expect(isOpenRiskPreview({ playId: null, direction: 'long', riskUsd: '2', reason: null, rounded: false }, request)).toBe(false)
     expect(isRiskSettings({ openRiskLimitPercent: null })).toBe(true)

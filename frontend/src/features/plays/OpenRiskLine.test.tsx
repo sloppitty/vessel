@@ -65,6 +65,13 @@ describe('open risk freshness and coverage (Sol round 1 on #36)', () => {
     await waitFor(() => expect(fake.openRiskPreview).toHaveBeenCalledTimes(2))
   })
 
+  it('sends the edited instrument source, so a manual instrument is measured like a saved one (Sol round 2 on #36)', async () => {
+    const fake = api(risk(), '10')
+    render(<OpenRiskLine api={fake} scope="all" reference="Main balance" playId={null} accountId={id(9)}
+      draft={{ ...createDraft(), instrumentSource: 'manual' }} reloadKey={0} />)
+    await waitFor(() => expect(fake.openRiskPreview).toHaveBeenCalledWith(expect.objectContaining({ instrumentSource: 'manual' }), expect.anything()))
+  })
+
   it('says when shares divide by the balances of only some accounts', async () => {
     const partial = { ...risk(), balance: { amountUsd: '1000', contributingAccountCount: 1, totalAccountCount: 2 } }
     render(<OpenRiskLine api={api(partial, '10')} scope={'portfolio:' + id(8)} reference="Main balance" playId={null} accountId={id(9)}

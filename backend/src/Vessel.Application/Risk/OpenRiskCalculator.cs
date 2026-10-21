@@ -1,6 +1,7 @@
 using System.Globalization;
 using Vessel.Application.Plays;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Workspace;
 
 namespace Vessel.Application.Risk;
 
@@ -9,7 +10,11 @@ namespace Vessel.Application.Risk;
 /// manual exit), its exact quantity and price, and whether its side or effect contradicts the role.
 /// </summary>
 public sealed record RiskExecution(OrderLinkRole Role, string? EntryId, string? LevelId, decimal Quantity, decimal Price,
-    bool Contradicts = false);
+    bool Contradicts = false)
+{
+    /// <summary>The retained venue fill behind a linked execution, so its side is checked against the plan being measured.</summary>
+    public ImportedFill? Fill { get; init; }
+}
 
 /// <summary>
 /// A Play's risk at its plan's stops, or null with the reason it is unknown. Whether its stops rest at the venue is not

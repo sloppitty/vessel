@@ -51,7 +51,7 @@ export interface RiskPlan {
   leverage: string
   entries: { id: string; share: string; price: string; stops: { id: string; unit: 'price' | 'percent'; value: string; share: string }[] }[]
 }
-export interface OpenRiskPreviewRequest { playId: string | null; accountId: string; plan: RiskPlan }
+export interface OpenRiskPreviewRequest { playId: string | null; accountId: string; plan: RiskPlan; instrumentSource: 'venue' | 'manual' }
 export interface OpenRiskPreview {
   playId: string | null
   direction: 'long' | 'short'

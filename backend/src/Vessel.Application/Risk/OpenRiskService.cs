@@ -1,6 +1,7 @@
 using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Plays;
+using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Application.Monitoring;
@@ -42,7 +43,7 @@ public sealed class OpenRiskService(IOpenRiskStore store, IWorkspaceStore worksp
         foreach (var fact in facts.Where(f => f.Play.Status is PlayStatus.Planned or PlayStatus.Open)
                      .OrderBy(f => f.Play.CreatedAtUtc).ThenBy(f => f.Play.Id))
         {
-            var risk = Risk(fact, PlayDocuments.Read(fact.Play.Plan));
+            var risk = Risk(fact, PlayDocuments.Read(fact.Play.Plan), fact.Play.InstrumentSource);
             plays.Add(new(fact.Play.Id, fact.Play.Title, fact.Play.Direction, PlayService.StatusName(fact.Play.Status), fact.Play.AccountId,
                 risk.Risk?.ToString(), risk.Reason, risk.Risk is { } value && !value.Terminates, Protection(fact)));
         }
@@ -72,6 +73,12 @@ public sealed class OpenRiskService(IOpenRiskStore store, IWorkspaceStore worksp
     public async Task<OpenRiskPreviewDto> PreviewAsync(OpenRiskPreviewRequest request, CancellationToken ct)
     {
         var plan = Validate(request.Plan);
+        var source = request.InstrumentSource switch
+        {
+            "venue" => InstrumentSource.Venue,
+            "manual" => InstrumentSource.Manual,
+            _ => throw new ProblemException(400, "The instrument source is venue or manual."),
+        };
         var account = await workspaceStore.AccountAsync(request.AccountId, ct);
         if (account is null || account.TradingMode != TradingMode.Real) throw new ProblemException(404, "Account not found.");
         OpenRiskFacts? fact = null;
@@ -80,11 +87,12 @@ public sealed class OpenRiskService(IOpenRiskStore store, IWorkspaceStore worksp
             // A saved Play must be this owner's real Play on this account; anything else is not found, never a new Draft.
             var play = await store.PlayAsync(id, ct);
             if (play is null || play.AccountId != account.Id || play.TradingMode != TradingMode.Real) throw new ProblemException(404, "Play not found.");
-            // A Draft or ended Play has no active executions to count; an active one has its own.
+            // Its own executions count in any status and account state; a Draft simply has none.
             fact = (await store.ActivePlaysAsync([id], ct)).SingleOrDefault();
         }
-        var manual = venues.Descriptor(account.VenueId)?.Capabilities.ManualExecutions == true;
-        var risk = fact is null ? OpenRiskCalculator.Calculate(plan, [], manual || UsdQuoted(account.VenueId)) : Risk(fact, plan);
+        // The edited plan's instrument source decides the quote, by the same rule as saved Plays.
+        var risk = fact is not null ? Risk(fact, plan, source) : OpenRiskCalculator.Calculate(plan, [],
+            venues.Descriptor(account.VenueId)?.Capabilities.ManualExecutions == true || source == InstrumentSource.Venue && UsdQuoted(account.VenueId));
         return new(request.PlayId, plan.Direction, risk.Risk?.ToString(), risk.Reason, risk.Risk is { } value && !value.Terminates);
     }
 
@@ -110,20 +118,26 @@ public sealed class OpenRiskService(IOpenRiskStore store, IWorkspaceStore worksp
         return new(Limit(saved));
     }
 
-    private PlayRisk Risk(OpenRiskFacts fact, PlayPlanDocument plan)
+    private PlayRisk Risk(OpenRiskFacts fact, PlayPlanDocument plan, InstrumentSource source)
     {
         if (fact.Problem is { } problem) return new(null, problem);
         var play = fact.Play;
         var manual = fact.ManualLedger || venues.Descriptor(play.VenueId)?.Capabilities.ManualExecutions == true;
-        var usd = manual || play.InstrumentSource == InstrumentSource.Venue && UsdQuoted(play.VenueId);
-        return OpenRiskCalculator.Calculate(plan, fact.Executions, usd);
+        var usd = manual || source == InstrumentSource.Venue && UsdQuoted(play.VenueId);
+        // A retained fill contradicts its role by the plan measured: the saved one, or the edited one in a preview.
+        var entrySide = ExecutionIntegrity.EntrySide(plan);
+        var executions = fact.Executions.Select(e => e.Fill is { } fill ? e with { Contradicts = ExecutionIntegrity.Contradicts(e.Role, entrySide, fill) } : e)
+            .ToList();
+        return OpenRiskCalculator.Calculate(plan, executions, usd);
     }
 
     public const string NotCovered = "not-covered", Covered = "covered", NotChecked = "not-checked";
+    private static readonly TimeSpan MaxClockSkew = TimeSpan.FromMinutes(1);
 
     /// <summary>
     /// The monitor's last recorded stop coverage of an Open venue Play (0.4c), projected stale after two intervals like the
-    /// monitor's own read. Only a fresh known "not covered" is confirmed absence; null for Planned and manual Plays.
+    /// monitor's own read. A check time ahead of this clock (beyond a minute's skew) verifies nothing either. Only a fresh
+    /// known "not covered" is confirmed absence; null for Planned and manual Plays.
     /// </summary>
     private string? Protection(OpenRiskFacts fact)
     {
@@ -131,7 +145,9 @@ public sealed class OpenRiskService(IOpenRiskStore store, IWorkspaceStore worksp
             return null;
         if (fact.Coverage is not { } coverage) return NotChecked;
         var interval = (monitor ?? new MonitorOptions()).Interval;
-        if (coverage.CheckedAtUtc < time.GetUtcNow() - interval * 2) return MonitorCoverageStates.Stale;
+        var now = time.GetUtcNow();
+        if (coverage.CheckedAtUtc < now - interval * 2) return MonitorCoverageStates.Stale;
+        if (coverage.CheckedAtUtc > now + MaxClockSkew) return MonitorCoverageStates.Unknown;
         return coverage.State switch
         {
             MonitorCoverageStates.Known => coverage.Covered == true ? Covered : coverage.Covered == false ? NotCovered : MonitorCoverageStates.Unknown,

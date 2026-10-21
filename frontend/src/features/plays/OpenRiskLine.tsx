@@ -14,10 +14,11 @@ import { exact, partialBalance, riskPlanOf, riskShare, useOpenRisk, useOpenRiskP
  */
 export function OpenRiskLine({ api, scope, reference, playId, accountId, draft, reloadKey }: {
   api: WorkspaceApi; scope: string; reference: string; playId: string | null; accountId: string
-  draft: Pick<PlayDraft, 'direction' | 'sizingMode' | 'size' | 'leverage' | 'entries'>; reloadKey: unknown
+  draft: Pick<PlayDraft, 'direction' | 'sizingMode' | 'size' | 'leverage' | 'entries' | 'instrumentSource'>; reloadKey: unknown
 }) {
   const plan = useMemo(() => riskPlanOf(draft), [draft])
-  const request = useMemo<OpenRiskPreviewRequest>(() => ({ playId, accountId, plan }), [playId, accountId, plan])
+  const instrumentSource = draft.instrumentSource
+  const request = useMemo<OpenRiskPreviewRequest>(() => ({ playId, accountId, plan, instrumentSource }), [playId, accountId, plan, instrumentSource])
   const risk = useOpenRisk(api, scope, reloadKey)
   const preview = useOpenRiskPreview(api, request, reloadKey)
   if (risk?.failed || preview?.failed) return <p className="capital-open-risk" data-testid="open-risk-line">

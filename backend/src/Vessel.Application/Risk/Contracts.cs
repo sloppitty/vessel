@@ -56,7 +56,8 @@ public sealed record RiskPlanDto(string Direction, string SizingMode, string Siz
 /// The plan being edited, so capital context can show this Play's own increment by the same rule as every other Play.
 /// <paramref name="PlayId"/> is the saved Play whose executions count, or null for a new Draft.
 /// </summary>
-public sealed record OpenRiskPreviewRequest(Guid? PlayId, [property: JsonRequired] Guid AccountId, [property: JsonRequired] RiskPlanDto Plan);
+public sealed record OpenRiskPreviewRequest(Guid? PlayId, [property: JsonRequired] Guid AccountId, [property: JsonRequired] RiskPlanDto Plan,
+    [property: JsonRequired] string InstrumentSource);
 public sealed record OpenRiskPreviewDto(Guid? PlayId, string Direction, string? RiskUsd, string? Reason, bool Rounded);
 
 /// <summary>
@@ -70,8 +71,8 @@ public sealed record OpenRiskFacts(Play Play, IReadOnlyList<RiskExecution> Execu
 public interface IOpenRiskStore
 {
     /// <summary>
-    /// The owner's real Planned, Paused, Open and Unresolved Plays on enabled accounts, or only <paramref name="playIds"/>
-    /// when given, with their linked executions or manual ledger.
+    /// The owner's real Planned, Paused, Open and Unresolved Plays on enabled accounts, or exactly the real Plays named by
+    /// <paramref name="playIds"/> in any status and account state, with their linked executions or manual ledger.
     /// </summary>
     Task<List<OpenRiskFacts>> ActivePlaysAsync(IReadOnlyCollection<Guid>? playIds, CancellationToken ct);
     /// <summary>The owner's Play by ID, in any status and mode; null when unknown.</summary>

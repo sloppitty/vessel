@@ -125,27 +125,36 @@ public sealed class OpenRiskApiTests
         RiskPlanDto Edited(string stop) => new("long", "quantity", "1", "1", [new("e1", "100", "100", [new("s1", "price", stop, "100")])]);
 
         // Moving the managed stop back below the fill shows its risk at once, from the saved fill at 100.
-        var saved = await Preview(client, new(open, account.Id, Edited("90")));
+        var saved = await Preview(client, new(open, account.Id, Edited("90"), "venue"));
         Assert.Equal(("10", (string?)null), (saved.RiskUsd, saved.Reason));
         // A new Draft has no executions: its planned quantity at its planned price.
-        var draft = await Preview(client, new(null, account.Id, Edited("97.5")));
+        var draft = await Preview(client, new(null, account.Id, Edited("97.5"), "venue"));
         Assert.Equal("2.5", draft.RiskUsd);
         // A blank stop in a Draft is unknown, never an error.
-        Assert.Equal(OpenRiskCalculator.UnpricedStop, (await Preview(client, new(null, account.Id, Edited("")))).Reason);
+        Assert.Equal(OpenRiskCalculator.UnpricedStop, (await Preview(client, new(null, account.Id, Edited(""), "venue"))).Reason);
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync("/api/risk/open/preview",
-            new OpenRiskPreviewRequest(null, Guid.NewGuid(), Edited("90")))).StatusCode);
+            new OpenRiskPreviewRequest(null, Guid.NewGuid(), Edited("90"), "venue"))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/risk/open/preview",
-            new OpenRiskPreviewRequest(null, account.Id, Edited("90") with { Entries = [] }))).StatusCode);
+            new OpenRiskPreviewRequest(null, account.Id, Edited("90") with { Entries = [] }, "venue"))).StatusCode);
         // Sol round 1 on #36: a saved Play must be this account's; an unknown or mismatched one is not found, never a Draft.
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync("/api/risk/open/preview",
-            new OpenRiskPreviewRequest(open, other.Id, Edited("90")))).StatusCode);
+            new OpenRiskPreviewRequest(open, other.Id, Edited("90"), "venue"))).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync("/api/risk/open/preview",
-            new OpenRiskPreviewRequest(Guid.NewGuid(), account.Id, Edited("90")))).StatusCode);
+            new OpenRiskPreviewRequest(Guid.NewGuid(), account.Id, Edited("90"), "venue"))).StatusCode);
         // Two stops sharing an ID cannot stand for one another.
         var duplicate = new RiskPlanDto("long", "quantity", "10", "1", [new("e1", "100", "100",
             [new("s", "price", "90", "50"), new("s", "price", "105", "50")])]);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/risk/open/preview",
-            new OpenRiskPreviewRequest(null, account.Id, duplicate))).StatusCode);
+            new OpenRiskPreviewRequest(null, account.Id, duplicate, "venue"))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/risk/open/preview",
+            new OpenRiskPreviewRequest(null, account.Id, Edited("90"), "spot"))).StatusCode);
+
+        // Sol round 2 on #36: the saved buy fill contradicts an entry of the edited short, so the edit is unknown.
+        var flipped = new RiskPlanDto("short", "quantity", "1", "1", [new("e1", "100", "100", [new("s1", "price", "105", "100")])]);
+        Assert.Equal(OpenRiskCalculator.Contradicting, (await Preview(client, new(open, account.Id, flipped, "venue"))).Reason);
+        // A manual instrument on a venue account has no known quote, as Draft and once planned alike.
+        Assert.Equal((null, OpenRiskCalculator.Units), ((await Preview(client, new(null, account.Id, Edited("95"), "manual"))).RiskUsd,
+            (await Preview(client, new(null, account.Id, Edited("95"), "manual"))).Reason));
     }
 
     [PostgresFact]
@@ -181,6 +190,11 @@ public sealed class OpenRiskApiTests
         // An old record is stale, like the monitor's own read.
         await Coverage("known", false, now.AddHours(-1));
         Assert.Equal((new OpenRiskProtectionDto(0, 1), "stale"), await Read());
+        // Sol round 2 on #36: a check time ahead of the clock verifies nothing, covered or not.
+        await Coverage("known", true, now.AddDays(2));
+        Assert.Equal((new OpenRiskProtectionDto(0, 1), "unknown"), await Read());
+        await Coverage("known", false, now.AddDays(2));
+        Assert.Equal((new OpenRiskProtectionDto(0, 1), "unknown"), await Read());
 
         // Sol round 1 on #36: a filled entry order whose retained executions fall short makes the whole Play unknown.
         await using (var db = database.Context(owner))
@@ -191,6 +205,15 @@ public sealed class OpenRiskApiTests
         }
         var risk = (await client.GetFromJsonAsync<OpenRiskDto>("/api/risk/open"))!;
         Assert.Equal((null, OpenRiskCalculator.MissingExecutions), (risk.Plays.Single(p => p.PlayId == open).RiskUsd, risk.Plays.Single(p => p.PlayId == open).Reason));
+        // Sol round 2 on #36: on a disabled account the preview still reads the Play's own facts, never an empty ledger.
+        await using (var db = database.Context(owner))
+        {
+            var stored = await db.Accounts.SingleAsync(a => a.Id == account.Id);
+            stored.UpdateSettings(stored.Name, stored.PortfolioId, false);
+            await db.SaveChangesAsync();
+        }
+        var edited = new RiskPlanDto("long", "quantity", "1", "1", [new("e1", "100", "100", [new("s1", "price", "90", "100")])]);
+        Assert.Equal(OpenRiskCalculator.MissingExecutions, (await Preview(client, new(open, account.Id, edited, "venue"))).Reason);
     }
 
     private static async Task<OpenRiskPreviewDto> Preview(HttpClient client, OpenRiskPreviewRequest request)
