@@ -71,7 +71,65 @@ October 21, 2026:
 
 ## 1. Open risk
 
-Not started.
+October 21, 2026. Implemented on `t3/phase2-open-risk`.
+- **The calculator.** `OpenRiskCalculator` computes the loss if every current
+  stop fills, in exact rationals (`Ratio`), and rounds once for the response:
+  - each filled entry's remaining quantity is measured from its exact average
+    fill;
+  - exits linked to the entry's levels, and a position-level exit when there
+    is only one filled entry, reduce it;
+  - the stops whose linked orders have not executed share it;
+  - the unfilled remainder of each entry counts at its planned price against
+    every stop;
+  - each stop's loss is clamped at zero.
+
+  A Play is unknown, with a named reason, when:
+  - a stop is unpriced;
+  - stop shares do not total 100%;
+  - the plan cannot be sized;
+  - an exit cannot be attributed to one entry;
+  - exits exceed their entry;
+  - a linked fill contradicts its role;
+  - the quote asset is not a listed stablecoin;
+  - a manual execution cannot be read.
+- **The API.**
+  - `GET /api/risk/open?scope=` sums Planned and Open real Plays by direction
+    on enabled accounts. It lists Paused and Unresolved Plays as not included
+    and counts Open Plays without a linked resting stop.
+  - `POST /api/risk/open/preview` measures the plan being edited against the
+    saved Play's executions.
+  - `GET`/`PUT /api/risk/settings` store the soft limit per owner. It is blank
+    by default, above 0 and at most 100, with up to 4 decimals (migration
+    `20261021144248_RiskSettings`).
+  - `/api/risk` is actual-only, so paper requests get 409.
+- **The browser.**
+  - Capital context gains one line, for Draft, Planned, Paused and Open real
+    Plays: long and short of the scope's balance, the unknown count, the
+    not-included count, this Play's increment and the limit flag.
+  - Overview gains an Open risk tile after the metric tiles, so Allocation
+    keeps its place.
+  - Settings gains Risk limits.
+  - The browser only replaces the saved Play's contribution with its preview
+    and forms exact shares.
+  - Clients without the read (partial test doubles) show neither.
+- **Tests.**
+  - `OpenRiskCalculatorTests` (10): G-06, the managed stop at 105 adding 0,
+    the average fill, exits and executed stops, the planned remainder (Sol
+    round 1's 10-unit case), position-level exits, D-04's unpriced half, and
+    the other unknowns.
+  - `OpenRiskApiTests` (3, PostgreSQL): directions never netted, exclusions,
+    scope, 404/400, paper 409, preview and limit validation.
+  - `RiskIsolationTests` in both auth modes.
+  - The SQL inventory has two new reviewed hashes. The body-limit inventory
+    lists the two new bounded writes.
+  - Frontend: validators, the paper guard, increment arithmetic, exact
+    shares, the capital-context line, the Overview tile and the Settings
+    panel.
+- **Check.** `scripts/check.sh` passed on `5c50b05a`: backend 4,023 passed,
+  5 skipped; frontend 170 files and 4,056 tests. An earlier run found 42
+  frontend failures from test doubles without `openRisk`, which the guard
+  fixed.
+- The migration is applied explicitly, never to the owner's database.
 
 ## 2. Weekly review page
 

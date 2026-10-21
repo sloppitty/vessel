@@ -4,6 +4,13 @@
 
 ### Added
 
+- Open risk: the loss if every current stop fills across your Planned and
+  Open Plays, long and short shown apart and never netted. A stop at or
+  beyond its entry adds nothing, and a Play that cannot be measured is
+  counted as unknown, never partly summed. Capital context shows this Play's
+  own increment as you edit it, Overview has an Open risk tile, and Settings
+  has an optional soft limit, blank until you set it, which is flagged and
+  never enforced (G-06).
 - Settings has a Times choice: Local (your browser's zone, the default) or
   UTC. Every page shows times in that zone and names it, with the other zone
   in each time's tooltip; Activity and Review still filter by UTC days and
