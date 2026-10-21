@@ -36,7 +36,7 @@ def configuration():
     for key, value in values.items():
         if configuration_key(key).startswith(("vessel:credentials:", "vessel:evidence:", "vessel:events:",
                                               "vessel:messaging:", "vessel:monitor:", "vessel:notifications:",
-                                              "vessel:worker:")):
+                                              "vessel:worker:", "vessel:paper:")):
             env[key] = value
     if not any(configuration_key(key) == "vessel:messaging:rabbitmquri" for key in env):
         user, password = values.get("RABBITMQ_USER"), values.get("RABBITMQ_PASSWORD")
@@ -172,6 +172,19 @@ def main():
                 "Vessel__Notifications__HeartbeatFile": env.get("Vessel__Notifications__HeartbeatFile",
                                                                 "/tmp/vessel-dev-notifications-heartbeat"),
             }, start_new_session=True))
+            if os.environ.get("Vessel_DEV_PAPER") == "1":
+                # A new deployment, never a changed module set for the existing monitor.
+                paper_env = {key: value for key, value in env.items()
+                             if not configuration_key(key).startswith((
+                                 "vessel:worker:modules:", "vessel:credentials:",
+                                 "vessel:evidence:", "vessel:messaging:"))}
+                processes.append(subprocess.Popen(worker, cwd=ROOT, env={
+                    **paper_env,
+                    "Vessel__Worker__Modules__0": "paper",
+                    "Vessel__Worker__Deployment": "paper",
+                    "Vessel__Paper__HeartbeatFile": env.get("Vessel__Paper__HeartbeatFile",
+                                                          "/tmp/vessel-dev-paper-heartbeat"),
+                }, start_new_session=True))
         if mode in ["run", "lan"]:
             # Do not give the frontend process database credentials or the API token.
             processes.append(subprocess.Popen(
@@ -180,6 +193,8 @@ def main():
             ))
             print(f"Frontend: http://{host}:5180 · API: http://127.0.0.1:5080", flush=True)
             print("Workers run the monitor and notifications modules. Stop with Ctrl+C; PostgreSQL and RabbitMQ keep running.", flush=True)
+            if os.environ.get("Vessel_DEV_PAPER") == "1":
+                print("Optional paper worker runs separately; paper execution remains off until enabled in Settings.", flush=True)
         while True:
             for process in processes:
                 if process.poll() is not None:

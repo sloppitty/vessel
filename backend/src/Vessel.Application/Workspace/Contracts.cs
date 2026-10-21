@@ -9,20 +9,20 @@ public sealed record AccountSettingsExpectation(
     [property: JsonRequired] Guid AccountId,
     [property: JsonRequired] long SettingsRevision);
 public sealed record CreatePortfolioRequest(string Name, string? Icon = null, IReadOnlyList<Guid>? AccountIds = null,
-    IReadOnlyList<AccountSettingsExpectation>? Expected = null);
+    IReadOnlyList<AccountSettingsExpectation>? Expected = null, string TradingMode = "real");
 public sealed record MoveAccountsRequest(
     [property: JsonRequired] IReadOnlyList<Guid>? AccountIds,
     [property: JsonRequired] Guid? PortfolioId,
     IReadOnlyList<AccountSettingsExpectation>? Expected = null);
 public sealed record CreateAccountRequest(Guid? PortfolioId, string Name, string VenueId, string? Address = null, string? ManualAccountValueUsd = null,
-    string? SourceId = null);
+    string? SourceId = null, string TradingMode = "real", string? StartingCapitalUsd = null);
 /// <summary>Renames a portfolio and, when <see cref="Icon"/> is present, changes its icon; an omitted icon is kept.</summary>
-public sealed record UpdatePortfolioRequest(string Name, string? Icon = null);
+public sealed record UpdatePortfolioRequest(string Name, string? Icon = null, string? TradingMode = null);
 public sealed record UpdateAccountRequest(
     [property: JsonRequired] string Name,
     [property: JsonRequired] Guid? PortfolioId,
     [property: JsonRequired] bool IsEnabled,
-    [property: JsonRequired] long ExpectedRevision);
+    [property: JsonRequired] long ExpectedRevision, string? StartingCapitalUsd = null, string? TradingMode = null);
 /// <summary>
 /// TotalValueUsd sums primary perps (or manual) values. BalanceUsd sums account balances: perps plus stablecoin wallet,
 /// or the wallet alone in unified and portfolio-margin modes, so no ledger is counted twice.
@@ -30,13 +30,14 @@ public sealed record UpdateAccountRequest(
 public sealed record PortfolioDto(Guid Id, string Name, int AccountCount, string? TotalValueUsd, string ValueCoverage,
     string? BalanceUsd = null, string BalanceCoverage = "unavailable", string Icon = PortfolioIcons.Default,
     string? AvailableBalanceUsd = null, int AvailableBalanceAccountCount = 0,
-    string AvailableBalanceCoverage = "unavailable", int EnabledAccountCount = 0);
+    string AvailableBalanceCoverage = "unavailable", int EnabledAccountCount = 0, string TradingMode = "real");
 public sealed record AccountDto(Guid Id, Guid? PortfolioId, string Name, string VenueId, string? Address,
     string? AccountValueUsd, DateTimeOffset? LastSyncedAtUtc, string SyncStatus, string? LastSyncError,
     int PositionCount, string? HistoryNotice, bool IsEnabled, long SettingsRevision,
     string? AvailableStablecoinNominalUsd = null, string? StablecoinScope = null, string? AccountMode = null,
     string? TotalStablecoinNominalUsd = null, string? BalanceUsd = null, string? SourceId = null,
-    string? AvailableBalanceUsd = null, string? AvailableBalanceSource = null);
+    string? AvailableBalanceUsd = null, string? AvailableBalanceSource = null, string TradingMode = "real",
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? StartingCapitalUsd = null);
 public sealed record AccountInstrumentsDto(string VenueId, string MarketScope, string Scope,
     IReadOnlyList<VenueInstrument> Instruments, string Notice);
 /// <summary>Where a catalogue comes from: the venue's selectable perpetuals, or none for a manual account.</summary>
@@ -68,7 +69,8 @@ public sealed record OverviewDto(IReadOnlyList<PortfolioDto> Portfolios, IReadOn
     OverviewTotals Totals, IReadOnlyList<FillDto> RecentActivity, string ScopeNote);
 
 // Application owns this bounded use-case port; EF and transaction details stay in Persistence.
-public sealed record MarketDataAccount(bool IsEnabled, string VenueId);
+public sealed record MarketDataAccount(bool IsEnabled, string VenueId, string TradingMode = "real");
+public sealed record PaperAccountBalance(string CashUsd, string? EquityUsd, string? AvailableMarginUsd, int OpenPositionCount);
 
 public interface IWorkspaceStore
 {
@@ -79,6 +81,12 @@ public interface IWorkspaceStore
     Task AccountVisibilityChangedAsync(Guid accountId, bool enabled, CancellationToken ct) => Task.CompletedTask;
     Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct);
     Task<List<Account>> AccountsAsync(CancellationToken ct);
+    async Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct, string tradingMode = "real") =>
+        (await PortfoliosAsync(ct)).Where(p => p.TradingMode == tradingMode).ToList();
+    async Task<List<Account>> AccountsAsync(CancellationToken ct, string tradingMode = "real") =>
+        (await AccountsAsync(ct)).Where(a => a.TradingMode == tradingMode).ToList();
+    Task<IReadOnlyDictionary<Guid, PaperAccountBalance>> PaperBalancesAsync(IReadOnlyList<Guid> accountIds, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyDictionary<Guid, PaperAccountBalance>>(new Dictionary<Guid, PaperAccountBalance>());
     Task<Account?> AccountAsync(Guid id, CancellationToken ct);
     Task<MarketDataAccount?> MarketDataAccountAsync(Guid id, CancellationToken ct);
     Task<AccountSnapshot?> SnapshotAsync(Guid id, CancellationToken ct);

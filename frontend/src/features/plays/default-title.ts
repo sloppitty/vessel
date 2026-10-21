@@ -5,8 +5,13 @@ export const maxPlayTitleLength = 200
 
 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
 
-/** Local day, short English month and year, e.g. `15 Oct 2026`. Fixed names keep it independent of the browser locale. */
-export const titleDate = (date: Date) => `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`
+/**
+ * Day, short English month and year, e.g. `15 Oct 2026`, in local time unless `zone` is UTC. Fixed names keep it
+ * independent of the browser locale.
+ */
+export const titleDate = (date: Date, zone: 'local' | 'utc' = 'local') => zone === 'utc'
+  ? `${date.getUTCDate()} ${months[date.getUTCMonth()]} ${date.getUTCFullYear()}`
+  : `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`
 
 const directionLabel = (direction: string | null | undefined) =>
   direction === 'long' ? 'Long' : direction === 'short' ? 'Short' : ''
@@ -24,8 +29,8 @@ function clip(text: string, max: number) {
  * such as `BTC` or a manual label. Missing parts are left out without stray separators, and an overlong
  * manual label is shortened so the whole title stays within the limit.
  */
-export function defaultPlayTitle(play: { instrument?: string | null; direction?: string | null }, now: Date = new Date()) {
-  const date = titleDate(now)
+export function defaultPlayTitle(play: { instrument?: string | null; direction?: string | null }, now: Date = new Date(), zone: 'local' | 'utc' = 'local') {
+  const date = titleDate(now, zone)
   const direction = directionLabel(play.direction)
   const asset = (play.instrument ?? '').replace(/\s+/g, ' ').trim()
   const reserved = (direction ? direction.length + 1 : 0) + ' · '.length + date.length

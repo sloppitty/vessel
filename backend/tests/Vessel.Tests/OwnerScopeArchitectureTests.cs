@@ -61,6 +61,21 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Persistence/Events/Subscriptions/SystemEventSubscriptionStore.cs|d861bf11b70ccc91d89b833f9d76ac9e59c6ce1b5ec881e11eaa6b15fe07ba1a",
             "Vessel.Persistence/EvidenceStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             "Vessel.Persistence/ExecutionStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
+            // Paper settings serialize by the assigned journal owner's advisory key; no owner rows are bypassed.
+            "Vessel.Persistence/PaperStore.cs|ca35ce83e5046ca71b824a5e1463e632f7a8a1da5a1d567b9cbd4c62cf33a4d3",
+            // Exact capital aggregates explicitly bind owner+account; suspended exposure correlates that owner's Play facts.
+            "Vessel.Persistence/PaperStore.cs|03709fdf8f9f4ee1c8ac2bc0eff423494c13010ee2d3d8f01038e080312b4737",
+            "Vessel.Persistence/PaperStore.cs|08d7fae2990f586cb97eda7d7b88003197c70bfdbcc6cea9c4e121d2ae85e800",
+            // One snapshot of paper balances: outer account is assigned-owner filtered; every lateral aggregate correlates owner+account.
+            "Vessel.Persistence/WorkspaceStore.Paper.cs|d536769e0d360a5190b0e2a654164db45c584b6035d845183f94a9538cccfb7e",
+            // Paper schema probe returns no rows; the scheduler's sole global acquire/release protects shared public reads.
+            "Vessel.Worker/PaperScheduler.cs|836ebdb2b79c67541fb7174785661d0bb001697ceeee2ce7e06a2a15ca0b2f5b",
+            "Vessel.Worker/PaperScheduler.cs|5553fefce46ca5daf07aa5e90a20bae242e0cf92c34cbaec98217b8b48a581d1",
+            "Vessel.Worker/PaperScheduler.cs|977d0760f4aac902b870946f7815ec72dd13e5590886281f3dbf0dc207acf752",
+            // Shared venue admission: the same server-wide advisory key as the real monitor; only a global lease count is read.
+            "Vessel.Worker/PaperScheduler.cs|2e6d3566b15d1febae42a7bb464483d062e02708eeb0f7b7113a41fe28ed2428",
+            "Vessel.Worker/PaperScheduler.cs|0bd82837aabbbd4c1ff5587c1b31d0a7c2f139b7b41ec238ba794e40b6c872b9",
+            "Vessel.Worker/PaperScheduler.cs|e83477b56188aca19b8fe5b167e717c77061df36b5e9555b425734927803888f",
             // System discovery returns owner IDs only, including every notification table and suspended owners.
             "Vessel.Persistence/JournalOwnerInventory.cs|bb06887355cced7bbc1fff79100360708d49bf80f3cc431f57d1891bb7aa623b",
             // Notification paging assembles both statements with the constant `visible` fragment, which
@@ -141,8 +156,8 @@ public sealed class OwnerScopeArchitectureTests
             // Progress row: inserts @owner from the server-wide registration and the owner's own retention floor.
             "Vessel.Persistence/Events/Subscriptions/SubscriptionProgress.cs|6a6e7519684ffb58f2e2cf0a0af6c1baf38c72a25cd1c8174919b0c641bd0b3c",
             // Fail-closed rule (quoted identifiers are never exempt); each is single-table with "OwnerId" = the scope owner:
-            // Open-play lock: plays by "AccountId" and "OwnerId" = db.CurrentOwnerId, a constant status list (Unresolved when settling).
-            "Vessel.Persistence/ExecutionStore.cs|2f0259ddb4eba4dacc0a17b339ed5d757e687e85b6f750e49547e60bfcb0b911",
+            // Open-play lock: plays by "AccountId" and "OwnerId" = db.CurrentOwnerId, real mode and a constant status list (Unresolved when settling).
+            "Vessel.Persistence/ExecutionStore.cs|95a972ad76be70f47e94ff36bb33b3663f8b466b0c0e8a0de0fa503ba9cd944e",
             // Account row lock: "Id" and "OwnerId" = db.CurrentOwnerId.
             "Vessel.Persistence/ExecutionStore.cs|f893e1f76d22fb36ed9f16200cec96625e462cf6930d1e287e08257755036a55",
             "Vessel.Persistence/MonitorDiscrepancyStore.cs|f893e1f76d22fb36ed9f16200cec96625e462cf6930d1e287e08257755036a55",
@@ -196,6 +211,10 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Persistence/VesselDbContextFactory.cs|e1b7a668a5e3ab1cf3318d78321688ad059827b7d660f00bda0ac249e2afee69",
             // Not SQL: check-config usage text ("--Vessel:Key=value" and the word "do").
             "Vessel.Api/ConfigurationCheckCommand.cs|ed23367322632085581515ce59e3a4ab16f07ac9f7dc62ae7df4d6fc17700445",
+            // Not SQL: paper report coverage prose and the account-move instruction.
+            "Vessel.Application/Review/ReviewService.cs|e540123a645048886c64b77cd996b33b11ba772faa86cca3911968a0a364ffde",
+            "Vessel.Application/Workspace/WorkspaceService.cs|a1c0bc9961d3e38f15fd9b7b59072f141e41a0ba20319ee201057cfa365c4a81",
+            "Vessel.Persistence/WorkspaceStore.cs|a1c0bc9961d3e38f15fd9b7b59072f141e41a0ba20319ee201057cfa365c4a81",
             // Not SQL: identity command names "reset-after-restore" and "revoke-sessions".
             "Vessel.Identity/IdentityAdministration.cs|de972956ff71edac782269c6c600a1fd82dc90c14f4363d70e3287828933c5db",
             "Vessel.Identity/IdentityAdministration.cs|d0a010615ff67a2fdcaabb9a9ea71fda1e68f0cb866d887bd960e2daac2ce4e2",

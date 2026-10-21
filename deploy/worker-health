@@ -2,10 +2,12 @@
 # Healthy only while the worker keeps completing productive passes. It writes
 # "<unix seconds> <timeout seconds>" after each one: the monitor scheduler for a monitor worker
 # (Vessel:Monitor:HeartbeatTimeout), subscription maintenance for a notifications worker
-# (Vessel:Notifications:HeartbeatTimeout). The first configured module chooses the file.
+# (Vessel:Notifications:HeartbeatTimeout), or the paper scheduler
+# (Vessel:Paper:HeartbeatTimeout). The first configured module chooses the file.
 set -euf
 case "${Vessel__Worker__Modules__0:-monitor}" in
   notifications) file="${Vessel__Notifications__HeartbeatFile:-/tmp/vessel-notifications-heartbeat}" ;;
+  paper) file="${Vessel__Paper__HeartbeatFile:-/tmp/vessel-paper-heartbeat}" ;;
   *) file="${Vessel__Monitor__HeartbeatFile:-/tmp/vessel-worker-heartbeat}" ;;
 esac
 test -r "$file" || exit 1

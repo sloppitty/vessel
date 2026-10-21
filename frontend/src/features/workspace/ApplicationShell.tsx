@@ -1,3 +1,5 @@
+import type { TradingMode } from '@/api/paper'
+import { NativeSelect } from '@/components/ui/native-select'
 import { createRef, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Tooltip } from 'radix-ui'
 import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
@@ -90,10 +92,38 @@ function logLine(page: Page, owner: string, now = new Date()) {
 }
 
 export function ApplicationShell(props: ShellProps) {
-  return <Tooltip.Provider delayDuration={250} skipDelayDuration={400}><NotificationProvider><VenuesProvider venues={props.system.venues}><Shell {...props} /></VenuesProvider></NotificationProvider></Tooltip.Provider>
+  return <Tooltip.Provider delayDuration={250} skipDelayDuration={400}><NotificationProvider><TradingWorkspace {...props} /></NotificationProvider></Tooltip.Provider>
 }
 
-function Shell({ system, disconnect, api, identity }: ShellProps) {
+type ModeProps = { tradingMode: TradingMode; paperAvailable: boolean; onTradingModeChange: (mode: TradingMode) => void; onPaperSettingsChange: () => void }
+
+function TradingWorkspace(props: ShellProps) {
+  const [mode, setMode] = useState<TradingMode>('real')
+  const [paperApi, setPaperApi] = useState<WorkspaceApi | null>(null)
+  const [settingsGeneration, setSettingsGeneration] = useState(0)
+  useEffect(() => {
+    if (!props.api.paperSettings || !props.api.forTradingMode) return
+    const controller = new AbortController()
+    props.api.paperSettings(controller.signal).then(() => { if (!controller.signal.aborted) setPaperApi(props.api) })
+      .catch(() => { /* Old/unsupported APIs stay real-only. Settings shows its own actionable error. */ })
+    return () => controller.abort()
+  }, [props.api, settingsGeneration])
+  const paperClient = useMemo(() => {
+    try { const client = props.api.forTradingMode?.('paper'); return client?.tradingMode === 'paper' ? client : null }
+    catch { return null }
+  }, [props.api])
+  const paperAvailable = paperApi === props.api && paperClient !== null && props.system.venues.some(venue => venue.capabilities.paperExecution)
+  const tradingMode = paperAvailable ? mode : 'real'
+  const api = tradingMode === 'paper' ? paperClient! : props.api
+  // A paper account shares public chart/catalogue support only, never real account actions or streaming.
+  const venues = useMemo(() => tradingMode === 'real' ? props.system.venues : props.system.venues.map(venue => ({ ...venue,
+    tradeUrlTemplate: null, capabilities: { ...venue.capabilities, sync: false, orders: false, stablecoinWallet: false,
+      accountDiscovery: false, readOnlyCredential: false, manualExecutions: false, marketContext: false, stream: false } })), [props.system.venues, tradingMode])
+  return <VenuesProvider venues={venues}><Shell key={tradingMode} {...props} api={api} tradingMode={tradingMode} paperAvailable={paperAvailable}
+    onTradingModeChange={setMode} onPaperSettingsChange={() => setSettingsGeneration(value => value + 1)} /></VenuesProvider>
+}
+
+function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable, onTradingModeChange, onPaperSettingsChange }: ShellProps & ModeProps) {
   const { notify } = useNotifications()
   const venues = useVenues()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -195,9 +225,9 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
   }, [startupNotice, noticePresented, notify])
   // Links from notifications go through the shell's own navigation; a missing account gets a short notice.
   const notificationLink = useRef<(link: NotificationLink) => void>(() => {})
-  const inApp = useInAppNotifications({ api, active: disconnectedApi !== api, onLink: link => notificationLink.current(link),
+  const inApp = useInAppNotifications({ api, active: disconnectedApi !== api && tradingMode === 'real', onLink: link => notificationLink.current(link),
     onOpenPage: () => navigate('notifications') })
-  const monitor = useMonitorEvents(api, disconnectedApi !== api, reload, reloadKey, inApp.handlers)
+  const monitor = useMonitorEvents(api, disconnectedApi !== api && tradingMode === 'real', reload, reloadKey, inApp.handlers)
   // The persistent incident count: stored monitor records only, never notifications. Shared by the Plays entry and Overview.
   const incidents = useMemo(() => monitorIncidents(monitor.summary?.accounts ?? []), [monitor.summary])
   const incidentCounts = countIncidents(incidents, incidentsBeyondCap(monitor.summary?.accounts ?? []))
@@ -205,9 +235,9 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
   // failure visibly clears and returns, without a synchronous effect render.
   const loading = loaded === null || loaded.api !== api || loaded.key !== reloadKey
   // Stored reads wait for the event head cursor, so the stream covers every change after them.
-  const pending = (loading && data === null) || !monitor.cursorReady
+  const pending = (loading && data === null) || (tradingMode === 'real' && !monitor.cursorReady)
   const error = loading ? null : loadError
-  const cursorReady = monitor.cursorReady
+  const cursorReady = tradingMode === 'paper' || monitor.cursorReady
   useEffect(() => {
     if (disconnectedApi === api || !cursorReady) return
     const controller = new AbortController()
@@ -284,8 +314,9 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
   const notificationsName = notificationsLabel(unread)
   // Plays are tracked: the condition that also shows the monitor's offline banner.
   const tracked = !!monitor.summary?.accounts.some(item => item.state !== 'idle' || item.manualState !== 'idle' || item.discrepancies.some(issue => issue.state === 'open'))
-  const created = () => { reload(); setNotice('Saved to your workspace.') }
+  const created = () => { if (exitState.current?.api !== api) return; reload(); setNotice('Saved to your workspace.') }
   const managementChanged = (event: ManagementEvent) => {
+    if (exitState.current?.api !== api) return
     if (event.kind === 'portfolio-deleted' && portfolioFilter === event.id) setPortfolioFilter('')
     if (event.kind === 'account-deleted' && selectedAccountId === event.id) setSelectedAccountId(null)
     reload(); setNotice(event.message)
@@ -306,8 +337,9 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
   }
   const { refreshing, refreshProgress, sync, refreshAll, enqueue, cancel: cancelRefresh } = useAccountRefresh({ api, refreshable, reload, notify })
   const accountCreated = (account?: BrokerAccount) => {
+    if (exitState.current?.api !== api) return
     reload()
-    if (account && account.isEnabled !== false && venues.can(account.venueId, 'sync')) enqueue(account)
+    if (account && account.tradingMode !== 'paper' && account.isEnabled !== false && venues.can(account.venueId, 'sync')) enqueue(account)
   }
   const disconnectSession = () => {
     const current = exitState.current
@@ -323,12 +355,22 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
     exitState.current = null
     cancelRefresh(); setDisconnectedApi(api); setRequestedPlay(null); setPlaysSession(createPlaysSession()); disconnect()
   }
-  const refreshAllAction = <Button variant="outline" size="sm" onClick={() => { void refreshAll() }}
+  const refreshAllAction = tradingMode === 'paper' ? null : <Button variant="outline" size="sm" onClick={() => { void refreshAll() }}
     disabled={refreshing !== null || loading || !refreshable.length} aria-busy={refreshProgress !== null}>
     <RefreshCw size={14} className={refreshProgress ? 'is-spinning' : ''} />
     <span role={refreshProgress ? 'status' : undefined}>{refreshProgress ? `Refreshing ${refreshProgress.current} of ${refreshProgress.total}` : 'Refresh all'}</span>
   </Button>
 
+  function switchTradingMode(next: TradingMode) {
+    if (next === tradingMode) return
+    const current = exitState.current
+    if (current?.work.current || current && hasUnsavedPlayWork(current.session)) {
+      if (!window.confirm('Switch trading mode and discard unsaved Play work? Already-sent changes may still complete in their original mode.')) return
+    }
+    cancelRefresh()
+    exitState.current = null
+    onTradingModeChange(next)
+  }
   if (disconnectedApi === api) return null
   return <div className={`journal-shell ${navigationCollapsed ? 'navigation-collapsed' : ''}`}>
     <a className="skip-content" href="#workspace-content" onClick={event => { event.preventDefault(); document.getElementById('workspace-content')?.focus() }}>Skip to content</a>
@@ -338,6 +380,8 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
       <button type="button" className="icon-button sidebar-toggle" aria-label={navigationCollapsed ? 'Expand navigation' : 'Collapse navigation'} title={navigationCollapsed ? 'Expand navigation' : 'Collapse navigation'} aria-controls="workspace-nav" aria-expanded={!navigationCollapsed} onClick={() => setNavigationCollapsed(collapsed => !collapsed)}>
         {navigationCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
       </button>
+      {paperAvailable && <label className="trading-mode-picker"><span>Trading mode</span><NativeSelect aria-label="Trading mode" value={tradingMode}
+        onChange={event => switchTradingMode(event.target.value === 'paper' ? 'paper' : 'real')}><option value="real">Real</option><option value="paper">Paper · simulated</option></NativeSelect></label>}
       <div className="nav-section-label">Workspace</div>
       <nav>{pages.filter(p => p.id !== 'settings' && p.id !== 'notifications').map(({ id, label, icon: Icon }) => {
         // Plays keeps its name; open monitor incidents describe it, beside a count in their severity tone.
@@ -350,7 +394,7 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
       <div className="nav-section-label later-section">Later</div>
       <div className="shell-nav-later" role="link" aria-label="Strategies" aria-disabled="true" title="Strategies are not available yet"><Compass size={18} aria-hidden="true" /><span className="sidebar-copy">Strategies</span><small className="sidebar-copy" aria-hidden="true">Soon</small></div>
       <div className="shell-sidebar-bottom">
-        <a href="#notifications" className={`shell-nav-item ${page === 'notifications' ? 'active' : ''}`} aria-label={notificationsName} title={notificationsName} aria-current={page === 'notifications' ? 'page' : undefined} onClick={() => navigate('notifications')}><Bell size={18} aria-hidden="true" /><span className="sidebar-copy">Notifications</span><NotificationBadge count={unread} /></a>
+        {tradingMode === 'real' && <a href="#notifications" className={`shell-nav-item ${page === 'notifications' ? 'active' : ''}`} aria-label={notificationsName} title={notificationsName} aria-current={page === 'notifications' ? 'page' : undefined} onClick={() => navigate('notifications')}><Bell size={18} aria-hidden="true" /><span className="sidebar-copy">Notifications</span><NotificationBadge count={unread} /></a>}
         <a href="#settings" className={`shell-nav-item ${page === 'settings' ? 'active' : ''}`} aria-label="Settings" title="Settings" aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}><Settings2 size={18} aria-hidden="true" /><span className="sidebar-copy">Settings</span></a>
         {identity ? <AccountMenu identity={identity} onSignOut={disconnectSession}
           onProfile={() => { setSettingsTab('profile'); navigate('settings') }}
@@ -360,9 +404,10 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
     </aside>
     <div className="shell-main" inert={menuOpen}>
       <header className="shell-header"><button id="workspace-menu" className="icon-button mobile-menu" aria-label="Open navigation" title="Open navigation" aria-expanded={menuOpen} aria-controls="workspace-nav" onClick={() => setMenuOpen(true)}><Menu size={19} aria-hidden="true" />{unread > 0 && <span className="menu-unread-dot" aria-hidden="true" />}</button><span className="shell-header-brand" aria-hidden="true"><VesselMark size={22} />vessel</span>
-        <a href="#notifications" className="icon-button header-notifications" aria-label={notificationsName} title={notificationsName} onClick={() => navigate('notifications')}><Bell size={18} aria-hidden="true" /><NotificationBadge count={unread} /></a></header>
+        {tradingMode === 'real' && <a href="#notifications" className="icon-button header-notifications" aria-label={notificationsName} title={notificationsName} onClick={() => navigate('notifications')}><Bell size={18} aria-hidden="true" /><NotificationBadge count={unread} /></a>}</header>
       <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
       <main id="workspace-content" className="shell-content" tabIndex={-1}>
+        {tradingMode === 'paper' && <div className="workspace-alert paper-mode-banner" role="note"><span className="workspace-badge">Paper</span><span>Simulated capital and executions only. Real accounts and results are excluded. Zero fees and slippage; candle touches can be ambiguous.</span></div>}
         {page !== 'plays' && page !== 'review' && page !== 'notifications' && <section className="shell-page-heading" key={`heading-${page}`}><div><div className="eyebrow">{logLine(page, system.owner.displayName)}</div><h1>{selectedAccount ? selectedAccount.name : currentPage.label}</h1></div><div className="shell-heading-actions">
           {page !== 'settings' && <Button variant="outline" onClick={reload} disabled={loading || refreshing !== null} aria-busy={loading}><RefreshCw size={14} className={loading ? 'is-spinning' : ''} />Reload</Button>}
           {page === 'overview' ? <OverviewActions disabled={pending || !data} onNewPlay={newPlay} onPortfolio={() => setPortfolioDialog(true)} onAccount={() => setAccountDialog(true)} /> : page === 'portfolios' ? <Button onClick={() => setPortfolioDialog(true)}><Plus size={15} />New portfolio</Button> : page !== 'settings' && page !== 'activity' && <Button onClick={() => setAccountDialog(true)} disabled={pending || !data}><Plus size={15} />Add account</Button>}
@@ -412,10 +457,11 @@ function Shell({ system, disconnect, api, identity }: ShellProps) {
 
         {page === 'activity' && data && <section className="shell-panel"><header className="shell-panel-heading"><h2>Position operations</h2></header><ActivityOperations api={api} accounts={accounts} portfolios={portfolios} filters state={activityState} onStateChange={setActivityState} reloadGeneration={reloadKey} onOpenPlay={viewPlay} onCreated={reload} /></section>}
 
-        {page === 'notifications' && cursorReady && <Suspense fallback={<PageLoading />}><NotificationsPage api={api} inApp={inApp} accounts={accounts}
+        {page === 'notifications' && tradingMode === 'paper' && <p className="workspace-scope-note">Real-account notifications are unavailable in Paper mode.</p>}
+        {page === 'notifications' && tradingMode === 'real' && cursorReady && <Suspense fallback={<PageLoading />}><NotificationsPage api={api} inApp={inApp} accounts={accounts}
           state={notificationList} onStateChange={setNotificationList} eyebrow={logLine(page, system.owner.displayName)} onPreferences={() => navigate('settings')} /></Suspense>}
 
-        {page === 'settings' && <Suspense fallback={<PageLoading />}><SettingsPage system={system} api={api} inApp={inApp} disconnectSession={disconnectSession} onAccounts={() => navigate('accounts')}
+        {page === 'settings' && <Suspense fallback={<PageLoading />}><SettingsPage system={system} api={api} onPaperSettingsChange={onPaperSettingsChange} inApp={inApp} disconnectSession={disconnectSession} onAccounts={() => navigate('accounts')}
           {...identity ? { identity, tab: settingsTab, onTab: setSettingsTab } : {}} /></Suspense>}
         </div></PageErrorBoundary>
       </main>
