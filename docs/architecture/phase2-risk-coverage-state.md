@@ -237,6 +237,20 @@ October 21, 2026.
   - The export isolation case in both auth modes.
   - The button and download helper tests.
 - **Check.** `scripts/check.sh` passed on `2ae53843`: backend 4,034 passed, 5 skipped; frontend 172 files and 4,065 tests.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `31e99f08`. Three findings, all fixed in
+  `62fff421`:
+  - An imported position's known fees were exported as unknown. Positions
+    now carry their fees as Activity totals them, and a paper Play's
+    simulated zero fees say so instead of an empty cell.
+  - Closed positions Review cannot score were missing from the CSV. They are
+    exported as exclusions with their reason and no amounts, matching the
+    report's omitted count.
+  - Number cells accepted a trailing newline and non-ASCII digits. They must
+    now be plain ASCII decimals.
+
+  Sol confirmed the owner filters, paper isolation, quoting and formula
+  protection, `no-store` and the safe filenames.
+- **Check after round 1.** `scripts/check.sh` passed on `62fff421`: backend 4,035 passed, 5 skipped; frontend 172 files and 4,065 tests.
 
 ## 6. Opt-in account history retention
 
