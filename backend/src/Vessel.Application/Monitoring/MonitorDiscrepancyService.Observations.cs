@@ -308,9 +308,9 @@ public sealed partial class MonitorDiscrepancyService
                     remainingQuantity = x.Order is null ? null : ExactAmount.From(x.Order.RemainingSize).ToString(), wholePosition = x.Order?.IsPositionTpsl }).ToArray() };
             var protection = Identity([OrderLinkRole.Stop, OrderLinkRole.Target]);
             // Every per-Play kind depends on the current book; without one it does not run (structural, never missing).
-            void Add(string kind, bool? present, bool undecidable = false, object? data = null, object? identity = null) => scan.Add(new(kind, "play:" + play.Id, play.Id,
-                p.Instrument.ContractId, Native(p.Instrument), Severity(kind), bookRead ? present : null, at, [play.Id], data ?? details, identity ?? protection,
-                !bookRead || present is null && undecidable));
+            void Add(string kind, bool? present, bool undecidable = false, object? data = null, object? identity = null, bool onCondition = false) =>
+                scan.Add(new(kind, "play:" + play.Id, play.Id, p.Instrument.ContractId, Native(p.Instrument), Severity(kind), bookRead ? present : null, at,
+                    [play.Id], data ?? details, identity ?? protection, !bookRead || present is null && undecidable, onCondition));
             var graceAt = p.FirstEntry + options.ProtectionGrace;
             // Without a current book a missing stop is never decided, so the grace deadline needs no confirmation run.
             if (bookRead && open && graceAt > at) scan.Next = Earlier(scan.Next, graceAt.Value);
@@ -329,9 +329,12 @@ public sealed partial class MonitorDiscrepancyService
             bool? missing = !open ? completeOrders ? false : null : !stopPresenceKnown ? null : superseded || stops.Length > 0 ? false :
                 !mechanicsKnown ? null : siblingWholeStop ? shared ? false : null : graceAt <= at;
             Add("protection.missing", missing, stopPresenceKnown && mechanicsKnown && structural);
+            // Phase 2, D-19: a persistent undersized stop confirms on its condition (this Play's linked stop covers less than its
+            // open quantity), so a position or stop that keeps changing still confirms. Its fingerprint and details keep the
+            // quantities, so an open record shows the latest and a dismissed one reopens only on changed evidence.
             Add("protection.short", !open ? completeOrders ? false : null : !stopPresenceKnown ? null :
                 superseded || stops.Length == 0 ? false : stopCoverageKnown ? Compare(stopQuantity, p.Quantity, p.Instrument) < 0 : null,
-                stopPresenceKnown && mechanicsKnown && structural);
+                stopPresenceKnown && mechanicsKnown && structural, onCondition: true);
             // Phase 2, item 8b: a resting linked stop at or beyond the venue's own liquidation price on the loss side cannot act
             // before liquidation. Only the venue's reported price counts, from this read's fresh snapshot; when the venue
             // reports none the check is undecidable by design. Under cross margin the price moves with the whole account.

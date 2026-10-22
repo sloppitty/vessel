@@ -595,7 +595,7 @@ stateDiagram-v2
 | any | fresh present or absent | Clears `UnverifiableAtUtc`; sets `LastObservedAtUtc` | — |
 | `open` | fresh present | Details and fingerprint follow the evidence | nothing |
 | `dismissed`, same fingerprint | fresh present | Stays dismissed | `dismissed` only if the last announcement was `unverifiable` |
-| `candidate`, `resolved`, or `dismissed` with changed evidence | fresh present | Starts or continues confirmation; once observed at least 60 s after the uninterrupted sequence began: `open`, `OpenedAtUtc` = sequence start, new revision | `opened` |
+| `candidate`, `resolved`, or `dismissed` with changed evidence | fresh present | Starts or continues confirmation (on its condition for `protection.short` and `position.unprotected`, below); once observed at least 60 s after the uninterrupted sequence began: `open`, `OpenedAtUtc` = sequence start, new revision | `opened` |
 | `resolved` | fresh absent | Unchanged | `resolved` only if an `unverifiable` announcement is open |
 | other | fresh absent | `resolved` | `resolved` if publicly open (last announcement `opened` or `unverifiable`), else silent |
 | any | incomplete | Confirmation sequence restarts; work kept | nothing |
@@ -605,6 +605,8 @@ stateDiagram-v2
 | other | dismissal | Rejected: 409 | nothing |
 
 Every announcement increments `Revision` and keys the event `discrepancy:{id}:{revision}:{transition}`. Anything ever announced stays visible (`Visible`), and every `opened` or `unverifiable` announcement gets exactly one matching close (`resolved` or `dismissed`). A repeated delivery of the same source snapshot is not independent confirmation.
+
+**Confirmation on the condition (October 22, 2026, Phase 2, D-19).** Other kinds confirm on their fingerprint: changed evidence restarts the sequence. A persistent undersized stop (`protection.short`) confirms on its condition instead, as item 6c's `position.unprotected` does (below): its kind and subject, with the Play's linked stop covering less than its open quantity. So a position or stop whose quantity keeps changing still confirms after 60 s (`DiscrepancyInput.ConfirmsOnCondition`). It keeps the changing evidence: the pending fingerprint, and a candidate's or open record's fingerprint and details, follow the latest observation. A dismissed record still stays dismissed when its dismissed evidence returns. Changed evidence reopens it only after the same 60 s confirmation. Interruptions still break the sequence: an incomplete, failed, discarded or interrupted check, a fresh absence, expiry, or the dismissed evidence returning. Severity and announcements are unchanged.
 
 ### Unobservable lifetime, eligibility and evaluation
 
@@ -958,7 +960,7 @@ Backend suites run with `dotnet test backend/tests/Vessel.Tests` against disposa
 | Broker | `VesselEventTransportTests` (outbox, settlement table through inline listeners, unroutable publish and lost queue recovery, provisioning-only storage), `MonitorEndToEndTests` (scheduler without a browser, HTTP Check through the real broker) |
 | Worker host / multi-owner | `WorkerHostTests`, `MultiOwnerWorkerTests`, `MultiOwnerEventTests`, `MultiOwnerMessagingTests`, `MultiOwnerMonitorLimitsTests`, `OwnerScopeArchitectureTests`, `Isolation/BackgroundIsolationTests` (directory status, assigned scopes, cross-owner events/claims, shared budgets and deployment heartbeat) |
 | Monitor | `MonitorAccountTests`, `MonitorPostgresTests`, `MonitorCredentialRaceTests` |
-| Discrepancies | `DiscrepancyLifecycleTests` (table-driven state machine), `MonitorDiscrepancyTests`, `MonitorDiscrepancyReviewTests`, `MonitorDiscrepancyRound2Tests`–`Round7Tests`, `MonitorDiscrepancyPostgresTests`, `MonitorDiscrepancyApiTests` |
+| Discrepancies | `DiscrepancyLifecycleTests` (table-driven state machine), `MonitorDiscrepancyTests`, `MonitorDiscrepancyReviewTests`, `MonitorDiscrepancyRound2Tests`–`Round7Tests`, `MonitorDiscrepancyStopConfirmationTests` (D-19), `MonitorDiscrepancyPostgresTests`, `MonitorDiscrepancyApiTests` |
 | Contract fixture | `MonitorEndToEndTests.Monitor_http_json_matches_the_browser_contract_fixture` compares real, normalized API JSON with `frontend/src/test/contracts/monitor-api.json` (`VESSEL_UPDATE_CONTRACT_FIXTURES=1` rewrites it); `monitor-contract.test.ts` checks that file with the browser validators |
 | Frontend | `api/event-cursor.test.ts`, `api/sse.test.ts`, `api/monitor.test.ts`, `features/workspace/useMonitorEvents.test.tsx`, `features/monitor/MonitorPanel.test.tsx`, `features/monitor/review47.test.tsx`, `test/contracts/monitor-contract.test.ts` |
 | Browser smoke | `scripts/monitor-browser-smoke.cjs` (UI-only fixtures, including an unverifiable discrepancy), run by `scripts/release-browser-smoke.cjs` from `verify-release.py --browser-module` |
