@@ -5,7 +5,7 @@ import { Time } from '@/components/ui/time'
 
 const fieldLabels: Record<FillConflictField, string> = {
   side: 'side', price: 'price', quantity: 'quantity', fee: 'fee', feeToken: 'fee asset', closedPnl: 'closed P&L', time: 'time',
-  orderId: 'order ID', transactionHash: 'transaction', venueContract: 'venue market', leverage: 'leverage',
+  orderId: 'order ID', transactionHash: 'transaction', venueContract: 'venue market', leverage: 'leverage', direction: 'direction',
 }
 
 /**

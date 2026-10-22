@@ -78,7 +78,7 @@ export interface VenueInstrument {
 }
 /** The venue fields compared when a retained fill ID is reported again (`FillConflictFields` on the server). */
 export const fillConflictFields = ['side', 'price', 'quantity', 'fee', 'feeToken', 'closedPnl', 'time', 'orderId', 'transactionHash',
-  'venueContract', 'leverage'] as const
+  'venueContract', 'leverage', 'direction'] as const
 export type FillConflictField = typeof fillConflictFields[number]
 export interface FillConflict {
   contractId: string

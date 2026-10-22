@@ -181,10 +181,10 @@ public static class FillConflictFields
 {
     public const string Side = "side", Price = "price", Quantity = "quantity", Fee = "fee", FeeToken = "feeToken",
         ClosedPnl = "closedPnl", Time = "time", OrderId = "orderId", TransactionHash = "transactionHash",
-        VenueContract = "venueContract", Leverage = "leverage";
+        VenueContract = "venueContract", Leverage = "leverage", Direction = "direction";
 
     public static readonly IReadOnlyList<string> All =
-        [Side, Price, Quantity, Fee, FeeToken, ClosedPnl, Time, OrderId, TransactionHash, VenueContract, Leverage];
+        [Side, Direction, Price, Quantity, Fee, FeeToken, ClosedPnl, Time, OrderId, TransactionHash, VenueContract, Leverage];
 }
 
 // The latest known state of a venue order that could belong to a Play. A fact, not trading intent.

@@ -129,3 +129,26 @@ negative price is an invalid response, never unknown.
     After the position is flat it keeps the first-read value ("Flat now").
   - These are the venue's figures, never mixed with the plan's isolated
     estimate.
+
+## Fill conflicts (October 21, 2026)
+
+Phase 2, item 14c (F-12, probe V10; see `phase2-risk-coverage-contract.md`).
+A retained fill ID that a venue reports again with different venue facts keeps
+its first stored copy, which is never overwritten. The report is recorded in
+`fill_import_conflicts` (migration `20261021180627_FillImportConflicts`): one
+row per fill, the names of the fields that differed, first and last seen, and a
+report count. Neither value and no payload is stored.
+- **Compared.** Side, the adapter's wording of the venue's direction
+  (Hyperliquid's `dir`, RISEx's position side), price, quantity, fee and its
+  asset, closed P&L, time at stored precision, order ID and transaction. A
+  venue contract or leverage counts only when both copies state one.
+- **Not compared.** What Vessel derives: the canonical label, position effect
+  and fee and P&L bases.
+- **Within one read.** A changed later copy of a fill new in that read is
+  compared with the copy stored from it (Sol round 1 on 14c). Adapters collapse
+  only identical copies, so a changed one reaches the store.
+- **Reading them.** `GET /api/accounts/{id}/import-conflicts` returns the count
+  and the latest 50 for an enabled real account; a disabled account returns
+  none, and a paper request gets 409. Account detail shows them only when
+  there are some. Account deletion removes them, and they cascade with their
+  fill.

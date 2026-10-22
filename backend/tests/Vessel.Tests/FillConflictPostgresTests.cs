@@ -78,6 +78,37 @@ public sealed class FillConflictPostgresTests
     }
 
     [PostgresFact]
+    public async Task A_changed_copy_in_one_batch_and_a_changed_direction_are_conflicts_and_a_disabled_account_lists_none()
+    {
+        // Sol round 1 on 14c: a changed second copy within the first batch was dropped silently, the venue's direction wording
+        // was not compared, and a disabled account's conflicts stayed readable.
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        await using var db = database.Context(owner);
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
+        account.Configure(null, "0x" + new string('b', 40), null);
+        db.Accounts.Add(account);
+        await db.SaveChangesAsync();
+
+        await SaveAsync(db, account.Id, Read(2, Fill(), Fill(price: 101), Fill()));
+        var kept = await db.Fills.AsNoTracking().SingleAsync();
+        Assert.Equal(100m, kept.Price);
+        var first = await db.FillImportConflicts.AsNoTracking().SingleAsync();
+        Assert.Equal(("price", 1), (first.Fields, first.Reports));
+
+        await SaveAsync(db, account.Id, Read(3, Fill() with { Direction = "Close Short" }));
+        var second = await db.FillImportConflicts.AsNoTracking().SingleAsync();
+        Assert.Equal(("direction,price", 2), (second.Fields, second.Reports));
+
+        var service = new WorkspaceService(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(), TestUnitOfWork.For(db));
+        Assert.Equal(1, (await service.FillConflictsAsync(account.Id, default)).Total);
+        account.UpdateSettings(account.Name, null, false);
+        await db.SaveChangesAsync();
+        var hidden = await service.FillConflictsAsync(account.Id, default);
+        Assert.Equal((0, 0), (hidden.Total, hidden.Recent.Count));
+    }
+
+    [PostgresFact]
     public async Task Paper_accounts_have_no_import_conflicts_to_read()
     {
         await using var database = await CoreDatabase.CreateAsync();

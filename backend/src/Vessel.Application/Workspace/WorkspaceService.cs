@@ -355,6 +355,8 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     {
         var account = await RequireAccount(id, ValidateTradingMode(tradingMode), ct);
         if (account.TradingMode == TradingMode.Paper) throw new ProblemException(409, "Paper accounts have simulated executions, not imported fills.");
+        // Disabled accounts hide their imported activity, so their conflicts too (Sol round 1 on 14c).
+        if (!account.IsEnabled) return new(0, [], FillConflictsNotice);
         var (total, recent) = await store.FillConflictsAsync(id, 50, ct);
         return new(total, recent.Select(c => new FillConflictDto(c.ContractId, c.SourceFillId, c.Fields.Split(','), c.FirstSeenAtUtc,
             c.LastSeenAtUtc, c.Reports)).ToList(), FillConflictsNotice);

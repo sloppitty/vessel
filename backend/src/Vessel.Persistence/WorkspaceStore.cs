@@ -120,6 +120,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 FundingPayment p => p.OwnerId == account.OwnerId && p.AccountId == account.Id,
                 LeverageObservation o => o.OwnerId == account.OwnerId && o.AccountId == account.Id,
                 RiskObservation o => o.OwnerId == account.OwnerId && o.AccountId == account.Id,
+                FillImportConflict c => c.OwnerId == account.OwnerId && c.AccountId == account.Id,
                 AccountFundingState s => s.OwnerId == account.OwnerId && s.AccountId == account.Id,
                 Vessel.Domain.Credentials.AccountCredential c => c.OwnerId == account.OwnerId && c.AccountId == account.Id,
                 _ => false
@@ -185,7 +186,6 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
             .AsNoTracking().ToListAsync(ct);
         var existing = retained.Select(f => (f.ContractId, f.SourceFillId)).ToHashSet();
         var newFills = result.Fills.Where(f => existing.Add((f.ContractId, f.SourceFillId))).ToList();
-        await RecordFillConflictsAsync(account, retained, result.Fills, observation.ObservedAtUtc, ct);
         // Leverage would be lost with the replaced positions; keep an observation when a position appears or changes,
         // or when new executions show it may have closed and reopened identically since the last refresh.
         if (replacePerps) await RecordLeverageAsync(account, observation, snapshot?.Positions ?? [], newFills, ct);
@@ -254,9 +254,10 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 Available = balance.Available
             }).ToList();
         }
+        var stored = new Dictionary<(string, string), ImportedFill>();
         foreach (var f in newFills)
         {
-            db.Fills.Add(new ImportedFill
+            db.Fills.Add(stored[(f.ContractId, f.SourceFillId)] = new ImportedFill
             {
                 Id = Guid.NewGuid(),
                 OwnerId = account.OwnerId,
@@ -280,6 +281,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 Leverage = f.Leverage
             });
         }
+        // A changed report of a retained fill, or a changed later copy within this batch, keeps the first (Sol round 1 on 14c).
+        await RecordFillConflictsAsync(account, retained, stored, result.Fills, observation.ObservedAtUtc, ct);
         // RawJson intentionally never crosses into journal persistence or logs.
         account.RecordSync(snapshot.ObservedAtUtc, result.HistoryNotice);
         await unitOfWork.SaveChangesAsync(ct);
@@ -291,16 +294,19 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
     /// copy and is recorded as a conflict with the differing field names. The row is upserted per fill, never with either
     /// payload.
     /// </summary>
-    private async Task RecordFillConflictsAsync(Account account, List<ImportedFill> retained, IReadOnlyList<VenueFill> incoming,
-        DateTimeOffset observedAt, CancellationToken ct)
+    private async Task RecordFillConflictsAsync(Account account, List<ImportedFill> retained,
+        Dictionary<(string, string), ImportedFill> added, IReadOnlyList<VenueFill> incoming, DateTimeOffset observedAt,
+        CancellationToken ct)
     {
-        if (retained.Count == 0) return;
         var byIdentity = retained.ToDictionary(f => (f.ContractId, f.SourceFillId));
+        var firstCopies = new HashSet<(string, string)>();
         var differing = new Dictionary<Guid, (ImportedFill Fill, HashSet<string> Fields)>();
         foreach (var report in incoming)
         {
-            if (!byIdentity.TryGetValue((report.ContractId, report.SourceFillId), out var stored)) continue;
-            var fields = DifferingFields(stored, report);
+            var key = (report.ContractId, report.SourceFillId);
+            // A fill new in this batch was stored from its first copy; only its later copies are compared with it.
+            if (!byIdentity.TryGetValue(key, out var stored) && !(added.TryGetValue(key, out stored) && !firstCopies.Add(key))) continue;
+            var fields = DifferingFields(stored!, report);
             if (fields.Count == 0) continue;
             if (differing.TryGetValue(stored.Id, out var known)) known.Fields.UnionWith(fields);
             else differing[stored.Id] = (stored, fields);
@@ -335,6 +341,9 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         static DateTimeOffset Stored(DateTimeOffset value) => value.ToUniversalTime().AddTicks(-(value.UtcTicks % 10));
         var fields = new HashSet<string>(StringComparer.Ordinal);
         if (stored.Side != report.Side) fields.Add(FillConflictFields.Side);
+        // The adapter's wording of the venue's own direction (Hyperliquid's dir, RISEx's position side): a venue fact, unlike
+        // the position effect or bases Vessel derives (Sol round 1 on 14c).
+        if (stored.Direction != report.Direction) fields.Add(FillConflictFields.Direction);
         if (stored.Price != report.Price) fields.Add(FillConflictFields.Price);
         if (stored.Quantity != report.Quantity) fields.Add(FillConflictFields.Quantity);
         if (stored.Fee != report.Fee) fields.Add(FillConflictFields.Fee);
