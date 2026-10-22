@@ -92,9 +92,9 @@ describe('Plays list views', () => {
       expect(screen.getByRole('navigation', { name: 'Plays pages' })).toHaveTextContent('51–60 of 60')
       await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Rows per page' }), '100')
       await waitFor(() => expect(lastQuery(api)).toEqual({ view: 'closed', page: 1, pageSize: 100 }))
-      expect(states.at(-1)).toEqual({ view: 'closed', q: '', page: 1, pageSize: 100 })
+      expect(states.at(-1)).toEqual({ ...initialPlaysList, view: 'closed', page: 1, pageSize: 100 })
       await userEvent.click(screen.getByRole('tab', { name: /^All/ }))
-      expect(states.at(-1)).toEqual({ view: 'all', q: '', page: 1, pageSize: 100 })
+      expect(states.at(-1)).toEqual({ ...initialPlaysList, view: 'all', page: 1, pageSize: 100 })
     } finally { delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView }
   })
   it('keeps the page the server clamped to, without reading it again, so a later return after growth stays there', async () => {

@@ -62,6 +62,9 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Persistence/Events/Subscriptions/SystemEventSubscriptionStore.cs|d861bf11b70ccc91d89b833f9d76ac9e59c6ce1b5ec881e11eaa6b15fe07ba1a",
             "Vessel.Persistence/EvidenceStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             "Vessel.Persistence/ExecutionStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
+            // Phase 2, item 13: the per-Play projection lock; its key carries the scope's owner and a Play ID that the owner-
+            // filtered read just found. It accesses no rows.
+            "Vessel.Persistence/Search/PlaySearchProjection.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             // Paper settings serialize by the assigned journal owner's advisory key; no owner rows are bypassed.
             "Vessel.Persistence/PaperStore.cs|ca35ce83e5046ca71b824a5e1463e632f7a8a1da5a1d567b9cbd4c62cf33a4d3",
             // Exact capital aggregates explicitly bind owner+account; suspended exposure correlates that owner's Play facts.

@@ -5,7 +5,7 @@ import { PaperExecutionPanel } from './PaperExecutionPanel'
 import { ApiError, errorMessage } from '@/api/errors'
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
-import { isEndedStatus, isReviewed, pagedPlayViews, playSearchLength, statusLabels, type NextAction, type PlayCounts, type PlayList as PlayListPage, type PreflightCheck, type PlayListQuery, type PlayStatus, type UnresolvedReason, type PlayView, type SavedPlay, type StatusRequest, type PlayRule, type PlayRuleState, type PlanRuleAnswer } from '@/api/plays'
+import { isEndedStatus, isJournalQuery, isReviewed, journalSearchMax, pagedPlayViews, playSearchLength, statusLabels, type NextAction, type PlayCounts, type PlayList as PlayListPage, type PreflightCheck, type PlayListQuery, type PlayStatus, type UnresolvedReason, type PlayView, type SavedPlay, type StatusRequest, type PlayRule, type PlayRuleState, type PlanRuleAnswer } from '@/api/plays'
 import type { AccountMonitor } from '@/api/monitor'
 import { Button } from '@/components/ui/button'
 import { Pager } from '@/components/ui/pager'
@@ -20,6 +20,7 @@ import { ArrowLeft, CircleHelp, Copy, History, Pause, Play, Plus, RotateCcw, Sav
 import type { PlayDraft } from './draft'
 import { PlayWorkspace } from './PlayWorkspace'
 import { PlayIdentity } from './PlayIdentity'
+import { JournalSearchResults, PlayOutcomeLine } from './JournalSearch'
 import { ExecutionPanel } from './ExecutionPanel'
 import { ManualExecutionPanel } from './ManualExecutionPanel'
 import { emptyManualDraft, hasManualDraft } from './manual'
@@ -826,6 +827,20 @@ function PlayList({ api, accounts, busy, reloadGeneration, unsaved, list, onList
     const timer = setTimeout(() => onList({ ...latestList.current, q, page: 1 }), playSearchDelay)
     return () => clearTimeout(timer)
   }, [search, onList])
+  // Journal search (Phase 2, item 13) waits the same way; below two characters it shows the list again.
+  const [journal, setJournal] = useState(list.journal)
+  const [journaled, setJournaled] = useState(list.journal)
+  if (journaled !== list.journal) {
+    setJournaled(list.journal)
+    if (journal.trim() !== list.journal) setJournal(list.journal)
+  }
+  useEffect(() => {
+    const q = journal.trim()
+    const next = isJournalQuery(q) ? q : ''
+    if (next === latestList.current.journal) return
+    const timer = setTimeout(() => onList({ ...latestList.current, journal: next, journalOffset: 0 }), playSearchDelay)
+    return () => clearTimeout(timer)
+  }, [journal, onList])
 
   const paged = pagedPlayViews.includes(list.view)
   const query: PlayListQuery = { view: list.view, ...(list.q ? { q: list.q } : {}), ...(paged ? { page: list.page, pageSize: list.pageSize } : {}) }
@@ -876,11 +891,19 @@ function PlayList({ api, accounts, busy, reloadGeneration, unsaved, list, onList
   return <section className="plays-page plays-list-page" aria-label="Saved plays">
     <div className="plays-draft-heading">
       <div className="page-heading-copy"><h1>Plays</h1></div>
-      <div className="plays-heading-actions"><Button onClick={onNew} disabled={!!unsaved || busy}><Plus size={15} />New play</Button></div>
+      <div className="plays-heading-actions">
+        <label className="plays-search journal-search"><Search size={14} aria-hidden="true" />
+          <input type="search" value={journal} maxLength={journalSearchMax} placeholder="Search notes, reviews and log" aria-label="Search the journal"
+            autoComplete="off" onChange={event => setJournal(event.target.value)} /></label>
+        <Button onClick={onNew} disabled={!!unsaved || busy}><Plus size={15} />New play</Button>
+      </div>
     </div>
     {unsaved && <div className="workspace-alert plays-unsaved" role="status"><span>Unsaved changes in <strong>{unsaved}</strong>. Save or discard them before opening another play.</span>
       <Button variant="outline" size="sm" onClick={onContinue}>Continue editing</Button>
       <Button variant="ghost" size="sm" className="danger-action" disabled={busy} onClick={onDiscard}>Discard changes</Button></div>}
+    {list.journal ? <JournalSearchResults api={api} accounts={accounts} query={list.journal} offset={list.journalOffset} disabled={!!unsaved || busy}
+      onOffset={offset => onList({ ...list, journalOffset: offset })} onOpen={onOpen}
+      onClear={() => { setJournal(''); onList({ ...list, journal: '', journalOffset: 0 }) }} /> :
     <Tabs value={list.view} onValueChange={value => onList({ ...list, view: value as PlayView, page: 1 })} className="plays-list-tabs">
       <div className="plays-list-toolbar">
         <TabsList aria-label="Show plays">
@@ -907,13 +930,15 @@ function PlayList({ api, accounts, busy, reloadGeneration, unsaved, list, onList
           {shown.plays.length ? <ul className={pending ? 'plays-list list-refetching' : 'plays-list'} aria-busy={pending || undefined}>
             {shown.plays.map(play => <li key={play.id}>
               <button type="button" className="plays-list-item" disabled={!!unsaved || busy} onClick={() => onOpen(play.id)} aria-label={`Open ${play.title || 'Untitled play'}`}
-                aria-describedby={incidents.has(play.id) ? `plays-list-identity-${play.id} plays-list-incidents-${play.id}` : `plays-list-identity-${play.id}`}>
+                aria-describedby={[`plays-list-identity-${play.id}`, incidents.has(play.id) && `plays-list-incidents-${play.id}`,
+                  play.outcome && ended.includes(play.status) && `plays-list-outcome-${play.id}`].filter(Boolean).join(' ')}>
                 <span className="plays-list-title"><span className="plays-list-heading"><strong>{play.title || 'Untitled play'}</strong>{play.origin === 'retrospective' && <span className="badge play-retrospective">Retrospective</span>}
                   <IncidentPill id={`plays-list-incidents-${play.id}`} counts={incidents.get(play.id)} /></span>
                   {play.tradingMode === 'paper' && <span className="workspace-badge">Paper</span>}<PlayIdentity id={`plays-list-identity-${play.id}`} instrument={play.instrument} source={play.instrumentSource} venueId={play.venueId} accountName={accountName(play.accountId)} /></span>
                 <span className={`direction-chip ${play.direction}`}>{play.direction === 'long' ? 'Long' : 'Short'}</span>
                 <span className={`badge play-status-${play.status}`}>{statusLabels[play.status]}</span>
-                <small className="plays-list-meta">{ended.includes(play.status) && (isReviewed(play) ? 'Reviewed · ' : 'Pending review · ')}{play.origin !== 'retrospective' && play.planRevision > 1 ? `${play.planRevision} revisions · ` : ''}Updated <Time at={play.updatedAtUtc} style="date" /></small>
+                <small className="plays-list-meta"><PlayOutcomeLine play={play} id={`plays-list-outcome-${play.id}`} />
+                  <span>{ended.includes(play.status) && (isReviewed(play) ? 'Reviewed · ' : 'Pending review · ')}{play.origin !== 'retrospective' && play.planRevision > 1 ? `${play.planRevision} revisions · ` : ''}Updated <Time at={play.updatedAtUtc} style="date" /></span></small>
               </button>
             </li>)}
           </ul> : <div className={pending ? 'plays-list-empty list-refetching' : 'plays-list-empty'} aria-busy={pending || undefined}>
@@ -923,6 +948,6 @@ function PlayList({ api, accounts, busy, reloadGeneration, unsaved, list, onList
             onPageSize={size => { if (isPageSize(size)) onList({ ...list, page: 1, pageSize: size }) }} />}
         </>}
       </TabsContent>
-    </Tabs>
+    </Tabs>}
   </section>
 }

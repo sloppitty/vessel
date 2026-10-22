@@ -34,6 +34,27 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         return new(result.Rows.Select(Summary).ToList(), ViewName(listView), result.Page, size, result.TotalCount);
     }
 
+    /// <summary>
+    /// Journal-wide search (Phase 2, item 13): the mode's Plays whose title, plan notes, review, answers, log or image notes
+    /// hold the query, 50 per page from <paramref name="offset"/>, each with its first matching field and an excerpt. The
+    /// paged list and its title/instrument search are unchanged; Plays not indexed yet are counted, never silently missed.
+    /// </summary>
+    public async Task<PlaySearchPageDto> SearchAsync(string? q, int? offset, CancellationToken ct, string? tradingMode = "real")
+    {
+        var mode = Mode(tradingMode);
+        var (query, folded) = JournalSearch.Query(q);
+        var start = offset ?? 0;
+        if (start is < 0 or > JournalSearch.MaxOffset)
+            throw new ProblemException(400, $"Offset is a whole number from 0 to {JournalSearch.MaxOffset}.");
+        var result = await store.SearchAsync(JournalSearch.LikePattern(folded), mode, start, JournalSearch.PageSize, ct);
+        var items = result.Matches.Select(match =>
+        {
+            var (excerpt, at, length) = JournalSearch.Excerpt(match.Text, match.Folded, folded);
+            return new PlaySearchHitDto(Summary(match.Play), match.Field, excerpt, at, length);
+        }).ToList();
+        return new(query, items, result.Total, start, start + items.Count < result.Total ? start + items.Count : null, result.NotIndexed);
+    }
+
     public async Task<PlayCountsDto> CountsAsync(string? search, string? scope, CancellationToken ct, string? tradingMode = "real")
     {
         var rows = await store.CountsAsync(await Filter(search, scope, Mode(tradingMode), ct), ct);
@@ -373,6 +394,8 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         play.HasReview, play.Origin == PlayOrigin.Retrospective ? "retrospective" : "planned", play.ReviewedAtUtc, play.TradingMode)
     {
         ReviewCompletion = CompletionName(play.ReviewCompletion), ReviewCompletedAtUtc = play.ReviewCompletedAtUtc,
+        // F-07: from the projection, never the plan. A row without one is not indexed yet, which is not "no result".
+        Outcome = JournalSearch.Dto(play.Outcome),
     };
 
     private IPaperTradingService RequirePaper() => paper ?? throw new ProblemException(503, "Paper execution is unavailable.");
