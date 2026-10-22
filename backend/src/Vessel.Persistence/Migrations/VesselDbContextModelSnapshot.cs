@@ -1398,6 +1398,10 @@ namespace Vessel.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<decimal?>("DailyLossLimitR")
+                        .HasPrecision(7, 4)
+                        .HasColumnType("numeric");
+
                     b.Property<decimal?>("OpenRiskLimitPercent")
                         .HasPrecision(7, 4)
                         .HasColumnType("numeric");
@@ -1405,11 +1409,19 @@ namespace Vessel.Persistence.Migrations
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<decimal?>("WeeklyLossLimitR")
+                        .HasPrecision(7, 4)
+                        .HasColumnType("numeric");
+
                     b.HasKey("OwnerId");
 
                     b.ToTable("risk_settings", null, t =>
                         {
+                            t.HasCheckConstraint("CK_risk_settings_daily_loss_limit", "\"DailyLossLimitR\" IS NULL OR (\"DailyLossLimitR\" > 0 AND \"DailyLossLimitR\" <= 100)");
+
                             t.HasCheckConstraint("CK_risk_settings_open_risk_limit", "\"OpenRiskLimitPercent\" IS NULL OR (\"OpenRiskLimitPercent\" > 0 AND \"OpenRiskLimitPercent\" <= 100)");
+
+                            t.HasCheckConstraint("CK_risk_settings_weekly_loss_limit", "\"WeeklyLossLimitR\" IS NULL OR (\"WeeklyLossLimitR\" > 0 AND \"WeeklyLossLimitR\" <= 100)");
                         });
                 });
 

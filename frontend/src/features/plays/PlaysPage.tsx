@@ -282,6 +282,9 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const [priceStep, setPriceStep] = useState<PriceStep>(null)
   // The Draft's pre-flight as the workspace last evaluated it; Plan it records it with revision 1 (phase 1, 1.5).
   const [preflight, setPreflight] = useState<PreflightCheck[] | null>(null)
+  const [lossLimitMessage, setLossLimitMessage] = useState<string | null>(null)
+  // Stable, so the workspace sends its checks only when they change.
+  const takePreflight = useCallback((checks: PreflightCheck[], lossLimit: string | null) => { setPreflight(checks); setLossLimitMessage(lossLimit) }, [])
   // The owner's recent next actions, offered while a Play is not yet under way. They are context, so a failed read shows none.
   const [nextActions, setNextActions] = useState<{ api: WorkspaceApi; actions: NextAction[] } | null>(null)
   const offersNextActions = visible && session.view === 'editor' && (saved?.summary.status ?? 'draft') !== 'open' &&
@@ -663,7 +666,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       filledEntries={filledEntries} fills={fills} onUnits={onUnits} onPriceStep={setPriceStep}
       incidents={saved ? playIncidents.get(saved.summary.id) : undefined} stopEvidence={manual ? undefined : stopEvidence}
       evidenceImages={evidenceImages} reviewReceipt={reviewReceipt} journalSave={journalSave} retrospectiveReceipt={retrospectiveReceipt}
-      onPreflight={setPreflight} nextActions={nextActions?.api === api ? nextActions.actions : null} onOpenPlay={id => { void open(id) }}
+      onPreflight={takePreflight} nextActions={nextActions?.api === api ? nextActions.actions : null} onOpenPlay={id => { void open(id) }}
       log={saved ? <PlayLog key={saved.summary.id} api={api} playId={saved.summary.id} draft={session.log}
         onDraft={change => {
           // A living page publishes its own session; once it has gone, the owner applies the change to its current one.
@@ -700,7 +703,9 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     {dialog === 'cancel' && <CancelDialog paper={paper} pending={busy === 'status'} error={dialogError}
       onCancel={(reason, note) => { void changeStatus({ status: 'cancelled', reason, ...(note ? { note } : {}) }) }} onClose={() => setDialog(null)} />}
     {dialog === 'preflight' && preflight && <PreflightDialog checks={preflight} pending={busy === 'status'} error={dialogError}
-      onPlan={() => { void changeStatus({ status: 'planned', preflight }) }} onClose={() => setDialog(null)} />}
+      lossLimit={lossLimitMessage} onPlan={note => { void changeStatus({ status: 'planned',
+        preflight: note ? preflight.map(check => check.code === 'loss-limit' ? { ...check, note } : check) : preflight }) }}
+      onClose={() => setDialog(null)} />}
     {dialog === 'unresolved' && <UnresolvedDialog pending={busy === 'status'} error={dialogError}
       onDeclare={(reason, note) => { void resolution({ kind: 'declare', reason, note }) }} onClose={() => setDialog(null)} />}
     {dialog === 'return-open' && <ReturnToOpenDialog pending={busy === 'status'} error={dialogError}

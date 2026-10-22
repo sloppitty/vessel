@@ -9,6 +9,8 @@ import { AccountSelect } from '@/components/accounts/AccountSelect'
 import { Input } from '@/components/ui/input'
 import { InfoTip } from '@/components/ui/info-tip'
 import { OpenRiskLine } from './OpenRiskLine'
+import { LossLimitLine } from './LossLimitLine'
+import { lossLimitBreach, lossLimitCheck, lossLimitsReadable, useLossLimits } from './loss-limits'
 import { openRiskReadable } from './open-risk'
 import type { DraftEvidence, PlayDraft } from './draft'
 import { captureFileName, createEvidence, evidenceLimits } from './evidence'
@@ -103,7 +105,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   /** The plan was written after the Play's first execution (D-17), as the server's receipt says. */
   plannedAfterExecution?: boolean
   /** Receives a Draft's pre-flight checks as the plan changes, for Plan it to show and record (phase 1, 1.5). */
-  onPreflight?: (checks: PreflightCheck[]) => void
+  onPreflight?: (checks: PreflightCheck[], lossLimit: string | null) => void
   /** The owner's recent next actions, offered in the Thesis tab while the Play is not yet under way. */
   nextActions?: readonly NextAction[] | null
   /** Opens a next action's source Play. */
@@ -206,6 +208,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const incidentTone = incidents ? topTone(incidents) : null
   const showExecution = () => { setExecutionRequest(current => current + 1); showEvidence() }
 
+  // Phase 2, item 10b: today's and this week's loss against the soft limits, for real Plays still to be traded.
+  const lossReadable = !paper && !retrospective && ['draft', 'planned', 'paused', 'open'].includes(status) && lossLimitsReadable(api)
+  const loss = useLossLimits(api, lossReadable, openRiskKey)
   const fills = useMemo<EntryFills | 'unknown'>(() => entryFills ?? { ...noEntryFills, filled: filledEntries instanceof Set ? filledEntries : noFilledEntries },
     [entryFills, filledEntries])
   // While the fills load, every stop keeps the wrong-side rule; the server decides per entry from its own facts.
@@ -213,10 +218,12 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   // The Draft's pre-flight, from the same Summary risk and liquidation estimate the page shows. It reaches the page only
   // when a check's outcome changes, so the page's copy is never older than what the owner sees.
   const preflight = status === 'draft' && onPreflight && !retrospective ? JSON.stringify(preflightChecks({ draft,
-    sizing: sizingStatus === 'ready' ? sizing : null,
+    sizing: sizingStatus === 'ready' ? sizing : null, lossLimit: lossLimitCheck(loss),
     risk: positionRiskSummary(draft, units, riskReference, fills),
     liquidation: estimatedLiquidation(draft.entries, draft.direction, leverageOf(draft.leverage), maxLeverage, maintenanceMargin) })) : null
-  useEffect(() => { if (preflight) onPreflight?.(JSON.parse(preflight) as PreflightCheck[]) }, [preflight, onPreflight])
+  // A reached loss limit's own words travel with the checks, for the dialog (Phase 2, item 10b).
+  const lossMessage = loss && 'value' in loss ? lossLimitBreach(loss.value) : null
+  useEffect(() => { if (preflight) onPreflight?.(JSON.parse(preflight) as PreflightCheck[], lossMessage) }, [preflight, lossMessage, onPreflight])
   // A next action is copied only on the owner's click, as an if-then the owner completes.
   const copyNextAction = (action: NextAction) => onChange({ ...draft, notes: { ...draft.notes, thesis: withIfThen(draft.notes.thesis, action) } })
   const offeredActions = !readOnly && !retrospective && (status === 'draft' || status === 'planned' || status === 'paused') && nextActions?.length
@@ -315,9 +322,11 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
       filledEntries={filled} />}
     <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} retrospective={retrospective}
       {...(!paper && !retrospective && ['draft', 'planned', 'paused', 'open'].includes(status) && openRiskReadable(api) ? { openRisk: (scope: string, reference: string) =>
-        <OpenRiskLine api={api} scope={scope} reference={reference} playId={playId} accountId={accountId} draft={draft} reloadKey={openRiskKey} /> } : {})} />
+        <><OpenRiskLine api={api} scope={scope} reference={reference} playId={playId} accountId={accountId} draft={draft} reloadKey={openRiskKey} />
+          <LossLimitLine load={loss} /></> } : {})} />
     {!readOnly && (onRiskChange || paper) && (suggestions || sizingStatus === 'failed') && <SuggestionsPanel plan={suggestions} sizing={sizing}
       status={sizingStatus} onRetry={onRetrySizing} draft={draft} leverage={leverage} units={units}
+      lossLimit={lossMessage}
       onSize={size => onChange({ ...draft, size })} onLevel={acceptLevel} {...(onRiskChange && !paper ? { onRiskChange } : {})}
       onLeverage={next => leverageChange.request(String(next))} />}
     {leverageChange.dialog}

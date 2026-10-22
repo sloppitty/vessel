@@ -4,6 +4,9 @@
 
 ### Added
 
+- Daily and weekly loss limits in R (Settings → Risk limits). Today's and this week's loss, by
+  your reporting week, shows beside open risk; a reached limit is flagged in Suggestions and at
+  Plan it, where you can add a cooldown note. Nothing is blocked.
 - Review's Week view shows one reporting week: its results, exclusions, process cases and
   repeated mistake tags, your latest next actions and the Plays waiting for review. Settings →
   Reporting week sets its time zone and first day (UTC and Monday until you change it).

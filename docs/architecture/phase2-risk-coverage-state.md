@@ -560,6 +560,53 @@ October 21, 2026.
   tokens and layout.
 - **Check.** `scripts/check.sh` passed on `b4343e74`: backend 4,093 passed, 5 skipped; frontend 177 files and 4,085 tests.
 
+**10b. Soft loss limits.** Implemented on `t3/phase2-loss-limits`.
+- **The limits.** Settings → Risk limits gains daily and weekly loss limits in R, above 0 and at most
+  100 with up to four decimals, blank until set. They are stored with the open-risk limit
+  (`risk_settings`, migration `20261022104353_LossLimits`). A `PUT` changes only the limits it names.
+- **The loss.** `GET /api/risk/loss` (real only) gives today and this week by the reporting setting:
+  - the exact sum of estimated R of real Plays closed in the span, on enabled accounts;
+  - how many have R, and how many have none, never counted as zero;
+  - whether the known loss reached the limit: the net R at or below minus the limit.
+- **Where it shows.** Capital context beside open risk, the Suggestions block even while closed, and
+  the pre-flight at Plan it as the `loss-limit` check. That check is not met at a reached limit,
+  unknown when a Play without R could still reach one, and absent without a limit or after a failed
+  read.
+- **The cooldown note.** At a reached limit the pre-flight dialog takes an optional note of at most
+  500 characters, stored with revision 1 on the check and listed in History.
+- **Fresh reads.** The loss is read again after the limits or the reporting week are saved, a second
+  after its day or week ends, and on returning to the tab after it.
+- **Nothing is blocked**, and sizing, Review and the ladder do not read the limits.
+- **Tests.**
+  - `LossLimitTests`: the limit rules, the cooldown note, and today's and this week's sums in Madrid
+    with a Play without R.
+  - The pre-flight note kept on revision 1, Review's counts and the skipped drill-down, and a `PUT`
+    keeping the limits it leaves out.
+  - The isolation case in both auth modes.
+  - In the browser: the check rules, the line, the flag, the dialog, History, Settings and the fresh
+    reads.
+- **Migration.** It is applied explicitly, never to the owner's database.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `a54a99d3`. Four findings, all fixed in
+  `a8611244`:
+  - Saving a limit in Settings left the Plays page's loss read as it was
+    until a reload, so a newly reached limit did not show. Saving the limits
+    or the reporting week now refreshes every mounted read.
+  - A read never expired, so yesterday's breach stood for today across the
+    reporting midnight. It is read again a second after the day or week it
+    shows ends, and on returning to the tab after that.
+  - An older client's `PUT` with only the open-risk limit cleared both loss
+    limits. A `PUT` now changes only the limits it names.
+  - A PostgreSQL test still expected five pre-flight counts. It expects the
+    loss-limit check, and a skipped one drills down to its Play.
+
+  Sol confirmed that Review's planned-stop R is reused, that the sums are
+  exact with wins offsetting losses and a breach at equality, that Plays
+  without R are counted apart, and that paper, disabled accounts, positions,
+  cancelled and Unresolved Plays are left out. It also confirmed the latest
+  exit time, the reporting boundaries, the paper guard, owner filters, note
+  validation and revision-1 storage.
+- **Check.** `scripts/check.sh` passed on `a8611244`: backend 4,139 passed, 5 skipped; frontend 183 files and 4,105 tests.
+
 ## 11. Shared-exit allocation
 
 Not started.

@@ -1,3 +1,4 @@
+import type { LossLimits } from '@/api/risk'
 import { vi } from 'vitest'
 import { emptyReview } from './review-fixture'
 import type { SizingDocument } from '@/api/sizing'
@@ -98,8 +99,15 @@ export const playCountsFrom = (plays: PlaySummary[]): WorkspaceApi['playCounts']
   Object.fromEntries(playViews.map(view => [view, playListPage(plays, { ...query, view }).totalCount])) as PlayCounts)
 
 /** Saved-play API stubs: no saved plays, and every write rejects unless a test overrides it. */
+/** No loss limit set and nothing closed (Phase 2, item 10b): no line, no flag and no pre-flight check. */
+export const lossLimitsFixture: LossLimits = {
+  day: { start: '2026-10-09', fromUtc: '2026-10-09T00:00:00Z', toUtc: '2026-10-10T00:00:00Z', limitR: null, netR: '0', withR: 0, withoutR: 0, breached: false },
+  week: { start: '2026-10-05', fromUtc: '2026-10-05T00:00:00Z', toUtc: '2026-10-12T00:00:00Z', limitR: null, netR: '0', withR: 0, withoutR: 0, breached: false },
+  timeZone: 'UTC', weekStart: 'monday', notice: 'Soft limits, never enforced.',
+}
+
 export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' | 'playCounts' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' | 'nextActions' | 'completeReview' | 'reopenReview' | 'noReviewNeeded' | 'declareUnresolved' | 'returnToOpen' | 'playNotes' | 'addPlayNote' |
-  'deletePlay' | 'playExecution' | 'monitor' | 'accountMonitor' | 'runAccountMonitor' | 'monitorEvents' | 'monitorStream' | 'dismissPlayDiscrepancy' | 'dismissAccountDiscrepancy' | 'linkOrder' | 'unlinkOrder' | 'rejectOrder' | 'rebindLevel' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'openRisk' | 'openRiskPreview' | 'riskSettings' | 'updateRiskSettings' | 'reportingSettings' | 'updateReportingSettings' | 'review' | 'reviewExclusions' | 'reviewExport' | 'accountFacts' | 'importConflicts' | 'playBundle' | 'reviewProcess' | 'mistakeTags' | 'retrospectivePreview' | 'createRetrospectivePlay' | 'manualExecutions' | 'addManualExecution' | 'correctManualExecution' | 'correctManualExecutions' |
+  'deletePlay' | 'playExecution' | 'monitor' | 'accountMonitor' | 'runAccountMonitor' | 'monitorEvents' | 'monitorStream' | 'dismissPlayDiscrepancy' | 'dismissAccountDiscrepancy' | 'linkOrder' | 'unlinkOrder' | 'rejectOrder' | 'rebindLevel' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'openRisk' | 'openRiskPreview' | 'riskSettings' | 'updateRiskSettings' | 'lossLimits' | 'reportingSettings' | 'updateReportingSettings' | 'review' | 'reviewExclusions' | 'reviewExport' | 'accountFacts' | 'importConflicts' | 'playBundle' | 'reviewProcess' | 'mistakeTags' | 'retrospectivePreview' | 'createRetrospectivePlay' | 'manualExecutions' | 'addManualExecution' | 'correctManualExecution' | 'correctManualExecutions' |
   'notificationHead' | 'notifications' | 'claimNotifications' | 'readNotification' | 'readAllNotifications' | 'notificationPreferences' |
   'saveNotificationPreferences' | 'requestTestNotification' | 'paperSettings' | 'savePaperSettings' | 'paperState'> {
   const unexpected = () => Promise.reject(new Error('Unexpected play API call in this test.'))
@@ -127,6 +135,7 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
     openRiskPreview: vi.fn().mockImplementation((request: { playId: string | null; plan: { direction: 'long' | 'short' } }) => Promise.resolve({
       playId: request.playId, direction: request.plan.direction, riskUsd: null, reason: 'An entry has no stop.', rounded: false })),
     riskSettings: vi.fn().mockResolvedValue({ openRiskLimitPercent: null }), updateRiskSettings: vi.fn(unexpected),
+    lossLimits: vi.fn().mockResolvedValue(lossLimitsFixture),
     reportingSettings: vi.fn().mockResolvedValue({ timeZone: 'UTC', weekStart: 'monday', isDefault: true }), updateReportingSettings: vi.fn(unexpected),
     review: vi.fn().mockResolvedValue(emptyReview),
     reviewExclusions: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, nextOffset: null, notice: 'Fixture exclusions.' }),
