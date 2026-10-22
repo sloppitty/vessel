@@ -188,15 +188,23 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
                 throw new VenueReadException(InvalidResponse);
 
             int? leverage = null;
+            string? mode = null;
             if (position.TryGetProperty("leverage", out var leverageElement) && leverageElement.ValueKind != JsonValueKind.Null)
             {
                 leverage = Integer(Property(leverageElement, "value"));
                 if (leverage <= 0)
                     throw new VenueReadException(InvalidResponse);
+                // The venue's own mode; another value is not one Vessel knows, so it stays unreported.
+                if (leverageElement.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String)
+                    mode = type.GetString() switch { "cross" => MarginModes.Cross, "isolated" => MarginModes.Isolated, _ => null };
             }
+            // liquidationPx is null when the venue reports none (for example a fully collateralised position).
+            decimal? liquidation = position.TryGetProperty("liquidationPx", out var liquidationElement) &&
+                liquidationElement.ValueKind != JsonValueKind.Null ? Nonnegative(liquidationElement) : null;
             positions.Add(new(HyperliquidInstruments.Canonical(name), quantity, Positive(Property(position, "entryPx")),
                 Number(Property(position, "unrealizedPnl")), Nonnegative(Property(position, "marginUsed")), leverage,
-                VenueContractId: HyperliquidInstruments.Canonical(name) == name ? null : name));
+                VenueContractId: HyperliquidInstruments.Canonical(name) == name ? null : name,
+                LiquidationPrice: liquidation is > 0 ? liquidation : null, MarginMode: mode));
         }
         return new(
             Timestamp(Property(state, "time"), latestTimestamp),

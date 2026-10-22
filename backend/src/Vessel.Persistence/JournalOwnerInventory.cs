@@ -20,6 +20,7 @@ public sealed class JournalOwnerInventory(NpgsqlDataSource data) : IJournalOwner
                 UNION SELECT "OwnerId" FROM account_stablecoins
                 UNION SELECT "OwnerId" FROM imported_fills
                 UNION SELECT "OwnerId" FROM imported_orders
+                UNION SELECT "OwnerId" FROM account_risk_observations
                 UNION SELECT "OwnerId" FROM funding_payments
                 UNION SELECT "OwnerId" FROM account_funding_states
                 UNION SELECT "OwnerId" FROM plays

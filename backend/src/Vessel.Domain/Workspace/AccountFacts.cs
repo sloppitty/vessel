@@ -70,6 +70,10 @@ public sealed class AccountPosition : IOwned
     public decimal UnrealizedPnlUsd { get; set; }
     public decimal MarginUsedUsd { get; set; }
     public int? Leverage { get; set; }
+    /// <summary>The venue's reported liquidation price at this snapshot (Phase 2, item 8a); null when it reports none.</summary>
+    public decimal? LiquidationPrice { get; set; }
+    /// <summary><c>cross</c> or <c>isolated</c> as the venue reports it; null when it does not.</summary>
+    public string? MarginMode { get; set; }
 }
 
 public sealed class ImportedFill : IOwned
@@ -122,6 +126,27 @@ public sealed class LeverageObservation : IOwned
     public decimal SignedQuantity { get; set; }
     public decimal EntryPrice { get; set; }
     public int Leverage { get; set; }
+}
+
+/// <summary>
+/// A position's venue-reported risk context (Phase 2, item 8a): its liquidation price and margin mode as the venue reported
+/// them, kept when the position appears, when its quantity, entry price or margin mode changes, or when its market
+/// receives new executions, so a later review still sees them. The current snapshot always holds the latest figures; a
+/// cross-margin liquidation price that only drifts with the account is not kept again. An observation, never an estimate.
+/// </summary>
+public sealed class RiskObservation : IOwned
+{
+    public Guid Id { get; set; }
+    public Guid OwnerId { get; set; }
+    public Guid AccountId { get; set; }
+    public string ContractId { get; set; } = null!;
+    public string? VenueContractId { get; set; }
+    /// <summary>The snapshot's observation time (when Vessel read the venue), not an execution time.</summary>
+    public DateTimeOffset ObservedAtUtc { get; set; }
+    public decimal SignedQuantity { get; set; }
+    public decimal EntryPrice { get; set; }
+    public decimal? LiquidationPrice { get; set; }
+    public string? MarginMode { get; set; }
 }
 
 // The latest known state of a venue order that could belong to a Play. A fact, not trading intent.

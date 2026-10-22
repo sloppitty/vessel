@@ -203,6 +203,16 @@ public sealed partial class RisexAdapterTests
     }
 
     [Fact]
+    public async Task A_negative_liquidation_price_is_an_invalid_response_never_unknown()
+    {
+        // Phase 2, item 8a (Sol round 1 on #41): zero means none; a negative price was silently read as unknown.
+        var body = Portfolio.Replace("\"liquidation_price\":\"73336.01\"", "\"liquidation_price\":\"-1\"");
+        Assert.NotEqual(Portfolio, body);
+        await Assert.ThrowsAsync<VenueReadException>(() => Reader(new() { ["/v1/portfolio/details"] = body }).Reader.ReadAsync(Address, default));
+    }
+
+
+    [Fact]
     public async Task Catalogue_maps_markets_to_assets_with_ticks_categories_and_market_ids_and_hides_retired_ones()
     {
         var instruments = await Reader().Reader.ReadInstrumentsAsync(default);
@@ -239,6 +249,9 @@ public sealed partial class RisexAdapterTests
         Assert.Null(snapshot.StablecoinWallet);
         Assert.Equal([("BTC", 0.702475m, 10), ("DOGE", -2000m, 5)], snapshot.Positions.Select(p => (p.ContractId, p.SignedQuantity, p.Leverage!.Value)));
         Assert.Equal(["1", "14"], snapshot.Positions.Select(p => p.VenueContractId));
+        // Phase 2, item 8a: the reported liquidation price and margin mode (0 is cross).
+        Assert.Equal([(73336.01m, MarginModes.Cross), (0.11m, MarginModes.Cross)],
+            snapshot.Positions.Select(p => (p.LiquidationPrice!.Value, p.MarginMode!)));
 
         var fills = result.Fills.ToDictionary(f => f.SourceFillId);
         Assert.Equal(4, fills.Count); // the unknown market is left out

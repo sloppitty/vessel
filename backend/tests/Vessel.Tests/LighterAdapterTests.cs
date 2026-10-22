@@ -34,7 +34,8 @@ public sealed partial class LighterAdapterTests
           "l1_address":"{{Address}}","total_asset_value":"1000.0012345678901234","available_balance":"939.9012345678901234","cross_initial_margin_requirement":"60.1",
           "assets":[{"asset_id":3,"symbol":"USDC","margin_balance":"998.0","balance":"100","locked_balance":"1"}],
           "positions":[{"market_id":1,"symbol":"BTC","position":"0.001","sign":-1,"initial_margin_fraction":"5.00",
-          "margin_mode":0,"position_value":"80","avg_entry_price":"79000.1","unrealized_pnl":"-0.9999","allocated_margin":"0"}]}]}
+          "margin_mode":0,"position_value":"80","avg_entry_price":"79000.1","unrealized_pnl":"-0.9999","allocated_margin":"0",
+          "liquidation_price":"95123.4"}]}]}
         """;
     private static readonly string Discovery = $$"""
         {"code":200,"l1_address":"{{Address}}","sub_accounts":[
@@ -205,6 +206,17 @@ public sealed partial class LighterAdapterTests
     public void Invalid_source_ids_fail_without_rounding(string index) => Assert.Throws<VenueReadException>(() => LighterReader.Index(index));
 
     [Fact]
+    public async Task A_negative_liquidation_price_is_an_invalid_response_never_unknown()
+    {
+        // Phase 2, item 8a (Sol round 1 on #41): zero means none; a negative price was silently read as unknown.
+        var handler = new Handler { Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/account", StringComparison.Ordinal)
+            ? new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                { Content = new StringContent(Snapshot.Replace("\"liquidation_price\":\"95123.4\"", "\"liquidation_price\":\"-1\""), System.Text.Encoding.UTF8, "application/json") }
+            : null };
+        await Assert.ThrowsAsync<VenueReadException>(() => Reader(handler).ReadAsync(Source, default));
+    }
+
+    [Fact]
     public async Task Public_snapshot_does_not_lookup_credentials_or_double_count_wallet()
     {
         var credentials = new Credentials(Token);
@@ -221,6 +233,7 @@ public sealed partial class LighterAdapterTests
         Assert.Equal(4m, position.MarginUsedUsd);
         Assert.Equal(20, position.Leverage);
         Assert.Equal("1", position.VenueContractId);
+        Assert.Equal((95123.4m, MarginModes.Cross), (position.LiquidationPrice, position.MarginMode));
         Assert.Contains("Only fee-free", result.HistoryNotice);
     }
 
