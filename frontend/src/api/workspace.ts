@@ -25,8 +25,8 @@ import {
   type AccountCredential, type AccountDiscovery,
 } from './account-access'
 import {
-  isNextAction, isPlayCounts, isPlayNote, isPlayExecution, isPlayHistory, isPlayList, isSavedEvidence, isSavedPlay, playCountsPath, playListPath,
-  type LinkOrder, type NextAction, type PlayNote, type PlayNoteState, type RebindLevel, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest, type UnresolvedReason,
+  isNextAction, isPlayRuleState, isPlayCounts, isPlayNote, isPlayExecution, isPlayHistory, isPlayList, isSavedEvidence, isSavedPlay, playCountsPath, playListPath,
+  type LinkOrder, type NextAction, type PlayRuleState, type PlayNote, type PlayNoteState, type RebindLevel, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest, type UnresolvedReason,
 } from './plays'
 import { isSizingDocument, type SizingDocument } from './sizing'
 import { attachmentName, type DownloadedFile } from '@/lib/download'
@@ -362,6 +362,11 @@ export interface WorkspaceApi {
   addPlayNote(id: string, request: { requestId: string; text: string; state: PlayNoteState | null }): Promise<PlayNote[]>
   /** The owner's most recent next actions from ended Plays, newest first, at most ten (phase 1, 1.5). */
   nextActions(signal?: AbortSignal): Promise<NextAction[]>
+  /** The active if-then rule in this client's mode (Phase 2, item 3). */
+  playRule(signal?: AbortSignal): Promise<PlayRuleState>
+  /** Makes a new rule version the active one; `expectedVersion` is the active version shown, null when there was none. */
+  setPlayRule(rule: { if: string; then: string; sourcePlayId: string | null; expectedVersion: number | null }): Promise<PlayRuleState>
+  archivePlayRule(expectedVersion: number): Promise<PlayRuleState>
   manualExecutions(id: string, signal?: AbortSignal): Promise<ManualExecutions>
   addManualExecution(id: string, input: ManualExecutionInput, signal?: AbortSignal): Promise<ManualExecutions>
   correctManualExecution(id: string, executionId: string, input: ManualExecutionCorrection, signal?: AbortSignal): Promise<ManualExecutions>
@@ -797,6 +802,10 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
       validate: (v): v is PlayNote[] => Array.isArray(v) && v.length <= 500 && v.every(isPlayNote), ...withSignal(signal) }),
     addPlayNote: (id, request) => call(`${playPath(id)}/notes`, { ...playRequest, method: 'POST', body: JSON.stringify(request),
       validate: (v): v is PlayNote[] => Array.isArray(v) && v.length <= 500 && v.every(isPlayNote) }),
+    playRule: signal => call('/api/plays/rule', { ...playRequest, validate: isPlayRuleState, ...withSignal(signal) }),
+    setPlayRule: rule => call('/api/plays/rule', { ...playRequest, validate: isPlayRuleState, method: 'PUT',
+      body: JSON.stringify({ if: rule.if, then: rule.then, sourcePlayId: rule.sourcePlayId, expectedVersion: rule.expectedVersion }) }),
+    archivePlayRule: expectedVersion => call(`/api/plays/rule?expectedVersion=${expectedVersion}`, { ...playRequest, validate: isPlayRuleState, method: 'DELETE' }),
     nextActions: signal => call('/api/plays/next-actions', { ...playRequest,
       validate: (v): v is NextAction[] => Array.isArray(v) && v.length <= 10 && v.every(isNextAction), ...withSignal(signal) }),
     manualExecutions: (id, signal) => call(`${playPath(id)}/manual-executions`, { ...playRequest, validate: (v): v is ManualExecutions => isManualExecutions(v) && v.play.summary.id === id, ...withSignal(signal) }),

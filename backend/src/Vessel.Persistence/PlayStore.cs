@@ -98,6 +98,22 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
         db.PlanRevisions.Where(x => x.PlayId == playId).OrderBy(x => x.Number).AsNoTracking().ToListAsync(ct);
     public Task<List<PlayStatusChange>> StatusChangesAsync(Guid playId, CancellationToken ct) =>
         db.StatusChanges.Where(x => x.PlayId == playId).OrderBy(x => x.OccurredAtUtc).ThenBy(x => x.Id).AsNoTracking().ToListAsync(ct);
+    public Task<PlayRule?> ActiveRuleAsync(string tradingMode, CancellationToken ct) =>
+        db.PlayRules.Where(r => r.TradingMode == tradingMode && r.ArchivedAtUtc == null).SingleOrDefaultAsync(ct);
+
+    public async Task<PlayRule> AddRuleAsync(string tradingMode, string @if, string then, Guid? sourcePlayId, DateTimeOffset now, CancellationToken ct)
+    {
+        unitOfWork.RequireActive();
+        // Two concurrent changes compute the same next version; the unique index turns the second into a 409.
+        var latest = await db.PlayRules.Where(r => r.TradingMode == tradingMode).MaxAsync(r => (int?)r.Version, ct) ?? 0;
+        var rule = new PlayRule(db.CurrentOwnerId, tradingMode, latest + 1, @if, then, sourcePlayId, now);
+        db.PlayRules.Add(rule);
+        return rule;
+    }
+
+    public Task<string?> TitleAsync(Guid playId, string tradingMode, CancellationToken ct) =>
+        db.Plays.Where(p => p.Id == playId && p.TradingMode == tradingMode).Select(p => p.Title).SingleOrDefaultAsync(ct);
+
     public Task<List<NextActionDto>> NextActionsAsync(int limit, string tradingMode, CancellationToken ct) =>
         // Every ended Play's review can carry a lesson, an Unresolved one's too.
         db.Plays.Where(p => p.TradingMode == tradingMode &&

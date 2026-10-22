@@ -527,5 +527,23 @@ Phase 2, item 2 (G-11, N4, G-13; see `phase2-risk-coverage-contract.md`).
   - The owner's latest next actions, as on the Plays page. Next actions have
     no done state, so these are the newest written, not only the week's.
   - The current Needs review count in the same scope, every asset.
-  - The promoted rule's answers arrive with item 3.
+  - The if-then rule's answers over the week's Plays (item 3).
 - **Nothing more.** No reminder, schedule or generated text is added.
+
+## If-then rule (October 22, 2026)
+
+Phase 2, item 3 of the [risk and coverage contract](phase2-risk-coverage-contract.md).
+- **Population.** The process cases (1.4b) planned under an if-then rule, each
+  with the rule as revision 1 kept it.
+- **`ReviewDto.rule`.** How many carried a rule; the answers at Plan it
+  (acknowledged, exceptions, not answered); and "Followed the rule?" (followed,
+  deviated, not applicable, not answered), each by wins, losses, scratches and
+  unscored Plays. The parts add up to the carried count, and the browser
+  refuses a report whose counts do not.
+- **Drill-down.** `GET /api/review/process` also takes `rule`: `followed`,
+  `deviated`, `not-applicable`, `unanswered`, `acknowledged`, `exception` or
+  `not-acknowledged`. Each count equals its drill-down.
+- **Counts only.** No share, ranking or cost is shown, and a winning deviation
+  stays a deviation. The section is absent while no Play carries a rule, and
+  the week page shows the same section for its week.
+

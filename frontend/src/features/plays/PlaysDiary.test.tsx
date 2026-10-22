@@ -1704,3 +1704,72 @@ describe('manual fills in the Summary', () => {
   })
 })
 const ids = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
+
+describe('the if-then rule on the Plays page (Phase 2, item 3)', () => {
+  const draftPlay: SavedPlay = { ...planned, plan: { ...planned.plan, size: '100',
+    entries: planned.plan.entries.map(entry => ({ ...entry, price: '100' })) },
+    summary: { ...planned.summary, status: 'draft', version: 1, planRevision: 0, plannedAtUtc: null } }
+  const active = { version: 2, if: 'price breaks out on low volume', then: 'wait for the retest', sourcePlayId: null, sourceTitle: null, createdAtUtc: at }
+
+  it('shows the rule at Plan it and sends the exception with its reason', async () => {
+    const { api } = client(draftPlay)
+    api.playRule = vi.fn(() => Promise.resolve({ active, tradingMode: 'real' as const }))
+    api.changePlayStatus = vi.fn(() => Promise.resolve({ ...draftPlay, summary: { ...planned.summary, version: 2 } }))
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(draftPlay)} manual />)
+    expect(await screen.findByRole('group', { name: 'If-then rule' })).toHaveTextContent('version 2')
+    await user.click(screen.getByRole('button', { name: 'Plan it' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('group', { name: 'Your if-then rule' })).toHaveTextContent('then wait for the retest')
+    await user.click(within(dialog).getByRole('radio', { name: 'An exception this time' }))
+    await user.type(within(dialog).getByRole('textbox', { name: 'Why this is an exception' }), 'Earnings gap')
+    await user.click(within(dialog).getByRole('button', { name: 'Plan it anyway' }))
+    await waitFor(() => expect(api.changePlayStatus).toHaveBeenCalledWith(draftPlay.summary.id, 1, expect.objectContaining({
+      status: 'planned', rule: { version: 2, answer: 'exception', reason: 'Earnings gap' } })))
+  })
+
+  it('promotes a next action into the rule, naming its Play, against the version shown', async () => {
+    const { api, methods } = client(draftPlay)
+    methods.nextActions.mockResolvedValue([{ playId: otherId, title: 'BTC breakout', nextAction: 'Wait for the retest', reviewedAtUtc: at }])
+    api.playRule = vi.fn(() => Promise.resolve({ active: null, tradingMode: 'real' as const }))
+    const promoted = { ...active, version: 1, if: 'price breaks out', then: 'Wait for the retest', sourcePlayId: otherId, sourceTitle: 'BTC breakout' }
+    api.setPlayRule = vi.fn().mockRejectedValueOnce(new ApiError('conflict', 'The if-then rule changed since you saw it.'))
+      .mockResolvedValueOnce({ active: promoted, tradingMode: 'real' })
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(draftPlay)} />)
+    expect(await screen.findByRole('group', { name: 'If-then rule' })).toHaveTextContent('No if-then rule yet.')
+    await user.click(await screen.findByText('Your recent next actions (1)'))
+    await user.click(screen.getByRole('button', { name: 'Make this the rule' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('textbox', { name: 'Then' })).toHaveValue('Wait for the retest')
+    await user.type(within(dialog).getByRole('textbox', { name: 'If' }), 'price breaks out')
+    await user.click(within(dialog).getByRole('button', { name: 'Save the rule' }))
+    // A refused save keeps the dialog and reads the rule again.
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('The if-then rule changed since you saw it.')
+    await waitFor(() => expect(api.playRule).toHaveBeenCalledTimes(2))
+    await user.click(within(dialog).getByRole('button', { name: 'Save the rule' }))
+    expect(api.setPlayRule).toHaveBeenLastCalledWith({ if: 'price breaks out', then: 'Wait for the retest', sourcePlayId: otherId, expectedVersion: null })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('group', { name: 'If-then rule' })).toHaveTextContent('from BTC breakout')
+    // The Thesis text is unchanged: promoting is not copying.
+    expect(screen.getByRole('textbox', { name: 'Thesis' })).not.toHaveValue(expect.stringContaining('Wait for the retest'))
+  })
+
+  it('asks whether the rule was followed in the review of a Play planned under it', async () => {
+    const reviewed: SavedPlay = { ...terminal, rule: { version: 2, if: 'price breaks out', then: 'wait' } }
+    const { api, methods } = client(reviewed)
+    api.playRule = vi.fn(() => Promise.resolve({ active, tradingMode: 'real' as const }))
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(reviewed)} />)
+    await user.click(screen.getByRole('tab', { name: 'Review' }))
+    const followed = screen.getByRole('combobox', { name: 'Followed the rule?' })
+    expect(followed).toHaveAccessibleDescription('If price breaks out, then wait · version 2 at Plan it')
+    await user.selectOptions(followed, 'deviated')
+    await user.click(screen.getByRole('button', { name: /^Save$/ }))
+    await waitFor(() => expect(methods.updatePlay).toHaveBeenCalledWith(reviewed.summary.id, expect.objectContaining({
+      structuredReview: expect.objectContaining({ rule: 'deviated' }) })))
+    // An ended Play neither shows nor reads the mode's current rule.
+    expect(screen.queryByRole('group', { name: 'If-then rule' })).toBeNull()
+    expect(api.playRule).not.toHaveBeenCalled()
+  })
+})

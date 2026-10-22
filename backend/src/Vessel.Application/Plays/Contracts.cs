@@ -35,7 +35,8 @@ public sealed record ChangePlayStatusRequest(
     [property: JsonRequired] string Status,
     string? Reason = null,
     string? Note = null,
-    IReadOnlyList<PreflightCheckDto>? Preflight = null);
+    IReadOnlyList<PreflightCheckDto>? Preflight = null,
+    PlanRuleAnswerDto? Rule = null);
 
 public sealed record PlaySummaryDto(Guid Id, string Title, string Status, Guid AccountId, string VenueId, string? Instrument,
     string InstrumentSource, string Direction, int PlanRevision, long Version, string? CancelReason,
@@ -105,12 +106,20 @@ public sealed record PlayListRow
 public sealed record PlayCountRow(PlayStatus Status, bool Reviewed, int Count);
 
 public sealed record PlayDto(PlaySummaryDto Summary, PlayPlanDocument Plan, JsonElement Drawings, string Review,
-    ReviewAnswers? StructuredReview = null);
+    ReviewAnswers? StructuredReview = null)
+{
+    /// <summary>The if-then rule the Play was planned under (Phase 2, item 3); null without one.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PlayRuleSeenDto? Rule { get; init; }
+}
 
 public sealed record PlanRevisionDto(int Number, string Status, string Reason, DateTimeOffset CreatedAtUtc, PlayPlanDocument Plan)
 {
     /// <summary>The pre-flight recorded at Plan it, on revision 1 only; null for older plans and later revisions.</summary>
     public IReadOnlyList<PreflightCheckDto>? Preflight { get; init; }
+    /// <summary>The if-then rule active at Plan it and the owner's answer, on revision 1 only (Phase 2, item 3).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PlanRuleSnapshotDto? Rule { get; init; }
 }
 
 /// <summary>One of the owner's recent next actions, with the Play it was written for (phase 1, 1.5).</summary>
@@ -172,6 +181,16 @@ public interface IPlayStore
     void Add(PlayPlanRevision revision);
     void Add(PlayStatusChange change);
     void Add(PlayReviewRevision revision);
+    /// <summary>The owner's active if-then rule in the mode (Phase 2, item 3), tracked for archiving; null without one.</summary>
+    Task<PlayRule?> ActiveRuleAsync(string tradingMode, CancellationToken ct) => Task.FromResult<PlayRule?>(null);
+    /// <summary>
+    /// Adds the owner's next rule version in the mode. Archive and save the active one first: one rule is active per mode, and
+    /// a concurrent change of the same rule is a 409.
+    /// </summary>
+    Task<PlayRule> AddRuleAsync(string tradingMode, string @if, string then, Guid? sourcePlayId, DateTimeOffset now, CancellationToken ct) =>
+        throw new NotSupportedException();
+    /// <summary>The title of the owner's Play in the mode, or null when there is none.</summary>
+    Task<string?> TitleAsync(Guid playId, string tradingMode, CancellationToken ct) => Task.FromResult<string?>(null);
     /// <summary>Persists pending changes through the active unit of work without committing; a concurrent Play write is a 409.</summary>
     Task SaveAsync(CancellationToken ct);
     /// <summary>

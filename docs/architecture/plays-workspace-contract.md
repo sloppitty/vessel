@@ -493,3 +493,34 @@ reporting setting.
   on the `loss-limit` check, and History lists it.
 - **Nothing is blocked**, and sizing, Review and the ladder do not read the
   limits. Review's pre-flight counts include the new check.
+
+## If-then rule (October 22, 2026)
+
+Phase 2, item 3 (see `phase2-risk-coverage-contract.md`). It builds on 1.5's
+next actions.
+- **The rule.** Each trading mode has at most one active rule: "If …, then …",
+  each part 1–500 characters (`play_rules`, migration `IfThenRule`). The
+  Thesis tab of a Draft, Planned or Paused Play shows it, with **Write a
+  rule**, **Change the rule** and **Archive the rule**. A next action offers
+  **Make this the rule**, which fills its Then and names its source Play;
+  promoting never copies anything into the thesis.
+- **Versions.** `GET`, `PUT` and `DELETE /api/plays/rule` work in the mode
+  they are asked for. A change adds the next version and archives the active
+  one; archiving leaves none. Both name the version the owner saw, and a
+  different active version (or a concurrent change) is a 409, after which the
+  browser reads the rule again. Changing or archiving never rewrites a Play's
+  snapshot.
+- **At Plan it.** The pre-flight dialog shows the active rule. The owner may
+  mark it **Acknowledged**, or **An exception this time** with a reason of at
+  most 500 characters. No answer never blocks; an exception waits for its
+  reason. The answer names the version shown: a rule that changed meanwhile is
+  a 409, and an answer given before a change is asked again.
+- **The snapshot.** Planning keeps the rule active at that moment, its
+  version, text and source with the answer (or none), on revision 1 beside the
+  pre-flight, and on the Play for its review. History lists it. Retrospective
+  Plays have none.
+- **In the review.** A Closed, Cancelled or Unresolved Play planned under a
+  rule asks **Followed the rule?**: followed, deviated or not applicable,
+  stored with the structured review and listed in its history. A Play planned
+  without a rule refuses an answer.
+

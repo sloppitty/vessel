@@ -1067,8 +1067,23 @@ namespace Vessel.Persistence.Migrations
                     b.Property<int>("ReviewRevision")
                         .HasColumnType("integer");
 
+                    b.Property<string>("ReviewRule")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<DateTimeOffset?>("ReviewedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RuleIf")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("RuleThen")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int?>("RuleVersion")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -1250,6 +1265,9 @@ namespace Vessel.Persistence.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("character varying(2000)");
 
+                    b.Property<string>("Rule")
+                        .HasColumnType("jsonb");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -1306,6 +1324,61 @@ namespace Vessel.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("play_review_revisions", (string)null);
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.PlayRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ArchivedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("If")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("SourcePlayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Then")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("TradingMode")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "TradingMode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_play_rules_owner_mode_active")
+                        .HasFilter("\"ArchivedAtUtc\" IS NULL");
+
+                    b.HasIndex("OwnerId", "TradingMode", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("UX_play_rules_owner_mode_version");
+
+                    b.ToTable("play_rules", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_play_rules_trading_mode", "\"TradingMode\" IN ('real', 'paper')");
+
+                            t.HasCheckConstraint("CK_play_rules_version", "\"Version\" >= 1");
+                        });
                 });
 
             modelBuilder.Entity("Vessel.Domain.Plays.PlayStatusChange", b =>

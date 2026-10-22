@@ -7,6 +7,9 @@ namespace Vessel.Api;
 
 public static class PlayEndpoints
 {
+    /// <summary>A rule is two parts of at most 500 characters and a source Play.</summary>
+    internal const long RuleBodyBytes = 8_192;
+
     public static void MapPlays(this WebApplication app)
     {
         var api = app.MapGroup("/api/plays").RequireAuthorization().WithTradingModeBoundary();
@@ -45,6 +48,13 @@ public static class PlayEndpoints
             Results.Ok(await service.ChangeStatusAsync(id, request, ct)));
         api.MapGet("/next-actions", async (string? tradingMode, PlayService service, CancellationToken ct) =>
             Results.Ok(await service.NextActionsAsync(ct, tradingMode)));
+        // Phase 2, item 3: the one active if-then rule in the requested mode.
+        api.MapGet("/rule", async (string? tradingMode, PlayService service, CancellationToken ct) =>
+            Results.Ok(await service.RuleAsync(tradingMode, ct)));
+        api.MapPut("/rule", async (string? tradingMode, SetPlayRuleRequest request, PlayService service, CancellationToken ct) =>
+            Results.Ok(await service.SetRuleAsync(tradingMode, request, ct))).WithBodyLimit(RuleBodyBytes, DiaryTooLarge);
+        api.MapDelete("/rule", async (string? tradingMode, int expectedVersion, PlayService service, CancellationToken ct) =>
+            Results.Ok(await service.ArchiveRuleAsync(tradingMode, expectedVersion, ct)));
         // Review completion and the in-trade log (phase 1, 1.2).
         api.MapPost("/{id:guid}/review/complete", async (Guid id, ReviewCompletionRequest request, PlayService service, CancellationToken ct) =>
             Results.Ok(await service.CompleteReviewAsync(id, request, ct)));

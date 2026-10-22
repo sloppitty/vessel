@@ -5,7 +5,7 @@ import { PaperExecutionPanel } from './PaperExecutionPanel'
 import { errorMessage } from '@/api/errors'
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
-import { isEndedStatus, isReviewed, pagedPlayViews, playSearchLength, statusLabels, type NextAction, type PlayCounts, type PlayList as PlayListPage, type PreflightCheck, type PlayListQuery, type PlayStatus, type UnresolvedReason, type PlayView, type SavedPlay, type StatusRequest } from '@/api/plays'
+import { isEndedStatus, isReviewed, pagedPlayViews, playSearchLength, statusLabels, type NextAction, type PlayCounts, type PlayList as PlayListPage, type PreflightCheck, type PlayListQuery, type PlayStatus, type UnresolvedReason, type PlayView, type SavedPlay, type StatusRequest, type PlayRule, type PlayRuleState, type PlanRuleAnswer } from '@/api/plays'
 import type { AccountMonitor } from '@/api/monitor'
 import { Button } from '@/components/ui/button'
 import { Pager } from '@/components/ui/pager'
@@ -40,6 +40,7 @@ import { planNumberIssues, planNumberSummary, storedPlanText, StoredPlanTextCont
 import { availableOf, defaultSizeUnits, marginOverBudget, overBudgetMessage, type SizeUnits } from './sizing'
 import { leverageOf } from './levels'
 import type { ChartFill } from './chart-fills'
+import { RuleDialog, type RuleControls, type RuleDraft } from './IfThenRule'
 import { CancelDialog, DeleteDialog, HistoryDialog, PauseDialog, PreflightDialog, ReturnToOpenDialog, RevisionDialog, UnresolvedDialog } from './PlayDialogs'
 import { initialPlaysList, playSearchDelay, playViewTabs, type PlaysListState } from './plays-list'
 import { useDisplayZone } from '@/lib/display-zone'
@@ -296,6 +297,43 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       .catch(() => { /* No suggestions on failure; planning does not depend on them. */ })
     return () => controller.abort()
   }, [api, offersNextActions])
+  // The mode's if-then rule (Phase 2, item 3), read while the Play can still be planned. It is context: a failed read shows
+  // none and never blocks Plan it. Plan it reads it again, so the checklist shows the current version.
+  const [ruleRead, setRuleRead] = useState<{ api: WorkspaceApi; state: PlayRuleState } | null>(null)
+  const [ruleGeneration, setRuleGeneration] = useState(0)
+  const [ruleDialog, setRuleDialog] = useState<RuleDraft | null>(null)
+  const [ruleWork, setRuleWork] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null })
+  const offersRule = visible && session.view === 'editor' && !retrospective && (status === 'draft' || status === 'planned' || status === 'paused')
+  useEffect(() => {
+    if (!offersRule) return
+    const controller = new AbortController()
+    api.playRule(controller.signal).then(state => { if (!controller.signal.aborted) setRuleRead({ api, state }) })
+      .catch(() => { /* No rule shown on failure; planning does not depend on it. */ })
+    return () => controller.abort()
+  }, [api, offersRule, ruleGeneration])
+  const ruleState = ruleRead?.api === api ? ruleRead.state : null
+  async function writeRule(change: (expected: number | null) => Promise<PlayRuleState>, failure: string) {
+    if (ruleWork.busy || !ruleState) return
+    setRuleWork({ busy: true, error: null })
+    try {
+      const state = await change(ruleState.active?.version ?? null)
+      if (!mounted.current || currentApi.current !== api) return
+      setRuleRead({ api, state })
+      setRuleDialog(null)
+      setRuleWork({ busy: false, error: null })
+    } catch (cause) {
+      if (!mounted.current || currentApi.current !== api) return
+      // A changed or archived rule is read again, so a retry starts from the current version.
+      setRuleWork({ busy: false, error: errorMessage(cause, failure) })
+      setRuleGeneration(value => value + 1)
+    }
+  }
+  const ruleControls: RuleControls | undefined = offersRule ? {
+    state: ruleState,
+    onWrite: () => { setRuleWork({ busy: false, error: null }); setRuleDialog({ if: ruleState?.active?.if ?? '', then: ruleState?.active?.then ?? '', source: null }) },
+    onPromote: action => { setRuleWork({ busy: false, error: null }); setRuleDialog({ if: '', then: action.nextAction, source: { playId: action.playId, title: action.title } }) },
+    onArchive: (active: PlayRule) => { void writeRule(() => api.archivePlayRule(active.version), 'The rule could not be archived.') },
+  } : undefined
   // The owner's earlier mistake tags, offered while reviewing an ended Play (phase 1, 1.4b). A failed read offers none.
   const [mistakeTags, setMistakeTags] = useState<{ api: WorkspaceApi; tags: string[] } | null>(null)
   const offersMistakeTags = visible && session.view === 'editor' && !!saved && isEndedStatus(saved.summary.status)
@@ -581,9 +619,19 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const statusBlocked = dirty ? 'Save your changes first' : undefined
   const pending = busy !== null
 
+  // Plan it from the checklist, with the cooldown note and the rule answer the owner gave. A rule changed meanwhile is
+  // refused and read again, so the checklist asks about the current version.
+  async function planWith(note: string | null, rule: PlanRuleAnswer | null) {
+    if (!preflight) return
+    await changeStatus({ status: 'planned', preflight: note ? preflight.map(check => check.code === 'loss-limit' ? { ...check, note } : check) : preflight,
+      ...(rule ? { rule } : {}) })
+    if (mounted.current) setRuleGeneration(value => value + 1)
+  }
+
   // Plan it always shows the checklist first; it never blocks, and what the owner saw is recorded with revision 1.
   const requestPlan = () => {
     if (planBlocked()) return
+    setRuleGeneration(value => value + 1)
     if (preflight) { setDialogError(null); setDialog('preflight') } else void changeStatus({ status: 'planned' })
   }
 
@@ -667,6 +715,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       incidents={saved ? playIncidents.get(saved.summary.id) : undefined} stopEvidence={manual ? undefined : stopEvidence}
       evidenceImages={evidenceImages} reviewReceipt={reviewReceipt} journalSave={journalSave} retrospectiveReceipt={retrospectiveReceipt}
       onPreflight={takePreflight} nextActions={nextActions?.api === api ? nextActions.actions : null} onOpenPlay={id => { void open(id) }}
+      ruleControls={ruleControls} planRule={saved?.rule ?? null}
       log={saved ? <PlayLog key={saved.summary.id} api={api} playId={saved.summary.id} draft={session.log}
         onDraft={change => {
           // A living page publishes its own session; once it has gone, the owner applies the change to its current one.
@@ -703,9 +752,11 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     {dialog === 'cancel' && <CancelDialog paper={paper} pending={busy === 'status'} error={dialogError}
       onCancel={(reason, note) => { void changeStatus({ status: 'cancelled', reason, ...(note ? { note } : {}) }) }} onClose={() => setDialog(null)} />}
     {dialog === 'preflight' && preflight && <PreflightDialog checks={preflight} pending={busy === 'status'} error={dialogError}
-      lossLimit={lossLimitMessage} onPlan={note => { void changeStatus({ status: 'planned',
-        preflight: note ? preflight.map(check => check.code === 'loss-limit' ? { ...check, note } : check) : preflight }) }}
+      lossLimit={lossLimitMessage} rule={ruleState?.active ?? null} onPlan={(note, rule) => { void planWith(note, rule) }}
       onClose={() => setDialog(null)} />}
+    {ruleDialog && <RuleDialog active={ruleState?.active ?? null} draft={ruleDialog} pending={ruleWork.busy} error={ruleWork.error}
+      onSave={rule => { void writeRule(expected => api.setPlayRule({ ...rule, sourcePlayId: ruleDialog.source?.playId ?? null, expectedVersion: expected }),
+        'The rule could not be saved.') }} onClose={() => setRuleDialog(null)} />}
     {dialog === 'unresolved' && <UnresolvedDialog pending={busy === 'status'} error={dialogError}
       onDeclare={(reason, note) => { void resolution({ kind: 'declare', reason, note }) }} onClose={() => setDialog(null)} />}
     {dialog === 'return-open' && <ReturnToOpenDialog pending={busy === 'status'} error={dialogError}

@@ -33,10 +33,34 @@ export interface StructuredReview {
   mistakeTag: string | null
   lesson: string
   nextAction: string
+  /** "Followed the rule?" for a Play planned under an if-then rule (Phase 2, item 3); absent from older servers. */
+  rule?: 'followed' | 'deviated' | 'not-applicable' | null
 }
 export const emptyStructuredReview = (): StructuredReview => ({ adherence: null, mistakeTag: null, lesson: '', nextAction: '' })
 export const hasStructuredReview = (review?: StructuredReview) =>
-  !!review && !!(review.adherence || review.mistakeTag?.trim() || review.lesson.trim() || review.nextAction.trim())
+  !!review && !!(review.adherence || review.mistakeTag?.trim() || review.lesson.trim() || review.nextAction.trim() || review.rule)
+
+/** The if-then rule a Play was planned under, fixed at Plan it (Phase 2, item 3). */
+export interface PlayRuleSeen { version: number; if: string; then: string }
+/** One rule version; `sourceTitle` names the Play its next action was promoted from. */
+export interface PlayRule extends PlayRuleSeen { sourcePlayId: string | null; sourceTitle: string | null; createdAtUtc: string }
+/** The active rule in one trading mode, or none. */
+export interface PlayRuleState { active: PlayRule | null; tradingMode: TradingMode }
+/** What revision 1 keeps: the rule seen at Plan it and the owner's answer, if any. */
+export interface PlanRuleSnapshot extends PlayRuleSeen { sourcePlayId: string | null; answer: 'acknowledged' | 'exception' | null; reason: string | null }
+/** The owner's answer at Plan it: acknowledged, or an exception with a reason. */
+export interface PlanRuleAnswer { version: number; answer: 'acknowledged' | 'exception'; reason?: string }
+export const maxRulePart = 500
+export const ruleAnswers = ['followed', 'deviated', 'not-applicable'] as const
+const rulePart = (v: unknown) => isText(v, maxRulePart) && v.trim() !== ''
+export const isPlayRuleSeen = (v: unknown): v is PlayRuleSeen => isRecord(v) && isCount(v.version) && v.version >= 1 &&
+  rulePart(v.if) && rulePart(v.then)
+export const isPlayRuleState = (v: unknown): v is PlayRuleState => isRecord(v) && (v.tradingMode === 'real' || v.tradingMode === 'paper') &&
+  (v.active === null || isPlayRuleSeen(v.active) && isRecord(v.active) && isNullOr(v.active.sourcePlayId, isGuid) &&
+    isNullOr(v.active.sourceTitle, x => isText(x, 200)) && isTimestamp(v.active.createdAtUtc, 64))
+export const isPlanRuleSnapshot = (v: unknown): v is PlanRuleSnapshot => isPlayRuleSeen(v) && isRecord(v) && isNullOr(v.sourcePlayId, isGuid) &&
+  (v.answer === null || v.answer === 'acknowledged' || v.answer === 'exception') &&
+  isNullOr(v.reason, x => isText(x, 500)) && (v.answer === 'exception') === (typeof v.reason === 'string')
 
 /** A stop or target. A percent value is the return on margin at the plan's leverage; share is the part of the entry it closes. */
 export interface PlanExit { id: string; unit: 'price' | 'percent'; value: string; share: string }
@@ -93,6 +117,8 @@ export interface SavedPlay {
   drawings: Record<string, unknown[]>
   review: string
   structuredReview?: StructuredReview | null
+  /** The if-then rule the Play was planned under (Phase 2, item 3); absent without one. */
+  rule?: PlayRuleSeen | null
 }
 export interface PlayFields {
   accountId: string
@@ -108,6 +134,8 @@ export interface PlanRevision {
   number: number; status: PlayStatus; reason: string; createdAtUtc: string; plan: PlayPlan
   /** The pre-flight seen at Plan it, on revision 1 only; null or absent for older plans and later revisions. */
   preflight?: PreflightCheck[] | null
+  /** The if-then rule seen at Plan it and the owner's answer, on revision 1 only (Phase 2, item 3). */
+  rule?: PlanRuleSnapshot | null
 }
 /** The non-blocking checks shown at Plan it, in display order (phase 1, 1.5). */
 export const preflightCodes = ['priced-stops', 'allocations', 'thesis', 'risk', 'liquidation', 'loss-limit'] as const
@@ -131,7 +159,7 @@ export interface ReviewRevision {
 }
 export interface PlayHistory { revisions: PlanRevision[]; statusChanges: StatusChange[]; reviews?: ReviewRevision[] | null }
 export type StatusRequest =
-  | { status: 'planned'; preflight?: PreflightCheck[] }
+  | { status: 'planned'; preflight?: PreflightCheck[]; rule?: PlanRuleAnswer }
   | { status: 'paused' }
   | { status: 'cancelled'; reason: CancelReason; note?: string }
 export interface SavedEvidence {
@@ -172,7 +200,8 @@ export const isPlaySummary = (v: unknown): v is PlaySummary => isRecord(v) &&
   (v.reviewCompletion == null) === (v.reviewCompletedAtUtc == null)
 export const isStructuredReview = (v: unknown): v is StructuredReview => isRecord(v) &&
   (v.adherence === null || ['followed', 'deviated', 'not-applicable'].includes(v.adherence as string)) &&
-  isNullOr(v.mistakeTag, x => isText(x, 100)) && isText(v.lesson, 4000) && isText(v.nextAction, 4000)
+  isNullOr(v.mistakeTag, x => isText(x, 100)) && isText(v.lesson, 4000) && isText(v.nextAction, 4000) &&
+  (v.rule == null || ruleAnswers.includes(v.rule as typeof ruleAnswers[number]))
 // Retrospective documents have a deliberately empty compatibility plan, not an original plan.
 const isRetrospectivePlan = (v: unknown) => isRecord(v) && Array.isArray(v.entries) && v.entries.length === 0 &&
   v.leverage === '0' && isRecord(v.notes) && ['thesis', 'invalidation', 'strategy', 'evidence'].every(k => v.notes && (v.notes as Record<string, unknown>)[k] === '') &&
@@ -180,7 +209,7 @@ const isRetrospectivePlan = (v: unknown) => isRecord(v) && Array.isArray(v.entri
 export const isSavedPlay = (v: unknown): v is SavedPlay => isRecord(v) && isPlaySummary(v.summary) &&
   (v.summary.origin === 'retrospective' ? isRetrospectivePlan(v.plan) : isPlayPlan(v.plan)) &&
   isRecord(v.drawings) && Object.values(v.drawings).every(Array.isArray) && isText(v.review, noteLength) &&
-  (v.structuredReview == null || isStructuredReview(v.structuredReview))
+  (v.structuredReview == null || isStructuredReview(v.structuredReview)) && (v.rule == null || isPlayRuleSeen(v.rule))
 export const isPreflightCheck = (v: unknown): v is PreflightCheck => isRecord(v) && preflightCodes.includes(v.code as PreflightCode) &&
   ['passed', 'skipped', 'unknown'].includes(v.outcome as string) &&
   (v.note === undefined || v.code === 'loss-limit' && v.outcome === 'skipped' && isText(v.note, maxPreflightNote) && v.note.trim() !== '')
@@ -195,7 +224,8 @@ export const isUnresolvedEvidence = (v: unknown): v is UnresolvedEvidence => isR
 export const isPlayHistory = (v: unknown): v is PlayHistory => isRecord(v) && Array.isArray(v.revisions) && Array.isArray(v.statusChanges) &&
   v.revisions.every(r => isRecord(r) && isCount(r.number) && playStatuses.includes(r.status as PlayStatus) && isText(r.reason, 2000) &&
     isTimestamp(r.createdAtUtc, timeLength) && isPlayPlan(r.plan) &&
-    (r.preflight == null || Array.isArray(r.preflight) && r.preflight.length <= preflightCodes.length && r.preflight.every(isPreflightCheck))) &&
+    (r.preflight == null || Array.isArray(r.preflight) && r.preflight.length <= preflightCodes.length && r.preflight.every(isPreflightCheck)) &&
+    (r.rule == null || r.number === 1 && isPlanRuleSnapshot(r.rule))) &&
   v.statusChanges.every(c => isRecord(c) && playStatuses.includes(c.from as PlayStatus) && playStatuses.includes(c.to as PlayStatus) &&
     isNullOr(c.reason, x => cancelReasons.includes(x as CancelReason)) && isNullOr(c.note, x => isText(x, 2000)) && isTimestamp(c.occurredAtUtc, timeLength) &&
     (c.source === undefined || c.source === 'owner' || c.source === 'venue' || c.source === 'manual' || c.source === 'paper') &&
