@@ -2,19 +2,40 @@ using Vessel.Application.Plays;
 using Vessel.Application.Sizing;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Reporting;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Application.Review;
 
 /// <summary>
 /// Review filters. <paramref name="Positions"/> is <c>exclude</c>, <c>include</c> or <c>auto</c>: auto adds imported positions
-/// while the selection has fewer than <paramref name="MinPlays"/> scored Plays.
+/// while the selection has fewer than <paramref name="MinPlays"/> scored Plays. <paramref name="Week"/>, a local date
+/// (yyyy-MM-dd) or <c>current</c>, replaces the rolling period with the reporting week holding it (Phase 2, item 2).
 /// </summary>
 public sealed record ReviewQuery(string Period = "month", string Portfolio = "all", Guid? AccountId = null,
-    string? Instrument = null, int Offset = 0, string Positions = "exclude", int MinPlays = ReviewQuery.DefaultMinPlays, string? TradingMode = "real")
+    string? Instrument = null, int Offset = 0, string Positions = "exclude", int MinPlays = ReviewQuery.DefaultMinPlays, string? TradingMode = "real",
+    string? Week = null)
 {
     public const int DefaultMinPlays = 5, MaxMinPlays = 1000;
 }
+
+/// <summary>
+/// Which times a report counts: a rolling period's (<paramref name="From"/>, <paramref name="To"/>], To being now, or a
+/// reporting week's half-open [From, To) in the reporting zone (Phase 2, item 2). Facts are read as of now either way;
+/// only membership differs.
+/// </summary>
+public sealed record ReviewWindow(DateTimeOffset? From, DateTimeOffset To, ReportingWeek? Week = null, TimeZoneInfo? Zone = null,
+    string? WeekStart = null)
+{
+    public bool Contains(DateTimeOffset at) => Week is { } week ? week.Contains(at) : at <= To && (From is null || at > From);
+}
+
+/// <summary>
+/// The reporting week a report covers: its first local day, UTC range, zone and week start. <paramref name="Data"/> is
+/// <c>some</c>, <c>empty</c> (data exists but nothing closed, was cancelled or declared Unresolved in the week) or <c>none</c>
+/// (Vessel holds nothing that early in this scope).
+/// </summary>
+public sealed record ReviewWeekDto(string Start, DateTimeOffset FromUtc, DateTimeOffset ToUtc, string TimeZone, string WeekStart, string Data);
 
 /// <summary>One repeatable-read snapshot of the owner's enabled accounts and retained execution facts.</summary>
 public sealed record ReviewFacts(IReadOnlyList<Portfolio> Portfolios, IReadOnlyList<Account> Accounts,
@@ -43,6 +64,10 @@ public sealed record UnresolvedPlayFacts(Play Play, UnresolvedDeclarationDto? De
 public interface IReviewStore
 {
     Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct);
+    /// <summary>The same snapshot, with the unassigned-fills count over <paramref name="window"/> (Phase 2, item 2).</summary>
+    Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, ReviewWindow window, CancellationToken ct) => ReadAsync(query, asOf, ct);
+    /// <summary>The owner's reporting setting, or null for the defaults (UTC, Monday).</summary>
+    Task<ReportingSettings?> ReportingAsync(CancellationToken ct) => Task.FromResult<ReportingSettings?>(null);
     /// <summary>
     /// The owner's own mistake tags for autocomplete, newest use first: trimmed, grouped case-insensitively in their latest
     /// spelling, at most <paramref name="limit"/> (phase 1, 1.4b).
@@ -173,6 +198,9 @@ public sealed record ReviewDto(DateTimeOffset AsOfUtc, DateTimeOffset? FromUtc, 
     public ReviewPreflightDto? Preflight { get; init; }
     /// <summary>Process and outcome as cases (phase 1, 1.4b).</summary>
     public ReviewProcessDto? Process { get; init; }
+    /// <summary>The reporting week, when the report covers one instead of a rolling period (Phase 2, item 2).</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public ReviewWeekDto? Week { get; init; }
 }
 /// <summary>
 /// <paramref name="Recorded"/> Plays have a pre-flight on revision 1 and <paramref name="NotRecorded"/> were planned before

@@ -177,6 +177,9 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Persistence/SizingStore.cs|a9ceddf772233bbe66f61445850ce916446ce6f3013950049716c2e75596eaf5",
             // Risk settings first write: the current owner's row only, inserted then locked FOR UPDATE, like sizing settings.
             "Vessel.Persistence/RiskStore.cs|24f46de69ab4d3902c2b6df44d48bd4fe30691666e6e9fe239bfd3b5bd21f7cb",
+            // Reporting settings first write (Phase 2, item 2): initial.OwnerId is checked equal to db.CurrentOwnerId just before;
+            // DO NOTHING, then the current owner's row is locked FOR UPDATE, like risk settings.
+            "Vessel.Persistence/ReportingStore.cs|1bae790ca809f53b6019e15a5181d427f9f8b144aaf89687de2f686e8ae90e79",
             // Portfolio row lock and its member accounts: "Id"/"PortfolioId" and "OwnerId" = db.CurrentOwnerId.
             "Vessel.Persistence/WorkspaceStore.cs|0c09a808bbe318f68eea1bda7d6dae1ac6ae5f56b4e988575a2787a457df5d2a",
             "Vessel.Persistence/WorkspaceStore.cs|029e4ce40dd7db519f675a99000b2f0e8cde631a8dd888f38f14cfd2f9e09a80",

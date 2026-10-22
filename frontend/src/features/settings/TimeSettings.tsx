@@ -11,8 +11,8 @@ export function TimeSettings() {
   return <section className="shell-panel settings-panel" aria-labelledby="time-settings-heading">
     <Clock size={23} aria-hidden="true" />
     <h2 id="time-settings-heading">Times<InfoTip label="About displayed times">Every page shows times in this zone and names
-      it; a time&apos;s tooltip shows the other zone. Activity and Review still filter by UTC days, and stored times never
-      change.</InfoTip></h2>
+      it; a time&apos;s tooltip shows the other zone. Activity and Review&apos;s rolling periods still filter by UTC days, the
+      week page follows the reporting week below, and stored times never change.</InfoTip></h2>
     <fieldset className="settings-choice">
       <legend>Show times in</legend>
       {displayZones.map(option => <label key={option}>

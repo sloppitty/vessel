@@ -1,5 +1,6 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
+using Vessel.Domain.Reporting;
 using Vessel.Application.Plays;
 using Vessel.Application.Review;
 using Vessel.Application.Sizing;
@@ -10,7 +11,12 @@ namespace Vessel.Persistence;
 
 public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IReviewStore
 {
-    public async Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct)
+    public Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct) =>
+        ReadAsync(query, asOf, new ReviewWindow(ReviewService.From(query.Period, asOf), asOf), ct);
+
+    public Task<ReportingSettings?> ReportingAsync(CancellationToken ct) => db.ReportingSettings.AsNoTracking().SingleOrDefaultAsync(ct);
+
+    public async Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, ReviewWindow window, CancellationToken ct)
     {
         var mode = TradingMode.Validate(query.TradingMode ?? TradingMode.Real);
         // One database snapshot for links, outcomes, membership and coverage during concurrent sync/management.
@@ -37,9 +43,16 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
         var fills = db.Fills.Where(f => ids.Contains(f.AccountId) && f.OccurredAtUtc <= asOf &&
             (query.Instrument == null || f.ContractId == query.Instrument));
         var first = await fills.Select(f => (DateTimeOffset?)f.OccurredAtUtc).MinAsync(ct);
-        var from = ReviewService.From(query.Period, asOf);
-        var unassigned = await fills.CountAsync(f => (from == null || f.OccurredAtUtc > from) &&
-            !db.OrderLinks.Any(l => l.AccountId == f.AccountId && l.State == OrderLinkState.Linked &&
+        // The window's own rule: a rolling period's (from, now], or a reporting week's [from, to) (Phase 2, item 2).
+        var windowed = fills;
+        if (window.From is { } from)
+            windowed = window.Week is null ? windowed.Where(f => f.OccurredAtUtc > from) : windowed.Where(f => f.OccurredAtUtc >= from);
+        if (window.Week is not null)
+        {
+            var to = window.To;
+            windowed = windowed.Where(f => f.OccurredAtUtc < to);
+        }
+        var unassigned = await windowed.CountAsync(f => !db.OrderLinks.Any(l => l.AccountId == f.AccountId && l.State == OrderLinkState.Linked &&
                 db.Orders.Any(o => o.OwnerId == l.OwnerId && o.AccountId == l.AccountId && o.Id == l.ImportedOrderId &&
                     o.ContractId == f.ContractId && o.ExternalOrderId == f.ExternalOrderId) &&
                 db.Plays.Any(p => p.Id == l.PlayId && p.TradingMode == mode && p.ContractId == f.ContractId)), ct);

@@ -1365,6 +1365,33 @@ namespace Vessel.Persistence.Migrations
                     b.ToTable("play_status_changes", (string)null);
                 });
 
+            modelBuilder.Entity("Vessel.Domain.Reporting.ReportingSettings", b =>
+                {
+                    b.Property<Guid>("OwnerId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TimeZone")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("WeekStart")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("OwnerId");
+
+                    b.ToTable("reporting_settings", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_reporting_settings_week_start", "\"WeekStart\" IN ('monday', 'sunday')");
+                        });
+                });
+
             modelBuilder.Entity("Vessel.Domain.Risk.RiskSettings", b =>
                 {
                     b.Property<Guid>("OwnerId")

@@ -32,6 +32,9 @@ internal sealed class ReviewFixture : IReviewStore
     public ReviewService Service => new(this, new ReviewClock(), TestVenues.With());
     public ReviewQuery? LastQuery { get; private set; }
     public Task<IReadOnlyList<string>> MistakeTagsAsync(int limit, CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([]);
+    /// <summary>The owner's reporting setting (Phase 2, item 2); null reads as UTC and Monday.</summary>
+    public Vessel.Domain.Reporting.ReportingSettings? Reporting { get; set; }
+    public Task<Vessel.Domain.Reporting.ReportingSettings?> ReportingAsync(CancellationToken ct) => Task.FromResult(Reporting);
     public Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct)
     {
         LastQuery = query;
