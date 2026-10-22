@@ -125,6 +125,7 @@ public sealed class HyperliquidFundingTests
         using var handler = new Handler(Page(Enumerable.Range(0, count).Select(i => Row(Start, hash: i + 1))));
         var result = await Reader(handler).ReadFundingAsync(Account(), From, To, default);
         Assert.False(result.Complete);
+        Assert.False(result.Truncated); // A narrower window cannot split one millisecond.
         Assert.Equal(count, result.Payments.Count);
         Assert.Contains("non-advancing timestamp", result.Notice);
         Assert.Single(handler.FundingRequests);
@@ -137,6 +138,7 @@ public sealed class HyperliquidFundingTests
             Enumerable.Range(page * 499, 500).Select(i => Row(Start + i)))));
         var result = await Reader(handler).ReadFundingAsync(Account(), From, To, default);
         Assert.False(result.Complete);
+        Assert.True(result.Truncated);
         Assert.Equal(20, handler.FundingRequests.Count);
         Assert.Equal(9981, result.Payments.Count);
         Assert.Contains("Incomplete funding", result.Notice);
@@ -149,6 +151,7 @@ public sealed class HyperliquidFundingTests
             Enumerable.Range(page * 5999, 6000).Select(i => Row(Start + i)))));
         var result = await Reader(handler).ReadFundingAsync(Account(), From, To, default);
         Assert.False(result.Complete);
+        Assert.True(result.Truncated);
         Assert.Equal(2, handler.FundingRequests.Count);
         Assert.Equal(6000, result.Payments.Count);
         Assert.Contains("page/row bound", result.Notice);
@@ -163,6 +166,7 @@ public sealed class HyperliquidFundingTests
         using var handler = new Handler(Page([Row(Start, coin: coin), Row(Start)]));
         var result = await Reader(handler).ReadFundingAsync(Account(), From, To, default);
         Assert.False(result.Complete);
+        Assert.False(result.Truncated);
         Assert.Equal("BTC", Assert.Single(result.Payments).ContractId);
         Assert.Contains("contracts were excluded", result.Notice);
     }

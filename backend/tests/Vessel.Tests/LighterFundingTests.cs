@@ -228,6 +228,7 @@ public sealed class LighterFundingTests
         }};
         var result = await Reader(handler).ReadFundingAsync(Account(), From, Now, default);
         Assert.False(result.Complete);
+        Assert.True(result.Truncated); // Only the page budget stopped it, so a narrower window may complete.
         Assert.Equal(5, page);
         Assert.Equal(5, result.Payments.Count);
         Assert.Contains("five-page", result.Notice);
@@ -244,6 +245,7 @@ public sealed class LighterFundingTests
             : Page([Row("2"), Row(change: "100")], cursorLoop ? "c" : null)) };
         var result = await Reader(handler).ReadFundingAsync(Account(), From, Now, default);
         Assert.False(result.Complete);
+        Assert.False(result.Truncated);
         Assert.Equal(-1.25m, Assert.Single(result.Payments).Amount);
         Assert.Equal(2, page);
     }

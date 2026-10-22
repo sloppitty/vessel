@@ -21,10 +21,10 @@ public sealed partial class LighterReader
             throw new VenueReadException($"{venue.Name} funding requires an inclusive, millisecond-aligned past window of at most 31 days.");
 
         var payments = new Dictionary<string, VenueFundingPayment>(StringComparer.Ordinal);
-        VenueFundingReadResult Result(bool complete, string detail) => new(payments.Values.ToArray(), fromUtc, toUtc,
+        VenueFundingReadResult Result(bool complete, string detail, bool truncated = false) => new(payments.Values.ToArray(), fromUtc, toUtc,
             complete, $"{(complete ? "" : "Incomplete ")}{venue.Name} settled funding: {detail} " +
             $"{venue.Collateral}; positive received, negative paid. Execution PnL funding inclusion is unverified.",
-            FundingFacts.Unknown);
+            FundingFacts.Unknown) { Truncated = truncated };
 
         var attempt = await credentials.ReadAttemptAsync(account.Id, cancellationToken);
         if (attempt is null)
@@ -71,7 +71,7 @@ public sealed partial class LighterReader
                         cursor = next;
                         if (cursor is null) return Result(true, "the requested window was exhausted.");
                     }
-                    return Result(false, "the five-page limit was reached; the requested window was not exhausted.");
+                    return Result(false, "the five-page limit was reached; the requested window was not exhausted.", truncated: true);
                 }
                 catch (LighterAuthenticationException)
                 {

@@ -101,7 +101,7 @@ public sealed partial class RisexReader
             VenueFundingReadResult Result(bool complete, bool truncated) => new(payments, fromUtc, toUtc, complete,
                 FundingNotice + (truncated ? " Incomplete history: the 10-page / 10,000-row funding limit was reached." : "") +
                 (unknownMarkets ? " Incomplete history: payments for unrecognized native markets were omitted." : ""),
-                FundingFacts.Unknown);
+                FundingFacts.Unknown) { Truncated = truncated && !unknownMarkets };
         }, cancellationToken);
     }
 
