@@ -7,8 +7,9 @@ public sealed class MonitorOptions
     public int VenueReadConcurrency { get; set; } = 4;
     /// <summary>
     /// Venue read slots kept free for protection checks when an account is read only because it keeps its execution
-    /// history (Phase 2, item 6); such a read also leaves one of the owner's two slots free. With
-    /// <see cref="VenueReadConcurrency"/> at or below it, those accounts are read only by Check or Refresh.
+    /// history (Phase 2, item 6); such a read also leaves one of the owner's two slots free. It never takes a venue's whole
+    /// capacity: at most <see cref="VenueReadConcurrency"/> − 1 slots are kept. The scheduler also claims protection work
+    /// first in each tick and keeps one of its own worker slots free when it has more than one.
     /// </summary>
     public int ProtectionHeadroom { get; set; } = 1;
     public TimeSpan Interval { get; set; } = TimeSpan.FromMinutes(10);

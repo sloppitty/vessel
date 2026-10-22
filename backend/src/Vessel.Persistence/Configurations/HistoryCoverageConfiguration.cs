@@ -18,7 +18,7 @@ internal sealed class FillCoverageRecordConfiguration : IEntityTypeConfiguration
                 "FirstObservedAtUtc" <= "LastObservedAtUtc" AND "ImportCount" >= 1 AND
                 ("RequestedFromUtc" IS NULL OR "RequestedFromUtc" <= "RequestedToUtc") AND
                 ("CoveredFromUtc" IS NULL OR "CoveredToUtc" IS NOT NULL AND "CoveredFromUtc" <= "CoveredToUtc") AND
-                ("GapFromUtc" IS NULL) = ("GapToUtc" IS NULL) AND ("GapFromUtc" IS NULL OR "GapFromUtc" <= "GapToUtc") AND
+                ("GapToUtc" IS NULL OR "GapFromUtc" IS NOT NULL AND "GapFromUtc" <= "GapToUtc") AND
                 ("Truncated" IS NOT NULL OR "CoveredToUtc" IS NULL AND "GapFromUtc" IS NULL AND NOT "Complete")
                 """);
         });

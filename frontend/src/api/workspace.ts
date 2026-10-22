@@ -138,7 +138,8 @@ const isFillCoverage = (v: unknown): v is FillCoverage => isRecord(v) && (v.sour
   isPositiveCount(v.importCount) && isNullOr(v.requestedFromUtc, isTimestamp) && isTimestamp(v.requestedToUtc) &&
   (v.truncated === null || typeof v.truncated === 'boolean') && typeof v.complete === 'boolean' &&
   isNullOr(v.coveredFromUtc, isTimestamp) && isNullOr(v.coveredToUtc, isTimestamp) && isNullOr(v.gapFromUtc, isTimestamp) &&
-  isNullOr(v.gapToUtc, isTimestamp) && (v.gapFromUtc === null) === (v.gapToUtc === null) &&
+  // A gap's end is unknown when the read reported no fill time; an end needs a start.
+  isNullOr(v.gapToUtc, isTimestamp) && (v.gapToUtc === null || v.gapFromUtc !== null) &&
   (v.coveredFromUtc === null || v.coveredToUtc !== null) && before(v.coveredFromUtc as string | null, v.coveredToUtc as string | null) &&
   before(v.gapFromUtc as string | null, v.gapToUtc as string | null) &&
   // Unknown truncation proves nothing: no coverage and no gap.

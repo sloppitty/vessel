@@ -28,7 +28,8 @@ describe('history coverage (Phase 2, item 6)', () => {
     const [first, second] = coverage.recent as [Coverage['recent'][number], Coverage['recent'][number]]
     // Unknown truncation proves nothing; a gap has both ends; an open list holds open gaps only.
     expect(isHistoryCoverage({ ...coverage, recent: [{ ...second, coveredToUtc: second.lastObservedAtUtc }] })).toBe(false)
-    expect(isHistoryCoverage({ ...coverage, recent: [{ ...first, gapToUtc: null }] })).toBe(false)
+    expect(isHistoryCoverage({ ...coverage, recent: [{ ...first, gapToUtc: null }] })).toBe(true)
+    expect(isHistoryCoverage({ ...coverage, recent: [{ ...first, gapFromUtc: null }] })).toBe(false)
     expect(isHistoryCoverage({ ...coverage, recent: [{ ...first, coveredFromUtc: first.coveredToUtc, coveredToUtc: first.gapFromUtc }] })).toBe(false)
     expect(isHistoryCoverage({ ...coverage, openGaps: [{ ...gap, closedAtUtc: '2026-10-22T10:00:00Z' }] })).toBe(false)
     expect(isHistoryCoverage({ ...coverage, openGapCount: 1 })).toBe(false)

@@ -27,7 +27,10 @@ public sealed class FillCoverageRecord : IOwned
     /// <summary>The span the import proves continuous; null when it proves none.</summary>
     public DateTimeOffset? CoveredFromUtc { get; set; }
     public DateTimeOffset? CoveredToUtc { get; set; }
-    /// <summary>The span the import may have skipped: from the newest fill known before it to its oldest raw fill.</summary>
+    /// <summary>
+    /// The span the import may have skipped, in execution time: from the newest fill known before it to its oldest raw fill.
+    /// The end is null when the read reported no fill time.
+    /// </summary>
     public DateTimeOffset? GapFromUtc { get; set; }
     public DateTimeOffset? GapToUtc { get; set; }
 
@@ -50,7 +53,8 @@ public sealed class FillCoverageRecord : IOwned
         if (record.Complete) { record.CoveredToUtc = readAt; return record; }
         if (truncated == true && boundary is { } known && (oldestRawFill is null || oldestRawFill > known))
         {
-            (record.GapFromUtc, record.GapToUtc) = (known, oldestRawFill is { } oldest && oldest < readAt ? oldest : readAt);
+            // Both ends are execution times, so venue clock skew against the read time can never invert the span (Sol round 1).
+            (record.GapFromUtc, record.GapToUtc) = (known, oldestRawFill);
             if (oldestRawFill is { } oldestRead && oldestRead <= readAt) (record.CoveredFromUtc, record.CoveredToUtc) = (oldestRead, readAt);
             return record;
         }
@@ -72,6 +76,8 @@ public sealed class FillCoverageRecord : IOwned
         if (!Continues(next)) throw new DomainRuleException("Only a continuous import of the same source extends a coverage record.");
         LastObservedAtUtc = next.LastObservedAtUtc;
         RequestedToUtc = next.RequestedToUtc;
+        // A later read can reach further back than this record did (Sol round 1).
+        if (next.CoveredFromUtc < CoveredFromUtc) CoveredFromUtc = next.CoveredFromUtc;
         CoveredToUtc = next.CoveredToUtc;
         Truncated = Truncated == true || next.Truncated == true;
         ImportCount = checked(ImportCount + 1);
@@ -96,6 +102,16 @@ public sealed class AccountHistoryGap : IOwned
     public DateTimeOffset? ClosedAtUtc { get; set; }
     public Guid? ClosedByCoverageId { get; set; }
     public bool IsOpen => ClosedAtUtc is null;
+
+    /// <summary>
+    /// Another import found the same possible gap again, from the same execution (Sol round 1): it widens this one rather
+    /// than opening a copy. An unknown end stays unknown.
+    /// </summary>
+    public void Widen(DateTimeOffset? to)
+    {
+        if (!IsOpen) throw new DomainRuleException("A closed gap is not widened.");
+        ToUtc = ToUtc is null || to is null ? null : to > ToUtc ? to : ToUtc;
+    }
 
     /// <summary>Closes the gap on proof: a read that covered it. Closing is final.</summary>
     public void Close(Guid coverageId, DateTimeOffset now)

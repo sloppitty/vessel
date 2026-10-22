@@ -200,7 +200,8 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         return leases;
     }
 
-    public Task<MonitorLease?> ClaimAsync(Guid accountId, Guid? requestId, string workerId, DateTimeOffset now, CancellationToken ct) =>
+    public Task<MonitorLease?> ClaimAsync(Guid accountId, Guid? requestId, string workerId, DateTimeOffset now, CancellationToken ct,
+        bool protectionOnly = false) =>
         unitOfWork.ExecuteAsync(async () =>
         {
             // Background claims must not wait behind an owner's credential verification or settings update.
@@ -222,8 +223,10 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
                 if (scheduled && !await ProtectionEligibleAsync(account.Id, now, ct))
                 {
                     if (!await KeepsHistoryAsync(account.Id, ct)) { row.NextRunAtUtc = null; return null; }
-                    // Phase 2, item 6: a read only for kept history runs behind protection checks.
-                    headroom = settings.ProtectionHeadroom;
+                    // Phase 2, item 6: a read only for kept history runs behind protection checks: the scheduler offers it
+                    // only after them, and it leaves headroom, never all of a venue's capacity (Sol round 1).
+                    if (protectionOnly) return null;
+                    headroom = Math.Min(settings.ProtectionHeadroom, settings.VenueReadConcurrency - 1);
                 }
                 if (!await ReadCapacityAsync(account.VenueId, now, ct, headroom) || await server.VenueRetryAtAsync(account.VenueId, ct) > now)
                     return null;
@@ -275,13 +278,21 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         if (latest is not null && latest.Continues(record)) latest.Extend(record);
         else db.FillCoverage.Add(record);
         if (record.GapFromUtc is { } from)
-            db.HistoryGaps.Add(new AccountHistoryGap
+        {
+            // The same capped window seen again, from the same last known execution, widens the open gap it already found
+            // (Sol round 1); each import's own record keeps its evidence.
+            var known = await db.HistoryGaps.Where(g => g.AccountId == record.AccountId && g.ClosedAtUtc == null && g.FromUtc == from)
+                .OrderBy(g => g.OpenedAtUtc).FirstOrDefaultAsync(ct);
+            if (known is not null) known.Widen(record.GapToUtc);
+            else db.HistoryGaps.Add(new AccountHistoryGap
             {
                 Id = Guid.CreateVersion7(), OwnerId = record.OwnerId, AccountId = record.AccountId, FromUtc = from, ToUtc = record.GapToUtc,
                 OpenedAtUtc = record.LastObservedAtUtc, OpenedByCoverageId = record.Id
             });
-        // Verified complete history proves every open gap covered; nothing else here closes one.
-        if (record.Complete)
+        }
+        // Verified complete history proves every open gap covered, as only a check clears the gap flag; a Refresh's
+        // complete read is recorded but closes nothing (Sol round 1).
+        if (record.Complete && record.Source != FillCoverageRecord.Refresh)
             foreach (var gap in await db.HistoryGaps.Where(g => g.AccountId == record.AccountId && g.ClosedAtUtc == null).ToListAsync(ct))
                 gap.Close(record.Id, record.LastObservedAtUtc > gap.OpenedAtUtc ? record.LastObservedAtUtc : gap.OpenedAtUtc);
     }

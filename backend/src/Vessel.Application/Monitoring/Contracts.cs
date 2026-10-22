@@ -167,7 +167,9 @@ public interface IMonitorStore
     Task RecordCoverageAsync(FillCoverageRecord record, CancellationToken ct);
     Task<T> LockedAsync<T>(Guid accountId, Func<Account, MonitorAccount, Task<T>> action, CancellationToken ct);
     Task<IReadOnlyList<MonitorLease>> ClaimDueAsync(string workerId, DateTimeOffset now, int limit, CancellationToken ct);
-    Task<MonitorLease?> ClaimAsync(Guid accountId, Guid? requestId, string workerId, DateTimeOffset now, CancellationToken ct);
+    /// <param name="protectionOnly">Phase 2, item 6: claim only protection work, leaving a scheduled read for kept history alone.</param>
+    Task<MonitorLease?> ClaimAsync(Guid accountId, Guid? requestId, string workerId, DateTimeOffset now, CancellationToken ct,
+        bool protectionOnly = false);
     Task<bool> RenewAsync(MonitorLease lease, DateTimeOffset now, CancellationToken ct);
     /// <summary>
     /// Inside the account lock. With <paramref name="orders"/>, a reported terminal status ends a watch whatever the

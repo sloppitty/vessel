@@ -41,7 +41,7 @@ namespace Vessel.Persistence.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_account_fill_coverage", x => x.Id);
-                    table.CheckConstraint("CK_account_fill_coverage_ranges", "\"FirstObservedAtUtc\" <= \"LastObservedAtUtc\" AND \"ImportCount\" >= 1 AND\n(\"RequestedFromUtc\" IS NULL OR \"RequestedFromUtc\" <= \"RequestedToUtc\") AND\n(\"CoveredFromUtc\" IS NULL OR \"CoveredToUtc\" IS NOT NULL AND \"CoveredFromUtc\" <= \"CoveredToUtc\") AND\n(\"GapFromUtc\" IS NULL) = (\"GapToUtc\" IS NULL) AND (\"GapFromUtc\" IS NULL OR \"GapFromUtc\" <= \"GapToUtc\") AND\n(\"Truncated\" IS NOT NULL OR \"CoveredToUtc\" IS NULL AND \"GapFromUtc\" IS NULL AND NOT \"Complete\")");
+                    table.CheckConstraint("CK_account_fill_coverage_ranges", "\"FirstObservedAtUtc\" <= \"LastObservedAtUtc\" AND \"ImportCount\" >= 1 AND\n(\"RequestedFromUtc\" IS NULL OR \"RequestedFromUtc\" <= \"RequestedToUtc\") AND\n(\"CoveredFromUtc\" IS NULL OR \"CoveredToUtc\" IS NOT NULL AND \"CoveredFromUtc\" <= \"CoveredToUtc\") AND\n(\"GapToUtc\" IS NULL OR \"GapFromUtc\" IS NOT NULL AND \"GapFromUtc\" <= \"GapToUtc\") AND\n(\"Truncated\" IS NOT NULL OR \"CoveredToUtc\" IS NULL AND \"GapFromUtc\" IS NULL AND NOT \"Complete\")");
                     table.CheckConstraint("CK_account_fill_coverage_source", "\"Source\" IN ('refresh', 'check')");
                     table.ForeignKey(
                         name: "FK_account_fill_coverage_accounts_OwnerId_AccountId",

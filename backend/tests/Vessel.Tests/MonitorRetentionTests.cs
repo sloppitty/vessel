@@ -138,4 +138,53 @@ public sealed partial class MonitorPostgresTests
         Assert.NotNull(await shared.ClaimAsync(ids[1], null, "worker", clock.Now, default));
         Assert.Null(await shared.ClaimAsync(ids[2], null, "worker", clock.Now, default));
     }
+
+    [PostgresFact]
+    public async Task Phase2_kept_history_never_takes_a_whole_venue_and_waits_for_protection_only_claims()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(new DateTimeOffset(2026, 10, 22, 8, 0, 0, TimeSpan.Zero));
+        await using var db = database.Context(owner);
+        await KeepHistoryAsync(db, id, true);
+        // A venue with one read slot: the default headroom cannot reserve it all (Sol round 1).
+        var options = new MonitorOptions { VenueReadConcurrency = 1 };
+        var work = TestUnitOfWork.For(db);
+        var store = MonitorTestPaths.Store(db, work, options);
+        var coordinator = new MonitorCoordinator(new MonitorWorkerOnline(store, clock), new WorkspaceStore(db, work), new Importer(),
+            TestVenues.With(new Reader(), new Orders()), new Credentials(), work, new EventSink(), new Commands(), new CoreOwner(owner), options, clock);
+        await coordinator.DiscoverAsync(["hyperliquid"], clock.Now, default);
+        // A protection-only claim leaves it due, untouched.
+        Assert.Null(await store.ClaimAsync(id, null, "worker", clock.Now, default, protectionOnly: true));
+        Assert.Equal(clock.Now, (await MonitorRowAsync(db)).NextRunAtUtc);
+        Assert.NotNull(await store.ClaimAsync(id, null, "worker", clock.Now, default));
+    }
+
+    [PostgresFact]
+    public async Task Phase2_the_same_gap_found_again_widens_one_gap_and_a_complete_Refresh_closes_none()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var at = new DateTimeOffset(2026, 10, 22, 8, 0, 0, TimeSpan.Zero);
+        await using var db = database.Context(owner);
+        var work = TestUnitOfWork.For(db);
+        var store = MonitorTestPaths.Store(db, work);
+        async Task Record(FillCoverageRecord record) =>
+            await work.ExecuteAsync(async () => { await store.RecordCoverageAsync(record, default); return true; }, default);
+        // Out-of-scope fills keep the boundary where it was, so each capped read finds the same gap from it (Sol round 1).
+        await Record(FillCoverageRecord.For(owner, id, FillCoverageRecord.Check, at, true, false, at.AddHours(-2), at.AddDays(-1)));
+        await Record(FillCoverageRecord.For(owner, id, FillCoverageRecord.Check, at.AddMinutes(10), true, false, at.AddHours(-1), at.AddDays(-1)));
+        db.ChangeTracker.Clear();
+        var gap = Assert.Single(await db.HistoryGaps.AsNoTracking().ToListAsync());
+        Assert.Equal((at.AddDays(-1), at.AddHours(-1)), (gap.FromUtc!.Value, gap.ToUtc!.Value));
+        Assert.Equal(2, await db.FillCoverage.CountAsync(r => r.GapFromUtc != null));
+        // Only a check's complete history closes gaps, as only a check clears the gap flag.
+        await Record(FillCoverageRecord.For(owner, id, FillCoverageRecord.Refresh, at.AddMinutes(20), false, true, null, at.AddDays(-1)));
+        db.ChangeTracker.Clear();
+        Assert.True((await db.HistoryGaps.AsNoTracking().SingleAsync()).IsOpen);
+        await Record(FillCoverageRecord.For(owner, id, FillCoverageRecord.Check, at.AddMinutes(30), false, true, null, at.AddDays(-1)));
+        db.ChangeTracker.Clear();
+        Assert.False((await db.HistoryGaps.AsNoTracking().SingleAsync()).IsOpen);
+    }
 }
+

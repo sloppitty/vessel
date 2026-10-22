@@ -31,9 +31,13 @@ public sealed class HistoryCoverageTests
         var gap = For(true, Read.AddDays(-1), boundary);
         Assert.Equal((boundary, Read.AddDays(-1)), (gap.GapFromUtc!.Value, gap.GapToUtc!.Value));
         Assert.Equal((Read.AddDays(-1), Read), Range(gap));
-        // Capped with no fill time: the whole span since the boundary may be missing, and nothing is proven.
+        // Capped with no fill time: the whole span since the boundary may be missing, its end unknown, and nothing is proven.
         var blind = For(true, null, boundary);
-        Assert.Equal((boundary, Read, (DateTimeOffset?)null), (blind.GapFromUtc!.Value, blind.GapToUtc!.Value, blind.CoveredFromUtc));
+        Assert.Equal((boundary, (DateTimeOffset?)null, (DateTimeOffset?)null), (blind.GapFromUtc!.Value, blind.GapToUtc, blind.CoveredFromUtc));
+        // Sol round 1: fills a few minutes ahead of the read time never invert the gap. Its ends are execution times.
+        var skewed = For(true, Read.AddMinutes(2), Read.AddMinutes(1));
+        Assert.Equal((Read.AddMinutes(1), Read.AddMinutes(2), (DateTimeOffset?)null), (skewed.GapFromUtc!.Value, skewed.GapToUtc!.Value,
+            skewed.CoveredFromUtc));
         // A first import has nothing before it to skip: covered from its oldest fill, and an empty one proves nothing.
         Assert.Equal((Read.AddDays(-5), Read), Range(For(true, Read.AddDays(-5), null)));
         Assert.Null(For(false, null, null).CoveredFromUtc);
@@ -57,6 +61,27 @@ public sealed class HistoryCoverageTests
         Assert.False(first.Continues(For(null, Read, Read, at: Read.AddMinutes(20))));
         Assert.False(first.Continues(For(false, Read.AddMinutes(15), Read.AddMinutes(12), at: Read.AddMinutes(20))));
         Assert.Throws<Vessel.Domain.Common.DomainRuleException>(() => first.Extend(For(true, null, Read, at: Read.AddMinutes(20))));
+        // Sol round 1: a later read reaching further back moves the record's start back.
+        var later = For(false, Read.AddDays(-3), Read.AddMinutes(5), at: Read.AddMinutes(30));
+        Assert.True(first.Continues(later));
+        first.Extend(later);
+        Assert.Equal(Read.AddDays(-3), first.CoveredFromUtc!.Value);
+    }
+
+    [Fact]
+    public void A_gap_found_again_from_the_same_execution_widens_and_an_unknown_end_stays_unknown()
+    {
+        var gap = new AccountHistoryGap { Id = Guid.NewGuid(), FromUtc = Read.AddDays(-2), ToUtc = Read.AddDays(-1), OpenedAtUtc = Read };
+        gap.Widen(Read.AddHours(-30));
+        Assert.Equal(Read.AddDays(-1), gap.ToUtc);
+        gap.Widen(Read.AddHours(-1));
+        Assert.Equal(Read.AddHours(-1), gap.ToUtc);
+        gap.Widen(null);
+        Assert.Null(gap.ToUtc);
+        gap.Widen(Read);
+        Assert.Null(gap.ToUtc);
+        gap.Close(Guid.NewGuid(), Read);
+        Assert.Throws<Vessel.Domain.Common.DomainRuleException>(() => gap.Widen(Read));
     }
 
     private static (DateTimeOffset, DateTimeOffset) Range(FillCoverageRecord record) => (record.CoveredFromUtc!.Value, record.CoveredToUtc!.Value);

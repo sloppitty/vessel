@@ -34,8 +34,8 @@ internal sealed class MonitorWorkerOnline(IMonitorStore inner, TimeProvider cloc
         inner.LockedAsync(accountId, action, ct);
     public Task<IReadOnlyList<MonitorLease>> ClaimDueAsync(string workerId, DateTimeOffset now, int limit, CancellationToken ct) =>
         inner.ClaimDueAsync(workerId, now, limit, ct);
-    public Task<MonitorLease?> ClaimAsync(Guid accountId, Guid? requestId, string workerId, DateTimeOffset now, CancellationToken ct) =>
-        inner.ClaimAsync(accountId, requestId, workerId, now, ct);
+    public Task<MonitorLease?> ClaimAsync(Guid accountId, Guid? requestId, string workerId, DateTimeOffset now, CancellationToken ct,
+        bool protectionOnly = false) => inner.ClaimAsync(accountId, requestId, workerId, now, ct, protectionOnly);
     public Task<bool> RenewAsync(MonitorLease lease, DateTimeOffset now, CancellationToken ct) => inner.RenewAsync(lease, now, ct);
     public Task UpdateWatchesAsync(Guid accountId, VenueOrderReadResult? orders, DateTimeOffset now, CancellationToken ct) =>
         inner.UpdateWatchesAsync(accountId, orders, now, ct);
