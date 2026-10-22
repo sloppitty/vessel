@@ -110,8 +110,8 @@ public sealed class InstrumentCatalogueApiTests
         Assert.Equal("Venue perpetual contract metadata only. No orders, balances or execution refresh.",
             root.GetProperty("notice").GetString());
         var instrument = Assert.Single(root.GetProperty("instruments").EnumerateArray());
-        Assert.Equal(new[] { "contractId", "quantityDecimals", "maxLeverage", "quoteAsset", "priceStep", "category", "venueContractId", "maintenanceMarginFraction" },
-            instrument.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(new[] { "contractId", "quantityDecimals", "maxLeverage", "quoteAsset", "priceStep", "category", "venueContractId", "maintenanceMarginFraction",
+            "maxPriceDecimals" }, instrument.EnumerateObject().Select(p => p.Name));
         // Hyperliquid rounds to significant figures, labels no categories and keys contracts by name.
         Assert.All(new[] { "priceStep", "category", "venueContractId" }, name => Assert.Equal(JsonValueKind.Null, instrument.GetProperty(name).ValueKind));
         Assert.Equal("MiXeD", instrument.GetProperty("contractId").GetString());
@@ -119,6 +119,8 @@ public sealed class InstrumentCatalogueApiTests
         Assert.Equal(40, instrument.GetProperty("maxLeverage").GetInt32());
         Assert.Equal("USDC", instrument.GetProperty("quoteAsset").GetString());
         Assert.Equal(0.0125m, instrument.GetProperty("maintenanceMarginFraction").GetDecimal());
+        // Phase 2, item 14b (F-11): at most 6 − szDecimals price decimals.
+        Assert.Equal(1, instrument.GetProperty("maxPriceDecimals").GetInt32());
         var request = Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal("https://api.hyperliquid.xyz/info", request.Uri);
