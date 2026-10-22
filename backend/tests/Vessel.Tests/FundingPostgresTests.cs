@@ -120,8 +120,9 @@ public sealed class FundingPostgresTests
         await using (var db = database.Context(owner)) await Refresh(db, owner, reader, id);
         await using (var db = database.Context(owner))
         {
-            // The new hour, then the rest of the 30 days before the stored coverage; nothing covered is read again.
-            Assert.Equal(15, reader.FundingReads);
+            // The new hour, then from the learned 3.75 days: one that fits and doubles, one too long, two more, and the
+            // day's recheck. Six reads, not the first Refresh's three halvings again.
+            Assert.Equal(14, reader.FundingReads);
             var state = await db.FundingStates.SingleAsync();
             Assert.Equal((At.AddHours(1).AddDays(-30), At.AddHours(1)), (state.CoveredFromUtc, state.CoveredToUtc));
             Assert.Equal("Synthetic settled funding.", state.Notice);

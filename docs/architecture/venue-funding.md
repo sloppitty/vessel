@@ -51,13 +51,24 @@ example is Lighter: five 100-row pages against 720 hourly rows per market.
     from the newest boundary.
 - **Recheck.** Only the last `Recheck` of the stored coverage (one day by
   default) is read again. This keeps a settlement the venue reports late, and
-  a changed one still fails closed.
-- **Halving.** The first window is the whole span (`Window`, 30 days, so a
-  venue that fits still makes one read). It halves only when the adapter marks
-  the result `Truncated`, meaning its page or row budget alone stopped it. Any
-  other incompleteness ends the read, and the venue's own incomplete result is
-  kept when nothing completed: a missing token, excluded or unknown markets,
-  or a saturated same-millisecond group.
+  a changed one still fails closed. It uses only the reads left once the
+  uncovered spans are read, so rechecks never starve new coverage (Sol round
+  1 on #44).
+- **Halving.** A window halves only when the adapter marks the result
+  `Truncated`, meaning its page or row budget alone stopped it. Any other
+  incompleteness ends the read, and the venue's own incomplete result is kept
+  when nothing completed: a missing token, excluded or unknown markets, or a
+  saturated same-millisecond group. After a full-size success the window
+  doubles, up to `Window` and never to a size that has just failed; a window
+  cut at a boundary proves nothing larger.
+- **Learning across Refreshes.** The size that fits is not relearned from 30
+  days every Refresh (Sol round 1 on #44). The account's funding state keeps,
+  as its last attempt, the widest window the Refresh completed, or the last one
+  it tried when it completed none. The next Refresh starts from that span, or
+  from half of it after an incomplete read. Without a last attempt the first
+  window is the whole span (`Window`, 30 days), so a venue that fits still
+  makes one read. A failed read keeps the last attempt, so the next Refresh
+  starts from half of it rather than the lookback.
 - **Bounds.** A Refresh stops at `MaxReads` (8), 10,000 payments, or
   `TimeBudget`, 20 seconds in total. That keeps the 20-second deadline of the
   single read it replaced, so the browser's 90-second Refresh still holds.
@@ -90,7 +101,9 @@ or exposed. RISEx native Unix-nanosecond timestamps have a separate nullable
 the API sends that integer as a string, never a JavaScript number.
 
 `account_funding_states` records the latest read and one contiguous verified
-coverage window, independently of how many payments were returned. Overlapping
+coverage window, independently of how many payments were returned. Since item
+9a its last-attempt interval is the window the next Refresh's first window
+takes its size from, not the whole span read. Overlapping
 complete windows merge; an unread gap is never bridged. A later disjoint complete
 window replaces the coverage window, not the retained payments. Since item 9a,
 this happens only when the stored coverage ends before the 30-day lookback,

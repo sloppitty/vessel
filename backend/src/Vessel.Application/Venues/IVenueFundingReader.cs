@@ -27,6 +27,13 @@ public sealed record VenueFundingReadResult(IReadOnlyList<VenueFundingPayment> P
     /// narrower window may complete (Phase 2, item 9a). False for every other kind of incompleteness.
     /// </summary>
     public bool Truncated { get; init; }
+    /// <summary>
+    /// Set by the windowed read (Phase 2, item 9a): the window whose length the next Refresh starts from, kept as the
+    /// account's last attempt. It is the widest window the read completed or, when none completed, the last one tried.
+    /// Null records the result's own span.
+    /// </summary>
+    public DateTimeOffset? WindowFromUtc { get; init; }
+    public DateTimeOffset? WindowToUtc { get; init; }
 }
 
 public static class VenueFundingChecks

@@ -42,9 +42,13 @@ public sealed class FundingWindowsTests
         }
     }
 
-    private static Task<FundingWindowRead> Read(Venue venue, DateTimeOffset to, (DateTimeOffset, DateTimeOffset)? covered,
-        FundingOptions? options = null, Func<CancellationToken, Task>? beforeRead = null) =>
-        FundingWindows.ReadAsync(venue, Lighter, to, covered, options ?? new FundingOptions(), beforeRead ?? Allowed, TimeProvider.System, default);
+    /// <summary>Reads with the stored coverage and, as the store records it, the last attempt of a previous result.</summary>
+    private static Task<FundingWindowRead> Read(Venue venue, DateTimeOffset to, (DateTimeOffset From, DateTimeOffset To)? covered,
+        FundingOptions? options = null, Func<CancellationToken, Task>? beforeRead = null, VenueFundingReadResult? previous = null) =>
+        FundingWindows.ReadAsync(venue, Lighter, to, covered is null && previous is null ? null
+                : new FundingCursor(covered?.From, covered?.To, previous?.WindowFromUtc ?? previous?.FromUtc,
+                    previous?.WindowToUtc ?? previous?.ToUtc, previous?.Complete ?? true),
+            options ?? new FundingOptions(), beforeRead ?? Allowed, TimeProvider.System, default);
 
     [Fact]
     public async Task A_page_budget_that_cannot_hold_30_days_is_covered_window_by_window_across_refreshes()
@@ -63,12 +67,15 @@ public sealed class FundingWindowsTests
         Assert.Contains("refresh again", first.Notice);
         Assert.Contains("Missing funding is not zero.", first.Notice);
 
-        // The next Refresh, an hour later, reads the new hour and the recheck day, then resumes before the stored coverage.
+        Assert.Equal(TimeSpan.FromDays(7.5), first.WindowToUtc - first.WindowFromUtc);
+
+        // The next Refresh, an hour later, reads the new hour, then resumes before the stored coverage from the learned
+        // 7.5 days, and with the read left rechecks the last day.
         venue.Reads.Clear();
         var later = To.AddHours(1);
-        var second = (await Read(venue, later, (first.FromUtc, first.ToUtc), options)).Result;
-        Assert.Equal((To.AddDays(-1), later), venue.Reads[0]);
-        Assert.All(venue.Reads.Skip(1), r => Assert.True(r.To <= To.AddDays(-15)));
+        var second = (await Read(venue, later, (first.FromUtc, first.ToUtc), options, previous: first)).Result;
+        Assert.Equal([(To, later), (To.AddDays(-22.5), To.AddDays(-15)), (later.AddDays(-30), To.AddDays(-22.5)), (To.AddDays(-1), To)],
+            venue.Reads);
         Assert.True(second.Complete);
         Assert.Equal((later.AddDays(-30), later), (second.FromUtc, second.ToUtc));
         Assert.DoesNotContain("refresh again", second.Notice);
@@ -80,7 +87,8 @@ public sealed class FundingWindowsTests
     {
         var venue = new Venue(markets: 1, budget: 10_000);
         var result = (await Read(venue, To, (To.AddDays(-40), To.AddHours(-1)))).Result;
-        Assert.Equal([(To.AddHours(-25), To)], venue.Reads);
+        // The new hour first, then the last day of the stored coverage again.
+        Assert.Equal([(To.AddHours(-1), To), (To.AddHours(-25), To.AddHours(-1))], venue.Reads);
         Assert.True(result.Complete);
         Assert.Equal((To.AddDays(-30), To), (result.FromUtc, result.ToUtc));
         Assert.Equal(26, result.Payments.Count);
@@ -93,6 +101,44 @@ public sealed class FundingWindowsTests
         var none = (await Read(venue, To, (To.AddDays(-40), To), new FundingOptions { Recheck = TimeSpan.Zero })).Result;
         Assert.Empty(venue.Reads);
         Assert.Equal((To.AddDays(-30), To, true), (none.FromUtc, none.ToUtc, none.Complete));
+    }
+
+    [Fact]
+    public async Task A_window_that_fits_is_learned_across_refreshes()
+    {
+        // Sol round 1 on #44: 100 hourly markets against a 500-row budget used all eight reads halving, every Refresh.
+        var venue = new Venue(markets: 100, budget: 500);
+        var first = (await Read(venue, To, null)).Result;
+        Assert.False(first.Complete);
+        Assert.Equal(8, venue.Reads.Count);
+        // The next Refresh starts from half the last window tried and completes windows at once.
+        venue.Reads.Clear();
+        var later = To.AddHours(1);
+        var second = (await Read(venue, later, null, previous: first)).Result;
+        Assert.Equal((first.ToUtc - first.FromUtc) / 2, venue.Reads[0].To - venue.Reads[0].From);
+        Assert.True(second.Complete);
+        Assert.True(second.FromUtc < later.AddHours(-12));
+        // A Refresh that completed windows carries the widest of them, not its whole coverage, to the next one.
+        var learned = second.WindowToUtc - second.WindowFromUtc;
+        Assert.Equal((first.ToUtc - first.FromUtc) / 2, learned);
+        venue.Reads.Clear();
+        await Read(venue, later.AddHours(1), (second.FromUtc, second.ToUtc), previous: second);
+        Assert.Equal((later, later.AddHours(1)), venue.Reads[0]);
+        Assert.Equal(learned, venue.Reads[1].To - venue.Reads[1].From);
+    }
+
+    [Fact]
+    public async Task Rechecks_never_starve_uncovered_funding()
+    {
+        // Sol round 1 on #44: with one-hour windows the day's recheck used every read, so coverage never advanced.
+        var venue = new Venue(markets: 1, budget: 10_000);
+        var options = new FundingOptions { Window = TimeSpan.FromHours(1), MaxReads = 8 };
+        var result = (await Read(venue, To, (To.AddDays(-2), To.AddHours(-1)), options,
+            previous: new([], To.AddHours(-2), To.AddHours(-1), true, "Lighter settled funding."))).Result;
+        Assert.Equal((To.AddHours(-1), To), venue.Reads[0]);
+        Assert.Equal(To, result.ToUtc);
+        Assert.Equal(To.AddDays(-2).AddHours(-7), result.FromUtc);
+        Assert.Contains("read limit", result.Notice);
     }
 
     [Fact]

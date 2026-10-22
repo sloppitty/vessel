@@ -239,10 +239,11 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                     var settings = funding ?? new FundingOptions();
                     var from = to - settings.Lookback;
                     VenueFundingReadResult fundingRead;
+                    FundingCursor? cursor = null;
                     try
                     {
-                        var covered = await store.FundingCoverageAsync(capture.Account.Id, ct);
-                        var read = await FundingWindows.ReadAsync(fundingReader, capture.Account, to, covered, settings, async token =>
+                        cursor = await store.FundingCursorAsync(capture.Account.Id, ct);
+                        var read = await FundingWindows.ReadAsync(fundingReader, capture.Account, to, cursor, settings, async token =>
                         {
                             var retryAt = await store.VenueRetryAtAsync(capture.Account.VenueId, token);
                             if (retryAt > time.GetUtcNow()) throw new VenueRateLimitException(retryAt.Value);
@@ -258,8 +259,10 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                     {
                         if (ex is VenueRateLimitException limited)
                             await store.DeferVenueAsync(capture.Account.VenueId, limited.RetryAtUtc, time.GetUtcNow(), CancellationToken.None);
+                        // A failed read keeps the last window, so the next Refresh starts from half of it, not the lookback.
                         fundingRead = new([], from, to, false,
-                            "Funding history could not be refreshed. Retained payments are unchanged; missing funding is not zero.");
+                            "Funding history could not be refreshed. Retained payments are unchanged; missing funding is not zero.")
+                        { WindowFromUtc = cursor?.LastAttemptFromUtc, WindowToUtc = cursor?.LastAttemptToUtc };
                     }
                     sync = sync with { Funding = fundingRead };
                 }

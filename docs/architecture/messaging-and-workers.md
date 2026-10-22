@@ -712,10 +712,10 @@ The owner Refresh reads settled funding in resumable windows (Phase 2, item 9a);
 | Setting | Default | Allowed | Meaning |
 |---|---|---|---|
 | `Lookback` | `30.00:00:00` | Up to 31 days | Span a Refresh tries to have covered |
-| `Window` | `30.00:00:00` | Up to `Lookback` | First window; halves only when the venue's page budget truncated it |
+| `Window` | `30.00:00:00` | Up to `Lookback` | Largest window, and the first when no last attempt is stored; halves only when the venue's page budget truncated it |
 | `MinimumWindow` | `01:00:00` | 1 minute to `Window` | A truncated window this short ends the read |
 | `MaxReads` | `8` | 1–100 | Venue reads per Refresh |
-| `Recheck` | `1.00:00:00` | 0 to `Lookback` | Stored coverage read again before its end, for late settlements |
+| `Recheck` | `1.00:00:00` | 0 to `Lookback` | Stored coverage read again before its end, for late settlements, with the reads left after the uncovered spans |
 | `TimeBudget` | `00:00:20` | 1–60 seconds | All of a Refresh's funding windows together |
 
 ### `Vessel:Worker` (`WorkerSettings`)
