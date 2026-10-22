@@ -164,6 +164,7 @@ public sealed partial class RisexAdapterTests
     [InlineData("realized_pnl", "empty")]
     public async Task Missing_execution_money_is_not_zeroed_even_on_an_opening_trade(string field, string value)
     {
+        // D-22's set-aside of a trade without PnL waits for item 7's durable omission markers (Sol round 1 on 14a).
         var history = JsonNode.Parse(Trades)!;
         var trade = history["data"]!["trades"]![0]!.AsObject();
         if (value == "missing") trade.Remove(field);
@@ -173,6 +174,24 @@ public sealed partial class RisexAdapterTests
         Assert.Equal(field == "realized_pnl"
             ? "RISEx omitted realized PnL for an execution. Its net-of-fee result is unknown; this refresh was not imported."
             : "RISEx returned an invalid or unsupported response.", error.Message);
+    }
+
+    [Fact]
+    public async Task Every_history_page_shares_one_end_cut_and_a_later_trade_waits_for_the_next_refresh()
+    {
+        // Phase 2, item 14a (F-13, probe V9): a trade arriving between pages can no longer shift page 2.
+        var history = JsonNode.Parse(Trades)!;
+        history["data"]!["has_next_page"] = true;
+        var late = JsonNode.Parse(Trade("0xlate", "1", "BUY", "BUY", "0.01", "-0.01", Now.AddMinutes(2), "0xorder6"))!;
+        history["data"]!["trades"]!.AsArray().Add(late);
+        var (reader, routes) = Reader(new() { ["/v1/trade-history"] = history.ToJsonString() });
+        var result = await reader.ReadAsync(Address, default);
+        var cut = Now.ToUnixTimeMilliseconds() * 1_000_000;
+        Assert.Equal([$"GET /v1/trade-history?account={Address}&end_time={cut}&limit=1000&page=1",
+            $"GET /v1/trade-history?account={Address}&end_time={cut}&limit=1000&page=2"], routes.Requests.Where(r => r.Contains("trade-history")));
+        Assert.DoesNotContain(result.Fills, f => f.SourceFillId == "0xlate");
+        Assert.Equal(1, result.OmittedExecutions); // Only the unrecognized market: the later trade is not an omission.
+        Assert.EndsWith("Omitted executions: 1 on an unrecognized market.", result.HistoryNotice);
     }
 
     [Theory]
@@ -238,7 +257,7 @@ public sealed partial class RisexAdapterTests
         var (reader, routes) = Reader();
         var result = await reader.ReadAsync(Address.ToUpperInvariant().Replace("0X", "0x"), default);
         Assert.Contains($"GET /v1/portfolio/details?account={Address}", routes.Requests);
-        Assert.Contains($"GET /v1/trade-history?account={Address}&limit=1000&page=1", routes.Requests);
+        Assert.Contains($"GET /v1/trade-history?account={Address}&end_time={Now.ToUnixTimeMilliseconds() * 1_000_000}&limit=1000&page=1", routes.Requests);
         Assert.All(routes.Requests, request => Assert.StartsWith("GET ", request));
 
         var snapshot = result.Snapshot;
