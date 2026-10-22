@@ -3,8 +3,8 @@
 Vessel is a self-hosted trading diary. These examples use the
 API and web images in one Docker Hub repository:
 
-- `skorcius/vessel:api-0.3.2` and `skorcius/vessel:api-latest`
-- `skorcius/vessel:web-0.3.2` and `skorcius/vessel:web-latest`
+- `skorcius/vessel:api-0.3.3` and `skorcius/vessel:api-latest`
+- `skorcius/vessel:web-0.3.3` and `skorcius/vessel:web-latest`
 
 Use versioned tags for deployments. The `latest` tags move with each release.
 This release targets Linux amd64.
@@ -940,6 +940,44 @@ unchanged and compresses static assets only.
 
 ## Upgrade
 
+### From v0.3.2 to v0.3.3
+
+Read the [release notes](../docs/releases/v0.3.3.md). Stop web, every API and
+every worker on all hosts/replicas, including `worker-notifications` and any
+`worker-paper`, before taking coordinated backups of both database schemas,
+evidence, credential keys and private configuration. Preserve the owner GUID,
+Compose project and every storage, credential, authentication and TLS overlay.
+This is not a rolling upgrade.
+
+Set `VESSEL_VERSION=0.3.3`, pull matching images and run the explicit `migrate`
+service before starting upgraded hosts. There are no new identity migrations;
+the journal migrations after v0.3.2 are:
+
+| Journal migration | Effect |
+| --- | --- |
+| `20261019132931_MonitorCoverage` | Records stop coverage after subsequent account checks; starts empty. |
+| `20261020085301_PlanPreflight` | Stores the nonblocking planning checklist; older revisions remain without one. |
+| `20261020093407_ReviewCompletion` | Adds explicit completion and append-only log notes; preserves previously Reviewed Plays. |
+| `20261020102320_UnresolvedStatus` | Retains owner-declared unresolved reasons and execution-facts snapshots. |
+| `20261020112132_ManualCorrectionBatch` | Groups atomic manual-execution corrections in their audit history. |
+| `20261020155750_PaperTradingFoundation` | Adds isolated paper accounts, capital and simulated facts with database guards; existing records remain Real. |
+
+Paper remains off by default. Opt in through Settings only after migrating;
+its scheduler additionally requires the optional `compose.paper.yaml` overlay
+and `--profile paper` with an explicit matching `VESSEL_AUTH_MODE` (see
+[Optional paper worker](#optional-paper-worker)). Keep that service stopped
+alongside every other writer during upgrades, backups and restores.
+
+Sizing now orders results by actual exit time and requires consecutive recovery
+wins, so historical ladder levels can change. Review preserves the scored
+result basis; Play-local results are shown separately. Existing Reviewed Plays
+stay reviewed; in-trade log notes do not complete a review.
+
+Rollback requires the pre-upgrade backup and matching previous images.
+Down migrations refuse retained Unresolved history or paper data. Earlier
+versions must also follow the requirements below, including the v0.3.0
+order-identity restriction. No application host migrates at startup.
+
 ### From v0.3.1 to v0.3.2
 
 Read the [release notes](../docs/releases/v0.3.2.md). This patch restores the
@@ -1471,11 +1509,11 @@ From the repository root, with no populated secret files in the build context:
 ```sh
 REVISION=$(git rev-parse HEAD)
 docker build --platform linux/amd64 -f backend/Dockerfile \
-  --build-arg VERSION=0.3.2 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:api-0.3.2 .
+  --build-arg VERSION=0.3.3 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:api-0.3.3 .
 docker build --platform linux/amd64 -f frontend/Dockerfile \
-  --build-arg VERSION=0.3.2 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:web-0.3.2 .
+  --build-arg VERSION=0.3.3 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:web-0.3.3 .
 ```
 
 The API build pins SDK `10.0.302` to match the repository's `global.json`. The
