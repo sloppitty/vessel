@@ -1140,6 +1140,9 @@ public sealed partial class MonitorPostgresTests
         public Task EnsureMonitoringBaselineAsync(Guid accountId, CancellationToken ct) { Baseline = true; return Task.CompletedTask; }
         public List<VesselEventDraft> Drafts { get; } = [];
         public Task AppendAsync(VesselEventDraft draft, CancellationToken ct) { Drafts.Add(draft); return Task.CompletedTask; }
+        public int HistoricalFills;
+        public Task ClaimHistoricalFillsAsync(IReadOnlyCollection<Vessel.Domain.Workspace.ImportedFill> fills, CancellationToken ct)
+        { HistoricalFills += fills.Count; return Task.CompletedTask; }
     }
     private sealed class Clock(DateTimeOffset now) : TimeProvider
     {

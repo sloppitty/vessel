@@ -31,6 +31,12 @@ public interface IVesselEventSink
     Task SetRunAsync(Guid runId, string trigger, CancellationToken cancellationToken);
     /// <summary>Call and commit before the first venue read; already imported fills are historical.</summary>
     Task EnsureMonitoringBaselineAsync(Guid accountId, CancellationToken cancellationToken);
+    /// <summary>
+    /// Phase 2, item 6b: fills a backfill added, in the active unit, are history and never a fresh execution. They are
+    /// claimed now, so no execution event is drafted for them, in this unit or when their order is linked later.
+    /// </summary>
+    Task ClaimHistoricalFillsAsync(IReadOnlyCollection<Vessel.Domain.Workspace.ImportedFill> fills, CancellationToken cancellationToken) =>
+        Task.CompletedTask;
 }
 
 public interface IVesselEventReader

@@ -70,4 +70,29 @@ describe('history coverage (Phase 2, item 6)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save settings' }))
     await waitFor(() => expect(updateAccount).toHaveBeenCalledWith(venueAccount.id, expect.objectContaining({ keepExecutionHistory: true })))
   })
+
+  it('offers Backfill on a gap the venue may still serve, starts it and shows its progress (Phase 2, item 6b)', async () => {
+    const beyond = { ...gap, id: '00000000-0000-4000-8000-000000000003', beyondVenueReach: true }
+    const queued = { id: '00000000-0000-4000-8000-000000000009', gapId: gap.id, state: 'queued' as const, fromUtc: gap.fromUtc!,
+      toUtc: gap.toUtc!, cursorUtc: gap.fromUtc!, pages: 1, rawRows: 2, addedFills: 1, omittedExecutions: 0, error: null,
+      createdAtUtc: '2026-10-22T10:00:00Z', finishedAtUtc: null }
+    const offered: Coverage = { ...coverage, backfillAvailable: true, openGapCount: 2, openGaps: [gap, beyond], backfills: [] }
+    expect(isHistoryCoverage(offered)).toBe(true)
+    expect(isHistoryCoverage({ ...offered, backfills: [queued, { ...queued, id: '00000000-0000-4000-8000-00000000000a' }] })).toBe(false)
+    const historyCoverage = vi.fn().mockResolvedValueOnce(offered).mockResolvedValue({ ...offered, backfills: [queued] })
+    const startBackfill = vi.fn().mockResolvedValue(queued)
+    render(<HistoryCoverage api={{ historyCoverage, startBackfill }} accountId="a" reloadKey="1" />)
+    const panel = await screen.findByRole('region', { name: 'History coverage' })
+    const gaps = within(panel).getByRole('group', { name: 'Possible gaps' })
+    // Only the gap the venue may still serve offers it.
+    const backfill = within(gaps).getByRole('button', { name: 'Backfill' })
+    expect(backfill).toHaveAccessibleDescription(/never creates a Play or an execution notification/)
+    expect(gaps).toHaveTextContent("beyond the venue's reach")
+    await userEvent.click(backfill)
+    expect(startBackfill).toHaveBeenCalledWith('a', gap.id)
+    expect(await within(panel).findByRole('group', { name: 'Backfills' })).toHaveTextContent('Reading behind protection checks · 1 page, 1 execution added')
+    // One backfill at a time: no other gap offers it while this one reads.
+    expect(within(panel).queryByRole('button', { name: 'Backfill' })).toBeNull()
+  })
 })
+

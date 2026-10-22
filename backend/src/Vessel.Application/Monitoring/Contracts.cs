@@ -165,6 +165,17 @@ public interface IMonitorStore
     /// the latest record when it continues it, opens the gap it found and closes every open gap on complete history.
     /// </summary>
     Task RecordCoverageAsync(FillCoverageRecord record, CancellationToken ct);
+    /// <summary>Phase 2, item 6b: the account's active backfill, read without tracking; null when none.</summary>
+    Task<HistoryBackfill?> ActiveBackfillAsync(Guid accountId, CancellationToken ct);
+    /// <summary>Inside the account lock: a backfill, tracked for update; null when not the account's.</summary>
+    Task<HistoryBackfill?> BackfillAsync(Guid accountId, Guid backfillId, CancellationToken ct);
+    /// <summary>Inside the account lock: a gap of the account, tracked for update; null when not the account's.</summary>
+    Task<AccountHistoryGap?> GapAsync(Guid accountId, Guid gapId, CancellationToken ct);
+    /// <summary>Inside the account lock: a new backfill (at most one active per account) or a new gap.</summary>
+    Task AddAsync(HistoryBackfill backfill, CancellationToken ct);
+    Task AddAsync(AccountHistoryGap gap, CancellationToken ct);
+    /// <summary>Whether any gap of the account is still open, unsaved changes in this unit included.</summary>
+    Task<bool> HasOpenGapAsync(Guid accountId, CancellationToken ct);
     Task<T> LockedAsync<T>(Guid accountId, Func<Account, MonitorAccount, Task<T>> action, CancellationToken ct);
     Task<IReadOnlyList<MonitorLease>> ClaimDueAsync(string workerId, DateTimeOffset now, int limit, CancellationToken ct);
     /// <param name="protectionOnly">Phase 2, item 6: claim only protection work, leaving a scheduled read for kept history alone.</param>

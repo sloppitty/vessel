@@ -98,8 +98,20 @@ const isFillConflict = (v: unknown): v is FillConflict => isRecord(v) && isFille
 const isFillConflicts = (v: unknown): v is FillConflicts => isRecord(v) && isCount(v.total) && Array.isArray(v.recent) &&
   v.recent.length <= 50 && v.recent.length <= v.total && v.recent.every(isFillConflict) && isText(v.notice, 1000)
 
-/** A span of execution history that may be missing (Phase 2, item 6); a null end is unknown. */
-export interface HistoryGap { id: string; fromUtc: string | null; toUtc: string | null; openedAtUtc: string; closedAtUtc: string | null }
+/**
+ * A span of execution history that may be missing (Phase 2, item 6); a null end is unknown. Beyond the venue's reach: a
+ * backfill showed the venue no longer serves it, so it cannot be backfilled again (6b).
+ */
+export interface HistoryGap {
+  id: string; fromUtc: string | null; toUtc: string | null; openedAtUtc: string; closedAtUtc: string | null; beyondVenueReach?: boolean
+}
+/** An owner-started backfill of one gap (Phase 2, item 6b): queued while it reads, then completed, narrowed or failed. */
+export interface HistoryBackfill {
+  id: string; gapId: string; state: 'queued' | 'completed' | 'narrowed' | 'failed'
+  fromUtc: string; toUtc: string; cursorUtc: string
+  pages: number; rawRows: number; addedFills: number; omittedExecutions: number
+  error: string | null; createdAtUtc: string; finishedAtUtc: string | null
+}
 /** One import's coverage, or a run of continuous imports of one source. */
 export interface FillCoverage {
   source: 'refresh' | 'check'
@@ -128,11 +140,22 @@ export interface HistoryCoverage {
   recordCount: number
   recent: FillCoverage[]
   notice: string
+  /** Whether this account's venue can backfill a gap; missing on older servers. */
+  backfillAvailable?: boolean
+  /** The latest backfills, newest first; at most one is queued. */
+  backfills?: HistoryBackfill[]
 }
 const before = (a: string | null, b: string | null) => a === null || b === null || Date.parse(a) <= Date.parse(b)
 const isHistoryGap = (v: unknown): v is HistoryGap => isRecord(v) && isGuid(v.id) && isNullOr(v.fromUtc, isTimestamp) &&
   isNullOr(v.toUtc, isTimestamp) && isTimestamp(v.openedAtUtc) && isNullOr(v.closedAtUtc, isTimestamp) &&
-  before(v.fromUtc as string | null, v.toUtc as string | null) && before(v.openedAtUtc, v.closedAtUtc as string | null)
+  before(v.fromUtc as string | null, v.toUtc as string | null) && before(v.openedAtUtc, v.closedAtUtc as string | null) &&
+  (v.beyondVenueReach === undefined || typeof v.beyondVenueReach === 'boolean')
+const backfillStates = ['queued', 'completed', 'narrowed', 'failed'] as const
+export const isHistoryBackfill = (v: unknown): v is HistoryBackfill => isRecord(v) && isGuid(v.id) && isGuid(v.gapId) &&
+  backfillStates.includes(v.state as typeof backfillStates[number]) && isTimestamp(v.fromUtc) && isTimestamp(v.toUtc) &&
+  isTimestamp(v.cursorUtc) && before(v.fromUtc, v.cursorUtc) && before(v.cursorUtc, v.toUtc) &&
+  [v.pages, v.rawRows, v.addedFills, v.omittedExecutions].every(isCount) && isNullOr(v.error, x => isText(x, 200)) &&
+  isTimestamp(v.createdAtUtc) && isNullOr(v.finishedAtUtc, isTimestamp) && (v.state === 'queued') === (v.finishedAtUtc === null)
 const isFillCoverage = (v: unknown): v is FillCoverage => isRecord(v) && (v.source === 'refresh' || v.source === 'check') &&
   isTimestamp(v.firstObservedAtUtc) && isTimestamp(v.lastObservedAtUtc) && before(v.firstObservedAtUtc, v.lastObservedAtUtc) &&
   isPositiveCount(v.importCount) && isNullOr(v.requestedFromUtc, isTimestamp) && isTimestamp(v.requestedToUtc) &&
@@ -149,7 +172,10 @@ export const isHistoryCoverage = (v: unknown): v is HistoryCoverage => isRecord(
   v.openGaps.length <= v.openGapCount && v.openGaps.every(g => isHistoryGap(g) && g.closedAtUtc === null) &&
   Array.isArray(v.closedGaps) && v.closedGaps.length <= 50 && v.closedGaps.every(g => isHistoryGap(g) && g.closedAtUtc !== null) &&
   isCount(v.recordCount) && Array.isArray(v.recent) && v.recent.length <= 50 && v.recent.length <= v.recordCount &&
-  v.recent.every(isFillCoverage) && isText(v.notice, 1000)
+  v.recent.every(isFillCoverage) && isText(v.notice, 1000) &&
+  (v.backfillAvailable === undefined || typeof v.backfillAvailable === 'boolean') &&
+  (v.backfills === undefined || Array.isArray(v.backfills) && v.backfills.length <= 10 && v.backfills.every(isHistoryBackfill) &&
+    v.backfills.filter(b => isRecord(b) && b.state === 'queued').length <= 1)
 
 export interface InstrumentCatalog {
   venueId: string
@@ -398,6 +424,8 @@ export interface WorkspaceApi {
   importConflicts(id: string, signal?: AbortSignal): Promise<FillConflicts>
   /** Phase 2, item 6: the opt-in and the coverage ledger of a real account. */
   historyCoverage(id: string, signal?: AbortSignal): Promise<HistoryCoverage>
+  /** Phase 2, item 6b: starts a backfill of one open gap; the monitor reads it behind protection checks. */
+  startBackfill(accountId: string, gapId: string): Promise<HistoryBackfill>
   sync(id: string, signal?: AbortSignal): Promise<BrokerAccount>
   /** One view of saved Plays: Drafts and In progress in full (at most 200), the others paged. */
   plays(query: PlayListQuery, signal?: AbortSignal): Promise<PlayList>
@@ -1027,6 +1055,8 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
     fills: (id, signal) => call(`${accountPath(id)}/fills`, { ...workspaceRequest, validate: (v): v is ImportedFill[] => Array.isArray(v) && v.every(isImportedFill), ...withSignal(signal) }),
     importConflicts: (id, signal) => call(`${accountPath(id)}/import-conflicts`, { ...workspaceRequest, validate: isFillConflicts, ...withSignal(signal) }),
     historyCoverage: (id, signal) => call(`${accountPath(id)}/history-coverage`, { ...workspaceRequest, validate: isHistoryCoverage, ...withSignal(signal) }),
+    startBackfill: (accountId, gapId) => call(`${accountPath(accountId)}/history-gaps/${resourceId(gapId)}/backfill`,
+      { ...workspaceRequest, validate: isHistoryBackfill, method: 'POST' }),
     // History, funding and order retention each allow 20s; leave room for account locking and persistence.
     sync: (id, signal) => call(`${accountPath(id)}/sync`, { ...workspaceRequest, validate: account, method: 'POST', ...withSignal(signal), timeout: 90_000, badGateway: 'The venue refresh failed. Previous account data is still available.' }),
   }

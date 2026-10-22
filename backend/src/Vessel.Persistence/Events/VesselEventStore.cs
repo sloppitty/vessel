@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Vessel.Application.Common;
 using Vessel.Application.Events;
 using Vessel.Application.Ownership;
+using Vessel.Domain.Workspace;
 
 namespace Vessel.Persistence.Events;
 
@@ -83,6 +84,13 @@ public sealed partial class VesselEventStore(VesselDbContext db, VesselEventMuta
             ON CONFLICT DO NOTHING
             """, cancellationToken, ("owner", db.CurrentOwnerId), ("account", accountId), ("now", DateTimeOffset.UtcNow));
     }, cancellationToken);
+
+    public Task ClaimHistoricalFillsAsync(IReadOnlyCollection<ImportedFill> fills, CancellationToken cancellationToken) =>
+        VesselEventSql.ParticipateAsync(db, async () =>
+        {
+            if (fills.Any(f => f.OwnerId != db.CurrentOwnerId)) throw new UnauthorizedAccessException();
+            await ClaimFillsAsync(fills, cancellationToken);
+        }, cancellationToken);
 
     public Task BeforeCommitAsync(CancellationToken cancellationToken) => VesselEventSql.ParticipateAsync(db, async () =>
     {

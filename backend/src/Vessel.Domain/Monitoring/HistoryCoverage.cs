@@ -9,7 +9,7 @@ namespace Vessel.Domain.Monitoring;
 /// </summary>
 public sealed class FillCoverageRecord : IOwned
 {
-    public const string Refresh = "refresh", Check = "check";
+    public const string Refresh = "refresh", Check = "check", Backfill = "backfill";
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }
     public Guid AccountId { get; set; }
@@ -64,6 +64,18 @@ public sealed class FillCoverageRecord : IOwned
     }
 
     /// <summary>
+    /// Phase 2, item 6b: what a finished backfill read proved. It asked for the gap's window and covers from the first
+    /// time it can vouch for to the window's end; with nothing proven it records the request only.
+    /// </summary>
+    public static FillCoverageRecord ForBackfill(Guid ownerId, Guid accountId, DateTimeOffset readAt, DateTimeOffset requestedFrom,
+        DateTimeOffset requestedTo, DateTimeOffset? coveredFrom, bool complete) => new()
+    {
+        Id = Guid.CreateVersion7(), OwnerId = ownerId, AccountId = accountId, Source = Backfill, FirstObservedAtUtc = readAt,
+        LastObservedAtUtc = readAt, RequestedFromUtc = requestedFrom, RequestedToUtc = requestedTo, Truncated = false, Complete = complete,
+        CoveredFromUtc = complete ? null : coveredFrom, CoveredToUtc = complete || coveredFrom is not null ? requestedTo : null
+    };
+
+    /// <summary>
     /// Whether <paramref name="next"/> continues this record: both continuous imports of the same source over the venue's
     /// recent window, with the next one starting at or before this one's end.
     /// </summary>
@@ -101,6 +113,13 @@ public sealed class AccountHistoryGap : IOwned
     public Guid? OpenedByCoverageId { get; set; }
     public DateTimeOffset? ClosedAtUtc { get; set; }
     public Guid? ClosedByCoverageId { get; set; }
+    /// <summary>
+    /// Phase 2, item 6b: a backfill showed the venue no longer serves this span (its executions are beyond the venue's
+    /// reach). It stays open, since nothing proves it covered, and cannot be backfilled again.
+    /// </summary>
+    public bool BeyondVenueReach { get; set; }
+    /// <summary>The backfill whose read left this span unproven, when it is what remains of a wider gap.</summary>
+    public Guid? OpenedByBackfillId { get; set; }
     public bool IsOpen => ClosedAtUtc is null;
 
     /// <summary>
@@ -120,3 +139,120 @@ public sealed class AccountHistoryGap : IOwned
         (ClosedAtUtc, ClosedByCoverageId) = (now, coverageId);
     }
 }
+
+/// <summary>
+/// Phase 2, item 6b: an owner-started backfill of one history gap, read page by page behind protection checks. It creates
+/// no Play, no thesis and no execution notification; the fills it finds go through the import's normal deduplication.
+/// </summary>
+public sealed class HistoryBackfill : IOwned
+{
+    public const string Queued = "queued", Completed = "completed", Narrowed = "narrowed", Failed = "failed";
+    public const int MaxFailures = 3;
+    public Guid Id { get; set; }
+    public Guid OwnerId { get; set; }
+    public Guid AccountId { get; set; }
+    public Guid GapId { get; set; }
+    public string State { get; set; } = Queued;
+    /// <summary>The window read: the gap's start (the epoch for a gap of unknown start) to its end, or to when it was started.</summary>
+    public DateTimeOffset FromUtc { get; set; }
+    public DateTimeOffset ToUtc { get; set; }
+    /// <summary>Whether the gap's start was known; a gap of unknown start closes only when the whole reach is read.</summary>
+    public bool StartKnown { get; set; }
+    /// <summary>Where the next page starts: the newest raw time read so far, inclusive.</summary>
+    public DateTimeOffset CursorUtc { get; set; }
+    public int Pages { get; set; }
+    public int RawRows { get; set; }
+    public int AddedFills { get; set; }
+    public int OmittedExecutions { get; set; }
+    /// <summary>The oldest raw row of the first page, which says whether the window's start is still served.</summary>
+    public DateTimeOffset? FirstRawAtUtc { get; set; }
+    public int Failures { get; set; }
+    public string? Error { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+    public DateTimeOffset? FinishedAtUtc { get; set; }
+    public bool IsActive => State == Queued;
+
+    public static HistoryBackfill For(AccountHistoryGap gap, DateTimeOffset now)
+    {
+        if (!gap.IsOpen || gap.BeyondVenueReach) throw new DomainRuleException("Only an open gap the venue may still serve can be backfilled.");
+        var from = gap.FromUtc ?? DateTimeOffset.UnixEpoch;
+        var to = gap.ToUtc ?? now;
+        // Venue windows are whole milliseconds; round outward so the gap stays inside the window.
+        from = new DateTimeOffset(from.Ticks - from.Ticks % TimeSpan.TicksPerMillisecond, TimeSpan.Zero);
+        to = new DateTimeOffset(to.Ticks + (TimeSpan.TicksPerMillisecond - to.Ticks % TimeSpan.TicksPerMillisecond) % TimeSpan.TicksPerMillisecond, TimeSpan.Zero);
+        if (to > now) to = new DateTimeOffset(now.Ticks - now.Ticks % TimeSpan.TicksPerMillisecond, TimeSpan.Zero);
+        if (from > to) throw new DomainRuleException("The gap's window is in the future.");
+        return new()
+        {
+            Id = Guid.CreateVersion7(), OwnerId = gap.OwnerId, AccountId = gap.AccountId, GapId = gap.Id, FromUtc = from, ToUtc = to,
+            StartKnown = gap.FromUtc is not null, CursorUtc = from, CreatedAtUtc = now, UpdatedAtUtc = now
+        };
+    }
+
+    /// <summary>
+    /// Records one page read from <see cref="CursorUtc"/>. Returns whether the window is exhausted: a page that brings
+    /// nothing newer than the cursor, with room left below the page limit. A full page at one time cannot be paged past,
+    /// so the backfill fails; so does reading more rows than the venue's reach.
+    /// </summary>
+    public bool Read(int rawCount, DateTimeOffset? oldestRaw, DateTimeOffset? newestRaw, int added, int omitted, int pageLimit, int reach,
+        DateTimeOffset now)
+    {
+        if (!IsActive) throw new DomainRuleException("The backfill has finished.");
+        Pages = checked(Pages + 1);
+        RawRows = checked(RawRows + rawCount);
+        AddedFills = checked(AddedFills + added);
+        OmittedExecutions = checked(OmittedExecutions + omitted);
+        if (Pages == 1) FirstRawAtUtc = oldestRaw;
+        UpdatedAtUtc = now;
+        Failures = 0;
+        Error = null;
+        if (RawRows > reach + pageLimit) { Fail("The backfill read more executions than the venue serves.", now); return false; }
+        if (newestRaw is not { } newest || newest <= CursorUtc)
+        {
+            if (rawCount < pageLimit) return true;
+            Fail("The venue returned a full page at one time, which cannot be paged past.", now);
+            return false;
+        }
+        CursorUtc = newest;
+        return false;
+    }
+
+    /// <summary>
+    /// What the exhausted window proves. A known start is proven when the venue still serves it: the first page's oldest
+    /// row is the gap's own starting execution. Then the whole window is covered. Otherwise only from the oldest row read
+    /// to the end is, and the span before it is beyond the venue's reach. An unknown start is proven only when the whole
+    /// account history fits within the reach, so nothing older can have been dropped.
+    /// </summary>
+    public (bool Complete, DateTimeOffset? CoveredFrom, bool Narrowed) Conclude(int reach)
+    {
+        if (!StartKnown) return RawRows < reach ? (true, null, false) : (false, FirstRawAtUtc, true);
+        if (FirstRawAtUtc == FromUtc) return (false, FromUtc, false);
+        return (false, FirstRawAtUtc, true);
+    }
+
+    public void Finish(string state, DateTimeOffset now)
+    {
+        if (state is not (Completed or Narrowed)) throw new DomainValidationException("Unknown backfill outcome.");
+        (State, FinishedAtUtc, UpdatedAtUtc) = (state, now, now);
+    }
+
+    /// <summary>A read that failed; after <see cref="MaxFailures"/> in a row the backfill stops with a safe message.</summary>
+    public void Failure(string error, DateTimeOffset now)
+    {
+        Failures++;
+        UpdatedAtUtc = now;
+        Error = error;
+        if (Failures >= MaxFailures) Fail(error, now);
+    }
+
+    /// <summary>Stops the backfill with a safe message; its gap stays as it was.</summary>
+    public void Stop(string error, DateTimeOffset now)
+    {
+        if (!IsActive) throw new DomainRuleException("The backfill has finished.");
+        Fail(error, now);
+    }
+
+    private void Fail(string error, DateTimeOffset now) => (State, Error, FinishedAtUtc, UpdatedAtUtc) = (Failed, error, now, now);
+}
+

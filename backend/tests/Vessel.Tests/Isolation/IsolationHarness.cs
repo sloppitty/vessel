@@ -83,9 +83,16 @@ internal sealed class IsolationVenues
     public VenueRegistry Registry() => new([VenueDescriptor.Manual, HyperliquidPerpetualReader.Descriptor, SecurityFixture.Venue],
         [Reader], [Orders], [Market], [Market], [Stream], [Discovery], [Verifier]);
 
-    /// <summary>The existing public fixture reader, plus one settled funding payment inside its operation.</summary>
-    internal sealed class FundedReader(FixtureReader fixture) : IPerpetualVenueReader, IVenueFundingReader
+    /// <summary>
+    /// The existing public fixture reader, plus one settled funding payment inside its operation, and empty fill-history
+    /// pages for backfills (Phase 2, item 6b).
+    /// </summary>
+    internal sealed class FundedReader(FixtureReader fixture) : IPerpetualVenueReader, IVenueFundingReader, IVenueFillHistoryReader
     {
+        public int PageLimit => 2000;
+        public int Reach => 10_000;
+        public Task<VenueFillPage> ReadFillPageAsync(Account account, DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken ct) =>
+            Task.FromResult(new VenueFillPage([], 0, null, null, 0));
         public const string FundingId = "funding-shared-1";
         public string VenueId => fixture.VenueId;
         public FixtureReader Fixture => fixture;

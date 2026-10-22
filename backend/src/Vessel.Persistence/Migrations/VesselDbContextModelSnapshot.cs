@@ -250,6 +250,9 @@ namespace Vessel.Persistence.Migrations
                     b.Property<Guid>("AccountId")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("BeyondVenueReach")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTimeOffset?>("ClosedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -261,6 +264,9 @@ namespace Vessel.Persistence.Migrations
 
                     b.Property<DateTimeOffset>("OpenedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("OpenedByBackfillId")
+                        .HasColumnType("uuid");
 
                     b.Property<Guid?>("OpenedByCoverageId")
                         .HasColumnType("uuid");
@@ -339,7 +345,89 @@ namespace Vessel.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_account_fill_coverage_ranges", "\"FirstObservedAtUtc\" <= \"LastObservedAtUtc\" AND \"ImportCount\" >= 1 AND\n(\"RequestedFromUtc\" IS NULL OR \"RequestedFromUtc\" <= \"RequestedToUtc\") AND\n(\"CoveredFromUtc\" IS NULL OR \"CoveredToUtc\" IS NOT NULL AND \"CoveredFromUtc\" <= \"CoveredToUtc\") AND\n(\"GapToUtc\" IS NULL OR \"GapFromUtc\" IS NOT NULL AND \"GapFromUtc\" <= \"GapToUtc\") AND\n(\"Truncated\" IS NOT NULL OR \"CoveredToUtc\" IS NULL AND \"GapFromUtc\" IS NULL AND NOT \"Complete\")");
 
-                            t.HasCheckConstraint("CK_account_fill_coverage_source", "\"Source\" IN ('refresh', 'check')");
+                            t.HasCheckConstraint("CK_account_fill_coverage_source", "\"Source\" IN ('refresh', 'check', 'backfill')");
+                        });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Monitoring.HistoryBackfill", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AddedFills")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CursorUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("Failures")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("FinishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("FirstRawAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("FromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("GapId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("OmittedExecutions")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Pages")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("RawRows")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("StartKnown")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTimeOffset>("ToUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GapId");
+
+                    b.HasIndex("OwnerId", "AccountId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_account_history_backfills_active")
+                        .HasFilter("\"State\" = 'queued'");
+
+                    b.HasIndex("OwnerId", "AccountId", "CreatedAtUtc");
+
+                    b.ToTable("account_history_backfills", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_account_history_backfills_state", "\"State\" IN ('queued', 'completed', 'narrowed', 'failed')");
+
+                            t.HasCheckConstraint("CK_account_history_backfills_window", "\"FromUtc\" <= \"ToUtc\" AND \"CursorUtc\" >= \"FromUtc\" AND \"CursorUtc\" <= \"ToUtc\" AND \"Pages\" >= 0 AND \"RawRows\" >= 0 AND\n\"AddedFills\" >= 0 AND \"OmittedExecutions\" >= 0 AND \"Failures\" >= 0 AND (\"State\" = 'queued') = (\"FinishedAtUtc\" IS NULL)");
                         });
                 });
 
@@ -2264,6 +2352,22 @@ namespace Vessel.Persistence.Migrations
 
             modelBuilder.Entity("Vessel.Domain.Monitoring.FillCoverageRecord", b =>
                 {
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Monitoring.HistoryBackfill", b =>
+                {
+                    b.HasOne("Vessel.Domain.Monitoring.AccountHistoryGap", null)
+                        .WithMany()
+                        .HasForeignKey("GapId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("Vessel.Domain.Accounts.Account", null)
                         .WithMany()
                         .HasForeignKey("OwnerId", "AccountId")

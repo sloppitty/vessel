@@ -53,9 +53,13 @@ public static class VenueLogos
 /// book-dependent checks (missing, short and cancelled stops, excess, orphaned exits and entries, level drift) do not
 /// run, and the history-only read alone does not degrade a check. Defaults to false, so a venue opts in.
 /// </param>
+/// <param name="FillHistory">
+/// The reader serves executions by time window (<see cref="IVenueFillHistoryReader"/>), so the owner can backfill a
+/// history gap (Phase 2, item 6b). Defaults to false.
+/// </param>
 public sealed record VenueCapabilities(bool Sync, bool Instruments, bool Orders, bool Candles, bool MarketContext, bool Stream, bool StablecoinWallet,
     bool AccountDiscovery = false, bool ReadOnlyCredential = false, bool ManualExecutions = false, bool CurrentOrderBook = false,
-    bool PaperExecution = false)
+    bool PaperExecution = false, bool FillHistory = false)
 {
     public static readonly VenueCapabilities None = new(false, false, false, false, false, false, false);
 }

@@ -153,3 +153,8 @@ Phase 2, item 6a of the [risk and coverage contract](phase2-risk-coverage-contra
   unknown end reads as such) and what each import covered. A gap closes only
   when a read proves its span covered. Deleting an account deletes its ledger
   with its other facts.
+- **Backfill (6b).** On a venue that serves executions by time, each open gap
+  offers **Backfill**, one at a time per account. Its progress shows under
+  **Backfills** and the panel reads it again every 15 seconds while it reads. A
+  span the venue no longer serves is marked beyond its reach and offers none.
+  See the [workers reference](messaging-and-workers.md#coverage-signals).

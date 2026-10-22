@@ -287,6 +287,65 @@ public sealed class OrderIdentityAttributionTests
         Assert.Equal(1, Filled(events, "later"));
     }
 
+    /// <summary>
+    /// Phase 2, item 6b: fills a backfill adds are history. Claimed with them, they draft no execution event in their unit,
+    /// nor later when their order is linked, while an ordinary import of the same order's next fill still does.
+    /// </summary>
+    [VesselEventPostgresFact]
+    public async Task Phase2_backfilled_fills_never_emit_an_execution_event_even_once_their_order_is_linked()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var at = Now.AddMinutes(10);
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
+        var linked = Order(account, "BTC", "linked", "buy", 100, 2);
+        var unlinked = Order(account, "BTC", "unlinked", "buy", 100, 1);
+        await using (var seed = database.Context(owner))
+        {
+            seed.Accounts.Add(account);
+            seed.Plays.Add(play);
+            var planned = play.MarkPlanned(Now.AddHours(-3));
+            seed.StatusChanges.Add(planned.Change); seed.PlanRevisions.Add(planned.Revision);
+            seed.Orders.AddRange(linked, unlinked);
+            seed.OrderLinks.Add(new PlayOrderLink(play, linked, OrderLinkRole.Entry, "entry-1", null, OrderLinkState.Linked, OrderLinkSource.Owner, Now));
+            await seed.SaveChangesAsync();
+        }
+        await using var scope = new Scope(database, owner);
+        await scope.Work.ExecuteAsync(async () => { await scope.Store.EnsureMonitoringBaselineAsync(account.Id, default); return true; }, default);
+        int Filled(IEnumerable<VesselEvent> events, string order) =>
+            events.Count(e => e.Type == "execution.filled" && e.Source.OrderIds!.Contains(order));
+
+        // The backfill's unit: fills after the monitoring baseline, on a linked and an unlinked order, claimed as history.
+        await scope.Work.ExecuteAsync(async () =>
+        {
+            var backfilled = new[] { Fill(account, "BTC", "linked", "b1", "buy", "open", 1, 100, at),
+                Fill(account, "BTC", "unlinked", "b2", "buy", "open", 1, 100, at) };
+            scope.Db.Fills.AddRange(backfilled);
+            await scope.Db.SaveChangesAsync();
+            await scope.Store.ClaimHistoricalFillsAsync(backfilled, default);
+            return true;
+        }, default);
+        Assert.Equal(0, Filled((await EventReads.ReadAsync(scope.Db, 0, 200, default)).Events, "linked"));
+        // Linking the other order later still announces nothing for its backfilled fill.
+        await scope.Work.ExecuteAsync(async () =>
+        {
+            scope.Db.OrderLinks.Add(new PlayOrderLink(await scope.Db.Plays.SingleAsync(p => p.Id == play.Id), unlinked, OrderLinkRole.Entry,
+                "entry-1", null, OrderLinkState.Linked, OrderLinkSource.Owner, Now));
+            return true;
+        }, default);
+        // An ordinary import of the linked order's next fill is a fresh execution.
+        await scope.Work.ExecuteAsync(() =>
+        {
+            scope.Db.Fills.Add(Fill(account, "BTC", "linked", "n1", "buy", "open", 1, 100, at.AddMinutes(1)));
+            return Task.FromResult(true);
+        }, default);
+        var events = (await EventReads.ReadAsync(scope.Db, 0, 200, default)).Events;
+        Assert.Equal(0, Filled(events, "unlinked"));
+        var fresh = Assert.Single(events, e => e.Type == "execution.filled");
+        Assert.Equal(["n1"], fresh.Source.FillIds!);
+    }
+
     private static ImportedOrder Order(Account account, string contract, string id, string side, decimal price, decimal size,
         string status = "filled") => new()
     {

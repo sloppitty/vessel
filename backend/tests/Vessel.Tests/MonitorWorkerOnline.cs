@@ -30,6 +30,12 @@ internal sealed class MonitorWorkerOnline(IMonitorStore inner, TimeProvider cloc
     public Task<bool> ProtectionEligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct) =>
         inner.ProtectionEligibleAsync(accountId, now, ct);
     public Task RecordCoverageAsync(FillCoverageRecord record, CancellationToken ct) => inner.RecordCoverageAsync(record, ct);
+    public Task<HistoryBackfill?> ActiveBackfillAsync(Guid accountId, CancellationToken ct) => inner.ActiveBackfillAsync(accountId, ct);
+    public Task<HistoryBackfill?> BackfillAsync(Guid accountId, Guid backfillId, CancellationToken ct) => inner.BackfillAsync(accountId, backfillId, ct);
+    public Task<AccountHistoryGap?> GapAsync(Guid accountId, Guid gapId, CancellationToken ct) => inner.GapAsync(accountId, gapId, ct);
+    public Task AddAsync(HistoryBackfill backfill, CancellationToken ct) => inner.AddAsync(backfill, ct);
+    public Task AddAsync(AccountHistoryGap gap, CancellationToken ct) => inner.AddAsync(gap, ct);
+    public Task<bool> HasOpenGapAsync(Guid accountId, CancellationToken ct) => inner.HasOpenGapAsync(accountId, ct);
     public Task<T> LockedAsync<T>(Guid accountId, Func<Account, MonitorAccount, Task<T>> action, CancellationToken ct) =>
         inner.LockedAsync(accountId, action, ct);
     public Task<IReadOnlyList<MonitorLease>> ClaimDueAsync(string workerId, DateTimeOffset now, int limit, CancellationToken ct) =>

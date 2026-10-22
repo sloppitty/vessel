@@ -371,13 +371,19 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     {
         var account = await RequireAccount(id, ValidateTradingMode(tradingMode), ct);
         if (account.TradingMode == TradingMode.Paper) throw new ProblemException(409, "Paper accounts have no venue history.");
-        if (!account.IsEnabled) return new(account.KeepExecutionHistory, KeepsHistory(account), 0, [], [], 0, [], HistoryCoverageNotice);
+        if (!account.IsEnabled) return new(account.KeepExecutionHistory, KeepsHistory(account), 0, [], [], 0, [], HistoryCoverageNotice)
+            { BackfillAvailable = false };
         var facts = await store.HistoryCoverageAsync(id, 50, ct);
-        static HistoryGapDto Gap(Vessel.Domain.Monitoring.AccountHistoryGap g) => new(g.Id, g.FromUtc, g.ToUtc, g.OpenedAtUtc, g.ClosedAtUtc);
+        static HistoryGapDto Gap(Vessel.Domain.Monitoring.AccountHistoryGap g) => new(g.Id, g.FromUtc, g.ToUtc, g.OpenedAtUtc, g.ClosedAtUtc,
+            g.BeyondVenueReach);
         return new(account.KeepExecutionHistory, KeepsHistory(account), facts.OpenGapCount, facts.OpenGaps.Select(Gap).ToList(),
             facts.ClosedGaps.Select(Gap).ToList(), facts.RecordCount, facts.Recent.Select(r => new FillCoverageDto(r.Source,
                 r.FirstObservedAtUtc, r.LastObservedAtUtc, r.ImportCount, r.RequestedFromUtc, r.RequestedToUtc, r.Truncated, r.Complete,
-                r.CoveredFromUtc, r.CoveredToUtc, r.GapFromUtc, r.GapToUtc)).ToList(), HistoryCoverageNotice);
+                r.CoveredFromUtc, r.CoveredToUtc, r.GapFromUtc, r.GapToUtc)).ToList(), HistoryCoverageNotice)
+        {
+            BackfillAvailable = KeepsHistory(account) && venues.FillHistory(account.VenueId) is not null,
+            Backfills = facts.Backfills.Select(HistoryBackfillDto.Of).ToList()
+        };
     }
 
     /// <summary>Phase 2, item 14c: retained fills reported again with different venue facts, newest first, at most 50.</summary>

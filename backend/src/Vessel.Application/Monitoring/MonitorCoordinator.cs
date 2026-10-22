@@ -307,6 +307,10 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 }
             }
             ct.ThrowIfCancellationRequested();
+            // Phase 2, item 6b: an owner-started backfill reads its next pages while this run still holds its lease, each
+            // applied in its own fenced unit, before the check itself applies. Its failures are its own, never the check's.
+            if (!refresh) await BackfillAsync(lease, capture, ct);
+            ct.ThrowIfCancellationRequested();
             return await ApplyAsync(lease, capture, new(sync, orders, orderError, credentialError), ct, snapshotApplied: snapshotApplied,
                 protection: protection);
         }
@@ -480,6 +484,9 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 if (deadline < earliest) deadline = earliest;
                 if (deadline < row.NextRunAtUtc) row.NextRunAtUtc = deadline;
             }
+            // Phase 2, item 6b: an unfinished backfill is read again soon, still behind protection checks.
+            if (await store.ActiveBackfillAsync(account.Id, ct) is not null && row.NextRunAtUtc > now + BackfillPacing)
+                row.NextRunAtUtc = now + BackfillPacing;
             await ApplyVenueBudgetAsync(account.VenueId, row, ct);
             if (!await store.EligibleAsync(account.Id, now, ct)) row.Idle();
             await StateEventAsync(account.Id, oldState, row, lease.RequestId, "monitor", now, ct);
@@ -491,6 +498,129 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                     JsonSerializer.SerializeToElement(new { expiresAtUtc = expires })), ct);
             return true;
         }, ct), ct);
+
+    /// <summary>Backfill pages one run reads, so a backfill stays paced behind protection checks and the venue's budget.</summary>
+    private const int BackfillPagesPerRun = 2;
+    /// <summary>How soon an account with an unfinished backfill is read again.</summary>
+    private static readonly TimeSpan BackfillPacing = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// Phase 2, item 6b: the owner starts a backfill of one open gap the venue may still serve. The monitor reads it behind
+    /// protection checks; nothing is read here.
+    /// </summary>
+    public Task<HistoryBackfillDto> StartBackfillAsync(Guid accountId, Guid gapId, CancellationToken ct) =>
+        unitOfWork.ExecuteAsync(() => store.LockedAsync(accountId, async (account, row) =>
+        {
+            if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts have no venue history.");
+            if (!account.IsEnabled) throw new ProblemException(400, "Enable the account before backfilling it.");
+            if (account.SourceId is null || !EligibleVenue(account.VenueId) || venues.FillHistory(account.VenueId) is null)
+                throw new ProblemException(400, "This venue cannot backfill executions.");
+            var gap = await store.GapAsync(accountId, gapId, ct) ?? throw new ProblemException(404, "Gap not found.");
+            if (!gap.IsOpen) throw new ProblemException(409, "This gap is already closed.");
+            if (gap.BeyondVenueReach) throw new ProblemException(409, "The venue no longer serves this span.");
+            if (await store.ActiveBackfillAsync(accountId, ct) is not null)
+                throw new ProblemException(409, "A backfill is already running for this account.");
+            var now = time.GetUtcNow();
+            var backfill = HistoryBackfill.For(gap, now);
+            await store.AddAsync(backfill, ct);
+            // Due now; the scheduler still claims it behind protection checks.
+            if (row.State != "credential-error" && !(row.NextRunAtUtc <= now)) row.NextRunAtUtc = now;
+            return HistoryBackfillDto.Of(backfill);
+        }, ct), ct);
+
+    private async Task BackfillAsync(MonitorLease lease, MonitorCapture capture, CancellationToken ct)
+    {
+        if (venues.FillHistory(capture.Account.VenueId) is not { } reader) return;
+        for (var page = 0; page < BackfillPagesPerRun; page++)
+        {
+            if (await store.ActiveBackfillAsync(lease.AccountId, ct) is not { } active) return;
+            VenueFillPage read;
+            try
+            {
+                if (await store.VenueRetryAtAsync(capture.Account.VenueId, ct) > time.GetUtcNow()) return;
+                read = await reader.ReadFillPageAsync(capture.Account, active.CursorUtc, active.ToUtc, ct);
+                if (!read.Fills.All(VenueFactChecks.Valid)) throw new VenueReadException("Invalid execution facts.");
+            }
+            catch (VenueRateLimitException limited)
+            {
+                // The venue's deadline holds for every account; the backfill waits for a later run.
+                log?.Failed(lease, limited.GetType().Name);
+                await store.DeferVenueAsync(capture.Account.VenueId, limited.RetryAtUtc, time.GetUtcNow(), CancellationToken.None);
+                return;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // Never record exception text, which can carry request details.
+                log?.Failed(lease, ex.GetType().Name);
+                await BackfillUnitAsync(lease, capture, active.Id, (_, _, backfill, now) =>
+                {
+                    backfill.Failure("The venue read failed. The backfill will retry.", now);
+                    return Task.FromResult(false);
+                }, ct);
+                return;
+            }
+            if (!await BackfillUnitAsync(lease, capture, active.Id, async (account, row, backfill, now) =>
+            {
+                var added = await workspace.SaveHistoricalFillsAsync(account, read.Fills, now, ct);
+                await events.ClaimHistoricalFillsAsync(added, ct);
+                if (backfill.Read(read.RawCount, read.OldestRawAtUtc, read.NewestRawAtUtc, added.Count, read.OmittedExecutions,
+                        reader.PageLimit, reader.Reach, now))
+                    await ConcludeBackfillAsync(account, row, backfill, reader.Reach, now, ct);
+                return backfill.IsActive;
+            }, ct)) return;
+        }
+    }
+
+    /// <summary>One backfill step under the run's own fence: its lease, and unchanged settings and source.</summary>
+    private Task<bool> BackfillUnitAsync(MonitorLease lease, MonitorCapture captured, Guid backfillId,
+        Func<Account, MonitorAccount, HistoryBackfill, DateTimeOffset, Task<bool>> step, CancellationToken ct) =>
+        unitOfWork.ExecuteAsync(() => store.LockedAsync(lease.AccountId, async (account, row) =>
+        {
+            await events.SetRunAsync(lease.RequestId, "monitor", ct);
+            var now = time.GetUtcNow();
+            if (!row.Owns(lease.Generation, lease.WorkerId, now) || !account.IsEnabled || account.TradingMode != "real" ||
+                account.SettingsRevision != captured.Account.SettingsRevision || account.SourceId != captured.Account.SourceId) return false;
+            if (await store.BackfillAsync(account.Id, backfillId, ct) is not { IsActive: true } backfill) return false;
+            var next = await step(account, row, backfill, now);
+            await unitOfWork.SaveChangesAsync(ct);
+            return next;
+        }, ct), ct);
+
+    /// <summary>
+    /// Phase 2, item 6b: what an exhausted backfill window proves. Omitted executions keep the gap open, since facts are
+    /// known to be missing. Complete history closes every open gap and a proven window closes its own. A start the venue no
+    /// longer serves leaves the unserved span open as its own gap, beyond the venue's reach, which cannot be backfilled
+    /// again. The account's gap flag clears only when no gap is left open.
+    /// </summary>
+    private async Task ConcludeBackfillAsync(Account account, MonitorAccount row, HistoryBackfill backfill, int reach, DateTimeOffset now,
+        CancellationToken ct)
+    {
+        if (backfill.OmittedExecutions > 0)
+        {
+            backfill.Stop("The venue reported executions Vessel could not verify, so the gap stays open.", now);
+            return;
+        }
+        var gap = await store.GapAsync(account.Id, backfill.GapId, ct);
+        var (complete, coveredFrom, narrowed) = backfill.Conclude(reach);
+        var record = FillCoverageRecord.ForBackfill(owner.OwnerId, account.Id, now, backfill.FromUtc, backfill.ToUtc, coveredFrom, complete);
+        await store.RecordCoverageAsync(record, ct);
+        if (!complete && gap is { IsOpen: true })
+        {
+            if (!narrowed) gap.Close(record.Id, now);
+            else if (coveredFrom is { } served && (gap.FromUtc is null || served > gap.FromUtc))
+            {
+                gap.Close(record.Id, now);
+                await store.AddAsync(new AccountHistoryGap
+                {
+                    Id = Guid.CreateVersion7(), OwnerId = gap.OwnerId, AccountId = gap.AccountId, FromUtc = gap.FromUtc, ToUtc = served,
+                    OpenedAtUtc = now, OpenedByBackfillId = backfill.Id, BeyondVenueReach = true
+                }, ct);
+            }
+            else gap.BeyondVenueReach = true;
+        }
+        backfill.Finish(narrowed ? HistoryBackfill.Narrowed : HistoryBackfill.Completed, now);
+        if (!await store.HasOpenGapAsync(account.Id, ct)) row.HasHistoryGap = false;
+    }
 
     /// <summary>
     /// Phase 2, item 6: one import's coverage by the 0.4b rule, in the unit that retains its fills. An import of unknown

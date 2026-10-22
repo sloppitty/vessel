@@ -39,7 +39,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         var rows = await (from m in Rows.AsNoTracking()
                           join a in db.Accounts on m.AccountId equals a.Id
                           where a.TradingMode == "real" && a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) &&
-                              (a.KeepExecutionHistory || ActivePlays.Any(p => p.AccountId == a.Id) ||
+                              (a.KeepExecutionHistory || ActiveBackfills.Any(b => b.AccountId == a.Id) || ActivePlays.Any(p => p.AccountId == a.Id) ||
                                Watching.Any(x => x.Link.AccountId == a.Id && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)) ||
                                AwaitingDiscrepancies.Any(d => d.AccountId == a.Id) ||
                                // Independent of scheduling: what the persistent incident indicators read stays listed.
@@ -96,9 +96,49 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
     public async Task<bool> EligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct) =>
         await KeepsHistoryAsync(accountId, ct) || await ProtectionEligibleAsync(accountId, now, ct);
 
-    /// <summary>An enabled real venue account that keeps its execution history (Phase 2, item 6).</summary>
+    /// <summary>
+    /// An enabled real venue account that keeps its execution history (Phase 2, item 6), or has a backfill the owner started
+    /// (6b); both are read behind protection checks.
+    /// </summary>
     private Task<bool> KeepsHistoryAsync(Guid accountId, CancellationToken ct) => db.Accounts.AnyAsync(a => a.Id == accountId &&
-        a.KeepExecutionHistory && a.TradingMode == "real" && a.IsEnabled && a.SourceId != null, ct);
+        (a.KeepExecutionHistory || ActiveBackfills.Any(b => b.AccountId == a.Id)) && a.TradingMode == "real" && a.IsEnabled && a.SourceId != null, ct);
+
+    private IQueryable<HistoryBackfill> ActiveBackfills => db.HistoryBackfills.Where(b => b.State == HistoryBackfill.Queued);
+
+    public Task<HistoryBackfill?> ActiveBackfillAsync(Guid accountId, CancellationToken ct) =>
+        ActiveBackfills.AsNoTracking().SingleOrDefaultAsync(b => b.AccountId == accountId, ct);
+
+    public Task<HistoryBackfill?> BackfillAsync(Guid accountId, Guid backfillId, CancellationToken ct)
+    {
+        unitOfWork.RequireActive();
+        return db.HistoryBackfills.SingleOrDefaultAsync(b => b.Id == backfillId && b.AccountId == accountId, ct);
+    }
+
+    public Task<AccountHistoryGap?> GapAsync(Guid accountId, Guid gapId, CancellationToken ct)
+    {
+        unitOfWork.RequireActive();
+        return db.HistoryGaps.SingleOrDefaultAsync(g => g.Id == gapId && g.AccountId == accountId, ct);
+    }
+
+    public Task AddAsync(HistoryBackfill backfill, CancellationToken ct)
+    {
+        unitOfWork.RequireActive();
+        db.HistoryBackfills.Add(backfill);
+        return Task.CompletedTask;
+    }
+
+    public Task AddAsync(AccountHistoryGap gap, CancellationToken ct)
+    {
+        unitOfWork.RequireActive();
+        db.HistoryGaps.Add(gap);
+        return Task.CompletedTask;
+    }
+
+    public async Task<bool> HasOpenGapAsync(Guid accountId, CancellationToken ct)
+    {
+        await unitOfWork.SaveChangesAsync(ct);
+        return await db.HistoryGaps.AnyAsync(g => g.AccountId == accountId && g.ClosedAtUtc == null, ct);
+    }
 
     public async Task<bool> ProtectionEligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct)
     {
@@ -148,7 +188,8 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
             {
                 a.Id, a.VenueId,
                 Monitorable = a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId),
-                Active = a.KeepExecutionHistory && a.TradingMode == "real" || ActivePlays.Any(p => p.AccountId == a.Id),
+                Active = (a.KeepExecutionHistory || ActiveBackfills.Any(b => b.AccountId == a.Id)) && a.TradingMode == "real" ||
+                    ActivePlays.Any(p => p.AccountId == a.Id),
                 Watching = Watching.Any(x => x.Link.AccountId == a.Id && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)),
                 Expired = Watching.Any(x => x.Link.AccountId == a.Id && !(x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)),
                 Awaiting = AwaitingDiscrepancies.Any(d => d.AccountId == a.Id),
@@ -283,7 +324,8 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
             // (Sol round 1); each import's own record keeps its evidence.
             var known = await db.HistoryGaps.Where(g => g.AccountId == record.AccountId && g.ClosedAtUtc == null && g.FromUtc == from)
                 .OrderBy(g => g.OpenedAtUtc).FirstOrDefaultAsync(ct);
-            if (known is not null) known.Widen(record.GapToUtc);
+            // A span already shown beyond the venue's reach is not widened; the new finding is its own gap (6b).
+            if (known is not null && !known.BeyondVenueReach) known.Widen(record.GapToUtc);
             else db.HistoryGaps.Add(new AccountHistoryGap
             {
                 Id = Guid.CreateVersion7(), OwnerId = record.OwnerId, AccountId = record.AccountId, FromUtc = from, ToUtc = record.GapToUtc,
