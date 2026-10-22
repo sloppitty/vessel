@@ -6,6 +6,7 @@ import type { WorkspaceApi } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { riskLimitText } from './risk-limit'
+import { lossLimitsChanged } from '@/features/plays/loss-limits'
 import './risk-settings.css'
 
 type RiskSettingsApi = Pick<WorkspaceApi, 'riskSettings' | 'updateRiskSettings'>
@@ -56,6 +57,7 @@ export function RiskSettings({ api }: { api: RiskSettingsApi }) {
     try {
       const settings = await api.updateRiskSettings({ openRiskLimitPercent: parsed.open ?? null, dailyLossLimitR: parsed.daily ?? null,
         weeklyLossLimitR: parsed.weekly ?? null })
+      lossLimitsChanged()
       if (!controller.signal.aborted) setLoaded({ ...current, saved: settings, text: texts(settings), error: null, message: 'Risk limits saved.' })
     } catch (cause) {
       if (!controller.signal.aborted) setLoaded({ ...current, error: errorMessage(cause, 'The limits could not be saved. Reload to see the saved values.'), message: null })

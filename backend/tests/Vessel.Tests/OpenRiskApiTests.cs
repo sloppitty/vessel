@@ -240,6 +240,15 @@ public sealed class OpenRiskApiTests
             Assert.Equal(HttpStatusCode.BadRequest, (await client.PutAsJsonAsync("/api/risk/settings", new UpdateRiskSettingsRequest(invalid))).StatusCode);
         (await client.PutAsJsonAsync("/api/risk/settings", new UpdateRiskSettingsRequest(null))).EnsureSuccessStatusCode();
         Assert.Null((await client.GetFromJsonAsync<RiskSettingsDto>("/api/risk/settings"))!.OpenRiskLimitPercent);
+        // Phase 2, item 10b, Sol round 1: a request without the loss limits, as an older client sends it, keeps them; an explicit
+        // null clears one.
+        (await client.PutAsJsonAsync("/api/risk/settings", new UpdateRiskSettingsRequest("2", "1.5", "4"))).EnsureSuccessStatusCode();
+        var older = await client.PutAsync("/api/risk/settings", new StringContent("{\"openRiskLimitPercent\":\"3\"}", System.Text.Encoding.UTF8, "application/json"));
+        var kept = (await older.Content.ReadFromJsonAsync<RiskSettingsDto>())!;
+        Assert.Equal(("3", "1.5", "4"), (kept.OpenRiskLimitPercent, kept.DailyLossLimitR, kept.WeeklyLossLimitR));
+        var cleared = await client.PutAsync("/api/risk/settings", new StringContent("{\"dailyLossLimitR\":null}", System.Text.Encoding.UTF8, "application/json"));
+        var after = (await cleared.Content.ReadFromJsonAsync<RiskSettingsDto>())!;
+        Assert.Equal(("3", (string?)null, "4"), (after.OpenRiskLimitPercent, after.DailyLossLimitR, after.WeeklyLossLimitR));
         Assert.Equal(HttpStatusCode.Conflict, (await client.PutAsJsonAsync("/api/risk/settings?tradingMode=paper", new UpdateRiskSettingsRequest("2"))).StatusCode);
     }
 }

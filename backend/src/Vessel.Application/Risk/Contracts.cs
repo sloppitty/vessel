@@ -45,8 +45,29 @@ public sealed record OpenRiskDto(DateTimeOffset AsOfUtc, string Scope, OpenRiskB
 /// <summary>The owner's soft risk limits; null is unset.</summary>
 /// <summary>The soft limits; each is null until the owner sets it. Loss limits are in R (Phase 2, item 10b).</summary>
 public sealed record RiskSettingsDto(string? OpenRiskLimitPercent, string? DailyLossLimitR = null, string? WeeklyLossLimitR = null);
-/// <summary>Replaces every limit: a missing or null one is cleared.</summary>
-public sealed record UpdateRiskSettingsRequest(string? OpenRiskLimitPercent, string? DailyLossLimitR = null, string? WeeklyLossLimitR = null);
+/// <summary>
+/// The soft limits to save. A property present replaces its limit, null clearing it; a property left out keeps the stored
+/// limit, so an older client that knows only the open-risk limit never clears the loss limits (Sol round 1 on 10b).
+/// </summary>
+public sealed class UpdateRiskSettingsRequest
+{
+    private readonly string? open, daily, weekly;
+
+    public UpdateRiskSettingsRequest() { }
+    public UpdateRiskSettingsRequest(string? openRiskLimitPercent) => OpenRiskLimitPercent = openRiskLimitPercent;
+    public UpdateRiskSettingsRequest(string? openRiskLimitPercent, string? dailyLossLimitR, string? weeklyLossLimitR) : this(openRiskLimitPercent)
+    {
+        DailyLossLimitR = dailyLossLimitR;
+        WeeklyLossLimitR = weeklyLossLimitR;
+    }
+
+    public string? OpenRiskLimitPercent { get => open; init { open = value; HasOpenRiskLimit = true; } }
+    public string? DailyLossLimitR { get => daily; init { daily = value; HasDailyLossLimit = true; } }
+    public string? WeeklyLossLimitR { get => weekly; init { weekly = value; HasWeeklyLossLimit = true; } }
+    [JsonIgnore] public bool HasOpenRiskLimit { get; private init; }
+    [JsonIgnore] public bool HasDailyLossLimit { get; private init; }
+    [JsonIgnore] public bool HasWeeklyLossLimit { get; private init; }
+}
 
 /// <summary>
 /// One reporting day or week's loss (Phase 2, item 10b): the exact sum of estimated R of real Plays closed in it

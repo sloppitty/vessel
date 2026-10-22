@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { PreflightCheck } from '@/api/plays'
 import type { LossLimits, LossWindow } from '@/api/risk'
 import type { WorkspaceApi } from '@/api/workspace'
@@ -14,9 +14,28 @@ export type LossLimitsLoad = { value: LossLimits } | { failed: true }
 
 export const lossLimitsReadable = (api: WorkspaceApi) => typeof api.lossLimits === 'function'
 
-/** The loss limits, read again whenever `reloadKey` changes; null while loading or when not read. */
+let generation = 0
+const listeners = new Set<() => void>()
+const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }
+const currentGeneration = () => generation
+
+/**
+ * Saving the limits or the reporting week calls this, so every mounted read refreshes; the Plays page stays mounted while
+ * Settings is open (Sol round 1 on 10b).
+ */
+export function lossLimitsChanged() {
+  generation += 1
+  for (const listener of [...listeners]) listener()
+}
+
+/**
+ * The loss limits, read again whenever `reloadKey` changes, the settings change, the reporting day or week the read covers
+ * ends, or the tab returns after that end; null while loading or when not read.
+ */
 export function useLossLimits(api: WorkspaceApi, enabled: boolean, reloadKey: unknown): LossLimitsLoad | null {
-  const key = JSON.stringify(reloadKey)
+  const changed = useSyncExternalStore(subscribe, currentGeneration, currentGeneration)
+  const [expired, setExpired] = useState(0)
+  const key = JSON.stringify([reloadKey, changed, expired])
   const [state, setState] = useState<{ api: WorkspaceApi; key: string; load: LossLimitsLoad } | null>(null)
   useEffect(() => {
     if (!enabled) return
@@ -25,7 +44,22 @@ export function useLossLimits(api: WorkspaceApi, enabled: boolean, reloadKey: un
       .catch(() => { if (!controller.signal.aborted) setState({ api, key, load: { failed: true } }) })
     return () => controller.abort()
   }, [api, enabled, key])
-  return enabled && state?.api === api && state.key === key ? state.load : null
+  const load = enabled && state?.api === api && state.key === key ? state.load : null
+  // Today's loss ends at the reporting midnight and the week's at its end: read again then. A sleeping tab's timer fires
+  // late, so returning to the tab after the end reads again too (Sol round 1 on 10b).
+  const ends = load && 'value' in load ? Math.min(Date.parse(load.value.day.toUtc), Date.parse(load.value.week.toUtc)) : null
+  useEffect(() => {
+    if (ends === null) return
+    const refresh = () => setExpired(count => count + 1)
+    // A second after the end; a span the server says has already ended (a clock ahead of it) is read again a minute later,
+    // never in a loop.
+    const left = ends - Date.now()
+    const timer = setTimeout(refresh, left > 0 ? Math.min(left + 1_000, 2_000_000_000) : 60_000)
+    const resumed = () => { if (document.visibilityState === 'visible' && Date.now() >= ends) refresh() }
+    document.addEventListener('visibilitychange', resumed)
+    return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', resumed) }
+  }, [ends])
+  return load
 }
 
 /** An exact R figure to two places, with a typographic minus: "−1.25R". */

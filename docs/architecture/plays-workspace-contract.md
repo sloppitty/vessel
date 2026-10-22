@@ -461,8 +461,10 @@ reporting setting.
 - **The limits.** Settings → Risk limits gains a daily and a weekly loss limit
   in R, each above 0 and at most 100 with up to four decimals, blank until set.
   They are stored on the server with the open-risk limit (`risk_settings`,
-  migration `20261022104353_LossLimits`). A `PUT` replaces every limit, so a
-  missing one is cleared.
+  migration `20261022104353_LossLimits`). A `PUT` changes the limits it names,
+  null clearing one; a limit it leaves out keeps its stored value, so an older
+  client that knows only the open-risk limit never clears the loss limits
+  (Sol round 1 on 10b).
 - **The loss.** `GET /api/risk/loss` (real only; paper gets 409) gives today and
   this week in the reporting zone and week start:
   - the exact sum of estimated R (planned-stop model) of real Plays closed in
@@ -481,6 +483,11 @@ reporting setting.
     limit is set. A reached limit is not met. A Play without R that could
     still reach one leaves it unknown. Otherwise it is met. A failed read
     sends no check.
+- **Fresh reads.** The browser reads the loss again when a Play reload asks,
+  after the risk limits or the reporting week are saved (the Plays page stays
+  mounted), a second after the reporting day or week it shows ends, and on
+  returning to the tab after that end. A span the server says has already
+  ended is read again a minute later, never in a loop.
 - **The cooldown note.** At a reached limit the pre-flight dialog takes an
   optional cooldown note of at most 500 characters. It is stored with revision 1
   on the `loss-limit` check, and History lists it.

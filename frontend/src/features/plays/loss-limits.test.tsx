@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { PlayHistory } from '@/api/plays'
@@ -7,7 +7,7 @@ import type { WorkspaceApi } from '@/api/workspace'
 import { RiskSettings } from '@/features/settings/RiskSettings'
 import { lossLimitsFixture } from '@/test/workspace-fixture'
 import { LossLimitLine } from './LossLimitLine'
-import { lossLimitBreach, lossLimitCheck, rText } from './loss-limits'
+import { lossLimitBreach, lossLimitCheck, lossLimitsChanged, rText, useLossLimits } from './loss-limits'
 import { HistoryDialog, PreflightDialog } from './PlayDialogs'
 import { SuggestionsPanel } from './Suggestions'
 
@@ -84,5 +84,36 @@ describe('soft loss limits (Phase 2, item 10b)', () => {
     await user.click(screen.getByRole('button', { name: 'Save risk limits' }))
     expect(updateRiskSettings).toHaveBeenCalledWith({ openRiskLimitPercent: null, dailyLossLimitR: '2', weeklyLossLimitR: '5' })
     expect(await screen.findByRole('status')).toHaveTextContent('Risk limits saved.')
+  })
+
+  it('reads again after a settings save, at the reporting midnight, and on returning to the tab after it (Sol round 1)', async () => {
+    vi.useFakeTimers({ now: new Date('2026-10-09T23:59:00Z'), toFake: ['Date', 'setTimeout', 'clearTimeout'], shouldAdvanceTime: true })
+    try {
+      const lossLimits = vi.fn().mockResolvedValue(limits({ limitR: '2', toUtc: '2026-10-10T00:00:00Z' }, { toUtc: '2026-10-12T00:00:00Z' }))
+      const api = { lossLimits } as unknown as WorkspaceApi
+      function Probe() {
+        return <LossLimitLine load={useLossLimits(api, true, 'one')} />
+      }
+      render(<Probe />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(lossLimits).toHaveBeenCalledTimes(1)
+      // Settings saved elsewhere while Plays stays mounted.
+      await act(async () => { lossLimitsChanged(); await vi.advanceTimersByTimeAsync(0) })
+      expect(lossLimits).toHaveBeenCalledTimes(2)
+      // The reporting day ends at midnight UTC here: today's loss is read again then.
+      await act(async () => { await vi.advanceTimersByTimeAsync(61_000) })
+      expect(lossLimits).toHaveBeenCalledTimes(3)
+      // A tab coming back after the end of the day it shows reads again; one coming back before does not.
+      lossLimits.mockResolvedValue(limits({ limitR: '2', toUtc: '2026-10-10T00:00:30Z' }))
+      await act(async () => { lossLimitsChanged(); await vi.advanceTimersByTimeAsync(0) })
+      const reads = lossLimits.mock.calls.length
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(0) })
+      expect(lossLimits).toHaveBeenCalledTimes(reads)
+      vi.setSystemTime(new Date('2026-10-10T00:05:00Z'))
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(0) })
+      expect(lossLimits.mock.calls.length).toBeGreaterThan(reads)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -113,8 +113,10 @@ public sealed class OpenRiskService(IOpenRiskStore store, IWorkspaceStore worksp
         var saved = await unitOfWork.ExecuteAsync(async () =>
         {
             var settings = await store.SettingsForUpdateAsync(new RiskSettings(owner.OwnerId, now), ct);
-            settings.SetOpenRiskLimit(limit, now);
-            settings.SetLossLimits(daily, weekly, now);
+            // Only the limits the request names change; the others keep their stored value.
+            if (request.HasOpenRiskLimit) settings.SetOpenRiskLimit(limit, now);
+            settings.SetLossLimits(request.HasDailyLossLimit ? daily : settings.DailyLossLimitR,
+                request.HasWeeklyLossLimit ? weekly : settings.WeeklyLossLimitR, now);
             await store.SaveAsync(ct);
             return settings;
         }, ct);
