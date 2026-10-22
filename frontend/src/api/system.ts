@@ -14,6 +14,8 @@ export interface VenueCapabilities {
   accountDiscovery?: boolean; readOnlyCredential?: boolean; manualExecutions?: boolean
   /** The order reader returns the current open book. Without it stop coverage reads "current book not read". */
   currentOrderBook?: boolean
+  /** The venue serves executions by time window, so a history gap can be backfilled (Phase 2, item 6b). */
+  fillHistory?: boolean
 }
 
 /** One venue and what Vessel can do there. The browser checks capabilities, never venue names. */
@@ -68,7 +70,7 @@ function isVenue(value: unknown): value is VenueInfo {
     ['planned', 'candidate', 'manual', 'read-only'].includes(String(value.status)) &&
     ['none', 'evm-address', 'account-index'].includes(String(value.source)) &&
     isRecord(value.capabilities) && capabilityNames.every(name => typeof (value.capabilities as Record<string, unknown>)[name] === 'boolean') &&
-    ['accountDiscovery', 'readOnlyCredential', 'manualExecutions', 'currentOrderBook', 'paperExecution'].every(name => {
+    ['accountDiscovery', 'readOnlyCredential', 'manualExecutions', 'currentOrderBook', 'paperExecution', 'fillHistory'].every(name => {
       const flag = (value.capabilities as Record<string, unknown>)[name]
       return flag === undefined || typeof flag === 'boolean'
     }) &&

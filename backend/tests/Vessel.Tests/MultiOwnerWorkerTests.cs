@@ -112,6 +112,43 @@ public sealed class MultiOwnerWorkerTests
         fixture.Venue.Release.TrySetResult();
     }
 
+    /// <summary>
+    /// Phase 2, item 6b (Sol round 1): a due backfill is read in a run of its own, after protection checks, and never takes
+    /// the worker slot they leave free.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_due_backfill_waits_behind_a_due_protection_check_and_its_free_slot()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var protection = fixture.Accounts[fixture.Second];
+        var backfilled = fixture.Accounts[fixture.First];
+        await using (var first = fixture.Database.Context(fixture.First))
+        {
+            // Nothing else to read for this account: its check is not due.
+            await first.Plays.ExecuteDeleteAsync();
+            var gap = new AccountHistoryGap
+            {
+                Id = Guid.CreateVersion7(), OwnerId = fixture.First, AccountId = backfilled, OpenedAtUtc = DateTimeOffset.UtcNow.AddHours(-1)
+            };
+            first.HistoryGaps.Add(gap);
+            first.HistoryBackfills.Add(HistoryBackfill.For(gap, DateTimeOffset.UtcNow.AddMinutes(-5)));
+            await first.SaveChangesAsync();
+        }
+        var scheduler = fixture.Host.Services.GetServices<IHostedService>().OfType<MonitorScheduler>().Single();
+        await scheduler.TickAsync(default);
+        await fixture.EventuallyAsync(async () =>
+        {
+            await using var db = fixture.Database.Context(fixture.Second);
+            return (await db.Set<MonitorAccount>().SingleAsync(m => m.AccountId == protection)).ManualState == "running";
+        });
+        await using (var db = fixture.Database.Context(fixture.First))
+        {
+            Assert.False(await db.Set<MonitorAccount>().AnyAsync(m => m.AccountId == backfilled && m.ManualState != "idle"));
+            Assert.Equal(0, (await db.HistoryBackfills.SingleAsync()).Pages);
+        }
+        fixture.Venue.Release.TrySetResult();
+    }
+
     [PostgresFact]
     public async Task Scheduler_shutdown_cancellation_propagates_instead_of_skipping_the_owner()
     {

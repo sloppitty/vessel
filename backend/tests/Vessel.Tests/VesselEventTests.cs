@@ -413,6 +413,46 @@ public sealed class VesselEventTests
     }
 
     [VesselEventPostgresFact]
+    public async Task Phase2_a_lifecycle_change_decided_by_a_backfilled_fill_is_recorded_as_history_and_never_announced()
+    {
+        // Item 6b (Sol round 1): the first entry backfilled, the settling exit imported live, and the reverse.
+        foreach (var (entryBackfilled, exitBackfilled) in new[] { (true, false), (false, true) })
+        {
+            await using var database = await CoreDatabase.CreateAsync();
+            var owner = Guid.NewGuid();
+            var now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            var first = now.AddDays(-3);
+            await using var scope = new EventScope(database, owner);
+            await scope.ExecuteAsync(async () =>
+            {
+                await scope.Store.SetRunAsync(Guid.CreateVersion7(), "monitor", default);
+                var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+                var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
+                scope.Db.Accounts.Add(account); scope.Db.Plays.Add(play);
+                var planned = play.MarkPlanned(first.AddHours(-1));
+                scope.Db.StatusChanges.Add(planned.Change); scope.Db.PlanRevisions.Add(planned.Revision);
+                AddOrder(scope.Db, play, "entry", OrderLinkRole.Entry, 1, 0, "filled", now);
+                AddOrder(scope.Db, play, "exit", OrderLinkRole.Exit, 1, 0, "filled", now);
+                var entry = VenueFill(play, "entry", "e1", 1, first);
+                var exit = VenueFill(play, "exit", "x1", 1, first.AddHours(2), exit: true);
+                (entry.Backfilled, exit.Backfilled) = (entryBackfilled, exitBackfilled);
+                scope.Db.Fills.AddRange(entry, exit);
+                scope.Db.StatusChanges.Add(play.MarkOpen("Found entry", now));
+                await scope.SaveChangesAsync(default);
+                scope.Db.StatusChanges.Add(play.MarkClosed("Found exit", now));
+                return true;
+            }, default);
+            var events = (await EventReads.ReadAsync(scope.Db, 0, 200, default)).Events;
+            var opened = Assert.Single(events, e => e.Type == "play.opened");
+            var closed = Assert.Single(events, e => e.Type == "play.closed");
+            Assert.Equal((entryBackfilled ? VesselEventSources.History : "monitor", exitBackfilled ? VesselEventSources.History : "monitor"),
+                (opened.Source.Trigger, closed.Source.Trigger));
+            // Its source times stay the facts' own.
+            Assert.Equal((first, first.AddHours(2)), (opened.OccurredAt, closed.OccurredAt));
+        }
+    }
+
+    [VesselEventPostgresFact]
     public async Task Closures_found_by_one_run_close_at_the_latest_valid_exit_their_outcomes_score()
     {
         // Phase 0 item 0.2: the play.closed source time and the sizing outcome share one helper. Three Plays exit at
