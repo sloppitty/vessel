@@ -98,6 +98,59 @@ const isFillConflict = (v: unknown): v is FillConflict => isRecord(v) && isFille
 const isFillConflicts = (v: unknown): v is FillConflicts => isRecord(v) && isCount(v.total) && Array.isArray(v.recent) &&
   v.recent.length <= 50 && v.recent.length <= v.total && v.recent.every(isFillConflict) && isText(v.notice, 1000)
 
+/** A span of execution history that may be missing (Phase 2, item 6); a null end is unknown. */
+export interface HistoryGap { id: string; fromUtc: string | null; toUtc: string | null; openedAtUtc: string; closedAtUtc: string | null }
+/** One import's coverage, or a run of continuous imports of one source. */
+export interface FillCoverage {
+  source: 'refresh' | 'check'
+  firstObservedAtUtc: string
+  lastObservedAtUtc: string
+  importCount: number
+  /** Null: the venue's own recent window. */
+  requestedFromUtc: string | null
+  requestedToUtc: string
+  /** Null: the venue did not say whether its cap was reached, so nothing is proven. */
+  truncated: boolean | null
+  complete: boolean
+  coveredFromUtc: string | null
+  coveredToUtc: string | null
+  gapFromUtc: string | null
+  gapToUtc: string | null
+}
+/** The "Keep execution history" opt-in and the account's coverage ledger, newest first. */
+export interface HistoryCoverage {
+  keepExecutionHistory: boolean
+  /** Whether this account's venue history can be kept at all. */
+  available: boolean
+  openGapCount: number
+  openGaps: HistoryGap[]
+  closedGaps: HistoryGap[]
+  recordCount: number
+  recent: FillCoverage[]
+  notice: string
+}
+const before = (a: string | null, b: string | null) => a === null || b === null || Date.parse(a) <= Date.parse(b)
+const isHistoryGap = (v: unknown): v is HistoryGap => isRecord(v) && isGuid(v.id) && isNullOr(v.fromUtc, isTimestamp) &&
+  isNullOr(v.toUtc, isTimestamp) && isTimestamp(v.openedAtUtc) && isNullOr(v.closedAtUtc, isTimestamp) &&
+  before(v.fromUtc as string | null, v.toUtc as string | null) && before(v.openedAtUtc, v.closedAtUtc as string | null)
+const isFillCoverage = (v: unknown): v is FillCoverage => isRecord(v) && (v.source === 'refresh' || v.source === 'check') &&
+  isTimestamp(v.firstObservedAtUtc) && isTimestamp(v.lastObservedAtUtc) && before(v.firstObservedAtUtc, v.lastObservedAtUtc) &&
+  isPositiveCount(v.importCount) && isNullOr(v.requestedFromUtc, isTimestamp) && isTimestamp(v.requestedToUtc) &&
+  (v.truncated === null || typeof v.truncated === 'boolean') && typeof v.complete === 'boolean' &&
+  isNullOr(v.coveredFromUtc, isTimestamp) && isNullOr(v.coveredToUtc, isTimestamp) && isNullOr(v.gapFromUtc, isTimestamp) &&
+  // A gap's end is unknown when the read reported no fill time; an end needs a start.
+  isNullOr(v.gapToUtc, isTimestamp) && (v.gapToUtc === null || v.gapFromUtc !== null) &&
+  (v.coveredFromUtc === null || v.coveredToUtc !== null) && before(v.coveredFromUtc as string | null, v.coveredToUtc as string | null) &&
+  before(v.gapFromUtc as string | null, v.gapToUtc as string | null) &&
+  // Unknown truncation proves nothing: no coverage and no gap.
+  (v.truncated !== null || v.coveredToUtc === null && v.gapFromUtc === null && !v.complete)
+export const isHistoryCoverage = (v: unknown): v is HistoryCoverage => isRecord(v) && typeof v.keepExecutionHistory === 'boolean' &&
+  typeof v.available === 'boolean' && isCount(v.openGapCount) && Array.isArray(v.openGaps) && v.openGaps.length <= 50 &&
+  v.openGaps.length <= v.openGapCount && v.openGaps.every(g => isHistoryGap(g) && g.closedAtUtc === null) &&
+  Array.isArray(v.closedGaps) && v.closedGaps.length <= 50 && v.closedGaps.every(g => isHistoryGap(g) && g.closedAtUtc !== null) &&
+  isCount(v.recordCount) && Array.isArray(v.recent) && v.recent.length <= 50 && v.recent.length <= v.recordCount &&
+  v.recent.every(isFillCoverage) && isText(v.notice, 1000)
+
 export interface InstrumentCatalog {
   venueId: string
   marketScope: 'perpetuals'
@@ -195,6 +248,8 @@ export interface BrokerAccount {
   availableBalanceUsd?: string | null
   availableBalanceSource?: 'wallet' | 'margin' | 'withdrawable' | 'paper' | null
   settingsRevision?: number
+  /** "Keep execution history" (Phase 2, item 6); missing on older servers, which read as off. */
+  keepExecutionHistory?: boolean
 }
 export interface AccountSettingsExpectation {
   accountId: string
@@ -333,12 +388,16 @@ export interface WorkspaceApi {
   deleteAccountCredential(id: string): Promise<void>
   updatePortfolio(id: string, settings: { name: string; icon?: string }): Promise<Portfolio>
   deletePortfolio(id: string): Promise<void>
-  updateAccount(id: string, settings: { name: string; portfolioId: string | null; isEnabled: boolean; expectedRevision: number }): Promise<BrokerAccount>
+  /** <c>keepExecutionHistory</c> left out keeps the stored opt-in (Phase 2, item 6). */
+  updateAccount(id: string, settings: { name: string; portfolioId: string | null; isEnabled: boolean; expectedRevision: number;
+    keepExecutionHistory?: boolean }): Promise<BrokerAccount>
   deleteAccount(id: string): Promise<void>
   snapshot(id: string, signal?: AbortSignal): Promise<AccountSnapshot | null>
   fills(id: string, signal?: AbortSignal): Promise<ImportedFill[]>
   /** Retained fills the venue later reported with different values (Phase 2, item 14c); the first copy is kept. */
   importConflicts(id: string, signal?: AbortSignal): Promise<FillConflicts>
+  /** Phase 2, item 6: the opt-in and the coverage ledger of a real account. */
+  historyCoverage(id: string, signal?: AbortSignal): Promise<HistoryCoverage>
   sync(id: string, signal?: AbortSignal): Promise<BrokerAccount>
   /** One view of saved Plays: Drafts and In progress in full (at most 200), the others paged. */
   plays(query: PlayListQuery, signal?: AbortSignal): Promise<PlayList>
@@ -470,7 +529,8 @@ const account = (v: unknown): v is BrokerAccount => isRecord(v) && optionalTradi
   (v.availableBalanceUsd === undefined || isNullOr(v.availableBalanceUsd, isPlainDecimal)) &&
   (v.availableBalanceSource === undefined || v.availableBalanceSource === null ||
     isText(v.availableBalanceSource) && ['wallet', 'margin', 'withdrawable', 'paper'].includes(v.availableBalanceSource)) &&
-  (v.settingsRevision === undefined || isPositiveCount(v.settingsRevision))
+  (v.settingsRevision === undefined || isPositiveCount(v.settingsRevision)) &&
+  (v.keepExecutionHistory === undefined || typeof v.keepExecutionHistory === 'boolean' && (!v.keepExecutionHistory || v.tradingMode !== 'paper'))
 const discovery = (venueId: string, address: string) => (v: unknown): v is AccountDiscovery => isRecord(v) &&
   v.venueId === venueId && isText(v.address) && v.address.toLowerCase() === address.toLowerCase() &&
   isText(v.notice, 2000) && Array.isArray(v.accounts) && v.accounts.length <= 1000 &&
@@ -966,6 +1026,7 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
     snapshot: (id, signal) => call(`${accountPath(id)}/snapshot`, { ...workspaceRequest, validate: snapshot, ...withSignal(signal) }),
     fills: (id, signal) => call(`${accountPath(id)}/fills`, { ...workspaceRequest, validate: (v): v is ImportedFill[] => Array.isArray(v) && v.every(isImportedFill), ...withSignal(signal) }),
     importConflicts: (id, signal) => call(`${accountPath(id)}/import-conflicts`, { ...workspaceRequest, validate: isFillConflicts, ...withSignal(signal) }),
+    historyCoverage: (id, signal) => call(`${accountPath(id)}/history-coverage`, { ...workspaceRequest, validate: isHistoryCoverage, ...withSignal(signal) }),
     // History, funding and order retention each allow 20s; leave room for account locking and persistence.
     sync: (id, signal) => call(`${accountPath(id)}/sync`, { ...workspaceRequest, validate: account, method: 'POST', ...withSignal(signal), timeout: 90_000, badGateway: 'The venue refresh failed. Previous account data is still available.' }),
   }

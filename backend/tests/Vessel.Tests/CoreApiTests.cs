@@ -143,7 +143,7 @@ public sealed class CoreApiTests(CoreApiRejectionHosts hosts) : IClassFixture<Co
             Assert.Equal(owner, (await db.Portfolios.IgnoreQueryFilters().SingleAsync()).OwnerId);
         }
         using var json = JsonDocument.Parse(await accountResponse.Content.ReadAsStringAsync());
-        Assert.Equal(new[] { "id", "portfolioId", "name", "venueId", "address", "accountValueUsd", "lastSyncedAtUtc", "syncStatus", "lastSyncError", "positionCount", "historyNotice", "isEnabled", "settingsRevision", "availableStablecoinNominalUsd", "stablecoinScope", "accountMode", "totalStablecoinNominalUsd", "balanceUsd", "sourceId", "availableBalanceUsd", "availableBalanceSource", "tradingMode" }, json.RootElement.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(new[] { "id", "portfolioId", "name", "venueId", "address", "accountValueUsd", "lastSyncedAtUtc", "syncStatus", "lastSyncError", "positionCount", "historyNotice", "isEnabled", "settingsRevision", "availableStablecoinNominalUsd", "stablecoinScope", "accountMode", "totalStablecoinNominalUsd", "balanceUsd", "sourceId", "availableBalanceUsd", "availableBalanceSource", "tradingMode", "keepExecutionHistory" }, json.RootElement.EnumerateObject().Select(p => p.Name));
         Assert.Equal("real", json.RootElement.GetProperty("tradingMode").GetString());
         Assert.False(json.RootElement.TryGetProperty("startingCapitalUsd", out _));
         Assert.Null(account.SourceId);

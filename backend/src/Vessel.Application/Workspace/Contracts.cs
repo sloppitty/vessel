@@ -22,7 +22,8 @@ public sealed record UpdateAccountRequest(
     [property: JsonRequired] string Name,
     [property: JsonRequired] Guid? PortfolioId,
     [property: JsonRequired] bool IsEnabled,
-    [property: JsonRequired] long ExpectedRevision, string? StartingCapitalUsd = null, string? TradingMode = null);
+    [property: JsonRequired] long ExpectedRevision, string? StartingCapitalUsd = null, string? TradingMode = null,
+    bool? KeepExecutionHistory = null);
 /// <summary>
 /// TotalValueUsd sums primary perps (or manual) values. BalanceUsd sums account balances: perps plus stablecoin wallet,
 /// or the wallet alone in unified and portfolio-margin modes, so no ledger is counted twice.
@@ -37,7 +38,8 @@ public sealed record AccountDto(Guid Id, Guid? PortfolioId, string Name, string 
     string? AvailableStablecoinNominalUsd = null, string? StablecoinScope = null, string? AccountMode = null,
     string? TotalStablecoinNominalUsd = null, string? BalanceUsd = null, string? SourceId = null,
     string? AvailableBalanceUsd = null, string? AvailableBalanceSource = null, string TradingMode = "real",
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? StartingCapitalUsd = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? StartingCapitalUsd = null,
+    bool KeepExecutionHistory = false);
 public sealed record AccountInstrumentsDto(string VenueId, string MarketScope, string Scope,
     IReadOnlyList<VenueInstrument> Instruments, string Notice);
 /// <summary>Where a catalogue comes from: the venue's selectable perpetuals, or none for a manual account.</summary>
@@ -70,6 +72,22 @@ public sealed record FillDto(Guid Id, Guid AccountId, string ContractId, string 
 public sealed record FillConflictDto(string ContractId, string SourceFillId, IReadOnlyList<string> Fields,
     DateTimeOffset FirstSeenAtUtc, DateTimeOffset LastSeenAtUtc, int Reports);
 public sealed record FillConflictsDto(int Total, IReadOnlyList<FillConflictDto> Recent, string Notice);
+
+/// <summary>A span of execution history that may be missing (Phase 2, item 6); null ends are unknown.</summary>
+public sealed record HistoryGapDto(Guid Id, DateTimeOffset? FromUtc, DateTimeOffset? ToUtc, DateTimeOffset OpenedAtUtc, DateTimeOffset? ClosedAtUtc);
+/// <summary>One coverage record: an import, or a run of continuous imports of one source.</summary>
+public sealed record FillCoverageDto(string Source, DateTimeOffset FirstObservedAtUtc, DateTimeOffset LastObservedAtUtc, int ImportCount,
+    DateTimeOffset? RequestedFromUtc, DateTimeOffset RequestedToUtc, bool? Truncated, bool Complete,
+    DateTimeOffset? CoveredFromUtc, DateTimeOffset? CoveredToUtc, DateTimeOffset? GapFromUtc, DateTimeOffset? GapToUtc);
+/// <summary>
+/// An account's history coverage (Phase 2, item 6): the opt-in, whether the venue allows it, the open gaps, the latest
+/// closed ones and the latest coverage records.
+/// </summary>
+public sealed record HistoryCoverageDto(bool KeepExecutionHistory, bool Available, int OpenGapCount, IReadOnlyList<HistoryGapDto> OpenGaps,
+    IReadOnlyList<HistoryGapDto> ClosedGaps, int RecordCount, IReadOnlyList<FillCoverageDto> Recent, string Notice);
+/// <summary>What the store reads for <see cref="HistoryCoverageDto"/>, newest first and bounded.</summary>
+public sealed record HistoryCoverageFacts(int OpenGapCount, IReadOnlyList<Vessel.Domain.Monitoring.AccountHistoryGap> OpenGaps,
+    IReadOnlyList<Vessel.Domain.Monitoring.AccountHistoryGap> ClosedGaps, int RecordCount, IReadOnlyList<Vessel.Domain.Monitoring.FillCoverageRecord> Recent);
 public sealed record OverviewTotals(int PortfolioCount, int AccountCount, string? TotalAccountValueUsd,
     int ValuedAccountCount, int OpenPositionCount, int ImportedFillCount,
     string? AvailableStablecoinNominalUsd = null, int StablecoinAccountCount = 0,
@@ -107,6 +125,9 @@ public interface IWorkspaceStore
     /// <summary>Retained fills the venue later reported differently (Phase 2, item 14c): the count and the latest ones.</summary>
     Task<(int Total, IReadOnlyList<FillImportConflict> Recent)> FillConflictsAsync(Guid accountId, int limit, CancellationToken ct) =>
         Task.FromResult<(int, IReadOnlyList<FillImportConflict>)>((0, []));
+    /// <summary>Phase 2, item 6: the account's history gaps and coverage records, bounded.</summary>
+    Task<HistoryCoverageFacts> HistoryCoverageAsync(Guid accountId, int limit, CancellationToken ct) =>
+        Task.FromResult(new HistoryCoverageFacts(0, [], [], 0, []));
     Task<int> FillCountAsync(CancellationToken ct);
     Task AddPortfolioAsync(Portfolio portfolio, CancellationToken ct);
     Task AddAccountAsync(Account account, CancellationToken ct);
