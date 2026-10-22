@@ -50,6 +50,10 @@ public static class MarginModes
     public const string Cross = "cross", Isolated = "isolated";
 }
 
+/// <param name="AccountMode">
+/// The venue's account mode as this read observed it, independently of whether its wallet could be read (Phase 2, item
+/// 14b, Sol round 1): it decides how the ledgers combine. Null when the venue has none.
+/// </param>
 public sealed record VenueSnapshot(
     DateTimeOffset ObservedAtUtc,
     string ValueScope,
@@ -58,7 +62,8 @@ public sealed record VenueSnapshot(
     decimal MarginUsedUsd,
     IReadOnlyList<VenuePosition> Positions,
     VenueStablecoinWallet? StablecoinWallet = null,
-    decimal? AvailableMarginUsd = null);
+    decimal? AvailableMarginUsd = null,
+    string? AccountMode = null);
 
 public sealed record VenueStablecoinBalance(
     string Symbol, int TokenIndex, string TokenId,

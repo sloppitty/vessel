@@ -134,16 +134,17 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
                 using var spotState = await ReadJsonAsync(new { type = "spotClearinghouseState", user = publicAddress }, token);
                 wallet = ReadStablecoinWallet(spotState.RootElement, stablecoins, accountMode, timeProvider.GetUtcNow());
             }
-            catch (VenueReadException error) when (error is not VenueRateLimitException && SeparateLedgers(accountMode) &&
-                !token.IsCancellationRequested)
+            catch (Exception error) when (WalletFailure(error) && SeparateLedgers(accountMode) && !token.IsCancellationRequested)
             {
                 // Phase 2, item 14b (F-14): with separate perps and spot ledgers the wallet is not the perps balance, so its
-                // failure degrades the wallet alone. The last observed wallet stays, with its own time. A rate limit still
-                // stops the whole read so the venue's backoff holds.
+                // failure degrades the wallet alone. The last observed wallet stays, with its own time, and the account's
+                // balance is unknown until a wallet is read with the perps again. A rate limit or the read's deadline
+                // still stops the whole read so the venue's backoff holds.
                 wallet = null;
                 notice += " " + WalletUnavailableNotice;
             }
-            return new PerpetualVenueReadResult(snapshot with { StablecoinWallet = wallet }, instruments, executions, notice,
+            return new PerpetualVenueReadResult(snapshot with { StablecoinWallet = wallet, AccountMode = accountMode }, instruments,
+                executions, notice,
                 PositionsComplete: positionsComplete, FillHistoryTruncated: fillCoverage.Count == MaxFills,
                 OldestRawFillAtUtc: fillCoverage.OldestAtUtc, OmittedExecutions: omitted);
         }, cancellationToken);
@@ -286,7 +287,19 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
     };
 
     internal const string WalletUnavailableNotice =
-        "The stablecoin wallet could not be refreshed; its last observed balances and their time are kept.";
+        "The stablecoin wallet could not be refreshed; its last observed balances and their time are kept, and the " +
+        "account balance is unknown until it is read again.";
+
+    /// <summary>
+    /// A wallet read that failed on its own: an invalid or failed venue response, a dropped connection or a malformed
+    /// body (Sol round 1 on 14b). Never a rate limit, cancellation or the read's deadline.
+    /// </summary>
+    private static bool WalletFailure(Exception error) => error switch
+    {
+        VenueRateLimitException => false,
+        VenueReadException or HttpRequestException or IOException or JsonException => true,
+        _ => false,
+    };
 
     /// <summary>
     /// Modes whose perps and spot ledgers are separate. Unified and portfolio-margin accounts hold every balance in the

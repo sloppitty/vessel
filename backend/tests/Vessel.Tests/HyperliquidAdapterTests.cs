@@ -357,6 +357,15 @@ public sealed partial class HyperliquidAdapterTests
         responses[stage] = "{\"private-secret\":";
         using var handler = Fixtures(responses);
         using var client = Client(handler);
+        if (stage >= 4)
+        {
+            // Phase 2, item 14b (F-14, Sol round 1): on a default-mode account a malformed wallet body degrades only the
+            // wallet, and nothing of it reaches the notice.
+            var degraded = await new HyperliquidPerpetualReader(client, new TestClock()).ReadAsync(Address, CancellationToken.None);
+            Assert.Null(degraded.Snapshot.StablecoinWallet);
+            Assert.DoesNotContain("private-secret", degraded.HistoryNotice);
+            return;
+        }
         await Invalid(() => new HyperliquidPerpetualReader(client, new TestClock()).ReadAsync(Address, CancellationToken.None));
         Assert.Equal(stage + 1, handler.Requests.Count);
     }

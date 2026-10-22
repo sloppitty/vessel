@@ -238,10 +238,31 @@ public sealed partial class HyperliquidAdapterTests
         Assert.Single(result.Snapshot.Positions);
         Assert.Single(result.Fills);
         Assert.Null(result.Snapshot.StablecoinWallet);
+        // The mode was read and decides how the ledgers combine, wallet or not (Sol round 1 on 14b).
+        Assert.Equal(mode, result.Snapshot.AccountMode);
         Assert.EndsWith(HyperliquidPerpetualReader.WalletUnavailableNotice, result.HistoryNotice);
         // A malformed wallet response degrades the same way; it is never read as an empty wallet.
         var malformed = await ReadWallet(mode: $"\"{mode}\"", state: Mutate(SpotState, node => ((JsonObject)node["balances"]![0]!).Remove("total")));
         Assert.Null(malformed.Snapshot.StablecoinWallet);
+    }
+
+    [Theory]
+    [InlineData("truncated")]
+    [InlineData("connection")]
+    public async Task A_truncated_or_dropped_wallet_response_degrades_only_the_wallet(string failure)
+    {
+        // Sol round 1 on 14b: these escaped the wallet boundary and discarded the perps and fills already read.
+        var responses = WalletResponses("\"default\"");
+        using var handler = new FixtureHandler((index, _) => index != 5 ? Task.FromResult(Json(responses[index]))
+            : failure == "truncated"
+                ? Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{", Encoding.UTF8, "application/json") })
+                : Task.FromException<HttpResponseMessage>(new HttpRequestException("The connection was reset.")));
+        using var client = Client(handler);
+        var result = await new HyperliquidPerpetualReader(client, new TestClock()).ReadAsync(Address, CancellationToken.None);
+        Assert.Equal(12345.678901234567890123m, result.Snapshot.AccountValueUsd);
+        Assert.Single(result.Fills);
+        Assert.Null(result.Snapshot.StablecoinWallet);
+        Assert.Equal("default", result.Snapshot.AccountMode);
     }
 
     [Theory]

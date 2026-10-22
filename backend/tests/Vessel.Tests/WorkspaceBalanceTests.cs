@@ -149,6 +149,22 @@ public sealed class WorkspaceBalanceTests
     }
 
     [Fact]
+    public async Task A_separate_ledger_wallet_read_before_the_perps_leaves_the_balance_unknown()
+    {
+        // Phase 2, item 14b, Sol round 1: never perps plus a wallet that may hold funds since moved into them.
+        var stale = Add(null, "hyperliquid", 40m, 35m, "default", 10m, 7m);
+        var snapshot = store.Snapshots.Single(s => s.AccountId == stale.Id);
+        snapshot.StablecoinsObservedAtUtc = snapshot.ObservedAtUtc.AddMinutes(-10);
+        var unified = Add(null, "hyperliquid", 999m, 888m, "unifiedAccount", 100m, 80m);
+        store.Snapshots.Single(s => s.AccountId == unified.Id).StablecoinsObservedAtUtc = snapshot.ObservedAtUtc.AddMinutes(-10);
+        var current = Add(null, "hyperliquid", 40m, 35m, "default", 10m, 7m);
+        Assert.Null((await service.AccountAsync(stale.Id, default)).BalanceUsd);
+        Assert.Equal("35", (await service.AccountAsync(stale.Id, default)).AvailableBalanceUsd);
+        Assert.Equal("100", (await service.AccountAsync(unified.Id, default)).BalanceUsd); // The wallet is its only ledger.
+        Assert.Equal("50", (await service.AccountAsync(current.Id, default)).BalanceUsd);
+    }
+
+    [Fact]
     public async Task Unknown_and_empty_observed_wallets_are_distinct_and_manual_value_is_not_available_funds()
     {
         Assert.Null((await service.OverviewAsync(default)).Totals.AvailableBalanceUsd);

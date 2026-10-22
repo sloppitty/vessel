@@ -428,6 +428,9 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         if (s is null) return null;
         List<decimal>? wallet = s.StablecoinsObservedAtUtc is null ? null : s.Stablecoins.Select(balance => balance.Total).ToList();
         if (s.AccountMode is "unifiedAccount" or "portfolioMargin") return wallet;
+        // Separate ledgers add up only when the wallet was read with the perps or after them. A wallet left from an earlier
+        // read could still hold funds since moved into perps, so the balance is unknown (Phase 2, item 14b, Sol round 1).
+        if (wallet is not null && s.StablecoinsObservedAtUtc < s.ObservedAtUtc) return null;
         return s.AccountValueUsd is { } perps ? [perps, ..wallet ?? []] : wallet;
     }
 
