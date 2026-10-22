@@ -153,7 +153,18 @@ public interface IMonitorStore
     /// </summary>
     Task<IReadOnlyList<MonitorCandidate>> DiscoveryCandidatesAsync(IReadOnlyCollection<string> venueIds, DateTimeOffset now,
         Guid? after, int limit, CancellationToken ct);
+    /// <summary>Whether the account has anything to check: protection work, or kept execution history (Phase 2, item 6).</summary>
     Task<bool> EligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct);
+    /// <summary>
+    /// Protection work only: an eligible Play, a live terminal-link watch or outstanding discrepancy work. An account
+    /// eligible only because it keeps its history runs behind it, with headroom left for protection checks.
+    /// </summary>
+    Task<bool> ProtectionEligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct);
+    /// <summary>
+    /// Inside the account lock and the import's unit of work (Phase 2, item 6): records one import's coverage, extending
+    /// the latest record when it continues it, opens the gap it found and closes every open gap on complete history.
+    /// </summary>
+    Task RecordCoverageAsync(FillCoverageRecord record, CancellationToken ct);
     Task<T> LockedAsync<T>(Guid accountId, Func<Account, MonitorAccount, Task<T>> action, CancellationToken ct);
     Task<IReadOnlyList<MonitorLease>> ClaimDueAsync(string workerId, DateTimeOffset now, int limit, CancellationToken ct);
     Task<MonitorLease?> ClaimAsync(Guid accountId, Guid? requestId, string workerId, DateTimeOffset now, CancellationToken ct);
@@ -174,8 +185,11 @@ public interface IMonitorStore
     Task<IReadOnlyList<MonitorCoverage>> CoverageAsync(IReadOnlyCollection<Guid> accountIds, CancellationToken ct);
     /// <summary>Per account, its Open tracked Plays (planned, on a venue instrument) without a coverage row; absent when none.</summary>
     Task<IReadOnlyDictionary<Guid, int>> UncheckedPlaysAsync(IReadOnlyCollection<Guid> accountIds, CancellationToken ct);
-    /// <summary>Inside account admission transaction. Locks the owner budget, then this venue budget, and checks both capacities.</summary>
-    Task<bool> ReadCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct);
+    /// <summary>
+    /// Inside account admission transaction. Locks the owner budget, then this venue budget, and checks both capacities.
+    /// <paramref name="headroom"/> venue slots, and one of the owner's, stay free for protection checks (Phase 2, item 6).
+    /// </summary>
+    Task<bool> ReadCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct, int headroom = 0);
     /// <summary>Lock-free preflight only; admission rechecks under the venue budget lock.</summary>
     Task<bool> VenueAtCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct);
     Task<bool> OwnerAtCapacityAsync(DateTimeOffset now, CancellationToken ct);

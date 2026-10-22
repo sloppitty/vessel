@@ -132,3 +132,24 @@ and both ends are included; leaving them out exports everything retained.
 - **Cells.** Numbers are plain decimal strings written exactly, and an
   unknown is empty. Text cells are neutralized against spreadsheet formulas.
   Nothing is computed: no lots, no valuation, no inferred fill.
+
+## Keep execution history (October 22, 2026)
+
+Phase 2, item 6a of the [risk and coverage contract](phase2-risk-coverage-contract.md), decision 11.
+- **The opt-in.** Manage account shows **Keep execution history** for a real
+  account with a source on a venue the monitor checks (sync and orders). It is
+  off until the owner turns it on. `PUT /api/accounts/{id}` takes an optional
+  `keepExecutionHistory`; left out, the stored value is kept, so older clients
+  never clear it. Turning it on for a paper account is a 409, and for a manual
+  record or another venue a 400; the database checks it too
+  (`CK_accounts_keep_history`, migration `HistoryRetention`). Like every
+  setting it takes a new settings revision.
+- **What it does.** The monitor reads the account on its schedule even without
+  an eligible Play, behind protection checks (see the
+  [workers reference](messaging-and-workers.md#scheduler-leases-and-fencing)).
+  Such a run imports and records coverage; it opens no discrepancy. A disabled
+  account is not read.
+- **History coverage.** Account detail shows the opt-in, the open gaps (an
+  unknown end reads as such) and what each import covered. A gap closes only
+  when a read proves its span covered. Deleting an account deletes its ledger
+  with its other facts.

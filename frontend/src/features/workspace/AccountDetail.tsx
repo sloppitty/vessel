@@ -7,6 +7,7 @@ import { errorMessage } from '@/api/errors'
 import { Button } from '@/components/ui/button'
 import { ActivityOperations } from './ActivityOperations'
 import { ImportConflicts } from './ImportConflicts'
+import { HistoryCoverage } from './HistoryCoverage'
 import { accountStatus, accountStatusTone, amount, money } from '@/lib/format'
 import { useVenues } from '@/api/venues'
 import { ArrowLeft, RefreshCw } from 'lucide-react'
@@ -109,5 +110,6 @@ export function AccountDetail({ account, api, refreshing, busy = refreshing, onS
     </section>}
     <section className="shell-panel"><header className="shell-panel-heading"><h2>{paper ? 'Simulated operations' : 'Recent executions'}</h2></header>{account.isEnabled === false ? <div className="workspace-empty small-empty"><strong>Imported movements hidden while disabled</strong></div> : <ActivityOperations key={requestKey} api={api} accountId={account.id} accounts={[account]} reloadGeneration={reloadGeneration} {...(onOpenPlay ? { onOpenPlay } : {})} {...(onCreated ? { onCreated } : {})} />}</section>
     {!paper && account.isEnabled !== false && <ImportConflicts api={api} accountId={account.id} reloadKey={requestKey} />}
+    {!paper && synced && account.isEnabled !== false && <HistoryCoverage api={api} accountId={account.id} reloadKey={requestKey} />}
   </div>
 }

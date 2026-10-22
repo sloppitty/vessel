@@ -534,3 +534,8 @@ span.value-tag { width: fit-content; }
 .trading-mode-picker { display: grid; gap: .4rem; padding: .75rem; color: var(--muted-foreground); font-size: .75rem; }
 .navigation-collapsed .trading-mode-picker { padding-inline: .25rem; }
 .paper-mode-banner { margin-bottom: 1rem; color: var(--foreground); border-color: var(--warning); }
+/* History coverage on account detail (Phase 2, item 6). */
+.history-coverage > p { margin: 0 0 8px; }
+.history-coverage .history-gaps { margin: 0 0 8px; padding-left: 18px; font-size: var(--text-sm); }
+.history-coverage .history-gaps small, .history-coverage td small { color: var(--muted-foreground); }
+.history-coverage details > summary { color: var(--muted-foreground); font-size: var(--text-xs); cursor: pointer; }

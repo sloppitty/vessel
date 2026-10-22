@@ -39,7 +39,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         var rows = await (from m in Rows.AsNoTracking()
                           join a in db.Accounts on m.AccountId equals a.Id
                           where a.TradingMode == "real" && a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) &&
-                              (ActivePlays.Any(p => p.AccountId == a.Id) ||
+                              (a.KeepExecutionHistory || ActivePlays.Any(p => p.AccountId == a.Id) ||
                                Watching.Any(x => x.Link.AccountId == a.Id && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)) ||
                                AwaitingDiscrepancies.Any(d => d.AccountId == a.Id) ||
                                // Independent of scheduling: what the persistent incident indicators read stays listed.
@@ -93,7 +93,14 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
     private IQueryable<TerminalExit> Watching => TerminalLinks.Where(x => !Exits.Any(e => e.LinkId == x.Link.Id &&
         e.EndedAtUtc != null && e.LinkRevisionAtUtc >= x.Link.UpdatedAtUtc && (x.EndedAtUtc == null || x.EndedAtUtc <= e.StartedAtUtc)));
 
-    public async Task<bool> EligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct)
+    public async Task<bool> EligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct) =>
+        await KeepsHistoryAsync(accountId, ct) || await ProtectionEligibleAsync(accountId, now, ct);
+
+    /// <summary>An enabled real venue account that keeps its execution history (Phase 2, item 6).</summary>
+    private Task<bool> KeepsHistoryAsync(Guid accountId, CancellationToken ct) => db.Accounts.AnyAsync(a => a.Id == accountId &&
+        a.KeepExecutionHistory && a.TradingMode == "real" && a.IsEnabled && a.SourceId != null, ct);
+
+    public async Task<bool> ProtectionEligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct)
     {
         var cutoff = now - settings.WatchLifetime;
         // The watch starts at the later of the Play's end and the link change; it is live while that is after the cutoff.
@@ -141,7 +148,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
             {
                 a.Id, a.VenueId,
                 Monitorable = a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId),
-                Active = ActivePlays.Any(p => p.AccountId == a.Id),
+                Active = a.KeepExecutionHistory && a.TradingMode == "real" || ActivePlays.Any(p => p.AccountId == a.Id),
                 Watching = Watching.Any(x => x.Link.AccountId == a.Id && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)),
                 Expired = Watching.Any(x => x.Link.AccountId == a.Id && !(x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)),
                 Awaiting = AwaitingDiscrepancies.Any(d => d.AccountId == a.Id),
@@ -210,13 +217,18 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
                 if (row.ManualState == "running" && row.LeaseUntilUtc > now ||
                     row.ManualState == "idle" && !(row.NextRunAtUtc <= now) || row.Trigger == "refresh" && requestId is not null)
                     return null;
-                if (!await ReadCapacityAsync(account.VenueId, now, ct) || await server.VenueRetryAtAsync(account.VenueId, ct) > now)
-                    return null;
-                if (requestId is null && row.ManualState == "idle")
+                var scheduled = requestId is null && row.ManualState == "idle";
+                var headroom = 0;
+                if (scheduled && !await ProtectionEligibleAsync(account.Id, now, ct))
                 {
-                    if (!await EligibleAsync(account.Id, now, ct)) { row.NextRunAtUtc = null; return null; }
-                    row.Admit(Guid.CreateVersion7(), row.ConfirmationAtUtc <= now ? "confirmation" : "monitor", now, scheduled: true);
+                    if (!await KeepsHistoryAsync(account.Id, ct)) { row.NextRunAtUtc = null; return null; }
+                    // Phase 2, item 6: a read only for kept history runs behind protection checks.
+                    headroom = settings.ProtectionHeadroom;
                 }
+                if (!await ReadCapacityAsync(account.VenueId, now, ct, headroom) || await server.VenueRetryAtAsync(account.VenueId, ct) > now)
+                    return null;
+                if (scheduled)
+                    row.Admit(Guid.CreateVersion7(), row.ConfirmationAtUtc <= now ? "confirmation" : "monitor", now, scheduled: true);
                 if (row.Trigger == "refresh") return null;
                 var request = requestId ?? row.RequestId;
                 return request is { } pending && row.Claim(pending, workerId, now, MonitorOptions.Lease)
@@ -224,11 +236,16 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
             }, ct);
         }, ct);
 
-    public async Task<bool> OwnerAtCapacityAsync(DateTimeOffset now, CancellationToken ct) =>
-        await Rows.CountAsync(m => m.ManualState == "running" && m.LeaseUntilUtc > now, ct) >= 2;
+    public Task<bool> OwnerAtCapacityAsync(DateTimeOffset now, CancellationToken ct) => OwnerAtCapacityAsync(now, 0, ct);
 
-    public async Task<bool> ReadCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct)
+    private async Task<bool> OwnerAtCapacityAsync(DateTimeOffset now, int reserved, CancellationToken ct) =>
+        await Rows.CountAsync(m => m.ManualState == "running" && m.LeaseUntilUtc > now, ct) >= OwnerReadSlots - reserved;
+
+    private const int OwnerReadSlots = 2;
+
+    public async Task<bool> ReadCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct, int headroom = 0)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(headroom);
         unitOfWork.RequireActive();
         var ownerKey = "vessel-monitor-budget:" + db.CurrentOwnerId;
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({ownerKey}, 0))", ct);
@@ -236,16 +253,38 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({venueKey}, 0))", ct);
         // Count on this transaction's connection, including any lease it has just saved. No owner filter is removed.
         await unitOfWork.SaveChangesAsync(ct);
-        if (await OwnerAtCapacityAsync(now, ct)) return false;
-        return !await VenueAtCapacityAsync(venueId, now, ct);
+        if (await OwnerAtCapacityAsync(now, headroom > 0 ? 1 : 0, ct)) return false;
+        return await VenueRunningAsync(venueId, now, ct) < settings.VenueReadConcurrency - headroom;
     }
 
     public async Task<bool> VenueAtCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct) =>
-        await db.Database.SqlQuery<long>($"""
+        await VenueRunningAsync(venueId, now, ct) >= settings.VenueReadConcurrency;
+
+    private Task<long> VenueRunningAsync(string venueId, DateTimeOffset now, CancellationToken ct) =>
+        db.Database.SqlQuery<long>($"""
             SELECT COUNT(*) AS "Value" FROM monitor_accounts m JOIN accounts a
                 ON a."Id" = m."AccountId" AND a."OwnerId" = m."OwnerId"
             WHERE a."VenueId" = {venueId} AND m."ManualState" = 'running' AND m."LeaseUntilUtc" > {now}
-            """).SingleAsync(ct) >= settings.VenueReadConcurrency;
+            """).SingleAsync(ct);
+
+    public async Task RecordCoverageAsync(FillCoverageRecord record, CancellationToken ct)
+    {
+        unitOfWork.RequireActive();
+        var latest = await db.FillCoverage.Where(r => r.AccountId == record.AccountId)
+            .OrderByDescending(r => r.LastObservedAtUtc).ThenByDescending(r => r.Id).FirstOrDefaultAsync(ct);
+        if (latest is not null && latest.Continues(record)) latest.Extend(record);
+        else db.FillCoverage.Add(record);
+        if (record.GapFromUtc is { } from)
+            db.HistoryGaps.Add(new AccountHistoryGap
+            {
+                Id = Guid.CreateVersion7(), OwnerId = record.OwnerId, AccountId = record.AccountId, FromUtc = from, ToUtc = record.GapToUtc,
+                OpenedAtUtc = record.LastObservedAtUtc, OpenedByCoverageId = record.Id
+            });
+        // Verified complete history proves every open gap covered; nothing else here closes one.
+        if (record.Complete)
+            foreach (var gap in await db.HistoryGaps.Where(g => g.AccountId == record.AccountId && g.ClosedAtUtc == null).ToListAsync(ct))
+                gap.Close(record.Id, record.LastObservedAtUtc > gap.OpenedAtUtc ? record.LastObservedAtUtc : gap.OpenedAtUtc);
+    }
 
     public Task<bool> RenewAsync(MonitorLease lease, DateTimeOffset now, CancellationToken ct) =>
         lease.OwnerId != db.CurrentOwnerId ? Task.FromResult(false) : unitOfWork.ExecuteAsync(() => LockedAsync(lease.AccountId, (_, row) =>

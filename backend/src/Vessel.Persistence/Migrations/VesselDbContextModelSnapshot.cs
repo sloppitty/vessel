@@ -41,6 +41,9 @@ namespace Vessel.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasDefaultValue(true);
 
+                    b.Property<bool>("KeepExecutionHistory")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("LastSyncError")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
@@ -102,6 +105,8 @@ namespace Vessel.Persistence.Migrations
 
                     b.ToTable("accounts", null, t =>
                         {
+                            t.HasCheckConstraint("CK_accounts_keep_history", "NOT \"KeepExecutionHistory\" OR \"TradingMode\"='real' AND \"SourceId\" IS NOT NULL AND \"VenueId\" <> 'manual'");
+
                             t.HasCheckConstraint("CK_accounts_normalized_address", "\"Address\" IS NULL OR \"Address\" = lower(\"Address\")");
 
                             t.HasCheckConstraint("CK_accounts_paper", "(\"TradingMode\"='real' AND \"StartingCapitalUsd\" IS NULL) OR (\"TradingMode\"='paper' AND \"PortfolioId\" IS NOT NULL AND \"VenueId\"='hyperliquid' AND \"Address\" IS NULL AND \"SourceId\" IS NULL AND \"ManualAccountValueUsd\" IS NULL AND \"StartingCapitalUsd\" IS NOT NULL AND \"StartingCapitalUsd\">=0)");
@@ -233,6 +238,108 @@ namespace Vessel.Persistence.Migrations
                             t.HasCheckConstraint("CK_play_evidence_sha256", "\"Sha256\" ~ '^[0-9a-f]{64}$'");
 
                             t.HasCheckConstraint("CK_play_evidence_size", "\"SizeBytes\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Monitoring.AccountHistoryGap", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ClosedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ClosedByCoverageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("FromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("OpenedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("OpenedByCoverageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ToUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "AccountId", "OpenedAtUtc");
+
+                    b.ToTable("account_history_gaps", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_account_history_gaps_range", "(\"FromUtc\" IS NULL OR \"ToUtc\" IS NULL OR \"FromUtc\" <= \"ToUtc\") AND (\"ClosedAtUtc\" IS NULL OR \"ClosedAtUtc\" >= \"OpenedAtUtc\")");
+                        });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Monitoring.FillCoverageRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Complete")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("CoveredFromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("CoveredToUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("FirstObservedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("GapFromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("GapToUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("ImportCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("LastObservedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("RequestedFromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("RequestedToUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<bool?>("Truncated")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "AccountId", "LastObservedAtUtc");
+
+                    b.ToTable("account_fill_coverage", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_account_fill_coverage_ranges", "\"FirstObservedAtUtc\" <= \"LastObservedAtUtc\" AND \"ImportCount\" >= 1 AND\n(\"RequestedFromUtc\" IS NULL OR \"RequestedFromUtc\" <= \"RequestedToUtc\") AND\n(\"CoveredFromUtc\" IS NULL OR \"CoveredToUtc\" IS NOT NULL AND \"CoveredFromUtc\" <= \"CoveredToUtc\") AND\n(\"GapFromUtc\" IS NULL) = (\"GapToUtc\" IS NULL) AND (\"GapFromUtc\" IS NULL OR \"GapFromUtc\" <= \"GapToUtc\") AND\n(\"Truncated\" IS NOT NULL OR \"CoveredToUtc\" IS NULL AND \"GapFromUtc\" IS NULL AND NOT \"Complete\")");
+
+                            t.HasCheckConstraint("CK_account_fill_coverage_source", "\"Source\" IN ('refresh', 'check')");
                         });
                 });
 
@@ -2140,6 +2247,26 @@ namespace Vessel.Persistence.Migrations
                     b.HasOne("Vessel.Domain.Plays.Play", null)
                         .WithMany()
                         .HasForeignKey("OwnerId", "PlayId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Monitoring.AccountHistoryGap", b =>
+                {
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Monitoring.FillCoverageRecord", b =>
+                {
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId")
                         .HasPrincipalKey("OwnerId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
