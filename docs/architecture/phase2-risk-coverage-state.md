@@ -429,7 +429,72 @@ October 21, 2026.
 
 ## 6. Opt-in account history retention
 
-Not started.
+October 22, 2026.
+
+**6a. Retention and the coverage ledger.** Implemented on `t3/phase2-retention`.
+- **The opt-in.** Manage account offers **Keep execution history** for a real account with a source
+  on a venue the monitor checks. It is off until set. `PUT /api/accounts/{id}` takes an optional
+  `keepExecutionHistory` and keeps the stored value when it is left out. A paper account gets a 409 and
+  a manual record a 400, and the database checks it too (`CK_accounts_keep_history`).
+- **The schedule.** An opted-in account is eligible for scheduled checks without a Play. Each tick
+  claims protection work first; a claim with only kept history behind it then leaves a worker slot, one
+  of the owner's two slots and up to `ProtectionHeadroom` venue slots (default 1, never the whole venue)
+  free for protection checks. Owner Checks and Refreshes keep the plain budgets.
+- **No comparison without protection work.** A run with no Play, watch or discrepancy work, neither when
+  it began nor before evaluation, imports fills and orders and records coverage, but compares nothing and
+  opens no discrepancy. Otherwise opting in would flag every untracked position on such an account; the
+  contract's own warning for these accounts comes with 6c.
+- **The ledger.** Every import, Refresh or check, records in `account_fill_coverage` what it requested,
+  whether the venue's cap was reached, the span it proves continuous and the gap it may have skipped, by
+  0.4b's rule. Consecutive continuous imports of one source extend one record.
+  - Each gap is an `account_history_gaps` row that closes only when a read proves its span covered. Only
+    verified complete history does so today; 6b's backfill will.
+  - The migration (`20261022143200_HistoryRetention`) turns each existing gap flag into an open gap of
+    unknown range.
+- **The read.** `GET /api/accounts/{id}/history-coverage` (real only) returns the opt-in, the open and
+  recently closed gaps and the latest records, 50 of each at most. Account detail shows them as **History
+  coverage**. Deleting an account deletes its ledger.
+- **Contract notes.** Item 6 is delivered in three pull requests in the chain: 6a (this), 6b (the
+  owner-started Hyperliquid backfill and its progress) and 6c (the "open position, no resting stop, no
+  Play" warning). The ledger is recorded for every real account, opted in or not, so gaps found before
+  opting in can still be backfilled.
+- **Tests.**
+  - `HistoryCoverageTests`: the coverage rule for unknown, uncapped, capped, blind, first and complete
+    reads, and when a record is extended.
+  - `MonitorPostgresTests`: an opted-in account checked without a Play, compared with nothing, its record
+    extended and a gap opened after a pause; the headroom for protection checks.
+  - The isolation case in both auth modes; the settings `PUT` and its refusals.
+  - In the browser: the validator, the panel and the Manage account toggle.
+- **Migration.** It is applied explicitly, never to the owner's database.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `30ab6173`. Six findings, all fixed in
+  `0d6811c8`:
+  - A fill a few minutes ahead of the read time could make a gap end before
+    it began, and the database refused the whole import. A gap's ends are
+    now both execution times, with an unknown end when no fill time is
+    reported.
+  - With one venue read slot, the default headroom kept it all, so an opted-in
+    account was never read on the schedule. The headroom now keeps at most all
+    but one slot.
+  - The database budget alone did not make protection checks go first: two
+    kept-history accounts sorting earlier could take both worker slots. Each
+    tick now claims protection work first, and kept history then leaves one
+    worker slot free.
+  - Capped reads of out-of-scope fills kept the boundary where it was, so each
+    check added an identical open gap. The same gap found again widens the
+    open one.
+  - Extending a record kept its start when a later read reached further back.
+    The start now moves back.
+  - A Refresh reporting complete history would have closed every gap while the
+    monitor's gap flag stayed set. Only a check closes them, as only a check
+    clears the flag.
+
+  Sol confirmed owner filtering and the composite account keys, isolation in
+  both auth modes, the paper and manual refusals, an omitted setting keeping
+  the opt-in, disabled accounts hidden, settings-revision fencing,
+  transactional fill and coverage writes, bounded responses, the
+  capability-driven toggle and that the evaluation gate rechecks protection
+  work after reconciliation and watch updates.
+- **Check.** `scripts/check.sh` passed on `e4cfdbe0`: backend 4,156 passed, 5 skipped; frontend 185 files and 4,121 tests.
 
 ## 7. Lighter forced events
 
