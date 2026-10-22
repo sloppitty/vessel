@@ -39,7 +39,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         var rows = await (from m in Rows.AsNoTracking()
                           join a in db.Accounts on m.AccountId equals a.Id
                           where a.TradingMode == "real" && a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) &&
-                              (a.KeepExecutionHistory || ActiveBackfills.Any(b => b.AccountId == a.Id) || ActivePlays.Any(p => p.AccountId == a.Id) ||
+                              (a.KeepExecutionHistory || ActivePlays.Any(p => p.AccountId == a.Id) ||
                                Watching.Any(x => x.Link.AccountId == a.Id && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)) ||
                                AwaitingDiscrepancies.Any(d => d.AccountId == a.Id) ||
                                // Independent of scheduling: what the persistent incident indicators read stays listed.
@@ -96,17 +96,70 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
     public async Task<bool> EligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct) =>
         await KeepsHistoryAsync(accountId, ct) || await ProtectionEligibleAsync(accountId, now, ct);
 
-    /// <summary>
-    /// An enabled real venue account that keeps its execution history (Phase 2, item 6), or has a backfill the owner started
-    /// (6b); both are read behind protection checks.
-    /// </summary>
+    /// <summary>An enabled real venue account that keeps its execution history (Phase 2, item 6).</summary>
     private Task<bool> KeepsHistoryAsync(Guid accountId, CancellationToken ct) => db.Accounts.AnyAsync(a => a.Id == accountId &&
-        (a.KeepExecutionHistory || ActiveBackfills.Any(b => b.AccountId == a.Id)) && a.TradingMode == "real" && a.IsEnabled && a.SourceId != null, ct);
+        a.KeepExecutionHistory && a.TradingMode == "real" && a.IsEnabled && a.SourceId != null, ct);
 
     private IQueryable<HistoryBackfill> ActiveBackfills => db.HistoryBackfills.Where(b => b.State == HistoryBackfill.Queued);
 
     public Task<HistoryBackfill?> ActiveBackfillAsync(Guid accountId, CancellationToken ct) =>
         ActiveBackfills.AsNoTracking().SingleOrDefaultAsync(b => b.AccountId == accountId, ct);
+
+    public Task<MonitorLease?> ClaimBackfillAsync(Guid accountId, string workerId, DateTimeOffset now, CancellationToken ct) =>
+        unitOfWork.ExecuteAsync(async () =>
+        {
+            var account = (await db.Accounts.FromSqlInterpolated($"""
+                SELECT * FROM accounts WHERE "Id" = {accountId} AND "OwnerId" = {db.CurrentOwnerId} FOR UPDATE SKIP LOCKED
+                """).ToListAsync(ct)).SingleOrDefault();
+            if (account is null) return null;
+            return await MonitorLockedAsync<MonitorLease?>(account, async (account, row) =>
+            {
+                if (await owners.StatusAsync(db.CurrentOwnerId, ct) != JournalOwnerStatus.Active || account.TradingMode != "real" ||
+                    !account.IsEnabled || account.SourceId is null) return null;
+                row.ReleaseAbandonedRefresh(now);
+                // Never beside another run of this account: a check, Refresh or backfill holds it.
+                if (row.ManualState != "idle") return null;
+                if (await ActiveBackfills.AsNoTracking().SingleOrDefaultAsync(b => b.AccountId == account.Id, ct) is not { } backfill ||
+                    backfill.NextPageAtUtc > now) return null;
+                if (await server.VenueRetryAtAsync(account.VenueId, ct) > now) return null;
+                // Behind protection checks: the same headroom as a read for kept history.
+                if (!await ReadCapacityAsync(account.VenueId, now, ct, Math.Min(settings.ProtectionHeadroom, settings.VenueReadConcurrency - 1)))
+                    return null;
+                var request = Guid.CreateVersion7();
+                row.Admit(request, "backfill", now, scheduled: true);
+                return row.Claim(request, workerId, now, MonitorOptions.Lease)
+                    ? new MonitorLease(db.CurrentOwnerId, accountId, request, row.Generation, workerId, "backfill") : null;
+            }, ct);
+        }, ct);
+
+    public async Task<(DateTimeOffset At, IReadOnlyList<string> Ids)?> FillWitnessAsync(Guid accountId, DateTimeOffset atOrBefore,
+        CancellationToken ct)
+    {
+        var at = await db.Fills.Where(f => f.AccountId == accountId && f.OccurredAtUtc <= atOrBefore)
+            .MaxAsync(f => (DateTimeOffset?)f.OccurredAtUtc, ct);
+        if (at is not { } known) return null;
+        return (known, await db.Fills.Where(f => f.AccountId == accountId && f.OccurredAtUtc == known)
+            .Select(f => f.SourceFillId).Distinct().ToListAsync(ct));
+    }
+
+    public async Task<IReadOnlyList<AccountHistoryGap>> OpenGapsAsync(Guid accountId, CancellationToken ct) =>
+        await db.HistoryGaps.Where(g => g.AccountId == accountId && g.ClosedAtUtc == null).OrderBy(g => g.OpenedAtUtc).ToListAsync(ct);
+
+    public async Task<DateTimeOffset> GapEndBoundAsync(AccountHistoryGap gap, CancellationToken ct)
+    {
+        // A gap from before the ledger is never widened, so it ended before it was recorded.
+        if (gap.FromUtc is not { } from) return gap.OpenedAtUtc;
+        var latest = await db.FillCoverage.Where(r => r.AccountId == gap.AccountId && r.GapFromUtc == from && r.GapToUtc == null)
+            .MaxAsync(r => (DateTimeOffset?)r.LastObservedAtUtc, ct);
+        return latest > gap.OpenedAtUtc ? latest.Value : gap.OpenedAtUtc;
+    }
+
+    public Task ReleaseBackfillAsync(MonitorLease lease, DateTimeOffset now, CancellationToken ct) => LockedAsync(lease.AccountId, (_, row) =>
+    {
+        // Only the run's own lease; a backfill run never moves the check schedule, state or cooldown.
+        if (row.Owns(lease.Generation, lease.WorkerId, now) && row.Trigger == "backfill") row.Release();
+        return Task.FromResult(true);
+    }, ct);
 
     public Task<HistoryBackfill?> BackfillAsync(Guid accountId, Guid backfillId, CancellationToken ct)
     {
@@ -188,8 +241,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
             {
                 a.Id, a.VenueId,
                 Monitorable = a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId),
-                Active = (a.KeepExecutionHistory || ActiveBackfills.Any(b => b.AccountId == a.Id)) && a.TradingMode == "real" ||
-                    ActivePlays.Any(p => p.AccountId == a.Id),
+                Active = a.KeepExecutionHistory && a.TradingMode == "real" || ActivePlays.Any(p => p.AccountId == a.Id),
                 Watching = Watching.Any(x => x.Link.AccountId == a.Id && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)),
                 Expired = Watching.Any(x => x.Link.AccountId == a.Id && !(x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)),
                 Awaiting = AwaitingDiscrepancies.Any(d => d.AccountId == a.Id),
@@ -257,7 +309,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
                     !account.IsEnabled || account.SourceId is null) return null;
                 row.ReleaseAbandonedRefresh(now);
                 if (row.ManualState == "running" && row.LeaseUntilUtc > now ||
-                    row.ManualState == "idle" && !(row.NextRunAtUtc <= now) || row.Trigger == "refresh" && requestId is not null)
+                    row.ManualState == "idle" && !(row.NextRunAtUtc <= now) || MonitorAccount.Background(row.Trigger) && requestId is not null)
                     return null;
                 var scheduled = requestId is null && row.ManualState == "idle";
                 var headroom = 0;
@@ -273,7 +325,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
                     return null;
                 if (scheduled)
                     row.Admit(Guid.CreateVersion7(), row.ConfirmationAtUtc <= now ? "confirmation" : "monitor", now, scheduled: true);
-                if (row.Trigger == "refresh") return null;
+                if (MonitorAccount.Background(row.Trigger)) return null;
                 var request = requestId ?? row.RequestId;
                 return request is { } pending && row.Claim(pending, workerId, now, MonitorOptions.Lease)
                     ? new MonitorLease(db.CurrentOwnerId, accountId, pending, row.Generation, workerId, row.Trigger) : null;
@@ -333,8 +385,8 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
             });
         }
         // Verified complete history proves every open gap covered, as only a check clears the gap flag; a Refresh's
-        // complete read is recorded but closes nothing (Sol round 1).
-        if (record.Complete && record.Source != FillCoverageRecord.Refresh)
+        // complete read is recorded but closes nothing (Sol round 1). A backfill settles the gaps it proves itself (6b).
+        if (record.Complete && record.Source == FillCoverageRecord.Check)
             foreach (var gap in await db.HistoryGaps.Where(g => g.AccountId == record.AccountId && g.ClosedAtUtc == null).ToListAsync(ct))
                 gap.Close(record.Id, record.LastObservedAtUtc > gap.OpenedAtUtc ? record.LastObservedAtUtc : gap.OpenedAtUtc);
     }

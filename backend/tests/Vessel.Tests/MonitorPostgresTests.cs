@@ -1136,7 +1136,8 @@ public sealed partial class MonitorPostgresTests
     private sealed class EventSink : IVesselEventSink
     {
         public bool Baseline;
-        public Task SetRunAsync(Guid runId, string trigger, CancellationToken ct) => Task.CompletedTask;
+        public List<string> RunTriggers { get; } = [];
+        public Task SetRunAsync(Guid runId, string trigger, CancellationToken ct) { RunTriggers.Add(trigger); return Task.CompletedTask; }
         public Task EnsureMonitoringBaselineAsync(Guid accountId, CancellationToken ct) { Baseline = true; return Task.CompletedTask; }
         public List<VesselEventDraft> Drafts { get; } = [];
         public Task AppendAsync(VesselEventDraft draft, CancellationToken ct) { Drafts.Add(draft); return Task.CompletedTask; }

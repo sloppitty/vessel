@@ -15,6 +15,11 @@ public interface ISystemMonitorStore
     /// Pages hold every such row in (due, owner, account) order and omit none, so a continuation never passes unexamined work.
     /// </summary>
     Task<IReadOnlyList<DueMonitorCandidate>> DueCandidatesAsync(DueMonitorKey? after, DateTimeOffset dueBy, int limit, CancellationToken ct);
+    /// <summary>
+    /// Phase 2, item 6b: up to <paramref name="limit"/> accounts whose owner-started backfill has a page due and no other run,
+    /// longest waiting first. A backfill that reads moves its due time on, so the others follow.
+    /// </summary>
+    Task<IReadOnlyList<DueMonitorCandidate>> DueBackfillsAsync(int limit, CancellationToken ct);
 }
 
 public sealed record ServerMonitorHeartbeat(string Deployment, DateTimeOffset HeartbeatAtUtc);

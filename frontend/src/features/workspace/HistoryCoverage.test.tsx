@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { render } from '@/test/render'
 import { createWorkspaceApi, isHistoryCoverage, type BrokerAccount, type HistoryCoverage as Coverage, type WorkspaceApi } from '@/api/workspace'
 import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
-import { HistoryCoverage } from './HistoryCoverage'
+import { HistoryCoverage, backfillPollMs } from './HistoryCoverage'
 import { ManageAccountDialog } from './ManageDialogs'
 
 const gap = { id: '00000000-0000-4000-8000-000000000001', fromUtc: '2026-10-20T10:00:00Z', toUtc: '2026-10-21T09:00:00Z',
@@ -86,13 +86,37 @@ describe('history coverage (Phase 2, item 6)', () => {
     const gaps = within(panel).getByRole('group', { name: 'Possible gaps' })
     // Only the gap the venue may still serve offers it.
     const backfill = within(gaps).getByRole('button', { name: 'Backfill' })
-    expect(backfill).toHaveAccessibleDescription(/never creates a Play or an execution notification/)
+    expect(backfill).toHaveAccessibleDescription(/never creates a Play or a notification/)
     expect(gaps).toHaveTextContent("beyond the venue's reach")
     await userEvent.click(backfill)
     expect(startBackfill).toHaveBeenCalledWith('a', gap.id)
     expect(await within(panel).findByRole('group', { name: 'Backfills' })).toHaveTextContent('Reading behind protection checks · 1 page, 1 execution added')
     // One backfill at a time: no other gap offers it while this one reads.
     expect(within(panel).queryByRole('button', { name: 'Backfill' })).toBeNull()
+  })
+
+  it('accepts a backfill record and a first page anchored before the gap, and keeps polling after a failed read (6b, Sol round 1)', async () => {
+    const queued = { id: '00000000-0000-4000-8000-000000000009', gapId: gap.id, state: 'queued' as const, fromUtc: gap.fromUtc!,
+      toUtc: '2026-10-22T10:00:00Z', cursorUtc: '2026-10-01T00:00:00Z', pages: 1, rawRows: 2, addedFills: 1, omittedExecutions: 0,
+      error: null, createdAtUtc: '2026-10-22T10:00:00Z', finishedAtUtc: null }
+    const record = { source: 'backfill' as const, firstObservedAtUtc: '2026-10-22T10:00:00Z', lastObservedAtUtc: '2026-10-22T10:00:00Z',
+      importCount: 1, requestedFromUtc: gap.fromUtc, requestedToUtc: '2026-10-22T10:00:00Z', truncated: false, complete: false,
+      coveredFromUtc: gap.fromUtc, coveredToUtc: '2026-10-22T10:00:00Z', gapFromUtc: null, gapToUtc: null }
+    const reading: Coverage = { ...coverage, backfillAvailable: true, recordCount: 1, recent: [record], backfills: [queued] }
+    expect(isHistoryCoverage(reading)).toBe(true)
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const historyCoverage = vi.fn().mockResolvedValueOnce(reading).mockRejectedValueOnce(new Error('offline')).mockResolvedValue(reading)
+      render(<HistoryCoverage api={{ historyCoverage }} accountId="a" reloadKey="1" />)
+      const panel = await screen.findByRole('region', { name: 'History coverage' })
+      expect(panel).toHaveTextContent('Backfill · from')
+      await vi.advanceTimersByTimeAsync(backfillPollMs)
+      await waitFor(() => expect(historyCoverage).toHaveBeenCalledTimes(2))
+      // The failed read keeps what was shown and still reads again.
+      await vi.advanceTimersByTimeAsync(backfillPollMs)
+      await waitFor(() => expect(historyCoverage).toHaveBeenCalledTimes(3))
+      expect(panel).toHaveTextContent('Reading behind protection checks')
+    } finally { vi.useRealTimers() }
   })
 })
 

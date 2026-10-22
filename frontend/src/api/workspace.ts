@@ -114,7 +114,7 @@ export interface HistoryBackfill {
 }
 /** One import's coverage, or a run of continuous imports of one source. */
 export interface FillCoverage {
-  source: 'refresh' | 'check'
+  source: 'refresh' | 'check' | 'backfill'
   firstObservedAtUtc: string
   lastObservedAtUtc: string
   importCount: number
@@ -153,10 +153,12 @@ const isHistoryGap = (v: unknown): v is HistoryGap => isRecord(v) && isGuid(v.id
 const backfillStates = ['queued', 'completed', 'narrowed', 'failed'] as const
 export const isHistoryBackfill = (v: unknown): v is HistoryBackfill => isRecord(v) && isGuid(v.id) && isGuid(v.gapId) &&
   backfillStates.includes(v.state as typeof backfillStates[number]) && isTimestamp(v.fromUtc) && isTimestamp(v.toUtc) &&
-  isTimestamp(v.cursorUtc) && before(v.fromUtc, v.cursorUtc) && before(v.cursorUtc, v.toUtc) &&
+  // The first page may start at the retained execution just before the gap's start.
+  isTimestamp(v.cursorUtc) && before(v.cursorUtc, v.toUtc) &&
   [v.pages, v.rawRows, v.addedFills, v.omittedExecutions].every(isCount) && isNullOr(v.error, x => isText(x, 200)) &&
   isTimestamp(v.createdAtUtc) && isNullOr(v.finishedAtUtc, isTimestamp) && (v.state === 'queued') === (v.finishedAtUtc === null)
-const isFillCoverage = (v: unknown): v is FillCoverage => isRecord(v) && (v.source === 'refresh' || v.source === 'check') &&
+const coverageSources = ['refresh', 'check', 'backfill'] as const
+const isFillCoverage = (v: unknown): v is FillCoverage => isRecord(v) && coverageSources.includes(v.source as typeof coverageSources[number]) &&
   isTimestamp(v.firstObservedAtUtc) && isTimestamp(v.lastObservedAtUtc) && before(v.firstObservedAtUtc, v.lastObservedAtUtc) &&
   isPositiveCount(v.importCount) && isNullOr(v.requestedFromUtc, isTimestamp) && isTimestamp(v.requestedToUtc) &&
   (v.truncated === null || typeof v.truncated === 'boolean') && typeof v.complete === 'boolean' &&

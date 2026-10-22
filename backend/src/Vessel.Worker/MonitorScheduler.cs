@@ -192,13 +192,27 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
         foreach (var candidate in keptHistory)
         {
             if (running.Count >= keptSlots) break;
+            await ClaimBehindAsync(candidate, (store, now) => store.ClaimAsync(candidate.AccountId, null, workerId, now, ct));
+        }
+        // Phase 2, item 6b: owner-started backfills read last, in runs of their own, leaving the same slot free.
+        if (running.Count < keptSlots)
+            foreach (var candidate in await candidates.DueBackfillsAsync(CandidatePageSize, ct))
+            {
+                if (running.Count >= keptSlots) break;
+                await ClaimBehindAsync(candidate, (store, now) => store.ClaimBackfillAsync(candidate.AccountId, workerId, now, ct));
+            }
+        // An empty/all-suspended directory or no due accounts is healthy: the pass still did real discovery.
+        // If every active owner's work failed, do not turn mere scheduler liveness into a healthy monitor.
+        if (productive.Count > 0 || !sawActiveOwner && failed.Count == 0) await HeartbeatAsync(ct);
+
+        async Task ClaimBehindAsync(DueMonitorCandidate candidate, Func<IMonitorStore, DateTimeOffset, Task<MonitorLease?>> claim)
+        {
             var owner = candidate.OwnerId;
             try
             {
-                if (cappedVenues.Contains(candidate.VenueId) || failed.Contains(owner) || capped.Contains(owner) || await StatusAsync(owner) != JournalOwnerStatus.Active) continue;
+                if (cappedVenues.Contains(candidate.VenueId) || failed.Contains(owner) || capped.Contains(owner) || await StatusAsync(owner) != JournalOwnerStatus.Active) return;
                 await using var scope = scopes.Create(owner);
-                var store = scope.Services.GetRequiredService<IMonitorStore>();
-                if (await store.ClaimAsync(candidate.AccountId, null, workerId, time.GetUtcNow(), ct) is { } lease)
+                if (await claim(scope.Services.GetRequiredService<IMonitorStore>(), time.GetUtcNow()) is { } lease)
                     running.Add(RunAsync(owner, lease, ct));
             }
             catch (Exception error) when (error is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -208,9 +222,6 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
                 Warn(owner, error);
             }
         }
-        // An empty/all-suspended directory or no due accounts is healthy: the pass still did real discovery.
-        // If every active owner's work failed, do not turn mere scheduler liveness into a healthy monitor.
-        if (productive.Count > 0 || !sawActiveOwner && failed.Count == 0) await HeartbeatAsync(ct);
 
         async Task<JournalOwnerStatus> StatusAsync(Guid owner)
         {

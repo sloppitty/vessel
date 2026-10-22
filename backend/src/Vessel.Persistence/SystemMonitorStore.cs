@@ -36,4 +36,29 @@ public sealed class SystemMonitorStore(NpgsqlDataSource data, TimeProvider time)
         while (await rows.ReadAsync(ct)) result.Add(new(rows.GetGuid(0), rows.GetGuid(1), rows.GetString(2), rows.GetFieldValue<DateTimeOffset>(3)));
         return result;
     }
+
+    public async Task<IReadOnlyList<DueMonitorCandidate>> DueBackfillsAsync(int limit, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(limit, 1000);
+        // An abandoned run's expired lease does not hide its account: the claim releases it.
+        await using var command = data.CreateCommand("""
+            SELECT a."OwnerId", a."Id", a."VenueId", b."NextPageAtUtc"
+            FROM account_history_backfills b
+            JOIN accounts a ON a."Id" = b."AccountId" AND a."OwnerId" = b."OwnerId"
+            LEFT JOIN monitor_accounts m ON m."AccountId" = a."Id" AND m."OwnerId" = a."OwnerId"
+            WHERE b."State" = 'queued' AND b."NextPageAtUtc" <= @now
+                AND a."IsEnabled" AND a."TradingMode" = 'real' AND a."SourceId" IS NOT NULL
+                AND (m."AccountId" IS NULL OR m."ManualState" = 'idle' OR m."LeaseUntilUtc" <= @now)
+                AND NOT EXISTS (SELECT 1 FROM server_venue_deadlines d
+                    WHERE d.venue_id = a."VenueId" AND d.retry_after_until > @now)
+            ORDER BY b."NextPageAtUtc", a."OwnerId", a."Id" LIMIT @limit
+            """);
+        command.Parameters.AddWithValue("now", time.GetUtcNow());
+        command.Parameters.AddWithValue("limit", limit);
+        await using var rows = await command.ExecuteReaderAsync(ct);
+        var result = new List<DueMonitorCandidate>();
+        while (await rows.ReadAsync(ct)) result.Add(new(rows.GetGuid(0), rows.GetGuid(1), rows.GetString(2), rows.GetFieldValue<DateTimeOffset>(3)));
+        return result;
+    }
 }

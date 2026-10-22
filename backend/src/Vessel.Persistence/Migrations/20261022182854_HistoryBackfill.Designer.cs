@@ -12,7 +12,7 @@ using Vessel.Persistence;
 namespace Vessel.Persistence.Migrations
 {
     [DbContext(typeof(VesselDbContext))]
-    [Migration("20261022143828_HistoryBackfill")]
+    [Migration("20261022182854_HistoryBackfill")]
     partial class HistoryBackfill
     {
         /// <inheritdoc />
@@ -364,6 +364,9 @@ namespace Vessel.Persistence.Migrations
                     b.Property<int>("AddedFills")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("ContinuityLost")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -373,6 +376,9 @@ namespace Vessel.Persistence.Migrations
                     b.Property<string>("Error")
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("Exhausted")
+                        .HasColumnType("boolean");
 
                     b.Property<int>("Failures")
                         .HasColumnType("integer");
@@ -389,6 +395,9 @@ namespace Vessel.Persistence.Migrations
                     b.Property<Guid>("GapId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset>("NextPageAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("OmittedExecutions")
                         .HasColumnType("integer");
 
@@ -404,6 +413,9 @@ namespace Vessel.Persistence.Migrations
                     b.Property<bool>("StartKnown")
                         .HasColumnType("boolean");
 
+                    b.Property<bool?>("StartServed")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("State")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -414,6 +426,10 @@ namespace Vessel.Persistence.Migrations
 
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Witness")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -430,7 +446,7 @@ namespace Vessel.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_account_history_backfills_state", "\"State\" IN ('queued', 'completed', 'narrowed', 'failed')");
 
-                            t.HasCheckConstraint("CK_account_history_backfills_window", "\"FromUtc\" <= \"ToUtc\" AND \"CursorUtc\" >= \"FromUtc\" AND \"CursorUtc\" <= \"ToUtc\" AND \"Pages\" >= 0 AND \"RawRows\" >= 0 AND\n\"AddedFills\" >= 0 AND \"OmittedExecutions\" >= 0 AND \"Failures\" >= 0 AND (\"State\" = 'queued') = (\"FinishedAtUtc\" IS NULL)");
+                            t.HasCheckConstraint("CK_account_history_backfills_window", "\"FromUtc\" <= \"ToUtc\" AND \"CursorUtc\" <= \"ToUtc\" AND \"Pages\" >= 0 AND \"RawRows\" >= 0 AND\n\"AddedFills\" >= 0 AND \"OmittedExecutions\" >= 0 AND \"Failures\" >= 0 AND (\"State\" = 'queued') = (\"FinishedAtUtc\" IS NULL)");
                         });
                 });
 
@@ -1999,6 +2015,9 @@ namespace Vessel.Persistence.Migrations
 
                     b.Property<Guid>("AccountId")
                         .HasColumnType("uuid");
+
+                    b.Property<bool>("Backfilled")
+                        .HasColumnType("boolean");
 
                     b.Property<decimal>("ClosedPnlUsd")
                         .HasColumnType("numeric");

@@ -281,13 +281,13 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         var ids = fills.Select(f => f.SourceFillId).Distinct().ToArray();
         var retained = await db.Fills.Where(f => f.AccountId == account.Id && ids.Contains(f.SourceFillId)).AsNoTracking().ToListAsync(ct);
         var existing = retained.Select(f => (f.ContractId, f.SourceFillId)).ToHashSet();
-        var stored = AddFills(account, fills.Where(f => existing.Add((f.ContractId, f.SourceFillId))));
+        var stored = AddFills(account, fills.Where(f => existing.Add((f.ContractId, f.SourceFillId))), backfilled: true);
         await RecordFillConflictsAsync(account, retained, stored, fills, observedAt, ct);
         await unitOfWork.SaveChangesAsync(ct);
         return stored.Values.ToList();
     }, ct);
 
-    private Dictionary<(string, string), ImportedFill> AddFills(Account account, IEnumerable<VenueFill> newFills)
+    private Dictionary<(string, string), ImportedFill> AddFills(Account account, IEnumerable<VenueFill> newFills, bool backfilled = false)
     {
         var stored = new Dictionary<(string, string), ImportedFill>();
         foreach (var f in newFills)
@@ -313,7 +313,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 OccurredAtUtc = f.OccurredAtUtc.ToUniversalTime(),
                 ExternalOrderId = f.OrderId,
                 TransactionHash = f.TransactionHash,
-                Leverage = f.Leverage
+                Leverage = f.Leverage,
+                Backfilled = backfilled
             });
         }
         return stored;

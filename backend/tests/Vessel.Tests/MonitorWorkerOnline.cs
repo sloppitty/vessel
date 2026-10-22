@@ -31,6 +31,14 @@ internal sealed class MonitorWorkerOnline(IMonitorStore inner, TimeProvider cloc
         inner.ProtectionEligibleAsync(accountId, now, ct);
     public Task RecordCoverageAsync(FillCoverageRecord record, CancellationToken ct) => inner.RecordCoverageAsync(record, ct);
     public Task<HistoryBackfill?> ActiveBackfillAsync(Guid accountId, CancellationToken ct) => inner.ActiveBackfillAsync(accountId, ct);
+
+    public Task<MonitorLease?> ClaimBackfillAsync(Guid accountId, string workerId, DateTimeOffset now, CancellationToken ct) =>
+        inner.ClaimBackfillAsync(accountId, workerId, now, ct);
+    public Task ReleaseBackfillAsync(MonitorLease lease, DateTimeOffset now, CancellationToken ct) => inner.ReleaseBackfillAsync(lease, now, ct);
+    public Task<(DateTimeOffset At, IReadOnlyList<string> Ids)?> FillWitnessAsync(Guid accountId, DateTimeOffset atOrBefore, CancellationToken ct) =>
+        inner.FillWitnessAsync(accountId, atOrBefore, ct);
+    public Task<IReadOnlyList<AccountHistoryGap>> OpenGapsAsync(Guid accountId, CancellationToken ct) => inner.OpenGapsAsync(accountId, ct);
+    public Task<DateTimeOffset> GapEndBoundAsync(AccountHistoryGap gap, CancellationToken ct) => inner.GapEndBoundAsync(gap, ct);
     public Task<HistoryBackfill?> BackfillAsync(Guid accountId, Guid backfillId, CancellationToken ct) => inner.BackfillAsync(accountId, backfillId, ct);
     public Task<AccountHistoryGap?> GapAsync(Guid accountId, Guid gapId, CancellationToken ct) => inner.GapAsync(accountId, gapId, ct);
     public Task AddAsync(HistoryBackfill backfill, CancellationToken ct) => inner.AddAsync(backfill, ct);

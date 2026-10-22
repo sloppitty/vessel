@@ -13,8 +13,8 @@ public sealed partial class HyperliquidPerpetualReader : IVenueFillHistoryReader
 
     /// <summary>
     /// Phase 2, item 6b: <c>userFillsByTime</c> over an inclusive, millisecond-aligned past window, parsed exactly like
-    /// <c>userFills</c>. Every raw row must carry a valid time inside the window: a page whose times are unknown proves
-    /// nothing, so it fails rather than being paged past.
+    /// <c>userFills</c>. Every raw row must carry a valid trade ID and a time inside the window: a page whose rows are
+    /// unknown proves nothing, so it fails rather than being paged past.
     /// </summary>
     public Task<VenueFillPage> ReadFillPageAsync(Account account, DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken ct)
     {
@@ -36,18 +36,16 @@ public sealed partial class HyperliquidPerpetualReader : IVenueFillHistoryReader
             using var document = await ReadJsonAsync(
                 new { type = "userFillsByTime", user = source, startTime = start, endTime = end, aggregateByTime = false }, token);
             var fills = ReadFills(document.RootElement, contracts, end, out var omitted);
-            DateTimeOffset? oldest = null, newest = null;
-            var count = 0;
+            var raw = new List<VenueRawRow>();
             foreach (var row in Array(document.RootElement).EnumerateArray())
             {
                 var at = Timestamp(Property(row, "time"), end);
                 var milliseconds = at.ToUnixTimeMilliseconds();
                 if (milliseconds < start || milliseconds > end) throw new VenueReadException(InvalidResponse);
-                if (oldest is null || at < oldest) oldest = at;
-                if (newest is null || at > newest) newest = at;
-                count++;
+                // tid is an in-scope fill's source ID; a row without one cannot witness continuity.
+                raw.Add(new(Identity(Property(row, "tid")), at));
             }
-            return new VenueFillPage(fills, count, oldest, newest, omitted);
+            return new VenueFillPage(fills, raw, omitted);
         }, ct);
     }
 }

@@ -92,7 +92,7 @@ internal sealed class IsolationVenues
         public int PageLimit => 2000;
         public int Reach => 10_000;
         public Task<VenueFillPage> ReadFillPageAsync(Account account, DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken ct) =>
-            Task.FromResult(new VenueFillPage([], 0, null, null, 0));
+            Task.FromResult(new VenueFillPage([], [], 0));
         public const string FundingId = "funding-shared-1";
         public string VenueId => fixture.VenueId;
         public FixtureReader Fixture => fixture;

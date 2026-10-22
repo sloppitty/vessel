@@ -64,7 +64,7 @@ public sealed partial class VesselEventStore
             var key = type == "play.opened" ? $"play:{play.Id}:opened" : type == "play.closed"
                 ? $"play:{play.Id}:closed" : $"status-change:{change.Id}";
             var account = await lookups.AccountAsync(play.AccountId, ct);
-            var occurred = await LifecycleSourceTimeAsync(play, change, ct);
+            var (occurred, historical) = await LifecycleSourceTimeAsync(play, change, ct);
             // A declaration and the return to Open that undoes it both carry its reason on the change itself.
             var unresolved = change.UnresolvedReason;
             var data = type == "play.closed" ? await ClosedDataAsync(play, ct) : VesselEventJson.Element(new
@@ -75,19 +75,21 @@ public sealed partial class VesselEventStore
             });
             drafts.Add(new(type, runId, key, change.From == PlayStatus.Paused && change.To == PlayStatus.Open
                 ? "warning" : "info", occurred, detected,
-                new(play.AccountId, account.VenueId, play.ContractId, play.Id), new(trigger), data,
+                new(play.AccountId, account.VenueId, play.ContractId, play.Id), new(historical ? VesselEventSources.History : trigger), data,
                 Timeliness(occurred, detected), play.Status == change.To ? "current" : "superseded"));
         }
         return drafts;
     }
 
-    private async Task<DateTimeOffset> LifecycleSourceTimeAsync(Play play, PlayStatusChange change, CancellationToken ct)
+    private async Task<(DateTimeOffset At, bool Historical)> LifecycleSourceTimeAsync(Play play, PlayStatusChange change, CancellationToken ct)
     {
         // Mutations still decide whether an event exists. Linked facts only supply its source timestamp.
         // Manual facts and owner lifecycle actions retain their action time, even when facts are backdated.
+        // Phase 2, item 6b: a change decided by a backfilled fill (the first entry for Open, the latest exit for Closed)
+        // happened in the past; its event is history, which no notification announces.
         var fallback = change.OccurredAtUtc;
         if (play.InstrumentSource != InstrumentSource.Venue || change.Source != StatusChangeSource.Venue ||
-            change.To is not (PlayStatus.Open or PlayStatus.Closed)) return fallback;
+            change.To is not (PlayStatus.Open or PlayStatus.Closed)) return (fallback, false);
         var rows = await db.LinkedOrders(db.OrderLinks.Where(l => l.PlayId == play.Id && l.State == OrderLinkState.Linked)).ToListAsync(ct);
         var links = rows.Select(r => r.Link).ToList();
         var orders = rows.Select(r => r.Order).DistinctBy(o => o.Id).ToList();
@@ -96,26 +98,29 @@ public sealed partial class VesselEventStore
             .Where(f => f.AccountId == play.AccountId && f.ContractId == play.ContractId).ToListAsync(ct)).ToLookup(OrderKey.Of);
         var facts = links.SelectMany(l => fills[OrderKey.Of(orderOf[l.ImportedOrderId])]
             .Select(f => new LinkedFill(l.Role, f))).ToList();
-        if (facts.Any(f => f.Fill.Quantity <= 0)) return fallback;
+        if (facts.Any(f => f.Fill.Quantity <= 0)) return (fallback, false);
         var side = ExecutionIntegrity.EntrySide(PlayDocuments.Read(play.Plan));
         var counted = facts.Where(f => !ExecutionIntegrity.Contradicts(f.Role, side, f.Fill)).ToList();
         var entries = counted.Where(f => f.Role == OrderLinkRole.Entry).ToList();
-        if (entries.Count == 0) return fallback;
+        if (entries.Count == 0) return (fallback, false);
         var incompleteOrders = orders.Where(o => ExecutionIntegrity.MissingExecutions(o, fills[OrderKey.Of(o)])).ToList();
         var incomplete = incompleteOrders.Select(o => o.ExternalOrderId).ToHashSet(StringComparer.Ordinal);
         var incompleteIds = incompleteOrders.Select(o => o.Id).ToHashSet();
         if (change.To == PlayStatus.Open)
         {
             // A partial resting order is valid evidence. Known missing executions cannot establish the first fill.
-            if (links.Any(l => l.Role == OrderLinkRole.Entry && incompleteIds.Contains(l.ImportedOrderId))) return fallback;
+            if (links.Any(l => l.Role == OrderLinkRole.Entry && incompleteIds.Contains(l.ImportedOrderId))) return (fallback, false);
             var opened = entries.Min(f => f.Fill.OccurredAtUtc);
+            var historical = entries.Where(f => f.Fill.OccurredAtUtc == opened).All(f => f.Fill.Backfilled);
             // An implausible future source timestamp is not evidence that a mutation happened in the future.
-            return opened <= fallback ? opened : fallback;
+            return (opened <= fallback ? opened : fallback, historical);
         }
         var entryOrders = links.Where(l => l.Role == OrderLinkRole.Entry).Select(l => l.ImportedOrderId).ToHashSet();
-        if (orders.Any(o => entryOrders.Contains(o.Id) && o.Status == "open")) return fallback;
+        if (orders.Any(o => entryOrders.Contains(o.Id) && o.Status == "open")) return (fallback, false);
         // The same latest valid exit the outcome calculator scores, clamped to the detection time.
-        return PlayExitTime.LatestValidExit(new(play, [], facts, incomplete), fallback) ?? fallback;
+        if (PlayExitTime.LatestValidExit(new(play, [], facts, incomplete), fallback) is not { } exit) return (fallback, false);
+        var deciding = counted.Where(f => f.Role != OrderLinkRole.Entry && f.Fill.OccurredAtUtc == exit).ToList();
+        return (exit, deciding.Count > 0 && deciding.All(f => f.Fill.Backfilled));
     }
 
     /// <summary>

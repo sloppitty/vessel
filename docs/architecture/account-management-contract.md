@@ -155,6 +155,7 @@ Phase 2, item 6a of the [risk and coverage contract](phase2-risk-coverage-contra
   with its other facts.
 - **Backfill (6b).** On a venue that serves executions by time, each open gap
   offers **Backfill**, one at a time per account. Its progress shows under
-  **Backfills** and the panel reads it again every 15 seconds while it reads. A
+  **Backfills** and the panel reads it again every 15 seconds while it reads,
+  after a failed read too. What it could not prove stays open as its own gap: a
   span the venue no longer serves is marked beyond its reach and offers none.
   See the [workers reference](messaging-and-workers.md#coverage-signals).

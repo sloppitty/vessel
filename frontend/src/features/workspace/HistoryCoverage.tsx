@@ -12,11 +12,11 @@ function backfillText(b: HistoryBackfill) {
   const read = `${b.pages} ${b.pages === 1 ? 'page' : 'pages'}, ${b.addedFills} ${b.addedFills === 1 ? 'execution' : 'executions'} added`
   return b.state === 'queued' ? `Reading behind protection checks · ${read}`
     : b.state === 'completed' ? `Covered · ${read}`
-    : b.state === 'narrowed' ? `Partly covered: the start is beyond the venue's reach · ${read}`
+    : b.state === 'narrowed' ? `Partly covered: the rest stays open as its own gap · ${read}`
     : `Stopped: ${b.error ?? 'the backfill failed.'}`
 }
 
-const sourceLabels: Record<FillCoverage['source'], string> = { refresh: 'Refresh', check: 'Scheduled or owner check' }
+const sourceLabels: Record<FillCoverage['source'], string> = { refresh: 'Refresh', check: 'Scheduled or owner check', backfill: 'Backfill' }
 
 function Span({ from, to, unknown }: { from: string | null; to: string | null; unknown: string }) {
   return <>{from ? <Time at={from} /> : unknown} – {to ? <Time at={to} /> : 'end unknown'}</>
@@ -36,6 +36,8 @@ export function HistoryCoverage({ api, accountId, reloadKey }: {
   const request = useMemo(() => ({ api, accountId, reloadKey, generation }), [api, accountId, reloadKey, generation])
   const [loaded, setLoaded] = useState<{ request: typeof request; coverage: Coverage } | null>(null)
   const [starting, setStarting] = useState<{ gapId: string; error: string | null } | null>(null)
+  // Reads that finished, failed ones included, so one failed read does not stop the polling.
+  const [settled, setSettled] = useState(0)
   useEffect(() => {
     // Clients without the read (older test doubles) show nothing.
     if (typeof request.api.historyCoverage !== 'function') return
@@ -43,16 +45,17 @@ export function HistoryCoverage({ api, accountId, reloadKey }: {
     request.api.historyCoverage(request.accountId, controller.signal)
       .then(coverage => { if (!controller.signal.aborted) setLoaded({ request, coverage }) })
       .catch(() => { /* Coverage is context: a failed read leaves it out rather than blocking the account. */ })
+      .finally(() => { if (!controller.signal.aborted) setSettled(value => value + 1) })
     return () => controller.abort()
   }, [request])
   const coverage = loaded?.request.api === api && loaded.request.accountId === accountId ? loaded.coverage : null
   const active = coverage?.backfills?.find(b => b.state === 'queued') ?? null
-  // While a backfill reads, the panel reads again now and then; it stops with the backfill or the page.
+  // While a backfill reads, the panel reads again now and then, after a failed read too; it stops with the backfill or the page.
   useEffect(() => {
     if (!active) return
     const timer = setTimeout(() => setGeneration(value => value + 1), backfillPollMs)
     return () => clearTimeout(timer)
-  }, [active, loaded])
+  }, [active, settled])
   async function start(gapId: string) {
     if (!api.startBackfill || starting && !starting.error) return
     setStarting({ gapId, error: null })
@@ -83,7 +86,7 @@ export function HistoryCoverage({ api, accountId, reloadKey }: {
             aria-describedby={`${id}-backfill-help`} onClick={() => { void start(gap.id) }}>Backfill</Button>}
         {starting?.gapId === gap.id && starting.error && <span className="error" role="alert"> {starting.error}</span>}</li>)}</ul>
       {canBackfill && <p id={`${id}-backfill-help`} className="muted">Backfill reads the gap&apos;s executions from the venue, behind protection
-        checks. It never creates a Play or an execution notification.</p>}
+        checks. It never creates a Play or a notification.</p>}
       {coverage.openGapCount > coverage.openGaps.length && <p className="muted">Showing the latest {coverage.openGaps.length} of {coverage.openGapCount}.</p>}
     </div> : <p className="muted">No open gap recorded.</p>}
     {coverage.backfills && coverage.backfills.length > 0 && <div role="group" aria-label="Backfills">

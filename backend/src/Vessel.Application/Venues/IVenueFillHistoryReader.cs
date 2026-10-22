@@ -17,9 +17,15 @@ public interface IVenueFillHistoryReader
 }
 
 /// <param name="Fills">The in-scope executions of the page, normalized like any import.</param>
-/// <param name="RawCount">Every row the venue returned, out-of-scope ones included.</param>
-/// <param name="OldestRawAtUtc">The oldest raw row's time; null without rows.</param>
-/// <param name="NewestRawAtUtc">The newest raw row's time; null without rows.</param>
+/// <param name="Raw">
+/// Every row the venue returned, out-of-scope ones included, by the venue's execution ID (an in-scope row's ID is its fill's
+/// source ID) and time. A later page proves it continues an earlier one only by returning that page's newest rows again.
+/// </param>
 /// <param name="OmittedExecutions">In-scope rows left out because a fact could not be verified.</param>
-public sealed record VenueFillPage(IReadOnlyList<VenueFill> Fills, int RawCount, DateTimeOffset? OldestRawAtUtc,
-    DateTimeOffset? NewestRawAtUtc, int OmittedExecutions);
+public sealed record VenueFillPage(IReadOnlyList<VenueFill> Fills, IReadOnlyList<VenueRawRow> Raw, int OmittedExecutions)
+{
+    public int RawCount => Raw.Count;
+}
+
+/// <summary>One raw execution row of a fill history page.</summary>
+public sealed record VenueRawRow(string Id, DateTimeOffset At);

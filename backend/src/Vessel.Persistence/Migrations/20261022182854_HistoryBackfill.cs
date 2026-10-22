@@ -16,6 +16,13 @@ namespace Vessel.Persistence.Migrations
                 table: "account_fill_coverage");
 
             migrationBuilder.AddColumn<bool>(
+                name: "Backfilled",
+                table: "imported_fills",
+                type: "boolean",
+                nullable: false,
+                defaultValue: false);
+
+            migrationBuilder.AddColumn<bool>(
                 name: "BeyondVenueReach",
                 table: "account_history_gaps",
                 type: "boolean",
@@ -41,11 +48,16 @@ namespace Vessel.Persistence.Migrations
                     ToUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     StartKnown = table.Column<bool>(type: "boolean", nullable: false),
                     CursorUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    Witness = table.Column<string>(type: "text", nullable: false),
                     Pages = table.Column<int>(type: "integer", nullable: false),
                     RawRows = table.Column<int>(type: "integer", nullable: false),
                     AddedFills = table.Column<int>(type: "integer", nullable: false),
                     OmittedExecutions = table.Column<int>(type: "integer", nullable: false),
                     FirstRawAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    StartServed = table.Column<bool>(type: "boolean", nullable: true),
+                    ContinuityLost = table.Column<bool>(type: "boolean", nullable: false),
+                    Exhausted = table.Column<bool>(type: "boolean", nullable: false),
+                    NextPageAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     Failures = table.Column<int>(type: "integer", nullable: false),
                     Error = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: true),
                     CreatedAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
@@ -56,7 +68,7 @@ namespace Vessel.Persistence.Migrations
                 {
                     table.PrimaryKey("PK_account_history_backfills", x => x.Id);
                     table.CheckConstraint("CK_account_history_backfills_state", "\"State\" IN ('queued', 'completed', 'narrowed', 'failed')");
-                    table.CheckConstraint("CK_account_history_backfills_window", "\"FromUtc\" <= \"ToUtc\" AND \"CursorUtc\" >= \"FromUtc\" AND \"CursorUtc\" <= \"ToUtc\" AND \"Pages\" >= 0 AND \"RawRows\" >= 0 AND\n\"AddedFills\" >= 0 AND \"OmittedExecutions\" >= 0 AND \"Failures\" >= 0 AND (\"State\" = 'queued') = (\"FinishedAtUtc\" IS NULL)");
+                    table.CheckConstraint("CK_account_history_backfills_window", "\"FromUtc\" <= \"ToUtc\" AND \"CursorUtc\" <= \"ToUtc\" AND \"Pages\" >= 0 AND \"RawRows\" >= 0 AND\n\"AddedFills\" >= 0 AND \"OmittedExecutions\" >= 0 AND \"Failures\" >= 0 AND (\"State\" = 'queued') = (\"FinishedAtUtc\" IS NULL)");
                     table.ForeignKey(
                         name: "FK_account_history_backfills_account_history_gaps_GapId",
                         column: x => x.GapId,
@@ -103,6 +115,10 @@ namespace Vessel.Persistence.Migrations
             migrationBuilder.DropCheckConstraint(
                 name: "CK_account_fill_coverage_source",
                 table: "account_fill_coverage");
+
+            migrationBuilder.DropColumn(
+                name: "Backfilled",
+                table: "imported_fills");
 
             migrationBuilder.DropColumn(
                 name: "BeyondVenueReach",

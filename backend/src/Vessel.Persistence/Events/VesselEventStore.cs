@@ -44,7 +44,7 @@ public sealed partial class VesselEventStore(VesselDbContext db, VesselEventMuta
             string.IsNullOrWhiteSpace(draft.DedupKey) || draft.DedupKey.Length > 1024 ||
             draft.Severity is not ("info" or "warning" or "critical") ||
             draft.Timeliness is not ("timely" or "late") || draft.Relevance is not ("current" or "superseded") ||
-            draft.Source.Trigger is not ("owner" or "monitor") || draft.Data.ValueKind != JsonValueKind.Object ||
+            draft.Source.Trigger is not ("owner" or "monitor" or VesselEventSources.History) || draft.Data.ValueKind != JsonValueKind.Object ||
             Encoding.UTF8.GetByteCount(draft.Data.GetRawText()) > 32_768 ||
             !ValidIds(draft.Source.OrderIds) || !ValidIds(draft.Source.FillIds))
             throw new ArgumentException("Invalid event.");

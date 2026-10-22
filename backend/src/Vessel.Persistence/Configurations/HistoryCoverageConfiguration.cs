@@ -57,7 +57,7 @@ internal sealed class HistoryBackfillConfiguration : IEntityTypeConfiguration<Hi
             table.HasCheckConstraint("CK_account_history_backfills_state", "\"State\" IN ('queued', 'completed', 'narrowed', 'failed')");
             table.HasCheckConstraint("CK_account_history_backfills_window",
                 """
-                "FromUtc" <= "ToUtc" AND "CursorUtc" >= "FromUtc" AND "CursorUtc" <= "ToUtc" AND "Pages" >= 0 AND "RawRows" >= 0 AND
+                "FromUtc" <= "ToUtc" AND "CursorUtc" <= "ToUtc" AND "Pages" >= 0 AND "RawRows" >= 0 AND
                 "AddedFills" >= 0 AND "OmittedExecutions" >= 0 AND "Failures" >= 0 AND ("State" = 'queued') = ("FinishedAtUtc" IS NULL)
                 """);
         });
