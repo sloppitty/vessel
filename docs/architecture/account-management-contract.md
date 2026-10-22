@@ -97,3 +97,38 @@ Verify names, nullable create, reparent/unlink, foreign IDs, portfolio deletion 
 The backend worker owns `backend/` and backend tests; the orchestrator owns frontend/root/docs and integration. The existing Hyperliquid adapter and approved Play/prototype layout need no changes. No new packages are required.
 
 Roll out the new explicit migration and rebuilt API to the owner-requested LAN preview only after checks, preserving existing records and the preview token.
+
+## Raw-facts export (October 21, 2026)
+
+Phase 2, item 5b (see `phase2-risk-coverage-contract.md`).
+
+`GET /api/accounts/{id}/facts?kind=executions|funding&from=yyyy-MM-dd&to=yyyy-MM-dd`
+streams one account's retained facts as CSV, in time order. The days are UTC
+and both ends are included; leaving them out exports everything retained.
+- **Which accounts.** Enabled real accounts only, as Activity shows them. A
+  disabled or paper account is refused with 409, and another owner's account
+  reads as not found.
+- **Requests.**
+  - The route is actual-only, so a `tradingMode=paper` request gets 409
+    before any read.
+  - An end date with no following day (9999-12-31) is a 400.
+  - A cancelled download stops its database reads.
+- **Executions** are imported fills, then owner-entered manual executions.
+  Each has:
+  - its provenance;
+  - native fill, order and contract IDs and the transaction hash;
+  - the normalized side, the venue's own direction and the position effect;
+  - exact price, quantity, fee and fee token, with the fee basis;
+  - the venue's P&L and its basis;
+  - the venue-reported leverage;
+  - for a manual row, its Play's instrument, and its Play, role and source
+    label.
+- **Funding** is its own file. Each settlement keeps its native source ID,
+  exact signed amount, asset, and RISEx's native nanoseconds. Settlements
+  within one microsecond follow their native nanoseconds.
+- **No notice row.** The files have none, so other tools can ingest them.
+  Settings → Data export states that they are retained facts only, not a tax
+  report.
+- **Cells.** Numbers are plain decimal strings written exactly, and an
+  unknown is empty. Text cells are neutralized against spreadsheet formulas.
+  Nothing is computed: no lots, no valuation, no inferred fill.
