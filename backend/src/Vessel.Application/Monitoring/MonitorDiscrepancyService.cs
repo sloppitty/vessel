@@ -27,8 +27,12 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
         var resting = observation.Read.Orders?.Orders.Where(x => x.Status == Venues.VenueOrderStatus.Open)
             .Select(x => new OrderKey(observation.Account.Id, x.ContractId, x.OrderId)).Distinct().ToArray() ?? [];
         var facts = await store.LoadAsync(observation.Account.Id, snapshotAt > recent ? snapshotAt : recent, resting, ct);
-        var records = (await store.RecordsAsync(observation.Account.Id, ct)).ToDictionary(x => (x.Kind, x.SubjectKey));
+        // Phase 2, item 6c: a run without protection work decides only the kept-history check; other records are untouched.
+        var keptOnly = !observation.Protection;
+        var records = (await store.RecordsAsync(observation.Account.Id, ct)).Where(x => !keptOnly || x.Kind == UnprotectedKind)
+            .ToDictionary(x => (x.Kind, x.SubjectKey));
         var scan = Observe(observation, facts, now);
+        if (keptOnly) scan.KeepOnly(UnprotectedKind);
         DateTimeOffset? next = scan.Next;
         var seen = new HashSet<(string, string)>();
         foreach (var finding in scan.Findings)

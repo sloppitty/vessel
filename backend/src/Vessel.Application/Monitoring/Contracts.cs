@@ -77,8 +77,12 @@ public sealed record MonitorRead(PerpetualVenueReadResult Sync, VenueOrderReadRe
     string? OrderError = null, bool CredentialError = false);
 /// <param name="CurrentOrderBook">The venue capability: its order reader returns the current open book. Without it the
 /// book-dependent checks do not run and protection coverage is unsupported. Required, so no caller assumes a book.</param>
+/// <param name="Protection">
+/// Whether the run has protection work. Without it (an account read only because it keeps its history, Phase 2, item 6c)
+/// only the kept-history check runs: an open position with no resting stop and no Play. Every other kind is left as it is.
+/// </param>
 public sealed record MonitorEvaluation(Guid RunId, Account Account, MonitorRead Read, DateTimeOffset? PreviousSuccessAtUtc,
-    DateTimeOffset? NewestFillBeforeReadUtc, bool HistoryGap, string Trigger, bool CurrentOrderBook);
+    DateTimeOffset? NewestFillBeforeReadUtc, bool HistoryGap, string Trigger, bool CurrentOrderBook, bool Protection = true);
 /// <param name="Coverage">Stop coverage of each evaluated Open Play; null when the facts were too incomplete to name them,
 /// which leaves the stored outcomes to go stale.</param>
 public sealed record MonitorEvaluationResult(DateTimeOffset? NextConfirmationAtUtc, bool Incomplete = false, string? SafeNotice = null,

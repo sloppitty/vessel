@@ -285,6 +285,7 @@ Whole-position orders and coverage (October 15):
 | `position.opposite` | The venue position has the opposite sign | critical |
 | `position.short` | The venue position is smaller than expected, same sign | warning |
 | `position.excess` | The venue position is larger than expected: untracked exposure | warning |
+| `position.unprotected` | On an account that keeps its history: an open position with no Open Play and no resting stop on the closing side (Phase 2, item 6c) | warning |
 | `fill.unlinked` | A fill on the instrument after an Open Play's first entry, whose order is neither linked nor suggested | warning |
 
 `fill.unlinked` details are bounded: a count, the total quantity, a capped list of fills and a fingerprint over the sorted fill IDs.

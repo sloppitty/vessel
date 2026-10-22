@@ -17,6 +17,11 @@ public sealed partial class MonitorDiscrepancyService
     private static readonly string[] PlayKinds = ["protection.missing", "protection.cancelled", "protection.short", "protection.excess",
         "protection.beyond-liquidation", "protection.orphaned", "entry.orphaned", "level.drift"];
     private static readonly string[] PositionKinds = ["position.missing", "position.opposite", "position.short", "position.excess", "fill.unlinked"];
+    /// <summary>
+    /// Phase 2, item 6c: an account that keeps its history has an open position with no resting stop and no Open Play.
+    /// A warning; it is the only check a run without protection work makes.
+    /// </summary>
+    public const string UnprotectedKind = "position.unprotected";
     /// <summary>Unlinked fills listed in details. The count, total and fingerprint always cover all of them.</summary>
     internal const int MaxListedFills = 20;
     /// <summary>Open Plays listed in instrument-level details. Their count, the fingerprint and InvolvedPlayIds cover all.</summary>
@@ -35,6 +40,14 @@ public sealed partial class MonitorDiscrepancyService
         /// <summary>Stop coverage of each evaluated Open Play; null while the facts cannot name them.</summary>
         public List<MonitorCoverageOutcome>? Coverage { get; set; }
         public void Add(Finding finding) { Findings.Add(finding); Incomplete |= finding.Present is null && !finding.Structural; }
+        /// <summary>Keeps one kind's findings; the run's completeness is then theirs alone, and no stop coverage is saved.</summary>
+        public void KeepOnly(string kind)
+        {
+            Findings.RemoveAll(x => x.Kind != kind);
+            Incomplete = Findings.Any(x => x.Present is null && !x.Structural);
+            Coverage = null;
+            Next = null;
+        }
     }
     private sealed record PlayFacts(Play Play, PlayPlanDocument Plan, VenueInstrument Instrument,
         PlayOrderLink[] Links, LinkedFill[] Fills, ExactAmount Quantity, DateTimeOffset? FirstEntry,
@@ -182,6 +195,9 @@ public sealed partial class MonitorDiscrepancyService
             var fillKnown = assignmentsComplete && Fresh(snapshotAt) && !gap && !ambiguousFills && involved.All(x => x.Valid) &&
                 !truncatedFills.Contains(instrument.ContractId) && unlinked.All(x => x.OccurredAtUtc <= snapshotAt);
             // Details stay bounded for any number of fills; the fingerprint still covers every fill ID.
+            // A fill gap leaves fill-derived checks unknown, not the current position: kept accounts often have gaps.
+            ObserveUnprotected(instrument, involved, positionsFresh && instrument.QuantityDecimals is >= 0 and <= 28 && positions.Length <= 1 &&
+                positions.All(x => Same(instrument, x.ContractId, x.VenueContractId)), actual);
             scan.Add(new("fill.unlinked", Subject(instrument), null, instrument.ContractId, Native(instrument), "warning", fillKnown ? unlinked.Length > 0 : null,
                 snapshotAt, ids, new { playIds = ids.Take(MaxListedPlays).ToArray(), playCount = ids.Length, nativeContractId = Native(instrument), count = unlinked.Length,
                     totalQuantity = ExecutionIntegrity.Quantity(unlinked).ToString(), fills = unlinked.Take(MaxListedFills).Select(x => new {
@@ -192,6 +208,27 @@ public sealed partial class MonitorDiscrepancyService
         // Unknown native products cannot be silently counted under a canonical alias.
         if (sync.Snapshot.Positions.Any(p => !sync.Instruments.Any(i => Same(i, p.ContractId, p.VenueContractId)))) scan.Incomplete = true;
         return scan;
+
+        // Phase 2, item 6c: an open position on an account that keeps its history, with no Open Play on its market and no
+        // stop resting on the closing side in the current book. Any stop on that side counts, whatever its size. Without a
+        // current book the check is undecidable by design; an unrecognized trigger on the closing side leaves it unknown.
+        // The account turning the opt-in off resolves it. Its identity is the position's side, so a changing quantity
+        // neither re-announces it nor restarts its confirmation.
+        void ObserveUnprotected(VenueInstrument instrument, PlayFacts[] involved, bool positionKnown, ExactAmount actual)
+        {
+            var kept = observation.Account.KeepExecutionHistory;
+            var sign = Rounded(actual, instrument.QuantityDecimals).Sign;
+            var direction = sign > 0 ? "long" : sign < 0 ? "short" : "flat";
+            var closing = sign > 0 ? ExecutionFacts.Sell : ExecutionFacts.Buy;
+            var triggers = currentOrders.Values.Where(order => Resting(order) && Same(instrument, order.ContractId, order.VenueContractId) &&
+                order.Side == closing).Select(OrderMechanics.Classify).ToArray();
+            bool? present = !kept ? false : !positionKnown ? null : sign == 0 || involved.Length > 0 ? false :
+                !bookRead ? null : !ordersFresh || orders?.OpenOrdersComplete != true || duplicateOrders ? null :
+                triggers.Contains(OrderMechanism.Stop) ? false : triggers.Contains(OrderMechanism.UnknownTrigger) ? null : true;
+            scan.Add(new(UnprotectedKind, Subject(instrument), null, instrument.ContractId, Native(instrument), Severity(UnprotectedKind), present,
+                snapshotAt, [], new { nativeContractId = Native(instrument), direction, venueQuantity = actual.ToString() }, new { direction },
+                Structural: kept && present is null && positionKnown && sign != 0 && involved.Length == 0 && !bookRead));
+        }
 
         // Only an actual linked stop on this account and native contract; a whole-position target, or a take-profit
         // linked with the Stop role, never protects.
