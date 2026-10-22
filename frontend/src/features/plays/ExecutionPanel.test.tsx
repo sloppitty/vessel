@@ -1,4 +1,4 @@
-import { coverageAs, coverageFixture, monitorFixture } from '@/test/monitor-fixture'
+import { coverageAs, coverageFixture, missingStopFixture, monitorFixture } from '@/test/monitor-fixture'
 import { screen, within } from '@testing-library/react'
 import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
@@ -209,6 +209,41 @@ describe('execution panel', () => {
     view.rerender(<ExecutionPanel execution={{ ...execution, venuePosition: null, riskAtFirstFill: null }} error={null} busy={false} entries={entries}
       direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
     expect(screen.queryByText(/^Venue liquidation/)).not.toBeInTheDocument()
+  })
+
+  it('offers a resting unlinked stop to answer a missing stop, never linking it by itself (phase 2, 8c)', async () => {
+    const user = userEvent.setup()
+    const onLink = vi.fn().mockResolvedValue(undefined)
+    const stop = order('41', { side: 'sell', orderType: 'Stop Market', triggerPrice: '95', reduceOnly: true })
+    const takeProfit = order('42', { side: 'sell', orderType: 'Take Profit Market', triggerPrice: '120', reduceOnly: true })
+    render(<ExecutionPanel execution={{ ...execution, unlinkedOrders: [stop, takeProfit], discrepancies: [missingStopFixture] }}
+      error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={onLink} onUnlink={vi.fn()} onDismiss={vi.fn()} />)
+    const buttons = screen.getAllByRole('button', { name: /^Link this stop/ })
+    // Only the stop mechanism on the exit side is offered; a take-profit never is.
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0]).toHaveTextContent('Link this stop to Entry 1 stop')
+    expect(onLink).not.toHaveBeenCalled()
+    await user.click(buttons[0]!)
+    expect(onLink).toHaveBeenLastCalledWith({ orderId: '41', role: 'stop', entryId: 'e1', levelId: 's1' })
+  })
+
+  it('offers it only for an open incident, for an order the server says can be a stop, and waits for unsaved edits (Sol round 1 on #43)', () => {
+    const stop = order('41', { side: 'sell', orderType: 'Stop Market', triggerPrice: '95', reduceOnly: true })
+    const contradicted = { ...order('43', { side: 'sell', orderType: 'Stop Market', triggerPrice: '94', reduceOnly: true }), roles: ['target' as const] }
+    const props = { error: null, busy: false, entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn(), onDismiss: vi.fn() }
+    const view = render(<ExecutionPanel execution={{ ...execution, unlinkedOrders: [stop],
+      discrepancies: [{ ...missingStopFixture, state: 'resolved' }] }} {...props} />)
+    expect(screen.queryByRole('button', { name: /^Link this stop/ })).toBeNull()
+    view.rerender(<ExecutionPanel execution={{ ...execution, unlinkedOrders: [stop],
+      discrepancies: [{ ...missingStopFixture, state: 'dismissed' }] }} {...props} />)
+    expect(screen.queryByRole('button', { name: /^Link this stop/ })).toBeNull()
+    // A retained fill the server says contradicts a stop: not offered.
+    view.rerender(<ExecutionPanel execution={{ ...execution, unlinkedOrders: [contradicted], discrepancies: [missingStopFixture] }} {...props} />)
+    expect(screen.queryByRole('button', { name: /^Link this stop/ })).toBeNull()
+    // Unsaved plan edits: the server does not know their levels yet.
+    view.rerender(<ExecutionPanel execution={{ ...execution, unlinkedOrders: [stop], discrepancies: [missingStopFixture] }} {...props}
+      rebindBlocked="Save or discard your plan changes first." />)
+    expect(screen.getByRole('button', { name: /^Link this stop/ })).toBeDisabled()
   })
 
   it('explains untracked and closed plays without edit controls', () => {
