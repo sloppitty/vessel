@@ -136,6 +136,10 @@
 
 ### Fixed
 
+- Hyperliquid: chart and suggestion prices follow the venue's decimal limit, so a planned
+  low-priced level matches the order the venue accepts. A wallet read failure on a
+  default-mode account no longer blocks the perpetuals refresh; the account balance shows as
+  unknown until the wallet is read again.
 - RISEx: history pages share one fixed end time, so new trades cannot shift them, and
   the history notice counts trades on unrecognized markets.
 - Plan numbers follow one grammar everywhere: the server refuses exponent,

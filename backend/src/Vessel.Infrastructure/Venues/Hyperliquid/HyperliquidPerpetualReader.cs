@@ -125,11 +125,26 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
 
             using var abstraction = await ReadJsonAsync(new { type = "userAbstraction", user = publicAddress }, token);
             var accountMode = ReadAccountMode(abstraction.RootElement);
-            using var spotMeta = await ReadJsonAsync(new { type = "spotMeta" }, token);
-            var stablecoins = ReadStablecoinMetadata(spotMeta.RootElement);
-            using var spotState = await ReadJsonAsync(new { type = "spotClearinghouseState", user = publicAddress }, token);
-            var wallet = ReadStablecoinWallet(spotState.RootElement, stablecoins, accountMode, timeProvider.GetUtcNow());
-            return new PerpetualVenueReadResult(snapshot with { StablecoinWallet = wallet }, instruments, executions, HistoryNotice,
+            VenueStablecoinWallet? wallet;
+            var notice = HistoryNotice;
+            try
+            {
+                using var spotMeta = await ReadJsonAsync(new { type = "spotMeta" }, token);
+                var stablecoins = ReadStablecoinMetadata(spotMeta.RootElement);
+                using var spotState = await ReadJsonAsync(new { type = "spotClearinghouseState", user = publicAddress }, token);
+                wallet = ReadStablecoinWallet(spotState.RootElement, stablecoins, accountMode, timeProvider.GetUtcNow());
+            }
+            catch (Exception error) when (WalletFailure(error) && SeparateLedgers(accountMode) && !token.IsCancellationRequested)
+            {
+                // Phase 2, item 14b (F-14): with separate perps and spot ledgers the wallet is not the perps balance, so its
+                // failure degrades the wallet alone. The last observed wallet stays, with its own time, and the account's
+                // balance is unknown until a wallet is read with the perps again. A rate limit or the read's deadline
+                // still stops the whole read so the venue's backoff holds.
+                wallet = null;
+                notice += " " + WalletUnavailableNotice;
+            }
+            return new PerpetualVenueReadResult(snapshot with { StablecoinWallet = wallet, AccountMode = accountMode }, instruments,
+                executions, notice,
                 PositionsComplete: positionsComplete, FillHistoryTruncated: fillCoverage.Count == MaxFills,
                 OldestRawFillAtUtc: fillCoverage.OldestAtUtc, OmittedExecutions: omitted);
         }, cancellationToken);
@@ -137,6 +152,8 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
 
     /// <summary>Primary perpetual DEX contracts are quoted and margined in USDC.</summary>
     private const string PrimaryQuoteAsset = "USDC";
+    /// <summary>Hyperliquid perpetual prices take at most this many decimals minus the contract's <c>szDecimals</c>.</summary>
+    private const int MaxPerpetualPriceDecimals = 6;
 
     private static List<VenueInstrument> ReadInstruments(JsonElement meta, bool selectableOnly = false)
     {
@@ -158,9 +175,11 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
                 throw new VenueReadException(InvalidResponse);
             // Delisted contracts still identify historical positions and fills during refresh.
             if (!selectableOnly || delisted.ValueKind != JsonValueKind.True)
-                // Hyperliquid's maintenance margin is half the initial margin at the contract's maximum leverage.
+                // Hyperliquid's maintenance margin is half the initial margin at the contract's maximum leverage. Perpetual
+                // prices take at most 6 − szDecimals decimals besides five significant figures (Phase 2, item 14b, F-11).
                 result.Add(new(canonical, decimals, leverage, PrimaryQuoteAsset,
-                    VenueContractId: canonical == name ? null : name, MaintenanceMarginFraction: 1m / (2 * leverage)));
+                    VenueContractId: canonical == name ? null : name, MaintenanceMarginFraction: 1m / (2 * leverage),
+                    MaxPriceDecimals: Math.Max(0, MaxPerpetualPriceDecimals - decimals)));
         }
         return result;
     }
@@ -266,6 +285,27 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         "Long > Short" or "Short > Long" => ExecutionFacts.Flip,
         _ => ExecutionFacts.Unknown
     };
+
+    internal const string WalletUnavailableNotice =
+        "The stablecoin wallet could not be refreshed; its last observed balances and their time are kept, and the " +
+        "account balance is unknown until it is read again.";
+
+    /// <summary>
+    /// A wallet read that failed on its own: an invalid or failed venue response, a dropped connection or a malformed
+    /// body (Sol round 1 on 14b). Never a rate limit, cancellation or the read's deadline.
+    /// </summary>
+    private static bool WalletFailure(Exception error) => error switch
+    {
+        VenueRateLimitException => false,
+        VenueReadException or HttpRequestException or IOException or JsonException => true,
+        _ => false,
+    };
+
+    /// <summary>
+    /// Modes whose perps and spot ledgers are separate. Unified and portfolio-margin accounts hold every balance in the
+    /// wallet, so they still need it to refresh.
+    /// </summary>
+    private static bool SeparateLedgers(string accountMode) => accountMode is not ("unifiedAccount" or "portfolioMargin");
 
     internal static bool IsPrimaryContract(string name) =>
         !name.StartsWith('@') && !name.Contains('/') && !name.Contains(':');

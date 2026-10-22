@@ -43,10 +43,11 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         store.WithAccountLockAsync(account.Id, async () =>
         {
             if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts cannot reconcile actual orders.");
-            var ticks = venues.Descriptor(account.VenueId)?.PriceRule == PriceRules.TickSize
-                ? instruments.Where(i => i.PriceStep is > 0).GroupBy(i => i.ContractId, StringComparer.Ordinal)
-                    .ToDictionary(g => g.Key, g => g.First().PriceStep!.Value, StringComparer.Ordinal)
-                : new Dictionary<string, decimal>(StringComparer.Ordinal);
+            // A tick-size venue's tick, or a significant-figure venue's decimal cap (Phase 2, item 14b, F-11).
+            var tickVenue = venues.Descriptor(account.VenueId)?.PriceRule == PriceRules.TickSize;
+            var ticks = instruments.Select(i => (i.ContractId, Step: tickVenue ? i.PriceStep : PriceRules.DecimalStep(i.MaxPriceDecimals)))
+                .Where(i => i.Step is > 0).GroupBy(i => i.ContractId, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First().Step!.Value, StringComparer.Ordinal);
             await ReconcileAsync(account, orders, ticks, ct);
             return true;
         }, ct);

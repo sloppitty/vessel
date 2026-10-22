@@ -218,6 +218,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
             snapshot.WithdrawableUsd = observation.WithdrawableUsd;
             snapshot.AvailableMarginUsd = observation.AvailableMarginUsd;
             snapshot.MarginUsedUsd = observation.MarginUsedUsd;
+            // The mode read with these perps decides how the ledgers combine, even when this read's wallet failed.
+            if (observation.AccountMode is { } mode) snapshot.AccountMode = mode;
             snapshot.Positions = observation.Positions.Select(p => new AccountPosition
             {
                 OwnerId = account.OwnerId,

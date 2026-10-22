@@ -1,3 +1,4 @@
+import type { PriceStep } from '@/lib/price-step'
 import type { ExecutionFill, ExecutionOrder, LinkOrder, LinkRole, OrderLink, PlaySummary } from '@/api/plays'
 import type { MonitorDiscrepancy } from '@/api/monitor'
 import { exactDecimal } from '@/lib/decimal'
@@ -96,7 +97,7 @@ export interface DriftContext {
   direction: 'long' | 'short'
   leverage: number
   /** The instrument's tick; prices match within it when it is coarser than the fifth significant figure. */
-  tick: number | null
+  tick: PriceStep
 }
 
 /**

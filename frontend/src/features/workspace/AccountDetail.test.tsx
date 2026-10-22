@@ -2,7 +2,7 @@ import { screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from '@/test/render'
 import { accountFixture } from '@/test/workspace-fixture'
-import type { WorkspaceApi } from '@/api/workspace'
+import type { AccountSnapshot, WorkspaceApi } from '@/api/workspace'
 import type { AccountMonitor } from '@/api/monitor'
 import { coverageFixture, monitorFixture } from '@/test/monitor-fixture'
 import { AccountDetail } from './AccountDetail'
@@ -45,5 +45,30 @@ describe('Account detail value unit', () => {
     detail('manual', 'manual')
     expect(screen.getByText('Known manual value')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'manual' })).toHaveAccessibleDescription('Entered manually')
+  })
+})
+
+describe('Account detail stablecoin wallet (Phase 2, item 14b)', () => {
+  const snapshot = (walletAt: string): AccountSnapshot => ({
+    observedAtUtc: '2026-10-22T11:00:00Z', valueScope: 'primary-perpetual-dex', accountValueUsd: '1000', withdrawableUsd: '900',
+    marginUsedUsd: '0', positions: [],
+    stablecoinWallet: { observedAtUtc: walletAt, accountMode: 'default', scope: 'hypercore-spot-stablecoins', totalNominalUsd: '1000',
+      availableNominalUsd: '1000', balances: [{ symbol: 'USDC', tokenIndex: 0, tokenId: 'usdc', total: '1000', held: '0', available: '1000' }],
+      notice: 'Venue stablecoin wallet only.' },
+  })
+  const show = (value: AccountSnapshot) => render(<AccountDetail account={{ ...accountFixture, venueId: 'hyperliquid', syncStatus: 'synced', sourceId: '7' }}
+    api={{ snapshot: vi.fn(() => Promise.resolve(value)) } as unknown as WorkspaceApi} refreshing={false} onSync={vi.fn()} onBack={vi.fn()} onManage={vi.fn()} />)
+
+  it('says when the wallet was read before the perpetuals, so its balances are not current (Sol round 1 on 14b)', async () => {
+    show(snapshot('2026-10-22T10:00:00Z'))
+    expect(await screen.findByRole('note')).toHaveTextContent(/before the latest perpetuals read: the wallet could not be refreshed with them, so the account balance is unknown/)
+    expect(screen.getByText(/^Wallet last read/)).toBeInTheDocument()
+  })
+
+  it('says nothing more when the wallet was read with the perpetuals', async () => {
+    show(snapshot('2026-10-22T11:00:01Z'))
+    expect(await screen.findByText('Venue stablecoin wallet only.')).toBeInTheDocument()
+    expect(screen.queryByRole('note')).toBeNull()
+    expect(screen.queryByText(/^Wallet last read/)).toBeNull()
   })
 })
