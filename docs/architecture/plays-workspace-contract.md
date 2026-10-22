@@ -453,3 +453,36 @@ Phase 2, item 10a (G-10; see `phase2-risk-coverage-contract.md`).
 - **Unchanged.** Sizing suggestions, Review, open risk and every stored
   result never read the assumptions. A venue with neither value set shows
   nothing.
+
+## Soft loss limits (October 22, 2026)
+
+Phase 2, item 10b (see `phase2-risk-coverage-contract.md`). It follows item 2's
+reporting setting.
+- **The limits.** Settings → Risk limits gains a daily and a weekly loss limit
+  in R, each above 0 and at most 100 with up to four decimals, blank until set.
+  They are stored on the server with the open-risk limit (`risk_settings`,
+  migration `20261022104353_LossLimits`). A `PUT` replaces every limit, so a
+  missing one is cleared.
+- **The loss.** `GET /api/risk/loss` (real only; paper gets 409) gives today and
+  this week in the reporting zone and week start:
+  - the exact sum of estimated R (planned-stop model) of real Plays closed in
+    the span, on the owner's enabled accounts, pooled;
+  - how many have R, and how many have none (unscorable, retrospective or
+    without a complete initial stop), which are counted apart and never as
+    zero;
+  - the limit, and whether the known loss reached it (the net R is at or
+    below minus the limit).
+- **Where it shows.** For real, non-retrospective Plays still to be traded:
+  - capital context, beside open risk, while a limit is set: today and this
+    week against their limits, with the Plays without R; a failed read says
+    unavailable;
+  - the Suggestions block, which states a reached limit even while closed;
+  - the pre-flight at Plan it, as the `loss-limit` check, sent only while a
+    limit is set. A reached limit is not met. A Play without R that could
+    still reach one leaves it unknown. Otherwise it is met. A failed read
+    sends no check.
+- **The cooldown note.** At a reached limit the pre-flight dialog takes an
+  optional cooldown note of at most 500 characters. It is stored with revision 1
+  on the `loss-limit` check, and History lists it.
+- **Nothing is blocked**, and sizing, Review and the ladder do not read the
+  limits. Review's pre-flight counts include the new check.

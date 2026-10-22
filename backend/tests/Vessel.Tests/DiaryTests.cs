@@ -364,7 +364,8 @@ public sealed partial class DiaryPostgresTests
             Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
         }
         var planned = (await (await client.PostAsJsonAsync($"/api/plays/{draft.Summary.Id}/status",
-            new ChangePlayStatusRequest(draft.Summary.Version, "planned", Preflight: [new("thesis", "passed")]))).Content.ReadFromJsonAsync<PlayDto>())!;
+            new ChangePlayStatusRequest(draft.Summary.Version, "planned",
+                Preflight: [new("thesis", "passed"), new("loss-limit", "skipped", "  Walk away until Monday.  ")]))).Content.ReadFromJsonAsync<PlayDto>())!;
         Assert.Equal("planned", planned.Summary.Status);
         var paused = (await (await client.PostAsJsonAsync($"/api/plays/{draft.Summary.Id}/status",
             new ChangePlayStatusRequest(planned.Summary.Version, "paused"))).Content.ReadFromJsonAsync<PlayDto>())!;
@@ -374,8 +375,9 @@ public sealed partial class DiaryPostgresTests
         (await client.PostAsJsonAsync($"/api/plays/{draft.Summary.Id}/status", new ChangePlayStatusRequest(paused.Summary.Version, "planned")))
             .EnsureSuccessStatusCode();
         var revision = Assert.Single((await client.GetFromJsonAsync<PlayHistoryDto>($"/api/plays/{draft.Summary.Id}/history"))!.Revisions);
-        var kept = Assert.Single(revision.Preflight!);
-        Assert.Equal(("thesis", "passed"), (kept.Code, kept.Outcome));
+        Assert.Collection(revision.Preflight!, kept => Assert.Equal(("thesis", "passed", (string?)null), (kept.Code, kept.Outcome, kept.Note)),
+            // Phase 2, item 10b: a reached loss limit keeps the owner's cooldown note with revision 1.
+            loss => Assert.Equal(("loss-limit", "skipped", "Walk away until Monday."), (loss.Code, loss.Outcome, loss.Note)));
     }
 
     [PostgresFact]

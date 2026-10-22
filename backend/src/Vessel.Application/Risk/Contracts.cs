@@ -43,8 +43,19 @@ public sealed record OpenRiskDto(DateTimeOffset AsOfUtc, string Scope, OpenRiskB
     OpenRiskProtectionDto Protection, IReadOnlyList<OpenRiskPlayDto> Plays, string? LimitPercent, string Notice);
 
 /// <summary>The owner's soft risk limits; null is unset.</summary>
-public sealed record RiskSettingsDto(string? OpenRiskLimitPercent);
-public sealed record UpdateRiskSettingsRequest(string? OpenRiskLimitPercent);
+/// <summary>The soft limits; each is null until the owner sets it. Loss limits are in R (Phase 2, item 10b).</summary>
+public sealed record RiskSettingsDto(string? OpenRiskLimitPercent, string? DailyLossLimitR = null, string? WeeklyLossLimitR = null);
+/// <summary>Replaces every limit: a missing or null one is cleared.</summary>
+public sealed record UpdateRiskSettingsRequest(string? OpenRiskLimitPercent, string? DailyLossLimitR = null, string? WeeklyLossLimitR = null);
+
+/// <summary>
+/// One reporting day or week's loss (Phase 2, item 10b): the exact sum of estimated R of real Plays closed in it
+/// (<paramref name="NetR"/>, "0" with none), how many have R and how many have none, which are never counted as zero, and
+/// whether the known loss reached the limit.
+/// </summary>
+public sealed record LossWindowDto(string Start, DateTimeOffset FromUtc, DateTimeOffset ToUtc, string? LimitR, string NetR, int WithR,
+    int WithoutR, bool Breached);
+public sealed record LossLimitsDto(LossWindowDto Day, LossWindowDto Week, string TimeZone, string WeekStart, string Notice);
 
 /// <summary>A stop of one entry, as the editor holds it: a price or a percent return on margin, and its share of the entry.</summary>
 public sealed record RiskStopDto(string Id, string Unit, string Value, string Share);

@@ -1,7 +1,7 @@
 import { errorMessage } from '@/api/errors'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { WorkspaceApi } from '@/api/workspace'
-import { cancelReasonLabels, cancelReasons, statusLabels, unresolvedReasonLabels, unresolvedReasons, type CancelReason, type PlayHistory, type PreflightCheck, type UnresolvedReason } from '@/api/plays'
+import { cancelReasonLabels, cancelReasons, statusLabels, unresolvedReasonLabels, unresolvedReasons, type CancelReason, type PlayHistory, type PreflightCheck, type UnresolvedReason, maxPreflightNote } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { describePlanChanges } from './saved'
@@ -136,15 +136,21 @@ const outcomeLabels = { passed: 'Met', skipped: 'Not met', unknown: 'Unknown' } 
 /** The pre-flight kept with revision 1, one line per check, or a line saying a plan from before it has none. */
 const preflightLines = (checks: readonly PreflightCheck[] | null | undefined) =>
   [checks?.length ? `Pre-flight: ${checks.map(check => `${preflightLabels[check.code].toLowerCase()} · ${outcomeLabels[check.outcome].toLowerCase()}`).join('; ')}.`
-    : 'Pre-flight not recorded.']
+    : 'Pre-flight not recorded.',
+  // Phase 2, item 10b: the owner's cooldown note at a reached loss limit, as written.
+  ...(checks?.flatMap(check => check.note ? [`Cooldown note: ${check.note}`] : []) ?? [])]
 
 /**
  * The pre-flight at Plan it (phase 1, 1.5): what the plan already says, recorded with revision 1. It never blocks:
  * Plan it anyway is always available, and so is going back to the plan.
  */
-export function PreflightDialog({ checks, pending, error, onPlan, onClose }: {
-  checks: readonly PreflightCheck[]; pending: boolean; error: string | null; onPlan: () => void; onClose: () => void
+export function PreflightDialog({ checks, pending, error, onPlan, onClose, lossLimit = null }: {
+  checks: readonly PreflightCheck[]; pending: boolean; error: string | null; onPlan: (note: string | null) => void; onClose: () => void
+  /** A reached soft loss limit (Phase 2, item 10b): the owner may add a cooldown note, kept with revision 1. */
+  lossLimit?: string | null
 }) {
+  const [note, setNote] = useState('')
+  const reached = checks.some(check => check.code === 'loss-limit' && check.outcome === 'skipped')
   return <Dialog open onOpenChange={next => { if (!next && !pending) onClose() }}>
     <DialogContent className="workspace-dialog">
       <DialogHeader><DialogTitle>Before planning</DialogTitle><DialogDescription>
@@ -152,9 +158,15 @@ export function PreflightDialog({ checks, pending, error, onPlan, onClose }: {
       </DialogDescription></DialogHeader>
       <ul className="preflight-checks" aria-label="Pre-flight checks">{checks.map(check => <li key={check.code} data-outcome={check.outcome}>
         <span>{preflightLabels[check.code]}</span><strong>{outcomeLabels[check.outcome]}</strong></li>)}</ul>
+      {reached && <div className="workspace-form">
+        {lossLimit && <p className="preflight-loss" role="note">{lossLimit}</p>}
+        <label htmlFor="preflight-cooldown">Cooldown note (optional)</label>
+        <textarea id="preflight-cooldown" value={note} maxLength={maxPreflightNote} rows={3} disabled={pending} onChange={event => setNote(event.target.value)} />
+      </div>}
       {error && <p className="error" role="alert">{error}</p>}
       <div className="management-actions"><Button type="button" variant="outline" onClick={onClose} disabled={pending}>Back to the plan</Button>
-        <Button type="button" className="play-primary" onClick={onPlan} disabled={pending}>{pending ? 'Planning…' : 'Plan it anyway'}</Button></div>
+        <Button type="button" className="play-primary" onClick={() => onPlan(reached && note.trim() ? note.trim() : null)} disabled={pending}>
+          {pending ? 'Planning…' : 'Plan it anyway'}</Button></div>
     </DialogContent>
   </Dialog>
 }

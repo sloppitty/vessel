@@ -96,27 +96,33 @@ public sealed class OpenRiskService(IOpenRiskStore store, IWorkspaceStore worksp
         return new(request.PlayId, plan.Direction, risk.Risk?.ToString(), risk.Reason, risk.Risk is { } value && !value.Terminates);
     }
 
-    public async Task<RiskSettingsDto> SettingsAsync(CancellationToken ct) => new(Limit(await store.SettingsAsync(ct)));
+    public async Task<RiskSettingsDto> SettingsAsync(CancellationToken ct) => Dto(await store.SettingsAsync(ct));
 
     public async Task<RiskSettingsDto> UpdateSettingsAsync(UpdateRiskSettingsRequest request, CancellationToken ct)
     {
-        decimal? limit = null;
-        if (request.OpenRiskLimitPercent is { } text)
+        static decimal? Parse(string? text, string message)
         {
-            if (!ExactDecimal.IsPlanText(text) || !ExactDecimal.TryParseVenue(text, out var value))
-                throw new ProblemException(400, "The open-risk limit is a plain decimal percentage, or empty to clear it.");
-            limit = value;
+            if (text is null) return null;
+            if (!ExactDecimal.IsPlanText(text) || !ExactDecimal.TryParseVenue(text, out var value)) throw new ProblemException(400, message);
+            return value;
         }
+        var limit = Parse(request.OpenRiskLimitPercent, "The open-risk limit is a plain decimal percentage, or empty to clear it.");
+        var daily = Parse(request.DailyLossLimitR, "The daily loss limit is a plain decimal number of R, or empty to clear it.");
+        var weekly = Parse(request.WeeklyLossLimitR, "The weekly loss limit is a plain decimal number of R, or empty to clear it.");
         var now = time.GetUtcNow();
         var saved = await unitOfWork.ExecuteAsync(async () =>
         {
             var settings = await store.SettingsForUpdateAsync(new RiskSettings(owner.OwnerId, now), ct);
             settings.SetOpenRiskLimit(limit, now);
+            settings.SetLossLimits(daily, weekly, now);
             await store.SaveAsync(ct);
             return settings;
         }, ct);
-        return new(Limit(saved));
+        return Dto(saved);
     }
+
+    private static RiskSettingsDto Dto(RiskSettings? settings) => new(Limit(settings), ExactDecimal.Format(settings?.DailyLossLimitR),
+        ExactDecimal.Format(settings?.WeeklyLossLimitR));
 
     private PlayRisk Risk(OpenRiskFacts fact, PlayPlanDocument plan, InstrumentSource source)
     {
