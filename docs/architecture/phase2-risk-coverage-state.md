@@ -568,6 +568,50 @@ October 22, 2026.
   checked between pages.
 - **Check.** `scripts/check.sh` passed on `89854857`: backend 4,175 passed, 5 skipped; frontend 185 files and 4,124 tests.
 
+**6c. Open position, no resting stop, no Play.** Implemented on `t3/phase2-no-stop`.
+- **The warning.** On an account that keeps its history, `position.unprotected` warns of an open position
+  with no Open Play on its market and no stop resting on the closing side in the current book. Any stop on
+  that side counts, whatever its size. It follows the usual lifecycle and the Hub's discrepancy rules.
+- **Its evidence.** A fresh, complete position read and a complete current book; a fill gap does not affect
+  it. Without a current book it is undecidable by design, and an unrecognized trigger on the closing side
+  leaves it unknown. Only an Open Play owns the position; a Planned one does not until its entry is linked.
+- **Confirmation.** It confirms on its condition (`ConfirmsOnCondition`, the lifecycle mechanism D-19 also
+  uses), so a changing quantity neither re-announces it nor restarts its confirmation. Its fingerprint keeps
+  the side and quantity, so a dismissed warning reopens when the position changes, after the same 60 s. It
+  rests on two reads: it is observed at the later and confirms only when every source of the confirming
+  observation is at least 60 s after the later source of the first (`EarliestSourceAtUtc`).
+- **Where it runs.** In every run of such an account, protection runs included. A run without protection
+  work decides only this kind and leaves every other record as it is.
+- **Not protection work.** An open warning never brings back the full comparison on an account without
+  Plays. It keeps the account checked until it resolves, and turning the opt-in off resolves it.
+- **Tests.** `MonitorUnprotectedPositionTests`: opening, a changing quantity, a closing-side stop, a stop on
+  the wrong side, an unrecognized trigger, no current book, a flat account, the opt-in turned off, an Open
+  Play owning the position, a Planned Play not owning it, a dismissed warning reopening on a changed
+  position, two reads confirming only when both are 60 s apart, and a protection run. The lifecycle's
+  condition and earliest-source rules in `DiscrepancyLifecycleTests`. The eligibility split against
+  PostgreSQL. The browser's wording and facts.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `f044295d`. Three findings, all fixed in
+  `bc4accae`:
+  - A dismissed warning never reopened when the position grew, since its
+    fingerprint held only the side. It now confirms on its condition, the
+    lifecycle mechanism D-19 also uses, with the quantity in its
+    fingerprint: a changing position still neither re-announces it nor
+    restarts its confirmation, but a dismissed warning reopens after 60 s.
+  - Confirmation used the snapshot's time for a finding that also rests on
+    the book, so two book reads 41 s apart could confirm it. It is observed
+    at the later read and confirms only when every source of the confirming
+    observation is 60 s after the first.
+  - The suggested action ("plan a Play for it, then Check") did not clear
+    it: only an Open Play owns the position. The action now says to link
+    the Play's entry so it is Open.
+
+  Sol confirmed the closing-side and take-profit classification, native
+  market matching, incomplete evidence and RISEx handling, that `KeepOnly`
+  leaves other kinds alone, protection-first scheduling and headroom, owner
+  and real-account scoping, the warning severity, Hub grouping and
+  withdrawal, and the browser's validators.
+- **Check.** `scripts/check.sh` passed on `bc4accae`: backend 4,194 passed, 5 skipped; frontend 185 files and 4,125 tests.
+
 ## 7. Lighter forced events
 
 Not started.

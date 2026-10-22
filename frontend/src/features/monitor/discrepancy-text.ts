@@ -16,6 +16,7 @@ const titles: Record<string, string> = {
   'position.short': 'The venue position is smaller than expected',
   'position.excess': 'The venue position is larger than expected',
   'fill.unlinked': 'A fill is not linked to a Play',
+  'position.unprotected': 'An open position has no resting stop and no Open Play',
 }
 
 /** One next step per kind. Vessel never sends orders, so venue changes are the owner's to make. */
@@ -33,6 +34,7 @@ const actions: Record<string, string> = {
   'position.short': 'Link the fills that reduced the position, or check it at the venue.',
   'position.excess': 'Link the extra fills to their Play, or reduce the position at the venue.',
   'fill.unlinked': 'Link the fill to its Play from that Play\'s Execution tab.',
+  'position.unprotected': 'Place a stop at the venue for the position, or record it in a Play and link its entry so the Play is Open, then Check.',
 }
 
 export const discrepancyTitle = (kind: string) => titles[kind] ?? 'Monitor discrepancy'
@@ -80,6 +82,11 @@ export function discrepancyFacts(record: MonitorDiscrepancy, time: (value: strin
   } else if (record.kind === 'fill.unlinked') {
     facts.push({ label: 'Unlinked fills', value: typeof details.count === 'number' ? String(details.count) : unknown })
     facts.push({ label: 'Total quantity', value: text(details.totalQuantity) ?? unknown })
+  } else if (record.kind === 'position.unprotected') {
+    // Phase 2, item 6c: a position on an account that keeps its history, with no Open Play and no resting stop.
+    const direction = details.direction === 'long' ? 'Long' : details.direction === 'short' ? 'Short' : null
+    facts.push({ label: 'Venue position', value: text(details.venueQuantity) ?? unknown })
+    facts.push({ label: 'Direction', value: direction ?? unknown })
   }
   facts.push({ label: 'Last observed', value: record.lastObservedAtUtc ? time(record.lastObservedAtUtc) : unknown })
   return facts
