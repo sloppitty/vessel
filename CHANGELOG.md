@@ -2,8 +2,20 @@
 
 ## Unreleased
 
+## 0.3.3 - October 22, 2026
+
+Release notes: [docs/releases/v0.3.3.md](docs/releases/v0.3.3.md).
+
 ### Added
 
+- An opt-in Hyperliquid paper playground keeps virtual portfolios, accounts,
+  capital and simulated executions separate from real accounts and results.
+  Starting capital is chosen once (4,000 nominal USD by default). Its optional
+  standalone worker checks closed minute candles hourly by default and counts
+  full eligible allocations at touched planned prices with zero fees/slippage.
+  Missing or ambiguous candles hold reservations and leave results unscored;
+  v1 has no manual resolution or simulated-close endpoint. New migration
+  `PaperTradingFoundation`; apply it explicitly before enabling Paper.
 - Settings has a Times choice: Local (your browser's zone, the default) or
   UTC. Every page shows times in that zone and names it, with the other zone
   in each time's tooltip; Activity and Review still filter by UTC days and
@@ -141,6 +153,25 @@
   one by one after the Play opens; an unavailable image offers Retry, a missing
   one says so, and saving never deletes or re-uploads an image that has not
   loaded (D-10).
+
+### Upgrade
+
+- Stop web, every API and every worker/replica (including notifications and
+  optional paper workers), then back up both database schemas, evidence,
+  credential keys and private configuration. Use matching v0.3.3 images and
+  apply the explicit migration service before restarting. No new identity
+  migration is included.
+- Journal migrations, in order: `20261019132931_MonitorCoverage`,
+  `20261020085301_PlanPreflight`, `20261020093407_ReviewCompletion`,
+  `20261020102320_UnresolvedStatus`, `20261020112132_ManualCorrectionBatch`,
+  `20261020155750_PaperTradingFoundation`. Existing records remain Real and
+  previously Reviewed Plays keep their completion. Paper stays off by default.
+- Historical sizing ladder levels may change because results now follow
+  actual exit times and recovery requires consecutive wins. Roll back with
+  the pre-upgrade backup and matching previous images; down migrations refuse
+  retained Unresolved history or paper data.
+- Earlier installations must also follow the existing upgrade requirements,
+  including the v0.3.0 order-identity restriction. See the deployment guide.
 
 ## 0.3.2 - October 19, 2026
 
