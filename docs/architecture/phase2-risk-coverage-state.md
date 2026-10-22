@@ -388,6 +388,19 @@ October 21, 2026.
   - Two `MonitorDiscrepancyTests` cases.
   - `discrepancy-text.test.ts`.
 - **Check.** `scripts/check.sh` passed on `53c029f1`: backend 4,054 passed, 5 skipped; frontend 175 files and 4,073 tests.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `d29aaec3`. Two findings, both fixed in
+  `49de89e0`:
+  - **High.** An incomplete order book that omitted the stop resolved a
+    critical incident. Only the complete book, or a fresh snapshot without
+    the Play's position, clears it.
+  - The position lookup ignored direction. Only a position in the Play's
+    direction counts; an opposite one leaves the check undecidable, for
+    `position.opposite` to report.
+
+  Sol confirmed equality at the boundary, cross and isolated prices, the
+  resting order's acting price, quiet cross drift and the stale-read and
+  capability guards.
+- **Check after round 1.** `scripts/check.sh` passed on `5c278dd6` (before documentation-only commits were restacked beneath it): backend 4,070 passed, 5 skipped; frontend 175 files and 4,073 tests.
 
 ## 9. Funding
 
