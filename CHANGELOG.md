@@ -136,6 +136,8 @@
 
 ### Fixed
 
+- RISEx: history pages share one fixed end time, so new trades cannot shift them, and
+  the history notice counts trades on unrecognized markets.
 - Plan numbers follow one grammar everywhere: the server refuses exponent,
   signed and trailing-dot text on write, naming the field, while unchanged
   stored text still saves; the browser never writes exponent text; a negative
