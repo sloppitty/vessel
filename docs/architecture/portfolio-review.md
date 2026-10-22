@@ -477,3 +477,55 @@ pages nothing. Review has a **Download CSV** button beside Definitions.
 - **What it leaves out.** Excluded rows carry no amounts, and imported
   positions carry no plan, R or review. Separate funding is not added. Owner
   data is never cached (`no-store`). Both auth modes isolate it by owner.
+
+## Week page (October 22, 2026)
+
+Phase 2, item 2 (G-11, N4, G-13; see `phase2-risk-coverage-contract.md`).
+- **The reporting setting.** One owner setting, stored on the server in
+  `reporting_settings` (migration `20261022100811_ReportingSettings`): an IANA
+  time zone and a week start, Monday or Sunday. Without a row the defaults
+  are UTC and Monday, so nothing shifts until the owner saves one.
+  - `GET` and `PUT /api/settings/reporting` belong to neither trading mode, so
+    Paper reads and saves it too. The zone must be an IANA ID this server
+    knows, exactly as given; Windows IDs are refused. A stored zone the server
+    no longer knows reads as UTC rather than failing the page.
+  - Settings shows it as **Reporting week**, after the display zone (1.6e),
+    which stays in the browser and display-only.
+- **The week.** Every Review read (`/api/review`, `/process`, `/exclusions`,
+  `/export`) takes an optional `week`: a local date (`yyyy-MM-dd`, from 2000
+  on) or `current`, the week holding today in the reporting zone. It replaces
+  the rolling period with that reporting week.
+  - The week runs from local midnight of its first day to the next week's,
+    half-open: `[from, to)`. A midnight a clock change skips starts the day at
+    its first valid instant, and a repeated one at its first occurrence. A
+    week can last 167 or 169 hours.
+  - Membership uses the same times as the rolling periods (latest exit,
+    cancellation, Unresolved declaration), as does the unassigned-fills count.
+    Facts are read as of now.
+  - The chart has one point per local day of the week, up to today.
+  - Weeks after the current one are refused (400), however far ahead.
+  - The report carries a `week` block: its first day, UTC range, zone, week
+    start and `data`. `none` means Vessel holds nothing that early in the
+    scope: no retained execution, and no Play of any status, Drafts included,
+    created before the week's end (Sol round 1 on item 2).
+    `empty` means it does, but nothing closed, was cancelled or was declared
+    Unresolved in the week. Otherwise it is `some`.
+  - The rolling periods and Activity keep UTC days, and rolling responses have
+    no `week` block.
+- **The page.** Review's **Week** action opens it in its own dialog, over the
+  page's filters, so Review's approved sections keep their place.
+  - Previous and next week, a date picker and This week.
+  - The week's scorecard and its exclusions. A rate is shown only from n = 10
+    decided Plays. Imported positions are counted apart from Plays, with the
+    weighting note, and positions Review cannot score are never counted as
+    excluded Plays.
+  - Review's coverage disclosure for the week: incomplete fees and
+    executions, Unresolved and cancelled Plays, unassigned fills, positions
+    included or not scored, the notice and the earliest retained fill.
+  - The process cases (1.4b), and the week's repeated mistake tags: those on
+    two or more of its Plays. Each count drills into the same week.
+  - The owner's latest next actions, as on the Plays page. Next actions have
+    no done state, so these are the newest written, not only the week's.
+  - The current Needs review count in the same scope, every asset.
+  - The promoted rule's answers arrive with item 3.
+- **Nothing more.** No reminder, schedule or generated text is added.

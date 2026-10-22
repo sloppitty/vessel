@@ -10,6 +10,7 @@ import type { WorkspaceApi } from '@/api/workspace'
 import { NotificationSettings } from '@/features/notifications/NotificationSettings'
 import { ReviewSettings } from '@/features/review/ReviewSettings'
 import { RiskSettings } from '@/features/settings/RiskSettings'
+import { ReportingSettings } from '@/features/settings/ReportingSettings'
 import { CostSettings } from '@/features/settings/CostSettings'
 import { DataExportSettings } from '@/features/settings/DataExportSettings'
 import type { InAppNotifications } from '@/features/notifications/useInAppNotifications'
@@ -37,6 +38,7 @@ export function SettingsPage({ system, disconnectSession, onAccounts, api, inApp
   if (!identity) return <div className="settings-grid">
     <AppearanceSettings />
     <TimeSettings />
+    <ReportingSettings api={api} />
     <PaperSettings api={api} {...(onPaperSettingsChange ? { onChange: onPaperSettingsChange } : {})} />
     {!paper && <NotificationSettings api={api} inApp={inApp} />}
     {!paper && <ReviewSettings />}
@@ -56,7 +58,7 @@ export function SettingsPage({ system, disconnectSession, onAccounts, api, inApp
   </div>
   return <Tabs value={tab} onValueChange={value => onTab?.(value === 'profile' ? 'profile' : 'appearance')} className="settings-tabs">
     <TabsList aria-label="Settings sections"><TabsTrigger value="appearance">Appearance</TabsTrigger><TabsTrigger value="profile">Profile &amp; sign-in</TabsTrigger></TabsList>
-    <TabsContent value="appearance"><div className="settings-grid"><AppearanceSettings /><TimeSettings /><PaperSettings api={api} {...(onPaperSettingsChange ? { onChange: onPaperSettingsChange } : {})} />{!paper && <NotificationSettings api={api} inApp={inApp} />}{!paper && <ReviewSettings />}{!paper && <RiskSettings api={api} />}{!paper && <CostSettings venues={system.venues} />}{!paper && <DataExportSettings api={api} />}{venuesPanel}</div></TabsContent>
+    <TabsContent value="appearance"><div className="settings-grid"><AppearanceSettings /><TimeSettings /><ReportingSettings api={api} /><PaperSettings api={api} {...(onPaperSettingsChange ? { onChange: onPaperSettingsChange } : {})} />{!paper && <NotificationSettings api={api} inApp={inApp} />}{!paper && <ReviewSettings />}{!paper && <RiskSettings api={api} />}{!paper && <CostSettings venues={system.venues} />}{!paper && <DataExportSettings api={api} />}{venuesPanel}</div></TabsContent>
     <TabsContent value="profile"><ProfileSettings identity={identity} onSignOut={disconnectSession} /></TabsContent>
   </Tabs>
 }

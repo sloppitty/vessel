@@ -31,6 +31,7 @@ import {
 import { isSizingDocument, type SizingDocument } from './sizing'
 import { attachmentName, type DownloadedFile } from '@/lib/download'
 import { isOpenRisk, isOpenRiskPreview, isRiskSettings, openRiskPath, type OpenRisk, type OpenRiskPreview, type OpenRiskPreviewRequest, type RiskSettings } from './risk'
+import { isReportingSettings, reportingSettingsPath, type ReportingSettings, type WeekStart } from './reporting'
 import { isReviewDocument, reviewPath, isReviewExclusions, reviewExclusionsPath, isReviewProcessPage, reviewProcessPath, type ReviewDocument, type ReviewQuery, type ReviewExclusions, type ReviewProcessPage, type ReviewProcessSelection } from './review'
 import {
   isRetrospectivePreview, isCreateRetrospectivePlayRequest, retrospectivePreviewPath, retrospectivePlayPath,
@@ -392,6 +393,9 @@ export interface WorkspaceApi {
   riskSettings(signal?: AbortSignal): Promise<RiskSettings>
   /** Saves the open-risk soft limit (a decimal percentage above 0 and at most 100), or clears it with null. */
   updateRiskSettings(settings: RiskSettings): Promise<RiskSettings>
+  /** The owner's reporting zone and week start (Phase 2, item 2); mode-neutral, so Paper reads and saves it too. */
+  reportingSettings(signal?: AbortSignal): Promise<ReportingSettings>
+  updateReportingSettings(settings: { timeZone: string; weekStart: WeekStart }): Promise<ReportingSettings>
 }
 
 const optionalTradingMode = (v: Record<string, unknown>) => v.tradingMode === undefined || v.tradingMode === 'real' || v.tradingMode === 'paper'
@@ -866,6 +870,9 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
     riskSettings: signal => call('/api/risk/settings', { ...playRequest, validate: isRiskSettings, ...withSignal(signal) }),
     updateRiskSettings: settings => call('/api/risk/settings', { ...playRequest, validate: isRiskSettings, method: 'PUT',
       body: JSON.stringify({ openRiskLimitPercent: settings.openRiskLimitPercent }) }),
+    reportingSettings: signal => call(reportingSettingsPath, { ...playRequest, validate: isReportingSettings, ...withSignal(signal) }),
+    updateReportingSettings: settings => call(reportingSettingsPath, { ...playRequest, validate: isReportingSettings, method: 'PUT',
+      body: JSON.stringify({ timeZone: settings.timeZone, weekStart: settings.weekStart }) }),
     updateSizingSettings: settings => tradingMode === 'paper' ? Promise.reject(new ApiError('http', 'Paper uses the shared risk preference read-only. Edit it in Real mode.', 409)) : call('/api/sizing/settings', { ...playRequest, validate: isSizingDocument, method: 'PUT', body: JSON.stringify({ riskPercent: settings.riskPercent }) }),
     activity: (query, signal) => call(activityPath(query), { ...workspaceRequest, validate: (v): v is ActivityPage => isActivityPage(v, query), ...withSignal(signal) }),
     activityFills: (accountId, operationId, signal) => call(activityFillsPath(accountId, operationId, tradingMode ?? 'real'), { ...workspaceRequest,
