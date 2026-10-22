@@ -187,16 +187,17 @@ Overview and portfolios select this reported amount once per enabled RISEx accou
 ## October 21, 2026: robustness (Phase 2, item 14a)
 
 See `phase2-risk-coverage-contract.md`, item 14a.
-- **A trade without reported PnL (D-22, probe V5)** is set aside and counted,
-  never imported with a zero result. It used to abort the whole read, so
-  balances and positions froze until the row aged out of the latest 2,000.
-  - The snapshot and every other fill still apply.
-  - `OmittedExecutions` counts it beside trades on unrecognized markets.
-  - The history notice ends with one sentence, for example "Omitted
-    executions: 1 without reported PnL, 1 on an unrecognized market."
-  - A Play linked to its order sees known missing executions through the
-    shared `OrderKey`/`MissingExecutions` rule, so its result is unknown.
-  - A missing or empty fee is still an invalid response.
+- **A trade without reported PnL (D-22, probe V5)** still fails the read, as
+  before. Setting it aside waits for item 7's durable omission markers (Sol
+  round 1 on 14a). Only a counted total of omissions reaches the import, and
+  the shared `MissingExecutions` rule checks only orders with status filled.
+  A set-aside trade of a partly filled order that is still open or was
+  cancelled would leave the order looking complete, so its Play could close
+  and be scored. Item 7's markers keep the trade's order, and a linked order
+  with one has known missing executions whatever its status.
+- **Counted omissions.** Trades on unrecognized markets were already counted
+  in `OmittedExecutions`; the history notice now ends with one sentence for
+  them, for example "Omitted executions: 1 on an unrecognized market."
 - **A fixed end cut (F-13, probe V9).** Every `/v1/trade-history` page carries
   the same `end_time`: the snapshot's observation time in nanoseconds,
   truncated to whole milliseconds. A trade arriving between page requests
