@@ -40,12 +40,17 @@ describe('the if-then rule (Phase 2, item 3)', () => {
     await user.click(screen.getByRole('button', { name: 'Archive the rule' }))
     expect(controls.onArchive).toHaveBeenCalledWith(rule(3))
     expect(screen.getByRole('button', { name: 'Change the rule' })).toBeEnabled()
+    // The source Play opens from the rule (Sol round 1).
+    const onOpenSource = vi.fn()
+    view.rerender(<IfThenRuleLine controls={{ ...controls, onOpenSource, state: { active: rule(3), tradingMode: 'real' } }} />)
+    await user.click(screen.getByRole('button', { name: 'BTC breakout' }))
+    expect(onOpenSource).toHaveBeenCalledWith(source)
   })
 
   it('writes a rule with both parts, trimmed, and names a promoted next action', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn()
-    render(<RuleDialog active={null} draft={{ if: '', then: 'Wait for the retest', source: { playId: source, title: 'BTC breakout' } }}
+    render(<RuleDialog active={null} draft={{ if: '', then: 'Wait for the retest', source: { playId: source, title: 'BTC breakout' }, expectedVersion: null }}
       pending={false} error={null} onSave={onSave} onClose={vi.fn()} />)
     expect(screen.getByText('From the next action of BTC breakout.')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Then' })).toHaveValue('Wait for the retest')
@@ -63,9 +68,9 @@ describe('the if-then rule (Phase 2, item 3)', () => {
     const view = render(<PreflightDialog checks={checks} pending={false} error={null} onPlan={onPlan} onClose={vi.fn()} rule={rule(2)} />)
     expect(screen.getByRole('group', { name: 'Your if-then rule' })).toHaveTextContent('If price breaks out on low volume, then wait for the retest')
     const plan = screen.getByRole('button', { name: 'Plan it anyway' })
-    // No answer never blocks planning.
+    // No answer never blocks planning; the shown version is still sent, so only a shown rule is recorded.
     await user.click(plan)
-    expect(onPlan).toHaveBeenLastCalledWith(null, null)
+    expect(onPlan).toHaveBeenLastCalledWith(null, { version: 2 })
     await user.click(screen.getByRole('radio', { name: 'An exception this time' }))
     expect(plan).toBeDisabled()
     await user.type(screen.getByRole('textbox', { name: 'Why this is an exception' }), '  Earnings gap, sized down.  ')
@@ -78,9 +83,12 @@ describe('the if-then rule (Phase 2, item 3)', () => {
     view.rerender(<PreflightDialog checks={checks} pending={false} error={null} onPlan={onPlan} onClose={vi.fn()} rule={rule(3, 'stand aside')} />)
     expect(screen.getByRole('radio', { name: 'Acknowledged' })).not.toBeChecked()
     await user.click(plan)
-    expect(onPlan).toHaveBeenLastCalledWith(null, null)
+    expect(onPlan).toHaveBeenLastCalledWith(null, { version: 3 })
+    // Without a rule shown (none active, or a failed read) nothing is sent.
     view.rerender(<PreflightDialog checks={checks} pending={false} error={null} onPlan={onPlan} onClose={vi.fn()} />)
     expect(screen.queryByRole('group', { name: 'Your if-then rule' })).toBeNull()
+    await user.click(plan)
+    expect(onPlan).toHaveBeenLastCalledWith(null, null)
   })
 
   it('lists the rule seen at Plan it and the answer in the plan history', async () => {

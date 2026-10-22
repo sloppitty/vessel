@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import type { ManualExecutions } from '@/api/diary'
-import { emptyStructuredReview, preflightCodes, type PlayExecution, type PlayFields, type PlayList, type PlayNote, type PlaySummary, type PlayView, type SavedPlay } from '@/api/plays'
+import { emptyStructuredReview, preflightCodes, type PlayRuleState, type PlayExecution, type PlayFields, type PlayList, type PlayNote, type PlaySummary, type PlayView, type SavedPlay } from '@/api/plays'
 import { VenuesProvider } from '@/api/venues'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { accountFixture, idleMarketStream, instrumentCatalogFixture, overviewFixture, playApiStubs, playCountsFrom, playListPage, playsFrom, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
@@ -1733,7 +1733,7 @@ describe('the if-then rule on the Plays page (Phase 2, item 3)', () => {
     methods.nextActions.mockResolvedValue([{ playId: otherId, title: 'BTC breakout', nextAction: 'Wait for the retest', reviewedAtUtc: at }])
     api.playRule = vi.fn(() => Promise.resolve({ active: null, tradingMode: 'real' as const }))
     const promoted = { ...active, version: 1, if: 'price breaks out', then: 'Wait for the retest', sourcePlayId: otherId, sourceTitle: 'BTC breakout' }
-    api.setPlayRule = vi.fn().mockRejectedValueOnce(new ApiError('conflict', 'The if-then rule changed since you saw it.'))
+    api.setPlayRule = vi.fn().mockRejectedValueOnce(new ApiError('http', 'The if-then rule changed since you saw it.', 409))
       .mockResolvedValueOnce({ active: promoted, tradingMode: 'real' })
     const user = userEvent.setup()
     render(<Harness api={api} initial={sessionFor(draftPlay)} />)
@@ -1753,6 +1753,51 @@ describe('the if-then rule on the Plays page (Phase 2, item 3)', () => {
     expect(screen.getByRole('group', { name: 'If-then rule' })).toHaveTextContent('from BTC breakout')
     // The Thesis text is unchanged: promoting is not copying.
     expect(screen.getByRole('textbox', { name: 'Thesis' })).not.toHaveValue(expect.stringContaining('Wait for the retest'))
+  })
+
+  it('keeps an editor on the version it opened after a conflict, until the owner loads the current rule (Sol round 1)', async () => {
+    const { api } = client(draftPlay)
+    const newer = { ...active, version: 3, if: 'a new setup from another tab', then: 'I size down' }
+    api.playRule = vi.fn().mockResolvedValueOnce({ active, tradingMode: 'real' as const }).mockResolvedValue({ active: newer, tradingMode: 'real' as const })
+    api.setPlayRule = vi.fn().mockRejectedValueOnce(new ApiError('http', 'The if-then rule changed since you read it. Reload it.', 409))
+      .mockResolvedValue({ active: { ...newer, version: 4 }, tradingMode: 'real' })
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(draftPlay)} />)
+    await screen.findByRole('group', { name: 'If-then rule' })
+    await user.click(screen.getByRole('button', { name: 'Change the rule' }))
+    const dialog = screen.getByRole('dialog')
+    await user.type(within(dialog).getByRole('textbox', { name: 'Then' }), ' twice')
+    await user.click(within(dialog).getByRole('button', { name: 'Save the rule' }))
+    expect(api.setPlayRule).toHaveBeenLastCalledWith(expect.objectContaining({ expectedVersion: 2 }))
+    // The rule read again is version 3: the editor still shows version 2's text, so it saves nothing until reloaded.
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Save the rule' })).toBeDisabled())
+    expect(within(dialog).getByRole('textbox', { name: 'If' })).toHaveValue(active.if)
+    await user.click(within(dialog).getByRole('button', { name: 'Load the current rule' }))
+    const reloaded = screen.getByRole('dialog')
+    expect(within(reloaded).getByRole('textbox', { name: 'If' })).toHaveValue(newer.if)
+    await user.click(within(reloaded).getByRole('button', { name: 'Save the rule' }))
+    expect(api.setPlayRule).toHaveBeenLastCalledWith(expect.objectContaining({ if: newer.if, expectedVersion: 3 }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('group', { name: 'If-then rule' })).toHaveTextContent('version 4')
+  })
+
+  it('never lets an older rule read replace a newer saved rule (Sol round 1)', async () => {
+    const { api } = client(draftPlay)
+    let answer!: (state: PlayRuleState) => void
+    api.playRule = vi.fn().mockResolvedValueOnce({ active, tradingMode: 'real' as const })
+      .mockReturnValueOnce(new Promise<PlayRuleState>(resolve => { answer = resolve }))
+    api.setPlayRule = vi.fn().mockResolvedValue({ active: { ...active, version: 3 }, tradingMode: 'real' })
+    const user = userEvent.setup()
+    render(<Harness api={api} initial={sessionFor(draftPlay)} manual />)
+    await screen.findByRole('group', { name: 'If-then rule' })
+    // Plan it reads the rule again; the owner goes back to the plan and saves a new version while that read is pending.
+    await user.click(screen.getByRole('button', { name: 'Plan it' }))
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: /Back|Keep/ }))
+    await user.click(screen.getByRole('button', { name: 'Change the rule' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save the rule' }))
+    await waitFor(() => expect(screen.getByRole('group', { name: 'If-then rule' })).toHaveTextContent('version 3'))
+    await act(async () => answer({ active, tradingMode: 'real' }))
+    expect(screen.getByRole('group', { name: 'If-then rule' })).toHaveTextContent('version 3')
   })
 
   it('asks whether the rule was followed in the review of a Play planned under it', async () => {

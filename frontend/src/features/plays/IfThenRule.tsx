@@ -10,6 +10,8 @@ export interface RuleControls {
   onWrite: () => void
   onPromote: (action: NextAction) => void
   onArchive: (rule: PlayRule) => void
+  /** Opens the Play a promoted rule came from (Sol round 1 on item 3). */
+  onOpenSource?: (playId: string) => void
 }
 
 /** The rule in the Thesis tab: what it says, and how to change or archive it. Nothing shows until it is read. */
@@ -18,7 +20,9 @@ export function IfThenRuleLine({ controls }: { controls: RuleControls }) {
   const active = controls.state.active
   return <div className="if-then-rule" role="group" aria-label="If-then rule">
     {active ? <p><strong>Your if-then rule</strong> · version {active.version}<br />If {active.if}, then {active.then}
-      {active.sourceTitle ? <small> · from {active.sourceTitle}</small> : null}</p>
+      {active.sourcePlayId && active.sourceTitle ? <small> · from {controls.onOpenSource
+        ? <button type="button" className="text-action" onClick={() => controls.onOpenSource!(active.sourcePlayId!)}>{active.sourceTitle}</button>
+        : active.sourceTitle}</small> : null}</p>
       : <p className="muted">No if-then rule yet. Promote one of your next actions below, or write one.</p>}
     <span className="if-then-rule-actions">
       <Button type="button" size="sm" variant="outline" onClick={controls.onWrite}>{active ? 'Change the rule' : 'Write a rule'}</Button>
@@ -27,13 +31,21 @@ export function IfThenRuleLine({ controls }: { controls: RuleControls }) {
   </div>
 }
 
-export interface RuleDraft { if: string; then: string; source: { playId: string; title: string } | null }
+/** An editor's text, its source, and the active version it was opened on, which its save names. */
+export interface RuleDraft { if: string; then: string; source: { playId: string; title: string } | null; expectedVersion: number | null }
 
-/** Writes or changes the rule; a promoted next action fills its Then and names its Play. Plays already planned keep theirs. */
-export function RuleDialog({ active, draft, pending, error, onSave, onClose }: {
+/**
+ * Writes or changes the rule; a promoted next action fills its Then and names its Play. Plays already planned keep theirs.
+ * After a conflict the editor saves nothing until the owner loads the current rule, so another version is never replaced
+ * unseen (Sol round 1 on item 3).
+ */
+export function RuleDialog({ active, draft, pending, error, onReload, onSave, onClose }: {
   active: PlayRule | null; draft: RuleDraft; pending: boolean; error: string | null
+  /** Offered after a conflict once a newer rule than the editor's has been read; until it is used, nothing saves. */
+  onReload?: (() => void) | undefined
   onSave: (rule: { if: string; then: string }) => void; onClose: () => void
 }) {
+  const conflict = !!onReload
   const [ifText, setIf] = useState(draft.if)
   const [thenText, setThen] = useState(draft.then)
   const valid = ifText.trim() !== '' && thenText.trim() !== ''
@@ -49,8 +61,11 @@ export function RuleDialog({ active, draft, pending, error, onSave, onClose }: {
         <label htmlFor="rule-then">Then</label>
         <textarea id="rule-then" value={thenText} maxLength={maxRulePart} rows={2} disabled={pending} onChange={event => setThen(event.target.value)} />
         {error && <p className="error" role="alert">{error}</p>}
+        {conflict && <div className="workspace-form"><p className="field-help">The rule changed since you opened this editor. Load the current
+          rule to review it; your text here is not saved.</p>
+          <Button type="button" variant="outline" disabled={pending} onClick={onReload}>Load the current rule</Button></div>}
         <div className="management-actions"><Button type="button" variant="outline" onClick={onClose} disabled={pending}>Cancel</Button>
-          <Button type="button" className="play-primary" disabled={!valid || pending} onClick={() => onSave({ if: ifText.trim(), then: thenText.trim() })}>
+          <Button type="button" className="play-primary" disabled={!valid || pending || conflict} onClick={() => onSave({ if: ifText.trim(), then: thenText.trim() })}>
             {pending ? 'Saving…' : 'Save the rule'}</Button></div>
       </div>
     </DialogContent>

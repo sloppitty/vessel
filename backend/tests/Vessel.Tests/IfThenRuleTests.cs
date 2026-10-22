@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Review;
@@ -33,16 +34,21 @@ public sealed class IfThenRuleTests
     {
         var rule = Rule(3);
         Assert.Null(PlayRules.Seen(null, null));
-        var silent = PlayRules.Seen(rule, null)!;
+        // A rule the owner was not shown (a failed read, an older client) is never attributed to the Play (Sol round 1).
+        Assert.Null(PlayRules.Seen(rule, null));
+        var silent = PlayRules.Seen(rule, new(3))!;
         Assert.Equal((3, "price tags the stop", "I wait for the close"), (silent.Version, silent.If, silent.Then));
         Assert.Null(PlayRules.Read(silent.Snapshot)!.Answer);
+        // Shown but unanswered, and changed since: asked again, like an answer.
+        Assert.Equal(409, Assert.Throws<ProblemException>(() => PlayRules.Seen(rule, new(2))).StatusCode);
         Assert.Equal("acknowledged", PlayRules.Read(PlayRules.Seen(rule, new(3, "acknowledged"))!.Snapshot)!.Answer);
         var exception = PlayRules.Read(PlayRules.Seen(rule, new(3, "exception", "  The news moved it.  "))!.Snapshot)!;
         Assert.Equal(("exception", "The news moved it."), (exception.Answer, exception.Reason));
         // The rule changed or was archived since it was shown: plan it again.
         Assert.Equal(409, Assert.Throws<ProblemException>(() => PlayRules.Seen(rule, new(2, "acknowledged"))).StatusCode);
         Assert.Equal(409, Assert.Throws<ProblemException>(() => PlayRules.Seen(null, new(3, "acknowledged"))).StatusCode);
-        foreach (var invalid in new PlanRuleAnswerDto[] { new(3, "exception"), new(3, "acknowledged", "why"), new(3, "ignored"), new(3, "exception", new string('x', 501)) })
+        foreach (var invalid in new PlanRuleAnswerDto[] { new(3, "exception"), new(3, "acknowledged", "why"), new(3, null, "why"), new(3, "ignored"),
+            new(3, "exception", new string('x', 501)) })
             Assert.Equal(400, Assert.Throws<ProblemException>(() => PlayRules.Seen(rule, invalid)).StatusCode);
     }
 
@@ -55,7 +61,7 @@ public sealed class IfThenRuleTests
         won.Play.Annotate(won.Play.Title, won.Play.Drawings, "", ReviewClock.Now, new(Rule: "deviated"));
         var lost = f.Add(-5, rule: PlayRules.Seen(Rule(), new(1, "exception", "Earnings week.")));
         lost.Play.Annotate(lost.Play.Title, lost.Play.Drawings, "", ReviewClock.Now, new(Rule: "followed"));
-        f.Add(3, rule: PlayRules.Seen(Rule(), null)); // Unanswered at Plan it and in the review.
+        f.Add(3, rule: PlayRules.Seen(Rule(), new(1))); // Shown, unanswered at Plan it and in the review.
         var without = f.Add(7); // Planned before any rule: not carried, and nothing to answer.
         Assert.Throws<DomainRuleException>(() => without.Play.Annotate(without.Play.Title, without.Play.Drawings, "", ReviewClock.Now, new(Rule: "followed")));
         var rule = (await f.Service.GetAsync(new(Period: "all"), default)).Rule!;
@@ -69,5 +75,53 @@ public sealed class IfThenRuleTests
         Assert.Equal(1, (await f.Service.ProcessAsync(new(new(Period: "all"), Rule: "unanswered"), default)).Total);
         Assert.Equal([lost.Play.Id], (await f.Service.ProcessAsync(new(new(Period: "all"), Rule: "exception"), default)).Items.Select(i => i.Id));
         Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => f.Service.ProcessAsync(new(new(Period: "all"), Rule: "broken"), default))).StatusCode);
+    }
+
+    private sealed class PauseActiveRead : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        public readonly TaskCompletionSource Selected = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public readonly TaskCompletionSource Resume = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override async ValueTask<System.Data.Common.DbDataReader> ReaderExecutedAsync(System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandExecutedEventData eventData, System.Data.Common.DbDataReader result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("FROM play_rules", StringComparison.Ordinal) && command.CommandText.Contains("IS NULL", StringComparison.Ordinal))
+            {
+                Selected.TrySetResult();
+                await Resume.Task.WaitAsync(TimeSpan.FromSeconds(15), cancellationToken);
+            }
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Sol round 1 on item 3: an archive and a replacement that both read version 1 as active cannot both succeed. The one
+    /// that writes second finds version 1 already archived and gets a 409, in either order.
+    /// </summary>
+    [PostgresTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Overlapping_archive_and_replacement_of_one_version_let_only_the_first_succeed(bool staleIsArchive)
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        await using var first = database.Context(owner);
+        var work = TestUnitOfWork.For(first);
+        var service = new PlayService(new Vessel.Persistence.PlayStore(first, work), null!, TimeProvider.System, work);
+        await service.SetRuleAsync("real", new("the stop is hit", "I wait a day"), default);
+        var pause = new PauseActiveRead();
+        await using var second = new Vessel.Persistence.VesselDbContext(new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<Vessel.Persistence.VesselDbContext>()
+            .UseNpgsql(database.ConnectionString).AddInterceptors(pause).Options, new CoreOwner(owner));
+        var secondWork = TestUnitOfWork.For(second);
+        var stale = new PlayService(new Vessel.Persistence.PlayStore(second, secondWork), null!, TimeProvider.System, secondWork);
+        var late = staleIsArchive ? stale.ArchiveRuleAsync("real", 1, default)
+            : stale.SetRuleAsync("real", new("the stop is hit twice", "I stop for the week", ExpectedVersion: 1), default);
+        await pause.Selected.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        if (staleIsArchive) await service.SetRuleAsync("real", new("a new setup", "I size down", ExpectedVersion: 1), default);
+        else await service.ArchiveRuleAsync("real", 1, default);
+        pause.Resume.TrySetResult();
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => late)).StatusCode);
+        var state = await service.RuleAsync("real", default);
+        Assert.Equal(staleIsArchive ? 2 : null, state.Active?.Version);
     }
 }

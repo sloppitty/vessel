@@ -49,7 +49,11 @@ export interface PlayRuleState { active: PlayRule | null; tradingMode: TradingMo
 /** What revision 1 keeps: the rule seen at Plan it and the owner's answer, if any. */
 export interface PlanRuleSnapshot extends PlayRuleSeen { sourcePlayId: string | null; answer: 'acknowledged' | 'exception' | null; reason: string | null }
 /** The owner's answer at Plan it: acknowledged, or an exception with a reason. */
-export interface PlanRuleAnswer { version: number; answer: 'acknowledged' | 'exception'; reason?: string }
+/**
+ * The rule version Plan it showed and the owner's answer, if any. Without it nothing is recorded, so an unseen rule is
+ * never attributed to the Play (Sol round 1 on item 3).
+ */
+export interface PlanRuleAnswer { version: number; answer?: 'acknowledged' | 'exception'; reason?: string }
 export const maxRulePart = 500
 export const ruleAnswers = ['followed', 'deviated', 'not-applicable'] as const
 const rulePart = (v: unknown) => isText(v, maxRulePart) && v.trim() !== ''

@@ -157,13 +157,14 @@ export function PreflightDialog({ checks, pending, error, onPlan, onClose, lossL
   rule?: PlayRule | null
 }) {
   const [note, setNote] = useState('')
-  const [given, setAnswer] = useState<{ version: number; answer: PlanRuleAnswer['answer'] } | null>(null)
+  const [given, setAnswer] = useState<{ version: number; answer: NonNullable<PlanRuleAnswer['answer']> } | null>(null)
   const [reason, setReason] = useState('')
   // An answer belongs to the version it was given for: a rule changed while the dialog is open is asked again. An
-  // exception needs its reason; no answer at all never blocks planning.
+  // exception needs its reason; no answer at all never blocks planning. The shown version is sent either way, and only a
+  // shown rule is recorded.
   const answer = rule && given?.version === rule.version ? given.answer : null
-  const ruleAnswer: PlanRuleAnswer | null = rule && answer === 'acknowledged' ? { version: rule.version, answer }
-    : rule && answer === 'exception' && reason.trim() ? { version: rule.version, answer, reason: reason.trim() } : null
+  const ruleAnswer: PlanRuleAnswer | null = !rule ? null : answer === 'acknowledged' ? { version: rule.version, answer }
+    : answer === 'exception' && reason.trim() ? { version: rule.version, answer, reason: reason.trim() } : { version: rule.version }
   const awaitingReason = answer === 'exception' && !reason.trim()
   const reached = checks.some(check => check.code === 'loss-limit' && check.outcome === 'skipped')
   return <Dialog open onOpenChange={next => { if (!next && !pending) onClose() }}>

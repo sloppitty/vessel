@@ -191,6 +191,8 @@ public interface IPlayStore
         throw new NotSupportedException();
     /// <summary>The title of the owner's Play in the mode, or null when there is none.</summary>
     Task<string?> TitleAsync(Guid playId, string tradingMode, CancellationToken ct) => Task.FromResult<string?>(null);
+    /// <summary>Flushes a rule change; a version another change archived first is a 409 about the rule.</summary>
+    Task SaveRuleAsync(CancellationToken ct) => SaveAsync(ct);
     /// <summary>Persists pending changes through the active unit of work without committing; a concurrent Play write is a 409.</summary>
     Task SaveAsync(CancellationToken ct);
     /// <summary>

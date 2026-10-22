@@ -164,6 +164,7 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
     public void Add(PlayReviewRevision revision) { unitOfWork.RequireActive(); db.ReviewRevisions.Add(revision); }
 
     public Task SaveAsync(CancellationToken ct) => unitOfWork.SaveChangesAsync(ct);
+    public Task SaveRuleAsync(CancellationToken ct) => unitOfWork.SaveChangesAsync(PlayRules.Changed, ct);
 
     public Task<T> WithPlayLockAsync<T>(Guid id, Func<Task<T>> action, CancellationToken ct, Guid? destinationAccountId = null) => unitOfWork.ParticipateAsync(async () =>
     {

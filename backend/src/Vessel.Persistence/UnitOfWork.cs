@@ -286,7 +286,7 @@ public sealed class UnitOfWork(VesselDbContext db, IEnumerable<IUnitOfWorkPartic
         {
             // Phase 2, item 3: another change of the if-then rule committed first.
             failure ??= error;
-            throw new ProblemException(409, "The if-then rule changed since you read it. Reload it.");
+            throw new ProblemException(409, Vessel.Application.Plays.PlayRules.Changed);
         }
         return true;
     }, cancellationToken);

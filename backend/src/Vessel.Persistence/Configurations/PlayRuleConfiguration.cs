@@ -18,6 +18,8 @@ internal sealed class PlayRuleConfiguration : IEntityTypeConfiguration<PlayRule>
         builder.Property(x => x.TradingMode).HasMaxLength(16);
         builder.Property(x => x.If).HasMaxLength(PlayRule.MaxPartLength);
         builder.Property(x => x.Then).HasMaxLength(PlayRule.MaxPartLength);
+        // Archiving updates only a row still active: a version another change archived first is a 409 (Sol round 1 on item 3).
+        builder.Property(x => x.ArchivedAtUtc).IsConcurrencyToken();
         builder.HasIndex(x => new { x.OwnerId, x.TradingMode, x.Version }).IsUnique().HasDatabaseName(PlayRuleIndexes.Version);
         builder.HasIndex(x => new { x.OwnerId, x.TradingMode }).IsUnique().HasFilter("\"ArchivedAtUtc\" IS NULL")
             .HasDatabaseName(PlayRuleIndexes.Active);

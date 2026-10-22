@@ -413,17 +413,17 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         var mode = Mode(tradingMode);
         var active = await store.ActiveRuleAsync(mode, ct);
         if (active?.Version != request.ExpectedVersion)
-            throw new ProblemException(409, "The if-then rule changed since you read it. Reload it.");
+            throw new ProblemException(409, PlayRules.Changed);
         if (request.SourcePlayId is { } source && await store.TitleAsync(source, mode, ct) is null)
             throw new ProblemException(404, "Play not found.");
         var now = time.GetUtcNow();
         if (active is not null)
         {
             active.Archive(now);
-            await store.SaveAsync(ct);
+            await store.SaveRuleAsync(ct);
         }
         var rule = await store.AddRuleAsync(mode, request.If ?? "", request.Then ?? "", request.SourcePlayId, now, ct);
-        await store.SaveAsync(ct);
+        await store.SaveRuleAsync(ct);
         return new PlayRuleStateDto(await RuleDto(rule, mode, ct), mode);
     }, ct);
 
@@ -433,9 +433,9 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         var mode = Mode(tradingMode);
         var active = await store.ActiveRuleAsync(mode, ct);
         if (active is null || active.Version != expectedVersion)
-            throw new ProblemException(409, "The if-then rule changed since you read it. Reload it.");
+            throw new ProblemException(409, PlayRules.Changed);
         active.Archive(time.GetUtcNow());
-        await store.SaveAsync(ct);
+        await store.SaveRuleAsync(ct);
         return new PlayRuleStateDto(null, mode);
     }, ct);
 

@@ -2,7 +2,7 @@ import type { PriceStep } from '@/lib/price-step'
 import { PlayBundleButton } from './PlayBundleButton'
 import type { PaperPlayState, PaperSettings as PaperSettingsDocument } from '@/api/paper'
 import { PaperExecutionPanel } from './PaperExecutionPanel'
-import { errorMessage } from '@/api/errors'
+import { ApiError, errorMessage } from '@/api/errors'
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { isEndedStatus, isReviewed, pagedPlayViews, playSearchLength, statusLabels, type NextAction, type PlayCounts, type PlayList as PlayListPage, type PreflightCheck, type PlayListQuery, type PlayStatus, type UnresolvedReason, type PlayView, type SavedPlay, type StatusRequest, type PlayRule, type PlayRuleState, type PlanRuleAnswer } from '@/api/plays'
@@ -56,6 +56,8 @@ import {
 const ended: PlayStatus[] = ['closed', 'cancelled', 'unresolved']
 type DialogKind = null | 'revision' | 'pause' | 'cancel' | 'delete' | 'history' | 'preflight' | 'unresolved' | 'return-open'
 type WorkKind = 'save' | 'status' | 'open' | 'delete' | 'manual'
+
+const idleRuleWork = { busy: false, error: null, conflict: false }
 
 export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef, list, onList, reloadGeneration = 0, accountMonitors = [], onManageAccount, onLogChange, onLogApplier }: {
   accounts: BrokerAccount[]
@@ -301,38 +303,52 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   // none and never blocks Plan it. Plan it reads it again, so the checklist shows the current version.
   const [ruleRead, setRuleRead] = useState<{ api: WorkspaceApi; state: PlayRuleState } | null>(null)
   const [ruleGeneration, setRuleGeneration] = useState(0)
-  const [ruleDialog, setRuleDialog] = useState<RuleDraft | null>(null)
-  const [ruleWork, setRuleWork] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null })
+  // Every rule read and write takes the next sequence, and a write takes another when it ends: a read answered after a
+  // later read or write began is dropped, so it never replaces a newer state (Sol round 1 on item 3).
+  const ruleSequence = useRef(0)
+  const [ruleDialog, setRuleDialog] = useState<(RuleDraft & { key: number }) | null>(null)
+  const [ruleWork, setRuleWork] = useState<{ busy: boolean; error: string | null; conflict: boolean }>(idleRuleWork)
   const offersRule = visible && session.view === 'editor' && !retrospective && (status === 'draft' || status === 'planned' || status === 'paused')
   useEffect(() => {
     if (!offersRule) return
     const controller = new AbortController()
-    api.playRule(controller.signal).then(state => { if (!controller.signal.aborted) setRuleRead({ api, state }) })
-      .catch(() => { /* No rule shown on failure; planning does not depend on it. */ })
+    const sequence = ++ruleSequence.current
+    api.playRule(controller.signal).then(state => {
+      if (!controller.signal.aborted && sequence === ruleSequence.current) setRuleRead({ api, state })
+    }).catch(() => { /* No rule shown on failure; planning does not depend on it. */ })
     return () => controller.abort()
   }, [api, offersRule, ruleGeneration])
   const ruleState = ruleRead?.api === api ? ruleRead.state : null
-  async function writeRule(change: (expected: number | null) => Promise<PlayRuleState>, failure: string) {
-    if (ruleWork.busy || !ruleState) return
-    setRuleWork({ busy: true, error: null })
+  async function writeRule(change: () => Promise<PlayRuleState>, failure: string) {
+    if (ruleWork.busy) return
+    ruleSequence.current++
+    setRuleWork({ busy: true, error: null, conflict: false })
     try {
-      const state = await change(ruleState.active?.version ?? null)
+      const state = await change()
+      ruleSequence.current++
       if (!mounted.current || currentApi.current !== api) return
       setRuleRead({ api, state })
       setRuleDialog(null)
-      setRuleWork({ busy: false, error: null })
+      setRuleWork(idleRuleWork)
     } catch (cause) {
+      ruleSequence.current++
       if (!mounted.current || currentApi.current !== api) return
-      // A changed or archived rule is read again, so a retry starts from the current version.
-      setRuleWork({ busy: false, error: errorMessage(cause, failure) })
+      // A changed or archived rule is read again. An open editor keeps the version it was opened on until the owner
+      // loads the current rule, so it never replaces a version they have not seen.
+      setRuleWork({ busy: false, error: errorMessage(cause, failure), conflict: cause instanceof ApiError && cause.status === 409 })
       setRuleGeneration(value => value + 1)
     }
   }
+  const openRuleEditor = (draft: RuleDraft) => { setRuleWork(idleRuleWork); setRuleDialog(current => ({ ...draft, key: (current?.key ?? 0) + 1 })) }
+  const fromActive = (state: PlayRuleState | null): RuleDraft => ({ if: state?.active?.if ?? '', then: state?.active?.then ?? '', source: null,
+    expectedVersion: state?.active?.version ?? null })
   const ruleControls: RuleControls | undefined = offersRule ? {
     state: ruleState,
-    onWrite: () => { setRuleWork({ busy: false, error: null }); setRuleDialog({ if: ruleState?.active?.if ?? '', then: ruleState?.active?.then ?? '', source: null }) },
-    onPromote: action => { setRuleWork({ busy: false, error: null }); setRuleDialog({ if: '', then: action.nextAction, source: { playId: action.playId, title: action.title } }) },
+    onWrite: () => openRuleEditor(fromActive(ruleState)),
+    onPromote: action => openRuleEditor({ if: '', then: action.nextAction, source: { playId: action.playId, title: action.title },
+      expectedVersion: ruleState?.active?.version ?? null }),
     onArchive: (active: PlayRule) => { void writeRule(() => api.archivePlayRule(active.version), 'The rule could not be archived.') },
+    onOpenSource: id => { void open(id) },
   } : undefined
   // The owner's earlier mistake tags, offered while reviewing an ended Play (phase 1, 1.4b). A failed read offers none.
   const [mistakeTags, setMistakeTags] = useState<{ api: WorkspaceApi; tags: string[] } | null>(null)
@@ -754,9 +770,12 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     {dialog === 'preflight' && preflight && <PreflightDialog checks={preflight} pending={busy === 'status'} error={dialogError}
       lossLimit={lossLimitMessage} rule={ruleState?.active ?? null} onPlan={(note, rule) => { void planWith(note, rule) }}
       onClose={() => setDialog(null)} />}
-    {ruleDialog && <RuleDialog active={ruleState?.active ?? null} draft={ruleDialog} pending={ruleWork.busy} error={ruleWork.error}
-      onSave={rule => { void writeRule(expected => api.setPlayRule({ ...rule, sourcePlayId: ruleDialog.source?.playId ?? null, expectedVersion: expected }),
-        'The rule could not be saved.') }} onClose={() => setRuleDialog(null)} />}
+    {ruleDialog && <RuleDialog key={ruleDialog.key} active={ruleState?.active ?? null} draft={ruleDialog} pending={ruleWork.busy} error={ruleWork.error}
+      // After a conflict, once a rule other than the editor's version has been read, the owner loads it before saving.
+      onReload={ruleWork.conflict && ruleState && (ruleState.active?.version ?? null) !== ruleDialog.expectedVersion
+        ? () => openRuleEditor(fromActive(ruleState)) : undefined}
+      onSave={rule => { void writeRule(() => api.setPlayRule({ ...rule, sourcePlayId: ruleDialog.source?.playId ?? null,
+        expectedVersion: ruleDialog.expectedVersion }), 'The rule could not be saved.') }} onClose={() => setRuleDialog(null)} />}
     {dialog === 'unresolved' && <UnresolvedDialog pending={busy === 'status'} error={dialogError}
       onDeclare={(reason, note) => { void resolution({ kind: 'declare', reason, note }) }} onClose={() => setDialog(null)} />}
     {dialog === 'return-open' && <ReturnToOpenDialog pending={busy === 'status'} error={dialogError}
