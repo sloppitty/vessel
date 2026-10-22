@@ -152,3 +152,39 @@ report count. Neither value and no payload is stored.
   none, and a paper request gets 409. Account detail shows them only when
   there are some. Account deletion removes them, and they cascade with their
   fill.
+
+## Omission markers and forced events (October 22, 2026)
+
+Phase 2, item 7a of the [risk and coverage contract](phase2-risk-coverage-contract.md), decision 11.
+- **Markers.** Every in-scope row an import leaves out leaves a durable marker in
+  `execution_omissions` (migration `ExecutionOmissions`): its native trade ID,
+  kind, plain reason, canonical and native market, native order ID and time. It
+  carries no money.
+  - The kinds are `forced`, `fee` (Lighter fee-bearing or unverified fee),
+    `missing-pnl` (a Lighter close or flip, or any RISEx trade, without
+    reported realized P&L) and `unrecognized-market` (a Hyperliquid or RISEx
+    market the catalogue does not list, so its canonical contract is null).
+  - Markers are deduplicated by kind and trade ID. A row seen again only moves
+    its last-seen time; a later read that no longer returns it erases nothing.
+  - Without a reported time, the marker records the read's window (its oldest
+    raw fill to its read time) instead. A time reported later fills it in.
+  - Every import writes them: Refresh, checks and backfill pages.
+- **Known missing executions.** A marker naming an order marks that retained
+  order `ExecutionsOmitted`, whether the marker or the order arrived first. The
+  shared rule (`ExecutionIntegrity.MissingExecutions`) then treats the order as
+  missing executions whatever its status, so its Play can neither settle nor be
+  scored, everywhere the rule is used. A later read never clears it. The scored
+  basis is unchanged.
+- **Forced events.** Lighter liquidations, deleverages and market settlements
+  are also kept in `imported_forced_events`: kind, the account's side, quantity,
+  price when reported, time, native trade, market and order IDs, an exclusion
+  reason, and nullable money. Lighter reports fee rates, not amounts, so the
+  fee stays null; an unreported P&L stays null, never zero. They are never
+  fills, links or scored results. Ordinary fee-bearing trades stay omitted as
+  before; the Standard-account fee policy is unchanged.
+- **RISEx D-22.** A trade with an empty `realized_pnl` is set aside once its
+  other fields validate, with a counted reason ("Omitted executions: 1 without
+  reported P&L.") and a marker keeping its order. The rest of the read
+  applies; before, the whole read failed. It is never zero.
+- Deleting an account deletes its markers and forced events. Activity becoming
+  gap-aware with them is item 7b.

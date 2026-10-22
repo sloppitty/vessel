@@ -154,6 +154,12 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
             row.StatusAtUtc = order.StatusAtUtc.ToUniversalTime();
             row.ObservedAtUtc = observedAt.ToUniversalTime();
         }
+        // Phase 2, item 7: an order an earlier import left an execution of out is known to be missing executions, even
+        // when the marker arrived before the order did.
+        var omitted = (await db.ExecutionOmissions.Where(m => m.AccountId == account.Id && m.OrderId != null && ids.Contains(m.OrderId))
+            .Select(m => new { m.ContractId, m.OrderId }).ToListAsync(ct)).Select(m => (m.ContractId, m.OrderId)).ToHashSet();
+        foreach (var row in known.Values.Where(r => !r.ExecutionsOmitted && omitted.Contains((r.ContractId, r.ExternalOrderId))))
+            row.ExecutionsOmitted = true;
         await unitOfWork.SaveChangesAsync(UnitOfWork.ExecutionConflict, ct);
         return true;
     }, ct);

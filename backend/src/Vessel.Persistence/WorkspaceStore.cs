@@ -89,6 +89,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         // Explicit owner-filtered deletes run under the locked account's transaction.
         // Positions cascade from the snapshot, never from trading intent.
         await db.FillImportConflicts.Where(c => c.AccountId == account.Id).ExecuteDeleteAsync(ct);
+        await db.ExecutionOmissions.Where(m => m.AccountId == account.Id).ExecuteDeleteAsync(ct);
+        await db.ForcedEvents.Where(e => e.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.HistoryBackfills.Where(b => b.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.HistoryGaps.Where(g => g.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.FillCoverage.Where(r => r.AccountId == account.Id).ExecuteDeleteAsync(ct);
@@ -124,6 +126,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 LeverageObservation o => o.OwnerId == account.OwnerId && o.AccountId == account.Id,
                 RiskObservation o => o.OwnerId == account.OwnerId && o.AccountId == account.Id,
                 FillImportConflict c => c.OwnerId == account.OwnerId && c.AccountId == account.Id,
+                ExecutionOmission m => m.OwnerId == account.OwnerId && m.AccountId == account.Id,
+                ForcedEvent e => e.OwnerId == account.OwnerId && e.AccountId == account.Id,
                 Vessel.Domain.Monitoring.AccountHistoryGap g => g.OwnerId == account.OwnerId && g.AccountId == account.Id,
                 Vessel.Domain.Monitoring.HistoryBackfill b => b.OwnerId == account.OwnerId && b.AccountId == account.Id,
                 Vessel.Domain.Monitoring.FillCoverageRecord r => r.OwnerId == account.OwnerId && r.AccountId == account.Id,
@@ -263,6 +267,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         var stored = AddFills(account, newFills);
         // A changed report of a retained fill, or a changed later copy within this batch, keeps the first (Sol round 1 on 14c).
         await RecordFillConflictsAsync(account, retained, stored, result.Fills, observation.ObservedAtUtc, ct);
+        await RecordOmissionsAsync(account, result.Omissions, result.ForcedEvents, result.OldestRawFillAtUtc, observation.ObservedAtUtc, ct);
         // RawJson intentionally never crosses into journal persistence or logs.
         account.RecordSync(snapshot.ObservedAtUtc, result.HistoryNotice);
         await unitOfWork.SaveChangesAsync(ct);
@@ -274,7 +279,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
     /// touching the snapshot, sync state, leverage or risk observations. Returns the fills it added.
     /// </summary>
     public Task<IReadOnlyList<ImportedFill>> SaveHistoricalFillsAsync(Account account, IReadOnlyList<VenueFill> fills, DateTimeOffset observedAt,
-        CancellationToken ct) => unitOfWork.ParticipateAsync<IReadOnlyList<ImportedFill>>(async () =>
+        CancellationToken ct, IReadOnlyList<VenueOmission>? omissions = null) => unitOfWork.ParticipateAsync<IReadOnlyList<ImportedFill>>(async () =>
     {
         if (account.TradingMode != TradingMode.Real)
             throw new ProblemException(409, "Paper accounts cannot import real venue facts.");
@@ -283,9 +288,73 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         var existing = retained.Select(f => (f.ContractId, f.SourceFillId)).ToHashSet();
         var stored = AddFills(account, fills.Where(f => existing.Add((f.ContractId, f.SourceFillId))), backfilled: true);
         await RecordFillConflictsAsync(account, retained, stored, fills, observedAt, ct);
+        // The page's own rows left out leave markers too; their time is the page's when unreported.
+        await RecordOmissionsAsync(account, omissions ?? [], [], null, observedAt, ct);
         await unitOfWork.SaveChangesAsync(ct);
         return stored.Values.ToList();
     }, ct);
+
+    /// <summary>
+    /// Phase 2, item 7: one durable marker per omitted row, deduplicated by kind and native trade ID, and one forced-event
+    /// fact per venue-forced execution, each also a marker. A row seen again only moves its last-seen time and fills in a
+    /// time first seen as unknown; a read without it erases nothing. A marker naming an order marks that retained order's
+    /// executions as known to be missing. An unreported time is bounded by the read's window instead.
+    /// </summary>
+    private async Task RecordOmissionsAsync(Account account, IReadOnlyList<VenueOmission> omissions, IReadOnlyList<VenueForcedEvent> forced,
+        DateTimeOffset? windowFrom, DateTimeOffset observedAt, CancellationToken ct)
+    {
+        var markers = omissions.Concat(forced.Select(f => new VenueOmission(f.SourceId, ExecutionOmission.Forced,
+                f.Kind == ForcedEvent.Settlement ? "market settlement" : f.Kind, f.ContractId, f.VenueContractId, f.OrderId, f.OccurredAtUtc)))
+            .DistinctBy(m => (m.Kind, m.SourceId)).ToList();
+        if (markers.Count == 0) return;
+        var ids = markers.Select(m => m.SourceId).Distinct().ToArray();
+        var known = (await db.ExecutionOmissions.Where(m => m.AccountId == account.Id && ids.Contains(m.SourceId)).ToListAsync(ct))
+            .ToDictionary(m => (m.Kind, m.SourceId));
+        foreach (var marker in markers)
+        {
+            if (known.TryGetValue((marker.Kind, marker.SourceId), out var row))
+            {
+                if (observedAt > row.LastSeenAtUtc) row.LastSeenAtUtc = observedAt;
+                if (row.OccurredAtUtc is null && marker.OccurredAtUtc is { } at)
+                    (row.OccurredAtUtc, row.UncertainFromUtc, row.UncertainToUtc) = (at.ToUniversalTime(), null, null);
+                row.ContractId ??= marker.ContractId;
+                row.VenueContractId ??= marker.VenueContractId;
+                row.OrderId ??= marker.OrderId;
+                continue;
+            }
+            db.ExecutionOmissions.Add(new ExecutionOmission
+            {
+                Id = Guid.CreateVersion7(), OwnerId = account.OwnerId, AccountId = account.Id, Kind = marker.Kind, Reason = marker.Reason,
+                SourceId = marker.SourceId, ContractId = marker.ContractId, VenueContractId = marker.VenueContractId, OrderId = marker.OrderId,
+                OccurredAtUtc = marker.OccurredAtUtc?.ToUniversalTime(),
+                UncertainFromUtc = marker.OccurredAtUtc is null ? windowFrom?.ToUniversalTime() : null,
+                UncertainToUtc = marker.OccurredAtUtc is null ? observedAt.ToUniversalTime() : null,
+                FirstSeenAtUtc = observedAt, LastSeenAtUtc = observedAt
+            });
+        }
+        var forcedIds = forced.Select(f => f.SourceId).Distinct().ToArray();
+        var retainedForced = (await db.ForcedEvents.Where(e => e.AccountId == account.Id && forcedIds.Contains(e.SourceId)).ToListAsync(ct))
+            .ToDictionary(e => e.SourceId);
+        foreach (var e in forced.DistinctBy(f => f.SourceId))
+        {
+            // The first copy is kept, as with fills; a repeat only moves the last-seen time.
+            if (retainedForced.TryGetValue(e.SourceId, out var row)) { if (observedAt > row.LastSeenAtUtc) row.LastSeenAtUtc = observedAt; continue; }
+            db.ForcedEvents.Add(new ForcedEvent
+            {
+                Id = Guid.CreateVersion7(), OwnerId = account.OwnerId, AccountId = account.Id, SourceId = e.SourceId, Kind = e.Kind,
+                ContractId = e.ContractId, VenueContractId = e.VenueContractId, Side = e.Side, Quantity = e.Quantity, Price = e.Price,
+                OccurredAtUtc = e.OccurredAtUtc.ToUniversalTime(), OrderId = e.OrderId, Fee = e.Fee, RealizedPnl = e.RealizedPnl,
+                Exclusion = $"Venue-forced {(e.Kind == ForcedEvent.Settlement ? "market settlement" : e.Kind)}: kept beside the fills, never linked or scored.",
+                FirstSeenAtUtc = observedAt, LastSeenAtUtc = observedAt
+            });
+        }
+        // An order named by a marker has known missing executions, whatever its status.
+        var named = markers.Where(m => m.OrderId is not null && m.ContractId is not null).Select(m => (m.ContractId!, m.OrderId!)).ToHashSet();
+        if (named.Count == 0) return;
+        var orderIds = named.Select(n => n.Item2).Distinct().ToArray();
+        foreach (var order in await db.Orders.Where(o => o.AccountId == account.Id && orderIds.Contains(o.ExternalOrderId) && !o.ExecutionsOmitted).ToListAsync(ct))
+            if (named.Contains((order.ContractId, order.ExternalOrderId))) order.ExecutionsOmitted = true;
+    }
 
     private Dictionary<(string, string), ImportedFill> AddFills(Account account, IEnumerable<VenueFill> newFills, bool backfilled = false)
     {
