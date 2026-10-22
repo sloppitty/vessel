@@ -270,6 +270,21 @@ October 21, 2026.
   - The isolation case in both auth modes.
   - The Settings panel test.
 - **Check.** `scripts/check.sh` passed on `ce60a82f`: backend 4,044 passed, 5 skipped; frontend 173 files and 4,067 tests.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `cf118a42`. Five findings, all fixed in
+  `83069b31`:
+  - A paper-mode request on a real account returned the CSV. The route is
+    actual-only now: a paper request gets 409 before any read.
+  - Manual executions had no instrument. Each row now carries its Play's
+    instrument.
+  - The database streams ignored cancellation. A dropped download now stops
+    its query.
+  - Funding settled within one microsecond follows its native nanoseconds.
+  - An end date of 9999-12-31 gave a 500. It is a 400 now, checked before any
+    read.
+
+  Sol confirmed the owner filters, the uncapped retained fills, exact
+  formatting, empty unknowns and formula neutralization.
+- **Check after round 1.** `scripts/check.sh` passed on `7790a4d3` (before documentation-only commits were restacked beneath it): backend 4,048 passed, 5 skipped; frontend 173 files and 4,067 tests.
 
 ## 6. Opt-in account history retention
 
