@@ -414,6 +414,21 @@ October 21, 2026.
   - The Execution panel cases.
   - The stop-mechanism helper.
 - **Check.** `scripts/check.sh` passed on `a8c7c85d` (before item 5a's round-1 fixes were restacked beneath it): backend 4,054 passed, 5 skipped; frontend 175 files and 4,074 tests.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `b127ede6`. Four findings, all fixed in
+  `77119bbd`:
+  - Resolved and dismissed warnings still offered the link. Only an open
+    incident does.
+  - A stop order that contradicts a retained fill could be offered, then
+    refused with 409. The execution read states each offered order's roles by
+    side, mechanics and retained fills (`RoleConflict`), and only an order
+    that can be a stop is offered. The general Link choices follow the same
+    roles.
+  - With unsaved plan edits the shortcut sent an unsaved stop. It waits until
+    the edits are saved, as rebinding does.
+  - The cadence was unstated. The monitor panel always states the configured
+    interval (`intervalMinutes`) and "not stop protection" (I-08). The
+    contract fixture was regenerated.
+- **Check after round 1.** `scripts/check.sh` passed on `3fe2334e` (before documentation-only commits were restacked beneath it): backend 4,071 passed, 5 skipped; frontend 175 files and 4,076 tests.
 
 ## 9. Funding
 
