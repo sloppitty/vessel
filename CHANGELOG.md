@@ -4,6 +4,9 @@
 
 ### Added
 
+- Settings → Cost assumptions: your round-trip fee and slippage per venue. A Play's
+  summary shows the assumed cost beside the planned figures, in R when the stops give a
+  loss. Nothing else reads it.
 - Funding history now fills in window by window: a venue whose page budget cannot
   hold 30 days (such as Lighter) is covered over successive Refreshes. Coverage says when
   it is partial, and missing funding is never shown as zero.
