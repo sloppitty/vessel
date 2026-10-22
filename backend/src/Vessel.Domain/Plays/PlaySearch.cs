@@ -24,6 +24,11 @@ public sealed class PlaySearchEntry : IOwned
     public decimal? EstimatedR { get; set; }
     /// <summary>Why a scored Play has no R: retrospective, plan-after-fill or no-stop; null otherwise.</summary>
     public string? RReason { get; set; }
+    /// <summary>
+    /// When an exclusion that a fact dated after the projection caused expires: its latest execution time. From then the
+    /// stored outcome is stale; readers compute it again by the same rules until a write reprojects it. Null otherwise.
+    /// </summary>
+    public DateTimeOffset? RecheckAtUtc { get; set; }
 }
 
 /// <summary>One searchable text of a Play: a field, or one log entry or image note, normalized and case-folded.</summary>

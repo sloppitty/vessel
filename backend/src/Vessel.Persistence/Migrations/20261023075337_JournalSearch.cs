@@ -23,13 +23,15 @@ namespace Vessel.Persistence.Migrations
                     ExitAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     ResultUsd = table.Column<decimal>(type: "numeric", nullable: true),
                     EstimatedR = table.Column<decimal>(type: "numeric", nullable: true),
-                    RReason = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: true)
+                    RReason = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: true),
+                    RecheckAtUtc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_play_search", x => new { x.OwnerId, x.PlayId });
                     table.CheckConstraint("CK_play_search_figures", "(\"State\" = 'scored') = (\"ResultUsd\" IS NOT NULL) AND (\"EstimatedR\" IS NULL OR \"ResultUsd\" IS NOT NULL) AND (\"RReason\" IS NULL OR \"State\" = 'scored' AND \"EstimatedR\" IS NULL)");
                     table.CheckConstraint("CK_play_search_reason", "\"RReason\" IS NULL OR \"RReason\" IN ('retrospective', 'plan-after-fill', 'no-stop')");
+                    table.CheckConstraint("CK_play_search_recheck", "\"RecheckAtUtc\" IS NULL OR \"State\" = 'executions'");
                     table.CheckConstraint("CK_play_search_state", "\"State\" IN ('active', 'scored', 'executions', 'fees', 'unresolved', 'cancelled')");
                     table.ForeignKey(
                         name: "FK_play_search_plays_OwnerId_PlayId",

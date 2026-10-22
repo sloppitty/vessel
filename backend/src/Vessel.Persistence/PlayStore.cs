@@ -7,7 +7,7 @@ using Vessel.Domain.Plays;
 
 namespace Vessel.Persistence;
 
-public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlayStore
+public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork, TimeProvider? time = null) : IPlayStore
 {
     public Task<bool> ScopeExistsAsync(ListScope scope, CancellationToken ct) => ScopeExistsAsync(scope, "real", ct);
     public Task<bool> ScopeExistsAsync(ListScope scope, string tradingMode, CancellationToken ct) => scope.Kind switch
@@ -33,14 +33,20 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
 
     /// <summary>
     /// The page's outcomes from the search projection (Phase 2, item 13, F-07), in the caller's snapshot: projection columns
-    /// only, never the plan. A Play without a current projection keeps a null outcome: not indexed yet.
+    /// only, never the plan. A Play without a current projection keeps a null outcome: not indexed yet. An outcome past its
+    /// recheck time, an exclusion by an execution dated after it was projected, is computed again by the same rules instead
+    /// (Sol round 1 on item 13): Review scores it once that time has passed, and no write may come to reproject it.
     /// </summary>
     private async Task<List<PlayListRow>> WithOutcomesAsync(List<PlayListRow> rows, CancellationToken ct)
     {
         if (rows.Count == 0) return rows;
         var ids = rows.Select(r => r.Id).ToList();
         var outcomes = await db.PlaySearch.Where(s => ids.Contains(s.PlayId) && s.Version == JournalSearch.Version).AsNoTracking()
-            .ToDictionaryAsync(s => s.PlayId, s => new PlayOutcomeFacts(s.State, s.ExitAtUtc, s.ResultUsd, s.EstimatedR, s.RReason), ct);
+            .ToDictionaryAsync(s => s.PlayId, s => new PlayOutcomeFacts(s.State, s.ExitAtUtc, s.ResultUsd, s.EstimatedR, s.RReason, s.RecheckAtUtc), ct);
+        var now = (time ?? TimeProvider.System).GetUtcNow();
+        var expired = outcomes.Where(o => o.Value.RecheckAtUtc <= now).Select(o => o.Key).ToList();
+        if (expired.Count > 0)
+            foreach (var (id, live) in await Search.PlaySearchProjection.LiveOutcomesAsync(db, expired, now, ct)) outcomes[id] = live;
         return rows.Select(r => outcomes.TryGetValue(r.Id, out var outcome) ? r with { Outcome = outcome } : r).ToList();
     }
 

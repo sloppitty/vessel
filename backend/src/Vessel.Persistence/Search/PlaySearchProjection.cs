@@ -13,7 +13,9 @@ namespace Vessel.Persistence.Search;
 /// <summary>
 /// Rewrites journal search projections (Phase 2, item 13) from the facts of the current transaction. Every Play is locked
 /// first, in ID order, so two units projecting the same Play take turns, and the later one reads what the earlier
-/// committed. The lock is the last any unit takes, just before its commit, so it never closes a cycle.
+/// committed. The lock is the last any unit takes, just before its commit, so it never closes a cycle. The Play rows are
+/// then held with a key-share lock, which no edit waits on, so a concurrent deletion waits for the projection instead of
+/// leaving it without its Play (Sol round 1 on item 13).
 /// </summary>
 internal static class PlaySearchProjection
 {
@@ -33,8 +35,12 @@ internal static class PlaySearchProjection
             var key = $"vessel-play-search:{db.CurrentOwnerId}:{id}";
             await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({key}, 0))", ct);
         }
-        // Read after the locks, so each statement sees every projection of these Plays committed before this one.
-        var plays = await db.Plays.Where(p => present.Contains(p.Id)).AsNoTracking().ToListAsync(ct);
+        // Read after the locks, so each statement sees every projection of these Plays committed before this one. A Play
+        // deleted since it was found is not returned; one deleted later waits for this commit and its rows cascade then.
+        var locked = present.ToArray();
+        var plays = locked.Length == 0 ? [] : await db.Plays.FromSqlInterpolated(
+                $"SELECT * FROM plays WHERE \"Id\" = ANY({locked}) AND \"OwnerId\" = {db.CurrentOwnerId} FOR KEY SHARE")
+            .AsNoTracking().ToListAsync(ct);
         var found = plays.Select(p => p.Id).ToList();
         var log = (await db.PlayNotes.Where(n => found.Contains(n.PlayId)).OrderBy(n => n.CreatedAtUtc).ThenBy(n => n.Id)
             .Select(n => new { n.PlayId, n.Text }).ToListAsync(ct)).ToLookup(n => n.PlayId, n => n.Text);
@@ -85,7 +91,8 @@ internal static class PlaySearchProjection
     {
         if (entry is null) db.PlaySearch.Add(entry = new PlaySearchEntry { OwnerId = db.CurrentOwnerId, PlayId = playId });
         else if (entry.Version == JournalSearch.Version && entry.State == outcome.State && entry.ExitAtUtc == outcome.ExitAtUtc &&
-            entry.RReason == outcome.RReason && Same(entry.ResultUsd, outcome.ResultUsd) && Same(entry.EstimatedR, outcome.EstimatedR)) return;
+            entry.RReason == outcome.RReason && entry.RecheckAtUtc == outcome.RecheckAtUtc && Same(entry.ResultUsd, outcome.ResultUsd) &&
+            Same(entry.EstimatedR, outcome.EstimatedR)) return;
         entry.Version = JournalSearch.Version;
         entry.ProjectedAtUtc = now;
         entry.State = outcome.State;
@@ -93,6 +100,20 @@ internal static class PlaySearchProjection
         entry.ResultUsd = outcome.ResultUsd;
         entry.EstimatedR = outcome.EstimatedR;
         entry.RReason = outcome.RReason;
+        entry.RecheckAtUtc = outcome.RecheckAtUtc;
+    }
+
+    /// <summary>
+    /// The outcomes of these Plays computed now by the same rules, without writing: for stored outcomes whose recheck time
+    /// has passed, so a list never serves an exclusion that Review no longer makes. Read in the caller's snapshot.
+    /// </summary>
+    public static async Task<Dictionary<Guid, PlayOutcomeFacts>> LiveOutcomesAsync(VesselDbContext db, IReadOnlyCollection<Guid> ids,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        var plays = await db.Plays.Where(p => ids.Contains(p.Id)).AsNoTracking().ToListAsync(ct);
+        var closed = plays.Where(p => p.Status == PlayStatus.Closed).ToList();
+        var facts = closed.Count == 0 ? [] : (await SizingStore.FactsAsync(db, closed, ct)).ToDictionary(f => f.Play.Id);
+        return plays.ToDictionary(p => p.Id, p => JournalSearch.Outcome(p, facts.GetValueOrDefault(p.Id), now));
     }
 
     // Equal amounts compare by their exact text, which is what the list shows.

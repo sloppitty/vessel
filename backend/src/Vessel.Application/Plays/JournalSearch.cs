@@ -177,7 +177,14 @@ public static class JournalSearch
             : PlayExitTime.LatestExit(facts.Fills);
         var score = ReviewService.Score(facts, now, facts.IncompleteOrders is { Count: > 0 });
         if (score.Result is not { } result || score.Exclusion is not null)
-            return new(score.Exclusion == "fees" ? PlaySearchStates.Fees : PlaySearchStates.Executions, exit, null, null, null);
+        {
+            // Review leaves out an execution dated after now, so that exclusion holds only until the latest one is past
+            // (Sol round 1 on item 13). Readers then compute the outcome again rather than serve a stale one.
+            var latest = facts.Paper is { } simulated ? simulated.Executions.Select(e => (DateTimeOffset?)e.OccurredAtUtc).Max()
+                : facts.Fills.Select(f => (DateTimeOffset?)f.Fill.OccurredAtUtc).Max();
+            return score.Exclusion == "fees" ? new(PlaySearchStates.Fees, exit, null, null, null)
+                : new(PlaySearchStates.Executions, exit, null, null, null, latest > now ? latest : null);
+        }
         string? reason = null;
         if (result.RMultiple is null)
         {
@@ -211,6 +218,8 @@ public static class JournalSearch
 
 /// <summary>
 /// An ended Play's outcome as its search projection stores it (F-07): the state (<see cref="PlaySearchStates"/>), the latest
-/// actual exit, the scored result and estimated R, and why a scored Play has no R.
+/// actual exit, the scored result and estimated R, why a scored Play has no R, and when an exclusion by a future-dated
+/// execution expires (<paramref name="RecheckAtUtc"/>).
 /// </summary>
-public sealed record PlayOutcomeFacts(string State, DateTimeOffset? ExitAtUtc, decimal? ResultUsd, decimal? EstimatedR, string? RReason);
+public sealed record PlayOutcomeFacts(string State, DateTimeOffset? ExitAtUtc, decimal? ResultUsd, decimal? EstimatedR, string? RReason,
+    DateTimeOffset? RecheckAtUtc = null);

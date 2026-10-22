@@ -901,7 +901,8 @@ function PlayList({ api, accounts, busy, reloadGeneration, unsaved, list, onList
     {unsaved && <div className="workspace-alert plays-unsaved" role="status"><span>Unsaved changes in <strong>{unsaved}</strong>. Save or discard them before opening another play.</span>
       <Button variant="outline" size="sm" onClick={onContinue}>Continue editing</Button>
       <Button variant="ghost" size="sm" className="danger-action" disabled={busy} onClick={onDiscard}>Discard changes</Button></div>}
-    {list.journal ? <JournalSearchResults api={api} accounts={accounts} query={list.journal} offset={list.journalOffset} disabled={!!unsaved || busy}
+    {list.journal ? <JournalSearchResults api={api} accounts={accounts} query={list.journal} offset={list.journalOffset}
+      refresh={`${generation}.${reloadGeneration}`} disabled={!!unsaved || busy}
       onOffset={offset => onList({ ...list, journalOffset: offset })} onOpen={onOpen}
       onClear={() => { setJournal(''); onList({ ...list, journal: '', journalOffset: 0 }) }} /> :
     <Tabs value={list.view} onValueChange={value => onList({ ...list, view: value as PlayView, page: 1 })} className="plays-list-tabs">

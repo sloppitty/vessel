@@ -1617,6 +1617,9 @@ namespace Vessel.Persistence.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
 
+                    b.Property<DateTimeOffset?>("RecheckAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<decimal?>("ResultUsd")
                         .HasColumnType("numeric");
 
@@ -1635,6 +1638,8 @@ namespace Vessel.Persistence.Migrations
                             t.HasCheckConstraint("CK_play_search_figures", "(\"State\" = 'scored') = (\"ResultUsd\" IS NOT NULL) AND (\"EstimatedR\" IS NULL OR \"ResultUsd\" IS NOT NULL) AND (\"RReason\" IS NULL OR \"State\" = 'scored' AND \"EstimatedR\" IS NULL)");
 
                             t.HasCheckConstraint("CK_play_search_reason", "\"RReason\" IS NULL OR \"RReason\" IN ('retrospective', 'plan-after-fill', 'no-stop')");
+
+                            t.HasCheckConstraint("CK_play_search_recheck", "\"RecheckAtUtc\" IS NULL OR \"State\" = 'executions'");
 
                             t.HasCheckConstraint("CK_play_search_state", "\"State\" IN ('active', 'scored', 'executions', 'fees', 'unresolved', 'cancelled')");
                         });

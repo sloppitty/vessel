@@ -45,23 +45,28 @@ function Excerpt({ hit }: { hit: JournalSearchHit }) {
  * shows it, with the field that matched and an excerpt, 50 per page. Plays the projection does not hold yet are counted,
  * never silently left out.
  */
-export function JournalSearchResults({ api, accounts, query, offset, disabled, onOffset, onOpen, onClear }: {
+export function JournalSearchResults({ api, accounts, query, offset, refresh, disabled, onOffset, onOpen, onClear }: {
   api: WorkspaceApi
   accounts: BrokerAccount[]
   query: string
   offset: number
+  /**
+   * Changes when the list would reload: a finished owner action or an accepted stored-state reload (a Play closed by the
+   * monitor, say). The same query is then read again, so statuses, outcomes and texts never stay behind (Sol round 1).
+   */
+  refresh: string
   disabled: boolean
   onOffset: (offset: number) => void
   onOpen: (id: string) => void
   onClear: () => void
 }) {
-  // Try again reads the same page anew: the attempt is part of the request it answers.
+  // Try again and a reload read the same page anew: both are part of the request a response answers.
   const [attempt, setAttempt] = useState(0)
-  const key = JSON.stringify([query, offset, attempt])
+  const key = JSON.stringify([query, offset, attempt, refresh])
   const [result, setResult] = useState<{ api: WorkspaceApi; key: string; page?: JournalSearchPage; error?: string } | null>(null)
   useEffect(() => {
     const controller = new AbortController()
-    const [q, from] = JSON.parse(key) as [string, number, number]
+    const [q, from] = JSON.parse(key) as [string, number, number, string]
     api.searchJournal({ q, ...(from ? { offset: from } : {}) }, controller.signal)
       .then(page => { if (!controller.signal.aborted) setResult({ api, key, page }) })
       .catch(cause => { if (!controller.signal.aborted) setResult({ api, key, error: errorMessage(cause, 'The journal could not be searched. Try again.') }) })

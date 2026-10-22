@@ -23,11 +23,12 @@ function client(plays: PlaySummary[], overrides: Partial<WorkspaceApi> = {}) {
   return { ...createWorkspaceApi('test-only'), ...playApiStubs(), marketStream: idleMarketStream,
     plays: vi.fn(playsFrom(plays)), playCounts: vi.fn(playCountsFrom(plays)), ...overrides } as WorkspaceApi
 }
-function Shell({ api, initial = initialPlaysList, onList }: { api: WorkspaceApi; initial?: PlaysListState; onList?: (list: PlaysListState) => void }) {
+function Shell({ api, initial = initialPlaysList, onList, reload = 0 }: { api: WorkspaceApi; initial?: PlaysListState
+  onList?: (list: PlaysListState) => void; reload?: number }) {
   const [session, setSession] = useState(createPlaysSession)
   const [list, setList] = useState(initial)
   return <NotificationProvider><PlaysPage accounts={[accountFixture]} portfolios={[portfolioFixture]} api={api} session={session} onSession={setSession}
-    list={list} onList={next => { setList(next); onList?.(next) }} /></NotificationProvider>
+    list={list} onList={next => { setList(next); onList?.(next) }} reloadGeneration={reload} /></NotificationProvider>
 }
 const page = (items: JournalSearchPage['items'], fields: Partial<JournalSearchPage> = {}): JournalSearchPage =>
   ({ query: 'wombat', items, total: items.length, offset: 0, nextOffset: null, notIndexed: 0, ...fields })
@@ -91,6 +92,25 @@ describe('Journal search', () => {
     expect(states.at(-1)).toMatchObject({ view: 'all', journal: 'wombat', journalOffset: 0 })
     await userEvent.click(row)
     await waitFor(() => expect(openPlay).toHaveBeenCalledWith(found.id, expect.any(AbortSignal)))
+  })
+
+  it('reads the same query again when stored state reloads, so a Play the monitor closed shows its new status and result', async () => {
+    // Sol round 1 on item 13: an accepted reload (here a monitor close) must reach the visible results, not only the list.
+    const open = play(3, { title: 'Wombat trade', status: 'open', planRevision: 1 })
+    const closedNow = closed(3, 'Wombat trade', { state: 'scored', exitAtUtc: '2026-10-08T14:30:00Z', resultUsd: '4', estimatedR: '2' })
+    const searchJournal = vi.fn<WorkspaceApi['searchJournal']>()
+      .mockResolvedValueOnce(page([hit(open)]))
+      .mockResolvedValueOnce(page([hit(closedNow, '…the wombat candle closed it…')]))
+    const api = client([open], { searchJournal })
+    const initial = { ...initialPlaysList, view: 'all' as const, journal: 'wombat', journalOffset: 0 }
+    const view = render(<Shell api={api} initial={initial} reload={0} />)
+    const row = await screen.findByRole('button', { name: 'Open Wombat trade' })
+    expect(row).toHaveTextContent('Open')
+    expect(row).not.toHaveTextContent('Exit')
+    view.rerender(<Shell api={api} initial={initial} reload={1} />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Open Wombat trade' })).toHaveTextContent(/Closed.*Exit .*\+\$4.*Est\. \+2\.00R/))
+    expect(screen.getByRole('button', { name: 'Open Wombat trade' })).toHaveAccessibleDescription(expect.stringContaining('closed it'))
+    expect(searchJournal.mock.calls.map(([query]) => query)).toEqual([{ q: 'wombat' }, { q: 'wombat' }])
   })
 
   it('pages fifty at a time, retries a failed read and returns to the unchanged list when cleared', async () => {

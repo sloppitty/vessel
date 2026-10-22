@@ -559,5 +559,6 @@ search projection in the unit of work of every change to those facts.
   with Review's reason. Cancelled and Unresolved Plays have none.
 - Nothing in Review, sizing or the ladder reads the projection, and its
   figures are not a second score.
-- A fill whose time is ahead of the projecting unit's clock is excluded at that
-  write, as Review would exclude it then, until the next write to the Play.
+- An execution dated after the projecting unit's clock excludes the Play, as
+  Review would then. Once that time has passed, the list computes the outcome
+  again by the same rules, so it matches Review without waiting for a write.

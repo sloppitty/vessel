@@ -8,7 +8,8 @@ public sealed record PlaySearchRebuildResult(int Plays, int Pending, int Project
 
 /// <summary>
 /// The one-time initialization of the journal search projection (Phase 2, item 13), for one owner scope: it projects the
-/// owner's Plays that have no projection of the current version, or all of them with <c>all</c>, in bounded units of work in
+/// owner's Plays that have no projection of the current version or whose recheck time has passed, or all of them with
+/// <c>all</c>, in bounded units of work in
 /// ID order. A dry run only counts. It takes the same per-Play locks as live writes, so it is safe beside running hosts, and
 /// running it again finds nothing left to do.
 /// </summary>
@@ -39,6 +40,11 @@ public sealed class PlaySearchRebuild(VesselDbContext db, UnitOfWork unitOfWork,
         return new(plays, pending, projected);
     }
 
-    private IQueryable<Vessel.Domain.Plays.Play> Pending() =>
-        db.Plays.Where(p => !db.PlaySearch.Any(s => s.PlayId == p.Id && s.Version == JournalSearch.Version));
+    // Not indexed with the current rules, or holding an exclusion whose recheck time has passed.
+    private IQueryable<Vessel.Domain.Plays.Play> Pending()
+    {
+        var now = (time ?? TimeProvider.System).GetUtcNow();
+        return db.Plays.Where(p => !db.PlaySearch.Any(s => s.PlayId == p.Id && s.Version == JournalSearch.Version &&
+            (s.RecheckAtUtc == null || s.RecheckAtUtc > now)));
+    }
 }

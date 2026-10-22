@@ -154,7 +154,7 @@ title/instrument search are unchanged.
 
 **The projection.** Each Play has one `play_search` row and one
 `play_search_texts` row per searchable text (migration
-`20261022150223_JournalSearch`). It is derived data, never a fact.
+`20261022185604_JournalSearch`). It is derived data, never a fact.
 - The texts are the title, the current plan's thesis, invalidation, strategy
   and evidence notes, the review note, lesson, mistake tag and next action,
   each log entry and each image note. Blank texts are left out.
@@ -185,14 +185,26 @@ Plays and paper evaluation all commit or roll back with their projection.
   in ID order, the last lock of the unit), so concurrent units take turns and
   the later one reads what the earlier committed. A Play the unit deleted is
   not locked; its rows cascade with it.
+- The Play rows are then read with a key-share lock, which no edit waits on.
+  A deletion that comes later waits for the projection to commit and its rows
+  cascade then; a Play deleted earlier is simply not projected (Sol round 1).
 - A read-only snapshot never writes the projection. A rolled-back unit keeps
   what it touched for the next unit, since projecting a Play again is harmless.
 
+**Expiring exclusions (Sol round 1).** Review leaves out a Play with an
+execution dated after its own clock, and scores it once that time has passed.
+The row keeps that time as `RecheckAtUtc`, only on an `executions` outcome.
+From then the list and search compute that row's outcome again, by the same
+rules over the same snapshot, instead of serving the stored one. The read
+writes nothing. The next write to the Play, or the rebuild, stores the new
+outcome.
+
 **Initialization.** The migration creates empty tables. The offline
 `play-search-rebuild` command fills them once, dry run by default, with
-`--apply` and `--all`; see `deploy/README.md`. Until a Play is projected with
-the current rules (`JournalSearch.Version`), search counts it as not indexed
-and the list shows its outcome as `not-indexed`.
+`--apply` and `--all`; see `deploy/README.md`. It also rewrites rows past their
+recheck time. Until a Play is projected with the current rules
+(`JournalSearch.Version`), search counts it as not indexed and the list shows
+its outcome as `not-indexed`.
 
 **`GET /api/plays/search?q=&offset=`** searches the requested trading mode
 (`?tradingMode=real|paper`, real when omitted). It is not a venue-fact
@@ -221,6 +233,8 @@ read keeps its receipt instead.
 - A "Search the journal" box sits beside New play. From two characters, after
   the same pause as the list search, its results replace the tabs and list
   until Clear search. Query and offset stay in shell memory with the list.
+  A finished owner action or an accepted stored-state reload (a Play the
+  monitor closed, say) reads the same results again, as it does the list.
 - Each result shows the Play as the list does (title, asset chip, venue logo,
   account, direction, status), the matched field and the excerpt with the
   match marked, and opens the Play. Previous and Next page by 50. A count of

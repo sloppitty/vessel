@@ -18,6 +18,8 @@ internal sealed class PlaySearchEntryConfiguration : IEntityTypeConfiguration<Pl
                 "(\"State\" = 'scored') = (\"ResultUsd\" IS NOT NULL) AND (\"EstimatedR\" IS NULL OR \"ResultUsd\" IS NOT NULL) AND " +
                 "(\"RReason\" IS NULL OR \"State\" = 'scored' AND \"EstimatedR\" IS NULL)");
             table.HasCheckConstraint("CK_play_search_reason", "\"RReason\" IS NULL OR \"RReason\" IN ('retrospective', 'plan-after-fill', 'no-stop')");
+            // A future-dated execution excludes a Play as incomplete executions, so only that state can expire.
+            table.HasCheckConstraint("CK_play_search_recheck", "\"RecheckAtUtc\" IS NULL OR \"State\" = 'executions'");
         });
         builder.HasKey(x => new { x.OwnerId, x.PlayId });
         builder.HasOne<Play>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId })

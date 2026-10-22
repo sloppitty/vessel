@@ -264,43 +264,56 @@ public sealed class JournalSearchPostgresTests
         Assert.Equal(1, await check.PlaySearch.CountAsync());
     }
 
-    [PostgresFact]
-    public async Task Venue_facts_reach_a_closed_Play_through_its_linked_orders()
+    /// <summary>
+    /// A Closed venue Play planned at T (one entry at 100 with its stop at 95, so R is the result over 5), detected closed at
+    /// T + 20 minutes, linked to a filled entry order and an exit order with <paramref name="exitStatus"/>, with an unlinked
+    /// filled order beside them. Seeded outside any unit, so it is not indexed. Returns its account.
+    /// </summary>
+    private static async Task<Account> SeedVenuePlayAsync(CoreDatabase database, Guid owner, string exitStatus,
+        params (string Id, string Order, string Side, string Effect, decimal Price, decimal Pnl, DateTimeOffset At)[] fills)
     {
-        await using var database = await CoreDatabase.CreateAsync();
-        var owner = Guid.NewGuid();
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue");
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
         play.Annotate("Linked trade", "{}", "", T);
         var (plannedChange, revision) = play.MarkPlanned(T);
         var opened = play.MarkOpen("Filled", T.AddMinutes(2));
         var closedChange = play.MarkClosed("Flat", T.AddMinutes(20));
-        ImportedOrder Order(string id, string side, decimal size, string status) => new()
+        ImportedOrder Order(string id, string side, string status) => new()
         {
             Id = Guid.NewGuid(), OwnerId = owner, AccountId = account.Id, ContractId = "BTC", ExternalOrderId = id, Side = side,
-            OrderType = "limit", LimitPrice = 100, OriginalSize = size, RemainingSize = 0, PlacedAtUtc = T, Status = status,
+            OrderType = "limit", LimitPrice = 100, OriginalSize = 1, RemainingSize = 0, PlacedAtUtc = T, Status = status,
             VenueStatus = status, StatusAtUtc = T.AddMinutes(1), ObservedAtUtc = T.AddMinutes(1)
         };
-        ImportedFill Fill(string id, string order, string side, string effect, decimal price, decimal pnl, int minutes) => new()
-        {
-            Id = Guid.NewGuid(), OwnerId = owner, AccountId = account.Id, ContractId = "BTC", SourceFillId = id, ExternalOrderId = order,
-            Side = side, Direction = effect, PositionEffect = effect, Quantity = 1, Price = price, Fee = 0, FeeToken = "USDC",
-            ClosedPnlUsd = pnl, OccurredAtUtc = T.AddMinutes(minutes), TransactionHash = ""
-        };
-        var entryOrder = Order("o-entry", "buy", 1, "filled");
-        var exitOrder = Order("o-exit", "sell", 1, "open");
-        await using (var seed = database.Context(owner))
-        {
-            seed.Accounts.Add(account); seed.Plays.Add(play); seed.PlanRevisions.Add(revision);
-            seed.StatusChanges.AddRange(plannedChange, opened, closedChange); seed.Orders.AddRange(entryOrder, exitOrder);
-            seed.OrderLinks.AddRange(new PlayOrderLink(play, entryOrder, OrderLinkRole.Entry, "entry-1", null, OrderLinkState.Linked, OrderLinkSource.Owner, T),
-                new PlayOrderLink(play, exitOrder, OrderLinkRole.Exit, null, null, OrderLinkState.Linked, OrderLinkSource.Owner, T));
-            seed.Fills.Add(Fill("f-entry", "o-entry", "buy", ExecutionFacts.Open, 100, 0, 2));
-            // An unlinked order's fill reaches no Play.
-            seed.Orders.Add(Order("o-other", "sell", 1, "filled"));
-            seed.Fills.Add(Fill("f-other", "o-other", "sell", ExecutionFacts.Close, 120, 20, 3));
-            await seed.SaveChangesAsync();
-        }
+        var entryOrder = Order("o-entry", "buy", "filled");
+        var exitOrder = Order("o-exit", "sell", exitStatus);
+        await using var seed = database.Context(owner);
+        seed.Accounts.Add(account); seed.Plays.Add(play); seed.PlanRevisions.Add(revision);
+        seed.StatusChanges.AddRange(plannedChange, opened, closedChange); seed.Orders.AddRange(entryOrder, exitOrder, Order("o-other", "sell", "filled"));
+        seed.OrderLinks.AddRange(new PlayOrderLink(play, entryOrder, OrderLinkRole.Entry, "entry-1", null, OrderLinkState.Linked, OrderLinkSource.Owner, T),
+            new PlayOrderLink(play, exitOrder, OrderLinkRole.Exit, null, null, OrderLinkState.Linked, OrderLinkSource.Owner, T));
+        seed.Fills.AddRange(fills.Select(f => VenueFill(account, f)));
+        await seed.SaveChangesAsync();
+        return account;
+    }
+
+    private static ImportedFill VenueFill(Account account,
+        (string Id, string Order, string Side, string Effect, decimal Price, decimal Pnl, DateTimeOffset At) fill) => new()
+    {
+        Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, ContractId = "BTC", SourceFillId = fill.Id,
+        ExternalOrderId = fill.Order, Side = fill.Side, Direction = fill.Effect, PositionEffect = fill.Effect, Quantity = 1,
+        Price = fill.Price, Fee = 0, FeeToken = "USDC", ClosedPnlUsd = fill.Pnl, OccurredAtUtc = fill.At, TransactionHash = ""
+    };
+
+    [PostgresFact]
+    public async Task Venue_facts_reach_a_closed_Play_through_its_linked_orders()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        // An unlinked order's fill reaches no Play.
+        var account = await SeedVenuePlayAsync(database, owner, "open", ("f-entry", "o-entry", "buy", ExecutionFacts.Open, 100, 0, T.AddMinutes(2)),
+            ("f-other", "o-other", "sell", ExecutionFacts.Close, 120, 20, T.AddMinutes(3)));
+        ImportedFill Fill(string id, string order, string side, string effect, decimal price, decimal pnl, int minutes) =>
+            VenueFill(account, (id, order, side, effect, price, pnl, T.AddMinutes(minutes)));
         await using var db = database.Context(owner);
         Assert.Equal(1, await RebuildAsync(db));
         async Task<PlayOutcomeSummaryDto> Outcome()
@@ -324,6 +337,110 @@ public sealed class JournalSearchPostgresTests
             return true;
         }, default);
         Assert.Equal(new PlayOutcomeSummaryDto("executions", T.AddMinutes(15), null, null, PlayReceipts.ExecutionsReason), await Outcome());
+    }
+
+    [PostgresFact]
+    public async Task An_exclusion_by_a_future_dated_execution_expires_with_it_without_a_write()
+    {
+        // Sol round 1 on item 13: a settled Play whose exit is dated two minutes ahead is excluded as Review excludes it, and
+        // once that time has passed the list serves Review's result, though nothing was written in between.
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var clock = new Isolation.IsolationClock { Now = T.AddMinutes(30) };
+        await SeedVenuePlayAsync(database, owner, "filled", ("f-entry", "o-entry", "buy", ExecutionFacts.Open, 100, 0, T.AddMinutes(2)),
+            ("f-exit", "o-exit", "sell", ExecutionFacts.Close, 110, 10, T.AddMinutes(32)));
+        await using var db = database.Context(owner);
+        var unit = new UnitOfWork(db, [new PlaySearchProjector(db, clock)]);
+        Assert.Equal(1, (await new PlaySearchRebuild(db, unit, clock).RunAsync(true, false, 10, default)).Projected);
+        async Task<(PlayOutcomeSummaryDto Outcome, Vessel.Application.Review.ReviewDto Review)> Read()
+        {
+            await using var read = database.Context(owner);
+            var none = TestUnitOfWork.For(read);
+            var list = await new PlayService(new PlayStore(read, none, clock), new MemoryObjectStore(), clock, none)
+                .ListAsync("closed", null, null, null, null, default);
+            var review = await new Vessel.Application.Review.ReviewService(new ReviewStore(read, new SizingStore(read, none)), clock)
+                .GetAsync(new(Period: "all"), default);
+            return (Assert.Single(list.Plays).Outcome!, review);
+        }
+        async Task<(string State, DateTimeOffset? Recheck)> Stored()
+        {
+            await using var read = database.Context(owner);
+            var row = await read.PlaySearch.AsNoTracking().SingleAsync();
+            return (row.State, row.RecheckAtUtc);
+        }
+
+        var (before, excluded) = await Read();
+        Assert.Equal(new PlayOutcomeSummaryDto("executions", T.AddMinutes(32), null, null, PlayReceipts.ExecutionsReason), before);
+        Assert.Empty(excluded.Plays);
+        Assert.Equal(("executions", T.AddMinutes(32)), await Stored());
+
+        clock.Now = T.AddMinutes(33);
+        var (after, scored) = await Read();
+        var row = Assert.Single(scored.Plays);
+        Assert.Equal(new PlayOutcomeSummaryDto("scored", T.AddMinutes(32), "10", "2", null), after);
+        Assert.Equal((row.Net, row.RMultiple, row.ClosedAtUtc), (after.ResultUsd, after.EstimatedR, after.ExitAtUtc!.Value));
+        // Reading wrote nothing; the stored outcome still waits for its recheck, and the rebuild rewrites it.
+        Assert.Equal(("executions", T.AddMinutes(32)), await Stored());
+        var rebuild = new PlaySearchRebuild(db, unit, clock);
+        Assert.Equal(1, (await rebuild.RunAsync(false, false, 10, default)).Pending);
+        Assert.Equal(1, (await rebuild.RunAsync(true, false, 10, default)).Projected);
+        Assert.Equal(("scored", (DateTimeOffset?)null), await Stored());
+        Assert.Equal(0, (await rebuild.RunAsync(false, false, 10, default)).Pending);
+    }
+
+    [PostgresFact]
+    public async Task A_Draft_deleted_while_it_is_projected_waits_and_leaves_no_rows()
+    {
+        // Sol round 1 on item 13: the rebuild has read an unindexed Draft when its deletion runs. The deletion waits for the
+        // projection's key-share lock, so the batch commits and the Draft's rows cascade with it afterwards.
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Manual");
+        var doomed = TestPlays.Create(account, new("manual", "BTC"));
+        doomed.Annotate("Doomed draft", "{}", "", T);
+        var kept = TestPlays.Create(account, new("manual", "BTC"));
+        kept.Annotate("Kept draft", "{}", "", T);
+        await using (var seed = database.Context(owner))
+        {
+            seed.Accounts.Add(account); seed.Plays.AddRange(doomed, kept);
+            await seed.SaveChangesAsync();
+        }
+        var gate = new Gate("FROM play_notes");
+        await using var rebuildDb = new VesselDbContext(new DbContextOptionsBuilder<VesselDbContext>().UseNpgsql(database.ConnectionString)
+            .AddInterceptors(gate).Options, new CoreOwner(owner));
+        var rebuild = Task.Run(() => new PlaySearchRebuild(rebuildDb, Projected(rebuildDb)).RunAsync(true, false, 10, default));
+        await gate.Reached.Task;
+        await using var deleteDb = database.Context(owner);
+        await deleteDb.Database.OpenConnectionAsync();
+        var pid = ((Npgsql.NpgsqlConnection)deleteDb.Database.GetDbConnection()).ProcessID;
+        var deletion = Service(deleteDb, Projected(deleteDb)).DeleteAsync(doomed.Id, default);
+        await AccountManagementPostgresTests.WaitForLock(database, pid);
+        gate.Release.SetResult();
+        Assert.Equal(2, (await rebuild).Projected);
+        await deletion;
+        await using var check = database.Context(owner);
+        Assert.Equal([kept.Id], await check.PlaySearch.Select(s => s.PlayId).ToListAsync());
+        Assert.False(await check.PlaySearchTexts.AnyAsync(t => t.PlayId == doomed.Id));
+        Assert.Equal([kept.Id], (await Service(check, Projected(check)).SearchAsync("draft", null, default)).Items.Select(i => i.Play.Id));
+    }
+
+    /// <summary>Holds the first command containing <paramref name="sql"/> until released.</summary>
+    private sealed class Gate(string sql) : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        private int held;
+        public TaskCompletionSource Reached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override async ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command, Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains(sql, StringComparison.Ordinal) && Interlocked.Exchange(ref held, 1) == 0)
+            {
+                Reached.TrySetResult();
+                await Release.Task;
+            }
+            return result;
+        }
     }
 
     [PostgresFact]
