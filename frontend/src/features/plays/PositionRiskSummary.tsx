@@ -5,7 +5,7 @@ import {
 } from './position-risk-summary'
 import { defaultSizeUnits, formatMoney, formatQuantity, formatRewardToRisk, type SizeUnits } from './sizing'
 import { InfoTip } from '@/components/ui/info-tip'
-import { exactFixed, exactNumber, exactSignOf } from '@/lib/decimal'
+import { exactFixed, exactSignOf, type Exact } from '@/lib/decimal'
 import { assumedCosts, type AssumedCosts, type CostAssumption } from './cost-assumptions'
 import './position-risk-summary.css'
 import { numberFormat } from '@/lib/format'
@@ -56,10 +56,17 @@ function Outcome({ value, units }: { value: PlannedExitSummary; units: SizeUnits
 const assumedPercent = ({ feePercent, slippagePercent }: CostAssumption) =>
   `fees ${feePercent === null ? 'not set' : `${feePercent}%`}, slippage ${slippagePercent === null ? 'not set' : `${slippagePercent}%`}`
 
+const costMoney = numberFormat({ maximumFractionDigits: 2 })
+// The exact cost rounded once, to cents, never through a float (Sol round 1 on 10a).
+const exactMoneyText = (value: Exact, units: SizeUnits) => {
+  const text = exactFixed(value, 2)
+  return exactSignOf(value) > 0 && text === '0' ? `< 0.01 ${units.quote}` : `${costMoney.format(text as Intl.StringNumericLiteral)} ${units.quote}`
+}
+
 /** The owner's assumed costs, beside the gross figures and never inside them. */
 function AssumedCostsLine({ value, units }: { value: AssumedCosts; units: SizeUnits }) {
   const r = value.r === null ? null : exactSignOf(value.r) > 0 && exactFixed(value.r, 2) === '0' ? '< 0.01' : exactFixed(value.r, 2)
-  const money = value.cost === null ? null : moneyText(exactNumber(value.cost), units)
+  const money = value.cost === null ? null : exactMoneyText(value.cost, units)
   return <p className="position-risk-costs" data-testid="assumed-costs">
     {r !== null ? <>Assumed costs ≈ −{r}R</> : money !== null ? <>Assumed costs ≈ −{money}</> : <>Assumed costs unknown</>}
     <span> ({assumedPercent(value.assumption)})</span>

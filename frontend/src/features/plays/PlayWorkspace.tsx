@@ -350,6 +350,6 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         marks={marks} filledEntries={filled} />}
     </div>
     {!retrospective && <PositionSummary draft={draft} units={units} instrumentName={instrumentName} riskReference={riskReference} fills={fills}
-      costs={!paper && account ? costAssumptions[account.venueId] ?? null : null} />}
+      costs={!paper && account && !venues.isManual(account.venueId) ? costAssumptions[account.venueId] ?? null : null} />}
   </section>
 }

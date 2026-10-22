@@ -413,6 +413,16 @@ describe('Position summary', () => {
     expect(screen.getByTestId('assumed-costs')).toHaveTextContent('Assumed costs unknown (fees not set, slippage 0.05%)')
   })
 
+  it('rounds the exact assumed cost once, never through a float (Sol round 1 on 10a)', () => {
+    // 1% of 100.49999999999999999999999 is 1.0049999999999999999999999: 1 USDC, where a float reads 1.005 and shows 1.01.
+    const draft = { ...createDraft(), size: '100.49999999999999999999999', leverage: '1' }
+    draft.entries[0]!.price = '2000'
+    draft.entries[0]!.stops[0]!.value = ''
+    render(<PositionSummary draft={draft} units={{ quote: 'USDC', base: 'ETH', quantityDecimals: 4 }}
+      costs={{ feePercent: '1', slippagePercent: null }} />)
+    expect(screen.getByTestId('assumed-costs')).toHaveTextContent('Assumed costs ≈ −1 USDC (fees 1%, slippage not set)')
+  })
+
   it('derives margin from a quantity once an entry is priced', () => {
     const draft = { ...createDraft(), sizingMode: 'quantity' as const, size: '0.125', leverage: '4' }
     const view = render(<PositionSummary draft={draft} />)

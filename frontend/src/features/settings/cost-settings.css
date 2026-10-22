@@ -1,17 +1,17 @@
 /* Cost assumptions section of Settings (Phase 2, item 10a). Theme tokens only. */
 .cost-settings > p { font-size: var(--text-xs); color: var(--muted-foreground); line-height: 1.6; }
+/* Fields wrap within the panel at any width, so nothing is clipped by its overflow (Sol round 1 on 10a). */
 .cost-settings-venue {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 6rem auto 6rem auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px 10px;
+  gap: 8px 14px;
   margin-top: 12px;
   font-size: var(--text-sm);
 }
-.cost-settings-venue label { color: var(--muted-foreground); font-size: var(--text-xs); }
-.cost-settings-venue p { grid-column: 1 / -1; margin: 0; font-size: var(--text-xs); }
+.cost-settings-venue > :first-child { flex: 1 1 8rem; min-width: 0; }
+.cost-settings-field { display: inline-flex; align-items: center; gap: 8px; }
+.cost-settings-field input { width: 6rem; }
+.cost-settings-venue label { color: var(--muted-foreground); font-size: var(--text-xs); white-space: nowrap; }
+.cost-settings-venue p { flex-basis: 100%; margin: 0; font-size: var(--text-xs); }
 .cost-settings-venue .cost-settings-error { color: var(--warning); }
-@media (max-width: 640px) {
-  .cost-settings-venue { grid-template-columns: auto 6rem; }
-  .cost-settings-venue > :first-child { grid-column: 1 / -1; }
-}

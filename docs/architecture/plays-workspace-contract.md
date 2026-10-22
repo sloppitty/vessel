@@ -439,11 +439,14 @@ Phase 2, item 10a (G-10; see `phase2-risk-coverage-contract.md`).
   - They are kept in this browser, per user, like the Review threshold
     (`costs.assumptions.v1`). They are hidden in paper mode, where simulated
     fees and slippage are zero.
+  - The Manual venue has none, since one manual account can stand for any
+    broker; its Plays show no line.
 - **The summary.** A real Play whose venue has an assumption shows one line
   below the planned metrics, beside the gross figures and never inside them,
   for example "Assumed costs ≈ −0.03R (fees 0.09%, slippage 0.05%)".
   - The cost is the planned position size (margin × leverage, or quantity ×
-    the share-weighted planned entry) times the two percentages.
+    the share-weighted planned entry) times the two percentages. It is
+    rounded once to cents from the exact value.
   - It is stated in R only against a known loss at the stops, otherwise in
     the quote asset, otherwise as unknown.
   - A part that is not set adds nothing and reads "not set", never zero.

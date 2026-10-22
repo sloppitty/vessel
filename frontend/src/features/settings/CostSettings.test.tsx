@@ -11,6 +11,12 @@ afterEach(() => localStorage.clear())
 const venue = (id: string, name: string) => ({ id, name, capabilities: {} }) as unknown as VenueInfo
 
 describe('Cost assumptions settings (Phase 2, item 10a)', () => {
+  it('lists no Manual venue: one manual account can stand for any broker (Sol round 1 on 10a)', () => {
+    render(<CostSettings venues={[venue('hyperliquid', 'Hyperliquid'), venue('manual', 'Manual')]} />)
+    expect(screen.getByRole('form', { name: 'Hyperliquid cost assumptions' })).toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: 'Manual cost assumptions' })).toBeNull()
+  })
+
   it('starts blank, saves a venue\'s two percentages in this browser and clears them', async () => {
     const user = userEvent.setup()
     render(<CostSettings venues={[venue('hyperliquid', 'Hyperliquid'), venue('lighter', 'Lighter')]} />)
