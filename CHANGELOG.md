@@ -4,6 +4,8 @@
 
 ### Added
 
+- A saved Play can be downloaded as a zip: its plan revisions, history, executions,
+  review, log and evidence notes as JSON, with every evidence original unchanged.
 - Settings → Data export downloads an account's retained executions or funding as CSV,
   with native IDs, exact amounts and fees kept apart, for reconciliation tools. Nothing is
   computed, and it is not a tax report.

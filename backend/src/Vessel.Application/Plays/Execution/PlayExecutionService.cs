@@ -617,6 +617,19 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
 
     private static string Name<T>(T value) where T : Enum => value.ToString().ToLowerInvariant();
 
+    /// <summary>Every retained link of a real Play, in any state, in creation order (Phase 2, item 5c).</summary>
+    public async Task<IReadOnlyList<LinkRecordDto>> LinkRecordAsync(Guid playId, CancellationToken ct)
+    {
+        var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+        if (play.TradingMode != "real") throw new ProblemException(404, "Play not found.");
+        var links = await store.PlayLinksAsync(play.AccountId, play.Id, ct);
+        var orders = (await store.OrdersAsync(play.AccountId, links.Select(l => l.ImportedOrderId).ToHashSet(),
+            new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal), ct)).ToDictionary(o => o.Id);
+        return links.OrderBy(l => l.CreatedAtUtc).ThenBy(l => l.Id).Select(l => new LinkRecordDto(l.Id, Name(l.Role), l.EntryId, l.LevelId,
+            Name(l.State), Name(l.Source), orders.GetValueOrDefault(l.ImportedOrderId)?.ExternalOrderId,
+            orders.GetValueOrDefault(l.ImportedOrderId)?.ContractId, l.CreatedAtUtc, l.UpdatedAtUtc)).ToList();
+    }
+
     private static ExecutionOrderDto OrderDto(ImportedOrder o) => new(o.ExternalOrderId, o.Side, o.OrderType, ExactDecimal.Format(o.LimitPrice),
         ExactDecimal.Format(o.TriggerPrice), o.ReduceOnly, o.IsPositionTpsl, ExactDecimal.Format(o.OriginalSize),
         ExactDecimal.Format(o.RemainingSize), o.PlacedAtUtc, o.Status, o.VenueStatus, o.StatusAtUtc);

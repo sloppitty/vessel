@@ -16,6 +16,13 @@ public interface IUnitOfWork
 {
     Task<T> ExecuteAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Runs reads against one consistent database snapshot, as the outermost unit (Phase 2, item 5c: a Play bundle whose
+    /// parts must agree). It writes nothing; close it before any object-storage read. Stores without snapshots run it as
+    /// an ordinary unit.
+    /// </summary>
+    Task<T> ReadSnapshotAsync<T>(Func<Task<T>> read, CancellationToken cancellationToken) => ExecuteAsync(read, cancellationToken);
+
     /// <summary>Persists intermediate changes inside the active boundary, without committing.</summary>
     Task SaveChangesAsync(CancellationToken cancellationToken);
 

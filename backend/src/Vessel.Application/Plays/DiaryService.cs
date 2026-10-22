@@ -158,6 +158,17 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
         return await ManualResult(play, resulting, ct);
     }
 
+    /// <summary>
+    /// The manual ledger and its history as recorded, for the Play bundle (Phase 2, item 5c): read-only, without the Play
+    /// lock, and also when the account is now disabled, since the Play itself stays readable.
+    /// </summary>
+    public async Task<ManualExecutionsDto> ManualRecordAsync(Guid playId, CancellationToken ct)
+    {
+        var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+        if (play.TradingMode != "real") throw new ProblemException(404, "Play not found.");
+        return await ManualResult(play, await diary.ManualAsync(playId, ct), ct);
+    }
+
     private async Task<Play> RequireManual(Guid id, CancellationToken ct)
     {
         var play = await plays.FindAsync(id, ct) ?? throw new ProblemException(404, "Play not found.");
