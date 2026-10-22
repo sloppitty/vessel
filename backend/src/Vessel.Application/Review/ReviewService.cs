@@ -185,6 +185,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         {
             Preflight = Preflight(cases),
             Process = Process(cases),
+            Rule = Rule(cases),
             Positions = new ReviewPositionsDto(query.Positions, include, query.MinPlays, playCount,
                 include ? current.Count(e => e.Position is not null) : null,
                 include ? omitted : null, PlayWeight.ToString(CultureInfo.InvariantCulture)),
@@ -308,7 +309,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
     /// null for an unscored planned Play with no answers, which only the exclusion list shows.
     /// </summary>
     private sealed record ProcessCase(Play Play, DateTimeOffset At, PlayOutcome? Result, IReadOnlyList<PreflightCheckDto>? Preflight,
-        bool PostHoc, string? Lane, string? Cell)
+        bool PostHoc, string? Lane, string? Cell, PlanRuleSnapshotDto? Rule = null)
     {
         public string Outcome => Result is null ? "unscored" : Result.NetResult > 0 ? "win" : Result.NetResult < 0 ? "loss" : "scratch";
     }
@@ -323,7 +324,8 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             : answers.Adherence is null ? ("unanswered", null)
             : answers.Adherence == "not-applicable" ? ("not-applicable", null)
             : ("cells", $"{answers.Adherence}-{outcome}");
-        return new(play, at, result, PlayPreflight.Read(revisions.SingleOrDefault(r => r.Number == 1)?.Preflight), postHoc, lane, cell);
+        var first = revisions.SingleOrDefault(r => r.Number == 1);
+        return new(play, at, result, PlayPreflight.Read(first?.Preflight), postHoc, lane, cell, PlayRules.Read(first?.Rule));
     }
 
     /// <summary>The process population: the period's Closed, Cancelled and Unresolved Plays in scope, each by its own time.</summary>
@@ -356,6 +358,32 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             .Select(g => (g.Key, g.OrderByDescending(c => c.Play.ReviewedAtUtc).ThenByDescending(c => c.Play.UpdatedAtUtc).ThenBy(c => c.Play.Id)
                 .First().Play.ReviewMistakeTag!.Trim(), g.ToList()));
 
+    /// <summary>The if-then rule's answers (Phase 2, item 3), over the cases planned under a rule; each count equals its drill-down.</summary>
+    private static ReviewRuleDto Rule(IReadOnlyList<ProcessCase> cases)
+    {
+        var carried = cases.Where(c => c.Rule is not null).ToList();
+        ReviewRuleRowDto Row(string? answer)
+        {
+            var rows = carried.Where(c => c.Play.ReviewRule == answer).ToList();
+            return new(rows.Count(c => c.Outcome == "win"), rows.Count(c => c.Outcome == "loss"), rows.Count(c => c.Outcome == "scratch"),
+                rows.Count(c => c.Outcome == "unscored"));
+        }
+        return new(carried.Count, carried.Count(c => c.Rule!.Answer == PlayRules.Acknowledged), carried.Count(c => c.Rule!.Answer == PlayRules.Exception),
+            carried.Count(c => c.Rule!.Answer is null), Row("followed"), Row("deviated"), Row("not-applicable"), Row(null));
+    }
+
+    /// <summary>The rule selectors: a review answer, unanswered, or the answer at Plan it.</summary>
+    public static readonly string[] RuleSelectors = ["followed", "deviated", "not-applicable", "unanswered", "acknowledged", "exception", "not-acknowledged"];
+
+    private static bool RuleMatches(ProcessCase c, string selector) => c.Rule is { } rule && selector switch
+    {
+        "unanswered" => c.Play.ReviewRule is null,
+        "acknowledged" => rule.Answer == PlayRules.Acknowledged,
+        "exception" => rule.Answer == PlayRules.Exception,
+        "not-acknowledged" => rule.Answer is null,
+        _ => c.Play.ReviewRule == selector,
+    };
+
     public static readonly string[] ProcessCells = ["followed-win", "followed-loss", "followed-scratch", "deviated-win", "deviated-loss", "deviated-scratch"];
     public static readonly string[] ProcessLanes = ["retrospective", "unscored", "unanswered", "not-applicable"];
 
@@ -368,11 +396,12 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         var now = time.GetUtcNow();
         var query = Validated(request.Filters);
         var window = await WindowAsync(query, now, ct);
-        var selectors = new[] { request.Cell, request.Lane, request.MistakeTag, request.SkippedCheck }.Count(s => s is not null);
-        if (selectors != 1) throw new ProblemException(400, "Choose one cell, lane, mistake tag or skipped check.");
+        var selectors = new[] { request.Cell, request.Lane, request.MistakeTag, request.SkippedCheck, request.Rule }.Count(s => s is not null);
+        if (selectors != 1) throw new ProblemException(400, "Choose one cell, lane, mistake tag, skipped check or rule answer.");
         if (request.Cell is { } cell && !ProcessCells.Contains(cell) || request.Lane is { } lane && !ProcessLanes.Contains(lane) ||
             request.MistakeTag is { } tag && (string.IsNullOrWhiteSpace(tag) || tag.Length > 100) ||
-            request.SkippedCheck is { } check && check != "not-recorded" && !PlayPreflight.Codes.Contains(check))
+            request.SkippedCheck is { } check && check != "not-recorded" && !PlayPreflight.Codes.Contains(check) ||
+            request.Rule is { } ruleSelector && !RuleSelectors.Contains(ruleSelector))
             throw new ProblemException(400, "Invalid process selection.");
         var facts = await store.ReadAsync(query, now, window, ct);
         var accounts = facts.Accounts.Where(a => a.IsEnabled && a.TradingMode == query.TradingMode).ToDictionary(a => a.Id);
@@ -386,6 +415,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         var selected = (request.Cell is { } c1 ? cases.Where(c => c.Cell == c1)
             : request.Lane is { } l1 ? cases.Where(c => c.Lane == l1)
             : request.MistakeTag is { } t1 ? Tags(cases).Where(t => t.Key == TagKey(t1)).SelectMany(t => t.Cases)
+            : request.Rule is { } r1 ? cases.Where(c => RuleMatches(c, r1))
             : request.SkippedCheck == "not-recorded" ? cases.Where(c => PreflightApplies(c) && c.Preflight is null)
             : cases.Where(c => PreflightApplies(c) && c.Preflight?.Any(p => p.Code == request.SkippedCheck && p.Outcome == "skipped") == true))
             .OrderByDescending(c => c.At).ThenBy(c => c.Play.Id).ToList();

@@ -493,3 +493,44 @@ reporting setting.
   on the `loss-limit` check, and History lists it.
 - **Nothing is blocked**, and sizing, Review and the ladder do not read the
   limits. Review's pre-flight counts include the new check.
+
+## If-then rule (October 22, 2026)
+
+Phase 2, item 3 (see `phase2-risk-coverage-contract.md`). It builds on 1.5's
+next actions.
+- **The rule.** Each trading mode has at most one active rule: "If …, then …",
+  each part 1–500 characters (`play_rules`, migration `IfThenRule`). The
+  Thesis tab of a Draft, Planned or Paused Play shows it, with **Write a
+  rule**, **Change the rule** and **Archive the rule**, and links a promoted
+  rule's source Play. A next action offers **Make this the rule**, which fills
+  its Then and names its source Play; promoting never copies anything into the
+  thesis.
+- **Versions.** `GET`, `PUT` and `DELETE /api/plays/rule` work in the mode
+  they are asked for. A change adds the next version and archives the active
+  one; archiving leaves none. Both name the version the owner saw. A different
+  active version, or a concurrent change or archive of the same version, is a
+  409: archiving updates only a row still active (Sol round 1 on item 3).
+  Changing or archiving never rewrites a Play's snapshot.
+- **The editor.** It saves against the version it was opened on. After a 409
+  the browser reads the rule again; while that read shows another version, the
+  editor saves nothing until the owner chooses **Load the current rule**, so a
+  version they have not seen is never replaced. A rule read answered after a
+  later read or write began is dropped.
+- **At Plan it.** The pre-flight dialog shows the active rule. The owner may
+  mark it **Acknowledged**, or **An exception this time** with a reason of at
+  most 500 characters. No answer never blocks; an exception waits for its
+  reason. The request names the version shown, with the answer when there is
+  one: a shown version that is no longer active is a 409, answered or not, and
+  the dialog asks again about the current one. An answer given before a change
+  is cleared.
+- **The snapshot.** Planning keeps the rule that was shown, its version, text
+  and source with the answer (or none), on revision 1 beside the pre-flight,
+  and on the Play for its review. History lists it. A request that names no
+  shown rule (none was active, the read failed, or an older client) keeps
+  none, whatever is active, so an unseen rule is never attributed to a Play
+  (Sol round 1 on item 3). Retrospective Plays have none.
+- **In the review.** A Closed, Cancelled or Unresolved Play planned under a
+  rule asks **Followed the rule?**: followed, deviated or not applicable,
+  stored with the structured review and listed in its history. A Play planned
+  without a rule refuses an answer.
+

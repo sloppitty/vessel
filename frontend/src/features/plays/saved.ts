@@ -1,6 +1,6 @@
 import type { WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
-import { emptyStructuredReview, hasStructuredReview, type PlanEntry, type PlayFields, type PlayPlan, type PlayStatus, type PlaySummary, type SavedEvidence, type SavedPlay } from '@/api/plays'
+import { emptyStructuredReview, hasStructuredReview, type PlanEntry, type PlayFields, type PlayPlan, type PlayStatus, type PlaySummary, type PlayRuleSeen, type SavedEvidence, type SavedPlay } from '@/api/plays'
 import { isChartDrawing, type ChartDrawing } from '@/components/chart/drawings'
 import { createDraft, createEvidenceId, type DraftEvidence, type PlayDraft } from './draft'
 import { emptyManualDraft, hasManualDraft, type ManualExecutionDraft } from './manual'
@@ -18,6 +18,8 @@ export interface SavedState {
   plan: PlayPlan
   /** Server evidence IDs present at the last save; a missing one was removed locally. */
   evidenceIds: string[]
+  /** The if-then rule the Play was planned under (Phase 2, item 3), for its review. */
+  rule?: PlayRuleSeen | null
 }
 
 /** Kept by the shell, so navigating away and back keeps the open play and its unsaved edits. */
@@ -119,6 +121,7 @@ export function savedState(play: SavedPlay, draft: PlayDraft): SavedState {
   return {
     summary: play.summary, fieldsKey: fieldsKey(draft), planKey: planKey(plan), plan,
     evidenceIds: draft.evidence.flatMap(item => item.serverId ? [item.serverId] : []),
+    ...(play.rule ? { rule: play.rule } : {}),
   }
 }
 

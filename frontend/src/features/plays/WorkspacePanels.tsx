@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, useState, type FocusEvent, type FormEvent, type ReactNode } from 'react'
+import { IfThenRuleLine, type RuleControls } from './IfThenRule'
 import { useVenues } from '@/api/venues'
 import { Maximize2, Minimize2, NotebookPen, Pencil, Plus, RotateCcw } from 'lucide-react'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
-import { emptyStructuredReview, isEndedStatus, type NextAction, type PlayStatus, type StructuredReview } from '@/api/plays'
+import { emptyStructuredReview, isEndedStatus, type NextAction, type PlayStatus, type StructuredReview, type PlayRuleSeen } from '@/api/plays'
 import { ChartIconButton } from '@/components/chart/ChartToolbar'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
@@ -151,7 +152,7 @@ const journalSections = [
 
 export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, evidenceImages, evidenceRequest = 0, executionRequest = 0, readOnly = false, execution,
   structuredReview, onStructuredReviewChange, status = 'draft', retrospective = false, reviewReceipt, journalSave, nextActions,
-  log, reviewCompletion, mistakeTags, keepExecutionMounted = false }: {
+  log, reviewCompletion, mistakeTags, keepExecutionMounted = false, rule, planRule }: {
   notes: PlayDraft['notes']
   onChange: (notes: PlayDraft['notes']) => void
   evidence?: DraftEvidence[]
@@ -184,6 +185,10 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
   /** The owner's recent next actions, shown in the Thesis tab with a way to copy one into it (phase 1, 1.5). */
   nextActions?: { actions: readonly NextAction[]; onCopy: (action: NextAction) => void; onOpen?: (id: string) => void } | undefined
   keepExecutionMounted?: boolean
+  /** The mode's if-then rule, shown and managed in the Thesis tab (Phase 2, item 3). */
+  rule?: RuleControls | undefined
+  /** The rule this Play was planned under, for the review's "Followed the rule?". */
+  planRule?: PlayRuleSeen | null | undefined
 }) {
   const id = useId()
   const state = useJournalStore()
@@ -267,6 +272,7 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
       } : {}}>
       {key === 'evidence' && onEvidenceChange && <EvidencePanel evidence={evidence} onChange={onEvidenceChange} images={evidenceImages} />}
       {key === 'review' && reviewReceipt}
+      {key === 'thesis' && rule && <IfThenRuleLine controls={rule} />}
       {key === 'thesis' && nextActions && <details className="next-actions">
         <summary>Your recent next actions ({nextActions.actions.length})</summary>
         <ul>{nextActions.actions.map(action => <li key={action.playId}>
@@ -274,7 +280,8 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
           <span className="next-action-source">From {nextActions.onOpen
             ? <button type="button" className="text-action" onClick={() => nextActions.onOpen!(action.playId)}>{action.title || 'Untitled play'}</button>
             : <strong>{action.title || 'Untitled play'}</strong>}
-            <Button type="button" size="sm" variant="outline" onClick={() => nextActions.onCopy(action)}>Copy into plan</Button></span>
+            <Button type="button" size="sm" variant="outline" onClick={() => nextActions.onCopy(action)}>Copy into plan</Button>
+            {rule?.state && <Button type="button" size="sm" variant="ghost" onClick={() => rule.onPromote(action)}>Make this the rule</Button>}</span>
         </li>)}</ul>
       </details>}
       <label className="sr-only" htmlFor={`${id}-${key}`}>{label}</label>
@@ -293,6 +300,15 @@ export function PlayJournal({ notes, onChange, evidence = [], onEvidenceChange, 
               <option value="not-applicable">Not applicable</option>
             </NativeSelect>
           </div>
+          {planRule && <div className="structured-review-field">
+            <label htmlFor={`${id}-rule`}>Followed the rule?</label>
+            <NativeSelect id={`${id}-rule`} value={review.rule ?? ''} aria-describedby={`${id}-rule-text`}
+              onChange={event => changeReview({ rule: (event.target.value || null) as NonNullable<StructuredReview['rule']> | null })}>
+              <option value="">Unanswered</option><option value="followed">Followed</option><option value="deviated">Deviated</option>
+              <option value="not-applicable">Not applicable</option>
+            </NativeSelect>
+            <small id={`${id}-rule-text`}>If {planRule.if}, then {planRule.then} · version {planRule.version} at Plan it</small>
+          </div>}
           <div className="structured-review-field">
             <label htmlFor={`${id}-mistake`}>Mistake tag</label>
             <input id={`${id}-mistake`} maxLength={100} value={review.mistakeTag ?? ''} placeholder="e.g. Chased the entry"

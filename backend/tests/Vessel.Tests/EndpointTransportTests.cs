@@ -48,7 +48,7 @@ public sealed class EndpointTransportTests
         Assert.Equal(
             ["POST /api/plays/retrospective", "POST /api/plays/{id:guid}/manual-executions",
              "POST /api/plays/{id:guid}/manual-executions/corrections", "POST /api/risk/open/preview",
-             "PUT /api/plays/{id:guid}/manual-executions/{executionId:guid}", "PUT /api/risk/settings", "PUT /api/settings/reporting"],
+             "PUT /api/plays/rule", "PUT /api/plays/{id:guid}/manual-executions/{executionId:guid}", "PUT /api/risk/settings", "PUT /api/settings/reporting"],
             limits.Keys.Order(StringComparer.Ordinal));
         Assert.All(limits.Where(pair => pair.Key.Contains("/api/plays/", StringComparison.Ordinal)),
             pair => Assert.Equal("Diary request is too large.", pair.Value.TooLargeMessage));
@@ -64,6 +64,8 @@ public sealed class EndpointTransportTests
         Assert.Equal(131_072, limits["POST /api/plays/retrospective"].MaxBytes);
         Assert.Equal(16_384, limits["POST /api/plays/{id:guid}/manual-executions"].MaxBytes);
         Assert.Equal(16_384, limits["PUT /api/plays/{id:guid}/manual-executions/{executionId:guid}"].MaxBytes);
+        // Phase 2, item 3: a rule is two parts of at most 500 characters and a source Play.
+        Assert.Equal(8_192, limits["PUT /api/plays/rule"].MaxBytes);
         // A correction batch holds up to 200 full rows and one reason (phase 1, 1.3b).
         Assert.Equal(262_144, limits["POST /api/plays/{id:guid}/manual-executions/corrections"].MaxBytes);
     }

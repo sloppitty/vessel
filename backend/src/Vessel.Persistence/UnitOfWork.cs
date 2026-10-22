@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Npgsql;
 using Vessel.Application.Common;
 using Vessel.Application.Ownership;
+using Vessel.Persistence.Configurations;
 
 namespace Vessel.Persistence;
 
@@ -279,6 +280,13 @@ public sealed class UnitOfWork(VesselDbContext db, IEnumerable<IUnitOfWorkPartic
         {
             failure ??= error;
             throw new ProblemException(409, "An account for this venue and source already exists. Manage or re-enable that account.");
+        }
+        catch (DbUpdateException error) when (error.InnerException is PostgresException
+            { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: PlayRuleIndexes.Version or PlayRuleIndexes.Active })
+        {
+            // Phase 2, item 3: another change of the if-then rule committed first.
+            failure ??= error;
+            throw new ProblemException(409, Vessel.Application.Plays.PlayRules.Changed);
         }
         return true;
     }, cancellationToken);

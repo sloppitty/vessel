@@ -1,13 +1,13 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { ReviewProcess, ReviewProcessPage } from '@/api/review'
-import { isReviewProcessPage, reviewProcessPath } from '@/api/review'
+import type { ReviewProcess, ReviewProcessPage, ReviewRule } from '@/api/review'
+import { isReviewProcessPage, isReviewRule, reviewProcessPath } from '@/api/review'
 import type { WorkspaceApi } from '@/api/workspace'
 import { createWorkspaceApi } from '@/api/workspace'
 import { reviewFixture } from '@/test/review-fixture'
 import { render as renderWithVenues } from '@/test/render'
-import { ProcessSection } from './ReviewProcess'
+import { ProcessSection, RuleSection } from './ReviewProcess'
 import { ReviewPage } from './ReviewPage'
 
 const process: ReviewProcess = {
@@ -116,5 +116,37 @@ describe('pre-flight drill-down (phase 1, 1.5 and 1.4b)', () => {
     await user.keyboard('{Escape}')
     await user.click(screen.getByRole('button', { name: '2 not recorded' }))
     expect(reviewProcess).toHaveBeenLastCalledWith(expect.anything(), { skippedCheck: 'not-recorded' }, expect.any(AbortSignal))
+  })
+})
+
+describe('the if-then rule in Review (Phase 2, item 3)', () => {
+  const row = (wins: number, losses: number, scratches: number, unscored: number) => ({ wins, losses, scratches, unscored })
+  const rule: ReviewRule = { carried: 6, acknowledged: 4, exceptions: 1, notAcknowledged: 1,
+    followed: row(2, 1, 0, 0), deviated: row(1, 0, 0, 1), notApplicable: row(0, 0, 0, 0), unanswered: row(0, 0, 1, 0) }
+
+  it('counts the answers at Plan it and in the review, with no share, each opening its Plays', async () => {
+    const onInspect = vi.fn()
+    const view = render(<RuleSection rule={rule} onInspect={onInspect} />)
+    const section = screen.getByRole('region', { name: 'If-then rule' })
+    expect(section).toHaveTextContent('6 Plays planned under a rule. At Plan it: 4 acknowledged · 1 exception · 1 not answered.')
+    const rows = within(section).getAllByRole('row')
+    expect(rows.map(r => within(r).queryByRole('rowheader')?.textContent)).toEqual([undefined, 'Followed', 'Deviated', 'Not applicable', 'Not answered'])
+    // A winning deviation stays a deviation.
+    expect(rows[2]).toHaveTextContent('Deviated21001')
+    expect(section).not.toHaveTextContent('%')
+    await userEvent.click(within(rows[2]!).getByRole('button', { name: '2 deviated the rule' }))
+    expect(onInspect).toHaveBeenLastCalledWith('Rule · deviated', { rule: 'deviated' })
+    await userEvent.click(within(section).getByRole('button', { name: '1 exception at Plan it' }))
+    expect(onInspect).toHaveBeenLastCalledWith('Rule at Plan it · exception', { rule: 'exception' })
+    view.rerender(<RuleSection rule={{ ...rule, carried: 0, acknowledged: 0, exceptions: 0, notAcknowledged: 0,
+      followed: row(0, 0, 0, 0), deviated: row(0, 0, 0, 0), unanswered: row(0, 0, 0, 0) }} onInspect={onInspect} />)
+    expect(screen.queryByRole('region', { name: 'If-then rule' })).toBeNull()
+  })
+
+  it('accepts only counts that add up, and builds the drill-down path', () => {
+    expect(isReviewRule(rule)).toBe(true)
+    expect(isReviewRule({ ...rule, carried: 5 })).toBe(false)
+    expect(reviewProcessPath({ period: 'all', portfolio: 'all', offset: 0 }, { rule: 'not-acknowledged' }))
+      .toBe('/api/review/process?period=all&portfolio=all&offset=0&rule=not-acknowledged')
   })
 })

@@ -125,15 +125,17 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     {
         var play = await Find(id, ct);
         RequireVersion(play, request.ExpectedVersion);
-        if (request.Preflight is not null && (request.Status, play.Status) is not ("planned", PlayStatus.Draft))
-            throw new ProblemException(400, "A pre-flight is recorded only when a Draft is planned.");
+        if ((request.Preflight is not null || request.Rule is not null) && (request.Status, play.Status) is not ("planned", PlayStatus.Draft))
+            throw new ProblemException(400, "A pre-flight and a rule answer are recorded only when a Draft is planned.");
         var now = time.GetUtcNow();
         switch (request.Status, play.Status)
         {
             case ("planned", PlayStatus.Draft):
                 await EnabledAccount(play.AccountId, ct);
                 PlayDocuments.RequirePlannable(PlayDocuments.Read(play.Plan));
-                var (change, revision) = play.MarkPlanned(now, PlayPreflight.Serialize(PlayPreflight.Normalize(request.Preflight)));
+                // The mode's active if-then rule goes with revision 1, with the owner's answer when they gave one (Phase 2, item 3).
+                var rule = PlayRules.Seen(await store.ActiveRuleAsync(play.TradingMode, ct), request.Rule);
+                var (change, revision) = play.MarkPlanned(now, PlayPreflight.Serialize(PlayPreflight.Normalize(request.Preflight)), rule);
                 store.Add(change);
                 store.Add(revision);
                 break;
@@ -239,7 +241,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         var changes = await store.StatusChangesAsync(play.Id, ct);
         var reviews = await store.ReviewsAsync(play.Id, ct);
         return new(revisions.Select(r => new PlanRevisionDto(r.Number, StatusName(r.Status), r.Reason, r.CreatedAtUtc, PlayDocuments.Read(r.Plan))
-            { Preflight = PlayPreflight.Read(r.Preflight) }).ToList(),
+            { Preflight = PlayPreflight.Read(r.Preflight), Rule = PlayRules.Read(r.Rule) }).ToList(),
             changes.Select(c => new StatusChangeDto(StatusName(c.From), StatusName(c.To), c.Reason is { } reason ? ReasonName(reason) : null,
                 c.Note, c.OccurredAtUtc, c.Source.ToString().ToLowerInvariant())
             {
@@ -389,8 +391,57 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     public static PlayDto ToDto(Play play)
     {
         var plan = PlayDocuments.Read(play.Plan);
-        return new(Summary(play, plan.Direction), plan, PlayDocuments.ReadDrawings(play.Drawings), play.Review, play.Answers);
+        return new(Summary(play, plan.Direction), plan, PlayDocuments.ReadDrawings(play.Drawings), play.Review, play.Answers)
+        {
+            Rule = play.RuleVersion is { } version ? new PlayRuleSeenDto(version, play.RuleIf!, play.RuleThen!) : null,
+        };
     }
+
+    /// <summary>The active if-then rule in the mode (Phase 2, item 3), naming the Play it was promoted from.</summary>
+    public async Task<PlayRuleStateDto> RuleAsync(string? tradingMode, CancellationToken ct)
+    {
+        var mode = Mode(tradingMode);
+        return new(await RuleDto(await store.ActiveRuleAsync(mode, ct), mode, ct), mode);
+    }
+
+    /// <summary>
+    /// Makes a new rule version the active one, archiving the one it replaces; Plays planned under it keep their text. It is
+    /// a 409 when the active version is not the one the owner saw. A source Play must be the owner's, in this mode.
+    /// </summary>
+    public Task<PlayRuleStateDto> SetRuleAsync(string? tradingMode, SetPlayRuleRequest request, CancellationToken ct) => unitOfWork.ExecuteAsync(async () =>
+    {
+        var mode = Mode(tradingMode);
+        var active = await store.ActiveRuleAsync(mode, ct);
+        if (active?.Version != request.ExpectedVersion)
+            throw new ProblemException(409, PlayRules.Changed);
+        if (request.SourcePlayId is { } source && await store.TitleAsync(source, mode, ct) is null)
+            throw new ProblemException(404, "Play not found.");
+        var now = time.GetUtcNow();
+        if (active is not null)
+        {
+            active.Archive(now);
+            await store.SaveRuleAsync(ct);
+        }
+        var rule = await store.AddRuleAsync(mode, request.If ?? "", request.Then ?? "", request.SourcePlayId, now, ct);
+        await store.SaveRuleAsync(ct);
+        return new PlayRuleStateDto(await RuleDto(rule, mode, ct), mode);
+    }, ct);
+
+    /// <summary>Archives the active rule, leaving none; 409 when it is not the version the owner saw.</summary>
+    public Task<PlayRuleStateDto> ArchiveRuleAsync(string? tradingMode, int expectedVersion, CancellationToken ct) => unitOfWork.ExecuteAsync(async () =>
+    {
+        var mode = Mode(tradingMode);
+        var active = await store.ActiveRuleAsync(mode, ct);
+        if (active is null || active.Version != expectedVersion)
+            throw new ProblemException(409, PlayRules.Changed);
+        active.Archive(time.GetUtcNow());
+        await store.SaveRuleAsync(ct);
+        return new PlayRuleStateDto(null, mode);
+    }, ct);
+
+    private async Task<PlayRuleDto?> RuleDto(PlayRule? rule, string mode, CancellationToken ct) => rule is null ? null
+        : new(rule.Version, rule.If, rule.Then, rule.SourcePlayId,
+            rule.SourcePlayId is { } source ? await store.TitleAsync(source, mode, ct) : null, rule.CreatedAtUtc);
 
     [GeneratedRegex("^[A-Za-z0-9_-]{1,32}$")]
     private static partial Regex ContractPattern();

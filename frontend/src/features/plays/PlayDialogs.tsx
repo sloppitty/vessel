@@ -1,7 +1,7 @@
 import { errorMessage } from '@/api/errors'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { WorkspaceApi } from '@/api/workspace'
-import { cancelReasonLabels, cancelReasons, statusLabels, unresolvedReasonLabels, unresolvedReasons, type CancelReason, type PlayHistory, type PreflightCheck, type UnresolvedReason, maxPreflightNote } from '@/api/plays'
+import { cancelReasonLabels, cancelReasons, statusLabels, unresolvedReasonLabels, unresolvedReasons, type CancelReason, type PlayHistory, type PreflightCheck, type UnresolvedReason, maxPreflightNote, type PlanRuleAnswer, type PlanRuleSnapshot, type PlayRule } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { describePlanChanges } from './saved'
@@ -140,16 +140,32 @@ const preflightLines = (checks: readonly PreflightCheck[] | null | undefined) =>
   // Phase 2, item 10b: the owner's cooldown note at a reached loss limit, as written.
   ...(checks?.flatMap(check => check.note ? [`Cooldown note: ${check.note}`] : []) ?? [])]
 
+/** The if-then rule seen at Plan it and the owner's answer, on revision 1 (Phase 2, item 3). */
+const ruleLines = (rule: PlanRuleSnapshot | null | undefined) => rule ? [`If-then rule, version ${rule.version}: if ${rule.if}, then ${rule.then} · ${
+  rule.answer === 'acknowledged' ? 'acknowledged' : rule.answer === 'exception' ? `exception: ${rule.reason}` : 'not answered'}.`] : []
+
 /**
  * The pre-flight at Plan it (phase 1, 1.5): what the plan already says, recorded with revision 1. It never blocks:
  * Plan it anyway is always available, and so is going back to the plan.
  */
-export function PreflightDialog({ checks, pending, error, onPlan, onClose, lossLimit = null }: {
-  checks: readonly PreflightCheck[]; pending: boolean; error: string | null; onPlan: (note: string | null) => void; onClose: () => void
+export function PreflightDialog({ checks, pending, error, onPlan, onClose, lossLimit = null, rule = null }: {
+  checks: readonly PreflightCheck[]; pending: boolean; error: string | null
+  onPlan: (note: string | null, rule: PlanRuleAnswer | null) => void; onClose: () => void
   /** A reached soft loss limit (Phase 2, item 10b): the owner may add a cooldown note, kept with revision 1. */
   lossLimit?: string | null
+  /** The mode's if-then rule (Phase 2, item 3): acknowledged, or an exception with a reason, kept with revision 1. */
+  rule?: PlayRule | null
 }) {
   const [note, setNote] = useState('')
+  const [given, setAnswer] = useState<{ version: number; answer: NonNullable<PlanRuleAnswer['answer']> } | null>(null)
+  const [reason, setReason] = useState('')
+  // An answer belongs to the version it was given for: a rule changed while the dialog is open is asked again. An
+  // exception needs its reason; no answer at all never blocks planning. The shown version is sent either way, and only a
+  // shown rule is recorded.
+  const answer = rule && given?.version === rule.version ? given.answer : null
+  const ruleAnswer: PlanRuleAnswer | null = !rule ? null : answer === 'acknowledged' ? { version: rule.version, answer }
+    : answer === 'exception' && reason.trim() ? { version: rule.version, answer, reason: reason.trim() } : { version: rule.version }
+  const awaitingReason = answer === 'exception' && !reason.trim()
   const reached = checks.some(check => check.code === 'loss-limit' && check.outcome === 'skipped')
   return <Dialog open onOpenChange={next => { if (!next && !pending) onClose() }}>
     <DialogContent className="workspace-dialog">
@@ -158,6 +174,16 @@ export function PreflightDialog({ checks, pending, error, onPlan, onClose, lossL
       </DialogDescription></DialogHeader>
       <ul className="preflight-checks" aria-label="Pre-flight checks">{checks.map(check => <li key={check.code} data-outcome={check.outcome}>
         <span>{preflightLabels[check.code]}</span><strong>{outcomeLabels[check.outcome]}</strong></li>)}</ul>
+      {rule && <fieldset className="workspace-form preflight-rule">
+        <legend>Your if-then rule</legend>
+        <p>If {rule.if}, then {rule.then}</p>
+        <label><input type="radio" name="preflight-rule" checked={answer === 'acknowledged'} disabled={pending} onChange={() => setAnswer({ version: rule.version, answer: 'acknowledged' })} />
+          Acknowledged</label>
+        <label><input type="radio" name="preflight-rule" checked={answer === 'exception'} disabled={pending} onChange={() => setAnswer({ version: rule.version, answer: 'exception' })} />
+          An exception this time</label>
+        {answer === 'exception' && <><label htmlFor="preflight-rule-reason">Why this is an exception</label>
+          <textarea id="preflight-rule-reason" value={reason} maxLength={500} rows={2} disabled={pending} onChange={event => setReason(event.target.value)} /></>}
+      </fieldset>}
       {reached && <div className="workspace-form">
         {lossLimit && <p className="preflight-loss" role="note">{lossLimit}</p>}
         <label htmlFor="preflight-cooldown">Cooldown note (optional)</label>
@@ -165,7 +191,8 @@ export function PreflightDialog({ checks, pending, error, onPlan, onClose, lossL
       </div>}
       {error && <p className="error" role="alert">{error}</p>}
       <div className="management-actions"><Button type="button" variant="outline" onClick={onClose} disabled={pending}>Back to the plan</Button>
-        <Button type="button" className="play-primary" onClick={() => onPlan(reached && note.trim() ? note.trim() : null)} disabled={pending}>
+        <Button type="button" className="play-primary" onClick={() => onPlan(reached && note.trim() ? note.trim() : null, ruleAnswer)}
+          disabled={pending || awaitingReason}>
           {pending ? 'Planning…' : 'Plan it anyway'}</Button></div>
     </DialogContent>
   </Dialog>
@@ -208,7 +235,7 @@ export function HistoryDialog({ api, playId, onClose }: { api: WorkspaceApi; pla
   const items: HistoryItem[] = result && 'history' in result ? [
     ...result.history.revisions.map((revision, index, all): HistoryItem => ({
       at: revision.createdAtUtc, key: `r${revision.number}`, title: `Plan revision ${revision.number} · ${revision.reason}`,
-      detail: index === 0 ? ['The plan as first committed.', ...(revision.number === 1 ? preflightLines(revision.preflight) : [])] : describePlanChanges(all[index - 1]!.plan, revision.plan),
+      detail: index === 0 ? ['The plan as first committed.', ...(revision.number === 1 ? [...preflightLines(revision.preflight), ...ruleLines(revision.rule)] : [])] : describePlanChanges(all[index - 1]!.plan, revision.plan),
     })),
     ...result.history.statusChanges.map((change, index): HistoryItem => ({
       at: change.occurredAtUtc, key: `s${index}`, title: `${statusLabels[change.from]} → ${statusLabels[change.to]}${change.source === 'paper' ? ' · from simulated paper executions' : change.source === 'venue' ? ' · from linked venue fills' : change.source === 'manual' ? ' · from manual facts' : ''}`,
@@ -220,6 +247,7 @@ export function HistoryDialog({ api, playId, onClose }: { api: WorkspaceApi; pla
       title: `Review revision ${review.number}${review.action && review.action !== 'edited' ? ` · ${reviewActionLabels[review.action]}` : ''}`,
       // Review again, No review needed and a cleared completion change only the completion; the text they keep is already listed.
       detail: review.action === 'reopened' || review.action === 'not-needed' || review.action === 'cleared' ? [] : [review.review, review.structuredReview.adherence ? `Adherence: ${review.structuredReview.adherence}` : '',
+        review.structuredReview.rule ? `Followed the rule: ${review.structuredReview.rule}` : '',
         review.structuredReview.mistakeTag ? `Mistake: ${review.structuredReview.mistakeTag}` : '',
         review.structuredReview.lesson ? `Lesson: ${review.structuredReview.lesson}` : '',
         review.structuredReview.nextAction ? `Next action: ${review.structuredReview.nextAction}` : ''].filter(Boolean),
