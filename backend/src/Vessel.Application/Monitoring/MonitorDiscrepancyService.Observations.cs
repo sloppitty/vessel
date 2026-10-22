@@ -30,8 +30,11 @@ public sealed partial class MonitorDiscrepancyService
     /// <param name="Identity">What the fingerprint covers: the quantities and orders involved. Null means the details.</param>
     /// <param name="Structural">An unknown that is undecidable by design (shared whole-position coverage, an order whose
     /// level has no planned price), not missing or stale evidence. It neither confirms nor resolves and does not degrade the run.</param>
+    /// <param name="OnCondition">Confirmation follows the condition (the kind and subject), not the fingerprint (Phase 2, D-19).</param>
+    /// <param name="EarliestAt">With <paramref name="At"/> the latest, the earliest of several source reads (Phase 2, item 6c).</param>
     private sealed record Finding(string Kind, string Subject, Guid? PlayId, string Contract, string Native, string Severity,
-        bool? Present, DateTimeOffset At, Guid[] PlayIds, object Details, object? Identity = null, bool Structural = false);
+        bool? Present, DateTimeOffset At, Guid[] PlayIds, object Details, object? Identity = null, bool Structural = false,
+        bool OnCondition = false, DateTimeOffset? EarliestAt = null);
     private sealed class Scan
     {
         public List<Finding> Findings { get; } = [];
@@ -212,8 +215,10 @@ public sealed partial class MonitorDiscrepancyService
         // Phase 2, item 6c: an open position on an account that keeps its history, with no Open Play on its market and no
         // stop resting on the closing side in the current book. Any stop on that side counts, whatever its size. Without a
         // current book the check is undecidable by design; an unrecognized trigger on the closing side leaves it unknown.
-        // The account turning the opt-in off resolves it. Its identity is the position's side, so a changing quantity
-        // neither re-announces it nor restarts its confirmation.
+        // The account turning the opt-in off resolves it. It confirms on its condition, so a changing quantity neither
+        // re-announces it nor restarts its confirmation, while its fingerprint keeps the quantity, so a dismissed warning
+        // reopens when the position changes (Sol round 1). It rests on two reads, the snapshot and the book: it is observed
+        // at the later and confirms only when both are the confirmation delay apart.
         void ObserveUnprotected(VenueInstrument instrument, PlayFacts[] involved, bool positionKnown, ExactAmount actual)
         {
             var kept = observation.Account.KeepExecutionHistory;
@@ -225,9 +230,12 @@ public sealed partial class MonitorDiscrepancyService
             bool? present = !kept ? false : !positionKnown ? null : sign == 0 || involved.Length > 0 ? false :
                 !bookRead ? null : !ordersFresh || orders?.OpenOrdersComplete != true || duplicateOrders ? null :
                 triggers.Contains(OrderMechanism.Stop) ? false : triggers.Contains(OrderMechanism.UnknownTrigger) ? null : true;
+            var book = orders?.ObservedAtUtc ?? snapshotAt;
             scan.Add(new(UnprotectedKind, Subject(instrument), null, instrument.ContractId, Native(instrument), Severity(UnprotectedKind), present,
-                snapshotAt, [], new { nativeContractId = Native(instrument), direction, venueQuantity = actual.ToString() }, new { direction },
-                Structural: kept && present is null && positionKnown && sign != 0 && involved.Length == 0 && !bookRead));
+                book > snapshotAt ? book : snapshotAt, [], new { nativeContractId = Native(instrument), direction, venueQuantity = actual.ToString() },
+                new { direction, venueQuantity = actual.ToString() },
+                Structural: kept && present is null && positionKnown && sign != 0 && involved.Length == 0 && !bookRead,
+                OnCondition: true, EarliestAt: book < snapshotAt ? book : snapshotAt));
         }
 
         // Only an actual linked stop on this account and native contract; a whole-position target, or a take-profit

@@ -70,7 +70,7 @@ public sealed partial class MonitorDiscrepancyService(IMonitorDiscrepancyStore s
                 json = row.Details;
             var plays = row.InvolvedPlayIds.SequenceEqual(finding.PlayIds) ? row.InvolvedPlayIds : finding.PlayIds;
             var change = DiscrepancyLifecycle.Apply(row, finding.Present.Value
-                ? DiscrepancyInput.Present(now, finding.At, fingerprint, json, plays)
+                ? DiscrepancyInput.Present(now, finding.At, fingerprint, json, plays, finding.OnCondition, finding.EarliestAt)
                 : DiscrepancyInput.Absent(now, finding.At, fingerprint, json, plays));
             if (change.ConfirmationDueAtUtc is { } due) next = Earlier(next, due > now ? due : now + ConfirmationDelay);
             await Publish(row, change, observation.RunId, observation.Account.VenueId, observation.Trigger, now, ct);

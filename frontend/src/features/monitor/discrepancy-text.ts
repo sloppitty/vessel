@@ -16,7 +16,7 @@ const titles: Record<string, string> = {
   'position.short': 'The venue position is smaller than expected',
   'position.excess': 'The venue position is larger than expected',
   'fill.unlinked': 'A fill is not linked to a Play',
-  'position.unprotected': 'An open position has no resting stop and no Play',
+  'position.unprotected': 'An open position has no resting stop and no Open Play',
 }
 
 /** One next step per kind. Vessel never sends orders, so venue changes are the owner's to make. */
@@ -34,7 +34,7 @@ const actions: Record<string, string> = {
   'position.short': 'Link the fills that reduced the position, or check it at the venue.',
   'position.excess': 'Link the extra fills to their Play, or reduce the position at the venue.',
   'fill.unlinked': 'Link the fill to its Play from that Play\'s Execution tab.',
-  'position.unprotected': 'Place a stop at the venue for the position, or plan a Play for it, then Check.',
+  'position.unprotected': 'Place a stop at the venue for the position, or record it in a Play and link its entry so the Play is Open, then Check.',
 }
 
 export const discrepancyTitle = (kind: string) => titles[kind] ?? 'Monitor discrepancy'

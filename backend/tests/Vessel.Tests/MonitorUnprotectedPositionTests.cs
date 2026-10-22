@@ -1,6 +1,7 @@
 using Vessel.Application.Monitoring;
 using Vessel.Application.Venues;
 using Vessel.Domain.Monitoring;
+using Vessel.Domain.Plays;
 
 namespace Vessel.Tests;
 
@@ -111,5 +112,57 @@ public sealed class MonitorUnprotectedPositionTests
         await f.Confirm();
         Assert.Contains(f.Store.Rows, x => x.Kind == Kind && x.State == DiscrepancyLifecycle.Open);
         Assert.Contains(f.Store.Rows, x => x.Kind == "position.excess" && x.State == DiscrepancyLifecycle.Open);
+    }
+
+    [Fact]
+    public async Task A_dismissed_warning_reopens_when_the_position_keeps_changing_and_stays_dismissed_while_it_does_not()
+    {
+        // Sol round 1: confirmed on its condition, but its fingerprint keeps the quantity.
+        var f = Untracked();
+        await KeptOnly(f); f.Advance(60); await KeptOnly(f);
+        var row = Row(f)!;
+        await f.Service.DismissAsync(f.Account.Id, null, row.Id, null, default);
+        f.Advance(60); await KeptOnly(f);
+        Assert.Equal(DiscrepancyLifecycle.Dismissed, row.State);
+        // The position grows, and grows again before the delay: the sequence continues and the warning reopens.
+        f.Position = 10;
+        f.Advance(60); await KeptOnly(f);
+        f.Position = 12;
+        f.Advance(30); await KeptOnly(f);
+        Assert.Equal(DiscrepancyLifecycle.Dismissed, row.State);
+        f.Advance(30); await KeptOnly(f);
+        Assert.Equal(DiscrepancyLifecycle.Open, row.State);
+        Assert.Contains("\"venueQuantity\":\"12\"", row.Details, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task It_confirms_only_when_both_the_snapshot_and_the_book_are_the_delay_apart()
+    {
+        // Sol round 1: the first book was read 19 s after its snapshot; a check 60 s after the snapshot is only 41 s after it.
+        var f = Untracked();
+        var first = f.Observation();
+        f.Advance(19);
+        var book = f.Observation().Read.Orders!;
+        await f.Service.EvaluateAsync(first with { Protection = false, Read = first.Read with { Orders = book } }, default);
+        f.Advance(41);
+        await f.Service.EvaluateAsync(f.Observation() with { Protection = false, PreviousSuccessAtUtc = f.Clock.Now.AddSeconds(-41) }, default);
+        Assert.Equal(DiscrepancyLifecycle.Candidate, Row(f)!.State);
+        f.Advance(19);
+        await f.Service.EvaluateAsync(f.Observation() with { Protection = false, PreviousSuccessAtUtc = f.Clock.Now.AddSeconds(-19) }, default);
+        Assert.Equal(DiscrepancyLifecycle.Open, Row(f)!.State);
+        Assert.Equal(first.Read.Orders!.ObservedAtUtc.AddSeconds(19), Row(f)!.OpenedAtUtc);
+    }
+
+    [Fact]
+    public async Task A_Planned_Play_does_not_own_the_position_until_its_entry_is_linked_and_it_is_Open()
+    {
+        var f = Untracked();
+        await KeptOnly(f); f.Advance(60); await KeptOnly(f);
+        var play = new Play(Guid.NewGuid(), f.Account, f.Play.Instrument, InstrumentSource.Venue, f.Play.Plan, f.Clock.Now);
+        play.MarkPlanned(f.Clock.Now);
+        f.Store.Plays.Add(play);
+        f.Advance(60);
+        await f.Service.EvaluateAsync(f.Observation(), default);
+        Assert.Equal(DiscrepancyLifecycle.Open, Row(f)!.State);
     }
 }

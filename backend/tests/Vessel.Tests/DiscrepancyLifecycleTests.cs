@@ -190,6 +190,91 @@ public sealed class DiscrepancyLifecycleTests
         Assert.Equal(("dismissed", true, false), (row.State, row.Visible, row.HasWork));
     }
 
+    [Theory] // Phase 2, D-19: confirms on the invariant, and the evidence follows the latest observation.
+    [InlineData("candidate")]
+    [InlineData("resolved")]
+    [InlineData("dismissed")]
+    public void A_condition_confirmed_on_its_invariant_opens_while_its_evidence_changes(string state)
+    {
+        var row = Undersized(state);
+        Assert.Equal(Now.AddSeconds(60), DiscrepancyLifecycle.Apply(row, Observed("B", 0)).ConfirmationDueAtUtc);
+        Assert.Equal(Now.AddSeconds(60), DiscrepancyLifecycle.Apply(row, Observed("C", 30)).ConfirmationDueAtUtc);
+        // A candidate's baseline follows its evidence; resolved and dismissed records keep theirs until confirmation.
+        Assert.Equal(("C", state == "candidate" ? "C" : "Z"), (row.PendingFingerprint, row.Fingerprint));
+        Assert.Equal("opened", DiscrepancyLifecycle.Apply(row, Observed("D", 60)).Publish);
+        Assert.Equal(("open", Now, "D", """{"q":"D"}""", (string?)null), (row.State, row.OpenedAtUtc, row.Fingerprint, row.Details, row.PendingFingerprint));
+    }
+
+    [Fact] // Every other kind: changed evidence restarts confirmation, as before.
+    public void Without_its_condition_changed_evidence_restarts_confirmation()
+    {
+        var row = Undersized("candidate");
+        DiscrepancyLifecycle.Apply(row, Observed("B", 0, false));
+        Assert.Equal(Now.AddSeconds(90), DiscrepancyLifecycle.Apply(row, Observed("C", 30, false)).ConfirmationDueAtUtc);
+        Assert.Null(DiscrepancyLifecycle.Apply(row, Observed("D", 60, false)).Publish);
+        Assert.Equal(("candidate", (DateTimeOffset?)Now.AddSeconds(60)), (row.State, row.PendingSinceUtc));
+    }
+
+    [Theory] // Phase 2, D-19: the invariant never bridges an interruption.
+    [InlineData("incomplete")]
+    [InlineData("expiry")]
+    [InlineData("absent")]
+    [InlineData("dismissed-evidence")]
+    public void A_condition_confirmed_on_its_invariant_still_restarts_after_an_interruption(string interruption)
+    {
+        var row = Undersized(interruption == "dismissed-evidence" ? "dismissed" : "candidate");
+        DiscrepancyLifecycle.Apply(row, Observed("B", 0));
+        DiscrepancyLifecycle.Apply(row, interruption switch
+        {
+            "incomplete" => DiscrepancyInput.Unknown(Now.AddSeconds(30)),
+            "expiry" => DiscrepancyInput.Expiry(Now.AddSeconds(30), TimeSpan.FromSeconds(30)),
+            "absent" => DiscrepancyInput.Absent(Now.AddSeconds(30), Now.AddSeconds(30), "Y", """{"q":"none"}""", []),
+            _ => Observed("Z", 30)
+        });
+        var restart = DiscrepancyLifecycle.Apply(row, Observed("C", 60));
+        Assert.Equal(((string?)null, (DateTimeOffset?)Now.AddSeconds(120)), (restart.Publish, restart.ConfirmationDueAtUtc));
+        Assert.Equal(Now.AddSeconds(60), row.PendingSinceUtc);
+        Assert.Equal("opened", DiscrepancyLifecycle.Apply(row, Observed("D", 120)).Publish);
+        Assert.Equal(("open", Now.AddSeconds(60)), (row.State, row.OpenedAtUtc));
+    }
+
+    [Fact] // Phase 2, D-19: the dismissed evidence is the latest pending one, so its return stays dismissed.
+    public void Dismissing_an_unverifiable_recurrence_on_its_condition_dismisses_its_latest_evidence()
+    {
+        var row = Undersized("resolved");
+        DiscrepancyLifecycle.Apply(row, Observed("B", 0));
+        DiscrepancyLifecycle.Apply(row, Observed("C", 30));
+        Assert.Equal("unverifiable", DiscrepancyLifecycle.Apply(row, DiscrepancyInput.Expiry(Now.AddSeconds(60), TimeSpan.FromSeconds(30))).Publish);
+        Assert.Equal("dismissed", DiscrepancyLifecycle.Apply(row, DiscrepancyInput.Dismissal(Now.AddSeconds(60), null)).Publish);
+        Assert.Equal("C", row.Fingerprint);
+        Assert.Null(DiscrepancyLifecycle.Apply(row, Observed("C", 90)).Publish);
+        Assert.Equal(("dismissed", false), (row.State, row.HasWork));
+    }
+
+    /// <summary>An undersized-stop record whose baseline evidence is Z, last decided ten minutes ago.</summary>
+    private static PlayDiscrepancy Undersized(string state)
+    {
+        var row = new PlayDiscrepancy { Kind = "protection.short", SubjectKey = "play:p", Severity = "warning", State = state,
+            Fingerprint = "Z", Details = """{"q":"Z"}""", LastObservedAtUtc = Now.AddMinutes(-10), Revision = 3 };
+        if (state != "candidate") (row.PublishedTransition, row.PublishedRevision) = (state, row.Revision);
+        return row;
+    }
+
+    /// <summary>A fresh present observation <paramref name="seconds"/> after <see cref="Now"/>, confirmed on its condition by default.</summary>
+    private static DiscrepancyInput Observed(string fingerprint, int seconds, bool onCondition = true) => DiscrepancyInput.Present(
+        Now.AddSeconds(seconds), Now.AddSeconds(seconds), fingerprint, $$"""{"q":"{{fingerprint}}"}""", [], onCondition);
+
+    [Fact] // Phase 2, item 6c: an observation from two reads confirms only when both are the delay after the first.
+    public void An_observation_from_several_reads_confirms_only_when_its_earliest_source_is_the_delay_later()
+    {
+        var row = Undersized("candidate");
+        // First: snapshot at 0 s, book at 19 s; the sequence starts at the later.
+        Assert.Equal(Now.AddSeconds(79), DiscrepancyLifecycle.Apply(row, Observed("B", 19) with { EarliestSourceAtUtc = Now }).ConfirmationDueAtUtc);
+        Assert.Null(DiscrepancyLifecycle.Apply(row, Observed("B", 80) with { EarliestSourceAtUtc = Now.AddSeconds(60) }).Publish);
+        Assert.Equal("opened", DiscrepancyLifecycle.Apply(row, Observed("B", 90) with { EarliestSourceAtUtc = Now.AddSeconds(79) }).Publish);
+        Assert.Equal(Now.AddSeconds(19), row.OpenedAtUtc);
+    }
+
     private static PlayDiscrepancy Clone(PlayDiscrepancy x) => new()
     {
         Id = x.Id, State = x.State, Fingerprint = x.Fingerprint, Details = x.Details, Revision = x.Revision,

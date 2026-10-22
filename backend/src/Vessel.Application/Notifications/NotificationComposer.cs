@@ -179,7 +179,7 @@ public static class NotificationComposer
         "position.short" => "the venue position is smaller than expected",
         "position.excess" => "the venue position is larger than expected",
         "fill.unlinked" => "a fill is not linked to a Play",
-        "position.unprotected" => "an open position has no resting stop and no Play",
+        "position.unprotected" => "an open position has no resting stop and no Open Play",
         _ => "a discrepancy"
     };
 
