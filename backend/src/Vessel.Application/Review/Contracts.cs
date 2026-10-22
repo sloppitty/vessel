@@ -46,6 +46,11 @@ public sealed record ReviewFacts(IReadOnlyList<Portfolio> Portfolios, IReadOnlyL
     public IReadOnlyList<UnresolvedPlayFacts> UnresolvedPlays { get; init; } = [];
     /// <summary>Cancelled Plays on enabled accounts, with plan revision 1 for the pre-flight (phase 1, 1.4b). Never scored.</summary>
     public IReadOnlyList<EndedPlayFacts> CancelledPlays { get; init; } = [];
+    /// <summary>
+    /// When the first Play in scope was created, in any status (Phase 2, item 2): with the first retained execution it decides
+    /// whether a week has data at all.
+    /// </summary>
+    public DateTimeOffset? FirstPlayAtUtc { get; init; }
 }
 
 /// <summary>A Cancelled Play in Review's process view: never scored, placed by its cancellation time.</summary>

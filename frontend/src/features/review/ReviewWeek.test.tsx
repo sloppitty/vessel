@@ -65,6 +65,23 @@ describe('the week page (Phase 2, item 2)', () => {
     expect(await within(dialog).findByRole('region', { name: 'Week scorecard' })).toBeInTheDocument()
   })
 
+  it('names positions apart from Plays, with their weighting, and discloses the week\'s coverage (Sol round 1)', async () => {
+    const mixed = weekly({}, {
+      metrics: { ...reviewFixture.metrics, count: 10, wins: 1, losses: 9, scratches: 0, positions: 9 },
+      positions: { mode: 'include', included: true, minPlays: 5, plays: 1, positions: 9, omitted: 1, playWeight: '2' },
+    })
+    const { api } = client(() => mixed)
+    const { dialog } = await openWeek(api)
+    const card = await within(dialog).findByRole('region', { name: 'Week scorecard' })
+    expect(card).toHaveTextContent('1 Play · 9 positions · 1 W · 9 L · 0 S')
+    expect(card).toHaveTextContent('Excluded Plays2Inspect exclusions1 imported position not scored')
+    expect(within(dialog).getByText(/Plays weigh 2× a position in batting average and expectancy/)).toBeInTheDocument()
+    const coverage = within(dialog).getByRole('region', { name: 'Week coverage' })
+    expect(coverage).toHaveTextContent('1 Play · 9 positions scored · 2 excluded Plays · 1 position not scored')
+    expect(coverage).toHaveTextContent('unassigned fills in this week')
+    expect(coverage).toHaveTextContent(reviewFixture.coverage.notice)
+  })
+
   it('lists the latest next actions and the Needs review count in Review\'s scope', async () => {
     const { api } = client(() => weekly())
     const { dialog } = await openWeek(api)

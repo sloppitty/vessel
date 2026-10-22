@@ -69,7 +69,10 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         var settings = await store.ReportingAsync(ct);
         var zone = settings?.Zone() ?? TimeZoneInfo.Utc;
         var weekStart = settings?.WeekStart ?? ReportingSettings.Monday;
-        var week = ReportingCalendar.Week(query.Week == CurrentWeek ? ReportingCalendar.Day(now, zone) : date, zone, weekStart);
+        var today = ReportingCalendar.Day(now, zone);
+        // No later date can be in the current week, and the calendar's end would overflow (Sol round 1 on item 2).
+        if (query.Week != CurrentWeek && date > today.AddDays(6)) throw new ProblemException(400, "Choose this week or an earlier one.");
+        var week = ReportingCalendar.Week(query.Week == CurrentWeek ? today : date, zone, weekStart);
         if (week.FromUtc > now) throw new ProblemException(400, "Choose this week or an earlier one.");
         return new(week.FromUtc, week.ToUtc, week, zone, weekStart);
     }
@@ -193,13 +196,13 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
     }
 
     /// <summary>
-    /// The earliest fact Vessel holds in scope: the first retained execution or the first Play created, so a week before it
-    /// reads as without data rather than without trades (Phase 2, item 2).
+    /// The earliest fact Vessel holds in scope: the first retained execution or the first Play created in any status, so a
+    /// week before it reads as without data rather than without trades (Phase 2, item 2; active Plays since Sol round 1).
     /// </summary>
     private static DateTimeOffset? Earliest(ReviewFacts facts, HashSet<Guid> scoped, ReviewQuery query) =>
         facts.ClosedPlays.Select(f => f.Play).Concat(facts.UnresolvedPlays.Select(u => u.Play)).Concat(facts.CancelledPlays.Select(c => c.Play))
             .Where(p => p.TradingMode == query.TradingMode && scoped.Contains(p.AccountId) && (query.Instrument is null || p.ContractId == query.Instrument))
-            .Select(p => (DateTimeOffset?)p.CreatedAtUtc).Append(facts.FirstFillAtUtc).Min();
+            .Select(p => (DateTimeOffset?)p.CreatedAtUtc).Append(facts.FirstFillAtUtc).Append(facts.FirstPlayAtUtc).Min();
 
     /// <summary>
     /// The report's selection from one snapshot: the scoped enabled accounts, every evaluated closed Play, imported

@@ -1,4 +1,5 @@
 using System.Net;
+using Vessel.Application.Plays;
 using Vessel.Application.Reporting;
 
 namespace Vessel.Tests.Isolation;
@@ -27,6 +28,11 @@ public abstract class ReportingIsolationCases(IsolationHost api)
             var paper = (await owner.GetJson("/api/review?week=2026-01-07&tradingMode=paper")).GetProperty("week");
             Assert.Equal(zone, paper.GetProperty("timeZone").GetString());
         }
+        // A Draft with no fills is data for its week (Sol round 1 on item 2), and only for its owner.
+        var account = (await a.ManualAccount(Isolated.Marker("week"))).GetProperty("id").GetGuid();
+        await a.Post("/api/plays", new CreatePlayRequest(account, "BTC", "manual", Isolated.Marker("draft"), TestPlays.Plan()), HttpStatusCode.Created);
+        Assert.Equal("empty", (await a.GetJson("/api/review?week=current")).GetProperty("week").GetProperty("data").GetString());
+        Assert.Equal("none", (await b.GetJson("/api/review?week=current")).GetProperty("week").GetProperty("data").GetString());
         await a.Send(HttpMethod.Put, "/api/settings/reporting", new UpdateReportingSettingsRequest("Romance Standard Time", "monday"),
             HttpStatusCode.BadRequest);
         await a.Send(HttpMethod.Put, "/api/settings/reporting", new UpdateReportingSettingsRequest("UTC", "tuesday"), HttpStatusCode.BadRequest);

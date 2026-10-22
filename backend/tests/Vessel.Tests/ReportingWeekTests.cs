@@ -118,12 +118,23 @@ public sealed class ReviewWeekTests
         Assert.Equal("some", (await f.Service.GetAsync(new(Week: "2026-09-10"), default)).Week!.Data);
     }
 
+    [Fact]
+    public async Task A_Play_still_active_is_data_for_the_weeks_after_its_creation()
+    {
+        // Sol round 1: a Draft, Planned or Open Play with no fills used to leave later weeks reading as without data.
+        Madrid();
+        f.FirstPlay = Utc("2026-09-01T10:00:00Z");
+        Assert.Equal("empty", (await f.Service.GetAsync(new(Week: "2026-09-21"), default)).Week!.Data);
+        Assert.Equal("none", (await f.Service.GetAsync(new(Week: "2026-08-24"), default)).Week!.Data);
+    }
+
     [Theory]
     [InlineData("2026-10-12")] // Next week.
     [InlineData("2026-10-7")]
     [InlineData("2026-13-01")]
     [InlineData("1999-12-27")]
     [InlineData("week")]
+    [InlineData("9999-12-31")] // Sol round 1: the calendar's end used to overflow into a 500.
     public async Task A_later_or_malformed_week_is_refused(string week)
     {
         Madrid();

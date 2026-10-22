@@ -503,10 +503,11 @@ Phase 2, item 2 (G-11, N4, G-13; see `phase2-risk-coverage-contract.md`).
     cancellation, Unresolved declaration), as does the unassigned-fills count.
     Facts are read as of now.
   - The chart has one point per local day of the week, up to today.
-  - Weeks after the current one are refused (400).
+  - Weeks after the current one are refused (400), however far ahead.
   - The report carries a `week` block: its first day, UTC range, zone, week
     start and `data`. `none` means Vessel holds nothing that early in the
-    scope (no retained execution or Play created before the week's end).
+    scope: no retained execution, and no Play of any status, Drafts included,
+    created before the week's end (Sol round 1 on item 2).
     `empty` means it does, but nothing closed, was cancelled or was declared
     Unresolved in the week. Otherwise it is `some`.
   - The rolling periods and Activity keep UTC days, and rolling responses have
@@ -515,7 +516,12 @@ Phase 2, item 2 (G-11, N4, G-13; see `phase2-risk-coverage-contract.md`).
   page's filters, so Review's approved sections keep their place.
   - Previous and next week, a date picker and This week.
   - The week's scorecard and its exclusions. A rate is shown only from n = 10
-    decided Plays.
+    decided Plays. Imported positions are counted apart from Plays, with the
+    weighting note, and positions Review cannot score are never counted as
+    excluded Plays.
+  - Review's coverage disclosure for the week: incomplete fees and
+    executions, Unresolved and cancelled Plays, unassigned fills, positions
+    included or not scored, the notice and the earliest retained fill.
   - The process cases (1.4b), and the week's repeated mistake tags: those on
     two or more of its Plays. Each count drills into the same week.
   - The owner's latest next actions, as on the Plays page. Next actions have
