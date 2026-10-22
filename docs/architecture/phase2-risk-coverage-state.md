@@ -376,6 +376,32 @@ October 21, 2026.
     an invalid response now.
 - **Check after round 1.** `scripts/check.sh` passed on `4cb06c01` (before documentation-only commits were restacked beneath it): backend 4,064 passed, 5 skipped; frontend 174 files and 4,071 tests.
 
+**8b. `protection.beyond-liquidation`.** Implemented on `t3/phase2-beyond-liquidation`.
+- **The rule.** An Open Play's stop that sits at or beyond the venue's reported liquidation price on
+  the losing side opens a critical incident.
+  - It is identified by its stop IDs.
+  - A drifting cross-margin price keeps confirming the same incident.
+  - A stop inside the liquidation price, or a position with no reported price, opens nothing.
+- **Unchanged.** Severity by uncovered fraction and re-announcing.
+- **Where it shows.** Notification text and the browser's discrepancy title, action and facts.
+- **Tests.**
+  - Two `MonitorDiscrepancyTests` cases.
+  - `discrepancy-text.test.ts`.
+- **Check.** `scripts/check.sh` passed on `53c029f1`: backend 4,054 passed, 5 skipped; frontend 175 files and 4,073 tests.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `d29aaec3`. Two findings, both fixed in
+  `49de89e0`:
+  - **High.** An incomplete order book that omitted the stop resolved a
+    critical incident. Only the complete book, or a fresh snapshot without
+    the Play's position, clears it.
+  - The position lookup ignored direction. Only a position in the Play's
+    direction counts; an opposite one leaves the check undecidable, for
+    `position.opposite` to report.
+
+  Sol confirmed equality at the boundary, cross and isolated prices, the
+  resting order's acting price, quiet cross drift and the stale-read and
+  capability guards.
+- **Check after round 1.** `scripts/check.sh` passed on `5c278dd6` (before documentation-only commits were restacked beneath it): backend 4,070 passed, 5 skipped; frontend 175 files and 4,073 tests.
+
 ## 9. Funding
 
 Not started.
