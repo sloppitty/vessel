@@ -17,4 +17,12 @@ public sealed partial class HyperliquidAdapterTests
         Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1790812799000), marker.OccurredAtUtc);
         Assert.Equal(1, result.OmittedExecutions);
     }
+
+    [Fact]
+    public async Task A_fill_on_an_unlisted_primary_market_without_a_trade_ID_fails_the_read_rather_than_leave_no_marker()
+    {
+        // Sol round 1: counting it without a durable marker would lose the evidence once the row leaves recent history.
+        var anonymous = Mutate(Fill, node => { node["coin"] = "SOL"; node["tid"] = null; });
+        await Assert.ThrowsAsync<Vessel.Application.Venues.VenueReadException>(() => Read(fills: $"[{Fill},{anonymous}]"));
+    }
 }

@@ -253,6 +253,24 @@ public sealed class ExecutionOmission : IOwned
     public DateTimeOffset? UncertainToUtc { get; set; }
     public DateTimeOffset FirstSeenAtUtc { get; set; }
     public DateTimeOffset LastSeenAtUtc { get; set; }
+
+    /// <summary>
+    /// Whether a marker names a retained order (Sol round 1): the same venue order ID on the same market, by the order's
+    /// identity rule. A marker on a recognized market names its canonical contract's order; when both name a native market
+    /// they must agree, and a disagreement is null, a conflict that fails closed like a known order reported on another
+    /// market. A marker on a market Vessel does not recognize names the order on that native market. A marker without
+    /// any market names every order with its ID, since nothing rules one out.
+    /// </summary>
+    public static bool? Names(string? contractId, string? venueContractId, string orderId, ImportedOrder order)
+    {
+        if (order.ExternalOrderId != orderId) return false;
+        if (contractId is not null)
+        {
+            if (contractId != order.ContractId) return false;
+            return venueContractId is not null && order.VenueContractId is not null && venueContractId != order.VenueContractId ? null : true;
+        }
+        return venueContractId is null || venueContractId == (order.VenueContractId ?? order.ContractId);
+    }
 }
 
 /// <summary>

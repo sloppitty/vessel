@@ -300,6 +300,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
     /// time first seen as unknown; a read without it erases nothing. A marker naming an order marks that retained order's
     /// executions as known to be missing. An unreported time is bounded by the read's window instead.
     /// </summary>
+    internal const string OmissionConflict = "The venue reported an omitted execution of a known order on a different market. No changes were saved.";
+
     private async Task RecordOmissionsAsync(Account account, IReadOnlyList<VenueOmission> omissions, IReadOnlyList<VenueForcedEvent> forced,
         DateTimeOffset? windowFrom, DateTimeOffset observedAt, CancellationToken ct)
     {
@@ -307,6 +309,10 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 f.Kind == ForcedEvent.Settlement ? "market settlement" : f.Kind, f.ContractId, f.VenueContractId, f.OrderId, f.OccurredAtUtc)))
             .DistinctBy(m => (m.Kind, m.SourceId)).ToList();
         if (markers.Count == 0) return;
+        // An unreported time lies before the read finished, which can be after its snapshot: Lighter reads its trades
+        // later (Sol round 1). Recording happens after the read, so its time bounds it.
+        var recordedAt = (time ?? TimeProvider.System).GetUtcNow();
+        var readBy = recordedAt > observedAt ? recordedAt : observedAt;
         var ids = markers.Select(m => m.SourceId).Distinct().ToArray();
         var known = (await db.ExecutionOmissions.Where(m => m.AccountId == account.Id && ids.Contains(m.SourceId)).ToListAsync(ct))
             .ToDictionary(m => (m.Kind, m.SourceId));
@@ -328,7 +334,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 SourceId = marker.SourceId, ContractId = marker.ContractId, VenueContractId = marker.VenueContractId, OrderId = marker.OrderId,
                 OccurredAtUtc = marker.OccurredAtUtc?.ToUniversalTime(),
                 UncertainFromUtc = marker.OccurredAtUtc is null ? windowFrom?.ToUniversalTime() : null,
-                UncertainToUtc = marker.OccurredAtUtc is null ? observedAt.ToUniversalTime() : null,
+                UncertainToUtc = marker.OccurredAtUtc is null ? readBy.ToUniversalTime() : null,
                 FirstSeenAtUtc = observedAt, LastSeenAtUtc = observedAt
             });
         }
@@ -348,12 +354,18 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 FirstSeenAtUtc = observedAt, LastSeenAtUtc = observedAt
             });
         }
-        // An order named by a marker has known missing executions, whatever its status.
-        var named = markers.Where(m => m.OrderId is not null && m.ContractId is not null).Select(m => (m.ContractId!, m.OrderId!)).ToHashSet();
+        // An order named by a marker has known missing executions, whatever its status. A marker naming a known order on
+        // another market fails closed, like the order itself would (Sol round 1).
+        var named = markers.Where(m => m.OrderId is not null).ToList();
         if (named.Count == 0) return;
-        var orderIds = named.Select(n => n.Item2).Distinct().ToArray();
-        foreach (var order in await db.Orders.Where(o => o.AccountId == account.Id && orderIds.Contains(o.ExternalOrderId) && !o.ExecutionsOmitted).ToListAsync(ct))
-            if (named.Contains((order.ContractId, order.ExternalOrderId))) order.ExecutionsOmitted = true;
+        var orderIds = named.Select(m => m.OrderId!).Distinct().ToArray();
+        foreach (var order in await db.Orders.Where(o => o.AccountId == account.Id && orderIds.Contains(o.ExternalOrderId)).ToListAsync(ct))
+            foreach (var marker in named)
+                switch (ExecutionOmission.Names(marker.ContractId, marker.VenueContractId, marker.OrderId!, order))
+                {
+                    case null: throw new VenueReadException(OmissionConflict);
+                    case true: order.ExecutionsOmitted = true; break;
+                }
     }
 
     private Dictionary<(string, string), ImportedFill> AddFills(Account account, IEnumerable<VenueFill> newFills, bool backfilled = false)

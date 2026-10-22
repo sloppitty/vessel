@@ -156,10 +156,16 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
         }
         // Phase 2, item 7: an order an earlier import left an execution of out is known to be missing executions, even
         // when the marker arrived before the order did.
-        var omitted = (await db.ExecutionOmissions.Where(m => m.AccountId == account.Id && m.OrderId != null && ids.Contains(m.OrderId))
-            .Select(m => new { m.ContractId, m.OrderId }).ToListAsync(ct)).Select(m => (m.ContractId, m.OrderId)).ToHashSet();
-        foreach (var row in known.Values.Where(r => !r.ExecutionsOmitted && omitted.Contains((r.ContractId, r.ExternalOrderId))))
-            row.ExecutionsOmitted = true;
+        // The same identity rule as a marker arriving later, so a marker on another native market fails closed (Sol round 1).
+        var omitted = await db.ExecutionOmissions.Where(m => m.AccountId == account.Id && m.OrderId != null && ids.Contains(m.OrderId))
+            .Select(m => new { m.ContractId, m.VenueContractId, m.OrderId }).ToListAsync(ct);
+        foreach (var row in known.Values)
+            foreach (var marker in omitted)
+                switch (ExecutionOmission.Names(marker.ContractId, marker.VenueContractId, marker.OrderId!, row))
+                {
+                    case null: throw new VenueReadException(WorkspaceStore.OmissionConflict);
+                    case true: row.ExecutionsOmitted = true; break;
+                }
         await unitOfWork.SaveChangesAsync(UnitOfWork.ExecutionConflict, ct);
         return true;
     }, ct);

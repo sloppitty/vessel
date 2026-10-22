@@ -240,7 +240,7 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
     /// Primary-perpetual fills on a contract the catalogue does not list. Spot (<c>@…</c>, <c>A/B</c>) and HIP-3
     /// (<c>dex:…</c>) fills are proven out of scope; an unrecognized primary contract is an in-scope fact Vessel left out.
     /// </param>
-    /// <param name="omissions">Phase 2, item 7: receives each omitted row's marker, keyed by its trade ID when it has a valid one.</param>
+    /// <param name="omissions">Phase 2, item 7: receives each omitted row's marker, keyed by its trade ID, which it must have.</param>
     internal static List<VenueFill> ReadFills(JsonElement root, HashSet<string> contracts, long latestTimestamp, out int omitted,
         List<VenueOmission>? omissions = null)
     {
@@ -258,10 +258,10 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
                 {
                     omitted++;
                     // An in-scope execution on a market the catalogue does not list: its canonical contract is unknown,
-                    // and its order and time are kept when valid.
-                    if (Lenient(() => Identity(Property(fill, "tid"))) is { } trade)
-                        omissions?.Add(new(trade, ExecutionOmission.UnrecognizedMarket, "unrecognized market", null, name,
-                            Lenient(() => Identity(Property(fill, "oid"))), LenientTime(() => Timestamp(Property(fill, "time"), latestTimestamp))));
+                    // and its order and time are kept when valid. Its trade ID is required, as for any in-scope fill: a
+                    // row whose omission cannot leave a durable marker fails the read (Sol round 1).
+                    omissions?.Add(new(Identity(Property(fill, "tid")), ExecutionOmission.UnrecognizedMarket, "unrecognized market", null, name,
+                        Lenient(() => Identity(Property(fill, "oid"))), LenientTime(() => Timestamp(Property(fill, "time"), latestTimestamp))));
                 }
                 continue;
             }

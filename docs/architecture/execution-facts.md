@@ -166,11 +166,22 @@ Phase 2, item 7a of the [risk and coverage contract](phase2-risk-coverage-contra
     market the catalogue does not list, so its canonical contract is null).
   - Markers are deduplicated by kind and trade ID. A row seen again only moves
     its last-seen time; a later read that no longer returns it erases nothing.
-  - Without a reported time, the marker records the read's window (its oldest
-    raw fill to its read time) instead. A time reported later fills it in.
+  - Without a reported time, the marker records the read's window instead:
+    from its oldest raw fill to when the read was recorded, which can be after
+    its snapshot (Lighter reads its trades later). A time reported later fills
+    it in.
+  - A Hyperliquid row on an unlisted primary market needs its trade ID, like
+    any in-scope fill: without one the read fails rather than count an
+    omission it cannot mark.
   - Every import writes them: Refresh, checks and backfill pages.
 - **Known missing executions.** A marker naming an order marks that retained
-  order `ExecutionsOmitted`, whether the marker or the order arrived first. The
+  order `ExecutionsOmitted`, whether the marker or the order arrived first.
+  `ExecutionOmission.Names` applies the order identity rule: on a recognized
+  market, the same canonical contract and venue order ID, with native markets
+  agreeing when both are known; on a market Vessel does not recognize, the
+  order on that native market; with no market at all, every order with that ID.
+  A marker naming a known order on another native market fails the import
+  closed, as an order reported on another market does, and saves nothing. The
   shared rule (`ExecutionIntegrity.MissingExecutions`) then treats the order as
   missing executions whatever its status, so its Play can neither settle nor be
   scored, everywhere the rule is used. A later read never clears it. The scored
