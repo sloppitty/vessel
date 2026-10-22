@@ -5,6 +5,13 @@ namespace Vessel.Application.Activity;
 
 internal readonly record struct ActivityContractKey(Guid AccountId, string Identity, bool IsNative);
 
+/// <summary>
+/// Phase 2, item 7b: an omitted execution in a partition. The walk loses its position from <paramref name="ResetAt"/>, and
+/// a snapshot can anchor only fills after <paramref name="AnchorAfter"/>. Both are the execution's time when it is known;
+/// otherwise the read window it lies in bounds it on either side.
+/// </summary>
+internal readonly record struct ActivityBreak(DateTimeOffset ResetAt, DateTimeOffset AnchorAfter);
+
 /// <summary>One shared index for grouping, anchoring and comparison, including legacy identities.</summary>
 internal sealed class ActivityPositions
 {
@@ -14,8 +21,10 @@ internal sealed class ActivityPositions
     private readonly Dictionary<ActivityContractKey, ExactAmount?> quantities = [];
     private readonly Dictionary<(Guid AccountId, string ContractId), ActivityContractKey[]> nativeCandidates;
 
+    private readonly Dictionary<ActivityContractKey, ActivityBreak[]> breaks = [];
+
     public ActivityPositions(IReadOnlyList<ImportedFill> fills, IReadOnlyList<AccountSnapshot> snapshots,
-        IReadOnlyList<FundingPayment>? funding = null)
+        IReadOnlyList<FundingPayment>? funding = null, IReadOnlyList<ExecutionOmission>? omissions = null)
     {
         Snapshots = snapshots.ToDictionary(s => s.AccountId);
         nativeCandidates = fills.Where(f => f.VenueContractId is not null)
@@ -49,6 +58,20 @@ internal sealed class ActivityPositions
                     quantities[key] = null;
             }
         }
+        IndexBreaks(omissions ?? []);
+    }
+
+    /// <summary>
+    /// Phase 2, item 7b: the omitted executions of a partition, by the same identity rule as its fills. An omission on a
+    /// market Vessel does not recognize has no canonical contract and belongs to no partition.
+    /// </summary>
+    public IReadOnlyList<ActivityBreak> Breaks(ActivityContractKey key) => breaks.GetValueOrDefault(key) ?? [];
+
+    private void IndexBreaks(IReadOnlyList<ExecutionOmission> omissions)
+    {
+        foreach (var group in omissions.Where(m => m.ContractId is not null).GroupBy(m => Key(m.AccountId, m.ContractId!, m.VenueContractId)))
+            breaks[group.Key] = group.Select(m => new ActivityBreak(m.OccurredAtUtc ?? m.UncertainFromUtc ?? DateTimeOffset.MinValue,
+                m.OccurredAtUtc ?? m.UncertainToUtc ?? DateTimeOffset.MaxValue)).OrderBy(b => b.ResetAt).ToArray();
     }
 
     public ActivityContractKey Key(ImportedFill fill) => Key(fill.AccountId, fill.ContractId, fill.VenueContractId);

@@ -160,3 +160,28 @@ covering F-05 and the F-06 preview:
 - **Default title.** The title field starts with the blank-title rule on the
   operation's opening day in UTC, for example `BTC Long · 12 Oct 2026`. A
   cleared field saves that default.
+
+## Omitted executions (October 22, 2026)
+
+Phase 2, item 7b of the [risk and coverage contract](phase2-risk-coverage-contract.md), decision 11. It uses item
+7a's durable omission markers and forced events (see [execution facts](execution-facts.md)).
+- **Partitions.** A marker belongs to the partition its canonical and native market resolve to under the shared
+  identity rule. A marker on a market Vessel does not recognize belongs to none.
+- **Never across an omission.** A marker at or after the partition's first retained fill breaks the walk there.
+  - An operation still open at it ends with unknown boundaries: direction, boundaries and position-derived
+    fields are null, the status is incomplete, and it reads "Direction unknown: executions omitted". This
+    replaces the phantom opposite operation an anchor across the omission used to produce (probe
+    `correctness-dotnet/Activity.cs` C6).
+  - The walk after it starts from an unknown position. It needs a new proof of flatness, or the snapshot anchor.
+  - The snapshot anchors only the fills after the partition's last marker. Earlier fills use the unanchored walk.
+  - A marker after the last retained fill leaves that fill's open operation unknown too.
+  - A marker before the first retained fill changes nothing.
+- **No reported time.** The marker's read window bounds it on both sides: the walk loses its position from the
+  window's start, and the snapshot can anchor only fills after its end.
+- **Forced events.** Each venue-forced execution is a coverage row on the page with its facts as reported and its
+  exclusion, for example "Liquidation on … UTC: sell 1 at 80; realized P&L unknown, fee unknown. Excluded:
+  venue-forced, kept beside the fills, never linked or scored." At most 50 rows; the rest are counted.
+- **Freshness.** Markers and forced events move the cached facts revision (migration triggers), and markers are
+  part of the version token, so a page with a new omission is flagged as changed.
+- Review, sizing and the ladder are unchanged: they already treat an order with an omitted execution as missing
+  executions (7a).

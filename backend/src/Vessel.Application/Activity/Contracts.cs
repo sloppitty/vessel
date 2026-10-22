@@ -15,6 +15,10 @@ public sealed record ActivityFacts(IReadOnlyList<Account> Accounts, IReadOnlyLis
     public IReadOnlyList<AccountFundingState> FundingStates { get; init; } = [];
     public IReadOnlyList<LeverageObservation> LeverageObservations { get; init; } = [];
     public IReadOnlyList<PaperPlayFacts> PaperPlays { get; init; } = [];
+    /// <summary>Phase 2, item 7b: durable omission markers, forced events included.</summary>
+    public IReadOnlyList<ExecutionOmission> Omissions { get; init; } = [];
+    /// <summary>Phase 2, item 7b: venue-forced executions, shown with their exclusion.</summary>
+    public IReadOnlyList<ForcedEvent> ForcedEvents { get; init; } = [];
 }
 public interface IActivitySummaryReader
 {

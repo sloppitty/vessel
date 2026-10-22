@@ -144,4 +144,31 @@ public sealed class OmissionMarkerTests
         db.ChangeTracker.Clear();
         Assert.Null(await db.Orders.AsNoTracking().SingleOrDefaultAsync(o => o.ExternalOrderId == "pending"));
     }
+
+    /// <summary>Phase 2, item 7b: Activity reads the markers, and recording one moves its cached facts revision.</summary>
+    [PostgresFact]
+    public async Task Activity_reads_markers_and_a_new_marker_moves_its_cache_revision()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        await using var db = database.Context(owner);
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        account.Configure(null, "0x" + new string('d', 40), null);
+        db.Accounts.Add(account);
+        await db.SaveChangesAsync();
+        var work = TestUnitOfWork.For(db);
+        async Task<long> Revision() => await db.Database.SqlQuery<long>(
+            $"SELECT COALESCE((SELECT revision FROM activity_facts_revisions WHERE owner_id = {owner}), 0) AS \"Value\"").SingleAsync();
+        var before = await Revision();
+        await work.ExecuteAsync(async () =>
+        {
+            await new WorkspaceStore(db, work).SaveRefreshAsync(account, Read(At, new VenueOmission("t9", ExecutionOmission.Fee, "fee-bearing or unverified fee",
+                "BTC", null, "o9", At.AddMinutes(-5))), default);
+            return true;
+        }, default);
+        Assert.True(await Revision() > before);
+        db.ChangeTracker.Clear();
+        var facts = await new ActivityStore(db).ReadAsync(null, default);
+        Assert.Equal("t9", Assert.Single(facts.Omissions).SourceId);
+    }
 }

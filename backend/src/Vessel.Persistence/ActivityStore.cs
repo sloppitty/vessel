@@ -42,6 +42,9 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         var funding = await db.FundingPayments.Where(p => ids.Contains(p.AccountId)).AsNoTracking().ToListAsync(ct);
         var fundingStates = await db.FundingStates.Where(s => ids.Contains(s.AccountId)).AsNoTracking().ToListAsync(ct);
         var leverage = await db.LeverageObservations.Where(o => ids.Contains(o.AccountId)).AsNoTracking().ToListAsync(ct);
+        // Phase 2, item 7b: what imports left out, so Activity never anchors or walks across it.
+        var omissions = await db.ExecutionOmissions.Where(m => ids.Contains(m.AccountId)).AsNoTracking().ToListAsync(ct);
+        var forced = await db.ForcedEvents.Where(e => ids.Contains(e.AccountId)).AsNoTracking().ToListAsync(ct);
         var links = await db.LinkedOrders(db.OrderLinks.Where(l => ids.Contains(l.AccountId) && l.State == OrderLinkState.Linked &&
             db.Plays.Any(p => p.Id == l.PlayId && p.TradingMode == TradingMode.Real)))
             .Select(x => new { x.Order.AccountId, x.Order.ContractId, x.Order.ExternalOrderId, x.Link.PlayId }).AsNoTracking().ToListAsync(ct);
@@ -50,7 +53,10 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         var playIds = fills.Where(f => byOrder.ContainsKey(OrderKey.Of(f)))
             .ToDictionary(f => f.Id, f => byOrder[OrderKey.Of(f)]);
         if (transaction is not null) await transaction.CommitAsync(ct);
-        return new(accounts, fills, snapshots, playIds) { FundingPayments = funding, FundingStates = fundingStates, LeverageObservations = leverage };
+        return new(accounts, fills, snapshots, playIds)
+        {
+            FundingPayments = funding, FundingStates = fundingStates, LeverageObservations = leverage, Omissions = omissions, ForcedEvents = forced
+        };
     }
 
     public async Task<IReadOnlyDictionary<Guid, string>> PlayTitlesAsync(IReadOnlyCollection<Guid> playIds, CancellationToken ct)

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -5,6 +6,8 @@ using Vessel.Application.Workspace;
 using Vessel.Application.Common;
 using Vessel.Application.Venues;
 using Vessel.Domain.Common;
+using Vessel.Domain.Workspace;
+using Vessel.Domain.Numerics;
 
 namespace Vessel.Application.Activity;
 
@@ -111,7 +114,23 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
         {
             s.AccountId, s.LastAttemptToUtc, s.LastReadComplete, s.PnlBasis, s.Notice
         }));
+        // Phase 2, item 7b: markers change the operations they break, and a newly seen one changes the page.
+        Append("omissions", facts.Omissions.OrderBy(m => m.Id).Select(m => new { m.Id, m.OccurredAtUtc, m.UncertainFromUtc, m.UncertainToUtc, m.OrderId }));
         return Convert.ToHexStringLower(hash.GetHashAndReset(), 0, 16);
+    }
+
+    private const int MaxForcedRows = 50;
+
+    /// <summary>One venue-forced execution, its facts as reported and why it is excluded; unknown money reads as unknown.</summary>
+    private static string ForcedText(ForcedEvent e)
+    {
+        var kind = e.Kind == ForcedEvent.Settlement ? "Market settlement" : e.Kind == ForcedEvent.Deleverage ? "Deleverage" : "Liquidation";
+        var price = e.Price is { } p ? $" at {ExactAmount.From(p)}" : ", price not reported";
+        var pnl = e.RealizedPnl is { } r ? ExactAmount.From(r).ToString() : "unknown";
+        var fee = e.Fee is { } f ? ExactAmount.From(f).ToString() : "unknown";
+        return string.Create(CultureInfo.InvariantCulture,
+            $"{kind} on {e.OccurredAtUtc:yyyy-MM-dd HH:mm:ss} UTC: {e.Side} {ExactAmount.From(e.Quantity)}{price}; realized P&L {pnl}, fee {fee}. ") +
+            "Excluded: venue-forced, kept beside the fills, never linked or scored.";
     }
 
     // Overview, Activity pages and the fills endpoint share these unbounded aggregate results; constituent DTOs
@@ -139,7 +158,11 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
             return paper with { Version = Version(paper.Operations.OrderBy(o => o.Id), paper.Facts, paper.Coverage) };
         }
         var fills = facts.Fills.Where(f => accounts.ContainsKey(f.AccountId)).ToList();
-        var positions = new ActivityPositions(fills, facts.Snapshots, facts.FundingPayments.Where(p => accounts.ContainsKey(p.AccountId)).ToList());
+        var omissions = facts.Omissions.Where(m => accounts.ContainsKey(m.AccountId)).ToList();
+        var forced = facts.ForcedEvents.Where(e => accounts.ContainsKey(e.AccountId)).OrderByDescending(e => e.OccurredAtUtc)
+            .ThenBy(e => e.Id).ToList();
+        var positions = new ActivityPositions(fills, facts.Snapshots, facts.FundingPayments.Where(p => accounts.ContainsKey(p.AccountId)).ToList(),
+            omissions);
         var operations = OperationLeverage.Apply(OperationAggregator.AggregateSummaries(fills, facts.FillPlayIds, positions),
             facts with { LeverageObservations = facts.LeverageObservations.Where(o => accounts.ContainsKey(o.AccountId)).ToList() },
             positions);
@@ -187,9 +210,15 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
                 }
             }
         }
+        // Phase 2, item 7b: each venue-forced execution is a visible row with its exclusion, at most 50 with a count.
+        foreach (var e in forced.Take(MaxForcedRows))
+            coverage.Add(new(e.AccountId, e.ContractId, ForcedText(e)));
+        foreach (var group in forced.Skip(MaxForcedRows).GroupBy(e => e.AccountId))
+            coverage.Add(new(group.Key, null, $"{group.Count()} more venue-forced executions are retained and excluded."));
         facts = facts with
         {
             Accounts = accounts.Values.ToList(), Fills = fills,
+            Omissions = omissions, ForcedEvents = forced,
             PaperPlays = [],
             FundingPayments = facts.FundingPayments.Where(p => accounts.ContainsKey(p.AccountId)).ToList(),
             FundingStates = facts.FundingStates.Where(s => accounts.ContainsKey(s.AccountId)).ToList()
