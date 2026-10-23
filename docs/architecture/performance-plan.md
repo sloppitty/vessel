@@ -522,13 +522,23 @@ What it does:
   offline `play-search-rebuild --apply`, and counts the rows.
 - **API.** It starts the built DLL in Production/Token mode, without a launch profile or worker modules, with a
   generated token kept in memory, and waits for `/health/ready`.
-- **Timing.** Activity (two pages, a filter, one expanded operation), Review (all, year, with imported
-  positions), the Plays list (tabs, counts, title and instrument search), Overview and its summary, open risk
-  and journal search (common word, second page, rare word). Each round visits every endpoint, in an order
-  rotated by one per round. Reads through the Activity facts cache are measured twice: a miss after a committed
-  no-op account update, which advances the revision, then a hit. It reports p50 and p95 after the warm-up
-  rounds, and the wire and JSON sizes (gzip is accepted; the API's restricted compression leaves these JSON
-  reads uncompressed). Any response that is not 200, or not the expected non-empty JSON, fails the run.
+- **Timing.** Activity (first and a deep page, a filter, one expanded operation), Review (all, year, with
+  imported positions), the Plays list (tabs, a deep Closed page, counts, title and instrument search), Overview
+  and its summary, open risk and journal search (common word, a deep offset, rare word). Each round visits every
+  endpoint, in an order rotated by one per round. It reports p50 and p95 after the warm-up rounds, and the wire
+  and JSON sizes (gzip is accepted; the API's restricted compression leaves these JSON reads uncompressed).
+- **Deep pages.** The deep page or offset is the middle one of the list, chosen from the counts the API reports
+  (the Closed Plays count is checked against the generated one). Each check requires that exact page or offset
+  with rows, so a clamped or empty page fails. A deep-page scenario the dataset cannot populate (everything on
+  one page, as in small smoke runs) is skipped and named in the report. Any other response that is not 200, or
+  not the expected non-empty JSON, fails the run.
+- **Cache.** Reads through the Activity facts cache are made right after a committed no-op account update, which
+  advances the revision so the aggregate is computed again, then repeated at once. The API exposes no cache
+  diagnostics, and the cache refuses an aggregate whose charge exceeds its capacity (256 MiB by default), so
+  the repeat is not always a hit. The report's Cache column estimates the charge from the generated rows by the
+  cache's own rule and calls the repeat a hit only well under the capacity; near or above it the repeat is
+  "unconfirmed" or "not cached". At 3 years, scale 1 estimates about 128 MiB (a hit) and scale 2 about
+  238 MiB (unconfirmed).
 - **Report.** A Markdown block for the state document: parameters, git SHA, host, phase times, the API's peak
   RSS, row counts and timings. `--out` also writes the timings as JSON; it writes nothing else.
 
@@ -537,7 +547,10 @@ Safety:
   touches no other database: its children get `scripts/dev.py`'s filtered environment plus its own settings.
 - Secrets are generated per run, passed through the environment, never a command line, and redacted from any
   error it prints.
-- Cleanup runs in `finally`, also on Ctrl+C or SIGTERM. It stops the API, removes only the containers that carry
-  this run's label (with their volumes) and deletes its temporary directory.
+- Cleanup runs in `finally`: after errors, Ctrl+C and SIGTERM. It stops the API, then removes the containers it
+  tracked (each name is recorded before its `docker run`) or finds by the run's label, each only after checking
+  that label, with their volumes, and deletes its temporary directory. It reports any container it could not
+  remove. Nothing runs after SIGKILL or a host crash: then remove the run's containers by hand with
+  `docker ps -a --filter label=vessel-bench.run` and `docker rm -f -v`.
 - On a shared host, serialize it with other heavy jobs (for example under `flock`). `--min-available-mb` waits
   for free memory before the build, the migrations, the seed and the API start.

@@ -112,6 +112,27 @@ class DatasetTests(unittest.TestCase):
         self.assertGreater(effects['flip'], 0)
         self.assertGreater(max(per_order.values()), 1)
 
+    def test_orders_are_placed_before_their_fills_and_finish_after_them(self):
+        fills = defaultdict(list)
+        for f in self.gen.records('imported_fills'):
+            fills[(f['AccountId'], f['ContractId'], f['ExternalOrderId'])].append(datetime.fromisoformat(f['OccurredAtUtc']))
+        checked = 0
+        for o in self.gen.records('imported_orders'):
+            placed, status = datetime.fromisoformat(o['PlacedAtUtc']), datetime.fromisoformat(o['StatusAtUtc'])
+            self.assertLessEqual(placed, status, o)
+            for at in fills.get((o['AccountId'], o['ContractId'], o['ExternalOrderId']), []):
+                self.assertLessEqual(placed, at, o)
+                self.assertLessEqual(at, status, o)
+                checked += 1
+        self.assertEqual(sum(map(len, fills.values())), checked)
+
+    def test_cache_charge_estimate_follows_the_rows_in_scope(self):
+        enabled = [a.id for a in self.gen.accounts if a.enabled]
+        everything = self.gen.cache_charge(enabled)
+        self.assertGreater(everything, self.gen.cache_charge(enabled[:1]) > 4096)
+        self.assertGreater(small(scale=0.1).cache_charge([a.id for a in small(scale=0.1).accounts if a.enabled]), everything)
+        self.assertTrue(benchmark.cache_status(everything).startswith('hit'))
+
     def test_phase_two_facts_are_present(self):
         counts = self.gen.table_counts()
         for table in ('funding_payments', 'account_leverage_observations', 'account_risk_observations',
@@ -159,6 +180,53 @@ class FormattingTests(unittest.TestCase):
         self.assertEqual(Decimal('123457'), benchmark.tick_price(123456.7, 5))
         self.assertEqual(Decimal('0.00001'), benchmark.lots(0.000001, 5))
         self.assertEqual(Decimal('1.23'), benchmark.lots(Decimal('1.239'), 2))
+
+
+class EndpointTests(unittest.TestCase):
+    def test_deep_pages_come_from_the_counts_or_are_skipped(self):
+        self.assertIsNone(benchmark.deep_page(0, 25))
+        self.assertIsNone(benchmark.deep_page(25, 25))
+        self.assertEqual(2, benchmark.deep_page(26, 25))
+        self.assertEqual(12, benchmark.deep_page(570, 25))
+        planned, skipped = benchmark.plan_endpoints('a', 'o', operations=267, closed=10, matches=7)
+        paths = [spec[1] for spec in planned]
+        self.assertIn('/api/activity?page=2&pageSize=100', paths)
+        self.assertFalse(any('view=closed' in p or 'offset=' in p for p in paths))
+        self.assertEqual(2, len(skipped))
+        self.assertTrue(any('10 Closed Plays' in s for s in skipped) and any('7 matches' in s for s in skipped))
+        planned, skipped = benchmark.plan_endpoints('a', 'o', operations=12000, closed=570, matches=120)
+        paths = [spec[1] for spec in planned]
+        self.assertEqual([], skipped)
+        self.assertIn('/api/plays?view=closed&page=12&pageSize=25', paths)
+        self.assertIn(f'/api/plays/search?q={benchmark.COMMON_WORD}&offset=50', paths)
+        self.assertIn('/api/activity?page=61&pageSize=100', paths)
+
+    def test_deep_page_checks_reject_empty_and_clamped_pages(self):
+        check, _ = benchmark.page_of('plays', 3)
+        self.assertTrue(check({'page': 3, 'plays': [{}]}))
+        self.assertFalse(check({'page': 3, 'plays': []}))
+        self.assertFalse(check({'page': 1, 'plays': [{}]}))  # the API clamps a page past the end
+        self.assertFalse(check({'plays': [{}]}))
+        check, _ = benchmark.search_page(50)
+        self.assertTrue(check({'offset': 50, 'items': [{}], 'notIndexed': 0}))
+        self.assertFalse(check({'offset': 50, 'items': [], 'notIndexed': 0}))
+        self.assertFalse(check({'offset': 0, 'items': [{}], 'notIndexed': 0}))
+        self.assertFalse(check({'offset': 50, 'items': [{}], 'notIndexed': 2}))
+
+    def test_a_repeat_is_called_a_hit_only_when_the_aggregate_fits_the_cache(self):
+        capacity = benchmark.CACHE_CAPACITY
+        self.assertTrue(benchmark.cache_status(capacity // 2).startswith('hit'))
+        self.assertTrue(benchmark.cache_status(capacity).startswith('unconfirmed'))
+        self.assertTrue(benchmark.cache_status(capacity * 2).startswith('not cached'))
+
+    def test_failed_reads_are_recorded_and_never_timed(self):
+        endpoint = benchmark.Endpoint('x', '/x', 'all', *benchmark.page_of('rows', 2))
+        endpoint.record(200, 5.0, 10, 10, b'{"page": 1, "rows": [1]}', endpoint.steady, True)
+        endpoint.record(500, 5.0, 10, 10, b'{}', endpoint.steady, True)
+        endpoint.record(200, 5.0, 10, 10, b'not json', endpoint.steady, True)
+        endpoint.record(200, 7.0, 10, 10, b'{"page": 2, "rows": [1]}', endpoint.steady, True)
+        self.assertEqual([7.0], endpoint.steady)
+        self.assertEqual(3, len(endpoint.failures))
 
 
 class PercentileTests(unittest.TestCase):
@@ -244,6 +312,57 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual([run.containers['postgres']], removed)
         self.assertEqual(1, len(problems))
         self.assertIn('someone-elses', problems[0])
+
+    def test_an_interrupted_start_is_still_removed(self):
+        docker = FakeDocker(create_then=KeyboardInterrupt)
+        run = benchmark.Run(arguments(), log=lambda *_: None)
+        with mock.patch.object(benchmark.subprocess, 'run', docker), mock.patch.object(benchmark.time, 'sleep'):
+            with self.assertRaises(KeyboardInterrupt):
+                run.start_containers()
+            self.assertEqual({run.containers['postgres']}, set(docker.containers))
+            self.assertEqual([], run.cleanup())
+        self.assertEqual({}, docker.containers)
+        self.assertEqual([run.containers['postgres']], docker.removed)
+
+    def test_a_failed_start_removes_what_the_daemon_created_and_nothing_else(self):
+        for creates in (True, False):
+            docker = FakeDocker(fail_with=125, creates=creates, others={'unrelated': 'other-run'})
+            run = benchmark.Run(arguments(), log=lambda *_: None)
+            with mock.patch.object(benchmark.subprocess, 'run', docker), mock.patch.object(benchmark.time, 'sleep'):
+                with self.assertRaises(RuntimeError):
+                    run.start_containers()
+                self.assertEqual([], run.cleanup())
+            self.assertEqual({'unrelated': 'other-run'}, docker.containers)
+            self.assertEqual([run.containers['postgres']] if creates else [], docker.removed)
+
+
+class FakeDocker:
+    """A daemon of named, labelled containers: `docker run` creates one and then fails or is interrupted as told."""
+
+    def __init__(self, create_then=None, fail_with=None, creates=True, others=None):
+        self.containers, self.removed = dict(others or {}), []
+        self.create_then, self.fail_with, self.creates = create_then, fail_with, creates
+
+    def __call__(self, args, **kwargs):
+        args = [str(a) for a in args]
+        done = lambda code=0, out='': subprocess.CompletedProcess(args, code, out, '')
+        if args[:2] == ['docker', 'run']:
+            name, label = args[args.index('--name') + 1], args[args.index('--label') + 1].split('=', 1)[1]
+            if self.creates:
+                self.containers[name] = label
+            if self.create_then:
+                raise self.create_then()
+            return done(self.fail_with or 0)
+        if args[:2] == ['docker', 'ps']:
+            wanted = args[args.index('--filter') + 1].split('=', 2)[2]
+            return done(0, '\n'.join(n for n, label in self.containers.items() if label == wanted))
+        if args[:2] == ['docker', 'inspect']:
+            return done(0, self.containers[args[-1]]) if args[-1] in self.containers else done(1)
+        if args[:2] == ['docker', 'rm']:
+            self.removed.append(args[-1])
+            self.containers.pop(args[-1], None)
+            return done()
+        return done()
 
 
 if __name__ == '__main__':

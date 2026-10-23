@@ -5,9 +5,11 @@ Starts its own throwaway PostgreSQL 18 and RabbitMQ containers, applies the migr
 journal, ensure-owner, provision-messaging, as deploy/migrate does), seeds one owner's deterministic synthetic journal with
 COPY, rebuilds the journal search projection with its offline command and starts the built API DLL in Release
 (Production, Token mode, a generated token kept in memory, no worker modules). It then times Activity, Review, the Plays
-list, Overview, open risk and journal search: warm-up rounds, then measured rounds interleaved across endpoints, with a
-cache miss after a committed no-op revision write against a hit where the Activity cache applies. Prints a Markdown report
-and removes the API, both containers and its temporary directory, even on failure.
+list, Overview, open risk and journal search: warm-up rounds, then measured rounds interleaved across endpoints. A read
+through the Activity facts cache is made after a committed no-op revision write and repeated; the report infers whether
+the repeat can be a hit from the cache's capacity. Deep pages come from the counts, and scenarios the dataset cannot
+populate are skipped and named. Prints a Markdown report, then stops the API and removes every container carrying the
+run's label and its temporary directory, after errors, Ctrl+C and SIGTERM too.
 
 Never reads .env, never uses a default connection string, never touches the owner's database and never runs in CI.
 
@@ -520,32 +522,41 @@ class Generator:
             # One market order closes the rest and opens the opposite position of the next round trip.
             following.qty = self.size(a, entry, rt.levels['distance'], sz)
             legs[-1] = ('flip', types[1], tick_price(self.price(rt.contract, end), sz), legs[-1][3], None)
+        # Execution times first: every order is placed before its earliest fill and finishes at or after its last.
+        times = [end] if len(legs) == 1 else [self.ms(at + (end - at) * 0.55), end]
+        schedule = []
+        for leg, when in zip(legs, times):
+            parts = [leg[3]] if leg[0] == 'flip' else self.split(leg[3], sz, self.rng.choices([1, 2], [7, 3])[0])
+            fill_at, fill_times = when - timedelta(seconds=2 * len(parts)), []
+            for _ in parts:
+                fill_at = self.ms(fill_at + timedelta(seconds=self.rng.uniform(0.2, 1.8)))
+                fill_times.append(fill_at)
+            schedule.append((leg, parts, fill_times))
+        # Resting stops and targets go in shortly after the entry, before the first exit executes.
+        placed = self.between(at + timedelta(seconds=0.5),
+                              min(at + timedelta(seconds=60), schedule[0][2][0] - timedelta(seconds=0.5)))
         protective = []
-        placed = at + timedelta(seconds=self.rng.uniform(1, 60))
         if not any(leg[0] == 'stop' for leg in legs):
             protective.append(self.order(rt, exit_side, types[2], rt.levels['stop'], rt.levels['stop'], True, rt.qty,
                                          placed, 'stop'))
         if not any(leg[0] == 'target' for leg in legs) and self.rng.random() < 0.7:
             protective.append(self.order(rt, exit_side, types[3], rt.levels['target'], rt.levels['target'], True, rt.qty,
                                          placed, 'target'))
-        times = [end] if len(legs) == 1 else [self.ms(at + (end - at) * 0.55), end]
-        for (role, kind, price, qty, trigger), when in zip(legs, times):
+        for (role, kind, price, qty, trigger), parts, fill_times in schedule:
             opening = following.qty if role == 'flip' else ZERO
             order = self.order(rt, exit_side, kind, price, trigger, role in ('stop', 'target'), qty + opening,
-                               placed if role in ('stop', 'target') else when - timedelta(seconds=3), role)
+                               placed if role in ('stop', 'target')
+                               else fill_times[0] - timedelta(seconds=self.rng.uniform(0.1, 3)), role)
             rt.exit_orders.append(order)
-            parts = [qty] if role == 'flip' else self.split(qty, sz, self.rng.choices([1, 2], [7, 3])[0])
-            fill_at = when - timedelta(seconds=2 * len(parts))
-            for n, part in enumerate(parts):
-                fill_at = self.ms(fill_at + timedelta(seconds=self.rng.uniform(0.2, 1.8)))
+            for n, (part, fill_at) in enumerate(zip(parts, fill_times)):
                 fill_price = price if role != 'stop' else tick_price(float(price) * (1 - sign * self.rng.uniform(0, 0.001)), sz)
                 pnl = money((fill_price - rt.average) * part * sign)
                 self.fill(rt, order, exit_side, 'flip' if role == 'flip' else 'close', fill_price,
                           part + (opening if n == len(parts) - 1 else ZERO), pnl, fill_at, maker=role == 'target')
-            rt.end = fill_at
-            self.finish(order, 'filled', fill_at)
+            rt.end = fill_times[-1]
+            self.finish(order, 'filled', rt.end)
             if role == 'flip':
-                following.flip_order, following.flip_price, following.start = order, price, fill_at
+                following.flip_order, following.flip_price, following.start = order, price, rt.end
         for order in protective:
             self.finish(order, 'canceled', rt.end + timedelta(seconds=self.rng.uniform(0.5, 5)))
             rt.exit_orders.append(order)
@@ -1214,6 +1225,22 @@ class Generator:
     def records(self, table):
         return [parse_copy(line, table) for line in self.rows.lines.get(table, [])]
 
+    def cache_charge(self, account_ids):
+        """The estimated ActivitySummaryCache charge of the aggregate over these accounts, by the cache's own rule:
+        768 bytes per retained row plus two per string character, 128 per Play-linked fill, and per operation its row,
+        288 bytes per execution and 16 per funding payment. Operation rows are approximated (OPERATION_ROW)."""
+        ids = set(account_ids)
+        charge = 4096 + 2 * 37 * len(ids)
+        for table, columns in CACHE_STRINGS.items():
+            for record in self.records(table):
+                if record['Id' if table == 'accounts' else 'AccountId'] in ids:
+                    charge += 768 + 2 * sum(len(record[c] or '') for c in columns)
+                    charge += {'imported_fills': 288, 'funding_payments': 16}.get(table, 0)
+        linked = {r['ImportedOrderId'] for r in self.records('play_order_links') if r['State'] == 'Linked'}
+        trips = [rt for rt in self.round_trips if rt.account.id in ids and not rt.omitted]
+        charge += 128 * sum(1 for rt in trips for f in rt.fills if f['order'].id in linked)
+        return charge + OPERATION_ROW * len(trips)
+
 
 def generate(seed, years, scale, anchor):
     return Generator(seed, years, scale, anchor).generate()
@@ -1267,36 +1294,105 @@ def positive(key):
     return lambda body: isinstance(body.get(key), int) and body[key] > 0, f'positive "{key}"'
 
 
-def search_check(body):
-    return isinstance(body.get('items'), list) and len(body['items']) > 0 and body.get('notIndexed') == 0
+def page_of(key, page):
+    """The requested page itself, with rows: a page past the end is clamped by the API and so reads as another number."""
+    return (lambda body: body.get('page') == page and isinstance(body.get(key), list) and len(body[key]) > 0,
+            f'page {page} with a non-empty "{key}"')
 
 
-# name, path, cached (goes through the Activity facts cache), check(body) -> bool and its description.
-ENDPOINTS = [
-    ('Activity, page 1', '/api/activity', True, *nonempty('operations')),
-    ('Activity, page 5 of 100', '/api/activity?page=5&pageSize=100', True, *nonempty('operations')),
-    ('Activity, closed longs in 90 days', '/api/activity?status=closed&direction=long&period=90', True,
-     *nonempty('operations')),
-    ('Activity, executions of one operation', '/api/activity/fills?accountId={account}&operationId={operation}', True,
-     *nonempty('fills')),
-    ('Review, all', '/api/review?period=all', False, *nonempty('plays')),
-    ('Review, year', '/api/review?period=year', False, *nonempty('plays')),
-    ('Review, all with imported positions', '/api/review?period=all&positions=include', True, *nonempty('plays')),
-    ('Plays, All tab', '/api/plays?view=all', False, *nonempty('plays')),
-    ('Plays, In progress tab', '/api/plays?view=progress', False, *nonempty('plays')),
-    ('Plays, Closed tab page 3', '/api/plays?view=closed&page=3', False, *positive('totalCount')),
-    ('Plays, tab counts', '/api/plays/counts', False, *positive('all')),
-    ('Plays, title and instrument search', '/api/plays?view=all&q=BTC', False, *nonempty('plays')),
-    ('Overview', '/api/overview', False, *nonempty('accounts')),
-    ('Overview summary by portfolio, all', '/api/overview/summary?groupBy=portfolio&period=all', True, *nonempty('rows')),
-    ('Overview summary by account, 30 days', '/api/overview/summary?groupBy=account&period=30', True, *nonempty('rows')),
-    ('Open risk', '/api/risk/open', False, *nonempty('plays')),
-    ('Journal search, common word', f'/api/plays/search?q={COMMON_WORD}', False, search_check,
-     'non-empty "items" with nothing unindexed'),
-    ('Journal search, second page', f'/api/plays/search?q={COMMON_WORD}&offset=50', False, *positive('total')),
-    ('Journal search, rare word', f'/api/plays/search?q={RARE_WORD}', False,
-     lambda body: body.get('total') == 1 and len(body.get('items', [])) == 1, 'exactly one match'),
-]
+def search_page(offset):
+    return (lambda body: body.get('offset') == offset and isinstance(body.get('items'), list) and len(body['items']) > 0
+            and body.get('notIndexed') == 0, f'offset {offset} with non-empty "items" and nothing unindexed')
+
+
+# Page sizes: the Plays list default (ListPaging), Activity's largest page and JournalSearch.PageSize.
+PLAYS_PAGE, ACTIVITY_PAGE, SEARCH_PAGE = 25, 100, 50
+
+
+def deep_page(total, size):
+    """A populated page past the first (the middle one), or None when everything fits on one page."""
+    pages = math.ceil(total / size) if total > 0 else 0
+    return pages // 2 + 1 if pages >= 2 else None
+
+
+def plan_endpoints(account, operation, operations, closed, matches):
+    """The measured reads as (name, path, cache scope or None, check, expectation), and the skipped scenarios.
+    Deep pages come from the counts the API reported; a scenario the dataset cannot populate is skipped, never faked.
+    The cache scope names the Activity facts aggregate a read goes through: every enabled account, or one account."""
+    planned, skipped = [], []
+
+    def add(name, path, cache, check):
+        planned.append((name, path, cache, *check))
+    add('Activity, page 1', '/api/activity', 'all', nonempty('operations'))
+    page = deep_page(operations, ACTIVITY_PAGE)
+    if page:
+        add(f'Activity, page {page} of {ACTIVITY_PAGE} rows', f'/api/activity?page={page}&pageSize={ACTIVITY_PAGE}', 'all',
+            page_of('operations', page))
+    else:
+        skipped.append(f'Activity deep page: {operations} operations fit on one page of {ACTIVITY_PAGE}')
+    add('Activity, closed longs in 90 days', '/api/activity?status=closed&direction=long&period=90', 'all',
+        nonempty('operations'))
+    add('Activity, executions of one operation', f'/api/activity/fills?accountId={account}&operationId={operation}',
+        'account', nonempty('fills'))
+    add('Review, all', '/api/review?period=all', None, nonempty('plays'))
+    add('Review, year', '/api/review?period=year', None, nonempty('plays'))
+    add('Review, all with imported positions', '/api/review?period=all&positions=include', 'all', nonempty('plays'))
+    add('Plays, All tab', '/api/plays?view=all', None, nonempty('plays'))
+    add('Plays, In progress tab', '/api/plays?view=progress', None, nonempty('plays'))
+    page = deep_page(closed, PLAYS_PAGE)
+    if page:
+        add(f'Plays, Closed tab page {page}', f'/api/plays?view=closed&page={page}&pageSize={PLAYS_PAGE}', None,
+            page_of('plays', page))
+    else:
+        skipped.append(f'Plays Closed tab deep page: {closed} Closed Plays fit on one page of {PLAYS_PAGE}')
+    add('Plays, tab counts', '/api/plays/counts', None, positive('all'))
+    add('Plays, title and instrument search', '/api/plays?view=all&q=BTC', None, nonempty('plays'))
+    add('Overview', '/api/overview', None, nonempty('accounts'))
+    add('Overview summary by portfolio, all', '/api/overview/summary?groupBy=portfolio&period=all', 'all', nonempty('rows'))
+    add('Overview summary by account, 30 days', '/api/overview/summary?groupBy=account&period=30', 'all', nonempty('rows'))
+    add('Open risk', '/api/risk/open', None, nonempty('plays'))
+    add('Journal search, common word', f'/api/plays/search?q={COMMON_WORD}', None, search_page(0))
+    page = deep_page(matches, SEARCH_PAGE)
+    if page:
+        offset = (page - 1) * SEARCH_PAGE
+        add(f'Journal search, offset {offset}', f'/api/plays/search?q={COMMON_WORD}&offset={offset}', None,
+            search_page(offset))
+    else:
+        skipped.append(f'Journal search deep page: {matches} matches fit on one page of {SEARCH_PAGE}')
+    add('Journal search, rare word', f'/api/plays/search?q={RARE_WORD}', None,
+        (lambda body: body.get('total') == 1 and len(body.get('items', [])) == 1, 'exactly one match'))
+    return planned, skipped
+
+
+# The string properties the cache charges, per table of the entities it retains (ActivitySummaryCache.Charge).
+CACHE_STRINGS = {
+    'accounts': ['TradingMode', 'VenueId', 'Name', 'Address', 'SourceId', 'SyncStatus', 'LastSyncError', 'HistoryNotice'],
+    'imported_fills': ['ContractId', 'VenueContractId', 'SourceFillId', 'Side', 'Direction', 'PositionEffect', 'FeeToken',
+                       'FeeBasis', 'PnlBasis', 'ExternalOrderId', 'TransactionHash'],
+    'account_snapshots': ['ValueScope', 'AccountMode', 'StablecoinScope'],
+    'account_positions': ['ContractId', 'VenueContractId', 'MarginMode'],
+    'account_stablecoins': ['TokenId', 'Symbol'],
+    'funding_payments': ['SourceId', 'ContractId', 'VenueContractId', 'Asset'],
+    'account_funding_states': ['PnlBasis', 'Notice'],
+    'account_leverage_observations': ['ContractId', 'VenueContractId'],
+    'execution_omissions': ['ContractId', 'VenueContractId'],
+    'imported_forced_events': ['SourceId', 'Kind', 'ContractId', 'VenueContractId', 'Side', 'OrderId', 'Exclusion'],
+}
+# An ActivityOperationDto row: 768 bytes plus about 250 characters of identity, quantity, price and P&L strings.
+OPERATION_ROW = 1300
+# The cache's default capacity (Vessel:Activity:CacheCapacityBytes); the run never changes it.
+CACHE_CAPACITY = 256 * 1024 * 1024
+
+
+def cache_status(charge, capacity=CACHE_CAPACITY):
+    """Whether a repeated read can be a hit: the cache refuses an entry whose charge exceeds its capacity. The charge is
+    an estimate, so values near the capacity are reported as unconfirmed rather than as hits or misses."""
+    mib, limit = charge / 2 ** 20, capacity / 2 ** 20
+    if charge <= 0.8 * capacity:
+        return f'hit (est. {mib:.0f} MiB)'
+    if charge > 1.25 * capacity:
+        return f'not cached (est. {mib:.0f} > {limit:.0f} MiB)'
+    return f'unconfirmed (est. {mib:.0f} MiB, near {limit:.0f})'
 
 
 class Client:
@@ -1332,8 +1428,9 @@ class Client:
 
 
 class Endpoint:
-    def __init__(self, name, path, cached, check, expectation):
-        self.name, self.path, self.cached, self.check, self.expectation = name, path, cached, check, expectation
+    def __init__(self, name, path, cache, check, expectation):
+        self.name, self.path, self.cache, self.check, self.expectation = name, path, cache, check, expectation
+        self.cached = cache is not None
         self.steady, self.miss = [], []
         self.wire = self.size = 0
         self.failures = []
@@ -1356,8 +1453,9 @@ class Endpoint:
 
 
 def measure(client, endpoints, warmup, rounds, write, progress=print):
-    """Interleaved rounds: every round visits every endpoint, in an order rotated by one per round. A cached endpoint
-    is read after a committed no-op revision write (a miss) and again at once (a hit)."""
+    """Interleaved rounds: every round visits every endpoint, in an order rotated by one per round. A read through the
+    Activity facts cache is made after a committed no-op revision write (always a miss) and repeated at once; the repeat
+    is a hit only when the aggregate fits the cache (see cache_status)."""
     for number in range(warmup + rounds):
         measured = number >= warmup
         shift = number % len(endpoints)
@@ -1432,14 +1530,15 @@ class Run:
     def start_containers(self):
         env = dict(os.environ, POSTGRES_PASSWORD=self.pg_password, RABBITMQ_DEFAULT_PASS=self.mq_password)
         label = f'{LABEL}={self.id}'
-        self.run(['docker', 'run', '-d', '--rm', '--name', self.containers['postgres'], '--label', label,
-                  '-e', 'POSTGRES_USER=vessel', '-e', f'POSTGRES_DB={DATABASE}', '-e', 'POSTGRES_PASSWORD',
-                  '-p', '127.0.0.1::5432', POSTGRES_IMAGE], env=env)
-        self.started.append(self.containers['postgres'])
-        self.run(['docker', 'run', '-d', '--rm', '--name', self.containers['rabbitmq'], '--label', label,
-                  '--hostname', 'vessel-bench-rabbitmq', '-e', 'RABBITMQ_DEFAULT_USER=bench', '-e', 'RABBITMQ_DEFAULT_PASS',
-                  '-p', '127.0.0.1::5672', RABBIT_IMAGE], env=env)
-        self.started.append(self.containers['rabbitmq'])
+        for key, options, image in (
+                ('postgres', ['-e', 'POSTGRES_USER=vessel', '-e', f'POSTGRES_DB={DATABASE}', '-e', 'POSTGRES_PASSWORD',
+                              '-p', '127.0.0.1::5432'], POSTGRES_IMAGE),
+                ('rabbitmq', ['--hostname', 'vessel-bench-rabbitmq', '-e', 'RABBITMQ_DEFAULT_USER=bench',
+                              '-e', 'RABBITMQ_DEFAULT_PASS', '-p', '127.0.0.1::5672'], RABBIT_IMAGE)):
+            # Tracked before launch: a failed or interrupted `docker run` can still leave a created container.
+            self.started.append(self.containers[key])
+            self.run(['docker', 'run', '-d', '--rm', '--name', self.containers[key], '--label', label, *options, image],
+                     env=env)
         self.pg_port = self.port(self.containers['postgres'], 5432)
         self.mq_port = self.port(self.containers['rabbitmq'], 5672)
         self.wait('PostgreSQL', ['docker', 'exec', self.containers['postgres'], 'pg_isready', '-h', '127.0.0.1',
@@ -1575,29 +1674,41 @@ class Run:
             os.killpg(self.api.pid, signal.SIGKILL)
             self.api.wait()
 
+    def labelled(self):
+        """The containers that carry this run's label, whether or not their start was seen to succeed."""
+        found = subprocess.run(['docker', 'ps', '-a', '--filter', f'label={LABEL}={self.id}', '--format', '{{.Names}}'],
+                               capture_output=True, text=True)
+        return found.stdout.split() if found.returncode == 0 else []
+
     def cleanup(self):
-        """Stops the API and removes only the containers this run started (checked by their run label) and its files."""
-        problems = []
+        """Stops the API, then removes the containers this run tracked or finds by its label, each only after checking
+        it carries this run's label, and its temporary directory. It cannot run after SIGKILL or a host crash; the
+        report then names the label to remove by hand."""
+        problems, foreign, stuck = [], set(), set()
         try:
             self.stop_api()
         except OSError as error:
             problems.append(f'API stop: {error}')
-        for name in reversed(self.started):
-            inspected = subprocess.run(['docker', 'inspect', '-f', f'{{{{index .Config.Labels "{LABEL}"}}}}', name],
-                                       capture_output=True, text=True)
-            if inspected.returncode:
-                continue  # already gone (--rm)
-            if inspected.stdout.strip() != self.id:
-                problems.append(f'{name} does not carry this run\'s label; left alone.')
-                continue
-            if subprocess.run(['docker', 'rm', '-f', '-v', name], capture_output=True).returncode:
-                problems.append(f'could not remove {name}')
+        for attempt in range(3):
+            for name in dict.fromkeys([*reversed(self.started), *self.labelled()]):
+                inspected = subprocess.run(['docker', 'inspect', '-f', f'{{{{index .Config.Labels "{LABEL}"}}}}', name],
+                                           capture_output=True, text=True)
+                if inspected.returncode:
+                    continue  # never created, or already gone (--rm)
+                if inspected.stdout.strip() != self.id:
+                    foreign.add(name)
+                    continue
+                if subprocess.run(['docker', 'rm', '-f', '-v', name], capture_output=True).returncode:
+                    stuck.add(name)
+            if not self.labelled():
+                break
+            time.sleep(1)  # a container the daemon was still creating when the client was interrupted
+        else:
+            problems.append(f'containers labelled {LABEL}={self.id} remain; remove them with docker rm -f -v')
+        problems += [f'could not remove {name}' for name in sorted(stuck)]
+        problems += [f'{name} does not carry this run\'s label; left alone' for name in sorted(foreign)]
         if self.temp is not None:
             shutil.rmtree(self.temp, ignore_errors=True)
-        leftover = subprocess.run(['docker', 'ps', '-aq', '--filter', f'label={LABEL}={self.id}'],
-                                  capture_output=True, text=True).stdout.split()
-        if leftover:
-            problems.append(f'{len(leftover)} container(s) with this run\'s label remain')
         return problems
 
 
@@ -1685,18 +1796,25 @@ def report(meta, counts, endpoints):
         f'Activity aggregates the {meta["activity"]["fills"]:,} retained fills of enabled accounts into '
         f'{meta["activity"]["operations"]:,} operations, {meta["activity"]["closed"]:,} of them closed.',
         '',
-        'Times are milliseconds from request to the last body byte on one keep-alive connection, gzip accepted. A miss '
-        'follows a committed no-op account update, which advances the Activity facts revision; the hit repeats the '
-        'request at once. Uncached reads have no miss column.',
+        'Times are milliseconds from request to the last body byte on one keep-alive connection, gzip accepted. '
+        'Reads through the Activity facts cache are made once right after a committed no-op account update, which '
+        'advances the facts revision so the aggregate is computed again ("After write"), then repeated at once ("p50", '
+        '"p95"). The API exposes no cache diagnostics, so the Cache column infers whether that repeat is a hit: the '
+        'cache refuses an aggregate whose charge exceeds its 256 MiB default capacity, and the charge is estimated '
+        'from the generated rows by the cache\'s own rule. Above or near the capacity the repeat is recomputed or '
+        'unconfirmed, never called a hit. Other reads are not cached; their p50 and p95 are of every measured read.',
         '',
-        '| Endpoint | Request | p50 | p95 | Miss p50 | Miss p95 | Wire KiB | JSON KiB |',
-        '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |',
+        '| Endpoint | Request | p50 | p95 | After write p50 | After write p95 | Cache | Wire KiB | JSON KiB |',
+        '| --- | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: |',
     ]
     for e in endpoints:
         steady, miss = summarize(e.steady), summarize(e.miss)
         path = re.sub(r'accountId=[^&]+&operationId=[^&]+', 'accountId=…&operationId=…', e.path)
+        cache = meta['cache'][e.cache]['status'] if e.cache else '–'
         lines.append(f'| {e.name} | `{path}` | {ms(steady and steady["p50"])} | {ms(steady and steady["p95"])} | '
-                     f'{ms(miss and miss["p50"])} | {ms(miss and miss["p95"])} | {kib(e.wire)} | {kib(e.size)} |')
+                     f'{ms(miss and miss["p50"])} | {ms(miss and miss["p95"])} | {cache} | {kib(e.wire)} | {kib(e.size)} |')
+    if meta['skipped']:
+        lines += ['', 'Skipped, because this dataset cannot populate them: ' + '; '.join(meta['skipped']) + '.']
     return '\n'.join(lines)
 
 
@@ -1798,8 +1916,17 @@ def main(argv=None):
         if operation is None:
             raise RuntimeError('Activity returned no closed operation with several executions to expand.')
         activity = {'fills': page['retainedFillCount'], 'operations': page['scopeCount'], 'closed': page['totalCount']}
-        endpoints = [Endpoint(name, path.format(account=operation['accountId'], operation=operation['id']), cached, check,
-                              expectation) for name, path, cached, check, expectation in ENDPOINTS]
+        # Deep pages come from the API's own counts, checked against the generated ones where they are exact.
+        status, _, _, _, body = client.get('/api/plays/counts')
+        closed = json.loads(body)['closed'] if status == 200 else None
+        if closed != generator.statuses['Closed']:
+            raise RuntimeError(f'The Plays counts show {closed} Closed Plays; the dataset has {generator.statuses["Closed"]}.')
+        status, _, _, _, body = client.get(f'/api/plays/search?q={COMMON_WORD}')
+        matches = json.loads(body)['total'] if status == 200 else 0
+        planned, skipped = plan_endpoints(operation['accountId'], operation['id'], activity['operations'], closed, matches)
+        endpoints = [Endpoint(*spec) for spec in planned]
+        enabled = [a.id for a in generator.accounts if a.enabled]
+        charges = {'all': generator.cache_charge(enabled), 'account': generator.cache_charge([operation['accountId']])}
         clock = time.monotonic()
         print(f'Measuring {len(endpoints)} endpoints: {args.warmup} warm-up and {args.rounds} measured rounds…', flush=True)
         measure(client, endpoints, args.warmup, args.rounds, lambda: run.psql(noop), lambda text: print(text, flush=True))
@@ -1812,13 +1939,15 @@ def main(argv=None):
                 'years': args.years, 'scale': args.scale, 'anchor': anchor.strftime('%Y-%m-%dT%H:%MZ'),
                 'warmup': args.warmup, 'rounds': args.rounds, 'host': host, 'postgres': f'PostgreSQL {postgres}',
                 'dotnet': subprocess.run(['dotnet', '--version'], capture_output=True, text=True).stdout.strip(),
-                'api_rss_mb': run.api_peak_rss(), 'postgres_memory': stats, 'phases': phases, 'activity': activity}
+                'api_rss_mb': run.api_peak_rss(), 'postgres_memory': stats, 'phases': phases, 'activity': activity,
+                'skipped': skipped, 'cache': {scope: {'estimatedBytes': charge, 'status': cache_status(charge)}
+                                              for scope, charge in charges.items()}}
         print()
         print(report(meta, counts, endpoints))
         if args.out:
             Path(args.out).write_text(json.dumps({
                 'meta': meta, 'counts': counts,
-                'endpoints': [{'name': e.name, 'cached': e.cached, 'wireBytes': e.wire, 'jsonBytes': e.size,
+                'endpoints': [{'name': e.name, 'path': e.path, 'cacheScope': e.cache, 'wireBytes': e.wire, 'jsonBytes': e.size,
                                'steady': summarize(e.steady), 'miss': summarize(e.miss), 'steadyMs': e.steady,
                                'missMs': e.miss, 'failures': e.failures} for e in endpoints]}, indent=2) + '\n')
     except KeyboardInterrupt:
