@@ -164,7 +164,7 @@ October 21, 2026. Implemented on `t3/phase2-open-risk`.
 
 ## 2. Weekly review page
 
-October 21, 2026.
+October 22, 2026.
 
 **2. Weekly review page.** Implemented on `t3/phase2-weekly-review`.
 - **The setting.** One owner setting on the server (`reporting_settings`, migration
@@ -914,6 +914,11 @@ October 21, 2026.
     full backfill writes a complete ledger record. Keeping flat observations would need a migration.
   - **Play status.** It is not fenced; it only affects the `not-settled` check.
   - **Order lifetimes.** They follow Vessel's clock.
+- **Owner answer (October 23).** These stay as built for now; the owner will rethink them later. Old Plays
+  keep reading "coverage incomplete" until a flat start is proven, and no flat observations are kept.
+  - **To revisit (owner, October 23).** Opening a new Play could close an older one on the same market that
+    never filled, only where that makes sense. Nothing is built: concurrent Plays stay allowed, and a Play's
+    status changes only by the owner or its linked fills.
 - **Tests.** `PlayFundingPostgresTests` (27):
   - the sole sum with unchanged results;
   - each failing condition, with missing executions in, after and before the window;
