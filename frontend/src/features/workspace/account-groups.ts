@@ -1,6 +1,7 @@
 import type { BrokerAccount } from '@/api/workspace'
 import type { AccountGroupBy } from './account-filters'
 import { sumDecimals } from './overview-allocation'
+import { isSolanaAddress } from '@/api/source-identity'
 
 /**
  * A group's balance is a total only when every enabled member reports one. Disabled accounts are left out, as in the
@@ -55,7 +56,8 @@ type Bucket = { key: string; accounts: BrokerAccount[] } & (
 export function groupAccounts(accounts: BrokerAccount[], by: Exclude<AccountGroupBy, 'none'>): AccountGroup[] {
   const buckets = new Map<string, Bucket>()
   for (const account of accounts) {
-    const owner = by === 'address' ? addressKey(account.address) : null
+    const publicAddress = account.address ?? (account.sourceId && isSolanaAddress(account.sourceId) ? account.sourceId : null)
+    const owner = by === 'address' ? addressKey(publicAddress) : null
     const key = by === 'venue' ? `venue:${account.venueId}` : owner === null ? 'no-address' : `address:${owner}`
     let bucket = buckets.get(key)
     if (!bucket) {

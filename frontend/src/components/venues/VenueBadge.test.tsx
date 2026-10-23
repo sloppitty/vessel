@@ -32,7 +32,7 @@ describe('VenueBadge', () => {
   })
 
   it('accepts only the fixed logo set', () => {
-    expect(venueLogoKeys).toEqual(['hyperliquid', 'lighter', 'lighter-rh', 'risex', 'manual'])
+    expect(venueLogoKeys).toEqual(['hyperliquid', 'lighter', 'lighter-rh', 'risex', 'pacifica', 'manual'])
     expect(isVenueLogoKey('lighter')).toBe(true)
     for (const key of ['Lighter', 'binance', 'toString', '__proto__', '', null, 3]) expect(isVenueLogoKey(key)).toBe(false)
   })

@@ -2,6 +2,7 @@ import { manualVenueId } from '@/api/system'
 import { useState, type FormEvent } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { accountIndex } from '@/api/account-access'
+import { isSolanaAddress } from '@/api/source-identity'
 import { ApiError, errorMessage } from '@/api/errors'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
@@ -80,6 +81,7 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
   const venue = choices.some(v => v.id === venueChoice) ? venueChoice : (choices.find(v => !venues.isManual(v.id)) ?? choices[0])?.id ?? manualVenueId
   const venueInfo = venues.find(venue)
   const needsAddress = !paper && venueInfo?.source === 'evm-address'
+  const needsSolana = !paper && venueInfo?.source === 'solana-address'
   const needsIndex = !paper && venueInfo?.source === 'account-index'
   const canDiscover = needsIndex && venues.can(venue, 'accountDiscovery')
   const [address, setAddress] = useState('')
@@ -93,8 +95,9 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
     if (paper && !choices.some(choice => choice.id === venue)) { setError('Paper execution is not available for this venue.'); return }
     if (paper && !/^\d+(\.\d+)?$/.test(startingCapital.trim())) { setError('Use an exact nonnegative starting capital amount.'); return }
     if (needsAddress && !/^0x[\da-f]{40}$/i.test(address.trim())) { setError('Use a valid public wallet address, starting with 0x.'); return }
+    if (needsSolana && !isSolanaAddress(address.trim())) { setError('Use a case-sensitive Solana public address: base58 decoding to 32 bytes.'); return }
     if (needsIndex && !accountIndex(address.trim())) { setError('Use the exact nonnegative account index.'); return }
-    if (needsIndex && accounts.some(a => a.venueId === venue && (a.sourceId ?? a.address) === address.trim())) {
+    if ((needsIndex || needsSolana) && accounts.some(a => a.venueId === venue && (a.sourceId ?? a.address) === address.trim())) {
       setError('This account is already imported. Manage or re-enable the existing account.'); return
     }
     if (venues.isManual(venue) && manualValue.trim() && !/^\d+(\.\d+)?$/.test(manualValue.trim())) { setError('Use a nonnegative balance, or leave it unavailable.'); return }
@@ -104,7 +107,7 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
       const target = await destination.resolve(); portfolioCreated = target.created
       const account = await api.createAccount({
         portfolioId: target.portfolioId, name: name.trim(), venueId: venue,
-        ...(paper ? { tradingMode: 'paper' as const, startingCapitalUsd: startingCapital.trim() } : needsAddress ? { address: address.trim().toLowerCase() } : needsIndex ? { sourceId: address.trim() } : manualValue.trim() ? { manualAccountValueUsd: manualValue.trim() } : {}),
+        ...(paper ? { tradingMode: 'paper' as const, startingCapitalUsd: startingCapital.trim() } : needsAddress ? { address: address.trim().toLowerCase() } : needsIndex || needsSolana ? { sourceId: address.trim() } : manualValue.trim() ? { manualAccountValueUsd: manualValue.trim() } : {}),
       })
       setName(''); setAddress(''); setManualValue(''); setStartingCapital('4000'); onOpenChange(false); onCreated(account)
     } catch (cause) { setError((portfolioCreated ? 'The new portfolio was created and kept. Retry adding the account into it; a duplicate portfolio will not be created. ' : '') + (errorMessage(cause, 'Could not create this account.'))) }
@@ -130,7 +133,7 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
           <PortfolioDestination destination={destination} inputId="account-portfolio" label={paper ? 'Paper portfolio · required' : 'Portfolio · optional'} required={paper} disabled={pending} />
           <label htmlFor="account-name">Account name</label><Input id="account-name" value={name} onChange={event => setName(event.target.value)} placeholder="e.g. Main account" maxLength={200} disabled={pending} />
           {paper ? <><label htmlFor="paper-starting-capital">Starting capital · virtual USD</label><Input id="paper-starting-capital" value={startingCapital} onChange={event => setStartingCapital(event.target.value)} inputMode="decimal" disabled={pending} required />
-            <p className="field-help">Default 4000 nominal virtual USD. Fixed immediately after creation: no later edits, deposits, withdrawals or reset. Zero capital cannot fund entries. No real wallet, credentials or history import.</p></> : needsAddress ? <><label htmlFor="account-address">Public wallet address</label><Input id="account-address" value={address} onChange={event => setAddress(event.target.value)} placeholder="0x…" maxLength={128} spellCheck={false} autoComplete="off" disabled={pending} /><p className="field-help">Never enter a private key or seed phrase.</p></> :
+            <p className="field-help">Default 4000 nominal virtual USD. Fixed immediately after creation: no later edits, deposits, withdrawals or reset. Zero capital cannot fund entries. No real wallet, credentials or history import.</p></> : needsAddress || needsSolana ? <><label htmlFor="account-address">{needsSolana ? 'Solana public address' : 'Public wallet address'}</label><Input id="account-address" value={address} onChange={event => setAddress(event.target.value)} placeholder={needsSolana ? 'Case-sensitive base58 address' : '0x…'} maxLength={needsSolana ? 44 : 128} spellCheck={false} autoComplete="off" autoCapitalize="none" disabled={pending} /><p className="field-help">Never enter a private key or seed phrase.</p></> :
             needsIndex ? <><label htmlFor="account-source">Account index</label><Input id="account-source" value={address} onChange={event => setAddress(event.target.value)} inputMode="numeric" autoComplete="off" disabled={pending} /></> :
             <><label htmlFor="manual-balance">Known account value · USD <span className="optional">optional</span></label><Input id="manual-balance" value={manualValue} onChange={event => setManualValue(event.target.value)} placeholder="Leave blank if unavailable" inputMode="decimal" disabled={pending} /></>}
           {error && <p role="alert" className="error">{error}</p>}

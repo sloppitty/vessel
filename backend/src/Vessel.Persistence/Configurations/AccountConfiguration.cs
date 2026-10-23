@@ -18,7 +18,7 @@ internal sealed class AccountConfiguration : IEntityTypeConfiguration<Account>
             table.HasCheckConstraint("CK_accounts_paper",
                 """("TradingMode"='real' AND "StartingCapitalUsd" IS NULL) OR ("TradingMode"='paper' AND "PortfolioId" IS NOT NULL AND "VenueId"='hyperliquid' AND "Address" IS NULL AND "SourceId" IS NULL AND "ManualAccountValueUsd" IS NULL AND "StartingCapitalUsd" IS NOT NULL AND "StartingCapitalUsd">=0)""");
             table.HasCheckConstraint("CK_accounts_source_identity",
-                """("Address" IS NULL OR "SourceId" IS NOT NULL AND "SourceId" = "Address") AND CASE WHEN "SourceId" IS NULL OR "Address" IS NOT NULL THEN true WHEN "SourceId" ~ '^(0|[1-9][0-9]{0,18})$' THEN "SourceId"::numeric <= 9223372036854775807 ELSE false END""");
+                """CASE WHEN "VenueId" = 'pacifica' THEN "Address" IS NULL AND "SourceId" IS NOT NULL AND vessel_is_solana_address("SourceId") ELSE ("Address" IS NULL OR "SourceId" IS NOT NULL AND "SourceId" = "Address") AND CASE WHEN "SourceId" IS NULL OR "Address" IS NOT NULL THEN true WHEN "SourceId" ~ '^(0|[1-9][0-9]{0,18})$' THEN "SourceId"::numeric <= 9223372036854775807 ELSE false END END""");
         });
         builder.HasKey(x => x.Id);
         builder.HasAlternateKey(x => new { x.OwnerId, x.Id });
@@ -36,7 +36,7 @@ internal sealed class AccountConfiguration : IEntityTypeConfiguration<Account>
         // sentinel keeps an explicitly disabled new account from being stored as enabled.
         builder.Property(x => x.IsEnabled).HasDefaultValue(true).HasSentinel(true);
         builder.Property(x => x.Address).HasMaxLength(42);
-        builder.Property(x => x.SourceId).HasMaxLength(128);
+        builder.Property(x => x.SourceId).HasMaxLength(128).UseCollation("C");
         builder.Property(x => x.SyncStatus).HasMaxLength(32);
         builder.Property(x => x.LastSyncError).HasMaxLength(200);
         builder.Property(x => x.HistoryNotice).HasMaxLength(1000);

@@ -69,7 +69,8 @@ namespace Vessel.Persistence.Migrations
 
                     b.Property<string>("SourceId")
                         .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
+                        .HasColumnType("character varying(128)")
+                        .UseCollation("C");
 
                     b.Property<decimal?>("StartingCapitalUsd")
                         .HasColumnType("numeric");
@@ -108,7 +109,7 @@ namespace Vessel.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_accounts_settings_revision", "\"SettingsRevision\" >= 1");
 
-                            t.HasCheckConstraint("CK_accounts_source_identity", "(\"Address\" IS NULL OR \"SourceId\" IS NOT NULL AND \"SourceId\" = \"Address\") AND CASE WHEN \"SourceId\" IS NULL OR \"Address\" IS NOT NULL THEN true WHEN \"SourceId\" ~ '^(0|[1-9][0-9]{0,18})$' THEN \"SourceId\"::numeric <= 9223372036854775807 ELSE false END");
+                            t.HasCheckConstraint("CK_accounts_source_identity", "CASE WHEN \"VenueId\" = 'pacifica' THEN \"Address\" IS NULL AND \"SourceId\" IS NOT NULL AND vessel_is_solana_address(\"SourceId\") ELSE (\"Address\" IS NULL OR \"SourceId\" IS NOT NULL AND \"SourceId\" = \"Address\") AND CASE WHEN \"SourceId\" IS NULL OR \"Address\" IS NOT NULL THEN true WHEN \"SourceId\" ~ '^(0|[1-9][0-9]{0,18})$' THEN \"SourceId\"::numeric <= 9223372036854775807 ELSE false END END");
 
                             t.HasCheckConstraint("CK_accounts_trading_mode", "\"TradingMode\" IN ('real','paper')");
                         });

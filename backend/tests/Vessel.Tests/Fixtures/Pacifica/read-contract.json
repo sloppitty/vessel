@@ -1,0 +1,256 @@
+{
+  "info": {
+    "success": true,
+    "data": [
+      {
+        "symbol": "BTC",
+        "tick_size": "1",
+        "min_tick": "0",
+        "max_tick": "1000000",
+        "lot_size": "0.00001",
+        "max_leverage": 50,
+        "isolated_only": false,
+        "min_order_size": "10",
+        "max_order_size": "5000000",
+        "funding_rate": "0.0000125",
+        "next_funding_rate": "0.0000125",
+        "created_at": 1748881333944,
+        "instrument_type": "perpetual",
+        "base_asset": "BTC",
+        "execution_modes": [
+          "orderbook"
+        ]
+      },
+      {
+        "symbol": "ETH",
+        "tick_size": "0.1",
+        "min_tick": "0",
+        "max_tick": "1000000",
+        "lot_size": "0.0001",
+        "max_leverage": 50,
+        "isolated_only": false,
+        "min_order_size": "10",
+        "max_order_size": "5000000",
+        "funding_rate": "0.00000743",
+        "next_funding_rate": "0.0000125",
+        "created_at": 1748881333944,
+        "instrument_type": "perpetual",
+        "base_asset": "ETH",
+        "execution_modes": [
+          "orderbook"
+        ]
+      },
+      {
+        "symbol": "kPEPE",
+        "tick_size": "0.000001",
+        "min_tick": "0",
+        "max_tick": "10000000",
+        "lot_size": "1",
+        "max_leverage": 10,
+        "isolated_only": false,
+        "min_order_size": "10",
+        "max_order_size": "1000000",
+        "funding_rate": "0.0000125",
+        "next_funding_rate": "0.0000125",
+        "created_at": 1754872885745,
+        "instrument_type": "perpetual",
+        "base_asset": "kPEPE",
+        "execution_modes": [
+          "orderbook"
+        ]
+      },
+      {
+        "symbol": "SOL-USDC",
+        "tick_size": "0.01",
+        "min_tick": "0",
+        "max_tick": "1000000",
+        "lot_size": "0.001",
+        "max_leverage": 1,
+        "isolated_only": false,
+        "min_order_size": "10",
+        "max_order_size": "1000000",
+        "funding_rate": "0",
+        "next_funding_rate": "0",
+        "created_at": 1776615970246,
+        "instrument_type": "spot",
+        "base_asset": "SOL",
+        "execution_modes": [
+          "orderbook"
+        ]
+      }
+    ],
+    "error": null,
+    "code": null
+  },
+  "account": {
+    "success": true,
+    "data": {
+      "balance": "1000.000000",
+      "account_equity": "1000.123456",
+      "available_to_spend": "900.000001",
+      "available_to_withdraw": "800.5",
+      "total_margin_used": "100",
+      "positions_count": 0,
+      "updated_at": 1792742399000,
+      "spot_market_value": "0",
+      "spot_collateral": "0",
+      "pending_interest": "0",
+      "spot_balances": []
+    },
+    "error": null,
+    "code": null
+  },
+  "positions": {
+    "success": true,
+    "data": [],
+    "error": null,
+    "code": null
+  },
+  "trades": {
+    "success": true,
+    "data": [
+      {
+        "history_id": 1,
+        "order_id": 101,
+        "symbol": "BTC",
+        "amount": "0.01",
+        "price": "100",
+        "entry_price": "99",
+        "fee": "0.1",
+        "pnl": "-0.1",
+        "event_type": "fulfill_taker",
+        "side": "open_long",
+        "created_at": 1792742390001,
+        "cause": "normal"
+      },
+      {
+        "history_id": 2,
+        "order_id": 102,
+        "symbol": "BTC",
+        "amount": "0.01",
+        "price": "100",
+        "entry_price": "99",
+        "fee": "0.1",
+        "pnl": "0.9",
+        "event_type": "fulfill_taker",
+        "side": "close_long",
+        "created_at": 1792742390002,
+        "cause": "normal"
+      },
+      {
+        "history_id": 3,
+        "order_id": 103,
+        "symbol": "BTC",
+        "amount": "0.01",
+        "price": "100",
+        "entry_price": "99",
+        "fee": "0.1",
+        "pnl": "-0.1",
+        "event_type": "fulfill_taker",
+        "side": "open_short",
+        "created_at": 1792742390003,
+        "cause": "normal"
+      },
+      {
+        "history_id": 4,
+        "order_id": 104,
+        "symbol": "BTC",
+        "amount": "0.01",
+        "price": "100",
+        "entry_price": "99",
+        "fee": "0.1",
+        "pnl": "-1.1",
+        "event_type": "fulfill_taker",
+        "side": "close_short",
+        "created_at": 1792742390004,
+        "cause": "normal"
+      }
+    ],
+    "error": null,
+    "code": null,
+    "next_cursor": null,
+    "has_more": false
+  },
+  "orders": {
+    "success": true,
+    "data": [
+      {
+        "order_id": 999,
+        "symbol": "BTC",
+        "side": "ask",
+        "price": "105",
+        "initial_amount": "0.01",
+        "filled_amount": "0",
+        "cancelled_amount": "0",
+        "stop_price": "105",
+        "order_type": "take_profit_market",
+        "stop_parent_order_id": null,
+        "reduce_only": true,
+        "created_at": 1792742380000,
+        "updated_at": 1792742395000
+      }
+    ],
+    "error": null,
+    "code": null
+  },
+  "history": {
+    "success": true,
+    "data": [
+      {
+        "order_id": 101,
+        "symbol": "BTC",
+        "side": "bid",
+        "initial_price": "100",
+        "average_filled_price": "100",
+        "amount": "0.01",
+        "filled_amount": "0.01",
+        "order_status": "filled",
+        "order_type": "limit",
+        "stop_price": null,
+        "stop_parent_order_id": null,
+        "reduce_only": false,
+        "created_at": 1792742380000,
+        "updated_at": 1792742390000
+      },
+      {
+        "order_id": 999,
+        "symbol": "BTC",
+        "side": "ask",
+        "initial_price": "105",
+        "average_filled_price": "100",
+        "amount": "0.01",
+        "filled_amount": "0",
+        "order_status": "open",
+        "order_type": "take_profit_market",
+        "stop_price": "105",
+        "stop_parent_order_id": null,
+        "reduce_only": true,
+        "created_at": 1792742380000,
+        "updated_at": 1792742390000
+      }
+    ],
+    "error": null,
+    "code": null,
+    "next_cursor": null,
+    "has_more": false
+  },
+  "candles": {
+    "success": true,
+    "data": [
+      {
+        "t": 1792742340000,
+        "T": 1792742400000,
+        "s": "BTC",
+        "i": "1m",
+        "o": "100.00",
+        "h": "102",
+        "l": "99",
+        "c": "101",
+        "v": "0.01000001",
+        "n": 3
+      }
+    ],
+    "error": null,
+    "code": null
+  }
+}
