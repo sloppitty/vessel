@@ -483,3 +483,61 @@ The API performance work now depends on the observed-leverage/sizing PR. The rev
 The opaque Activity version now hashes every displayed summary field, sorted coverage and full funding DTO details incrementally, once per aggregate, without materializing execution rows. This corrects previously missed metric/coverage changes. Startup work is separately scheduled so its timeout covers synchronous model construction; readiness completes before cancellation cleanup, which observes callback/read faults and retains the cancellation source until both finish. Three timeout and six data-version regressions were demonstrated failing before their fixes. See [the verification record](pr-3-6-verification.md).
 
 The previous unshipped revision ID `20261018130000_ActivityFactsRevision` must not remain in development migration history: recreate those disposable databases. Existing installation migrations remain explicit; no live database or deployment is part of this verification. Original benchmark measurements above predate these correctness follow-ups and were not rerun.
+
+## Phase 2 benchmark (item 14d)
+
+`scripts/benchmark.py` brings the 50,000-fill method above into the repository for item 14d of the
+[Phase 2 contract](phase2-risk-coverage-contract.md). It is a manual measurement on a chosen host: nothing runs
+in CI, and only its pure parts (the dataset's shape and determinism, the percentile math, the safety guard) are
+unit-tested, in `scripts/test_benchmark.py`. Results are recorded in
+[phase2-risk-coverage-state.md](phase2-risk-coverage-state.md).
+
+Run it from the repository root with the pinned SDK on `PATH`, alone on the host:
+
+```sh
+python3 scripts/benchmark.py --disposable --years 3 --scale 1 --warmup 5 --rounds 20 [--out /tmp/bench.json]
+```
+
+What it does:
+- **Containers.** It starts its own `postgres:18-alpine` and `rabbitmq:4.3.6-management` containers (the
+  deployment example's images and default settings), labelled with the run, on loopback ports with generated
+  passwords.
+- **Migrations.** It builds `Vessel.Api` in Release (`--no-build` reuses that build) and applies the migrations
+  explicitly in `deploy/migrate`'s order: `check-config`, the identity and journal migrations
+  (`dotnet ef database update --no-build`), `identity ensure-owner` and `provision-messaging`. Nothing migrates
+  at startup.
+- **Dataset.** One owner's journal, deterministic from `--seed`, `--years` (default 3) and `--scale` (1 is about
+  50,000 fills over 3 years), ending at `--anchor` (default: now, to the hour):
+  - portfolios; Hyperliquid, Lighter and RISEx accounts, including an unassigned, a disabled, a manual and a paper
+    account;
+  - orders and fills as signed-position round trips with partial fills, flips and still-open positions that match
+    the latest snapshot; hourly funding, leverage and risk observations, import conflicts;
+  - Plays in every status with plan revisions, if-then rules and pre-flight checks, linked orders, structured
+    reviews, log entries and image notes;
+  - Lighter forced events with their markers, fee-bearing and missing-P&L omission markers, coverage records,
+    history gaps and backfills; paper drafts.
+
+  It loads everything in one COPY transaction through `psql` in the container, so every constraint and trigger
+  applies and the Activity facts revision is the one the triggers leave. It then runs `VACUUM (ANALYZE)` and the
+  offline `play-search-rebuild --apply`, and counts the rows.
+- **API.** It starts the built DLL in Production/Token mode, without a launch profile or worker modules, with a
+  generated token kept in memory, and waits for `/health/ready`.
+- **Timing.** Activity (two pages, a filter, one expanded operation), Review (all, year, with imported
+  positions), the Plays list (tabs, counts, title and instrument search), Overview and its summary, open risk
+  and journal search (common word, second page, rare word). Each round visits every endpoint, in an order
+  rotated by one per round. Reads through the Activity facts cache are measured twice: a miss after a committed
+  no-op account update, which advances the revision, then a hit. It reports p50 and p95 after the warm-up
+  rounds, and the wire and JSON sizes (gzip is accepted; the API's restricted compression leaves these JSON
+  reads uncompressed). Any response that is not 200, or not the expected non-empty JSON, fails the run.
+- **Report.** A Markdown block for the state document: parameters, git SHA, host, phase times, the API's peak
+  RSS, row counts and timings. `--out` also writes the timings as JSON; it writes nothing else.
+
+Safety:
+- It refuses to run without `--disposable`, and under CI. It never reads `.env`, takes no connection string and
+  touches no other database: its children get `scripts/dev.py`'s filtered environment plus its own settings.
+- Secrets are generated per run, passed through the environment, never a command line, and redacted from any
+  error it prints.
+- Cleanup runs in `finally`, also on Ctrl+C or SIGTERM. It stops the API, removes only the containers that carry
+  this run's label (with their volumes) and deletes its temporary directory.
+- On a shared host, serialize it with other heavy jobs (for example under `flock`). `--min-available-mb` waits
+  for free memory before the build, the migrations, the seed and the API start.
