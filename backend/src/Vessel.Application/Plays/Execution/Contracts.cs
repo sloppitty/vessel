@@ -142,12 +142,26 @@ public sealed record PlayFundingDto(string State, string? Reason, string? Amount
 public readonly record struct LedgerSpan(DateTimeOffset? FromUtc, DateTimeOffset? ToUtc);
 
 /// <summary>
-/// What an account's ledger shows for the funding proof (Phase 2, item 9b): the spans its coverage records prove
-/// continuous, its open history gaps, and its venue-forced executions as omissions (each also leaves a marker, so this
-/// only adds to what the walk already breaks on).
+/// What the funding proof asks the store for (Phase 2, item 9b): one account and Play, the canonical contracts of the Play's
+/// partition and its native market (null for a canonical-only one, where every market of the contract counts), and the
+/// earliest time evidence can matter for the window and the snapshot anchor.
 /// </summary>
-public sealed record ExecutionLedger(IReadOnlyList<LedgerSpan> Covered, IReadOnlyList<LedgerSpan> OpenGaps,
-    IReadOnlyList<Vessel.Application.Activity.ActivityOmission> ForcedEvents);
+public sealed record FundingEvidenceRequest(Guid AccountId, Guid PlayId, IReadOnlyCollection<string> ContractIds, string? VenueContractId,
+    DateTimeOffset FromUtc);
+
+/// <summary>An order on the instrument with known missing executions, by the shared rule, and the life its executions lie in.</summary>
+public sealed record MissingExecutionOrder(string ContractId, string? VenueContractId, DateTimeOffset PlacedAtUtc, DateTimeOffset? EndedAtUtc);
+
+/// <summary>
+/// The evidence the funding proof reads besides Activity's aggregate (Phase 2, item 9b), in one repeatable-read snapshot:
+/// the owner's Activity facts revision at its start and end, the Play's linked orders, the coverage spans the ledger proves
+/// continuous, the open history gaps, and the venue-forced executions and orders with known missing executions on the
+/// instrument. Rows before <see cref="FundingEvidenceRequest.FromUtc"/> are read only when a complete ledger record could
+/// make them matter; none is ever truncated.
+/// </summary>
+public sealed record FundingEvidence(long Revision, long RevisionAfter, IReadOnlyList<(OrderLinkRole Role, ImportedOrder Order)> Links,
+    IReadOnlyList<LedgerSpan> Covered, IReadOnlyList<LedgerSpan> OpenGaps,
+    IReadOnlyList<Vessel.Application.Activity.ActivityOmission> ForcedEvents, IReadOnlyList<MissingExecutionOrder> MissingExecutions);
 
 /// <summary>
 /// A position's venue-reported risk context (Phase 2, item 8a): signed quantity and entry as reported, the venue's
@@ -241,10 +255,10 @@ public interface IPlayExecutionStore
         DateTimeOffset? until, CancellationToken ct) =>
         Task.FromResult<VenueRiskDto?>(null);
     /// <summary>
-    /// Phase 2, item 9b: the account's coverage ledger and venue-forced executions, read-only. Null when the store keeps no
-    /// ledger, which proves nothing.
+    /// Phase 2, item 9b: the funding proof's evidence, read-only, in one snapshot (<see cref="FundingEvidence"/>). Null when
+    /// the store keeps no ledger, which proves nothing.
     /// </summary>
-    Task<ExecutionLedger?> LedgerAsync(Guid accountId, CancellationToken ct) => Task.FromResult<ExecutionLedger?>(null);
+    Task<FundingEvidence?> FundingEvidenceAsync(FundingEvidenceRequest request, CancellationToken ct) => Task.FromResult<FundingEvidence?>(null);
     void Add(PlayOrderLink link);
     void Add(PlayStatusChange change);
     /// <summary>

@@ -1,4 +1,5 @@
 using Vessel.Application.Activity;
+using Vessel.Application.Common;
 using Vessel.Application.Sizing;
 using Vessel.Domain.Common;
 using Vessel.Domain.Numerics;
@@ -33,27 +34,55 @@ internal static class PlayFunding
         linked.Any(f => f.Role == OrderLinkRole.Entry && !ExecutionIntegrity.Contradicts(f.Role, ExecutionIntegrity.EntrySide(plan), f.Fill));
 
     /// <summary>
-    /// The proof, in order. <paramref name="activity"/> is the account's Activity aggregate (enabled account, real facts);
-    /// <paramref name="ledger"/> its coverage ledger, or null when none is kept.
+    /// The facts changed between Activity's aggregate and the evidence read (Sol round 1 on 9b): they do not describe one
+    /// state, so nothing is shown until the next read.
     /// </summary>
-    public static PlayFundingDto Evaluate(Play play, PlayPlanDocument plan, IReadOnlyCollection<LinkedFill> linked,
-        IReadOnlyCollection<string> incompleteOrders, ActivitySummaries activity, ExecutionLedger? ledger)
+    public static readonly PlayFundingDto Changing = Not(Incomplete, "changing");
+    /// <summary>The store keeps no ledger, which proves nothing.</summary>
+    public static readonly PlayFundingDto NoLedger = Not(Incomplete, "history-unproven");
+
+    /// <summary>
+    /// What to read besides the aggregate, from the aggregate's own view of the Play's linked fills: the canonical contracts
+    /// and native market of their partition, and the first fill's millisecond. Null when the aggregate holds none of them.
+    /// </summary>
+    public static FundingEvidenceRequest? Request(Play play, ActivitySummaries activity)
     {
+        var proof = activity.Proof;
+        var own = proof.FillsOfPlay(play.Id).ToList();
+        if (own.Count == 0 || play.ContractId is null) return null;
+        var keys = own.Select(proof.Positions.Key).Distinct().ToList();
+        var contracts = keys.SelectMany(k => proof.Partition(k) is { } partition ? partition.Contracts : Enumerable.Empty<string>()).Append(play.ContractId).Distinct(StringComparer.Ordinal).ToList();
+        return new(play.AccountId, play.Id, contracts, keys is [{ IsNative: true } key] ? key.Identity : null,
+            Floor(own.Min(f => f.OccurredAtUtc)));
+    }
+
+    /// <summary>
+    /// The proof, in order. <paramref name="activity"/> is the account's Activity aggregate (enabled account, real facts) and
+    /// <paramref name="evidence"/> the store's single-snapshot read. Both must be at one facts revision, or it reads
+    /// <see cref="Changing"/>: the Play's links, every fill and order, the snapshot, funding, markers and forced events are
+    /// then exactly the ones the evidence's ledger was read with.
+    /// </summary>
+    public static PlayFundingDto Evaluate(Play play, PlayPlanDocument plan, ActivitySummaries activity, FundingEvidence evidence)
+    {
+        if (evidence.Revision != evidence.RevisionAfter || activity.Facts.Revision != evidence.Revision || play.ContractId is null)
+            return Changing;
         var facts = activity.Facts;
-        // Activity's own partitions and omission markers, plus the venue-forced executions themselves.
-        var positions = new ActivityPositions(facts.Fills, facts.Snapshots, facts.FundingPayments,
-            [.. facts.Omissions, .. (ledger?.ForcedEvents ?? [])]);
+        // Built once per cached aggregate, never per read (Sol round 1 on 9b).
+        var proof = activity.Proof;
+        var positions = proof.Positions;
+        // The Play's linked executions at that revision: its links as the evidence read them, their fills as Activity holds them.
+        var linked = evidence.Links.SelectMany(l => proof.FillsOf(OrderKey.Of(l.Order)).Select(f => new LinkedFill(l.Role, f))).ToList();
         var own = linked.Select(f => f.Fill).DistinctBy(f => f.Id).ToList();
         var ids = own.Select(f => f.Id).ToHashSet();
+        if (!Applies(play, plan, linked) || !ids.SetEquals(proof.FillsOfPlay(play.Id).Select(f => f.Id))) return Changing;
 
         // 1. One resolved native partition, by Activity's identity rule. An ID-less fill or settlement of the contract left
         // in the unresolved canonical partition could be this market's, so it leaves the partition unproven.
-        if (own.Select(positions.Key).Distinct().ToList() is not [var key] || positions.Quantity(key) is null)
+        if (own.Select(positions.Key).Distinct().ToList() is not [var key] || positions.Quantity(key) is null ||
+            proof.Partition(key) is not { } partition)
             return Not(Incomplete, "identity");
-        bool Unresolved(ActivityContractKey k) => !k.IsNative && k.Identity == play.ContractId && k != key;
-        if (facts.Fills.Any(f => Unresolved(positions.Key(f))) || facts.FundingPayments.Any(p => Unresolved(positions.Key(p))))
+        if (key.IsNative && partition.Contracts.Append(play.ContractId).Any(c => proof.Unresolved(play.AccountId, c)))
             return Not(Incomplete, "identity");
-        var partition = facts.Fills.Where(f => positions.Key(f) == key).ToList();
 
         // The holding window.
         var start = own.Min(f => f.OccurredAtUtc);
@@ -66,47 +95,57 @@ internal static class PlayFunding
 
         // 2. Sole exposure: every retained fill of the partition in the window is this Play's. Another Play's fills, or fills
         // linked to none, mean the funding is shared and not allocated.
-        var others = partition.Where(f => !ids.Contains(f.Id) && f.OccurredAtUtc >= start && (!flat || f.OccurredAtUtc <= end) &&
-            !(facts.FillPlayIds.TryGetValue(f.Id, out var linkedTo) && linkedTo == play.Id)).ToList();
+        var others = partition.Between(start, flat ? end : DateTimeOffset.MaxValue).Where(f => !ids.Contains(f.Id)).ToList();
         if (others.Count > 0) return Not(Shared, others.Any(f => facts.FillPlayIds.ContainsKey(f.Id)) ? "other-play" : "unlinked-fill");
 
         // 3. Its own executions settle it: none of its orders has known missing executions (the shared rule), nothing
         // contradicts or runs out of order, and an ended Play is Closed with its fills flat.
-        if (incompleteOrders.Count > 0) return Not(Incomplete, "missing-executions");
+        var incomplete = evidence.Links.Where(l => ExecutionIntegrity.MissingExecutions(l.Order, proof.FillsOf(OrderKey.Of(l.Order))))
+            .Select(l => l.Order.ExternalOrderId).ToList();
+        if (incomplete.Count > 0) return Not(Incomplete, "missing-executions");
         if (play.Status is PlayStatus.Unresolved or PlayStatus.Cancelled || play.Status == PlayStatus.Closed && !flat ||
-            ExecutionIntegrity.Problems(ExecutionIntegrity.EntrySide(plan), linked, incompleteOrders).Count > 0)
+            ExecutionIntegrity.Problems(ExecutionIntegrity.EntrySide(plan), linked, incomplete).Count > 0)
             return Not(Incomplete, "not-settled");
 
-        // 4. Nothing omitted and affirmative execution coverage: no omission marker or forced event could lie in the
-        // partition and the window (a marker's read window counts, not just its time), no open history gap overlaps it, and
-        // the coverage ledger proves it continuous.
-        var breaks = positions.Breaks(key);
+        // 4. Nothing omitted or known missing, and affirmative execution coverage over the window: no omission marker or
+        // forced event could lie in the partition and the window (a marker's read window counts, not just its time), no
+        // order on the partition, linked or not, has known missing executions that could lie in it (Sol round 1 on 9b), no
+        // open history gap overlaps it, and the coverage ledger proves it continuous.
+        var breaks = positions.Breaks(key)
+            .Concat(evidence.ForcedEvents.Where(m => positions.Affects(m, key)).Select(ActivityPositions.Break)).ToList();
         bool Omitted(DateTimeOffset a, DateTimeOffset b) => breaks.Any(m => m.ResetAt <= b && m.AnchorAfter >= a);
-        var gaps = ledger?.OpenGaps ?? [];
+        // An ID-less order of the partition's contracts could be this market's.
+        var missing = evidence.MissingExecutions.Where(o => key.IsNative
+            ? o.VenueContractId == key.Identity || o.VenueContractId is null && partition.Contracts.Contains(o.ContractId)
+            : partition.Contracts.Contains(o.ContractId)).ToList();
+        bool Missing(DateTimeOffset a, DateTimeOffset b) => missing.Any(o => o.PlacedAtUtc <= b && (o.EndedAtUtc ?? DateTimeOffset.MaxValue) >= a);
         bool Gap(DateTimeOffset a, DateTimeOffset b) =>
-            gaps.Any(g => (g.FromUtc ?? DateTimeOffset.MinValue) <= b && (g.ToUtc ?? DateTimeOffset.MaxValue) >= a);
-        var spans = Merge(ledger?.Covered ?? []);
+            evidence.OpenGaps.Any(g => (g.FromUtc ?? DateTimeOffset.MinValue) <= b && (g.ToUtc ?? DateTimeOffset.MaxValue) >= a);
+        var spans = Merge(evidence.Covered);
         // One continuous span holds [a, b]; a null a asks for complete history from the account's start.
         bool Covered(DateTimeOffset? a, DateTimeOffset b) =>
             spans.Any(s => s.ToUtc >= b && (s.FromUtc is null || a is { } at && s.FromUtc <= at));
         if (Omitted(from, to)) return Not(Incomplete, "omitted-executions");
+        if (Missing(from, to)) return Not(Incomplete, "missing-executions");
         if (Gap(from, to)) return Not(Incomplete, "history-gap");
         if (!Covered(start, end)) return Not(Incomplete, "history-unproven");
 
         // 5. Flat before the first entry, anchored to covered history or to a snapshot; Activity's unanchored zero start is
-        // never proof. Another fill earlier in that first millisecond might follow it.
-        if (partition.Any(f => !ids.Contains(f.Id) && f.OccurredAtUtc >= from && f.OccurredAtUtc < start))
+        // never proof. Another fill earlier in that first millisecond might follow it. Each anchor walks retained fills, so
+        // it holds only where none is known missing (Sol round 1 on 9b) and nothing is omitted.
+        if (partition.Between(from, start).Any(f => f.OccurredAtUtc < start && !ids.Contains(f.Id)))
             return Not(Incomplete, "flat-start-unproven");
         var proofs = new List<ExactAmount>();
-        // Covered history: complete from the account's start, which was flat, with nothing omitted or missing since.
-        if (Covered(null, end) && !Omitted(DateTimeOffset.MinValue, to) && !Gap(DateTimeOffset.MinValue, to))
-            proofs.Add(Sum(partition.Where(f => f.OccurredAtUtc < start)));
+        // Covered history: complete from the account's start, which was flat, with nothing omitted, missing or open since.
+        if (Covered(null, end) && !Omitted(DateTimeOffset.MinValue, to) && !Missing(DateTimeOffset.MinValue, to) &&
+            !Gap(DateTimeOffset.MinValue, to))
+            proofs.Add(partition.Before(start));
         // The latest snapshot, walked back as Activity anchors it (observed at or after every fill of the partition) over a
-        // covered span with nothing omitted.
-        if (snapshot is not null && positions.Quantity(key) is { } observed &&
-            partition.All(f => f.OccurredAtUtc <= snapshot.ObservedAtUtc && f.Quantity > 0) &&
-            Covered(start, snapshot.ObservedAtUtc) && !Omitted(from, snapshot.ObservedAtUtc) && !Gap(from, snapshot.ObservedAtUtc))
-            proofs.Add(observed - Sum(partition.Where(f => f.OccurredAtUtc >= start)));
+        // covered span with nothing omitted, missing or open.
+        if (snapshot is not null && positions.Quantity(key) is { } observed && partition.Last <= snapshot.ObservedAtUtc && partition.AllPositive &&
+            Covered(start, snapshot.ObservedAtUtc) && !Omitted(from, snapshot.ObservedAtUtc) && !Missing(from, snapshot.ObservedAtUtc) &&
+            !Gap(from, snapshot.ObservedAtUtc))
+            proofs.Add(observed - partition.From(start));
         if (proofs.Count == 0 || proofs.Any(p => p.Units.IsZero) && !proofs.All(p => p.Units.IsZero))
             return Not(Incomplete, "flat-start-unproven");
         // A position proven open at the first entry is someone else's exposure.
@@ -114,12 +153,12 @@ internal static class PlayFunding
 
         // 6. Flat after the last exit once its own fills net to zero: flat before, nothing else in the window, and nothing
         // else in the last exit's millisecond, where the order is unknown.
-        if (flat && partition.Any(f => !ids.Contains(f.Id) && f.OccurredAtUtc > end && f.OccurredAtUtc <= to))
+        if (flat && partition.Between(end, to).Any(f => f.OccurredAtUtc > end && !ids.Contains(f.Id)))
             return Not(Incomplete, "flat-end-unproven");
 
         // 7. Activity bounds the same position: one operation of exactly these fills, opened at the first and closed at the
         // last once flat, so its funding interval is the holding window.
-        var touching = activity.Operations.Where(o => o.ContractKey == key && o.SourceFills.Any(f => ids.Contains(f.Id))).ToList();
+        var touching = proof.Operations(key).Where(o => o.SourceFills.Any(f => ids.Contains(f.Id))).ToList();
         if (touching is not [var operation] || operation.PlayAssociation != "linked" || operation.PlayId != play.Id ||
             operation.OpenedAtUtc != start || operation.ClosedAtUtc != (flat ? end : (DateTimeOffset?)null) ||
             !operation.SourceFills.Select(f => f.Id).ToHashSet().SetEquals(ids))

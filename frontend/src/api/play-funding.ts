@@ -4,7 +4,8 @@ import { isCount, isNullOr, isPlainDecimal, isRecord, isText, isTimestamp } from
 export const playFundingReasons = {
   shared: ['other-play', 'unlinked-fill', 'open-position'],
   incomplete: ['identity', 'missing-executions', 'not-settled', 'omitted-executions', 'history-gap', 'history-unproven',
-    'flat-start-unproven', 'flat-end-unproven', 'operation-boundaries', 'funding-coverage', 'funding-ambiguous', 'funding-asset'],
+    'flat-start-unproven', 'flat-end-unproven', 'operation-boundaries', 'funding-coverage', 'funding-ambiguous', 'funding-asset',
+    'changing'],
   unavailable: ['no-funding-read', 'account-disabled'],
 } as const
 type Reason<S extends keyof typeof playFundingReasons> = typeof playFundingReasons[S][number]

@@ -102,6 +102,22 @@ public sealed class PlayFundingPostgresTests
         return order;
     }
 
+    /// <summary>A filled order on BTC whose execution is not retained: known missing executions by the shared rule.</summary>
+    private static void MissingOrder(VesselDbContext db, Account account, string id, string side, decimal quantity, DateTimeOffset at) =>
+        db.Orders.Add(new ImportedOrder
+        {
+            Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, ExternalOrderId = "order-" + id, ContractId = "BTC",
+            Side = side, OrderType = "Limit", LimitPrice = 100, OriginalSize = quantity, RemainingSize = 0, PlacedAtUtc = at.AddMinutes(-1),
+            Status = "filled", VenueStatus = "filled", StatusAtUtc = at, ObservedAtUtc = at,
+        });
+
+    private static ForcedEvent Forced(Account account, DateTimeOffset at) => new()
+    {
+        Id = Guid.NewGuid(), OwnerId = account.OwnerId, AccountId = account.Id, SourceId = "liquidation-" + at.ToUnixTimeMilliseconds(),
+        Kind = ForcedEvent.Liquidation, ContractId = "BTC", Side = "sell", Quantity = 0.1m, Price = 90, OccurredAtUtc = at,
+        Exclusion = "Venue-forced.", FirstSeenAtUtc = Read, LastSeenAtUtc = Read,
+    };
+
     private static void Pay(VesselDbContext db, Account account, string id, decimal amount, DateTimeOffset at, long? nanoseconds = null) =>
         db.FundingPayments.Add(new FundingPayment
         {
@@ -141,7 +157,7 @@ public sealed class PlayFundingPostgresTests
         db.FillCoverage.Add(change switch
         {
             "no-continuity" => Coverage(account, T.AddHours(1), Read),
-            "complete-history" => Coverage(account, null, Read),
+            "complete-history" or "forced-before-complete" or "missing-before-complete" => Coverage(account, null, Read),
             _ => Coverage(account, T.AddHours(-2), Read),
         });
         db.FundingStates.Add(FundingState(account, change == "partial-funding" ? T.AddHours(1) : T.AddDays(-1), Read));
@@ -171,9 +187,29 @@ public sealed class PlayFundingPostgresTests
                 db.ExecutionOmissions.Add(Marker(account, null, T.AddHours(-3), T.AddMinutes(30)));
                 break;
             case "forced-event":
-                db.ForcedEvents.Add(new ForcedEvent { Id = Guid.NewGuid(), OwnerId = owner, AccountId = account.Id, SourceId = "liquidation-1",
-                    Kind = ForcedEvent.Liquidation, ContractId = "BTC", Side = "sell", Quantity = 0.1m, Price = 90,
-                    OccurredAtUtc = T.AddHours(2).AddMinutes(30), Exclusion = "Venue-forced.", FirstSeenAtUtc = Read, LastSeenAtUtc = Read });
+                db.ForcedEvents.Add(Forced(account, T.AddHours(2).AddMinutes(30)));
+                break;
+            case "missing-in-window":
+                // An order linked to no Play filled inside the window, its execution not retained (Sol round 1 on 9b).
+                MissingOrder(db, account, "hidden", "buy", 0.5m, T.AddMinutes(90));
+                break;
+            case "missing-after-exit":
+                // Sol round 1 on 9b: another long was open before the Play; its close after the exit is known only from its
+                // order. The flat snapshot, walked back over retained fills alone, would "prove" a flat start.
+                Trade(db, account, null, "earlier-position", "buy", 1, T.AddHours(-1));
+                MissingOrder(db, account, "missing-later-close", "sell", 1, T.AddHours(4));
+                break;
+            case "forced-before-window":
+                // Before the window, it matters to neither the window nor the snapshot anchor.
+                db.ForcedEvents.Add(Forced(account, T.AddHours(-1)));
+                break;
+            case "forced-before-complete":
+            case "missing-before-complete":
+                // With complete history the proof walks from the account's start, so evidence before the window counts and is
+                // read, never scoped away.
+                if (change == "forced-before-complete") db.ForcedEvents.Add(Forced(account, T.AddHours(-1)));
+                else MissingOrder(db, account, "old", "sell", 1, T.AddHours(-1));
+                db.Snapshots.Remove(await db.Snapshots.SingleAsync(s => s.AccountId == account.Id));
                 break;
             case "unanchored-start":
             case "complete-history":
@@ -252,6 +288,10 @@ public sealed class PlayFundingPostgresTests
     [InlineData("ambiguous-entry", "incomplete", "funding-ambiguous")]
     [InlineData("ambiguous-exit", "incomplete", "funding-ambiguous")]
     [InlineData("idless-legacy", "incomplete", "identity")]
+    [InlineData("missing-in-window", "incomplete", "missing-executions")]
+    [InlineData("missing-after-exit", "incomplete", "flat-start-unproven")]
+    [InlineData("forced-before-complete", "incomplete", "flat-start-unproven")]
+    [InlineData("missing-before-complete", "incomplete", "flat-start-unproven")]
     public async Task An_unproven_condition_reads_shared_or_incomplete_never_a_sum(string change, string state, string reason)
     {
         await using var database = await CoreDatabase.CreateAsync();
@@ -260,13 +300,87 @@ public sealed class PlayFundingPostgresTests
         Assert.Equal(Not(state, reason), await FundingAsync(database, owner, playId));
     }
 
-    [PostgresFact]
-    public async Task Complete_history_from_the_accounts_start_proves_the_flat_start_without_a_snapshot()
+    [PostgresTheory]
+    [InlineData("complete-history")]
+    [InlineData("forced-before-window")]
+    public async Task Complete_history_proves_the_flat_start_and_evidence_before_the_window_needs_it(string change)
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var (_, playId) = await SeedAsync(database, owner, "complete-history");
+        var (_, playId) = await SeedAsync(database, owner, change);
         Assert.Equal(new PlayFundingDto("sole", null, Inside, "USDC", 2, T, Exit), await FundingAsync(database, owner, playId));
+    }
+
+    /// <summary>An Activity aggregate captured earlier, as a cache entry or a racing read can serve it.</summary>
+    private sealed class EarlierSummaries(ActivitySummaries value) : IActivitySummaryReader
+    {
+        public Task<ActivitySummaries> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) =>
+            Task.FromResult(value);
+    }
+
+    private static async Task<PlayFundingDto?> FundingWithAsync(CoreDatabase database, Guid owner, Guid playId, ActivitySummaries summaries)
+    {
+        await using var db = database.Context(owner);
+        var venues = TestVenues.With(new FundingVenue());
+        var activity = new ActivityService(new ActivityStore(db), new WorkspaceStore(db, TestUnitOfWork.For(db)), TimeProvider.System, venues,
+            new EarlierSummaries(summaries));
+        return (await new PlayExecutionService(new PlayStore(db, TestUnitOfWork.For(db)), new ExecutionStore(db, TestUnitOfWork.For(db)),
+            venues, TimeProvider.System, TestUnitOfWork.For(db), activity: activity).GetAsync(playId, default)).Funding;
+    }
+
+    [PostgresFact]
+    public async Task A_backfill_between_the_aggregate_and_the_ledger_read_never_certifies_the_older_fills()
+    {
+        // Sol round 1 on 9b: Activity's aggregate was read while the gap was open; a backfill then retained an unlinked round
+        // trip inside the window and closed the gap before the ledger was read.
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var (accountId, playId) = await SeedAsync(database, owner, "open-gap");
+        ActivitySummaries before;
+        await using (var db = database.Context(owner))
+            before = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(accountId, default));
+        await using (var db = database.Context(owner))
+        {
+            var account = await db.Accounts.SingleAsync(a => a.Id == accountId);
+            Trade(db, account, null, "backfilled-entry", "buy", 0.5m, T.AddMinutes(90));
+            Trade(db, account, null, "backfilled-exit", "sell", 0.5m, T.AddMinutes(150));
+            (await db.HistoryGaps.SingleAsync()).Close((await db.FillCoverage.SingleAsync()).Id, Read);
+            await db.SaveChangesAsync();
+        }
+        // The facts moved past the aggregate's revision: read again, still earlier, so nothing is shown.
+        Assert.Equal(Not("incomplete", "changing"), await FundingWithAsync(database, owner, playId, before));
+        // A fresh read sees the backfilled round trip.
+        Assert.Equal(Not("shared", "unlinked-fill"), await FundingAsync(database, owner, playId));
+    }
+
+    [PostgresFact]
+    public async Task Inside_a_read_snapshot_such_as_the_bundles_the_evidence_reuses_it()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var (_, playId) = await SeedAsync(database, owner);
+        await using var db = database.Context(owner);
+        var execution = await TestUnitOfWork.For(db).ReadSnapshotAsync(() => Service(db).GetAsync(playId, default), default);
+        Assert.Equal(new PlayFundingDto("sole", null, Inside, "USDC", 2, T, Exit), execution.Funding);
+    }
+
+    [PostgresFact]
+    public async Task A_ledger_change_without_a_facts_change_is_read_with_the_same_facts()
+    {
+        // Closing a gap moves no facts revision: the aggregate's facts are exactly the ones the ledger was read with.
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var (accountId, playId) = await SeedAsync(database, owner, "open-gap");
+        ActivitySummaries before;
+        await using (var db = database.Context(owner))
+            before = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(accountId, default));
+        Assert.Equal(Not("incomplete", "history-gap"), await FundingWithAsync(database, owner, playId, before));
+        await using (var db = database.Context(owner))
+        {
+            (await db.HistoryGaps.SingleAsync()).Close((await db.FillCoverage.SingleAsync()).Id, Read);
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(new PlayFundingDto("sole", null, Inside, "USDC", 2, T, Exit), await FundingWithAsync(database, owner, playId, before));
     }
 
     [PostgresFact]

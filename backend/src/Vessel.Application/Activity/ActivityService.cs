@@ -242,7 +242,10 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
             coverage.Add(new(group.Key, null, $"{group.Count()} retained funding settlements could not be attributed safely to an operation. They are not added to operation results."));
         var ordered = funding.Operations.OrderByDescending(o => o.LastOccurredAtUtc)
             .ThenBy(o => o.AccountId.ToString("D"), StringComparer.Ordinal).ThenBy(o => o.Id, StringComparer.Ordinal).ToList();
-        return new(funding.Operations, coverage, facts) { UnassignedFunding = funding.Unassigned, Version = Version(ordered, facts, coverage) };
+        return new(funding.Operations, coverage, facts)
+        {
+            UnassignedFunding = funding.Unassigned, Version = Version(ordered, facts, coverage), Positions = positions
+        };
     }
 }
 
@@ -251,4 +254,12 @@ public sealed record ActivitySummaries(IReadOnlyList<ActivityOperationDto> Opera
 {
     public string Version { get; init; } = Convert.ToHexStringLower(SHA256.HashData([]), 0, 16);
     public IReadOnlyList<Vessel.Domain.Workspace.FundingPayment> UnassignedFunding { get; init; } = [];
+    // The partitions, anchors and omissions this aggregate was walked with, kept for Phase 2, item 9b.
+    internal ActivityPositions? Positions { get; init; }
+    private ActivityProofIndex? proof;
+    /// <summary>
+    /// Phase 2, item 9b: the funding proof's indexes, built on first use and kept with this aggregate, so a cached
+    /// aggregate (one facts revision) builds them once however often a Play is read.
+    /// </summary>
+    internal ActivityProofIndex Proof => LazyInitializer.EnsureInitialized(ref proof, () => new ActivityProofIndex(this));
 }

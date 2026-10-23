@@ -23,6 +23,9 @@ internal sealed class ActivityPositions
     private readonly Dictionary<(Guid AccountId, string ContractId), ActivityContractKey[]> nativeCandidates;
 
     private readonly Dictionary<ActivityContractKey, ActivityBreak[]> breaks = [];
+    // The partitions an omission could belong to (7b's rule), by account, by canonical contract and by ID-less fill.
+    private readonly Dictionary<Guid, HashSet<ActivityContractKey>> byAccount = [];
+    private readonly Dictionary<(Guid, string), HashSet<ActivityContractKey>> byContract = [], idless = [];
 
     public ActivityPositions(IReadOnlyList<ImportedFill> fills, IReadOnlyList<AccountSnapshot> snapshots,
         IReadOnlyList<FundingPayment>? funding = null, IReadOnlyList<ActivityOmission>? omissions = null)
@@ -82,10 +85,6 @@ internal sealed class ActivityPositions
     /// </summary>
     private void IndexBreaks(IReadOnlyList<ImportedFill> fills, IReadOnlyList<ActivityOmission> omissions)
     {
-        if (omissions.Count == 0) return;
-        var byAccount = new Dictionary<Guid, HashSet<ActivityContractKey>>();
-        var byContract = new Dictionary<(Guid, string), HashSet<ActivityContractKey>>();
-        var idless = new Dictionary<(Guid, string), HashSet<ActivityContractKey>>();
         static void Add<T>(Dictionary<T, HashSet<ActivityContractKey>> index, T at, ActivityContractKey key) where T : notnull
         {
             if (!index.TryGetValue(at, out var keys)) index[at] = keys = [];
@@ -98,18 +97,11 @@ internal sealed class ActivityPositions
             Add(byContract, (fill.AccountId, fill.ContractId), key);
             if (fill.VenueContractId is null) Add(idless, (fill.AccountId, fill.ContractId), key);
         }
-        IEnumerable<ActivityContractKey> Affected(ActivityOmission m) => (m.ContractId, m.VenueContractId) switch
-        {
-            (null, null) => byAccount.GetValueOrDefault(m.AccountId) ?? [],
-            ({ } contract, null) => byContract.GetValueOrDefault((m.AccountId, contract)) ?? [],
-            (var contract, { } native) => (idless.GetValueOrDefault((m.AccountId, contract ?? native)) ?? [])
-                .Append(new ActivityContractKey(m.AccountId, native, true))
-        };
+        if (omissions.Count == 0) return;
         var found = new Dictionary<ActivityContractKey, List<ActivityBreak>>();
         foreach (var marker in omissions)
         {
-            var at = new ActivityBreak(marker.OccurredAtUtc ?? marker.UncertainFromUtc ?? DateTimeOffset.MinValue,
-                marker.OccurredAtUtc ?? marker.UncertainToUtc ?? DateTimeOffset.MaxValue);
+            var at = Break(marker);
             foreach (var key in Affected(marker).Distinct())
             {
                 if (!found.TryGetValue(key, out var list)) found[key] = list = [];
@@ -118,6 +110,21 @@ internal sealed class ActivityPositions
         }
         foreach (var (key, list) in found) breaks[key] = list.OrderBy(b => b.ResetAt).ThenBy(b => b.AnchorAfter).ToArray();
     }
+
+    private IEnumerable<ActivityContractKey> Affected(ActivityOmission m) => (m.ContractId, m.VenueContractId) switch
+    {
+        (null, null) => byAccount.GetValueOrDefault(m.AccountId) ?? [],
+        ({ } contract, null) => byContract.GetValueOrDefault((m.AccountId, contract)) ?? [],
+        (var contract, { } native) => (idless.GetValueOrDefault((m.AccountId, contract ?? native)) ?? [])
+            .Append(new ActivityContractKey(m.AccountId, native, true))
+    };
+
+    /// <summary>Phase 2, item 9b: whether an omission read on its own (a forced event) could lie in a partition, by the same rule.</summary>
+    public bool Affects(ActivityOmission marker, ActivityContractKey key) => Affected(marker).Contains(key);
+
+    /// <summary>An omission's time, or the read window it lies in; an unknown bound is unbounded.</summary>
+    public static ActivityBreak Break(ActivityOmission marker) => new(marker.OccurredAtUtc ?? marker.UncertainFromUtc ?? DateTimeOffset.MinValue,
+        marker.OccurredAtUtc ?? marker.UncertainToUtc ?? DateTimeOffset.MaxValue);
 
     public ActivityContractKey Key(ImportedFill fill) => Key(fill.AccountId, fill.ContractId, fill.VenueContractId);
     public ActivityContractKey Key(FundingPayment payment) => Key(payment.AccountId, payment.ContractId, payment.VenueContractId);

@@ -156,15 +156,23 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
 
     /// <summary>
     /// Phase 2, item 9b: settled funding beside the Play, shown only with proven sole exposure (<see cref="PlayFunding"/>).
-    /// It reads the account's Activity aggregate and coverage ledger, never a venue, and changes no result.
+    /// It reads the account's Activity aggregate and the store's evidence, never a venue, and changes no result.
     /// </summary>
     private async Task<PlayFundingDto?> FundingAsync(Play play, PlayPlanDocument plan, Settlement settlement, Account? account, CancellationToken ct)
     {
         if (activity is null || !PlayFunding.Applies(play, plan, settlement.All)) return null;
         if (venues.Funding(play.VenueId) is null) return PlayFunding.NotRead;
         if (account is not { IsEnabled: true }) return PlayFunding.Disabled;
-        var summaries = await activity.ReadSummariesAsync(account.Id, ct);
-        return PlayFunding.Evaluate(play, plan, settlement.All, settlement.Incomplete, summaries, await store.LedgerAsync(account.Id, ct));
+        // The aggregate and the evidence must be at one facts revision (Sol round 1 on 9b); a change between them is read
+        // once more, then reads as changing.
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var summaries = await activity.ReadSummariesAsync(account.Id, ct);
+            if (PlayFunding.Request(play, summaries) is not { } request) continue;
+            if (await store.FundingEvidenceAsync(request, ct) is not { } evidence) return PlayFunding.NoLedger;
+            if (PlayFunding.Evaluate(play, plan, summaries, evidence) is var result && result != PlayFunding.Changing) return result;
+        }
+        return PlayFunding.Changing;
     }
 
     /// <summary>The owner links an order (or confirms a suggestion). It must not belong to another level already.</summary>

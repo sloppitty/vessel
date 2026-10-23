@@ -26,6 +26,7 @@ const reasons: Record<Exclude<PlayFunding['reason'], null>, string> = {
   'funding-coverage': 'Settled funding has not been read for the whole holding window.',
   'funding-ambiguous': 'A settlement falls at the time of an entry or exit, so it cannot be placed inside or outside the window.',
   'funding-asset': 'A settlement is in an asset outside the listed stablecoins.',
+  changing: 'The account’s retained history changed while it was read; the next read shows it.',
   'no-funding-read': 'Settled funding is not read for this venue.',
   'account-disabled': 'The account is disabled.',
 }

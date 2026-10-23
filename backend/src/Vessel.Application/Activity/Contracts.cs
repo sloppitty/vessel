@@ -27,6 +27,12 @@ public sealed record ActivityFacts(IReadOnlyList<Account> Accounts, IReadOnlyLis
     public IReadOnlyList<ForcedEvent> ForcedEvents { get; init; } = [];
     /// <summary>Retained forced events per account when <see cref="ForcedEvents"/> holds only the newest; null when it holds all.</summary>
     public IReadOnlyDictionary<Guid, int>? ForcedEventCounts { get; init; }
+    /// <summary>
+    /// Phase 2, item 9b: the owner's Activity facts revision these facts were read at, in the same snapshot; null when the
+    /// facts do not come from the store. Every change to fills, orders, links, snapshots, funding, markers or forced events
+    /// moves it in its own transaction.
+    /// </summary>
+    public long? Revision { get; init; }
 }
 
 /// <summary>
