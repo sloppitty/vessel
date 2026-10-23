@@ -701,11 +701,11 @@ October 23, 2026.
   Against PostgreSQL: the store reading markers and moving the revision; only the newest forced events loaded,
   with the rest counted; and a retrospective preview and confirmation refused across an omission Activity
   reports.
-- **Open question for the owner.** A marker on a market Vessel does not recognize breaks only the partition
-  keyed by its native ID. An older partition of the same market listed under another key (for example a
-  retired RISEx market whose old fills say `BTC` with no native ID) is not broken. Breaking every ID-less
-  partition of the account would close that, but then any marker on an unrecognized Hyperliquid market would
-  break every ordinary coin.
+- **Unrecognized markets (owner answer, October 23).** A marker on a market Vessel does not recognize breaks only
+  the partition keyed by its native ID. An older partition of the same market listed under another key (for
+  example a retired RISEx market whose old fills say `BTC` with no native ID) is not broken. Breaking every
+  ID-less partition of the account would close that, but any marker on an unrecognized Hyperliquid market would
+  then break every ordinary coin. The owner chose not to break them, so the rule stays as built.
 - **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `af35eb75`. Six findings, all fixed in
   `779efaed`:
   - A fill inside an omission's uncertainty window could prove flatness or a
@@ -975,7 +975,8 @@ October 21, 2026.
   ticks, the page budget), the keyset continuation against PostgreSQL, the Wallet-mode isolation case, the
   interval bounds and the reviewed SQL inventory.
 - **Migration.** It is applied explicitly, never to the owner's database.
-- **Open questions for the owner.**
+- **Owner answer (October 23).** Funding matters for the final figures, not in between, so the schedule stays as
+  built on every point below.
   - A run that stops at the read limit waits a full interval even while coverage is partial; the backfill
     brings its next run forward instead.
   - A Refresh does not push the scheduled read back.
@@ -1152,7 +1153,7 @@ October 23, 2026.
   - The allocated cases of `PlayFundingPostgresTests`, owner isolation, the paper refusal and the inventories.
   - In the browser: the dialog's live remainder, fee split, bounds and errors, older pages, and the panel.
 - **Migration.** It is applied explicitly, never to the owner's database.
-- **Open questions for the owner.**
+- **To revisit (owner, October 23).** These choices stay as built and are recorded to revisit later.
   - An allocation is allowed on a fill whose order is linked to no Play. A flip order can never be linked, and an
     order links to one Play only.
   - Fee precision follows the reported fee's own decimals, at least 6; there is no per-token table.
@@ -1163,9 +1164,11 @@ October 23, 2026.
   - Any allocated fill in a funding proof's span makes funding "shared", even before the Play's window.
   - The revisions are kept but not shown, and the migration's `Down` refuses while allocations exist.
   - Entries alone go beyond the contract's wording. They are limited to later opening fills of an order a flip
-    already split. Confirm this, or choose another way to attribute those executions.
+    already split; the alternatives are counting them for the Play that took the entry, or refusing a flip split
+    while its order still rests.
   - A shared exit does not split its order, so the order's other fills still count wholly for the Play holding
-    the link. Should it?
+    the link. A mismatch shows as an over-exit; splitting the order would make every later fill wait for an
+    allocation.
   - Each page offers at most 200 Plays for a new line.
 - **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `e7267e40`. Four findings, all fixed in
   `8148cfb6`:
