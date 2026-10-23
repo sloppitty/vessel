@@ -92,11 +92,14 @@ public sealed partial class MonitorPostgresTests
     private static object CheckSchedule(MonitorAccount row) => (row.NextRunAtUtc, row.LastAttemptAtUtc, row.LastSuccessAtUtc, row.State,
         row.StateRevision, row.NextManualAllowedAtUtc, row.ConsecutiveFailures, row.Error, row.LastObservationAtUtc);
 
+    private static Task<IReadOnlyList<DueMonitorCandidate>> DueFundingAsync(CoreDatabase database, TimeProvider clock,
+        params string[] venues) => DueFundingAsync(database, clock, null, venues);
+
     private static async Task<IReadOnlyList<DueMonitorCandidate>> DueFundingAsync(CoreDatabase database, TimeProvider clock,
-        params string[] venues)
+        DueMonitorKey? after, params string[] venues)
     {
         await using var data = NpgsqlDataSource.Create(database.ConnectionString);
-        return await new SystemMonitorStore(data, clock).DueFundingAsync(venues, 100, default);
+        return await new SystemMonitorStore(data, clock).DueFundingAsync(venues, after, 100, default);
     }
 
     private static Task<MonitorLease?> ClaimFundingAsync(FundingSetup s) =>
@@ -267,7 +270,11 @@ public sealed partial class MonitorPostgresTests
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
-        Assert.Equal(new[] { open, kept }.Order(), (await DueFundingAsync(database, clock, "hyperliquid")).Select(c => c.AccountId).Order());
+        var due = await DueFundingAsync(database, clock, "hyperliquid");
+        Assert.Equal(new[] { open, kept }.Order(), due.Select(c => c.AccountId).Order());
+        // Sol round 1: a page continues after the key the scheduler last examined, in (due, owner, account) order.
+        Assert.Equal(due[1].AccountId, Assert.Single(await DueFundingAsync(database, clock, due[0].Key, "hyperliquid")).AccountId);
+        Assert.Empty(await DueFundingAsync(database, clock, due[1].Key, "hyperliquid"));
         // Only the venues the scheduler offers, those with a funding reader.
         Assert.Empty(await DueFundingAsync(database, clock, "lighter"));
         Assert.Empty(await DueFundingAsync(database, clock));

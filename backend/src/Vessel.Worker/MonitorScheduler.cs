@@ -98,6 +98,8 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
     internal const int CandidatePagesPerTick = 10;
     private DueMonitorKey? continuation;
     private DateTimeOffset? cycleBound;
+    // Phase 2, item 9c (Sol round 1): the background passes keep their own place, so the candidates they skip never hide the rest.
+    private readonly DueQueue backfills = new(), funding = new();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -199,19 +201,12 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
             await ClaimBehindAsync(candidate, (store, now) => store.ClaimAsync(candidate.AccountId, null, workerId, now, ct));
         }
         // Phase 2, item 6b: owner-started backfills read last, in runs of their own, leaving the same slot free.
-        if (running.Count < keptSlots)
-            foreach (var candidate in await candidates.DueBackfillsAsync(CandidatePageSize, ct))
-            {
-                if (running.Count >= keptSlots) break;
-                await ClaimBehindAsync(candidate, (store, now) => store.ClaimBackfillAsync(candidate.AccountId, workerId, now, ct));
-            }
+        await backfills.RunAsync(after => candidates.DueBackfillsAsync(after, CandidatePageSize, ct), () => running.Count >= keptSlots,
+            candidate => ClaimBehindAsync(candidate, (store, now) => store.ClaimBackfillAsync(candidate.AccountId, workerId, now, ct)));
         // Phase 2, item 9c: settled funding on its slow schedule comes after everything else, leaving the same slot free.
-        if (running.Count < keptSlots && fundingVenues is { Length: > 0 })
-            foreach (var candidate in await candidates.DueFundingAsync(fundingVenues, CandidatePageSize, ct))
-            {
-                if (running.Count >= keptSlots) break;
-                await ClaimBehindAsync(candidate, (store, now) => store.ClaimFundingAsync(candidate.AccountId, workerId, now, ct));
-            }
+        if (fundingVenues is { Length: > 0 } fundable)
+            await funding.RunAsync(after => candidates.DueFundingAsync(fundable, after, CandidatePageSize, ct), () => running.Count >= keptSlots,
+                candidate => ClaimBehindAsync(candidate, (store, now) => store.ClaimFundingAsync(candidate.AccountId, workerId, now, ct)));
         // An empty/all-suspended directory or no due accounts is healthy: the pass still did real discovery.
         // If every active owner's work failed, do not turn mere scheduler liveness into a healthy monitor.
         if (productive.Count > 0 || !sawActiveOwner && failed.Count == 0) await HeartbeatAsync(ct);

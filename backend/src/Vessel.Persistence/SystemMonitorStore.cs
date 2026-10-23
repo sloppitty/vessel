@@ -27,9 +27,7 @@ public sealed class SystemMonitorStore(NpgsqlDataSource data, TimeProvider time)
             """);
         command.Parameters.AddWithValue("now", time.GetUtcNow());
         command.Parameters.AddWithValue("due_by", NpgsqlDbType.TimestampTz, dueBy.ToUniversalTime());
-        command.Parameters.AddWithValue("after_due", NpgsqlDbType.TimestampTz, (object?)after?.DueAt ?? DBNull.Value);
-        command.Parameters.AddWithValue("after_owner", NpgsqlDbType.Uuid, (object?)after?.OwnerId ?? DBNull.Value);
-        command.Parameters.AddWithValue("after_account", NpgsqlDbType.Uuid, (object?)after?.AccountId ?? DBNull.Value);
+        After(command, after);
         command.Parameters.AddWithValue("limit", limit);
         await using var rows = await command.ExecuteReaderAsync(ct);
         var result = new List<DueMonitorCandidate>();
@@ -37,7 +35,7 @@ public sealed class SystemMonitorStore(NpgsqlDataSource data, TimeProvider time)
         return result;
     }
 
-    public async Task<IReadOnlyList<DueMonitorCandidate>> DueBackfillsAsync(int limit, CancellationToken ct)
+    public async Task<IReadOnlyList<DueMonitorCandidate>> DueBackfillsAsync(DueMonitorKey? after, int limit, CancellationToken ct)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(limit, 1000);
@@ -52,9 +50,11 @@ public sealed class SystemMonitorStore(NpgsqlDataSource data, TimeProvider time)
                 AND (m."AccountId" IS NULL OR m."ManualState" = 'idle' OR m."LeaseUntilUtc" <= @now)
                 AND NOT EXISTS (SELECT 1 FROM server_venue_deadlines d
                     WHERE d.venue_id = a."VenueId" AND d.retry_after_until > @now)
+                AND (@after_due IS NULL OR (b."NextPageAtUtc", a."OwnerId", a."Id") > (@after_due, @after_owner, @after_account))
             ORDER BY b."NextPageAtUtc", a."OwnerId", a."Id" LIMIT @limit
             """);
         command.Parameters.AddWithValue("now", time.GetUtcNow());
+        After(command, after);
         command.Parameters.AddWithValue("limit", limit);
         await using var rows = await command.ExecuteReaderAsync(ct);
         var result = new List<DueMonitorCandidate>();
@@ -62,7 +62,8 @@ public sealed class SystemMonitorStore(NpgsqlDataSource data, TimeProvider time)
         return result;
     }
 
-    public async Task<IReadOnlyList<DueMonitorCandidate>> DueFundingAsync(IReadOnlyCollection<string> venueIds, int limit, CancellationToken ct)
+    public async Task<IReadOnlyList<DueMonitorCandidate>> DueFundingAsync(IReadOnlyCollection<string> venueIds, DueMonitorKey? after, int limit,
+        CancellationToken ct)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(limit, 1000);
@@ -82,14 +83,25 @@ public sealed class SystemMonitorStore(NpgsqlDataSource data, TimeProvider time)
                 AND (m."AccountId" IS NULL OR m."ManualState" = 'idle' OR m."LeaseUntilUtc" <= @now)
                 AND NOT EXISTS (SELECT 1 FROM server_venue_deadlines d
                     WHERE d.venue_id = a."VenueId" AND d.retry_after_until > @now)
+                AND (@after_due IS NULL OR (COALESCE(m."NextFundingAtUtc", TIMESTAMPTZ '1970-01-01'), a."OwnerId", a."Id")
+                    > (@after_due, @after_owner, @after_account))
             ORDER BY due_at, a."OwnerId", a."Id" LIMIT @limit
             """);
         command.Parameters.AddWithValue("now", time.GetUtcNow());
         command.Parameters.AddWithValue("venues", venueIds.ToArray());
+        After(command, after);
         command.Parameters.AddWithValue("limit", limit);
         await using var rows = await command.ExecuteReaderAsync(ct);
         var result = new List<DueMonitorCandidate>();
         while (await rows.ReadAsync(ct)) result.Add(new(rows.GetGuid(0), rows.GetGuid(1), rows.GetString(2), rows.GetFieldValue<DateTimeOffset>(3)));
         return result;
+    }
+
+    /// <summary>The (due, owner, account) key a page continues after; none starts at the beginning.</summary>
+    private static void After(NpgsqlCommand command, DueMonitorKey? after)
+    {
+        command.Parameters.AddWithValue("after_due", NpgsqlDbType.TimestampTz, (object?)after?.DueAt ?? DBNull.Value);
+        command.Parameters.AddWithValue("after_owner", NpgsqlDbType.Uuid, (object?)after?.OwnerId ?? DBNull.Value);
+        command.Parameters.AddWithValue("after_account", NpgsqlDbType.Uuid, (object?)after?.AccountId ?? DBNull.Value);
     }
 }

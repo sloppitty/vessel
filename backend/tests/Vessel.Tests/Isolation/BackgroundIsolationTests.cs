@@ -171,7 +171,7 @@ public sealed class BackgroundIsolationTests(WalletIsolationApi api) : IClassFix
         var scopes = api.Factory.Services.GetRequiredService<IOwnerScopeFactory>();
         var registry = api.Factory.Services.GetRequiredService<IVenueRegistry>();
         var venues = registry.Descriptors.Where(v => v.Capabilities.Sync && registry.Funding(v.Id) is not null).Select(v => v.Id).ToArray();
-        var due = await api.Factory.Services.GetRequiredService<ISystemMonitorStore>().DueFundingAsync(venues, 1000, default);
+        var due = await api.Factory.Services.GetRequiredService<ISystemMonitorStore>().DueFundingAsync(venues, null, 1000, default);
         Assert.Equal(a.Id, Assert.Single(due, c => c.AccountId == aAccount).OwnerId);
         Assert.Equal(b.Id, Assert.Single(due, c => c.AccountId == bAccount).OwnerId);
         var aRow = await Row(a.Id, aAccount);

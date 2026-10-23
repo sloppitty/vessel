@@ -396,6 +396,7 @@ flowchart TB
    - Such a claim needs one of the owner's two slots left free, and fewer than `VenueReadConcurrency − ProtectionHeadroom` live runs on the venue (`ProtectionHeadroom`, default 1). The headroom never takes a venue's whole capacity: at most `VenueReadConcurrency − 1` slots are kept (Sol round 1 on 6a).
    - Owner Checks and Refreshes keep the plain budgets.
    - Owner-started backfills (item 6b) and then scheduled funding reads (October 22, item 9c) are claimed last, in runs of their own, with the same headroom and free slot; see [coverage signals](#coverage-signals).
+   - Each of these two passes keeps its own place across ticks (`DueQueue`, item 9c Sol round 1): it pages its keys-only discovery after the last candidate it examined, so candidates it skips (suspended owners, capped owners or venues, refused claims) never hide the accounts after them. A tick that began part way starts again from the beginning at the end, once; a tick reads at most the same page budget as protection discovery.
 4. A claim increments `Generation` and sets a 5-minute lease; `MonitorRunExecutor` renews it every minute and cancels the run if renewal fails.
 5. Every write of results checks `Owns(generation, holder)` under the account lock. A worker that lost its lease cannot apply late results; an expired lease is recovered by the next claim.
 6. After a productive discovery/claim pass, the scheduler writes its deployment heartbeat; it never depends on a user being present. `MonitorLease.OwnerId` fixes the owner of execution/renewal scopes.
