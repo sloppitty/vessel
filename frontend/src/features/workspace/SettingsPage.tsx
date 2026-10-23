@@ -27,7 +27,7 @@ export function SettingsPage({ system, disconnectSession, onAccounts, api, inApp
   const venuesPanel = <section className="shell-panel settings-panel">
     <Database size={23} /><h2>{paper ? 'Paper capabilities' : 'Venue capabilities'}</h2>
     <div className="venue-capability-list">{system.venues.filter(venue => !paper || venue.capabilities.paperExecution).map(venue => <div key={venue.id}>
-      <VenueBadge venueId={venue.id} /><span className="workspace-badge">{paper ? 'Paper · simulated execution; no imports or real orders' : <>import {venue.capabilities.sync ? 'available' : 'unavailable'} · orders {venue.capabilities.orders ? 'read-only' : 'unavailable'}</>}</span>
+      <VenueBadge venueId={venue.id} /><span className="workspace-badge">{paper ? 'Paper · simulated execution; no imports or real orders' : !venue.capabilities.sync && (venue.capabilities.instruments || venue.capabilities.candles) ? 'Public data only · account integration unavailable' : <>import {venue.capabilities.sync ? 'available' : 'unavailable'} · orders {venue.capabilities.orders ? 'read-only' : 'unavailable'}</>}</span>
     </div>)}</div>
     <Button variant="outline" onClick={onAccounts}>{paper ? 'Manage paper accounts' : 'Manage account access and refresh'}</Button>
   </section>

@@ -4,6 +4,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import { systemFixture } from '@/test/system-fixture'
+import { Venues } from '@/api/venues'
 import { reviewFixture } from '@/test/review-fixture'
 import { accountFixture, emptyOverview, candleSeriesFixture, idleMarketStream, instrumentCatalogFixture, marketContextFixture, overviewFixture, playApiStubs, playCountsFrom, playsFrom, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import type { ActivityQuery } from '@/api/activity'
@@ -44,6 +45,39 @@ beforeAll(async () => {
 }, 60_000)
 beforeEach(() => { window.history.replaceState(null, '', '/') })
 describe('Main application shell', () => {
+  it('labels a public-only venue as incomplete and excludes it from actual account creation', async () => {
+    const publicVenue = {
+      id: 'extended', name: 'Extended', status: 'candidate', source: 'none', quoteAsset: 'USD',
+      tradeUrlTemplate: null, credentialSetupUrl: null, intervals: ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '1d'],
+      priceRule: 'tick-size',
+      capabilities: { sync: false, instruments: true, orders: false, candles: true, marketContext: false, stream: false,
+        stablecoinWallet: false, accountDiscovery: false, readOnlyCredential: false, manualExecutions: false,
+        currentOrderBook: false, paperExecution: false },
+    } as const
+    const system = { ...systemFixture, venues: [...systemFixture.venues, { ...publicVenue, intervals: [...publicVenue.intervals] }] }
+    const venues = new Venues(system.venues)
+    expect(venues.creatable().some(venue => venue.id === 'extended')).toBe(false)
+    expect(venues.can('extended', 'readOnlyCredential')).toBe(false)
+    expect(venues.can('extended', 'orders')).toBe(false)
+    expect(venues.can('extended', 'paperExecution')).toBe(false)
+    const client = api()
+    render(<ApplicationShell system={system} disconnect={vi.fn()} api={client} />)
+    await screen.findByText('Start with your accounts.')
+    await userEvent.click(screen.getByRole('link', { name: 'Settings' }))
+    await screen.findByText('Public data only · account integration unavailable')
+    expect(screen.getByText('Extended')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Manage account access and refresh' }))
+    await userEvent.click(screen.getAllByRole('button', { name: 'Add account' })[0]!)
+    const dialog = within(screen.getByRole('dialog'))
+    expect(dialog.queryByRole('radio', { name: /Extended/ })).not.toBeInTheDocument()
+    expect(dialog.queryByLabelText(/token|API key|Stark/i)).not.toBeInTheDocument()
+    await userEvent.click(dialog.getByRole('radio', { name: 'Manual account' }))
+    await userEvent.type(dialog.getByLabelText('Account name'), 'Still a manual record')
+    await userEvent.click(dialog.getByRole('button', { name: 'Add account' }))
+    await waitFor(() => expect(client.createAccount).toHaveBeenCalledWith({ portfolioId: null, name: 'Still a manual record', venueId: 'manual' }))
+    expect(client.saveAccountCredential).not.toHaveBeenCalled()
+    expect(client.sync).not.toHaveBeenCalled()
+  })
   it('keeps one owner stream across navigation, displays exceptional health, and aborts it on disconnect', async () => {
     const client = api({ overview: vi.fn().mockResolvedValue(overviewFixture),
       monitor: vi.fn().mockResolvedValue({ ...monitorSummaryFixture, workerOnline: false, accounts: [{ ...monitorFixture, state: 'stale' }] }) })

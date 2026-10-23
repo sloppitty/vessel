@@ -20,6 +20,7 @@ using Vessel.Infrastructure.Evidence;
 using Vessel.Application.Venues;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 using Vessel.Infrastructure.Venues.Risex;
+using Vessel.Infrastructure.Venues.Extended;
 
 namespace Vessel.Infrastructure;
 
@@ -63,6 +64,15 @@ public static class DependencyInjection
                 builder => builder.AddHttpMessageHandler(() => new LighterAuthenticationHandler(exchange.Name))
                     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false }));
         }
+        // Extended is public-data only: ordinary API keys do not meet the read-only credential policy.
+        services.AddSingleton<ExtendedCatalogueCache>();
+        services.AddVenueModule(ExtendedReader.Descriptor, (sp, client) =>
+        {
+            client.BaseAddress = Hosts(sp).BaseUri(nameof(VenueHostOptions.Extended));
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Vessel/1.0 (self-hosted trading journal; public data only)");
+        }, (sp, client) => ActivatorUtilities.CreateInstance<ExtendedReader>(sp, client),
+            builder => builder.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false }));
         services.AddScoped<IVenueRegistry, VenueRegistry>();
         services.AddSingleton<CandleCache>();
         services.AddSingleton<MarketContextCache>();
