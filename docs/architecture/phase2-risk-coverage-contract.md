@@ -531,6 +531,7 @@ main (Phase 1 merged October 21) → contract + state (this document)
       → 7b gap-aware Activity
       → 9b funding beside a Play → 9c funding schedule → D-19 confirmation
       → 13 search (migration) → 11 allocation (migration) → 14d benchmark
+      → D-19 follow-up (owner, October 23)
 ```
 
 Progress is recorded in
