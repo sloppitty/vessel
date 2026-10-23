@@ -253,7 +253,9 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
         if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts use simulated executions, not actual execution facts.");
         if (!account.IsEnabled) throw new ProblemException(409, "Enable the account before reviewing imported operations.");
         var facts = await diary.ActivityAsync(accountId, ct);
-        var operation = OperationAggregator.Aggregate(facts.Fills, facts.FillPlayIds, facts.Snapshots, facts.FundingPayments).SingleOrDefault(o => o.Id == operationId)
+        // The same inputs as Activity, omission markers included (Phase 2, item 7b, Sol round 1): the fingerprint and
+        // confirmation read this operation, so neither can cross a gap Activity reports.
+        var operation = OperationAggregator.Aggregate(facts).SingleOrDefault(o => o.Id == operationId)
             ?? throw new ProblemException(404, "Retained operation not found. Reload Activity.");
         var bounded = operation with { Fills = operation.Fills.Take(ActivityService.MaxFillsPerOperation).ToList(),
             OmittedFillCount = operation.OmittedFillCount + Math.Max(0, operation.Fills.Count - ActivityService.MaxFillsPerOperation) };

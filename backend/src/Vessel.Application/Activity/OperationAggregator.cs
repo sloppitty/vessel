@@ -11,12 +11,20 @@ public static class OperationAggregator
 {
     public static IReadOnlyList<ActivityOperationDto> Aggregate(IEnumerable<ImportedFill> fills,
         IReadOnlyDictionary<Guid, Guid>? fillPlayIds = null, IReadOnlyList<AccountSnapshot>? snapshots = null,
-        IReadOnlyList<FundingPayment>? funding = null)
+        IReadOnlyList<FundingPayment>? funding = null, IReadOnlyList<ActivityOmission>? omissions = null)
     {
         var retained = fills.ToList();
-        return AggregateSummaries(retained, fillPlayIds, new(retained, snapshots ?? [], funding))
+        return AggregateSummaries(retained, fillPlayIds, new(retained, snapshots ?? [], funding, omissions))
             .Select(o => o with { Fills = o.Fills.ToList() }).ToList();
     }
+
+    /// <summary>
+    /// Every operation of one read's facts, from the same inputs Activity's partitions, anchors and walk use, omission markers
+    /// included (Phase 2, item 7b, Sol round 1), so a preview or confirmation never rebuilds an operation across a gap that
+    /// Activity reports.
+    /// </summary>
+    public static IReadOnlyList<ActivityOperationDto> Aggregate(ActivityFacts facts) =>
+        Aggregate(facts.Fills, facts.FillPlayIds, facts.Snapshots, facts.FundingPayments, facts.Omissions);
 
     internal static IReadOnlyList<ActivityOperationDto> AggregateSummaries(IReadOnlyList<ImportedFill> fills,
         IReadOnlyDictionary<Guid, Guid>? fillPlayIds, ActivityPositions positions)
@@ -38,14 +46,22 @@ public static class OperationAggregator
             // Addition is order-independent. This is the backward walk's position before the first fill.
             var position = anchored ? observed!.Value
                 - group.Aggregate(default(ExactAmount), (sum, f) => sum + Signed(f)) : default;
-            var known = anchored || breaks.All(b => b.ResetAt > times[0].Key) &&
+            // Markers whose time or window has begun by the first retained fill: the walk starts unknown and stays uncertain
+            // to the end of their windows.
+            var begun = breaks.Where(b => b.ResetAt <= times[0].Key).ToList();
+            var known = anchored || begun.Count == 0 &&
                 times[0].All(f => f.PositionEffect == ExecutionFacts.Open) && times[0].Select(f => f.Side).Distinct().Count() == 1;
             var pending = new Queue<ActivityBreak>(breaks.Where(b => b.ResetAt > times[0].Key).OrderBy(b => b.ResetAt));
+            // Sol round 1 on 7b: an omitted execution can lie between any two fills of its window, so nothing inside the
+            // window proves flatness or direction; only evidence strictly after its end can. An unknown end never passes.
+            DateTimeOffset? uncertainUntil = begun.Count == 0 ? null : begun.Max(b => b.AnchorAfter);
+            // Every unknown operation from an omission on carries its explanation, until flatness is proved or anchored again.
+            var omitted = begun.Count > 0;
             var unknownDirection = 0;
             Builder? current = null;
             // An open operation at an omitted execution ends there with unknown boundaries ("direction unknown"), never a
             // phantom opposite operation; the walk after it needs a new proof of flatness or the snapshot anchor.
-            void Break()
+            void Break(ActivityBreak? at)
             {
                 if (current is not null)
                 {
@@ -54,18 +70,20 @@ public static class OperationAggregator
                     result.Add(current.Build(position));
                     current = null;
                 }
-                (known, unknownDirection, position) = (false, 0, default);
+                (known, unknownDirection, position, omitted) = (false, 0, default, true);
+                if (at is { } window && (uncertainUntil is null || window.AnchorAfter > uncertainUntil)) uncertainUntil = window.AnchorAfter;
             }
             foreach (var time in times)
             {
-                while (pending.Count > 0 && pending.Peek().ResetAt <= time.Key) { pending.Dequeue(); Break(); }
+                while (pending.Count > 0 && pending.Peek().ResetAt <= time.Key) Break(pending.Dequeue());
                 // After the last omitted execution, the snapshot anchors the remaining fills again.
                 if (!anchored && anchorAfter is { } lastOmission && time.Key > lastOmission && anchorable && snapshot!.ObservedAtUtc >= lastOmission && tail.Count > 0)
                 {
-                    Break();
+                    Break(null);
                     position = observed!.Value - tail.Aggregate(default(ExactAmount), (sum, f) => sum + Signed(f));
-                    (known, anchored) = (true, true);
+                    (known, anchored, omitted) = (true, true, false);
                 }
+                var uncertain = uncertainUntil is { } until && time.Key <= until;
                 var (ordered, ambiguous, peakAmbiguous) = OrderTimestamp(time, known ? position : null, current?.Peak ?? position.Abs());
                 foreach (var fill in ordered)
                 {
@@ -74,20 +92,22 @@ public static class OperationAggregator
                     // A close proves the unknown position's direction, not its size. Opening the
                     // opposite position proves flatness between those fills. Reopening the same
                     // direction could just be another increase and cannot resynchronize the walk.
-                    if (!known && !ambiguous && fill.Quantity > 0 && fill.PositionEffect == ExecutionFacts.Open && unknownDirection == -signed.Units.Sign)
+                    if (!known && !ambiguous && !uncertain && fill.Quantity > 0 && fill.PositionEffect == ExecutionFacts.Open && unknownDirection == -signed.Units.Sign)
                     {
                         if (current is not null) result.Add(current.Build(default));
                         current = null;
                         position = default;
-                        known = true;
+                        (known, omitted) = (true, false);
                     }
                     if (!known)
                     {
                         current ??= new Builder(fill, fill.PositionEffect == ExecutionFacts.Close ? -signed.Units.Sign : signed.Units.Sign);
                         current.UnknownBoundaries = true;
                         current.Note(ambiguous ? TimestampNotice : "Retained opening history or position effect is unknown; position boundaries are unavailable until flatness is proved.");
+                        if (omitted) current.Note(OmittedNotice);
                         current.Add(fill, "unknown", quantity, true, fillPlayIds);
-                        unknownDirection = ambiguous || fill.Quantity <= 0 ? 0 : fill.PositionEffect switch
+                        // Inside an omission's window a close proves nothing: the omitted execution may follow it.
+                        unknownDirection = ambiguous || uncertain || fill.Quantity <= 0 ? 0 : fill.PositionEffect switch
                         {
                             ExecutionFacts.Close => -signed.Units.Sign,
                             ExecutionFacts.Open or ExecutionFacts.Flip => signed.Units.Sign,
@@ -147,7 +167,7 @@ public static class OperationAggregator
                 }
             }
             // An omitted execution after the last retained fill leaves its open operation unknown too.
-            if (pending.Count > 0) Break();
+            if (pending.Count > 0) Break(null);
             if (current is not null) result.Add(current.Build(position));
             for (var i = firstResult; i < result.Count; i++)
                 result[i] = result[i] with

@@ -15,10 +15,29 @@ public sealed record ActivityFacts(IReadOnlyList<Account> Accounts, IReadOnlyLis
     public IReadOnlyList<AccountFundingState> FundingStates { get; init; } = [];
     public IReadOnlyList<LeverageObservation> LeverageObservations { get; init; } = [];
     public IReadOnlyList<PaperPlayFacts> PaperPlays { get; init; } = [];
-    /// <summary>Phase 2, item 7b: durable omission markers, forced events included.</summary>
-    public IReadOnlyList<ExecutionOmission> Omissions { get; init; } = [];
-    /// <summary>Phase 2, item 7b: venue-forced executions, shown with their exclusion.</summary>
+    /// <summary>
+    /// Phase 2, item 7b: every durable omission marker (forced events included, since each also leaves one), with only what
+    /// the walk needs: its time or read window and its market.
+    /// </summary>
+    public IReadOnlyList<ActivityOmission> Omissions { get; init; } = [];
+    /// <summary>
+    /// Phase 2, item 7b: venue-forced executions, shown with their exclusion. A store may read only the newest
+    /// <see cref="ActivityService.MaxForcedEventRows"/>, with <see cref="ForcedEventCounts"/> counting every retained one.
+    /// </summary>
     public IReadOnlyList<ForcedEvent> ForcedEvents { get; init; } = [];
+    /// <summary>Retained forced events per account when <see cref="ForcedEvents"/> holds only the newest; null when it holds all.</summary>
+    public IReadOnlyDictionary<Guid, int>? ForcedEventCounts { get; init; }
+}
+
+/// <summary>
+/// Phase 2, item 7b: an omitted execution as Activity reads it (Sol round 1 on 7b): its market, canonical and native, either
+/// possibly null, and its time, or the read window it lies in when the venue gave none. Never money, order or reason.
+/// </summary>
+public sealed record ActivityOmission(Guid Id, Guid AccountId, string? ContractId, string? VenueContractId,
+    DateTimeOffset? OccurredAtUtc, DateTimeOffset? UncertainFromUtc, DateTimeOffset? UncertainToUtc)
+{
+    public static ActivityOmission From(ExecutionOmission marker) => new(marker.Id, marker.AccountId, marker.ContractId,
+        marker.VenueContractId, marker.OccurredAtUtc, marker.UncertainFromUtc, marker.UncertainToUtc);
 }
 public interface IActivitySummaryReader
 {

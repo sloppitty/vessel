@@ -6,9 +6,10 @@ namespace Vessel.Application.Activity;
 internal readonly record struct ActivityContractKey(Guid AccountId, string Identity, bool IsNative);
 
 /// <summary>
-/// Phase 2, item 7b: an omitted execution in a partition. The walk loses its position from <paramref name="ResetAt"/>, and
-/// a snapshot can anchor only fills after <paramref name="AnchorAfter"/>. Both are the execution's time when it is known;
-/// otherwise the read window it lies in bounds it on either side.
+/// Phase 2, item 7b: an omitted execution in a partition. The walk loses its position from <paramref name="ResetAt"/>, stays
+/// uncertain through <paramref name="AnchorAfter"/> (nothing at or before it proves flatness or direction), and a snapshot
+/// can anchor only fills after it. Both are the execution's time when it is known; otherwise the read window it lies in
+/// bounds it on either side, and an unknown bound is unbounded.
 /// </summary>
 internal readonly record struct ActivityBreak(DateTimeOffset ResetAt, DateTimeOffset AnchorAfter);
 
@@ -24,7 +25,7 @@ internal sealed class ActivityPositions
     private readonly Dictionary<ActivityContractKey, ActivityBreak[]> breaks = [];
 
     public ActivityPositions(IReadOnlyList<ImportedFill> fills, IReadOnlyList<AccountSnapshot> snapshots,
-        IReadOnlyList<FundingPayment>? funding = null, IReadOnlyList<ExecutionOmission>? omissions = null)
+        IReadOnlyList<FundingPayment>? funding = null, IReadOnlyList<ActivityOmission>? omissions = null)
     {
         Snapshots = snapshots.ToDictionary(s => s.AccountId);
         nativeCandidates = fills.Where(f => f.VenueContractId is not null)
@@ -58,20 +59,64 @@ internal sealed class ActivityPositions
                     quantities[key] = null;
             }
         }
-        IndexBreaks(omissions ?? []);
+        IndexBreaks(fills, omissions ?? []);
     }
 
     /// <summary>
-    /// Phase 2, item 7b: the omitted executions of a partition, by the same identity rule as its fills. An omission on a
-    /// market Vessel does not recognize has no canonical contract and belongs to no partition.
+    /// Phase 2, item 7b: the omitted executions that may lie in a partition, ordered by <see cref="ActivityBreak.ResetAt"/>.
+    /// See <see cref="IndexBreaks"/>.
     /// </summary>
     public IReadOnlyList<ActivityBreak> Breaks(ActivityContractKey key) => breaks.GetValueOrDefault(key) ?? [];
 
-    private void IndexBreaks(IReadOnlyList<ExecutionOmission> omissions)
+    /// <summary>
+    /// Phase 2, item 7b (Sol round 1): a marker breaks every partition it could belong to, conservatively, and never moves a
+    /// fill between partitions (markers are not grouping evidence). An ID-less fill's native market is unknown, so a marker
+    /// on its canonical contract may lie in its partition whatever native market the marker names.
+    /// <list type="bullet">
+    /// <item>No market at all: every partition of its account.</item>
+    /// <item>A canonical contract only: every partition holding a fill of that contract, native ones included.</item>
+    /// <item>A native market: that native partition, and every partition holding an ID-less fill of its canonical contract.
+    /// Without a canonical contract (a market Vessel does not recognize), the native ID is the market's identity, as for an
+    /// ID-less fact under the order rule (<see cref="ExecutionOmission.Names"/>), so an ID-less fill keyed by it is included.</item>
+    /// </list>
+    /// </summary>
+    private void IndexBreaks(IReadOnlyList<ImportedFill> fills, IReadOnlyList<ActivityOmission> omissions)
     {
-        foreach (var group in omissions.Where(m => m.ContractId is not null).GroupBy(m => Key(m.AccountId, m.ContractId!, m.VenueContractId)))
-            breaks[group.Key] = group.Select(m => new ActivityBreak(m.OccurredAtUtc ?? m.UncertainFromUtc ?? DateTimeOffset.MinValue,
-                m.OccurredAtUtc ?? m.UncertainToUtc ?? DateTimeOffset.MaxValue)).OrderBy(b => b.ResetAt).ToArray();
+        if (omissions.Count == 0) return;
+        var byAccount = new Dictionary<Guid, HashSet<ActivityContractKey>>();
+        var byContract = new Dictionary<(Guid, string), HashSet<ActivityContractKey>>();
+        var idless = new Dictionary<(Guid, string), HashSet<ActivityContractKey>>();
+        static void Add<T>(Dictionary<T, HashSet<ActivityContractKey>> index, T at, ActivityContractKey key) where T : notnull
+        {
+            if (!index.TryGetValue(at, out var keys)) index[at] = keys = [];
+            keys.Add(key);
+        }
+        foreach (var fill in fills)
+        {
+            var key = Key(fill);
+            Add(byAccount, fill.AccountId, key);
+            Add(byContract, (fill.AccountId, fill.ContractId), key);
+            if (fill.VenueContractId is null) Add(idless, (fill.AccountId, fill.ContractId), key);
+        }
+        IEnumerable<ActivityContractKey> Affected(ActivityOmission m) => (m.ContractId, m.VenueContractId) switch
+        {
+            (null, null) => byAccount.GetValueOrDefault(m.AccountId) ?? [],
+            ({ } contract, null) => byContract.GetValueOrDefault((m.AccountId, contract)) ?? [],
+            (var contract, { } native) => (idless.GetValueOrDefault((m.AccountId, contract ?? native)) ?? [])
+                .Append(new ActivityContractKey(m.AccountId, native, true))
+        };
+        var found = new Dictionary<ActivityContractKey, List<ActivityBreak>>();
+        foreach (var marker in omissions)
+        {
+            var at = new ActivityBreak(marker.OccurredAtUtc ?? marker.UncertainFromUtc ?? DateTimeOffset.MinValue,
+                marker.OccurredAtUtc ?? marker.UncertainToUtc ?? DateTimeOffset.MaxValue);
+            foreach (var key in Affected(marker).Distinct())
+            {
+                if (!found.TryGetValue(key, out var list)) found[key] = list = [];
+                list.Add(at);
+            }
+        }
+        foreach (var (key, list) in found) breaks[key] = list.OrderBy(b => b.ResetAt).ThenBy(b => b.AnchorAfter).ToArray();
     }
 
     public ActivityContractKey Key(ImportedFill fill) => Key(fill.AccountId, fill.ContractId, fill.VenueContractId);

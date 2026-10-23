@@ -836,6 +836,44 @@ public sealed partial class DiaryPostgresTests
         Assert.False(fresh.Eligible); Assert.Contains(fresh.Reasons, r => r.Contains("Order x") && r.Contains("missing"));
     }
 
+    /// <summary>
+    /// Phase 2, item 7b (Sol round 1, finding 4): an omitted execution of another order between a round trip's fills makes
+    /// Activity report it incomplete; the preview and confirmation aggregate the same markers and never cross that gap.
+    /// </summary>
+    [PostgresFact]
+    public async Task Retrospective_preview_and_confirmation_never_cross_an_omission_activity_reports()
+    {
+        await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
+        var account = await Account(database, owner, "hyperliquid");
+        var entry = Imported(account, "e", "e", "buy", "open", 1, 100, 0);
+        await using (var db = database.Context(owner))
+        {
+            db.Fills.AddRange(entry, Imported(account, "x", "x", "sell", "close", 1, 110, 20, 10));
+            db.Orders.AddRange(Order(account, "e", "buy", 1), Order(account, "x", "sell", 1));
+            // A flat snapshot after both fills would otherwise anchor them as one complete round trip.
+            db.Snapshots.Add(new AccountSnapshot { OwnerId = owner, AccountId = account.Id, ObservedAtUtc = At.AddMinutes(5), ValueScope = "fixture" });
+            db.ExecutionOmissions.Add(new ExecutionOmission
+            {
+                Id = Guid.NewGuid(), OwnerId = owner, AccountId = account.Id, Kind = ExecutionOmission.Forced, Reason = "liquidation",
+                SourceId = "omitted", ContractId = "BTC", OrderId = "other", OccurredAtUtc = At.AddSeconds(10),
+                FirstSeenAtUtc = At.AddMinutes(5), LastSeenAtUtc = At.AddMinutes(5)
+            });
+            await db.SaveChangesAsync();
+        }
+        await using var reading = database.Context(owner);
+        var operations = (await ActivityTestSupport.Activity(reading).PageAsync(account.Id)).Operations;
+        var first = Assert.Single(operations, o => o.Id.StartsWith(entry.Id.ToString(), StringComparison.Ordinal));
+        Assert.Equal("incomplete", first.Status);
+        var preview = await Service(reading).PreviewAsync(account.Id, first.Id, default);
+        Assert.Equal(("incomplete", false), (preview.Operation.Status, preview.Eligible));
+        Assert.Contains(OperationAggregator.OmittedNotice, preview.Reasons);
+        await using var writing = database.Context(owner);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => Service(writing).CreateRetrospectiveAsync(
+            new(Guid.NewGuid(), account.Id, first.Id, preview.Fingerprint, "Across the gap"), default))).StatusCode);
+        await using var verify = database.Context(owner);
+        Assert.Empty(await verify.Plays.ToListAsync()); Assert.Empty(await verify.OrderLinks.ToListAsync());
+    }
+
     [PostgresFact]
     public async Task Concurrent_retrospective_creations_or_linking_use_one_account_lock_and_never_mutate_fills()
     {

@@ -18,7 +18,7 @@ public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int 
     private static readonly Dictionary<Type, PropertyInfo[]> StringProperties = new[]
     {
         typeof(Account), typeof(ImportedFill), typeof(AccountSnapshot), typeof(AccountPosition), typeof(AccountStablecoin),
-        typeof(FundingPayment), typeof(AccountFundingState), typeof(LeverageObservation), typeof(ExecutionOmission), typeof(ForcedEvent),
+        typeof(FundingPayment), typeof(AccountFundingState), typeof(LeverageObservation), typeof(ActivityOmission), typeof(ForcedEvent),
         typeof(ActivityOperationDto), typeof(OperationFeeDto), typeof(ActivityCoverageDto)
     }.ToDictionary(type => type, type => type.GetProperties().Where(p => p.PropertyType == typeof(string)).ToArray());
 
@@ -154,6 +154,7 @@ public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int 
             + facts.Snapshots.Sum(s => Row(s) + s.Positions.Sum(Row) + s.Stablecoins.Sum(Row))
             + facts.FundingPayments.Sum(Row) + facts.FundingStates.Sum(Row) + 128L * facts.FillPlayIds.Count
             + facts.LeverageObservations.Sum(Row) + facts.Omissions.Sum(Row) + facts.ForcedEvents.Sum(Row)
+            + 64L * (facts.ForcedEventCounts?.Count ?? 0)
             // Each fill allocation can also retain a timestamp/leverage pair (at most one pair per allocation).
             + value.Operations.Sum(o => Row(o) + 288L * o.FillCount + o.OtherFees.Sum(Row)
                 + o.Coverage.Sum(s => 64L + 2L * s.Length) + 16L * o.FundingPaymentCount)

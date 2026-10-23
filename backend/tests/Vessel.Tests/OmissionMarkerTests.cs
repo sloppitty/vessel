@@ -169,6 +169,8 @@ public sealed class OmissionMarkerTests
         Assert.True(await Revision() > before);
         db.ChangeTracker.Clear();
         var facts = await new ActivityStore(db).ReadAsync(null, default);
-        Assert.Equal("t9", Assert.Single(facts.Omissions).SourceId);
+        // Only what the walk reads: the market and the time (Sol round 1 on 7b).
+        var marker = Assert.Single(facts.Omissions);
+        Assert.Equal(("BTC", (string?)null, (DateTimeOffset?)At.AddMinutes(-5)), (marker.ContractId, marker.VenueContractId, marker.OccurredAtUtc));
     }
 }
