@@ -36,7 +36,8 @@ milliseconds, inclusive at both ends. Each window the adapters are asked for is
 also inclusive. They widen venue request boundaries where necessary and locally
 enforce the exact requested window. Reads remain bounded by their existing HTTP
 response/deadline limits and explicit page budgets. There is no lifetime
-backfill, separate automatic job or new authorization.
+backfill or new authorization. Since October 22 (item 9c, below) the monitor
+worker also reads funding on a slow schedule for some accounts.
 
 **Resumable windows (Phase 2, item 9a, D-23).** A venue whose page budget cannot
 hold 30 days is still covered window by window and Refresh by Refresh. One
@@ -79,11 +80,40 @@ example is Lighter: five 100-row pages against 720 hourly rows per market.
     reported incomplete and the venue is deferred on a rate limit.
 - **Partial coverage says so.** The notice states the covered span and "refresh
   again to read the rest"; missing funding is not zero.
+
+**A slow schedule (October 22, Phase 2, item 9c; owner accepted).** The monitor
+worker also reads settled funding on its own, every `Vessel:Funding:Interval`
+(6 hours by default), so funding does not wait for the owner's Refresh.
+- **Which accounts.** Enabled real accounts with a source, on a venue with a
+  funding reader (the capability, never a venue name), that have an Open venue
+  Play or keep their execution history. Paper accounts, disabled accounts,
+  suspended owners and other owners' accounts are never read.
+- **The read.** It is the Refresh's read: 9a's windows from the stored cursor,
+  with the same bounds, outside any transaction. It needs no account or order
+  read. A venue that needs a read-only credential is not asked without a usable
+  one. The result is applied in one unit under the account lock, fenced by the
+  run's lease and the settings, source, venue and credential it was read with.
+  Settlements are deduplicated and coverage merged exactly as a Refresh's.
+- **Behind protection checks.** Each read is a run of its own (trigger
+  `funding`), claimed last by the scheduler with the same headroom and free
+  slot as kept-history reads and backfills, and never ahead of the account's
+  own due check. It never moves the check schedule, attempt time, state or
+  cooldown; see [messaging and workers](messaging-and-workers.md#coverage-signals).
+- **Next due.** `monitor_accounts.NextFundingAtUtc` (migration
+  `FundingSchedule`) is null until the first read, which makes the account due
+  at once. After a read, failed or not, the next is an interval later. A rate
+  limit defers the venue as elsewhere and leaves the read due, so it follows
+  once the venue's deadline passes.
+- **Quiet.** A failed read keeps the last window, like a Refresh's, and stores
+  the same fixed notice. Only the exception type is logged. Nothing is
+  announced: no event or notification, no Play attribution, and Review, sizing
+  and Activity's rules are unchanged. A Refresh still reads funding as before
+  and does not move the schedule.
 Browser account refresh allows 90 seconds for the sequential bounded history,
 funding and order-retention reads plus locking/persistence overhead. Play
 checks now use the monitor's asynchronous admission endpoint and retain its
 10-second request budget; neither scheduled checks nor Play checks add a funding
-read. Funding imports are applied in the monitor's short owner-scoped unit of
+read (the slow schedule reads funding in runs of its own). Funding imports are applied in the monitor's short owner-scoped unit of
 work only after revalidating the lease, settings, source and credential revision.
 
 `funding_payments` stores immutable normalized settlement facts, with exact
@@ -147,7 +177,8 @@ sharing a canonical key remain uncertain.
 Activity list/detail reads and retrospective previews use the same funding-aware
 identity resolver, so selecting an operation preserves its constituent grouping.
 Scheduled and Play checks can advance the latest observation without reading
-funding. An open operation can then become partial until the next owner refresh;
+funding. An open operation can then become partial until the next owner refresh
+or, for an account the slow schedule covers, its next scheduled funding read;
 retained payments are not removed or counted as a verified zero.
 
 All sums use `ExactAmount` integer arithmetic. Supported stablecoins pool

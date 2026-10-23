@@ -160,6 +160,12 @@ public interface IWorkspaceStore
     Task<IReadOnlyList<ImportedFill>> SaveHistoricalFillsAsync(Account account, IReadOnlyList<VenueFill> fills, DateTimeOffset observedAt,
         CancellationToken ct, IReadOnlyList<VenueOmission>? omissions = null) =>
         throw new NotSupportedException("This store cannot import backfilled fills.");
+    /// <summary>
+    /// Phase 2, item 9c: a scheduled funding read's settlements and coverage, deduplicated and merged like a Refresh's,
+    /// without the snapshot, fills or sync state. The caller holds the account lock and unit of work.
+    /// </summary>
+    Task SaveFundingAsync(Account account, VenueFundingReadResult result, CancellationToken ct) =>
+        throw new NotSupportedException("This store cannot import funding on its own.");
     // Management serializes owner grouping changes before acquiring account row locks.
     // Sync takes only the account lock, so independent venue reads can still run concurrently.
     Task<T> WithManagementLockAsync<T>(Func<Task<T>> action, CancellationToken ct);

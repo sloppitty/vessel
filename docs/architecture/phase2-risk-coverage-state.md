@@ -952,6 +952,58 @@ October 21, 2026.
 - **Check.** `scripts/check.sh` passed on `0e9ca318`, after the first run's only failure, the Overview
   query-count test, was updated for the revision read (10 queries instead of 9): backend 4,242 passed, 5 skipped; frontend 186 files and 4,141 tests.
 
+**9c. A slow schedule.** Implemented on `t3/phase2-funding-schedule`.
+- **The run.** The monitor worker reads settled funding every `Vessel:Funding:Interval` (6 hours by default,
+  1 hour to 7 days, never longer than `Lookback`) as a background run, trigger `funding`. Like a backfill, it
+  never moves the check schedule, attempt time, state or cooldown, and releases its lease when done.
+- **Who.** Enabled real accounts with a source, on venues with the funding capability, that have an Open
+  venue Play or keep their execution history. Paper accounts, disabled accounts, suspended owners and
+  manual records never.
+- **Priority.** A fourth scheduler pass after protection checks, kept-history reads and backfills. It needs
+  the protection headroom and the owner slot kept for protection, so a due check always goes first.
+- **The read** is the Refresh's own (`MonitorCoordinator.ReadFundingAsync`): 9a's cursor, windows and bounds,
+  saved in one unit under the account lock and fenced by the lease and the settings, source, venue and
+  credential it read with. It reads no account or order.
+- **Due time.** `monitor_accounts.NextFundingAtUtc` (migration `FundingSchedule`) is empty until the first
+  read, so a newly eligible account is due at once, and moves one interval after every finished read. A rate
+  limit defers the venue and leaves the read due.
+- **Quiet.** A failed read keeps the last window and the Refresh's fixed notice, and logs only the exception
+  type. No event, notification or Play attribution; Refresh, Review, sizing and Activity are unchanged.
+- **Tests.** `MonitorPostgresTests` (the cursor resumed each interval, the check schedule untouched, a due
+  check first, rate-limit deferral, a quiet failure, eligibility), `MultiOwnerWorkerTests` (protection first,
+  a suspended owner, no funding reader), `DueQueueTests` (a full page of skipped candidates, resuming across
+  ticks, the page budget), the keyset continuation against PostgreSQL, the Wallet-mode isolation case, the
+  interval bounds and the reviewed SQL inventory.
+- **Migration.** It is applied explicitly, never to the owner's database.
+- **Open questions for the owner.**
+  - A run that stops at the read limit waits a full interval even while coverage is partial; the backfill
+    brings its next run forward instead.
+  - A Refresh does not push the scheduled read back.
+  - An owner Check or Refresh during a funding run gets a 429, as during a backfill.
+  - After the migration every eligible account is due at once; the background slot paces them.
+  - Unresolved Plays do not count as Open.
+  - `Interval` must not exceed `Lookback`, so a `Lookback` under an hour now fails at startup.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `b0a2d2bb`. One finding, fixed in
+  `2ca2de90`:
+  - Funding discovery returned the first 100 due accounts every tick with no
+    continuation, so a full page of accounts the scheduler skips (a suspended
+    owner's, capped owners or venues, refused claims) hid every account after
+    them. The backfill pass had the same shape. Both passes now page through
+    a `DueQueue` that keeps its place across ticks, after the last candidate
+    examined; a tick that began part way starts again from the beginning
+    once.
+
+  Sol confirmed protection ordering, capacity reservations, lease renewal and
+  stale-result fencing; eligibility at claim, owner scopes, the paper,
+  disabled and source-less exclusions and the credential guards; the shared
+  windows, exact settlements, native nanoseconds, deduplication, coverage
+  merge and account locking; the due time on failure, rate limit,
+  cancellation and a superseded result; check scheduling, admission,
+  Activity invalidation, events, notifications and secret-safe logging; and
+  the migration and configuration. It noted untested mutation during a read,
+  lease loss and concurrent capacity, which it found sound statically.
+- **Check.** `scripts/check.sh` passed on `2ca2de90`: backend 4,258 passed, 5 skipped; frontend 186 files and 4,141 tests.
+
 ## 10. Planning assumptions and soft limits
 
 October 21, 2026.
