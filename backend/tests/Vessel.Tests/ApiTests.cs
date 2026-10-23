@@ -84,7 +84,7 @@ public sealed class ApiTests
         Assert.True(root.GetProperty("allowsConcurrentPlays").GetBoolean());
         Assert.Equal("11111111-1111-1111-1111-111111111111", root.GetProperty("owner").GetProperty("id").GetString());
         Assert.Equal("Owner", root.GetProperty("owner").GetProperty("displayName").GetString());
-        Assert.Equal(new[] { "hyperliquid:Hyperliquid:read-only", "risex:RISEx:read-only", "lighter:Lighter:read-only", "lighter-rh:Lighter · Robinhood:read-only", "quantfury:Quantfury:candidate", "manual:Manual:manual" },
+        Assert.Equal(new[] { "hyperliquid:Hyperliquid:read-only", "risex:RISEx:read-only", "lighter:Lighter:read-only", "lighter-rh:Lighter · Robinhood:read-only", "extended:Extended:candidate", "quantfury:Quantfury:candidate", "manual:Manual:manual" },
             root.GetProperty("venues").EnumerateArray().Select(v =>
                 $"{v.GetProperty("id").GetString()}:{v.GetProperty("name").GetString()}:{v.GetProperty("status").GetString()}"));
         // Capabilities tell the browser what each venue can do; planned venues can do nothing yet.
@@ -101,10 +101,10 @@ public sealed class ApiTests
         Assert.True(venues["manual"].GetProperty("capabilities").GetProperty("manualExecutions").GetBoolean());
         Assert.All(venues["manual"].GetProperty("capabilities").EnumerateObject().Where(c => c.Name != "manualExecutions"),
             c => Assert.False(c.Value.GetBoolean()));
-        Assert.All(new[] { "hyperliquid", "risex", "lighter", "lighter-rh", "quantfury" },
+        Assert.All(new[] { "hyperliquid", "risex", "lighter", "lighter-rh", "extended", "quantfury" },
             id => Assert.False(venues[id].GetProperty("capabilities").GetProperty("manualExecutions").GetBoolean()));
         // Logo keys come from the fixed backend set; planned venues have none.
-        Assert.Equal(["hyperliquid", "risex", "lighter", "lighter-rh", null, "manual"],
+        Assert.Equal(["hyperliquid", "risex", "lighter", "lighter-rh", null, null, "manual"],
             venues.Values.Select(v => v.GetProperty("logo").GetString()));
         Assert.Equal("significant-figures", hyperliquid.GetProperty("priceRule").GetString());
         Assert.Equal(["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "3d", "1w", "1M"],

@@ -57,7 +57,15 @@ The browser reads the same flag (`capabilities.currentOrderBook`, optional; `Ven
 
 ## Hosts and several instances of one module
 
-Venue hosts are configuration under `Vessel:Venues` (`Hyperliquid:BaseUrl`, `Hyperliquid:StreamUrl`, `Risex:BaseUrl`, `Lighter:BaseUrl`, `LighterRh:BaseUrl`), defaulting to the production hosts in `appsettings.json` and `VenueHostOptions`. `ValidateOnStart` requires absolute `https://` origins for REST (adapters send absolute request paths, so a base path would be silently dropped) and `wss://` for streams, with no user info, query or fragment; an origin without a trailing slash is normalized. Failures name the key, never the value. Tests override hosts through ordinary configuration. Operator settings are in [deploy/README.md](../../deploy/README.md#optional-venue-hosts).
+Venue hosts are configuration under `Vessel:Venues` (`Hyperliquid:BaseUrl`, `Hyperliquid:StreamUrl`, `Risex:BaseUrl`, `Lighter:BaseUrl`, `LighterRh:BaseUrl`, `Extended:BaseUrl`), defaulting to the production hosts in `appsettings.json` and `VenueHostOptions`. `ValidateOnStart` requires absolute `https://` origins for REST (adapters send absolute request paths, so a base path would be silently dropped) and `wss://` for streams, with no user info, query or fragment; an origin without a trailing slash is normalized. Failures name the key, never the value. Tests override hosts through ordinary configuration. Operator settings are in [deploy/README.md](../../deploy/README.md#optional-venue-hosts).
+
+October 23, 2026: [Extended](extended-integration.md) is a public-data-only candidate,
+not an account integration. Its descriptor registers instruments and manual
+candles, with no sync, orders, credentials or source identity supported. Settings
+labels this partial state; existing creation rules exclude it. Existing market-data
+HTTP routes require an account, so the adapter is not reachable from an ordinary
+Extended Play until a separate account/auth-policy decision. Do not broaden
+Manual or accept a cancellation-capable API key to bypass that boundary.
 
 One module may register several venues. The Lighter module registers one instance per `LighterExchange` (`lighter`, `lighter-rh`): each has its own descriptor, named `HttpClient`, keyed catalogue cache, keyed scoped reader and read gate, and registers each port once, so the registry and the `SingleOrDefault(v => v.VenueId == …)` lookups for discovery and credential verification find exactly one adapter per venue ID. See [robinhood-lighter-integration.md](robinhood-lighter-integration.md#implementation-state).
 

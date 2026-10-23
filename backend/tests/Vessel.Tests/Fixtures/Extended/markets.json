@@ -1,0 +1,80 @@
+{
+  "status": "OK",
+  "data": [
+    {
+      "name": "SHOP-USD",
+      "type": "PERPETUAL",
+      "assetName": "SHOP",
+      "assetPrecision": 2,
+      "collateralAssetName": "USD",
+      "active": true,
+      "status": "ACTIVE",
+      "category": "RWA",
+      "tradingConfig": {
+        "minOrderSizeChange": "0.01",
+        "minPriceChange": "0.001",
+        "maxLeverage": "10.00"
+      }
+    },
+    {
+      "name": "NOW_24_5-USD",
+      "type": "PERPETUAL",
+      "assetName": "NOW_24_5",
+      "assetPrecision": 2,
+      "collateralAssetName": "USD",
+      "active": true,
+      "status": "DELISTED",
+      "category": "RWA",
+      "tradingConfig": {
+        "minOrderSizeChange": "0.01",
+        "minPriceChange": "0.001",
+        "maxLeverage": "10.00"
+      }
+    },
+    {
+      "name": "USDTSPOT-USD",
+      "type": "SPOT",
+      "assetName": "USDTSPOT",
+      "assetPrecision": 6,
+      "collateralAssetName": "USD",
+      "active": true,
+      "status": "ACTIVE",
+      "category": "Crypto",
+      "tradingConfig": {
+        "minOrderSizeChange": "1",
+        "minPriceChange": "0.0001",
+        "maxLeverage": "1"
+      }
+    },
+    {
+      "name": "BTC-USD",
+      "type": "PERPETUAL",
+      "assetName": "BTC",
+      "assetPrecision": 5,
+      "collateralAssetName": "USD",
+      "active": true,
+      "status": "ACTIVE",
+      "category": "Crypto",
+      "tradingConfig": {
+        "minOrderSizeChange": "0.00001",
+        "minPriceChange": "1",
+        "maxLeverage": "50.00"
+      }
+    },
+    {
+      "name": "kDOGS-USD",
+      "type": "PERPETUAL",
+      "assetName": "kDOGS",
+      "assetPrecision": 0,
+      "collateralAssetName": "USD",
+      "active": true,
+      "status": "ACTIVE",
+      "category": "Crypto",
+      "tradingConfig": {
+        "minOrderSizeChange": "100",
+        "minPriceChange": "0.000001",
+        "maxLeverage": "5.00"
+      }
+    }
+  ]
+}
