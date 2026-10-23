@@ -29,6 +29,7 @@ public sealed class PacificaAdapterTests
             var key = request.RequestUri.AbsolutePath switch
             {
                 "/api/v1/info" => "info", "/api/v1/account" => "account", "/api/v1/positions" => "positions",
+                "/api/v1/account/settings" => "settings",
                 "/api/v1/trades/history" => "trades", "/api/v1/orders" => "orders",
                 "/api/v1/orders/history" => "history", "/api/v1/kline" => "candles", _ => throw new Exception("Unexpected route")
             };
@@ -167,16 +168,60 @@ public sealed class PacificaAdapterTests
         await Assert.ThrowsAsync<VenueReadException>(() => Reader(fixture).Reader.ReadAsync(Source, default));
     }
 
-    [Fact]
-    public async Task Open_positions_are_incomplete_not_fabricated_zero_pnl_margin_or_max_leverage()
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(0, true)]
+    [InlineData(1, false)]
+    public async Task Open_or_inconsistent_position_reads_fail_before_any_snapshot_or_history_can_be_imported(int count, bool hasRow)
     {
         var fixture = Fixture();
-        fixture["positions"]!["data"]!.AsArray().Add(new JsonObject
-            { ["symbol"] = "BTC", ["side"] = "bid", ["amount"] = "1", ["entry_price"] = "100", ["margin"] = "0", ["isolated"] = false });
-        fixture["account"]!["data"]!["positions_count"] = 1;
-        var result = await Reader(fixture).Reader.ReadAsync(Source, default);
-        Assert.False(result.PositionsComplete); Assert.Empty(result.Snapshot.Positions);
-        Assert.Contains("Leverage is not inferred", result.HistoryNotice);
+        if (hasRow) fixture["positions"]!["data"]!.AsArray().Add(new JsonObject
+            { ["symbol"] = "BTC", ["side"] = "bid", ["amount"] = "1", ["entry_price"] = "90", ["isolated"] = false });
+        fixture["account"]!["data"]!["positions_count"] = count;
+        var (reader, routes) = Reader(fixture);
+        var failure = await Assert.ThrowsAsync<VenueReadException>(() => reader.ReadAsync(Source, default));
+        Assert.Contains("open positions", failure.Message);
+        Assert.DoesNotContain(routes.Requests, path => path.StartsWith("/api/v1/trades/history", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("false")]
+    [InlineData("null")]
+    [InlineData("missing")]
+    [InlineData("\"true\"")]
+    [InlineData("1")]
+    public async Task Lending_is_not_assumed_disabled_from_default_unknown_or_malformed_settings(string setting)
+    {
+        var fixture = Fixture();
+        // Review P2: an eligible idle-USDC lender has zero borrower interest and no positions or spot assets.
+        fixture["account"]!["data"]!["balance"] = "1500";
+        fixture["account"]!["data"]!["account_equity"] = "1500";
+        fixture["account"]!["data"]!["total_margin_used"] = "0";
+        if (setting == "missing") fixture["settings"]!["data"]!.AsObject().Remove("auto_lend_disabled");
+        else fixture["settings"]!["data"]!["auto_lend_disabled"] = JsonNode.Parse(setting);
+        var (reader, routes) = Reader(fixture);
+        var failure = await Assert.ThrowsAsync<VenueReadException>(() => reader.ReadAsync(Source, default));
+        Assert.Contains("explicitly disabled", failure.Message);
+        Assert.DoesNotContain(routes.Requests, path => path.StartsWith("/api/v1/trades/history", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Only_explicit_lending_disablement_permits_exact_values_and_the_setting_is_checked_on_every_refresh()
+    {
+        var fixture = Fixture();
+        fixture["account"]!["data"]!["balance"] = "1500.123456789123456789";
+        fixture["account"]!["data"]!["account_equity"] = "1500.123456789123456789";
+        fixture["account"]!["data"]!["available_to_spend"] = "0";
+        fixture["account"]!["data"]!["total_margin_used"] = "0";
+        var (reader, routes) = Reader(fixture);
+        var result = await reader.ReadAsync(Source, default);
+        Assert.Equal(1500.123456789123456789m, result.Snapshot.AccountValueUsd);
+        Assert.Equal(0m, result.Snapshot.AvailableMarginUsd);
+        Assert.True(result.PositionsComplete); Assert.Empty(result.Snapshot.Positions);
+        Assert.Contains(routes.Requests, path => path == "/api/v1/account/settings?account=" + Source);
+        fixture["settings"]!["data"]!["auto_lend_disabled"] = false;
+        await Assert.ThrowsAsync<VenueReadException>(() => reader.ReadAsync(Source, default));
+        Assert.Equal(2, routes.Requests.Count(path => path.StartsWith("/api/v1/account/settings?", StringComparison.Ordinal)));
     }
 
     [Theory]

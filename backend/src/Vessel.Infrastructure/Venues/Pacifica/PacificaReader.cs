@@ -150,6 +150,14 @@ public sealed partial class PacificaReader(HttpClient client, TimeProvider time,
         return http.ReadBoundedAsync(async ct =>
         {
             var catalogue = await CatalogueAsync(ct, refresh: true);
+            using var settingsDoc = await Get($"/api/v1/account/settings?account={source}", ct);
+            var settings = Data(settingsDoc);
+            if (settings.ValueKind != JsonValueKind.Object) throw Json.Invalid();
+            // pending_interest is borrower interest, not a lender indicator. Pacifica enables implicit lending by
+            // default; only an explicit public opt-out establishes the supported no-lending account scope.
+            if (!settings.TryGetProperty("auto_lend_disabled", out var disabled) || disabled.ValueKind != JsonValueKind.True)
+                throw new VenueReadException("Pacifica automatic lending must be explicitly disabled at the venue before refreshing. No refresh was imported.")
+                    { IsDeterministicSourceFailure = true };
             using var accountDoc = await Get($"/api/v1/account?account={source}", ct);
             var account = Data(accountDoc);
             // account_equity now includes raw spot market value. Never silently add non-stable valuation or lending.
@@ -161,9 +169,11 @@ public sealed partial class PacificaReader(HttpClient client, TimeProvider time,
             var positionRows = Rows(Data(positions));
             var count = Json.Integer(Json.Property(account, "positions_count"));
             if (count < 0) throw Json.Invalid();
-            // REST does not report per-position unrealized PnL or cross margin usage. The shared position model
-            // requires both; omit instead of filling them with zero/mark-derived guesses or inferring leverage.
-            var positionsComplete = positionRows.GetArrayLength() == 0 && count == 0;
+            // Completeness does not survive into the stored snapshot. Publishing [] with a transient incomplete
+            // flag would look flat to Activity/sizing/Review, so unsupported or inconsistent positions abort the read.
+            if (positionRows.GetArrayLength() != 0 || count != 0)
+                throw new VenueReadException("Pacifica open positions cannot be projected safely. Refresh only when the account has no open positions. No refresh was imported.")
+                    { IsDeterministicSourceFailure = true };
             At(account, "updated_at");
             var snapshot = new VenueSnapshot(time.GetUtcNow(), "pacifica-perpetual-account-equity",
                 Number(account, "account_equity"), Json.OptionalAmount(account, "available_to_withdraw"),
@@ -206,11 +216,11 @@ public sealed partial class PacificaReader(HttpClient client, TimeProvider time,
             var notice = "Pacifica: at most 1,000 recent raw executions per refresh; not complete lifetime history. " +
                 "Reported trade PnL is net of trading fees; funding inclusion is unknown. " +
                 $"Omitted executions: {omitted} unsupported or unverified records. " +
-                (positionsComplete ? "" : "Open positions omitted: REST does not report unrealized PnL and cross-position margin usage. Leverage is not inferred. ") +
+                "Refresh requires no open positions and explicit automatic-lending disablement. Leverage is not inferred. " +
                 "Unverified contract denominations are omitted. Account equity excludes unsupported spot/lending accounts. " +
                 "Funding settlements are not imported: payout sign is unverified.";
             return new PerpetualVenueReadResult(snapshot, catalogue.Instruments, fills, notice,
-                PositionsComplete: positionsComplete, FillHistoryComplete: false, FillHistoryTruncated: more,
+                PositionsComplete: true, FillHistoryComplete: false, FillHistoryTruncated: more,
                 OldestRawFillAtUtc: coverage.OldestAtUtc, OmittedExecutions: omitted);
         }, cancellationToken);
     }

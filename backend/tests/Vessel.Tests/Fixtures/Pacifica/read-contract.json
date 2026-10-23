@@ -252,5 +252,15 @@
     ],
     "error": null,
     "code": null
+  },
+  "settings": {
+    "success": true,
+    "data": {
+      "auto_lend_disabled": true,
+      "margin_settings": [],
+      "spot_settings": []
+    },
+    "error": null,
+    "code": null
   }
 }

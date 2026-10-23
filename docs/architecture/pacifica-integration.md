@@ -2,7 +2,9 @@
 
 Verified **October 23, 2026**, independently of the Extended adapter. Implementation
 base: `315144f011ae86c73db6080ed3debd7201f714a1`; origin is
-`git@github.com:sloppitty/vessel.git`. Independent adversarial review is **pending**.
+`git@github.com:sloppitty/vessel.git`. Independent adversarial review of
+`9924705f` **requested changes** (P1 flat-snapshot safety, P2 automatic lending).
+The corrections below await a **new independent review**; they are not approval.
 No deployment, owner's database migration, publication, signing or trading is authorized.
 
 ## Primary-source verification
@@ -22,7 +24,15 @@ Primary sources checked:
    Production REST origin is `https://api.pacifica.fi`.
 2. [Account info](https://docs.pacifica.fi/api-documentation/api/rest-api/account/get-account-info),
    [positions](https://docs.pacifica.fi/api-documentation/api/rest-api/account/get-positions),
-   [settings](https://docs.pacifica.fi/api-documentation/api/rest-api/account/get-account-settings).
+   [settings](https://docs.pacifica.fi/api-documentation/api/rest-api/account/get-account-settings),
+   [loan info](https://docs.pacifica.fi/api-documentation/api/rest-api/account/get-account-loan-info).
+   Settings, loan info and the
+   [Money Market](https://docs.pacifica.fi/trading-on-pacifica/money-market)
+   were re-fetched October 23 for P2: automatic lending is enabled by default,
+   `auto_lend_disabled=null` means enabled, and `pending_interest` belongs to
+   borrowers rather than identifying lenders. Explicit `auto_lend_disabled=true`
+   excludes the account's USDC from the lending pool and yield. Loan info was
+   research evidence only; Vessel does not import loan/yield amounts.
 3. [Account trade history](https://docs.pacifica.fi/api-documentation/api/rest-api/account/get-trade-history),
    [account trade subscription schema/example](https://docs.pacifica.fi/api-documentation/api/websocket/subscriptions/account-trades).
    The subscription is evidence for financial semantics, **not an implemented stream**.
@@ -66,6 +76,16 @@ Primary sources checked:
 
 `pacifica`, read-only, source `solana-address`, nominal USDC, tick-size price rule.
 Sync, instruments, reported orders and manual trade candles are enabled.
+**Refresh/history import is fail-closed:** it requires a fresh public settings
+read with literal `auto_lend_disabled=true`, zero `positions_count`, an empty
+`/positions` result, and no unsupported spot collateral/balances or borrower
+interest. Otherwise the entire refresh fails before publishing a snapshot or
+executions. A transient `PositionsComplete=false` cannot safely stand in for
+unknown stored quantities, so it is not used to publish an empty projection.
+Existing good facts remain intact; a new account receives neither a snapshot
+nor historical fills on failure. Account/monitor failure state may be recorded.
+These account/settings/position reads are observations, not an atomic venue
+transaction or a guarantee that external settings will never change.
 The current ordinary/stop order endpoint is read, but `OpenOrdersComplete` is
 **always false**: TWAP/strategy parents and unsupported whole-position triggers
 are not covered. Absence cannot establish cancellation or missing protection.
@@ -89,8 +109,9 @@ startup host validation requires an HTTPS origin without user-info/query/path.
 | Endpoint | Read contract / bounds |
 | --- | --- |
 | `GET /api/v1/info` | Full public catalogue, local 10,000-row ceiling, one-minute shared public metadata cache/single-flight; refresh/import forces fresh metadata. Only `instrument_type=perpetual` is selectable. |
+| `GET /api/v1/account/settings?account=…` | Public unsigned read on every refresh, never cached. Require explicit boolean `auto_lend_disabled=true`; false, null/default, omission and malformed values all fail the refresh. No setting is changed. |
 | `GET /api/v1/account?account=…` | Reported `account_equity`, `total_margin_used`, optional `available_to_spend` and `available_to_withdraw`; validate `updated_at`. No browser request goes directly to Pacifica. |
-| `GET /api/v1/positions?account=…` | Current unpaginated positions, local 10,000-row ceiling. Used only to establish an empty position set; nonempty positions are explicitly omitted (below). |
+| `GET /api/v1/positions?account=…` | Current unpaginated positions, local 10,000-row ceiling. Any row or any nonzero `positions_count` aborts the entire refresh; only matching empty/zero observations can publish an empty snapshot. |
 | `GET /api/v1/trades/history?account=…&limit=100[&cursor=…]` | At most 10 pages / 1,000 **raw** rows per refresh, all symbols, opaque escaped `next_cursor`, explicit `has_more`. No undocumented time ordering/maximum request limit assumed. |
 | `GET /api/v1/orders/history?account=…&limit=100[&cursor=…]` | Same 10-page / 1,000 raw-row bound, summarized historical statuses, not a current book. No event-history expansion. |
 | `GET /api/v1/orders?account=…` | Independent current ordinary/stop read after history, local 10,000-row ceiling. Current updates replace older history only with compatible identity and chronology. |
@@ -164,15 +185,26 @@ continuity recording remain in place; Refresh cannot clear a known history gap.
 1. **Open position projection:** documented `/positions` has size, entry price,
    isolated margin/funding and side, but no per-position unrealized PnL or cross
    margin requirement. Vessel's current position projection requires both money
-   fields, so nonempty rows are not manufactured with zero, calculated from mark,
-   or used to infer flatness. `PositionsComplete=false` and the persisted notice
-   state the omission. Metadata maximum leverage and omitted default settings
-   are never treated as reported historical leverage. No new leverage
-   observations are created for these unknown positions.
+   fields, so **any nonempty response or nonzero account position count fails the
+   entire refresh**, including the first history import. It does not publish
+   `Positions=[]` with an incomplete flag: that flag is not retained by the
+   current snapshot model and Activity would interpret absent quantity as zero.
+   No previously retained snapshot, position or execution is replaced, and no
+   new fill is imported. Only matching empty/zero observations return
+   `PositionsComplete=true`. This limits refresh/import to accounts without open
+   positions until unknown quantity coverage can survive persistence and gate
+   all downstream consumers. No PnL/margin/leverage is invented.
 2. **Spot/unified/lending equity:** account equity now includes raw spot market
    value. Any nonzero spot balance/value/collateral or accrued loan interest
    rejects the refresh before persistence with an explicit unsupported-account
-   error. No non-stable valuation, lending or second wallet total is silently added.
+   error. **Zero borrower interest does not establish a non-lending account.**
+   The public settings response must additionally report explicit boolean
+   `auto_lend_disabled=true` on every refresh; false, null/default-enabled,
+   missing and malformed settings are refused even below the current lender
+   threshold. Vessel never signs a lending-setting change or asks for a
+   credential. The owner must choose to opt out using the venue outside Vessel
+   before refreshing; the default-enabled initial refresh may fail and keeps the
+   created account. No lending valuation, yield or second wallet ledger is added.
 3. **Funding settlement sign:** `/funding/history` is real payment history with
    `history_id`, symbol, side, payout, rate and milliseconds, unlike public
    historical rates. However, the payout field says “Funding paid” without
@@ -191,15 +223,34 @@ subset and entirely synthetic account/execution/order/candle fixtures, with no
 owner account reads. Tests cover exact source/ID preservation, decoded validation,
 database uniqueness and owner scopes, legacy migration compatibility, strict
 omissions, fee/PnL absence, liquidation/flip/correction cases, cursor escaping,
-cycles, truncation before filtering, duplicates, partial positions/orders,
+cycles, truncation before filtering, duplicates, rejected unsupported positions, partial orders,
 manual candles, safe HTTP errors, rate limits and the real locked refresh path.
 
-Focused backend verification passes **97 tests** (Pacifica, venue registry,
+### Independent review corrections: P1 and P2
+
+The review's missing-earlier-entry repro (old long `1 BTC @ 80` outside
+retained history, retained buy `1 @ 100` and sell `1 @ 110`, venue still long
+`1 @ 90`) is now rejected before persistence rather than turned into an apparent
+closed win. `PacificaSafetyPostgresTests` exercises the actual admitted refresh
+and newly isolated PostgreSQL schemas, both with existing good state and with no
+initial snapshot. It verifies retained snapshots/positions/fills remain unchanged,
+Activity has no false closure, sizing has no decided outcome, the imported-position
+eligibility source is empty, and forced imported-position Review scores nothing.
+The same four-case regression covers the review's default-enabled 1,500-USDC
+lender with no positions, spot assets or borrower interest. Adapter regressions
+cover true/false/null/default/malformed settings, exact values and fresh
+revalidation after a settings change. These **13 cases failed before the
+corrections and passed afterward**. No shared persistence/scoring abstraction,
+schema change or automatic setting mutation was introduced for these fixes.
+
+Focused backend verification passes **109 tests** (Pacifica, venue registry,
 existing Lighter-instance regressions and the exact API metadata contract)
 with the isolated parent's PostgreSQL fixture.
 Full frontend verification passes **4,061 tests across 168 files**; focused frontend
 verification passes **111 tests**. Typecheck, lint and production build pass.
-The Release solution build passes with zero warnings/errors. These cover the source validator, capability-driven account creation,
+Those frontend checks precede the backend-only P1/P2 changes; no frontend file changed
+in this correction. The Release solution build passes with zero warnings/errors.
+These cover the source validator, capability-driven account creation,
 case-sensitive grouping and bundled logo allowlist. Broader checks and independent
 adversarial review are tracked in the PR; this document does not claim sign-off.
 The standalone full backend run was stopped at the parent's request to avoid
