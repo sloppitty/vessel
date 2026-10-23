@@ -20,6 +20,12 @@ public interface ISystemMonitorStore
     /// longest waiting first. A backfill that reads moves its due time on, so the others follow.
     /// </summary>
     Task<IReadOnlyList<DueMonitorCandidate>> DueBackfillsAsync(int limit, CancellationToken ct);
+    /// <summary>
+    /// Phase 2, item 9c: up to <paramref name="limit"/> enabled real accounts on <paramref name="venueIds"/> (the venues with
+    /// a funding reader) with an Open venue Play or kept execution history, whose scheduled funding read is due and that have
+    /// no other run or due check, longest waiting first. A run moves its due time on, so the others follow.
+    /// </summary>
+    Task<IReadOnlyList<DueMonitorCandidate>> DueFundingAsync(IReadOnlyCollection<string> venueIds, int limit, CancellationToken ct);
 }
 
 public sealed record ServerMonitorHeartbeat(string Deployment, DateTimeOffset HeartbeatAtUtc);

@@ -61,4 +61,35 @@ public sealed class SystemMonitorStore(NpgsqlDataSource data, TimeProvider time)
         while (await rows.ReadAsync(ct)) result.Add(new(rows.GetGuid(0), rows.GetGuid(1), rows.GetString(2), rows.GetFieldValue<DateTimeOffset>(3)));
         return result;
     }
+
+    public async Task<IReadOnlyList<DueMonitorCandidate>> DueFundingAsync(IReadOnlyCollection<string> venueIds, int limit, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(limit, 1000);
+        if (venueIds.Count == 0) return [];
+        // Keys only. An account never read has no due time and comes first; an abandoned run's expired lease does not hide
+        // its account, and an account whose own check is due waits for it. Each claim rechecks all of this in its owner's scope.
+        await using var command = data.CreateCommand("""
+            SELECT a."OwnerId", a."Id", a."VenueId", COALESCE(m."NextFundingAtUtc", TIMESTAMPTZ '1970-01-01') AS due_at
+            FROM accounts a
+            LEFT JOIN monitor_accounts m ON m."AccountId" = a."Id" AND m."OwnerId" = a."OwnerId"
+            WHERE a."IsEnabled" AND a."TradingMode" = 'real' AND a."SourceId" IS NOT NULL AND a."VenueId" = ANY(@venues)
+                AND (a."KeepExecutionHistory" OR EXISTS (SELECT 1 FROM plays p
+                    WHERE p."OwnerId" = a."OwnerId" AND p."AccountId" = a."Id" AND p."TradingMode" = 'real'
+                        AND p."InstrumentSource" = 'Venue' AND p."Status" = 'Open'))
+                AND (m."NextFundingAtUtc" IS NULL OR m."NextFundingAtUtc" <= @now)
+                AND (m."NextRunAtUtc" IS NULL OR m."NextRunAtUtc" > @now)
+                AND (m."AccountId" IS NULL OR m."ManualState" = 'idle' OR m."LeaseUntilUtc" <= @now)
+                AND NOT EXISTS (SELECT 1 FROM server_venue_deadlines d
+                    WHERE d.venue_id = a."VenueId" AND d.retry_after_until > @now)
+            ORDER BY due_at, a."OwnerId", a."Id" LIMIT @limit
+            """);
+        command.Parameters.AddWithValue("now", time.GetUtcNow());
+        command.Parameters.AddWithValue("venues", venueIds.ToArray());
+        command.Parameters.AddWithValue("limit", limit);
+        await using var rows = await command.ExecuteReaderAsync(ct);
+        var result = new List<DueMonitorCandidate>();
+        while (await rows.ReadAsync(ct)) result.Add(new(rows.GetGuid(0), rows.GetGuid(1), rows.GetString(2), rows.GetFieldValue<DateTimeOffset>(3)));
+        return result;
+    }
 }

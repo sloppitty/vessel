@@ -149,6 +149,89 @@ public sealed class MultiOwnerWorkerTests
         fixture.Venue.Release.TrySetResult();
     }
 
+    /// <summary>
+    /// Phase 2, item 9c: a due funding read runs after protection checks and never takes the worker slot they leave free. Once
+    /// the slot is free it reads the account's funding in a run of its own, without moving its check schedule; a suspended
+    /// owner's account is never read.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_due_funding_read_waits_behind_a_due_protection_check_and_its_free_slot_and_skips_suspended_owners()
+    {
+        await using var fixture = await Fixture.CreateAsync(funding: true);
+        var protection = fixture.Accounts[fixture.Second];
+        var kept = fixture.Accounts[fixture.First];
+        var checkDue = await KeptHistoryWithoutDueCheckAsync(fixture, fixture.First);
+        await KeptHistoryWithoutDueCheckAsync(fixture, fixture.Suspended);
+        var scheduler = fixture.Host.Services.GetServices<IHostedService>().OfType<MonitorScheduler>().Single();
+        await scheduler.TickAsync(default);
+        await fixture.EventuallyAsync(async () =>
+        {
+            await using var db = fixture.Database.Context(fixture.Second);
+            return (await db.Set<MonitorAccount>().SingleAsync(m => m.AccountId == protection)).ManualState == "running";
+        });
+        var venue = (FundingGatedVenue)fixture.Venue;
+        await using (var db = fixture.Database.Context(fixture.First))
+            Assert.Null((await db.Set<MonitorAccount>().AsNoTracking().SingleAsync(m => m.AccountId == kept)).NextFundingAtUtc);
+        Assert.Empty(venue.FundingReads);
+
+        fixture.Venue.Release.TrySetResult();
+        await fixture.EventuallyAsync(async () =>
+        {
+            await using var db = fixture.Database.Context(fixture.Second);
+            return (await db.Set<MonitorAccount>().SingleAsync(m => m.AccountId == protection)).ManualState == "idle";
+        });
+        await scheduler.TickAsync(default);
+        await fixture.EventuallyAsync(async () =>
+        {
+            await using var db = fixture.Database.Context(fixture.First);
+            return (await db.Set<MonitorAccount>().AsNoTracking().SingleAsync(m => m.AccountId == kept)) is { ManualState: "idle", NextFundingAtUtc: not null };
+        });
+        await using (var db = fixture.Database.Context(fixture.First))
+        {
+            var row = await db.Set<MonitorAccount>().AsNoTracking().SingleAsync(m => m.AccountId == kept);
+            Assert.Equal((fixture.Clock.GetUtcNow().AddHours(6), checkDue, (DateTimeOffset?)null),
+                (row.NextFundingAtUtc!.Value, row.NextRunAtUtc!.Value, row.LastAttemptAtUtc));
+            Assert.True((await db.FundingStates.AsNoTracking().SingleAsync()).LastReadComplete);
+        }
+        // Only the active owner with kept history was read: not the protection account, which has no funding work, and not
+        // the suspended owner's.
+        Assert.Equal(new[] { fixture.First }, venue.FundingReads.Distinct());
+        await using (var db = fixture.Database.Context(fixture.Suspended))
+        {
+            Assert.Empty(await db.FundingStates.AsNoTracking().ToListAsync());
+            Assert.Null((await db.Set<MonitorAccount>().AsNoTracking().SingleAsync()).NextFundingAtUtc);
+        }
+    }
+
+    /// <summary>Phase 2, item 9c: on a venue without a funding reader the schedule offers nothing, even when nothing else runs.</summary>
+    [PostgresFact]
+    public async Task A_venue_without_a_funding_reader_is_never_offered_to_the_funding_schedule()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var kept = fixture.Accounts[fixture.First];
+        await KeptHistoryWithoutDueCheckAsync(fixture, fixture.First);
+        await using (var second = fixture.Database.Context(fixture.Second)) await second.Plays.ExecuteDeleteAsync();
+        var scheduler = fixture.Host.Services.GetServices<IHostedService>().OfType<MonitorScheduler>().Single();
+        await scheduler.TickAsync(default);
+        await using var db = fixture.Database.Context(fixture.First);
+        var row = await db.Set<MonitorAccount>().AsNoTracking().SingleAsync(m => m.AccountId == kept);
+        Assert.Equal(("idle", (DateTimeOffset?)null), (row.ManualState, row.NextFundingAtUtc));
+        Assert.Empty(fixture.Venue.Reads);
+    }
+
+    /// <summary>The owner's account keeps its history, has no Play, and its own check is an hour away.</summary>
+    private static async Task<DateTimeOffset> KeptHistoryWithoutDueCheckAsync(Fixture fixture, Guid owner)
+    {
+        await using var db = fixture.Database.Context(owner);
+        await db.Plays.ExecuteDeleteAsync();
+        var account = await db.Accounts.SingleAsync();
+        account.UpdateSettings(account.Name, null, true, keepExecutionHistory: true);
+        var due = fixture.Clock.GetUtcNow().AddHours(1);
+        db.Add(new MonitorAccount { AccountId = account.Id, OwnerId = owner, NextRunAtUtc = due });
+        await db.SaveChangesAsync();
+        return due;
+    }
+
     [PostgresFact]
     public async Task Scheduler_shutdown_cancellation_propagates_instead_of_skipping_the_owner()
     {
@@ -569,13 +652,13 @@ public sealed class MultiOwnerWorkerTests
     private sealed class Fixture : IAsyncDisposable
     {
         public string Heartbeat { get; } = Path.Combine(Path.GetTempPath(), "vessel-owner-heartbeat-" + Guid.NewGuid().ToString("N"));
-        private Fixture(CoreDatabase database, int concurrency, int venueConcurrency)
+        private Fixture(CoreDatabase database, int concurrency, int venueConcurrency, bool funding)
         {
             Database = database;
             Directory.Set(First, JournalOwnerStatus.Active);
             Directory.Set(Second, JournalOwnerStatus.Active);
             Directory.Set(Suspended, JournalOwnerStatus.Suspended);
-            Venue = new(Clock);
+            Venue = funding ? new FundingGatedVenue(Clock) : new GatedVenue(Clock);
             var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
             builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -610,9 +693,11 @@ public sealed class MultiOwnerWorkerTests
         public OwnerFailure Failures { get; } = new();
         public Dictionary<Guid, Guid> Accounts { get; } = [];
 
-        public static async Task<Fixture> CreateAsync(int firstAccounts = 1, int secondAccounts = 1, int concurrency = 2, int venueConcurrency = 4)
+        /// <param name="funding">Phase 2, item 9c: the venue also reads settled funding (<see cref="FundingGatedVenue"/>).</param>
+        public static async Task<Fixture> CreateAsync(int firstAccounts = 1, int secondAccounts = 1, int concurrency = 2, int venueConcurrency = 4,
+            bool funding = false)
         {
-            var fixture = new Fixture(await CoreDatabase.CreateAsync(), concurrency, venueConcurrency);
+            var fixture = new Fixture(await CoreDatabase.CreateAsync(), concurrency, venueConcurrency, funding);
             foreach (var owner in new[] { fixture.First, fixture.Second, fixture.Suspended })
             {
                 var count = owner == fixture.First ? firstAccounts : owner == fixture.Second ? secondAccounts : 1;
@@ -658,7 +743,7 @@ public sealed class MultiOwnerWorkerTests
         }
     }
 
-    private sealed class GatedVenue(RenewalClock clock) : IPerpetualVenueReader, IVenueOrderReader
+    private class GatedVenue(RenewalClock clock) : IPerpetualVenueReader, IVenueOrderReader
     {
         private int activeReads;
         public int PeakReads { get; private set; }
@@ -682,6 +767,18 @@ public sealed class MultiOwnerWorkerTests
         }
         public Task<VenueOrderReadResult> ReadOrdersAsync(string source, CancellationToken ct) =>
             Task.FromResult(new VenueOrderReadResult([], clock.GetUtcNow(), "Synthetic isolated orders", OpenOrdersComplete: true));
+    }
+
+    /// <summary>Phase 2, item 9c: the gated venue with a funding reader, which answers at once with one settlement per window.</summary>
+    private sealed class FundingGatedVenue(RenewalClock clock) : GatedVenue(clock), IVenueFundingReader
+    {
+        public ConcurrentBag<Guid> FundingReads { get; } = [];
+        public Task<VenueFundingReadResult> ReadFundingAsync(Account account, DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken ct)
+        {
+            FundingReads.Add(account.OwnerId);
+            return Task.FromResult(new VenueFundingReadResult([new($"gated-{fromUtc.ToUnixTimeMilliseconds()}", "BTC", "BTC", -1m, "USDC",
+                fromUtc, "{}")], fromUtc, toUtc, true, "Synthetic settled funding."));
+        }
     }
 
     private sealed class OwnerFailure : DbCommandInterceptor

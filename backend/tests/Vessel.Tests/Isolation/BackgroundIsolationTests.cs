@@ -6,6 +6,7 @@ using Vessel.Application.Monitoring;
 using Vessel.Application.Ownership;
 using Vessel.Application.Plays;
 using Vessel.Application.Venues;
+using Vessel.Application.Workspace;
 using Vessel.Domain.Monitoring;
 using Vessel.Infrastructure.Monitoring;
 using Vessel.Persistence;
@@ -134,6 +135,78 @@ public sealed class BackgroundIsolationTests(WalletIsolationApi api) : IClassFix
                     .ClaimAsync(aAccount, null, Worker, api.Clock.Now, default)).OwnerId);
         }
         finally { api.Clock.Now = now; }
+    }
+
+    /// <summary>A synced account that keeps its execution history, so the slow funding schedule reads it (Phase 2, item 9c).</summary>
+    private static async Task<Guid> KeptHistory(Owner owner)
+    {
+        var account = (await owner.SyncedVenueAccount(Isolated.Marker("venue"))).GetProperty("id").GetGuid();
+        var current = await owner.GetJson($"/api/accounts/{account}");
+        await owner.Send(HttpMethod.Put, $"/api/accounts/{account}", new UpdateAccountRequest(current.GetProperty("name").GetString()!, null, true,
+            current.GetProperty("settingsRevision").GetInt64(), KeepExecutionHistory: true));
+        return account;
+    }
+
+    /// <summary>The stored funding state and settlements, read in their owner's own context.</summary>
+    private async Task<string> Funding(Guid owner, Guid account)
+    {
+        await using var db = api.Database.Context(owner);
+        return JsonSerializer.Serialize(new
+        {
+            State = await db.FundingStates.AsNoTracking().SingleOrDefaultAsync(s => s.AccountId == account),
+            Payments = await db.FundingPayments.AsNoTracking().Where(p => p.AccountId == account).OrderBy(p => p.SourceId).ToListAsync()
+        });
+    }
+
+    /// <summary>
+    /// Phase 2, item 9c: the slow funding schedule lists each due account under its own owner. Only that owner's scope can
+    /// claim and run it, and the run writes that owner's funding only.
+    /// </summary>
+    [PostgresFact]
+    public async Task Owner_scopes_claim_and_run_only_their_own_scheduled_funding_reads()
+    {
+        var (a, b) = await api.Owners();
+        var aAccount = await KeptHistory(a);
+        var bAccount = await KeptHistory(b);
+        var scopes = api.Factory.Services.GetRequiredService<IOwnerScopeFactory>();
+        var registry = api.Factory.Services.GetRequiredService<IVenueRegistry>();
+        var venues = registry.Descriptors.Where(v => v.Capabilities.Sync && registry.Funding(v.Id) is not null).Select(v => v.Id).ToArray();
+        var due = await api.Factory.Services.GetRequiredService<ISystemMonitorStore>().DueFundingAsync(venues, 1000, default);
+        Assert.Equal(a.Id, Assert.Single(due, c => c.AccountId == aAccount).OwnerId);
+        Assert.Equal(b.Id, Assert.Single(due, c => c.AccountId == bAccount).OwnerId);
+        var aRow = await Row(a.Id, aAccount);
+        var aFunding = await Funding(a.Id, aAccount);
+        var bFunding = await Funding(b.Id, bAccount);
+
+        // A's scope cannot claim B's account, and B's row stays as it was.
+        var bRow = await Row(b.Id, bAccount);
+        await using (var scope = scopes.Create(a.Id))
+            Assert.Null(await scope.Services.GetRequiredService<IMonitorStore>().ClaimFundingAsync(bAccount, Worker, api.Clock.Now, default));
+        Assert.Equal(bRow, await Row(b.Id, bAccount));
+
+        // B's own scope claims it; A's scope refuses B's lease as issued.
+        MonitorLease lease;
+        await using (var scope = scopes.Create(b.Id))
+            lease = Assert.IsType<MonitorLease>(await scope.Services.GetRequiredService<IMonitorStore>()
+                .ClaimFundingAsync(bAccount, Worker, api.Clock.Now, default));
+        Assert.Equal((b.Id, bAccount, "funding"), (lease.OwnerId, lease.AccountId, lease.Trigger));
+        await using (var scope = scopes.Create(a.Id))
+            await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Services.GetRequiredService<MonitorCoordinator>().RunAsync(lease, default));
+
+        // B's run reads B's funding again and moves only B's next read.
+        await using (var scope = scopes.Create(b.Id))
+            Assert.True(await scope.Services.GetRequiredService<MonitorRunExecutor>().RunAsync(lease, default));
+        var settled = JsonDocument.Parse(await Row(b.Id, bAccount)).RootElement;
+        Assert.Equal(("idle", api.Clock.Now.AddHours(6)), (settled.GetProperty(nameof(MonitorAccount.ManualState)).GetString(),
+            settled.GetProperty(nameof(MonitorAccount.NextFundingAtUtc)).GetDateTimeOffset()));
+        Assert.NotEqual(bFunding, await Funding(b.Id, bAccount));
+        Assert.Equal(aRow, await Row(a.Id, aAccount));
+        Assert.Equal(aFunding, await Funding(a.Id, aAccount));
+
+        // A's own claim is still admitted.
+        await using (var scope = scopes.Create(a.Id))
+            Assert.Equal(a.Id, Assert.IsType<MonitorLease>(await scope.Services.GetRequiredService<IMonitorStore>()
+                .ClaimFundingAsync(aAccount, Worker, api.Clock.Now, default)).OwnerId);
     }
 
     /// <summary>A background call's result, or the refusal it threw, comparable between two attempts.</summary>

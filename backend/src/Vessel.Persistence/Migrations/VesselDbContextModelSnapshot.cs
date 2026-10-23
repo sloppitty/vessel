@@ -499,6 +499,9 @@ namespace Vessel.Persistence.Migrations
                     b.Property<DateTimeOffset?>("NewestFillAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("NextFundingAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset?>("NextManualAllowedAtUtc")
                         .HasColumnType("timestamp with time zone");
 

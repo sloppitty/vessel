@@ -202,6 +202,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         var before = await store.FindAsync(lease.AccountId, ct);
         if (before is null || !before.Owns(lease.Generation, lease.WorkerId, time.GetUtcNow())) return false;
         if (lease.Trigger == "backfill") return await RunBackfillAsync(lease, capture, ct);
+        if (lease.Trigger == "funding") return await RunFundingAsync(lease, capture, ct);
         var refresh = lease.Trigger == "refresh";
         var snapshotApplied = false;
         try
@@ -240,35 +241,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                     // Read outside the unit of work; apply facts only after the lease/settings fence. Phase 2, item 9a: in
                     // bounded windows that extend the stored coverage (FundingWindows).
                     var to = DateTimeOffset.FromUnixTimeMilliseconds(sync.Snapshot.ObservedAtUtc.ToUnixTimeMilliseconds());
-                    var settings = funding ?? new FundingOptions();
-                    var from = to - settings.Lookback;
-                    VenueFundingReadResult fundingRead;
-                    FundingCursor? cursor = null;
-                    try
-                    {
-                        cursor = await store.FundingCursorAsync(capture.Account.Id, ct);
-                        var read = await FundingWindows.ReadAsync(fundingReader, capture.Account, to, cursor, settings, async token =>
-                        {
-                            var retryAt = await store.VenueRetryAtAsync(capture.Account.VenueId, token);
-                            if (retryAt > time.GetUtcNow()) throw new VenueRateLimitException(retryAt.Value);
-                        }, time, ct);
-                        fundingRead = read.Result;
-                        VenueFundingChecks.Validate(fundingRead, fundingRead.FromUtc, fundingRead.ToUtc);
-                        // A rate limit after some windows completed keeps them; the venue still waits.
-                        if (read.RetryAtUtc is { } retry)
-                            await store.DeferVenueAsync(capture.Account.VenueId, retry, time.GetUtcNow(), CancellationToken.None);
-                    }
-                    catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
-                        ex is OperationCanceledException && !ct.IsCancellationRequested)
-                    {
-                        if (ex is VenueRateLimitException limited)
-                            await store.DeferVenueAsync(capture.Account.VenueId, limited.RetryAtUtc, time.GetUtcNow(), CancellationToken.None);
-                        // A failed read keeps the last window, so the next Refresh starts from half of it, not the lookback.
-                        fundingRead = new([], from, to, false,
-                            "Funding history could not be refreshed. Retained payments are unchanged; missing funding is not zero.")
-                        { WindowFromUtc = cursor?.LastAttemptFromUtc, WindowToUtc = cursor?.LastAttemptToUtc };
-                    }
-                    sync = sync with { Funding = fundingRead };
+                    sync = sync with { Funding = (await ReadFundingAsync(fundingReader, capture.Account, to, ct)).Result };
                 }
                 // Preserve the public Refresh commit even if the later optional order read is cancelled.
                 // This is a short fenced transaction; the lease, not a DB lock, spans the order read.
@@ -596,6 +569,115 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             }, CancellationToken.None);
         }
     }
+
+    /// <summary>
+    /// Settled funding up to <paramref name="to"/>, in 9a's resumable windows from the stored cursor, read outside any unit of
+    /// work: a Refresh's and a scheduled funding read's (item 9c) alike. A failed read keeps the last window, so the next read
+    /// starts from half of it, not the lookback. A rate limit, before or after some windows completed, defers the venue.
+    /// </summary>
+    /// <returns>The result to store; the failure's exception type name, never its text; and whether a rate limit stopped it.</returns>
+    private async Task<(VenueFundingReadResult Result, string? Error, bool Limited)> ReadFundingAsync(IVenueFundingReader reader,
+        Account account, DateTimeOffset to, CancellationToken ct)
+    {
+        var settings = funding ?? new FundingOptions();
+        FundingCursor? cursor = null;
+        try
+        {
+            cursor = await store.FundingCursorAsync(account.Id, ct);
+            var read = await FundingWindows.ReadAsync(reader, account, to, cursor, settings, async token =>
+            {
+                var retryAt = await store.VenueRetryAtAsync(account.VenueId, token);
+                if (retryAt > time.GetUtcNow()) throw new VenueRateLimitException(retryAt.Value);
+            }, time, ct);
+            VenueFundingChecks.Validate(read.Result, read.Result.FromUtc, read.Result.ToUtc);
+            // A rate limit after some windows completed keeps them; the venue still waits.
+            if (read.RetryAtUtc is { } retry)
+                await store.DeferVenueAsync(account.VenueId, retry, time.GetUtcNow(), CancellationToken.None);
+            return (read.Result, null, read.RetryAtUtc is not null);
+        }
+        catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
+            ex is OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            if (ex is VenueRateLimitException limited)
+                await store.DeferVenueAsync(account.VenueId, limited.RetryAtUtc, time.GetUtcNow(), CancellationToken.None);
+            return (new([], to - settings.Lookback, to, false,
+                "Funding history could not be refreshed. Retained payments are unchanged; missing funding is not zero.")
+            { WindowFromUtc = cursor?.LastAttemptFromUtc, WindowToUtc = cursor?.LastAttemptToUtc }, ex.GetType().Name, ex is VenueRateLimitException);
+        }
+    }
+
+    /// <summary>
+    /// Phase 2, item 9c: a scheduled funding read on its own lease, claimed behind protection checks for an account with an Open
+    /// venue Play or kept execution history. It reads 9a's windows from the stored cursor exactly as a Refresh does, outside any
+    /// transaction, applies the result in one unit fenced by the lease and unchanged settings, source, venue and credential, and
+    /// releases the lease. It never touches the check schedule, attempt time, state or cooldown, and announces nothing.
+    /// <list type="bullet">
+    /// <item>The next read is due <see cref="FundingOptions.Interval"/> later, after a success or a failure alike.</item>
+    /// <item>A rate limit defers the venue and leaves the read due, so it follows once the venue's deadline passes; so does a
+    /// venue deadline found before reading, a superseded result or an interrupted run.</item>
+    /// <item>Failures are quiet: the stored notice is the Refresh's fixed text, and only the exception type is logged.</item>
+    /// </list>
+    /// </summary>
+    private async Task<bool> RunFundingAsync(MonitorLease lease, MonitorCapture capture, CancellationToken ct)
+    {
+        var settings = funding ?? new FundingOptions();
+        DateTimeOffset? next = null;
+        try
+        {
+            var account = capture.Account;
+            if (account.TradingMode != "real" || !account.IsEnabled || account.SourceId is null ||
+                venues.Descriptor(account.VenueId)?.Capabilities.Sync != true || venues.Funding(account.VenueId) is not { } reader)
+            {
+                next = time.GetUtcNow() + settings.Interval;
+                return false;
+            }
+            // The venue's deadline holds for every account: the read stays due until it passes.
+            if (await store.VenueRetryAtAsync(account.VenueId, ct) > time.GetUtcNow()) return false;
+            // A venue that needs a read-only credential is not asked without a usable one.
+            if (venues.Descriptor(account.VenueId)?.Capabilities.ReadOnlyCredential == true && !await credentials.IsUsableAsync(account, ct))
+            {
+                next = time.GetUtcNow() + settings.Interval;
+                return false;
+            }
+            var read = await ReadFundingAsync(reader, account, DateTimeOffset.FromUnixTimeMilliseconds(time.GetUtcNow().ToUnixTimeMilliseconds()), ct);
+            if (read.Error is { } error) log?.Failed(lease, error);
+            ct.ThrowIfCancellationRequested();
+            if (!await FundingUnitAsync(lease, capture, read.Result, ct)) return false;
+            if (!read.Limited) next = time.GetUtcNow() + settings.Interval;
+            return read.Error is null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // Never record exception text, which can carry request details. A conflicting settlement rolled its unit back.
+            log?.Failed(lease, ex.GetType().Name);
+            next = time.GetUtcNow() + settings.Interval;
+            return false;
+        }
+        finally
+        {
+            // Released even when the run is cancelled or failed; a lost lease is left to recovery.
+            await unitOfWork.ExecuteAsync(async () =>
+            {
+                await store.ReleaseFundingAsync(lease, time.GetUtcNow(), next, CancellationToken.None);
+                return true;
+            }, CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// A scheduled funding read's result under the run's own fence: its lease, and the settings, source, venue and credential
+    /// it was read with, as a Refresh's apply checks. Only the funding settlements and coverage change.
+    /// </summary>
+    private Task<bool> FundingUnitAsync(MonitorLease lease, MonitorCapture captured, VenueFundingReadResult result, CancellationToken ct) =>
+        unitOfWork.ExecuteAsync(() => store.LockedAsync(lease.AccountId, async (account, row) =>
+        {
+            if (!row.Owns(lease.Generation, lease.WorkerId, time.GetUtcNow()) || !account.IsEnabled || account.TradingMode != "real" ||
+                account.SettingsRevision != captured.Account.SettingsRevision || account.SourceId != captured.Account.SourceId ||
+                account.VenueId != captured.Account.VenueId ||
+                (await store.CaptureAsync(account.Id, ct))?.CredentialRevision != captured.CredentialRevision) return false;
+            await workspace.SaveFundingAsync(account, result, ct);
+            return true;
+        }, ct), ct);
 
     /// <summary>One backfill step under the run's own fence: its lease, and unchanged settings and source.</summary>
     private Task<bool> BackfillUnitAsync(MonitorLease lease, MonitorCapture captured, Guid backfillId,

@@ -184,7 +184,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         if (account.TradingMode != TradingMode.Real)
             throw new ProblemException(409, "Paper accounts cannot import real venue facts.");
         // Validate immutable settlement identities before any refresh facts are written.
-        if (result.Funding is { } funding) await SaveFundingAsync(account, funding, ct);
+        if (result.Funding is { } funding) await ApplyFundingAsync(account, funding, ct);
         var observation = result.Snapshot;
         var snapshot = await db.Snapshots.Include(x => x.Positions).Include(x => x.Stablecoins).AsSplitQuery().SingleOrDefaultAsync(x => x.AccountId == account.Id, ct);
         var replacePerps = snapshot is null || observation.ObservedAtUtc > snapshot.ObservedAtUtc;

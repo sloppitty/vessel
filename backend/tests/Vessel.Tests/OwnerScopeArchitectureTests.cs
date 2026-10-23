@@ -105,6 +105,10 @@ public sealed class OwnerScopeArchitectureTests
             // Phase 2, item 6b: due backfill discovery, keys only in (due, owner, account) order; each claim rechecks the
             // owner's status, the account's run, pacing, deadlines and budgets inside that owner's scope.
             "Vessel.Persistence/SystemMonitorStore.cs|4e18af27c6db281fb8ca13a870b07611896bc9810b6bd03d5ec9d99f7876297e",
+            // Phase 2, item 9c: due scheduled-funding discovery, keys only in (due, owner, account) order, joined on the
+            // composite owner keys; each claim rechecks the owner's status, eligibility, the account's run and due check,
+            // pacing, deadlines and budgets inside that owner's scope.
+            "Vessel.Persistence/SystemMonitorStore.cs|c158ab0b6394523ccc0d1ec155f0d3e1b4cfd6706b90d015f1d98a2da8370fb0",
             "Vessel.Persistence/ServerStateStore.cs|40c74c937dd0eb512282090d98087bea4726000d71185d726dbbdd89e80b5b51",
             "Vessel.Persistence/ServerStateStore.cs|4de6036152e376cb02952ca7410a4db74f2a434f16091e168cf64995f90293f8",
             "Vessel.Persistence/ServerStateStore.cs|ee73f5478e13936ed833caed3737b495efb924b2d70cbf4c9d46ca0f8ff1593a",
