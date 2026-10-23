@@ -160,3 +160,50 @@ covering F-05 and the F-06 preview:
 - **Default title.** The title field starts with the blank-title rule on the
   operation's opening day in UTC, for example `BTC Long · 12 Oct 2026`. A
   cleared field saves that default.
+
+## Omitted executions (October 22, 2026)
+
+Phase 2, item 7b of the [risk and coverage contract](phase2-risk-coverage-contract.md), decision 11. It uses item
+7a's durable omission markers and forced events (see [execution facts](execution-facts.md)). Every forced event also
+leaves a marker, so markers alone break the walk.
+- **Partitions.** A marker breaks every partition it could belong to, and never moves a fill between partitions:
+  markers are not grouping evidence. An ID-less fill's native market is unknown, so a marker on its canonical
+  contract may lie in its partition whatever native market the marker names. Unlike leverage observations, which
+  are placed only when unambiguous, an ambiguous marker breaks every candidate.
+  - No market at all: every partition of its account.
+  - A canonical contract only: every partition with a fill of that contract, native ones included.
+  - A native market: that native partition, and every partition with an ID-less fill of its canonical contract. A
+    marker on a market Vessel does not recognize has no canonical contract; its native ID is then the market's
+    identity, as in 7a's order rule, so an ID-less fill keyed by that ID is included.
+- **Never across an omission.** A marker at or after the partition's first retained fill breaks the walk there.
+  - An operation still open at it ends with unknown boundaries: direction, boundaries and position-derived
+    fields are null, the status is incomplete, and it reads "Direction unknown: executions omitted". This
+    replaces the phantom opposite operation an anchor across the omission used to produce (probe
+    `correctness-dotnet/Activity.cs` C6).
+  - The walk after it starts from an unknown position. It needs a new proof of flatness, or the snapshot anchor.
+    Every unknown operation from the marker on carries the same explanation until then, including one that starts
+    unknown because a marker lies at the first retained fill's time.
+  - Inside a marker's window nothing proves flatness or direction, since the omitted execution can lie between any
+    two of its fills. Only evidence strictly after the window's end counts (Sol round 1, finding 1). For a marker with
+    a reported time, the window is that instant, so fills sharing it prove nothing either.
+  - The snapshot anchors only the fills after the partition's last marker. Earlier fills use the unanchored walk.
+  - A marker after the last retained fill leaves that fill's open operation unknown too.
+  - A marker before the first retained fill changes nothing.
+- **No reported time.** The marker's read window bounds it on both sides: the walk loses its position from the
+  window's start and stays uncertain to its end, and the snapshot can anchor only fills after its end. An unknown
+  start or end is unbounded on that side, so an unknown end never lets the walk recover or anchor.
+- **One set of inputs.** Activity, Overview, the sizing fallback, Review's imported positions, the expanded
+  executions, and the retrospective preview, confirmation and fingerprint all aggregate the same markers (Sol round
+  1, finding 4). The preview's diary read loads them like the Activity read, so a preview never rebuilds a round
+  trip across a gap Activity reports, and the omission notice is one of its ineligibility reasons. Both reads keep
+  only what the walk needs: each marker's ID, account, canonical and native market, and time or window.
+- **Forced events.** Each venue-forced execution is a coverage row on the page with its facts as reported and its
+  exclusion, for example "Liquidation on … UTC: sell 1 at 80; realized P&L unknown, fee unknown. Excluded:
+  venue-forced, kept beside the fills, never linked or scored." The newest 50 are rows. The read loads only those
+  (one more to detect the cap) and, past the cap, counts each account's forced events in SQL; the rest read
+  "N more venue-forced executions are retained and excluded" per account.
+- **Freshness.** Markers and forced events move the cached facts revision (migration triggers), and markers (their
+  IDs, markets and times) are part of the version token, so a page with a new omission is flagged as changed.
+- Review, sizing and the ladder are otherwise unchanged. They read only closed, complete operations, which an
+  operation with unknown boundaries never is, and they already treat an order with an omitted execution as missing
+  executions (7a).
