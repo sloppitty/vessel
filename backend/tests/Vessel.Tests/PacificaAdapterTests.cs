@@ -193,13 +193,21 @@ public sealed class PacificaAdapterTests
     [Fact]
     public async Task Current_and_historical_orders_are_distinct_and_partial_book_never_proves_absence()
     {
-        var result = await Reader().Reader.ReadOrdersAsync(Source, default);
+        var fixture = Fixture();
+        var oldOpen = fixture["history"]!["data"]![1]!.DeepClone(); oldOpen["order_id"] = 888;
+        fixture["history"]!["data"]!.AsArray().Add(oldOpen);
+        var result = await Reader(fixture).Reader.ReadOrdersAsync(Source, default);
         Assert.False(result.OpenOrdersComplete);
         Assert.Equal(VenueOrderStatus.Filled, Assert.Single(result.Orders, o => o.OrderId == "101").Status);
         var current = Assert.Single(result.Orders, o => o.OrderId == "999");
         Assert.Equal(VenueOrderStatus.Open, current.Status); Assert.Equal(105m, current.TriggerPrice);
         Assert.True(current.ReduceOnly); Assert.Equal(0.01m, current.RemainingSize);
+        var historical = Assert.Single(result.Orders, o => o.OrderId == "888");
+        Assert.Equal("open", historical.VenueStatus); Assert.Equal(VenueOrderStatus.Other, historical.Status);
         Assert.Contains("TWAP/strategy", result.Notice);
+        fixture["orders"]!["data"]![0]!["updated_at"] = fixture["history"]!["data"]![1]!["updated_at"]!.DeepClone();
+        var simultaneous = await Reader(fixture).Reader.ReadOrdersAsync(Source, default);
+        Assert.Equal(VenueOrderStatus.Open, Assert.Single(simultaneous.Orders, o => o.OrderId == "999").Status);
     }
 
     [Fact]
@@ -208,6 +216,15 @@ public sealed class PacificaAdapterTests
         var (reader, routes) = Reader();
         routes.Override = req => req.RequestUri!.AbsolutePath == "/api/v1/orders" ? """{"success":false,"data":[]}""" : null;
         await Assert.ThrowsAsync<VenueReadException>(() => reader.ReadOrdersAsync(Source, default));
+    }
+
+    [Fact]
+    public async Task Remaining_order_quantity_is_never_silently_rounded()
+    {
+        var fixture = Fixture();
+        fixture["orders"]!["data"]![0]!["initial_amount"] = "79228162514264337593543950335";
+        fixture["orders"]!["data"]![0]!["filled_amount"] = "0.0000000000000000000000000001";
+        await Assert.ThrowsAsync<VenueReadException>(() => Reader(fixture).Reader.ReadOrdersAsync(Source, default));
     }
 
     [Fact]

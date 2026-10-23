@@ -33,7 +33,8 @@ public sealed partial class PacificaReader
                     if (old.VenueContractId != order.VenueContractId || old.Side != order.Side ||
                         old.PlacedAtUtc != order.PlacedAtUtc) throw Json.Invalid();
                     if (old.StatusAtUtc > order.StatusAtUtc) continue;
-                    if (old.StatusAtUtc == order.StatusAtUtc && old.Status != order.Status) throw Json.Invalid();
+                    if (old.StatusAtUtc == order.StatusAtUtc && old.Status != order.Status &&
+                        !(old.Status == VenueOrderStatus.Other && old.VenueStatus is "open" or "partially_filled")) throw Json.Invalid();
                 }
                 orders[order.OrderId] = order;
             }
@@ -71,6 +72,9 @@ public sealed partial class PacificaReader
             "rejected" => VenueOrderStatus.Rejected,
             _ => VenueOrderStatus.Other
         };
+        // The shared monitor treats Open as resting evidence even on a partial book. A historical open status
+        // therefore stays unknown unless the independent current endpoint also reports that order.
+        if (!current && status == VenueOrderStatus.Open) status = VenueOrderStatus.Other;
         var stop = Json.OptionalAmount(row, "stop_price");
         if (triggered && stop is not > 0) return null;
         var placed = At(row, "created_at"); var updated = At(row, "updated_at");

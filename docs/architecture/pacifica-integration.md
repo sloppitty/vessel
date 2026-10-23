@@ -69,6 +69,9 @@ Sync, instruments, reported orders and manual trade candles are enabled.
 The current ordinary/stop order endpoint is read, but `OpenOrdersComplete` is
 **always false**: TWAP/strategy parents and unsupported whole-position triggers
 are not covered. Absence cannot establish cancellation or missing protection.
+History-only open/partially-filled statuses keep their original venue wording
+but normalize to `Other` (unknown current state), never to resting `Open`;
+only the independent current endpoint establishes positive resting evidence.
 
 No discovery, credentials, stablecoin-wallet ledger, market context, SSE/WebSocket,
 paper execution, arbitrary history/backfill or trading capability is advertised.
@@ -191,12 +194,16 @@ omissions, fee/PnL absence, liquidation/flip/correction cases, cursor escaping,
 cycles, truncation before filtering, duplicates, partial positions/orders,
 manual candles, safe HTTP errors, rate limits and the real locked refresh path.
 
-Focused backend verification passes **84 tests** (Pacifica, venue registry and
-existing Lighter-instance regressions) with the isolated parent's PostgreSQL fixture.
-Focused frontend verification passes **111 tests**; typecheck, lint and production
-build pass. These cover the source validator, capability-driven account creation,
+Focused backend verification passes **97 tests** (Pacifica, venue registry,
+existing Lighter-instance regressions and the exact API metadata contract)
+with the isolated parent's PostgreSQL fixture.
+Full frontend verification passes **4,061 tests across 168 files**; focused frontend
+verification passes **111 tests**. Typecheck, lint and production build pass.
+The Release solution build passes with zero warnings/errors. These cover the source validator, capability-driven account creation,
 case-sensitive grouping and bundled logo allowlist. Broader checks and independent
 adversarial review are tracked in the PR; this document does not claim sign-off.
+The standalone full backend run was stopped at the parent's request to avoid
+duplicating its combined full-suite run; no full backend pass is claimed here.
 No existing database was migrated, no owner services were used and no CI
 workflow was changed. The bundled venue mark is the official
 [cyan SVG](https://app.pacifica.fi/imgs/cyan-logo.svg), fetched October 23, 2026;
