@@ -624,6 +624,8 @@ internal sealed class DiscrepancyMemoryStore : IMonitorDiscrepancyStore
     public List<ImportedOrder> Orders = [];
     public List<ImportedFill> Fills = [];
     public List<PlayDiscrepancy> Rows = [];
+    /// <summary>Owner-confirmed allocations the facts carry (Phase 2, item 11).</summary>
+    public List<Vessel.Application.Plays.Execution.AllocatedFill> Allocations = [];
     public bool Complete = true, AssignmentLinksComplete = true;
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => Task.FromResult(id == Account.Id ? Account : null);
     public Task<Play?> PlayAsync(Guid id, CancellationToken ct) => Task.FromResult(Plays.SingleOrDefault(x => x.Id == id));
@@ -632,7 +634,8 @@ internal sealed class DiscrepancyMemoryStore : IMonitorDiscrepancyStore
     public Task<MonitorDiscrepancyFacts> LoadAsync(Guid id, DateTimeOffset recentSince, IReadOnlyCollection<OrderKey> resting, CancellationToken ct)
     {
         RecentSince = recentSince;
-        return Task.FromResult(new MonitorDiscrepancyFacts(Plays, Links, Orders, Fills, Complete, Links, AssignmentLinksComplete, TruncatedFillContracts));
+        return Task.FromResult(new MonitorDiscrepancyFacts(Plays, Links, Orders, Fills, Complete, Links, AssignmentLinksComplete, TruncatedFillContracts)
+            { Allocations = Allocations });
     }
     public Task<IReadOnlyList<PlayDiscrepancy>> RecordsAsync(Guid id, CancellationToken ct) => Task.FromResult<IReadOnlyList<PlayDiscrepancy>>(Rows.Where(x => x.AccountId == id).ToArray());
     public void Add(PlayDiscrepancy row) => Rows.Add(row);

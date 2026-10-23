@@ -96,15 +96,18 @@ public sealed partial class VesselEventStore
         var orderOf = orders.ToDictionary(o => o.Id);
         var fills = (await db.FillsOf(db.Orders.Where(o => orderOf.Keys.Contains(o.Id)))
             .Where(f => f.AccountId == play.AccountId && f.ContractId == play.ContractId).ToListAsync(ct)).ToLookup(OrderKey.Of);
-        var facts = links.SelectMany(l => fills[OrderKey.Of(orderOf[l.ImportedOrderId])]
-            .Select(f => new LinkedFill(l.Role, f))).ToList();
+        var pairs = links.SelectMany(l => fills[OrderKey.Of(orderOf[l.ImportedOrderId])].Select(f => (l, f))).ToList();
+        // The allocation read rule (Phase 2, item 11): an allocated fill counts only through the Play's own line.
+        var allocations = await AllocatedFills.ForAsync(db, [play.Id], pairs.Select(x => x.f.Id).ToList(), ct);
+        var facts = FillAllocations.For(play.Id, pairs, allocations).Select(f => f.Linked).ToList();
         if (facts.Any(f => f.Fill.Quantity <= 0)) return (fallback, false);
         var side = ExecutionIntegrity.EntrySide(PlayDocuments.Read(play.Plan));
         var counted = facts.Where(f => !ExecutionIntegrity.Contradicts(f.Role, side, f.Fill)).ToList();
         var entries = counted.Where(f => f.Role == OrderLinkRole.Entry).ToList();
         if (entries.Count == 0) return (fallback, false);
         var incompleteOrders = orders.Where(o => ExecutionIntegrity.MissingExecutions(o, fills[OrderKey.Of(o)])).ToList();
-        var incomplete = incompleteOrders.Select(o => o.ExternalOrderId).ToHashSet(StringComparer.Ordinal);
+        var incomplete = incompleteOrders.Select(o => o.ExternalOrderId).Concat(FillAllocations.Incomplete(play.Id, allocations))
+            .ToHashSet(StringComparer.Ordinal);
         var incompleteIds = incompleteOrders.Select(o => o.Id).ToHashSet();
         if (change.To == PlayStatus.Open)
         {
@@ -257,9 +260,14 @@ public sealed partial class VesselEventStore
 
     private async Task<JsonElement> ClosedDataAsync(Play play, CancellationToken ct)
     {
-        var facts = (await db.LinkedFills(db.OrderLinks.Where(l => l.PlayId == play.Id && l.State == OrderLinkState.Linked))
-            .Where(x => x.Fill.AccountId == play.AccountId).Select(x => new { x.Link.Role, x.Fill }).ToListAsync(ct))
-            .Select(x => (x.Role, x.Fill)).ToList();
+        var linkedRows = await db.LinkedFills(db.OrderLinks.Where(l => l.PlayId == play.Id && l.State == OrderLinkState.Linked))
+            .Where(x => x.Fill.AccountId == play.AccountId).Select(x => new { x.Link, x.Fill }).ToListAsync(ct);
+        // The allocation read rule (Phase 2, item 11): the Play's lines count, and the venue's closed P&L of a split fill is unknown.
+        List<AllocatedFill> allocations = play.InstrumentSource == InstrumentSource.Manual ? []
+            : await AllocatedFills.ForAsync(db, [play.Id], linkedRows.Select(x => x.Fill.Id).ToList(), ct);
+        var own = FillAllocations.For(play.Id, linkedRows.Select(x => (x.Link, x.Fill)), allocations);
+        var allocated = own.Any(f => f.Allocated);
+        var facts = own.Select(f => (f.Role, f.Fill)).ToList();
         if (play.InstrumentSource == InstrumentSource.Manual)
         {
             var rows = await db.ManualExecutions.Where(f => f.PlayId == play.Id).ToListAsync(ct);
@@ -273,7 +281,7 @@ public sealed partial class VesselEventStore
         {
             enteredQuantity = VesselEventValues.Sum(counted.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill.Quantity)),
             exitedQuantity = VesselEventValues.Sum(counted.Where(f => f.Role != OrderLinkRole.Entry).Select(f => f.Fill.Quantity)),
-            closedPnlUsd = VesselEventValues.Sum(counted.Select(f => f.Fill.ClosedPnlUsd)),
+            closedPnlUsd = allocated ? null : VesselEventValues.Sum(counted.Select(f => f.Fill.ClosedPnlUsd)),
             closedPnlBasis = basis.Count == 1 ? basis[0] : basis.Count == 0 ? ExecutionFacts.PnlGross : "mixed",
             fees = counted.GroupBy(f => f.Fill.FeeToken).OrderBy(g => g.Key, StringComparer.Ordinal)
                 .Select(g => new { token = g.Key, amount = VesselEventValues.Sum(g.Select(f => f.Fill.Fee)) }).ToArray()

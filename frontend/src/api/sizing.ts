@@ -74,6 +74,11 @@ export interface SizingRecord {
   unknownGrossLosses?: number
   /** Unresolved Plays on enabled accounts: no result, so never in the record or the ladder (phase 1, 1.3a). */
   unresolved?: number
+  /**
+   * Closed Plays whose fills settle them but include a fill allocated between Plays (Phase 2, item 11): their venue result is
+   * not allocated, so they are never in the record or the ladder. Absent from older servers.
+   */
+  notAllocated?: number
 }
 export interface SizingLimits {
   effectiveRiskPercent: string
@@ -108,7 +113,7 @@ const record = (v: unknown): v is SizingRecord => isRecord(v) && ['plays', 'acti
   Array.isArray(v.recent) && v.recent.length <= 100 && v.recent.every(recorded) &&
   ['localSignChanges', 'localUnknown'].every(k => v[k] === undefined || isNullOr(v[k], x => isCount(x) && x <= (v.decidedPlays as number))) &&
   ['feeOnlyLosses', 'unknownGrossLosses'].every(k => v[k] === undefined || isCount(v[k]) && (v[k] as number) <= (v.losses as number)) &&
-  (v.unresolved === undefined || isCount(v.unresolved))
+  (v.unresolved === undefined || isCount(v.unresolved)) && (v.notAllocated === undefined || isCount(v.notAllocated))
 
 export const isSizingDocument = (v: unknown): v is SizingDocument => isRecord(v) &&
   (v.tradingMode === undefined || isTradingMode(v.tradingMode)) &&

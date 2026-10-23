@@ -127,12 +127,14 @@ export interface PlayOutcome {
   estimatedR: string | null
   reason: string | null
 }
-export const playOutcomeStates = ['not-indexed', 'active', 'scored', 'executions', 'fees', 'unresolved', 'cancelled'] as const
+export const playOutcomeStates = ['not-indexed', 'active', 'scored', 'executions', 'fees', 'unresolved', 'cancelled', 'not-allocated'] as const
 export type PlayOutcomeState = typeof playOutcomeStates[number]
 /** The statuses each state belongs to, as the projection writes it with the status in one transaction. */
 const outcomeStatuses: Record<Exclude<PlayOutcomeState, 'not-indexed'>, readonly PlayStatus[]> = {
   active: ['draft', 'planned', 'paused', 'open'], scored: ['closed'], executions: ['closed'], fees: ['closed'],
   unresolved: ['unresolved'], cancelled: ['cancelled'],
+  // A fill shared with another Play is allocated between them, so the venue result is not allocated (Phase 2, item 11).
+  'not-allocated': ['closed'],
 }
 export const isPlayOutcome = (v: unknown, status: PlayStatus): v is PlayOutcome => isRecord(v) &&
   playOutcomeStates.includes(v.state as PlayOutcomeState) && isNullOr(v.exitAtUtc, x => isTimestamp(x, 64)) &&
@@ -140,7 +142,7 @@ export const isPlayOutcome = (v: unknown, status: PlayStatus): v is PlayOutcome 
   (v.state === 'not-indexed' || outcomeStatuses[v.state as Exclude<PlayOutcomeState, 'not-indexed'>].includes(status)) &&
   // Figures come only with a scored result, R never without it, and an exit only for a Closed Play.
   (v.state === 'scored') === (v.resultUsd !== null) && (v.estimatedR === null || v.resultUsd !== null) &&
-  (v.exitAtUtc === null || ['scored', 'executions', 'fees'].includes(v.state as string))
+  (v.exitAtUtc === null || ['scored', 'executions', 'fees', 'not-allocated'].includes(v.state as string))
 /** An append-only in-trade log entry with an optional state; it never counts as a review. */
 export interface PlayNote { id: string; text: string; state: PlayNoteState | null; createdAtUtc: string }
 export const playNoteStates = ['calm', 'rushed', 'fomo', 'tired', 'after-loss'] as const
@@ -489,6 +491,11 @@ export interface PlayExecution {
     venueNetUsd?: string | null
     /** The Play-local result beside it, known once the play is closed and its fills settle it. */
     local?: PlayLocalResult
+    /**
+     * A fill of this Play is allocated between Plays (Phase 2, item 11): the venue's average-cost P&L cannot be split, so the
+     * venue result is not allocated and neither venue figure is this Play's. Absent from older servers.
+     */
+    venueNotAllocated?: boolean
   }
   entries: EntryProgress[]
   links: OrderLink[]
@@ -517,6 +524,70 @@ export interface PlayExecution {
   watches: MonitorWatch[]
   /** Times, averages and estimated R by Review's rules; absent from servers before Phase 1. */
   receipt?: PlayReceipt | null
+  /**
+   * Fills the owner may split between Plays from this Play (Phase 2, item 11): its allocated fills, the exit fills of its
+   * linked orders while they exceed its entries, and unallocated flips that close its direction. Absent from older servers.
+   */
+  sharedFills?: SharedFill[]
+  /** The Plays a line of those fills may name, with the versions a request expects. */
+  allocationPlays?: AllocationPlay[]
+  /** How many allocated fills this Play has; `sharedFills` holds the newest page of them. Absent from older servers. */
+  sharedFillCount?: number
+  /** Where the next page of allocated fills starts (`sharedFillsPage`); null when none is left. */
+  sharedFillsNextOffset?: number | null
+}
+/** A further page of a Play's allocated fills, newest first, with the Plays their lines name and may name. */
+export interface SharedFillsPage { items: SharedFill[]; plays: AllocationPlay[]; total: number; offset: number; nextOffset: number | null }
+/**
+ * The server's bounds (`PlayExecutionService`): pages of 20 allocated fills, as many fills offered beside the first, and the
+ * Plays a page lists: up to 200 that may take a new line plus every Play on the page's lines (20 × 20) and this one.
+ */
+export const allocationBounds = { pageFills: 20, sharedFills: 40, plays: 200 + 20 * 20 + 1 } as const
+/** One Play's part of an allocated fill; `feeRemainder` is set on the one line that took the fee split's rounding remainder. */
+export interface AllocationLine {
+  playId: string
+  title: string
+  role: 'exit' | 'entry'
+  entryId: string | null
+  quantity: string
+  /** Null when the fill's fee is unknown: it is never split. */
+  fee: string | null
+  feeRemainder: string | null
+}
+export type AllocationReason = 'shared-close' | 'flip' | 'other'
+export const allocationReasons: readonly AllocationReason[] = ['shared-close', 'flip', 'other']
+export const allocationReasonLabels: Record<AllocationReason, string> = { 'shared-close': 'Shared close', flip: 'Flip', other: 'Other' }
+/**
+ * A fill the owner may split: `shared-exit` across the Plays it closed, or `flip` into one Play's exit and another's entry.
+ * `revision` is the allocation's current revision (0 when it has none) and `lines` its current lines, empty when none.
+ * `open` gives each Play that may close part of it its open quantity without this fill.
+ */
+export interface SharedFill {
+  fillId: string
+  /** `entry`: a later execution of an order a flip split, which only opens plays. */
+  kind: 'shared-exit' | 'flip' | 'entry'
+  fill: ExecutionFill
+  orderId: string
+  revision: number
+  reason: AllocationReason | null
+  note: string | null
+  updatedAtUtc: string | null
+  lines: AllocationLine[]
+  open: Array<{ playId: string; openQuantity: string }>
+}
+export interface AllocationPlay { playId: string; title: string; direction: 'long' | 'short'; status: PlayStatus; version: number; entryIds: string[] }
+/**
+ * Splits one imported fill between Plays, replaces the split, or removes it with no `lines` (Phase 2, item 11). Every Play
+ * on the current or new lines comes with the version the owner saw; the server refuses a stale one (409) and writes nothing.
+ */
+export interface AllocateFill {
+  requestId: string
+  fillId: string
+  expectedRevision: number
+  reason: AllocationReason
+  note: string
+  plays: Array<{ playId: string; expectedVersion: number }>
+  lines: Array<{ playId: string; role: 'exit' | 'entry'; entryId: string | null; quantity: string }>
 }
 /** One planned entry's fills beside its plan (phase 1, 1.1a). */
 export interface EntryProgress {
@@ -566,6 +637,22 @@ const executionFill = (v: unknown): v is ExecutionFill => isRecord(v) && isText(
   isPlainDecimal(v.price) && isPlainDecimal(v.quantity) && isPlainDecimal(v.fee) && isText(v.feeToken, 64) && isPlainDecimal(v.closedPnlUsd) && isTimestamp(v.occurredAtUtc, timeLength) &&
   (v.side === 'buy' || v.side === 'sell') && ['open', 'close', 'flip', 'unknown'].includes(v.positionEffect as string) &&
   (v.pnlBasis === 'gross' || v.pnlBasis === 'net-of-fee')
+const allocationLine = (v: unknown): v is AllocationLine => isRecord(v) && isGuid(v.playId) && isText(v.title, 200) &&
+  (v.role === 'exit' || v.role === 'entry') && isNullOr(v.entryId, x => isText(x, 64)) && (v.role === 'entry') === (v.entryId !== null) &&
+  isPlainDecimal(v.quantity) && isNullOr(v.fee, isPlainDecimal) && isNullOr(v.feeRemainder, isPlainDecimal)
+const sharedFill = (v: unknown): v is SharedFill => isRecord(v) && isGuid(v.fillId) && ['shared-exit', 'flip', 'entry'].includes(v.kind as string) &&
+  executionFill(v.fill) && isText(v.orderId, 128) && isCount(v.revision) &&
+  (v.reason === null || allocationReasons.includes(v.reason as AllocationReason)) && isNullOr(v.note, x => isText(x, 2000)) &&
+  isNullOr(v.updatedAtUtc, x => isTimestamp(x, timeLength)) && Array.isArray(v.lines) && v.lines.length <= 20 && v.lines.every(allocationLine) &&
+  (v.lines.length === 0) === (v.reason === null) && Array.isArray(v.open) && v.open.length <= allocationBounds.plays &&
+  v.open.every(o => isRecord(o) && isGuid(o.playId) && isPlainDecimal(o.openQuantity))
+const allocationPlay = (v: unknown): v is AllocationPlay => isRecord(v) && isGuid(v.playId) && isText(v.title, 200) &&
+  (v.direction === 'long' || v.direction === 'short') && playStatuses.includes(v.status as PlayStatus) && isCount(v.version) &&
+  Array.isArray(v.entryIds) && v.entryIds.length <= 20 && v.entryIds.every(id => isText(id, 64))
+export const isSharedFillsPage = (v: unknown): v is SharedFillsPage => isRecord(v) && Array.isArray(v.items) &&
+  v.items.length <= allocationBounds.pageFills && v.items.every(item => sharedFill(item) && item.lines.length > 0) &&
+  Array.isArray(v.plays) && v.plays.length <= allocationBounds.plays && v.plays.every(allocationPlay) && isCount(v.total) && isCount(v.offset) &&
+  isNullOr(v.nextOffset, isCount) && (v.nextOffset === null || (v.nextOffset as number) > (v.offset as number))
 const orderLink = (v: unknown): v is OrderLink => isRecord(v) && isGuid(v.id) && ['entry', 'stop', 'target', 'exit'].includes(v.role as string) &&
   isNullOr(v.entryId, x => isText(x, 64)) && isNullOr(v.levelId, x => isText(x, 64)) && (v.state === 'linked' || v.state === 'suggested') &&
   (v.source === 'automatic' || v.source === 'owner') && (v.order === null || executionOrder(v.order)) && isPlainDecimal(v.filledQuantity) &&
@@ -586,6 +673,11 @@ export const isPlayExecution = (v: unknown): v is PlayExecution => isRecord(v) &
   ['gross', 'net-of-fee', 'mixed'].includes(v.totals.closedPnlBasis as string) &&
   Array.isArray(v.totals.fees) && v.totals.fees.every(f => isRecord(f) && isText(f.token, 64) && isPlainDecimal(f.amount)) &&
   (v.totals.venueNetUsd === undefined || isNullOr(v.totals.venueNetUsd, isPlainDecimal)) && isOptionalPlayLocalResult(v.totals.local) &&
+  (v.totals.venueNotAllocated === undefined || typeof v.totals.venueNotAllocated === 'boolean') &&
+  (v.sharedFills === undefined || Array.isArray(v.sharedFills) && v.sharedFills.length <= allocationBounds.sharedFills && v.sharedFills.every(sharedFill)) &&
+  (v.allocationPlays === undefined || Array.isArray(v.allocationPlays) && v.allocationPlays.length <= allocationBounds.plays && v.allocationPlays.every(allocationPlay)) &&
+  (v.sharedFillCount === undefined || isCount(v.sharedFillCount)) &&
+  (v.sharedFillsNextOffset === undefined || isNullOr(v.sharedFillsNextOffset, isCount)) &&
   Array.isArray(v.entries) && v.entries.every(isEntryProgress) && (v.receipt === undefined || isNullOr(v.receipt, isPlayReceipt)) &&
   Array.isArray(v.links) && v.links.every(orderLink) && Array.isArray(v.suggestions) && v.suggestions.every(orderLink) &&
   Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(executionOrder) &&

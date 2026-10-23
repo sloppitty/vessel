@@ -75,6 +75,9 @@ public interface IDiaryStore
     /// <summary>Read-only links of the account in any state on one of the internal <paramref name="orderIds"/>.</summary>
     async Task<List<PlayOrderLink>> LinksAsync(Guid accountId, IReadOnlyCollection<Guid> orderIds, CancellationToken ct) =>
         (await LinksAsync(accountId, ct)).Where(l => orderIds.Contains(l.ImportedOrderId)).ToList();
+    /// <summary>Of <paramref name="fillIds"/>, the fills with a current allocation between Plays (Phase 2, item 11); none by default.</summary>
+    Task<IReadOnlySet<Guid>> AllocatedFillIdsAsync(IReadOnlyCollection<Guid> fillIds, CancellationToken ct) =>
+        Task.FromResult<IReadOnlySet<Guid>>(new HashSet<Guid>());
     void Add(ManualExecution execution);
     void Add(ManualExecutionHistory history);
     void Add(DiaryRequest request);
