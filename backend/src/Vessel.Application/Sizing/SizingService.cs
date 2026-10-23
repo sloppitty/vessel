@@ -83,10 +83,15 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
             return ToDto(risk, paper, SourcePaper) with { TradingMode = TradingMode.Paper };
         }
         var plays = PlayOutcomes(closed, venues);
-        if (plays.Any(x => x.Outcome.Kind != PlayOutcomeKind.Scratch) || activity is null) return ToDto(risk, plays, SourcePlays);
+        // Phase 2, item 11: a settled Play with an allocated fill has no venue result, so it is never in the record or the
+        // ladder; it is counted beside them, like Unresolved Plays.
+        var notAllocated = closed.Count(f => f.Paper is null && f.Play.Origin != PlayOrigin.Retrospective && f.Fills.Any(x => x.Allocated) &&
+            ExecutionIntegrity.Settled(f));
+        SizingDto Counted(SizingDto dto) => dto with { Record = dto.Record with { NotAllocated = notAllocated } };
+        if (plays.Any(x => x.Outcome.Kind != PlayOutcomeKind.Scratch) || activity is null) return Counted(ToDto(risk, plays, SourcePlays));
         // Only with no decided Play outcome; the two sources are never mixed.
         var operations = await ActivityRecordAsync(activity, ct);
-        return operations.Any(x => x.Outcome.Kind != PlayOutcomeKind.Scratch) ? ToDto(risk, operations, SourceActivity) : ToDto(risk, plays, SourceNone);
+        return Counted(operations.Any(x => x.Outcome.Kind != PlayOutcomeKind.Scratch) ? ToDto(risk, operations, SourceActivity) : ToDto(risk, plays, SourceNone));
     }
 
     /// <summary>

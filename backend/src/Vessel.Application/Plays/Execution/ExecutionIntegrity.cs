@@ -16,7 +16,8 @@ public static class ExecutionIntegrity
 
     /// <summary>
     /// The fill's normalized side or effect contradicts the role: an entry opens on the entry side and an exit reduces
-    /// on the other. An unknown effect is no contradiction; a flip cannot be split into its closing and opening parts.
+    /// on the other. An unknown effect is no contradiction; a flip is split into its closing and opening parts only by an
+    /// owner-confirmed allocation (Phase 2, item 11), whose lines carry the closing and opening effects.
     /// </summary>
     public static bool Contradicts(OrderLinkRole role, string entrySide, ImportedFill fill) => role == OrderLinkRole.Entry
         ? fill.Side != entrySide || fill.PositionEffect is ExecutionFacts.Close or ExecutionFacts.Flip
@@ -88,7 +89,7 @@ public static class ExecutionIntegrity
         var counted = fills.Where(f => !Contradicts(f.Role, entrySide, f.Fill)).ToList();
         if (Quantity(counted.Where(f => f.Role != OrderLinkRole.Entry).Select(f => f.Fill))
             .CompareTo(Quantity(counted.Where(f => f.Role == OrderLinkRole.Entry).Select(f => f.Fill))) > 0)
-            problems.Add("Linked exits exceed the entered quantity; a fill cannot be split between plays.");
+            problems.Add("Linked exits exceed the entered quantity; a fill shared with another play can be allocated between them.");
         else if (!Chronological(counted))
             problems.Add("A linked exit filled before the entry it would close.");
         return problems;

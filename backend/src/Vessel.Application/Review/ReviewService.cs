@@ -180,7 +180,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             new ReviewCoverageDto(candidates.Count, candidates.Count(e => e.Exclusion == "fees"),
                 candidates.Count(e => e.Exclusion == "executions"), facts.OpenPlays, facts.UnassignedFills, facts.FirstFillAtUtc,
                 query.TradingMode == TradingMode.Paper ? PaperNotice : include ? Notice + PositionNotice : Notice)
-            { Unresolved = unresolved, Cancelled = cancelled },
+            { Unresolved = unresolved, Cancelled = cancelled, NotAllocated = candidates.Count(e => e.Exclusion == NotAllocated) },
             page, query.Offset, query.Offset + page.Count < current.Count ? query.Offset + page.Count : null, query.TradingMode!)
         {
             Preflight = Preflight(cases),
@@ -587,6 +587,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             paper.Outcome(now, out var problem);
             return DiaryService.BoundedReasons(paper.Issues.Concat(problem is null ? [] : new[] { problem }));
         }
+        if (exclusion == NotAllocated) return [FillAllocations.NotAllocatedReason];
         var reasons = ExecutionIntegrity.Problems(ExecutionIntegrity.EntrySide(facts.CurrentPlan),
             facts.Fills.ToList(), facts.IncompleteOrders ?? []);
         PlayOutcomeCalculator.Outcome(facts, out var arithmeticProblem);
@@ -617,6 +618,9 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
 
     /// <summary>Review's verdict on one Play: placed at <paramref name="ClosedAt"/>, scored, or excluded with a reason code.</summary>
     public sealed record PlayScore(DateTimeOffset ClosedAt, PlayOutcome? Result, string? Exclusion);
+
+    /// <summary>The exclusion code of a settled Play with an allocated fill: its venue result is not allocated (Phase 2, item 11).</summary>
+    public const string NotAllocated = "not-allocated";
 
     /// <summary>
     /// One closed Play or imported position; an accepted Play also has its Play-local result beside the scored venue result.
@@ -674,6 +678,9 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             exits.Any(f => f.Fill.PositionEffect != ExecutionFacts.Close) ||
             !ExecutionIntegrity.Settled(facts))
             return incomplete;
+        // Phase 2, item 11: the venue's average-cost P&L of a fill allocated between Plays cannot be split, so a Play with
+        // one has no venue result to score (decision 1). Its Play-local result is still shown.
+        if (fills.Any(f => f.Allocated)) return new PlayScore(close, null, NotAllocated);
         var side = ExecutionIntegrity.EntrySide(facts.CurrentPlan);
         var result = PlayOutcomeCalculator.Outcome(facts);
         if (result is not null && !HasCompleteInitialRisk(facts, entries.Min(f => f.Fill.OccurredAtUtc), side))

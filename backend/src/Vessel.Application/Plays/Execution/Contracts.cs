@@ -90,6 +90,12 @@ public sealed record ExecutionTotalsDto(string EnteredQuantity, string ExitedQua
     public string? VenueNetUsd { get; init; }
     /// <summary>The Play-local result beside it; known once the play is closed and its fills settle it.</summary>
     public PlayLocalResultDto? Local { get; init; }
+    /// <summary>
+    /// A fill of this Play is allocated between Plays (Phase 2, item 11): the venue's average-cost P&amp;L cannot be split, so
+    /// the venue result is not allocated. <see cref="VenueNetUsd"/> is null and <see cref="ExecutionTotalsDto.ClosedPnlUsd"/>
+    /// covers only the unallocated fills; neither is shown as this Play's result.
+    /// </summary>
+    public bool VenueNotAllocated { get; init; }
 }
 
 /// <summary><paramref name="Issues"/> say why linked fills cannot settle the play; their quantities stay out of the totals when they contradict it.</summary>
@@ -118,6 +124,13 @@ public sealed record PlayExecutionDto(Guid PlayId, string Status, bool Tracked, 
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public PlayFundingDto? Funding { get; init; }
+    /// <summary>
+    /// Fills the owner may split between Plays from this Play (Phase 2, item 11): its allocated fills, the exit fills of its
+    /// linked orders while they exceed its entries, and unallocated flip fills that close its direction after its first entry.
+    /// </summary>
+    public IReadOnlyList<AllocatableFillDto> SharedFills { get; init; } = [];
+    /// <summary>The Plays a line of those fills may name, and the ones current lines name, with their versions.</summary>
+    public IReadOnlyList<AllocationPlayDto> AllocationPlays { get; init; } = [];
 }
 
 /// <summary>
@@ -161,7 +174,17 @@ public sealed record MissingExecutionOrder(string ContractId, string? VenueContr
 /// </summary>
 public sealed record FundingEvidence(long Revision, long RevisionAfter, IReadOnlyList<(OrderLinkRole Role, ImportedOrder Order)> Links,
     IReadOnlyList<LedgerSpan> Covered, IReadOnlyList<LedgerSpan> OpenGaps,
-    IReadOnlyList<Vessel.Application.Activity.ActivityOmission> ForcedEvents, IReadOnlyList<MissingExecutionOrder> MissingExecutions);
+    IReadOnlyList<Vessel.Application.Activity.ActivityOmission> ForcedEvents, IReadOnlyList<MissingExecutionOrder> MissingExecutions)
+{
+    /// <summary>
+    /// Phase 2, item 11: the instrument's fills with a current allocation between Plays, read in the same snapshot. An
+    /// allocation is no Activity fact and moves no revision, so the snapshot itself fences it.
+    /// </summary>
+    public IReadOnlyList<AllocatedExecution> Allocated { get; init; } = [];
+}
+
+/// <summary>A retained fill with a current allocation between Plays (Phase 2, item 11): where and when it executed.</summary>
+public sealed record AllocatedExecution(string ContractId, string? VenueContractId, DateTimeOffset OccurredAtUtc);
 
 /// <summary>
 /// A position's venue-reported risk context (Phase 2, item 8a): signed quantity and entry as reported, the venue's
@@ -259,6 +282,33 @@ public interface IPlayExecutionStore
     /// the store keeps no ledger, which proves nothing.
     /// </summary>
     Task<FundingEvidence?> FundingEvidenceAsync(FundingEvidenceRequest request, CancellationToken ct) => Task.FromResult<FundingEvidence?>(null);
+    /// <summary>
+    /// Allocations (Phase 2, item 11) with a line naming one of <paramref name="playIds"/>, and those on one of
+    /// <paramref name="fillIds"/> in any state (a removed one has no lines), each with its fill and the fill's retained order,
+    /// read-only. None in stores without them.
+    /// </summary>
+    Task<List<AllocatedFill>> AllocationsAsync(Guid accountId, IReadOnlyCollection<Guid> playIds, IReadOnlyCollection<Guid> fillIds,
+        CancellationToken ct) => Task.FromResult(new List<AllocatedFill>());
+    /// <summary>A fill's allocation with its lines, tracked for changes, or null; a removed one has no lines.</summary>
+    Task<FillAllocation?> AllocationForUpdateAsync(Guid accountId, Guid fillId, CancellationToken ct) => Task.FromResult<FillAllocation?>(null);
+    /// <summary>One retained fill of the account by its internal ID, read-only, or null.</summary>
+    Task<ImportedFill?> FillAsync(Guid accountId, Guid fillId, CancellationToken ct) => Task.FromResult<ImportedFill?>(null);
+    /// <summary>
+    /// Retained fills the venue reports as flips on one contract of the account, of <paramref name="side"/>, at or after
+    /// <paramref name="since"/> and without a current allocation: newest first, at most <paramref name="limit"/>.
+    /// </summary>
+    Task<List<ImportedFill>> FlipFillsAsync(Guid accountId, string contractId, string side, DateTimeOffset since, int limit, CancellationToken ct) =>
+        Task.FromResult(new List<ImportedFill>());
+    /// <summary>
+    /// The account's real, planned-origin venue Plays on <paramref name="contractId"/> that can take a part of a fill (Planned,
+    /// Paused, Open or Unresolved), and its Plays in <paramref name="named"/> in any status; read-only.
+    /// </summary>
+    Task<List<Play>> AllocationCandidatesAsync(Guid accountId, string contractId, IReadOnlyCollection<Guid> named, CancellationToken ct) =>
+        Task.FromResult(new List<Play>());
+    /// <summary>Plays of the account with these IDs, in any status, tracked for changes; owner status writes wait on the account lock.</summary>
+    Task<List<Play>> PlaysAsync(Guid accountId, IReadOnlyCollection<Guid> ids, CancellationToken ct) => Task.FromResult(new List<Play>());
+    void Add(FillAllocation allocation) => throw new NotSupportedException("This store keeps no allocations.");
+    void Add(FillAllocationRevision revision) => throw new NotSupportedException("This store keeps no allocations.");
     void Add(PlayOrderLink link);
     void Add(PlayStatusChange change);
     /// <summary>

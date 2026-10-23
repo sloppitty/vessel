@@ -262,6 +262,18 @@ public sealed class Play : IOwned
         Touch(now);
     }
 
+    /// <summary>
+    /// An owner-confirmed allocation changed this Play's part of a shared or flipped fill (Phase 2, item 11): its facts
+    /// changed, so its version moves on. Any status it reaches follows from the existing settlement rules.
+    /// </summary>
+    public void RecordFillAllocation(DateTimeOffset now)
+    {
+        if (TradingMode != Common.TradingMode.Real) throw new DomainRuleException("Paper Plays use simulated executions, not actual fills.");
+        if (Status is not (PlayStatus.Planned or PlayStatus.Paused or PlayStatus.Open or PlayStatus.Unresolved))
+            throw new DomainRuleException("Only a planned, paused, open or unresolved Play takes a new part of a fill.");
+        Touch(now);
+    }
+
     /// <summary>Changes a Draft's plan without a revision, or records the next revision of a planned one.</summary>
     public PlayPlanRevision? ChangePlan(string plan, string? reason, DateTimeOffset now)
     {

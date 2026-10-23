@@ -89,6 +89,10 @@ public static class PlayEndpoints
         api.MapDelete("/{id:guid}/execution/links/{linkId:guid}", async (Guid id, Guid linkId, PlayExecutionService service,
             MonitorExecutionView monitor, CancellationToken ct) =>
             Results.Ok(await monitor.ComposeAsync(await service.UnlinkAsync(id, linkId, ct), ct)));
+        // Phase 2, item 11: the owner splits one fill between Plays (a shared exit or a flip), replaces or removes the split.
+        api.MapPost("/{id:guid}/execution/allocations", async (Guid id, AllocateFillRequest request, PlayExecutionService service,
+            MonitorExecutionView monitor, CancellationToken ct) =>
+            Results.Ok(await monitor.ComposeAsync(await service.AllocateAsync(id, request, ct), ct)));
         // Answers level.drift: one plan revision moves the linked level to the observed order's price. Returns the Play.
         api.MapPost("/{id:guid}/execution/links/{linkId:guid}/rebind", async (Guid id, Guid linkId, RebindLevelRequest request,
             PlayExecutionService service, CancellationToken ct) => Results.Ok(await service.RebindAsync(id, linkId, request, ct)));

@@ -57,12 +57,15 @@ public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISi
         IEnumerable<ImportedFill> FillsOf(PlayOrderLink link) => known.TryGetValue(link.ImportedOrderId, out var order) ? fills[OrderKey.Of(order)] : [];
         var linked = links.ToLookup(l => l.PlayId);
         var manual = (await db.ManualExecutions.Where(r => ids.Contains(r.PlayId)).AsNoTracking().ToListAsync(ct)).ToLookup(r => r.PlayId);
+        // Owner-confirmed allocations (Phase 2, item 11): an allocated fill counts only through the Play's own line.
+        var allocations = await AllocatedFills.ForAsync(db, ids, links.SelectMany(FillsOf).Select(f => f.Id).ToList(), ct);
         return plays.Select(p => paper.TryGetValue(p.Id, out var simulated) ? Paper(simulated) :
             manual[p.Id].Any() ? ManualFacts(p, revisions[p.Id].ToList(), manual[p.Id]) :
             new ClosedPlayFacts(p, revisions[p.Id].ToList(),
-            linked[p.Id].SelectMany(l => FillsOf(l).Select(f => new LinkedFill(l.Role, f))).ToList(),
+            FillAllocations.For(p.Id, linked[p.Id].SelectMany(l => FillsOf(l).Select(f => (l, f))), allocations).Select(f => f.Linked).ToList(),
             linked[p.Id].Where(l => known.TryGetValue(l.ImportedOrderId, out var order) &&
-                ExecutionIntegrity.MissingExecutions(order, FillsOf(l))).Select(l => known[l.ImportedOrderId].ExternalOrderId).ToList())).ToList();
+                ExecutionIntegrity.MissingExecutions(order, FillsOf(l))).Select(l => known[l.ImportedOrderId].ExternalOrderId)
+                .Concat(FillAllocations.Incomplete(p.Id, allocations)).Distinct(StringComparer.Ordinal).ToList())).ToList();
     }
 
     private static ClosedPlayFacts Paper(PaperPlayFacts facts) => new(facts.Play, facts.Revisions, []) { Paper = facts };

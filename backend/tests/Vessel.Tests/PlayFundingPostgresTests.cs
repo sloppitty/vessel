@@ -240,9 +240,67 @@ public sealed class PlayFundingPostgresTests
                 // A whole-second settlement in the exit's second.
                 Pay(db, account, "at-exit", 0.01m, Exit);
                 break;
+            case "allocated-exit":
+            {
+                // Phase 2, item 11: the Play's own linked exit is shared with another Play that entered inside the window. Its
+                // allocated part alone makes the position shared, before any other check.
+                var other = AddPlay(db, account, closed: false);
+                Trade(db, account, other, "other-in", "buy", 0.5m, T.AddMinutes(30));
+                var exit = db.Fills.Local.Single(f => f.SourceFillId == "fill-out");
+                exit.Quantity = 1.5m;
+                (await db.Orders.SingleAsync(o => o.ExternalOrderId == "order-out")).OriginalSize = 1.5m;
+                await db.SaveChangesAsync();
+                Allocate(db, exit, AllocationReason.SharedClose, (play.Id, "long", AllocationRole.Exit, 1m), (other.Id, "long", AllocationRole.Exit, 0.5m));
+                break;
+            }
+            case "allocated-in-window":
+            case "allocated-after-window":
+            case "flip-in-window":
+            {
+                // Phase 2, item 11: a round trip of two other Plays, its exit split between them (a shared exit) or flipped from
+                // one into the other, inside the window or after the exit, where only the snapshot anchor walks over it.
+                var after = change == "allocated-after-window";
+                var (opened, closed) = after ? (Exit.AddMinutes(20), Exit.AddMinutes(40)) : (T.AddMinutes(90), T.AddMinutes(150));
+                var first = AddPlay(db, account, closed: false);
+                var second = change == "flip-in-window" ? AddShortPlay(db, account) : AddPlay(db, account, closed: false);
+                // The flip's fill as the venue labels it; the quantities stay flat by the snapshot either way.
+                Trade(db, account, null, "other-in", "buy", change == "flip-in-window" ? 1m : 0.5m, opened);
+                Trade(db, account, null, "other-out", "sell", change == "flip-in-window" ? 1m : 0.5m, closed);
+                var shared = db.Fills.Local.Single(f => f.SourceFillId == "fill-other-out");
+                if (change == "flip-in-window") (shared.PositionEffect, shared.Direction) = (ExecutionFacts.Flip, "Long > Short");
+                await db.SaveChangesAsync();
+                if (change == "flip-in-window")
+                    Allocate(db, shared, AllocationReason.Flip, (first.Id, "long", AllocationRole.Exit, 0.5m), (second.Id, "short", AllocationRole.Entry, 0.5m));
+                else
+                    Allocate(db, shared, AllocationReason.SharedClose, (first.Id, "long", AllocationRole.Exit, 0.25m), (second.Id, "long", AllocationRole.Exit, 0.25m));
+                break;
+            }
         }
         await db.SaveChangesAsync();
         return (account.Id, play.Id);
+    }
+
+    /// <summary>An owner-confirmed allocation of one retained fill (Phase 2, item 11), saved with its first revision.</summary>
+    private static void Allocate(VesselDbContext db, ImportedFill fill, AllocationReason reason,
+        params (Guid Play, string Direction, AllocationRole Role, decimal Quantity)[] lines)
+    {
+        var (allocation, revision) = FillAllocation.Create(fill, reason, "Split between plays.",
+            lines.Select(l => new AllocationLineRequest(l.Play, l.Direction, l.Role, l.Role == AllocationRole.Entry ? "entry-1" : null, l.Quantity)).ToList(), Read);
+        db.FillAllocations.Add(allocation);
+        db.FillAllocationRevisions.Add(revision);
+    }
+
+    /// <summary>A planned short Play on the instrument, the entry side of a flip.</summary>
+    private static Play AddShortPlay(VesselDbContext db, Account account)
+    {
+        var plan = TestPlays.Plan() with { Direction = "short" };
+        plan = plan with { Entries = [plan.Entries[0] with { Stops = [new PlanExit("stop-1", "price", "105", "100")],
+            Targets = [new PlanExit("target-1", "price", "90", "100")] }] };
+        var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
+            PlayDocuments.Serialize(plan), T.AddDays(-1));
+        var (change, revision) = play.MarkPlanned(T.AddDays(-1));
+        db.Plays.Add(play); db.Add(change); db.Add(revision);
+        return play;
     }
 
     private static ExecutionOmission Marker(Account account, DateTimeOffset? at, DateTimeOffset? from, DateTimeOffset? to) => new()
@@ -292,6 +350,11 @@ public sealed class PlayFundingPostgresTests
     [InlineData("missing-after-exit", "incomplete", "flat-start-unproven")]
     [InlineData("forced-before-complete", "incomplete", "flat-start-unproven")]
     [InlineData("missing-before-complete", "incomplete", "flat-start-unproven")]
+    // Phase 2, item 11: a fill split between plays, the Play's own or another's, in the window or where a proof walks.
+    [InlineData("allocated-exit", "shared", "allocated")]
+    [InlineData("allocated-in-window", "shared", "allocated")]
+    [InlineData("flip-in-window", "shared", "allocated")]
+    [InlineData("allocated-after-window", "shared", "allocated")]
     public async Task An_unproven_condition_reads_shared_or_incomplete_never_a_sum(string change, string state, string reason)
     {
         await using var database = await CoreDatabase.CreateAsync();

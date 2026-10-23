@@ -96,6 +96,17 @@ describe('suggestions panel', () => {
     expect(screen.queryByTestId('record-unresolved')).not.toBeInTheDocument()
   })
 
+  it('counts Plays with a shared fill beside the ladder, never in the record (Phase 2, item 11)', async () => {
+    const user = userEvent.setup()
+    const view = render(<Workspace initial={plan()} sizing={{ ...sizingFixture, record: { ...sizingFixture.record, unresolved: 1, notAllocated: 2 } }} />)
+    await openPanel(user)
+    expect(screen.getByTestId('record-not-allocated').closest('p')!).toHaveTextContent(/1 unresolved not counted · 2 with a shared fill not counted$/)
+    view.unmount()
+    render(<Workspace initial={plan()} />)
+    await openPanel(user)
+    expect(screen.queryByTestId('record-not-allocated')).not.toBeInTheDocument()
+  })
+
   it('suggests the risk-based size with its reasoning and applies it only on Accept', async () => {
     const user = userEvent.setup()
     const onDraft = vi.fn<(draft: PlayDraft) => void>()

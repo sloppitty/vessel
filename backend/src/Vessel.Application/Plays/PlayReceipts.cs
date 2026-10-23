@@ -33,6 +33,7 @@ public static class PlayReceipts
     public const string NoStopReason = "The plan in force at the first entry fill lacks a complete stop on the loss side of every entry.";
     public const string PlanAfterFillReason = "No plan revision was in force at the first entry fill: the plan was written after it.";
     public const string UnresolvedNote = "An unresolved Play has no result, so it has no R.";
+    public const string NotAllocatedNote = "Review leaves this Play out because a fill of it is allocated between plays, so its venue result is not allocated.";
 
     /// <summary>The receipt of a Play from the facts Review and sizing read: every linked fill, or the manual ledger.</summary>
     public static PlayReceiptDto Build(ClosedPlayFacts facts, DateTimeOffset now)
@@ -60,6 +61,7 @@ public static class PlayReceipts
         if (facts.Play.Status != PlayStatus.Closed) return (null, null, OpenReason);
         var score = ReviewService.Score(facts, now, facts.IncompleteOrders is { Count: > 0 });
         if (score.Exclusion == "fees") return (null, null, FeesReason);
+        if (score.Exclusion == ReviewService.NotAllocated) return (null, null, NotAllocatedNote);
         if (score.Result is null || score.Exclusion is not null) return (null, null, ExecutionsReason);
         if (score.Result is { RMultiple: { } r, PlannedRisk: { } risk }) return (ExactDecimal.Format(r), ExactDecimal.Format(risk), null);
         var firstEntry = facts.Fills.Where(f => f.Role == OrderLinkRole.Entry).Min(f => f.Fill.OccurredAtUtc);

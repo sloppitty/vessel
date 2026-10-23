@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type { WorkspaceApi } from '@/api/workspace'
-import type { LinkOrder, PlayExecution, RebindLevel, SavedPlay } from '@/api/plays'
+import type { AllocateFill, LinkOrder, PlayExecution, RebindLevel, SavedPlay } from '@/api/plays'
 import { errorMessage } from '@/api/errors'
 
 type Context = { api: WorkspaceApi; playId: string | null }
@@ -136,6 +136,16 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
   /** The new plan revision belongs to the Play, so the saved Play goes to `onPlay`; the execution is read again after. */
   const rebind = useCallback((linkId: string, request: RebindLevel, onPlay: (play: SavedPlay) => void) =>
     run(async (play, signal) => { onPlay(await api.rebindLevel(play, linkId, request, signal)) }), [api, run])
+  /**
+   * Splits a fill between Plays (Phase 2, item 11). Every Play on its lines moves to a new version, this one too, so the saved
+   * Play is read again for `onPlay`; the answer is this Play's execution.
+   */
+  const allocate = useCallback((request: AllocateFill, onPlay: (play: SavedPlay) => void) =>
+    run(async (play, signal) => {
+      const execution = await api.allocateFill(play, request, signal)
+      onPlay(await api.play(play, signal))
+      return execution
+    }), [api, run])
   const current = state.context === context ? state : nothingShown
   return { execution: current.execution,
     error: error?.context === context ? error.message : null,
@@ -145,5 +155,5 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
      * has been shown yet (a link's own answer does not count), or a read started after the facts shown has failed. Facts
      * derived from it (fills, averages) are unknown until it is fresh.
      */
-    stale: !isFresh(current, basis), reload, link, unlink, reject, dismiss, rebind }
+    stale: !isFresh(current, basis), reload, link, unlink, reject, dismiss, rebind, allocate }
 }

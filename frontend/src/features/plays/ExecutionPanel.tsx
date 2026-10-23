@@ -1,5 +1,7 @@
 import type { PriceStep } from '@/lib/price-step'
-import type { ExecutionOrder, LinkOrder, PlayExecution, PlaySummary, RebindLevel, VenueRisk } from '@/api/plays'
+import { allocationReasonLabels, type AllocateFill, type ExecutionOrder, type LinkOrder, type PlayExecution, type PlaySummary, type RebindLevel, type SharedFill, type VenueRisk } from '@/api/plays'
+import { useState } from 'react'
+import { AllocationDialog } from './AllocationDialog'
 import { Button } from '@/components/ui/button'
 import { Link2, Link2Off } from 'lucide-react'
 import { MonitorDiscrepancies, MonitorPanel, MonitorWatches } from '@/features/monitor/MonitorPanel'
@@ -26,6 +28,12 @@ const venueRisk = (risk: VenueRisk) => `${risk.liquidationPrice ?? 'not reported
 const noChoices: Record<string, string> = {}
 
 
+const notAllocatedNote = 'A fill of this play is split with another play. The venue\u2019s average-cost result cannot be split, so this play has no venue result and is not scored.'
+
+/** The current split of a shared fill: each Play's part, and the revision. */
+const allocationSummary = (item: SharedFill) =>
+  `${item.reason ? allocationReasonLabels[item.reason] : 'Allocated'}: ${item.lines.map(line => `${line.title || 'Untitled play'} ${line.role === 'entry' ? 'opens' : 'closes'} ${line.quantity}${line.fee === null ? '' : ` (fee ${line.fee}${line.feeRemainder ? `, incl. remainder ${line.feeRemainder}` : ''})`}`).join(' · ')} · revision ${item.revision}`
+
 /** Venue orders and fills linked to the play, suggestions to confirm and orders that could be linked by hand. */
 const pnlBasisNote = {
   gross: 'As the venue reports it, before fees; fees are listed separately.',
@@ -34,7 +42,7 @@ const pnlBasisNote = {
 } as const
 
 export function ExecutionPanel({ execution, error, busy, stale = false, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, onReject, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, currentBookRead = true, onDismiss, onManageCredential,
-  version, leverage = 1, priceStep = null, onRebind, rebindBlocked }: {
+  version, leverage = 1, priceStep = null, onRebind, rebindBlocked, onAllocate }: {
   execution: PlayExecution | null
   error: string | null
   busy: boolean
@@ -66,13 +74,19 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
   onRebind?: (linkId: string, request: RebindLevel) => Promise<void>
   /** Why a rebind is not available now, such as unsaved plan edits. */
   rebindBlocked?: string | undefined
+  /** Splits a shared or flipped fill between Plays (Phase 2, item 11); rejects with the server's refusal. */
+  onAllocate?: ((request: AllocateFill) => Promise<void>) | undefined
 }) {
   const zone = useDisplayZone()
+  const [allocating, setAllocating] = useState<string | null>(null)
   // The chosen roles belong to the journal, not to this tab: expanding the journal remounts the panel. Scoped by play.
   const [choices, setChoices] = useJournalState(`execution-choices:${execution?.playId ?? ''}`, noChoices)
   if (!execution) return <div className="execution-panel"><p className="muted" role="status">{error ?? 'Loading execution…'}</p></div>
   const retrospective = origin === 'retrospective'
   const editable = !retrospective && ['planned', 'paused', 'open'].includes(execution.status)
+  // An Unresolved Play may still receive its part of a shared fill (Phase 2, item 11); the server checks every Play on the lines.
+  const allocatable = !retrospective && ['planned', 'paused', 'open', 'unresolved'].includes(execution.status)
+  const allocatingFill = execution.sharedFills?.find(item => item.fillId === allocating)
   const options = levelOptions(entries, execution.status === 'open')
   const shownMonitor = monitor === undefined ? execution.monitor : monitor
   // This Play's own recorded stop coverage; an Open Play without one has not been checked since it opened.
@@ -126,10 +140,12 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
       <div><dt>Entered</dt><dd>{totals.enteredQuantity}</dd></div>
       <div><dt>Exited</dt><dd>{totals.exitedQuantity}</dd></div>
       <div><dt>Still open</dt><dd>{totals.openQuantity}</dd></div>
-      <div title={pnlBasisNote[totals.closedPnlBasis]}><dt>Venue closed PnL{totals.closedPnlBasis === 'net-of-fee' ? ' · after fees' : ''}</dt><dd>{totals.closedPnlUsd} USD</dd></div>
+      <div title={pnlBasisNote[totals.closedPnlBasis]}><dt>Venue closed PnL{totals.closedPnlBasis === 'net-of-fee' ? ' · after fees' : ''}</dt><dd>{totals.venueNotAllocated
+        ? <InfoTip className="value-tag" trigger="Not allocated" label="venue closed PnL">{notAllocatedNote}</InfoTip> : `${totals.closedPnlUsd} USD`}</dd></div>
       <div><dt>Fees</dt><dd>{totals.fees.length ? totals.fees.map(fee => `${fee.amount} ${fee.token}`).join(' · ') : '0'}</dd></div>
       {totals.venueNetUsd !== undefined && <div><dt>Venue net<InfoTip label="About venue net">Venue closed PnL less fees in listed stablecoins on before-fee fills, over the fills counted here, so far while the play is open. Review and sizing score the venue result of a closed play whose fills settle it, each with its own eligibility rules; retrospective plays are not in sizing.</InfoTip></dt>
-        <dd>{totals.venueNetUsd === null ? <InfoTip className="value-tag" trigger="Unknown" label="venue net">A fee is unverified or in a token outside the listed stablecoins.</InfoTip> : `${totals.venueNetUsd} USD`}</dd></div>}
+        <dd>{totals.venueNotAllocated ? <InfoTip className="value-tag" trigger="Not allocated" label="venue net">{notAllocatedNote}</InfoTip>
+          : totals.venueNetUsd === null ? <InfoTip className="value-tag" trigger="Unknown" label="venue net">A fee is unverified or in a token outside the listed stablecoins.</InfoTip> : `${totals.venueNetUsd} USD`}</dd></div>}
       {totals.local && <div><dt>Play-local result<InfoTip label="About the Play-local result">{localResultNote}</InfoTip></dt>
         <dd><LocalResultValue local={totals.local} format={value => `${value} USD`} />{totals.local.signDiffers && <SignDiffersFlag />}</dd></div>}
       {/* Phase 2, item 9b: beside the results, never added to either. */}
@@ -145,6 +161,21 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
       <h3>Not reconciled<InfoTip label="About unreconciled executions">Vessel neither closes nor scores a play while these remain. Fills that contradict their link are left out of the totals.</InfoTip></h3>
       <ul className="execution-list">{execution.issues.map(issue => <li key={issue}>{issue}</li>)}</ul>
     </section>}
+
+    {(execution.sharedFills?.length ?? 0) > 0 && <section aria-label="Shared fills" className="execution-section execution-shared">
+      <h3>Shared fills<InfoTip label="About shared fills">One fill can close several plays, or close one and open another. Split it by quantity; the fee follows the quantities. A play with a split fill has no venue result and is not scored.</InfoTip></h3>
+      <ul className="execution-list">{execution.sharedFills!.map(item => <li key={item.fillId}>
+        <span><strong>{item.fill.direction} {item.fill.quantity} at {item.fill.price}</strong>
+          <small>order {item.orderId} · <Time at={item.fill.occurredAtUtc} />{item.lines.length > 0 ? ` · ${allocationSummary(item)}` : ''}</small></span>
+        {onAllocate && allocatable && <span className="execution-actions">
+          {/* An allocation writes new versions of its Plays, so it waits for unsaved plan edits and other Play work, as a rebind does. */}
+          <Button size="sm" variant="outline" disabled={busy || stale || !execution.allocationPlays || !!rebindBlocked} title={rebindBlocked}
+            onClick={() => setAllocating(item.fillId)}>
+            {item.lines.length > 0 ? 'Edit' : item.kind === 'flip' ? 'Split flip' : 'Allocate'}</Button></span>}
+      </li>)}</ul>
+    </section>}
+    {allocatingFill && onAllocate && <AllocationDialog shared={allocatingFill} plays={execution.allocationPlays ?? []} playId={execution.playId} busy={busy}
+      onSubmit={onAllocate} onClose={() => setAllocating(null)} />}
 
     {execution.suggestions.length > 0 && <section aria-label="Orders to confirm" className="execution-section">
       <h3>Confirm these orders<InfoTip label="Why confirm these orders">Each matches more than one level, of this play or another, so Vessel does not assign it on its own.</InfoTip></h3>

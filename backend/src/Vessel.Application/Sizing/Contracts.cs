@@ -65,6 +65,12 @@ public sealed record TrackRecordDto(int ClosedPlays, int DecidedPlays, int Windo
     /// window or the ladder; the count is shown beside the ladder as "N unresolved not counted".
     /// </summary>
     public int Unresolved { get; init; }
+
+    /// <summary>
+    /// Closed real Plays on enabled accounts whose fills settle them but include an allocated fill (Phase 2, item 11): their
+    /// venue result is not allocated, so they are never in the record, the window or the ladder; only counted beside it.
+    /// </summary>
+    public int NotAllocated { get; init; }
 }
 
 public sealed record SizingLimitsDto(string EffectiveRiskPercent, string MaxStopPercent, string MinRewardRisk, string MaxStopSource,
@@ -113,7 +119,14 @@ public sealed record ClosedPlayFacts(Play Play, IReadOnlyList<PlayPlanRevision> 
     }
 }
 
-public sealed record LinkedFill(OrderLinkRole Role, ImportedFill Fill);
+public sealed record LinkedFill(OrderLinkRole Role, ImportedFill Fill)
+{
+    /// <summary>
+    /// The fill is this Play's line of an owner-confirmed allocation (Phase 2, item 11): <see cref="Fill"/> carries the line's
+    /// quantity and fee share, not the venue's closed P&amp;L, so the Play has no venue result.
+    /// </summary>
+    public bool Allocated { get; init; }
+}
 
 // Application owns this bounded port; EF details stay in Persistence. Reads are owner-filtered.
 public interface ISizingStore

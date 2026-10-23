@@ -169,7 +169,7 @@ public sealed class ExecutionIntegrityTests
         var execution = await Link("out", "target");
         Assert.Equal(("planned", "0", "1", "0"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.ExitedQuantity,
             execution.Totals.OpenQuantity));
-        Assert.Equal(["Order cover has buy close fills, so it cannot be an entry of this long play.", "Linked exits exceed the entered quantity; a fill cannot be split between plays."],
+        Assert.Equal(["Order cover has buy close fills, so it cannot be an entry of this long play.", "Linked exits exceed the entered quantity; a fill shared with another play can be allocated between them."],
             execution.Issues);
         Assert.Equal("0", Assert.Single(execution.Entries).FilledQuantity);
     }

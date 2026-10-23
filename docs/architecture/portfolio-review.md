@@ -562,3 +562,28 @@ search projection in the unit of work of every change to those facts.
 - An execution dated after the projecting unit's clock excludes the Play, as
   Review would then. Once that time has passed, the list computes the outcome
   again by the same rules, so it matches Review without waiting for a write.
+
+## Shared-exit allocations (October 23, 2026)
+
+Phase 2, item 11 (G-18, C2; see `phase2-risk-coverage-contract.md` and the
+Shared-exit allocation section of `play-lifecycle.md`). The owner can split
+one imported fill between Plays: a shared exit across the Plays it closed, or
+a flip into one Play's exit and another Play's entry.
+- **Not allocated.** The venue realizes P&L at the position's average cost,
+  and that figure cannot be split by quantity. A closed Play whose fills settle
+  it but include an allocated fill therefore has no venue result. Review
+  leaves it out with the code `not-allocated` and the reason "A fill of this
+  play is allocated between plays. The venue's average-cost P&L cannot be
+  split, so its venue result is not allocated and it is not scored."
+- **Coverage.** `coverage.notAllocated` counts those in scope in the period;
+  the excluded count and the coverage line include them, and the exclusion
+  drill-down and the CSV list them with the reason. A Play its fills do not
+  settle keeps the "incomplete executions" exclusion.
+- **Play-local result.** It reads the Play's own line of the fill (its
+  quantity and fee share), so it is known as for any settled Play, and the
+  Execution panel shows it. It is never scored.
+- **Unassigned fills.** A fill allocated to Plays of the mode is assigned,
+  whether or not its order is linked.
+- The scored basis (decision 1), decision 8, the metrics and the receipt's
+  rules are unchanged; the receipt and the Plays list say why such a Play has
+  no result or R (`not-allocated`).

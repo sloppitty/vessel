@@ -256,7 +256,9 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     return () => controller.abort()
   }, [visible, api, venueStatus, reloadGeneration, saved?.summary.id])
   // The server keeps the direction once an entry has filled: it decides which side closes the position.
-  const filled = paperFills ? paperFills.filled.size > 0 : venueStatus !== undefined && !!tracking.execution?.links.some(link => link.role === 'entry' && link.fills.length > 0)
+  const filled = paperFills ? paperFills.filled.size > 0 : venueStatus !== undefined && (!!tracking.execution?.links.some(link => link.role === 'entry' && link.fills.length > 0) ||
+    // A flip's entry line fills this Play's entry as a linked entry fill does (Phase 2, item 11).
+    !!tracking.execution?.sharedFills?.some(item => item.lines.some(line => line.role === 'entry' && line.playId === tracking.execution?.playId)))
   const status = saved?.summary.status ?? 'draft'
   // Which entries have filled, per entry, as the server decides it: the execution's linked entry fills for a venue Play,
   // the manual ledger for a manual one. Whatever facts are loaded count, whatever the saved status says (a reread of the
@@ -760,7 +762,9 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         onUnlink={linkId => { void tracking.unlink(linkId) }} onReject={orderId => { void tracking.reject(orderId) }}
         // A rebind writes a plan revision, so it waits for unsaved edits and other Play work, and its answer is the saved Play.
         version={saved.summary.version} leverage={leverageOf(draft.leverage)} priceStep={priceStep} rebindBlocked={dirty ? 'Save or discard your plan changes first.' : busy !== null ? 'Wait for the current change to finish.' : undefined}
-        onRebind={(linkId, request) => tracking.rebind(linkId, request, acceptStoredPlay)} /> : undefined} />
+        onRebind={(linkId, request) => tracking.rebind(linkId, request, acceptStoredPlay)}
+        // An allocation gives every Play on its lines a new version, this one included, so the saved Play is read again.
+        onAllocate={request => tracking.allocate(request, acceptStoredPlay)} /> : undefined} />
     </StoredPlanTextContext.Provider>
     {dialog === 'revision' && saved && <RevisionDialog revision={saved.summary.planRevision} pending={saving} error={dialogError}
       onSave={reason => { void save(reason) }} onClose={() => setDialog(null)} />}
