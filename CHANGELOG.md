@@ -169,6 +169,8 @@
 
 ### Fixed
 
+- A stop that stays smaller than its Play's position now raises the undersized-stop warning
+  even when the position or the stop keeps changing size.
 - When a venue later reports a retained fill with different values, Vessel keeps the first
   copy and lists the fill and the fields that differed in Account detail.
 - Hyperliquid: chart and suggestion prices follow the venue's decimal limit, so a planned
