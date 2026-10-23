@@ -1,3 +1,4 @@
+using System.Data;
 using Vessel.Domain.Numerics;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Common;
@@ -213,5 +214,54 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
         var row = rows.FirstOrDefault();
         return row is null ? null : new(ExactDecimal.Format(row.SignedQuantity), ExactDecimal.Format(row.EntryPrice),
             ExactDecimal.Format(row.LiquidationPrice), row.MarginMode, row.ObservedAtUtc);
+    }
+
+    public async Task<FundingEvidence?> FundingEvidenceAsync(FundingEvidenceRequest request, CancellationToken ct)
+    {
+        // Phase 2, item 9b: one snapshot, so the ledger read belongs to the facts at its revision. An ambient snapshot (the Play
+        // bundle's) is reused; the revision read at both ends still shows a change under a weaker ambient isolation.
+        await using var transaction = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct) : null;
+        var revision = await ActivityStore.RevisionAsync(db, db.CurrentOwnerId, ct);
+        var (account, native, contracts) = (request.AccountId, request.VenueContractId, request.ContractIds.ToArray());
+        var links = await db.OrderLinks.Where(l => l.AccountId == account && l.PlayId == request.PlayId && l.State == OrderLinkState.Linked)
+            .Join(db.Orders, l => l.ImportedOrderId, o => o.Id, (l, o) => new { l.Role, Order = o }).AsNoTracking().ToListAsync(ct);
+        // The latest complete record covers everything before its end. Only with one can evidence before the window matter
+        // (the complete-history proof); otherwise rows ending before the window are left out, never ones that could matter.
+        var complete = await db.FillCoverage.Where(r => r.AccountId == account && r.Complete && r.CoveredToUtc != null)
+            .OrderByDescending(r => r.CoveredToUtc).Select(r => r.CoveredToUtc).FirstOrDefaultAsync(ct);
+        var spansFrom = complete is { } until && until < request.FromUtc ? until : request.FromUtc;
+        DateTimeOffset? rowsFrom = complete is null ? request.FromUtc : null;
+        // A span ending before that cannot join the window or extend the complete record (a record ends at its last read).
+        var covered = await db.FillCoverage.Where(r => r.AccountId == account && !r.Complete && r.CoveredFromUtc != null &&
+                r.CoveredToUtc != null && r.LastObservedAtUtc >= spansFrom && r.CoveredToUtc >= spansFrom)
+            .Select(r => new { r.CoveredFromUtc, r.CoveredToUtc }).AsNoTracking().ToListAsync(ct);
+        var gaps = await db.HistoryGaps.Where(g => g.AccountId == account && g.ClosedAtUtc == null &&
+                (rowsFrom == null || g.ToUtc == null || g.ToUtc >= rowsFrom))
+            .Select(g => new { g.FromUtc, g.ToUtc }).AsNoTracking().ToListAsync(ct);
+        var forced = await db.ForcedEvents.Where(e => e.AccountId == account && (contracts.Contains(e.ContractId) ||
+                native != null && e.VenueContractId == native) && (rowsFrom == null || e.OccurredAtUtc >= rowsFrom))
+            .Select(e => new { e.Id, e.ContractId, e.VenueContractId, e.OccurredAtUtc }).AsNoTracking().ToListAsync(ct);
+        // Orders that may be missing executions (the shared rule's own preconditions), with their retained quantity; the
+        // shared rule decides. A terminal order's executions all precede its last observation; any other's may still come.
+        string[] terminal = ["filled", "canceled", "rejected"];
+        var candidates = await db.Orders.Where(o => o.AccountId == account && (contracts.Contains(o.ContractId) ||
+                native != null && o.VenueContractId == native) && (o.ExecutionsOmitted || o.Status == "filled" && !o.IsPositionTpsl) &&
+                (rowsFrom == null || !terminal.Contains(o.Status) || o.ObservedAtUtc >= rowsFrom || o.StatusAtUtc >= rowsFrom))
+            .Select(o => new
+            {
+                Order = o,
+                Retained = db.Fills.Where(f => f.AccountId == o.AccountId && f.ContractId == o.ContractId && f.ExternalOrderId == o.ExternalOrderId)
+                    .Sum(f => (decimal?)f.Quantity) ?? 0m
+            }).AsNoTracking().ToListAsync(ct);
+        var after = await ActivityStore.RevisionAsync(db, db.CurrentOwnerId, ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
+        return new(revision, after, links.Select(l => (l.Role, l.Order)).ToList(),
+            [.. covered.Select(r => new LedgerSpan(r.CoveredFromUtc, r.CoveredToUtc)), .. complete is { } end ? [new LedgerSpan(null, end)] : Array.Empty<LedgerSpan>()],
+            gaps.Select(g => new LedgerSpan(g.FromUtc, g.ToUtc)).ToList(),
+            forced.Select(e => new Vessel.Application.Activity.ActivityOmission(e.Id, account, e.ContractId, e.VenueContractId, e.OccurredAtUtc, null, null)).ToList(),
+            candidates.Where(c => ExecutionIntegrity.MissingExecutions(c.Order, c.Retained)).Select(c => new MissingExecutionOrder(c.Order.ContractId,
+                c.Order.VenueContractId, c.Order.PlacedAtUtc, terminal.Contains(c.Order.Status)
+                    ? c.Order.StatusAtUtc > c.Order.ObservedAtUtc ? c.Order.StatusAtUtc : c.Order.ObservedAtUtc : null)).ToList());
     }
 }

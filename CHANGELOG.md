@@ -4,6 +4,9 @@
 
 ### Added
 
+- A Play shows the funding it settled when it is provably the only position on its market over
+  its holding window; otherwise the line says the funding is shared or its coverage incomplete.
+  Funding is never added to a result.
 - Activity no longer walks across executions an import left out: the operation they interrupt reads
   "direction unknown: executions omitted" instead of a phantom opposite operation, and
   venue-forced executions show as rows with their exclusion. A round trip across an omission

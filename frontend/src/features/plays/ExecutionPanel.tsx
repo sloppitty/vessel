@@ -13,6 +13,7 @@ import { useJournalState } from './journal-state'
 import { LevelDriftAction } from './LevelDriftAction'
 import { LinkStopAction } from './LinkStopAction'
 import { LocalResultValue, SignDiffersFlag, localResultNote } from './LocalResult'
+import { PlayFundingRow } from './PlayFundingRow'
 import { EntryReceipts, ReceiptTotals } from './Receipt'
 import { Time } from '@/components/ui/time'
 import { useDisplayZone } from '@/lib/display-zone'
@@ -131,6 +132,8 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
         <dd>{totals.venueNetUsd === null ? <InfoTip className="value-tag" trigger="Unknown" label="venue net">A fee is unverified or in a token outside the listed stablecoins.</InfoTip> : `${totals.venueNetUsd} USD`}</dd></div>}
       {totals.local && <div><dt>Play-local result<InfoTip label="About the Play-local result">{localResultNote}</InfoTip></dt>
         <dd><LocalResultValue local={totals.local} format={value => `${value} USD`} />{totals.local.signDiffers && <SignDiffersFlag />}</dd></div>}
+      {/* Phase 2, item 9b: beside the results, never added to either. */}
+      {execution.funding && <PlayFundingRow funding={execution.funding} />}
       {execution.receipt && <ReceiptTotals receipt={execution.receipt} status={execution.status} />}
       {(execution.venuePosition || execution.riskAtFirstFill) && <div><dt>Venue liquidation<InfoTip label="About the venue liquidation price">The venue's own liquidation price and margin mode for this Play's position, each as read at the time shown. It is not the plan's isolated estimate; under cross margin it moves with the whole account. The earliest one is the first read after the first entry fill, not a value at the fill itself.</InfoTip></dt>
         <dd>{execution.venuePosition ? <>{venueRisk(execution.venuePosition)} <small>read <Time at={execution.venuePosition.observedAtUtc} /></small></> : <>Flat now</>}
