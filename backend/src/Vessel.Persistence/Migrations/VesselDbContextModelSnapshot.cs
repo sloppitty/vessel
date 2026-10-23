@@ -1596,6 +1596,87 @@ namespace Vessel.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Vessel.Domain.Plays.PlaySearchEntry", b =>
+                {
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PlayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("EstimatedR")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTimeOffset?>("ExitAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ProjectedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RReason")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTimeOffset?>("RecheckAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal?>("ResultUsd")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("OwnerId", "PlayId");
+
+                    b.ToTable("play_search", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_play_search_figures", "(\"State\" = 'scored') = (\"ResultUsd\" IS NOT NULL) AND (\"EstimatedR\" IS NULL OR \"ResultUsd\" IS NOT NULL) AND (\"RReason\" IS NULL OR \"State\" = 'scored' AND \"EstimatedR\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_play_search_reason", "\"RReason\" IS NULL OR \"RReason\" IN ('retrospective', 'plan-after-fill', 'no-stop')");
+
+                            t.HasCheckConstraint("CK_play_search_recheck", "\"RecheckAtUtc\" IS NULL OR \"State\" = 'executions'");
+
+                            t.HasCheckConstraint("CK_play_search_state", "\"State\" IN ('active', 'scored', 'executions', 'fees', 'unresolved', 'cancelled')");
+                        });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.PlaySearchText", b =>
+                {
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PlayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Field")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Folded")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("OwnerId", "PlayId", "Position");
+
+                    b.ToTable("play_search_texts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_play_search_texts_text", "\"Text\" <> '' AND length(\"Folded\") = length(\"Text\") AND \"Position\" >= 0");
+                        });
+                });
+
             modelBuilder.Entity("Vessel.Domain.Plays.PlayStatusChange", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2773,6 +2854,25 @@ namespace Vessel.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("OwnerId", "PlayId")
                         .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.PlaySearchEntry", b =>
+                {
+                    b.HasOne("Vessel.Domain.Plays.Play", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "PlayId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.PlaySearchText", b =>
+                {
+                    b.HasOne("Vessel.Domain.Plays.PlaySearchEntry", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "PlayId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

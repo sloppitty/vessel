@@ -547,3 +547,18 @@ Phase 2, item 3 of the [risk and coverage contract](phase2-risk-coverage-contrac
   stays a deviation. The section is absent while no Play carries a rule, and
   the week page shows the same section for its week.
 
+
+## Plays list outcomes (October 22, 2026)
+
+Phase 2, item 13 (F-07; see `phase2-risk-coverage-contract.md` and
+`list-paging.md`). The Plays list shows each ended Play's latest actual exit,
+scored result and estimated R without reading plans. They come from Review's
+own verdict (`ReviewService.Score`) over the same facts, stored in the journal
+search projection in the unit of work of every change to those facts.
+- A Play Review leaves out keeps its exit time but has no result and no R,
+  with Review's reason. Cancelled and Unresolved Plays have none.
+- Nothing in Review, sizing or the ladder reads the projection, and its
+  figures are not a second score.
+- An execution dated after the projecting unit's clock excludes the Play, as
+  Review would then. Once that time has passed, the list computes the outcome
+  again by the same rules, so it matches Review without waiting for a write.
