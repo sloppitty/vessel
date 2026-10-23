@@ -18,7 +18,7 @@ namespace Vessel.Application.Plays.Execution;
 /// </summary>
 public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore store,
     IVenueRegistry venues, TimeProvider time, IUnitOfWork unitOfWork, IAccountCredentialReader? credentials = null,
-    PlayExecutionOptions? executionOptions = null) : IMonitorImporter
+    PlayExecutionOptions? executionOptions = null, Activity.ActivityService? activity = null) : IMonitorImporter
 {
     private const int MaxUnlinkedOrders = 20;
     /// <summary>Earlier orders checked for compatibility, newest first, bounding the fills read for them.</summary>
@@ -150,7 +150,21 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
                 : await store.PositionAsync(play.AccountId, play.ContractId, at.Native, at.Direction, ct),
             RiskAtFirstFill = play.ContractId is not null && risk is { First: { } first } own
                 ? await store.RiskSinceAsync(play.AccountId, play.ContractId, own.Native, own.Direction, first, own.Until, ct) : null,
+            Funding = await FundingAsync(play, plan, settlement, account, ct),
         };
+    }
+
+    /// <summary>
+    /// Phase 2, item 9b: settled funding beside the Play, shown only with proven sole exposure (<see cref="PlayFunding"/>).
+    /// It reads the account's Activity aggregate and coverage ledger, never a venue, and changes no result.
+    /// </summary>
+    private async Task<PlayFundingDto?> FundingAsync(Play play, PlayPlanDocument plan, Settlement settlement, Account? account, CancellationToken ct)
+    {
+        if (activity is null || !PlayFunding.Applies(play, plan, settlement.All)) return null;
+        if (venues.Funding(play.VenueId) is null) return PlayFunding.NotRead;
+        if (account is not { IsEnabled: true }) return PlayFunding.Disabled;
+        var summaries = await activity.ReadSummariesAsync(account.Id, ct);
+        return PlayFunding.Evaluate(play, plan, settlement.All, settlement.Incomplete, summaries, await store.LedgerAsync(account.Id, ct));
     }
 
     /// <summary>The owner links an order (or confirms a suggestion). It must not belong to another level already.</summary>

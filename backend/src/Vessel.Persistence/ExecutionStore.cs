@@ -214,4 +214,19 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
         return row is null ? null : new(ExactDecimal.Format(row.SignedQuantity), ExactDecimal.Format(row.EntryPrice),
             ExactDecimal.Format(row.LiquidationPrice), row.MarginMode, row.ObservedAtUtc);
     }
+
+    public async Task<ExecutionLedger?> LedgerAsync(Guid accountId, CancellationToken ct)
+    {
+        // Phase 2, item 9b. Only the spans a record proves continuous: a complete record covers everything before its end.
+        var covered = await db.FillCoverage.Where(r => r.AccountId == accountId && r.CoveredToUtc != null && (r.Complete || r.CoveredFromUtc != null))
+            .Select(r => new { r.Complete, r.CoveredFromUtc, r.CoveredToUtc }).AsNoTracking().ToListAsync(ct);
+        var gaps = await db.HistoryGaps.Where(g => g.AccountId == accountId && g.ClosedAtUtc == null)
+            .Select(g => new { g.FromUtc, g.ToUtc }).AsNoTracking().ToListAsync(ct);
+        var forced = await db.ForcedEvents.Where(e => e.AccountId == accountId)
+            .Select(e => new { e.Id, e.AccountId, e.ContractId, e.VenueContractId, e.OccurredAtUtc }).AsNoTracking().ToListAsync(ct);
+        return new(covered.Select(r => new LedgerSpan(r.Complete ? null : r.CoveredFromUtc, r.CoveredToUtc)).ToList(),
+            gaps.Select(g => new LedgerSpan(g.FromUtc, g.ToUtc)).ToList(),
+            forced.Select(e => new Vessel.Application.Activity.ActivityOmission(e.Id, e.AccountId, e.ContractId, e.VenueContractId,
+                e.OccurredAtUtc, null, null)).ToList());
+    }
 }

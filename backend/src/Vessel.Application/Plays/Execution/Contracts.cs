@@ -112,7 +112,42 @@ public sealed record PlayExecutionDto(Guid PlayId, string Status, bool Tracked, 
     public VenueRiskDto? VenuePosition { get; init; }
     /// <summary>The first risk context the venue reported at or after the Play's first entry fill; null when none was kept.</summary>
     public VenueRiskDto? RiskAtFirstFill { get; init; }
+    /// <summary>
+    /// Settled funding beside the Play (Phase 2, item 9b), shown only with proven sole exposure. Absent for a manual
+    /// instrument and before the first linked entry fill. Never added to the venue or Play-local result.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PlayFundingDto? Funding { get; init; }
 }
+
+/// <summary>
+/// Settled funding beside a Play (Phase 2, item 9b). <see cref="State"/> is one of:
+/// <list type="bullet">
+/// <item><c>sole</c>: the Play alone held the position over its holding window (<see cref="FromUtc"/> to <see cref="ToUtc"/>),
+/// with the exact nominal sum of the settlements in it, their asset when they share one, and their count;</item>
+/// <item><c>shared</c>: shared, not allocated, because other exposure was on the position;</item>
+/// <item><c>incomplete</c>: coverage incomplete, because a condition of the proof is not shown;</item>
+/// <item><c>unavailable</c>: the venue's funding is not read, or the account is disabled.</item>
+/// </list>
+/// Every state but <c>sole</c> has a <see cref="Reason"/> code and no amount, count or window. The amount is never added to
+/// the venue or Play-local result, and no execution P&amp;L funding basis moves from unknown.
+/// </summary>
+public sealed record PlayFundingDto(string State, string? Reason, string? AmountUsd, string? Asset, int? PaymentCount,
+    DateTimeOffset? FromUtc, DateTimeOffset? ToUtc);
+
+/// <summary>
+/// A span of an account's execution history (Phase 2, item 9b reads the item 6 ledger). As a covered span, a null start is
+/// verified complete history from the account's start; as an open gap, a null end is unbounded on that side.
+/// </summary>
+public readonly record struct LedgerSpan(DateTimeOffset? FromUtc, DateTimeOffset? ToUtc);
+
+/// <summary>
+/// What an account's ledger shows for the funding proof (Phase 2, item 9b): the spans its coverage records prove
+/// continuous, its open history gaps, and its venue-forced executions as omissions (each also leaves a marker, so this
+/// only adds to what the walk already breaks on).
+/// </summary>
+public sealed record ExecutionLedger(IReadOnlyList<LedgerSpan> Covered, IReadOnlyList<LedgerSpan> OpenGaps,
+    IReadOnlyList<Vessel.Application.Activity.ActivityOmission> ForcedEvents);
 
 /// <summary>
 /// A position's venue-reported risk context (Phase 2, item 8a): signed quantity and entry as reported, the venue's
@@ -205,6 +240,11 @@ public interface IPlayExecutionStore
     Task<VenueRiskDto?> RiskSinceAsync(Guid accountId, string contractId, string? venueContractId, int direction, DateTimeOffset since,
         DateTimeOffset? until, CancellationToken ct) =>
         Task.FromResult<VenueRiskDto?>(null);
+    /// <summary>
+    /// Phase 2, item 9b: the account's coverage ledger and venue-forced executions, read-only. Null when the store keeps no
+    /// ledger, which proves nothing.
+    /// </summary>
+    Task<ExecutionLedger?> LedgerAsync(Guid accountId, CancellationToken ct) => Task.FromResult<ExecutionLedger?>(null);
     void Add(PlayOrderLink link);
     void Add(PlayStatusChange change);
     /// <summary>

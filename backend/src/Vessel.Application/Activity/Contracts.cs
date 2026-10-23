@@ -99,6 +99,10 @@ public sealed record ActivityOperationDto(string Id, Guid AccountId, string Cont
     public int? LeverageMin { get; init; }
     public int? LeverageMax { get; init; }
     internal IReadOnlyList<FundingPayment> FundingPayments { get; init; } = [];
+    // Why funding is not complete, for Phase 2, item 9b: a settlement shares a boundary's precision bucket, or one of the
+    // attributed settlements is in an asset outside the nominal stablecoin list.
+    internal bool FundingAmbiguous { get; init; }
+    internal bool FundingUnsupported { get; init; }
     // The first retained execution, the lower bound for observations when opening entries are missing.
     internal DateTimeOffset FirstOccurredAtUtc { get; init; }
     // Leverage reported on this operation's executions, excluding split flip allocations.

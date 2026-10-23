@@ -69,10 +69,7 @@ internal static class OperationFunding
             var supported = payments.All(p => NominalStablecoins.Contains(p.Asset));
             var amount = payments.Aggregate(default(ExactAmount), (sum, p) =>
                 NominalStablecoins.Contains(p.Asset) ? sum + ExactAmount.From(p.Amount) : sum);
-            var end = operation.ClosedAtUtc ?? (positions.Snapshots.TryGetValue(operation.AccountId, out var snapshot) &&
-                snapshot.ObservedAtUtc > operation.LastOccurredAtUtc ? snapshot.ObservedAtUtc : operation.LastOccurredAtUtc);
-            // Shared refresh bounds use whole milliseconds, including a venue's sub-ms snapshot observation.
-            if (operation.ClosedAtUtc is null) end = DateTimeOffset.FromUnixTimeMilliseconds(end.ToUnixTimeMilliseconds());
+            var end = End(operation.ClosedAtUtc, operation.LastOccurredAtUtc, positions.Snapshots.GetValueOrDefault(operation.AccountId));
             var complete = operation.OpenedAtUtc is { } start &&
                 state is { CoveredFromUtc: { } coveredFrom, CoveredToUtc: { } coveredTo } &&
                 end >= start && coveredFrom <= start && coveredTo >= end && !ambiguous.Contains(operation.Id) && supported &&
@@ -94,9 +91,22 @@ internal static class OperationFunding
                 TotalResultUsd = net,
                 FundingNetUsd = supported && (payments.Count > 0 || complete) ? amount.ToString() : null,
                 FundingStatus = status, FundingPnlBasis = basis, FundingAsOfUtc = state?.CoveredToUtc,
-                FundingPaymentCount = payments.Count, FundingPayments = payments, Coverage = coverage
+                FundingPaymentCount = payments.Count, FundingPayments = payments, Coverage = coverage,
+                FundingAmbiguous = ambiguous.Contains(operation.Id), FundingUnsupported = !supported
             };
         }).ToList(), unassigned);
+    }
+
+    /// <summary>
+    /// Where an interval's funding ends: at its close, or while open at the later of its last execution and the account's
+    /// latest snapshot, in whole milliseconds as the shared refresh bounds are (a venue's snapshot can be sub-millisecond).
+    /// Phase 2, item 9b ends a Play's holding window by the same rule.
+    /// </summary>
+    internal static DateTimeOffset End(DateTimeOffset? closedAt, DateTimeOffset lastOccurred, AccountSnapshot? snapshot)
+    {
+        if (closedAt is { } closed) return closed;
+        var end = snapshot is not null && snapshot.ObservedAtUtc > lastOccurred ? snapshot.ObservedAtUtc : lastOccurred;
+        return DateTimeOffset.FromUnixTimeMilliseconds(end.ToUnixTimeMilliseconds());
     }
 
     private static BigInteger Time(DateTimeOffset at) => (BigInteger)(at - DateTimeOffset.UnixEpoch).Ticks * 100;
