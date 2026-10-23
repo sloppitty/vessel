@@ -20,10 +20,11 @@ public enum AllocationRole { Exit, Entry }
 public sealed record AllocationLineRequest(Guid PlayId, string Direction, AllocationRole Role, string? EntryId, decimal Quantity);
 
 /// <summary>
-/// The owner's split of one imported fill between Plays (Phase 2, item 11): a shared exit across the Plays it closed, or a
-/// flip into one Play's exit and another Play's entry. Lines conserve the fill's quantity exactly, and its fee is shared pro
-/// rata with a disclosed remainder. A fill has at most one allocation; each change is the next revision, kept in
-/// <see cref="FillAllocationRevision"/>. It never changes the fill, an order or an order link.
+/// The owner's split of one imported fill between Plays (Phase 2, item 11): a shared exit across the Plays it closed, a flip
+/// into one Play's exit and another Play's entry, or, for a later execution of an order a flip split, entries alone. Lines
+/// conserve the fill's quantity exactly, and its fee is shared pro rata with a disclosed remainder. A fill has at most one
+/// allocation; each change is the next revision, kept in <see cref="FillAllocationRevision"/>. It never changes the fill, an
+/// order or an order link.
 /// </summary>
 public sealed class FillAllocation : IOwned
 {
@@ -199,17 +200,21 @@ public sealed class FillAllocation : IOwned
         if (sum != ExactAmount.From(fill.Quantity))
             throw new DomainValidationException($"The lines total {sum}, but the fill's quantity is {ExactDecimal.Format(fill.Quantity)}. They must match exactly.");
 
-        var flip = lines.Any(l => l.Role == AllocationRole.Entry);
+        var entries = lines.Count(l => l.Role == AllocationRole.Entry);
+        var flip = entries > 0 && entries < lines.Count;
+        // Sol round 1: a later opening execution of an order a flip split opens Plays only. The caller checks the order is
+        // split; here the fill must be an opening one.
+        var opening = entries == lines.Count;
         if (flip)
         {
-            if (lines.Count != 2 || lines.Count(l => l.Role == AllocationRole.Exit) != 1)
-                throw new DomainRuleException("A flip is split into exactly one exit and one entry.");
+            if (lines.Count != 2 || entries != 1) throw new DomainRuleException("A flip is split into exactly one exit and one entry.");
             if (fill.PositionEffect != ExecutionFacts.Flip) throw new DomainRuleException("Only a fill the venue reports as a flip splits into an exit and an entry.");
         }
         else if (fill.PositionEffect == ExecutionFacts.Flip) throw new DomainRuleException("A flip fill splits into one exit and one entry.");
-        else if (fill.PositionEffect == ExecutionFacts.Open) throw new DomainRuleException("This fill opened a position, so it is no Play's exit.");
-        if (reason == AllocationReason.Flip && !flip) throw new DomainValidationException("The reason flip needs one exit and one entry.");
-        if (reason == AllocationReason.SharedClose && flip) throw new DomainValidationException("The reason shared-close needs exit lines only.");
+        else if (opening && fill.PositionEffect == ExecutionFacts.Close) throw new DomainRuleException("This fill closed a position, so it is no Play's entry.");
+        else if (!opening && fill.PositionEffect == ExecutionFacts.Open) throw new DomainRuleException("This fill opened a position, so it is no Play's exit.");
+        if (reason == AllocationReason.Flip && !flip && !opening) throw new DomainValidationException("The reason flip needs one exit and one entry, or entries alone for the rest of a flip.");
+        if (reason == AllocationReason.SharedClose && entries > 0) throw new DomainValidationException("The reason shared-close needs exit lines only.");
 
         // A sell closes longs and opens shorts; a buy closes shorts and opens longs.
         var closes = fill.Side switch

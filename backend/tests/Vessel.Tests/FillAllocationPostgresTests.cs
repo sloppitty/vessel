@@ -2,6 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
+using Vessel.Application.Review;
+using Vessel.Application.Sizing;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
@@ -250,6 +252,136 @@ public sealed partial class ExecutionPostgresTests
         Assert.Equal(404, await Refusal(async () => await Allocating(h).AllocateAsync(a,
             await Allocation(h, Guid.NewGuid(), 0, "shared-close", ExitLine(a, "1"), ExitLine(b, "2")), default)));
         Assert.Equal(0, await h.Db.FillAllocations.CountAsync());
+    }
+
+    [PostgresFact]
+    public async Task A_resting_order_that_opened_a_Play_keeps_it_open_and_its_later_execution_waits_for_an_allocation()
+    {
+        // Sol round 1 on item 11: a partly filled sell flips the long into the short and still rests.
+        var (database, h, account) = await SetUp();
+        await using var _ = database;
+        var a = (await PlannedPlay(h, account, "Long")).Summary.Id;
+        var c = (await PlannedShort(h, account, "Short")).Summary.Id;
+        var at = DateTimeOffset.UtcNow.AddMinutes(-5);
+        h.Orders.Orders.AddRange([Order("21", "buy", 100m, "filled"), Order("24", "sell", 100m, "open", size: 3m)]);
+        AddFills(h, Fill("e1", "21", "Open Long", 100m, 1m, at), Fill("f1", "24", "Long > Short", 100m, 2m, at.AddMinutes(1)));
+        var flip = Assert.Single((await h.CheckAsync(a)).SharedFills);
+        await Allocating(h).AllocateAsync(a, await Allocation(h, flip.FillId, 0, "flip", ExitLine(a, "1"), new(c, "entry", "entry-1", "1")), default);
+        var opened = await h.Execution.GetAsync(c, default);
+        // The still resting opening order is counted with the entry it filled.
+        Assert.Equal(("open", 1), (opened.Status, opened.Entries.Single().RestingOrders));
+
+        // A buy covering its allocated entry, linked as its exit, does not close it while the opening order rests.
+        h.Orders.Orders.Add(Order("25", "buy", 95m, "filled"));
+        AddFills(h, Fill("x1", "25", "Close Short", 95m, 1m, at.AddMinutes(2)));
+        var execution = await h.CheckAsync(c);
+        if (!execution.Links.Any(l => l.Order?.OrderId == "25")) execution = await h.Execution.LinkAsync(c, new("25", "exit"), default);
+        Assert.Equal(("open", "1", "1"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.ExitedQuantity));
+
+        // Its later execution counts for no Play until the owner allocates it, and the Play is not reconciled meanwhile.
+        h.Orders.Orders[1] = Order("24", "sell", 100m, "filled", size: 3m);
+        // Another short entry on an order no flip split, priced away from every level so nothing links it.
+        h.Orders.Orders.Add(Order("27", "sell", 120m, "filled"));
+        AddFills(h, Fill("f2", "24", "Open Short", 100m, 1m, at.AddMinutes(3)), Fill("f3", "27", "Open Short", 120m, 1m, at.AddMinutes(3).AddSeconds(1)));
+        execution = await h.CheckAsync(c);
+        Assert.Equal(("open", "1"), (execution.Status, execution.Totals.EnteredQuantity));
+        Assert.Contains(FillAllocations.UnallocatedProblem("24"), execution.Issues);
+        Assert.Contains(FillAllocations.UnallocatedProblem("24"), (await h.Execution.GetAsync(a, default)).Issues);
+        var later = Assert.Single(execution.SharedFills, f => f.Kind == "entry");
+        Assert.Equal("f2", later.Fill.SourceFillId);
+        // Entries alone are only for such an execution: on an order no flip split they are refused.
+        var unsplit = (await h.Db.Fills.AsNoTracking().SingleAsync(f => f.SourceFillId == "f3")).Id;
+        Assert.Equal(409, await Refusal(async () => await Allocating(h).AllocateAsync(c,
+            await Allocation(h, unsplit, 0, "other", new AllocationLineInput(c, "entry", "entry-1", "1")), default)));
+
+        execution = await Allocating(h).AllocateAsync(c, await Allocation(h, later.FillId, 0, "flip", new AllocationLineInput(c, "entry", "entry-1", "1")), default);
+        Assert.Equal(("open", "2", "1"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.ExitedQuantity));
+        Assert.DoesNotContain(FillAllocations.UnallocatedProblem("24"), execution.Issues);
+    }
+
+    [PostgresFact]
+    public async Task Trades_split_between_Plays_never_reappear_as_imported_positions_or_fallback_outcomes()
+    {
+        // Sol round 1 on item 11: one flip from the long into the short, then another from the short into a second long, with
+        // neither flip order linked. Activity still shows the short's round trip as unassigned.
+        var (database, h, account) = await SetUp();
+        await using var _ = database;
+        var a = (await PlannedPlay(h, account, "First long")).Summary.Id;
+        var b = (await PlannedShort(h, account, "Short")).Summary.Id;
+        var c = (await PlannedPlay(h, account, "Second long")).Summary.Id;
+        var at = DateTimeOffset.UtcNow.AddMinutes(-5);
+        h.Orders.Orders.AddRange([Order("21", "buy", 100m, "filled"), Order("24", "sell", 110m, "filled", size: 2m),
+            Order("26", "buy", 90m, "filled", size: 2m)]);
+        // The venue's position matches the trades: the second long holds 1.
+        h.Reader.Result = h.Reader.Result with { Snapshot = h.Reader.Result.Snapshot with { Positions = [new("BTC", 1m, 90m, 0m, 18m, 5)] } };
+        // The shared Fill helper reads every reversal as a sell; this one is a buy.
+        AddFills(h, Fill("e1", "21", "Open Long", 100m, 1m, at), Fill("f1", "24", "Long > Short", 110m, 2m, at.AddMinutes(1)),
+            Fill("f2", "26", "Short > Long", 90m, 2m, at.AddMinutes(2)) with { Side = Vessel.Domain.Workspace.ExecutionFacts.Buy });
+        await h.CheckAsync(a);
+        // Both longs could own the entry, so the owner links it.
+        var first = Assert.Single((await h.Execution.LinkAsync(a, new("21", "entry", "entry-1"), default)).SharedFills, f => f.Fill.SourceFillId == "f1");
+        await Allocating(h).AllocateAsync(a, await Allocation(h, first.FillId, 0, "flip", ExitLine(a, "1"), new(b, "entry", "entry-1", "1")), default);
+        var second = Assert.Single((await h.Execution.GetAsync(b, default)).SharedFills, f => f.Fill.SourceFillId == "f2");
+        await Allocating(h).AllocateAsync(b, await Allocation(h, second.FillId, 0, "flip", ExitLine(b, "1"), new(c, "entry", "entry-1", "1")), default);
+        Assert.Equal("closed", (await h.Plays.GetAsync(b, default)).Summary.Status);
+
+        var activity = ActivityTestSupport.Activity(h.Db);
+        Assert.Contains((await activity.PageAsync()).Operations, o => o.Direction == "short" && o.Status == "closed" && o.PlayAssociation == "unassigned");
+        var store = new SizingStore(h.Db, TestUnitOfWork.For(h.Db));
+        var review = new ReviewService(new ReviewStore(h.Db, store), TimeProvider.System, TestVenues.With(), new ActivityReviewPositions(activity, store));
+        var report = await review.GetAsync(new(Period: "all", Positions: "include"), default);
+        // Both Plays are left out as not allocated, and their trades are neither scored nor listed as imported positions.
+        Assert.Equal((2, 0, 0), (report.Coverage.NotAllocated, report.Positions!.Positions, report.Positions.Omitted));
+        Assert.Empty(report.Plays);
+        // No decided Play, and no Activity operation holding a split fill: the sizing record has no source.
+        var sizing = new SizingService(store, new CoreOwner(h.Owner), TimeProvider.System, TestUnitOfWork.For(h.Db), activity);
+        var record = (await sizing.GetAsync(default)).Record;
+        Assert.Equal((SizingService.SourceNone, 0), (record.Source, record.ClosedPlays));
+    }
+
+    [PostgresFact]
+    public async Task Every_allocated_fill_stays_reachable_a_page_at_a_time()
+    {
+        // Sol round 1 on item 11: two longs entered 15 each, closed by one sell of 30 fills of 1, 21 of them split 0.5 / 0.5.
+        var (database, h, account) = await SetUp();
+        await using var _ = database;
+        var a = (await PlannedPlay(h, account, "First")).Summary.Id;
+        var b = (await PlannedPlay(h, account, "Second")).Summary.Id;
+        var at = DateTimeOffset.UtcNow.AddMinutes(-60);
+        h.Orders.Orders.AddRange([Order("21", "buy", 100m, "filled", size: 15m), Order("22", "buy", 100m, "filled", size: 15m),
+            Order("23", "sell", 105m, "filled", size: 30m)]);
+        AddFills(h, [Fill("e1", "21", "Open Long", 100m, 15m, at), Fill("e2", "22", "Open Long", 100m, 15m, at.AddSeconds(1)),
+            .. Enumerable.Range(1, 30).Select(i => Fill($"x{i:00}", "23", "Close Long", 105m, 1m, at.AddMinutes(i)))]);
+        await h.CheckAsync(a);
+        await h.Execution.LinkAsync(a, new("21", "entry", "entry-1"), default);
+        await h.Execution.LinkAsync(b, new("22", "entry", "entry-1"), default);
+        await h.Execution.LinkAsync(a, new("23", "exit"), default);
+        await using (var seed = database.Context(h.Owner))
+        {
+            foreach (var fill in await seed.Fills.Where(f => f.SourceFillId.StartsWith("x")).OrderBy(f => f.OccurredAtUtc).Take(21).ToListAsync())
+            {
+                var (allocation, revision) = FillAllocation.Create(fill, AllocationReason.SharedClose, "Half each.",
+                    [new(a, "long", AllocationRole.Exit, null, 0.5m), new(b, "long", AllocationRole.Exit, null, 0.5m)], DateTimeOffset.UtcNow);
+                seed.FillAllocations.Add(allocation); seed.FillAllocationRevisions.Add(revision);
+            }
+            await seed.SaveChangesAsync();
+        }
+        var execution = await h.Execution.GetAsync(a, default);
+        // The newest 20 come with the execution, with the total and where the rest begin; offered fills come beside them.
+        Assert.Equal((21, (int?)20), (execution.SharedFillCount, execution.SharedFillsNextOffset));
+        Assert.Equal(20, execution.SharedFills.Count(f => f.Lines.Count > 0));
+        Assert.Equal(9, execution.SharedFills.Count(f => f.Lines.Count == 0));
+        Assert.True(execution.SharedFills.Count <= 2 * PlayExecutionService.MaxSharedFills);
+        var page = await h.Execution.SharedFillsAsync(a, 20, default);
+        Assert.Equal((21, 20, (int?)null), (page.Total, page.Offset, page.NextOffset));
+        var oldest = Assert.Single(page.Items);
+        Assert.Equal("x01", oldest.Fill.SourceFillId);
+        Assert.Equal(400, await Refusal(() => h.Execution.SharedFillsAsync(a, -1, default)));
+        // The oldest is still editable with the versions its page lists.
+        var versions = page.Plays.Where(p => p.PlayId == a || p.PlayId == b).Select(p => new AllocationPlayVersion(p.PlayId, p.Version)).ToList();
+        execution = await Allocating(h).AllocateAsync(a, new(Guid.NewGuid(), oldest.FillId, oldest.Revision, "shared-close", "Moved.", versions,
+            [ExitLine(a, "0.25"), ExitLine(b, "0.75")]), default);
+        Assert.Equal(2, (await h.Execution.SharedFillsAsync(a, 20, default)).Items.Single().Revision);
     }
 
     [PostgresFact]

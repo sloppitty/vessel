@@ -120,6 +120,7 @@ public abstract class PlayIsolationCases(IsolationHost api)
     [Covers("POST", "/api/plays/{id:guid}/unresolved")]
     [Covers("POST", "/api/plays/{id:guid}/return-to-open")]
     [Covers("POST", "/api/plays/{id:guid}/execution/allocations")]
+    [Covers("GET", "/api/plays/{id:guid}/execution/allocations")]
     public async Task Order_links_of_another_owner_answer_like_unknown_ones_and_stay_unchanged()
     {
         var (a, b) = await api.Owners();
@@ -179,6 +180,9 @@ public abstract class PlayIsolationCases(IsolationHost api)
                 id => Allocation(aFill, id, 1)), PlayNotFound));
             await state.After(() => Isolated.NotFound(b, aFill, Isolated.Request(HttpMethod.Post, _ => $"/api/plays/{bPlay}/execution/allocations",
                 id => Allocation(id, bPlay, Version(bPlanned))), "Fill not found."));
+            // A's allocated fills, a page at a time, answer like an unknown Play (Sol round 1 on item 11).
+            await state.After(() => Isolated.NotFound(b, play, Isolated.Request(HttpMethod.Get, id => $"/api/plays/{id}/execution/allocations?offset=0"),
+                PlayNotFound));
 
             // B links the same native order ID in its own account: a separate link that leaves A's untouched.
             var aState = await Snapshot.Of(a, paths);
@@ -202,6 +206,8 @@ public abstract class PlayIsolationCases(IsolationHost api)
             // Positive controls: A's own declaration and return reach its Play: a stale version is a conflict, not an unknown Play.
             await a.Post($"/api/plays/{play}/unresolved", new DeclareUnresolvedRequest(0, "other", "Stuck."), HttpStatusCode.Conflict);
             await a.Post($"/api/plays/{play}/return-to-open", new ReturnToOpenRequest(0, "Back."), HttpStatusCode.Conflict);
+            // Positive control: A reads its own page of allocated fills (none yet).
+            Assert.Equal(0, (await a.GetJson($"/api/plays/{play}/execution/allocations?offset=0")).GetProperty("total").GetInt32());
             // Positive control: A's own allocation reaches its fill and Play: a stale version is a conflict, not unknown.
             await a.Post($"/api/plays/{play}/execution/allocations", new AllocateFillRequest(Guid.NewGuid(), aFill, 0, "shared-close", "Mine.",
                 [new(play, 0)], [new(play, "exit", null, "1")]), HttpStatusCode.Conflict);

@@ -107,7 +107,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var allocations = await store.AllocationsAsync(play.AccountId, [play.Id], LinkedFillIds(linked, fills), ct);
         var own = PlayFills(play.Id, linked, fills, allocations);
         var settlement = Settle(plan, linked, orders, fills, own, FillAllocations.Incomplete(play.Id, allocations),
-            play.Origin == PlayOrigin.Retrospective);
+            play.Origin == PlayOrigin.Retrospective, FillAllocations.Unallocated(play.Id, allocations));
         var entered = settlement.Entered;
         var exited = settlement.Exited;
         var open = entered - exited;
@@ -139,7 +139,10 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             var notional = filled.Aggregate(BigInteger.Zero, (sum, f) => sum + ExactAmount.Product(f.Price, f.Quantity));
             var planned = PlayReceipts.Planned(play, revisions, entry.Id, filled.Count == 0 ? null : filled.Min(f => f.OccurredAtUtc));
             return new EntryProgressDto(entry.Id, quantity.ToString(), quantity.Units.Sign > 0 ? ExactAmount.Average(notional, quantity) : null,
-                entryLinks.Count(l => orders.TryGetValue(l.ImportedOrderId, out var o) && o.Status == "open"))
+                entryLinks.Count(l => orders.TryGetValue(l.ImportedOrderId, out var o) && o.Status == "open") +
+                // An order that opened this entry through an allocation and still rests counts as a resting entry order.
+                allocations.Where(a => a.Order is { Status: "open" } && a.Allocation.Lines.Any(l => l.PlayId == play.Id && l.Role == AllocationRole.Entry &&
+                    l.EntryId == entry.Id)).Select(a => a.Order!.Id).Distinct().Count())
             {
                 PlannedPrice = planned.Price, PlannedQuantity = planned.Quantity, PlanRevision = planned.Revision,
             };
@@ -153,15 +156,17 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         if (reason is null && account is { IsEnabled: true } && play.Status is not (PlayStatus.Closed or PlayStatus.Cancelled))
             reason = await CredentialReasonAsync(account, ct);
         var risk = RiskScope(plan, own, settlement.EntrySide, open.Units.Sign <= 0 && exited.Units.Sign > 0);
-        var (shared, allocationPlays) = await SharedFillsAsync(play, linked, fills, own, allocations, settlement, ct);
+        var shared = await SharedFillsAsync(play, linked, fills, own, allocations, settlement, 0, offer: true, ct);
         return new PlayExecutionDto(play.Id, PlayService.StatusName(play.Status), reason is null, reason, account?.LastSyncedAtUtc,
             totals, entries, linked.Select(Link).ToList(),
             suggestions.Select(l => Link(l) with { OtherPlay = elsewhere.Contains(l.ImportedOrderId) }).ToList(), unlinked, Notice, settlement.Problems)
         {
             Receipt = PlayReceipts.Build(new ClosedPlayFacts(play, revisions, settlement.All, settlement.Incomplete), time.GetUtcNow()),
             EarlierOrders = earlier,
-            SharedFills = shared,
-            AllocationPlays = allocationPlays,
+            SharedFills = shared.Items,
+            AllocationPlays = shared.Plays,
+            SharedFillCount = shared.Total,
+            SharedFillsNextOffset = shared.NextOffset,
             VenuePosition = play.ContractId is null || risk is not { } at ? null
                 : await store.PositionAsync(play.AccountId, play.ContractId, at.Native, at.Direction, ct),
             RiskAtFirstFill = play.ContractId is not null && risk is { First: { } first } scope
@@ -443,7 +448,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var fills = FillsByOrder(orders.Values, await store.FillsAsync(play.AccountId, orders.Values.Select(OrderKey.Of).ToList(), ct));
         var allocations = await store.AllocationsAsync(play.AccountId, [play.Id], LinkedFillIds(links, fills), ct);
         var settlement = Settle(PlayDocuments.Read(play.Plan), links, orders, fills, PlayFills(play.Id, links, fills, allocations),
-            FillAllocations.Incomplete(play.Id, allocations));
+            FillAllocations.Incomplete(play.Id, allocations), unallocated: FillAllocations.Unallocated(play.Id, allocations));
         if (settlement.All.Count == 0) return null;
         return new(settlement.Entered.ToString(), settlement.Exited.ToString(), (settlement.Entered - settlement.Exited).ToString(), links.Count,
             links.OrderBy(l => l.Role).ThenBy(l => l.EntryId).ThenBy(l => l.LevelId).ThenBy(l => External(orders, l), StringComparer.Ordinal)
@@ -453,24 +458,34 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             settlement.Problems.Take(PlayUnresolved.MaxEvidenceProblems).ToList());
     }
 
-    private const int MaxSharedFills = 20;
-    private const string SharedExit = "shared-exit", FlipSplit = "flip";
+    /// <summary>Allocated fills per page, and fills offered for a new allocation (the first page only).</summary>
+    public const int MaxSharedFills = 20;
+    /// <summary>Plays that may take a new line, listed with each page; the Plays already on the page's lines come too.</summary>
+    public const int MaxCandidatePlays = 200;
+    private const string SharedExit = "shared-exit", FlipSplit = "flip", EntrySplit = "entry";
+
+    private sealed record SharedFillsPage(List<AllocatableFillDto> Items, List<AllocationPlayDto> Plays, int Total, int? NextOffset);
 
     /// <summary>
-    /// The fills the owner may split from this Play's panel (Phase 2, item 11), and the Plays their lines may name: its
-    /// allocated fills; while it is Open or Unresolved, the exit fills of its linked orders when its exits exceed its
-    /// entries, and the unallocated flips that close its direction after its first entry. Read-only.
+    /// The fills the owner may split from this Play's panel (Phase 2, item 11), and the Plays their lines may name. Its
+    /// allocated fills come newest first, a page of <see cref="MaxSharedFills"/> from <paramref name="offset"/> with their total
+    /// (Sol round 1: every one stays reachable). With <paramref name="offer"/> come the fills offered for a new allocation:
+    /// while it is Open or Unresolved, the exit fills of its linked orders when its exits exceed its entries and the unallocated
+    /// flips that close its direction after its first entry; while it can take an entry, the unallocated executions of an
+    /// order that opened it through an allocation. Read-only.
     /// </summary>
-    private async Task<(List<AllocatableFillDto> Fills, List<AllocationPlayDto> Plays)> SharedFillsAsync(Play play,
-        IReadOnlyCollection<PlayOrderLink> linked, ILookup<Guid, ImportedFill> fills, IReadOnlyCollection<PlayFill> own,
-        IReadOnlyCollection<AllocatedFill> allocations, Settlement settlement, CancellationToken ct)
+    private async Task<SharedFillsPage> SharedFillsAsync(Play play, IReadOnlyCollection<PlayOrderLink> linked, ILookup<Guid, ImportedFill> fills,
+        IReadOnlyCollection<PlayFill> own, IReadOnlyCollection<AllocatedFill> allocations, Settlement settlement, int offset, bool offer,
+        CancellationToken ct)
     {
         if (play.InstrumentSource != InstrumentSource.Venue || play.ContractId is null || play.Origin != PlayOrigin.Planned ||
-            play.Status == PlayStatus.Draft) return ([], []);
+            play.Status == PlayStatus.Draft) return new([], [], 0, null);
         var mine = allocations.Where(a => a.Allocation.Lines.Count > 0 && (a.Allocation.Lines.Any(l => l.PlayId == play.Id) ||
-            linked.Any(l => fills[l.ImportedOrderId].Any(f => f.Id == a.Fill.Id)))).OrderByDescending(a => a.Fill.OccurredAtUtc).ToList();
+            linked.Any(l => fills[l.ImportedOrderId].Any(f => f.Id == a.Fill.Id))))
+            .OrderByDescending(a => a.Fill.OccurredAtUtc).ThenBy(a => a.Fill.Id).ToList();
+        var page = mine.Skip(offset).Take(MaxSharedFills).ToList();
         var offered = new List<(ImportedFill Fill, string Kind)>();
-        if (play.Status is PlayStatus.Open or PlayStatus.Unresolved)
+        if (offer && play.Status is PlayStatus.Open or PlayStatus.Unresolved)
         {
             var taken = mine.Select(a => a.Fill.Id).ToHashSet();
             // Exits of its own linked orders that exceed its entries are the shared close a line can split.
@@ -485,30 +500,72 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
                 offered.AddRange((await store.FlipFillsAsync(play.AccountId, play.ContractId, Opposite(settlement.EntrySide), first, MaxSharedFills, ct))
                     .Select(f => (f, FlipSplit)));
         }
+        // Sol round 1 on item 11: an order that opened this Play through an allocation may execute again; that execution counts
+        // for no Play until the owner allocates it, so it is offered here as an entry.
+        var opening = allocations.Where(a => a.Splits && a.UnallocatedOrderFills > 0 && a.Order is not null &&
+            a.Allocation.Lines.Any(l => l.PlayId == play.Id && l.Role == AllocationRole.Entry)).Select(a => a.Order!).DistinctBy(o => o.Id).ToList();
+        if (offer && opening.Count > 0 && play.Status is PlayStatus.Planned or PlayStatus.Paused or PlayStatus.Open)
+        {
+            var later = await store.FillsAsync(play.AccountId, opening.Select(OrderKey.Of).ToList(), ct);
+            var current = (await store.AllocationsAsync(play.AccountId, [], later.Select(f => f.Id).ToHashSet(), ct))
+                .Where(a => a.Allocation.Lines.Count > 0).Select(a => a.Fill.Id).ToHashSet();
+            offered.AddRange(later.Where(f => !current.Contains(f.Id) && f.Side == settlement.EntrySide &&
+                f.PositionEffect is ExecutionFacts.Open or ExecutionFacts.Unknown).Select(f => (f, EntrySplit)));
+        }
         offered = offered.DistinctBy(x => x.Fill.Id).OrderByDescending(x => x.Fill.OccurredAtUtc).ThenBy(x => x.Fill.Id).Take(MaxSharedFills).ToList();
-        if (mine.Count == 0 && offered.Count == 0) return ([], []);
+        int? next = offset + page.Count < mine.Count ? offset + page.Count : null;
+        if (page.Count == 0 && offered.Count == 0) return new([], [], mine.Count, next);
         // A removed allocation keeps its revision, which the next request expects.
         var removed = offered.Count == 0 ? [] : (await store.AllocationsAsync(play.AccountId, [], offered.Select(x => x.Fill.Id).ToHashSet(), ct))
             .ToDictionary(a => a.Fill.Id, a => a.Allocation.Revision);
 
-        // Plays a line may name: the account's planned venue Plays on this contract that can take a part, and those on the lines.
-        var named = mine.SelectMany(a => a.Allocation.Lines.Select(l => l.PlayId)).ToHashSet();
-        var candidates = (await store.AllocationCandidatesAsync(play.AccountId, play.ContractId, named, ct))
-            .Where(p => p.Id == play.Id || named.Contains(p.Id) || p.Status is PlayStatus.Planned or PlayStatus.Paused or PlayStatus.Open or PlayStatus.Unresolved)
-            .OrderBy(p => p.CreatedAtUtc).ThenBy(p => p.Id).ToList();
-        var ledgers = await LedgersAsync(play.AccountId, candidates.Select(p => p.Id).ToList(), ct);
+        // Plays a line may name: the account's planned venue Plays on this contract that can take a part (at most
+        // MaxCandidatePlays, oldest first), this Play, and every Play on the page's lines whatever its status.
+        var named = page.SelectMany(a => a.Allocation.Lines.Select(l => l.PlayId)).Append(play.Id).ToHashSet();
+        var found = await store.AllocationCandidatesAsync(play.AccountId, play.ContractId, named, ct);
+        var candidates = found.Where(p => !named.Contains(p.Id)).OrderBy(p => p.CreatedAtUtc).ThenBy(p => p.Id).Take(MaxCandidatePlays)
+            .Concat(found.Where(p => named.Contains(p.Id))).OrderBy(p => p.CreatedAtUtc).ThenBy(p => p.Id).ToList();
         var titles = candidates.ToDictionary(p => p.Id, p => p.Title);
+        // Each fill's open quantities are for the Plays that may close part of it: of the direction it closes and open or
+        // unresolved, or already on its exit lines.
+        List<Play> Closers(ImportedFill fill, FillAllocation? allocation) => candidates.Where(p =>
+            p.Direction == (fill.Side == ExecutionFacts.Sell ? "long" : "short") && p.Status is PlayStatus.Open or PlayStatus.Unresolved ||
+            allocation?.Lines.Any(l => l.PlayId == p.Id && l.Role == AllocationRole.Exit) == true).ToList();
+        var rows = page.Select(a => (a.Fill, Kind: a.Splits ? a.Allocation.Lines.Any(l => l.Role == AllocationRole.Exit) ? FlipSplit : EntrySplit : SharedExit,
+                Allocation: (FillAllocation?)a.Allocation, a.Allocation.Revision))
+            .Concat(offered.Select(x => (x.Fill, x.Kind, Allocation: (FillAllocation?)null, Revision: removed.GetValueOrDefault(x.Fill.Id)))).ToList();
+        var ledgers = await LedgersAsync(play.AccountId, rows.SelectMany(r => Closers(r.Fill, r.Allocation)).Select(p => p.Id).Distinct().ToList(), ct);
         AllocatableFillDto Dto(ImportedFill fill, string kind, FillAllocation? allocation, int revision) =>
             new(fill.Id, kind, FillDto(fill), fill.ExternalOrderId, revision, allocation is null ? null : FillAllocations.ReasonName(allocation.Reason),
                 allocation?.Note, allocation?.UpdatedAtUtc, allocation?.Lines.OrderBy(l => l.Role).ThenBy(l => l.PlayId.ToString("D"), StringComparer.Ordinal)
                     .Select(l => new FillAllocationLineDto(l.PlayId, titles.GetValueOrDefault(l.PlayId, ""), FillAllocations.RoleName(l.Role), l.EntryId,
                         ExactDecimal.Format(l.Quantity), ExactDecimal.Format(l.Fee),
                         l.TookRemainder ? ExactDecimal.Format(allocation!.FeeRemainder) : null)).ToList() ?? [],
-                candidates.Select(p => new AllocationOpenDto(p.Id, OpenWithout(ledgers[p.Id], p, fill.Id).ToString())).ToList());
-        var dtos = mine.Select(a => Dto(a.Fill, a.Allocation.Lines.Any(l => l.Role == AllocationRole.Entry) ? FlipSplit : SharedExit, a.Allocation, a.Allocation.Revision))
-            .Concat(offered.Select(x => Dto(x.Fill, x.Kind, null, removed.GetValueOrDefault(x.Fill.Id)))).ToList();
-        return (dtos, candidates.Select(p => new AllocationPlayDto(p.Id, p.Title, p.Direction, PlayService.StatusName(p.Status), p.Version,
-            PlayDocuments.Read(p.Plan).Entries.Select(e => e.Id).ToList())).ToList());
+                Closers(fill, allocation).Select(p => new AllocationOpenDto(p.Id, OpenWithout(ledgers[p.Id], p, fill.Id).ToString())).ToList());
+        return new(rows.Select(r => Dto(r.Fill, r.Kind, r.Allocation, r.Revision)).ToList(),
+            candidates.Select(p => new AllocationPlayDto(p.Id, p.Title, p.Direction, PlayService.StatusName(p.Status), p.Version,
+                PlayDocuments.Read(p.Plan).Entries.Select(e => e.Id).ToList())).ToList(), mine.Count, next);
+    }
+
+    /// <summary>
+    /// A further page of this Play's allocated fills (Sol round 1 on item 11), newest first from <paramref name="offset"/>,
+    /// with the Plays their lines name and may name: every allocation stays reachable for editing however many there are.
+    /// Real-only; nothing is offered here.
+    /// </summary>
+    public async Task<SharedFillsPageDto> SharedFillsAsync(Guid playId, int offset, CancellationToken ct)
+    {
+        if (offset < 0) throw new ProblemException(400, "The offset is a whole number from 0.");
+        var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
+        if (play.TradingMode != "real") throw new ProblemException(409, "Paper Plays use explicit simulated executions, not actual fills.");
+        var links = (await store.PlayLinksAsync(play.AccountId, play.Id, ct)).Where(l => l.State == OrderLinkState.Linked).ToList();
+        var orders = (await store.OrdersAsync(play.AccountId, links.Select(l => l.ImportedOrderId).ToHashSet(), NoContracts, ct)).ToDictionary(o => o.Id);
+        var fills = FillsByOrder(orders.Values, await store.FillsAsync(play.AccountId, orders.Values.Select(OrderKey.Of).ToList(), ct));
+        var allocations = await store.AllocationsAsync(play.AccountId, [play.Id], LinkedFillIds(links, fills), ct);
+        var own = PlayFills(play.Id, links, fills, allocations);
+        var settlement = Settle(PlayDocuments.Read(play.Plan), links, orders, fills, own, FillAllocations.Incomplete(play.Id, allocations),
+            play.Origin == PlayOrigin.Retrospective, FillAllocations.Unallocated(play.Id, allocations));
+        var page = await SharedFillsAsync(play, links, fills, own, allocations, settlement, offset, offer: false, ct);
+        return new(page.Items, page.Plays, page.Total, offset, page.NextOffset);
     }
 
     private static string Opposite(string side) => side == ExecutionFacts.Buy ? ExecutionFacts.Sell : ExecutionFacts.Buy;
@@ -635,7 +692,14 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         var order = await store.OrderAsync(accountId, fill.ContractId, fill.ExternalOrderId, ct)
             ?? throw new ProblemException(409, "This fill's order is not retained, so the fill cannot be allocated. Check the venue first.");
         var holder = (await store.LinksAsync(accountId, [order.Id], [], ct)).FirstOrDefault(l => l.State == OrderLinkState.Linked);
-        if (holder is not null && after.Count > 0)
+        // Sol round 1: an order another of whose fills opened a Play through an allocation is split. Its fills count only
+        // through allocations, so its link decides nothing, and only its later opening executions may take entries alone.
+        var siblings = await store.FillsAsync(accountId, [OrderKey.Of(order)], ct);
+        var split = (await store.AllocationsAsync(accountId, [], siblings.Where(f => f.Id != fill.Id).Select(f => f.Id).ToHashSet(), ct))
+            .Any(a => a.Allocation.Lines.Count > 0 && a.Splits);
+        if (after.Count > 0 && after.All(l => l.Role == AllocationRole.Entry) && !split)
+            throw new ProblemException(409, "Entries alone are only for a later execution of an order a flip split; split a flip into an exit and an entry.");
+        if (holder is not null && after.Count > 0 && !split)
         {
             var line = after.FirstOrDefault(l => l.PlayId == holder.PlayId) ?? throw new ProblemException(409,
                 $"Order {order.ExternalOrderId} is linked to a Play that is not on the lines. Put that Play on the lines, or unlink the order first.");
@@ -846,7 +910,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         {
             var own = links.Where(l => l.PlayId == play.Id).ToList();
             var settlement = Settle(PlayDocuments.Read(play.Plan), own, orders, fills, PlayFills(play.Id, own, fills, allocations),
-                FillAllocations.Incomplete(play.Id, allocations));
+                FillAllocations.Incomplete(play.Id, allocations), unallocated: FillAllocations.Unallocated(play.Id, allocations));
             var entryFills = settlement.Counted.Where(f => f.Role == OrderLinkRole.Entry).OrderBy(f => f.Fill.OccurredAtUtc).ToList();
             var entered = settlement.Entered;
             if (play.Status is PlayStatus.Planned or PlayStatus.Paused && entered.Units.Sign > 0)
@@ -855,7 +919,10 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
                 store.Add(play.MarkOpen($"Entry fill of {ExactDecimal.Format(first.Fill.Quantity)} at {ExactDecimal.Format(first.Fill.Price)} " +
                     $"on order {first.Fill.ExternalOrderId}{(first.Allocated ? ", allocated from a shared fill" : "")}.", now));
             }
-            var resting = own.Any(l => l.Role == OrderLinkRole.Entry && orders.TryGetValue(l.ImportedOrderId, out var o) && o.Status == "open");
+            // A resting order that opened the Play through an allocation keeps it from closing, as a resting linked entry does
+            // (Sol round 1 on item 11): more of it may still open the Play.
+            var resting = own.Any(l => l.Role == OrderLinkRole.Entry && orders.TryGetValue(l.ImportedOrderId, out var o) && o.Status == "open") ||
+                FillAllocations.EntryResting(play.Id, allocations);
             var settled = entered.Units.Sign > 0 && settlement.Exited == entered && settlement.Problems.Count == 0 && !resting;
             var covered = settlement.All.Any(f => f.Allocated) ? $"Linked and allocated exits covered the {entered} entered." : $"Linked exits covered the {entered} entered.";
             if (play.Status == PlayStatus.Open && settled)
@@ -888,7 +955,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     /// </summary>
     private static Settlement Settle(PlayPlanDocument plan, IReadOnlyCollection<PlayOrderLink> linked,
         Dictionary<Guid, ImportedOrder> orders, ILookup<Guid, ImportedFill> fills, IReadOnlyCollection<PlayFill> own,
-        IEnumerable<string> allocatedIncomplete, bool retrospective = false)
+        IEnumerable<string> allocatedIncomplete, bool retrospective = false, IEnumerable<string>? unallocated = null)
     {
         var side = ExecutionIntegrity.EntrySide(plan);
         var all = own.Select(f => f.Linked).ToList();
@@ -896,6 +963,8 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             ExecutionIntegrity.MissingExecutions(order, fills[l.ImportedOrderId])).Select(l => orders[l.ImportedOrderId].ExternalOrderId)
             .Concat(allocatedIncomplete).Distinct(StringComparer.Ordinal).ToList();
         var problems = ExecutionIntegrity.Problems(side, all, incomplete);
+        // Sol round 1 on item 11: a split order's unallocated execution counts for no Play, so the Play cannot settle yet.
+        problems.AddRange((unallocated ?? []).Select(FillAllocations.UnallocatedProblem));
         if (!retrospective)
         {
             var levels = ExecutionMatcher.Levels(plan).Select(l => l.Key).ToHashSet(StringComparer.Ordinal);

@@ -1,5 +1,6 @@
 import type { PriceStep } from '@/lib/price-step'
-import { allocationReasonLabels, type AllocateFill, type ExecutionOrder, type LinkOrder, type PlayExecution, type PlaySummary, type RebindLevel, type SharedFill, type VenueRisk } from '@/api/plays'
+import { allocationReasonLabels, type AllocateFill, type AllocationPlay, type ExecutionOrder, type LinkOrder, type PlayExecution, type PlaySummary, type RebindLevel, type SharedFill, type SharedFillsPage, type VenueRisk } from '@/api/plays'
+import { errorMessage } from '@/api/errors'
 import { useState } from 'react'
 import { AllocationDialog } from './AllocationDialog'
 import { Button } from '@/components/ui/button'
@@ -42,7 +43,7 @@ const pnlBasisNote = {
 } as const
 
 export function ExecutionPanel({ execution, error, busy, stale = false, entries, direction, origin = 'planned', onCheck, onLink, onUnlink, onReject, monitor, monitorBusy = false, monitorError = null, retryAtUtc, monitorUnavailable = false, currentBookRead = true, onDismiss, onManageCredential,
-  version, leverage = 1, priceStep = null, onRebind, rebindBlocked, onAllocate }: {
+  version, leverage = 1, priceStep = null, onRebind, rebindBlocked, onAllocate, onLoadSharedFills }: {
   execution: PlayExecution | null
   error: string | null
   busy: boolean
@@ -76,9 +77,14 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
   rebindBlocked?: string | undefined
   /** Splits a shared or flipped fill between Plays (Phase 2, item 11); rejects with the server's refusal. */
   onAllocate?: ((request: AllocateFill) => Promise<void>) | undefined
+  /** Reads a further page of this Play's allocated fills, so every one stays reachable for editing. */
+  onLoadSharedFills?: ((offset: number) => Promise<SharedFillsPage>) | undefined
 }) {
   const zone = useDisplayZone()
   const [allocating, setAllocating] = useState<string | null>(null)
+  // Older pages of allocated fills, kept for the execution they were read with (its Play and allocation count).
+  const [older, setOlder] = useState<{ key: string; items: SharedFill[]; plays: AllocationPlay[]; next: number | null } | null>(null)
+  const [olderWork, setOlderWork] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null })
   // The chosen roles belong to the journal, not to this tab: expanding the journal remounts the panel. Scoped by play.
   const [choices, setChoices] = useJournalState(`execution-choices:${execution?.playId ?? ''}`, noChoices)
   if (!execution) return <div className="execution-panel"><p className="muted" role="status">{error ?? 'Loading execution…'}</p></div>
@@ -86,7 +92,24 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
   const editable = !retrospective && ['planned', 'paused', 'open'].includes(execution.status)
   // An Unresolved Play may still receive its part of a shared fill (Phase 2, item 11); the server checks every Play on the lines.
   const allocatable = !retrospective && ['planned', 'paused', 'open', 'unresolved'].includes(execution.status)
-  const allocatingFill = execution.sharedFills?.find(item => item.fillId === allocating)
+  const pageKey = `${execution.playId}:${execution.sharedFillCount ?? 0}`
+  const loaded = older?.key === pageKey ? older : null
+  const shared = [...(execution.sharedFills ?? []),
+    ...(loaded?.items ?? []).filter(item => !execution.sharedFills?.some(fill => fill.fillId === item.fillId))]
+  const nextOffset = loaded ? loaded.next : execution.sharedFillsNextOffset ?? null
+  // Every page lists the Plays its lines name, with their versions; a later read of the same Play wins.
+  const allocationPlays = [...new Map([...(execution.allocationPlays ?? []), ...(loaded?.plays ?? [])].map(play => [play.playId, play])).values()]
+  const allocated = shared.filter(item => item.lines.length > 0).length
+  const allocatingFill = shared.find(item => item.fillId === allocating)
+  const loadOlder = async () => {
+    if (!onLoadSharedFills || nextOffset === null) return
+    setOlderWork({ busy: true, error: null })
+    try {
+      const page = await onLoadSharedFills(nextOffset)
+      setOlder({ key: pageKey, items: [...(loaded?.items ?? []), ...page.items], plays: [...(loaded?.plays ?? []), ...page.plays], next: page.nextOffset })
+      setOlderWork({ busy: false, error: null })
+    } catch (cause) { setOlderWork({ busy: false, error: errorMessage(cause, 'Older allocations could not be read. Try again.') }) }
+  }
   const options = levelOptions(entries, execution.status === 'open')
   const shownMonitor = monitor === undefined ? execution.monitor : monitor
   // This Play's own recorded stop coverage; an Open Play without one has not been checked since it opened.
@@ -162,9 +185,9 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
       <ul className="execution-list">{execution.issues.map(issue => <li key={issue}>{issue}</li>)}</ul>
     </section>}
 
-    {(execution.sharedFills?.length ?? 0) > 0 && <section aria-label="Shared fills" className="execution-section execution-shared">
+    {(shared.length > 0 || nextOffset !== null) && <section aria-label="Shared fills" className="execution-section execution-shared">
       <h3>Shared fills<InfoTip label="About shared fills">One fill can close several plays, or close one and open another. Split it by quantity; the fee follows the quantities. A play with a split fill has no venue result and is not scored.</InfoTip></h3>
-      <ul className="execution-list">{execution.sharedFills!.map(item => <li key={item.fillId}>
+      <ul className="execution-list">{shared.map(item => <li key={item.fillId}>
         <span><strong>{item.fill.direction} {item.fill.quantity} at {item.fill.price}</strong>
           <small>order {item.orderId} · <Time at={item.fill.occurredAtUtc} />{item.lines.length > 0 ? ` · ${allocationSummary(item)}` : ''}</small></span>
         {onAllocate && allocatable && <span className="execution-actions">
@@ -173,9 +196,15 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
             onClick={() => setAllocating(item.fillId)}>
             {item.lines.length > 0 ? 'Edit' : item.kind === 'flip' ? 'Split flip' : 'Allocate'}</Button></span>}
       </li>)}</ul>
+      {nextOffset !== null && <p className="execution-more">
+        <small>{allocated} of {execution.sharedFillCount ?? allocated} allocated fills shown</small>
+        {onLoadSharedFills && <Button size="sm" variant="ghost" disabled={olderWork.busy} onClick={() => { void loadOlder() }}>
+          {olderWork.busy ? 'Reading…' : 'Show older allocations'}</Button>}</p>}
+      {olderWork.error && <p className="error" role="alert">{olderWork.error}</p>}
     </section>}
-    {allocatingFill && onAllocate && <AllocationDialog shared={allocatingFill} plays={execution.allocationPlays ?? []} playId={execution.playId} busy={busy}
-      onSubmit={onAllocate} onClose={() => setAllocating(null)} />}
+    {allocatingFill && onAllocate && <AllocationDialog shared={allocatingFill} plays={allocationPlays} playId={execution.playId} busy={busy}
+      // A saved change gives new revisions, so older pages are read again rather than edited from their old state.
+      onSubmit={async request => { await onAllocate(request); setOlder(null) }} onClose={() => setAllocating(null)} />}
 
     {execution.suggestions.length > 0 && <section aria-label="Orders to confirm" className="execution-section">
       <h3>Confirm these orders<InfoTip label="Why confirm these orders">Each matches more than one level, of this play or another, so Vessel does not assign it on its own.</InfoTip></h3>

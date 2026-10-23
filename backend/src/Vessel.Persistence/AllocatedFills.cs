@@ -37,11 +37,17 @@ internal static class AllocatedFills
         var orderIds = orders.Values.Select(o => o.Id).ToArray();
         var orderFills = orderIds.Length == 0 ? Enumerable.Empty<Vessel.Domain.Workspace.ImportedFill>().ToLookup(OrderKey.Of)
             : (await db.FillsOf(db.Orders.Where(o => orderIds.Contains(o.Id))).AsNoTracking().ToListAsync(ct)).ToLookup(OrderKey.Of);
+        // Which of those orders' fills have a current allocation, so a split order's unallocated executions are known.
+        var allocatedOfOrders = await AllocatedIdsAsync(db, orderFills.SelectMany(g => g).Select(f => f.Id).ToList(), ct);
         return heads.Where(h => allocated.ContainsKey(h.FillId)).Select(h =>
         {
             var fill = allocated[h.FillId];
             var order = orders.GetValueOrDefault(OrderKey.Of(fill));
-            return new AllocatedFill(h, fill, order, order is not null && ExecutionIntegrity.MissingExecutions(order, orderFills[OrderKey.Of(order)]));
+            var siblings = orderFills[OrderKey.Of(fill)];
+            return new AllocatedFill(h, fill, order, order is not null && ExecutionIntegrity.MissingExecutions(order, orderFills[OrderKey.Of(order)]))
+            {
+                UnallocatedOrderFills = siblings.Count(f => !allocatedOfOrders.Contains(f.Id)),
+            };
         }).ToList();
     }
 

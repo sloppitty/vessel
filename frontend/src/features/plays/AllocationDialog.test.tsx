@@ -3,7 +3,7 @@ import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/api/errors'
-import { isPlayExecution, type AllocationPlay, type SharedFill } from '@/api/plays'
+import { allocationBounds, isPlayExecution, isSharedFillsPage, type AllocationPlay, type SharedFill } from '@/api/plays'
 import { allocationRemainder, feeShares } from './allocation'
 import { AllocationDialog } from './AllocationDialog'
 import { ExecutionPanel } from './ExecutionPanel'
@@ -59,6 +59,30 @@ describe('allocation preview', () => {
     expect(isPlayExecution({ ...execution, sharedFills: [shared({ reason: 'flip', lines: [
       { playId: c, title: 'Reverse', role: 'entry', entryId: null, quantity: '1', fee: null, feeRemainder: null }] })] })).toBe(false)
     expect(isPlayExecution({ ...execution, allocationPlays: [{ ...plays[0], direction: 'sideways' }] })).toBe(false)
+  })
+
+  it('accepts exactly what the server can send (Sol round 1): pages of allocated fills, offered fills and the Plays they list', () => {
+    const execution = {
+      playId: a, status: 'open', tracked: true, reason: null, checkedAtUtc: null,
+      totals: { enteredQuantity: '1', exitedQuantity: '3', openQuantity: '0', closedPnlUsd: '15', closedPnlBasis: 'gross', fees: [] },
+      entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Facts.', issues: [], monitor: null, discrepancies: [], watches: [],
+    }
+    const allocated = (i: number) => shared({ fillId: `40000000-0000-4000-8000-${String(i).padStart(12, '0')}`, revision: 1, reason: 'shared-close',
+      note: 'Shared.', lines: [{ playId: a, title: 'First', role: 'exit', entryId: null, quantity: '0.5', fee: null, feeRemainder: null }] })
+    const many = (count: number) => Array.from({ length: count }, (_, i) => ({ ...plays[0]!, playId: `50000000-0000-4000-8000-${String(i).padStart(12, '0')}` }))
+    // A page of 20 allocated fills beside 20 offered ones, 21 allocated in all, and every Play the page may list.
+    const full = { ...execution, sharedFills: [...Array.from({ length: 20 }, (_, i) => allocated(i)), ...Array.from({ length: 20 }, () => shared())],
+      allocationPlays: many(allocationBounds.plays), sharedFillCount: 21, sharedFillsNextOffset: 20 }
+    expect(isPlayExecution(full)).toBe(true)
+    expect(isPlayExecution({ ...full, sharedFills: [...full.sharedFills, shared()] })).toBe(false)
+    expect(isPlayExecution({ ...full, allocationPlays: many(allocationBounds.plays + 1) })).toBe(false)
+    // The next page: allocated fills only, a total and where the next one starts.
+    const page = { items: [allocated(20)], plays: many(3), total: 21, offset: 20, nextOffset: null }
+    expect(isSharedFillsPage(page)).toBe(true)
+    expect(isSharedFillsPage({ ...page, items: Array.from({ length: 21 }, (_, i) => allocated(i)) })).toBe(false)
+    expect(isSharedFillsPage({ ...page, items: [shared()] })).toBe(false)
+    expect(isSharedFillsPage({ ...page, nextOffset: 20 })).toBe(false)
+    expect(isPlayExecution({ ...execution, sharedFills: [shared({ kind: 'entry' })] })).toBe(true)
   })
 })
 
@@ -166,6 +190,44 @@ describe('shared fills in the execution panel', () => {
     // Unsaved plan edits block it, as they block a rebind.
     render(<ExecutionPanel {...props} execution={base} onAllocate={onAllocate} rebindBlocked="Save or discard your plan changes first." />)
     expect(screen.getByRole('button', { name: 'Allocate' })).toBeDisabled()
+  })
+
+  it('reaches older allocated fills a page at a time and edits one with the versions its page lists', async () => {
+    const older = shared({ fillId: '60000000-0000-4000-8000-000000000000', revision: 2, reason: 'shared-close', note: 'Old split.',
+      fill: { ...shared().fill, sourceFillId: 'x01', quantity: '1' },
+      lines: [{ playId: a, title: 'First', role: 'exit', entryId: null, quantity: '0.5', fee: null, feeRemainder: null },
+        { playId: b, title: 'Second', role: 'exit', entryId: null, quantity: '0.5', fee: null, feeRemainder: null }] })
+    const onLoadSharedFills = vi.fn().mockResolvedValue({ items: [older], plays: [{ ...plays[1]!, version: 9 }, plays[0]!], total: 21, offset: 20, nextOffset: null })
+    const onAllocate = vi.fn().mockResolvedValue(undefined)
+    render(<ExecutionPanel {...props} execution={{ ...base, sharedFillCount: 21, sharedFillsNextOffset: 20 }} onAllocate={onAllocate}
+      onLoadSharedFills={onLoadSharedFills} />)
+    const section = screen.getByRole('region', { name: 'Shared fills' })
+    expect(within(section).getByText('0 of 21 allocated fills shown')).toBeInTheDocument()
+    await userEvent.click(within(section).getByRole('button', { name: 'Show older allocations' }))
+    expect(onLoadSharedFills).toHaveBeenCalledExactlyOnceWith(20)
+    expect(within(section).queryByRole('button', { name: 'Show older allocations' })).not.toBeInTheDocument()
+    await userEvent.click(within(section).getByRole('button', { name: 'Edit' }))
+    await userEvent.clear(screen.getByLabelText('Quantity for Second'))
+    await userEvent.type(screen.getByLabelText('Quantity for Second'), '0.25')
+    await userEvent.clear(screen.getByLabelText('Quantity for First'))
+    await userEvent.type(screen.getByLabelText('Quantity for First'), '0.75')
+    await userEvent.click(screen.getByRole('button', { name: 'Save allocation' }))
+    expect(onAllocate.mock.calls[0]![0]).toMatchObject({ fillId: older.fillId, expectedRevision: 2,
+      plays: [{ playId: a, expectedVersion: 7 }, { playId: b, expectedVersion: 9 }] })
+  })
+
+  it('allocates a later execution of a split order to entries alone', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const later = shared({ kind: 'entry', fill: { ...shared().fill, direction: 'Open Short', quantity: '1', positionEffect: 'open' } })
+    render(<AllocationDialog shared={later} plays={plays} playId={c} busy={false} onSubmit={onSubmit} onClose={vi.fn()} />)
+    expect(screen.getByRole('heading', { name: 'Allocate this entry' })).toBeInTheDocument()
+    // Only the short can take it, and its quantity starts at the whole execution.
+    expect(screen.queryByLabelText('Entry quantity for First')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Entry quantity for Reverse')).toHaveValue('1')
+    await userEvent.type(screen.getByLabelText('Note'), 'The rest of the flip.')
+    await userEvent.click(screen.getByRole('button', { name: 'Save allocation' }))
+    expect(onSubmit.mock.calls[0]![0]).toMatchObject({ reason: 'flip', plays: [{ playId: c, expectedVersion: 2 }],
+      lines: [{ playId: c, role: 'entry', entryId: 'entry-1', quantity: '1' }] })
   })
 
   it('shows a split fill with its fee shares and says the venue result is not allocated', () => {

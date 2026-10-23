@@ -764,7 +764,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         version={saved.summary.version} leverage={leverageOf(draft.leverage)} priceStep={priceStep} rebindBlocked={dirty ? 'Save or discard your plan changes first.' : busy !== null ? 'Wait for the current change to finish.' : undefined}
         onRebind={(linkId, request) => tracking.rebind(linkId, request, acceptStoredPlay)}
         // An allocation gives every Play on its lines a new version, this one included, so the saved Play is read again.
-        onAllocate={request => tracking.allocate(request, acceptStoredPlay)} /> : undefined} />
+        onAllocate={request => tracking.allocate(request, acceptStoredPlay)}
+        onLoadSharedFills={offset => api.sharedFills(saved.summary.id, offset)} /> : undefined} />
     </StoredPlanTextContext.Provider>
     {dialog === 'revision' && saved && <RevisionDialog revision={saved.summary.planRevision} pending={saving} error={dialogError}
       onSave={reason => { void save(reason) }} onClose={() => setDialog(null)} />}

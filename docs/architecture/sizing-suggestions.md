@@ -220,5 +220,8 @@ average-cost P&L cannot be split. It is never in the record, the window or the
 ladder. `record.notAllocated` counts such real Plays on enabled accounts, and
 the Suggestions record column shows "N with a shared fill not counted" beside
 the exposure line when it is above zero. The ladder thresholds, the window,
-the scored basis and the Activity fallback rule are unchanged: the fallback
-still depends only on decided closed Plays.
+the scored basis and the Activity fallback's trigger are unchanged: the
+fallback still depends only on decided closed Plays. Its eligibility, shared
+with Review's imported positions, now leaves out any operation holding a fill
+with a current allocation (Sol round 1): that trade belongs to the Plays it
+was split between.

@@ -93,6 +93,9 @@ public static class PlayEndpoints
         api.MapPost("/{id:guid}/execution/allocations", async (Guid id, AllocateFillRequest request, PlayExecutionService service,
             MonitorExecutionView monitor, CancellationToken ct) =>
             Results.Ok(await monitor.ComposeAsync(await service.AllocateAsync(id, request, ct), ct)));
+        // Sol round 1 on item 11: a further page of the Play's allocated fills, so every one stays reachable for editing.
+        api.MapGet("/{id:guid}/execution/allocations", async (Guid id, int? offset, PlayExecutionService service, CancellationToken ct) =>
+            Results.Ok(await service.SharedFillsAsync(id, offset ?? 0, ct)));
         // Answers level.drift: one plan revision moves the linked level to the observed order's price. Returns the Play.
         api.MapPost("/{id:guid}/execution/links/{linkId:guid}/rebind", async (Guid id, Guid linkId, RebindLevelRequest request,
             PlayExecutionService service, CancellationToken ct) => Results.Ok(await service.RebindAsync(id, linkId, request, ct)));

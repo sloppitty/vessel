@@ -31,6 +31,8 @@ export function AllocationDialog({ shared, plays, playId, busy, onSubmit, onClos
 }) {
   const { fill } = shared
   const flip = shared.kind === 'flip'
+  // A later execution of an order a flip split only opens plays (Sol round 1 on item 11).
+  const opening = shared.kind === 'entry'
   // A sell closes longs and opens shorts; a buy closes shorts and opens longs.
   const closes = fill.side === 'sell' ? 'long' : 'short'
   const byId = useMemo(() => new Map(plays.map(play => [play.playId, play])), [plays])
@@ -43,6 +45,7 @@ export function AllocationDialog({ shared, plays, playId, busy, onSubmit, onClos
   const currentExit = shared.lines.find(line => line.role === 'exit')
   const [quantities, setQuantities] = useState<Record<string, string>>(() => {
     if (shared.lines.length) return Object.fromEntries(shared.lines.map(line => [line.playId, line.quantity]))
+    if (opening) return entryPlays.some(play => play.playId === playId) ? { [playId]: fill.quantity } : {}
     if (!flip) return {}
     // A flip's exit closes this Play exactly: its open quantity without this fill.
     const open = openOf(playId)
@@ -51,7 +54,10 @@ export function AllocationDialog({ shared, plays, playId, busy, onSubmit, onClos
   const [exitPlay, setExitPlay] = useState(currentExit?.playId ?? (byId.get(playId)?.direction === closes ? playId : exitPlays[0]?.playId ?? ''))
   const [entryPlay, setEntryPlay] = useState(currentEntry?.playId ?? '')
   const [entryId, setEntryId] = useState(currentEntry?.entryId ?? '')
-  const [reason, setReason] = useState<AllocationReason>(shared.reason ?? (flip ? 'flip' : 'shared-close'))
+  // The entry each opening line fills, by Play; the first plan entry unless the owner chooses another.
+  const [entryIds, setEntryIds] = useState<Record<string, string>>(() =>
+    Object.fromEntries(shared.lines.filter(line => line.entryId !== null).map(line => [line.playId, line.entryId!])))
+  const [reason, setReason] = useState<AllocationReason>(shared.reason ?? (flip || opening ? 'flip' : 'shared-close'))
   const [note, setNote] = useState(shared.note ?? '')
   const [error, setError] = useState<string | null>(null)
   const requests = useRef<{ key: string; id: string } | null>(null)
@@ -59,8 +65,12 @@ export function AllocationDialog({ shared, plays, playId, busy, onSubmit, onClos
   const entryPlayInfo = byId.get(entryPlay)
   const entryOptions = entryPlayInfo?.entryIds ?? []
   const chosenEntry = entryOptions.includes(entryId) ? entryId : entryOptions[0] ?? ''
-  // The lines as they would be sent: one exit per Play with a quantity, or a flip's exit and entry.
-  const lines = flip
+  const entryOf = (id: string) => { const options = byId.get(id)?.entryIds ?? []; return options.includes(entryIds[id] ?? '') ? entryIds[id]! : options[0] ?? '' }
+  // The lines as they would be sent: one exit per Play with a quantity, a flip's exit and entry, or entries alone.
+  const lines = opening
+    ? entryPlays.filter(play => (quantities[play.playId] ?? '').trim() !== '')
+      .map(play => ({ playId: play.playId, role: 'entry' as const, entryId: entryOf(play.playId) || null, quantity: quantities[play.playId]!.trim() }))
+    : flip
     ? [
         ...(exitPlay ? [{ playId: exitPlay, role: 'exit' as const, entryId: null, quantity: quantities[exitPlay] ?? '' }] : []),
         ...(entryPlay ? [{ playId: entryPlay, role: 'entry' as const, entryId: chosenEntry || null, quantity: quantities[entryPlay] ?? '' }] : []),
@@ -71,7 +81,8 @@ export function AllocationDialog({ shared, plays, playId, busy, onSubmit, onClos
   const fees = remainder === '0' ? feeShares(fill.fee, fill.quantity, lines) : null
   const remainderLine = fees?.find(share => share.remainder !== null)
   const title = (id: string) => byId.get(id)?.title || 'This play'
-  const ready = remainder === '0' && note.trim() !== '' && lines.length > 0 && (!flip || lines.length === 2 && !!chosenEntry)
+  const ready = remainder === '0' && note.trim() !== '' && lines.length > 0 && (!flip || lines.length === 2 && !!chosenEntry) &&
+    lines.every(line => line.role === 'exit' || !!line.entryId)
 
   const send = async (next: AllocateFill['lines']) => {
     const involved = [...new Set([...shared.lines.map(line => line.playId), ...next.map(line => line.playId)])]
@@ -95,7 +106,7 @@ export function AllocationDialog({ shared, plays, playId, busy, onSubmit, onClos
 
   return <Dialog open onOpenChange={next => { if (!next && !busy) onClose() }}>
     <DialogContent className="workspace-dialog allocation-dialog">
-      <DialogHeader><DialogTitle>{flip ? 'Split this flip' : 'Allocate this fill'}</DialogTitle><DialogDescription>
+      <DialogHeader><DialogTitle>{flip ? 'Split this flip' : opening ? 'Allocate this entry' : 'Allocate this fill'}</DialogTitle><DialogDescription>
         {fill.direction} {fill.quantity} at {fill.price} · order {shared.orderId}. The lines must add up to the fill. These plays get
         no venue result; each keeps its own fills' result.
       </DialogDescription></DialogHeader>
@@ -116,7 +127,16 @@ export function AllocationDialog({ shared, plays, playId, busy, onSubmit, onClos
             {entryOptions.map((id, index) => <option key={id} value={id}>Entry {index + 1}</option>)}
           </NativeSelect>}
           {entryPlay && quantityField(entryPlay, `Entry quantity for ${title(entryPlay)}`)}
-        </> : <ul className="execution-list allocation-lines">
+        </> : opening ? <ul className="execution-list allocation-lines">
+          {entryPlays.map(play => <li key={play.playId}>
+            <span><strong>{play.title || 'Untitled play'}</strong><small>{statusLabels[play.status]}</small></span>
+            {play.entryIds.length > 1 && <NativeSelect aria-label={`Entry for ${play.title || 'Untitled play'}`} value={entryOf(play.playId)} disabled={busy}
+              onChange={event => setEntryIds(current => ({ ...current, [play.playId]: event.target.value }))}>
+              {play.entryIds.map((id, index) => <option key={id} value={id}>Entry {index + 1}</option>)}
+            </NativeSelect>}
+            {quantityField(play.playId, `Entry quantity for ${play.title || 'Untitled play'}`)}
+          </li>)}
+        </ul> : <ul className="execution-list allocation-lines">
           {exitPlays.map(play => <li key={play.playId}>
             <span><strong>{play.title || 'Untitled play'}</strong><small>{statusLabels[play.status]} · open without this fill {openOf(play.playId) ?? 'unknown'}</small></span>
             {quantityField(play.playId, `Quantity for ${play.title || 'Untitled play'}`, play.status === 'closed')}

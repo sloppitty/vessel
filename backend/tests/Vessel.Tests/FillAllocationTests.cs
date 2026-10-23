@@ -122,6 +122,21 @@ public sealed class FillAllocationDomainTests
     }
 
     [Fact]
+    public void A_later_opening_execution_of_a_split_order_takes_entries_alone()
+    {
+        // Sol round 1: the rest of a flip order opens Plays only; the service checks the order was split by a flip.
+        var opening = Fill(1m, 0.01m, effect: ExecutionFacts.Open);
+        var (allocation, _) = FillAllocation.Create(opening, AllocationReason.Flip, "The rest of the flip.", [Entry(B, 0.4m), Entry(C, 0.6m)], At);
+        Assert.All(allocation.Lines, l => Assert.Equal(AllocationRole.Entry, l.Role));
+        Assert.Equal(0.01m, allocation.Lines.Sum(l => l.Fee!.Value));
+        // Entries alone never take a closing or flipping fill, nor the reason shared-close.
+        Assert.Throws<DomainRuleException>(() => FillAllocation.Create(Fill(1m, 0m), AllocationReason.Other, "Split.", [Entry(B, 1m)], At));
+        Assert.Throws<DomainRuleException>(() => FillAllocation.Create(Fill(1m, 0m, effect: ExecutionFacts.Flip), AllocationReason.Flip, "Split.", [Entry(B, 1m)], At));
+        Assert.Throws<DomainValidationException>(() => FillAllocation.Create(opening, AllocationReason.SharedClose, "Split.", [Entry(B, 1m)], At));
+        Assert.Throws<DomainRuleException>(() => FillAllocation.Create(opening, AllocationReason.Flip, "Split.", [Entry(B, 1m, "long")], At));
+    }
+
+    [Fact]
     public void Roles_follow_the_fill_side_and_each_Play_s_direction()
     {
         // A sell closes longs and opens shorts; a buy closes shorts and opens longs.
@@ -242,6 +257,36 @@ public sealed class FillAllocationReadRuleTests
             [new(a.Id, "long", AllocationRole.Exit, null, 1m), new(b.Id, "long", AllocationRole.Exit, null, 2m)], At);
         Assert.Equal(["23"], FillAllocations.Incomplete(b.Id, [new(again, shared, exitOrder, true)]));
         Assert.Empty(FillAllocations.Incomplete(c.Id, [new(again, shared, exitOrder, true)]));
+    }
+
+    [Fact]
+    public void A_split_order_s_other_executions_count_for_no_Play_until_allocated_and_its_resting_order_holds_the_opened_Play()
+    {
+        // Sol round 1: a sell order linked to a long as its target flips it into a short, and still rests. A later execution
+        // of it is neither the long's exit nor the short's entry until the owner allocates it.
+        var (exitPlay, opened) = (Open(), Open("short"));
+        var order = Order("24", "sell");
+        order.Status = "open";
+        var target = new PlayOrderLink(exitPlay, order, OrderLinkRole.Target, "entry-1", "target-1", OrderLinkState.Linked, OrderLinkSource.Owner, At);
+        var flip = Fill("f1", "24", "sell", ExecutionFacts.Flip, 2m, 105m, 5);
+        var later = Fill("f2", "24", "sell", ExecutionFacts.Open, 1m, 105m, 6);
+        var (allocation, _) = FillAllocation.Create(flip, AllocationReason.Flip, "Reversed.",
+            [new(exitPlay.Id, "long", AllocationRole.Exit, null, 1m), new(opened.Id, "short", AllocationRole.Entry, "entry-1", 1m)], At);
+        AllocatedFill[] allocations = [new(allocation, flip, order, false) { UnallocatedOrderFills = 1 }];
+
+        Assert.Equal([("f1", OrderLinkRole.Target, 1m)],
+            FillAllocations.For(exitPlay.Id, [(target, flip), (target, later)], allocations).Select(f => (f.Fill.SourceFillId, f.Role, f.Fill.Quantity)));
+        Assert.Equal(["f1"], FillAllocations.For(opened.Id, [], allocations).Select(f => f.Fill.SourceFillId));
+        Assert.Equal(["24"], FillAllocations.Unallocated(opened.Id, allocations));
+        Assert.Equal(["24"], FillAllocations.Unallocated(exitPlay.Id, allocations));
+        Assert.True(FillAllocations.EntryResting(opened.Id, allocations));
+        Assert.True(FillAllocations.EntryResting(opened.Id, allocations, "entry-1"));
+        Assert.False(FillAllocations.EntryResting(exitPlay.Id, allocations));
+        // Once every execution is allocated nothing waits, and a filled order rests no more.
+        order.Status = "filled";
+        allocations = [new(allocation, flip, order, false)];
+        Assert.Empty(FillAllocations.Unallocated(opened.Id, allocations));
+        Assert.False(FillAllocations.EntryResting(opened.Id, allocations));
     }
 
     [Fact]

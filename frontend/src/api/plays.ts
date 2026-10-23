@@ -531,7 +531,18 @@ export interface PlayExecution {
   sharedFills?: SharedFill[]
   /** The Plays a line of those fills may name, with the versions a request expects. */
   allocationPlays?: AllocationPlay[]
+  /** How many allocated fills this Play has; `sharedFills` holds the newest page of them. Absent from older servers. */
+  sharedFillCount?: number
+  /** Where the next page of allocated fills starts (`sharedFillsPage`); null when none is left. */
+  sharedFillsNextOffset?: number | null
 }
+/** A further page of a Play's allocated fills, newest first, with the Plays their lines name and may name. */
+export interface SharedFillsPage { items: SharedFill[]; plays: AllocationPlay[]; total: number; offset: number; nextOffset: number | null }
+/**
+ * The server's bounds (`PlayExecutionService`): pages of 20 allocated fills, as many fills offered beside the first, and the
+ * Plays a page lists: up to 200 that may take a new line plus every Play on the page's lines (20 × 20) and this one.
+ */
+export const allocationBounds = { pageFills: 20, sharedFills: 40, plays: 200 + 20 * 20 + 1 } as const
 /** One Play's part of an allocated fill; `feeRemainder` is set on the one line that took the fee split's rounding remainder. */
 export interface AllocationLine {
   playId: string
@@ -549,11 +560,12 @@ export const allocationReasonLabels: Record<AllocationReason, string> = { 'share
 /**
  * A fill the owner may split: `shared-exit` across the Plays it closed, or `flip` into one Play's exit and another's entry.
  * `revision` is the allocation's current revision (0 when it has none) and `lines` its current lines, empty when none.
- * `open` gives each Play its open quantity without this fill.
+ * `open` gives each Play that may close part of it its open quantity without this fill.
  */
 export interface SharedFill {
   fillId: string
-  kind: 'shared-exit' | 'flip'
+  /** `entry`: a later execution of an order a flip split, which only opens plays. */
+  kind: 'shared-exit' | 'flip' | 'entry'
   fill: ExecutionFill
   orderId: string
   revision: number
@@ -628,15 +640,19 @@ const executionFill = (v: unknown): v is ExecutionFill => isRecord(v) && isText(
 const allocationLine = (v: unknown): v is AllocationLine => isRecord(v) && isGuid(v.playId) && isText(v.title, 200) &&
   (v.role === 'exit' || v.role === 'entry') && isNullOr(v.entryId, x => isText(x, 64)) && (v.role === 'entry') === (v.entryId !== null) &&
   isPlainDecimal(v.quantity) && isNullOr(v.fee, isPlainDecimal) && isNullOr(v.feeRemainder, isPlainDecimal)
-const sharedFill = (v: unknown): v is SharedFill => isRecord(v) && isGuid(v.fillId) && (v.kind === 'shared-exit' || v.kind === 'flip') &&
+const sharedFill = (v: unknown): v is SharedFill => isRecord(v) && isGuid(v.fillId) && ['shared-exit', 'flip', 'entry'].includes(v.kind as string) &&
   executionFill(v.fill) && isText(v.orderId, 128) && isCount(v.revision) &&
   (v.reason === null || allocationReasons.includes(v.reason as AllocationReason)) && isNullOr(v.note, x => isText(x, 2000)) &&
   isNullOr(v.updatedAtUtc, x => isTimestamp(x, timeLength)) && Array.isArray(v.lines) && v.lines.length <= 20 && v.lines.every(allocationLine) &&
-  (v.lines.length === 0) === (v.reason === null) && Array.isArray(v.open) && v.open.length <= 200 &&
+  (v.lines.length === 0) === (v.reason === null) && Array.isArray(v.open) && v.open.length <= allocationBounds.plays &&
   v.open.every(o => isRecord(o) && isGuid(o.playId) && isPlainDecimal(o.openQuantity))
 const allocationPlay = (v: unknown): v is AllocationPlay => isRecord(v) && isGuid(v.playId) && isText(v.title, 200) &&
   (v.direction === 'long' || v.direction === 'short') && playStatuses.includes(v.status as PlayStatus) && isCount(v.version) &&
   Array.isArray(v.entryIds) && v.entryIds.length <= 20 && v.entryIds.every(id => isText(id, 64))
+export const isSharedFillsPage = (v: unknown): v is SharedFillsPage => isRecord(v) && Array.isArray(v.items) &&
+  v.items.length <= allocationBounds.pageFills && v.items.every(item => sharedFill(item) && item.lines.length > 0) &&
+  Array.isArray(v.plays) && v.plays.length <= allocationBounds.plays && v.plays.every(allocationPlay) && isCount(v.total) && isCount(v.offset) &&
+  isNullOr(v.nextOffset, isCount) && (v.nextOffset === null || (v.nextOffset as number) > (v.offset as number))
 const orderLink = (v: unknown): v is OrderLink => isRecord(v) && isGuid(v.id) && ['entry', 'stop', 'target', 'exit'].includes(v.role as string) &&
   isNullOr(v.entryId, x => isText(x, 64)) && isNullOr(v.levelId, x => isText(x, 64)) && (v.state === 'linked' || v.state === 'suggested') &&
   (v.source === 'automatic' || v.source === 'owner') && (v.order === null || executionOrder(v.order)) && isPlainDecimal(v.filledQuantity) &&
@@ -658,8 +674,10 @@ export const isPlayExecution = (v: unknown): v is PlayExecution => isRecord(v) &
   Array.isArray(v.totals.fees) && v.totals.fees.every(f => isRecord(f) && isText(f.token, 64) && isPlainDecimal(f.amount)) &&
   (v.totals.venueNetUsd === undefined || isNullOr(v.totals.venueNetUsd, isPlainDecimal)) && isOptionalPlayLocalResult(v.totals.local) &&
   (v.totals.venueNotAllocated === undefined || typeof v.totals.venueNotAllocated === 'boolean') &&
-  (v.sharedFills === undefined || Array.isArray(v.sharedFills) && v.sharedFills.length <= 40 && v.sharedFills.every(sharedFill)) &&
-  (v.allocationPlays === undefined || Array.isArray(v.allocationPlays) && v.allocationPlays.length <= 200 && v.allocationPlays.every(allocationPlay)) &&
+  (v.sharedFills === undefined || Array.isArray(v.sharedFills) && v.sharedFills.length <= allocationBounds.sharedFills && v.sharedFills.every(sharedFill)) &&
+  (v.allocationPlays === undefined || Array.isArray(v.allocationPlays) && v.allocationPlays.length <= allocationBounds.plays && v.allocationPlays.every(allocationPlay)) &&
+  (v.sharedFillCount === undefined || isCount(v.sharedFillCount)) &&
+  (v.sharedFillsNextOffset === undefined || isNullOr(v.sharedFillsNextOffset, isCount)) &&
   Array.isArray(v.entries) && v.entries.every(isEntryProgress) && (v.receipt === undefined || isNullOr(v.receipt, isPlayReceipt)) &&
   Array.isArray(v.links) && v.links.every(orderLink) && Array.isArray(v.suggestions) && v.suggestions.every(orderLink) &&
   Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(executionOrder) &&

@@ -196,7 +196,11 @@ Unresolved with the reasons `shared-close` and `flip`.
     one `entry` line, on a Play of the other direction, naming one of its
     plan entries. The fill's effect is `flip`. The exit line must equal the
     exit Play's open quantity exactly: what its other counted fills entered
-    minus what they exited.
+    minus what they exited;
+  - **entries alone** (Sol round 1) are only for a later execution of an
+    order a flip split (below): `entry` lines on Plays of the direction the
+    fill opens, on an opening fill (`open` or `unknown`). Any other fill is
+    refused with 409.
 - **The record.** One allocation per fill (`fill_allocations`, unique by
   owner and fill): owner, account, fill, reason (`shared-close`, `flip` or
   `other`), note, revision, created and updated times, and the fee
@@ -207,7 +211,8 @@ Unresolved with the reasons `shared-close` and `flip`.
 - **Conservation.** Line quantities are positive plain decimals, one line per
   Play, at most 20. They sum exactly to the fill's quantity, compared as
   28-place integers; off by any amount is refused with 400. `flip` needs the
-  flip shape and `shared-close` the shared-exit shape; `other` fits either.
+  flip shape or entries alone, `shared-close` the shared-exit shape; `other`
+  fits any.
 - **Fees.** Each line's share is the fee × its quantity ÷ the fill's quantity,
   truncated toward zero to the fee's precision: the decimals the venue
   reported, and at least 6 (the USDC unit). The remainder, the fee minus
@@ -249,6 +254,16 @@ Unresolved with the reasons `shared-close` and `flip`.
   fill counts for a Play only through its own line, whatever the links say;
   fills without an allocation count through links as before. The matcher,
   suggestions and the link endpoint are unchanged.
+- **Split orders** (Sol round 1). An order whose allocated fill opened a Play
+  (an entry line) is split, and its other fills count for no Play, not even
+  through a link, until the owner allocates them:
+  - every Play with a line on it shows "Not reconciled" ("Order … has an
+    execution that is not allocated yet"), which keeps it from settling;
+  - the Play it opened offers each such execution under **Allocate** as
+    entries alone; the link rule above does not apply to a split order;
+  - while the order still rests, the Play it opened cannot close, as with a
+    resting linked entry order, and its entry progress counts it as a
+    resting order.
 - **Effect on each Play.** Every reader of a Play's executions applies the
   read rule: execution totals and entry progress, the integrity problems
   (over-exit, chronology, contradiction), settlement, the exit time, the
@@ -269,6 +284,20 @@ Unresolved with the reasons `shared-close` and `flip`.
   - Settled funding beside a Play (item 9b) reads `shared` (`allocated`)
     whenever an allocated fill lies in its holding window or in a span its
     proof walks, its own or another Play's ([venue funding](venue-funding.md#beside-a-play-phase-2-item-9b)).
+  - **The monitor's protection checks** (Sol round 1) compare stops with the
+    Play's quantity by the read rule, so a Play a flip opened without an
+    entry link is checked for `protection.missing` after its grace, and a
+    shared exit leaves `protection.short` and `protection.excess` the Play's
+    own part. A split order's unallocated execution leaves that quantity
+    unknown. An allocated fill is never `fill.unlinked`. The position
+    comparison (`position.*`) still reads linked fills only, as accepted: a
+    Play reached only through lines leaves it unknown rather than showing a
+    false mismatch. See [messaging and workers](messaging-and-workers.md#coverage-signals).
+  - **Imported positions** (Sol round 1). Review's imported positions and
+    the sizing fallback, which share one eligibility rule, leave out every
+    Activity operation that holds a fill with a current allocation: it is
+    those Plays' trade, though Activity, whose aggregation is unchanged, may
+    still show it unassigned.
 - **Scoring.** The venue's average-cost P&L cannot be split, so a Play with an
   allocated fill has no venue result: "not allocated".
   - Review leaves a settled one out with the code `not-allocated` and a
@@ -288,11 +317,19 @@ Unresolved with the reasons `shared-close` and `flip`.
   every P&L basis.
 - **Browser.** The Execution panel gains a "Shared fills" section. It lists
   this Play's allocated fills, the exit fills of its linked orders when they
-  over-exit, and unallocated flip fills that close its direction after its
-  first entry, with **Allocate**, **Split flip** or **Edit**. The dialog
-  takes a quantity per Play with the remainder live, a reason and a note.
-  It shows the fee split and where the remainder went, and the server's
-  error when it refuses.
+  over-exit, unallocated flip fills that close its direction after its first
+  entry, and a split order's unallocated executions, with **Allocate**,
+  **Split flip** or **Edit**. The dialog takes a quantity per Play with the
+  remainder live, a reason and a note. It shows the fee split and where the
+  remainder went, and the server's error when it refuses.
+- **Bounds** (Sol round 1). The execution view lists the newest 20 allocated
+  fills (`sharedFills`, with `sharedFillCount` and `sharedFillsNextOffset`)
+  and at most 20 offered ones. `GET /api/plays/{id}/execution/allocations?offset=`
+  (real-only, paper 409) returns the next 20, newest first, so every
+  allocation stays reachable for editing; the panel's **Show older
+  allocations** reads them. Each page lists up to 200 Plays that may take a
+  new line, plus every Play on its lines and the Play itself; the browser
+  accepts exactly those bounds.
 - **Migration.** The explicit `FillAllocations` migration adds the three
   tables. Apply it explicitly, never at startup.
 

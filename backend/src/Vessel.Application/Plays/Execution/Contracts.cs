@@ -131,6 +131,10 @@ public sealed record PlayExecutionDto(Guid PlayId, string Status, bool Tracked, 
     public IReadOnlyList<AllocatableFillDto> SharedFills { get; init; } = [];
     /// <summary>The Plays a line of those fills may name, and the ones current lines name, with their versions.</summary>
     public IReadOnlyList<AllocationPlayDto> AllocationPlays { get; init; } = [];
+    /// <summary>How many allocated fills this Play has; <see cref="SharedFills"/> holds the newest page of them.</summary>
+    public int SharedFillCount { get; init; }
+    /// <summary>The offset of the next page of allocated fills (<c>GET …/execution/allocations?offset=</c>); null when none is left.</summary>
+    public int? SharedFillsNextOffset { get; init; }
 }
 
 /// <summary>

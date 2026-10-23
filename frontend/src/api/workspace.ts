@@ -26,7 +26,7 @@ import {
 } from './account-access'
 import {
   isNextAction, isPlayRuleState, isPlayCounts, isPlayNote, isPlayExecution, isPlayHistory, isPlayList, isSavedEvidence, isSavedPlay, playCountsPath, playListPath, isJournalSearchPage, journalSearchPath,
-  type AllocateFill, type LinkOrder, type NextAction, type PlayRuleState, type PlayNote, type PlayNoteState, type RebindLevel, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest, type UnresolvedReason, type JournalSearchPage, type JournalSearchQuery,
+  isSharedFillsPage, type SharedFillsPage, type AllocateFill, type LinkOrder, type NextAction, type PlayRuleState, type PlayNote, type PlayNoteState, type RebindLevel, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest, type UnresolvedReason, type JournalSearchPage, type JournalSearchQuery,
 } from './plays'
 import { isSizingDocument, type SizingDocument } from './sizing'
 import { attachmentName, type DownloadedFile } from '@/lib/download'
@@ -473,6 +473,8 @@ export interface WorkspaceApi {
   rebindLevel(id: string, linkId: string, request: RebindLevel, signal?: AbortSignal): Promise<SavedPlay>
   /** Splits one fill between Plays, replaces or removes the split (Phase 2, item 11); returns this Play's execution. */
   allocateFill(id: string, request: AllocateFill, signal?: AbortSignal): Promise<PlayExecution>
+  /** A further page of the Play's allocated fills, so every allocation stays reachable for editing. */
+  sharedFills(id: string, offset: number, signal?: AbortSignal): Promise<SharedFillsPage>
   evidence(playId: string, signal?: AbortSignal): Promise<SavedEvidence[]>
   evidenceImage(id: string, signal?: AbortSignal): Promise<Blob>
   uploadEvidence(playId: string, image: Blob, fields: { source: 'capture' | 'upload'; note: string; markup: ImageMarkup | null; name: string }): Promise<SavedEvidence>
@@ -933,6 +935,8 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
       return call(`${playPath(id)}/execution/allocations`, { ...playRequest,
         validate: (v): v is PlayExecution => isPlayExecution(v) && v.playId === id, method: 'POST', body: JSON.stringify(request), ...withSignal(signal) })
     },
+    sharedFills: (id, offset, signal) => call(`${playPath(id)}/execution/allocations?offset=${Math.max(0, Math.trunc(offset))}`, { ...playRequest,
+      validate: isSharedFillsPage, ...withSignal(signal) }),
     rebindLevel: (id, linkId, request, signal) => {
       if (!isGuid(linkId)) return Promise.reject(new ApiError('invalid-response', 'The link identifier is invalid.'))
       return call(`${playPath(id)}/execution/links/${linkId}/rebind`, { ...playRequest,

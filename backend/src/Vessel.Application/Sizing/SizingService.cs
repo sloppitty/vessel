@@ -111,7 +111,11 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
         ActivityService activity, ISizingStore store, IReadOnlySet<Guid>? accountIds, CancellationToken ct)
     {
         var summaries = await activity.ReadSummariesAsync(null, ct, accountIds);
-        var candidates = summaries.Operations.Where(Candidate)
+        // Phase 2, item 11 (Sol round 1): an operation holding a fill the owner allocated between Plays is their trade; Activity
+        // still reports it, but it is never scored as a position here, nor listed as one that could not be.
+        var allocated = await store.AllocatedFillIdsAsync(ct);
+        bool Allocated(ActivityOperationDto o) => allocated.Count > 0 && o.SourceFills.Any(f => allocated.Contains(f.Id));
+        var candidates = summaries.Operations.Where(o => Candidate(o) && !Allocated(o))
             .Select(o => (Operation: o, Orders: o.SourceFills.Where(f => !string.IsNullOrWhiteSpace(f.ExternalOrderId))
                 .Select(OrderKey.Of).ToHashSet())).ToList();
         var keys = candidates.SelectMany(c => c.Orders).ToHashSet();
@@ -124,7 +128,8 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
         }
         var complete = candidates.Where(c => !c.Orders.Overlaps(incomplete)).Select(c => c.Operation).ToList();
         var kept = new HashSet<ActivityOperationDto>(complete, ReferenceEqualityComparer.Instance);
-        return (complete, summaries.Operations.Where(o => o.ClosedAtUtc is not null && o.Status is "closed" or "incomplete" && !kept.Contains(o)).ToList());
+        return (complete, summaries.Operations.Where(o => o.ClosedAtUtc is not null && o.Status is "closed" or "incomplete" && !kept.Contains(o) &&
+            !Allocated(o)).ToList());
     }
 
     private static bool Candidate(ActivityOperationDto operation) =>

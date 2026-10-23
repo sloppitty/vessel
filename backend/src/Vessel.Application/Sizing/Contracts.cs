@@ -143,6 +143,11 @@ public interface ISizingStore
     /// check. Matching uses the shared <see cref="OrderKey"/> rule, never the external ID alone.
     /// </summary>
     Task<List<ImportedOrder>> OrdersAsync(IReadOnlyCollection<OrderKey> orders, CancellationToken ct);
+    /// <summary>
+    /// The owner's real fills with a current allocation between Plays (Phase 2, item 11, Sol round 1). An Activity operation
+    /// holding one is those Plays' trade, so it is never an imported position or a fallback outcome. None by default.
+    /// </summary>
+    Task<IReadOnlySet<Guid>> AllocatedFillIdsAsync(CancellationToken ct) => Task.FromResult<IReadOnlySet<Guid>>(new HashSet<Guid>());
     void Add(SizingSettings settings);
 
     /// <summary>

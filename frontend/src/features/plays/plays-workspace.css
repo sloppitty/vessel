@@ -668,6 +668,7 @@
 .journal-tabs .execution-notice p { margin: 4px 0 0; font-size: var(--text-2xs); }
 .journal-tabs .execution-issues li { border-color: color-mix(in srgb, var(--warning) 55%, var(--line)); border-left: 3px solid var(--warning); }
 /* Phase 2, item 11: shared fills and the allocation dialog read theme tokens only. */
+.journal-tabs .execution-more { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 6px 0 0; color: var(--muted-foreground); }
 .allocation-dialog .allocation-lines li { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .allocation-dialog .allocation-lines input { width: 9rem; font-variant-numeric: tabular-nums; }
 .allocation-dialog .allocation-remainder { margin: 4px 0; color: var(--muted-foreground); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }

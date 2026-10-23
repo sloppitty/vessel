@@ -86,6 +86,10 @@ public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISi
             .Where(o => keys.Contains(OrderKey.Of(o))).ToList();
     }
 
+    public async Task<IReadOnlySet<Guid>> AllocatedFillIdsAsync(CancellationToken ct) =>
+        (await db.FillAllocations.Where(a => a.Lines.Any() && db.Accounts.Any(x => x.Id == a.AccountId && x.TradingMode == TradingMode.Real))
+            .Select(a => a.FillId).ToListAsync(ct)).ToHashSet();
+
     internal static async Task<List<PaperPlayFacts>> PaperFactsAsync(VesselDbContext db, IReadOnlyList<Play> plays, CancellationToken ct)
     {
         var ids = plays.Where(p => p.TradingMode == TradingMode.Paper).Select(p => p.Id).ToArray();

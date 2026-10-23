@@ -584,6 +584,10 @@ a flip into one Play's exit and another Play's entry.
   Execution panel shows it. It is never scored.
 - **Unassigned fills.** A fill allocated to Plays of the mode is assigned,
   whether or not its order is linked.
+- **Imported positions** (Sol round 1). An Activity operation holding a fill
+  with a current allocation is those Plays' trade: it is never scored as an
+  imported position nor listed as one Review could not score, even when
+  Activity shows it unassigned (no order of it is linked).
 - The scored basis (decision 1), decision 8, the metrics and the receipt's
   rules are unchanged; the receipt and the Plays list say why such a Play has
   no result or R (`not-allocated`).
