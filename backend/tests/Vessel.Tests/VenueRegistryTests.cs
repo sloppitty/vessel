@@ -147,7 +147,7 @@ public sealed class VenueRegistryTests
     [Fact]
     public void Registration_accepts_only_the_fixed_logo_keys()
     {
-        Assert.Equal(["hyperliquid", "lighter", "lighter-rh", "risex", "manual"], VenueLogos.All);
+        Assert.Equal(["hyperliquid", "lighter", "lighter-rh", "risex", "pacifica", "manual"], VenueLogos.All);
         foreach (var logo in VenueLogos.All)
             Assert.Equal(logo, new VenueRegistry([Other with { Logo = logo }], [], [], [], [], [], [], []).Descriptor("other")!.Logo);
         Assert.Null(new VenueRegistry([Other], [], [], [], [], [], [], []).Descriptor("other")!.Logo);

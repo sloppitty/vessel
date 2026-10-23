@@ -20,6 +20,7 @@ using Vessel.Infrastructure.Evidence;
 using Vessel.Application.Venues;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 using Vessel.Infrastructure.Venues.Risex;
+using Vessel.Infrastructure.Venues.Pacifica;
 
 namespace Vessel.Infrastructure;
 
@@ -63,6 +64,13 @@ public static class DependencyInjection
                 builder => builder.AddHttpMessageHandler(() => new LighterAuthenticationHandler(exchange.Name))
                     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false }));
         }
+        services.AddSingleton<PacificaCatalogueCache>();
+        services.AddVenueModule(PacificaReader.Descriptor, (sp, client) =>
+        {
+            client.BaseAddress = Hosts(sp).BaseUri(nameof(VenueHostOptions.Pacifica));
+            client.Timeout = TimeSpan.FromSeconds(20);
+        }, (sp, client) => ActivatorUtilities.CreateInstance<PacificaReader>(sp, client),
+            builder => builder.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false }));
         services.AddScoped<IVenueRegistry, VenueRegistry>();
         services.AddSingleton<CandleCache>();
         services.AddSingleton<MarketContextCache>();

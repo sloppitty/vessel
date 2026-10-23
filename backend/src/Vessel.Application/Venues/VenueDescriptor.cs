@@ -8,6 +8,7 @@ public static class VenueSources
     public const string None = "none";
     public const string EvmAddress = "evm-address";
     public const string AccountIndex = "account-index";
+    public const string SolanaAddress = "solana-address";
 }
 
 /// <summary>How a venue rounds prices: Hyperliquid's five significant figures, or each instrument's tick.</summary>
@@ -27,9 +28,10 @@ public static class VenueLogos
     public const string Lighter = "lighter";
     public const string LighterRh = "lighter-rh";
     public const string Risex = "risex";
+    public const string Pacifica = "pacifica";
     public const string Manual = "manual";
 
-    public static readonly IReadOnlyList<string> All = [Hyperliquid, Lighter, LighterRh, Risex, Manual];
+    public static readonly IReadOnlyList<string> All = [Hyperliquid, Lighter, LighterRh, Risex, Pacifica, Manual];
 
     public static bool IsValid(string? logo) => logo is null || All.Contains(logo, StringComparer.Ordinal);
 }

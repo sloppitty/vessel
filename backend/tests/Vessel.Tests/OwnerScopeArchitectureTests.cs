@@ -206,6 +206,8 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Infrastructure/Venues/Lighter/LighterReader.Account.cs|f074918f528ce6faa19ada092244639377c9eb3603e338a3cb8057b9a2ba2913",
             "Vessel.Infrastructure/Venues/Risex/RisexReader.cs|980f257a57d5846f41e59e1d79fafb13929ea348e0eae3a28daf7132f4fe286d",
             "Vessel.Infrastructure/Venues/Risex/RisexReader.cs|f074918f528ce6faa19ada092244639377c9eb3603e338a3cb8057b9a2ba2913",
+            // Not SQL: Pacifica account-refresh coverage notice; returned as prose, never passed to a SQL execution API.
+            "Vessel.Infrastructure/Venues/Pacifica/PacificaReader.cs|6a7bdf24cd52710c46716b7f45dc2c3e265ab689d106e0bed60ec2e8bde9d69e",
             // Not SQL: design-time DbContext factory error messages.
             "Vessel.Identity/IdentityDbContext.cs|e1b7a668a5e3ab1cf3318d78321688ad059827b7d660f00bda0ac249e2afee69",
             "Vessel.Persistence/VesselDbContextFactory.cs|e1b7a668a5e3ab1cf3318d78321688ad059827b7d660f00bda0ac249e2afee69",

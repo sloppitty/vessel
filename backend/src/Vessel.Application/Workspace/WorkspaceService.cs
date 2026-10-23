@@ -156,6 +156,13 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
                     throw new ProblemException(400, "A matching 42-character public hexadecimal address is required.");
                 address = sourceId = sourceId!.ToLowerInvariant();
             }
+            else if (descriptor.Source == VenueSources.SolanaAddress)
+            {
+                if (request.Address is not null || !AccountSource.IsSolanaAddress(request.SourceId))
+                    throw new ProblemException(400, $"{descriptor.Name} requires a case-sensitive base58 public address decoding to 32 bytes in sourceId.");
+                // Address is the legacy, lowercased EVM field. Never route a Solana identity through it.
+                sourceId = request.SourceId;
+            }
             else if (descriptor.Source == VenueSources.AccountIndex)
             {
                 if (request.Address is not null || !AccountSource.IsAccountIndex(request.SourceId))

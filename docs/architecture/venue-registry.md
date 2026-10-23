@@ -1,5 +1,14 @@
 # Venue registry and capabilities
 
+October 23, 2026: [Pacifica](pacifica-integration.md) adds a `solana-address`
+source rule and the bundled `pacifica` logo. The public source is an exact
+base58-encoded 32-byte `SourceId`, never the legacy lowercased EVM `Address`.
+Its current ordinary/stop orders are read with explicitly incomplete book
+coverage. Account refresh/history import fails closed while any position is open
+or public settings do not explicitly disable automatic lending; unsupported
+positions never publish an empty snapshot. Funding settlement sign remains
+unverified and funding is not imported.
+
 October 5, 2026, slice S1 of the RISEx-first plan ([risex-integration.md](risex-integration.md)). Behaviour for Hyperliquid and manual accounts is unchanged. This is the seam through which every further venue (RISEx, then Lighter) plugs in.
 
 ## Contract
