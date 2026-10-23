@@ -1898,6 +1898,75 @@ namespace Vessel.Persistence.Migrations
                     b.ToTable("account_stablecoins", (string)null);
                 });
 
+            modelBuilder.Entity("Vessel.Domain.Workspace.ExecutionOmission", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContractId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset>("FirstSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("LastSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OrderId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("SourceId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset?>("UncertainFromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("UncertainToUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("VenueContractId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "AccountId", "OrderId");
+
+                    b.HasIndex("OwnerId", "AccountId", "Kind", "SourceId")
+                        .IsUnique();
+
+                    b.ToTable("execution_omissions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_execution_omissions_kind", "\"Kind\" IN ('forced', 'fee', 'missing-pnl', 'unrecognized-market')");
+
+                            t.HasCheckConstraint("CK_execution_omissions_time", "\"FirstSeenAtUtc\" <= \"LastSeenAtUtc\" AND (\"OccurredAtUtc\" IS NULL OR \"UncertainFromUtc\" IS NULL AND \"UncertainToUtc\" IS NULL) AND\n(\"UncertainFromUtc\" IS NULL OR \"UncertainToUtc\" IS NULL OR \"UncertainFromUtc\" <= \"UncertainToUtc\")");
+                        });
+                });
+
             modelBuilder.Entity("Vessel.Domain.Workspace.FillImportConflict", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1951,6 +2020,87 @@ namespace Vessel.Persistence.Migrations
                             t.HasCheckConstraint("CK_fill_import_conflicts_reports", "\"Reports\" >= 1");
 
                             t.HasCheckConstraint("CK_fill_import_conflicts_seen", "\"FirstSeenAtUtc\" <= \"LastSeenAtUtc\"");
+                        });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Workspace.ForcedEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContractId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Exclusion")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<decimal?>("Fee")
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTimeOffset>("FirstSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("LastSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OrderId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("Price")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal?>("RealizedPnl")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Side")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<string>("SourceId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("VenueContractId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "AccountId", "OccurredAtUtc");
+
+                    b.HasIndex("OwnerId", "AccountId", "SourceId")
+                        .IsUnique();
+
+                    b.ToTable("imported_forced_events", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_imported_forced_events_facts", "\"Side\" IN ('buy', 'sell') AND \"Quantity\" > 0 AND (\"Price\" IS NULL OR \"Price\" > 0) AND \"FirstSeenAtUtc\" <= \"LastSeenAtUtc\"");
+
+                            t.HasCheckConstraint("CK_imported_forced_events_kind", "\"Kind\" IN ('liquidation', 'deleverage', 'settlement')");
                         });
                 });
 
@@ -2127,6 +2277,9 @@ namespace Vessel.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
+
+                    b.Property<bool>("ExecutionsOmitted")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("ExternalOrderId")
                         .IsRequired()
@@ -2669,6 +2822,16 @@ namespace Vessel.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Vessel.Domain.Workspace.ExecutionOmission", b =>
+                {
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Vessel.Domain.Workspace.FillImportConflict", b =>
                 {
                     b.HasOne("Vessel.Domain.Workspace.ImportedFill", null)
@@ -2677,6 +2840,16 @@ namespace Vessel.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Workspace.ForcedEvent", b =>
+                {
                     b.HasOne("Vessel.Domain.Accounts.Account", null)
                         .WithMany()
                         .HasForeignKey("OwnerId", "AccountId")

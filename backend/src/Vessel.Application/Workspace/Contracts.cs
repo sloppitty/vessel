@@ -158,7 +158,8 @@ public interface IWorkspaceStore
     /// the fills it added.
     /// </summary>
     Task<IReadOnlyList<ImportedFill>> SaveHistoricalFillsAsync(Account account, IReadOnlyList<VenueFill> fills, DateTimeOffset observedAt,
-        CancellationToken ct) => throw new NotSupportedException("This store cannot import backfilled fills.");
+        CancellationToken ct, IReadOnlyList<VenueOmission>? omissions = null) =>
+        throw new NotSupportedException("This store cannot import backfilled fills.");
     // Management serializes owner grouping changes before acquiring account row locks.
     // Sync takes only the account lock, so independent venue reads can still run concurrently.
     Task<T> WithManagementLockAsync<T>(Func<Task<T>> action, CancellationToken ct);

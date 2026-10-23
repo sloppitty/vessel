@@ -219,4 +219,87 @@ public sealed class ImportedOrder : IOwned
     public string VenueStatus { get; set; } = null!;
     public DateTimeOffset StatusAtUtc { get; set; }
     public DateTimeOffset ObservedAtUtc { get; set; }
+    /// <summary>
+    /// Phase 2, item 7: an import left out one of this order's executions (an omission marker names it). Its executions
+    /// are then known to be missing whatever its status, under the shared rule; a later read never clears it.
+    /// </summary>
+    public bool ExecutionsOmitted { get; set; }
 }
+
+/// <summary>
+/// Phase 2, item 7: an in-scope execution an import read but left out (forced, fee-bearing, missing reported P&amp;L, or on
+/// a market Vessel does not recognize). A durable marker, deduplicated by its native trade ID and kind: a later read that
+/// no longer returns the row cannot erase it. It carries no money. Without a reported time, the read's window bounds it.
+/// </summary>
+public sealed class ExecutionOmission : IOwned
+{
+    public const string Forced = "forced", Fee = "fee", MissingPnl = "missing-pnl", UnrecognizedMarket = "unrecognized-market";
+    public static readonly IReadOnlyList<string> Kinds = [Forced, Fee, MissingPnl, UnrecognizedMarket];
+    public Guid Id { get; set; }
+    public Guid OwnerId { get; set; }
+    public Guid AccountId { get; set; }
+    public string Kind { get; set; } = null!;
+    /// <summary>Why it was left out, in plain words, for example "liquidation" or "fee-bearing or unverified fee".</summary>
+    public string Reason { get; set; } = null!;
+    public string SourceId { get; set; } = null!;
+    /// <summary>The canonical contract; null when the market is one Vessel does not recognize.</summary>
+    public string? ContractId { get; set; }
+    public string? VenueContractId { get; set; }
+    /// <summary>The native order ID, when the venue gives one.</summary>
+    public string? OrderId { get; set; }
+    public DateTimeOffset? OccurredAtUtc { get; set; }
+    /// <summary>When no time was reported: the read's window the execution lies in.</summary>
+    public DateTimeOffset? UncertainFromUtc { get; set; }
+    public DateTimeOffset? UncertainToUtc { get; set; }
+    public DateTimeOffset FirstSeenAtUtc { get; set; }
+    public DateTimeOffset LastSeenAtUtc { get; set; }
+
+    /// <summary>
+    /// Whether a marker names a retained order (Sol round 1): the same venue order ID on the same market, by the order's
+    /// identity rule. A marker on a recognized market names its canonical contract's order; when both name a native market
+    /// they must agree, and a disagreement is null, a conflict that fails closed like a known order reported on another
+    /// market. A marker on a market Vessel does not recognize names the order on that native market. A marker without
+    /// any market names every order with its ID, since nothing rules one out.
+    /// </summary>
+    public static bool? Names(string? contractId, string? venueContractId, string orderId, ImportedOrder order)
+    {
+        if (order.ExternalOrderId != orderId) return false;
+        if (contractId is not null)
+        {
+            if (contractId != order.ContractId) return false;
+            return venueContractId is not null && order.VenueContractId is not null && venueContractId != order.VenueContractId ? null : true;
+        }
+        return venueContractId is null || venueContractId == (order.VenueContractId ?? order.ContractId);
+    }
+}
+
+/// <summary>
+/// Phase 2, item 7: a venue-forced execution (a Lighter liquidation, deleverage or market settlement), kept beside the
+/// imported fills and never one of them: no link, no lifecycle change and no scored result. Money the venue did not
+/// report or Vessel cannot verify stays null.
+/// </summary>
+public sealed class ForcedEvent : IOwned
+{
+    public const string Liquidation = "liquidation", Deleverage = "deleverage", Settlement = "settlement";
+    public static readonly IReadOnlyList<string> Kinds = [Liquidation, Deleverage, Settlement];
+    public Guid Id { get; set; }
+    public Guid OwnerId { get; set; }
+    public Guid AccountId { get; set; }
+    public string SourceId { get; set; } = null!;
+    public string Kind { get; set; } = null!;
+    public string ContractId { get; set; } = null!;
+    public string? VenueContractId { get; set; }
+    /// <summary>The account's side of the execution, buy or sell.</summary>
+    public string Side { get; set; } = null!;
+    public decimal Quantity { get; set; }
+    public decimal? Price { get; set; }
+    public DateTimeOffset OccurredAtUtc { get; set; }
+    public string? OrderId { get; set; }
+    public decimal? Fee { get; set; }
+    public decimal? RealizedPnl { get; set; }
+    /// <summary>Why it is not scored, in plain words.</summary>
+    public string Exclusion { get; set; } = null!;
+    public DateTimeOffset FirstSeenAtUtc { get; set; }
+    public DateTimeOffset LastSeenAtUtc { get; set; }
+}
+
