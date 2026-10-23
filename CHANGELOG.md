@@ -179,6 +179,8 @@
 
 ### Fixed
 
+- The missing-stop, oversized-stop and position-size warnings now also open when the position
+  or the order keeps changing size between checks.
 - A stop that stays smaller than its Play's position now raises the undersized-stop warning
   even when the position or the stop keeps changing size.
 - When a venue later reports a retained fill with different values, Vessel keeps the first
