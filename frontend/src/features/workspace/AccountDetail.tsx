@@ -79,13 +79,13 @@ export function AccountDetail({ account, api, refreshing, busy = refreshing, onS
     <div className="workspace-stat-grid three">
       <div className="shell-panel metric"><span>{paper ? 'Paper cash balance · virtual USD' : wallet ? 'Wallet stablecoins available' : synced ? 'Account value · reported' : 'Known manual value'}</span><strong>{money(paper ? account.balanceUsd ?? null : wallet ? account.availableStablecoinNominalUsd ?? null : account.accountValueUsd)}</strong>
         <div className="metric-tags">{account.isEnabled === false ? <SourcePill text="hidden" detail="Hidden while disabled" />
-          : paper ? <SourcePill text="Paper" detail="Simulated cash, not a real stablecoin wallet" /> : !wallet ? (synced ? <SourcePill text={venues.valueUnit(account.venueId)} detail={`Perpetuals equity in ${venues.valueUnit(account.venueId)} · nominal`} /> : <SourcePill text="manual" detail="Entered manually" />)
+          : paper ? <SourcePill text="simulated" detail="Simulated cash, not a real stablecoin wallet" /> : !wallet ? (synced ? <SourcePill text={venues.valueUnit(account.venueId)} detail={`Perpetuals equity in ${venues.valueUnit(account.venueId)} · nominal`} /> : <SourcePill text="manual" detail="Entered manually" />)
           : snapshot?.stablecoinWallet ? <SourcePill text="wallet" detail={`${snapshot.stablecoinWallet.accountMode} · nominal total minus held`} /> : <SourcePill text="not read" detail="Refresh to read the stablecoin wallet" />}</div>
         {/* Perps equity is a separate figure, never summed with the wallet. */}
         {wallet && snapshot && account.isEnabled !== false && <small>Perps equity {money(snapshot.accountValueUsd)}</small>}</div>
       <div className="shell-panel metric"><span>Available balance</span><strong>{money(account.isEnabled === false ? null : account.availableBalanceUsd ?? null)}</strong>
         <div className="metric-tags">{account.isEnabled === false ? <SourcePill text="hidden" detail="Hidden while disabled" />
-          : paper ? <SourcePill text="paper" detail="Virtual available margin, not real funds" /> : account.availableBalanceSource === 'wallet' ? <SourcePill text="wallet" detail="Wallet total minus held · nominal" />
+          : paper ? <SourcePill text="simulated" detail="Virtual available margin, not real funds" /> : account.availableBalanceSource === 'wallet' ? <SourcePill text="wallet" detail="Wallet total minus held · nominal" />
           : account.availableBalanceSource === 'margin' ? <SourcePill text="reported margin" detail="Venue-reported available margin · not guaranteed withdrawable" />
           : account.availableBalanceSource === 'withdrawable' ? <SourcePill text="reported withdrawal" detail="Venue-reported perps withdrawable" />
           : <SourcePill text="not reported" detail="Not reported by this venue" />}</div>
