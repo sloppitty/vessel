@@ -233,3 +233,41 @@ Each finding was proved by a failing test that is kept as a regression:
 
 At `57407d46`: `pnpm --dir frontend typecheck` and `lint` pass, and
 `pnpm --dir frontend test` passes 176 files, 4,099 tests.
+
+## October 24, 2026: end-to-end verification
+
+Two Sol (Codex) agents ran the packaged checks at `682b2b5a` in isolated
+Compose projects with synthetic data; no `.env`, owner database or dev
+service was used, and every container, network, volume and image tag was
+removed afterwards.
+
+- `scripts/verify-release.py` with Chromium: 177 packaged and 14 browser
+  assertions passed. `--storage local`: 177 passed. `--auth wallet` with
+  Chromium and Firefox: 155 packaged and 22 browser assertions passed. No
+  CSP violations, console or page errors.
+- `scripts/check.sh`: Python 82, prototype 76, backend 3,094 passed (730
+  skipped: they need disposable PostgreSQL/RabbitMQ/S3 endpoints or live
+  venue opt-ins), frontend 4,099; build, typecheck and lint clean.
+- `scripts/e2e-full-stack.py`: 168 checks passed and 5 failed. Step 6 times
+  out waiting for an exit watch to become `unverifiable` because the runner
+  ages only `monitor_exit_watches.StartedAtUtc`, which reconciliation
+  restores; two 11b checks and one 7b check depend on that watch, and 10c
+  failed only because a resumed run compares a new stream reader with
+  history from before the resume. The runner and backend are unchanged from
+  `315144f0`, so these are not caused by this stack; they are left for a
+  separate fix.
+- `scripts/e2e/shell-e2e.cjs`, a new browser pass run against the kept
+  full-stack stack (real API, fake venue): 45 passed and 1 failed. It covers
+  the header on every page, breadcrumb resets, drill-downs, filters kept,
+  Back, truncation, browser back/forward and hash edits, the collapsed
+  trail, a saved-Play crumb with unsaved work (cancel and accept), enabling
+  Paper in Settings, a paper portfolio, account (4,000 virtual USD) and
+  saved Play created through the UI, the single header notice, the brand
+  switch in the rail and the sheet, the unsaved-work dialog, focus and
+  announcements, and Graphite and Daylight at 1440, 1024, 390 and 320 px
+  with no horizontal overflow and no console, page, CSP or external-request
+  errors. The failure was a standalone "Paper" cash-source pill in account
+  detail; `b3977ee3` relabels both paper source pills "simulated" with their
+  explanations unchanged, covered by `AccountDetail.paper-source.test.tsx`.
+  Not covered: Wallet-only flows, populated paper Activity rows, the paper
+  worker and the arrival animation (reduced motion was on).
