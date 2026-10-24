@@ -9,8 +9,8 @@ import { ApplicationShell } from './ApplicationShell'
 const system = { ...systemFixture, venues: systemFixture.venues.map(venue => ({
   ...venue, capabilities: { ...venue.capabilities, paperExecution: venue.id === 'hyperliquid' },
 })) }
-const realName = 'Real journal, switch to Paper playground'
-const paperName = 'Paper playground, switch to Real journal'
+const realName = 'Journal, switch to Paper playground'
+const paperName = 'Paper playground, switch to Journal'
 function client() {
   const base = { ...createWorkspaceApi('synthetic-only'), ...playApiStubs(), overview: vi.fn().mockResolvedValue(emptyOverview),
     accounts: vi.fn().mockResolvedValue([]), portfolios: vi.fn().mockResolvedValue([]) }

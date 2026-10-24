@@ -1,6 +1,8 @@
 # Trading mode switch options
 
 > **Implemented** (October 24, 2026): option 5, the brand lockup, is in the app.
+> After reviewing the pull request the owner renamed "Real journal" to
+> "Journal"; the `implemented-*.png` captures still show the earlier name.
 > The rules are in the trading mode lockup subsection of the
 > [core workspace contract](../../architecture/core-workspace-contract.md#trading-mode-lockup)
 > and the verification in

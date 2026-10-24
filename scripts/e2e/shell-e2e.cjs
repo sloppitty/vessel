@@ -22,7 +22,7 @@ let page, context, browser
 const crumb = () => page.getByRole('navigation', { name: 'Breadcrumb', exact: true })
 const title = () => page.getByRole('textbox', { name: 'Play title', exact: true })
 const switchName = mode => mode === 'real'
-  ? 'Real journal, switch to Paper playground' : 'Paper playground, switch to Real journal'
+  ? 'Journal, switch to Paper playground' : 'Paper playground, switch to Journal'
 const switchButton = mode => page.getByRole('button', { name: switchName(mode), exact: true }).filter({ visible: true })
 const api = async route => {
   const response = await fetch(base + route, { headers: { Authorization: `Bearer ${token}` } })
@@ -347,7 +347,7 @@ async function main() {
       await title().fill('E2E Shell paper BTC unsaved')
       await openSheet()
       await switchButton('paper').click()
-      const dialog = page.getByRole('alertdialog', { name: 'Switch to Real journal?', exact: true })
+      const dialog = page.getByRole('alertdialog', { name: 'Switch to Journal?', exact: true })
       await dialog.waitFor()
       assert.equal(await dialog.getByRole('button', { name: 'Keep editing', exact: true }).evaluate(el => el === document.activeElement), true)
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
@@ -364,7 +364,7 @@ async function main() {
       await title().fill('E2E Shell paper BTC unsaved')
       const before = await crumb().innerText(), url = page.url()
       await switchButton('paper').click()
-      const dialog = page.getByRole('alertdialog', { name: 'Switch to Real journal?', exact: true })
+      const dialog = page.getByRole('alertdialog', { name: 'Switch to Journal?', exact: true })
       await dialog.waitFor()
       assert.equal(await dialog.getByRole('button', { name: 'Keep editing', exact: true }).evaluate(el => el === document.activeElement), true)
       await shot('paper-unsaved-switch-dialog')
@@ -377,7 +377,7 @@ async function main() {
       await page.getByRole('alertdialog').getByRole('button', { name: 'Discard and switch', exact: true }).click()
       await switchButton('real').waitFor()
       await until(async () => await switchButton('real').evaluate(el => el === document.activeElement), 'Discard returns focus to new control')
-      assert.ok(await page.getByRole('status').filter({ hasText: /^Real journal$/ }).count())
+      assert.ok(await page.getByRole('status').filter({ hasText: /^Journal$/ }).count())
       await trail(['Plays'])
       await header()
       await shot('real-after-discard-switch')
@@ -415,7 +415,7 @@ async function main() {
       await switchButton('paper').click()
       await until(async () => await page.getByRole('button', { name: 'Open navigation', exact: true }).evaluate(el => el === document.activeElement), 'Narrow switch focuses menu')
       await header()
-      assert.ok(await page.getByRole('status').filter({ hasText: /^Real journal$/ }).count())
+      assert.ok(await page.getByRole('status').filter({ hasText: /^Journal$/ }).count())
       await openSheet()
       await switchButton('real').click()
       await header(true)

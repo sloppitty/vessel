@@ -27,10 +27,10 @@ function api(overrides: Partial<WorkspaceApi> = {}) {
 beforeEach(() => { window.history.replaceState(null, '', '/#accounts') })
 
 // The trading mode control is the brand subtitle (or its rail form); only these helpers know how to find it.
-const modeNames = { real: 'Real journal', paper: 'Paper playground' } as const
+const modeNames = { real: 'Journal', paper: 'Paper playground' } as const
 type Mode = keyof typeof modeNames
 const switchName = (from: Mode) => `${modeNames[from]}, switch to ${modeNames[from === 'real' ? 'paper' : 'real']}`
-const tradingModeControl = () => screen.queryByRole('button', { name: /^(Real journal|Paper playground), switch to / })
+const tradingModeControl = () => screen.queryByRole('button', { name: /^(Journal|Paper playground), switch to / })
 async function switchTradingMode(user: { click: (element: Element) => Promise<void> }, mode: Mode) {
   await user.click(await screen.findByRole('button', { name: switchName(mode === 'paper' ? 'real' : 'paper') }))
 }
@@ -178,16 +178,16 @@ describe('trading mode lockup', () => {
   it('names the action both ways in a button beside, not inside, the Overview link', async () => {
     const user = userEvent.setup()
     render(<ApplicationShell system={system} api={modeApis().root} disconnect={vi.fn()} />)
-    const control = await screen.findByRole('button', { name: 'Real journal, switch to Paper playground' })
+    const control = await screen.findByRole('button', { name: 'Journal, switch to Paper playground' })
     const link = screen.getByRole('link', { name: 'Vessel overview' })
-    expect(control).toHaveTextContent('Real journal')
-    expect(control).toHaveAttribute('title', 'Real journal, switch to Paper playground')
+    expect(control).toHaveTextContent(/^\s*Journal\s*$/)
+    expect(control).toHaveAttribute('title', 'Journal, switch to Paper playground')
     expect(control).not.toHaveAttribute('aria-pressed')
     expect(link).not.toContainElement(control)
     expect(link.parentElement).toContainElement(control)
     expect(within(link).queryByText('The trading journal')).not.toBeInTheDocument()
     await user.click(control)
-    const back = await screen.findByRole('button', { name: 'Paper playground, switch to Real journal' })
+    const back = await screen.findByRole('button', { name: 'Paper playground, switch to Journal' })
     expect(back).toHaveTextContent('Paper playground')
     expect(back).not.toHaveAttribute('aria-pressed')
     expect(screen.getByRole('link', { name: 'Vessel overview' })).not.toContainElement(back)
@@ -240,7 +240,7 @@ describe('trading mode lockup', () => {
     await switchTradingMode(user, 'real')
     await waitFor(() => expect(screen.getByRole('button', { name: switchName('real') })).toHaveFocus())
     expect(modeAnnouncer()).toBe(live)
-    expect(live).toHaveTextContent('Real journal')
+    expect(live).toHaveTextContent(/^\s*Journal\s*$/)
   })
 
   it('animates the mark only after a switch made in this session, never on load or reload', async () => {

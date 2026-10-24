@@ -261,10 +261,11 @@ select; switching still remounts the shell in the other mode.
 
 - **Control.** The mark and "vessel" wordmark stay the Overview link ("Vessel
   overview"). When Paper is available the subtitle under the wordmark is a
-  sibling button, never nested in the link, reading **Real journal** or
-  **Paper playground** with a swap icon. Its name states the action ("Real
-  journal, switch to Paper playground" / "Paper playground, switch to Real
-  journal"), so it has no pressed state; its title repeats the name. When Paper
+  sibling button, never nested in the link, reading **Journal** or
+  **Paper playground** with a swap icon (the owner renamed "Real journal" to
+  "Journal" the same day). Its name states the action ("Journal, switch to
+  Paper playground" / "Paper playground, switch to Journal"), so it has no
+  pressed state; its title repeats the name. When Paper
   is unavailable the subtitle is the plain "The trading journal" and nothing
   else changes. "Paper" alone is not used for the control because a light
   appearance theme has that name; the header notice keeps **Paper mode**.
@@ -291,7 +292,7 @@ select; switching still remounts the shell in the other mode.
   visual refresh's opacity-only rule.
 - **Confirmation.** While Play work is unsaved or a Play request is in flight
   (the condition that used to call `window.confirm`), the switch opens an
-  alert dialog: "Switch to Paper playground?" or "Switch to Real journal?",
+  alert dialog: "Switch to Paper playground?" or "Switch to Journal?",
   the unchanged message as its description, **Keep editing** (focused first)
   and **Discard and switch**. The control shows a dashed pending outline while
   it is open. Keep editing and Escape change nothing and return focus to the
@@ -302,4 +303,4 @@ select; switching still remounts the shell in the other mode.
 - **Focus and announcement.** After a switch from the control, focus moves to
   the new control (the rail button when collapsed), or to the menu button on
   narrow screens because the sheet closes. A polite live region outside the
-  per-mode shell announces "Paper playground" or "Real journal".
+  per-mode shell announces "Paper playground" or "Journal".

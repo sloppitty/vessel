@@ -1103,7 +1103,7 @@ unchanged. No backend, deployment or migration is included.
 ## October 24, 2026: trading mode lockup
 
 The sidebar "Trading mode" select was replaced by the owner-chosen brand
-lockup: the subtitle under "vessel" reads **Real journal** or **Paper
+lockup: the subtitle under "vessel" reads **Journal** or **Paper
 playground** and switches mode (a round swap button in the collapsed rail),
 Paper mode shows a paper-boat mark and a derived Paper tone on the sidebar and
 the **Paper mode** strip, and the discard prompt is an in-app alert dialog

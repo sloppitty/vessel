@@ -1,7 +1,7 @@
 import type { TradingMode } from '@/api/paper'
 
 /** The trading mode control's names. "Paper" alone is avoided: a light appearance theme has that name. */
-export const tradingModeNames: Record<TradingMode, string> = { real: 'Real journal', paper: 'Paper playground' }
+export const tradingModeNames: Record<TradingMode, string> = { real: 'Journal', paper: 'Paper playground' }
 export const otherTradingMode = (mode: TradingMode): TradingMode => mode === 'real' ? 'paper' : 'real'
 /** The label changes on every switch, so the name states the action instead of a pressed state. */
 export const tradingModeSwitchName = (mode: TradingMode) => `${tradingModeNames[mode]}, switch to ${tradingModeNames[otherTradingMode(mode)]}`
