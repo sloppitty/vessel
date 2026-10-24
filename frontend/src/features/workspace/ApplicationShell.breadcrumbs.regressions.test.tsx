@@ -115,3 +115,19 @@ it('does not let an unmounted restore owner cancel a new connection request', as
   await act(async () => finishNew(first))
   expect(await screen.findByRole('textbox', { name: 'Play title' })).toHaveValue(first.summary.title)
 })
+
+it('does not retain an old connection request as a breadcrumb guard on the new connection', async () => {
+  const oldApi = client(), newApi = client()
+  const user = await openBoth(oldApi)
+  let finishOld!: (play: SavedPlay) => void
+  vi.mocked(oldApi.play).mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+  await user.click(crumb(first.summary.title))
+  await waitFor(() => expect(oldApi.play).toHaveBeenCalledTimes(3))
+
+  user.view.rerender(<ApplicationShell api={newApi} system={systemFixture} disconnect={vi.fn()} />)
+  await act(async () => finishOld(first))
+  await user.click(await screen.findByRole('tab', { name: /^Drafts/ }))
+  await user.click(await screen.findByRole('button', { name: `Open ${second.summary.title}` }))
+  expect(await screen.findByRole('textbox', { name: 'Play title' })).toHaveValue(second.summary.title)
+  expect(labels()).toEqual(['Plays', second.summary.title])
+})

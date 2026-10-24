@@ -219,6 +219,8 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     setPlaysSession(createPlaysSession())
     setPlaysList(initialPlaysList)
     setTrail([pageLocation(page)])
+    // A request belongs to its connection: left in place it would keep holding back the new connection's Play breadcrumbs.
+    setRequestedPlay(null)
   } else if (page === 'plays' && !playsLifetime.visited) {
     setPlaysLifetime({ ...playsLifetime, visited: true })
   }
