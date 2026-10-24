@@ -92,6 +92,8 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Persistence/Notifications/SystemNotificationStore.cs|4cf27d1a1a94c5bc022ecda2a317013fd1e76b1f37682a7ed6550510acd42dc7",
             // Not SQL: server-authored notification title beginning with the word "Update".
             "Vessel.Application/Notifications/NotificationComposer.cs|fb59481d31b3a452f939961f54a0da2ba0ebfb1c04c24b7cd273dcf14f79c639",
+            // Not SQL: Extended candle notice; "; refresh manually" instructs the reader, not a database command.
+            "Vessel.Infrastructure/Venues/Extended/ExtendedReader.cs|79913f236220c89fc6520dab67a97bb81d31a46f3a03fc47a06ccc50a5256d21",
             "Vessel.Persistence/PlayStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             "Vessel.Persistence/WorkspaceStore.cs|c020f566091297d43f5450ac02e794b1ea045d677575f85160310daa91b8fe9b",
             // B2: reviewed system discovery/state, transactional venue count and budget-lock statements.
