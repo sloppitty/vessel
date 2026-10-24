@@ -46,14 +46,14 @@ function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
 
 async function openBoth(api: WorkspaceApi) {
   const user = userEvent.setup()
-  render(<ApplicationShell api={api} system={systemFixture} disconnect={vi.fn()} />)
+  const view = render(<ApplicationShell api={api} system={systemFixture} disconnect={vi.fn()} />)
   await user.click(await screen.findByRole('button', { name: 'Inspect Swing trading' }))
   await user.click(await screen.findByRole('button', { name: 'Open Play BTC breakout' }))
   await screen.findByRole('textbox', { name: 'Play title' })
   await user.click(await screen.findByRole('button', { name: 'Open second Play' }))
   await waitFor(() => expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue(second.summary.title))
   expect(labels()).toEqual(['Review', 'Plays', first.summary.title, second.summary.title])
-  return user
+  return { ...user, view }
 }
 
 describe('pending breadcrumb restoration', () => {
@@ -71,4 +71,47 @@ describe('pending breadcrumb restoration', () => {
     expect(labels()).toEqual(['Review', 'Plays'])
     expect(screen.queryByRole('textbox', { name: 'Play title' })).not.toBeInTheDocument()
   })
+})
+
+it('uses the latest origin when the shell requests the same Play again without clearing the request', async () => {
+  const popup = notificationWith(10, { content: { ...notificationWith(10).content,
+    links: [{ kind: 'play', label: 'Request A again', playId: first.summary.id, accountId: null }] } })
+  const api = client({ claimNotifications: vi.fn().mockResolvedValue({ popups: [popup], more: 0 }) })
+  const user = userEvent.setup()
+  window.history.replaceState(null, '', '/#plays')
+  render(<ApplicationShell api={api} system={systemFixture} disconnect={vi.fn()} />)
+  await user.click(await screen.findByRole('tab', { name: /^Drafts/ }))
+  await user.click(await screen.findByRole('button', { name: `Open ${second.summary.title}` }))
+  await screen.findByRole('textbox', { name: 'Play title' })
+  await user.click(screen.getByRole('link', { name: 'Review' }))
+  await user.click(await screen.findByRole('button', { name: 'Inspect Swing trading' }))
+  let finish!: (play: SavedPlay) => void
+  vi.mocked(api.play).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  await user.click(await screen.findByRole('button', { name: 'Open Play BTC breakout' }))
+  await waitFor(() => expect(api.play).toHaveBeenCalledTimes(2))
+  expect(labels()).toEqual(['Review', 'Plays', second.summary.title])
+  await user.click(screen.getByRole('button', { name: 'Request A again' }))
+  await act(async () => finish(first))
+  await waitFor(() => expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue(first.summary.title))
+  expect(labels()).toEqual(['Review', 'Plays', second.summary.title, first.summary.title])
+})
+
+it('does not let an unmounted restore owner cancel a new connection request', async () => {
+  const oldApi = client(), newApi = client()
+  const user = await openBoth(oldApi)
+  let finishOld!: (play: SavedPlay) => void
+  vi.mocked(oldApi.play).mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+  await user.click(crumb(first.summary.title))
+  await waitFor(() => expect(oldApi.play).toHaveBeenCalledTimes(3))
+  // Keep ApplicationShell mounted while the connection replaces and re-keys its Plays owner.
+  user.view.rerender(<ApplicationShell api={newApi} system={systemFixture} disconnect={vi.fn()} />)
+  await user.click(screen.getByRole('link', { name: 'Review' }))
+  await user.click(await screen.findByRole('button', { name: 'Inspect Swing trading' }))
+  let finishNew!: (play: SavedPlay) => void
+  vi.mocked(newApi.play).mockImplementationOnce(() => new Promise(resolve => { finishNew = resolve }))
+  await user.click(await screen.findByRole('button', { name: 'Open Play BTC breakout' }))
+  await waitFor(() => expect(newApi.play).toHaveBeenCalledOnce())
+  await act(async () => finishOld(first))
+  await act(async () => finishNew(first))
+  expect(await screen.findByRole('textbox', { name: 'Play title' })).toHaveValue(first.summary.title)
 })

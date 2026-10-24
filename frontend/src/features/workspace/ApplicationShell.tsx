@@ -170,7 +170,8 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
   const rail = wide && navigationCollapsed
   // The trading mode control: the brand subtitle, or its rail form. A switch asks first while Play work could be lost.
   const modeControl = useRef<HTMLButtonElement>(null)
-  const switchFocus = useRef<HTMLElement | null>(null)
+  // Set only when the dialog closes without a switch; a switch moves focus to the remounted shell itself.
+  const switchFocus = useRef<{ control: HTMLElement | null } | null>(null)
   const [pendingSwitch, setPendingSwitch] = useState<{ target: TradingMode; api: WorkspaceApi; work: RefObject<symbol | null>; control: HTMLButtonElement } | null>(null)
   // Read once: this shell was mounted by a switch made in this browser session, not by a load or reload.
   const [arrival] = useState(() => modeArrival?.to === tradingMode ? modeArrival : null)
@@ -189,7 +190,12 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
   })
   const [playsSession, setPlaysSession] = useState(createPlaysSession)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('appearance')
-  const [requestedPlay, setRequestedPlay] = useState<{ api: WorkspaceApi; id: string; origin: ShellLocation[]; restore: boolean } | null>(null)
+  // `token` makes each request its own, a repeat of the same Play included; the ref lets late acknowledgements from an
+  // earlier render or connection see the request as it is now.
+  const [requestedPlay, setRequestedPlay] = useState<{ api: WorkspaceApi; id: string; origin: ShellLocation[]; restore: boolean; token: number } | null>(null)
+  const requestTokens = useRef(0)
+  const requestedPlayRef = useRef(requestedPlay)
+  useLayoutEffect(() => { requestedPlayRef.current = requestedPlay })
   const onHashNavigation = useCallback((next: Page) => {
     setMenuOpen(false)
     if (next !== 'accounts') setSelectedAccountId(null)
@@ -373,23 +379,25 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
   async function viewPlay(id: string, signal: AbortSignal, restore = false) {
     if (signal.aborted) return
     // PlaysPage owns draft protection and loading. Navigation must not replace the editor session.
-    setRequestedPlay({ api, id, origin: trail, restore })
+    setRequestedPlay({ api, id, origin: trail, restore, token: ++requestTokens.current })
     if (!restore) {
       navigateHash('plays')
       setTrail(history => visitLocations(history, pageLocation('plays'),
         ...(playsSession.view === 'editor' ? [playLocation(playsSession)] : [])))
     }
   }
-  function requestedPlayHandled(opened = true) {
-    if (!requestedPlay || requestedPlay.api !== api) return
+  function requestedPlayHandled(opened = true, key?: unknown) {
+    const request = requestedPlayRef.current
+    if (!request || request.api !== api || exitState.current?.api !== api || key !== request.token) return
     if (opened) {
-      const session = exitState.current?.session
-      if (session?.view === 'editor') {
+      const session = exitState.current.session
+      if (session.view === 'editor') {
         navigateHash('plays')
-        setTrail(visitLocations(requestedPlay.origin, ...(requestedPlay.origin.at(-1)?.page === 'plays' ? [] : [pageLocation('plays')]), playLocation(session)))
+        setTrail(visitLocations(request.origin, ...(request.origin.at(-1)?.page === 'plays' ? [] : [pageLocation('plays')]), playLocation(session)))
       }
     }
-    setRequestedPlay(null)
+    requestedPlayRef.current = null
+    setRequestedPlay(current => current === request ? null : current)
   }
   function backToAccounts() {
     setSelectedAccountId(null)
@@ -509,7 +517,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     onTradingModeChange(next)
   }
   function keepTradingMode() {
-    switchFocus.current = pendingSwitch?.control ?? null
+    switchFocus.current = { control: pendingSwitch?.control ?? null }
     setPendingSwitch(null)
   }
   function confirmTradingMode() {
@@ -522,10 +530,13 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     setPendingSwitch(null)
     commitTradingMode(pendingSwitch.target)
   }
-  // Cancelling returns focus to the control that asked, or to the current one if a resize swapped the rail and subtitle forms.
+  // Cancelling returns focus to the control that asked, or to the current one if a resize swapped the rail and subtitle forms,
+  // or to the content when Paper became unavailable and no mode control is left.
   function tradingModeDialogClosed() {
-    const target = switchFocus.current?.isConnected ? switchFocus.current : modeControl.current
+    const kept = switchFocus.current
     switchFocus.current = null
+    if (!kept) return
+    const target = kept.control?.isConnected ? kept.control : modeControl.current ?? document.getElementById('workspace-content')
     target?.focus({ preventScroll: true })
   }
   if (disconnectedApi === api) return null
@@ -598,7 +609,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
                   if (account) manageAccount(account)
                 }}
                 api={api} session={playsSession} onSession={acceptPlaysSession} onLogChange={changePlaysLog} onLogApplier={registerLogApplier} onReload={reload} loading={loading}
-                requestedPlayId={requestedPlay?.api === api ? requestedPlay.id : null} requestedPlayRestore={requestedPlay?.restore ?? false}
+                requestedPlayId={requestedPlay?.api === api ? requestedPlay.id : null} requestedPlayRestore={requestedPlay?.restore ?? false} requestedPlayKey={requestedPlay?.api === api ? requestedPlay.token : undefined}
                 onRequestedPlayHandled={requestedPlayHandled}
                 list={playsList} onList={setPlaysList} />
             </Suspense>

@@ -54,7 +54,7 @@ const ended: PlayStatus[] = ['closed', 'cancelled', 'unresolved']
 type DialogKind = null | 'revision' | 'pause' | 'cancel' | 'delete' | 'history' | 'preflight' | 'unresolved' | 'return-open'
 type WorkKind = 'save' | 'status' | 'open' | 'delete' | 'manual'
 
-export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, requestedPlayRestore = false, onRequestedPlayHandled, active: visible = true, workRef, list, onList, reloadGeneration = 0, accountMonitors = [], onManageAccount, onLogChange, onLogApplier }: {
+export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, requestedPlayRestore = false, requestedPlayKey, onRequestedPlayHandled, active: visible = true, workRef, list, onList, reloadGeneration = 0, accountMonitors = [], onManageAccount, onLogChange, onLogApplier }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -79,7 +79,9 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   requestedPlayId?: string | null
   /** Breadcrumb restoration waits for this owner to confirm any discard before the shell changes location. */
   requestedPlayRestore?: boolean
-  onRequestedPlayHandled?: (opened?: boolean) => void
+  /** The shell's identity for this request: asking for the same Play again is a new request. Returned when handled. */
+  requestedPlayKey?: unknown
+  onRequestedPlayHandled?: (opened?: boolean, key?: unknown) => void
   /** The shell retains this mutation owner while another page is visible, not its UI or polling. */
   active?: boolean
   /** Shared with shell actions that could replace the session, before disabled controls render. */
@@ -105,10 +107,11 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const activeWork = useRef(workRef ?? { current: null as symbol | null })
   const [navigationError, setNavigationError] = useState<string | null>(null)
   const requestAttempt = useRef<number | null>(null)
-  // Every shell request is its own generation, a repeat of the same Play included: a response, and the discard confirmed
-  // for it, belong to the request that started them, never to a later one. Declared before the request effect below.
+  // Every shell request is its own generation, a repeat of the same Play or a new connection included: a response, the
+  // discard confirmed for it and its acknowledgement belong to the request that started them, never to a later one.
+  // Declared before the request effect below.
   const requestGeneration = useRef(0)
-  useEffect(() => { requestGeneration.current++ }, [requestedPlayId, requestedPlayRestore])
+  useEffect(() => { requestGeneration.current++ }, [requestedPlayId, requestedPlayRestore, requestedPlayKey, api])
   const openController = useRef<AbortController | null>(null)
   const epoch = useRef(0)
   const mounted = useRef(false)
@@ -539,34 +542,39 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   useEffect(() => {
     if (!requestedPlayId) { requestAttempt.current = null; return }
     if (!visible && !requestedPlayRestore) return
-    const generation = requestGeneration.current
-    const current = () => requestGeneration.current === generation
+    const generation = requestGeneration.current, key = requestedPlayKey
+    const current = () => mounted.current && requestGeneration.current === generation
     if (requestAttempt.current === generation || busy) return
     if (saved?.summary.id === requestedPlayId) {
       update({ view: 'editor' })
       requestAttempt.current = generation
-      onRequestedPlayHandled?.()
+      onRequestedPlayHandled?.(true, key)
       return
     }
     if (unsaved && !requestedPlayRestore) return
-    requestAttempt.current = generation
     let active = true
-    queueMicrotask(() => { if (active) void open(requestedPlayId, requestedPlayRestore, current).then(success => {
-      if ((success || requestedPlayRestore) && current()) onRequestedPlayHandled?.(success)
-    }) })
+    // Claimed when it starts, not when queued: a rerun that cancels the queued start must be able to queue it again.
+    queueMicrotask(() => {
+      if (!active || requestAttempt.current === generation) return
+      requestAttempt.current = generation
+      void open(requestedPlayId, requestedPlayRestore, current).then(success => {
+        if ((success || requestedPlayRestore) && current()) onRequestedPlayHandled?.(success, key)
+      })
+    })
     return () => { active = false }
     // open reads the live session and guards edits made during loading.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, requestedPlayId, requestedPlayRestore, busy, unsaved, saved?.summary.id, onRequestedPlayHandled, api, update])
+  }, [visible, requestedPlayId, requestedPlayRestore, requestedPlayKey, busy, unsaved, saved?.summary.id, onRequestedPlayHandled, api, update])
 
   const requested = requestedPlayId && requestedPlayId !== saved?.summary.id ? <div className="workspace-alert plays-request" role="status">
     <span>{unsaved ? 'A Play was requested from another screen. Your current work is kept; save it or explicitly discard it before opening.'
       : navigationError ?? 'Opening the requested Play…'}</span>
-    <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => { update({ view: 'editor' }); onRequestedPlayHandled?.() }}>Keep current work</Button>
+    <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => { update({ view: 'editor' }); onRequestedPlayHandled?.(undefined, requestedPlayKey) }}>Keep current work</Button>
     {!unsaved && navigationError && <Button variant="outline" size="sm" disabled={busy !== null}
       onClick={() => {
-        const generation = requestGeneration.current, current = () => requestGeneration.current === generation
-        void open(requestedPlayId, false, current).then(success => { if (success && current()) onRequestedPlayHandled?.() })
+        const generation = requestGeneration.current, key = requestedPlayKey
+        const current = () => mounted.current && requestGeneration.current === generation
+        void open(requestedPlayId, false, current).then(success => { if (success && current()) onRequestedPlayHandled?.(undefined, key) })
       }}>Retry requested Play</Button>}
   </div> : null
 
