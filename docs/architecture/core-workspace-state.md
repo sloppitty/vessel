@@ -209,3 +209,27 @@ Verification from the repository root:
 Captures (`implemented-*.png` in the design folder) use the same synthetic
 bootstrap. No backend checks, migration, deployment, release, push or pull
 request are claimed.
+
+## October 24, 2026: adversarial review
+
+Five Sol (Codex) review rounds covered the breadcrumb commit and the lockup.
+Each finding was proved by a failing test that is kept as a regression:
+
+1. A breadcrumb restore the shell had cleared or superseded still replaced
+   the editor, and a confirmed discard kept the previous Play's log entry.
+2. Restore validity keyed by Play ID let a later request for the same Play
+   inherit a cancelled restore's response and discard; confirming a switch
+   after Paper became unavailable cleared the exit guards without a remount.
+3. An obsolete acknowledgement could cancel a new connection's request, a
+   rerender could strand a queued request, a repeat request kept the old
+   origin, and focus fell to the page body after an unavailable switch.
+   Every shell Play request now carries a token that PlaysPage returns, a
+   start is claimed only when it runs, and the dialog falls back to the
+   content.
+4. API replacement left the old request in place and suppressed the new
+   connection's Play breadcrumbs; the reset now clears it.
+5. Clean: no remaining defects in the request, breadcrumb and mode-switch
+   flows.
+
+At `57407d46`: `pnpm --dir frontend typecheck` and `lint` pass, and
+`pnpm --dir frontend test` passes 176 files, 4,099 tests.
