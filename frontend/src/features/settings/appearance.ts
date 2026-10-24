@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { deviceThemeKey, onPreferenceScope, preferenceKey, preferenceUser } from '@/lib/preference-scope'
 import { generatePalette } from './generator'
-import { defaultThemeId, isHexColor, mix, themes, type Theme, type ThemeColorKey, type ThemeColors, type ThemeScheme } from './themes'
+import { defaultThemeId, isHexColor, mix, sidebarColor, themes, type Theme, type ThemeColorKey, type ThemeColors, type ThemeScheme } from './themes'
 
 /**
  * The owner's theme choice and per-theme colour overrides. Appearance is a browser preference, not workspace
@@ -153,7 +153,7 @@ export function themeTokens({ theme, colors, radius, candleUpEdge, candleDownEdg
     '--input': colors.border,
     '--ring': colors.ring,
     '--field': colors.field,
-    '--sidebar': mix(colors.background, colors.card, 0.5),
+    '--sidebar': sidebarColor(colors),
     '--positive': colors.positive,
     '--negative': colors.negative,
     '--warning': colors.warning,

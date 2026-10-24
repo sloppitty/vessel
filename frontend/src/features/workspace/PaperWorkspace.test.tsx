@@ -4,12 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Overview, WorkspaceApi } from '@/api/workspace'
 import { VenuesProvider } from '@/api/venues'
 import { systemFixture } from '@/test/system-fixture'
-import { accountFixture, emptyOverview, playApiStubs, portfolioFixture } from '@/test/workspace-fixture'
+import { accountFixture, emptyOverview, playApiStubs, playCountsFrom, playsFrom, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { ApplicationShell } from './ApplicationShell'
 import { CreateAccountDialog } from './CreateDialogs'
 import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
-import { activityPage } from '@/test/activity-fixture'
+import { activityPage, operationFixture } from '@/test/activity-fixture'
 import { reviewFixture } from '@/test/review-fixture'
+import { pickerAccounts } from './account-picker-options'
+import { accountStatus } from '@/lib/format'
 
 const paperPortfolio = { ...portfolioFixture, tradingMode: 'paper' as const, name: 'Paper hypotheses' }
 const paperAccount = { ...accountFixture, tradingMode: 'paper' as const, syncStatus: 'paper' as const, venueId: 'hyperliquid', name: 'Paper hypothesis 1',
@@ -24,7 +26,52 @@ function api(overrides: Partial<WorkspaceApi> = {}) {
 }
 beforeEach(() => { window.history.replaceState(null, '', '/#accounts') })
 
+// The trading mode control is the brand subtitle (or its rail form); only these helpers know how to find it.
+const modeNames = { real: 'Journal', paper: 'Paper playground' } as const
+type Mode = keyof typeof modeNames
+const switchName = (from: Mode) => `${modeNames[from]}, switch to ${modeNames[from === 'real' ? 'paper' : 'real']}`
+const tradingModeControl = () => screen.queryByRole('button', { name: /^(Journal|Paper playground), switch to / })
+async function switchTradingMode(user: { click: (element: Element) => Promise<void> }, mode: Mode) {
+  await user.click(await screen.findByRole('button', { name: switchName(mode === 'paper' ? 'real' : 'paper') }))
+}
+
 describe('isolated Paper workspace', () => {
+  it('shows mode context once in the header, not on accounts, portfolios, operations or Play rows, and resets history on a mode switch', async () => {
+    const user = userEvent.setup()
+    const summary = { ...savedPlayFixture.summary, tradingMode: 'paper' as const, accountId: paperAccount.id }
+    const paper = api({ tradingMode: 'paper', overview: vi.fn().mockResolvedValue(paperOverview),
+      activity: vi.fn().mockResolvedValue(activityPage([{ ...operationFixture, tradingMode: 'paper' }])),
+      plays: vi.fn(playsFrom([summary])), playCounts: vi.fn(playCountsFrom([summary])) })
+    const real = api()
+    const root = api({ ...real, forTradingMode: vi.fn(mode => mode === 'paper' ? paper : real) })
+    render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+    await switchTradingMode(user, 'paper')
+    const note = await screen.findByRole('note')
+    expect(note.closest('.shell-header')).not.toBeNull()
+    expect(note.querySelector('strong')).toHaveTextContent('Paper mode')
+    expect(note).toHaveTextContent('Simulated capital and executions only. Real accounts and results are excluded. Zero fees and slippage; candle touches can be ambiguous.')
+    expect(note.querySelector('.workspace-badge')).toBeNull()
+    const row = await screen.findByRole('row', { name: /Paper hypothesis 1/ })
+    expect(within(row).getByText('Enabled')).toBeInTheDocument()
+    expect(within(row).queryByText('Paper')).not.toBeInTheDocument()
+    expect(within(row).queryByText('Not refreshed yet')).not.toBeInTheDocument()
+    expect(accountStatus({ ...paperAccount, isEnabled: false })).toBe('Disabled')
+    expect(pickerAccounts([paperAccount], [paperPortfolio])[0]?.detail).toBe(paperPortfolio.name)
+    await user.click(screen.getByRole('link', { name: 'Portfolios' }))
+    const portfolio = await screen.findByRole('button', { name: `Open ${paperPortfolio.name}` })
+    expect(within(portfolio).queryByText('Paper')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: 'Activity' }))
+    expect(await screen.findByRole('button', { name: 'Expand BTC operation' })).toBeInTheDocument()
+    expect(within(screen.getByRole('main')).queryByText('Paper · simulated')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: 'Plays' }))
+    await user.click(await screen.findByRole('tab', { name: /^Drafts/ }))
+    const playRow = await screen.findByRole('button', { name: `Open ${summary.title}` })
+    expect(within(playRow).queryByText('Paper')).not.toBeInTheDocument()
+    await switchTradingMode(user, 'real')
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getAllByRole('listitem')).toHaveLength(1)
+  })
   it('keeps imported-position Review controls and preferences real-only across shell mode changes', async () => {
     window.history.replaceState(null, '', '/#review')
     const user = userEvent.setup()
@@ -36,7 +83,7 @@ describe('isolated Paper workspace', () => {
     const real = api()
     const root = api({ ...real, forTradingMode: vi.fn(mode => mode === 'paper' ? paper : real) })
     render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
-    await user.selectOptions(await screen.findByRole('combobox', { name: 'Trading mode' }), 'paper')
+    await switchTradingMode(user, 'paper')
     await waitFor(() => expect(paper.review).toHaveBeenCalled())
     expect(paper.review).toHaveBeenLastCalledWith(expect.objectContaining({ positions: 'exclude' }), expect.any(AbortSignal))
     expect(screen.queryByRole('switch', { name: 'Include imported positions' })).not.toBeInTheDocument()
@@ -53,7 +100,7 @@ describe('isolated Paper workspace', () => {
     await user.click(screen.getByRole('link', { name: 'Settings' }))
     expect(await screen.findByRole('heading', { name: 'Paper trading' })).toBeVisible()
     expect(screen.queryByRole('spinbutton', { name: /fewer Plays than/ })).not.toBeInTheDocument()
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Trading mode' }), 'real')
+    await switchTradingMode(user, 'real')
     expect(await screen.findByRole('spinbutton', { name: /fewer Plays than/ })).toBeVisible()
     await user.click(screen.getByRole('link', { name: 'Review' }))
     expect(await screen.findByRole('switch', { name: 'Include imported positions' })).toBeVisible()
@@ -69,8 +116,7 @@ describe('isolated Paper workspace', () => {
     const root = api({ ...real, forTradingMode: vi.fn(mode => mode === 'paper' ? paper : real), paperSettings: vi.fn().mockResolvedValue({ enabled: false, checkIntervalMinutes: 60 }) })
     render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
     await waitFor(() => expect(real.overview).toHaveBeenCalled())
-    const picker = await screen.findByRole('combobox', { name: 'Trading mode' })
-    await userEvent.selectOptions(picker, 'paper')
+    await switchTradingMode(userEvent, 'paper')
     expect(await screen.findByRole('button', { name: 'View Paper hypothesis 1' })).toBeInTheDocument()
     expect(paper.monitor).not.toHaveBeenCalled()
     expect(paper.monitorEvents).not.toHaveBeenCalled()
@@ -91,7 +137,8 @@ describe('isolated Paper workspace', () => {
     const root = api({ paperSettings: vi.fn().mockRejectedValue(new Error('Not supported')), forTradingMode: vi.fn(() => api()) })
     render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
     await waitFor(() => expect(root.paperSettings).toHaveBeenCalled())
-    expect(screen.queryByRole('combobox', { name: 'Trading mode' })).not.toBeInTheDocument()
+    expect(tradingModeControl()).not.toBeInTheDocument()
+    expect(within(screen.getByRole('link', { name: 'Vessel overview' })).getByText('The trading journal')).toBeInTheDocument()
   })
   it('protects unsaved Play work before remounting another mode', async () => {
     window.history.replaceState(null, '', '/#plays')
@@ -100,14 +147,227 @@ describe('isolated Paper workspace', () => {
     render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
     await userEvent.click(await screen.findByRole('button', { name: 'New play' }))
     await userEvent.type(await screen.findByRole('textbox', { name: 'Play title' }), 'Unsaved real thesis')
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Trading mode' }), 'paper')
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('discard unsaved Play work'))
+    const confirm = vi.spyOn(window, 'confirm')
+    await switchTradingMode(userEvent, 'paper')
+    const dialog = screen.getByRole('alertdialog', { name: 'Switch to Paper playground?' })
+    expect(dialog).toHaveAccessibleDescription('Switch trading mode and discard unsaved Play work? Already-sent changes may still complete in their original mode.')
+    expect(within(dialog).getByRole('button', { name: 'Keep editing' })).toHaveFocus()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Keep editing' }))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Unsaved real thesis')
-    confirm.mockReturnValue(true)
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Trading mode' }), 'paper')
+    await switchTradingMode(userEvent, 'paper')
+    await userEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Discard and switch' }))
     expect(await screen.findByRole('heading', { name: 'Plays' })).toBeInTheDocument()
     expect(screen.queryByDisplayValue('Unsaved real thesis')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: switchName('paper') })).toBeInTheDocument()
+    expect(confirm).not.toHaveBeenCalled()
+  })
+})
+
+describe('trading mode lockup', () => {
+  function modeApis(realOverrides: Partial<WorkspaceApi> = {}) {
+    const real = api(realOverrides), paper = api({ tradingMode: 'paper', overview: vi.fn().mockResolvedValue(paperOverview) })
+    const root = api({ ...real, forTradingMode: vi.fn(mode => mode === 'paper' ? paper : real) })
+    return { real, paper, root }
+  }
+  const shellMode = () => document.querySelector('.journal-shell')!.getAttribute('data-trading-mode')
+  const monogram = () => document.querySelector('.shell-monogram')!
+  // The mode announcement lives outside the per-mode shell so it survives the remount.
+  const modeAnnouncer = () => screen.getAllByRole('status').find(region => !region.closest('.journal-shell'))!
+
+  it('names the action both ways in a button beside, not inside, the Overview link', async () => {
+    const user = userEvent.setup()
+    render(<ApplicationShell system={system} api={modeApis().root} disconnect={vi.fn()} />)
+    const control = await screen.findByRole('button', { name: 'Journal, switch to Paper playground' })
+    const link = screen.getByRole('link', { name: 'Vessel overview' })
+    expect(control).toHaveTextContent(/^\s*Journal\s*$/)
+    expect(control).toHaveAttribute('title', 'Journal, switch to Paper playground')
+    expect(control).not.toHaveAttribute('aria-pressed')
+    expect(link).not.toContainElement(control)
+    expect(link.parentElement).toContainElement(control)
+    expect(within(link).queryByText('The trading journal')).not.toBeInTheDocument()
+    await user.click(control)
+    const back = await screen.findByRole('button', { name: 'Paper playground, switch to Journal' })
+    expect(back).toHaveTextContent('Paper playground')
+    expect(back).not.toHaveAttribute('aria-pressed')
+    expect(screen.getByRole('link', { name: 'Vessel overview' })).not.toContainElement(back)
+    expect(shellMode()).toBe('paper')
+  })
+
+  it('keeps the plain subtitle and no control, even in the rail, when no venue simulates executions', async () => {
+    const { root } = modeApis()
+    render(<ApplicationShell system={systemFixture} api={root} disconnect={vi.fn()} />)
+    await waitFor(() => expect(root.paperSettings).toHaveBeenCalled())
+    await screen.findByRole('button', { name: 'Collapse navigation' })
+    expect(tradingModeControl()).not.toBeInTheDocument()
+    expect(within(screen.getByRole('link', { name: 'Vessel overview' })).getByText('The trading journal')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Collapse navigation' }))
+    expect(tradingModeControl()).not.toBeInTheDocument()
+    expect(shellMode()).toBe('real')
+  })
+
+  it('becomes a round swap button in the collapsed rail and keeps the rail across a switch', async () => {
+    const user = userEvent.setup()
+    render(<ApplicationShell system={system} api={modeApis().root} disconnect={vi.fn()} />)
+    await screen.findByRole('button', { name: switchName('real') })
+    await user.click(screen.getByRole('button', { name: 'Collapse navigation' }))
+    const swap = screen.getByRole('button', { name: switchName('real') })
+    expect(screen.getAllByRole('button', { name: switchName('real') })).toHaveLength(1)
+    expect(swap).toHaveClass('shell-mode-swap')
+    expect(swap).toHaveAttribute('title', switchName('real'))
+    await user.click(swap)
+    const next = await screen.findByRole('button', { name: switchName('paper') })
+    expect(next).toHaveClass('shell-mode-swap')
+    await waitFor(() => expect(next).toHaveFocus())
+    expect(screen.getByRole('button', { name: 'Expand navigation' })).toHaveAttribute('aria-expanded', 'false')
+    // The rail only applies to desktop widths: the narrow sheet keeps the subtitle.
+    vi.stubGlobal('innerWidth', 800)
+    fireEvent(window, new Event('resize'))
+    expect(screen.getByRole('button', { name: switchName('paper') })).toHaveClass('shell-mode-switch')
+  })
+
+  it('focuses the new control and announces the mode in a live region that survives the remount', async () => {
+    const user = userEvent.setup()
+    render(<ApplicationShell system={system} api={modeApis().root} disconnect={vi.fn()} />)
+    await screen.findByRole('button', { name: switchName('real') })
+    const live = modeAnnouncer()
+    expect(live).toHaveAttribute('aria-live', 'polite')
+    expect(live).toBeEmptyDOMElement()
+    await switchTradingMode(user, 'paper')
+    await waitFor(() => expect(screen.getByRole('button', { name: switchName('paper') })).toHaveFocus())
+    expect(live).toBeInTheDocument()
+    expect(live).toHaveTextContent('Paper playground')
+    await switchTradingMode(user, 'real')
+    await waitFor(() => expect(screen.getByRole('button', { name: switchName('real') })).toHaveFocus())
+    expect(modeAnnouncer()).toBe(live)
+    expect(live).toHaveTextContent(/^\s*Journal\s*$/)
+  })
+
+  it('animates the mark only after a switch made in this session, never on load or reload', async () => {
+    const user = userEvent.setup()
+    const session = render(<ApplicationShell system={system} api={modeApis().root} disconnect={vi.fn()} />)
+    await screen.findByRole('button', { name: switchName('real') })
+    expect(monogram()).not.toHaveClass('is-arriving')
+    expect(monogram().querySelector('.is-leaving')).toBeNull()
+    await switchTradingMode(user, 'paper')
+    await screen.findByRole('button', { name: switchName('paper') })
+    expect(monogram()).toHaveClass('is-arriving')
+    expect(monogram().querySelectorAll('.mode-mark')).toHaveLength(2)
+    expect(monogram().querySelector('.mode-mark.is-leaving')).not.toBeNull()
+    session.unmount()
+    render(<ApplicationShell system={system} api={modeApis().root} disconnect={vi.fn()} />)
+    await screen.findByRole('button', { name: switchName('real') })
+    expect(monogram()).not.toHaveClass('is-arriving')
+    expect(monogram().querySelector('.is-leaving')).toBeNull()
+  })
+
+  it('asks before discarding Play work; Keep editing, Escape and outside clicks change nothing and return focus', async () => {
+    window.history.replaceState(null, '', '/#plays')
+    const user = userEvent.setup()
+    const { root, paper } = modeApis()
+    render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
+    await user.click(await screen.findByRole('button', { name: 'New play' }))
+    await user.type(await screen.findByRole('textbox', { name: 'Play title' }), 'Unsaved real thesis')
+    const control = screen.getByRole('button', { name: switchName('real') })
+    await user.click(control)
+    let dialog = screen.getByRole('alertdialog', { name: 'Switch to Paper playground?' })
+    expect(within(dialog).getByRole('button', { name: 'Keep editing' })).toHaveFocus()
+    expect(within(dialog).getAllByRole('button').map(button => button.textContent)).toEqual(['Keep editing', 'Discard and switch'])
+    expect(control).toHaveAttribute('data-pending')
+    await user.click(document.querySelector('[data-slot="dialog-overlay"]')!)
+    expect(screen.getByRole('alertdialog')).toBe(dialog)
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    await waitFor(() => expect(control).toHaveFocus())
+    expect(control).not.toHaveAttribute('data-pending')
+    await user.click(control)
+    dialog = screen.getByRole('alertdialog', { name: 'Switch to Paper playground?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Keep editing' }))
+    await waitFor(() => expect(control).toHaveFocus())
+    expect(screen.getByRole('textbox', { name: 'Play title' })).toHaveValue('Unsaved real thesis')
+    expect(shellMode()).toBe('real')
+    expect(modeAnnouncer()).toBeEmptyDOMElement()
+    expect(paper.overview).not.toHaveBeenCalled()
+  })
+
+  it('switches after Discard and switch, then focuses the new control and announces it', async () => {
+    window.history.replaceState(null, '', '/#plays')
+    const user = userEvent.setup()
+    const { root, paper } = modeApis()
+    render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
+    await user.click(await screen.findByRole('button', { name: 'New play' }))
+    await user.type(await screen.findByRole('textbox', { name: 'Play title' }), 'Unsaved real thesis')
+    await switchTradingMode(user, 'paper')
+    await user.click(within(screen.getByRole('alertdialog', { name: 'Switch to Paper playground?' })).getByRole('button', { name: 'Discard and switch' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: switchName('paper') })).toHaveFocus())
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(shellMode()).toBe('paper')
+    expect(modeAnnouncer()).toHaveTextContent('Paper playground')
+    expect(screen.queryByDisplayValue('Unsaved real thesis')).not.toBeInTheDocument()
+    await waitFor(() => expect(paper.overview).toHaveBeenCalled())
+  })
+
+  it('re-checks the guard at confirm time: work that finished meanwhile still switches', async () => {
+    window.history.replaceState(null, '', '/#plays')
+    const user = userEvent.setup()
+    let finish!: (play: typeof savedPlayFixture) => void
+    const { root } = modeApis({ plays: vi.fn(playsFrom([savedPlayFixture.summary])), playCounts: vi.fn(playCountsFrom([savedPlayFixture.summary])),
+      play: vi.fn(() => new Promise<typeof savedPlayFixture>(resolve => { finish = resolve })) })
+    render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
+    await user.click(await screen.findByRole('tab', { name: /^Drafts/ }))
+    await user.click(await screen.findByRole('button', { name: `Open ${savedPlayFixture.summary.title}` }))
+    // Opening is in flight, so the switch asks first.
+    await switchTradingMode(user, 'paper')
+    const dialog = screen.getByRole('alertdialog', { name: 'Switch to Paper playground?' })
+    await act(async () => finish(savedPlayFixture))
+    await user.click(within(dialog).getByRole('button', { name: 'Discard and switch' }))
+    await waitFor(() => expect(shellMode()).toBe('paper'))
+    expect(screen.queryByRole('textbox', { name: 'Play title' })).not.toBeInTheDocument()
+  })
+
+  it('re-checks the guard at confirm time: a confirmation left from a replaced connection switches nothing', async () => {
+    window.history.replaceState(null, '', '/#plays')
+    const user = userEvent.setup()
+    const first = modeApis(), second = modeApis()
+    const view = render(<ApplicationShell system={system} api={first.root} disconnect={vi.fn()} />)
+    await user.click(await screen.findByRole('button', { name: 'New play' }))
+    await user.type(await screen.findByRole('textbox', { name: 'Play title' }), 'Unsaved real thesis')
+    await switchTradingMode(user, 'paper')
+    const dialog = screen.getByRole('alertdialog', { name: 'Switch to Paper playground?' })
+    view.rerender(<ApplicationShell system={system} api={second.root} disconnect={vi.fn()} />)
+    await waitFor(() => expect(second.root.paperSettings).toHaveBeenCalled())
+    await user.click(within(dialog).getByRole('button', { name: 'Discard and switch' }))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: switchName('real') })).toBeInTheDocument()
+    expect(shellMode()).toBe('real')
+    expect(first.paper.overview).not.toHaveBeenCalled()
+    expect(second.paper.overview).not.toHaveBeenCalled()
+  })
+
+  it('lives in the narrow sheet: Escape in the dialog keeps the sheet, and a switch focuses the menu button', async () => {
+    vi.stubGlobal('innerWidth', 390)
+    window.history.replaceState(null, '', '/#plays')
+    const user = userEvent.setup()
+    render(<ApplicationShell system={system} api={modeApis().root} disconnect={vi.fn()} />)
+    await user.click(await screen.findByRole('button', { name: 'New play' }))
+    await user.type(await screen.findByRole('textbox', { name: 'Play title' }), 'Unsaved real thesis')
+    expect(document.querySelector('.header-mode')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Open navigation' }))
+    const control = within(screen.getByRole('dialog', { name: 'Main navigation' })).getByRole('button', { name: switchName('real') })
+    expect(control).toHaveClass('shell-mode-switch')
+    await user.click(control)
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Main navigation' })).toBeInTheDocument()
+    await waitFor(() => expect(control).toHaveFocus())
+    await user.click(control)
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Discard and switch' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Open navigation' })).toHaveFocus())
+    expect(screen.queryByRole('dialog', { name: 'Main navigation' })).not.toBeInTheDocument()
+    const mark = document.querySelector('.header-mode')!
+    expect(mark).toHaveAttribute('aria-hidden', 'true')
+    expect(mark).toHaveTextContent('Paper')
+    expect(mark.closest('.shell-header-row')).not.toBeNull()
   })
 })
 
@@ -122,6 +382,8 @@ describe('paper account creation and immutable capital', () => {
     expect(screen.queryByText('Known account value · USD')).not.toBeInTheDocument()
     expect(screen.queryByText('Main account')).not.toBeInTheDocument()
     expect(screen.getAllByRole('radio')).toHaveLength(1)
+    expect(screen.queryByText('Paper · simulated')).not.toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Hyperliquid' })).toBeInTheDocument()
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Paper portfolio · required' }), paperPortfolio.id)
     await userEvent.type(screen.getByLabelText('Account name'), 'Paper hypothesis 2')
     await userEvent.click(screen.getByRole('button', { name: 'Create paper account' }))
@@ -140,6 +402,8 @@ describe('paper account creation and immutable capital', () => {
     created.unmount()
     render(<VenuesProvider venues={system.venues}><ManageAccountDialog api={client} account={paperAccount} portfolios={[paperPortfolio]} onClose={vi.fn()} onChanged={vi.fn()} /></VenuesProvider>)
     expect(screen.getByText(/Starting capital: 4000 virtual USD · fixed at creation/)).toBeInTheDocument()
+    expect(screen.queryByText('Paper')).not.toBeInTheDocument()
+    expect(document.querySelector('.account-source')).toHaveTextContent('Simulated executions')
     expect(screen.queryByLabelText('Starting capital · virtual USD')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /credential|reset|deposit|withdraw/i })).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Save settings' }))
