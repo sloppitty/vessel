@@ -490,9 +490,11 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     }
   }
 
-  async function open(id: string, restore = false): Promise<boolean> {
+  /** `wanted` is checked after loading: a request the shell cleared or superseded meanwhile never replaces the editor. */
+  async function open(id: string, restore = false, wanted: () => boolean = () => true): Promise<boolean> {
     const before = latest.current
-    if (hasUnsavedPlayWork(before)) {
+    const discarding = hasUnsavedPlayWork(before)
+    if (discarding) {
       if (!restore) {
         setNavigationError('Keep your current work. Save or explicitly discard it before opening the requested Play.')
         return false
@@ -508,7 +510,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     setError(null)
     try {
       const loaded = await loadSavedPlay(api, id, controller.signal)
-      if (started !== epoch.current || controller.signal.aborted) return false
+      if (started !== epoch.current || controller.signal.aborted || !wanted()) return false
       if (latest.current.draft !== before.draft || latest.current.manual !== before.manual || latest.current.log !== before.log) {
         setNavigationError('Your edits made while loading were kept. Save them before trying the requested Play again.')
         return false
@@ -517,7 +519,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
         setNavigationError('This response is older than the latest known Play. Retry opening the current saved Play.')
         return false
       }
-      update({ view: 'editor', ...loaded, manual: emptyManualDraft(), observedPlay: {
+      // A confirmed discard covers the previous Play's log entry too, so returning to it never resurrects that entry.
+      update({ view: 'editor', ...loaded, manual: emptyManualDraft(), ...(discarding ? { log: undefined } : {}), observedPlay: {
         api, id, accountId: loaded.saved.summary.accountId, version: loaded.saved.summary.version, conflict: false,
       } })
       setNavigationError(null)
@@ -544,7 +547,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     if (unsaved && !requestedPlayRestore) return
     requestAttempt.current = requestedPlayId
     let active = true
-    queueMicrotask(() => { if (active) void open(requestedPlayId, requestedPlayRestore).then(success => {
+    queueMicrotask(() => { if (active) void open(requestedPlayId, requestedPlayRestore, () => requestedId.current === requestedPlayId).then(success => {
       if ((success || requestedPlayRestore) && requestedId.current === requestedPlayId) onRequestedPlayHandled?.(success)
     }) })
     return () => { active = false }
@@ -557,7 +560,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       : navigationError ?? 'Opening the requested Play…'}</span>
     <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => { update({ view: 'editor' }); onRequestedPlayHandled?.() }}>Keep current work</Button>
     {!unsaved && navigationError && <Button variant="outline" size="sm" disabled={busy !== null}
-      onClick={() => { void open(requestedPlayId).then(success => { if (success && requestedId.current === requestedPlayId) onRequestedPlayHandled?.() }) }}>Retry requested Play</Button>}
+      onClick={() => { void open(requestedPlayId, false, () => requestedId.current === requestedPlayId).then(success => { if (success && requestedId.current === requestedPlayId) onRequestedPlayHandled?.() }) }}>Retry requested Play</Button>}
   </div> : null
 
   if (!visible) return null
