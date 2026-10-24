@@ -252,3 +252,54 @@ Accounts were told apart by name only, so "main" on Hyperliquid and "main" on RI
   neutral account statuses; paper rows do not claim a refresh timestamp or
   leverage observation. Simulation result/basis, execution-source, immutable
   capital, sizing-source and capability explanations remain.
+
+### Trading mode lockup
+
+The owner compared eight switch designs (`docs/design/trading-mode-switch/`)
+and chose option 5, the brand lockup. It replaces the sidebar "Trading mode"
+select; switching still remounts the shell in the other mode.
+
+- **Control.** The mark and "vessel" wordmark stay the Overview link ("Vessel
+  overview"). When Paper is available the subtitle under the wordmark is a
+  sibling button, never nested in the link, reading **Real journal** or
+  **Paper playground** with a swap icon. Its name states the action ("Real
+  journal, switch to Paper playground" / "Paper playground, switch to Real
+  journal"), so it has no pressed state; its title repeats the name. When Paper
+  is unavailable the subtitle is the plain "The trading journal" and nothing
+  else changes. "Paper" alone is not used for the control because a light
+  appearance theme has that name; the header notice keeps **Paper mode**.
+- **Collapsed rail** (desktop only): the subtitle goes with the copy and a round
+  swap button with the same name and title sits under the mark and the collapse
+  toggle. The collapsed state lives above the per-mode shell, so a switch keeps
+  the rail. **Narrow screens** (≤800px): the subtitle is in the off-canvas
+  sheet; in Paper the header shows a decorative paper boat and "Paper" beside
+  the menu button (`aria-hidden`) and a 2px Paper rail on its bottom edge.
+- **Mark and chrome.** Real shows the Vessel hull; Paper shows a paper boat
+  (`PaperBoatMark`) and the monogram tile takes the Paper tone. In Paper the
+  desktop sidebar gets a 2px inset rail on the edge facing content, a faint top
+  wash and contours tinted with the Paper tone, and the `ShellNotices` Paper
+  strip uses the same tone. The tone is derived from theme tokens only in
+  `styles.css`: `--paper-ink` (72% warning, 28% secondary text), `--paper-wash`
+  (9% warning), `--paper-glow` (22%) and `--paper-line` (36% warning over the
+  border). The built-in readability checks include Paper ink on the page, the
+  navigation and the Paper strip (4.5:1), and the theme builder keeps every
+  roll passing them.
+- **Motion.** After a switch made in this browser session the old mark sinks
+  and the new one rises inside the tile (transform and opacity only, about
+  half a second). Load, reload and a new connection show no motion, and none
+  plays under reduced motion. This is an owner-approved exception to the
+  visual refresh's opacity-only rule.
+- **Confirmation.** While Play work is unsaved or a Play request is in flight
+  (the condition that used to call `window.confirm`), the switch opens an
+  alert dialog: "Switch to Paper playground?" or "Switch to Real journal?",
+  the unchanged message as its description, **Keep editing** (focused first)
+  and **Discard and switch**. The control shows a dashed pending outline while
+  it is open. Keep editing and Escape change nothing and return focus to the
+  control; clicks outside do nothing; Escape in a dialog opened from the sheet
+  leaves the sheet open. Confirming re-reads the live guard: work that has
+  finished or started meanwhile still switches (discarding was confirmed), but
+  a confirmation left from a replaced or ended connection switches nothing.
+- **Focus and announcement.** After a switch from the control, focus moves to
+  the new control (the rail button when collapsed), or to the menu button on
+  narrow screens because the sheet closes. A polite live region outside the
+  per-mode shell announces "Paper playground" or "Real journal".

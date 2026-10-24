@@ -9,12 +9,13 @@ October 9, 2026: the owner asked for a Settings page with a theme customizer and
 - October 10: the Appearance header has Theme builder and Customize colours buttons, and the Theme row of the Private session panel has a Customize button. They scroll to the section and focus its heading; they do not change the hash route.
 - A theme only changes colours and radius. It never moves sections; the approved layout is shared by all themes.
 - Every built-in theme passes WCAG AA (4.5:1) for text, secondary text, positive, negative and warning on all surfaces, and for the primary button (3:1 for the focus ring). The customizer reports failing pairs but does not block them. A test enforces this for the built-ins.
+- October 24, 2026: the checks also cover Paper mode's derived ink (`--paper-ink`, 72% warning and 28% secondary text) on the page, the navigation and the Paper strip (4.5:1). All ten built-ins pass (lowest: Sand on the strip, 5.35:1). See the trading mode lockup in the [core workspace contract](core-workspace-contract.md#trading-mode-lockup).
 
 ## Theme builder
 
 The owner then asked for a builder that randomizes colour combinations and saves them under a custom name.
 
-- *Randomize* rolls a dark, light or either-scheme palette: one tinted neutral hue for surfaces and text, one accent hue (same, analogous, complementary or split) for actions and focus, and conventional green/red/amber signals. Inks are lightened (dark) or darkened (light) until every readability check passes, so every roll is readable; a test checks 1,000 rolls.
+- *Randomize* rolls a dark, light or either-scheme palette: one tinted neutral hue for surfaces and text, one accent hue (same, analogous, complementary or split) for actions and focus, and conventional green/red/amber signals. Inks are lightened (dark) or darkened (light) until every readability check passes, so every roll is readable; a test checks 1,000 rolls. The warning ink is also moved until the Paper ink mixed from it passes.
 - The roll becomes the *Random draft* theme and applies immediately. It can be fine-tuned in the customizer like any theme; a new roll replaces it.
 - *Save theme* stores whatever is on screen (a draft, or a customized built-in or saved theme) under a name in *My themes*. Names are unique (case-insensitive), at most 40 characters; up to 24 saved themes. Saved themes can be deleted after a confirmation step; deleting the selected one returns to Graphite.
 - Saved themes and the draft live in the same `vessel.appearance` entry. Malformed, duplicate or unknown entries are dropped when it is read.

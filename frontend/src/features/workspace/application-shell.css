@@ -16,7 +16,8 @@
   mask-image: var(--contours), linear-gradient(to top, #000 10%, transparent 92%);
   mask-size: 640px auto, 100% 100%; mask-position: 30% 100%, 0 0; mask-repeat: no-repeat; mask-composite: intersect;
 }
-.shell-brand { display: flex; align-items: center; gap: 11px; padding: 2px 8px; margin-bottom: 14px; color: var(--foreground); text-decoration: none; }
+.shell-brand { display: grid; padding: 2px 8px; margin-bottom: 14px; }
+.shell-brand-link { grid-area: 1 / 1; display: flex; align-items: center; gap: 11px; min-width: 0; color: var(--foreground); text-decoration: none; }
 .shell-brand .sidebar-copy { display: block; font-size: 23px; font-weight: 650; letter-spacing: -.04em; line-height: 1; }
 .shell-monogram {
   display: grid; place-items: center; flex-shrink: 0; width: 38px; height: 38px; border-radius: 11px; color: var(--brand);
@@ -557,6 +558,3 @@ span.value-tag { width: fit-content; }
 .bulk-error { padding: 12px 22px; color: var(--negative); font-size: var(--text-sm); }
 
 .portfolio-account-choice input, .workspace-table input[type="checkbox"] { accent-color: var(--primary); }
-
-.trading-mode-picker { display: grid; gap: .4rem; padding: .75rem; color: var(--muted-foreground); font-size: .75rem; }
-.navigation-collapsed .trading-mode-picker { padding-inline: .25rem; }

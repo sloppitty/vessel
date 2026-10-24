@@ -1,5 +1,26 @@
 # Trading mode switch options
 
+> **Implemented** (October 24, 2026): option 5, the brand lockup, is in the app.
+> The rules are in the trading mode lockup subsection of the
+> [core workspace contract](../../architecture/core-workspace-contract.md#trading-mode-lockup)
+> and the verification in
+> [core-workspace-state](../../architecture/core-workspace-state.md#october-24-2026-trading-mode-lockup).
+> Deviations from the prototype: the collapse toggle and the Paper strip keep
+> their existing app positions; the dialog shows the Vessel hull (not an anchor)
+> for Real, the same mark as the tile; the mark animation plays on the remount
+> after a switch, not as a transition. Synthetic captures of the app:
+>
+> | Real | Paper |
+> | --- | --- |
+> | ![Real, 1440px](implemented-real.png) | ![Paper, 1440px](implemented-paper.png) |
+> | ![Paper on Daylight](implemented-paper-daylight.png) | ![Collapsed rail, 1024px](implemented-rail.png) |
+> | ![Phone header, 390px](implemented-phone.png) | ![Phone sheet, 390px](implemented-phone-sheet.png) |
+> | ![Confirmation](implemented-confirmation.png) | ![Confirmation on a Daylight phone](implemented-confirmation-phone-daylight.png) |
+>
+> ![Mark change after a switch, frame by frame](implemented-arrival.png)
+>
+> The rest of this page is the original comparison, kept as the record.
+
 October 24, 2026. The owner asked to replace the component that switches between
 Paper and Real: "something radically different, maybe a toggle button, but give
 me more options to see what can fit better". This is a disposable comparison for

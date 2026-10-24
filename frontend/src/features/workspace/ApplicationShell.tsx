@@ -1,6 +1,5 @@
 import type { TradingMode } from '@/api/paper'
-import { NativeSelect } from '@/components/ui/native-select'
-import { createRef, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createRef, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { Tooltip } from 'radix-ui'
 import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
@@ -37,7 +36,6 @@ import {
   LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, Wallet, BookOpen, X,
 } from 'lucide-react'
 import { PageErrorBoundary } from '@/components/PageErrorBoundary'
-import { VesselMark } from '@/components/brand/VesselMark'
 import { OverviewPage } from './OverviewPage'
 import { PortfoliosPage } from './PortfoliosPage'
 import { useHashPage, type Page } from './useHashPage'
@@ -48,7 +46,9 @@ import type { ShellIdentity } from '@/features/identity/types'
 import { AccountMenu } from '@/features/identity/AccountMenu'
 import type { SettingsTab } from './SettingsPage'
 import { ShellBreadcrumb } from './ShellBreadcrumb'
-import { ShellNotices } from './ShellNotices'
+import { ShellNotices, type ShellNotice } from './ShellNotices'
+import { ShellMonogram, TradingModeConfirmDialog, TradingModeHeaderMark, TradingModeRailSwitch, TradingModeSubtitle } from './TradingModeSwitch'
+import { otherTradingMode, tradingModeNames, type TradingModeArrival } from './trading-mode'
 import { locationKey, playLocation, settingsLocation, visitLocations, type ShellLocation } from './shell-history'
 import './application-shell.css'
 import './skip-content.css'
@@ -74,8 +74,8 @@ const pages = [
   { id: 'settings', label: 'Settings', icon: Settings2 },
 ] as const
 const pageLocation = (page: Page): ShellLocation => ({ kind: 'page', page, label: pages.find(item => item.id === page)!.label })
-const paperNotice = {
-  id: 'paper', title: 'Paper mode',
+const paperNotice: ShellNotice = {
+  id: 'paper', title: 'Paper mode', tone: 'paper',
   message: 'Simulated capital and executions only. Real accounts and results are excluded. Zero fees and slippage; candle touches can be ambiguous.',
 }
 /** `identity` is present in Wallet mode only; Token mode keeps the owner card that disconnects at once. */
@@ -104,7 +104,23 @@ export function ApplicationShell(props: ShellProps) {
   return <Tooltip.Provider delayDuration={250} skipDelayDuration={400}><NotificationProvider><TradingWorkspace {...props} /></NotificationProvider></Tooltip.Provider>
 }
 
-type ModeProps = { tradingMode: TradingMode; paperAvailable: boolean; onTradingModeChange: (mode: TradingMode) => void; onPaperSettingsChange: () => void }
+type ModeProps = {
+  tradingMode: TradingMode; paperAvailable: boolean; onTradingModeChange: (mode: TradingMode) => void; onPaperSettingsChange: () => void
+  /** Kept above the per-mode shell so a switch keeps the rail and its control. */
+  navigationCollapsed: boolean; onNavigationCollapsedChange: (collapsed: boolean) => void
+  modeArrival: TradingModeArrival | null; onModeArrivalSeen: () => void
+}
+
+/** Desktop widths, where the collapsed rail applies; narrower screens use the off-canvas sheet. */
+function useWideNavigation() {
+  const [wide, setWide] = useState(() => window.innerWidth > 800)
+  useEffect(() => {
+    const resize = () => setWide(window.innerWidth > 800)
+    window.addEventListener('resize', resize)
+    return () => window.removeEventListener('resize', resize)
+  }, [])
+  return wide
+}
 
 function TradingWorkspace(props: ShellProps) {
   const [mode, setMode] = useState<TradingMode>('real')
@@ -124,18 +140,48 @@ function TradingWorkspace(props: ShellProps) {
   const paperAvailable = paperApi === props.api && paperClient !== null && props.system.venues.some(venue => venue.capabilities.paperExecution)
   const tradingMode = paperAvailable ? mode : 'real'
   const api = tradingMode === 'paper' ? paperClient! : props.api
+  const [navigationCollapsed, setNavigationCollapsed] = useState(false)
+  // The shell is keyed by mode, so a switch remounts it: what it needs afterwards lives here.
+  const [modeArrival, setModeArrival] = useState<TradingModeArrival | null>(null)
+  const [modeAnnouncement, setModeAnnouncement] = useState('')
+  const changeTradingMode = useCallback((next: TradingMode) => {
+    setModeArrival({ from: tradingMode, to: next, focusControl: true })
+    setModeAnnouncement(tradingModeNames[next])
+    setMode(next)
+  }, [tradingMode])
+  const modeArrivalSeen = useCallback(() => setModeArrival(null), [])
   // A paper account shares public chart/catalogue support only, never real account actions or streaming.
   const venues = useMemo(() => tradingMode === 'real' ? props.system.venues : props.system.venues.map(venue => ({ ...venue,
     tradeUrlTemplate: null, capabilities: { ...venue.capabilities, sync: false, orders: false, stablecoinWallet: false,
       accountDiscovery: false, readOnlyCredential: false, manualExecutions: false, marketContext: false, stream: false } })), [props.system.venues, tradingMode])
   return <VenuesProvider venues={venues}><Shell key={tradingMode} {...props} api={api} tradingMode={tradingMode} paperAvailable={paperAvailable}
-    onTradingModeChange={setMode} onPaperSettingsChange={() => setSettingsGeneration(value => value + 1)} /></VenuesProvider>
+    onTradingModeChange={changeTradingMode} onPaperSettingsChange={() => setSettingsGeneration(value => value + 1)}
+    navigationCollapsed={navigationCollapsed} onNavigationCollapsedChange={setNavigationCollapsed} modeArrival={modeArrival} onModeArrivalSeen={modeArrivalSeen} />
+    {/* Outlives the remount, so the new mode is announced. */}
+    {paperAvailable && <span className="sr-only" role="status" aria-live="polite">{modeAnnouncement}</span>}</VenuesProvider>
 }
 
-function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable, onTradingModeChange, onPaperSettingsChange }: ShellProps & ModeProps) {
+function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable, onTradingModeChange, onPaperSettingsChange,
+  navigationCollapsed, onNavigationCollapsedChange, modeArrival, onModeArrivalSeen }: ShellProps & ModeProps) {
   const { notify } = useNotifications()
   const venues = useVenues()
   const [menuOpen, setMenuOpen] = useState(false)
+  const wide = useWideNavigation()
+  const rail = wide && navigationCollapsed
+  // The trading mode control: the brand subtitle, or its rail form. A switch asks first while Play work could be lost.
+  const modeControl = useRef<HTMLButtonElement>(null)
+  const switchFocus = useRef<HTMLElement | null>(null)
+  const [pendingSwitch, setPendingSwitch] = useState<{ target: TradingMode; api: WorkspaceApi; work: RefObject<symbol | null>; control: HTMLButtonElement } | null>(null)
+  // Read once: this shell was mounted by a switch made in this browser session, not by a load or reload.
+  const [arrival] = useState(() => modeArrival?.to === tradingMode ? modeArrival : null)
+  const arrivedFrom = arrival?.from ?? null
+  // Runs once (both dependencies are stable): later layout changes never move focus.
+  useEffect(() => {
+    if (!arrival) return
+    onModeArrivalSeen()
+    // Focus follows a switch made from the control: the new control, or the menu button because the sheet has closed.
+    if (arrival.focusControl) (window.innerWidth > 800 ? modeControl.current : document.getElementById('workspace-menu'))?.focus({ preventScroll: true })
+  }, [arrival, onModeArrivalSeen])
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
   const [trail, setTrail] = useState<ShellLocation[]>(() => {
     const initial = pages.find(item => `#${item.id}` === window.location.hash)?.id ?? 'overview'
@@ -220,7 +266,6 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     current.session = next
     setPlaysSession(next)
   }, [api, playsLifetime.work])
-  const [navigationCollapsed, setNavigationCollapsed] = useState(false)
   const [data, setData] = useState<Overview | null>(null)
   const [loaded, setLoaded] = useState<{ api: WorkspaceApi; key: number } | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -281,6 +326,8 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     const controls = () => [...sidebar.querySelectorAll<HTMLAnchorElement | HTMLButtonElement>('a[href],button:not(:disabled)')]
     controls()[0]?.focus()
     const handle = (event: KeyboardEvent) => {
+      // A dialog opened from the sheet (the trading mode confirmation) has already handled its own Escape.
+      if (event.defaultPrevented) return
       if (event.key === 'Escape') {
         event.preventDefault(); setMenuOpen(false)
       } else if (event.key === 'Tab') {
@@ -443,27 +490,56 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     <span role={refreshProgress ? 'status' : undefined}>{refreshProgress ? `Refreshing ${refreshProgress.current} of ${refreshProgress.total}` : 'Refresh all'}</span>
   </Button>
 
-  function switchTradingMode(next: TradingMode) {
-    if (next === tradingMode) return
+  function switchTradingMode(control: HTMLButtonElement) {
+    if (pendingSwitch) return
+    const next = otherTradingMode(tradingMode)
     const current = exitState.current
     if (current?.work.current || current && hasUnsavedPlayWork(current.session)) {
-      if (!window.confirm('Switch trading mode and discard unsaved Play work? Already-sent changes may still complete in their original mode.')) return
+      setPendingSwitch({ target: next, api, work: current.work, control })
+      return
     }
+    commitTradingMode(next)
+  }
+  function commitTradingMode(next: TradingMode) {
     cancelRefresh()
     exitState.current = null
     onTradingModeChange(next)
   }
+  function keepTradingMode() {
+    switchFocus.current = pendingSwitch?.control ?? null
+    setPendingSwitch(null)
+  }
+  function confirmTradingMode() {
+    if (!pendingSwitch) return
+    // Re-check now: work may have finished or started while the dialog was open, and only the connection that asked may
+    // switch. Discarding was confirmed either way; a replaced or ended connection changes nothing.
+    const current = exitState.current
+    if (current?.api !== pendingSwitch.api || current.work !== pendingSwitch.work) { keepTradingMode(); return }
+    switchFocus.current = null
+    setPendingSwitch(null)
+    commitTradingMode(pendingSwitch.target)
+  }
+  // Cancelling returns focus to the control that asked, or to the current one if a resize swapped the rail and subtitle forms.
+  function tradingModeDialogClosed() {
+    const target = switchFocus.current?.isConnected ? switchFocus.current : modeControl.current
+    switchFocus.current = null
+    target?.focus({ preventScroll: true })
+  }
   if (disconnectedApi === api) return null
-  return <div className={`journal-shell ${navigationCollapsed ? 'navigation-collapsed' : ''}`}>
+  const modeSwitch = { mode: tradingMode, pending: pendingSwitch !== null, onSwitch: switchTradingMode, ref: modeControl }
+  return <div className={`journal-shell ${navigationCollapsed ? 'navigation-collapsed' : ''}`} data-trading-mode={tradingMode}>
     <a className="skip-content" href="#workspace-content" onClick={event => { event.preventDefault(); document.getElementById('workspace-content')?.focus() }}>Skip to content</a>
     <aside id="workspace-nav" className={`shell-sidebar ${menuOpen ? 'is-open' : ''}`} aria-label="Main navigation" role={menuOpen ? 'dialog' : undefined} aria-modal={menuOpen ? true : undefined}>
-      <a className="shell-brand" href="#overview" aria-label="Vessel overview" title="Vessel overview" onClick={event => { event.preventDefault(); navigate('overview') }}><span className="shell-monogram" aria-hidden="true"><VesselMark size={24} /></span><span className="sidebar-copy">vessel<small>The trading journal</small></span></a>
+      <div className={`shell-brand${paperAvailable ? ' has-mode' : ''}`}>
+        <a className="shell-brand-link" href="#overview" aria-label="Vessel overview" title="Vessel overview" onClick={event => { event.preventDefault(); navigate('overview') }}>
+          <ShellMonogram mode={tradingMode} arrivedFrom={arrivedFrom} /><span className="sidebar-copy">vessel{!paperAvailable && <small>The trading journal</small>}</span></a>
+        {paperAvailable && !rail && <TradingModeSubtitle {...modeSwitch} />}
+      </div>
       {menuOpen && <button type="button" className="icon-button sidebar-close" aria-label="Close navigation" title="Close navigation" onClick={() => setMenuOpen(false)}><X size={19} aria-hidden="true" /></button>}
-      <button type="button" className="icon-button sidebar-toggle" aria-label={navigationCollapsed ? 'Expand navigation' : 'Collapse navigation'} title={navigationCollapsed ? 'Expand navigation' : 'Collapse navigation'} aria-controls="workspace-nav" aria-expanded={!navigationCollapsed} onClick={() => setNavigationCollapsed(collapsed => !collapsed)}>
+      <button type="button" className="icon-button sidebar-toggle" aria-label={navigationCollapsed ? 'Expand navigation' : 'Collapse navigation'} title={navigationCollapsed ? 'Expand navigation' : 'Collapse navigation'} aria-controls="workspace-nav" aria-expanded={!navigationCollapsed} onClick={() => onNavigationCollapsedChange(!navigationCollapsed)}>
         {navigationCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
       </button>
-      {paperAvailable && <label className="trading-mode-picker"><span>Trading mode</span><NativeSelect aria-label="Trading mode" value={tradingMode}
-        onChange={event => switchTradingMode(event.target.value === 'paper' ? 'paper' : 'real')}><option value="real">Real</option><option value="paper">Paper · simulated</option></NativeSelect></label>}
+      {paperAvailable && rail && <TradingModeRailSwitch {...modeSwitch} />}
       <div className="nav-section-label">Workspace</div>
       <nav>{pages.filter(p => p.id !== 'settings' && p.id !== 'notifications').map(({ id, label, icon: Icon }) => {
         // Plays keeps its name; open monitor incidents describe it, beside a count in their severity tone.
@@ -486,6 +562,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     </aside>
     <div className="shell-main" inert={menuOpen}>
       <header className="shell-header"><div className="shell-header-row"><button id="workspace-menu" className="icon-button mobile-menu" aria-label="Open navigation" title="Open navigation" aria-expanded={menuOpen} aria-controls="workspace-nav" onClick={() => setMenuOpen(true)}><Menu size={19} aria-hidden="true" />{unread > 0 && <span className="menu-unread-dot" aria-hidden="true" />}</button>
+        {tradingMode === 'paper' && <TradingModeHeaderMark />}
         <ShellBreadcrumb key={locationKey(trail.at(-1)!)} trail={trail.map(location => location.kind === 'account'
           ? { ...location, label: accounts.find(account => account.id === location.id)?.name || location.label } : location)} onVisit={visitCrumb} />
         {tradingMode === 'real' && <a href="#notifications" className="icon-button header-notifications" aria-label={notificationsName} title={notificationsName} onClick={event => { event.preventDefault(); navigate('notifications') }}><Bell size={18} aria-hidden="true" /><NotificationBadge count={unread} /></a>}</div>
@@ -556,5 +633,6 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     <CreateAccountDialog open={accountDialog} onOpenChange={setAccountDialog} api={api} portfolios={portfolios} accounts={accounts} onCreated={accountCreated} />
     {managedPortfolio && <ManagePortfolioDialog key={managedPortfolio.id} portfolio={managedPortfolio} accounts={accounts} portfolios={portfolios} focusAccounts={focusPortfolioAccounts} onStale={reload} api={api} onClose={() => setManagedPortfolioId(null)} onChanged={managementChanged} />}
     {managedAccount && <ManageAccountDialog key={managedAccount.id} account={managedAccount} portfolios={portfolios} api={api} onClose={() => setManagedAccountId(null)} onChanged={managementChanged} onStale={reload} />}
+    {pendingSwitch && <TradingModeConfirmDialog target={pendingSwitch.target} onKeep={keepTradingMode} onConfirm={confirmTradingMode} onClosed={tradingModeDialogClosed} />}
   </div>
 }

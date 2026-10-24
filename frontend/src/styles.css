@@ -75,6 +75,12 @@
   --brand-glow: color-mix(in srgb, var(--ring) 22%, transparent);
   --brand-line: color-mix(in srgb, var(--ring) 38%, var(--border));
 
+  /* The Paper tone: caution softened toward secondary text, quieter than real warnings. Paper mode's chrome only. */
+  --paper-ink: color-mix(in srgb, var(--warning) 72%, var(--muted-foreground));
+  --paper-wash: color-mix(in srgb, var(--warning) 9%, transparent);
+  --paper-glow: color-mix(in srgb, var(--warning) 22%, transparent);
+  --paper-line: color-mix(in srgb, var(--warning) 36%, var(--border));
+
   /* Depth over lines: quieter dividers, sunken fields, panels lit from above. */
   --line: color-mix(in srgb, var(--border) 60%, var(--card));
   --line-strong: var(--border);

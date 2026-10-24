@@ -152,3 +152,60 @@ the guarded load before replacing them.
 
 No backend checks, migration, deployment, release, push or pull request are
 claimed by this frontend-only verification.
+
+## October 24, 2026: trading mode lockup
+
+Implemented the owner's choice, option 5 of `docs/design/trading-mode-switch/`:
+the sidebar "Trading mode" select became the brand subtitle button (Real
+journal / Paper playground), with a round swap button in the collapsed rail,
+the subtitle in the narrow sheet, a decorative "Paper" header mark on narrow
+screens, the paper-boat mark, the derived Paper tone (`--paper-*`) on the tile,
+sidebar edge rail, contours and Paper strip, an alert dialog instead of
+`window.confirm`, focus return and a polite announcement that survives the
+per-mode remount. See the trading mode lockup subsection of the
+[contract](core-workspace-contract.md#trading-mode-lockup). Backend,
+`prototype/` and `AGENTS.md` were not changed.
+
+Verification from the repository root:
+
+- `pnpm install --frozen-lockfile` — pass; lockfile unchanged.
+- `pnpm --dir frontend typecheck` — pass.
+- `pnpm --dir frontend lint` — pass, **0 warnings**.
+- `pnpm --dir frontend test` — **168 files, 4,076 tests passed**. The Paper
+  workspace tests find the control only through one `switchTradingMode`
+  helper; ten new tests cover both accessible names and the sibling (not
+  nested) placement, the plain subtitle with no control when no venue
+  simulates executions (rail included), the rail swap button and a kept rail
+  across a switch, focus on the new control or the menu button, the live
+  region surviving the remount, no mark animation on load or reload, Keep
+  editing/Escape/outside clicks changing nothing and returning focus,
+  Discard and switch, and the confirm-time guard re-check both ways (finished
+  work still switches; a replaced connection switches nothing). Ten more
+  check `--paper-ink` on the page, navigation and Paper strip for every
+  built-in theme. Removing the re-check, the sheet's Escape guard or either
+  focus step makes these tests fail.
+- `pnpm --dir frontend build` — pass.
+- Headless Chromium (Playwright 1.60 headless shell) against a temporary,
+  uncommitted bootstrap of the real `ApplicationShell` with an in-memory
+  synthetic API (invented accounts, no network, owner API, database or
+  venue): **485 scripted checks passed, 0 failed** at **320, 390, 800, 1024
+  and 1440px** in **Graphite, Daylight, Paper and Sand**, Real and Paper,
+  expanded and collapsed (desktop) or sheet (narrow). No page, header or
+  sidebar overflow; at 320px the breadcrumb keeps 185px beside the header
+  mark. Keyboard switches leave a visible focus ring on the new control,
+  the rail button or the menu button; the rail stays collapsed after a
+  switch. The confirmation focuses Keep editing, shows the dashed pending
+  outline, fits the viewport, returns focus on Escape and keeps the sheet
+  open on narrow screens. With motion allowed the new mark runs
+  `mode-mark-rise` and the old one `mode-mark-sink` after a switch, never on
+  load or reload; under reduced motion the leaving mark is not displayed.
+  No console errors. The bootstrap and server were removed afterwards.
+- Rendered `--paper-ink` contrast (live tokens): Graphite 11.78 on the page,
+  11.30 on the navigation, 10.24 on its top wash, 9.91 on hover and 9.85 on
+  the Paper strip; Daylight 6.35 / 6.70 / 6.24 / 6.10 / 5.59; Paper 6.19 /
+  6.52 / 6.07 / 6.00 / 5.45; Sand 6.05 / 6.43 / 5.99 / 5.78 / 5.34. Secondary
+  text on the Paper strip is 5.62–7.49:1 across those themes.
+
+Captures (`implemented-*.png` in the design folder) use the same synthetic
+bootstrap. No backend checks, migration, deployment, release, push or pull
+request are claimed.

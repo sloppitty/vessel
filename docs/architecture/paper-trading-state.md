@@ -1099,3 +1099,16 @@ sizing-source and Settings capability explanations remain. Enabled paper
 accounts use the neutral **Enabled** status, not a claim of import or sync.
 The sidebar Trading mode control and its switching/discard behaviour are
 unchanged. No backend, deployment or migration is included.
+
+## October 24, 2026: trading mode lockup
+
+The sidebar "Trading mode" select was replaced by the owner-chosen brand
+lockup: the subtitle under "vessel" reads **Real journal** or **Paper
+playground** and switches mode (a round swap button in the collapsed rail),
+Paper mode shows a paper-boat mark and a derived Paper tone on the sidebar and
+the **Paper mode** strip, and the discard prompt is an in-app alert dialog
+instead of `window.confirm`. Availability, the remount per mode, the discard
+condition and the isolation of Paper data are unchanged. See the trading mode
+lockup subsection of the
+[core workspace contract](core-workspace-contract.md#trading-mode-lockup). No
+backend, deployment or migration is included.
