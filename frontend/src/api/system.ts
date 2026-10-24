@@ -22,7 +22,7 @@ export interface VenueInfo {
   name: string
   status: 'planned' | 'candidate' | 'manual' | 'read-only'
   /** Account indices stay strings, including indices beyond JavaScript's safe integer range. */
-  source: 'none' | 'evm-address' | 'account-index'
+  source: 'none' | 'evm-address' | 'account-index' | 'solana-address'
   capabilities: VenueCapabilities
   quoteAsset: string | null
   /** Uses canonical `{instrument}` and/or the catalogue's native `{venueContractId}`. */
@@ -66,7 +66,7 @@ function isVenue(value: unknown): value is VenueInfo {
   return isRecord(value) && typeof value.id === 'string' && /^[a-z][a-z\d-]{0,63}$/.test(value.id) &&
     typeof value.name === 'string' && value.name.trim().length > 0 &&
     ['planned', 'candidate', 'manual', 'read-only'].includes(String(value.status)) &&
-    ['none', 'evm-address', 'account-index'].includes(String(value.source)) &&
+    ['none', 'evm-address', 'account-index', 'solana-address'].includes(String(value.source)) &&
     isRecord(value.capabilities) && capabilityNames.every(name => typeof (value.capabilities as Record<string, unknown>)[name] === 'boolean') &&
     ['accountDiscovery', 'readOnlyCredential', 'manualExecutions', 'currentOrderBook', 'paperExecution'].every(name => {
       const flag = (value.capabilities as Record<string, unknown>)[name]

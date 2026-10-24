@@ -11,6 +11,13 @@ function mockResponse(body: unknown, status = 200) {
 }
 
 describe('GET /api/system', () => {
+  it('accepts Solana source rules and the bundled Pacifica logo without inferring extra capabilities', async () => {
+    const body = { ...systemFixture, venues: [{ ...systemFixture.venues[0]!, id: 'pacifica', name: 'Pacifica',
+      source: 'solana-address', logo: 'pacifica', capabilities: { ...systemFixture.venues[0]!.capabilities,
+        marketContext: false, stream: false, stablecoinWallet: false } }, ...systemFixture.venues] }
+    mockResponse(body)
+    await expect(getSystem('token')).resolves.toEqual(body)
+  })
   it('accepts account-index sources and optional discovery/credential capabilities', async () => {
     const body = { ...systemFixture, venues: [indexVenue, ...systemFixture.venues.filter(v => v.id !== indexVenue.id)] }
     mockResponse(body)

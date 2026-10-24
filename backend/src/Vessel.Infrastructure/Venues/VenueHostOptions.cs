@@ -21,6 +21,7 @@ public sealed class VenueHostOptions
     public VenueHost Risex { get; set; } = new() { BaseUrl = "https://api.rise.trade/" };
     public VenueHost Lighter { get; set; } = new() { BaseUrl = "https://mainnet.zklighter.elliot.ai/" };
     public VenueHost LighterRh { get; set; } = new() { BaseUrl = "https://api.rh.lighter.xyz/" };
+    public VenueHost Pacifica { get; set; } = new() { BaseUrl = "https://api.pacifica.fi/" };
 
     /// <summary>The REST host for a configuration section name (for example <c>LighterRh</c>).</summary>
     public Uri BaseUri(string section) => VenueHostValidation.Rest(Host(section).BaseUrl)
@@ -35,6 +36,7 @@ public sealed class VenueHostOptions
         yield return (nameof(Risex), Risex);
         yield return (nameof(Lighter), Lighter);
         yield return (nameof(LighterRh), LighterRh);
+        yield return (nameof(Pacifica), Pacifica);
     }
 
     private VenueHost Host(string section) => Hosts().FirstOrDefault(h => h.Section == section).Host

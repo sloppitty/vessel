@@ -573,6 +573,7 @@ from `.env`, and an empty value is invalid rather than a default.
 | `Vessel__Venues__Risex__BaseUrl` | `https://api.rise.trade/` |
 | `Vessel__Venues__Lighter__BaseUrl` | `https://mainnet.zklighter.elliot.ai/` |
 | `Vessel__Venues__LighterRh__BaseUrl` | `https://api.rh.lighter.xyz/` |
+| `Vessel__Venues__Pacifica__BaseUrl` | `https://api.pacifica.fi/` |
 
 Base URLs must be `https://` origins with no path. Stream URLs must be `wss://`.
 Neither may contain user info, a query or a fragment. The API refuses to start

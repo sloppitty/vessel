@@ -9,6 +9,18 @@ const hl = (id: string, patch: Partial<BrokerAccount> = {}) => account(id, { ven
 const risex = (id: string, patch: Partial<BrokerAccount> = {}) => account(id, { venueId: 'risex', address: HL.toLowerCase(), sourceId: HL.toLowerCase(), balanceUsd: '50', ...patch })
 const ids = (accounts: BrokerAccount[]) => accounts.map(a => a.id)
 
+it('groups Solana public source IDs even with a null legacy address, preserving distinct case-sensitive keys', () => {
+  const source = 'So11111111111111111111111111111111111111112'
+  const groups = groupAccounts([
+    account('sol-a', { venueId: 'synthetic-solana', address: null, sourceId: source }),
+    account('sol-b', { venueId: 'synthetic-solana', address: null, sourceId: source.toLowerCase() }),
+    account('sol-c', { venueId: 'synthetic-solana', address: null, sourceId: source }),
+    account('index', { address: null, sourceId: '123' }),
+  ], 'address')
+  expect(groups.map(g => g.key)).toEqual([`address:${source}`, `address:${source.toLowerCase()}`, 'no-address'])
+  expect(ids(groups[0]!.accounts)).toEqual(['sol-a', 'sol-c'])
+})
+
 describe('addressKey', () => {
   it('compares EVM addresses without case and everything else as written', () => {
     expect(addressKey(HL)).toBe(HL.toLowerCase())
