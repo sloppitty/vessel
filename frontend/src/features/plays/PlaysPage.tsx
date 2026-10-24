@@ -104,9 +104,11 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const [busy, setBusy] = useState<WorkKind | null>(null)
   const activeWork = useRef(workRef ?? { current: null as symbol | null })
   const [navigationError, setNavigationError] = useState<string | null>(null)
-  const requestAttempt = useRef<string | null>(null)
-  const requestedId = useRef(requestedPlayId)
-  useEffect(() => { requestedId.current = requestedPlayId })
+  const requestAttempt = useRef<number | null>(null)
+  // Every shell request is its own generation, a repeat of the same Play included: a response, and the discard confirmed
+  // for it, belong to the request that started them, never to a later one. Declared before the request effect below.
+  const requestGeneration = useRef(0)
+  useEffect(() => { requestGeneration.current++ }, [requestedPlayId, requestedPlayRestore])
   const openController = useRef<AbortController | null>(null)
   const epoch = useRef(0)
   const mounted = useRef(false)
@@ -537,18 +539,20 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   useEffect(() => {
     if (!requestedPlayId) { requestAttempt.current = null; return }
     if (!visible && !requestedPlayRestore) return
-    if (requestAttempt.current === requestedPlayId || busy) return
+    const generation = requestGeneration.current
+    const current = () => requestGeneration.current === generation
+    if (requestAttempt.current === generation || busy) return
     if (saved?.summary.id === requestedPlayId) {
       update({ view: 'editor' })
-      requestAttempt.current = requestedPlayId
+      requestAttempt.current = generation
       onRequestedPlayHandled?.()
       return
     }
     if (unsaved && !requestedPlayRestore) return
-    requestAttempt.current = requestedPlayId
+    requestAttempt.current = generation
     let active = true
-    queueMicrotask(() => { if (active) void open(requestedPlayId, requestedPlayRestore, () => requestedId.current === requestedPlayId).then(success => {
-      if ((success || requestedPlayRestore) && requestedId.current === requestedPlayId) onRequestedPlayHandled?.(success)
+    queueMicrotask(() => { if (active) void open(requestedPlayId, requestedPlayRestore, current).then(success => {
+      if ((success || requestedPlayRestore) && current()) onRequestedPlayHandled?.(success)
     }) })
     return () => { active = false }
     // open reads the live session and guards edits made during loading.
@@ -560,7 +564,10 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       : navigationError ?? 'Opening the requested Play…'}</span>
     <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => { update({ view: 'editor' }); onRequestedPlayHandled?.() }}>Keep current work</Button>
     {!unsaved && navigationError && <Button variant="outline" size="sm" disabled={busy !== null}
-      onClick={() => { void open(requestedPlayId, false, () => requestedId.current === requestedPlayId).then(success => { if (success && requestedId.current === requestedPlayId) onRequestedPlayHandled?.() }) }}>Retry requested Play</Button>}
+      onClick={() => {
+        const generation = requestGeneration.current, current = () => requestGeneration.current === generation
+        void open(requestedPlayId, false, current).then(success => { if (success && current()) onRequestedPlayHandled?.() })
+      }}>Retry requested Play</Button>}
   </div> : null
 
   if (!visible) return null

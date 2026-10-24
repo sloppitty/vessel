@@ -500,7 +500,10 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     }
     commitTradingMode(next)
   }
+  // Only a mode the shell can enter remounts it; clearing the guards without that remount would leave live work unprotected.
+  const canEnter = (next: TradingMode) => next !== tradingMode && (next === 'real' || paperAvailable)
   function commitTradingMode(next: TradingMode) {
+    if (!canEnter(next)) return
     cancelRefresh()
     exitState.current = null
     onTradingModeChange(next)
@@ -514,7 +517,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     // Re-check now: work may have finished or started while the dialog was open, and only the connection that asked may
     // switch. Discarding was confirmed either way; a replaced or ended connection changes nothing.
     const current = exitState.current
-    if (current?.api !== pendingSwitch.api || current.work !== pendingSwitch.work) { keepTradingMode(); return }
+    if (current?.api !== pendingSwitch.api || current.work !== pendingSwitch.work || !canEnter(pendingSwitch.target)) { keepTradingMode(); return }
     switchFocus.current = null
     setPendingSwitch(null)
     commitTradingMode(pendingSwitch.target)
