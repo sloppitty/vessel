@@ -104,3 +104,51 @@ The runner gives credentials only to the API, not the frontend. API/frontend por
 - Native fixture checks covered the empty and populated shell, account navigation and detail, plus 390px/320px navigation and internal table scrolling. An absolute screen-reader label initially widened the mobile page; positioning its scroll container fixed that overflow.
 
 See [the shared contract](core-workspace-contract.md), [development setup](../development.md), and `backend/README.md`.
+
+## October 24, 2026: shell header, breadcrumb trail and mode banner
+
+Implemented the always-visible sticky header, Shell-memory route history,
+accessible collapsed trails, Wallet Settings-tab locations, and the generic
+mode-notice slot. Paper's existing disclosure now lives in that header, without
+per-item Paper markers. Account status is Enabled/Disabled; simulated-result,
+execution-source, sizing-source, immutable-capital and capability explanations
+remain. The sidebar Trading mode select, switching behaviour, approved page
+headings/layout, backend, `prototype/` and `AGENTS.md` were not changed.
+
+Verification from the repository root:
+
+- `pnpm install --frozen-lockfile` — pass; lockfile unchanged.
+- `pnpm --dir frontend typecheck` — pass.
+- `pnpm --dir frontend lint` — pass, **0 warnings**.
+- `pnpm --dir frontend test` — **168 files, 4,056 tests passed**. Fourteen new
+  tests cover top-level resets, retained account filters, detail/list Back,
+  Review/account/notification drill-downs, earlier-crumb truncation, collapsed
+  history, current-location accessibility, draft titles, cancelled/confirmed
+  Play restoration (including hidden-editor retries), background save completion,
+  hash routing and mode-level versus per-item Paper context.
+  Existing identity tests also verify restoring Wallet Settings tabs.
+- `pnpm --dir frontend build` — pass.
+- T3's headless browser, using a temporary synthetic-only bootstrap of the
+  production shell: **320, 390, 800, 1024 and 1440px**, Real and Paper, Graphite
+  plus **Paper, Daylight and Sand** themes. The document width matched the
+  viewport at every checked size; no header child extended past the viewport.
+  Long account/Play labels truncate, the narrow trail collapses, and the hidden
+  locations open without page overflow. Real has no mode strip; its bell is
+  visible at ≤800px and hidden on desktop. The header retained `top: 0` after
+  scrolling and its 10px backdrop blur. The synthetic bootstrap/server were
+  removed/stopped afterward; no owner API, database or live venue was used.
+- Rendered warning/text contrast in Graphite and those three light themes
+  exceeded **4.5:1** on the notice's tinted surface (minimum measured warning
+  5.26:1, body text 5.71:1); the full suite's built-in-theme contrast checks
+  also pass.
+
+The notice is a single line at 1440px. It wraps at 1024px as well as on mobile,
+deliberately preserving all disclosure text and the minimum type scale instead
+of clipping or creating horizontal overflow. Browser/hash navigation still
+retains the existing Play editor and its mutation owner; only an explicit
+All plays/page crumb shows the list. Cancelling a breadcrumb's discard prompt
+keeps the page, hash, trail and unsaved edits, and a confirmed restore waits for
+the guarded load before replacing them.
+
+No backend checks, migration, deployment, release, push or pull request are
+claimed by this frontend-only verification.

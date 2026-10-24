@@ -4,12 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Overview, WorkspaceApi } from '@/api/workspace'
 import { VenuesProvider } from '@/api/venues'
 import { systemFixture } from '@/test/system-fixture'
-import { accountFixture, emptyOverview, playApiStubs, portfolioFixture } from '@/test/workspace-fixture'
+import { accountFixture, emptyOverview, playApiStubs, playCountsFrom, playsFrom, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { ApplicationShell } from './ApplicationShell'
 import { CreateAccountDialog } from './CreateDialogs'
 import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
-import { activityPage } from '@/test/activity-fixture'
+import { activityPage, operationFixture } from '@/test/activity-fixture'
 import { reviewFixture } from '@/test/review-fixture'
+import { pickerAccounts } from './account-picker-options'
+import { accountStatus } from '@/lib/format'
 
 const paperPortfolio = { ...portfolioFixture, tradingMode: 'paper' as const, name: 'Paper hypotheses' }
 const paperAccount = { ...accountFixture, tradingMode: 'paper' as const, syncStatus: 'paper' as const, venueId: 'hyperliquid', name: 'Paper hypothesis 1',
@@ -25,6 +27,42 @@ function api(overrides: Partial<WorkspaceApi> = {}) {
 beforeEach(() => { window.history.replaceState(null, '', '/#accounts') })
 
 describe('isolated Paper workspace', () => {
+  it('shows mode context once in the header, not on accounts, portfolios, operations or Play rows, and resets history on a mode switch', async () => {
+    const user = userEvent.setup()
+    const summary = { ...savedPlayFixture.summary, tradingMode: 'paper' as const, accountId: paperAccount.id }
+    const paper = api({ tradingMode: 'paper', overview: vi.fn().mockResolvedValue(paperOverview),
+      activity: vi.fn().mockResolvedValue(activityPage([{ ...operationFixture, tradingMode: 'paper' }])),
+      plays: vi.fn(playsFrom([summary])), playCounts: vi.fn(playCountsFrom([summary])) })
+    const real = api()
+    const root = api({ ...real, forTradingMode: vi.fn(mode => mode === 'paper' ? paper : real) })
+    render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Trading mode' }), 'paper')
+    const note = await screen.findByRole('note')
+    expect(note.closest('.shell-header')).not.toBeNull()
+    expect(note.querySelector('strong')).toHaveTextContent('Paper mode')
+    expect(note).toHaveTextContent('Simulated capital and executions only. Real accounts and results are excluded. Zero fees and slippage; candle touches can be ambiguous.')
+    expect(note.querySelector('.workspace-badge')).toBeNull()
+    const row = await screen.findByRole('row', { name: /Paper hypothesis 1/ })
+    expect(within(row).getByText('Enabled')).toBeInTheDocument()
+    expect(within(row).queryByText('Paper')).not.toBeInTheDocument()
+    expect(within(row).queryByText('Not refreshed yet')).not.toBeInTheDocument()
+    expect(accountStatus({ ...paperAccount, isEnabled: false })).toBe('Disabled')
+    expect(pickerAccounts([paperAccount], [paperPortfolio])[0]?.detail).toBe(paperPortfolio.name)
+    await user.click(screen.getByRole('link', { name: 'Portfolios' }))
+    const portfolio = await screen.findByRole('button', { name: `Open ${paperPortfolio.name}` })
+    expect(within(portfolio).queryByText('Paper')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: 'Activity' }))
+    expect(await screen.findByRole('button', { name: 'Expand BTC operation' })).toBeInTheDocument()
+    expect(within(screen.getByRole('main')).queryByText('Paper · simulated')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: 'Plays' }))
+    await user.click(await screen.findByRole('tab', { name: /^Drafts/ }))
+    const playRow = await screen.findByRole('button', { name: `Open ${summary.title}` })
+    expect(within(playRow).queryByText('Paper')).not.toBeInTheDocument()
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Trading mode' }), 'real')
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getAllByRole('listitem')).toHaveLength(1)
+  })
   it('keeps imported-position Review controls and preferences real-only across shell mode changes', async () => {
     window.history.replaceState(null, '', '/#review')
     const user = userEvent.setup()
@@ -122,6 +160,8 @@ describe('paper account creation and immutable capital', () => {
     expect(screen.queryByText('Known account value · USD')).not.toBeInTheDocument()
     expect(screen.queryByText('Main account')).not.toBeInTheDocument()
     expect(screen.getAllByRole('radio')).toHaveLength(1)
+    expect(screen.queryByText('Paper · simulated')).not.toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Hyperliquid' })).toBeInTheDocument()
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Paper portfolio · required' }), paperPortfolio.id)
     await userEvent.type(screen.getByLabelText('Account name'), 'Paper hypothesis 2')
     await userEvent.click(screen.getByRole('button', { name: 'Create paper account' }))
@@ -140,6 +180,8 @@ describe('paper account creation and immutable capital', () => {
     created.unmount()
     render(<VenuesProvider venues={system.venues}><ManageAccountDialog api={client} account={paperAccount} portfolios={[paperPortfolio]} onClose={vi.fn()} onChanged={vi.fn()} /></VenuesProvider>)
     expect(screen.getByText(/Starting capital: 4000 virtual USD · fixed at creation/)).toBeInTheDocument()
+    expect(screen.queryByText('Paper')).not.toBeInTheDocument()
+    expect(document.querySelector('.account-source')).toHaveTextContent('Simulated executions')
     expect(screen.queryByLabelText('Starting capital · virtual USD')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /credential|reset|deposit|withdraw/i })).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Save settings' }))

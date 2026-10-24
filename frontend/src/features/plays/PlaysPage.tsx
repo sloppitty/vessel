@@ -54,7 +54,7 @@ const ended: PlayStatus[] = ['closed', 'cancelled', 'unresolved']
 type DialogKind = null | 'revision' | 'pause' | 'cancel' | 'delete' | 'history' | 'preflight' | 'unresolved' | 'return-open'
 type WorkKind = 'save' | 'status' | 'open' | 'delete' | 'manual'
 
-export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, onRequestedPlayHandled, active: visible = true, workRef, list, onList, reloadGeneration = 0, accountMonitors = [], onManageAccount, onLogChange, onLogApplier }: {
+export function PlaysPage({ accounts, portfolios, api, session, onSession, onReload, loading = false, requestedPlayId, requestedPlayRestore = false, onRequestedPlayHandled, active: visible = true, workRef, list, onList, reloadGeneration = 0, accountMonitors = [], onManageAccount, onLogChange, onLogApplier }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -77,7 +77,9 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   onManageAccount?: ((accountId: string) => void) | undefined
   loading?: boolean
   requestedPlayId?: string | null
-  onRequestedPlayHandled?: () => void
+  /** Breadcrumb restoration waits for this owner to confirm any discard before the shell changes location. */
+  requestedPlayRestore?: boolean
+  onRequestedPlayHandled?: (opened?: boolean) => void
   /** The shell retains this mutation owner while another page is visible, not its UI or polling. */
   active?: boolean
   /** Shared with shell actions that could replace the session, before disabled controls render. */
@@ -488,11 +490,14 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     }
   }
 
-  async function open(id: string): Promise<boolean> {
+  async function open(id: string, restore = false): Promise<boolean> {
     const before = latest.current
     if (hasUnsavedPlayWork(before)) {
-      setNavigationError('Keep your current work. Save or explicitly discard it before opening the requested Play.')
-      return false
+      if (!restore) {
+        setNavigationError('Keep your current work. Save or explicitly discard it before opening the requested Play.')
+        return false
+      }
+      if (activeWork.current.current || !window.confirm('Discard unsaved Play work and open this Play?')) return false
     }
     const finish = beginWork('open')
     if (!finish) return false
@@ -504,7 +509,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     try {
       const loaded = await loadSavedPlay(api, id, controller.signal)
       if (started !== epoch.current || controller.signal.aborted) return false
-      if (latest.current.draft !== before.draft || hasManualDraft(latest.current.manual) || hasPlayLogDraft(latest.current)) {
+      if (latest.current.draft !== before.draft || latest.current.manual !== before.manual || latest.current.log !== before.log) {
         setNavigationError('Your edits made while loading were kept. Save them before trying the requested Play again.')
         return false
       }
@@ -527,8 +532,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   }
 
   useEffect(() => {
-    if (!visible) return
     if (!requestedPlayId) { requestAttempt.current = null; return }
+    if (!visible && !requestedPlayRestore) return
     if (requestAttempt.current === requestedPlayId || busy) return
     if (saved?.summary.id === requestedPlayId) {
       update({ view: 'editor' })
@@ -536,16 +541,16 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       onRequestedPlayHandled?.()
       return
     }
-    if (unsaved) return
+    if (unsaved && !requestedPlayRestore) return
     requestAttempt.current = requestedPlayId
     let active = true
-    queueMicrotask(() => { if (active) void open(requestedPlayId).then(success => {
-      if (success && requestedId.current === requestedPlayId) onRequestedPlayHandled?.()
+    queueMicrotask(() => { if (active) void open(requestedPlayId, requestedPlayRestore).then(success => {
+      if ((success || requestedPlayRestore) && requestedId.current === requestedPlayId) onRequestedPlayHandled?.(success)
     }) })
     return () => { active = false }
     // open reads the live session and guards edits made during loading.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, requestedPlayId, busy, unsaved, saved?.summary.id, onRequestedPlayHandled, api, update])
+  }, [visible, requestedPlayId, requestedPlayRestore, busy, unsaved, saved?.summary.id, onRequestedPlayHandled, api, update])
 
   const requested = requestedPlayId && requestedPlayId !== saved?.summary.id ? <div className="workspace-alert plays-request" role="status">
     <span>{unsaved ? 'A Play was requested from another screen. Your current work is kept; save it or explicitly discard it before opening.'
@@ -831,7 +836,7 @@ function PlayList({ api, accounts, busy, reloadGeneration, unsaved, list, onList
                 aria-describedby={incidents.has(play.id) ? `plays-list-identity-${play.id} plays-list-incidents-${play.id}` : `plays-list-identity-${play.id}`}>
                 <span className="plays-list-title"><span className="plays-list-heading"><strong>{play.title || 'Untitled play'}</strong>{play.origin === 'retrospective' && <span className="badge play-retrospective">Retrospective</span>}
                   <IncidentPill id={`plays-list-incidents-${play.id}`} counts={incidents.get(play.id)} /></span>
-                  {play.tradingMode === 'paper' && <span className="workspace-badge">Paper</span>}<PlayIdentity id={`plays-list-identity-${play.id}`} instrument={play.instrument} source={play.instrumentSource} venueId={play.venueId} accountName={accountName(play.accountId)} /></span>
+                  <PlayIdentity id={`plays-list-identity-${play.id}`} instrument={play.instrument} source={play.instrumentSource} venueId={play.venueId} accountName={accountName(play.accountId)} /></span>
                 <span className={`direction-chip ${play.direction}`}>{play.direction === 'long' ? 'Long' : 'Short'}</span>
                 <span className={`badge play-status-${play.status}`}>{statusLabels[play.status]}</span>
                 <small className="plays-list-meta">{ended.includes(play.status) && (isReviewed(play) ? 'Reviewed · ' : 'Pending review · ')}{play.origin !== 'retrospective' && play.planRevision > 1 ? `${play.planRevision} revisions · ` : ''}Updated <Time at={play.updatedAtUtc} style="date" /></small>

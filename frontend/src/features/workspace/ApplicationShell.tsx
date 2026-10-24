@@ -47,6 +47,9 @@ import type { ManagementEvent } from './management-events'
 import type { ShellIdentity } from '@/features/identity/types'
 import { AccountMenu } from '@/features/identity/AccountMenu'
 import type { SettingsTab } from './SettingsPage'
+import { ShellBreadcrumb } from './ShellBreadcrumb'
+import { ShellNotices } from './ShellNotices'
+import { locationKey, playLocation, settingsLocation, visitLocations, type ShellLocation } from './shell-history'
 import './application-shell.css'
 import './skip-content.css'
 import { Time } from '@/components/ui/time'
@@ -70,6 +73,11 @@ const pages = [
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'settings', label: 'Settings', icon: Settings2 },
 ] as const
+const pageLocation = (page: Page): ShellLocation => ({ kind: 'page', page, label: pages.find(item => item.id === page)!.label })
+const paperNotice = {
+  id: 'paper', title: 'Paper mode',
+  message: 'Simulated capital and executions only. Real accounts and results are excluded. Zero fees and slippage; candle touches can be ambiguous.',
+}
 /** `identity` is present in Wallet mode only; Token mode keeps the owner card that disconnects at once. */
 type ShellProps = { system: SystemInfo; disconnect: () => void; api: WorkspaceApi; identity?: ShellIdentity }
 
@@ -129,12 +137,27 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
   const venues = useVenues()
   const [menuOpen, setMenuOpen] = useState(false)
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
+  const [trail, setTrail] = useState<ShellLocation[]>(() => {
+    const initial = pages.find(item => `#${item.id}` === window.location.hash)?.id ?? 'overview'
+    return [pageLocation(initial), ...(initial === 'settings' && identity ? [settingsLocation('appearance')] : [])]
+  })
+  const [playsSession, setPlaysSession] = useState(createPlaysSession)
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('appearance')
+  const [requestedPlay, setRequestedPlay] = useState<{ api: WorkspaceApi; id: string; origin: ShellLocation[]; restore: boolean } | null>(null)
   const onHashNavigation = useCallback((next: Page) => {
     setMenuOpen(false)
     if (next !== 'accounts') setSelectedAccountId(null)
   }, [])
-  const { page, navigate: navigateHash } = useHashPage(onHashNavigation)
-  const [playsSession, setPlaysSession] = useState(createPlaysSession)
+  const { page, navigate: navigateHash } = useHashPage(onHashNavigation, next => {
+    setSelectedAccountId(null)
+    setRequestedPlay(null)
+    setTrail(history => {
+      const parent = history.some(location => location.kind === 'page' && location.page === next)
+        ? visitLocations(history, pageLocation(next)) : [pageLocation(next)]
+      if (next === 'plays' && playsSession.view === 'editor') return visitLocations(parent, playLocation(playsSession))
+      return next === 'settings' && identity ? visitLocations(parent, settingsLocation(settingsTab)) : parent
+    })
+  })
   const [playsList, setPlaysList] = useState(initialPlaysList)
   const [playsLifetime, setPlaysLifetime] = useState(() => ({ api, visited: page === 'plays', generation: 0, work: createRef<symbol>() }))
   // Shell navigation hides the Plays UI without destroying the owner of an in-flight mutation.
@@ -143,18 +166,18 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     setPlaysLifetime({ api, visited: page === 'plays', generation: playsLifetime.generation + 1, work: createRef<symbol>() })
     setPlaysSession(createPlaysSession())
     setPlaysList(initialPlaysList)
+    setTrail([pageLocation(page)])
   } else if (page === 'plays' && !playsLifetime.visited) {
     setPlaysLifetime({ ...playsLifetime, visited: true })
   }
-  const [requestedPlay, setRequestedPlay] = useState<{ api: WorkspaceApi; id: string } | null>(null)
   const [disconnectedApi, setDisconnectedApi] = useState<WorkspaceApi | null>(null)
-  const exitState = useRef<{ api: WorkspaceApi; session: PlaysSession; work: typeof playsLifetime.work } | null>(null)
+  const exitState = useRef<{ api: WorkspaceApi; session: PlaysSession; work: typeof playsLifetime.work; page: Page; playRequested: boolean } | null>(null)
   useLayoutEffect(() => {
     if (disconnectedApi === api) return
-    const current = { api, session: playsSession, work: playsLifetime.work }
+    const current = { api, session: playsSession, work: playsLifetime.work, page, playRequested: requestedPlay !== null }
     exitState.current = current
     return () => { if (exitState.current === current) exitState.current = null }
-  }, [api, disconnectedApi, playsSession, playsLifetime.work])
+  }, [api, disconnectedApi, playsSession, playsLifetime.work, page, requestedPlay])
   // A forced sign-out drops the exit state first, so the reload never asks about unsaved work.
   const registerExitState = identity?.registerExitState
   useLayoutEffect(() => registerExitState?.(() => { exitState.current = null; setDisconnectedApi(api) }), [api, registerExitState])
@@ -177,6 +200,10 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     if (current?.api !== api || current.work !== playsLifetime.work) return
     current.session = next
     setPlaysSession(next)
+    // A mutation may finish after its editor was hidden: use the live location,
+    // not the page captured by the callback that started the request.
+    if (current.page === 'plays' && !current.playRequested) setTrail(history => next.view === 'editor'
+      ? visitLocations(history, playLocation(next)) : visitLocations(history, pageLocation('plays')))
   }, [api, playsLifetime.work])
   // A log write that completes after its Plays page has gone changes the session as it is now, never a discarded one.
   // A mounted Plays page applies it to its own current session, so its edits and the acknowledgement never race.
@@ -208,7 +235,6 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
   const [managedPortfolioId, setManagedPortfolioId] = useState<string | null>(null)
   const [managedAccountId, setManagedAccountId] = useState<string | null>(null)
   const setNotice = useCallback((message: string) => { notify({ tone: 'success', message }) }, [notify])
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>('appearance')
   const [reloadKey, setReloadKey] = useState(0)
   const reload = useCallback(() => setReloadKey(key => key + 1), [])
   // A write answered under the session another tab replaced may still have applied: say so and read everything again.
@@ -227,7 +253,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
   // Links from notifications go through the shell's own navigation; a missing account gets a short notice.
   const notificationLink = useRef<(link: NotificationLink) => void>(() => {})
   const inApp = useInAppNotifications({ api, active: disconnectedApi !== api && tradingMode === 'real', onLink: link => notificationLink.current(link),
-    onOpenPage: () => navigate('notifications') })
+    onOpenPage: () => navigate('notifications', true) })
   const monitor = useMonitorEvents(api, disconnectedApi !== api && tradingMode === 'real', reload, reloadKey, inApp.handlers)
   // The persistent incident count: stored monitor records only, never notifications. Shared by the Plays entry and Overview.
   const incidents = useMemo(() => monitorIncidents(monitor.summary?.accounts ?? []), [monitor.summary])
@@ -273,24 +299,74 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
       document.getElementById('workspace-menu')?.focus({ preventScroll: true })
     }
   }, [menuOpen])
-  function navigate(next: Page) {
+  function navigate(next: Page, drillDown = false) {
     navigateHash(next); setSelectedAccountId(null)
+    setRequestedPlay(null)
+    const locations = [pageLocation(next)]
+    if (next === 'plays' && playsSession.view === 'editor') locations.push(playLocation(playsSession))
+    if (next === 'settings' && identity) locations.push(settingsLocation(settingsTab))
+    setTrail(history => drillDown ? visitLocations(history, ...locations) : locations)
   }
   function viewAccount(id: string) {
     if (page !== 'accounts') navigateHash('accounts')
     setSelectedAccountId(id); setMenuOpen(false)
+    setRequestedPlay(null)
+    const account = data?.accounts.find(item => item.id === id)
+    setTrail(history => visitLocations(history, ...(page === 'accounts' ? [] : [pageLocation('accounts')]),
+      { kind: 'account', page: 'accounts', id, label: account?.name || 'Account' }))
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
   }
   function browsePlays(view: PlayView) {
+    setRequestedPlay(null)
     setPlaysSession(session => ({ ...session, view: 'list' }))
     setPlaysList(list => ({ ...list, view, q: '', page: 1 }))
-    navigate('plays')
+    navigateHash('plays')
+    setTrail(history => visitLocations(history, pageLocation('plays')))
   }
-  async function viewPlay(id: string, signal: AbortSignal) {
+  async function viewPlay(id: string, signal: AbortSignal, restore = false) {
     if (signal.aborted) return
     // PlaysPage owns draft protection and loading. Navigation must not replace the editor session.
-    setRequestedPlay({ api, id })
-    navigate('plays')
+    setRequestedPlay({ api, id, origin: trail, restore })
+    if (!restore) {
+      navigateHash('plays')
+      setTrail(history => visitLocations(history, pageLocation('plays'),
+        ...(playsSession.view === 'editor' ? [playLocation(playsSession)] : [])))
+    }
+  }
+  function requestedPlayHandled(opened = true) {
+    if (!requestedPlay || requestedPlay.api !== api) return
+    if (opened) {
+      const session = exitState.current?.session
+      if (session?.view === 'editor') {
+        navigateHash('plays')
+        setTrail(visitLocations(requestedPlay.origin, ...(requestedPlay.origin.at(-1)?.page === 'plays' ? [] : [pageLocation('plays')]), playLocation(session)))
+      }
+    }
+    setRequestedPlay(null)
+  }
+  function backToAccounts() {
+    setSelectedAccountId(null)
+    setTrail(history => visitLocations(history, pageLocation('accounts')))
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }
+  function changeSettingsTab(tab: SettingsTab, topLevel = false) {
+    setSettingsTab(tab)
+    setTrail(history => topLevel ? [pageLocation('settings'), settingsLocation(tab)] : visitLocations(history, settingsLocation(tab)))
+  }
+  function visitCrumb(location: ShellLocation) {
+    if (location.kind === 'account') { viewAccount(location.id); return }
+    if (location.kind === 'play') {
+      if (location.id) void viewPlay(location.id, new AbortController().signal, true)
+      return
+    }
+    if (location.kind === 'settings-tab') setSettingsTab(location.tab)
+    if (location.kind === 'page' && location.page === 'settings') setSettingsTab('appearance')
+    if (location.page === 'plays') setPlaysSession(session => ({ ...session, view: 'list' }))
+    navigateHash(location.page)
+    setSelectedAccountId(null)
+    setRequestedPlay(null)
+    setTrail(history => visitLocations(history, location,
+      ...(location.kind === 'page' && location.page === 'settings' && identity ? [settingsLocation('appearance')] : [])))
   }
   const portfolios = data?.portfolios ?? [], accounts = data?.accounts ?? []
   useEffect(() => {
@@ -319,7 +395,10 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
   const managementChanged = (event: ManagementEvent) => {
     if (exitState.current?.api !== api) return
     if (event.kind === 'portfolio-deleted' && portfolioFilter === event.id) setPortfolioFilter('')
-    if (event.kind === 'account-deleted' && selectedAccountId === event.id) setSelectedAccountId(null)
+    if (event.kind === 'account-deleted' && selectedAccountId === event.id) {
+      setSelectedAccountId(null)
+      setTrail(history => visitLocations(history, pageLocation('accounts')))
+    }
     reload(); setNotice(event.message)
   }
 
@@ -327,14 +406,16 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     // Read the owner's guard, not render-time busy/dirty state: either may still be stale.
     if (playsLifetime.work.current) {
       notify({ tone: 'info', message: 'A Play change is still pending. Your current work is kept until it finishes.' })
-      navigate('plays')
+      navigate('plays', true)
       return
     }
     const next = startNewPlay(playsSession)
     if (next.draft === playsSession.draft)
       notify({ tone: 'info', message: 'Your unsaved changes are still open. Save or discard them before starting a new play.' })
     setPlaysSession(next)
-    navigate('plays')
+    setRequestedPlay(null)
+    navigateHash('plays')
+    setTrail(history => visitLocations(history, ...(page === 'plays' ? [] : [pageLocation('plays')]), playLocation(next)))
   }
   const { refreshing, refreshProgress, sync, refreshAll, enqueue, cancel: cancelRefresh } = useAccountRefresh({ api, refreshable, reload, notify })
   const accountCreated = (account?: BrokerAccount) => {
@@ -376,7 +457,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
   return <div className={`journal-shell ${navigationCollapsed ? 'navigation-collapsed' : ''}`}>
     <a className="skip-content" href="#workspace-content" onClick={event => { event.preventDefault(); document.getElementById('workspace-content')?.focus() }}>Skip to content</a>
     <aside id="workspace-nav" className={`shell-sidebar ${menuOpen ? 'is-open' : ''}`} aria-label="Main navigation" role={menuOpen ? 'dialog' : undefined} aria-modal={menuOpen ? true : undefined}>
-      <a className="shell-brand" href="#overview" aria-label="Vessel overview" title="Vessel overview" onClick={() => navigate('overview')}><span className="shell-monogram" aria-hidden="true"><VesselMark size={24} /></span><span className="sidebar-copy">vessel<small>The trading journal</small></span></a>
+      <a className="shell-brand" href="#overview" aria-label="Vessel overview" title="Vessel overview" onClick={event => { event.preventDefault(); navigate('overview') }}><span className="shell-monogram" aria-hidden="true"><VesselMark size={24} /></span><span className="sidebar-copy">vessel<small>The trading journal</small></span></a>
       {menuOpen && <button type="button" className="icon-button sidebar-close" aria-label="Close navigation" title="Close navigation" onClick={() => setMenuOpen(false)}><X size={19} aria-hidden="true" /></button>}
       <button type="button" className="icon-button sidebar-toggle" aria-label={navigationCollapsed ? 'Expand navigation' : 'Collapse navigation'} title={navigationCollapsed ? 'Expand navigation' : 'Collapse navigation'} aria-controls="workspace-nav" aria-expanded={!navigationCollapsed} onClick={() => setNavigationCollapsed(collapsed => !collapsed)}>
         {navigationCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
@@ -387,7 +468,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
       <nav>{pages.filter(p => p.id !== 'settings' && p.id !== 'notifications').map(({ id, label, icon: Icon }) => {
         // Plays keeps its name; open monitor incidents describe it, beside a count in their severity tone.
         const incidentsShown = id === 'plays' && incidentCounts.total > 0
-        return <a key={id} href={`#${id}`} className={`shell-nav-item ${page === id ? 'active' : ''}`} aria-label={label} title={label} onClick={() => navigate(id)} aria-current={page === id ? 'page' : undefined}
+        return <a key={id} href={`#${id}`} className={`shell-nav-item ${page === id ? 'active' : ''}`} aria-label={label} title={label} onClick={event => { event.preventDefault(); navigate(id) }} aria-current={page === id ? 'page' : undefined}
           aria-describedby={incidentsShown ? 'plays-nav-incidents' : undefined}><Icon size={18} aria-hidden="true" /><span className="sidebar-copy">{label}</span>
           {id === 'accounts' && accounts.length > 0 && <small>{accounts.length}</small>}
           {incidentsShown && <IncidentCount counts={incidentCounts} id="plays-nav-incidents" />}</a>
@@ -395,20 +476,23 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
       <div className="nav-section-label later-section">Later</div>
       <div className="shell-nav-later" role="link" aria-label="Strategies" aria-disabled="true" title="Strategies are not available yet"><Compass size={18} aria-hidden="true" /><span className="sidebar-copy">Strategies</span><small className="sidebar-copy" aria-hidden="true">Soon</small></div>
       <div className="shell-sidebar-bottom">
-        {tradingMode === 'real' && <a href="#notifications" className={`shell-nav-item ${page === 'notifications' ? 'active' : ''}`} aria-label={notificationsName} title={notificationsName} aria-current={page === 'notifications' ? 'page' : undefined} onClick={() => navigate('notifications')}><Bell size={18} aria-hidden="true" /><span className="sidebar-copy">Notifications</span><NotificationBadge count={unread} /></a>}
-        <a href="#settings" className={`shell-nav-item ${page === 'settings' ? 'active' : ''}`} aria-label="Settings" title="Settings" aria-current={page === 'settings' ? 'page' : undefined} onClick={() => navigate('settings')}><Settings2 size={18} aria-hidden="true" /><span className="sidebar-copy">Settings</span></a>
+        {tradingMode === 'real' && <a href="#notifications" className={`shell-nav-item ${page === 'notifications' ? 'active' : ''}`} aria-label={notificationsName} title={notificationsName} aria-current={page === 'notifications' ? 'page' : undefined} onClick={event => { event.preventDefault(); navigate('notifications') }}><Bell size={18} aria-hidden="true" /><span className="sidebar-copy">Notifications</span><NotificationBadge count={unread} /></a>}
+        <a href="#settings" className={`shell-nav-item ${page === 'settings' ? 'active' : ''}`} aria-label="Settings" title="Settings" aria-current={page === 'settings' ? 'page' : undefined} onClick={event => { event.preventDefault(); navigate('settings') }}><Settings2 size={18} aria-hidden="true" /><span className="sidebar-copy">Settings</span></a>
         {identity ? <AccountMenu identity={identity} onSignOut={disconnectSession}
-          onProfile={() => { setSettingsTab('profile'); navigate('settings') }}
-          onSessions={() => { setSettingsTab('profile'); navigate('settings'); focusWhenShown('sessions-heading') }} />
+          onProfile={() => { navigate('settings'); changeSettingsTab('profile', true) }}
+          onSessions={() => { navigate('settings'); changeSettingsTab('profile', true); focusWhenShown('sessions-heading') }} />
           : <button className="owner-card" onClick={disconnectSession} aria-label={`Disconnect ${system.owner.displayName}'s session`} title={`Disconnect ${system.owner.displayName}'s browser session`}><span className="owner-avatar" aria-hidden="true">{system.owner.displayName.slice(0, 1).toUpperCase()}</span><span className="sidebar-copy"><strong>{system.owner.displayName}</strong></span><LogOut size={15} aria-hidden="true" /></button>}
       </div>
     </aside>
     <div className="shell-main" inert={menuOpen}>
-      <header className="shell-header"><button id="workspace-menu" className="icon-button mobile-menu" aria-label="Open navigation" title="Open navigation" aria-expanded={menuOpen} aria-controls="workspace-nav" onClick={() => setMenuOpen(true)}><Menu size={19} aria-hidden="true" />{unread > 0 && <span className="menu-unread-dot" aria-hidden="true" />}</button><span className="shell-header-brand" aria-hidden="true"><VesselMark size={22} />vessel</span>
-        {tradingMode === 'real' && <a href="#notifications" className="icon-button header-notifications" aria-label={notificationsName} title={notificationsName} onClick={() => navigate('notifications')}><Bell size={18} aria-hidden="true" /><NotificationBadge count={unread} /></a>}</header>
+      <header className="shell-header"><div className="shell-header-row"><button id="workspace-menu" className="icon-button mobile-menu" aria-label="Open navigation" title="Open navigation" aria-expanded={menuOpen} aria-controls="workspace-nav" onClick={() => setMenuOpen(true)}><Menu size={19} aria-hidden="true" />{unread > 0 && <span className="menu-unread-dot" aria-hidden="true" />}</button>
+        <ShellBreadcrumb key={locationKey(trail.at(-1)!)} trail={trail.map(location => location.kind === 'account'
+          ? { ...location, label: accounts.find(account => account.id === location.id)?.name || location.label } : location)} onVisit={visitCrumb} />
+        {tradingMode === 'real' && <a href="#notifications" className="icon-button header-notifications" aria-label={notificationsName} title={notificationsName} onClick={event => { event.preventDefault(); navigate('notifications') }}><Bell size={18} aria-hidden="true" /><NotificationBadge count={unread} /></a>}</div>
+        <ShellNotices notices={tradingMode === 'paper' ? [paperNotice] : []} />
+      </header>
       <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
       <main id="workspace-content" className="shell-content" tabIndex={-1}>
-        {tradingMode === 'paper' && <div className="workspace-alert paper-mode-banner" role="note"><span className="workspace-badge">Paper</span><span>Simulated capital and executions only. Real accounts and results are excluded. Zero fees and slippage; candle touches can be ambiguous.</span></div>}
         {page !== 'plays' && page !== 'review' && page !== 'notifications' && <section className="shell-page-heading" key={`heading-${page}`}><div><div className="eyebrow">{logLine(page, system.owner.displayName)}</div><h1>{selectedAccount ? selectedAccount.name : currentPage.label}</h1></div><div className="shell-heading-actions">
           {page !== 'settings' && <Button variant="outline" onClick={reload} disabled={loading || refreshing !== null} aria-busy={loading}><RefreshCw size={14} className={loading ? 'is-spinning' : ''} />Reload</Button>}
           {page === 'overview' ? <OverviewActions disabled={pending || !data} onNewPlay={newPlay} onPortfolio={() => setPortfolioDialog(true)} onAccount={() => setAccountDialog(true)} /> : page === 'portfolios' ? <Button onClick={() => setPortfolioDialog(true)}><Plus size={15} />New portfolio</Button> : page !== 'settings' && page !== 'activity' && <Button onClick={() => setAccountDialog(true)} disabled={pending || !data}><Plus size={15} />Add account</Button>}
@@ -434,7 +518,8 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
                   if (account) manageAccount(account)
                 }}
                 api={api} session={playsSession} onSession={acceptPlaysSession} onLogChange={changePlaysLog} onLogApplier={registerLogApplier} onReload={reload} loading={loading}
-                requestedPlayId={requestedPlay?.api === api ? requestedPlay.id : null} onRequestedPlayHandled={() => setRequestedPlay(null)}
+                requestedPlayId={requestedPlay?.api === api ? requestedPlay.id : null} requestedPlayRestore={requestedPlay?.restore ?? false}
+                onRequestedPlayHandled={requestedPlayHandled}
                 list={playsList} onList={setPlaysList} />
             </Suspense>
           </PageErrorBoundary>
@@ -444,14 +529,14 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
 
         {page === 'overview' && data && <OverviewPage data={data} api={api} monitors={monitor.summary?.accounts ?? []} incidents={incidents} overviewQuery={overviewQuery} setOverviewQuery={setOverviewQuery}
           reloadKey={reloadKey} refreshAllAction={refreshAllAction} refreshing={refreshing} onAddAccount={() => setAccountDialog(true)}
-          onCreatePortfolio={() => setPortfolioDialog(true)} onAccounts={() => navigate('accounts')} onActivity={() => navigate('activity')}
+          onCreatePortfolio={() => setPortfolioDialog(true)} onAccounts={() => navigate('accounts', true)} onActivity={() => navigate('activity', true)}
           viewAccount={viewAccount} sync={sync} manageAccount={manageAccount} browsePlays={browsePlays} viewPlay={viewPlay} reload={reload} />}
 
         {page === 'portfolios' && data && <PortfoliosPage portfolios={portfolios} accounts={accounts} onAddAccount={() => setAccountDialog(true)}
-          onCreatePortfolio={() => setPortfolioDialog(true)} onOpen={id => { setPortfolioFilter(id); navigate('accounts') }}
+          onCreatePortfolio={() => setPortfolioDialog(true)} onOpen={id => { setPortfolioFilter(id); navigate('accounts', true) }}
           onManage={(id, focusAccounts) => { setFocusPortfolioAccounts(focusAccounts); setManagedPortfolioId(id) }} />}
 
-        {page === 'accounts' && data && (selectedAccount ? <AccountDetail key={selectedAccount.id} account={selectedAccount} api={api} monitor={monitor.summary?.accounts.find(item => item.accountId === selectedAccount.id) ?? null} refreshing={refreshing === selectedAccount.id} busy={refreshing !== null} reloadGeneration={reloadKey} onOpenPlay={viewPlay} onCreated={reload} onSync={id => { void sync(id) }} onManage={() => manageAccount(selectedAccount)} onBack={() => { setSelectedAccountId(null); window.scrollTo({ top: 0, left: 0, behavior: 'auto' }) }} /> :
+        {page === 'accounts' && data && (selectedAccount ? <AccountDetail key={selectedAccount.id} account={selectedAccount} api={api} monitor={monitor.summary?.accounts.find(item => item.accountId === selectedAccount.id) ?? null} refreshing={refreshing === selectedAccount.id} busy={refreshing !== null} reloadGeneration={reloadKey} onOpenPlay={viewPlay} onCreated={reload} onSync={id => { void sync(id) }} onManage={() => manageAccount(selectedAccount)} onBack={backToAccounts} /> :
           <AccountsPanel monitors={monitor.summary?.accounts ?? []} api={api} onChanged={managementChanged} onReload={reload} filters={accountFilters} onFiltersChange={setAccountFilters} accounts={accounts} portfolios={portfolios} portfolioFilter={activePortfolioFilter} onPortfolioFilter={setPortfolioFilter}
             refreshing={refreshing} refreshAction={refreshAllAction} onDetail={viewAccount} onSync={id => { void sync(id) }} onManage={manageAccount} onAdd={() => setAccountDialog(true)} />)}
 
@@ -460,10 +545,10 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
 
         {page === 'notifications' && tradingMode === 'paper' && <p className="workspace-scope-note">Real-account notifications are unavailable in Paper mode.</p>}
         {page === 'notifications' && tradingMode === 'real' && cursorReady && <Suspense fallback={<PageLoading />}><NotificationsPage api={api} inApp={inApp} accounts={accounts}
-          state={notificationList} onStateChange={setNotificationList} eyebrow={logLine(page, system.owner.displayName)} onPreferences={() => navigate('settings')} /></Suspense>}
+          state={notificationList} onStateChange={setNotificationList} eyebrow={logLine(page, system.owner.displayName)} onPreferences={() => navigate('settings', true)} /></Suspense>}
 
-        {page === 'settings' && <Suspense fallback={<PageLoading />}><SettingsPage system={system} api={api} onPaperSettingsChange={onPaperSettingsChange} inApp={inApp} disconnectSession={disconnectSession} onAccounts={() => navigate('accounts')}
-          {...identity ? { identity, tab: settingsTab, onTab: setSettingsTab } : {}} /></Suspense>}
+        {page === 'settings' && <Suspense fallback={<PageLoading />}><SettingsPage system={system} api={api} onPaperSettingsChange={onPaperSettingsChange} inApp={inApp} disconnectSession={disconnectSession} onAccounts={() => navigate('accounts', true)}
+          {...identity ? { identity, tab: settingsTab, onTab: changeSettingsTab } : {}} /></Suspense>}
         </div></PageErrorBoundary>
       </main>
     </div>

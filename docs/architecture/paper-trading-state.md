@@ -1088,3 +1088,14 @@ gate, not a claim of PR CI execution. Final documentation changes do not alter
 the reviewed production/tests. The owner explicitly authorized merge after
 this verification; mark ready and merge only the exact final pushed head.
 No deployment, release or owner-database migration is included.
+
+## October 24, 2026: shell mode context
+
+At the owner's request, redundant per-item Paper chips were removed from Plays,
+portfolios, accounts, operation rows and management dialogs. Mode context now
+appears once in the sticky shell header's **Paper mode** information strip.
+Execution-source, simulated-result, zero-fee/slippage, fixed-capital,
+sizing-source and Settings capability explanations remain. Enabled paper
+accounts use the neutral **Enabled** status, not a claim of import or sync.
+The sidebar Trading mode control and its switching/discard behaviour are
+unchanged. No backend, deployment or migration is included.
