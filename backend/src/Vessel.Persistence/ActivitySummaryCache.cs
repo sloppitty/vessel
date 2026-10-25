@@ -158,7 +158,9 @@ public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int 
             // Each fill allocation can also retain a timestamp/leverage pair (at most one pair per allocation).
             + value.Operations.Sum(o => Row(o) + 288L * o.FillCount + o.OtherFees.Sum(Row)
                 + o.Coverage.Sum(s => 64L + 2L * s.Length) + 16L * o.FundingPaymentCount)
-            + value.Coverage.Sum(Row) + 16L * value.UnassignedFunding.Count;
+            + value.Coverage.Sum(Row) + 16L * value.UnassignedFunding.Count
+            // Phase 2, item 9b's proof index, built on first use: fills by partition, order and Play, with prefix sums.
+            + 160L * facts.Fills.Count;
     }
 
     private sealed class Flight

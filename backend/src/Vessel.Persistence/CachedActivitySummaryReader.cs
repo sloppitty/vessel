@@ -33,9 +33,7 @@ public sealed class CachedActivitySummaryReader(IJournalOwnerContext owner, IOwn
                 await db.Database.CurrentTransaction!.CommitAsync(ct);
                 return ActivityService.Aggregate(facts, accountId, ids, tradingMode: tradingMode);
             }
-            var revision = await db.Database.SqlQuery<long>($"""
-                SELECT COALESCE((SELECT revision FROM activity_facts_revisions WHERE owner_id = {scope.OwnerId}), 0) AS "Value"
-                """).SingleAsync(ct);
+            var revision = await ActivityStore.RevisionAsync(db, scope.OwnerId, ct);
             var key = new ActivitySummaryKey(scope.OwnerId, revision, accountId,
                 ids is null ? "*" : string.Join(',', ids.Order()), tradingMode);
             return await cache.ReadAsync(key, async token =>

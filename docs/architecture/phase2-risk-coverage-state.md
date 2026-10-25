@@ -878,6 +878,80 @@ October 21, 2026.
   recheck is not read again.
 - **Check after round 1.** `scripts/check.sh` passed on `834004c2` (before documentation-only commits were restacked beneath it): backend 4,093 passed, 5 skipped; frontend 175 files and 4,076 tests.
 
+**9b. Beside a Play.** Implemented on `t3/phase2-funding-play`.
+- **The line.** The execution view of a real venue Play carries `funding`, and the execution panel shows one
+  "Settled funding" line after the Play-local result. It is never added to the venue or Play-local result,
+  and no basis moves from Unknown. It has four states:
+  - `sole`: the exact nominal sum, its asset, the payment count and the window;
+  - `shared` ("shared, not allocated"): another Play's fill, an unlinked fill or an open position on the
+    market;
+  - `incomplete` ("coverage incomplete"), with its reason, `changing` included when the facts moved while
+    being read;
+  - `unavailable`: a venue without a funding reader (a capability) or a disabled account.
+
+  Manual instruments and Plays before their first entry fill have none; paper keeps its 409.
+- **The window.** It runs from the first linked fill. While the Play's own fills net to zero (a Closed Play),
+  it ends at the last fill. Otherwise it ends at the later of the last fill and the latest snapshot, the rule
+  Activity uses for an open operation (`OperationFunding.End`, now shared).
+- **The proof** (`PlayFunding`). `sole` needs all of these:
+  - one resolved partition by Activity's rules, with no ID-less fill or settlement that could belong to it;
+  - no other fill in the window, and no order on the market with known missing executions overlapping it
+    or either proof's span;
+  - no omission marker (its read window included), forced event or open gap overlapping it;
+  - ledger coverage containing the window;
+  - a flat start, proven by complete history or by the latest snapshot walked back over covered,
+    unomitted history, and no other fill in the exit's millisecond;
+  - exactly one Activity operation made of exactly these fills, with complete funding and no ambiguous
+    bucket, so there is still one attribution rule.
+- **One state.** The evidence is read in one repeatable-read snapshot whose facts revision, at its start and
+  end, must equal the one the cached Activity aggregate was built from. Every write to fills, orders, links,
+  snapshots, funding, markers or forced events moves it. The proof's indexes are built once per aggregate,
+  and evidence is read only for the market from the window on.
+- **The bundle.** The one-Play bundle (5c) reuses the execution view, so it now carries the funding object,
+  read in the bundle's own snapshot.
+- **Open questions for the owner.**
+  - **Old Plays.** They rarely prove a flat start, because only the latest snapshot is kept and only a
+    full backfill writes a complete ledger record. Keeping flat observations would need a migration.
+  - **Play status.** It is not fenced; it only affects the `not-settled` check.
+  - **Order lifetimes.** They follow Vessel's clock.
+- **Tests.** `PlayFundingPostgresTests` (27):
+  - the sole sum with unchanged results;
+  - each failing condition, with missing executions in, after and before the window;
+  - a complete history, concurrent Plays, an open Play and an ID-less legacy fill;
+  - a backfill between the reads, a ledger change alone and the bundle's snapshot;
+  - paper, owner isolation, a disabled account and a venue without a funding reader.
+
+  In the browser: the validator and the line's states.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `cea2b982`. Three findings, all fixed in
+  `0e9ca318`:
+  - **High.** A known missing execution on another order could prove a false
+    flat start: an earlier position closed by a retained filled order whose
+    execution is missing left the latest snapshot flat, so the walk back over
+    retained fills found zero exposure before the Play and showed its
+    funding as sole. Any order on the partition with known missing
+    executions overlapping the window now reads `missing-executions`, and
+    one overlapping either proof's span rules that proof out.
+  - **High.** The fills and the coverage ledger were read separately, so a
+    backfill landing between the two reads could pair the older fills with
+    the newly completed coverage and certify a window that another round trip
+    shared. The evidence is read in one repeatable-read snapshot with the
+    owner's facts revision at its start and end, which must equal the
+    revision the Activity aggregate was built from; otherwise it retries
+    once and reads `changing`.
+  - Every poll loaded the account's whole forced-event history and rebuilt
+    its partition and omission indexes. Evidence is now read for the market
+    from the window on (earlier only for the complete-history proof), without
+    truncating it, and the proof's indexes are built once per cached Activity
+    aggregate.
+
+  Sol confirmed exact arithmetic and unsupported-asset rejection, owner
+  isolation, the disabled, manual and paper guards, capability checks, the
+  separation from Review and sizing, the unchanged Activity funding after the
+  shared window rule moved, the browser validator, the monitor's composition
+  and the locked layout.
+- **Check.** `scripts/check.sh` passed on `0e9ca318`, after the first run's only failure, the Overview
+  query-count test, was updated for the revision read (10 queries instead of 9): backend 4,242 passed, 5 skipped; frontend 186 files and 4,141 tests.
+
 ## 10. Planning assumptions and soft limits
 
 October 21, 2026.

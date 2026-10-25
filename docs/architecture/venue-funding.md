@@ -179,7 +179,123 @@ verified bases as well as the current unknown case.
 
 Play linking, Review, sizing and Overview realized-summary arithmetic remain
 execution-based and unchanged. Funding is not assigned automatically to
-concurrent Plays. A position operation and a saved Play are different scopes.
+concurrent Plays. A position operation and a saved Play are different scopes;
+since Phase 2, item 9b, a Play shows its operation's settled funding beside its
+results only under the proof below.
+
+## Beside a Play (Phase 2, item 9b)
+
+The Play execution view (`GET /api/plays/{id}/execution`) has a `funding`
+object for a real venue Play once a linked entry has filled. A manual
+instrument, a Play before its first entry fill and a paper Play have none (the
+paper execution view is refused with 409 as before). It is one of:
+
+- `sole`: the exact nominal sum of the settlements in the holding window
+  (`amountUsd`), their asset when they share one, their count and the window
+  (`fromUtc`, `toUtc`);
+- `shared` ("shared, not allocated"): `other-play`, `unlinked-fill` or
+  `open-position`;
+- `incomplete` ("coverage incomplete"), with a reason code (`changing` when
+  the facts moved while they were read);
+- `unavailable`: `no-funding-read` when the venue has no funding reader (a
+  capability, never a venue name) or `account-disabled`, whose facts stay
+  hidden as in Activity.
+
+Every state but `sole` has no amount, count or window. The amount is shown on
+its own line beside the venue and Play-local results and is never added to
+either, and no execution P&L funding basis moves from `unknown`.
+
+**The holding window** starts at the Play's first linked fill. Once its own
+fills net to zero (a Closed Play's always do) it ends at the last one;
+otherwise it ends at the latest covered evidence, exactly as an open Activity
+operation's funding does: the later of its last fill and the account's latest
+snapshot, in whole milliseconds (`OperationFunding.End`).
+
+**The proof** (`PlayFunding`) reads only retained facts, never a venue: the
+account's Activity aggregate and one evidence read from the store. In order:
+
+1. *Identity.* The Play's fills lie in one resolved partition of Activity's
+   identity rule. An ID-less fill or settlement of the instrument left in the
+   unresolved canonical partition could be this market's, so it reads
+   `identity`.
+2. *Sole exposure.* Every retained fill of the partition in the window (from
+   the first fill on while a position is open) is this Play's. Another Play's
+   fill reads `shared` (`other-play`), so concurrent Plays on one position are
+   never allocated; an unlinked one reads `unlinked-fill`.
+3. *Its own executions.* None of its orders has known missing executions by
+   the shared `MissingExecutions` rule (`missing-executions`), nothing
+   contradicts or runs out of order, and an ended Play is Closed with its fills
+   flat (`not-settled`, also for Unresolved and Cancelled Plays).
+4. *Nothing omitted or missing, and covered history* over the window, its
+   first and last milliseconds included: no omission marker or forced event
+   that could lie in the partition, by 7b's partition rule, where a marker's
+   read window counts and not just its time (`omitted-executions`); no order on
+   the partition, linked or not, with known missing executions by the shared
+   rule whose life (from placement to its last terminal observation, or open
+   ended) overlaps it (`missing-executions`); no open `account_history_gaps`
+   row overlapping it (`history-gap`); and `account_fill_coverage` spans,
+   joined only where they touch, proving it continuous (`history-unproven`).
+5. *Flat before the first entry*, anchored to covered history or to a snapshot,
+   and no other fill earlier in its first millisecond. Both anchors walk
+   retained fills, so each holds only over a span with nothing omitted, no
+   order known to be missing executions and no open gap (Sol round 1: a flat
+   snapshot walked back over retained fills alone "proved" a flat start while a
+   filled order closing an earlier position had no retained execution).
+   Covered history is a complete ledger record (from the account's start, which
+   was flat) joined to the window, clean from the account's start: the
+   partition's fills before the window sum to zero. The snapshot is the latest
+   one, at or after every fill of the partition as Activity anchors it, over a
+   covered span clean up to it: walked back, it is flat before the first fill.
+   Activity's unanchored zero start is never proof (`flat-start-unproven`, also
+   when the two anchors disagree). A position proven open at the first entry
+   is someone else's exposure (`shared`, `open-position`).
+6. *Flat after the last exit*, once the fills are flat: proven flat before,
+   only this Play's fills in the window, and no other fill later in the last
+   exit's millisecond (`flat-end-unproven`).
+7. *One Activity operation* of exactly these fills, opened at the first and
+   closed at the last once flat (`operation-boundaries`), so its funding
+   interval is the holding window.
+8. *Its funding* is complete over the window by the funding state's stored
+   coverage (`funding-coverage`), no settlement shares an opening or closing
+   precision bucket (`funding-ambiguous`), and every settlement is a listed
+   stablecoin (`funding-asset`). Its sum is `OperationFunding`'s, so there is
+   one attribution rule.
+
+**One state of the facts** (Sol round 1). Every change to fills, orders,
+links, snapshots, funding, markers and forced events moves the owner's Activity
+facts revision in its own transaction (the `ActivityFactsRevision` and
+`ExecutionOmissions` triggers). The aggregate records the revision it was read
+at, in its own snapshot. The store's evidence read is one repeatable-read
+snapshot (an ambient one, such as the Play bundle's, is reused): it reads the
+revision first and last, the Play's linked orders, the coverage spans, the open
+gaps, and the forced events and orders with known missing executions on the
+partition's contracts and native market. The proof runs only when the three
+revisions are equal. Then the Play's links, every fill and order, the snapshot,
+funding, markers and forced events are exactly those the ledger was read with,
+so all inputs describe one committed state. Ledger and gap writes do not move
+the revision, but they are read in the same snapshot as it: a gap closed
+without new facts is simply part of that state, and a backfill that retains
+fills moves the revision. Otherwise it reads once more and then reads
+`incomplete` (`changing`). The Play bundle inherits the guarantee; inside its
+snapshot, an aggregate cached at a later revision reads `changing`.
+
+**Bounded reads.** The evidence read is scoped to the account, the partition's
+canonical contracts and native market, and to rows that can matter from the
+first fill's millisecond on: coverage spans reaching it, gaps not ending
+before it, forced events at or after it, and orders whose life may reach it.
+Rows before it are read only when a complete ledger record exists, because only
+the complete-history proof walks from the account's start; no disqualifying
+row is truncated. Partitions, omission markers, fills by partition (with
+signed prefix sums), by order and by Play, and operations by partition are kept
+with the cached Activity aggregate (`ActivityProofIndex`), so a polled Play
+never rebuilds them over the account's history.
+
+Retained facts can prove the flat start only through a snapshot or a complete
+ledger record. Only an exhausted Hyperliquid backfill writes a complete record
+today, so most Plays rely on the latest snapshot and on the ledger proving
+continuity from the first entry to it. An account with a gap from before the
+ledger existed (an open gap of unknown range) reads `history-gap` until a read
+proves it covered. No migration is needed.
 
 ## Activity presentation and bounds
 

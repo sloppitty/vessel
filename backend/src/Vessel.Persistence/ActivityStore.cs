@@ -54,6 +54,8 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
             forcedCounts = await db.ForcedEvents.Where(e => ids.Contains(e.AccountId)).GroupBy(e => e.AccountId)
                 .Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(g => g.Key, g => g.Count, ct);
         }
+        // Phase 2, item 9b: the revision these facts belong to, read in their snapshot, so a later read can be fenced to it.
+        var revision = await RevisionAsync(db, db.CurrentOwnerId, ct);
         var links = await db.LinkedOrders(db.OrderLinks.Where(l => ids.Contains(l.AccountId) && l.State == OrderLinkState.Linked &&
             db.Plays.Any(p => p.Id == l.PlayId && p.TradingMode == TradingMode.Real)))
             .Select(x => new { x.Order.AccountId, x.Order.ContractId, x.Order.ExternalOrderId, x.Link.PlayId }).AsNoTracking().ToListAsync(ct);
@@ -65,9 +67,17 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         return new(accounts, fills, snapshots, playIds)
         {
             FundingPayments = funding, FundingStates = fundingStates, LeverageObservations = leverage, Omissions = omissions,
-            ForcedEvents = forced, ForcedEventCounts = forcedCounts
+            ForcedEvents = forced, ForcedEventCounts = forcedCounts, Revision = revision
         };
     }
+
+    /// <summary>
+    /// The owner's Activity facts revision (0 before any fact): the cached aggregate's key, and since Phase 2, item 9b the
+    /// fence between the aggregate and the funding evidence read.
+    /// </summary>
+    internal static Task<long> RevisionAsync(VesselDbContext db, Guid ownerId, CancellationToken ct) => db.Database.SqlQuery<long>($"""
+        SELECT COALESCE((SELECT revision FROM activity_facts_revisions WHERE owner_id = {ownerId}), 0) AS "Value"
+        """).SingleAsync(ct);
 
     /// <summary>
     /// Phase 2, item 7b: every omission marker of these accounts, with only the columns the walk reads (time or window and
