@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -32,6 +33,8 @@ public static class DependencyInjection
         services.AddHostedService<IdentityCleanup>();
         services.AddAuthentication(SessionAuthentication.SchemeName)
             .AddScheme<AuthenticationSchemeOptions, SessionAuthentication>(SessionAuthentication.SchemeName, _ => { });
+        // New endpoints need a signed-in user unless they explicitly opt out, such as liveness and public sign-in.
+        services.AddAuthorizationBuilder().SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
         services.AddSingleton<IWalletSignatureVerifier, WalletSignatures>();
         services.AddScoped<IdentityTransaction>();
         services.AddScoped<IdentityService>();

@@ -1,6 +1,5 @@
 using Amazon.Runtime;
 using Amazon.S3;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -74,15 +73,8 @@ public static class DependencyInjection
         services.AddHttpContextAccessor();
         services.AddScoped<IJournalOwnerContext, HttpJournalOwnerContext>();
         services.TryAddScoped<OwnerScopeAssignment>();
-        // Wallet sign-in is the only authentication: the identity module registers the session scheme and the
-        // owner directory (AddVesselIdentityDirectory / AddVesselIdentityApi).
-        services.AddAuthorization(options =>
-        {
-            // New endpoints are private unless they explicitly opt out, such as liveness.
-            options.FallbackPolicy = new AuthorizationPolicyBuilder()
-                .RequireAuthenticatedUser()
-                .Build();
-        });
+        // Wallet sign-in is the only authentication. The identity module registers the owner directory
+        // (AddVesselIdentityDirectory) and, for the API only, the session scheme and authorization (AddVesselIdentityApi).
         return services;
     }
 
