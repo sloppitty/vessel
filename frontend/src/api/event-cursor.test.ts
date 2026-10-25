@@ -3,6 +3,7 @@ import type { WorkspaceApi } from './workspace'
 import { createWorkspaceApi } from './workspace'
 import { isAfter, isEventCursor, isEventSequence, isNotificationAfter, isNotificationCursor, isRequestCursor, isStaleNotificationCursor,
   isUnknownCursor, readHeadCursor, unknownCursor } from './event-cursor'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const epoch = '0123456789abcdef0123456789abcdef'
 const other = 'fedcba9876543210fedcba9876543210'
@@ -12,7 +13,7 @@ describe('owner event cursor', () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ events: [], nextCursor: `${epoch}.9007199254740993`, resetRequired: true })))
     vi.stubGlobal('fetch', fetcher)
     const signal = new AbortController().signal
-    expect(await readHeadCursor(createWorkspaceApi('test'), signal)).toBe(`${epoch}.9007199254740993`)
+    expect(await readHeadCursor(createWorkspaceApi(credentialsFixture), signal)).toBe(`${epoch}.9007199254740993`)
     const url = new URL(fetcher.mock.calls[0]![0] as string, 'http://vessel.test')
     expect(url.pathname).toBe('/api/events')
     expect(url.searchParams.get('limit')).toBe('1')
@@ -26,7 +27,7 @@ describe('owner event cursor', () => {
     expect(api.monitorEvents).toHaveBeenCalledWith(expect.any(String), 1, signal)
     for (const nextCursor of [3, '3', `${epoch}.-1`, `${epoch.toUpperCase()}.3`]) {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ events: [], nextCursor, resetRequired: true }))))
-      await expect(readHeadCursor(createWorkspaceApi('test'), signal)).rejects.toMatchObject({ kind: 'invalid-response' })
+      await expect(readHeadCursor(createWorkspaceApi(credentialsFixture), signal)).rejects.toMatchObject({ kind: 'invalid-response' })
     }
     vi.unstubAllGlobals()
   })

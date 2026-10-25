@@ -6,6 +6,7 @@ import { emptyOverview } from '@/test/workspace-fixture'
 import { systemFixture } from '@/test/system-fixture'
 import type { WorkspaceApi } from '@/api/workspace'
 import { ChartIconButton, ChartToolbar } from './ChartToolbar'
+import { shellIdentityFixture } from '@/test/identity-fixture'
 
 function Controls() {
   return <ChartToolbar label="Test chart tools">
@@ -34,7 +35,7 @@ describe.each(['standalone render helper', 'application shell'])('chart tooltips
     else {
       window.history.replaceState(null, '', '/#plays')
       const api = { overview: vi.fn().mockResolvedValue(emptyOverview) } as unknown as WorkspaceApi
-      testingRender(<ApplicationShell system={systemFixture} api={api} disconnect={vi.fn()} />)
+      testingRender(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} api={api} disconnect={vi.fn()} />)
     }
     await act(async () => {})
   }

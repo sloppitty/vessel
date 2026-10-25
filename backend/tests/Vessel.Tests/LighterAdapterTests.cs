@@ -125,6 +125,18 @@ public sealed partial class LighterAdapterTests
         return account;
     }
 
+    [Fact]
+    public async Task Changed_copies_reach_conflict_recording_but_identical_reports_collapse()
+    {
+        var changed = Change(Trade, "price", JsonValue.Create("81000.01"));
+        var handler = new Handler { Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/trades", StringComparison.Ordinal)
+            ? Response(Trades(Trade + "," + changed + "," + Trade)) : null };
+        var result = await Reader(handler).ReadAsync(Source, default);
+        Assert.Equal(2, result.Fills.Count);
+        Assert.Equal(result.Fills[0].SourceFillId, result.Fills[1].SourceFillId);
+        Assert.Equal([80000.01m, 81000.01m], result.Fills.Select(f => f.Price));
+    }
+
     [Theory]
     [InlineData(null, null)]
     [InlineData("null", null)]

@@ -17,7 +17,7 @@ public sealed record StartupWarmupOutcome(bool Skipped, bool TimedOut, IReadOnly
 /// <summary>
 /// Moves first-use EF model building, query compilation and JIT off the first user's requests. After Kestrel listens,
 /// it builds both models and runs the hot read shapes once: cookie-session and sign-in lookups and EOA recovery of a
-/// public vector (Wallet mode), then Overview, Plays, notifications, the event head, monitor and Activity reads for a
+/// public vector, then Overview, Plays, notifications, the event head, monitor and Activity reads for a
 /// fresh random owner that has no rows. Readiness answers 503 <c>warming-up</c> until it finishes or its timeout
 /// passes; after that every existing readiness check applies unchanged. It never writes, never issues or consumes
 /// challenges or sessions, keeps no result (authorization is never cached) and logs step names and exception types only.
