@@ -34,8 +34,7 @@ describe('sign-in styles', () => {
     expect(page).not.toContain('overflow: hidden')
   })
 
-  it('keeps the token form rules off the sign-in forms', () => {
+  it('keeps card-wide form rules off the sign-in forms', () => {
     expect(styles).not.toMatch(/\.connection-card form/)
-    expect(rule(styles, '.connection-form button[type="submit"]')).toContain('margin-top: 6px')
   })
 })

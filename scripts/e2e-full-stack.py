@@ -2,10 +2,13 @@
 """Full-stack end-to-end test of the packaged Vessel images with a fake Hyperliquid venue.
 
 Runs the real Compose stack (postgres, rabbitmq, rustfs, storage-init, migrate, api, monitor and
-notifications workers, a verifier worker, web) on an isolated project, unused subnet and loopback ports, with generated secrets, a synthetic
-owner and synthetic venue data served by scripts/e2e/fake_venue.py over TLS (a private CA trusted only by
-the API and worker containers). It drives a realistic monitor scenario through the public HTTP API, the
-SSE stream and a Playwright browser, asserting at every step, then cleans up everything it created.
+notifications workers, a verifier worker, web behind the Caddy TLS overlay with `tls internal`) on an isolated project,
+unused subnet and loopback ports, with generated secrets, a synthetic owner and synthetic venue data served by
+scripts/e2e/fake_venue.py over TLS (a private CA trusted only by the API and worker containers). The owner signs in
+with a publicly known synthetic EOA (scripts/wallet-test-signer.cjs, index 1) bound by `identity bind-wallet`; the
+signer runs in the pinned Playwright image with @noble from NOBLE_MODULE_DIR or a run-owned install. It drives a
+realistic monitor scenario through the public HTTPS API, the SSE stream and a Playwright browser, asserting at every
+step, then cleans up everything it created.
 
 Never reads the repository .env, never touches the owner's database or services, never pushes images.
 
@@ -14,6 +17,7 @@ Never reads the repository .env, never touches the owner's database or services,
 import argparse
 import base64
 import http.client
+from http.cookies import SimpleCookie
 import ipaddress
 import json
 import os
@@ -22,6 +26,7 @@ import re
 import secrets
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -36,6 +41,8 @@ IMAGES = {'api': 'vessel-e2e:api', 'web': 'vessel-e2e:web'}
 FAKE_IMAGE = 'python:3.13-slim'
 PLAYWRIGHT_VERSION = '1.63.0'
 PLAYWRIGHT_IMAGE = f'mcr.microsoft.com/playwright:v{PLAYWRIGHT_VERSION}-noble'
+NOBLE_VERSION = '2.4.0'
+SIGNER = ROOT / 'scripts' / 'wallet-test-signer.cjs'
 HEAD_PROBE = '/api/events?after=9223372036854775807&limit=1'
 CURSOR = re.compile(r'[0-9a-f]{32}\.[1-9][0-9]*')
 SUBJECT_KEYS = {'accountId', 'venueId', 'contractId', 'playId', 'entryId', 'levelId', 'discrepancyId'}
@@ -128,9 +135,10 @@ class SseReader(threading.Thread):
     def run(self):
         while not self.stop.is_set():
             try:
-                self.connection = http.client.HTTPConnection('127.0.0.1', self.e2e.http_port, timeout=40)
+                self.connection = self.e2e.connect(timeout=40)
+                # The current session on every connect: a restore's identity reset replaces it.
                 self.connection.request('GET', '/api/events/stream?after=' + self.cursor,
-                                        headers={'Authorization': 'Bearer ' + self.e2e.token, 'Accept': 'text/event-stream'})
+                                        headers={**self.e2e.session_headers(), 'Accept': 'text/event-stream'})
                 response = self.connection.getresponse()
                 if response.status != 200:
                     self.errors.append(response.status)
@@ -194,13 +202,15 @@ class E2E:
         self.name = 'vessel-e2e-' + secrets.token_hex(4)
         self.project = self.name
         self.projects = [self.name, self.name + '-restore']
-        self.token = secrets.token_hex(32)
         self.owner = str(uuid.uuid4())
         self.database_password = secrets.token_hex(24)
         self.broker_password, self.app_password = secrets.token_hex(24), secrets.token_hex(24)
         self.s3_access, self.s3_secret = secrets.token_hex(16), secrets.token_hex(32)
+        # Wallet sign-in: the synthetic operator EOA's public address and the current session cookie (a secret).
+        self.wallet_address, self.session_cookie, self.tool_paths = None, None, None
         self.register_secrets()
-        self.http_port, self.broker_port, self.control_port = free_port(), free_port(), free_port()
+        self.https_port, self.redirect_port = free_port(), free_port()
+        self.broker_port, self.control_port = free_port(), free_port()
         stamp = time.strftime('%Y%m%d-%H%M%S')
         self.artifacts = Path(args.artifacts or Path(tempfile.gettempdir()) / f'vessel-e2e-artifacts-{stamp}')
         self.artifacts.mkdir(parents=True, exist_ok=True)
@@ -215,8 +225,10 @@ class E2E:
     # ---- reporting -----------------------------------------------------------------------------------
 
     def register_secrets(self):
-        SECRETS.update(value for value in (self.token, self.database_password, self.broker_password, self.app_password,
+        SECRETS.update(value for value in (self.database_password, self.broker_password, self.app_password,
                                            self.s3_access, self.s3_secret) if value)
+        if self.session_cookie:
+            SECRETS.add(self.session_cookie.split('=', 1)[1])
 
     def expect(self, condition, label, detail='', soft=False):
         label, detail = redact(label), redact(detail)
@@ -237,7 +249,7 @@ class E2E:
         # The ownership marker a later --resume must find before it adopts this directory and its projects.
         (self.temp / MARKER).write_text(json.dumps({'tool': MARKER_TOOL, 'name': self.name}))
         (self.temp / MARKER).chmod(0o600)
-        for file in ('compose.yaml',):
+        for file in ('compose.yaml', 'compose.tls.yaml', 'Caddyfile'):
             shutil.copyfile(ROOT / 'deploy' / file, self.temp / file)
         shutil.copyfile(ROOT / 'scripts' / 'e2e' / 'fake_venue.py', self.temp / 'fake_venue.py')
         networks = [json.loads(line) for line in run('docker', 'network', 'ls', '--format', 'json', capture_output=True, text=True).stdout.splitlines()]
@@ -252,9 +264,9 @@ class E2E:
         self.network = f'172.28.{octet}'
         self.certificates()
         (self.temp / '.env').write_text(f'''POSTGRES_PASSWORD={self.database_password}
-Vessel__Auth__Token={self.token}
 Vessel__Auth__OwnerId={self.owner}
 Vessel__Auth__OwnerName=E2E
+VESSEL_IDENTITY_ORIGIN={self.base}
 VESSEL_S3_ACCESS_KEY_ID={self.s3_access}
 VESSEL_S3_SECRET_ACCESS_KEY={self.s3_secret}
 RABBITMQ_USER=vessel
@@ -262,10 +274,14 @@ RABBITMQ_PASSWORD={self.broker_password}
 RABBITMQ_APP_USER=vessel-app
 RABBITMQ_APP_PASSWORD={self.app_password}
 VESSEL_RABBITMQ_MANAGEMENT_BIND=127.0.0.1:{self.broker_port}
-VESSEL_WEB_BIND=127.0.0.1:{self.http_port}
 VESSEL_NETWORK_SUBNET={self.network}.0/24
 VESSEL_NETWORK_GATEWAY={self.network}.1
 VESSEL_WEB_IP={self.network}.10
+VESSEL_TLS_PROXY_IP={self.network}.20
+VESSEL_TLS_HOST=localhost
+VESSEL_TLS_HTTP_BIND=127.0.0.1:{self.redirect_port}
+VESSEL_TLS_HTTPS_BIND=127.0.0.1:{self.https_port}
+VESSEL_TLS_DIRECTIVE=tls internal
 VESSEL_MONITOR_INTERVAL=00:01:00
 VESSEL_MONITOR_PROTECTION_GRACE=00:00:00
 VESSEL_MONITOR_MANUAL_COOLDOWN=00:00:{COOLDOWN:02d}
@@ -313,7 +329,9 @@ services:
       Vessel__Messaging__Verification: "true"
       Vessel__Events__RetentionDays: "1"
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${{POSTGRES_PASSWORD}}"
+      # Every worker reads the identity owner directory, so it needs the same sign-in settings as the API.
       Vessel__Auth__OwnerId: ${{Vessel__Auth__OwnerId}}
+      Vessel__Identity__Origins__0: ${{VESSEL_IDENTITY_ORIGIN}}
       Vessel__Messaging__RabbitMqUri: "amqp://${{RABBITMQ_APP_USER}}:${{RABBITMQ_APP_PASSWORD}}@rabbitmq:5672/"
     depends_on:
       migrate:
@@ -369,13 +387,14 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
             (certs / name).chmod(0o644)
         certs.chmod(0o755)
 
-    def standalone(self, purpose, arguments, timeout):
+    def standalone(self, purpose, arguments, timeout, input=None):
         """A run-owned, labelled `docker run --rm` container, removed explicitly if it outlives its timeout."""
         name = f'{self.name}-{purpose}'
         self.last_standalone = None
         try:
             result = subprocess.run(['docker', 'run', '--rm', '--name', name, '--label', f'{RUN_LABEL}={self.name}', *arguments],
-                                    capture_output=True, text=True, timeout=timeout, env=getattr(self, 'standalone_env', None))
+                                    capture_output=True, text=True, timeout=timeout, input=input,
+                                    env=getattr(self, 'standalone_env', None))
         except subprocess.TimeoutExpired:
             # Killing the client does not stop the daemon-side container; remove it before reporting.
             removed = subprocess.run(['docker', 'rm', '-f', name], capture_output=True, text=True).returncode == 0
@@ -386,8 +405,9 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         return result.stdout
 
     def compose(self, *args, project=None, **kwargs):
+        # Wallet sign-in needs HTTPS: every command keeps the Caddy overlay, as an installation's COMPOSE_FILE does.
         cmd = ['docker', 'compose', '--project-directory', str(self.temp), '-p', project or self.project,
-               '-f', str(self.temp / 'compose.yaml'), '-f', str(self.temp / 'e2e.yaml')]
+               '-f', str(self.temp / 'compose.yaml'), '-f', str(self.temp / 'compose.tls.yaml'), '-f', str(self.temp / 'e2e.yaml')]
         # The private synthetic .env must win over the caller's deployment settings.
         return run(*cmd, *args, env=verification_environment(), **kwargs)
 
@@ -431,19 +451,35 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
 
     # ---- HTTP ----------------------------------------------------------------------------------------
 
+    @property
+    def base(self):
+        return f'https://localhost:{self.https_port}'
+
+    def connect(self, timeout=30):
+        # Caddy's `tls internal` certificate: an isolated loopback run, so the chain is not verified.
+        return http.client.HTTPSConnection('localhost', self.https_port, context=ssl._create_unverified_context(), timeout=timeout)
+
+    def session_headers(self, auth=True):
+        """What the browser sends: the accepted origin, and with a session its cookie and the tab's user binding."""
+        headers = {'Origin': self.base, 'X-Vessel-Request': '1'}
+        if auth and self.session_cookie:
+            headers.update({'Cookie': self.session_cookie, 'X-Vessel-User': self.owner})
+        return headers
+
     def request(self, path, method='GET', body=None, auth=True, headers=None):
-        headers = {'Host': f'127.0.0.1:{self.http_port}', **(headers or {})}
-        if auth:
-            headers['Authorization'] = 'Bearer ' + self.token
+        headers = {'Host': f'localhost:{self.https_port}', **self.session_headers(auth), **(headers or {})}
         if body is not None:
             headers['Content-Type'] = 'application/json'
             body = json.dumps(body).encode()
-        connection = http.client.HTTPConnection('127.0.0.1', self.http_port, timeout=30)
+        connection = self.connect()
         try:
             connection.request(method, path, body, headers)
             response = connection.getresponse()
             data = response.read()
-            return response.status, {k.lower(): v for k, v in response.getheaders()}, data
+            raw = response.getheaders()
+            answer = {k.lower(): v for k, v in raw}
+            answer['set-cookie'] = [v for k, v in raw if k.lower() == 'set-cookie']
+            return response.status, answer, data
         finally:
             connection.close()
 
@@ -452,6 +488,50 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         if status not in expect:
             raise StepFailed(f'{method or "GET"} {path} returned {status}: {data[:300]!r}')
         return json.loads(data) if data else None
+
+    # ---- wallet sign-in --------------------------------------------------------------------------------
+
+    def sign(self, message=None):
+        """The synthetic operator EOA (index 1), signed in a network-less pinned Playwright container."""
+        mounts, _, noble = self.tools()
+        arguments = ['-i', '--network', 'none', '-e', 'NOBLE_MODULE_DIR=' + noble, '-e', 'VESSEL_RELEASE_SYNTHETIC=1',
+                     '-v', f'{SIGNER}:/wallet-test-signer.cjs:ro']
+        for mount in mounts:
+            arguments += ['-v', mount]
+        # A fresh name per call: a removed --rm container's name can briefly stay taken.
+        output = self.standalone('sign-' + secrets.token_hex(3), [*arguments, PLAYWRIGHT_IMAGE, 'node', '/wallet-test-signer.cjs'], timeout=120,
+                                 input=json.dumps({'wallet': 1, 'message': message}))
+        return json.loads(output)
+
+    def operator_address(self):
+        if not self.wallet_address:
+            self.wallet_address = self.sign()['address']
+        return self.wallet_address
+
+    def cookie(self, headers, name):
+        values = [value for value in headers['set-cookie'] if value.startswith(name + '=')]
+        self.expect(len(values) == 1, name + ' issued exactly once', f'{len(values)} issued')
+        jar = SimpleCookie()
+        jar.load(values[0])
+        cookie = jar[name]
+        self.expect(bool(cookie['secure']) and bool(cookie['httponly']) and cookie['samesite'].lower() == 'strict' and
+                    cookie['path'] == '/' and not cookie['domain'], name + ' is Secure, HttpOnly, SameSite=Strict, host-only, Path=/')
+        return name + '=' + cookie.value
+
+    def sign_in(self):
+        """Challenge, EOA signature and verify through Caddy and nginx, like the browser; keeps the session cookie."""
+        status, headers, data = self.request('/api/auth/challenge', 'POST', {'address': self.operator_address()}, auth=False)
+        self.expect(status == 200, 'the API issues the operator EOA a sign-in challenge', data[:200])
+        binding = self.cookie(headers, '__Host-vessel-signin')
+        challenge = json.loads(data)
+        signature = self.sign(challenge['message'])['signature']
+        status, headers, data = self.request('/api/auth/verify', 'POST', {'challengeId': challenge['challengeId'],
+                                             'signature': signature, 'remember': False}, auth=False, headers={'Cookie': binding})
+        body = json.loads(data) if status == 200 else {}
+        self.expect(body.get('status') == 'signed-in', 'the synthetic operator wallet signs in over HTTPS', (status, data[:200]))
+        self.session_cookie = self.cookie(headers, '__Host-vessel-session')
+        self.register_secrets()
+        self.expect(body['session']['user']['id'] == self.owner, 'the operator session keeps the journal owner GUID')
 
     def control(self, path, body=None):
         connection = http.client.HTTPConnection('127.0.0.1', self.control_port, timeout=30)
@@ -629,6 +709,12 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
                     'provisioning prepares every deployment envelope schema', output[-300:])
         self.expect(subscription_report(output) == ({'notifications', 'verification'}, set()),
                     'notifications and verification subscriptions registered insert-only', output[-300:])
+        self.expect(f'Ensured identity user {self.owner}.' in output, 'migrate ensures the configured owner as the operator', output[-300:])
+        # Nobody can sign in, and readiness stays 503, until the operator has a wallet: bound explicitly, never by migrate.
+        bound = self.compose('run', '--rm', '--no-deps', '--entrypoint', 'dotnet', 'migrate', '/app/Vessel.Api.dll', 'identity',
+                             'bind-wallet', '--user', self.owner, '--address', self.operator_address(), '--label', 'E2E operator',
+                             capture_output=True, text=True, check=False)
+        self.expect(bound.returncode == 0, 'identity bind-wallet binds the synthetic operator EOA', (bound.stdout + bound.stderr)[-300:])
         queues, exchanges, bindings = self.topology()
         expected = {'vessel.commands.monitor', 'vessel.commands.monitor.dlq', 'vessel.events.sub.verification',
                     'vessel.events.sub.verification.dlq', 'vessel.events.sub.notifications',
@@ -654,6 +740,9 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         self.broker_app_user()
         self.quiet('up', '-d', '--wait')
         self.ready()
+        self.expect(self.request('/api/system', auth=False, headers={'Authorization': 'Bearer ' + secrets.token_hex(32)})[0] == 401,
+                    'a bearer token authenticates nobody')
+        self.sign_in()
         summary = self.wait(lambda: (lambda s: s if s['workerOnline'] else None)(self.api('/api/monitor')), 'worker heartbeat', 120)
         self.expect(summary['workerOnline'] and summary['heartbeatAtUtc'], 'worker heartbeat online in /api/monitor')
         worker = json.loads(run('docker', 'inspect', self.container('worker', 0), capture_output=True, text=True).stdout)[0]
@@ -1148,6 +1237,11 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         with (self.temp / 'objects.tar.gz').open('rb') as source:
             self.compose('run', '--rm', '--no-deps', '-T', '--user', '0', '--entrypoint', 'sh', 'rustfs', '-c',
                          'tar -xzf - -C /data && chown -R 10001:10001 /data', stdin=source, stdout=subprocess.DEVNULL)
+        # Mandatory before any host starts: the backup's sessions are revoked and only the confirmed operator stays active.
+        reset = self.compose('run', '--rm', '--no-deps', '--entrypoint', 'dotnet', 'migrate', '/app/Vessel.Api.dll', 'identity',
+                             'reset-after-restore', '--keep-active', self.owner, capture_output=True, text=True, check=False)
+        self.expect(reset.returncode == 0 and self.sql('SELECT count(*) FROM identity.sessions WHERE revoked_at IS NULL') == '0',
+                    'identity reset-after-restore revokes every restored session before any host starts', reset.stdout[-300:])
         rotated = self.compose('run', '--rm', '--no-deps', '--entrypoint', 'dotnet', 'migrate', '/app/Vessel.Api.dll', 'rotate-event-epoch',
                                capture_output=True, text=True)
         self.expect('Rotated the event stream epoch for 1 owner' in rotated.stdout, 'rotate-event-epoch before any host starts', rotated.stdout)
@@ -1155,6 +1249,8 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         self.quiet('run', '--rm', 'migrate')
         self.quiet('up', '-d', '--wait')
         self.ready()
+        self.expect(self.request('/api/auth/session')[0] == 401, 'the restored, reset session no longer authenticates')
+        self.sign_in()
         self.expect(self.play(self.p1)['summary']['status'] == 'closed' and self.play(self.p4)['summary']['status'] == 'closed',
                     'restored Plays keep their lifecycle')
         page = self.api(f'/api/events?after={old_cursor}&limit=10')
@@ -1197,42 +1293,65 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
 
     # ---- browser -------------------------------------------------------------------------------------
 
-    def playwright(self):
-        """The (mount, module path) of playwright-core for the pinned Playwright image.
+    def tools(self):
+        """The (mounts, playwright-core path, @noble directory) for the pinned Playwright image.
 
-        A supplied --playwright-module is mounted read-only. Otherwise playwright-core is installed once per run with the
-        repository's pinned pnpm (through Corepack inside the same image) into a run-owned Docker volume, so a fresh
-        machine needs only Docker and Python. The volume is removed with the run.
+        A supplied --playwright-module and an absolute NOBLE_MODULE_DIR (holding @noble/curves and @noble/hashes) are
+        mounted read-only. Whatever is missing is installed once per run with the repository's pinned pnpm (through
+        Corepack inside the same image) into a run-owned Docker volume, so a fresh machine needs only Docker and Python.
+        The volume is removed with the run.
         """
+        if self.tool_paths:
+            return self.tool_paths
+        mounts, packages = [], []
         if self.args.playwright_module:
             module = Path(self.args.playwright_module)
             self.expect(module.exists(), 'supplied playwright-core module exists', module)
-            return f'{module.parent}:/playwright:ro', f'/playwright/{module.name}'
-        if not self.playwright_volume:
+            mounts.append(f'{module.parent}:/playwright:ro')
+            playwright = f'/playwright/{module.name}'
+        else:
+            packages.append(f'playwright-core@{PLAYWRIGHT_VERSION}')
+            playwright = '/tools/node_modules/playwright-core'
+        noble = os.environ.get('NOBLE_MODULE_DIR')
+        if noble:
+            self.expect(Path(noble).is_absolute() and (Path(noble) / '@noble' / 'curves').is_dir() and (Path(noble) / '@noble' / 'hashes').is_dir(),
+                        'supplied NOBLE_MODULE_DIR holds @noble/curves and @noble/hashes', noble)
+            mounts.append(f'{noble}:/noble:ro')
+            noble = '/noble'
+        else:
+            packages += [f'@noble/curves@{NOBLE_VERSION}', f'@noble/hashes@{NOBLE_VERSION}']
+            noble = '/tools/node_modules'
+        if packages:
             pnpm = json.loads((ROOT / 'package.json').read_text())['packageManager']
             volume = self.name + '-playwright'
             run('docker', 'volume', 'create', '--label', f'{RUN_LABEL}={self.name}', volume, stdout=subprocess.DEVNULL)
             self.playwright_volume = volume
             try:
-                self.standalone('playwright-install', ['-e', 'HOME=/tmp', '-e', 'COREPACK_ENABLE_DOWNLOAD_PROMPT=0', '-v', f'{volume}:/cache',
-                                                       '-w', '/cache', PLAYWRIGHT_IMAGE, 'sh', '-ec',
-                                                       f'echo \'{{"private":true}}\' > package.json && '
-                                                       f'corepack {pnpm} add --save-exact playwright-core@{PLAYWRIGHT_VERSION}'], timeout=600)
+                self.standalone('tools-install', ['-e', 'HOME=/tmp', '-e', 'COREPACK_ENABLE_DOWNLOAD_PROMPT=0', '-v', f'{volume}:/cache',
+                                                  '-w', '/cache', PLAYWRIGHT_IMAGE, 'sh', '-ec',
+                                                  f'echo \'{{"private":true}}\' > package.json && '
+                                                  f'corepack {pnpm} add --save-exact {" ".join(packages)}'], timeout=600)
                 installed = ''
             except CommandFailed as error:
                 installed = str(error)
-            self.expect(not installed, f'playwright-core {PLAYWRIGHT_VERSION} installed with {pnpm} for the pinned image', installed)
-        return f'{self.playwright_volume}:/playwright:ro', '/playwright/node_modules/playwright-core'
+            self.expect(not installed, f'{", ".join(packages)} installed with {pnpm} for the pinned image', installed)
+            mounts.append(f'{volume}:/tools:ro')
+        self.tool_paths = (mounts, playwright, noble)
+        return self.tool_paths
 
     def browser(self, phase):
-        mount, module = self.playwright()
-        env = {'E2E_URL': f'http://127.0.0.1:{self.http_port}', 'E2E_TOKEN': self.token, 'E2E_PHASE': phase,
+        mounts, module, noble = self.tools()
+        # The page signs in with the same synthetic operator EOA; E2E_SESSION is the harness's own second client.
+        env = {'E2E_URL': self.base, 'E2E_SESSION': self.session_cookie, 'E2E_USER': self.owner, 'E2E_PHASE': phase,
+               'NOBLE_MODULE_DIR': noble, 'VESSEL_RELEASE_SYNTHETIC': '1',
                'E2E_CONTROL': f'http://127.0.0.1:{self.control_port}', 'E2E_OUT': '/artifacts', 'PLAYWRIGHT_MODULE': module,
                'E2E_IDS': json.dumps({'account': self.account, 'accountName': 'E2E Hyperliquid', 'address': self.address,
                                       'p1': self.p1, 'p2': self.p2, 'p3': getattr(self, 'p3', None), 'p1_target': self.p1_orders['target'],
                                       'p1_stop2': self.p1_orders['stop2'], 'p3_entry': getattr(self, 'p3_entry', None), **self.ids})}
-        arguments = ['--network', 'host', '--ipc=host', '-v', f'{ROOT / "scripts" / "e2e"}:/e2e:ro', '-v', mount,
-                     '-v', f'{self.artifacts}:/artifacts']
+        arguments = ['--network', 'host', '--ipc=host', '-v', f'{ROOT / "scripts" / "e2e"}:/e2e:ro',
+                     '-v', f'{SIGNER}:/wallet-test-signer.cjs:ro', '-v', f'{self.artifacts}:/artifacts']
+        for mount in mounts:
+            arguments += ['-v', mount]
         for key in env:
             arguments += ['-e', key]
         arguments += [PLAYWRIGHT_IMAGE, 'node', '/e2e/browser-e2e.cjs']
@@ -1256,8 +1375,9 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
 
     # ---- driver --------------------------------------------------------------------------------------
 
-    STATE = ('name', 'project', 'projects', 'token', 'owner', 'database_password', 'broker_password', 'app_password', 's3_access',
-             's3_secret', 'http_port', 'broker_port', 'control_port', 'network', 'address', 'account', 'portfolio', 'p1', 'p2', 'p3',
+    STATE = ('name', 'project', 'projects', 'owner', 'database_password', 'broker_password', 'app_password', 's3_access',
+             's3_secret', 'https_port', 'redirect_port', 'broker_port', 'control_port', 'network', 'address', 'wallet_address',
+             'account', 'portfolio', 'p1', 'p2', 'p3',
              'p4', 'p5', 'p1_orders', 'p2_entry', 'p2_exit', 'p3_entry', 'p4_orders', 'ids', 'head_cursor', 'mark_browser')
 
     def save_state(self):
@@ -1293,7 +1413,7 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         name = marker['name']
         if state.get('name') != name or state.get('projects') != [name, name + '-restore'] or state.get('project') not in state['projects']:
             raise ResumeRefused('saved state does not match the ownership marker')
-        missing = [key for key in ('token', 'owner', 'http_port', 'control_port', 'address', 'account') if key not in state]
+        missing = [key for key in ('owner', 'https_port', 'control_port', 'address', 'account') if key not in state]
         if missing:
             raise ResumeRefused('saved state is incomplete: ' + ', '.join(missing))
         projects = run('docker', 'compose', 'ls', '-a', '--format', 'json', capture_output=True, text=True, check=False)
@@ -1315,6 +1435,9 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         self.register_secrets()
         self.temp = self.owned_temp = candidate
         self.owned_projects = list(state['projects'])
+        # Sessions are never saved: sign in again with the synthetic operator wallet.
+        self.step = '0-resume'
+        self.sign_in()
         self.sse = SseReader(self, self.head())
         self.sse.start()
 
@@ -1322,14 +1445,14 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
         if self.sse:
             self.sse.close()
         failures = []
-        # Standalone containers never outlive the run, even with --keep: they hold the token and host networking.
+        # Standalone containers never outlive the run, even with --keep: they hold the session and host networking.
         listed = run('docker', 'ps', '-aq', '--filter', f'label={RUN_LABEL}={self.name}', capture_output=True, text=True, check=False)
         for container in listed.stdout.split():
             if run('docker', 'rm', '-f', container, capture_output=True, check=False).returncode:
                 failures.append('container ' + container)
         if self.args.keep:
-            print(f'Kept: projects {", ".join(self.owned_projects)}, directory {self.owned_temp}, web http://127.0.0.1:{self.http_port}, '
-                  f'fake control http://127.0.0.1:{self.control_port}, token in {self.owned_temp and self.owned_temp / ".env"}', flush=True)
+            print(f'Kept: projects {", ".join(self.owned_projects)}, directory {self.owned_temp}, web {self.base} '
+                  f'(sign in with synthetic wallet index 1), fake control http://127.0.0.1:{self.control_port}', flush=True)
         else:
             if self.owned_temp and self.temp == self.owned_temp:
                 for project in self.owned_projects:

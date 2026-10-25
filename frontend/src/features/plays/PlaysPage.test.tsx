@@ -19,6 +19,7 @@ import type { ImageMarkup } from '@/api/markup'
 import { createPlaysSession, describePlanChanges, draftFromSaved, planFromDraft, savedState, syncEvidence, type PlaysSession } from './saved'
 import { accountPicker, chooseInPicker } from '@/test/account-picker'
 import { retrospectiveSavedFixture } from '@/test/retrospective.fixtures'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const ids = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 
@@ -121,7 +122,7 @@ function Page({ api, accounts = [accountFixture], initial = createPlaysSession()
 }
 
 const client = (server: ReturnType<typeof fakeServer>, overrides: Partial<WorkspaceApi> = {}) =>
-  ({ ...createWorkspaceApi('test-only'), ...server.api, marketStream: idleMarketStream, ...overrides }) as unknown as WorkspaceApi
+  ({ ...createWorkspaceApi(credentialsFixture), ...server.api, marketStream: idleMarketStream, ...overrides }) as unknown as WorkspaceApi
 
 /** Plan it, through the pre-flight checklist these test plans open: they have no thesis or invalidation (phase 1, 1.5). */
 async function planIt(user: ReturnType<typeof userEvent.setup>) {

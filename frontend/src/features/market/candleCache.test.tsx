@@ -5,6 +5,7 @@ import { createWorkspaceApi, type CandleSeries, type VenueCandle, type Workspace
 import { candleSeriesFixture } from '@/test/workspace-fixture'
 import { candleCache, candleLimit, clearCandleCache, evictAccountCandles, pageLifetime } from './candleCache'
 import { useCandles } from './useCandles'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 function candle(time: number, trades = 10, close = '103'): VenueCandle {
   return { openTime: time, closeTime: time + 59_999, open: '100', high: '105', low: '95', close, volume: '20', trades }
@@ -20,7 +21,7 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 function setup(candles = vi.fn<WorkspaceApi['candles']>().mockResolvedValue(series(candle(60_000), candle(120_000)))) {
-  const api = { ...createWorkspaceApi('test-only'), candles }
+  const api = { ...createWorkspaceApi(credentialsFixture), candles }
   const cache = candleCache(api)
   const entry = cache.entry('lighter-main', 'BTC', '1m')
   return { api, cache, entry, candles }

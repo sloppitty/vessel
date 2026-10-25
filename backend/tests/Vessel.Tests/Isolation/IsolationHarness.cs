@@ -1,7 +1,5 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Security.Claims;
-using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Authentication;
@@ -10,8 +8,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Nethereum.Signer;
 using Npgsql;
 using Vessel.Application.Credentials;
@@ -21,42 +17,11 @@ using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
-using Vessel.Infrastructure.Auth;
 using Vessel.Infrastructure.Credentials;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 using Vessel.Tests.Identity;
 
 namespace Vessel.Tests.Isolation;
-
-/// <summary>
-/// Test-only authentication: the <see cref="Header"/> names the owner of each request and the handler issues the
-/// production owner claims (<see cref="JournalOwnerClaims"/>) with the production authentication type. Registered as
-/// the default scheme, so the bearer token path never runs in this suite. Not production code: Wallet mode
-/// authenticates sessions, never a header.
-/// </summary>
-internal sealed class TestOwnerAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
-    : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
-{
-    public const string SchemeName = "VesselIsolationTest";
-    public const string Header = "X-Vessel-Test-Owner";
-
-    /// <summary>
-    /// The identity's authentication type, as the production bearer handler sets it; the session scheme keeps the same
-    /// type. Wallet-mode cases do not use this handler: <see cref="WalletIsolationApi"/> runs the real session scheme.
-    /// </summary>
-    public const string AuthenticationType = BearerTokenHandler.SchemeName;
-
-    public static string NameOf(Guid owner) => "Owner " + owner.ToString("N")[..8];
-
-    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
-    {
-        if (!Request.Headers.TryGetValue(Header, out var value)) return Task.FromResult(AuthenticateResult.NoResult());
-        if (!Guid.TryParseExact(value.ToString(), "D", out var owner) || owner == Guid.Empty)
-            return Task.FromResult(AuthenticateResult.Fail("Invalid test owner."));
-        var identity = JournalOwnerClaims.Identity(owner, NameOf(owner), AuthenticationType);
-        return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName)));
-    }
-}
 
 /// <summary>A settable clock shared by the API under test; venue fixtures observe at <see cref="AccountHistoryOrders.At"/> + 1 day.</summary>
 internal sealed class IsolationClock : TimeProvider
@@ -142,7 +107,8 @@ public abstract class IsolationHost : IAsyncLifetime
             ["Vessel:Events:StreamPollSeconds"] = "1"
         };
         foreach (var (key, value) in Settings(database)) settings[key] = value;
-        factory = new CoreApiFactory(InstallationOwner, connection: database.ConnectionString, settings: settings, configure: services =>
+        factory = new CoreApiFactory(InstallationOwner, connection: database.ConnectionString, settings: settings,
+            testAuthentication: UsesTestScheme, configure: services =>
         {
             Configure(services);
             services.AddSingleton<IVenueRegistry>(registry);
@@ -152,13 +118,16 @@ public abstract class IsolationHost : IAsyncLifetime
         _ = factory.Server;
     }
 
+    /// <summary>Whether owners authenticate through the test scheme (<see cref="TestOwnerAuthHandler"/>) instead of wallet sessions.</summary>
+    private protected virtual bool UsesTestScheme => true;
+
     /// <summary>Runs once the journal schema exists, before the host starts.</summary>
     private protected virtual Task PrepareAsync(CoreDatabase journal) => Task.CompletedTask;
 
     /// <summary>Settings beside the suite's evidence root and stream poll interval.</summary>
     private protected virtual IEnumerable<KeyValuePair<string, string?>> Settings(CoreDatabase journal) => [];
 
-    protected abstract void Configure(IServiceCollection services);
+    protected virtual void Configure(IServiceCollection services) { }
 
     public async Task DisposeAsync()
     {
@@ -197,34 +166,24 @@ public abstract class IsolationHost : IAsyncLifetime
 }
 
 /// <summary>
-/// Token mode with the suite's test scheme: <see cref="TestOwnerAuthHandler"/> selects the owner from a header. The
-/// bearer token is configured but never sent.
+/// The suite's fast host: <see cref="TestOwnerAuthHandler"/> selects the owner from a header, with the request guard's
+/// tab binding and accepted origin, so many owners need no wallet sign-in. <see cref="WalletIsolationApi"/> repeats the
+/// cases through real wallet sessions.
 /// </summary>
 public sealed class IsolationApi : IsolationHost
 {
-    protected override void Configure(IServiceCollection services)
-    {
-        services.AddAuthentication().AddScheme<AuthenticationSchemeOptions, TestOwnerAuthHandler>(TestOwnerAuthHandler.SchemeName, _ => { });
-        services.PostConfigure<AuthenticationOptions>(options =>
-        {
-            options.DefaultScheme = TestOwnerAuthHandler.SchemeName;
-            options.DefaultAuthenticateScheme = TestOwnerAuthHandler.SchemeName;
-            options.DefaultChallengeScheme = TestOwnerAuthHandler.SchemeName;
-        });
-    }
-
     internal override Task<Owner> Owner(Guid id)
     {
         var client = Factory.CreateClient();
         // A stream answered where a 404 was expected must fail the case, not hang the run.
         client.Timeout = TimeSpan.FromSeconds(30);
-        client.DefaultRequestHeaders.Add(TestOwnerAuthHandler.Header, id.ToString("D"));
+        TestAuthentication.SignIn(client.DefaultRequestHeaders, id);
         return Task.FromResult(new Owner(id, client, Journal: Database.ConnectionString));
     }
 }
 
 /// <summary>
-/// Wallet mode as production runs it: the session scheme, the request guard and tab binding, over an identity schema
+/// Wallet sign-in as production runs it: the session scheme, the request guard and tab binding, over an identity schema
 /// with real migrations in the journal's database. Each owner is a seeded identity user with its own synthetic EOA
 /// that signs in through <c>/api/auth/challenge</c> and <c>/api/auth/verify</c>; its client then carries only the
 /// session cookie, <c>X-Vessel-User</c> and the accepted <c>Origin</c>. No test scheme and no token exist here.
@@ -242,9 +201,11 @@ public sealed class WalletIsolationApi : IsolationHost
 
     private protected override async Task PrepareAsync(CoreDatabase journal) => identity = await IdentityDatabase.CreateAsync();
 
+    private protected override bool UsesTestScheme => false;
+
     private protected override IEnumerable<KeyValuePair<string, string?>> Settings(CoreDatabase journal) => new Dictionary<string, string?>
     {
-        ["Vessel:Auth:Mode"] = "Wallet", ["Vessel:Auth:Token"] = null, ["Vessel:Auth:OwnerId"] = InstallationOwner.ToString(),
+        ["Vessel:Auth:OwnerId"] = InstallationOwner.ToString(),
         ["Vessel:Identity:Schema"] = Identity.Schema.Name, ["Vessel:Identity:Origins:0"] = Origin,
         ["ConnectionStrings:Vessel"] = journal.ConnectionString
     };
@@ -312,8 +273,8 @@ public sealed class WalletIsolationApi : IsolationHost
 internal sealed record WalletLogin(EthECKey Key, Guid Wallet, Guid Session);
 
 /// <summary>
-/// An owner's HTTP client. In Token mode every request carries only the test owner header, never a bearer token; in
-/// Wallet mode only the session cookie and the tab-binding and origin headers (<see cref="Login"/>). The
+/// An owner's HTTP client. With the test scheme every request carries the test owner header with the tab-binding and
+/// origin headers; through wallet sessions only the session cookie and those headers (<see cref="Login"/>). The
 /// <see cref="Journal"/> connection lets a <see cref="Snapshot"/> fingerprint the owner's persisted rows.
 /// </summary>
 internal sealed record Owner(Guid Id, HttpClient Http, WalletLogin? Login = null, string? Journal = null)

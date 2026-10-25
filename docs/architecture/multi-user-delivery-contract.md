@@ -9,6 +9,8 @@ On October 17 the owner asked to start orchestrating the work, with Opus and Sol
 
 Every required edit is applied or explicitly decided in §14, and the round-3 fixes are in §15. The discussion is recorded in [the review log](multi-user-review-log.md).
 
+**October 25, 2026 amendment: wallet sign-in only.** The owner removed Token sign-in. D3 is superseded: `Vessel:Auth:Mode` is retired (absent or `Wallet` is accepted, any other value refuses startup) and a nonempty `Vessel:Auth:Token` refuses startup in every environment, including `check-config` and the identity commands. The Token rows of §3, the bearer scheme and its limiter, the configured-owner directory (§9.1), `AlwaysValidPrincipal` (§9.5) and the `bearer` transport and Token gate of §11 no longer exist; `/api/auth/config` answers `{registration, originAccepted}`. Readiness always requires an active operator with a bound wallet. Workers no longer register authorization. Everything else stands, and §10 is still not signed off. State: [multi-user-state.md](multi-user-state.md#wallet-only-sign-in--october-25-2026).
+
 Where this contract and [the analysis](multi-user-wallet-auth.md) disagree, this contract wins. The screens are in [`docs/design/wallet-sign-in/`](../design/wallet-sign-in/README.md).
 
 Implementers must not decide anything this contract leaves open. Ask the orchestrator instead.
@@ -21,7 +23,7 @@ The owner has not answered D1–D12. These are the working defaults, adopted fro
 | --- | --- |
 | D1 | Registration policy `Invitation` by default. Policies: `Closed`, `Invitation`, `AllowList`, `Open`. Wallet mode forces `Closed` in code until B2 (§10). |
 | D2 | The configured owner GUID becomes user 1 through the idempotent `identity ensure-owner` command (role `operator`). The owner's wallet is attached with `identity bind-wallet`. No migration seeds data. |
-| D3 | `Vessel:Auth:Mode` = `Token` (the default when the key is absent) or `Wallet`. The default is never flipped implicitly. In Wallet mode the bearer scheme is not registered, and startup fails if `Vessel:Auth:Token` is set. |
+| D3 | *(Superseded October 25, 2026: wallet sign-in only; see the amendment above.)* `Vessel:Auth:Mode` = `Token` (the default when the key is absent) or `Wallet`. The default is never flipped implicitly. In Wallet mode the bearer scheme is not registered, and startup fails if `Vessel:Auth:Token` is set. |
 | D4 | No WalletConnect and no CSP change. |
 | D5 | Regular wallets (EOAs) only. Unsupported signature formats get their own code; Vessel never claims to know the wallet type. |
 | D6 | Several wallets per user; the last one cannot be removed. Wallet changes are serialized per user. |
