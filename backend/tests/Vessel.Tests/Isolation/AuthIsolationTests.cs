@@ -13,7 +13,7 @@ using Vessel.Tests.Identity;
 namespace Vessel.Tests.Isolation;
 
 /// <summary>
-/// Contract §12 C1 and A2 in Wallet mode: two signed-in users' sessions, wallets, step-up grants, profiles and tab
+/// Contract §12 C1 and A2: two signed-in users' sessions, wallets, step-up grants, profiles and tab
 /// binding, and suspension. Another user's session or wallet ID answers exactly like an unknown one, and every
 /// refused attempt leaves both users' identity state unchanged.
 /// </summary>
@@ -272,7 +272,7 @@ public sealed class AuthIsolationTests(WalletIsolationApi api) : IClassFixture<W
             using var response = await a.Http.SendAsync(probe);
             Assert.Equal(a.Id, (await Isolated.Json(response, HttpStatusCode.OK)).GetProperty("user").GetProperty("id").GetGuid());
         }
-        // Neither the suite's Token-mode test header nor a tab binding alone authenticates anyone in Wallet mode.
+        // Neither the suite's test-scheme header nor a tab binding alone authenticates anyone through wallet sessions.
         using var anonymous = api.Client();
         anonymous.DefaultRequestHeaders.Add(TestOwnerAuthHandler.Header, a.Id.ToString("D"));
         anonymous.DefaultRequestHeaders.Add("X-Vessel-User", a.Id.ToString());

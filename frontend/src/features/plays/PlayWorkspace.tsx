@@ -316,7 +316,6 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           title={lockDirection ? 'An entry has filled, so the direction stays. Start a new play for the opposite idea.' : undefined} />
       </div>
       <div className="plays-context-status"><span className="field-label">Status</span><span className="plays-status-pills">
-        {paper && <span className="badge">Paper · simulated</span>}
         <span className={`badge play-status-${status}`} title={readOnly && !retrospective ? 'The plan is kept as it was; review and images can change' : undefined}>{statusLabels[status]}</span>
         {revision !== null && <span className="badge play-revision" title="Saved plan changes ask for a reason">Revision {revision}</span>}
         {retrospective && <InfoTip className="badge play-retrospective" trigger="Retrospective">

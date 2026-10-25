@@ -14,6 +14,7 @@ import type { InAppNotifications } from '@/features/notifications/useInAppNotifi
 import { ReviewPage } from './ReviewPage'
 import { ReviewSettings } from './ReviewSettings'
 import { readReviewPreferences, useReviewPreferences } from './reviewPreferences'
+import { credentialsFixture, shellIdentityFixture } from '@/test/identity-fixture'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -72,7 +73,7 @@ describe('Review positions round 2 regressions (Sol review)', () => {
   it('commits Enter in the real Settings layout without submitting either sibling form', async () => {
     const user = userEvent.setup()
     const api = {
-      ...createWorkspaceApi('test'),
+      ...createWorkspaceApi(credentialsFixture),
       notificationPreferences: vi.fn().mockResolvedValue(notificationPreferencesFixture),
     }
     const inApp: InAppNotifications = {
@@ -81,7 +82,7 @@ describe('Review positions round 2 regressions (Sol review)', () => {
       cursor: () => null, acceptHead: vi.fn(), subscribe: () => () => {},
       markRead: vi.fn().mockResolvedValue(notificationFixture), openLink: vi.fn(),
     }
-    const { container } = render(<NotificationProvider><SettingsPage system={systemFixture} api={api}
+    const { container } = render(<NotificationProvider><SettingsPage identity={shellIdentityFixture()} system={systemFixture} api={api}
       inApp={inApp} disconnectSession={vi.fn()} onAccounts={vi.fn()} /></NotificationProvider>)
     await screen.findByRole('button', { name: 'Save notifications' })
     const submit = vi.fn()
@@ -139,7 +140,7 @@ describe('Review positions round 2 regressions (Sol review)', () => {
     const review = vi.fn()
       .mockImplementationOnce(() => new Promise<ReviewDocument>(resolve => { resolveFirst = resolve }))
       .mockImplementation(async (query: ReviewQuery) => report(query))
-    const api = { ...createWorkspaceApi('test'), review }
+    const api = { ...createWorkspaceApi(credentialsFixture), review }
     render(<ReviewPage api={api} reloadGeneration={0} onOpenPlay={vi.fn()} />)
     await waitFor(() => expect(review).toHaveBeenCalledTimes(1))
     const signal = review.mock.calls[0]![1] as AbortSignal
@@ -163,7 +164,7 @@ describe('Review positions round 2 regressions (Sol review)', () => {
       })))
     })
     vi.stubGlobal('fetch', fetch)
-    render(<StrictMode><ReviewPage api={createWorkspaceApi('test')} reloadGeneration={0} onOpenPlay={vi.fn()} /></StrictMode>)
+    render(<StrictMode><ReviewPage api={createWorkspaceApi(credentialsFixture)} reloadGeneration={0} onOpenPlay={vi.fn()} /></StrictMode>)
     await screen.findByRole('region', { name: 'Performance scorecard' })
     const toggle = screen.getByRole('switch', { name: 'Include imported positions' })
     expect(toggle).toBeChecked()
@@ -186,7 +187,7 @@ describe('Review positions round 2 regressions (Sol review)', () => {
     const user = userEvent.setup()
     const review = vi.fn(async (query: ReviewQuery) => report(query,
       query.portfolio === 'unassigned' ? { ...emptyReview, options: reviewFixture.options } : reviewFixture))
-    render(<ReviewPage api={{ ...createWorkspaceApi('test'), review }} reloadGeneration={0} onOpenPlay={vi.fn()} />)
+    render(<ReviewPage api={{ ...createWorkspaceApi(credentialsFixture), review }} reloadGeneration={0} onOpenPlay={vi.fn()} />)
     await screen.findByRole('region', { name: 'Performance scorecard' })
     if (mode !== 'auto') {
       await user.click(screen.getByRole('switch', { name: 'Include imported positions' }))
@@ -217,7 +218,7 @@ describe('Review positions round 2 regressions (Sol review)', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ status: 409, detail }), { status: 409 }))
       .mockResolvedValueOnce(new Response(body))
     vi.stubGlobal('fetch', fetch)
-    render(<ReviewPage api={createWorkspaceApi('test')} reloadGeneration={0} onOpenPlay={vi.fn()} />)
+    render(<ReviewPage api={createWorkspaceApi(credentialsFixture)} reloadGeneration={0} onOpenPlay={vi.fn()} />)
     await screen.findByRole('region', { name: 'Performance scorecard' })
     await user.click(screen.getByRole('button', { name: 'Reload review' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(detail)
@@ -237,7 +238,7 @@ describe('Review positions round 2 regressions (Sol review)', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ status: 409, detail }), { status: 409 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(report({ period: 'month', portfolio: 'all', positions: 'include' }))))
     vi.stubGlobal('fetch', fetch)
-    render(<ReviewPage api={createWorkspaceApi('test')} reloadGeneration={0} onOpenPlay={vi.fn()} />)
+    render(<ReviewPage api={createWorkspaceApi(credentialsFixture)} reloadGeneration={0} onOpenPlay={vi.fn()} />)
     await user.click(await screen.findByRole('button', { name: 'Inspect Swing trading' }))
     const dialog = await screen.findByRole('dialog')
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(detail)
@@ -273,7 +274,7 @@ describe('Review positions round 2 regressions (Sol review)', () => {
       return new Response(JSON.stringify(report(query, query.instrument ? reviewFixture : base)))
     })
     vi.stubGlobal('fetch', fetch)
-    render(<ReviewPage api={createWorkspaceApi('test')} reloadGeneration={0} onOpenPlay={vi.fn()} />)
+    render(<ReviewPage api={createWorkspaceApi(credentialsFixture)} reloadGeneration={0} onOpenPlay={vi.fn()} />)
     await screen.findByRole('region', { name: 'Performance scorecard' })
     expect(screen.getByRole('switch')).not.toBeChecked()
     await user.click(screen.getByRole('button', { name: new RegExp(label) }))

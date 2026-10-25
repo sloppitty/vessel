@@ -13,10 +13,11 @@ import type { PlayStatus } from '@/api/plays'
 import { systemFixture } from '@/test/system-fixture'
 import { accountPicker, chooseInPicker } from '@/test/account-picker'
 import { preferenceKey } from '@/lib/preference-scope'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 function Workspace({ disabled = false, status = 'draft', retrospective = false }: { disabled?: boolean; status?: PlayStatus; retrospective?: boolean }) {
   const [draft, setDraft] = useState(createDraft)
-  return <PlayWorkspace accounts={[{ ...accountFixture, isEnabled: !disabled }]} portfolios={[portfolioFixture]} api={createWorkspaceApi('test-only')} draft={draft} onChange={setDraft}
+  return <PlayWorkspace accounts={[{ ...accountFixture, isEnabled: !disabled }]} portfolios={[portfolioFixture]} api={createWorkspaceApi(credentialsFixture)} draft={draft} onChange={setDraft}
     status={status} retrospective={retrospective} />
 }
 
@@ -127,7 +128,7 @@ describe('Play draft workspace', () => {
   })
 
   it('does not claim accounts are empty while the account context is still loading', () => {
-    render(<PlayWorkspace accounts={[]} portfolios={[]} api={createWorkspaceApi('test-only')} draft={createDraft()} onChange={vi.fn()} loading />)
+    render(<PlayWorkspace accounts={[]} portfolios={[]} api={createWorkspaceApi(credentialsFixture)} draft={createDraft()} onChange={vi.fn()} loading />)
     expect(accountPicker('Account')).toHaveAccessibleName('Account Choose an account')
     expect(accountPicker('Account')).toBeDisabled()
     expect(screen.getByRole('textbox', { name: 'Play title' })).toBeEnabled()
@@ -137,7 +138,7 @@ describe('Play draft workspace', () => {
     const draft = { ...createDraft(), accountId: accountFixture.id, budgetOverride: '50' }
     const onChange = vi.fn()
     const second = { ...accountFixture, id: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', name: 'Second wallet' }
-    render(<PlayWorkspace accounts={[accountFixture, second]} portfolios={[portfolioFixture]} api={createWorkspaceApi('test-only')} draft={draft} onChange={onChange} />)
+    render(<PlayWorkspace accounts={[accountFixture, second]} portfolios={[portfolioFixture]} api={createWorkspaceApi(credentialsFixture)} draft={draft} onChange={onChange} />)
     await chooseInPicker('Account', second.name)
     expect(onChange).toHaveBeenCalledWith({ ...draft, accountId: second.id, instrument: '', instrumentSource: 'manual', budgetOverride: null })
   })
@@ -147,7 +148,7 @@ describe('Play draft workspace', () => {
     try {
       const draft = { ...createDraft(), accountId: accountFixture.id, size: '100', leverage: '1' }
       draft.entries[0]!.price = '100'
-      render(<PlayWorkspace accounts={[accountFixture]} portfolios={[portfolioFixture]} api={createWorkspaceApi('test-only')} draft={draft} onChange={vi.fn()} />)
+      render(<PlayWorkspace accounts={[accountFixture]} portfolios={[portfolioFixture]} api={createWorkspaceApi(credentialsFixture)} draft={draft} onChange={vi.fn()} />)
       expect(screen.getByRole('group', { name: 'Planned position money summary' })).toBeInTheDocument()
       expect(screen.queryByTestId('assumed-costs')).toBeNull()
     } finally {
@@ -157,7 +158,7 @@ describe('Play draft workspace', () => {
 
   it('does not display a selected account balance after that account becomes disabled', () => {
     const draft = { ...createDraft(), accountId: accountFixture.id }
-    render(<PlayWorkspace accounts={[{ ...accountFixture, isEnabled: false }]} portfolios={[portfolioFixture]} api={createWorkspaceApi('test-only')} draft={draft} onChange={vi.fn()} />)
+    render(<PlayWorkspace accounts={[{ ...accountFixture, isEnabled: false }]} portfolios={[portfolioFixture]} api={createWorkspaceApi(credentialsFixture)} draft={draft} onChange={vi.fn()} />)
     expect(accountPicker('Account')).toHaveAttribute('data-value', '')
     expect(within(screen.getByTestId('capital-context')).queryByText('$1,250.12')).not.toBeInTheDocument()
   })
@@ -192,7 +193,7 @@ describe('Play draft workspace', () => {
     const first = { ...accountFixture, venueId: 'hyperliquid' }
     const second = { ...first, id: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', name: 'Second wallet' }
     const instruments = vi.fn().mockResolvedValue(instrumentCatalogFixture)
-    const api = { ...createWorkspaceApi('test-only'), instruments }
+    const api = { ...createWorkspaceApi(credentialsFixture), instruments }
     render(<AccountWorkspace accounts={[first, second]} api={api} />)
     await chooseInPicker('Account', first.name)
     await pickInstrument(userEvent, 'BTC')
@@ -210,7 +211,7 @@ describe('Play draft workspace', () => {
   it('keeps leverage within the venue maximum of the chosen contract', async () => {
     const wallet = { ...accountFixture, venueId: 'hyperliquid' }
     const user = userEvent.setup()
-    render(<AccountWorkspace accounts={[wallet]} api={{ ...createWorkspaceApi('test-only'), ...catalogueApi }} />)
+    render(<AccountWorkspace accounts={[wallet]} api={{ ...createWorkspaceApi(credentialsFixture), ...catalogueApi }} />)
     await chooseInPicker('Account', wallet.name, user)
     await pickInstrument(user, 'BTC')
     await user.click(screen.getByRole('button', { name: '25×' }))
@@ -223,7 +224,7 @@ describe('Play draft workspace', () => {
 
   it('filters accounts by real portfolio and unassigned grouping without inventing a portfolio', async () => {
     const unassigned = { ...accountFixture, id: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', name: 'Unassigned broker', portfolioId: null }
-    const api = createWorkspaceApi('test-only')
+    const api = createWorkspaceApi(credentialsFixture)
     render(<AccountWorkspace accounts={[accountFixture, unassigned]} api={api} />)
     await chooseInPicker('Account', accountFixture.name)
     await userEvent.type(screen.getByRole('textbox', { name: 'Perpetual instrument' }), 'Manual contract')
@@ -237,7 +238,7 @@ describe('Play draft workspace', () => {
   })
 
   it('keeps the draft and shows All accounts if a metadata reload moves its account out of the selected portfolio', async () => {
-    const api = createWorkspaceApi('test-only')
+    const api = createWorkspaceApi(credentialsFixture)
     const view = render(<AccountWorkspace accounts={[accountFixture]} api={api} />)
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Portfolio' }), portfolioFixture.id)
     await chooseInPicker('Account', accountFixture.name)

@@ -3,8 +3,8 @@ using System.Globalization;
 namespace Vessel.Application.Ownership;
 
 /// <summary>
-/// The single configured journal owner. Authentication, messaging hosts and tools read the same key and default,
-/// so a message owner is always validated against the owner the API authenticates.
+/// The configured installation owner: the operator that <c>identity ensure-owner</c> creates with this ID, so the
+/// journal that existed before wallet sign-in keeps its owner. Every host and tool reads the same key and default.
 /// </summary>
 public static class JournalOwner
 {

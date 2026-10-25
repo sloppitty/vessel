@@ -4,6 +4,7 @@ import { createWorkspaceApi } from './workspace'
 import { isSavedPlay, isPlayPlan, emptyStructuredReview, type SavedPlay } from './plays'
 import { createDraft } from '@/features/plays/draft'
 import { planFromDraft } from '@/features/plays/saved'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const id = '00000000-0000-4000-8000-000000000001'
 const at = '2026-10-13T10:00:00Z'
@@ -59,13 +60,13 @@ describe('diary boundary', () => {
   it('writes authenticated no-store requests and preserves payload retry identity', async () => {
     const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify(ledger()), { status: 200 }))
     try {
-      const api = createWorkspaceApi('test-only')
+      const api = createWorkspaceApi(credentialsFixture)
       await api.addManualExecution!(id, input)
       await api.addManualExecution!(id, input)
       const calls = fetcher.mock.calls
       expect(calls[0]![0]).toBe(`/api/plays/${id}/manual-executions`)
-      expect(calls[0]![1]).toMatchObject({ method: 'POST', cache: 'no-store', credentials: 'omit',
-        headers: { Authorization: 'Bearer test-only' }, body: JSON.stringify(input) })
+      expect(calls[0]![1]).toMatchObject({ method: 'POST', cache: 'no-store', credentials: 'same-origin', referrerPolicy: 'same-origin',
+        headers: { 'X-Vessel-User': credentialsFixture.userId }, body: JSON.stringify(input) })
       expect(calls[1]![1]!.body).toEqual(calls[0]![1]!.body)
       await api.correctManualExecution!(id, id, { ...input, reason: 'Statement fix' })
       expect(fetcher.mock.lastCall![0]).toBe(`/api/plays/${id}/manual-executions/${id}`)
@@ -75,7 +76,7 @@ describe('diary boundary', () => {
   it('rejects invalid inputs before fetch and propagates stale writes without retrying them', async () => {
     const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ error: 'Reload the Play.' }), { status: 409 }))
     try {
-      const api = createWorkspaceApi('test-only')
+      const api = createWorkspaceApi(credentialsFixture)
       await expect(api.addManualExecution!(id, { ...input, quantity: '1e200' })).rejects.toMatchObject({ kind: 'invalid-response' })
       expect(fetcher).not.toHaveBeenCalled()
       await expect(api.addManualExecution!(id, input)).rejects.toMatchObject({ status: 409 })
