@@ -148,7 +148,7 @@ describe('Play draft workspace', () => {
     try {
       const draft = { ...createDraft(), accountId: accountFixture.id, size: '100', leverage: '1' }
       draft.entries[0]!.price = '100'
-      render(<PlayWorkspace accounts={[accountFixture]} portfolios={[portfolioFixture]} api={createWorkspaceApi('test-only')} draft={draft} onChange={vi.fn()} />)
+      render(<PlayWorkspace accounts={[accountFixture]} portfolios={[portfolioFixture]} api={createWorkspaceApi(credentialsFixture)} draft={draft} onChange={vi.fn()} />)
       expect(screen.getByRole('group', { name: 'Planned position money summary' })).toBeInTheDocument()
       expect(screen.queryByTestId('assumed-costs')).toBeNull()
     } finally {
