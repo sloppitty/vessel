@@ -949,6 +949,36 @@ own security headers, without duplicate nginx headers. Nginx gzip is disabled
 for `/api` and `/health`; it passes backend-selected market-data compression
 unchanged and compresses static assets only.
 
+## Journal search index
+
+October 22, 2026 (Phase 2, item 13). Journal-wide search and the Plays list's
+exit time, result and estimated R read a search projection: the tables
+`play_search` and `play_search_texts`, added by the journal migration
+`JournalSearch`. Every change to a Play writes its projection in the same
+transaction, but Plays that existed before the upgrade have none until it is
+filled once. Until then search counts them as "not indexed yet" and the list
+shows "Result not indexed yet"; nothing is guessed.
+
+Run the offline command once, after `migrate` has applied the migration. It
+dry-runs by default:
+
+```sh
+# Counts each owner's Plays that are not indexed yet; writes nothing.
+docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll play-search-rebuild
+# Indexes them in batches of 100 Plays per transaction (--batch 1-500).
+docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll play-search-rebuild --apply
+```
+
+- It reads only `ConnectionStrings__Vessel`. It starts no HTTP listener and
+  applies no schema migration. It never changes Plays, plans, reviews,
+  executions or any other journal fact.
+- It takes the same per-Play locks as the API and workers, so hosts may keep
+  running. Batches already committed stay indexed after a failure or Ctrl+C.
+- Running it again finds nothing left to do. `--all` rebuilds every Play's
+  projection, for example after a later release changes what it holds.
+- Use the same overlay set as `migrate`. Backups need nothing new: the
+  projection is derived data and can always be rebuilt from the journal.
+
 ## Upgrade
 
 ### Moving from the API token to wallet sign-in

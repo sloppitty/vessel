@@ -534,3 +534,17 @@ next actions.
   stored with the structured review and listed in its history. A Play planned
   without a rule refuses an answer.
 
+
+## October 22, 2026: journal search (Phase 2, item 13)
+
+See `list-paging.md` for the projection, the endpoint and the rules.
+- The Plays page has a **Search the journal** box beside New play. It
+  searches the title, the plan's thesis, invalidation, strategy and evidence
+  notes, the review and its lesson, mistake tag and next action, the log and
+  the image notes.
+- Its results replace the tabs and list while a query is active, and each one
+  opens its Play. The list itself, its tabs and its title/instrument search
+  are unchanged.
+- Ended rows show their exit time, result and estimated R (F-07) in the meta
+  column, from the projection. The Play editor and its approved section
+  positions are unchanged.

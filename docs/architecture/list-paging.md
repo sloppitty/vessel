@@ -7,7 +7,9 @@ history grows. Decisions:
 - Plays uses the same pager for ended and mixed views. Drafts and In progress
   are shown in full because they stay small.
 - Drafts are split from In progress, and Closed from Cancelled.
-- Plays search covers title and instrument.
+- Plays search covers title and instrument. Since October 22, 2026, a
+  separate journal search covers the notes, review and log; see the last
+  section.
 - Loading shows a delayed skeleton that matches the row geometry.
 
 Research basis (October 16): the cost of an Activity request is the aggregation of
@@ -143,3 +145,101 @@ grouped query with the same search and scope.
   Closed stays Closed only. Counts carry `unresolved`, so Drafts + In progress
   + Closed + Cancelled + Unresolved = All, and Needs review + Reviewed =
   Closed + Cancelled + Unresolved. Older servers omit it.
+
+## Journal search and list outcomes
+
+October 22, 2026 (Phase 2, item 13, with F-07). See
+`phase2-risk-coverage-contract.md`. The paged list, its tabs, its counts and its
+title/instrument search are unchanged.
+
+**The projection.** Each Play has one `play_search` row and one
+`play_search_texts` row per searchable text (migration
+`20261022185604_JournalSearch`). It is derived data, never a fact.
+- The texts are the title, the current plan's thesis, invalidation, strategy
+  and evidence notes, the review note, lesson, mistake tag and next action,
+  each log entry and each image note. Blank texts are left out.
+- Each text is stored normalized (NFKC, every run of white space or control
+  characters one space, invisible format characters dropped, trimmed) and
+  case-folded with the same length, so a match position in the folded text is
+  the same in the shown text.
+- The row also holds the Play's outcome (F-07): a state (`active`, `scored`,
+  `executions`, `fees`, `unresolved` or `cancelled`), the latest actual exit
+  execution of a Closed Play, Review's scored result and its estimated R, and
+  why a scored Play has no R. They come from Review's own rules
+  (`ReviewService.Score` over the facts sizing and Review read, and
+  `PlayExitTime.LatestExit`). Unknown stays null, never zero. A Play's own
+  figures do not depend on whether its account is enabled; Review still
+  leaves disabled accounts out.
+
+**Written in the same unit of work.** Every save records what it touched on
+the context, whichever store makes it. Before the commit, one unit-of-work
+participant (`PlaySearchProjector`) reprojects those Plays from the database
+state of that transaction. A Play is reached directly (Plays, plan and review
+revisions, status changes, log entries, image notes, manual executions, order
+links, paper executions and simulations) or through its linked orders (an
+imported fill by the shared order-key rule, or an order whose status, size or
+position TP/SL flag changed). So Play saves and reviews, log appends, image
+note edits and deletions, venue lifecycle, manual corrections, retrospective
+Plays and paper evaluation all commit or roll back with their projection.
+- Each projected Play is locked first (an advisory lock per owner and Play,
+  in ID order, the last lock of the unit), so concurrent units take turns and
+  the later one reads what the earlier committed. A Play the unit deleted is
+  not locked; its rows cascade with it.
+- The Play rows are then read with a key-share lock, which no edit waits on.
+  A deletion that comes later waits for the projection to commit and its rows
+  cascade then; a Play deleted earlier is simply not projected (Sol round 1).
+- A read-only snapshot never writes the projection. A rolled-back unit keeps
+  what it touched for the next unit, since projecting a Play again is harmless.
+
+**Expiring exclusions (Sol round 1).** Review leaves out a Play with an
+execution dated after its own clock, and scores it once that time has passed.
+The row keeps that time as `RecheckAtUtc`, only on an `executions` outcome.
+From then the list and search compute that row's outcome again, by the same
+rules over the same snapshot, instead of serving the stored one. The read
+writes nothing. The next write to the Play, or the rebuild, stores the new
+outcome.
+
+**Initialization.** The migration creates empty tables. The offline
+`play-search-rebuild` command fills them once, dry run by default, with
+`--apply` and `--all`; see `deploy/README.md`. It also rewrites rows past their
+recheck time. Until a Play is projected with the current rules
+(`JournalSearch.Version`), search counts it as not indexed and the list shows
+its outcome as `not-indexed`.
+
+**`GET /api/plays/search?q=&offset=`** searches the requested trading mode
+(`?tradingMode=real|paper`, real when omitted). It is not a venue-fact
+feature, so paper is allowed.
+- `q` is trimmed and normalized like the stored text: 2 to 100 characters,
+  else 400. It is a case-insensitive substring of the folded text, with `\`,
+  `%` and `_` escaped. No PostgreSQL extension is used.
+- Like the unscoped list, it covers every owner Play in the mode, Plays on
+  disabled accounts included. A Play in the other mode or of another owner is
+  never found or counted.
+- `offset` is 0 to 1,000,000. Pages hold 50 Plays, newest updated first, as
+  Review's drill-downs do: `{ query, items, total, offset, nextOffset,
+  notIndexed }`.
+- Each item is the Play's list summary, the field of its first match (in the
+  field order above, then oldest log entry or image), an excerpt of about 160
+  characters around the match with an ellipsis where it was cut, and the
+  match's start and length in the excerpt.
+
+**List rows.** `PlaySummary.outcome` appears on list and search rows only:
+`{ state, exitAtUtc, resultUsd, estimatedR, reason }`, with `not-indexed`
+when the Play has no current projection. It is read for the page's IDs from
+the projection in the page's snapshot, never from the plan. The Play's own
+read keeps its receipt instead.
+
+**Browser.**
+- A "Search the journal" box sits beside New play. From two characters, after
+  the same pause as the list search, its results replace the tabs and list
+  until Clear search. Query and offset stay in shell memory with the list.
+  A finished owner action or an accepted stored-state reload (a Play the
+  monitor closed, say) reads the same results again, as it does the list.
+- Each result shows the Play as the list does (title, asset chip, venue logo,
+  account, direction, status), the matched field and the excerpt with the
+  match marked, and opens the Play. Previous and Next page by 50. A count of
+  Plays not indexed yet says search cannot find them.
+- An ended row's meta column adds "Exit <date> · <result> · Est. <R>". An
+  unknown exit, result or R reads as unknown, with the reason in the row's
+  description; "Result not indexed yet", "Unresolved · no result" and
+  "No result" (Cancelled) say why there is none.

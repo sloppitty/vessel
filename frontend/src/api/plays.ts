@@ -108,8 +108,39 @@ export interface PlaySummary {
    */
   reviewCompletion?: ReviewCompletion | null
   reviewCompletedAtUtc?: string | null
+  /**
+   * List and search rows only (Phase 2, item 13, F-07): the Play's outcome from its search projection, never the plan.
+   * Absent from the Play's own read and from older servers.
+   */
+  outcome?: PlayOutcome
 }
 export type ReviewCompletion = 'completed' | 'not-needed' | 'legacy'
+/**
+ * An ended Play's latest actual exit, Review's scored result and estimated R (planned-stop model). `not-indexed` means
+ * the projection does not hold the Play yet, which is never "no result"; unknown figures are null, never zero, and `reason`
+ * says why the result or R is unknown.
+ */
+export interface PlayOutcome {
+  state: PlayOutcomeState
+  exitAtUtc: string | null
+  resultUsd: string | null
+  estimatedR: string | null
+  reason: string | null
+}
+export const playOutcomeStates = ['not-indexed', 'active', 'scored', 'executions', 'fees', 'unresolved', 'cancelled'] as const
+export type PlayOutcomeState = typeof playOutcomeStates[number]
+/** The statuses each state belongs to, as the projection writes it with the status in one transaction. */
+const outcomeStatuses: Record<Exclude<PlayOutcomeState, 'not-indexed'>, readonly PlayStatus[]> = {
+  active: ['draft', 'planned', 'paused', 'open'], scored: ['closed'], executions: ['closed'], fees: ['closed'],
+  unresolved: ['unresolved'], cancelled: ['cancelled'],
+}
+export const isPlayOutcome = (v: unknown, status: PlayStatus): v is PlayOutcome => isRecord(v) &&
+  playOutcomeStates.includes(v.state as PlayOutcomeState) && isNullOr(v.exitAtUtc, x => isTimestamp(x, 64)) &&
+  isNullOr(v.resultUsd, isPlainDecimal) && isNullOr(v.estimatedR, isPlainDecimal) && isNullOr(v.reason, x => isText(x, 500)) &&
+  (v.state === 'not-indexed' || outcomeStatuses[v.state as Exclude<PlayOutcomeState, 'not-indexed'>].includes(status)) &&
+  // Figures come only with a scored result, R never without it, and an exit only for a Closed Play.
+  (v.state === 'scored') === (v.resultUsd !== null) && (v.estimatedR === null || v.resultUsd !== null) &&
+  (v.exitAtUtc === null || ['scored', 'executions', 'fees'].includes(v.state as string))
 /** An append-only in-trade log entry with an optional state; it never counts as a review. */
 export interface PlayNote { id: string; text: string; state: PlayNoteState | null; createdAtUtc: string }
 export const playNoteStates = ['calm', 'rushed', 'fomo', 'tired', 'after-loss'] as const
@@ -202,7 +233,8 @@ export const isPlaySummary = (v: unknown): v is PlaySummary => isRecord(v) &&
   (v.reviewedAtUtc === undefined || isNullOr(v.reviewedAtUtc, x => isTimestamp(x, timeLength))) &&
   (v.reviewCompletion === undefined || isNullOr(v.reviewCompletion, x => ['completed', 'not-needed', 'legacy'].includes(x as string))) &&
   (v.reviewCompletedAtUtc === undefined || isNullOr(v.reviewCompletedAtUtc, x => isTimestamp(x, timeLength))) &&
-  (v.reviewCompletion == null) === (v.reviewCompletedAtUtc == null)
+  (v.reviewCompletion == null) === (v.reviewCompletedAtUtc == null) &&
+  (v.outcome === undefined || isPlayOutcome(v.outcome, v.status as PlayStatus))
 export const isStructuredReview = (v: unknown): v is StructuredReview => isRecord(v) &&
   (v.adherence === null || ['followed', 'deviated', 'not-applicable'].includes(v.adherence as string)) &&
   isNullOr(v.mistakeTag, x => isText(x, 100)) && isText(v.lesson, 4000) && isText(v.nextAction, 4000) &&
@@ -329,6 +361,45 @@ export function isPlayCounts(v: unknown): v is PlayCounts {
   const c = v as PlayCounts
   const unresolved = c.unresolved ?? 0
   return c.drafts + c.progress + c.closed + c.cancelled + unresolved === c.all && c.review + c.reviewed === c.closed + c.cancelled + unresolved
+}
+
+/** Journal-wide search (Phase 2, item 13): the fields it reads, in the order a Play's first match is chosen. */
+export const journalFields = ['title', 'thesis', 'invalidation', 'strategy', 'evidence', 'review', 'lesson', 'mistakeTag', 'nextAction', 'log', 'image'] as const
+export type JournalField = typeof journalFields[number]
+export const journalFieldLabels: Record<JournalField, string> = {
+  title: 'Title', thesis: 'Thesis', invalidation: 'Invalidation', strategy: 'Strategy', evidence: 'Evidence notes',
+  review: 'Review note', lesson: 'Lesson', mistakeTag: 'Mistake tag', nextAction: 'Next action', log: 'Log entry', image: 'Image note',
+}
+export const journalSearchMin = 2
+export const journalSearchMax = 100
+export const journalSearchPageSize = 50
+/** One Play a search found: its first matching field, an excerpt around the match and where the match sits in it. */
+export interface JournalSearchHit { play: PlaySummary; field: JournalField; excerpt: string; matchStart: number; matchLength: number }
+/** A page of 50 Plays from `offset`, newest updated first; `notIndexed` Plays are not in the projection, so search cannot find them. */
+export interface JournalSearchPage { query: string; items: JournalSearchHit[]; total: number; offset: number; nextOffset: number | null; notIndexed: number }
+export interface JournalSearchQuery { q: string; offset?: number }
+
+/** A query the server accepts: trimmed, 2 to 100 characters. The server also normalizes it, so it may echo it shortened. */
+export const isJournalQuery = (q: string) => q.trim().length >= journalSearchMin && q.trim().length <= journalSearchMax
+export function journalSearchPath(query: JournalSearchQuery): string {
+  const q = query.q.trim()
+  if (!isJournalQuery(q) || query.offset !== undefined && !(isCount(query.offset) && query.offset <= 1_000_000)) invalidPlayQuery()
+  const params = new URLSearchParams({ q })
+  if (query.offset) params.set('offset', String(query.offset))
+  return `/api/plays/search?${params}`
+}
+const isJournalHit = (v: unknown): v is JournalSearchHit => isRecord(v) && isPlaySummary(v.play) &&
+  journalFields.includes(v.field as JournalField) && isText(v.excerpt, 400) && isCount(v.matchStart) && isCount(v.matchLength) &&
+  v.matchStart + v.matchLength <= v.excerpt.length
+/** One page: at most 50 distinct Plays, exactly as many as remain from its offset, and a next offset that follows them. */
+export function isJournalSearchPage(v: unknown, query: JournalSearchQuery): v is JournalSearchPage {
+  const offset = query.offset ?? 0
+  if (!isRecord(v) || !isText(v.query, journalSearchMax) || v.query.length < journalSearchMin || !isCount(v.total) || !isCount(v.notIndexed) ||
+    v.offset !== offset || !Array.isArray(v.items) || !v.items.every(isJournalHit)) return false
+  const items = v.items as JournalSearchHit[]
+  return items.length === Math.min(journalSearchPageSize, Math.max(0, v.total - offset)) &&
+    new Set(items.map(item => item.play.id)).size === items.length &&
+    (v.nextOffset === null ? offset + items.length >= v.total : v.nextOffset === offset + items.length && v.nextOffset < v.total)
 }
 
 export const statusLabels: Record<PlayStatus, string> = {

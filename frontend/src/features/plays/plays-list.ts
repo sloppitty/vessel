@@ -1,9 +1,12 @@
 import type { PlayView } from '@/api/plays'
 import { defaultPageSize, type PageSize } from '@/components/ui/paging'
 
-/** The Plays list view, search, page and size, kept in shell memory while a Play is open. */
-export interface PlaysListState { view: PlayView; q: string; page: number; pageSize: PageSize }
-export const initialPlaysList: PlaysListState = { view: 'progress', q: '', page: 1, pageSize: defaultPageSize }
+/**
+ * The Plays list view, search, page and size, kept in shell memory while a Play is open, with the journal search and its
+ * offset (Phase 2, item 13). A journal query shows its results in place of the list; the list keeps its own state meanwhile.
+ */
+export interface PlaysListState { view: PlayView; q: string; page: number; pageSize: PageSize; journal: string; journalOffset: number }
+export const initialPlaysList: PlaysListState = { view: 'progress', q: '', page: 1, pageSize: defaultPageSize, journal: '', journalOffset: 0 }
 
 export const playViewTabs: readonly { view: PlayView; label: string; description: string }[] = [
   { view: 'drafts', label: 'Drafts', description: 'Saved drafts, most recently updated first' },

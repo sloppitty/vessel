@@ -25,8 +25,8 @@ import {
   type AccountCredential, type AccountDiscovery,
 } from './account-access'
 import {
-  isNextAction, isPlayRuleState, isPlayCounts, isPlayNote, isPlayExecution, isPlayHistory, isPlayList, isSavedEvidence, isSavedPlay, playCountsPath, playListPath,
-  type LinkOrder, type NextAction, type PlayRuleState, type PlayNote, type PlayNoteState, type RebindLevel, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest, type UnresolvedReason,
+  isNextAction, isPlayRuleState, isPlayCounts, isPlayNote, isPlayExecution, isPlayHistory, isPlayList, isSavedEvidence, isSavedPlay, playCountsPath, playListPath, isJournalSearchPage, journalSearchPath,
+  type LinkOrder, type NextAction, type PlayRuleState, type PlayNote, type PlayNoteState, type RebindLevel, type PlayCounts, type PlayExecution, type PlayFields, type PlayHistory, type PlayList, type PlayListQuery, type SavedEvidence, type SavedPlay, type StatusRequest, type UnresolvedReason, type JournalSearchPage, type JournalSearchQuery,
 } from './plays'
 import { isSizingDocument, type SizingDocument } from './sizing'
 import { attachmentName, type DownloadedFile } from '@/lib/download'
@@ -433,6 +433,8 @@ export interface WorkspaceApi {
   plays(query: PlayListQuery, signal?: AbortSignal): Promise<PlayList>
   /** Rows in every view for the same search and scope. */
   playCounts(query: { q?: string; scope?: string }, signal?: AbortSignal): Promise<PlayCounts>
+  /** Journal-wide search in this client's mode (Phase 2, item 13): 50 Plays per page with their first matching field. */
+  searchJournal(query: JournalSearchQuery, signal?: AbortSignal): Promise<JournalSearchPage>
   play(id: string, signal?: AbortSignal): Promise<SavedPlay>
   createPlay(fields: PlayFields): Promise<SavedPlay>
   /** A plan change after planning needs `revisionReason`. A stale `expectedVersion` is a 409. */
@@ -868,6 +870,11 @@ export function createWorkspaceApi(credentials: SessionCredentials, onAuthFailur
       { ...workspaceRequest, validate: none, method: 'POST', body: JSON.stringify({ note: note ?? null }), ...withSignal(signal) }),
     plays: (query, signal) => call(playListPath(query), { ...playRequest, validate: (v): v is PlayList => isPlayList(v, query), ...withSignal(signal) }),
     playCounts: (query, signal) => call(playCountsPath(query), { ...playRequest, validate: isPlayCounts, ...withSignal(signal) }),
+    searchJournal: (query, signal) => {
+      let path: string
+      try { path = journalSearchPath(query) } catch (cause) { return Promise.reject(cause) }
+      return call(path, { ...playRequest, validate: (v): v is JournalSearchPage => isJournalSearchPage(v, query), ...withSignal(signal) })
+    },
     play: (id, signal) => call(playPath(id), { ...playRequest, validate: isSavedPlay, ...withSignal(signal) }),
     createPlay: fields => call('/api/plays', { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify(fields) }),
     updatePlay: (id, fields) => call(playPath(id), { ...playRequest, validate: isSavedPlay, method: 'PUT', body: JSON.stringify(fields) }),
