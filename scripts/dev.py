@@ -30,11 +30,12 @@ def configuration():
     # Explicit process environment takes precedence over the local development file.
     values.update(os.environ)
     env = dict(os.environ)
-    for key in ["Vessel__Auth__Token", "Vessel__Auth__OwnerId", "Vessel__Auth__OwnerName"]:
+    # The retired Token settings are passed on too, so a stale .env makes the API refuse to start instead of ignoring them.
+    for key in ["Vessel__Auth__OwnerId", "Vessel__Auth__OwnerName", "Vessel__Auth__Token", "Vessel__Auth__Mode"]:
         if key in values:
             env[key] = values[key]
     for key, value in values.items():
-        if configuration_key(key).startswith(("vessel:credentials:", "vessel:evidence:", "vessel:events:",
+        if configuration_key(key).startswith(("vessel:identity:", "vessel:credentials:", "vessel:evidence:", "vessel:events:",
                                               "vessel:messaging:", "vessel:monitor:", "vessel:notifications:",
                                               "vessel:worker:", "vessel:paper:")):
             env[key] = value
@@ -91,6 +92,19 @@ def configuration_key(key):
     return key.replace("__", ":")
 
 
+def with_identity_origins(env, host):
+    """Wallet sign-in accepts writes only from listed origins: default to the Vite page unless .env lists its own."""
+    if any(configuration_key(key).startswith("vessel:identity:origins:") for key in env):
+        return env
+    origins = [f"http://{host}:5180"] + (["http://localhost:5180"] if host == "127.0.0.1" else [])
+    return {**env, **{f"Vessel__Identity__Origins__{index}": origin for index, origin in enumerate(origins)}}
+
+
+def identity_command(arguments):
+    # Offline identity commands read the same settings; Development allows the plain-HTTP dev origin.
+    return ["dotnet", "run", "--project", "backend/src/Vessel.Api", "--no-launch-profile", "--", "identity", *arguments]
+
+
 def frontend_environment():
     # This process loads Vite plugins as well as the client build. Keep server
     # credentials out of it, even when they came from the caller's environment.
@@ -116,20 +130,29 @@ def main():
     env = configuration()
     if mode in ["migrate", "run", "api", "worker", "lan"]:
         require_broker(env)
+    if mode == "identity":
+        # For example: python3 scripts/dev.py identity bind-wallet --user <owner GUID> --address 0x…
+        start_services()
+        command = {**with_identity_origins(env, "127.0.0.1"), "ASPNETCORE_ENVIRONMENT": "Development"}
+        raise SystemExit(subprocess.run(identity_command(sys.argv[2:]), cwd=ROOT, env=command).returncode)
     if mode == "migrate":
         start_services()
         subprocess.run(["dotnet", "tool", "restore"], cwd=ROOT / "backend", env=env, check=True)
-        subprocess.run(
-            ["dotnet", "ef", "database", "update", "--project", "src/Vessel.Persistence"],
-            cwd=ROOT / "backend", env=env, check=True,
-        )
+        for project in ["src/Vessel.Identity", "src/Vessel.Persistence"]:
+            subprocess.run(
+                ["dotnet", "ef", "database", "update", "--project", project],
+                cwd=ROOT / "backend", env=env, check=True,
+            )
+        # The configured owner becomes the operator user; binding its wallet stays an explicit step.
+        subprocess.run(identity_command(["ensure-owner"]), cwd=ROOT,
+                       env={**with_identity_origins(env, "127.0.0.1"), "ASPNETCORE_ENVIRONMENT": "Development"}, check=True)
         subprocess.run(
             ["dotnet", "run", "--project", "backend/src/Vessel.Api", "--no-launch-profile", "--", "provision-messaging"],
             cwd=ROOT, env=env, check=True,
         )
         return
     if mode not in ["run", "api", "worker", "lan"]:
-        raise SystemExit("Use run, api, worker, lan, or migrate.")
+        raise SystemExit("Use run, api, worker, lan, migrate, or identity.")
     host = "127.0.0.1"
     if mode == "lan":
         host = os.environ.get("Vessel_DEV_HOST", "")
@@ -139,9 +162,7 @@ def main():
             raise SystemExit("Set Vessel_DEV_HOST to the server's private LAN IPv4 address.") from None
         if address.version != 4 or not address.is_private or address.is_loopback or address.is_unspecified or address.is_multicast:
             raise SystemExit("LAN preview must bind an explicit private, non-loopback IPv4 address.")
-    token = env.get("Vessel__Auth__Token", "")
-    if not token or token.startswith("replace-"):
-        raise SystemExit("Set a private Vessel__Auth__Token in root .env or process environment first.")
+    env = with_identity_origins(env, host)
     start_services()
     processes = []
     def stop(*_):
@@ -163,6 +184,8 @@ def main():
             ))
         if mode in ["run", "worker", "lan"]:
             worker = ["dotnet", "run", "--project", "backend/src/Vessel.Worker", "--no-build", "--no-launch-profile"]
+            # Workers validate the same sign-in settings as the API, whose dev origin is plain HTTP.
+            env = {**env, "DOTNET_ENVIRONMENT": "Development"}
             processes.append(subprocess.Popen(worker, cwd=ROOT, env=env, start_new_session=True))
             # The Notification Hub is its own deployment with its own heartbeat file.
             processes.append(subprocess.Popen(worker, cwd=ROOT, env={
@@ -186,13 +209,15 @@ def main():
                                                           "/tmp/vessel-dev-paper-heartbeat"),
                 }, start_new_session=True))
         if mode in ["run", "lan"]:
-            # Do not give the frontend process database credentials or the API token.
+            # Do not give the frontend process database or broker credentials.
             processes.append(subprocess.Popen(
                 ["pnpm", "--filter", "vessel-frontend", "dev", "--host", host],
                 cwd=ROOT, env=frontend_environment(), start_new_session=True,
             ))
             print(f"Frontend: http://{host}:5180 · API: http://127.0.0.1:5080", flush=True)
             print("Workers run the monitor and notifications modules. Stop with Ctrl+C; PostgreSQL and RabbitMQ keep running.", flush=True)
+            print("Sign in with a browser wallet bound once by: python3 scripts/dev.py identity bind-wallet "
+                  "--user <owner GUID> --address <0x public address>", flush=True)
             if os.environ.get("Vessel_DEV_PAPER") == "1":
                 print("Optional paper worker runs separately; paper execution remains off until enabled in Settings.", flush=True)
         while True:

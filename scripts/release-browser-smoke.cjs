@@ -1,22 +1,30 @@
 // Production-image CSP check against verify-release.py's isolated synthetic API.
-// Playwright is supplied externally, never installed as an application dependency.
+// Playwright and the signer's NOBLE_MODULE_DIR are supplied externally, never installed as application dependencies.
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const assert = require('node:assert/strict')
+const { signer, exposeSyntheticWallet, signInWithSyntheticWallet } = require('./wallet-test-signer.cjs')
 
 async function main() {
   assert.equal(process.env.VESSEL_RELEASE_SYNTHETIC, '1')
-  assert.ok(process.env.VESSEL_RELEASE_URL && process.env.VESSEL_RELEASE_TOKEN && process.env.VESSEL_RELEASE_CHART_ACCOUNT)
+  assert.ok(process.env.VESSEL_RELEASE_URL && process.env.VESSEL_RELEASE_CHART_ACCOUNT)
+  // The synthetic operator wallet verify-release.py bound with `identity bind-wallet`.
+  const operator = await signer(1)
   const browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}) })
   const failures = [], violations = [], seen = new Set()
   let checks = 0
   const pass = label => { checks++; console.log(`PASS [browser] ${label}`) }
   try {
     const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1512, height: 1120 } })
+    await exposeSyntheticWallet(context, operator)
     const page = await context.newPage()
     const verifyMonitor = await require('./monitor-browser-smoke.cjs')(page, process.env.VESSEL_RELEASE_CHART_ACCOUNT)
     await page.exposeFunction('recordCspViolation', entry => violations.push(entry))
     await page.addInitScript(() => document.addEventListener('securitypolicyviolation', event => window.recordCspViolation({ directive: event.violatedDirective, blocked: event.blockedURI })))
-    page.on('console', message => { if (message.type() === 'error') failures.push(message.text()) })
+    // Before sign-in, the sign-in screen's session probe answers 401, which Chromium logs as a failed load.
+    let signedIn = false
+    page.on('console', message => {
+      if (message.type() === 'error' && (signedIn || !/status of 401 \(Unauthorized\)/.test(message.text()))) failures.push(message.text())
+    })
     page.on('pageerror', error => failures.push(error.message))
     // The app still uses its real same-origin fetch/chart/canvas code. Intercept
     // public market data only, to avoid all outbound venue requests in this check.
@@ -37,12 +45,10 @@ async function main() {
     })
     // Any unexpected external browser connection fails rather than calling a venue.
     await page.route(url => url.origin !== new URL(process.env.VESSEL_RELEASE_URL).origin, route => { failures.push('Unexpected external request: ' + new URL(route.request().url()).origin); return route.abort() })
-    await page.goto(process.env.VESSEL_RELEASE_URL)
-    await page.getByLabel('API token').fill(process.env.VESSEL_RELEASE_TOKEN)
-    await page.getByRole('button', { name: 'Connect', exact: true }).click()
-    await page.getByRole('region', { name: 'Overview summary', exact: true }).waitFor()
+    await signInWithSyntheticWallet(page, process.env.VESSEL_RELEASE_URL)
+    signedIn = true
     assert.ok(await page.getByRole('region', { name: 'Scoped overview totals' }).isVisible())
-    pass('login and new Overview summary use real synthetic API data')
+    pass('operator wallet sign-in and new Overview summary use real synthetic API data')
     await page.evaluate(() => document.fonts.ready)
     assert.ok(await page.evaluate(() => [...document.fonts].some(font => font.status === 'loaded')))
     pass('self-hosted fonts load')

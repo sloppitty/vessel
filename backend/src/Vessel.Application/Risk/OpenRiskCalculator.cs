@@ -45,6 +45,7 @@ public static class OpenRiskCalculator
     public const string Contradicting = "A linked fill contradicts its role.";
     public const string Units = "The quote asset is not a listed USD stablecoin.";
     public const string MissingExecutions = "A linked order is missing executions, so its fills are not all known.";
+    public const string UnallocatedExecution = "A split order has an execution that is not allocated yet.";
 
     private static readonly Ratio Hundred = Ratio.Of(100);
 
@@ -53,7 +54,11 @@ public static class OpenRiskCalculator
         if (!usdQuoted) return new(null, Units);
         if (executions.Any(e => e.Contradicts)) return new(null, Contradicting);
         var sign = plan.Direction == "short" ? -1 : 1;
-        var leverage = int.TryParse(plan.Leverage?.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var lever) && lever >= 1 ? lever : 1;
+        // Preview accepts unfinished editor text. An absent or invalid leverage cannot be treated as 1x: doing so can
+        // report a plausible but false quantity or percent-stop price. Saved plans use the same whole-number range.
+        if (!int.TryParse(plan.Leverage, NumberStyles.None, CultureInfo.InvariantCulture, out var leverage) ||
+            leverage is < 1 or > 100 || plan.Leverage != leverage.ToString(CultureInfo.InvariantCulture))
+            return new(null, NoQuantity);
 
         // Entries the plan sizes; a zero share is planned but holds nothing.
         var entries = new List<(PlanEntry Entry, Ratio Share, Ratio? Price)>();

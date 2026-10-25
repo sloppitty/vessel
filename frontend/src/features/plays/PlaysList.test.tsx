@@ -12,6 +12,7 @@ import { createPlaysSession } from './saved'
 import { initialPlaysList, type PlaysListState } from './plays-list'
 import type { AccountMonitor } from '@/api/monitor'
 import { discrepancyFixture, missingStopFixture, monitorFixture, shortStopFixture } from '@/test/monitor-fixture'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const play = (n: number, fields: Partial<PlaySummary> = {}): PlaySummary => ({ ...savedPlayFixture.summary, id: id(n), title: `Play ${n}`,
@@ -23,7 +24,7 @@ const library = [
   ended(4, 'closed', { title: 'Closed loser' }), ended(5, 'closed', { title: 'Closed reviewed', hasReview: true }), ended(6, 'cancelled', { title: 'Cancelled idea' }),
 ]
 function client(plays: PlaySummary[] = library, overrides: Partial<WorkspaceApi> = {}) {
-  return { ...createWorkspaceApi('test-only'), ...playApiStubs(), marketStream: idleMarketStream,
+  return { ...createWorkspaceApi(credentialsFixture), ...playApiStubs(), marketStream: idleMarketStream,
     plays: vi.fn(playsFrom(plays)), playCounts: vi.fn(playCountsFrom(plays)), ...overrides } as WorkspaceApi & {
     plays: ReturnType<typeof vi.fn<WorkspaceApi['plays']>>; playCounts: ReturnType<typeof vi.fn<WorkspaceApi['playCounts']>> }
 }
