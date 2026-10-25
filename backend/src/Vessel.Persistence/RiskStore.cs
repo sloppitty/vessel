@@ -8,6 +8,7 @@ using Vessel.Domain.Monitoring;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Risk;
+using Vessel.Domain.Workspace;
 
 namespace Vessel.Persistence;
 
@@ -34,22 +35,29 @@ public sealed class RiskStore(VesselDbContext db, UnitOfWork unitOfWork) : IOpen
         var linked = links.ToLookup(l => l.PlayId);
         var manual = (await db.ManualExecutions.Where(r => ids.Contains(r.PlayId)).AsNoTracking().ToListAsync(ct)).ToLookup(r => r.PlayId);
         var coverage = (await db.Set<MonitorCoverage>().Where(c => ids.Contains(c.PlayId)).AsNoTracking().ToListAsync(ct)).ToDictionary(c => c.PlayId);
+        // Owner-confirmed allocations (Phase 2, item 11): an allocated fill counts only through the Play's own line.
+        var allocations = await AllocatedFills.ForAsync(db, ids,
+            links.Where(l => orders.ContainsKey(l.ImportedOrderId)).SelectMany(l => fills[OrderKey.Of(orders[l.ImportedOrderId])]).Select(f => f.Id).ToList(), ct);
         return plays.Select(play =>
         {
             if (manual[play.Id].Any()) return Manual(play, manual[play.Id]);
             var executions = new List<RiskExecution>();
             string? problem = null;
+            var pairs = new List<(PlayOrderLink, ImportedFill)>();
             foreach (var link in linked[play.Id])
             {
                 if (!orders.TryGetValue(link.ImportedOrderId, out var order)) continue;
                 var own = fills[OrderKey.Of(order)].ToList();
                 // A filled order whose retained executions fall short leaves its prices and quantity unknown.
                 if (ExecutionIntegrity.MissingExecutions(order, own)) problem = OpenRiskCalculator.MissingExecutions;
-                // Whether a fill contradicts its role depends on the plan measured, saved or edited: the service decides.
-                foreach (var fill in own)
-                    executions.Add(new(link.Role, link.Role == OrderLinkRole.Exit ? null : link.EntryId, link.LevelId, fill.Quantity, fill.Price)
-                        { Fill = fill });
+                pairs.AddRange(own.Select(fill => (link, fill)));
             }
+            if (FillAllocations.Incomplete(play.Id, allocations).Any()) problem = OpenRiskCalculator.MissingExecutions;
+            if (FillAllocations.Unallocated(play.Id, allocations).Any()) problem = OpenRiskCalculator.UnallocatedExecution;
+            // Whether a fill contradicts its role depends on the plan measured, saved or edited: the service decides.
+            foreach (var fill in FillAllocations.For(play.Id, pairs, allocations))
+                executions.Add(new(fill.Role, fill.Role == OrderLinkRole.Exit ? null : fill.EntryId, fill.LevelId, fill.Fill.Quantity, fill.Fill.Price)
+                    { Fill = fill.Fill });
             return new OpenRiskFacts(play, executions, coverage.GetValueOrDefault(play.Id), false, problem);
         }).ToList();
     }

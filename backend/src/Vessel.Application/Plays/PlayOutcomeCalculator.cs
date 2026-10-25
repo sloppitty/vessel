@@ -23,6 +23,8 @@ public static class PlayOutcomeCalculator
     public static PlayOutcome? Outcome(ClosedPlayFacts facts, out string? problem, DateTimeOffset? projectedClose = null)
     {
         problem = null;
+        // A fill allocated between Plays carries no venue P&L of its own: the Play has no venue result (Phase 2, item 11).
+        if (facts.Fills.Any(f => f.Allocated)) return null;
         if (projectedClose is null && facts.Play.Status != PlayStatus.Closed ||
             (projectedClose ?? CloseTime(facts)) is not { } closedAt) return null;
         try

@@ -163,7 +163,9 @@ title/instrument search are unchanged.
   case-folded with the same length, so a match position in the folded text is
   the same in the shown text.
 - The row also holds the Play's outcome (F-07): a state (`active`, `scored`,
-  `executions`, `fees`, `unresolved` or `cancelled`), the latest actual exit
+  `executions`, `fees`, `unresolved`, `cancelled`, or since October 23
+  `not-allocated` for a Closed Play with a fill allocated between Plays, Phase
+  2 item 11, whose venue result cannot be split), the latest actual exit
   execution of a Closed Play, Review's scored result and its estimated R, and
   why a scored Play has no R. They come from Review's own rules
   (`ReviewService.Score` over the facts sizing and Review read, and

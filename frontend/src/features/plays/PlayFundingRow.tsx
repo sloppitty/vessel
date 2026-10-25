@@ -14,6 +14,7 @@ const reasons: Record<Exclude<PlayFunding['reason'], null>, string> = {
   'other-play': 'Another play traded this position during the holding window.',
   'unlinked-fill': 'Fills linked to no play traded this position during the holding window.',
   'open-position': 'The position was already open when this play’s first entry filled.',
+  allocated: 'A fill of this position is split between plays, so this play did not hold it alone.',
   identity: 'The position’s market cannot be told apart from another market of this instrument.',
   'missing-executions': 'An order of this play has executions that are not retained.',
   'not-settled': 'This play’s own fills do not settle it.',

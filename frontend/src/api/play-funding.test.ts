@@ -13,6 +13,9 @@ describe('settled funding beside a Play (phase 2, 9b)', () => {
     expect(isPlayFunding(sole)).toBe(true)
     expect(isPlayFunding({ ...sole, asset: null, amountUsd: '0', paymentCount: 0 })).toBe(true)
     expect(isPlayFunding({ state: 'shared', reason: 'other-play', ...none })).toBe(true)
+    // A fill split between plays (Phase 2, item 11) makes the position shared, never incomplete.
+    expect(isPlayFunding({ state: 'shared', reason: 'allocated', ...none })).toBe(true)
+    expect(isPlayFunding({ state: 'incomplete', reason: 'allocated', ...none })).toBe(false)
     expect(isPlayFunding({ state: 'incomplete', reason: 'flat-start-unproven', ...none })).toBe(true)
     expect(isPlayFunding({ state: 'incomplete', reason: 'changing', ...none })).toBe(true)
     expect(isPlayFunding({ state: 'unavailable', reason: 'no-funding-read', ...none })).toBe(true)

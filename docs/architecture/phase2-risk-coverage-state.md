@@ -1092,7 +1092,109 @@ October 21, 2026.
 
 ## 11. Shared-exit allocation
 
-Not started.
+October 23, 2026.
+
+**11. Shared-exit allocation and flip splits.** Implemented on `t3/phase2-allocation`.
+- **The record.** `fill_allocations` holds one allocation per imported fill: its reason (`shared-close`, `flip` or
+  `other`), note, revision and fee remainder. `fill_allocation_lines` holds each Play's line: role (exit or entry),
+  the plan entry for an entry line, an exact quantity and a fee share. `fill_allocation_revisions` keeps every
+  change, append-only (migration `FillAllocations`).
+- **The request.** `POST /api/plays/{id}/execution/allocations` is real-only, so paper gets a 409 before any read.
+  - It takes the fill, the allocation's expected revision, every involved Play's expected version, the reason,
+    the note and the lines. Empty lines remove the allocation, as a new revision.
+  - It runs in one unit under the request and account locks, with the account's active Plays locked. It is
+    idempotent by request ID, the 1.3b mechanism.
+- **Validation.**
+  - The lines sum exactly to the fill.
+  - A shared exit is all exit lines, on Plays the fill's side closes. A flip is one exit, equal to that Play's
+    open quantity without this fill, and one entry of the other direction.
+  - Entries alone are accepted only for a later opening fill of an order a flip already split.
+  - Exit lines need an Open or Unresolved Play, and an entry line a Planned, Paused or Open one.
+  - The final ledger is checked: a Closed Play keeps an identical line, and no Open or Unresolved Play is left
+    without its entry.
+- **Fees.** Each share is the fee times the line's share of the fill, truncated at the fee's own decimals (never
+  fewer than 6). The remainder goes to the largest line, with ties to the lowest Play ID; it is stored and shown.
+  An unknown fee stays unknown on every line.
+- **Order links are unchanged.** An allocation never creates or removes a link. A fill's order must be retained,
+  and if it is linked, that Play must be on the lines with a matching role. An allocated fill counts for a Play
+  only through its own line, everywhere the Play's fills are read.
+- **Lifecycle.** The existing transitions follow the write: Planned or Paused to Open, Open to Closed, and
+  Unresolved to Closed through `SettleUnresolved`. Nothing moves a Play back.
+  - An order behind an allocated entry that still rests keeps its Play from closing.
+  - Once a flip split opens a Play, its order is split: its other fills count for no Play, even through a link,
+    and flag its Plays as not reconciled until the owner allocates them.
+- **Scoring.** The Play-local result is shown, and the venue result reads "Not allocated". Review excludes a
+  settled allocated Play as `not-allocated`, counted in its coverage and listed in the drill-down and CSV; sizing
+  leaves it out and counts it; search shows the state. `play.closed` carries the allocated quantities and a null
+  venue P&L.
+- **Funding (9b).** A Play with an allocated part, or an allocated fill in its holding window or in a span a
+  funding proof walks, reads "shared" (`allocated`). Allocations are read inside 9b's evidence snapshot, so the
+  Activity facts revision and cache are unchanged.
+- **The browser.** A "Shared fills" section inside the execution panel offers Allocate, Split flip and Edit. The
+  dialog shows the remainder and fee split live and the server's refusal.
+  - The execution view holds the newest 20 allocations and up to 20 offered fills, with a total.
+  - `GET /api/plays/{id}/execution/allocations?offset=` returns the older ones 20 at a time, so every allocation
+    stays editable. It is real-only.
+- **Other readers.**
+  - The same per-line rule now feeds the monitor's protection checks and their quantities, open risk, the
+    matcher's first entry fill, the plan-edit checks on filled entries and Review's unassigned-fill count.
+  - An allocated fill is never `fill.unlinked`.
+  - Review's imported positions and the sizing fallback leave out operations holding an allocated fill.
+  - A retrospective Play cannot be made from allocated fills.
+  - Activity and the monitor's position comparison are unchanged.
+- **Tests.**
+  - `FillAllocationTests`: conservation, the fee rule and its remainder, unknown fees, shapes and revisions.
+  - `FillAllocationPostgresTests` and the allocation cases in `ExecutionPostgresTests`: two Plays closing
+    through a shared exit, a flip opening the second Play, an Unresolved Play settling, stale versions and
+    revisions refused with nothing written, Review and sizing exclusions, a resting flip order and its later
+    fill, successive flips kept out of imported positions, and paging past 20 allocations.
+  - `FillAllocationMonitorTests`: a flip-opened Play's missing stop and a shared exit's undersized stop.
+  - The allocated cases of `PlayFundingPostgresTests`, owner isolation, the paper refusal and the inventories.
+  - In the browser: the dialog's live remainder, fee split, bounds and errors, older pages, and the panel.
+- **Migration.** It is applied explicitly, never to the owner's database.
+- **Open questions for the owner.**
+  - An allocation is allowed on a fill whose order is linked to no Play. A flip order can never be linked, and an
+    order links to one Play only.
+  - Fee precision follows the reported fee's own decimals, at least 6; there is no per-token table.
+  - A flip whose opening part belongs to no Play cannot be allocated, since the lines must sum to the fill.
+  - A Closed Play's lines cannot change, so a wrong split that closed it cannot be corrected for it.
+  - The monitor's position comparison still reads linked fills only, so a Play opened by a flip split shows an
+    unexplained position.
+  - Any allocated fill in a funding proof's span makes funding "shared", even before the Play's window.
+  - The revisions are kept but not shown, and the migration's `Down` refuses while allocations exist.
+  - Entries alone go beyond the contract's wording. They are limited to later opening fills of an order a flip
+    already split. Confirm this, or choose another way to attribute those executions.
+  - A shared exit does not split its order, so the order's other fills still count wholly for the Play holding
+    the link. Should it?
+  - Each page offers at most 200 Plays for a new line.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `e7267e40`. Four findings, all fixed in
+  `8148cfb6`:
+  - **High.** The monitor built a Play's executions from linked orders only,
+    so a Play opened by a flip split had no entry: its missing stop stayed
+    undecidable even with a complete book, and a shared exit's whole fill set
+    the protection quantities. Protection checks now read allocated
+    executions by the per-line rule; the position comparison is unchanged.
+  - An allocated entry's order still resting did not stop the Play from
+    closing, so a partly filled flip order could close the Play it opened.
+    The orders behind allocated entry lines now count in the closing guard
+    and entry progress, and a later fill of an order a flip split counts for
+    no Play, flagging its Plays as not reconciled, until the owner allocates
+    it.
+  - Review's imported positions still treated an allocated round trip whose
+    orders link to no Play as unassigned, so a trade excluded as not
+    allocated could be scored as a position. Operations with an allocated
+    fill are now left out of imported positions and the sizing fallback.
+  - The browser capped shared fills below what the server returns, so a Play
+    with many allocations failed validation on every read. The execution view
+    now holds the newest 20 allocations and 20 offered fills with a total, a
+    paged route returns the rest, and both sides share the same bounds.
+
+  Sol confirmed exact conservation and fee arithmetic, ownership and account
+  checks, the paper refusal, lock ordering, version checks and rollback,
+  Closed lines kept, Unresolved settlement, the scoring exclusions, the
+  funding fence, the migration and deletion, theme tokens and `NativeSelect`.
+- **Check.** `scripts/check.sh` passed on `8148cfb6`, after the first run's only failure, the monitor's browser
+  contract fixture, was regenerated for the new execution fields: backend 4,314 passed, 5 skipped; frontend 189 files and 4,160 tests.
 
 ## 13. Journal-wide search
 

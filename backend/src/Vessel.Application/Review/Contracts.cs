@@ -197,6 +197,11 @@ public sealed record ReviewCoverageDto(int ClosedCandidates, int IncompleteFees,
     public int Unresolved { get; init; }
     /// <summary>Plays cancelled in the period: they have no fills and no result, and the exclusion list shows them (phase 1, 1.4b).</summary>
     public int Cancelled { get; init; }
+    /// <summary>
+    /// Closed Plays whose fills settle them but include a fill allocated between Plays (Phase 2, item 11): their venue result is
+    /// not allocated, so they are excluded with that reason and listed in the drill-down.
+    /// </summary>
+    public int NotAllocated { get; init; }
 }
 /// <summary>
 /// Whether imported positions are in this report. <paramref name="Plays"/> counts scored Plays in the selection, which auto
