@@ -12,8 +12,8 @@ import { VenuesProvider } from '@/api/venues'
 import type { PlayStatus } from '@/api/plays'
 import { systemFixture } from '@/test/system-fixture'
 import { accountPicker, chooseInPicker } from '@/test/account-picker'
-import { preferenceKey } from '@/lib/preference-scope'
 import { credentialsFixture } from '@/test/identity-fixture'
+import { preferenceKey } from '@/lib/preference-scope'
 
 function Workspace({ disabled = false, status = 'draft', retrospective = false }: { disabled?: boolean; status?: PlayStatus; retrospective?: boolean }) {
   const [draft, setDraft] = useState(createDraft)
