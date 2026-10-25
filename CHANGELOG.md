@@ -37,6 +37,11 @@
   has an optional soft limit, blank until you set it, which is flagged and
   never enforced (G-06).
 
+### Fixed
+
+- RISEx: history pages share one fixed end time, so new trades cannot shift them, and
+  the history notice counts trades on unrecognized markets.
+
 ### Removed
 
 - **Breaking:** the API token (Token sign-in) is gone; Vessel signs in with
@@ -172,8 +177,6 @@ Release notes: [docs/releases/v0.3.3.md](docs/releases/v0.3.3.md).
 
 ### Fixed
 
-- RISEx: history pages share one fixed end time, so new trades cannot shift them, and
-  the history notice counts trades on unrecognized markets.
 - Plan numbers follow one grammar everywhere: the server refuses exponent,
   signed and trailing-dot text on write, naming the field, while unchanged
   stored text still saves; the browser never writes exponent text; a negative
