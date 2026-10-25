@@ -524,7 +524,6 @@ export function endsSession(failure: AuthFailure) {
   return failure.status === 401 || failure.code === 'user-suspended'
 }
 
-/** `onAuthFailure` hears every 401 and 403 of this client, so the session owner can tear down or open a dialog. */
 /** The report's filters without its page: an export holds every row. */
 function withoutOffset(query: ReviewQuery): ReviewQuery {
   const rest = { ...query }
@@ -532,6 +531,7 @@ function withoutOffset(query: ReviewQuery): ReviewQuery {
   return rest
 }
 
+/** `onAuthFailure` hears every 401 and 403 of this client, so the session owner can tear down or open a dialog. */
 export function createWorkspaceApi(credentials: SessionCredentials, onAuthFailure?: (failure: AuthFailure) => void, tradingMode?: TradingMode): WorkspaceApi {
   const rawCall = createApiCall(credentials, failure => {
     if (endsSession(failure)) emitApiEvent(api, { type: 'unauthorized' })
