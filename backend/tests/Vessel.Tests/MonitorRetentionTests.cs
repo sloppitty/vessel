@@ -14,8 +14,9 @@ public sealed partial class MonitorPostgresTests
     private sealed class CountingEvaluator : IMonitorEvaluator
     {
         public int Evaluations;
+        public readonly List<bool> Protection = [];
         public Task<MonitorEvaluationResult> EvaluateAsync(MonitorEvaluation observation, CancellationToken ct)
-        { Evaluations++; return Task.FromResult(new MonitorEvaluationResult(null)); }
+        { Evaluations++; Protection.Add(observation.Protection); return Task.FromResult(new MonitorEvaluationResult(null)); }
         public Task<IReadOnlyList<MonitorDiscrepancyDto>> ReadAsync(Guid accountId, Guid? playId, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<MonitorDiscrepancyDto>>([]);
         public Task<MonitorDiscrepancyList> ReadListAsync(Guid accountId, Guid? playId, CancellationToken ct) =>
@@ -56,9 +57,10 @@ public sealed partial class MonitorPostgresTests
         Assert.True(await store.EligibleAsync(id, clock.Now, default));
         Assert.False(await store.ProtectionEligibleAsync(id, clock.Now, default));
 
-        // The scheduled run imports and records coverage, and compares nothing: no Play, no protection work.
+        // The scheduled run imports and records coverage and, with no Play or protection work, makes only the kept-history
+        // check (6c).
         await ScheduledCheckAsync(coordinator, store, clock);
-        Assert.Equal(0, evaluator.Evaluations);
+        Assert.Equal([false], evaluator.Protection);
         db.ChangeTracker.Clear();
         Assert.Equal(1, await db.Fills.CountAsync());
         var first = Assert.Single(await db.FillCoverage.AsNoTracking().ToListAsync());

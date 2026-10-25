@@ -4,6 +4,8 @@
 
 ### Added
 
+- Accounts that keep their execution history warn of an open position with no resting stop
+  and no Open Play.
 - History gaps on Hyperliquid accounts can be backfilled from Account detail. The monitor
   reads the gap's executions in its own runs behind protection checks, proves each page continues
   the last, and closes only the part of a gap it proves; what the venue no longer serves is marked
