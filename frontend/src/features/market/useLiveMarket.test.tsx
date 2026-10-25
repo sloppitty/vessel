@@ -4,6 +4,7 @@ import { createWorkspaceApi, type MarketStreamEvent, type WorkspaceApi } from '@
 import { ApiError } from '@/api/errors'
 import { candleCache, clearCandleCache, evictAccountCandles } from './candleCache'
 import { useLiveMarket } from './useLiveMarket'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 function setup() {
   let emit!: (event: MarketStreamEvent) => void
@@ -13,7 +14,7 @@ function setup() {
     signal = abort; emit = callback
     return new Promise<void>((_resolve, no) => { reject = no })
   })
-  const api = { ...createWorkspaceApi('test-only'), marketStream }
+  const api = { ...createWorkspaceApi(credentialsFixture), marketStream }
   const callbacks = { onCandle: vi.fn(), onContext: vi.fn(), refreshCandles: vi.fn(), refreshContext: vi.fn() }
   const view = renderHook(() => useLiveMarket({ api, accountId: 'account', instrument: 'BTC', interval: '1h', enabled: true, ready: true, ...callbacks }))
   const status = (state: 'reconnecting' | 'stale' | 'live') => act(() => emit({ type: 'status', status: { state, observedAt: '2026-10-11T12:00:00Z' } }))

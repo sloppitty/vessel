@@ -60,7 +60,21 @@ jobs:
         storage: [s3, local]
     steps:
       - uses: useblacksmith/checkout@v1
-      - name: Isolated images, transport, restore
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+      - name: Enable pinned pnpm
+        run: |
+          corepack enable
+          corepack install
+      # Sign-in is wallet-only: the check binds and signs in with a synthetic, publicly known EOA. Its signer
+      # libraries stay outside the checkout and the application's dependencies.
+      - name: Synthetic wallet signer
+        run: |
+          mkdir -p "$RUNNER_TEMP/wallet-signer"
+          pnpm --dir "$RUNNER_TEMP/wallet-signer" add @noble/curves@2.4.0 @noble/hashes@2.4.0
+          echo "NOBLE_MODULE_DIR=$RUNNER_TEMP/wallet-signer/node_modules" >> "$GITHUB_ENV"
+      - name: Isolated images, transport, sign-in, restore
         run: python3 scripts/verify-release.py --storage "${{ matrix.storage }}"
 
   publish:

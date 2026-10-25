@@ -8,6 +8,7 @@ import { preferenceKey, scopePreferences, userPreferenceKey } from '@/lib/prefer
 import { ReviewPage } from './ReviewPage'
 import { ReviewSettings } from './ReviewSettings'
 import { readReviewPreferences, useReviewPreferences } from './reviewPreferences'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 // Same populations as the server: one scored Play and two unassigned positions.
 const mixedMetrics = {
@@ -42,7 +43,7 @@ const mixedReport: ReviewDocument = {
 }
 
 function setup(review = vi.fn().mockResolvedValue(mixedReport)) {
-  const api = { ...createWorkspaceApi('test'), review }
+  const api = { ...createWorkspaceApi(credentialsFixture), review }
   render(<ReviewPage api={api} reloadGeneration={0} onOpenPlay={vi.fn().mockResolvedValue(undefined)} />)
   return { review, user: userEvent.setup() }
 }
