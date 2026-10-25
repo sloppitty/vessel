@@ -11,6 +11,7 @@
     "dev:web": "pnpm --filter vessel-frontend dev --host 127.0.0.1",
     "dev:api": "python3 scripts/dev.py api",
     "dev:worker": "python3 scripts/dev.py worker",
+    "dev:identity": "python3 scripts/dev.py identity",
     "db:up": "docker compose up --detach --wait postgres",
     "broker:up": "docker compose up --detach --wait rabbitmq",
     "db:migrate": "python3 scripts/dev.py migrate",

@@ -2,14 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { credentialFailureMessage } from './account-access'
 import { ApiError, errorMessage, rateLimitMessage } from './errors'
 import { createWorkspaceApi } from './workspace'
-import { sessionFixture } from '@/test/identity-fixture'
+import { credentialsFixture } from '@/test/identity-fixture'
 import { accountFixture } from '@/test/workspace-fixture'
 
 describe('per-user wait notices', () => {
-  it.each(['bearer', 'session'] as const)('keeps Retry-After in %s mode, including protected credential calls', async mode => {
-    const api = createWorkspaceApi(mode === 'bearer' ? 'test-only' : {
-      kind: 'session', userId: sessionFixture.user.id, sessionId: sessionFixture.session.id,
-    })
+  it('keeps Retry-After, including on protected credential calls', async () => {
+    const api = createWorkspaceApi(credentialsFixture)
     const fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ code: 'rate-limited', detail: 'ro:private' }),
       { status: 429, headers: { 'Retry-After': '60' } }))
     vi.stubGlobal('fetch', fetch)
@@ -38,7 +36,7 @@ describe('per-user wait notices', () => {
       const response = new Response('private credential detail', { status: 429, headers: { 'Retry-After': new Date(now + 30_000).toUTCString() } })
       const json = vi.spyOn(response, 'json')
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
-      const cause = await createWorkspaceApi('test-only').saveAccountCredential(accountFixture.id, 'ro:test-only').catch((error: unknown) => error)
+      const cause = await createWorkspaceApi(credentialsFixture).saveAccountCredential(accountFixture.id, 'ro:test-only').catch((error: unknown) => error)
       expect(errorMessage(cause, '')).toBe('Too many requests. Wait 30 seconds before trying again.')
       expect(json).not.toHaveBeenCalled()
     } finally { clock.mockRestore() }
@@ -51,6 +49,5 @@ describe('per-user wait notices', () => {
   it('rounds up a positive wait and uses singular seconds', () => {
     expect(rateLimitMessage(new Date(Date.now() + 500).toISOString())).toBe('Too many requests. Wait 1 second before trying again.')
     expect(errorMessage(new ApiError('http', 'Another failure.', 409), '')).toBe('Another failure.')
-    expect(errorMessage(new ApiError('unauthorized', 'Too many wrong tokens from this device.', 429), '')).toBe('Too many wrong tokens from this device.')
   })
 })

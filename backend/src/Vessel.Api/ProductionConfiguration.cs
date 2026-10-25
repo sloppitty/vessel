@@ -6,22 +6,11 @@ namespace Vessel.Api;
 /// </summary>
 public static class ProductionConfiguration
 {
-    public const int MinimumTokenLength = 32;
-
     public static void Validate(IConfiguration config)
     {
-        var mode = config["Vessel:Auth:Mode"] ?? "Token";
-        if (mode is not ("Token" or "Wallet")) throw new InvalidOperationException("Vessel:Auth:Mode is invalid.");
-        if (mode == "Wallet") _ = Vessel.Identity.IdentitySettings.Read(config, development: false);
-        var problems = new List<string>();
-        var token = config["Vessel:Auth:Token"];
-        if (mode == "Token" && (string.IsNullOrWhiteSpace(token) || token.Trim().Length < MinimumTokenLength))
-            problems.Add($"Vessel__Auth__Token must be a generated secret of at least {MinimumTokenLength} characters (for example `openssl rand -base64 48`).");
-        if (config["Vessel:Auth:OwnerId"] is { } owner && (!Guid.TryParse(owner, out var id) || id == Guid.Empty))
-            problems.Add("Vessel__Auth__OwnerId must be a non-empty GUID.");
+        // The wallet sign-in settings, including the owner GUID, and a refusal of the removed Token sign-in's settings.
+        _ = Vessel.Identity.IdentitySettings.Read(config, development: false);
         if (string.IsNullOrWhiteSpace(config.GetConnectionString("Vessel")))
-            problems.Add("ConnectionStrings__Vessel is required.");
-        if (problems.Count > 0)
-            throw new InvalidOperationException("Vessel cannot start: " + string.Join(" ", problems));
+            throw new InvalidOperationException("Vessel cannot start: ConnectionStrings__Vessel is required.");
     }
 }
