@@ -151,6 +151,7 @@ app.MapPlays();
 app.MapPaperEndpoints();
 app.MapSizing();
 app.MapRisk();
+app.MapExports();
 app.MapReview();
 app.MapVesselEvents();
 app.MapMonitor();
