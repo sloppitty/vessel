@@ -89,6 +89,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         // Explicit owner-filtered deletes run under the locked account's transaction.
         // Positions cascade from the snapshot, never from trading intent.
         await db.FillImportConflicts.Where(c => c.AccountId == account.Id).ExecuteDeleteAsync(ct);
+        await db.HistoryBackfills.Where(b => b.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.HistoryGaps.Where(g => g.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.FillCoverage.Where(r => r.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.Fills.Where(f => f.AccountId == account.Id).ExecuteDeleteAsync(ct);
@@ -124,6 +125,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 RiskObservation o => o.OwnerId == account.OwnerId && o.AccountId == account.Id,
                 FillImportConflict c => c.OwnerId == account.OwnerId && c.AccountId == account.Id,
                 Vessel.Domain.Monitoring.AccountHistoryGap g => g.OwnerId == account.OwnerId && g.AccountId == account.Id,
+                Vessel.Domain.Monitoring.HistoryBackfill b => b.OwnerId == account.OwnerId && b.AccountId == account.Id,
                 Vessel.Domain.Monitoring.FillCoverageRecord r => r.OwnerId == account.OwnerId && r.AccountId == account.Id,
                 AccountFundingState s => s.OwnerId == account.OwnerId && s.AccountId == account.Id,
                 Vessel.Domain.Credentials.AccountCredential c => c.OwnerId == account.OwnerId && c.AccountId == account.Id,
@@ -258,6 +260,35 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 Available = balance.Available
             }).ToList();
         }
+        var stored = AddFills(account, newFills);
+        // A changed report of a retained fill, or a changed later copy within this batch, keeps the first (Sol round 1 on 14c).
+        await RecordFillConflictsAsync(account, retained, stored, result.Fills, observation.ObservedAtUtc, ct);
+        // RawJson intentionally never crosses into journal persistence or logs.
+        account.RecordSync(snapshot.ObservedAtUtc, result.HistoryNotice);
+        await unitOfWork.SaveChangesAsync(ct);
+        return true;
+    }, ct);
+
+    /// <summary>
+    /// Phase 2, item 6b: fills a backfill read, through the same deduplication and conflict rules as any import, without
+    /// touching the snapshot, sync state, leverage or risk observations. Returns the fills it added.
+    /// </summary>
+    public Task<IReadOnlyList<ImportedFill>> SaveHistoricalFillsAsync(Account account, IReadOnlyList<VenueFill> fills, DateTimeOffset observedAt,
+        CancellationToken ct) => unitOfWork.ParticipateAsync<IReadOnlyList<ImportedFill>>(async () =>
+    {
+        if (account.TradingMode != TradingMode.Real)
+            throw new ProblemException(409, "Paper accounts cannot import real venue facts.");
+        var ids = fills.Select(f => f.SourceFillId).Distinct().ToArray();
+        var retained = await db.Fills.Where(f => f.AccountId == account.Id && ids.Contains(f.SourceFillId)).AsNoTracking().ToListAsync(ct);
+        var existing = retained.Select(f => (f.ContractId, f.SourceFillId)).ToHashSet();
+        var stored = AddFills(account, fills.Where(f => existing.Add((f.ContractId, f.SourceFillId))), backfilled: true);
+        await RecordFillConflictsAsync(account, retained, stored, fills, observedAt, ct);
+        await unitOfWork.SaveChangesAsync(ct);
+        return stored.Values.ToList();
+    }, ct);
+
+    private Dictionary<(string, string), ImportedFill> AddFills(Account account, IEnumerable<VenueFill> newFills, bool backfilled = false)
+    {
         var stored = new Dictionary<(string, string), ImportedFill>();
         foreach (var f in newFills)
         {
@@ -282,16 +313,12 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 OccurredAtUtc = f.OccurredAtUtc.ToUniversalTime(),
                 ExternalOrderId = f.OrderId,
                 TransactionHash = f.TransactionHash,
-                Leverage = f.Leverage
+                Leverage = f.Leverage,
+                Backfilled = backfilled
             });
         }
-        // A changed report of a retained fill, or a changed later copy within this batch, keeps the first (Sol round 1 on 14c).
-        await RecordFillConflictsAsync(account, retained, stored, result.Fills, observation.ObservedAtUtc, ct);
-        // RawJson intentionally never crosses into journal persistence or logs.
-        account.RecordSync(snapshot.ObservedAtUtc, result.HistoryNotice);
-        await unitOfWork.SaveChangesAsync(ct);
-        return true;
-    }, ct);
+        return stored;
+    }
 
     /// <summary>
     /// Phase 2, item 14c (F-12, probe V10): a retained fill ID reported again with different venue facts keeps its first
@@ -370,7 +397,11 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         var records = db.FillCoverage.AsNoTracking().Where(r => r.AccountId == accountId);
         return new(await open.CountAsync(ct), await open.OrderByDescending(g => g.OpenedAtUtc).ThenBy(g => g.Id).Take(limit).ToListAsync(ct),
             await gaps.Where(g => g.ClosedAtUtc != null).OrderByDescending(g => g.ClosedAtUtc).ThenBy(g => g.Id).Take(limit).ToListAsync(ct),
-            await records.CountAsync(ct), await records.OrderByDescending(r => r.LastObservedAtUtc).ThenByDescending(r => r.Id).Take(limit).ToListAsync(ct));
+            await records.CountAsync(ct), await records.OrderByDescending(r => r.LastObservedAtUtc).ThenByDescending(r => r.Id).Take(limit).ToListAsync(ct))
+        {
+            Backfills = await db.HistoryBackfills.AsNoTracking().Where(b => b.AccountId == accountId).OrderByDescending(b => b.CreatedAtUtc)
+                .ThenByDescending(b => b.Id).Take(10).ToListAsync(ct)
+        };
     }
 
     public async Task<(int Total, IReadOnlyList<FillImportConflict> Recent)> FillConflictsAsync(Guid accountId, int limit, CancellationToken ct)

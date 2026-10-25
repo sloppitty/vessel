@@ -17,7 +17,7 @@ describe('GET /api/system', () => {
     mockResponse(body)
     await expect(getSystem(credentialsFixture)).resolves.toEqual(body)
   })
-  it.each(['accountDiscovery', 'readOnlyCredential', 'manualExecutions', 'currentOrderBook'])('rejects a non-boolean %s capability', async name => {
+  it.each(['accountDiscovery', 'readOnlyCredential', 'manualExecutions', 'currentOrderBook', 'fillHistory'])('rejects a non-boolean %s capability', async name => {
     mockResponse({ ...systemFixture, venues: [
       { ...indexVenue, capabilities: { ...indexVenue.capabilities, [name]: 'yes' } },
       ...systemFixture.venues.filter(v => v.id !== indexVenue.id),

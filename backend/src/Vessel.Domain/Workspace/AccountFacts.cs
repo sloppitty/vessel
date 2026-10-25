@@ -107,6 +107,11 @@ public sealed class ImportedFill : IOwned
     /// Null when the venue does not report it; never derived from margin or notional.
     /// </summary>
     public int? Leverage { get; set; }
+    /// <summary>
+    /// Phase 2, item 6b: first retained by an owner-started backfill. Its provenance only: a Play it opens or closes is
+    /// recorded as history, never announced as news.
+    /// </summary>
+    public bool Backfilled { get; set; }
 }
 
 /// <summary>

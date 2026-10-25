@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { render } from '@/test/render'
 import { createWorkspaceApi, isHistoryCoverage, type BrokerAccount, type HistoryCoverage as Coverage, type WorkspaceApi } from '@/api/workspace'
 import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
-import { HistoryCoverage } from './HistoryCoverage'
+import { HistoryCoverage, backfillPollMs } from './HistoryCoverage'
 import { ManageAccountDialog } from './ManageDialogs'
 
 const gap = { id: '00000000-0000-4000-8000-000000000001', fromUtc: '2026-10-20T10:00:00Z', toUtc: '2026-10-21T09:00:00Z',
@@ -24,6 +24,21 @@ const coverage: Coverage = {
 }
 
 describe('history coverage (Phase 2, item 6)', () => {
+  it('labels a failed reread as stale, withholds backfill and retries the current coverage', async () => {
+    const historyCoverage = vi.fn().mockResolvedValueOnce({ ...coverage, backfillAvailable: true })
+      .mockRejectedValueOnce(new Error('private transport detail')).mockResolvedValue({ ...coverage, backfillAvailable: true })
+    const api = { historyCoverage, startBackfill: vi.fn() }
+    const { rerender } = render(<HistoryCoverage api={api} accountId="a" reloadKey="1" />)
+    await screen.findAllByRole('button', { name: 'Backfill' })
+    rerender(<HistoryCoverage api={api} accountId="a" reloadKey="2" />)
+    expect(await screen.findByRole('status')).toHaveTextContent('History coverage could not be refreshed. Showing the previous read.')
+    expect(screen.queryByRole('button', { name: 'Backfill' })).not.toBeInTheDocument()
+    expect(screen.queryByText('private transport detail')).not.toBeInTheDocument()
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry history coverage' }))
+    await screen.findAllByRole('button', { name: 'Backfill' })
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
   it('reads only ledgers whose ranges hold together', () => {
     expect(isHistoryCoverage(coverage)).toBe(true)
     const [first, second] = coverage.recent as [Coverage['recent'][number], Coverage['recent'][number]]
@@ -71,4 +86,53 @@ describe('history coverage (Phase 2, item 6)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save settings' }))
     await waitFor(() => expect(updateAccount).toHaveBeenCalledWith(venueAccount.id, expect.objectContaining({ keepExecutionHistory: true })))
   })
+
+  it('offers Backfill on a gap the venue may still serve, starts it and shows its progress (Phase 2, item 6b)', async () => {
+    const beyond = { ...gap, id: '00000000-0000-4000-8000-000000000003', beyondVenueReach: true }
+    const queued = { id: '00000000-0000-4000-8000-000000000009', gapId: gap.id, state: 'queued' as const, fromUtc: gap.fromUtc!,
+      toUtc: gap.toUtc!, cursorUtc: gap.fromUtc!, pages: 1, rawRows: 2, addedFills: 1, omittedExecutions: 0, error: null,
+      createdAtUtc: '2026-10-22T10:00:00Z', finishedAtUtc: null }
+    const offered: Coverage = { ...coverage, backfillAvailable: true, openGapCount: 2, openGaps: [gap, beyond], backfills: [] }
+    expect(isHistoryCoverage(offered)).toBe(true)
+    expect(isHistoryCoverage({ ...offered, backfills: [queued, { ...queued, id: '00000000-0000-4000-8000-00000000000a' }] })).toBe(false)
+    const historyCoverage = vi.fn().mockResolvedValueOnce(offered).mockResolvedValue({ ...offered, backfills: [queued] })
+    const startBackfill = vi.fn().mockResolvedValue(queued)
+    render(<HistoryCoverage api={{ historyCoverage, startBackfill }} accountId="a" reloadKey="1" />)
+    const panel = await screen.findByRole('region', { name: 'History coverage' })
+    const gaps = within(panel).getByRole('group', { name: 'Possible gaps' })
+    // Only the gap the venue may still serve offers it.
+    const backfill = within(gaps).getByRole('button', { name: 'Backfill' })
+    expect(backfill).toHaveAccessibleDescription(/never creates a Play or a notification/)
+    expect(gaps).toHaveTextContent("beyond the venue's reach")
+    await userEvent.click(backfill)
+    expect(startBackfill).toHaveBeenCalledWith('a', gap.id)
+    expect(await within(panel).findByRole('group', { name: 'Backfills' })).toHaveTextContent('Reading behind protection checks · 1 page, 1 execution added')
+    // One backfill at a time: no other gap offers it while this one reads.
+    expect(within(panel).queryByRole('button', { name: 'Backfill' })).toBeNull()
+  })
+
+  it('accepts a backfill record and a first page anchored before the gap, and keeps polling after a failed read (6b, Sol round 1)', async () => {
+    const queued = { id: '00000000-0000-4000-8000-000000000009', gapId: gap.id, state: 'queued' as const, fromUtc: gap.fromUtc!,
+      toUtc: '2026-10-22T10:00:00Z', cursorUtc: '2026-10-01T00:00:00Z', pages: 1, rawRows: 2, addedFills: 1, omittedExecutions: 0,
+      error: null, createdAtUtc: '2026-10-22T10:00:00Z', finishedAtUtc: null }
+    const record = { source: 'backfill' as const, firstObservedAtUtc: '2026-10-22T10:00:00Z', lastObservedAtUtc: '2026-10-22T10:00:00Z',
+      importCount: 1, requestedFromUtc: gap.fromUtc, requestedToUtc: '2026-10-22T10:00:00Z', truncated: false, complete: false,
+      coveredFromUtc: gap.fromUtc, coveredToUtc: '2026-10-22T10:00:00Z', gapFromUtc: null, gapToUtc: null }
+    const reading: Coverage = { ...coverage, backfillAvailable: true, recordCount: 1, recent: [record], backfills: [queued] }
+    expect(isHistoryCoverage(reading)).toBe(true)
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const historyCoverage = vi.fn().mockResolvedValueOnce(reading).mockRejectedValueOnce(new Error('offline')).mockResolvedValue(reading)
+      render(<HistoryCoverage api={{ historyCoverage }} accountId="a" reloadKey="1" />)
+      const panel = await screen.findByRole('region', { name: 'History coverage' })
+      expect(panel).toHaveTextContent('Backfill · from')
+      await vi.advanceTimersByTimeAsync(backfillPollMs)
+      await waitFor(() => expect(historyCoverage).toHaveBeenCalledTimes(2))
+      // The failed read keeps what was shown and still reads again.
+      await vi.advanceTimersByTimeAsync(backfillPollMs)
+      await waitFor(() => expect(historyCoverage).toHaveBeenCalledTimes(3))
+      expect(panel).toHaveTextContent('Reading behind protection checks')
+    } finally { vi.useRealTimers() }
+  })
 })
+

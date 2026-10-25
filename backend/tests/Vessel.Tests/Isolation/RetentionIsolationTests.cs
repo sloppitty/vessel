@@ -45,6 +45,22 @@ public abstract class RetentionIsolationCases(IsolationHost api)
             await Isolated.NotFound(caller, foreign, id => new HttpRequestMessage(HttpMethod.Get, $"/api/accounts/{id}/history-coverage"),
                 "Account not found.");
     }
+
+    [PostgresFact]
+    [Covers("POST", "/api/accounts/{id:guid}/history-gaps/{gapId:guid}/backfill")]
+    public async Task A_backfill_starts_only_on_the_owners_own_account_and_gap()
+    {
+        var (a, b) = await api.Owners();
+        var aAccount = (await a.SyncedVenueAccount(Isolated.Marker("venue"))).GetProperty("id").GetGuid();
+        var bAccount = (await b.SyncedVenueAccount(Isolated.Marker("venue"))).GetProperty("id").GetGuid();
+        Assert.True((await a.GetJson($"/api/accounts/{aAccount}/history-coverage")).GetProperty("backfillAvailable").GetBoolean());
+        // A gap that is not the account's is not found; another owner's account is not found either.
+        var unknown = Guid.NewGuid();
+        await a.Post($"/api/accounts/{aAccount}/history-gaps/{unknown}/backfill", expected: HttpStatusCode.NotFound);
+        foreach (var (caller, foreign) in new[] { (a, bAccount), (b, aAccount) })
+            await Isolated.NotFound(caller, foreign, id => new HttpRequestMessage(HttpMethod.Post, $"/api/accounts/{id}/history-gaps/{unknown}/backfill"),
+                "Account not found.");
+    }
 }
 
 /// <summary>The cases above in Token mode.</summary>

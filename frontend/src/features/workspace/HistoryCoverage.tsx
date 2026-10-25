@@ -1,9 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { FillCoverage, HistoryCoverage as Coverage, HistoryGap, WorkspaceApi } from '@/api/workspace'
+import { errorMessage } from '@/api/errors'
+import type { FillCoverage, HistoryBackfill, HistoryCoverage as Coverage, HistoryGap, WorkspaceApi } from '@/api/workspace'
+import { Button } from '@/components/ui/button'
 import { InfoTip } from '@/components/ui/info-tip'
 import { Time } from '@/components/ui/time'
 
-const sourceLabels: Record<FillCoverage['source'], string> = { refresh: 'Refresh', check: 'Scheduled or owner check' }
+/** How often the panel reads again while a backfill is reading (Phase 2, item 6b). */
+export const backfillPollMs = 15_000
+
+function backfillText(b: HistoryBackfill) {
+  const read = `${b.pages} ${b.pages === 1 ? 'page' : 'pages'}, ${b.addedFills} ${b.addedFills === 1 ? 'execution' : 'executions'} added`
+  return b.state === 'queued' ? `Reading behind protection checks · ${read}`
+    : b.state === 'completed' ? `Covered · ${read}`
+    : b.state === 'narrowed' ? `Partly covered: the rest stays open as its own gap · ${read}`
+    : `Stopped: ${b.error ?? 'the backfill failed.'}`
+}
+
+const sourceLabels: Record<FillCoverage['source'], string> = { refresh: 'Refresh', check: 'Scheduled or owner check', backfill: 'Backfill' }
 
 function Span({ from, to, unknown }: { from: string | null; to: string | null; unknown: string }) {
   return <>{from ? <Time at={from} /> : unknown} – {to ? <Time at={to} /> : 'end unknown'}</>
@@ -14,21 +27,49 @@ const gapSpan = (gap: HistoryGap) => <Span from={gap.fromUtc} to={gap.toUtc} unk
 /**
  * Phase 2, item 6: whether the account keeps its execution history, the gaps its imports may have skipped, and what each
  * import covered by the 0.4b continuity rule. A gap closes only when a later read proves its span covered. Nothing shows
- * when the read fails.
+ * on an initial read failure; a failed reread labels the retained information as stale.
  */
-export function HistoryCoverage({ api, accountId, reloadKey }: { api: Pick<WorkspaceApi, 'historyCoverage'>; accountId: string; reloadKey: string }) {
-  const request = useMemo(() => ({ api, accountId, reloadKey }), [api, accountId, reloadKey])
+export function HistoryCoverage({ api, accountId, reloadKey }: {
+  api: Pick<WorkspaceApi, 'historyCoverage'> & Partial<Pick<WorkspaceApi, 'startBackfill'>>; accountId: string; reloadKey: string
+}) {
+  const [generation, setGeneration] = useState(0)
+  const request = useMemo(() => ({ api, accountId, reloadKey, generation }), [api, accountId, reloadKey, generation])
   const [loaded, setLoaded] = useState<{ request: typeof request; coverage: Coverage } | null>(null)
+  const [failed, setFailed] = useState<typeof request | null>(null)
+  const [starting, setStarting] = useState<{ gapId: string; error: string | null } | null>(null)
+  // Reads that finished, failed ones included, so one failed read does not stop the polling.
+  const [settled, setSettled] = useState(0)
   useEffect(() => {
     // Clients without the read (older test doubles) show nothing.
     if (typeof request.api.historyCoverage !== 'function') return
     const controller = new AbortController()
     request.api.historyCoverage(request.accountId, controller.signal)
       .then(coverage => { if (!controller.signal.aborted) setLoaded({ request, coverage }) })
-      .catch(() => { /* Coverage is context: a failed read leaves it out rather than blocking the account. */ })
+      .catch(() => { if (!controller.signal.aborted) setFailed(request) })
+      .finally(() => { if (!controller.signal.aborted) setSettled(value => value + 1) })
     return () => controller.abort()
   }, [request])
-  const coverage = loaded?.request === request ? loaded.coverage : null
+  const coverage = loaded?.request.api === api && loaded.request.accountId === accountId ? loaded.coverage : null
+  const stale = coverage !== null && loaded?.request !== request
+  const active = coverage?.backfills?.find(b => b.state === 'queued') ?? null
+  // While a backfill reads, the panel reads again now and then, after a failed read too; it stops with the backfill or the page.
+  useEffect(() => {
+    if (!active) return
+    const timer = setTimeout(() => setGeneration(value => value + 1), backfillPollMs)
+    return () => clearTimeout(timer)
+  }, [active, settled])
+  async function start(gapId: string) {
+    if (!api.startBackfill || starting && !starting.error) return
+    setStarting({ gapId, error: null })
+    try {
+      await api.startBackfill(accountId, gapId)
+      setStarting(null)
+    } catch (cause) {
+      setStarting({ gapId, error: errorMessage(cause, 'The backfill could not be started.') })
+    }
+    setGeneration(value => value + 1)
+  }
+  const canBackfill = coverage?.backfillAvailable === true && !!api.startBackfill && !active && !stale
   if (!coverage || !coverage.available && coverage.recordCount === 0) return null
   const id = `history-coverage-${accountId}`
   return <section className="shell-panel history-coverage" aria-labelledby={id}>
@@ -37,13 +78,26 @@ export function HistoryCoverage({ api, accountId, reloadKey }: { api: Pick<Works
       <InfoTip label="About history coverage">{coverage.notice}</InfoTip>
     </div><span className="workspace-badge">
       {coverage.keepExecutionHistory ? 'Keeping execution history' : 'History not kept'}</span></header>
+    {stale && <p role="status">{failed === request
+      ? <>History coverage could not be refreshed. Showing the previous read. <Button type="button" size="sm" variant="outline"
+          onClick={() => setGeneration(value => value + 1)}>Retry history coverage</Button></>
+      : 'Refreshing history coverage…'}</p>}
     {coverage.keepExecutionHistory && <p className="muted">Read on the monitor&apos;s schedule even without a Play, after protection checks.</p>}
     {coverage.openGapCount > 0 ? <div role="group" aria-label="Possible gaps">
       <p><strong>{coverage.openGapCount} possible {coverage.openGapCount === 1 ? 'gap' : 'gaps'}</strong> in the imported executions:
         missing executions in {coverage.openGapCount === 1 ? 'it' : 'them'} cannot be ruled out.</p>
-      <ul className="history-gaps">{coverage.openGaps.map(gap => <li key={gap.id}>{gapSpan(gap)} <small>· found <Time at={gap.openedAtUtc} /></small></li>)}</ul>
+      <ul className="history-gaps">{coverage.openGaps.map(gap => <li key={gap.id}>{gapSpan(gap)} <small>· found <Time at={gap.openedAtUtc} /></small>
+        {gap.beyondVenueReach ? <small> · beyond the venue&apos;s reach</small>
+          : canBackfill && <Button type="button" size="sm" variant="outline" disabled={starting?.gapId === gap.id && !starting.error}
+            aria-describedby={`${id}-backfill-help`} onClick={() => { void start(gap.id) }}>Backfill</Button>}
+        {starting?.gapId === gap.id && starting.error && <span className="error" role="alert"> {starting.error}</span>}</li>)}</ul>
+      {canBackfill && <p id={`${id}-backfill-help`} className="muted">Backfill reads the gap&apos;s executions from the venue, behind protection
+        checks. It never creates a Play or a notification.</p>}
       {coverage.openGapCount > coverage.openGaps.length && <p className="muted">Showing the latest {coverage.openGaps.length} of {coverage.openGapCount}.</p>}
     </div> : <p className="muted">No open gap recorded.</p>}
+    {coverage.backfills && coverage.backfills.length > 0 && <div role="group" aria-label="Backfills">
+      <ul className="history-gaps">{coverage.backfills.map(b => <li key={b.id}>{backfillText(b)} <small>· started <Time at={b.createdAtUtc} /></small></li>)}</ul>
+    </div>}
     {coverage.closedGaps.length > 0 && <details><summary>Closed gaps ({coverage.closedGaps.length})</summary>
       <ul className="history-gaps">{coverage.closedGaps.map(gap => <li key={gap.id}>{gapSpan(gap)} <small>· covered <Time at={gap.closedAtUtc!} /></small></li>)}</ul>
     </details>}

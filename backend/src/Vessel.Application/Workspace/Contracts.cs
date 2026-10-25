@@ -73,8 +73,19 @@ public sealed record FillConflictDto(string ContractId, string SourceFillId, IRe
     DateTimeOffset FirstSeenAtUtc, DateTimeOffset LastSeenAtUtc, int Reports);
 public sealed record FillConflictsDto(int Total, IReadOnlyList<FillConflictDto> Recent, string Notice);
 
-/// <summary>A span of execution history that may be missing (Phase 2, item 6); null ends are unknown.</summary>
-public sealed record HistoryGapDto(Guid Id, DateTimeOffset? FromUtc, DateTimeOffset? ToUtc, DateTimeOffset OpenedAtUtc, DateTimeOffset? ClosedAtUtc);
+/// <summary>
+/// A span of execution history that may be missing (Phase 2, item 6); null ends are unknown. <paramref name="BeyondVenueReach"/>:
+/// a backfill showed the venue no longer serves it (6b).
+/// </summary>
+public sealed record HistoryGapDto(Guid Id, DateTimeOffset? FromUtc, DateTimeOffset? ToUtc, DateTimeOffset OpenedAtUtc, DateTimeOffset? ClosedAtUtc,
+    bool BeyondVenueReach = false);
+/// <summary>An owner-started backfill of one gap (Phase 2, item 6b) and how far it has read.</summary>
+public sealed record HistoryBackfillDto(Guid Id, Guid GapId, string State, DateTimeOffset FromUtc, DateTimeOffset ToUtc, DateTimeOffset CursorUtc,
+    int Pages, int RawRows, int AddedFills, int OmittedExecutions, string? Error, DateTimeOffset CreatedAtUtc, DateTimeOffset? FinishedAtUtc)
+{
+    public static HistoryBackfillDto Of(Vessel.Domain.Monitoring.HistoryBackfill b) => new(b.Id, b.GapId, b.State, b.FromUtc, b.ToUtc, b.CursorUtc,
+        b.Pages, b.RawRows, b.AddedFills, b.OmittedExecutions, b.Error, b.CreatedAtUtc, b.FinishedAtUtc);
+}
 /// <summary>One coverage record: an import, or a run of continuous imports of one source.</summary>
 public sealed record FillCoverageDto(string Source, DateTimeOffset FirstObservedAtUtc, DateTimeOffset LastObservedAtUtc, int ImportCount,
     DateTimeOffset? RequestedFromUtc, DateTimeOffset RequestedToUtc, bool? Truncated, bool Complete,
@@ -84,10 +95,18 @@ public sealed record FillCoverageDto(string Source, DateTimeOffset FirstObserved
 /// closed ones and the latest coverage records.
 /// </summary>
 public sealed record HistoryCoverageDto(bool KeepExecutionHistory, bool Available, int OpenGapCount, IReadOnlyList<HistoryGapDto> OpenGaps,
-    IReadOnlyList<HistoryGapDto> ClosedGaps, int RecordCount, IReadOnlyList<FillCoverageDto> Recent, string Notice);
+    IReadOnlyList<HistoryGapDto> ClosedGaps, int RecordCount, IReadOnlyList<FillCoverageDto> Recent, string Notice)
+{
+    /// <summary>Phase 2, item 6b: whether the venue can backfill a gap, and the latest backfills, newest first.</summary>
+    public bool BackfillAvailable { get; init; }
+    public IReadOnlyList<HistoryBackfillDto> Backfills { get; init; } = [];
+}
 /// <summary>What the store reads for <see cref="HistoryCoverageDto"/>, newest first and bounded.</summary>
 public sealed record HistoryCoverageFacts(int OpenGapCount, IReadOnlyList<Vessel.Domain.Monitoring.AccountHistoryGap> OpenGaps,
-    IReadOnlyList<Vessel.Domain.Monitoring.AccountHistoryGap> ClosedGaps, int RecordCount, IReadOnlyList<Vessel.Domain.Monitoring.FillCoverageRecord> Recent);
+    IReadOnlyList<Vessel.Domain.Monitoring.AccountHistoryGap> ClosedGaps, int RecordCount, IReadOnlyList<Vessel.Domain.Monitoring.FillCoverageRecord> Recent)
+{
+    public IReadOnlyList<Vessel.Domain.Monitoring.HistoryBackfill> Backfills { get; init; } = [];
+}
 public sealed record OverviewTotals(int PortfolioCount, int AccountCount, string? TotalAccountValueUsd,
     int ValuedAccountCount, int OpenPositionCount, int ImportedFillCount,
     string? AvailableStablecoinNominalUsd = null, int StablecoinAccountCount = 0,
@@ -134,6 +153,12 @@ public interface IWorkspaceStore
     // Locks require the caller's active unit of work and never complete it.
     Task<T> WithAccountLockAsync<T>(Guid id, Func<Account, Task<T>> action, CancellationToken ct);
     Task SaveRefreshAsync(Account account, PerpetualVenueReadResult result, CancellationToken ct);
+    /// <summary>
+    /// Phase 2, item 6b: a backfill page's fills, deduplicated like any import, without the snapshot or sync state. Returns
+    /// the fills it added.
+    /// </summary>
+    Task<IReadOnlyList<ImportedFill>> SaveHistoricalFillsAsync(Account account, IReadOnlyList<VenueFill> fills, DateTimeOffset observedAt,
+        CancellationToken ct) => throw new NotSupportedException("This store cannot import backfilled fills.");
     // Management serializes owner grouping changes before acquiring account row locks.
     // Sync takes only the account lock, so independent venue reads can still run concurrently.
     Task<T> WithManagementLockAsync<T>(Func<Task<T>> action, CancellationToken ct);
