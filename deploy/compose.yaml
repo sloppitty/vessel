@@ -1,5 +1,15 @@
-# Token remains the default. To opt in to wallet sign-in, see README "Sign-in mode"
-# and include compose.wallet.yaml on all commands (plus an HTTPS proxy).
+# Vessel signs in with wallets only and needs HTTPS: use compose.tls.yaml or your own
+# HTTPS proxy, and see README "Sign-in" before the first start.
+
+# Sign-in settings that migrate, the API and both workers must read identically.
+x-identity-environment: &identity-environment
+  Vessel__Auth__OwnerId: ${Vessel__Auth__OwnerId:?Set a non-empty GUID}
+  Vessel__Auth__OwnerName: ${Vessel__Auth__OwnerName:-Owner}
+  Vessel__Identity__Origins__0: ${VESSEL_IDENTITY_ORIGIN:?Set the public HTTPS origin, without a path}
+  # Closed admits linked wallets only; see README before choosing Invitation.
+  Vessel__Identity__Registration: ${VESSEL_IDENTITY_REGISTRATION:-Closed}
+  Vessel__Identity__AllowLegacyDefaultOwner: ${VESSEL_ALLOW_LEGACY_DEFAULT_OWNER:-false}
+
 services:
   rustfs:
     image: rustfs/rustfs:1.0.1
@@ -81,10 +91,8 @@ services:
     # Nothing is migrated or provisioned at API or worker startup.
     entrypoint: ["/app/migrate"]
     environment:
+      <<: *identity-environment
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      Vessel__Auth__Mode: ${VESSEL_AUTH_MODE:-Token}
-      Vessel__Auth__Token: ${Vessel__Auth__Token:-}
-      Vessel__Auth__OwnerId: ${Vessel__Auth__OwnerId:?Set a non-empty GUID}
       Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_USER:?Set RABBITMQ_USER}:${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}@rabbitmq:5672/"
     depends_on:
       postgres:
@@ -98,12 +106,8 @@ services:
   api:
     image: skorcius/vessel:api-${VESSEL_VERSION:-0.3.3}
     environment:
+      <<: *identity-environment
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      # Required by the API in Token mode; Wallet overlay explicitly clears it.
-      Vessel__Auth__Mode: ${VESSEL_AUTH_MODE:-Token}
-      Vessel__Auth__Token: ${Vessel__Auth__Token:-}
-      Vessel__Auth__OwnerId: ${Vessel__Auth__OwnerId:?Set a non-empty GUID}
-      Vessel__Auth__OwnerName: ${Vessel__Auth__OwnerName:-Owner}
       Vessel__Evidence__Storage__Provider: S3
       Vessel__Evidence__Storage__S3__Endpoint: ${VESSEL_S3_ENDPOINT:-http://rustfs:9000}
       Vessel__Evidence__Storage__S3__Bucket: ${VESSEL_S3_BUCKET:-vessel-evidence}
@@ -131,13 +135,11 @@ services:
     image: skorcius/vessel:api-${VESSEL_VERSION:-0.3.3}
     entrypoint: ["/app/worker"]
     environment:
+      <<: *identity-environment
       DOTNET_ENVIRONMENT: Production
       Vessel__Worker__Modules__0: monitor
       Vessel__Worker__Deployment: monitor
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      Vessel__Auth__Mode: ${VESSEL_AUTH_MODE:-Token}
-      Vessel__Auth__Token: ${Vessel__Auth__Token:-}
-      Vessel__Auth__OwnerId: ${Vessel__Auth__OwnerId:?Set a non-empty GUID}
       Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_APP_USER:-${RABBITMQ_USER:?Set RABBITMQ_USER}}:${RABBITMQ_APP_PASSWORD:-${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}}@rabbitmq:5672/"
       Vessel__Monitor__Interval: ${VESSEL_MONITOR_INTERVAL:-00:10:00}
       Vessel__Monitor__ProtectionGrace: ${VESSEL_MONITOR_PROTECTION_GRACE:-00:10:00}
@@ -159,13 +161,11 @@ services:
     image: skorcius/vessel:api-${VESSEL_VERSION:-0.3.3}
     entrypoint: ["/app/worker"]
     environment:
+      <<: *identity-environment
       DOTNET_ENVIRONMENT: Production
       Vessel__Worker__Modules__0: notifications
       Vessel__Worker__Deployment: notifications
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      Vessel__Auth__Mode: ${VESSEL_AUTH_MODE:-Token}
-      Vessel__Auth__Token: ${Vessel__Auth__Token:-}
-      Vessel__Auth__OwnerId: ${Vessel__Auth__OwnerId:?Set a non-empty GUID}
       Vessel__Messaging__RabbitMqUri: "amqp://${RABBITMQ_APP_USER:-${RABBITMQ_USER:?Set RABBITMQ_USER}}:${RABBITMQ_APP_PASSWORD:-${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}}@rabbitmq:5672/"
       Vessel__Monitor__Interval: ${VESSEL_MONITOR_INTERVAL:-00:10:00}
     depends_on:

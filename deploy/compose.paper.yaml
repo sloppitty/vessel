@@ -12,16 +12,11 @@ services:
       - Vessel__Worker__Modules__0=paper
       - Vessel__Worker__Deployment=paper
       - "ConnectionStrings__Vessel=Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
-      - Vessel__Auth__Mode=${VESSEL_AUTH_MODE:?Set VESSEL_AUTH_MODE to match the API Token or Wallet mode}
+      # The same sign-in settings as compose.yaml's x-identity-environment (anchors do not cross files):
+      # the worker reads the identity owner directory.
       - Vessel__Auth__OwnerId=${Vessel__Auth__OwnerId:?Set a non-empty GUID}
-      # Token directory uses only the configured owner, not an HTTP bearer.
-      - Vessel__Auth__Token=
-      # The optional wallet overlay has no service stub for an absent paper
-      # worker. Mirror its directory settings here without enabling registration.
       - Vessel__Auth__OwnerName=${Vessel__Auth__OwnerName:-Owner}
-      # Without an origin, leave this unassigned so Compose omits it instead
-      # of passing an invalid empty Identity origin to a Token-mode host.
-      - "Vessel__Identity__Origins__0${VESSEL_IDENTITY_ORIGIN:+=$VESSEL_IDENTITY_ORIGIN}"
+      - Vessel__Identity__Origins__0=${VESSEL_IDENTITY_ORIGIN:?Set the public HTTPS origin, without a path}
       - Vessel__Identity__Registration=${VESSEL_IDENTITY_REGISTRATION:-Closed}
       - Vessel__Identity__AllowLegacyDefaultOwner=${VESSEL_ALLOW_LEGACY_DEFAULT_OWNER:-false}
     # Public candles only: no credential key-ring/evidence mount or published port.
