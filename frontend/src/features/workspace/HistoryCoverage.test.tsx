@@ -1,3 +1,4 @@
+import { credentialsFixture } from '@/test/fixtures'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -61,7 +62,7 @@ describe('history coverage (Phase 2, item 6)', () => {
     const venueAccount: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', address: '0x' + '1'.repeat(40),
       sourceId: '0x' + '1'.repeat(40), syncStatus: 'synced' }
     const updateAccount = vi.fn().mockResolvedValue({ ...venueAccount, keepExecutionHistory: true })
-    const api: WorkspaceApi = { ...createWorkspaceApi('test-only-token'), updateAccount }
+    const api: WorkspaceApi = { ...createWorkspaceApi(credentialsFixture), updateAccount }
     render(<ManageAccountDialog account={venueAccount} portfolios={[portfolioFixture]} api={api} onClose={vi.fn()} onChanged={vi.fn()} />)
     const keep = screen.getByRole('checkbox', { name: 'Keep execution history' })
     expect(keep).not.toBeChecked()
