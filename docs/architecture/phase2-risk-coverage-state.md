@@ -172,7 +172,47 @@ Not started.
 
 ## 4. Earlier-order link candidates
 
-Not started.
+October 21, 2026. Implemented on `t3/phase2-earlier-orders`.
+- **The panel's read.** `PlayExecutionService.GetAsync` loads the contract's
+  orders from `Vessel:Plays:EarlierOrderLookback` (24 hours by default, 0 to
+  7 days, validated at start-up) before the Play's creation. It lists the
+  compatible ones placed before creation as `earlierOrders`, at most 20: open,
+  filled or triggered, and not linked to any Play.
+- **What is unchanged.** Retention (`RetainAsync` keeps every returned order)
+  and the automatic matcher's rule (placed at or after creation).
+- **The panel.** The Execution panel shows them under "Placed before this Play
+  was saved", with the same Link controls as other orders.
+- **Linking** uses the existing endpoint. The badge follows the actual fill
+  times:
+  - a fast entry that filled before the plan shows "plan written after first
+    execution";
+  - an order placed before the Play but filled after planning keeps a
+    contemporaneous plan.
+- **Tests.**
+  - `EarlierOrderCandidateTests` (4, three on PostgreSQL): a check offers but
+    never links an earlier order, a zero lookback offers none, linking a fast
+    entry opens the Play with the badge, a contemporaneous plan stays one, and
+    the lookback is bounded.
+  - The Execution panel test.
+  - The monitor contract fixture regenerated with `earlierOrders`.
+- **Check.** `scripts/check.sh` passed on `b18f6db8` (before item 1's round-1
+  fixes were restacked beneath it): backend 4,027 passed, 5 skipped; frontend
+  170 files and 4,057 tests. An earlier run failed only on the contract
+  fixture, which was then regenerated.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `a2672af9`. Two findings,
+  both fixed in `9c1dd421`:
+  - Incompatible orders could use up the 20 places. An earlier order is now
+    offered only when some role of the plan accepts its side, reduce-only and
+    take-profit mechanics, and retained fills. This is checked before the cap,
+    over at most 200 recent orders. Price is not required to match, since a
+    fast market entry rarely fills at the planned price.
+  - The panel said "the day before" whatever the configured lookback. It now
+    says 24 hours unless the server is set otherwise.
+
+  Sol confirmed that nothing links earlier orders automatically, the matcher's
+  ambiguity is unchanged, the scoping and identity rules hold, and the
+  configuration reaches the API and the worker.
+- **Check after round 1.** `scripts/check.sh` passed on `9c1dd421`: backend 4,029 passed, 5 skipped; frontend 170 files and 4,062 tests.
 
 ## 5. Export
 
