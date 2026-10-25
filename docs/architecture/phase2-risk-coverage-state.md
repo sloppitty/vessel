@@ -1533,3 +1533,58 @@ October 21, 2026.
   It suggested more coverage: a whole-position target with split read times, the accepted switches and direct
   revision assertions.
 - **Check.** `scripts/check.sh` passed on `2d4c1645`: backend 4,354 passed, 5 skipped; frontend 189 files and 4,160 tests.
+
+
+## October 25, 2026: deeper stack verification and corrections
+
+The owner requested another Sol investigation and fixes across the open Phase 2 stack, from PR #35 through
+#66 (29 PRs). The review pinned the original tip at `6499460a`, then integrated wallet-only main `adf521ef`.
+The existing PR branches keep their ancestry and receive the corrections in the layer that owns them.
+No installation database, deployment or release was changed.
+
+- **Open risk (#36, #64).** Invalid or unfinished leverage stays unknown instead of becoming 1x. A split order's
+  retained but unallocated execution also keeps risk unknown for its affected Plays, using the execution
+  reader's existing allocation rule. Regressions cover invalid leverage and risk before/after allocation.
+- **Review export (#38).** CSV receives the displayed request, including the owner's imported-position threshold.
+  A page-level regression uses a non-default threshold and checks both the report and download requests.
+- **Evidence integrity (#40).** A bundle verifies each included original's exact recorded length and SHA-256
+  before delivering the temporary archive. Short, oversized and same-length altered objects fail the download;
+  the existing explicit treatment of missing originals remains. Regressions exercise the copy and bundle paths.
+- **Changed Lighter fills (#48).** Meaningfully changed copies reach the shared conflict recorder instead of
+  disappearing under ID-only deduplication. Identical normalized facts collapse even when raw responses differ.
+  The first stored fact remains immutable. Adapter regressions cover both changed and repeated copies.
+- **History coverage (#52/#54).** A failed reread labels the retained information as the previous read and offers
+  Retry. Backfill controls wait for current coverage. Initial unavailable reads remain hidden; interrupted or
+  failed reads do not stop active-backfill polling. The regression covers failure, withheld controls and recovery.
+- **Search (#63).** Only the current projection version can supply matches; old versions count as unindexed.
+  The PostgreSQL regression covers a stale projection and the rebuilt version.
+- **Allocation dependencies (#64).** Entry-only fills depend on an actual flip allocation with both exit and
+  entry lines. Removing the last such split is refused while later allocated entries depend on it. The new
+  PostgreSQL regression keeps the source Play editable to exercise the removal path.
+- **Wallet-only integration (#35–#66).** Conflict resolution preserves main's shell navigation and mandatory
+  wallet identity while retaining Phase 2 settings. New frontend clients use session fixtures. Phase 2 changelog
+  entries stay in Unreleased; published 0.3.3 notes are unchanged.
+- **Benchmark (#65).** The script uses a temporary loopback certificate, Production wallet authentication,
+  offline synthetic operator binding, the actual signed challenge and its session cookie. Registration stays
+  Closed. A disposable smoke run passed with `--years 1 --scale 0.05 --warmup 0 --rounds 1 --no-build`: 4,472
+  seeded rows, 17 authenticated read scenarios, with two deep-page scenarios explicitly skipped because the
+  small dataset cannot populate them. Its API, PostgreSQL, RabbitMQ and temporary credentials were removed.
+  This verifies the HTTPS/sign-in path; it does not replace the historical full-size Token-mode timings above.
+
+**Sol verification.** Fresh `gpt-6-sol` investigations separately covered execution/risk, security/exports/search,
+monitor/history/funding and wallet benchmark compatibility. A fifth independent read-only adversarial review
+checked the combined fixes and the allocation guard: no further concrete code defect; it identified the
+historical benchmark description, now corrected. No authorization bypass or cross-owner disclosure was
+confirmed in these reviews. The initial targeted run caught and corrected an entry-only allocation being
+mistaken for a second flip, and raw-only Lighter response differences being retained as separate copies.
+A sixth independent Sol review checked all 29 propagated branches, original-head/base ancestry, conflict
+resolutions and unchanged released notes; no propagation defect. The final propagated code tree matches the
+integration tree that received the full test run.
+
+**Local checks.** The frontend passes typecheck, ESLint, production build and all 4,207 tests in 198 files.
+Each of the 28 code-bearing intermediate PR layers also passes frontend typecheck (#35 changes docs only).
+The frozen pnpm lockfile and locked NuGet restore pass. Python: 118 tests; prototype: 76 tests. The isolated
+Production/Wallet benchmark passes as described above.
+The Release backend run against a run-owned PostgreSQL database passes 4,342 tests with 17 explicit optional
+skips (live venues, RabbitMQ/worker end-to-end and S3 services were not enabled); no failures. No skipped check
+is counted as a pass. The new PostgreSQL regressions ran in this suite.

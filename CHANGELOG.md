@@ -82,6 +82,12 @@
 
 ### Fixed
 
+- Open risk stays unknown for unfinished leverage or unallocated executions of a split
+  order. A flip allocation cannot be removed while later entry allocations depend on it.
+- Review CSV exports use the displayed imported-position threshold. Play bundles verify
+  each included original's recorded size and SHA-256 before delivering the download.
+- Changed Lighter fill reports reach conflict recording, stale search projections stay
+  out of results, and failed history rereads label the previous data and offer Retry.
 - The missing-stop, oversized-stop and position-size warnings now also open when the position
   or the order keeps changing size between checks.
 - A stop that stays smaller than its Play's position now raises the undersized-stop warning
