@@ -242,7 +242,7 @@ public sealed class MultiOwnerWorkerTests
             var accessor = fixture.Host.Services.GetRequiredService<IHttpContextAccessor>();
             accessor.HttpContext = new DefaultHttpContext
             {
-                User = new ClaimsPrincipal(JournalOwnerClaims.Identity(owner, "Synthetic owner", "test"))
+                User = TestAuthentication.Principal(owner, "Synthetic owner")
             };
             try
             {
@@ -581,6 +581,7 @@ public sealed class MultiOwnerWorkerTests
             {
                 ["ConnectionStrings:Vessel"] = database.ConnectionString,
                 ["Vessel:Auth:OwnerId"] = First.ToString(),
+                ["Vessel:Identity:Origins:0"] = TestAuthentication.Origin,
                 ["Vessel:Messaging:RabbitMqUri"] = "amqp://unused:unused@127.0.0.1:1",
                 ["Vessel:Monitor:HeartbeatFile"] = Heartbeat,
                 ["Vessel:Monitor:WorkerConcurrency"] = concurrency.ToString(System.Globalization.CultureInfo.InvariantCulture),

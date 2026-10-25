@@ -16,9 +16,8 @@ namespace Vessel.Tests;
 
 internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, string? connection = null, IPerpetualVenueReader? reader = null, Vessel.Application.MarketData.ICandleReader? candles = null, Vessel.Application.MarketData.IMarketContextReader? market = null, Vessel.Application.MarketData.IMarketStream? stream = null,
     Dictionary<string, string?>? settings = null, Action<IServiceCollection>? configure = null,
-    string environment = "Development") : WebApplicationFactory<Program>
+    string environment = "Development", bool testAuthentication = true) : WebApplicationFactory<Program>
 {
-    public const string Token = "core-tests-only-token-not-a-real-secret";
     protected override IHost CreateHost(IHostBuilder builder)
     {
         VesselEventTestHosting.ConfigureBootstrap(builder);
@@ -27,8 +26,8 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
         if (environment != "Development")
             builder.ConfigureHostConfiguration(config => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Vessel:Auth:Token"] = Token,
                 ["Vessel:Auth:OwnerId"] = owner.ToString(),
+                ["Vessel:Identity:Origins:0"] = TestAuthentication.Origin,
                 ["ConnectionStrings:Vessel"] = connection
             }));
         // Startup-bound settings (auth schemes, deployment maps, notification cooldown) are read before
@@ -43,14 +42,21 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
         builder.UseEnvironment(environment);
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["Vessel:Auth:Token"] = Token,
             ["Vessel:Auth:OwnerId"] = owner.ToString(),
+            ["Vessel:Identity:Origins:0"] = TestAuthentication.Origin,
             ["Vessel:Evidence:Storage:Provider"] = "Local",
             ["ConnectionStrings:Vessel"] = connection
         }.Concat(settings ?? []).GroupBy(pair => pair.Key).ToDictionary(group => group.Key, group => group.Last().Value)));
         builder.ConfigureServices(services =>
         {
             VesselEventTestHosting.ConfigureServices(services);
+            if (testAuthentication)
+            {
+                TestAuthentication.Add(services);
+                // Test-scheme owners are no identity users: like the installation before wallets, only the owner is known.
+                services.RemoveAll<Vessel.Application.Ownership.IJournalOwnerDirectory>();
+                services.AddSingleton<Vessel.Application.Ownership.IJournalOwnerDirectory>(new ConfiguredOwnerDirectory(owner));
+            }
             if (store is not null)
             {
                 services.AddSingleton(store);
@@ -71,10 +77,17 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
             configure?.Invoke(services);
         });
     }
-    public HttpClient AuthorizedClient()
+    /// <summary>A client signed in as the factory's owner through the test scheme.</summary>
+    public HttpClient AuthorizedClient() => AuthorizedClient(owner);
+
+    /// <summary>A client signed in as <paramref name="as"/> through the test scheme.</summary>
+    public HttpClient AuthorizedClient(Guid @as)
     {
-        var client = CreateClient(); client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Token); return client;
+        var client = CreateClient(); TestAuthentication.SignIn(client.DefaultRequestHeaders, @as); return client;
     }
+
+    /// <summary>Signs one request in as the factory's owner.</summary>
+    public void SignIn(HttpRequestMessage request) => TestAuthentication.SignIn(request.Headers, owner);
 }
 
 /// <summary>

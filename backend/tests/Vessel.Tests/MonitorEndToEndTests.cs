@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -383,7 +382,7 @@ public sealed class MonitorEndToEndTests
                 {
                     ["ConnectionStrings:Vessel"] = fixture.Database.ConnectionString,
                     ["Vessel:Auth:OwnerId"] = fixture.Owner.ToString(),
-                    ["Vessel:Auth:Token"] = CoreApiFactory.Token,
+                    ["Vessel:Identity:Origins:0"] = TestAuthentication.Origin,
                     ["Vessel:Messaging:RabbitMqUri"] = Environment.GetEnvironmentVariable("Vessel_TEST_EVENT_RABBIT"),
                     ["Vessel:Messaging:Prefix"] = "e2e" + fixture.id,
                     ["Vessel:Messaging:Verification"] = "true",
@@ -397,7 +396,7 @@ public sealed class MonitorEndToEndTests
                 fixture.verification = fixture.BuildVerification();
                 await fixture.verification.StartAsync();
                 fixture.worker = fixture.BuildWorker();
-                fixture.api = new(fixture.config, fixture.Clock, fixture.Venue);
+                fixture.api = new(fixture.config, fixture.Clock, fixture.Venue, fixture.Owner);
                 await fixture.worker.StartAsync();
                 await fixture.WaitForRunAsync(1);
                 Assert.Equal("live", (await fixture.MonitorAsync()).State);
@@ -418,7 +417,7 @@ public sealed class MonitorEndToEndTests
             builder.Logging.ClearProviders();
             builder.Logging.AddConsole().SetMinimumLevel(LogLevel.Warning);
             WorkerHost.Configure(builder);
-            ReplaceInputs(builder.Services, Clock, Venue);
+            ReplaceInputs(builder.Services, Clock, Venue, Owner);
             return builder.Build();
         }
 
@@ -492,7 +491,7 @@ public sealed class MonitorEndToEndTests
         public HttpClient ApiClient()
         {
             var client = api!.CreateClient();
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CoreApiFactory.Token);
+            TestAuthentication.SignIn(client.DefaultRequestHeaders, Owner);
             return client;
         }
         public async Task<MonitorAccount> MonitorAsync()
@@ -600,7 +599,7 @@ public sealed class MonitorEndToEndTests
         }
     }
 
-    private sealed class MonitorApiFactory(Dictionary<string, string?> config, TestClock clock, SyntheticVenue venue)
+    private sealed class MonitorApiFactory(Dictionary<string, string?> config, TestClock clock, SyntheticVenue venue, Guid owner)
         : WebApplicationFactory<Program>
     {
         protected override IHost CreateHost(IHostBuilder builder)
@@ -613,12 +612,19 @@ public sealed class MonitorEndToEndTests
             builder.UseEnvironment("Production");
             builder.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(config));
             builder.ConfigureLogging(logging => logging.ClearProviders());
-            builder.ConfigureServices(services => ReplaceInputs(services, clock, venue));
+            builder.ConfigureServices(services =>
+            {
+                ReplaceInputs(services, clock, venue, owner);
+                TestAuthentication.Add(services);
+            });
         }
     }
 
-    private static void ReplaceInputs(IServiceCollection services, TestClock clock, SyntheticVenue venue)
+    /// <summary>The synthetic clock and venue, and one active owner instead of the identity users this database lacks.</summary>
+    private static void ReplaceInputs(IServiceCollection services, TestClock clock, SyntheticVenue venue, Guid owner)
     {
+        services.RemoveAll<IJournalOwnerDirectory>();
+        services.AddSingleton<IJournalOwnerDirectory>(new ConfiguredOwnerDirectory(owner));
         services.RemoveAll<TimeProvider>();
         services.AddSingleton<TimeProvider>(clock);
         services.RemoveAll<IVenueRegistry>();

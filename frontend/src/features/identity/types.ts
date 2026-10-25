@@ -4,7 +4,7 @@ import type { SessionCheck } from './session'
 /** The session generation and profile epoch an asynchronous profile read started under. */
 export interface ProfileRead { generation: number; epoch: number }
 
-/** What the workspace shell gets in Wallet mode. Token mode passes nothing, and the shell behaves as before. */
+/** What the workspace shell gets about the signed-in session. */
 export interface ShellIdentity {
   session: SessionDto
   auth: SessionAuthApi

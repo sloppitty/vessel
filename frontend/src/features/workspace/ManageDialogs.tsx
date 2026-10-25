@@ -178,8 +178,8 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
       {deleting ? <div className="workspace-form">
         {error && <p className="error" role="alert">{error}</p>}
         <div className="management-actions"><Button variant="outline" onClick={() => { setDeleting(false); setError(null) }} disabled={pending}>Keep account</Button><Button variant="destructive" onClick={() => { void remove() }} disabled={pending}>{pending ? 'Deleting…' : 'Delete account'}</Button></div>
-      </div> : <><p className="account-source"><span>Source</span> <VenueBadge venueId={account.venueId} size="xs" /> · {account.tradingMode === 'paper' ? 'Paper · simulated' : account.sourceId ?? account.address ?? 'Manual record'}</p>
-      {account.tradingMode === 'paper' && <p className="field-help"><span className="workspace-badge">Paper</span> Starting capital: {account.startingCapitalUsd ?? 'Unknown'} virtual USD · fixed at creation, not editable.</p>}
+      </div> : <><p className="account-source"><span>Source</span> <VenueBadge venueId={account.venueId} size="xs" /> · {account.tradingMode === 'paper' ? 'Simulated executions' : account.sourceId ?? account.address ?? 'Manual record'}</p>
+      {account.tradingMode === 'paper' && <p className="field-help">Starting capital: {account.startingCapitalUsd ?? 'Unknown'} virtual USD · fixed at creation, not editable.</p>}
       <form className="workspace-form" onSubmit={event => { void save(event) }} aria-busy={pending}>
         <label htmlFor="rename-account">Account name</label><Input id="rename-account" value={name} onChange={event => setName(event.target.value)} maxLength={200} disabled={pending} autoFocus />
         <label htmlFor="move-account">Portfolio</label><NativeSelect id="move-account" value={portfolioId} onChange={event => setPortfolioId(event.target.value)} disabled={pending}>
