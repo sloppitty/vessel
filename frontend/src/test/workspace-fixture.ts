@@ -99,7 +99,7 @@ export const playCountsFrom = (plays: PlaySummary[]): WorkspaceApi['playCounts']
 
 /** Saved-play API stubs: no saved plays, and every write rejects unless a test overrides it. */
 export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' | 'playCounts' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' | 'nextActions' | 'completeReview' | 'reopenReview' | 'noReviewNeeded' | 'declareUnresolved' | 'returnToOpen' | 'playNotes' | 'addPlayNote' |
-  'deletePlay' | 'playExecution' | 'monitor' | 'accountMonitor' | 'runAccountMonitor' | 'monitorEvents' | 'monitorStream' | 'dismissPlayDiscrepancy' | 'dismissAccountDiscrepancy' | 'linkOrder' | 'unlinkOrder' | 'rejectOrder' | 'rebindLevel' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'openRisk' | 'openRiskPreview' | 'riskSettings' | 'updateRiskSettings' | 'review' | 'reviewExclusions' | 'reviewExport' | 'accountFacts' | 'reviewProcess' | 'mistakeTags' | 'retrospectivePreview' | 'createRetrospectivePlay' | 'manualExecutions' | 'addManualExecution' | 'correctManualExecution' | 'correctManualExecutions' |
+  'deletePlay' | 'playExecution' | 'monitor' | 'accountMonitor' | 'runAccountMonitor' | 'monitorEvents' | 'monitorStream' | 'dismissPlayDiscrepancy' | 'dismissAccountDiscrepancy' | 'linkOrder' | 'unlinkOrder' | 'rejectOrder' | 'rebindLevel' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'openRisk' | 'openRiskPreview' | 'riskSettings' | 'updateRiskSettings' | 'review' | 'reviewExclusions' | 'reviewExport' | 'accountFacts' | 'playBundle' | 'reviewProcess' | 'mistakeTags' | 'retrospectivePreview' | 'createRetrospectivePlay' | 'manualExecutions' | 'addManualExecution' | 'correctManualExecution' | 'correctManualExecutions' |
   'notificationHead' | 'notifications' | 'claimNotifications' | 'readNotification' | 'readAllNotifications' | 'notificationPreferences' |
   'saveNotificationPreferences' | 'requestTestNotification' | 'paperSettings' | 'savePaperSettings' | 'paperState'> {
   const unexpected = () => Promise.reject(new Error('Unexpected play API call in this test.'))
@@ -129,7 +129,7 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
     riskSettings: vi.fn().mockResolvedValue({ openRiskLimitPercent: null }), updateRiskSettings: vi.fn(unexpected),
     review: vi.fn().mockResolvedValue(emptyReview),
     reviewExclusions: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, nextOffset: null, notice: 'Fixture exclusions.' }),
-    reviewExport: vi.fn(unexpected), accountFacts: vi.fn(unexpected),
+    reviewExport: vi.fn(unexpected), accountFacts: vi.fn(unexpected), playBundle: vi.fn(unexpected),
     reviewProcess: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, nextOffset: null }),
     mistakeTags: vi.fn().mockResolvedValue([]),
     retrospectivePreview: vi.fn(unexpected), createRetrospectivePlay: vi.fn(unexpected),

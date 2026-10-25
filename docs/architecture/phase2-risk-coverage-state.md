@@ -286,6 +286,46 @@ October 21, 2026.
   formatting, empty unknowns and formula neutralization.
 - **Check after round 1.** `scripts/check.sh` passed on `7790a4d3` (before documentation-only commits were restacked beneath it): backend 4,048 passed, 5 skipped; frontend 173 files and 4,067 tests.
 
+**5c. Play bundle.** Implemented on `t3/phase2-play-bundle`.
+- **The read.** `GET /api/plays/{id}/bundle` returns a zip in the Play's own trading mode.
+  - `play.json` holds, from the API's own read models: the Play; its plan revisions, status and review
+    history; its executions (linked orders and fills, the manual ledger, or paper's simulated state);
+    its log; and its evidence with markup and notes.
+  - Each evidence original sits under `evidence/`, unchanged.
+- **What it leaves out.** It holds no storage key, path or credential. An original that cannot be read
+  is listed as unavailable rather than failing the download.
+- **How it is built.** The archive is built in a delete-on-close temporary file and then copied, so no
+  synchronous write reaches the response.
+- **The page.** A saved Play's header gains **Download** beside History.
+- **Tests.**
+  - `PlayBundleTests` (2, PostgreSQL): the record and an unchanged original; an unreadable original
+    listed, not hidden; another owner's Play and the other mode not found.
+  - The isolation case in both auth modes.
+  - The button test.
+- **Check.** `scripts/check.sh` passed on `75371a37`: backend 4,048 passed, 5 skipped; frontend 174 files and 4,069 tests.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `20d1ef0f`. Six findings, all fixed in
+  `218aff6b`:
+  - **High.** The temporary archive took the umask (0644), so other local
+    users could read it during a download. It is created owner-only (0600).
+  - A manual Play on a disabled account could not export its ledger. It now
+    can.
+  - A paper bundle lacked its simulation provenance. Each simulated
+    execution states its model and plan version, with the plan activations,
+    through a paper export projection.
+  - A link the owner removed disappeared. Every retained link is exported in
+    any state, with its times and order ID.
+  - A concurrent change could make the bundle contradict itself. All database
+    reads come from one repeatable-read snapshot
+    (`IUnitOfWork.ReadSnapshotAsync`), closed before originals are read.
+  - Concurrent downloads could fill temporary storage. At most two bundles
+    are built at once, and each original is cut off at its recorded size.
+
+  Sol confirmed that the bundle holds no credentials, sessions, storage keys
+  or raw venue JSON, and that paths and headers are safe. Its own backend
+  tests could not start in its environment, which lacked SDK 10.0.302; the
+  check below ran them.
+- **Check after round 1.** `scripts/check.sh` passed on `41044726` (before documentation-only commits were restacked beneath it): backend 4,058 passed, 5 skipped; frontend 174 files and 4,069 tests.
+
 ## 6. Opt-in account history retention
 
 Not started.
