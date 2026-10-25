@@ -11,11 +11,12 @@ import { notificationWith } from '@/test/notification-fixture'
 import { ApplicationShell } from './ApplicationShell'
 import { ShellBreadcrumb } from './ShellBreadcrumb'
 import type { ShellLocation } from './shell-history'
+import { credentialsFixture, shellIdentityFixture } from '@/test/identity-fixture'
 
 const play = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, title: 'HYPE Long · 24 Oct 2026' } }
 function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
-    ...createWorkspaceApi('synthetic-only'), ...playApiStubs(),
+    ...createWorkspaceApi(credentialsFixture), ...playApiStubs(),
     overview: vi.fn().mockResolvedValue(overviewFixture), accounts: vi.fn().mockResolvedValue([accountFixture]),
     snapshot: vi.fn().mockResolvedValue(null), fills: vi.fn().mockResolvedValue([]),
     activity: vi.fn().mockResolvedValue(activityPage([])), play: vi.fn().mockResolvedValue(play),
@@ -27,7 +28,7 @@ function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
 const breadcrumb = () => screen.getByRole('navigation', { name: 'Breadcrumb' })
 const labels = () => within(breadcrumb()).getAllByRole('listitem').map(item => item.textContent)
 const backLink = (name: string) => within(breadcrumb()).getByRole('link', { name: `${name} — previous location` })
-const mount = (api = client()) => render(<ApplicationShell api={api} system={systemFixture} disconnect={vi.fn()} />)
+const mount = (api = client()) => render(<ApplicationShell identity={shellIdentityFixture()} api={api} system={systemFixture} disconnect={vi.fn()} />)
 
 beforeAll(async () => {
   await Promise.all([import('@/features/plays/PlaysPage'), import('@/features/review/ReviewPage'), import('./SettingsPage')])
@@ -48,7 +49,7 @@ describe('shell route history', () => {
     expect(labels()).toEqual(['Accounts'])
     await user.click(await screen.findByRole('button', { name: 'View Main account' }))
     await user.click(screen.getByRole('link', { name: 'Settings' }))
-    expect(labels()).toEqual(['Settings'])
+    expect(labels()).toEqual(['Settings', 'Appearance'])
     await user.click(screen.getByRole('link', { name: 'Vessel overview' }))
     expect(labels()).toEqual(['Overview'])
   })
@@ -191,9 +192,9 @@ describe('shell route history', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(api.updatePlay).toHaveBeenCalledOnce())
     await user.click(screen.getByRole('link', { name: 'Settings' }))
-    expect(labels()).toEqual(['Settings'])
+    expect(labels()).toEqual(['Settings', 'Appearance'])
     await act(async () => finish({ ...play, summary: { ...play.summary, title: 'Renamed saved Play', version: 2 } }))
-    expect(labels()).toEqual(['Settings'])
+    expect(labels()).toEqual(['Settings', 'Appearance'])
     await user.click(screen.getByRole('link', { name: 'Plays' }))
     expect(await screen.findByRole('textbox', { name: 'Play title' })).toHaveValue('Renamed saved Play')
     expect(labels()).toEqual(['Plays', 'Renamed saved Play'])

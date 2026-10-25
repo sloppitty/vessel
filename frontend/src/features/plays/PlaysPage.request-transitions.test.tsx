@@ -8,6 +8,7 @@ import { NotificationProvider } from '@/components/notifications/NotificationPro
 import { accountFixture, playApiStubs, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { PlaysPage } from './PlaysPage'
 import { draftFromSaved, savedState, type PlaysSession } from './saved'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const a: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, status: 'open', planRevision: 1 } }
 const b: SavedPlay = { ...a, summary: { ...a.summary, id: '33333333-4444-5555-6666-777777777777', title: 'Play B' } }
@@ -17,7 +18,7 @@ const sessionFor = (play: SavedPlay): PlaysSession => {
   const draft = draftFromSaved(play, [])
   return { view: 'editor', draft, saved: savedState(play, draft) }
 }
-const client = (): WorkspaceApi => ({ ...createWorkspaceApi('synthetic-only'), ...playApiStubs(), play: vi.fn().mockResolvedValue(a) })
+const client = (): WorkspaceApi => ({ ...createWorkspaceApi(credentialsFixture), ...playApiStubs(), play: vi.fn().mockResolvedValue(a) })
 function Harness({ api, request, initial, onSession, onHandled }: {
   api: WorkspaceApi; request: Request; initial: PlaysSession
   onSession: (session: PlaysSession) => void; onHandled: (opened?: boolean) => void

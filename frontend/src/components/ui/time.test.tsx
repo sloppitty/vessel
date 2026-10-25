@@ -15,6 +15,7 @@ import { reviewFixture } from '@/test/review-fixture'
 import { defaultReviewQuery } from '@/api/review'
 import { ReviewProcessList } from '@/features/review/ReviewProcess'
 import { restoreZone } from '@/test/zone'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const originalZone = process.env.TZ
 afterEach(() => {
@@ -56,7 +57,7 @@ describe('display time zone (phase 1, 1.6e)', () => {
   it("names Review's close-date zone beside the UTC report periods", async () => {
     process.env.TZ = 'America/Los_Angeles'
     const user = userEvent.setup()
-    const api = { ...createWorkspaceApi('test'), review: () => Promise.resolve(reviewFixture) }
+    const api = { ...createWorkspaceApi(credentialsFixture), review: () => Promise.resolve(reviewFixture) }
     render(<ReviewPage api={api} reloadGeneration={0} onOpenPlay={() => Promise.resolve()} />)
     await user.click(await screen.findByRole('button', { name: `${reviewFixture.metrics.count} Plays` }))
     const table = await within(await screen.findByRole('dialog')).findByRole('table', { name: 'Contributing closed Plays' })
@@ -71,7 +72,7 @@ describe('display time zone (phase 1, 1.6e)', () => {
     process.env.TZ = 'America/Los_Angeles'
     // 00:30 UTC on 20 October is still 19 October in Los Angeles.
     const at = '2026-10-20T00:30:00Z'
-    const api = { ...createWorkspaceApi('test'), review: () => Promise.resolve({ ...reviewFixture, coverage: { ...reviewFixture.coverage, firstFillAtUtc: at } }) }
+    const api = { ...createWorkspaceApi(credentialsFixture), review: () => Promise.resolve({ ...reviewFixture, coverage: { ...reviewFixture.coverage, firstFillAtUtc: at } }) }
     const view = render(<ReviewPage api={api} reloadGeneration={0} onOpenPlay={() => Promise.resolve()} />)
     expect((await screen.findByText('19 Oct 2026, 17:30 GMT-7')).closest('p')).toHaveTextContent(/^Earliest retained fill in this scope/)
     view.unmount()
@@ -80,7 +81,7 @@ describe('display time zone (phase 1, 1.6e)', () => {
       accountName: play.accountName, venueId: play.venueId, instrument: play.instrument, status: 'closed' as const, origin: 'planned' as const,
       direction: 'long', atUtc: at, net: null, returnPercent: null, rMultiple: null, adherence: null, mistakeTag: null,
       plannedAfterExecution: false, reviewCompletion: null }] }
-    render(<ReviewProcessList api={{ ...createWorkspaceApi('test'), reviewProcess: () => Promise.resolve(page) }} query={defaultReviewQuery}
+    render(<ReviewProcessList api={{ ...createWorkspaceApi(credentialsFixture), reviewProcess: () => Promise.resolve(page) }} query={defaultReviewQuery}
       selection={{ lane: 'unanswered' }} onOpenPlay={() => Promise.resolve()} />)
     expect(await screen.findByText('19 Oct 2026, 17:30 GMT-7')).toBeInTheDocument()
   })

@@ -9,6 +9,7 @@ import { reviewFixture } from '@/test/review-fixture'
 import { systemFixture } from '@/test/system-fixture'
 import { notificationWith } from '@/test/notification-fixture'
 import { ApplicationShell } from './ApplicationShell'
+import { credentialsFixture, shellIdentityFixture } from '@/test/identity-fixture'
 
 const first = savedPlayFixture
 const second = { ...first, summary: { ...first.summary, id: '33333333-4444-5555-6666-777777777777', title: 'Second saved Play' } }
@@ -29,7 +30,7 @@ function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   const popup = notificationWith(1, { content: { ...notificationWith(1).content,
     links: [{ kind: 'play', label: 'Open second Play', playId: second.summary.id, accountId: null }] } })
   return {
-    ...createWorkspaceApi('synthetic-only'), ...playApiStubs(),
+    ...createWorkspaceApi(credentialsFixture), ...playApiStubs(),
     overview: vi.fn().mockResolvedValue(overviewFixture), accounts: vi.fn().mockResolvedValue([accountFixture]),
     snapshot: vi.fn().mockResolvedValue(null), fills: vi.fn().mockResolvedValue([]),
     activity: vi.fn().mockResolvedValue(activityPage([])),
@@ -46,7 +47,7 @@ function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
 
 async function openBoth(api: WorkspaceApi) {
   const user = userEvent.setup()
-  const view = render(<ApplicationShell api={api} system={systemFixture} disconnect={vi.fn()} />)
+  const view = render(<ApplicationShell identity={shellIdentityFixture()} api={api} system={systemFixture} disconnect={vi.fn()} />)
   await user.click(await screen.findByRole('button', { name: 'Inspect Swing trading' }))
   await user.click(await screen.findByRole('button', { name: 'Open Play BTC breakout' }))
   await screen.findByRole('textbox', { name: 'Play title' })
@@ -79,7 +80,7 @@ it('uses the latest origin when the shell requests the same Play again without c
   const api = client({ claimNotifications: vi.fn().mockResolvedValue({ popups: [popup], more: 0 }) })
   const user = userEvent.setup()
   window.history.replaceState(null, '', '/#plays')
-  render(<ApplicationShell api={api} system={systemFixture} disconnect={vi.fn()} />)
+  render(<ApplicationShell identity={shellIdentityFixture()} api={api} system={systemFixture} disconnect={vi.fn()} />)
   await user.click(await screen.findByRole('tab', { name: /^Drafts/ }))
   await user.click(await screen.findByRole('button', { name: `Open ${second.summary.title}` }))
   await screen.findByRole('textbox', { name: 'Play title' })
@@ -104,7 +105,7 @@ it('does not let an unmounted restore owner cancel a new connection request', as
   await user.click(crumb(first.summary.title))
   await waitFor(() => expect(oldApi.play).toHaveBeenCalledTimes(3))
   // Keep ApplicationShell mounted while the connection replaces and re-keys its Plays owner.
-  user.view.rerender(<ApplicationShell api={newApi} system={systemFixture} disconnect={vi.fn()} />)
+  user.view.rerender(<ApplicationShell identity={shellIdentityFixture()} api={newApi} system={systemFixture} disconnect={vi.fn()} />)
   await user.click(screen.getByRole('link', { name: 'Review' }))
   await user.click(await screen.findByRole('button', { name: 'Inspect Swing trading' }))
   let finishNew!: (play: SavedPlay) => void
@@ -124,7 +125,7 @@ it('does not retain an old connection request as a breadcrumb guard on the new c
   await user.click(crumb(first.summary.title))
   await waitFor(() => expect(oldApi.play).toHaveBeenCalledTimes(3))
 
-  user.view.rerender(<ApplicationShell api={newApi} system={systemFixture} disconnect={vi.fn()} />)
+  user.view.rerender(<ApplicationShell identity={shellIdentityFixture()} api={newApi} system={systemFixture} disconnect={vi.fn()} />)
   await act(async () => finishOld(first))
   await user.click(await screen.findByRole('tab', { name: /^Drafts/ }))
   await user.click(await screen.findByRole('button', { name: `Open ${second.summary.title}` }))

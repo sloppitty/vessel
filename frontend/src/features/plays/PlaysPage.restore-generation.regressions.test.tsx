@@ -8,6 +8,7 @@ import { NotificationProvider } from '@/components/notifications/NotificationPro
 import { accountFixture, playApiStubs, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { PlaysPage } from './PlaysPage'
 import { draftFromSaved, savedState, type PlaysSession } from './saved'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 it('does not treat a fresh non-restore request for A as permission to complete a cancelled restore of A', async () => {
   const first: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, status: 'open', planRevision: 1 } }
@@ -15,7 +16,7 @@ it('does not treat a fresh non-restore request for A as permission to complete a
   const stored = draftFromSaved(second, [])
   let current: PlaysSession = { view: 'editor', draft: { ...stored, title: 'Keep B unsaved' }, saved: savedState(second, stored) }
   let finish!: (play: SavedPlay) => void
-  const api = { ...createWorkspaceApi('synthetic-only'), ...playApiStubs(),
+  const api = { ...createWorkspaceApi(credentialsFixture), ...playApiStubs(),
     play: vi.fn(() => new Promise<SavedPlay>(resolve => { finish = resolve })) }
   function Harness() {
     const [session, setSession] = useState(current)

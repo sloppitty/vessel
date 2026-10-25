@@ -20,16 +20,6 @@ function lastInit(fetch: ReturnType<typeof vi.fn>) {
 }
 
 describe('transport kinds', () => {
-  it('keeps the bearer kind exactly as Token mode sends it', async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response('"ok"'))
-    vi.stubGlobal('fetch', fetch)
-    await createApiCall('memory-token')('/api/example', { timeout: 1_000, validate: isString })
-    const init = lastInit(fetch)
-    expect(init.credentials).toBe('omit')
-    expect(init.referrerPolicy).toBeUndefined()
-    expect(init.headers).toEqual({ Authorization: 'Bearer memory-token', Accept: 'application/json' })
-  })
-
   it('sends the session cookie, the tab binding and a real Origin for the session kind', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response('"ok"'))
     vi.stubGlobal('fetch', fetch)
@@ -42,15 +32,20 @@ describe('transport kinds', () => {
   })
 
   it('marks public auth calls with X-Vessel-Request and no user', async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ mode: 'token' })))
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ registration: 'closed', originAccepted: true })))
     vi.stubGlobal('fetch', fetch)
-    await expect(createPublicAuthApi().config('http://vessel.test:5180')).resolves.toEqual({ mode: 'token' })
+    await expect(createPublicAuthApi().config('http://vessel.test:5180')).resolves.toEqual({ registration: 'closed', originAccepted: true })
     const [path] = fetch.mock.calls[0] as [string]
     expect(path).toBe('/api/auth/config?origin=http%3A%2F%2Fvessel.test%3A5180')
     const init = lastInit(fetch)
     expect(init.credentials).toBe('same-origin')
     expect(init.referrerPolicy).toBe('same-origin')
     expect(init.headers).toEqual({ 'X-Vessel-Request': '1', Accept: 'application/json' })
+  })
+
+  it('refuses a configuration without a registration policy, such as the removed Token mode answer', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ mode: 'token' }))))
+    await expect(createPublicAuthApi().config('http://vessel.test:5180')).rejects.toMatchObject({ kind: 'invalid-response' })
   })
 
   it('applies the session kind to stream headers and the system read', async () => {
@@ -112,20 +107,11 @@ describe('auth failures', () => {
     const events: unknown[] = []
     onApiEvent(api, event => events.push(event))
     const error = await api.overview().catch((cause: unknown) => cause) as ApiError
-    expect(endsSession(credentials, { status, ...code ? { code } : {} })).toBe(ends)
+    expect(endsSession({ status, ...code ? { code } : {} })).toBe(ends)
     expect(events).toEqual(ends ? [{ type: 'unauthorized' }] : [])
     expect(failures).toHaveLength(1)
     expect(error.message).not.toContain('private')
     if (code === 'step-up-required') expect(error.message).toBe('Confirm with a wallet already linked to this journal to continue.')
-  })
-
-  it('keeps Token mode treating every 401 and 403 as a rejected token', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(problem(403, 'csrf-rejected')))
-    const api = createWorkspaceApi('token')
-    const events: unknown[] = []
-    onApiEvent(api, event => events.push(event))
-    await expect(api.overview()).rejects.toThrow('Your API token was rejected. Disconnect and connect again.')
-    expect(events).toEqual([{ type: 'unauthorized' }])
   })
 })
 

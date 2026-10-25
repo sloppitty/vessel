@@ -5,6 +5,7 @@ import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { emptyOverview, playApiStubs } from '@/test/workspace-fixture'
 import { systemFixture } from '@/test/system-fixture'
 import { ApplicationShell } from './ApplicationShell'
+import { credentialsFixture, shellIdentityFixture } from '@/test/identity-fixture'
 
 const system = { ...systemFixture, venues: systemFixture.venues.map(venue => ({
   ...venue, capabilities: { ...venue.capabilities, paperExecution: venue.id === 'hyperliquid' },
@@ -12,7 +13,7 @@ const system = { ...systemFixture, venues: systemFixture.venues.map(venue => ({
 const realName = 'Journal, switch to Paper playground'
 const paperName = 'Paper playground, switch to Journal'
 function client() {
-  const base = { ...createWorkspaceApi('synthetic-only'), ...playApiStubs(), overview: vi.fn().mockResolvedValue(emptyOverview),
+  const base = { ...createWorkspaceApi(credentialsFixture), ...playApiStubs(), overview: vi.fn().mockResolvedValue(emptyOverview),
     accounts: vi.fn().mockResolvedValue([]), portfolios: vi.fn().mockResolvedValue([]) }
   const real: WorkspaceApi = { ...base, tradingMode: 'real' }
   const paper: WorkspaceApi = { ...base, tradingMode: 'paper' }
@@ -25,7 +26,7 @@ it('keeps the exit guard if Paper becomes unavailable while its switch confirmat
   const user = userEvent.setup()
   const { root } = client()
   const disconnect = vi.fn()
-  const view = render(<ApplicationShell system={system} api={root} disconnect={disconnect} />)
+  const view = render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={root} disconnect={disconnect} />)
   await user.click(await screen.findByRole('button', { name: 'New play' }))
   await user.type(await screen.findByRole('textbox', { name: 'Play title' }), 'Keep this real work')
   const before = new Event('beforeunload', { cancelable: true })
@@ -33,7 +34,7 @@ it('keeps the exit guard if Paper becomes unavailable while its switch confirmat
   expect(before.defaultPrevented).toBe(true)
   await user.click(await screen.findByRole('button', { name: realName }))
   const dialog = screen.getByRole('alertdialog')
-  view.rerender(<ApplicationShell system={systemFixture} api={root} disconnect={disconnect} />)
+  view.rerender(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} api={root} disconnect={disconnect} />)
   expect(screen.queryByRole('button', { name: realName })).not.toBeInTheDocument()
   await user.click(within(dialog).getByRole('button', { name: 'Discard and switch' }))
   expect(document.querySelector('.journal-shell')).toHaveAttribute('data-trading-mode', 'real')
@@ -43,14 +44,15 @@ it('keeps the exit guard if Paper becomes unavailable while its switch confirmat
   fireEvent.change(screen.getByRole('textbox', { name: 'Play title' }), { target: { value: 'Continue real work' } })
   const title = (screen.getByRole('textbox', { name: 'Play title' }) as HTMLInputElement).value
   vi.spyOn(window, 'confirm').mockReturnValue(true)
-  await user.click(screen.getByRole('button', { name: "Disconnect Owner's session" }))
+  await user.click(screen.getByRole('button', { name: /^Sam Rivera, account menu/ }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Sign out' }))
   expect({ exitProtected: after.defaultPrevented, title, disconnects: disconnect.mock.calls.length })
     .toEqual({ exitProtected: true, title: 'Continue real work', disconnects: 1 })
 })
 
 it('keeps beforeunload protection on cancel, but removes it on an actual mode switch', async () => {
   const user = userEvent.setup()
-  render(<ApplicationShell system={system} api={client().root} disconnect={vi.fn()} />)
+  render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={client().root} disconnect={vi.fn()} />)
   await user.click(await screen.findByRole('button', { name: 'New play' }))
   await user.type(await screen.findByRole('textbox', { name: 'Play title' }), 'Unsaved work')
   await user.click(await screen.findByRole('button', { name: realName }))
@@ -75,7 +77,7 @@ it('does not leave Paper or discard its hidden Play draft when monitoring is dis
   let settings = { enabled: true, checkIntervalMinutes: 60 }
   vi.mocked(root.paperSettings).mockImplementation(async () => settings)
   vi.mocked(paper.savePaperSettings).mockImplementation(async next => { settings = next; return settings })
-  render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
+  render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={root} disconnect={vi.fn()} />)
   await user.click(await screen.findByRole('button', { name: realName }))
   await user.click(await screen.findByRole('button', { name: 'New play' }))
   await user.type(await screen.findByRole('textbox', { name: 'Play title' }), 'Keep this Paper work')
@@ -95,12 +97,12 @@ it('returns focus to a surviving shell control when Paper disappears during conf
   const user = userEvent.setup()
   const { root } = client()
   const disconnect = vi.fn()
-  const view = render(<ApplicationShell system={system} api={root} disconnect={disconnect} />)
+  const view = render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={root} disconnect={disconnect} />)
   await user.click(await screen.findByRole('button', { name: 'New play' }))
   await user.type(await screen.findByRole('textbox', { name: 'Play title' }), 'Keep this real work')
   await user.click(await screen.findByRole('button', { name: realName }))
   const dialog = screen.getByRole('alertdialog')
-  view.rerender(<ApplicationShell system={systemFixture} api={root} disconnect={disconnect} />)
+  view.rerender(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} api={root} disconnect={disconnect} />)
   expect(screen.queryByRole('button', { name: realName })).not.toBeInTheDocument()
   await user.click(within(dialog).getByRole('button', { name: 'Discard and switch' }))
   await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())

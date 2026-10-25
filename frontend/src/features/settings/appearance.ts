@@ -219,8 +219,8 @@ export function initAppearance() {
   applyAppearance(device ? { ...emptyAppearance(), themeId: device } : current)
 }
 
-/** Token mode has no device theme: show the stored appearance in case an earlier Wallet-mode page left one. */
-export function applyStoredAppearance() {
+/** Re-reads and applies the stored appearance of the current preference scope. */
+function applyStoredAppearance() {
   current = parseAppearance(readStorage())
   applyAppearance(current)
   for (const listener of listeners) listener()

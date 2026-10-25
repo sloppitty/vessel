@@ -12,6 +12,7 @@ import { activityPage, operationFixture } from '@/test/activity-fixture'
 import { reviewFixture } from '@/test/review-fixture'
 import { pickerAccounts } from './account-picker-options'
 import { accountStatus } from '@/lib/format'
+import { shellIdentityFixture } from '@/test/identity-fixture'
 
 const paperPortfolio = { ...portfolioFixture, tradingMode: 'paper' as const, name: 'Paper hypotheses' }
 const paperAccount = { ...accountFixture, tradingMode: 'paper' as const, syncStatus: 'paper' as const, venueId: 'hyperliquid', name: 'Paper hypothesis 1',
@@ -44,7 +45,7 @@ describe('isolated Paper workspace', () => {
       plays: vi.fn(playsFrom([summary])), playCounts: vi.fn(playCountsFrom([summary])) })
     const real = api()
     const root = api({ ...real, forTradingMode: vi.fn(mode => mode === 'paper' ? paper : real) })
-    render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={root} disconnect={vi.fn()} />)
     expect(screen.queryByRole('note')).not.toBeInTheDocument()
     await switchTradingMode(user, 'paper')
     const note = await screen.findByRole('note')
@@ -82,7 +83,7 @@ describe('isolated Paper workspace', () => {
     }) })
     const real = api()
     const root = api({ ...real, forTradingMode: vi.fn(mode => mode === 'paper' ? paper : real) })
-    render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={root} disconnect={vi.fn()} />)
     await switchTradingMode(user, 'paper')
     await waitFor(() => expect(paper.review).toHaveBeenCalled())
     expect(paper.review).toHaveBeenLastCalledWith(expect.objectContaining({ positions: 'exclude' }), expect.any(AbortSignal))
@@ -114,7 +115,7 @@ describe('isolated Paper workspace', () => {
     const real = api({ overview: vi.fn().mockImplementation(() => new Promise<Overview>(resolve => { finish = resolve })) })
     const paper = api({ tradingMode: 'paper', overview: vi.fn().mockResolvedValue(paperOverview) })
     const root = api({ ...real, forTradingMode: vi.fn(mode => mode === 'paper' ? paper : real), paperSettings: vi.fn().mockResolvedValue({ enabled: false, checkIntervalMinutes: 60 }) })
-    render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={root} disconnect={vi.fn()} />)
     await waitFor(() => expect(real.overview).toHaveBeenCalled())
     await switchTradingMode(userEvent, 'paper')
     expect(await screen.findByRole('button', { name: 'View Paper hypothesis 1' })).toBeInTheDocument()
@@ -135,7 +136,7 @@ describe('isolated Paper workspace', () => {
   })
   it('keeps old or unsupported servers real-only without a broad venue fallback', async () => {
     const root = api({ paperSettings: vi.fn().mockRejectedValue(new Error('Not supported')), forTradingMode: vi.fn(() => api()) })
-    render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={root} disconnect={vi.fn()} />)
     await waitFor(() => expect(root.paperSettings).toHaveBeenCalled())
     expect(tradingModeControl()).not.toBeInTheDocument()
     expect(within(screen.getByRole('link', { name: 'Vessel overview' })).getByText('The trading journal')).toBeInTheDocument()
@@ -144,7 +145,7 @@ describe('isolated Paper workspace', () => {
     window.history.replaceState(null, '', '/#plays')
     const real = api(), paper = api({ tradingMode: 'paper' })
     const root = api({ ...real, forTradingMode: vi.fn(mode => mode === 'paper' ? paper : real) })
-    render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={root} disconnect={vi.fn()} />)
     await userEvent.click(await screen.findByRole('button', { name: 'New play' }))
     await userEvent.type(await screen.findByRole('textbox', { name: 'Play title' }), 'Unsaved real thesis')
     const confirm = vi.spyOn(window, 'confirm')
@@ -177,7 +178,7 @@ describe('trading mode lockup', () => {
 
   it('names the action both ways in a button beside, not inside, the Overview link', async () => {
     const user = userEvent.setup()
-    render(<ApplicationShell system={system} api={modeApis().root} disconnect={vi.fn()} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={modeApis().root} disconnect={vi.fn()} />)
     const control = await screen.findByRole('button', { name: 'Journal, switch to Paper playground' })
     const link = screen.getByRole('link', { name: 'Vessel overview' })
     expect(control).toHaveTextContent(/^\s*Journal\s*$/)
@@ -196,7 +197,7 @@ describe('trading mode lockup', () => {
 
   it('keeps the plain subtitle and no control, even in the rail, when no venue simulates executions', async () => {
     const { root } = modeApis()
-    render(<ApplicationShell system={systemFixture} api={root} disconnect={vi.fn()} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} api={root} disconnect={vi.fn()} />)
     await waitFor(() => expect(root.paperSettings).toHaveBeenCalled())
     await screen.findByRole('button', { name: 'Collapse navigation' })
     expect(tradingModeControl()).not.toBeInTheDocument()
@@ -208,7 +209,7 @@ describe('trading mode lockup', () => {
 
   it('becomes a round swap button in the collapsed rail and keeps the rail across a switch', async () => {
     const user = userEvent.setup()
-    render(<ApplicationShell system={system} api={modeApis().root} disconnect={vi.fn()} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={modeApis().root} disconnect={vi.fn()} />)
     await screen.findByRole('button', { name: switchName('real') })
     await user.click(screen.getByRole('button', { name: 'Collapse navigation' }))
     const swap = screen.getByRole('button', { name: switchName('real') })
@@ -228,7 +229,7 @@ describe('trading mode lockup', () => {
 
   it('focuses the new control and announces the mode in a live region that survives the remount', async () => {
     const user = userEvent.setup()
-    render(<ApplicationShell system={system} api={modeApis().root} disconnect={vi.fn()} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={modeApis().root} disconnect={vi.fn()} />)
     await screen.findByRole('button', { name: switchName('real') })
     const live = modeAnnouncer()
     expect(live).toHaveAttribute('aria-live', 'polite')
@@ -245,7 +246,7 @@ describe('trading mode lockup', () => {
 
   it('animates the mark only after a switch made in this session, never on load or reload', async () => {
     const user = userEvent.setup()
-    const session = render(<ApplicationShell system={system} api={modeApis().root} disconnect={vi.fn()} />)
+    const session = render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={modeApis().root} disconnect={vi.fn()} />)
     await screen.findByRole('button', { name: switchName('real') })
     expect(monogram()).not.toHaveClass('is-arriving')
     expect(monogram().querySelector('.is-leaving')).toBeNull()
@@ -255,7 +256,7 @@ describe('trading mode lockup', () => {
     expect(monogram().querySelectorAll('.mode-mark')).toHaveLength(2)
     expect(monogram().querySelector('.mode-mark.is-leaving')).not.toBeNull()
     session.unmount()
-    render(<ApplicationShell system={system} api={modeApis().root} disconnect={vi.fn()} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={modeApis().root} disconnect={vi.fn()} />)
     await screen.findByRole('button', { name: switchName('real') })
     expect(monogram()).not.toHaveClass('is-arriving')
     expect(monogram().querySelector('.is-leaving')).toBeNull()
@@ -265,7 +266,7 @@ describe('trading mode lockup', () => {
     window.history.replaceState(null, '', '/#plays')
     const user = userEvent.setup()
     const { root, paper } = modeApis()
-    render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={root} disconnect={vi.fn()} />)
     await user.click(await screen.findByRole('button', { name: 'New play' }))
     await user.type(await screen.findByRole('textbox', { name: 'Play title' }), 'Unsaved real thesis')
     const control = screen.getByRole('button', { name: switchName('real') })
@@ -294,7 +295,7 @@ describe('trading mode lockup', () => {
     window.history.replaceState(null, '', '/#plays')
     const user = userEvent.setup()
     const { root, paper } = modeApis()
-    render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={root} disconnect={vi.fn()} />)
     await user.click(await screen.findByRole('button', { name: 'New play' }))
     await user.type(await screen.findByRole('textbox', { name: 'Play title' }), 'Unsaved real thesis')
     await switchTradingMode(user, 'paper')
@@ -313,7 +314,7 @@ describe('trading mode lockup', () => {
     let finish!: (play: typeof savedPlayFixture) => void
     const { root } = modeApis({ plays: vi.fn(playsFrom([savedPlayFixture.summary])), playCounts: vi.fn(playCountsFrom([savedPlayFixture.summary])),
       play: vi.fn(() => new Promise<typeof savedPlayFixture>(resolve => { finish = resolve })) })
-    render(<ApplicationShell system={system} api={root} disconnect={vi.fn()} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={root} disconnect={vi.fn()} />)
     await user.click(await screen.findByRole('tab', { name: /^Drafts/ }))
     await user.click(await screen.findByRole('button', { name: `Open ${savedPlayFixture.summary.title}` }))
     // Opening is in flight, so the switch asks first.
@@ -329,12 +330,12 @@ describe('trading mode lockup', () => {
     window.history.replaceState(null, '', '/#plays')
     const user = userEvent.setup()
     const first = modeApis(), second = modeApis()
-    const view = render(<ApplicationShell system={system} api={first.root} disconnect={vi.fn()} />)
+    const view = render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={first.root} disconnect={vi.fn()} />)
     await user.click(await screen.findByRole('button', { name: 'New play' }))
     await user.type(await screen.findByRole('textbox', { name: 'Play title' }), 'Unsaved real thesis')
     await switchTradingMode(user, 'paper')
     const dialog = screen.getByRole('alertdialog', { name: 'Switch to Paper playground?' })
-    view.rerender(<ApplicationShell system={system} api={second.root} disconnect={vi.fn()} />)
+    view.rerender(<ApplicationShell identity={shellIdentityFixture()} system={system} api={second.root} disconnect={vi.fn()} />)
     await waitFor(() => expect(second.root.paperSettings).toHaveBeenCalled())
     await user.click(within(dialog).getByRole('button', { name: 'Discard and switch' }))
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
@@ -348,7 +349,7 @@ describe('trading mode lockup', () => {
     vi.stubGlobal('innerWidth', 390)
     window.history.replaceState(null, '', '/#plays')
     const user = userEvent.setup()
-    render(<ApplicationShell system={system} api={modeApis().root} disconnect={vi.fn()} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={system} api={modeApis().root} disconnect={vi.fn()} />)
     await user.click(await screen.findByRole('button', { name: 'New play' }))
     await user.type(await screen.findByRole('textbox', { name: 'Play title' }), 'Unsaved real thesis')
     expect(document.querySelector('.header-mode')).toBeNull()
