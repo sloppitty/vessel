@@ -43,7 +43,7 @@ public static class EndpointTransport
 
     /// <summary>
     /// Applies the matched endpoint's transport metadata. Register after authorization, so a request without a valid
-    /// bearer token gets 401 before any transport or size answer. Never reads or logs the body.
+    /// session gets 401 before any transport or size answer. Never reads or logs the body.
     /// </summary>
     public static void UseEndpointTransport(this WebApplication app) => app.Use(async (context, next) =>
     {

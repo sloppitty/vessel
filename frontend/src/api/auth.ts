@@ -2,10 +2,8 @@ import { ApiError } from './errors'
 import { hasNoControlCharacters, isCount, isGuid, isListOf, isNonBlankText, isNullOr, isRecord, isText, isTimestamp } from './guards'
 import { createApiCall, type AuthFailure, type SessionGeneration } from './request'
 
-/** `GET /api/auth/config`: the server's sign-in mode. `originAccepted` is only a hint for the screen. */
-export type AuthConfig =
-  | { mode: 'token' }
-  | { mode: 'wallet'; registration: RegistrationPolicy; originAccepted: boolean }
+/** `GET /api/auth/config`: the server's registration policy. `originAccepted` is only a hint for the screen. */
+export interface AuthConfig { registration: RegistrationPolicy; originAccepted: boolean }
 export type RegistrationPolicy = 'closed' | 'invitation' | 'allow-list' | 'open'
 
 export interface Challenge { challengeId: string; message: string; expiresAt: string }
@@ -16,7 +14,7 @@ export interface SessionDto {
   user: UserDto
   wallet: WalletDto
   session: { id: string; createdAt: string; idleExpiresAt: string; absoluteExpiresAt: string; remember: boolean }
-  /** True only for the owner migrated from Token mode: the browser's unscoped preferences become theirs. */
+  /** True only for the configured installation owner, whose journal predates wallet sign-in: the browser's unscoped preferences become theirs. */
   adoptsLegacyPreferences: boolean
 }
 export interface SessionRow {
@@ -102,9 +100,7 @@ function isSessionRow(v: unknown): v is SessionRow {
     isNullOr(v.walletAddress, isAddress)
 }
 function isConfig(v: unknown): v is AuthConfig {
-  if (!isRecord(v)) return false
-  if (v.mode === 'token') return true
-  return v.mode === 'wallet' && ['closed', 'invitation', 'allow-list', 'open'].includes(String(v.registration)) && typeof v.originAccepted === 'boolean'
+  return isRecord(v) && ['closed', 'invitation', 'allow-list', 'open'].includes(String(v.registration)) && typeof v.originAccepted === 'boolean'
 }
 /** The server writes the message; the browser only checks it is a bounded sign-in text before showing it. */
 function isChallenge(v: unknown): v is Challenge {

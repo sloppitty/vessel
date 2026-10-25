@@ -1088,3 +1088,27 @@ gate, not a claim of PR CI execution. Final documentation changes do not alter
 the reviewed production/tests. The owner explicitly authorized merge after
 this verification; mark ready and merge only the exact final pushed head.
 No deployment, release or owner-database migration is included.
+
+## October 24, 2026: shell mode context
+
+At the owner's request, redundant per-item Paper chips were removed from Plays,
+portfolios, accounts, operation rows and management dialogs. Mode context now
+appears once in the sticky shell header's **Paper mode** information strip.
+Execution-source, simulated-result, zero-fee/slippage, fixed-capital,
+sizing-source and Settings capability explanations remain. Enabled paper
+accounts use the neutral **Enabled** status, not a claim of import or sync.
+The sidebar Trading mode control and its switching/discard behaviour are
+unchanged. No backend, deployment or migration is included.
+
+## October 24, 2026: trading mode lockup
+
+The sidebar "Trading mode" select was replaced by the owner-chosen brand
+lockup: the subtitle under "vessel" reads **Journal** or **Paper
+playground** and switches mode (a round swap button in the collapsed rail),
+Paper mode shows a paper-boat mark and a derived Paper tone on the sidebar and
+the **Paper mode** strip, and the discard prompt is an in-app alert dialog
+instead of `window.confirm`. Availability, the remount per mode, the discard
+condition and the isolation of Paper data are unchanged. See the trading mode
+lockup subsection of the
+[core workspace contract](core-workspace-contract.md#trading-mode-lockup). No
+backend, deployment or migration is included.
