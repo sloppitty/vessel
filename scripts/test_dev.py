@@ -32,7 +32,8 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
     def test_explicit_environment_wins_without_leaking_to_vite(self):
         values = {
             "PATH": "/bin",
-            "Vessel__Auth__Token": "test-auth",
+            "Vessel__Auth__OwnerId": "test-owner",
+            "Vessel__Identity__Origins__0": "http://127.0.0.1:5180",
             "Vessel__Credentials__Keys__current": "test-master-key",
             "Vessel__Credentials__ActiveKeyId": "current",
             "Vessel__Credentials__KeyFile": "/private/keys.json",
@@ -131,7 +132,7 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".env").write_text(
-                "ConnectionStrings__Vessel=test-connection\nVessel__Auth__Token=test-token\n"
+                "ConnectionStrings__Vessel=test-connection\n"
                 "RABBITMQ_USER=local-user\nRABBITMQ_PASSWORD=local-password\n"
             )
             started = []
@@ -157,6 +158,9 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
                 self.assertEqual(["dotnet", "run", "--project", "backend/src/Vessel.Api"], started[0][0])
                 self.assertEqual("amqp://local-user:local-password@127.0.0.1:55672/",
                                  started[0][1]["Vessel__Messaging__RabbitMqUri"])
+                # Wallet sign-in accepts writes from the Vite page by default.
+                self.assertEqual(("http://127.0.0.1:5180", "http://localhost:5180"),
+                                 (started[0][1]["Vessel__Identity__Origins__0"], started[0][1]["Vessel__Identity__Origins__1"]))
             started.clear()
             with patch.object(dev, "ROOT", root), patch.dict(os.environ, {}, clear=True), \
                     patch.object(dev.sys, "argv", ["dev.py", "worker"]), \
@@ -169,6 +173,9 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
                 worker = ["dotnet", "run", "--project", "backend/src/Vessel.Worker", "--no-build", "--no-launch-profile"]
                 self.assertEqual([worker, worker], [command for command, _ in started])
                 self.assertNotIn("Vessel__Worker__Modules__0", started[0][1])
+                # Workers read the same sign-in settings, so they run as Development with the plain-HTTP dev origin.
+                self.assertEqual(["Development", "Development"], [env["DOTNET_ENVIRONMENT"] for _, env in started])
+                self.assertEqual("http://127.0.0.1:5180", started[1][1]["Vessel__Identity__Origins__0"])
                 self.assertEqual(("notifications", "notifications"), (started[1][1]["Vessel__Worker__Modules__0"],
                                                                       started[1][1]["Vessel__Worker__Deployment"]))
                 self.assertEqual("/tmp/vessel-dev-notifications-heartbeat", started[1][1]["Vessel__Notifications__HeartbeatFile"])
@@ -189,6 +196,65 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
                 self.assertNotIn("Vessel__Worker__Modules__1", paper)
                 self.assertNotIn("Vessel__Messaging__RabbitMqUri", paper)
                 self.assertEqual("/tmp/vessel-dev-paper-heartbeat", paper["Vessel__Paper__HeartbeatFile"])
+
+    def test_configured_identity_origins_replace_the_dev_default(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text("ConnectionStrings__Vessel=test-connection\n"
+                                       "Vessel__Identity__Origins__0=http://10.1.0.219:5180\n")
+            with patch.object(dev, "ROOT", root), patch.dict(os.environ, {}, clear=True):
+                environment = dev.with_identity_origins(dev.configuration(), "127.0.0.1")
+                self.assertEqual("http://10.1.0.219:5180", environment["Vessel__Identity__Origins__0"])
+                self.assertNotIn("Vessel__Identity__Origins__1", environment)
+                self.assertEqual({}, dev.frontend_environment())
+        self.assertEqual({"Vessel__Identity__Origins__0": "http://10.1.0.219:5180"},
+                         dev.with_identity_origins({}, "10.1.0.219"))
+
+    def test_a_stale_token_reaches_the_server_so_it_refuses_to_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text("ConnectionStrings__Vessel=test-connection\n"
+                                       "Vessel__Auth__Token=stale-secret\nVessel__Auth__Mode=Token\n")
+            with patch.object(dev, "ROOT", root), patch.dict(os.environ, {}, clear=True):
+                environment = dev.configuration()
+                self.assertEqual(("stale-secret", "Token"),
+                                 (environment["Vessel__Auth__Token"], environment["Vessel__Auth__Mode"]))
+                self.assertEqual({}, dev.frontend_environment())
+
+    def test_identity_mode_runs_an_offline_identity_command_without_the_broker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text("ConnectionStrings__Vessel=test-connection\n")
+            arguments = ["bind-wallet", "--user", "11111111-1111-1111-1111-111111111111", "--address", "0x" + "a" * 40]
+            with patch.object(dev, "ROOT", root), patch.dict(os.environ, {}, clear=True), \
+                    patch.object(dev.sys, "argv", ["dev.py", "identity", *arguments]), \
+                    patch.object(dev.subprocess, "run") as run:
+                run.return_value.returncode = 3
+                with self.assertRaises(SystemExit) as stopped:
+                    dev.main()
+                self.assertEqual(3, stopped.exception.code)
+                command, env = run.call_args_list[-1].args[0], run.call_args_list[-1].kwargs["env"]
+                self.assertEqual(dev.identity_command(arguments), command)
+                self.assertEqual("Development", env["ASPNETCORE_ENVIRONMENT"])
+                self.assertEqual("http://127.0.0.1:5180", env["Vessel__Identity__Origins__0"])
+                self.assertEqual("test-connection", env["ConnectionStrings__Vessel"])
+
+    def test_migrate_applies_identity_then_journal_migrations_then_ensures_the_owner(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text("ConnectionStrings__Vessel=test-connection\n"
+                                       "RABBITMQ_USER=local-user\nRABBITMQ_PASSWORD=local-password\n")
+            with patch.object(dev, "ROOT", root), patch.dict(os.environ, {}, clear=True), \
+                    patch.object(dev.sys, "argv", ["dev.py", "migrate"]), \
+                    patch.object(dev.subprocess, "run") as run:
+                dev.main()
+                commands = [call.args[0] for call in run.call_args_list]
+                update = ["dotnet", "ef", "database", "update", "--project"]
+                self.assertEqual([dev.SERVICES, ["dotnet", "tool", "restore"], update + ["src/Vessel.Identity"],
+                                  update + ["src/Vessel.Persistence"], dev.identity_command(["ensure-owner"]),
+                                  ["dotnet", "run", "--project", "backend/src/Vessel.Api", "--no-launch-profile", "--",
+                                   "provision-messaging"]], commands)
+                self.assertEqual("Development", run.call_args_list[4].kwargs["env"]["ASPNETCORE_ENVIRONMENT"])
 
 
 if __name__ == "__main__":

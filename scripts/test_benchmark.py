@@ -294,7 +294,58 @@ class SafetyTests(unittest.TestCase):
         environments = [env for args, env in calls if args[:2] == ['docker', 'run']]
         self.assertEqual(run.pg_password, environments[0]['POSTGRES_PASSWORD'])
         self.assertTrue(all(f'{benchmark.LABEL}={run.id}' in args for args, _ in calls if args[:2] == ['docker', 'run']))
-        self.assertEqual('token [redacted]', run.redact('token ' + run.token))
+        self.assertEqual('password [redacted]', run.redact('password ' + run.pg_password))
+
+    def test_wallet_settings_have_an_https_origin_and_no_bearer_token(self):
+        run = benchmark.Run(arguments(), log=lambda *_: None)
+        run.owner = '00000000-0000-4000-8000-000000000001'
+        run.pg_port, run.mq_port = 1234, 5678
+        run.temp = Path('/tmp/isolated-benchmark-test')
+        settings = run.settings()
+        self.assertEqual('Production', settings['ASPNETCORE_ENVIRONMENT'])
+        self.assertEqual('Wallet', settings['Vessel__Auth__Mode'])
+        self.assertEqual(run.origin, settings['Vessel__Identity__Origins__0'])
+        self.assertTrue(run.origin.startswith('https://127.0.0.1:'))
+        self.assertFalse(any('Token' in key or 'Bearer' in key for key in settings))
+
+    def test_cookie_requires_secure_host_only_binding(self):
+        good = [('Set-Cookie', '__Host-vessel-session=private; Path=/; Secure; HttpOnly; SameSite=Strict')]
+        self.assertEqual('__Host-vessel-session=private', benchmark.Run.cookie(good, '__Host-vessel-session'))
+        with self.assertRaisesRegex(RuntimeError, 'attributes'):
+            benchmark.Run.cookie([('Set-Cookie', '__Host-vessel-session=private; Path=/; HttpOnly')],
+                                 '__Host-vessel-session')
+        with self.assertRaisesRegex(RuntimeError, 'exactly once'):
+            benchmark.Run.cookie([], '__Host-vessel-session')
+
+    def test_client_sends_cookie_and_owner_header_over_https(self):
+        connection = mock.Mock()
+        connection.getresponse.return_value.status = 200
+        connection.getresponse.return_value.read.return_value = b'{}'
+        connection.getresponse.return_value.getheader.return_value = None
+        with mock.patch.object(benchmark.http.client, 'HTTPSConnection', return_value=connection):
+            client = benchmark.Client(1234, object(), 'owner-id', '__Host-vessel-session=private')
+            self.assertEqual(200, client.get('/api/review')[0])
+        self.assertEqual('GET', connection.request.call_args.args[0])
+        headers = connection.request.call_args.kwargs['headers']
+        self.assertEqual('__Host-vessel-session=private', headers['Cookie'])
+        self.assertEqual('owner-id', headers['X-Vessel-User'])
+        self.assertNotIn('Authorization', headers)
+
+    def test_sign_in_uses_binding_cookie_and_checks_owner(self):
+        run = benchmark.Run(arguments(), log=lambda *_: None)
+        run.owner = 'owner-id'
+        challenge = (200, [('Set-Cookie', '__Host-vessel-signin=binding; Path=/; Secure; HttpOnly; SameSite=Strict')],
+                     b'{"challengeId":"challenge","message":"sign this"}')
+        verified = (200, [('Set-Cookie', '__Host-vessel-session=session; Path=/; Secure; HttpOnly; SameSite=Strict')],
+                    b'{"status":"signed-in","session":{"user":{"id":"owner-id"}}}')
+        with mock.patch.object(run, 'auth_request', side_effect=[challenge, verified]) as request, \
+                mock.patch.object(run, 'wallet_signature', return_value={'signature': '0xsigned'}) as signer:
+            self.assertEqual('__Host-vessel-session=session', run.sign_in('0xaddress'))
+        self.assertEqual(('sign this',), signer.call_args.args)
+        self.assertEqual('__Host-vessel-signin=binding', request.call_args.args[2])
+        self.assertEqual('/api/auth/verify', request.call_args.args[0])
+        self.assertIn('binding', run.secrets)
+        self.assertIn('session', run.secrets)
 
     def test_cleanup_removes_only_this_runs_labelled_containers(self):
         run = benchmark.Run(arguments(), log=lambda *_: None)

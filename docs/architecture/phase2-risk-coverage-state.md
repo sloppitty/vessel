@@ -1422,12 +1422,15 @@ October 21, 2026.
 - **Check.** `scripts/check.sh` passed on `9dd2b8ed`: backend 4,268 passed, 5 skipped; frontend 186 files and 4,141 tests.
 
 **14d. Benchmark.** Implemented on `t3/phase2-benchmark`.
-- **The script.** `scripts/benchmark.py` (standard library only, with `scripts/test_benchmark.py`). See the "Phase 2
+- **The script.** `scripts/benchmark.py` (Python standard library, with `scripts/test_benchmark.py`, plus the
+  external synthetic wallet signer). See the "Phase 2
   benchmark (item 14d)" section of `performance-plan.md`.
   - It runs only with `--disposable`, never under CI, never reads `.env` and takes no connection string.
   - It starts its own labelled PostgreSQL 18 and RabbitMQ containers with per-run secrets passed through the
-    environment, migrates explicitly in `deploy/migrate`'s order, and starts the Release API in Production/Token
-    mode without worker modules. Cleanup removes everything carrying the run's label, after errors and signals
+    environment, migrates explicitly in `deploy/migrate`'s order, binds a synthetic operator wallet, and starts
+    the Release API in Production/Wallet mode over loopback HTTPS without worker modules. The ephemeral
+    certificate is trusted explicitly and reads use the real authenticated session. Cleanup removes everything
+    carrying the run's label, after errors and signals
     too.
 - **The dataset.** It is deterministic from `--seed` and `--anchor`, and scaled by `--years` and `--scale`. It is
   seeded in one COPY transaction, with every constraint and trigger, then the search projection is rebuilt.
@@ -1435,7 +1438,8 @@ October 21, 2026.
   - Round trips, flips and partial fills, with funding, snapshots, leverage and risk observations.
   - Plays in every status, with plans, links, reviews, log entries, evidence notes and if-then rules.
   - Omission markers, forced events, coverage records, gaps, backfills and import conflicts.
-- **The full run** (`--years 3 --scale 1 --warmup 5 --rounds 20 --anchor 2026-10-23T12:00Z`), on `00cb8ceb`, on a
+- **Historical Token-mode full run** (before wallet-only main; these timings have not been remeasured for
+  Wallet authentication): (`--years 3 --scale 1 --warmup 5 --rounds 20 --anchor 2026-10-23T12:00Z`), on `00cb8ceb`, on a
   Ryzen 5 7640HS with 10 CPUs and 20 GB (13 GB free), in about 10 minutes.
   - **The data.** 184,047 rows: 48,745 fills, 52,147 orders, 58,951 funding payments and 774 Plays. Activity
     aggregates the 45,928 fills of enabled accounts into 15,532 operations.
@@ -1468,7 +1472,7 @@ October 21, 2026.
 - **Not covered.** Monitor tables, events and notifications, manual executions, retrospective Plays,
   allocations and most paper data are not seeded. Review's process, exclusion and CSV views, the week page,
   and scoped Activity and Overview are not timed.
-- **Tests.** `test_benchmark.py` (25): the generator's shape, determinism and order-before-fill times, the
+- **Tests.** `test_benchmark.py` (29 after the October 25 wallet update): the generator's shape, determinism and order-before-fill times, the
   percentiles, the safety guard, cleanup after an interrupted or failed start, the cache estimate, and deep-page
   selection and rejection. They need no Docker.
 - **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `9baf1409`. Four findings, all fixed in

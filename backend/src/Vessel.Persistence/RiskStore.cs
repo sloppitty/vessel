@@ -53,6 +53,7 @@ public sealed class RiskStore(VesselDbContext db, UnitOfWork unitOfWork) : IOpen
                 pairs.AddRange(own.Select(fill => (link, fill)));
             }
             if (FillAllocations.Incomplete(play.Id, allocations).Any()) problem = OpenRiskCalculator.MissingExecutions;
+            if (FillAllocations.Unallocated(play.Id, allocations).Any()) problem = OpenRiskCalculator.UnallocatedExecution;
             // Whether a fill contradicts its role depends on the plan measured, saved or edited: the service decides.
             foreach (var fill in FillAllocations.For(play.Id, pairs, allocations))
                 executions.Add(new(fill.Role, fill.Role == OrderLinkRole.Exit ? null : fill.EntryId, fill.LevelId, fill.Fill.Quantity, fill.Fill.Price)

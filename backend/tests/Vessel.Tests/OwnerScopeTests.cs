@@ -27,7 +27,7 @@ public sealed class OwnerScopeTests
         var accessor = provider.GetRequiredService<IHttpContextAccessor>();
         accessor.HttpContext = new DefaultHttpContext
         {
-            User = new ClaimsPrincipal(JournalOwnerClaims.Identity(owner, "Owner", "test"))
+            User = TestAuthentication.Principal(owner, "Owner")
         };
         var factory = provider.GetRequiredService<IOwnerScopeFactory>();
         Assert.Throws<ArgumentException>(() => factory.Create(Guid.Empty));

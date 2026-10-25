@@ -1,7 +1,6 @@
 import { candleIntervals, type CandleInterval } from './candles'
-import { ApiError } from './errors'
 import { isGuid, isRecord } from './guards'
-import { createApiCall, type ApiCredentials, type AuthFailure } from './request'
+import { createApiCall, type AuthFailure, type SessionCredentials } from './request'
 import { authErrorMessage } from './auth'
 import { isVenueLogoKey, type VenueLogoKey } from './venue-logos'
 
@@ -92,30 +91,15 @@ function isSystemInfo(value: unknown): value is SystemInfo {
     venues.every(isVenue) && new Set(ids).size === ids.length && ids.includes(manualVenueId)
 }
 
-/**
- * Token stays in the caller's runtime memory; never put it in an environment variable or URL. A session call reports
- * its 401 and 403 answers to `onAuthFailure`, like every other session request.
- */
-export async function getSystem(credentials: string | ApiCredentials, onAuthFailure?: (failure: AuthFailure) => void): Promise<SystemInfo> {
-  const session = typeof credentials !== 'string' && credentials.kind !== 'bearer'
+/** A session call reports its 401 and 403 answers to `onAuthFailure`, like every other session request. */
+export async function getSystem(credentials: SessionCredentials, onAuthFailure?: (failure: AuthFailure) => void): Promise<SystemInfo> {
   const body = await createApiCall(credentials, onAuthFailure)('/api/system', {
-    timeout: 8_000, validate: isSystemInfo, ...session ? { codeMessage: (code: string) => authErrorMessage(code) } : {},
+    timeout: 8_000, validate: isSystemInfo, codeMessage: (code: string) => authErrorMessage(code),
     unavailable: 'Vessel API is unavailable. Check that the API is running and the proxy target is correct.',
     invalidJson: 'The API returned an invalid system response.',
     noContent: 'The API returned an invalid system response.',
     invalidData: 'The API returned an incompatible system contract.',
-    ...session ? {} : { httpError: (response: Response) => {
-      if (response.status === 401 || response.status === 403) {
-        return new ApiError('unauthorized', 'The API rejected this token. Check the configured server token and try again.', response.status)
-      }
-      if (response.status === 429) {
-        return new ApiError('unauthorized', 'Too many wrong tokens from this device. Check the configured server token; wrong tokens are refused for a few minutes.', response.status)
-      }
-      if (response.status >= 500) {
-        return new ApiError('unavailable', 'Vessel API is unavailable. Check the server configuration and try again.', response.status)
-      }
-      return new ApiError('http', `The API request failed with HTTP ${response.status}.`, response.status)
-    } },
+    notFound: 'The API request failed with HTTP 404.',
   })
   return { ...body, venues: body.venues.map(withKnownLogo) }
 }

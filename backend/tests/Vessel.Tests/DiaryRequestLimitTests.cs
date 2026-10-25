@@ -2,41 +2,26 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.DependencyInjection;
-using Vessel.Infrastructure.Auth;
 
 namespace Vessel.Tests;
 
 /// <summary>
 /// One Kestrel host for the whole matrix: every case only sends requests that fail validation or authentication,
-/// so nothing persists. Each test gets its own HttpClient (and connections); the wrong-token limiter is the only
-/// cross-request state and is reset before each unauthorized case.
+/// so nothing persists. Each test gets its own HttpClient (and connections).
 /// </summary>
 public sealed class DiaryLimitHost : IAsyncDisposable
 {
-    private readonly LimiterClock limiterClock = new();
     internal CoreApiFactory Factory { get; }
 
     public DiaryLimitHost()
     {
-        Factory = new CoreApiFactory(Guid.NewGuid(),
-            configure: services => services.AddSingleton(new AuthFailureLimiter(limiterClock)));
+        Factory = new CoreApiFactory(Guid.NewGuid());
         // TestServer does not enforce Kestrel's chunked request-body limit.
         Factory.UseKestrel(0);
         Factory.StartServer();
     }
 
-    /// <summary>Moves the limiter past its window, so earlier wrong tokens never turn a 401 into a 429.</summary>
-    public void ForgetAuthFailures() => limiterClock.Advance(AuthFailureLimiter.Window + TimeSpan.FromSeconds(1));
-
     public ValueTask DisposeAsync() => Factory.DisposeAsync();
-
-    private sealed class LimiterClock : TimeProvider
-    {
-        private long ticks = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).UtcTicks;
-        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref ticks), TimeSpan.Zero);
-        public void Advance(TimeSpan by) => Interlocked.Add(ref ticks, by.Ticks);
-    }
 }
 
 public sealed class DiaryRequestLimitTests(DiaryLimitHost host) : IClassFixture<DiaryLimitHost>
@@ -91,8 +76,8 @@ public sealed class DiaryRequestLimitTests(DiaryLimitHost host) : IClassFixture<
     public async Task Unauthorized_diary_requests_are_rejected_before_body_limits(
         string method, string path, int limit, bool chunked)
     {
-        host.ForgetAuthFailures();
         using var client = host.Factory.CreateClient();
+        // No session, and a bearer value that the API no longer reads at all.
         foreach (var token in new[] { null, "invalid-test-token" })
         {
             client.DefaultRequestHeaders.Authorization = token is null
@@ -103,7 +88,6 @@ public sealed class DiaryRequestLimitTests(DiaryLimitHost host) : IClassFixture<
             var body = await response.Content.ReadAsStringAsync();
             Assert.DoesNotContain("too large", body);
             Assert.DoesNotContain("invalid-test-token", body);
-            Assert.DoesNotContain(CoreApiFactory.Token, body);
         }
     }
 
@@ -129,7 +113,6 @@ public sealed class DiaryRequestLimitTests(DiaryLimitHost host) : IClassFixture<
         Assert.True(response.Headers.CacheControl?.NoStore);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
         var body = await response.Content.ReadAsStringAsync();
-        Assert.DoesNotContain(CoreApiFactory.Token, body);
         using var problem = JsonDocument.Parse(body);
         Assert.Equal((int)status, problem.RootElement.GetProperty("status").GetInt32());
         Assert.Equal(detail, problem.RootElement.GetProperty("detail").GetString());

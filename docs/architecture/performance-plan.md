@@ -492,7 +492,9 @@ in CI, and only its pure parts (the dataset's shape and determinism, the percent
 unit-tested, in `scripts/test_benchmark.py`. Results are recorded in
 [phase2-risk-coverage-state.md](phase2-risk-coverage-state.md).
 
-Run it from the repository root with the pinned SDK on `PATH`, alone on the host:
+Run it from the repository root with the pinned SDK, Node.js and OpenSSL on `PATH`, alone on the host.
+Set `NOBLE_MODULE_DIR` to an absolute directory outside the checkout holding `@noble/curves` and
+`@noble/hashes` v2 for `scripts/wallet-test-signer.cjs` (the same synthetic signer as release checks):
 
 ```sh
 python3 scripts/benchmark.py --disposable --years 3 --scale 1 --warmup 5 --rounds 20 [--out /tmp/bench.json]
@@ -520,8 +522,11 @@ What it does:
   It loads everything in one COPY transaction through `psql` in the container, so every constraint and trigger
   applies and the Activity facts revision is the one the triggers leave. It then runs `VACUUM (ANALYZE)` and the
   offline `play-search-rebuild --apply`, and counts the rows.
-- **API.** It starts the built DLL in Production/Token mode, without a launch profile or worker modules, with a
-  generated token kept in memory, and waits for `/health/ready`.
+- **API.** It binds the synthetic operator wallet with the offline identity command and starts the built DLL
+  in Production/Wallet mode over loopback HTTPS, without a launch profile or worker modules. Registration stays
+  Closed. The client trusts its ephemeral certificate, waits for `/health/ready`, signs the real API challenge
+  and times authenticated reads with the resulting session cookie and owner header. Cookies are kept in memory
+  and redacted from failures; cleanup removes the certificate and key.
 - **Timing.** Activity (first and a deep page, a filter, one expanded operation), Review (all, year, with
   imported positions), the Plays list (tabs, a deep Closed page, counts, title and instrument search), Overview
   and its summary, open risk and journal search (common word, a deep offset, rare word). Each round visits every

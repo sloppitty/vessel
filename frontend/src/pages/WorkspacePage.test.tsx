@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
+import { sessionFixture } from '@/test/identity-fixture'
 import { systemFixture } from '@/test/system-fixture'
 import { WorkspacePage } from './WorkspacePage'
 
@@ -12,24 +12,38 @@ const shell = vi.hoisted(() => {
 vi.mock('@/features/workspace/ApplicationShell', async () => {
   shell.loads++
   await shell.ready
-  return { ApplicationShell: ({ system }: { system: { owner: { displayName: string } } }) => <p>Shell for {system.owner.displayName}</p> }
+  return { ApplicationShell: ({ system, identity }: { system: { owner: { displayName: string } }; identity: { session: { user: { displayName: string } } } }) =>
+    <p>Shell for {identity.session.user.displayName} · {system.owner.displayName}</p> }
 })
 
-it('starts loading the workspace on the connection screen and opens it once both are ready', async () => {
-  const user = userEvent.setup()
-  // Token mode: the page asks the server for its sign-in mode first.
-  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (path: string) =>
-    new Response(JSON.stringify(path.startsWith('/api/auth/config') ? { mode: 'token' } : systemFixture))))
-  render(<WorkspacePage />)
-  expect(await screen.findByRole('heading', { name: 'Connect to your diary' })).toBeVisible()
-  await vi.waitFor(() => expect(shell.loads).toBe(1))
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
+function serve(session: () => Response) {
+  // No cross-tab channel in this test: sign-in state stays in this tab.
+  vi.stubGlobal('BroadcastChannel', undefined)
+  const fetch = vi.fn().mockImplementation(async (path: string) =>
+    path.startsWith('/api/auth/config') ? json({ registration: 'closed', originAccepted: true })
+      : path === '/api/auth/session' ? session()
+        : path === '/api/system' ? json(systemFixture) : new Response(null, { status: 404 }))
+  vi.stubGlobal('fetch', fetch)
+  return fetch
+}
+afterEach(() => vi.unstubAllGlobals())
 
-  await user.type(await screen.findByLabelText('API token'), 'memory-only-token')
-  await user.click(screen.getByRole('button', { name: 'Connect' }))
-  expect(await screen.findByRole('status')).toHaveTextContent('Loading your workspace…')
+it('shows wallet sign-in when there is no session, while the workspace downloads', async () => {
+  const fetch = serve(() => json({ code: 'session-required' }, 401))
+  render(<WorkspacePage />)
+  expect(await screen.findByRole('heading', { name: 'Sign in to Vessel' })).toBeVisible()
+  await vi.waitFor(() => expect(shell.loads).toBe(1))
+  expect(fetch.mock.calls.map(([path]) => path)).toEqual([`/api/auth/config?${new URLSearchParams({ origin: window.location.origin })}`, '/api/auth/session'])
+})
+
+it('opens the workspace for a live session once the workspace code is ready', async () => {
+  serve(() => json(sessionFixture))
+  render(<WorkspacePage />)
+  expect(await screen.findByText('Loading your workspace…')).toHaveAttribute('role', 'status')
 
   shell.release()
-  expect(await screen.findByText(`Shell for ${systemFixture.owner.displayName}`)).toBeVisible()
+  expect(await screen.findByText(`Shell for ${sessionFixture.user.displayName} · ${systemFixture.owner.displayName}`)).toBeVisible()
   expect(screen.queryByText('Loading your workspace…')).not.toBeInTheDocument()
   expect(shell.loads).toBe(1)
 })

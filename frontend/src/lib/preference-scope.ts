@@ -1,6 +1,6 @@
 /**
- * Whose browser preferences are in use. Token mode and the sign-in screen use the unscoped legacy keys; a signed-in
- * user reads and writes `vessel:u:{userId}:{name}`. Only the theme ID is kept per device, so the sign-in screen
+ * Whose browser preferences are in use. The sign-in screen uses the unscoped legacy keys; a signed-in user reads and
+ * writes `vessel:u:{userId}:{name}`. Only the theme ID is kept per device, so the sign-in screen
  * shows a familiar theme before anyone signs in. A user change always reloads the page, so the scope moves at most
  * once per page, from none to one user.
  */
@@ -27,7 +27,7 @@ export function preferenceKey(name: PreferenceName) {
 export const preferenceUser = () => scopedUser
 
 /**
- * Switches the in-memory stores to `userId`. When `adoptsLegacy` is true (the owner migrated from Token mode), each
+ * Switches the in-memory stores to `userId`. When `adoptsLegacy` is true (the installation owner), each
  * legacy key is copied only if the user's key is absent, then deleted. Other users never see the legacy keys.
  */
 export function scopePreferences(userId: string, adoptsLegacy: boolean) {

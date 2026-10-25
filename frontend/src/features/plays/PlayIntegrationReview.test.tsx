@@ -6,6 +6,7 @@ import { expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from '@/api/workspace'
 import { createDraft, createEntry } from './draft'
 import { PlayWorkspace } from './PlayWorkspace'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 it('reveals the selected entry again when its chart legend is clicked after sidebar scrolling', async () => {
   function Harness() {
@@ -13,7 +14,7 @@ it('reveals the selected entry again when its chart legend is clicked after side
       ...createDraft(),
       entries: [createEntry(0), createEntry(1)],
     }))
-    return <PlayWorkspace accounts={[]} portfolios={[]} api={createWorkspaceApi('test-only')} draft={draft} onChange={setDraft} />
+    return <PlayWorkspace accounts={[]} portfolios={[]} api={createWorkspaceApi(credentialsFixture)} draft={draft} onChange={setDraft} />
   }
 
   const user = userEvent.setup()

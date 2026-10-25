@@ -46,14 +46,14 @@ request (versions, a dated changelog section and `docs/releases/vX.Y.Z.md`),
 then push an annotated tag on `main`:
 
 ```sh
-git tag -a v0.3.2 -m "Vessel v0.3.2" origin/main
-git push origin v0.3.2
+git tag -a v0.3.3 -m "Vessel v0.3.3" origin/main
+git push origin v0.3.3
 ```
 
 The workflow checks that the tag, packaged versions and notes agree
-(`python3 scripts/release.py check --tag v0.3.2`), runs the foundation checks and
+(`python3 scripts/release.py check --tag v0.3.3`), runs the foundation checks and
 `scripts/verify-release.py` for S3 and local storage, then builds and pushes
-`skorcius/vessel:api-0.3.2` and `web-0.3.2`, moves `api-latest` and `web-latest`
+`skorcius/vessel:api-0.3.3` and `web-0.3.3`, moves `api-latest` and `web-latest`
 only after both are verified, and creates the GitHub Release from the notes. It
 never overwrites a version published from another commit. It needs the
 `DOCKERHUB_TOKEN` secret on the `docker-hub` environment; see the
@@ -102,11 +102,11 @@ Linux amd64 images can still be built locally from the repository root:
 ```sh
 REVISION=$(git rev-parse HEAD)
 docker build --platform linux/amd64 -f backend/Dockerfile \
-  --build-arg VERSION=0.3.2 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:api-0.3.2 .
+  --build-arg VERSION=0.3.3 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:api-0.3.3 .
 docker build --platform linux/amd64 -f frontend/Dockerfile \
-  --build-arg VERSION=0.3.2 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:web-0.3.2 .
+  --build-arg VERSION=0.3.3 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:web-0.3.3 .
 ```
 
 The `api-latest` and `web-latest` tags move with releases; deploy fixed versions
@@ -124,7 +124,7 @@ transport modes and restores synthetic backups into fresh volumes. Its optional
 
 ## PostgreSQL and RabbitMQ
 
-Copy `.env.example` to the ignored root `.env`, set private database and broker passwords, a random API token and a nonempty owner GUID, and keep the file private. The development runner supports KEY=value entries and optional matching quotes, not shell commands. Then:
+Copy `.env.example` to the ignored root `.env`, set private database and broker passwords and a nonempty owner GUID, and keep the file private. The development runner supports KEY=value entries and optional matching quotes, not shell commands. Then:
 
 ```sh
 pnpm db:up
@@ -161,13 +161,17 @@ Do not commit the populated value. Migrations are deliberate:
 pnpm db:migrate
 ```
 
-Neither API nor worker migrates or provisions at startup. `pnpm db:migrate` starts both local services if needed, applies EF migrations, then runs the API binary's explicit `provision-messaging` command: envelope storage and the schema registration of every deployment (`api`, `monitor` and `notifications`), the broker topology of every module and insert-only subscription registrations. A host whose schema was provisioned for other modules refuses to start. The active-Play account/instrument index remains non-unique, with composite owner constraints.
+Neither API nor worker migrates or provisions at startup. `pnpm db:migrate` starts both local services if needed, applies the identity and then the journal EF migrations, runs `identity ensure-owner` (the configured owner GUID becomes the operator user), then runs the API binary's explicit `provision-messaging` command: envelope storage and the schema registration of every deployment (`api`, `monitor` and `notifications`), the broker topology of every module and insert-only subscription registrations. A host whose schema was provisioned for other modules refuses to start. The active-Play account/instrument index remains non-unique, with composite owner constraints.
 
-## API and token
+## API and sign-in
 
-Configure `Vessel__Auth__Token` privately before connecting. There is no default production token. It is read by the API, not Vite. Never create a `VITE_*` token variable.
+Vessel signs in with an Ethereum wallet (an EOA) only; there is no API token. Set `Vessel__Auth__OwnerId` to the same nonempty GUID for API and workers: `pnpm db:migrate` makes it the operator user. `Vessel__Auth__OwnerName` is optional; neither value is a venue credential. Bind the public address of a browser wallet you control to that user once:
 
-Set `Vessel__Auth__OwnerId` to the same nonempty GUID for API and worker. `Vessel__Auth__OwnerName` is optional; neither value is a venue credential.
+```sh
+pnpm dev:identity bind-wallet --user <owner GUID> --address <0x public address>
+```
+
+Never supply a private key or seed phrase; signing in only signs a message in the wallet. `pnpm dev:identity` runs any offline `identity` command (for example `invite`) with the development configuration. The runner allows sign-in from the Vite page (`http://127.0.0.1:5180` and `http://localhost:5180`, or the LAN page in `pnpm dev:lan`) unless `.env` lists its own `Vessel__Identity__Origins__0…`. Plain-HTTP origins are accepted only in Development; the API and the dev workers run as Development.
 
 Run:
 
@@ -178,11 +182,12 @@ pnpm dev:api
 The development launch profile binds `http://127.0.0.1:5080`.
 
 - `GET /health/live` is anonymous liveness and does not prove database readiness.
-- `GET /api/system` requires `Authorization: Bearer …` and reports foundation metadata, including perps scope and planned/manual venue statuses.
-- Missing/wrong tokens fail closed. New unannotated endpoints have an authenticated fallback policy.
+- `GET /api/auth/config` reports the registration policy; sign-in uses `/api/auth/challenge` and `/api/auth/verify` and sets an `HttpOnly` session cookie.
+- `GET /api/system` needs a session and reports foundation metadata, including perps scope and planned/manual venue statuses.
+- Requests without a session fail closed; a bearer header authenticates nobody. New unannotated endpoints have an authenticated fallback policy.
 - Development OpenAPI is also protected.
 
-Lighter read-only tokens are separate from the Vessel API token. Configure a server-only encryption key ring before saving them; public account discovery and reads work without one. The default setup uses `scripts/credential_keys.py init` to create a private file without printing its key. Set only `Vessel__Credentials__KeyFile` in `.env`. The optional `fetch-infisical` command can provision the same file through an authenticated Infisical CLI later, without changing the API or existing ciphertext. Neither command runs automatically. See [credential setup, HTTPS and rotation](architecture/venue-credentials.md#operator-setup) and the [implemented import workflow](architecture/lighter-state.md). The Vite development build permits token entry on LAN HTTP when the API also runs in Development, and displays a plaintext-transport warning. Use only a trusted test network; HTTPS is still preferable. Production builds and non-Development APIs retain the HTTPS guard outside loopback.
+Lighter read-only tokens are separate from Vessel sign-in. Configure a server-only encryption key ring before saving them; public account discovery and reads work without one. The default setup uses `scripts/credential_keys.py init` to create a private file without printing its key. Set only `Vessel__Credentials__KeyFile` in `.env`. The optional `fetch-infisical` command can provision the same file through an authenticated Infisical CLI later, without changing the API or existing ciphertext. Neither command runs automatically. See [credential setup, HTTPS and rotation](architecture/venue-credentials.md#operator-setup) and the [implemented import workflow](architecture/lighter-state.md). The Vite development build permits token entry on LAN HTTP when the API also runs in Development, and displays a plaintext-transport warning. Use only a trusted test network; HTTPS is still preferable. Production builds and non-Development APIs retain the HTTPS guard outside loopback.
 
 Metadata and liveness can run without database connectivity. Protected endpoints provide accounts, portfolios, saved Plays, review, snapshots and retained executions. The separate worker checks active Plays and potentially resting linked exits at the configured interval. Manual Refresh and Check share account admission limits. Venue reads remain bounded, not a full-history backfill.
 
@@ -198,17 +203,19 @@ Or start API, worker and frontend with `pnpm dev`. The runner reads private serv
 
 Open `http://127.0.0.1:5180`. The Vite development proxy forwards `/api` and `/health` to the API. `VESSEL_API_TARGET` can override the server-side proxy target; it is not a token or a browser configuration secret.
 
-Enter the configured backend token at runtime. The field clears after connection; the API-client closure keeps the token only in session memory for protected reads/writes, until disconnect. Nothing stores it in browser storage, a URL or the build.
+Sign in with the bound wallet (an EIP-6963 browser wallet). The session lives in an `HttpOnly` cookie the page cannot read; "Keep me signed in on this device" chooses a persistent cookie. Nothing secret is stored in browser storage, a URL or the build. See [the sign-in delivery contract](architecture/multi-user-delivery-contract.md).
 
 The default page uses actual core API records, with honest loading/empty/error states. Manual values may be unavailable. Venue refresh covers supported perpetual state and bounded recent executions. Imported fills carry no invented thesis, FX adjustment or complete-lifetime claim. Plays can be saved with revisions and lifecycle status, link imported orders and fills, render venue candle charts with drawings and indicators, and keep evidence images; unsaved drafts stay in browser memory. The browser reads committed monitor events and stored state rather than polling venues. Notification delivery remains later work. See [the monitor plan](architecture/play-monitor-plan.md), [the Plays contract](architecture/plays-workspace-contract.md), [Play lifecycle](architecture/play-lifecycle.md) and [portfolio review](architecture/portfolio-review.md).
 
 These HTTP addresses are loopback development endpoints. A real self-hosted deployment needs HTTPS and deliberate proxy/authentication policy.
 
-Outside `Development`, the API refuses to start unless `Vessel__Auth__Token` is a generated secret of at least 32 characters, `ConnectionStrings__Vessel` is set and any `Vessel__Auth__OwnerId` is a GUID. `/health/live` reports the process; `/health/ready` (anonymous, no details) returns 200 only when the database answers and every migration is applied. After 20 wrong tokens within 10 minutes, further wrong tokens from that client address receive 429 with `Retry-After` until the window ends; the right token keeps working so a shared proxy address cannot lock the owner out. Only loopback proxies may set `X-Forwarded-For`/`X-Forwarded-Proto`; put the TLS-terminating proxy on the same host or configure trusted proxies before relying on them. API responses carry `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and `Cache-Control: no-store` unless an endpoint sets its own policy. The existing LAN prototype at `10.1.0.219:5173` remains separate; the scaffold does not automatically open firewall ports.
+Outside `Development`, the API refuses to start unless `ConnectionStrings__Vessel` is set, `Vessel__Auth__OwnerId` is a non-default GUID and every `Vessel__Identity__Origins__…` entry is an `https://` origin. A leftover `Vessel__Auth__Token`, or a `Vessel__Auth__Mode` other than `Wallet`, refuses startup in every environment. `/health/live` reports the process; `/health/ready` (anonymous, no details) returns 200 only when the database answers, every migration is applied and an active operator has a bound wallet. Sign-in attempts are rate-limited per client and process (see the [deployment guide](../deploy/README.md)). Only loopback proxies may set `X-Forwarded-For`/`X-Forwarded-Proto`; put the TLS-terminating proxy on the same host or configure trusted proxies before relying on them. API responses carry `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and `Cache-Control: no-store` unless an endpoint sets its own policy. The existing LAN prototype at `10.1.0.219:5173` remains separate; the scaffold does not automatically open firewall ports.
 
 ## Current LAN review
 
 October 1, 2026: the owner requested the actual frontend/backend preview on the LAN and explicitly requested a development-only authentication token.
+
+October 25, 2026: Token sign-in was removed. The token override below is historical: the preview now needs a wallet bound to its owner (`pnpm dev:identity bind-wallet …` with the preview's environment), and `pnpm dev:lan` allows sign-in from `http://10.1.0.219:5180`. Remove `Vessel__Auth__Token` from `.env.lan-preview`; the API refuses to start while it is set.
 
 - Application URL: **http://10.1.0.219:5180/**
 - Frontend listener: `10.1.0.219:5180`, not all interfaces.

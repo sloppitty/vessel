@@ -1,3 +1,4 @@
+import { credentialsFixture } from '@/test/identity-fixture'
 import { useState } from 'react'
 import { screen, waitFor, within } from '@testing-library/react'
 import { render } from '@/test/render'
@@ -20,7 +21,7 @@ const closed = (n: number, title: string, result: Partial<PlayOutcome>) => play(
   endedAtUtc: '2026-10-09T00:00:00Z', outcome: outcome(result) })
 
 function client(plays: PlaySummary[], overrides: Partial<WorkspaceApi> = {}) {
-  return { ...createWorkspaceApi('test-only'), ...playApiStubs(), marketStream: idleMarketStream,
+  return { ...createWorkspaceApi(credentialsFixture), ...playApiStubs(), marketStream: idleMarketStream,
     plays: vi.fn(playsFrom(plays)), playCounts: vi.fn(playCountsFrom(plays)), ...overrides } as WorkspaceApi
 }
 function Shell({ api, initial = initialPlaysList, onList, reload = 0 }: { api: WorkspaceApi; initial?: PlaysListState
