@@ -10,39 +10,33 @@ namespace Vessel.Tests;
 
 public sealed class OwnerDirectoryIntegrationTests
 {
-    [Theory]
-    [InlineData("Token")]
-    [InlineData("Wallet")]
-    public async Task Api_composition_resolves_the_mode_directory_and_explicit_owner_scope(string mode)
+    [Fact]
+    public async Task Api_composition_resolves_the_identity_directory_and_explicit_owner_scope()
     {
         var owner = Guid.NewGuid();
-        await using var factory = new CoreApiFactory(owner, settings: Settings(mode, owner));
-        AssertDirectory(factory.Services, mode);
+        await using var factory = new CoreApiFactory(owner, settings: Settings(owner), testAuthentication: false);
+        AssertDirectory(factory.Services);
         await AssertOwnerScopeAsync(factory.Services, owner);
     }
 
-    [Theory]
-    [InlineData("Token")]
-    [InlineData("Wallet")]
-    public async Task Worker_composition_resolves_the_mode_directory_and_explicit_owner_scope(string mode)
+    [Fact]
+    public async Task Worker_composition_resolves_the_identity_directory_and_explicit_owner_scope()
     {
         var owner = Guid.NewGuid();
-        var builder = Builder(mode, owner);
+        var builder = Builder(owner);
         WorkerHost.Configure(builder);
         // Resolve the real composition without starting database/broker background services.
         using var host = builder.Build();
-        AssertDirectory(host.Services, mode);
+        AssertDirectory(host.Services);
         await AssertOwnerScopeAsync(host.Services, owner);
     }
 
     [Theory]
-    [InlineData("Token", false)]
-    [InlineData("Token", true)]
-    [InlineData("Wallet", false)]
-    [InlineData("Wallet", true)]
-    public void Directory_selection_is_independent_of_identity_infrastructure_registration_order(string mode, bool identityFirst)
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Directory_selection_is_independent_of_identity_infrastructure_registration_order(bool identityFirst)
     {
-        var builder = Builder(mode, Guid.NewGuid());
+        var builder = Builder(Guid.NewGuid());
         if (identityFirst)
         {
             builder.Services.AddVesselIdentityDirectory(builder.Configuration);
@@ -54,16 +48,15 @@ public sealed class OwnerDirectoryIntegrationTests
             builder.Services.AddVesselIdentityDirectory(builder.Configuration);
         }
         using var host = builder.Build();
-        AssertDirectory(host.Services, mode);
+        AssertDirectory(host.Services);
     }
 
-    private static void AssertDirectory(IServiceProvider services, string mode)
+    private static void AssertDirectory(IServiceProvider services)
     {
         var directory = services.GetRequiredService<IJournalOwnerDirectory>();
         Assert.Same(directory, services.GetRequiredService<IJournalOwnerDirectory>());
         Assert.Same(directory, Assert.Single(services.GetServices<IJournalOwnerDirectory>()));
-        if (mode == "Token") Assert.IsType<ConfiguredOwnerDirectory>(directory);
-        else Assert.IsType<IdentityOwnerDirectory>(directory);
+        Assert.IsType<IdentityOwnerDirectory>(directory);
     }
 
     private static async Task AssertOwnerScopeAsync(IServiceProvider services, Guid owner)
@@ -78,17 +71,15 @@ public sealed class OwnerDirectoryIntegrationTests
         Assert.Equal(owner, assigned.Services.GetRequiredService<IJournalOwnerContext>().OwnerId);
     }
 
-    private static HostApplicationBuilder Builder(string mode, Guid owner)
+    private static HostApplicationBuilder Builder(Guid owner)
     {
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
-        builder.Configuration.AddInMemoryCollection(Settings(mode, owner));
+        builder.Configuration.AddInMemoryCollection(Settings(owner));
         return builder;
     }
 
-    private static Dictionary<string, string?> Settings(string mode, Guid owner) => new()
+    private static Dictionary<string, string?> Settings(Guid owner) => new()
     {
-        ["Vessel:Auth:Mode"] = mode,
-        ["Vessel:Auth:Token"] = mode == "Token" ? CoreApiFactory.Token : null,
         ["Vessel:Auth:OwnerId"] = owner.ToString(),
         ["Vessel:Identity:Origins:0"] = "https://vessel.test",
         ["Vessel:Messaging:RabbitMqUri"] = "amqp://unused:unused@127.0.0.1:1",

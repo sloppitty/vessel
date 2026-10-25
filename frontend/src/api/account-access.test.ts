@@ -3,8 +3,9 @@ import { accountIndex, credentialFailureMessage, credentialSaveMessage, credenti
 import { ApiError } from './errors'
 import { createWorkspaceApi } from './workspace'
 import { credentialFixture, discoveryFixture, indexAccount } from '@/test/account-access-fixture'
+import { credentialsFixture } from '@/test/identity-fixture'
 
-const api = () => createWorkspaceApi('vessel-test-token')
+const api = () => createWorkspaceApi(credentialsFixture)
 beforeEach(() => vi.stubEnv('DEV', false))
 function respond(body: unknown, status = 200) {
   const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }))
@@ -26,7 +27,7 @@ describe('Account discovery contract', () => {
     await expect(api().discoverAccounts('lighter', discoveryFixture.address, undefined, token)).resolves.toEqual(discoveryFixture)
     expect(fetch).toHaveBeenCalledWith('/api/venues/lighter/accounts/credential', expect.objectContaining({
       method: 'POST', body: JSON.stringify({ address: discoveryFixture.address, token }),
-      cache: 'no-store', credentials: 'omit', redirect: 'error',
+      cache: 'no-store', credentials: 'same-origin', referrerPolicy: 'same-origin', redirect: 'error',
     }))
     expect(localStorage.length).toBe(0)
     expect(sessionStorage.length).toBe(0)
@@ -47,7 +48,7 @@ describe('Account discovery contract', () => {
   it('keeps int64 indices and decimal balances as exact strings', async () => {
     const fetch = respond(discoveryFixture)
     await expect(api().discoverAccounts('lighter', discoveryFixture.address)).resolves.toEqual(discoveryFixture)
-    expect(fetch).toHaveBeenCalledWith(`/api/venues/lighter/accounts?address=${discoveryFixture.address}`, expect.objectContaining({ credentials: 'omit', cache: 'no-store', redirect: 'error' }))
+    expect(fetch).toHaveBeenCalledWith(`/api/venues/lighter/accounts?address=${discoveryFixture.address}`, expect.objectContaining({ credentials: 'same-origin', referrerPolicy: 'same-origin', cache: 'no-store', redirect: 'error' }))
     respond(indexAccount, 201)
     const body = { venueId: 'lighter', sourceId: indexAccount.sourceId, name: 'Main', portfolioId: null }
     await expect(api().createAccount(body)).resolves.toEqual(indexAccount)
@@ -98,7 +99,7 @@ describe('Account discovery contract', () => {
 
 describe('Credential API safety', () => {
   it.each([
-    [401, /Reconnect/], [403, /trusted reverse proxy/], [404, /same version/],
+    [401, /Sign in again/], [403, /trusted reverse proxy/], [404, /same version/],
     [409, /enable it/], [413, /512 characters/], [429, /Too many requests/],
     [502, /server credential vault/], [503, /server credential vault/], [504, /server credential vault/],
   ])('uses a local diagnostic for HTTP %s, not the error message', (status, message) => {
@@ -125,8 +126,8 @@ describe('Credential API safety', () => {
     const token = 'ro:test-only-secret'
     await expect(api().saveAccountCredential(indexAccount.id, token)).resolves.toEqual(credentialFixture)
     expect(fetch).toHaveBeenCalledWith(`/api/accounts/${indexAccount.id}/credential`, expect.objectContaining({
-      method: 'PUT', body: JSON.stringify({ token }), cache: 'no-store', redirect: 'error', credentials: 'omit',
-      headers: { Authorization: 'Bearer vessel-test-token', Accept: 'application/json', 'Content-Type': 'application/json' },
+      method: 'PUT', body: JSON.stringify({ token }), cache: 'no-store', redirect: 'error', credentials: 'same-origin', referrerPolicy: 'same-origin',
+      headers: { 'X-Vessel-User': credentialsFixture.userId, Accept: 'application/json', 'Content-Type': 'application/json' },
     }))
   })
   it.each([400, 401, 403, 404, 409, 500, 502, 503])('never echoes a credential error body at HTTP %s', async status => {

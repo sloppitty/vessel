@@ -28,7 +28,38 @@ async function signer(index) {
   }
 }
 
-module.exports = { signer }
+/**
+ * Announces one synthetic EIP-6963 wallet in every page of `target` (a Playwright browser context or page). Only
+ * `eth_requestAccounts` and `personal_sign` are answered, by `wallet` from `signer()`.
+ */
+async function exposeSyntheticWallet(target, wallet, name = 'Synthetic wallet') {
+  await target.exposeFunction('syntheticWalletRequest', async (method, params) => {
+    if (method === 'eth_requestAccounts') return [wallet.address]
+    assert.equal(method, 'personal_sign')
+    assert.equal(String(params[1]).toLowerCase(), wallet.address)
+    return wallet.sign(params[0].startsWith('0x') ? Buffer.from(params[0].slice(2), 'hex').toString('utf8') : params[0])
+  })
+  await target.addInitScript(name => {
+    const detail = {
+      info: { uuid: '00000000-0000-4000-8000-000000000001', name, rdns: 'test.vessel.synthetic',
+        icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>' },
+      provider: { request: ({ method, params }) => window.syntheticWalletRequest(method, params), on() {}, removeListener() {} },
+    }
+    const announce = () => window.dispatchEvent(new CustomEvent('eip6963:announceProvider', { detail }))
+    window.addEventListener('eip6963:requestProvider', announce)
+    announce()
+  }, name)
+}
+
+/** Signs in through the real sign-in screen with the wallet `exposeSyntheticWallet` announced, up to the Overview. */
+async function signInWithSyntheticWallet(page, url, name = 'Synthetic wallet') {
+  await page.goto(url)
+  await page.getByRole('button', { name: new RegExp(name) }).click()
+  await page.getByRole('button', { name: `Sign with ${name}`, exact: true }).click()
+  await page.getByRole('region', { name: 'Overview summary', exact: true }).waitFor()
+}
+
+module.exports = { signer, exposeSyntheticWallet, signInWithSyntheticWallet }
 if (require.main === module) {
   let input = ''
   process.stdin.setEncoding('utf8').on('data', chunk => { input += chunk }).on('end', async () => {

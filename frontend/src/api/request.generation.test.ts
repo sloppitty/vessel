@@ -182,10 +182,10 @@ describe('session generation', () => {
     expect(settled).not.toHaveBeenCalled()
   })
 
-  it('leaves calls without a generation, and Token mode, exactly as before', async () => {
+  it('leaves calls without a generation exactly as before', async () => {
     const fetch = vi.fn().mockImplementation(async () => json('ok'))
     vi.stubGlobal('fetch', fetch)
-    await expect(createApiCall('memory-token')('/api/example', { timeout: 1_000, validate: isText })).resolves.toBe('ok')
+    await expect(createApiCall({ kind: 'public' })('/api/example', { timeout: 1_000, validate: isText })).resolves.toBe('ok')
     await expect(createApiCall({ kind: 'session', userId, sessionId })('/api/example', { timeout: 1_000, validate: isText })).resolves.toBe('ok')
     expect(fetch).toHaveBeenCalledTimes(2)
   })
