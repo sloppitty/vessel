@@ -9,6 +9,7 @@ import { reviewFixture } from '@/test/review-fixture'
 import { render as renderWithVenues } from '@/test/render'
 import { ProcessSection, RuleSection } from './ReviewProcess'
 import { ReviewPage } from './ReviewPage'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const process: ReviewProcess = {
   followed: { wins: 7, losses: 3, scratches: 2 }, deviated: { wins: 2, losses: 4, scratches: 0 },
@@ -44,7 +45,7 @@ describe('process cases (phase 1, 1.4b)', () => {
 
   it('opens a count as its Plays, unscored values as such, with the post-hoc badge', async () => {
     const reviewProcess = vi.fn<WorkspaceApi['reviewProcess']>().mockResolvedValue(page)
-    const api = { ...createWorkspaceApi('test'), review: vi.fn().mockResolvedValue({ ...reviewFixture, process }), reviewProcess }
+    const api = { ...createWorkspaceApi(credentialsFixture), review: vi.fn().mockResolvedValue({ ...reviewFixture, process }), reviewProcess }
     const user = userEvent.setup()
     renderWithVenues(<ReviewPage api={api} reloadGeneration={0} onOpenPlay={vi.fn()} />)
     await user.click(await screen.findByRole('button', { name: '7 followed wins' }))
@@ -59,7 +60,7 @@ describe('process cases (phase 1, 1.4b)', () => {
 
   it('breaks results down by origin and direction in a fixed order, without inspecting their rows', async () => {
     const group = (id: string, name: string) => ({ id, name, detail: '1 scored', metrics: reviewFixture.metrics })
-    const api = { ...createWorkspaceApi('test'), review: vi.fn().mockResolvedValue({ ...reviewFixture,
+    const api = { ...createWorkspaceApi(credentialsFixture), review: vi.fn().mockResolvedValue({ ...reviewFixture,
       groups: { ...reviewFixture.groups, origins: [group('planned', 'Planned'), group('retrospective', 'Retrospective')], directions: [group('long', 'Long')] } }) }
     const user = userEvent.setup()
     renderWithVenues(<ReviewPage api={api} reloadGeneration={0} onOpenPlay={vi.fn()} />)
@@ -78,7 +79,7 @@ describe('process cases (phase 1, 1.4b)', () => {
   })
 
   it('lists the period\'s cancelled Plays with the exclusions and counts them as excluded', async () => {
-    const api = { ...createWorkspaceApi('test'), review: vi.fn().mockResolvedValue({ ...reviewFixture,
+    const api = { ...createWorkspaceApi(credentialsFixture), review: vi.fn().mockResolvedValue({ ...reviewFixture,
       coverage: { ...reviewFixture.coverage, unresolved: 1, cancelled: 3 } }) }
     renderWithVenues(<ReviewPage api={api} reloadGeneration={0} onOpenPlay={vi.fn()} />)
     // 1 incomplete fees + 1 incomplete executions + 1 unresolved + 3 cancelled.
@@ -106,7 +107,7 @@ describe('process cases (phase 1, 1.4b)', () => {
 describe('pre-flight drill-down (phase 1, 1.5 and 1.4b)', () => {
   it('opens the Plays planned without a check, and those with no pre-flight recorded', async () => {
     const reviewProcess = vi.fn<WorkspaceApi['reviewProcess']>().mockResolvedValue({ items: [], total: 0, offset: 0, nextOffset: null })
-    const api = { ...createWorkspaceApi('test'), reviewProcess, review: vi.fn().mockResolvedValue({ ...reviewFixture, process,
+    const api = { ...createWorkspaceApi(credentialsFixture), reviewProcess, review: vi.fn().mockResolvedValue({ ...reviewFixture, process,
       preflight: { recorded: 3, notRecorded: 2, skipped: [{ code: 'thesis', count: 1 }, { code: 'risk', count: 0 }] } }) }
     const user = userEvent.setup()
     renderWithVenues(<ReviewPage api={api} reloadGeneration={0} onOpenPlay={vi.fn()} />)

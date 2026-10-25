@@ -67,11 +67,6 @@ public static partial class IdentityCommands
                 await output.WriteLineAsync(Usage); return 2;
             }
             var settings = IdentitySettings.Read(configuration, development);
-            if (args[0] == "ensure-owner" && !settings.WalletMode)
-            {
-                await output.WriteLineAsync("Token mode: identity ensure-owner has nothing to do."); return 0;
-            }
-            if (!settings.WalletMode) { await output.WriteLineAsync("This command requires Wallet mode."); return 3; }
             if (settings.LegacyOwnerOverride && settings.OwnerId == Vessel.Application.Ownership.JournalOwner.Default)
                 await output.WriteLineAsync("Warning: Vessel:Identity:AllowLegacyDefaultOwner permits the legacy default owner.");
             var connection = configuration.GetConnectionString("Vessel");

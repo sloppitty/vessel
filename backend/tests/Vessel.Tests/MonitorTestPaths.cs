@@ -18,7 +18,7 @@ internal static class MonitorTestPaths
     public const string RefreshFailed = "The venue refresh failed or was superseded by changed account settings. Try again later.";
 
     public static MonitorStore Store(VesselDbContext db, UnitOfWork work, MonitorOptions? options = null) =>
-        new(db, work, MonitorServerState.For(db), new Vessel.Application.Ownership.ConfiguredOwnerDirectory(db.CurrentOwnerId), options);
+        new(db, work, MonitorServerState.For(db), new ConfiguredOwnerDirectory(db.CurrentOwnerId), options);
 
     public static MonitorOptions Options() => new() { ManualCooldown = TimeSpan.Zero };
 

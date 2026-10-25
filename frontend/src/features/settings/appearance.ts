@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { deviceThemeKey, onPreferenceScope, preferenceKey, preferenceUser } from '@/lib/preference-scope'
 import { generatePalette } from './generator'
-import { defaultThemeId, isHexColor, mix, themes, type Theme, type ThemeColorKey, type ThemeColors, type ThemeScheme } from './themes'
+import { defaultThemeId, isHexColor, mix, sidebarColor, themes, type Theme, type ThemeColorKey, type ThemeColors, type ThemeScheme } from './themes'
 
 /**
  * The owner's theme choice and per-theme colour overrides. Appearance is a browser preference, not workspace
@@ -153,7 +153,7 @@ export function themeTokens({ theme, colors, radius, candleUpEdge, candleDownEdg
     '--input': colors.border,
     '--ring': colors.ring,
     '--field': colors.field,
-    '--sidebar': mix(colors.background, colors.card, 0.5),
+    '--sidebar': sidebarColor(colors),
     '--positive': colors.positive,
     '--negative': colors.negative,
     '--warning': colors.warning,
@@ -219,8 +219,8 @@ export function initAppearance() {
   applyAppearance(device ? { ...emptyAppearance(), themeId: device } : current)
 }
 
-/** Token mode has no device theme: show the stored appearance in case an earlier Wallet-mode page left one. */
-export function applyStoredAppearance() {
+/** Re-reads and applies the stored appearance of the current preference scope. */
+function applyStoredAppearance() {
   current = parseAppearance(readStorage())
   applyAppearance(current)
   for (const listener of listeners) listener()

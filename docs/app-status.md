@@ -15,8 +15,10 @@ isolated release/browser verification. See the
 These are checkout/verification states, not a claim that a branch has merged,
 a release has been published or an installation has been deployed/migrated.
 The D1–D12 defaults are adopted recommendations and remain owner-overridable.
-§10 is **not signed off**: Wallet mode is a documented opt-in, **not activated**.
-The real-wallet EOA/non-mainnet compatibility check remains owner-pending;
+October 25, 2026: the owner removed Token sign-in; wallet sign-in is the only
+way in, so installations must bind the owner's wallet before upgrading.
+§10 is still **not signed off**: the real-wallet EOA/non-mainnet compatibility
+check remains owner-pending;
 Firefox **146.0.1 Wallet writes PASS** through the official Playwright 1.58.2
 container ([exact command](architecture/multi-user-state.md#manual-wallet-pre-release-step-not-a-ci-gate)).
 Keep registration `Closed` until both pass and are recorded there.
@@ -30,10 +32,9 @@ continue to the [backend guide](architecture/backend-guide.md). The
 
 ## Find your way around
 
-Token mode remains the default: connect with the installation's Vessel API
-token, kept in memory until disconnect/reload. An operator may explicitly enable
-Wallet mode over HTTPS: choose an EIP-6963 browser wallet, sign the displayed
-EOA message and use an invitation to create a journal when required. This is
+Sign in over HTTPS with an Ethereum wallet: choose an EIP-6963 browser wallet,
+sign the displayed EOA message and use an invitation to create a journal when
+required. There is no API token. This is
 not a venue login, transaction or approval; the message fixes Chain ID 1 without
 requiring a network switch. WalletConnect/smart-contract wallets are absent.
 Profile & sign-in manages display name, linked recovery wallets and sessions;
@@ -168,10 +169,10 @@ See [venue registration](../backend/src/Vessel.Infrastructure/DependencyInjectio
 | --- | --- |
 | PostgreSQL | Accounts, portfolios, latest snapshots, retained fills/orders, saved Plays, plan/status/review history, order links, manual executions/corrections, diary retry records and sizing settings. Evidence notes/markup and encrypted venue credentials also live here. The separate identity schema stores users, wallets, hashed sessions, challenges and invitations; events, owner progress/receipts and server monitor state live in the journal schema. |
 | Private evidence object store | Original saved-Play image bytes behind the owner-scoped API. Local remains the no-settings default; explicit S3 opts into private S3-compatible storage (bundled RustFS in Compose). |
-| Server configuration | Selected sign-in mode, allowed origins/policy, Token-mode bearer and credential-encryption key ring. The key ring is outside the database and never sent to Vite or the browser. |
-| Browser memory | Token-mode bearer or Wallet user/session metadata (never the HttpOnly cookie value), unsaved edits/drawings/images, shell filters and scope, and the session candle cache. Navigation retains the draft; reload or disconnect discards unsaved work. |
+| Server configuration | Allowed sign-in origins, registration policy and credential-encryption key ring. The key ring is outside the database and never sent to Vite or the browser. |
+| Browser memory | User/session metadata (never the HttpOnly cookie value), unsaved edits/drawings/images, shell filters and scope, and the session candle cache. Navigation retains the draft; reload or sign-out discards unsaved work. |
 | Browser `localStorage` | User-scoped appearance/chart preferences and device theme/last-provider convenience keys, including saved palettes and indicator settings. No token, execution history, candle history or Play draft. |
-| Browser cookie jar | Wallet mode only: host-only HttpOnly session/binding cookies, server-bounded expiry and revocation; remembered sessions can persist. No wallet private key. |
+| Browser cookie jar | Host-only HttpOnly session/binding cookies, server-bounded expiry and revocation; remembered sessions can persist. No wallet private key. |
 | Server memory | Bounded public catalogue, candle and market-context caches, plus active market-stream subscriptions. These are not a durable candle archive. |
 
 Save writes the Play and then synchronizes its images. These are separate
@@ -232,9 +233,9 @@ Wallet sign-in is delivered against the [multi-user contract](architecture/multi
 with [verification/activation evidence](architecture/multi-user-state.md). The
 original [analysis](architecture/multi-user-wallet-auth.md) and
 [design](design/wallet-sign-in/README.md) are historical context; adopted D1–D12
-defaults remain owner-overridable. Wallet mode is **not activated** and §10 is
-not signed off: Firefox 146.0.1 Wallet writes passed, but the real-wallet/
-non-mainnet EOA check is still owner-pending. Both must pass and be recorded
+defaults remain owner-overridable. Wallet sign-in is the only sign-in since
+October 25, 2026, but §10 is not signed off: Firefox 146.0.1 Wallet writes
+passed, and the real-wallet/non-mainnet EOA check is still owner-pending. Both must pass and be recorded
 in `multi-user-state.md` before registration leaves `Closed`.
 
 The [backend review](architecture/backend-review.md) and

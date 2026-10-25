@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -17,7 +16,7 @@ public sealed class CredentialTransportApiTests(CredentialTransportApiTests.Reje
 {
     /// <summary>
     /// The legacy-rejection matrix's shared Production host from a remote peer. Every case is refused before any
-    /// read or write (401 without a token, 403/413 with one), and no case sends a wrong token to the limiter.
+    /// read or write (401 without a session, 403/413 with one).
     /// </summary>
     public sealed class RejectionHost : IAsyncDisposable
     {
@@ -50,7 +49,7 @@ public sealed class CredentialTransportApiTests(CredentialTransportApiTests.Reje
             {
                 Content = new StringContent(new string(' ', bodyBytes), Encoding.UTF8, "application/json")
             };
-            if (authorized) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", CoreApiFactory.Token);
+            if (authorized) host.Factory.SignIn(request);
             using var response = await client.SendAsync(request);
             Assert.Equal(authorized ? status : 401, (int)response.StatusCode);
             if (!authorized) continue;
@@ -106,7 +105,7 @@ public sealed class CredentialTransportApiTests(CredentialTransportApiTests.Reje
         client.DefaultRequestHeaders.Add("ASPNETCORE_ENVIRONMENT", "Development");
         using (var unauthorized = await client.PutAsJsonAsync($"/api/accounts/{account.Id}/credential", new { token = SecurityFixture.Token }))
             Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CoreApiFactory.Token);
+        TestAuthentication.SignIn(client.DefaultRequestHeaders, owner);
         if (forwardedProto is not null) client.DefaultRequestHeaders.Add("X-Forwarded-Proto", forwardedProto);
         if (forwardedFor is not null) client.DefaultRequestHeaders.Add("X-Forwarded-For", forwardedFor);
 
@@ -135,36 +134,6 @@ public sealed class CredentialTransportApiTests(CredentialTransportApiTests.Reje
             using var removed = await client.DeleteAsync($"/api/accounts/{account.Id}/credential");
             Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
         }
-    }
-
-    [Theory]
-    [InlineData("172.30.86.1")]
-    [InlineData("172.30.86.11")]
-    public async Task Untrusted_bridge_peers_cannot_reset_auth_limiter_with_forwarded_claims(string peer)
-    {
-        var owner = Guid.NewGuid();
-        await using var factory = new CoreApiFactory(owner, new MemoryWorkspaceStore(owner),
-            connection: "Host=unused.invalid;Database=synthetic", environment: "Production",
-            settings: new() { ["Vessel:ForwardedHeaders:KnownProxies:0"] = "172.30.86.10", ["Vessel:ForwardedHeaders:ForwardLimit"] = "1" },
-            configure: services => services.AddSingleton<IStartupFilter>(new Peer(IPAddress.Parse(peer))));
-        using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "wrong-token");
-        for (var i = 0; i < 20; i++)
-        {
-            using var failure = await client.GetAsync("/api/system");
-            Assert.Equal(HttpStatusCode.Unauthorized, failure.StatusCode);
-        }
-        for (var i = 1; i <= 3; i++)
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, "/api/system");
-            request.Headers.Add("X-Forwarded-For", $"198.51.100.{i}");
-            request.Headers.Add("X-Forwarded-Proto", "https");
-            using var failure = await client.SendAsync(request);
-            Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
-        }
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CoreApiFactory.Token);
-        using var success = await client.GetAsync("/api/system");
-        Assert.Equal(HttpStatusCode.OK, success.StatusCode);
     }
 
     private sealed class Peer(IPAddress address) : IStartupFilter
