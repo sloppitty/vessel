@@ -5,6 +5,7 @@ import { isPlayExecution, type PlayExecution } from './plays'
 import { discrepancyFacts } from '@/features/monitor/discrepancy-text'
 import { coverageAs, coverageFixture, discrepancyFixture, eventCursor, monitorEventFixture, monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
 import { accountFixture, savedPlayFixture } from '@/test/workspace-fixture'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 afterEach(() => vi.unstubAllGlobals())
 const executionFixture: PlayExecution = {
@@ -131,20 +132,20 @@ describe('monitor contract', () => {
     const fetcher = vi.fn().mockResolvedValueOnce(json(monitorSummaryFixture)).mockResolvedValueOnce(json(monitorFixture))
       .mockResolvedValueOnce(json({ requestId: 'run-1', monitor: { ...monitorFixture, manualState: 'pending', runTrigger: 'owner' } }, 202))
     vi.stubGlobal('fetch', fetcher)
-    const api = createWorkspaceApi('private-token')
+    const api = createWorkspaceApi(credentialsFixture)
     const signal = new AbortController().signal
     await api.monitor(signal)
     await api.accountMonitor(accountFixture.id, signal)
     await api.runAccountMonitor(accountFixture.id, signal)
     expect(fetcher.mock.calls.map(call => call[0])).toEqual(['/api/monitor', `/api/accounts/${accountFixture.id}/monitor`, `/api/accounts/${accountFixture.id}/monitor/run`])
-    for (const [, init] of fetcher.mock.calls) expect(init).toMatchObject({ credentials: 'omit', cache: 'no-store', headers: { Authorization: 'Bearer private-token' } })
+    for (const [, init] of fetcher.mock.calls) expect(init).toMatchObject({ credentials: 'same-origin', referrerPolicy: 'same-origin', cache: 'no-store', headers: { 'X-Vessel-User': credentialsFixture.userId } })
     expect(fetcher.mock.calls[2]![1]).toMatchObject({ method: 'POST' })
     expect(fetcher.mock.calls[2]![1].body).toBeUndefined()
   })
   it('rejects monitor state belonging to another account and preserves Retry-After on 429', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json({ ...monitorFixture, accountId: savedPlayFixture.summary.id }))
       .mockResolvedValueOnce(new Response(null, { status: 429, headers: { 'Retry-After': '60' } })))
-    const api = createWorkspaceApi('test')
+    const api = createWorkspaceApi(credentialsFixture)
     await expect(api.accountMonitor(accountFixture.id)).rejects.toMatchObject({ kind: 'invalid-response' })
     const before = Date.now()
     const failure = await api.runAccountMonitor(accountFixture.id).catch(error => error)
@@ -153,13 +154,13 @@ describe('monitor contract', () => {
   })
   it('explains an offline monitor when a check is refused with 503', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(null, { status: 503 })))
-    const failure = await createWorkspaceApi('test').runAccountMonitor(accountFixture.id).catch(error => error)
+    const failure = await createWorkspaceApi(credentialsFixture).runAccountMonitor(accountFixture.id).catch(error => error)
     expect(failure).toMatchObject({ status: 503, message: 'The monitor is offline, so the check could not start. Try again once the monitor is back.' })
   })
   it('dismisses from either Play or account using exact IDs and plain-text notes', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetcher)
-    const api = createWorkspaceApi('test')
+    const api = createWorkspaceApi(credentialsFixture)
     await api.dismissPlayDiscrepancy(savedPlayFixture.summary.id, discrepancyFixture.id, 'Still investigating.')
     await api.dismissAccountDiscrepancy(accountFixture.id, discrepancyFixture.id)
     expect(fetcher.mock.calls[0]).toEqual([`/api/plays/${savedPlayFixture.summary.id}/discrepancies/${discrepancyFixture.id}/dismiss`,
@@ -174,7 +175,7 @@ describe('monitor contract', () => {
     vi.stubGlobal('fetch', fetcher)
     const abort = new AbortController()
     const received = vi.fn()
-    const task = createWorkspaceApi('test').monitorStream(eventCursor('9007199254740992'), abort.signal, received)
+    const task = createWorkspaceApi(credentialsFixture).monitorStream(eventCursor('9007199254740992'), abort.signal, received)
     await vi.waitFor(() => expect(fetcher).toHaveBeenCalled())
     const encoder = new TextEncoder()
     writer.enqueue(encoder.encode(': keepalive\r\nevent: event\ndata: invalid\n\nevent: event\nda'))
@@ -185,6 +186,6 @@ describe('monitor contract', () => {
     await task
     expect(cancelled).toHaveBeenCalledOnce()
     expect(fetcher.mock.calls[0]![0]).toBe(`/api/events/stream?after=${eventCursor('9007199254740992')}`)
-    expect(fetcher.mock.calls[0]![1]).toMatchObject({ signal: abort.signal, headers: { Authorization: 'Bearer test', Accept: 'text/event-stream' } })
+    expect(fetcher.mock.calls[0]![1]).toMatchObject({ signal: abort.signal, headers: { 'X-Vessel-User': credentialsFixture.userId, Accept: 'text/event-stream' } })
   })
 })

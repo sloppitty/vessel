@@ -107,28 +107,15 @@ public sealed class IdentityStreamCollection;
 [Collection("Identity streams")]
 public sealed class StreamRevalidationTests
 {
-    [Theory]
-    [InlineData("Token")]
-    [InlineData("Wallet")]
-    public async Task Each_authentication_mode_registers_its_principal_validity(string mode)
+    [Fact]
+    public async Task Streams_revalidate_the_wallet_session_that_opened_them()
     {
-        await using var factory = new CoreApiFactory(Guid.NewGuid(), settings: new()
-        {
-            ["Vessel:Auth:Mode"] = mode, ["Vessel:Auth:Token"] = mode == "Token" ? CoreApiFactory.Token : null,
-            ["Vessel:Identity:Origins:0"] = "https://vessel.test"
-        });
+        await using var factory = new CoreApiFactory(Guid.NewGuid(), testAuthentication: false);
         using var scope = factory.Services.CreateScope();
         var validity = scope.ServiceProvider.GetRequiredService<IPrincipalValidity>();
-        if (mode == "Token")
-        {
-            Assert.IsType<AlwaysValidPrincipal>(validity);
-            Assert.True(await validity.StillValidAsync(default));
-        }
-        else
-        {
-            Assert.IsType<SessionPrincipal>(validity);
-            Assert.False(await validity.StillValidAsync(default));
-        }
+        Assert.IsType<SessionPrincipal>(validity);
+        // No session authenticated this scope, so nothing may keep streaming.
+        Assert.False(await validity.StillValidAsync(default));
     }
 
     [Theory]

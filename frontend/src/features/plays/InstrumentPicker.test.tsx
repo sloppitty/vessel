@@ -8,10 +8,11 @@ import { ApiError } from '@/api/errors'
 import { accountFixture, instrumentCatalogFixture } from '@/test/workspace-fixture'
 import { InstrumentPicker } from './InstrumentPicker'
 import { instrumentLabel, searchInstruments, useInstrumentCatalog } from './instruments'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const wallet: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid' }
 function api() {
-  return { ...createWorkspaceApi('test-only'), instruments: vi.fn().mockResolvedValue(instrumentCatalogFixture) }
+  return { ...createWorkspaceApi(credentialsFixture), instruments: vi.fn().mockResolvedValue(instrumentCatalogFixture) }
 }
 function Harness({ account = wallet, client, onChange = vi.fn() }: {
   account?: BrokerAccount; client: WorkspaceApi; onChange?: (value: string, source: 'manual' | 'venue') => void

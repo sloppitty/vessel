@@ -9,6 +9,7 @@ import { monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
 import { notificationCursor, notificationHeadFixture, notificationWith } from '@/test/notification-fixture'
 import { activityPage } from '@/test/activity-fixture'
 import { ApplicationShell } from './ApplicationShell'
+import { shellIdentityFixture } from '@/test/identity-fixture'
 
 function client(overrides: Partial<WorkspaceApi> = {}) {
   const streams: ((frame: MonitorStreamEvent) => void)[] = []
@@ -34,7 +35,7 @@ beforeEach(() => { window.history.replaceState(null, '', '/') })
 describe('Notifications in the shell', () => {
   it('places the entry above Settings with a capped badge whose count is in the accessible name', async () => {
     const { api } = client({ notificationHead: vi.fn().mockResolvedValue(unreadHead(120)) })
-    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={api} />)
     const sidebar = await screen.findByRole('complementary', { name: 'Main navigation' })
     const entry = await within(sidebar).findByRole('link', { name: 'Notifications, 99+ unread' })
     expect(entry).toHaveTextContent('Notifications99+')
@@ -52,7 +53,7 @@ describe('Notifications in the shell', () => {
 
   it('follows the unread count from stream frames and hides the badge when the channel is off', async () => {
     const { api, emit } = client({ notificationHead: vi.fn().mockResolvedValue(unreadHead(0)) })
-    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={api} />)
     await waitFor(() => expect(screen.getAllByRole('link', { name: 'Notifications' })).toHaveLength(2))
     await waitFor(() => expect(api.monitorStream).toHaveBeenCalled())
     emit({ type: 'notification', frame: { cursor: notificationCursor(11), unreadCount: 3, enabled: true, notification: notificationWith(1) } })
@@ -65,7 +66,7 @@ describe('Notifications in the shell', () => {
   it('opens the page from #notifications without the workspace heading actions', async () => {
     window.history.replaceState(null, '', '/#notifications')
     const { api } = client()
-    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={api} />)
     // Both pages are lazy: a loaded parallel run can take longer than the default second to show them.
     expect(await screen.findByRole('heading', { level: 1, name: 'Notifications' }, { timeout: 5_000 })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add account' })).toBeNull()
@@ -86,7 +87,7 @@ describe('Notifications in the shell', () => {
     ]
     for (const { head, monitor, shown } of cases) {
       const { api } = client({ notificationHead: vi.fn().mockResolvedValue(head), monitor: vi.fn().mockResolvedValue(monitor) })
-      const view = render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
+      const view = render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={api} />)
       await screen.findByRole('button', { name: 'View Main account' })
       await waitFor(() => expect(api.monitor).toHaveBeenCalled())
       await act(async () => { await Promise.resolve() })
@@ -98,7 +99,7 @@ describe('Notifications in the shell', () => {
 
   it('keeps workspace reads going when the notification head fails', async () => {
     const { api } = client({ overview: vi.fn().mockResolvedValue(emptyOverview), notificationHead: vi.fn().mockRejectedValue(new Error('down')) })
-    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={api} />)
     await waitFor(() => expect(api.overview).toHaveBeenCalled())
     await waitFor(() => expect(api.monitorStream).toHaveBeenCalled())
     expect(vi.mocked(api.monitorStream).mock.calls[0]).toHaveLength(3)
@@ -115,7 +116,7 @@ describe('Notifications in the shell', () => {
       claimNotifications: vi.fn().mockResolvedValue({ popups, more: 0 }),
       readNotification: vi.fn((id: string) => Promise.resolve({ ...popups.find(item => item.id === id)!, state: 'read' as const, readAt: '2026-10-17T11:00:00Z' })),
     })
-    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={api} />)
     await screen.findByRole('button', { name: 'View Main account' })
     await userEvent.click(await screen.findByRole('button', { name: 'Open account' }))
     expect(window.location.hash).toBe('#accounts')

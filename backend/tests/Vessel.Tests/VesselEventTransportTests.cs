@@ -293,6 +293,7 @@ internal sealed class BrokerScope : IAsyncDisposable
         {
             ["ConnectionStrings:Vessel"] = database.ConnectionString,
             ["Vessel:Auth:OwnerId"] = Owner.ToString(),
+            ["Vessel:Identity:Origins:0"] = TestAuthentication.Origin,
             ["Vessel:Messaging:RabbitMqUri"] = Environment.GetEnvironmentVariable("Vessel_TEST_EVENT_RABBIT"),
             ["Vessel:Messaging:Prefix"] = "vt" + id
         };

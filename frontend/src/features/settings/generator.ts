@@ -1,4 +1,4 @@
-import { contrastChecks, contrastRatio, luminance, type ThemeColors, type ThemeScheme } from './themes'
+import { contrastChecks, contrastRatio, luminance, paperInk, paperSurfaces, type ThemeColors, type ThemeScheme } from './themes'
 
 /**
  * Random but coherent palettes: one neutral base hue for surfaces and text, one accent hue for actions,
@@ -23,12 +23,15 @@ export function hsl(hue: number, saturation: number, lightness: number) {
 
 interface Hsl { h: number; s: number; l: number }
 
-/** Moves `color` lighter (dark schemes) or darker (light schemes) until it reaches `minimum` on every surface. */
-function readable(color: Hsl, surfaces: readonly string[], minimum: number, scheme: ThemeScheme) {
+/**
+ * Moves `color` lighter (dark schemes) or darker (light schemes) until it reaches `minimum` on every surface and passes
+ * any colour derived from it (`derived`).
+ */
+function readable(color: Hsl, surfaces: readonly string[], minimum: number, scheme: ThemeScheme, derived: (hex: string) => boolean = () => true) {
   let { l } = color
   for (let step = 0; step < 100; step++) {
     const hex = hsl(color.h, color.s, l)
-    if (surfaces.every(surface => contrastRatio(hex, surface) >= minimum)) return hex
+    if (surfaces.every(surface => contrastRatio(hex, surface) >= minimum) && derived(hex)) return hex
     l += scheme === 'dark' ? 1 : -1
   }
   return scheme === 'dark' ? '#ffffff' : '#000000'
@@ -59,7 +62,12 @@ export function generatePalette(scheme: ThemeScheme, random: Random = Math.rando
   const ring = readable({ h: accentHue, s: accentSaturation, l: dark ? 70 : 42 }, [card, background], 3, scheme)
   const positive = readable({ h: between(random, 128, 155), s: between(random, 40, 65), l: dark ? 70 : 30 }, surfaces, 4.5, scheme)
   const negative = readable({ h: between(random, -8, 10), s: between(random, 60, 80), l: dark ? 76 : 42 }, surfaces, 4.5, scheme)
-  const warning = readable({ h: between(random, 34, 48), s: between(random, 65, 90), l: dark ? 74 : 28 }, surfaces, 4.5, scheme)
+  // Paper mode's ink mixes warning with secondary text, so the warning also has to carry that mix.
+  const paperReadable = (hex: string) => {
+    const colors = { background, card, mutedForeground, warning: hex }
+    return Object.values(paperSurfaces(colors)).every(surface => contrastRatio(paperInk(colors), surface) >= 4.5)
+  }
+  const warning = readable({ h: between(random, 34, 48), s: between(random, 65, 90), l: dark ? 74 : 28 }, surfaces, 4.5, scheme, paperReadable)
 
   // Either an accent-coloured or a neutral primary button, with whichever ink reads better on it.
   const primary = random() < 0.65 ? ring : dark ? foreground : hsl(base, tint, 16)

@@ -277,16 +277,16 @@ public abstract class NotificationIsolationCases(IsolationHost api)
     }
 }
 
-/// <summary>The cases above in Token mode, with the suite's test scheme selecting the owner.</summary>
+/// <summary>The cases above with the suite's test scheme selecting the owner.</summary>
 public sealed class NotificationIsolationTests(IsolationApi api) : NotificationIsolationCases(api), IClassFixture<IsolationApi>;
 
-/// <summary>The same cases in Wallet mode: two signed-in users, dispatched against the identity directory the API itself uses.</summary>
+/// <summary>The same cases through wallet sessions: two signed-in users, dispatched against the identity directory the API itself uses.</summary>
 public sealed class WalletNotificationIsolationTests(WalletIsolationApi api) : NotificationIsolationCases(api), IClassFixture<WalletIsolationApi>;
 
 /// <summary>
 /// The <c>notifications</c> subscription as its worker runs it, over the isolation host's journal: the registration is
 /// server-wide, and each event is dispatched by the real listener into its own owner's scope with the hub as subscriber.
-/// In Wallet mode the owner directory is the identity one the API resolves; in Token mode the configured directory
+/// Through wallet sessions the owner directory is the identity one the API resolves; the test-scheme host's directory
 /// knows only the installation owner, so the case's two owners are listed active instead.
 /// </summary>
 internal sealed class IsolationNotifications : IAsyncDisposable

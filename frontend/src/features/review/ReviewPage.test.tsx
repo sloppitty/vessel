@@ -10,9 +10,10 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chooseInPicker } from '@/test/account-picker'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 function setup(review = vi.fn().mockResolvedValue(reviewFixture)) {
-  const api = { ...createWorkspaceApi('test'), review }
+  const api = { ...createWorkspaceApi(credentialsFixture), review }
   const open = vi.fn().mockResolvedValue(undefined)
   const view = render(<ReviewPage api={api} reloadGeneration={0} onOpenPlay={open} />)
   return { review, open, user: userEvent.setup(), ...view }
@@ -270,7 +271,7 @@ describe('Review result bases', () => {
 
 describe('Review venue names', () => {
   it('shows venue descriptor names instead of raw venue IDs in breakdowns and the Play list', async () => {
-    const api = { ...createWorkspaceApi('test'), review: vi.fn().mockResolvedValue(reviewFixture) }
+    const api = { ...createWorkspaceApi(credentialsFixture), review: vi.fn().mockResolvedValue(reviewFixture) }
     const user = userEvent.setup()
     renderWithVenues(<ReviewPage api={api} reloadGeneration={0} onOpenPlay={vi.fn().mockResolvedValue(undefined)} />)
     const breakdown = await screen.findByRole('table', { name: /ranked by net closed-play P&L/ })

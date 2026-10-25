@@ -1,3 +1,4 @@
+import { credentialsFixture } from '@/test/identity-fixture'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { emptyOpenRisk } from '@/test/workspace-fixture'
 import { isOpenRisk, isOpenRiskPreview, isRiskSettings, type OpenRisk } from './risk'
@@ -40,7 +41,7 @@ describe('open risk documents', () => {
   it('never reads open risk in Paper mode', async () => {
     const fetch = vi.fn()
     vi.stubGlobal('fetch', fetch)
-    const paper = createWorkspaceApi('synthetic-token', undefined, 'paper')
+    const paper = createWorkspaceApi(credentialsFixture, undefined, 'paper')
     await expect(paper.openRisk('all')).rejects.toMatchObject({ kind: 'unavailable' })
     await expect(paper.riskSettings()).rejects.toMatchObject({ kind: 'unavailable' })
     expect(fetch).not.toHaveBeenCalled()

@@ -16,12 +16,14 @@ public sealed class ConfigurationAndCommandTests
     private static IConfiguration Config(Dictionary<string, string?>? overrides = null) =>
         new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["Vessel:Auth:Mode"] = "Wallet", ["Vessel:Auth:OwnerId"] = Guid.NewGuid().ToString(),
+            ["Vessel:Auth:OwnerId"] = Guid.NewGuid().ToString(),
             ["Vessel:Identity:Origins:0"] = "https://vessel.test"
         }.Concat(overrides ?? []).GroupBy(x => x.Key).ToDictionary(x => x.Key, x => x.Last().Value)).Build();
 
     [Theory]
     [InlineData("Vessel:Auth:Mode", "wallet")]
+    [InlineData("Vessel:Auth:Mode", "Token")]
+    [InlineData("Vessel:Auth:Mode", "")]
     [InlineData("Vessel:Auth:Token", "synthetic-must-never-echo")]
     [InlineData("Vessel:Auth:OwnerId", null)]
     [InlineData("Vessel:Auth:OwnerId", "11111111-1111-1111-1111-111111111111")]
@@ -37,25 +39,22 @@ public sealed class ConfigurationAndCommandTests
     [InlineData("Vessel:Identity:CookieName", "not-host-prefixed")]
     [InlineData("Vessel:Identity:SignInCookieName", "__Host-vessel-session")]
     [InlineData("Vessel:Events:MaxStreams", "0")]
-    public void Wallet_mode_rejects_invalid_configuration_without_values(string key, string? value)
+    public void Invalid_or_removed_token_settings_are_rejected_without_values(string key, string? value)
     {
         var error = Assert.ThrowsAny<Exception>(() => IdentitySettings.Read(Config(new() { [key] = value }), false));
         Assert.DoesNotContain("synthetic-must-never-echo", error.Message);
     }
 
     [Fact]
-    public void Origins_are_normalized_and_registration_is_gated_and_default_owner_is_token_compatible()
+    public void Origins_are_normalized_and_registration_is_open_to_policy_and_default_owner_needs_the_override()
     {
         var settings = IdentitySettings.Read(Config(new() { ["Vessel:Identity:Origins:0"] = "https://VESSEL.test:443/" }), false);
         Assert.Equal("https://vessel.test", Assert.Single(settings.Origins));
         Assert.Equal("Invitation", settings.Registration);
         Assert.True(IdentityRegistrationGate.MultiOwnerReady);
-        var token = IdentitySettings.Read(Config(new()
-        {
-            ["Vessel:Auth:Mode"] = "Token", ["Vessel:Auth:OwnerId"] = null, ["Vessel:Identity:Origins:0"] = null
-        }), false);
-        Assert.Equal(JournalOwner.Default, token.OwnerId);
-        Assert.False(token.WalletMode);
+        // An explicit Wallet mode from an earlier opt-in stays accepted; Development keeps the legacy default owner.
+        Assert.Equal(JournalOwner.Default, IdentitySettings.Read(Config(new()
+            { ["Vessel:Auth:Mode"] = "Wallet", ["Vessel:Auth:OwnerId"] = null }), true).OwnerId);
         _ = IdentitySettings.Read(Config(new()
         {
             ["Vessel:Auth:OwnerId"] = JournalOwner.Default.ToString(), ["Vessel:Identity:AllowLegacyDefaultOwner"] = "true"
@@ -63,20 +62,18 @@ public sealed class ConfigurationAndCommandTests
     }
 
     [Theory]
-    [InlineData("Development")]
-    [InlineData("Production")]
-    [InlineData("Staging")]
-    public async Task Wallet_hosts_refuse_a_configured_bearer_token_in_every_environment(string environment)
+    [InlineData("Development", "Vessel:Auth:Token", "synthetic-must-never-echo")]
+    [InlineData("Production", "Vessel:Auth:Token", "synthetic-must-never-echo")]
+    [InlineData("Staging", "Vessel:Auth:Token", "synthetic-must-never-echo")]
+    [InlineData("Development", "Vessel:Auth:Mode", "Token")]
+    [InlineData("Production", "Vessel:Auth:Mode", "Token")]
+    public async Task Hosts_refuse_the_removed_token_settings_in_every_environment(string environment, string key, string value)
     {
         await using var factory = new CoreApiFactory(Guid.NewGuid(), connection: "Host=unused", environment: environment,
-            settings: new()
-            {
-                ["Vessel:Auth:Mode"] = "Wallet", ["Vessel:Auth:Token"] = "synthetic-must-never-echo",
-                ["Vessel:Identity:Origins:0"] = "https://vessel.test"
-            });
+            settings: new() { [key] = value });
         var error = Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
-        Assert.Contains("Vessel:Auth:Token", error.Message);
-        Assert.DoesNotContain("synthetic-must-never-echo", error.Message);
+        Assert.Contains(key, error.Message);
+        if (key == "Vessel:Auth:Token") Assert.DoesNotContain(value, error.Message);
     }
 
     [Theory]
@@ -89,7 +86,6 @@ public sealed class ConfigurationAndCommandTests
     {
         var values = new Dictionary<string, string?>
         {
-            ["Vessel:Auth:Mode"] = "Wallet", ["Vessel:Auth:Token"] = null,
             ["Vessel:Identity:Origins:0"] = "https://vessel.test", ["ConnectionStrings:Vessel"] = "Host=unused"
         };
         ProductionConfiguration.Validate(Config(values));
@@ -104,7 +100,7 @@ public sealed class ConfigurationAndCommandTests
     [PostgresTheory]
     [InlineData("Production")]
     [InlineData("Staging")]
-    public async Task Nondevelopment_wallet_hosts_use_secure_configured_cookies_without_a_bearer_token(string environment)
+    public async Task Nondevelopment_hosts_use_secure_configured_cookies(string environment)
     {
         await using var database = await IdentityDatabase.CreateAsync();
         var key = EthECKey.GenerateKey();
@@ -113,7 +109,7 @@ public sealed class ConfigurationAndCommandTests
         values.Remove("Vessel:Identity:Origins:1");
         values["Vessel:Identity:CookieName"] = "__Host-test-session";
         values["Vessel:Identity:SignInCookieName"] = "__Host-test-signin";
-        await using var factory = new CoreApiFactory(owner.User.Id, environment: environment, settings: values);
+        await using var factory = new CoreApiFactory(owner.User.Id, environment: environment, settings: values, testAuthentication: false);
         using var client = IdentityHttpTest.Client(factory);
         var binding = await client.PostAsJsonAsync("/api/auth/challenge", new { address = key.GetPublicAddress() });
         Assert.Equal(HttpStatusCode.OK, binding.StatusCode);
@@ -145,25 +141,25 @@ public sealed class ConfigurationAndCommandTests
     }
 
     [Fact]
-    public async Task Ensure_owner_in_Token_mode_does_not_touch_a_database_or_require_nondefault_owner()
+    public async Task Identity_commands_refuse_the_removed_token_settings_before_touching_a_database()
     {
-        var output = new StringWriter();
-        var config = Config(new()
+        foreach (var (key, value) in new[] { ("Vessel:Auth:Mode", "Token"), ("Vessel:Auth:Token", "synthetic-must-never-echo") })
         {
-            ["Vessel:Auth:Mode"] = "Token", ["Vessel:Auth:OwnerId"] = JournalOwner.Default.ToString(),
-            ["ConnectionStrings:Vessel"] = null
-        });
-        Assert.Equal(0, await IdentityCommands.RunAsync(["ensure-owner"], config, false, output));
-        Assert.Contains("Token mode", output.ToString());
-        Assert.Equal(2, await IdentityCommands.RunAsync(["unknown"], config, false, output));
+            var output = new StringWriter();
+            var config = Config(new() { [key] = value, ["ConnectionStrings:Vessel"] = null });
+            Assert.Equal(1, await IdentityCommands.RunAsync(["ensure-owner"], config, false, output));
+            Assert.Contains(key, output.ToString());
+            Assert.DoesNotContain("synthetic-must-never-echo", output.ToString());
+            Assert.Equal(2, await IdentityCommands.RunAsync(["unknown"], config, false, output));
+        }
     }
 
     [Fact]
     public async Task Command_line_configuration_is_effective_and_malformed_command_options_are_usage_errors()
     {
         var output = new StringWriter();
-        Assert.Equal(0, await IdentityCommands.RunAsync(["ensure-owner", "--Vessel:Auth:Mode=Token"], output));
-        Assert.Contains("Token mode", output.ToString());
+        Assert.Equal(1, await IdentityCommands.RunAsync(["ensure-owner", "--Vessel:Auth:Mode=Token"], output));
+        Assert.Contains("Vessel:Auth:Mode", output.ToString());
         Assert.Equal(2, await IdentityCommands.RunAsync(["bind-wallet", "--user"], output));
         Assert.Equal(2, await IdentityCommands.RunAsync(["ensure-owner", "--Vessel:Auth:Mode"], output));
     }
@@ -209,7 +205,7 @@ public sealed class ConfigurationAndCommandTests
     }
 
     [Fact]
-    public async Task Default_GUID_refusal_and_override_apply_only_in_Wallet_mode()
+    public async Task Default_GUID_is_refused_outside_Development_without_the_override()
     {
         var output = new StringWriter();
         Assert.Equal(1, await IdentityCommands.RunAsync(["ensure-owner"], Config(new()

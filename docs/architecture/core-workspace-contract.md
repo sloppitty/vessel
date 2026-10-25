@@ -236,3 +236,95 @@ reads only enabled real accounts. Paused and Unresolved Plays are counted as
 not included. Paper requests get 409. The limit is stored per owner on the
 server by `GET`/`PUT /api/risk/settings`, blank by default. Settings has a
 "Risk limits" panel for it.
+
+## October 24, 2026: shell header, breadcrumb trail and mode banner
+
+- The shell has a sticky, blurred header at every width. Its small breadcrumb
+  does not replace page headings or move the approved workspace sections.
+  The menu, unread dot, focus return and bell remain mobile-only; desktop
+  notifications stay in the sidebar. The mobile brand yields to the trail.
+- History lives only in Shell memory. Reload starts at the hash page; switching
+  trading mode re-keys Shell and resets history. Hashes still identify pages,
+  never accounts, Plays or Settings tabs. Sidebar/brand/Settings/Notifications
+  navigation starts a new root. Browser hash navigation truncates to a page
+  already in the trail, or starts a new root otherwise. Retained Play editors
+  and Wallet Settings tabs remain the page's current sub-location.
+- Drill-downs append their target page and sub-location: for example,
+  `Overview › Accounts › main`, `Review › Plays › <saved title>`, and
+  `Accounts › main › Plays › <saved title>`. Overview actions, portfolio
+  account filters and notification links are drill-downs too. Revisiting a
+  location truncates the loop. All accounts/All plays pop to their parent,
+  preserving filters, list state and retained work as before.
+- Earlier crumbs restore pages, accounts, saved Plays or Wallet Settings tabs.
+  Play restoration goes through PlaysPage's mutation/unsaved-work guard;
+  cancelling discard changes neither route nor history. A confirmed restore
+  replaces work only after loading successfully and checking for intervening
+  edits. Unsaved drafts have a current title (or “New play”), never a back link.
+- The breadcrumb is a labelled navigation list, with plain-text `aria-current`
+  on the final crumb, hidden chevrons, titled/truncated labels and token-based
+  focus rings. More than four desktop crumbs collapse to first, an accessible
+  expandable “…” control and last two. At ≤800px only “…” and last two remain;
+  at ≤360px only “…” and the current location remain.
+- `ShellNotices` accepts mode-level notices. Paper shows one slim `role="note"`
+  strip with an information icon, plain bold **Paper mode**, and the unchanged
+  simulation/zero-fee/ambiguity disclosure. Real has no strip. Existing load,
+  monitor and notification alerts stay where they were. Colours and radius
+  use theme tokens. The strip is one line when space permits (1440px); at
+  constrained desktop widths (1024px) it also wraps rather than hiding copy or
+  shrinking below the type scale.
+- Redundant per-item Paper markers are removed. Enabled/disabled are the
+  neutral account statuses; paper rows do not claim a refresh timestamp or
+  leverage observation. Simulation result/basis, execution-source, immutable
+  capital, sizing-source and capability explanations remain.
+
+### Trading mode lockup
+
+The owner compared eight switch designs (`docs/design/trading-mode-switch/`)
+and chose option 5, the brand lockup. It replaces the sidebar "Trading mode"
+select; switching still remounts the shell in the other mode.
+
+- **Control.** The mark and "vessel" wordmark stay the Overview link ("Vessel
+  overview"). When Paper is available the subtitle under the wordmark is a
+  sibling button, never nested in the link, reading **Journal** or
+  **Paper playground** with a swap icon (the owner renamed "Real journal" to
+  "Journal" the same day). Its name states the action ("Journal, switch to
+  Paper playground" / "Paper playground, switch to Journal"), so it has no
+  pressed state; its title repeats the name. When Paper
+  is unavailable the subtitle is the plain "The trading journal" and nothing
+  else changes. "Paper" alone is not used for the control because a light
+  appearance theme has that name; the header notice keeps **Paper mode**.
+- **Collapsed rail** (desktop only): the subtitle goes with the copy and a round
+  swap button with the same name and title sits under the mark and the collapse
+  toggle. The collapsed state lives above the per-mode shell, so a switch keeps
+  the rail. **Narrow screens** (≤800px): the subtitle is in the off-canvas
+  sheet; in Paper the header shows a decorative paper boat and "Paper" beside
+  the menu button (`aria-hidden`) and a 2px Paper rail on its bottom edge.
+- **Mark and chrome.** Real shows the Vessel hull; Paper shows a paper boat
+  (`PaperBoatMark`) and the monogram tile takes the Paper tone. In Paper the
+  desktop sidebar gets a 2px inset rail on the edge facing content, a faint top
+  wash and contours tinted with the Paper tone, and the `ShellNotices` Paper
+  strip uses the same tone. The tone is derived from theme tokens only in
+  `styles.css`: `--paper-ink` (72% warning, 28% secondary text), `--paper-wash`
+  (9% warning), `--paper-glow` (22%) and `--paper-line` (36% warning over the
+  border). The built-in readability checks include Paper ink on the page, the
+  navigation and the Paper strip (4.5:1), and the theme builder keeps every
+  roll passing them.
+- **Motion.** After a switch made in this browser session the old mark sinks
+  and the new one rises inside the tile (transform and opacity only, about
+  half a second). Load, reload and a new connection show no motion, and none
+  plays under reduced motion. This is an owner-approved exception to the
+  visual refresh's opacity-only rule.
+- **Confirmation.** While Play work is unsaved or a Play request is in flight
+  (the condition that used to call `window.confirm`), the switch opens an
+  alert dialog: "Switch to Paper playground?" or "Switch to Journal?",
+  the unchanged message as its description, **Keep editing** (focused first)
+  and **Discard and switch**. The control shows a dashed pending outline while
+  it is open. Keep editing and Escape change nothing and return focus to the
+  control; clicks outside do nothing; Escape in a dialog opened from the sheet
+  leaves the sheet open. Confirming re-reads the live guard: work that has
+  finished or started meanwhile still switches (discarding was confirmed), but
+  a confirmation left from a replaced or ended connection switches nothing.
+- **Focus and announcement.** After a switch from the control, focus moves to
+  the new control (the rail button when collapsed), or to the menu button on
+  narrow screens because the sheet closes. A polite live region outside the
+  per-mode shell announces "Paper playground" or "Journal".
