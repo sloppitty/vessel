@@ -1,3 +1,4 @@
+import { significantDecimals, tickOf, type PriceStep } from '@/lib/price-step'
 /** Draft publications are frame-batched; the renderer keeps its own immediate preview. */
 export class FrameEdit<T> {
   private frame: number | null = null
@@ -37,12 +38,13 @@ export class FrameEdit<T> {
   }
 }
 
-/** Same rounding as chart-plan edits: venue tick, otherwise five significant figures / eight decimals. */
-export function roundedLevelPrice(price: number, step?: number | null) {
-  if (step != null && step > 0) {
+/** Same rounding as chart-plan edits: venue tick, otherwise five significant figures / eight decimals / the venue's cap. */
+export function roundedLevelPrice(price: number, step?: PriceStep) {
+  const tick = tickOf(step)
+  if (tick !== null) {
     let places = 0
-    while (places < 12 && Math.abs(Math.round(step * 10 ** places) - step * 10 ** places) > 1e-9) places++
-    return Number((Math.round(price / step) * step).toFixed(places))
+    while (places < 12 && Math.abs(Math.round(tick * 10 ** places) - tick * 10 ** places) > 1e-9) places++
+    return Number((Math.round(price / tick) * tick).toFixed(places))
   }
-  return Number(price.toFixed(Math.min(8, Math.max(0, 4 - Math.floor(Math.log10(price))))))
+  return Number(price.toFixed(significantDecimals(price, step)))
 }

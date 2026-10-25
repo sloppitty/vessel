@@ -558,3 +558,44 @@ October 21, 2026.
   an omission, and that net-of-fee handling and the history-gap rule are
   unchanged.
 - **Check.** `scripts/check.sh` passed on `ddf801e7`: backend 4,094 passed, 5 skipped; frontend 177 files and 4,085 tests.
+
+**14b. Hyperliquid.** Implemented on `t3/phase2-hyperliquid-robustness`.
+- **F-11 (probe C9).** Instruments state `MaxPriceDecimals` (`6 − szDecimals`).
+  - Matching and the monitor's drift and level checks take one unit of the last allowed decimal as a
+    minimum step. A planned 0.051234 at `szDecimals = 1` now matches an order at 0.05123.
+  - The browser's chart and suggestion rounding keep five significant figures within the cap.
+  - Prices of six digits or more stay whole numbers.
+  - Nothing becomes stricter, and typed prices are kept as entered.
+- **F-14 (probe V6).** On separate-ledger accounts (`default`, `disabled`, `dexAbstraction`) a failed,
+  dropped or malformed wallet read degrades only the wallet.
+  - Perps and fills still apply, and the last observed wallet is kept with its own read time.
+  - The account mode read with the perps is kept even when the wallet failed, so availability
+    follows the current mode.
+  - The balance is unknown until a wallet is read with the perps again. Separate ledgers add up only
+    when the wallet was read with the perps or after them: an older wallet could hold funds since
+    moved into perps. Account detail shows the wallet's own read time.
+  - Unified and portfolio-margin accounts, rate limits and the shared deadline still fail the read.
+- **Tests.**
+  - `PriceRuleTests` (2, one on PostgreSQL).
+  - Wallet degrade cases, the stale-wallet balance, and the transfer case on PostgreSQL.
+  - `price-step.test.ts` and the Account detail stale-wallet note.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `fd157150`. Three findings, all fixed in
+  `68b8933d`:
+  - A dropped connection or a malformed wallet body escaped the wallet
+    boundary and discarded the perps and fills already read. They degrade the
+    wallet like an invalid response; a rate limit, cancellation or the read's
+    deadline still stops the read.
+  - **High.** A kept wallet looked current and could count funds twice: with
+    1,000 in the wallet moved into perps and the next wallet read failing, the
+    balance read 2,000. Separate ledgers now add up only when the wallet was
+    read with the perps or after them; otherwise the balance is unknown, and
+    Account detail shows the wallet's own read time.
+  - **High.** The account mode lived only in the wallet, so a failed wallet
+    read kept the old mode and its stale availability. The mode read with the
+    perps is kept on its own.
+
+  Sol confirmed that the decimal cap reaches instruments, matching, the
+  monitor's checks and the browser's rounding without venue-name checks, that
+  typed levels are never rewritten, and that unknown modes, unified and
+  portfolio-margin accounts, rate limits and deadlines still fail the read.
+- **Check.** `scripts/check.sh` passed on `b91d8ea9`: backend 4,106 passed, 5 skipped; frontend 178 files and 4,090 tests.

@@ -271,6 +271,47 @@ public sealed class WorkspaceReviewPostgresTests
     }
 
     [PostgresFact]
+    public async Task A_wallet_older_than_the_perps_is_never_added_to_them_and_the_mode_follows_the_perps()
+    {
+        // Phase 2, item 14b, Sol round 1: a unified wallet of 1,000 and perps 0; the account switches to default, moves the
+        // 1,000 into perps, and the next refresh cannot read the wallet.
+        await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); var reader = new FixtureReader(); Guid id;
+        await using (var db = database.Context(owner)) id = (await Service(db, owner).CreateAccountAsync(new(null, "Venue", "hyperliquid", "0x" + new string('2', 40)), default)).Id;
+        static DateTimeOffset At(int hour) => DateTimeOffset.Parse($"2026-10-01T{hour:00}:00:00Z");
+        var baseline = reader.Result;
+        reader.Result = baseline with
+        {
+            Snapshot = baseline.Snapshot with
+            {
+                ObservedAtUtc = At(10), AccountValueUsd = 0, AccountMode = "unifiedAccount",
+                StablecoinWallet = new(At(10), "unifiedAccount", "hypercore-spot-stablecoins", [new("USDC", 0, "usdc-token", 1000, 0, 1000)])
+            }
+        };
+        await using (var db = database.Context(owner))
+        {
+            var dto = await Refresh(db, owner, id, reader);
+            Assert.Equal(("1000", "wallet", "1000"), (dto.BalanceUsd, dto.AvailableBalanceSource, dto.AvailableBalanceUsd));
+        }
+        reader.Result = baseline with
+        {
+            Snapshot = baseline.Snapshot with
+            {
+                ObservedAtUtc = At(11), AccountValueUsd = 1000, WithdrawableUsd = 900, AvailableMarginUsd = null,
+                AccountMode = "default", StablecoinWallet = null
+            }
+        };
+        await using (var db = database.Context(owner))
+        {
+            var dto = await Refresh(db, owner, id, reader);
+            // Never 2,000: the 10:00 wallet may hold funds since moved into perps, so the balance is unknown.
+            Assert.Null(dto.BalanceUsd);
+            // The mode read with the perps decides availability: the reported withdrawal, not the old wallet's 1,000.
+            Assert.Equal(("default", "withdrawable", "900"), (dto.AccountMode, dto.AvailableBalanceSource, dto.AvailableBalanceUsd));
+            Assert.Equal(At(10), (await Service(db, owner).SnapshotAsync(id, default))!.StablecoinWallet!.ObservedAtUtc);
+        }
+    }
+
+    [PostgresFact]
     public async Task Targeted_snapshot_SQL_loads_only_requested_positions_wallet_and_enabled_owner_record()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); Guid id; Guid unrelated;

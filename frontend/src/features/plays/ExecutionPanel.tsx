@@ -1,3 +1,4 @@
+import type { PriceStep } from '@/lib/price-step'
 import type { ExecutionOrder, LinkOrder, PlayExecution, PlaySummary, RebindLevel, VenueRisk } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { Link2, Link2Off } from 'lucide-react'
@@ -59,7 +60,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
   version?: number
   /** The plan's leverage and the instrument's tick, to resolve and match levels as the server does. */
   leverage?: number
-  priceStep?: number | null
+  priceStep?: PriceStep
   /** Moves a drifted linked stop or target to its order's price (`level.drift`); resolves once the Play is saved. */
   onRebind?: (linkId: string, request: RebindLevel) => Promise<void>
   /** Why a rebind is not available now, such as unsaved plan edits. */

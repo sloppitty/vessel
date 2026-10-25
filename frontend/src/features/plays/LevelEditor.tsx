@@ -1,3 +1,4 @@
+import type { PriceStep } from '@/lib/price-step'
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 import { Plus, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -19,7 +20,7 @@ export function LevelEditor({ entries, entry, overlayId, anchor, direction, leve
   anchor: { x: number; y: number }
   direction: PlayDraft['direction']
   leverage: number
-  priceStep?: number | null
+  priceStep?: PriceStep
   onApply: (next: DraftEntry, label: string) => void
   onClose: () => void
 }) {

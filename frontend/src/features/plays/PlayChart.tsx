@@ -1,3 +1,4 @@
+import type { PriceStep } from '@/lib/price-step'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import { ArrowRightToLine, Camera, ChartNoAxesCombined, ChartSpline, Layers, Maximize2, OctagonX, RefreshCw, Star, Target } from 'lucide-react'
 import { Popover } from 'radix-ui'
@@ -65,7 +66,7 @@ interface ChartPanelProps {
   /** Intervals the venue serves; the timeframe bar offers only these. Defaults to all. */
   intervals?: readonly CandleInterval[] | undefined
   /** The instrument's price tick; levels placed or dragged on the chart round to it. */
-  priceStep?: number | null
+  priceStep?: PriceStep
   /** False for venues without a live stream: the chart refreshes on request only. */
   streamable?: boolean
   /** False for venues without market context: the header statistics are not requested. */

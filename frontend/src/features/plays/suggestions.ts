@@ -1,3 +1,4 @@
+import { significantDecimals, tickOf, type PriceStep } from '@/lib/price-step'
 import type { ExposureLevel, SizingDocument } from '@/api/sizing'
 import type { DraftEntry, DraftExit, PlayDraft } from './draft'
 import { averageEntryPrice, levelPrice, stepDecimals } from './levels'
@@ -28,14 +29,16 @@ const tolerance = 1e-9
 
 /**
  * Rounds a price the way the venue accepts it, in one direction, so a suggestion still meets its
- * limit after rounding: to the instrument's tick when there is one, otherwise to five significant figures.
+ * limit after rounding: to the instrument's tick when there is one, otherwise to five significant figures within the
+ * venue's decimal cap.
  */
-export function roundPrice(price: number, way: 'up' | 'down', step: number | null = null) {
-  if (step !== null && step > 0) {
-    const ticks = way === 'up' ? Math.ceil(price / step - tolerance) : Math.floor(price / step + tolerance)
-    return formatPlanNumber(ticks * step, stepDecimals(step))
+export function roundPrice(price: number, way: 'up' | 'down', step: PriceStep = null) {
+  const tick = tickOf(step)
+  if (tick !== null) {
+    const ticks = way === 'up' ? Math.ceil(price / tick - tolerance) : Math.floor(price / tick + tolerance)
+    return formatPlanNumber(ticks * tick, stepDecimals(tick))
   }
-  const decimals = Math.min(8, Math.max(0, 4 - Math.floor(Math.log10(price))))
+  const decimals = significantDecimals(price, step)
   const factor = 10 ** decimals
   const rounded = way === 'up' ? Math.ceil(price * factor - tolerance) / factor : Math.floor(price * factor + tolerance) / factor
   return formatPlanNumber(rounded, decimals)
@@ -136,7 +139,7 @@ export interface LevelSuggestion {
 
 /** The value of a stop or target at `price`: the price itself, or the % return at the leverage. */
 function levelValue(exit: DraftExit, entryPrice: number, price: number, leverage: number, way: 'up' | 'down', percentWay: 'up' | 'down',
-  step: number | null) {
+  step: PriceStep) {
   if (exit.unit === 'price') return roundPrice(price, way, step)
   return roundDecimals(Math.abs(price - entryPrice) / entryPrice * 100 * Math.max(1, leverage), 2, percentWay)
 }
@@ -147,7 +150,7 @@ function levelValue(exit: DraftExit, entryPrice: number, price: number, leverage
  * is within the limit, blank or on the wrong side.
  */
 export function suggestMaxStop(entry: DraftEntry, exit: DraftExit, direction: Direction, leverage: number, maxStopPercent: number,
-  step: number | null = null): LevelSuggestion | null {
+  step: PriceStep = null): LevelSuggestion | null {
   const entryPrice = positive(entry.price)
   if (entryPrice === null || !(maxStopPercent > 0) || wrongSide(entryPrice, exit, 'stop', direction)) return null
   const price = levelPrice(entryPrice, exit, 'stop', direction, leverage)
@@ -165,7 +168,7 @@ export function suggestMaxStop(entry: DraftEntry, exit: DraftExit, direction: Di
  * already enough, or when a short target would need a price at or below zero.
  */
 export function suggestMinTarget(entry: DraftEntry, direction: Direction, leverage: number, minRewardRisk: number,
-  step: number | null = null): (LevelSuggestion & { levelId: string }) | null {
+  step: PriceStep = null): (LevelSuggestion & { levelId: string }) | null {
   const ratio = rewardToRisk(entry, direction, leverage)
   const entryPrice = positive(entry.price)
   if (ratio === null || entryPrice === null || !(minRewardRisk > 0) || ratio >= minRewardRisk * (1 - tolerance)) return null
@@ -267,7 +270,7 @@ export interface SuggestionInputs {
   /** Maintenance margin fraction the venue states for the contract, or null. */
   maintenanceMargin?: number | null
   /** The instrument's price tick; suggested prices round to it. */
-  priceStep?: number | null
+  priceStep?: PriceStep
   sizing: SizingDocument
   units: SizeUnits
   balance: number | null
