@@ -6,6 +6,7 @@ import type { PaperPlayState } from '@/api/paper'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { formatTime } from '@/lib/time'
 import { PaperExecutionPanel } from './PaperExecutionPanel'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const playId = '30000000-0000-4000-8000-000000000001'
 const otherPlayId = '30000000-0000-4000-8000-000000000002'
@@ -299,7 +300,7 @@ describe('PaperExecutionPanel', () => {
       declinedEntries: [{ entryId: 'entry-2', reason: 'Insufficient capital.', declinedAtUtc: '2026-10-20T11:59:00Z' }] }
     const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify(blocked)))
     vi.stubGlobal('fetch', fetcher)
-    render(<PaperExecutionPanel api={createWorkspaceApi('synthetic-token', undefined, 'paper')} playId={playId} />)
+    render(<PaperExecutionPanel api={createWorkspaceApi(credentialsFixture, undefined, 'paper')} playId={playId} />)
     await act(async () => {})
     expect(fetcher).toHaveBeenCalledTimes(1)
     await act(async () => { await vi.advanceTimersByTimeAsync(11_999) })

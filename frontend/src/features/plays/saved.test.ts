@@ -5,26 +5,27 @@ import { createPlaysSession, draftEvidenceFromSaved, draftFromSaved, draftSessio
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import type { SavedEvidence } from '@/api/plays'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 describe('Unsaved draft protection', () => {
   it('starts a blank editor from a clean session without retaining the saved Play', () => {
     const draft = draftFromSaved(savedPlayFixture, [])
     const next = startNewPlay({ view: 'list', draft, saved: savedState(savedPlayFixture, draft),
-      observedPlay: { api: createWorkspaceApi('test'), id: savedPlayFixture.summary.id, accountId: savedPlayFixture.summary.accountId, version: 6, conflict: true } })
+      observedPlay: { api: createWorkspaceApi(credentialsFixture), id: savedPlayFixture.summary.id, accountId: savedPlayFixture.summary.accountId, version: 6, conflict: true } })
     expect(next.view).toBe('editor')
     expect(next.saved).toBeNull()
     expect(next.observedPlay).toBeNull()
     expect(hasDraftContent(next.draft)).toBe(false)
   })
   it('keeps the observed version apart from the baseline and scopes it to the API, Play and account', () => {
-    const api = createWorkspaceApi('test')
+    const api = createWorkspaceApi(credentialsFixture)
     const draft = draftFromSaved(savedPlayFixture, [])
     const saved = savedState(savedPlayFixture, draft)
     const observedPlay = { api, id: saved.summary.id, accountId: saved.summary.accountId, version: 6, conflict: true }
     const session = { ...createPlaysSession(), draft, saved, observedPlay }
     expect(observedPlayVersion(session, api)).toBe(6)
     expect(session.saved.summary.version).toBe(savedPlayFixture.summary.version)
-    expect(observedPlayVersion(session, createWorkspaceApi('new identity'))).toBe(saved.summary.version)
+    expect(observedPlayVersion(session, createWorkspaceApi(credentialsFixture))).toBe(saved.summary.version)
     expect(observedPlayVersion({ ...session, observedPlay: { ...observedPlay, id: 'other-play' } }, api)).toBe(saved.summary.version)
     expect(observedPlayVersion({ ...session, observedPlay: { ...observedPlay, accountId: 'other-account' } }, api)).toBe(saved.summary.version)
     expect(observedPlayVersion({ ...session, saved: null }, api)).toBe(0)

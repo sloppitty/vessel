@@ -71,6 +71,7 @@ describe('Paper Play integration in the existing editor', () => {
     const api = makeApi()
     render(<Workspace api={api} />)
     await waitFor(() => expect(api.paperState).toHaveBeenCalledWith(play.summary.id, expect.any(AbortSignal)))
+    expect(screen.queryByText('Paper · simulated')).not.toBeInTheDocument()
     expect(api.playExecution).not.toHaveBeenCalled()
     expect(api.manualExecutions).not.toHaveBeenCalled()
     expect(api.accountMonitor).not.toHaveBeenCalled()

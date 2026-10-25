@@ -104,3 +104,170 @@ The runner gives credentials only to the API, not the frontend. API/frontend por
 - Native fixture checks covered the empty and populated shell, account navigation and detail, plus 390px/320px navigation and internal table scrolling. An absolute screen-reader label initially widened the mobile page; positioning its scroll container fixed that overflow.
 
 See [the shared contract](core-workspace-contract.md), [development setup](../development.md), and `backend/README.md`.
+
+## October 24, 2026: shell header, breadcrumb trail and mode banner
+
+Implemented the always-visible sticky header, Shell-memory route history,
+accessible collapsed trails, Wallet Settings-tab locations, and the generic
+mode-notice slot. Paper's existing disclosure now lives in that header, without
+per-item Paper markers. Account status is Enabled/Disabled; simulated-result,
+execution-source, sizing-source, immutable-capital and capability explanations
+remain. The sidebar Trading mode select, switching behaviour, approved page
+headings/layout, backend, `prototype/` and `AGENTS.md` were not changed.
+
+Verification from the repository root:
+
+- `pnpm install --frozen-lockfile` — pass; lockfile unchanged.
+- `pnpm --dir frontend typecheck` — pass.
+- `pnpm --dir frontend lint` — pass, **0 warnings**.
+- `pnpm --dir frontend test` — **168 files, 4,056 tests passed**. Fourteen new
+  tests cover top-level resets, retained account filters, detail/list Back,
+  Review/account/notification drill-downs, earlier-crumb truncation, collapsed
+  history, current-location accessibility, draft titles, cancelled/confirmed
+  Play restoration (including hidden-editor retries), background save completion,
+  hash routing and mode-level versus per-item Paper context.
+  Existing identity tests also verify restoring Wallet Settings tabs.
+- `pnpm --dir frontend build` — pass.
+- T3's headless browser, using a temporary synthetic-only bootstrap of the
+  production shell: **320, 390, 800, 1024 and 1440px**, Real and Paper, Graphite
+  plus **Paper, Daylight and Sand** themes. The document width matched the
+  viewport at every checked size; no header child extended past the viewport.
+  Long account/Play labels truncate, the narrow trail collapses, and the hidden
+  locations open without page overflow. Real has no mode strip; its bell is
+  visible at ≤800px and hidden on desktop. The header retained `top: 0` after
+  scrolling and its 10px backdrop blur. The synthetic bootstrap/server were
+  removed/stopped afterward; no owner API, database or live venue was used.
+- Rendered warning/text contrast in Graphite and those three light themes
+  exceeded **4.5:1** on the notice's tinted surface (minimum measured warning
+  5.26:1, body text 5.71:1); the full suite's built-in-theme contrast checks
+  also pass.
+
+The notice is a single line at 1440px. It wraps at 1024px as well as on mobile,
+deliberately preserving all disclosure text and the minimum type scale instead
+of clipping or creating horizontal overflow. Browser/hash navigation still
+retains the existing Play editor and its mutation owner; only an explicit
+All plays/page crumb shows the list. Cancelling a breadcrumb's discard prompt
+keeps the page, hash, trail and unsaved edits, and a confirmed restore waits for
+the guarded load before replacing them.
+
+No backend checks, migration, deployment, release, push or pull request are
+claimed by this frontend-only verification.
+
+## October 24, 2026: trading mode lockup
+
+Implemented the owner's choice, option 5 of `docs/design/trading-mode-switch/`:
+the sidebar "Trading mode" select became the brand subtitle button (Real
+journal / Paper playground), with a round swap button in the collapsed rail,
+the subtitle in the narrow sheet, a decorative "Paper" header mark on narrow
+screens, the paper-boat mark, the derived Paper tone (`--paper-*`) on the tile,
+sidebar edge rail, contours and Paper strip, an alert dialog instead of
+`window.confirm`, focus return and a polite announcement that survives the
+per-mode remount. See the trading mode lockup subsection of the
+[contract](core-workspace-contract.md#trading-mode-lockup). Backend,
+`prototype/` and `AGENTS.md` were not changed.
+
+Verification from the repository root:
+
+- `pnpm install --frozen-lockfile` — pass; lockfile unchanged.
+- `pnpm --dir frontend typecheck` — pass.
+- `pnpm --dir frontend lint` — pass, **0 warnings**.
+- `pnpm --dir frontend test` — **168 files, 4,076 tests passed**. The Paper
+  workspace tests find the control only through one `switchTradingMode`
+  helper; ten new tests cover both accessible names and the sibling (not
+  nested) placement, the plain subtitle with no control when no venue
+  simulates executions (rail included), the rail swap button and a kept rail
+  across a switch, focus on the new control or the menu button, the live
+  region surviving the remount, no mark animation on load or reload, Keep
+  editing/Escape/outside clicks changing nothing and returning focus,
+  Discard and switch, and the confirm-time guard re-check both ways (finished
+  work still switches; a replaced connection switches nothing). Ten more
+  check `--paper-ink` on the page, navigation and Paper strip for every
+  built-in theme. Removing the re-check, the sheet's Escape guard or either
+  focus step makes these tests fail.
+- `pnpm --dir frontend build` — pass.
+- Headless Chromium (Playwright 1.60 headless shell) against a temporary,
+  uncommitted bootstrap of the real `ApplicationShell` with an in-memory
+  synthetic API (invented accounts, no network, owner API, database or
+  venue): **485 scripted checks passed, 0 failed** at **320, 390, 800, 1024
+  and 1440px** in **Graphite, Daylight, Paper and Sand**, Real and Paper,
+  expanded and collapsed (desktop) or sheet (narrow). No page, header or
+  sidebar overflow; at 320px the breadcrumb keeps 185px beside the header
+  mark. Keyboard switches leave a visible focus ring on the new control,
+  the rail button or the menu button; the rail stays collapsed after a
+  switch. The confirmation focuses Keep editing, shows the dashed pending
+  outline, fits the viewport, returns focus on Escape and keeps the sheet
+  open on narrow screens. With motion allowed the new mark runs
+  `mode-mark-rise` and the old one `mode-mark-sink` after a switch, never on
+  load or reload; under reduced motion the leaving mark is not displayed.
+  No console errors. The bootstrap and server were removed afterwards.
+- Rendered `--paper-ink` contrast (live tokens): Graphite 11.78 on the page,
+  11.30 on the navigation, 10.24 on its top wash, 9.91 on hover and 9.85 on
+  the Paper strip; Daylight 6.35 / 6.70 / 6.24 / 6.10 / 5.59; Paper 6.19 /
+  6.52 / 6.07 / 6.00 / 5.45; Sand 6.05 / 6.43 / 5.99 / 5.78 / 5.34. Secondary
+  text on the Paper strip is 5.62–7.49:1 across those themes.
+
+Captures (`implemented-*.png` in the design folder) use the same synthetic
+bootstrap. No backend checks, migration, deployment, release, push or pull
+request are claimed.
+
+## October 24, 2026: adversarial review
+
+Five Sol (Codex) review rounds covered the breadcrumb commit and the lockup.
+Each finding was proved by a failing test that is kept as a regression:
+
+1. A breadcrumb restore the shell had cleared or superseded still replaced
+   the editor, and a confirmed discard kept the previous Play's log entry.
+2. Restore validity keyed by Play ID let a later request for the same Play
+   inherit a cancelled restore's response and discard; confirming a switch
+   after Paper became unavailable cleared the exit guards without a remount.
+3. An obsolete acknowledgement could cancel a new connection's request, a
+   rerender could strand a queued request, a repeat request kept the old
+   origin, and focus fell to the page body after an unavailable switch.
+   Every shell Play request now carries a token that PlaysPage returns, a
+   start is claimed only when it runs, and the dialog falls back to the
+   content.
+4. API replacement left the old request in place and suppressed the new
+   connection's Play breadcrumbs; the reset now clears it.
+5. Clean: no remaining defects in the request, breadcrumb and mode-switch
+   flows.
+
+At `57407d46`: `pnpm --dir frontend typecheck` and `lint` pass, and
+`pnpm --dir frontend test` passes 176 files, 4,099 tests.
+
+## October 24, 2026: end-to-end verification
+
+Two Sol (Codex) agents ran the packaged checks at `682b2b5a` in isolated
+Compose projects with synthetic data; no `.env`, owner database or dev
+service was used, and every container, network, volume and image tag was
+removed afterwards.
+
+- `scripts/verify-release.py` with Chromium: 177 packaged and 14 browser
+  assertions passed. `--storage local`: 177 passed. `--auth wallet` with
+  Chromium and Firefox: 155 packaged and 22 browser assertions passed. No
+  CSP violations, console or page errors.
+- `scripts/check.sh`: Python 82, prototype 76, backend 3,094 passed (730
+  skipped: they need disposable PostgreSQL/RabbitMQ/S3 endpoints or live
+  venue opt-ins), frontend 4,099; build, typecheck and lint clean.
+- `scripts/e2e-full-stack.py`: 168 checks passed and 5 failed. Step 6 times
+  out waiting for an exit watch to become `unverifiable` because the runner
+  ages only `monitor_exit_watches.StartedAtUtc`, which reconciliation
+  restores; two 11b checks and one 7b check depend on that watch, and 10c
+  failed only because a resumed run compares a new stream reader with
+  history from before the resume. The runner and backend are unchanged from
+  `315144f0`, so these are not caused by this stack; they are left for a
+  separate fix.
+- `scripts/e2e/shell-e2e.cjs`, a new browser pass run against the kept
+  full-stack stack (real API, fake venue): 45 passed and 1 failed. It covers
+  the header on every page, breadcrumb resets, drill-downs, filters kept,
+  Back, truncation, browser back/forward and hash edits, the collapsed
+  trail, a saved-Play crumb with unsaved work (cancel and accept), enabling
+  Paper in Settings, a paper portfolio, account (4,000 virtual USD) and
+  saved Play created through the UI, the single header notice, the brand
+  switch in the rail and the sheet, the unsaved-work dialog, focus and
+  announcements, and Graphite and Daylight at 1440, 1024, 390 and 320 px
+  with no horizontal overflow and no console, page, CSP or external-request
+  errors. The failure was a standalone "Paper" cash-source pill in account
+  detail; `b3977ee3` relabels both paper source pills "simulated" with their
+  explanations unchanged, covered by `AccountDetail.paper-source.test.tsx`.
+  Not covered: Wallet-only flows, populated paper Activity rows, the paper
+  worker and the arrival animation (reduced motion was on).

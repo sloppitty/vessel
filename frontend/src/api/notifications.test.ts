@@ -5,7 +5,7 @@ import { monitorFrame } from './monitor'
 import { isInAppNotification, isNotificationClaim, isNotificationHead, isNotificationPage, isNotificationPreferences,
   notificationPreferencesConflict, notificationReadAllConflict, type NotificationQuery } from './notifications'
 import { eventCursor, fixtureEpoch } from '@/test/monitor-fixture'
-import { sessionFixture } from '@/test/identity-fixture'
+import { credentialsFixture, sessionFixture } from '@/test/identity-fixture'
 import { notificationCursor, notificationFixture, notificationHeadFixture, notificationPreferencesFixture, notificationWith } from '@/test/notification-fixture'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -94,10 +94,8 @@ describe('notification stream frames', () => {
   })
 })
 
-describe.each(['bearer', 'session'] as const)('%s notification client', mode => {
-  const client = () => createWorkspaceApi(mode === 'bearer' ? 'token' : {
-    kind: 'session', userId: sessionFixture.user.id, sessionId: sessionFixture.session.id,
-  })
+describe('notification client', () => {
+  const client = () => createWorkspaceApi(credentialsFixture)
   it('uses this transport for every notification endpoint', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json(notificationHeadFixture))
@@ -120,10 +118,10 @@ describe.each(['bearer', 'session'] as const)('%s notification client', mode => 
     await api.requestTestNotification()
     expect(fetcher).toHaveBeenCalledTimes(8)
     for (const [, init] of fetcher.mock.calls) {
-      expect(init.credentials).toBe(mode === 'session' ? 'same-origin' : 'omit')
-      expect(init.headers).toMatchObject(mode === 'session' ? { 'X-Vessel-User': sessionFixture.user.id } : { Authorization: 'Bearer token' })
-      expect(init.headers).not.toHaveProperty(mode === 'session' ? 'Authorization' : 'X-Vessel-User')
-      if (mode === 'session') expect(init.referrerPolicy).toBe('same-origin')
+      expect(init.credentials).toBe('same-origin')
+      expect(init.headers).toMatchObject({ 'X-Vessel-User': sessionFixture.user.id })
+      expect(init.headers).not.toHaveProperty('Authorization')
+      expect(init.referrerPolicy).toBe('same-origin')
     }
   })
 
