@@ -4,7 +4,7 @@
 Starts its own throwaway PostgreSQL 18 and RabbitMQ containers, applies the migrations explicitly (check-config, identity,
 journal, ensure-owner, provision-messaging, as deploy/migrate does), seeds one owner's deterministic synthetic journal with
 COPY, rebuilds the journal search projection with its offline command and starts the built API DLL in Release
-(Production, Token mode, a generated token kept in memory, no worker modules). It then times Activity, Review, the Plays
+(Production, Wallet mode over loopback HTTPS, a synthetic operator session, no worker modules). It then times Activity, Review, the Plays
 list, Overview, open risk and journal search: warm-up rounds, then measured rounds interleaved across endpoints. A read
 through the Activity facts cache is made after a committed no-op revision write and repeated; the report infers whether
 the repeat can be a hit from the cache's capacity. Deep pages come from the counts, and scenarios the dataset cannot
@@ -22,6 +22,7 @@ from decimal import ROUND_DOWN, ROUND_HALF_EVEN, Decimal
 import gzip
 import hashlib
 import http.client
+from http.cookies import SimpleCookie
 import json
 import math
 import os
@@ -32,6 +33,7 @@ import re
 import secrets
 import shutil
 import signal
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -1396,17 +1398,18 @@ def cache_status(charge, capacity=CACHE_CAPACITY):
 
 
 class Client:
-    """One keep-alive HTTP/1.1 connection to the API, timed from request to the last body byte."""
+    """One authenticated keep-alive HTTPS/1.1 connection, timed from request to the last body byte."""
 
-    def __init__(self, port, token):
-        self.port, self.headers = port, {'Authorization': 'Bearer ' + token, 'Accept': 'application/json',
-                                         'Accept-Encoding': 'gzip'}
+    def __init__(self, port, context, owner, cookie):
+        self.port, self.context = port, context
+        self.headers = {'Cookie': cookie, 'X-Vessel-User': owner, 'Accept': 'application/json',
+                        'Accept-Encoding': 'gzip'}
         self.connection = None
 
     def get(self, path):
         for attempt in (1, 2):
             if self.connection is None:
-                self.connection = http.client.HTTPConnection('127.0.0.1', self.port, timeout=300)
+                self.connection = http.client.HTTPSConnection('127.0.0.1', self.port, context=self.context, timeout=300)
             try:
                 started = time.perf_counter()
                 self.connection.request('GET', path, headers=self.headers)
@@ -1507,8 +1510,8 @@ class Run:
         self.api = None
         self.temp = None
         self.pg_password, self.mq_password = secrets.token_hex(24), secrets.token_hex(24)
-        self.token = secrets.token_urlsafe(48)
-        self.secrets = {self.pg_password, self.mq_password, self.token}
+        self.api_port = free_port()
+        self.secrets = {self.pg_password, self.mq_password}
 
     def redact(self, text):
         text = str(text)
@@ -1591,9 +1594,10 @@ class Run:
             'ASPNETCORE_ENVIRONMENT': 'Production',
             'DOTNET_ENVIRONMENT': 'Production',
             'ConnectionStrings__Vessel': connection,
-            'Vessel__Auth__Mode': 'Token',
-            'Vessel__Auth__Token': self.token,
+            'Vessel__Auth__Mode': 'Wallet',
             'Vessel__Auth__OwnerId': self.owner,
+            'Vessel__Identity__Origins__0': self.origin,
+            'Vessel__Identity__Registration': 'Closed',
             'Vessel__Messaging__RabbitMqUri': f'amqp://bench:{self.mq_password}@127.0.0.1:{self.mq_port}/',
             'Vessel__Evidence__Storage__Provider': 'Local',
             'Vessel__Evidence__Storage__Local__RootPath': str(self.temp / 'evidence'),
@@ -1618,6 +1622,85 @@ class Run:
         self.run(['dotnet', dll, 'identity', 'ensure-owner'], cwd=API_BIN, env=env)
         self.run(['dotnet', dll, 'provision-messaging'], cwd=API_BIN, env=env)
 
+    @property
+    def origin(self):
+        return f'https://127.0.0.1:{self.api_port}'
+
+    def wallet_signature(self, message=None):
+        """Use the publicly known test key; noble dependencies must live outside this checkout."""
+        if shutil.which('node') is None:
+            raise RuntimeError('Node.js is required for the synthetic wallet signer.')
+        noble = os.environ.get('NOBLE_MODULE_DIR', '')
+        if not noble or not Path(noble).is_absolute() or not Path(noble).is_dir():
+            raise RuntimeError('Set NOBLE_MODULE_DIR to an absolute external node_modules directory with @noble '
+                               'dependencies before running the benchmark.')
+        result = self.run(['node', str(ROOT / 'scripts/wallet-test-signer.cjs')],
+                          input=json.dumps({'wallet': 1, 'message': message}),
+                          env=dict(os.environ, VESSEL_RELEASE_SYNTHETIC='1'))
+        return json.loads(result.stdout)
+
+    def bind_wallet(self, address):
+        self.run(['dotnet', str(API_BIN / 'Vessel.Api.dll'), 'identity', 'bind-wallet',
+                  '--user', self.owner, '--address', address], cwd=API_BIN,
+                 env=child_environment(self.settings()))
+
+    def prepare_tls(self):
+        """A private, ephemeral loopback certificate; the client trusts only this exact certificate."""
+        if shutil.which('openssl') is None:
+            raise RuntimeError('OpenSSL is required to create the disposable loopback HTTPS certificate.')
+        key, cert = self.temp / 'loopback.key', self.temp / 'loopback.crt'
+        self.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-noenc', '-days', '1',
+                  '-keyout', str(key), '-out', str(cert), '-subj', '/CN=127.0.0.1',
+                  '-addext', 'subjectAltName=IP:127.0.0.1'], env=child_environment({}))
+        key.chmod(0o600)
+        self.tls_cert, self.tls_key = cert, key
+        self.tls_context = ssl.create_default_context(cafile=str(cert))
+
+    @staticmethod
+    def cookie(headers, name):
+        values = [value for key, value in headers if key.lower() == 'set-cookie' and value.startswith(name + '=')]
+        if len(values) != 1:
+            raise RuntimeError(f'{name} was not issued exactly once.')
+        jar = SimpleCookie()
+        jar.load(values[0])
+        cookie = jar[name]
+        if not (cookie['secure'] and cookie['httponly'] and cookie['samesite'].lower() == 'strict'
+                and cookie['path'] == '/' and not cookie['domain']):
+            raise RuntimeError(f'{name} lacked required session cookie attributes.')
+        return name + '=' + cookie.value
+
+    def auth_request(self, path, body, cookie=None):
+        connection = http.client.HTTPSConnection('127.0.0.1', self.api_port, context=self.tls_context, timeout=15)
+        headers = {'Content-Type': 'application/json', 'Origin': self.origin, 'Sec-Fetch-Site': 'same-origin',
+                   'X-Vessel-Request': '1'}
+        if cookie:
+            headers['Cookie'] = cookie
+        try:
+            connection.request('POST', path, body=json.dumps(body).encode(), headers=headers)
+            response = connection.getresponse()
+            return response.status, response.getheaders(), response.read()
+        finally:
+            connection.close()
+
+    def sign_in(self, address):
+        status, headers, body = self.auth_request('/api/auth/challenge', {'address': address})
+        if status != 200:
+            raise RuntimeError(f'Wallet challenge failed: HTTP {status}.')
+        binding = self.cookie(headers, '__Host-vessel-signin')
+        self.secrets.add(binding.split('=', 1)[1])
+        challenge = json.loads(body)
+        signature = self.wallet_signature(challenge['message'])['signature']
+        self.secrets.add(signature)
+        status, headers, body = self.auth_request('/api/auth/verify',
+            {'challengeId': challenge['challengeId'], 'signature': signature, 'remember': False}, binding)
+        if status != 200 or json.loads(body).get('status') != 'signed-in':
+            raise RuntimeError(f'Wallet verification failed: HTTP {status}.')
+        cookie = self.cookie(headers, '__Host-vessel-session')
+        self.secrets.add(cookie.split('=', 1)[1])
+        if json.loads(body)['session']['user']['id'] != self.owner:
+            raise RuntimeError('The signed-in user does not match the synthetic owner.')
+        return cookie
+
     def rebuild_search(self):
         output = self.run(['dotnet', str(API_BIN / 'Vessel.Api.dll'), 'play-search-rebuild', '--apply'], cwd=API_BIN,
                           env=child_environment(self.settings())).stdout
@@ -1627,10 +1710,12 @@ class Run:
         return int(match.group(1))
 
     def start_api(self):
-        port = free_port()
+        port = self.api_port
         log = open(self.temp / 'api.log', 'w')
-        self.api = subprocess.Popen(['dotnet', str(API_BIN / 'Vessel.Api.dll'), '--urls', f'http://127.0.0.1:{port}'],
-                                    cwd=API_BIN, env=child_environment(self.settings()), stdout=log,
+        settings = dict(self.settings(), ASPNETCORE_Kestrel__Certificates__Default__Path=str(self.tls_cert),
+                        ASPNETCORE_Kestrel__Certificates__Default__KeyPath=str(self.tls_key))
+        self.api = subprocess.Popen(['dotnet', str(API_BIN / 'Vessel.Api.dll'), '--urls', self.origin],
+                                    cwd=API_BIN, env=child_environment(settings), stdout=log,
                                     stderr=subprocess.STDOUT, start_new_session=True)
         log.close()
         deadline = time.monotonic() + 180
@@ -1638,7 +1723,7 @@ class Run:
             if self.api.poll() is not None:
                 raise RuntimeError('The API exited during startup:\n' + self.api_log())
             try:
-                connection = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+                connection = http.client.HTTPSConnection('127.0.0.1', port, context=self.tls_context, timeout=5)
                 connection.request('GET', '/health/ready')
                 if connection.getresponse().status == 200:
                     break
@@ -1780,7 +1865,8 @@ def report(meta, counts, endpoints):
         f'Host: {meta["host"]["cpu"]}, {meta["host"]["cpus"]} CPUs, {meta["host"]["memory_mb"]} MB RAM '
         f'({meta["host"]["available_mb"]} MB available at start), load {meta["host"]["load"]}, Linux '
         f'{meta["host"]["kernel"]}. {meta["postgres"]} and {RABBIT_IMAGE} in throwaway containers; the API DLL built '
-        f'in Release (.NET {meta["dotnet"]}), Production/Token mode, no worker modules, on the same host. '
+        f'in Release (.NET {meta["dotnet"]}), Production/Wallet mode over loopback HTTPS, no worker modules, '
+        f'on the same host. '
         f'API peak RSS {meta["api_rss_mb"]} MB; PostgreSQL container {meta["postgres_memory"]}.',
         '',
         f'Phases: generate {meta["phases"]["generate"]:.1f} s, migrate {meta["phases"]["migrate"]:.1f} s, '
@@ -1871,6 +1957,9 @@ def main(argv=None):
         phases['generate'] = time.monotonic() - clock
         run.temp = Path(tempfile.mkdtemp(prefix='vessel-bench-'))
         (run.temp / 'evidence').mkdir()
+        # Fail before creating containers if the external signer dependencies or TLS tooling are unavailable.
+        address = run.wallet_signature()['address']
+        run.prepare_tls()
         if not args.no_build:
             wait_for_memory(args.min_available_mb, 'the build')
             print('Building Vessel.Api in Release…', flush=True)
@@ -1883,6 +1972,7 @@ def main(argv=None):
         clock = time.monotonic()
         print('Applying migrations explicitly…', flush=True)
         run.migrate()
+        run.bind_wallet(address)
         phases['migrate'] = time.monotonic() - clock
         wait_for_memory(args.min_available_mb, 'seeding')
         clock = time.monotonic()
@@ -1900,9 +1990,9 @@ def main(argv=None):
             counts[table] = int(count)
         postgres = run.psql('SHOW server_version', query=True).strip()
         wait_for_memory(args.min_available_mb, 'the API')
-        print('Starting the API (Release, Production, Token mode)…', flush=True)
+        print('Starting the API (Release, Production, Wallet mode over HTTPS)…', flush=True)
         port = run.start_api()
-        client = Client(port, run.token)
+        client = Client(port, run.tls_context, run.owner, run.sign_in(address))
         account = next(a for a in generator.accounts if a.enabled)
         revision_sql = f"SELECT revision FROM activity_facts_revisions WHERE owner_id = '{generator.owner}'"
         noop = f'UPDATE accounts SET "Name" = "Name" WHERE "OwnerId" = \'{generator.owner}\' AND "Id" = \'{account.id}\''
