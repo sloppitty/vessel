@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { PageErrorBoundary, PageLoadFallback } from './PageErrorBoundary'
 
 function Child({ fail }: { fail: boolean }) {
-  if (fail) throw new Error('Bearer private-token database-password')
+  if (fail) throw new Error('session private-token database-password')
   return <p>Recovered content</p>
 }
 

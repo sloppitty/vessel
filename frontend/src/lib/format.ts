@@ -73,7 +73,7 @@ export function asOf(value: string, zone: DisplayZone, now = new Date()): string
   return `as of ${formatIn(value, zone, 'date') === formatIn(now, zone, 'date') ? clock : `${formatIn(value, zone, 'day')} ${clock}`}`
 }
 /** The account state shown in rows and detail. */
-export const accountStatus = (account: BrokerAccount) => account.isEnabled === false ? 'Disabled' : account.tradingMode === 'paper' ? 'Paper' : account.syncStatus === 'manual' ? 'Manual' :
+export const accountStatus = (account: BrokerAccount) => account.isEnabled === false ? 'Disabled' : account.tradingMode === 'paper' ? 'Enabled' : account.syncStatus === 'manual' ? 'Manual' :
   account.syncStatus === 'synced' ? 'Read-only' : account.syncStatus === 'error' ? 'Refresh failed' : 'Not refreshed'
 
 export const accountStatusTone = (account: BrokerAccount) => account.isEnabled === false || account.syncStatus === 'error' ? 'warning-badge' :

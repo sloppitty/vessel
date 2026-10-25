@@ -242,12 +242,15 @@ public sealed class WorkerHostTests
         {
             ["ConnectionStrings:Vessel"] = connection,
             ["Vessel:Auth:OwnerId"] = owner.ToString(),
+            ["Vessel:Identity:Origins:0"] = TestAuthentication.Origin,
             ["Vessel:Messaging:RabbitMqUri"] = "amqp://unused:unused@127.0.0.1:1",
             ["Vessel:Monitor:HeartbeatFile"] = file
         }));
         builder.Logging.ClearProviders();
         WorkerHost.Configure(builder);
         VesselEventTestHosting.ConfigureServices(builder.Services);
+        // No identity schema here: the configured owner is the only active one.
+        builder.Services.Replace(ServiceDescriptor.Singleton<IJournalOwnerDirectory>(new ConfiguredOwnerDirectory(owner)));
         var host = builder.Build();
         scheduler = host.Services.GetServices<IHostedService>().OfType<MonitorScheduler>().Single();
         return host;

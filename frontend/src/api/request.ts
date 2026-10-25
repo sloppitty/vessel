@@ -2,14 +2,12 @@ import { ApiError } from './errors'
 import { isGuid, isRecord, isText } from './guards'
 
 /**
- * How a call proves who it is. `bearer` is Token mode's in-memory token. `session` rides the same-origin session
- * cookie and binds the tab to its user with `X-Vessel-User`. `public` is for the anonymous auth routes and the
- * session probe. Both cookie kinds send a real `Origin` despite the page's `no-referrer` policy.
+ * How a call proves who it is. `session` rides the same-origin session cookie and binds the tab to its user with
+ * `X-Vessel-User`. `public` is for the anonymous auth routes and the session probe. Both send a real `Origin` despite
+ * the page's `no-referrer` policy.
  */
-export type ApiCredentials =
-  | { kind: 'bearer'; token: string }
-  | { kind: 'session'; userId: string; sessionId: string; generation?: SessionGeneration }
-  | { kind: 'public' }
+export type ApiCredentials = SessionCredentials | { kind: 'public' }
+export type SessionCredentials = { kind: 'session'; userId: string; sessionId: string; generation?: SessionGeneration }
 
 /**
  * The tab's session generation. It grows when this tab adopts a newer session of the same user from another tab;
@@ -40,7 +38,7 @@ export const sessionChangedRead = 'Your session changed in another tab. Try agai
 export const sessionChangedWrite = 'Your session changed in another tab. This change may already be saved; check before trying again.'
 
 /**
- * A 401 or 403 answer, with the ProblemDetails `code` when a cookie call received one. `generation` is the session
+ * A 401 or 403 answer, with the ProblemDetails `code` when one was received. `generation` is the session
  * generation read when the request started, so a caller can discard answers to requests sent before a session change.
  */
 export interface AuthFailure { status: 401 | 403; code?: string; generation?: number }
@@ -61,7 +59,7 @@ interface RequestOptions {
   invalidJson?: string
   invalidData?: string
   httpError?: (response: Response) => ApiError
-  /** Copy for a ProblemDetails `code` on session and public calls; `undefined` keeps the status default. */
+  /** Copy for a ProblemDetails `code`; `undefined` keeps the status default. */
   codeMessage?: (code: string, status: number) => string | undefined
 }
 
@@ -87,18 +85,15 @@ function retryAt(response: Response) {
   return at !== undefined && Number.isFinite(at) && Math.abs(at) <= 8.64e15 ? new Date(at).toISOString() : undefined
 }
 
-async function httpError(response: Response, options: RequestOptions, cookie: boolean): Promise<ApiError> {
+async function httpError(response: Response, options: RequestOptions): Promise<ApiError> {
   const auth = response.status === 401 || response.status === 403
   if (options.safeError) {
-    // Only the code of a cookie call's 401 or 403 is read, so session handling still works; the body is never shown.
-    const code = cookie && auth ? (await readProblem(response)).code : undefined
+    // Only the code of a 401 or 403 is read, so session handling still works; the body is never shown.
+    const code = auth ? (await readProblem(response)).code : undefined
     return new ApiError('http', options.safeError, response.status, retryAt(response), code)
   }
   if (options.httpError) return options.httpError(response)
-  if (auth && !cookie) {
-    return new ApiError('unauthorized', 'Your API token was rejected. Disconnect and connect again.', response.status)
-  }
-  const problem = cookie || [400, 409, 413, 415, 429].includes(response.status) ? await readProblem(response) : {}
+  const problem = await readProblem(response)
   const coded = problem.code ? options.codeMessage?.(problem.code, response.status) : undefined
   if (auth) {
     return new ApiError(response.status === 401 || problem.code === 'user-suspended' ? 'unauthorized' : 'http',
@@ -122,11 +117,6 @@ async function httpError(response: Response, options: RequestOptions, cookie: bo
 
 function transport(credentials: ApiCredentials): { headers: Record<string, string>; init: RequestInit } {
   switch (credentials.kind) {
-    case 'bearer': {
-      const bearer = credentials.token.trim()
-      if (!bearer) throw new ApiError('missing-token', 'Enter your Vessel API token.')
-      return { headers: { Authorization: `Bearer ${bearer}` }, init: { credentials: 'omit' } }
-    }
     case 'session':
       if (!isGuid(credentials.userId)) throw new ApiError('unauthorized', 'Your session ended. Sign in again.')
       return { headers: { 'X-Vessel-User': credentials.userId }, init: { credentials: 'same-origin', referrerPolicy: 'same-origin' } }
@@ -143,8 +133,8 @@ function discard(outcome: Outcome<unknown>) {
 }
 
 /**
- * One transport for JSON, images and stream headers. A token stays in this closure. `onUnauthorized` hears every 401
- * and 403, with the cookie call's code; the caller decides what ends a session.
+ * One transport for JSON, images and stream headers. `onUnauthorized` hears every 401 and 403, with the answer's code;
+ * the caller decides what ends a session.
  *
  * A session call checks its generation before it publishes anything. An answer to a request sent under an older
  * generation is dropped with its 401 or 403: a read (GET without a body) is sent once more under the current
@@ -153,11 +143,9 @@ function discard(outcome: Outcome<unknown>) {
  * aborted, their bodies freed, and every call stays pending for good, without reporting failures or session changes.
  * A caller's own abort still rejects as before.
  */
-export function createApiCall(credentials: string | ApiCredentials, onUnauthorized?: (failure: AuthFailure) => void, onSessionChanged?: () => void) {
-  const kind: ApiCredentials = typeof credentials === 'string' ? { kind: 'bearer', token: credentials } : credentials
-  const { headers: identity, init } = transport(kind)
-  const cookie = kind.kind !== 'bearer'
-  const source = kind.kind === 'session' ? kind.generation : undefined
+export function createApiCall(credentials: ApiCredentials, onUnauthorized?: (failure: AuthFailure) => void, onSessionChanged?: () => void) {
+  const { headers: identity, init } = transport(credentials)
+  const source = credentials.kind === 'session' ? credentials.generation : undefined
 
   type Options<T> = RequestOptions & (
     { validate: (value: unknown) => value is T; read?: never } |
@@ -184,7 +172,7 @@ export function createApiCall(credentials: string | ApiCredentials, onUnauthoriz
         throw new ApiError('unavailable', options.safeError ?? options.unavailable ?? 'The request did not complete. Check the API and try again.')
       }
       if (!response.ok) {
-        const error = await httpError(response, options, cookie)
+        const error = await httpError(response, options)
         if (response.status === 401 || response.status === 403) failure = { status: response.status, ...error.code ? { code: error.code } : {} }
         throw error
       }
