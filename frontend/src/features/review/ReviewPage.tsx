@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { ReviewExportButton } from './ReviewExportButton'
 import { ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, ChevronRight, Info, RefreshCw, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import type { BrokerAccount, WorkspaceApi } from '@/api/workspace'
@@ -197,7 +198,7 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay, workspaceAccount
   const groupDetail = (row: ReviewGroup) => group === 'accounts' ? venues.name(options?.accounts.find(a => a.id === row.id)?.venueId ?? row.detail) :
     group === 'assets' ? row.detail.split(', ').map(id => venues.name(id)).join(', ') : row.detail
   return <section className="portfolio-review review-workspace" aria-label="Portfolio review">
-    <div className="pr-heading"><h1>Portfolio review</h1><div className="pr-heading-actions"><button className="pr-outline-button" onClick={() => { remember(); setMethods(true) }}><Info size={15} />Definitions</button><button className="pr-outline-button" disabled={loading} onClick={() => setReload(n => n + 1)} aria-label="Reload review"><RefreshCw size={15} /></button></div></div>
+    <div className="pr-heading"><h1>Portfolio review</h1><div className="pr-heading-actions"><ReviewExportButton api={api} query={requested} /><button className="pr-outline-button" onClick={() => { remember(); setMethods(true) }}><Info size={15} />Definitions</button><button className="pr-outline-button" disabled={loading} onClick={() => setReload(n => n + 1)} aria-label="Reload review"><RefreshCw size={15} /></button></div></div>
     <section className="pr-filters" aria-label="Review filters">
       <label><span>Portfolio</span><NativeSelect value={query.portfolio} onChange={e => setQuery(previous => { const next = { ...previous, portfolio: e.target.value }; delete next.accountId; return next })}><option value="all">All portfolios</option>{options?.portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}<option value="unassigned">Unassigned accounts</option>{query.portfolio !== 'all' && query.portfolio !== 'unassigned' && !options?.portfolios.some(p => p.id === query.portfolio) && <option value={query.portfolio}>Unavailable portfolio</option>}</NativeSelect></label>
       <div className="pr-filter-field"><span id={`${fieldId}-account`}>Account</span><AccountPicker labelledBy={`${fieldId}-account`} value={query.accountId ?? ''}
