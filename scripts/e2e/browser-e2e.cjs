@@ -2,24 +2,37 @@
 // venue, with no route interception. Runs in the pinned Playwright image; prints PASS/FAIL [browser] lines.
 // E2E_PHASE=live: monitor panel, discrepancies, SSE live updates, Check 202/cooldown/429, dismissal, a Play
 // closing on screen. E2E_PHASE=ended: degraded badge, watched orders and unverifiable records.
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE)
+const { chromium, request } = require(process.env.PLAYWRIGHT_MODULE)
 const assert = require('node:assert/strict')
 const path = require('node:path')
+// Mounted beside /e2e; its @noble dependencies come from NOBLE_MODULE_DIR.
+const { signer, exposeSyntheticWallet, signInWithSyntheticWallet } = require('../wallet-test-signer.cjs')
 
-const base = process.env.E2E_URL, token = process.env.E2E_TOKEN, phase = process.env.E2E_PHASE
+const base = process.env.E2E_URL, phase = process.env.E2E_PHASE
 const ids = JSON.parse(process.env.E2E_IDS), out = process.env.E2E_OUT
 let failed = 0
 const pass = label => console.log(`PASS [browser] ${label}`)
 async function step(label, body) {
   try { await body(); pass(label) } catch (error) { failed++; console.log(`FAIL [browser] ${label} -- ${String(error.message || error).split('\n')[0]}`); throw error }
 }
-const api = (route, init = {}) => fetch(base + route, { ...init, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers || {}) } })
+// A second client beside the page: the harness's own operator session, with its tab binding and accepted origin.
+let other
+const api = async (route, init = {}) => {
+  other ??= await request.newContext({ ignoreHTTPSErrors: true, extraHTTPHeaders: {
+    Cookie: process.env.E2E_SESSION, 'X-Vessel-User': process.env.E2E_USER, Origin: base } })
+  const response = await other.fetch(base + route, { method: init.method || 'GET', data: init.body,
+    headers: { 'Content-Type': 'application/json', ...(init.headers || {}) } })
+  return { status: response.status(), json: () => response.json() }
+}
 const control = (route, body) => fetch(`${process.env.E2E_CONTROL}/control/${route}`, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } })
   .then(r => { assert.equal(r.status, 200); return r.json() })
 
 async function main() {
   const browser = await chromium.launch({ headless: true })
-  const context = await browser.newContext({ viewport: { width: 1512, height: 1000 } })
+  // Caddy's internal CA is not trusted by the browser image; the run reaches only its own loopback stack.
+  const context = await browser.newContext({ viewport: { width: 1512, height: 1000 }, ignoreHTTPSErrors: true })
+  // The synthetic operator EOA the harness bound with `identity bind-wallet`.
+  await exposeSyntheticWallet(context, await signer(1))
   // Test instrumentation only: tee the app's own authenticated SSE response so frames can be asserted.
   await context.addInitScript(() => {
     window.__sse = []
@@ -48,7 +61,11 @@ async function main() {
   const page = await context.newPage()
   page.setDefaultTimeout(30_000)
   const errors = [], violations = []
-  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
+  // Before sign-in, the sign-in screen's session probe answers 401, which Chromium logs as a failed load.
+  let signedIn = false
+  page.on('console', message => {
+    if (message.type() === 'error' && (signedIn || !/status of 401 \(Unauthorized\)/.test(message.text()))) errors.push(message.text())
+  })
   page.on('pageerror', error => errors.push(error.message))
   await page.exposeFunction('recordCspViolation', entry => violations.push(entry))
   await page.addInitScript(() => document.addEventListener('securitypolicyviolation', event => window.recordCspViolation({ directive: event.violatedDirective, blocked: event.blockedURI })))
@@ -75,11 +92,9 @@ async function main() {
   const statusPill = () => page.locator('.plays-context-status .badge').first()
 
   try {
-    await step('login with the generated token over the packaged web image', async () => {
-      await page.goto(base)
-      await page.getByLabel('API token').fill(token)
-      await page.getByRole('button', { name: 'Connect', exact: true }).click()
-      await page.getByRole('region', { name: 'Overview summary', exact: true }).waitFor()
+    await step('operator wallet sign-in over the packaged web image and HTTPS', async () => {
+      await signInWithSyntheticWallet(page, base)
+      signedIn = true
     })
     if (phase === 'live') {
       await step('no worker-offline banner while the worker heartbeat is fresh', async () => {
@@ -232,6 +247,7 @@ async function main() {
       assert.deepEqual(errors.filter(e => !provoked.includes(e)), [], JSON.stringify(errors))
     })
   } finally {
+    await other?.dispose()
     await browser.close()
   }
 }

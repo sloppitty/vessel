@@ -23,7 +23,7 @@ var builder = WebApplication.CreateBuilder(args);
 if (!builder.Environment.IsDevelopment()) ProductionConfiguration.Validate(builder.Configuration);
 builder.Services.AddVesselInfrastructure(builder.Configuration);
 builder.Services.AddVesselIdentityDirectory(builder.Configuration);
-builder.Services.AddVesselIdentityApi(builder.Configuration);
+builder.Services.AddVesselIdentityApi();
 builder.Services.AddVesselPersistence(builder.Configuration);
 builder.Services.AddVesselApplication();
 builder.Services.AddPaperTrading();
@@ -130,8 +130,8 @@ app.MapGet("/health/ready", async (IServiceProvider services, CancellationToken 
         var ready = await db.Database.CanConnectAsync(ct) && !(await db.Database.GetPendingMigrationsAsync(ct)).Any();
         var identity = services.GetRequiredService<IdentityDbContext>();
         ready = ready && await identity.Database.CanConnectAsync(ct) && !(await identity.Database.GetPendingMigrationsAsync(ct)).Any();
-        if (ready && services.GetRequiredService<IdentitySettings>().WalletMode &&
-            !await (from user in identity.Users
+        // Nobody can sign in until an active operator has a wallet (identity bind-wallet), so the API is not ready.
+        if (ready && !await (from user in identity.Users
                     join wallet in identity.Wallets on user.Id equals wallet.UserId
                     where user.Role == "operator" && user.Status == "active"
                     select user.Id).AnyAsync(ct))
