@@ -89,6 +89,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         // Explicit owner-filtered deletes run under the locked account's transaction.
         // Positions cascade from the snapshot, never from trading intent.
         await db.FillImportConflicts.Where(c => c.AccountId == account.Id).ExecuteDeleteAsync(ct);
+        await db.HistoryGaps.Where(g => g.AccountId == account.Id).ExecuteDeleteAsync(ct);
+        await db.FillCoverage.Where(r => r.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.Fills.Where(f => f.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.Orders.Where(o => o.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.FundingPayments.Where(p => p.AccountId == account.Id).ExecuteDeleteAsync(ct);
@@ -121,6 +123,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
                 LeverageObservation o => o.OwnerId == account.OwnerId && o.AccountId == account.Id,
                 RiskObservation o => o.OwnerId == account.OwnerId && o.AccountId == account.Id,
                 FillImportConflict c => c.OwnerId == account.OwnerId && c.AccountId == account.Id,
+                Vessel.Domain.Monitoring.AccountHistoryGap g => g.OwnerId == account.OwnerId && g.AccountId == account.Id,
+                Vessel.Domain.Monitoring.FillCoverageRecord r => r.OwnerId == account.OwnerId && r.AccountId == account.Id,
                 AccountFundingState s => s.OwnerId == account.OwnerId && s.AccountId == account.Id,
                 Vessel.Domain.Credentials.AccountCredential c => c.OwnerId == account.OwnerId && c.AccountId == account.Id,
                 _ => false
@@ -357,6 +361,16 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         if (stored.Leverage is not null && report.Leverage is not null && stored.Leverage != report.Leverage)
             fields.Add(FillConflictFields.Leverage);
         return fields;
+    }
+
+    public async Task<HistoryCoverageFacts> HistoryCoverageAsync(Guid accountId, int limit, CancellationToken ct)
+    {
+        var gaps = db.HistoryGaps.AsNoTracking().Where(g => g.AccountId == accountId);
+        var open = gaps.Where(g => g.ClosedAtUtc == null);
+        var records = db.FillCoverage.AsNoTracking().Where(r => r.AccountId == accountId);
+        return new(await open.CountAsync(ct), await open.OrderByDescending(g => g.OpenedAtUtc).ThenBy(g => g.Id).Take(limit).ToListAsync(ct),
+            await gaps.Where(g => g.ClosedAtUtc != null).OrderByDescending(g => g.ClosedAtUtc).ThenBy(g => g.Id).Take(limit).ToListAsync(ct),
+            await records.CountAsync(ct), await records.OrderByDescending(r => r.LastObservedAtUtc).ThenByDescending(r => r.Id).Take(limit).ToListAsync(ct));
     }
 
     public async Task<(int Total, IReadOnlyList<FillImportConflict> Recent)> FillConflictsAsync(Guid accountId, int limit, CancellationToken ct)

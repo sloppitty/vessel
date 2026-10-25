@@ -146,6 +146,9 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
         var capped = new HashSet<Guid>();
         var cappedVenues = new HashSet<string>(StringComparer.Ordinal);
         var wrapped = false;
+        // Phase 2, item 6 (Sol round 1): protection work is claimed first. Due accounts with only kept history behind them
+        // wait for the rest of the tick, and leave one of this process's worker slots free when it has more than one.
+        var keptHistory = new List<DueMonitorCandidate>();
         for (var pages = 0; running.Count < options.WorkerConcurrency && pages < CandidatePagesPerTick; pages++)
         {
             cycleBound ??= time.GetUtcNow();
@@ -172,8 +175,9 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
                     if (await store.VenueAtCapacityAsync(candidate.VenueId, time.GetUtcNow(), ct))
                     { cappedVenues.Add(candidate.VenueId); continue; }
                     // Claim rechecks status, deadlines and both budgets, locking just this account and venue.
-                    if (await store.ClaimAsync(candidate.AccountId, null, workerId, time.GetUtcNow(), ct) is { } lease)
+                    if (await store.ClaimAsync(candidate.AccountId, null, workerId, time.GetUtcNow(), ct, protectionOnly: true) is { } lease)
                         running.Add(RunAsync(owner, lease, ct));
+                    else if (keptHistory.Count < CandidatePagesPerTick * CandidatePageSize) keptHistory.Add(candidate);
                 }
                 catch (Exception error) when (error is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
@@ -182,6 +186,26 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
                     Warn(owner, error);
                 }
                 if (running.Count >= options.WorkerConcurrency) break;
+            }
+        }
+        var keptSlots = options.WorkerConcurrency - (options.WorkerConcurrency > 1 ? 1 : 0);
+        foreach (var candidate in keptHistory)
+        {
+            if (running.Count >= keptSlots) break;
+            var owner = candidate.OwnerId;
+            try
+            {
+                if (cappedVenues.Contains(candidate.VenueId) || failed.Contains(owner) || capped.Contains(owner) || await StatusAsync(owner) != JournalOwnerStatus.Active) continue;
+                await using var scope = scopes.Create(owner);
+                var store = scope.Services.GetRequiredService<IMonitorStore>();
+                if (await store.ClaimAsync(candidate.AccountId, null, workerId, time.GetUtcNow(), ct) is { } lease)
+                    running.Add(RunAsync(owner, lease, ct));
+            }
+            catch (Exception error) when (error is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                productive.Remove(owner);
+                failed.Add(owner);
+                Warn(owner, error);
             }
         }
         // An empty/all-suspended directory or no due accounts is healthy: the pass still did real discovery.

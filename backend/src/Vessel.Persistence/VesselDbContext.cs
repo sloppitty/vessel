@@ -4,6 +4,7 @@ using Vessel.Application.Ownership;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Common;
 using Vessel.Domain.Credentials;
+using Vessel.Domain.Monitoring;
 using Vessel.Domain.Evidence;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Paper;
@@ -35,6 +36,8 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<FillImportConflict> FillImportConflicts => Set<FillImportConflict>();
     public DbSet<FundingPayment> FundingPayments => Set<FundingPayment>();
     public DbSet<AccountFundingState> FundingStates => Set<AccountFundingState>();
+    public DbSet<FillCoverageRecord> FillCoverage => Set<FillCoverageRecord>();
+    public DbSet<AccountHistoryGap> HistoryGaps => Set<AccountHistoryGap>();
     public DbSet<PlayEvidence> Evidence => Set<PlayEvidence>();
     public DbSet<PlayPlanRevision> PlanRevisions => Set<PlayPlanRevision>();
     public DbSet<PlayStatusChange> StatusChanges => Set<PlayStatusChange>();

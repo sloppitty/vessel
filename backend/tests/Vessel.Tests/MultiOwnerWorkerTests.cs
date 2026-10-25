@@ -67,6 +67,51 @@ public sealed class MultiOwnerWorkerTests
             });
     }
 
+    /// <summary>
+    /// Phase 2, item 6 (Sol round 1): due accounts with only kept history behind them, sorted first, never take every worker
+    /// slot before a due protection check is claimed.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_due_protection_check_is_claimed_before_kept_history_reads_that_sort_ahead_of_it()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var protection = fixture.Accounts[fixture.Second];
+        var kept = new List<Guid> { fixture.Accounts[fixture.First] };
+        await using (var first = fixture.Database.Context(fixture.First))
+        {
+            await first.Plays.ExecuteDeleteAsync();
+            var account = await first.Accounts.SingleAsync();
+            account.UpdateSettings(account.Name, null, true, keepExecutionHistory: true);
+            await first.SaveChangesAsync();
+        }
+        await using (var second = fixture.Database.Context(fixture.Second))
+        {
+            // The smallest ID, so it sorts before the protection account at the same due time.
+            var account = new Account(Guid.Parse("00000000-0000-4000-8000-000000000001"), fixture.Second, "hyperliquid", "Kept history");
+            account.Configure(null, "0x" + new string('f', 40), null);
+            account.UpdateSettings(account.Name, null, true, keepExecutionHistory: true);
+            second.Accounts.Add(account);
+            await second.SaveChangesAsync();
+            kept.Add(account.Id);
+        }
+        var scheduler = fixture.Host.Services.GetServices<IHostedService>().OfType<MonitorScheduler>().Single();
+        await scheduler.TickAsync(default);
+        await fixture.EventuallyAsync(async () =>
+        {
+            await using var db = fixture.Database.Context(fixture.Second);
+            return (await db.Set<MonitorAccount>().SingleAsync(m => m.AccountId == protection)).ManualState == "running";
+        });
+        // One of the two worker slots stays free of kept-history reads: at most one of them runs.
+        var running = 0;
+        foreach (var (owner, id) in new[] { (fixture.First, kept[0]), (fixture.Second, kept[1]) })
+        {
+            await using var db = fixture.Database.Context(owner);
+            if (await db.Set<MonitorAccount>().AnyAsync(m => m.AccountId == id && m.ManualState == "running")) running++;
+        }
+        Assert.Equal(0, running);
+        fixture.Venue.Release.TrySetResult();
+    }
+
     [PostgresFact]
     public async Task Scheduler_shutdown_cancellation_propagates_instead_of_skipping_the_owner()
     {
