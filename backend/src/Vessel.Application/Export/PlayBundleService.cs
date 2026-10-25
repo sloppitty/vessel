@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Vessel.Application.Common;
@@ -95,7 +96,7 @@ public sealed partial class PlayBundleService(PlayService plays, PlayExecutionSe
             {
                 var entry = zip.CreateEntry(file, CompressionLevel.NoCompression);
                 await using var target = await entry.OpenAsync(token);
-                await CopyBoundedAsync(content.Content, target, image.SizeBytes, token);
+                await CopyBoundedAsync(content.Content, target, image.SizeBytes, image.Sha256, token);
             }
             originals.Add(new { image.Id, File = file, Included = true, Reason = (string?)null });
         }
@@ -124,18 +125,23 @@ public sealed partial class PlayBundleService(PlayService plays, PlayExecutionSe
         return new FileStream(Path.Combine(directory, $"vessel-bundle-{Guid.NewGuid():N}.zip"), options);
     }
 
-    /// <summary>Copies an original, failing the download if storage returns more than its recorded size.</summary>
-    public static async Task CopyBoundedAsync(Stream source, Stream target, long recorded, CancellationToken token)
+    /// <summary>Copies an original only when its length and digest match the recorded metadata.</summary>
+    public static async Task CopyBoundedAsync(Stream source, Stream target, long recorded, string sha256, CancellationToken token)
     {
         var buffer = new byte[81_920];
         long copied = 0;
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         int read;
         while ((read = await source.ReadAsync(buffer, token)) > 0)
         {
             copied += read;
             if (copied > recorded) throw new InvalidOperationException("An evidence original is larger than its recorded size.");
+            hash.AppendData(buffer, 0, read);
             await target.WriteAsync(buffer.AsMemory(0, read), token);
         }
+        if (copied != recorded) throw new InvalidOperationException("An evidence original is shorter than its recorded size.");
+        if (!Convert.ToHexStringLower(hash.GetHashAndReset()).Equals(sha256, StringComparison.Ordinal))
+            throw new InvalidOperationException("An evidence original does not match its recorded digest.");
     }
 
     private static string Extension(string contentType) => contentType switch

@@ -40,11 +40,11 @@ public sealed class SessionAuthentication(
         {
             var authenticated = await sessions.AuthenticateAsync(token, refresh: true, Context.RequestAborted);
             principal.Authenticated = authenticated;
-            // Preserve the journal principal's existing authentication type, independently of the cookie scheme.
+            // The journal owner claims (JournalOwnerClaims reads them back): the user ID is the owner.
             var identity = new ClaimsIdentity([
                 new Claim(ClaimTypes.NameIdentifier, authenticated.User.Id.ToString()),
                 new Claim(ClaimTypes.Name, authenticated.User.DisplayName),
-                new Claim(SessionClaim, authenticated.Session.Id.ToString())], "VesselBearer");
+                new Claim(SessionClaim, authenticated.Session.Id.ToString())], SchemeName);
             return AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName));
         }
         catch (ProblemException error)

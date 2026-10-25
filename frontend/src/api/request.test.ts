@@ -5,6 +5,7 @@ import { createWorkspaceApi } from './workspace'
 import { getSystem } from './system'
 import { accountFixture, emptyOverview, savedPlayFixture } from '@/test/workspace-fixture'
 import { systemFixture } from '@/test/system-fixture'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const isString = (value: unknown): value is string => typeof value === 'string'
 const query = { instrument: 'BTC', interval: '1h' as const }
@@ -14,17 +15,17 @@ afterEach(() => vi.useRealTimers())
 describe('shared API request pipeline', () => {
   it.each([200, 201, 202, 206, 299])('accepts HTTP %i and guards JSON without changing exact strings', async status => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify('1.0000000000000000000000000001'), { status })))
-    expect(await createApiCall('token')('/api/example', { timeout: 10_000, validate: isString })).toBe('1.0000000000000000000000000001')
+    expect(await createApiCall(credentialsFixture)('/api/example', { timeout: 10_000, validate: isString })).toBe('1.0000000000000000000000000001')
   })
 
   it('guards no-content responses rather than assuming every endpoint permits them', async () => {
     const fetch = vi.fn().mockImplementation(async () => new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetch)
-    const api = createWorkspaceApi('token')
+    const api = createWorkspaceApi(credentialsFixture)
     await expect(api.deletePlay(savedPlayFixture.summary.id)).resolves.toBeUndefined()
     await expect(api.overview()).rejects.toThrow('The API returned no workspace data.')
     await expect(api.play(savedPlayFixture.summary.id)).rejects.toThrow('The API returned no play data.')
-    await expect(getSystem('token')).rejects.toThrow('The API returned an invalid system response.')
+    await expect(getSystem(credentialsFixture)).rejects.toThrow('The API returned an invalid system response.')
   })
 
   it.each([
@@ -33,22 +34,25 @@ describe('shared API request pipeline', () => {
     ['system', 'The API request failed with HTTP 404.'],
   ])('keeps the %s not-found message', async (area, message) => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('private proxy detail', { status: 404 })))
-    const api = createWorkspaceApi('token')
-    const request = area === 'workspace' ? api.overview() : area === 'play' ? api.play(savedPlayFixture.summary.id) : getSystem('token')
+    const api = createWorkspaceApi(credentialsFixture)
+    const request = area === 'workspace' ? api.overview() : area === 'play' ? api.play(savedPlayFixture.summary.id) : getSystem(credentialsFixture)
     await expect(request).rejects.toThrow(message)
   })
 
   it.each(['invalid JSON', 'incompatible contract'])('keeps endpoint-specific messages for %s', async kind => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(kind === 'invalid JSON' ? '{' : '{}')))
-    const api = createWorkspaceApi('token')
+    const api = createWorkspaceApi(credentialsFixture)
     await expect(api.overview()).rejects.toThrow(kind === 'invalid JSON' ? 'The API returned invalid data.' : 'The API returned incompatible workspace data.')
     await expect(api.play(savedPlayFixture.summary.id)).rejects.toThrow(kind === 'invalid JSON' ? 'The API returned invalid data.' : 'The API returned incompatible play data.')
-    await expect(getSystem('token')).rejects.toThrow(kind === 'invalid JSON' ? 'The API returned an invalid system response.' : 'The API returned an incompatible system contract.')
+    await expect(getSystem(credentialsFixture)).rejects.toThrow(kind === 'invalid JSON' ? 'The API returned an invalid system response.' : 'The API returned an incompatible system contract.')
   })
 
-  it.each([401, 403])('emits one unauthorized event for every response mode at HTTP %i', async status => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response('private response', { status })))
-    const api = createWorkspaceApi('token')
+  it.each([
+    [401, 'private response'],
+    [403, JSON.stringify({ code: 'user-suspended' })],
+  ])('emits one unauthorized event for every response mode at HTTP %i', async (status, body) => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(body, { status })))
+    const api = createWorkspaceApi(credentialsFixture)
     const listener = vi.fn()
     const unsubscribe = onApiEvent(api, listener)
     for (const request of [() => api.overview(), () => api.play(savedPlayFixture.summary.id),
@@ -66,7 +70,7 @@ describe('shared API request pipeline', () => {
     const response = new Response('{"detail":"ro:private"}', { status: 502, headers: { 'X-Correlation-ID': 'a'.repeat(32) } })
     const json = vi.spyOn(response, 'json')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
-    await expect(createWorkspaceApi('token').accountCredential(accountFixture.id)).rejects.toThrow(
+    await expect(createWorkspaceApi(credentialsFixture).accountCredential(accountFixture.id)).rejects.toThrow(
       'Credential status is unavailable. Retry or ask the operator to check credential storage.')
     expect(json).not.toHaveBeenCalled()
   })
@@ -77,14 +81,14 @@ describe('shared API request pipeline', () => {
     const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(evidence)))
       .mockResolvedValueOnce(new Response('png', { headers: { 'Content-Type': 'image/png' } }))
     vi.stubGlobal('fetch', fetch)
-    const api = createWorkspaceApi(' token ')
+    const api = createWorkspaceApi(credentialsFixture)
     await expect(api.uploadEvidence(savedPlayFixture.summary.id, new Blob(['png']), { source: 'upload', name: 'fixture.png', note: '', markup: null })).resolves.toEqual(evidence)
     expect(fetch.mock.calls[0]![1]).toMatchObject({ method: 'POST', body: expect.any(FormData),
-      credentials: 'omit', cache: 'no-store', redirect: 'error',
-      headers: { Authorization: 'Bearer token', Accept: 'application/json' } })
+      credentials: 'same-origin', referrerPolicy: 'same-origin', cache: 'no-store', redirect: 'error',
+      headers: { 'X-Vessel-User': credentialsFixture.userId, Accept: 'application/json' } })
     expect(fetch.mock.calls[0]![1].headers).not.toHaveProperty('Content-Type')
     expect(await (await api.evidenceImage(evidence.id)).text()).toBe('png')
-    expect(fetch.mock.calls[1]![1].headers).toEqual({ Authorization: 'Bearer token', Accept: 'image/*' })
+    expect(fetch.mock.calls[1]![1].headers).toEqual({ 'X-Vessel-User': credentialsFixture.userId, Accept: 'image/*' })
   })
 
   it('retains endpoint timeout budgets and clears completed request timers', async () => {
@@ -98,8 +102,8 @@ describe('shared API request pipeline', () => {
       .mockResolvedValueOnce(new Response('{}'))
       .mockResolvedValueOnce(new Response('{}'))
       .mockResolvedValueOnce(new Response('image')))
-    const api = createWorkspaceApi('token')
-    await getSystem('token')
+    const api = createWorkspaceApi(credentialsFixture)
+    await getSystem(credentialsFixture)
     await api.overview()
     await api.play(savedPlayFixture.summary.id)
     await expect(api.candles(accountFixture.id, query)).rejects.toThrow()
@@ -120,7 +124,7 @@ describe('shared API request pipeline', () => {
       signal = init.signal!
       signal.addEventListener('abort', () => reject(new Error('private transport detail')), { once: true })
     })))
-    const api = createWorkspaceApi('token')
+    const api = createWorkspaceApi(credentialsFixture)
     const result = api.sync(accountFixture.id).then(value => ({ value }), error => ({ error }))
     await vi.advanceTimersByTimeAsync(65_000)
     expect(signal.aborted).toBe(false)
@@ -135,7 +139,7 @@ describe('shared API request pipeline', () => {
       init.signal!.addEventListener('abort', () => reject(new Error('private transport detail')), { once: true })
     })))
     const controller = new AbortController()
-    const request = createWorkspaceApi('token').overview(controller.signal)
+    const request = createWorkspaceApi(credentialsFixture).overview(controller.signal)
     const assertion = expect(request).rejects.toMatchObject({ kind: 'unavailable',
       message: 'The request did not complete. Check the API and try again.' })
     if (reason === 'caller') controller.abort()
@@ -150,7 +154,7 @@ describe('shared API request pipeline', () => {
     const fetch = vi.fn().mockResolvedValue(new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } }))
     vi.stubGlobal('fetch', fetch)
     const controller = new AbortController()
-    const api = createWorkspaceApi('token')
+    const api = createWorkspaceApi(credentialsFixture)
     const request = kind === 'market' ? api.marketStream(accountFixture.id, query, controller.signal, vi.fn())
       : api.monitorStream('0', controller.signal, vi.fn())
     await vi.advanceTimersByTimeAsync(25_001)

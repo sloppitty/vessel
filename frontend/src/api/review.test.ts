@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultReviewQuery, isReviewDocument, isReviewExclusions, reviewExclusionsPath, reviewPath } from './review'
 import { createWorkspaceApi } from './workspace'
 import { emptyReview, reviewFixture } from '@/test/review-fixture'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 afterEach(() => vi.unstubAllGlobals())
 describe('Review API', () => {
@@ -11,11 +12,11 @@ describe('Review API', () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(reviewFixture)))
     vi.stubGlobal('fetch', fetch)
     const controller = new AbortController()
-    const report = await createWorkspaceApi('token').review(defaultReviewQuery, controller.signal)
+    const report = await createWorkspaceApi(credentialsFixture).review(defaultReviewQuery, controller.signal)
     expect(report.metrics.net).toBe('150.123456789')
     expect(fetch).toHaveBeenCalledWith('/api/review?period=month&portfolio=all', expect.objectContaining({
-      signal: expect.any(AbortSignal), cache: 'no-store', credentials: 'omit',
-      headers: { Authorization: 'Bearer token', Accept: 'application/json' },
+      signal: expect.any(AbortSignal), cache: 'no-store', credentials: 'same-origin', referrerPolicy: 'same-origin',
+      headers: { 'X-Vessel-User': credentialsFixture.userId, Accept: 'application/json' },
     }))
     controller.abort()
     expect(fetch.mock.calls[0]![1].signal.aborted).toBe(true)
@@ -76,13 +77,13 @@ describe('Review API', () => {
     for (const report of mixed) expect.soft(isReviewDocument(report)).toBe(false)
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(paper)))
     vi.stubGlobal('fetch', fetch)
-    const api = createWorkspaceApi('token').forTradingMode!('paper')
+    const api = createWorkspaceApi(credentialsFixture).forTradingMode!('paper')
     expect(await api.review({ ...defaultReviewQuery, positions: 'exclude' })).toEqual(paper)
     expect(fetch).toHaveBeenLastCalledWith('/api/review?period=month&portfolio=all&positions=exclude&tradingMode=paper', expect.anything())
     fetch.mockResolvedValue(new Response(JSON.stringify(mixed[0])))
     await expect(api.review(defaultReviewQuery)).rejects.toThrow()
     fetch.mockResolvedValue(new Response(JSON.stringify(paper)))
-    await expect(createWorkspaceApi('token').review(defaultReviewQuery)).rejects.toThrow(/different trading mode/)
+    await expect(createWorkspaceApi(credentialsFixture).review(defaultReviewQuery)).rejects.toThrow(/different trading mode/)
   })
   it('encodes asset identifiers without changing scope', () => {
     const path = reviewPath({ ...defaultReviewQuery, instrument: 'A&B/#', offset: 50 })
@@ -93,7 +94,7 @@ describe('Review API', () => {
   })
   it('does not use mocked performance when the endpoint fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('server details', { status: 500 })))
-    await expect(createWorkspaceApi('token').review(defaultReviewQuery)).rejects.toThrow()
+    await expect(createWorkspaceApi(credentialsFixture).review(defaultReviewQuery)).rejects.toThrow()
   })
   it('keeps executed-notional returns for retrospective Plays and rejects invented R', () => {
     const play = { ...reviewFixture.plays[0]!, origin: 'retrospective', executionSource: 'imported', rMultiple: null }
@@ -133,8 +134,8 @@ describe('Review API', () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(page)))
     vi.stubGlobal('fetch', fetch)
     const query = { ...defaultReviewQuery, instrument: 'A&B/#', offset: 0 }
-    expect(await createWorkspaceApi('token').reviewExclusions!(query)).toEqual(page)
-    expect(fetch).toHaveBeenCalledWith(reviewExclusionsPath(query), expect.objectContaining({ cache: 'no-store', credentials: 'omit' }))
+    expect(await createWorkspaceApi(credentialsFixture).reviewExclusions!(query)).toEqual(page)
+    expect(fetch).toHaveBeenCalledWith(reviewExclusionsPath(query), expect.objectContaining({ cache: 'no-store', credentials: 'same-origin', referrerPolicy: 'same-origin' }))
     expect(new URL(reviewExclusionsPath(query), 'http://localhost').searchParams.get('instrument')).toBe('A&B/#')
   })
 })

@@ -80,6 +80,9 @@ public sealed class AccountOrderHistoryApiTests
         builder.Configuration.AddConfiguration(factory.Services.GetRequiredService<IConfiguration>());
         WorkerHost.Configure(builder);
         VesselEventTestHosting.ConfigureServices(builder.Services);
+        // No identity schema here: the configured owner is the only active one.
+        builder.Services.AddSingleton<IJournalOwnerDirectory>(
+            new ConfiguredOwnerDirectory(JournalOwner.Parse(builder.Configuration[JournalOwner.ConfigurationKey])));
         builder.Services.AddSingleton(clock);
         builder.Services.AddSingleton<IVenueRegistry>(AccountHistoryOrders.Registry(reader, orders));
         if (credential is not null) builder.Services.AddSingleton(credential);

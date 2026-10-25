@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Vessel.Application.Plays;
 using Vessel.Application.Workspace;
@@ -137,12 +138,35 @@ public sealed class PlayBundleTests : IDisposable
     }
 
     [Fact]
-    public async Task An_original_larger_than_its_recorded_size_fails_the_copy()
+    public async Task An_original_must_match_its_recorded_length_and_digest()
     {
+        var original = new byte[10];
+        var digest = Convert.ToHexStringLower(SHA256.HashData(original));
         using var target = new MemoryStream();
-        await PlayBundleService.CopyBoundedAsync(new MemoryStream(new byte[10]), target, 10, default);
+        await PlayBundleService.CopyBoundedAsync(new MemoryStream(original), target, 10, digest, default);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            PlayBundleService.CopyBoundedAsync(new MemoryStream(new byte[11]), new MemoryStream(), 10, default));
+            PlayBundleService.CopyBoundedAsync(new MemoryStream(new byte[11]), new MemoryStream(), 10, digest, default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            PlayBundleService.CopyBoundedAsync(new MemoryStream(new byte[9]), new MemoryStream(), 10, digest, default));
+        var corrupted = new byte[10];
+        corrupted[0] = 1;
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            PlayBundleService.CopyBoundedAsync(new MemoryStream(corrupted), new MemoryStream(), 10, digest, default));
+    }
+
+    [PostgresFact]
+    public async Task A_corrupted_original_fails_the_bundle_instead_of_claiming_it_was_included()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        await using var factory = Factory(Guid.NewGuid(), database);
+        using var client = factory.AuthorizedClient();
+        var (playId, _) = await Seed(client);
+        var path = Assert.Single(Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories));
+        var bytes = await File.ReadAllBytesAsync(path);
+        bytes[^1] ^= 1;
+        await File.WriteAllBytesAsync(path, bytes);
+        // The response body must fail: it cannot contain a valid play.json claiming a corrupted original was included.
+        await Assert.ThrowsAnyAsync<Exception>(async () => await Bundle(client, playId));
     }
 
     [PostgresFact]

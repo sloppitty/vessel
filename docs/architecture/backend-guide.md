@@ -64,7 +64,7 @@ flowchart LR
 | Domain | Entities (`Account`, `Portfolio`, `Play`, `PlayOrderLink`, `PlayEvidence`, …), fact records (`ImportedFill`, `ImportedOrder`, `AccountSnapshot`), the execution vocabulary (`ExecutionFacts`) and pure rules (`TrackRecord`, `Exposure`, `SizingLimits`). | EF, HTTP, JSON contracts, venue knowledge. |
 | Application | One folder per feature with its use-case service, request/response DTOs and the store port it needs. Venue ports and the `IVenueRegistry`. | SQL, EF types, `HttpClient` configuration, venue wire formats. |
 | Persistence | `VesselDbContext`, per-entity configurations, one store class per port, the `UnitOfWork`, the event store, dispatcher and retention (`Events/`), explicit migrations. Registers the context and stores. | Business rules beyond locking and storage. |
-| Infrastructure | Bearer authentication and owner context, AES-GCM credential vault, evidence object stores (local and S3-compatible), venue adapters and their caches. `ApplicationServices` (`AddVesselApplication()`, `AddVesselMonitoring()`): the use-case registrations both hosts share, and the host-side `Monitoring/MonitorRunExecutor`. | Use-case logic. |
+| Infrastructure | Owner context (claims of the identity module's session), AES-GCM credential vault, evidence object stores (local and S3-compatible), venue adapters and their caches. `ApplicationServices` (`AddVesselApplication()`, `AddVesselMonitoring()`): the use-case registrations both hosts share, and the host-side `Monitoring/MonitorRunExecutor`. | Use-case logic. |
 | Identity | Identity context/migrations, EOA verification, cookies/sessions, owner directory and offline identity administration. References Application only. | Journal tables, journal unit of work or Infrastructure/Persistence references. |
 | Messaging | The only project that references Wolverine and RabbitMQ: the outbox behind `IVesselEventOutbox`, the `vessel.events` topic and subscription queues, provisioning commands, and feature modules (`Modules/Monitor`) that declare their own topology and hosted services. | Business decisions; Domain and Application never reference it. |
 | Api | `Program.cs` pipeline (calls the shared `AddVesselApplication()` and `AddVesselMonitoring()`), endpoint mapping files and transport rules for credentials, compression, forwarded headers and production configuration. | Business decisions. |
@@ -81,9 +81,9 @@ switch. Smart-contract signatures and WalletConnect are out of scope.
 
 `IOwnerScopeFactory` assigns a fresh background scope before resolving an
 owner-filtered context. It never mutates request scopes or discovers owners.
-`IJournalOwnerDirectory` supplies Active/Suspended/Unknown status; registration
-is order-independent, fixed configured owner in Token mode and identity-backed
-in Wallet mode. No unassigned background scope may resolve journal services.
+`IJournalOwnerDirectory` supplies Active/Suspended/Unknown status from the
+identity users; registration is order-independent. No unassigned background
+scope may resolve journal services.
 Singleton system stores use their own `NpgsqlDataSource`, not `VesselDbContext`:
 subscriber registrations/discovery, journal-owner inventory, monitor candidate
 selection and server venue/heartbeat state. Reviewed raw SQL and the absence of
@@ -133,12 +133,12 @@ and the [integration decisions](multi-user-delivery-contract.md#16-implementatio
 
 `Program.cs` builds one pipeline for every request:
 
-1. **Startup checks.** A connection string is required outside Development. Token mode requires a 32+ character token. Wallet mode refuses a nonempty token, requires allowed HTTPS origins and an explicit owner GUID, and refuses the legacy default GUID unless explicitly overridden. All hosts read identical identity settings; see the [operator reference](../../deploy/README.md#sign-in-mode).
+1. **Startup checks.** Sign-in is by wallet only (Token sign-in was removed on October 25, 2026). Every host refuses a nonempty `Vessel:Auth:Token` or a `Vessel:Auth:Mode` other than `Wallet`, and requires at least one allowed origin. Outside Development a connection string, `https://` origins and an explicit owner GUID are required, and the legacy default GUID is refused unless explicitly overridden. All hosts read identical identity settings; see the [operator reference](../../deploy/README.md#sign-in).
 2. **Forwarded headers.** Only explicitly configured proxies are trusted (`ForwardedHeadersConfiguration`).
 3. **Security headers.** `nosniff`, `X-Frame-Options: DENY`, `no-referrer`, and `Cache-Control: no-store` on `/api` unless an endpoint set its own policy.
 4. **Error mapping.** Exceptions become RFC 7807 Problem Details. `ProblemException(status, detail)` maps to its status and safe message. `DomainValidationException` maps to 400 and `DomainRuleException` to 409. Bad bodies map to 400/413; transient database or network failures anywhere in the exception chain, and an evidence storage outage (`EvidenceStorageUnavailableException`), map to 503. Anything else is a 500 logged once by `SafeExceptionDiagnostics`, with trace ID, route, exception type and method names only, never messages or data.
 5. **Compression.** Only endpoints marked with `CompressMarketData` metadata (instruments, candles, market context) are compressed.
-6. **Authentication and authorization.** Token mode uses constant-time `BearerTokenHandler` verification and the configured owner. Wallet mode registers only session authentication, backed by `Vessel.Identity`; unsafe requests check allowed Origin/Fetch Metadata and all private requests except the session probe require `X-Vessel-User`. Public auth writes also require `X-Vessel-Request: 1`. The fallback policy is private; health and public auth routes opt out. Wrong-token and identity endpoint limits return 429 with `Retry-After`. Streams require `IPrincipalValidity` and revalidate at most every 15 s.
+6. **Authentication and authorization.** The API registers only session authentication, backed by `Vessel.Identity` (`AddVesselIdentityApi`, which also sets the private fallback policy; workers register neither). Unsafe requests check allowed Origin/Fetch Metadata and all private requests except the session probe require `X-Vessel-User`. Public auth writes also require `X-Vessel-Request: 1`. Health and public auth routes opt out of the fallback policy. Identity endpoint limits return 429 with `Retry-After`. Streams require `IPrincipalValidity` and revalidate at most every 15 s.
 7. **Endpoint transport.** `CarriesCredential()` marks token routes with the HTTPS guard and a 4 KiB body limit. `WithBodyLimit()` marks manual writes with 16 KiB and retrospective creation with 128 KiB. The guard and server body limit run after authorization, before binding. Matched routes use their metadata; an unmatched-route fallback preserves the old error responses for malformed URLs and unsupported methods. Non-loopback credential entry requires HTTPS outside Development.
 8. **Endpoint.** A thin lambda binds the request, calls one application service and returns `Results.Ok/Created/NoContent`.
 
@@ -146,7 +146,7 @@ Application services throw `ProblemException` from `Application/Common` for expe
 
 ## Ownership and security model
 
-- **One owner per journal.** Token mode maps its bearer to `Vessel:Auth:OwnerId`. Wallet mode maps its cookie to the identity user GUID, equal to the journal owner GUID. `IJournalOwnerContext` exposes that owner; request bodies never choose it. Operator role does not bypass journal isolation. The configured legacy owner remains user 1, preserving credential encryption bindings.
+- **One owner per journal.** The session cookie maps to the identity user GUID, equal to the journal owner GUID. `IJournalOwnerContext` exposes that owner; request bodies never choose it. Operator role does not bypass journal isolation. The configured legacy owner remains user 1, preserving credential encryption bindings.
 - **Every journal entity implements `IOwned` (identity and reviewed system stores are separate).** Model construction fails if a mapped entity lacks the owner contract. `VesselDbContext` builds query filters from that contract, and `SaveChanges` checks both current and original owner IDs. Composite owner foreign keys prevent cross-owner relationships. Raw SQL still needs its own explicit owner predicate.
 - **Venue secrets.** Only Lighter needs one: a read-only `ro:` token, verified at the venue, sealed with AES-GCM (associated data binds owner, account and purpose, built once by `VenueCredentialPurpose`) and stored in `account_credentials`. Verification runs with no transaction or lock open; a short locked recheck then saves, or answers 409 if the account or its credential changed meanwhile. Keys come from configuration or a mode-600 key file, never from the database. See [`venue-credentials.md`](venue-credentials.md).
 - **No leaks.** Venue payloads, exception messages, tokens and connection strings are never logged or returned. HTTP clients have logging removed; EF error events are downgraded to Debug.
@@ -358,9 +358,9 @@ Journal migrations live in `Vessel.Persistence/Migrations`; identity migrations 
 
 | Setting | Meaning |
 | --- | --- |
-| `Vessel__Auth__Token` | Token mode bearer secret (32+ characters outside Development); must be absent/empty in Wallet mode. |
-| `Vessel__Auth__OwnerId`, `Vessel__Auth__OwnerName` | Token fixed journal owner; Wallet legacy owner/operator bootstrap, preserving the same GUID. |
-| `ConnectionStrings__Vessel` | PostgreSQL connection. Resolved lazily, so `/health/live` and `/api/system` work without a database. |
+| `Vessel__Auth__OwnerId`, `Vessel__Auth__OwnerName` | Installation owner/operator bootstrap (`identity ensure-owner`), preserving the journal's GUID. `Vessel__Auth__Token` is refused: Token sign-in was removed. |
+| `Vessel__Identity__…` | Allowed origins, registration policy, session lifetimes and cookie names; see the [operator reference](../../deploy/README.md#identity-settings). |
+| `ConnectionStrings__Vessel` | PostgreSQL connection. Resolved lazily, so `/health/live` works without a database. |
 | `Vessel__Credentials__…` | Key ring for venue credentials (`ActiveKeyId` + `Keys`, or `KeyFile`). |
 | `Vessel__Evidence__…` | Upload limits and storage (`Local` root by default, or `Provider=S3`). |
 | `Vessel__Monitor__…` | Check interval, protection grace, manual cooldown, heartbeat timeout, watch and unobservable lifetimes. |

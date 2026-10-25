@@ -28,7 +28,7 @@ October 18, 2026. Developer and operator reference for the implemented event, me
 - **Domain and Application are free of Wolverine and RabbitMQ.** All broker code is in `Vessel.Messaging`; `ArchitectureTests` enforces it.
 - **Nothing is created at runtime.** The API and workers never migrate, create envelope storage or declare broker topology. The one-shot `migrate` step does, explicitly.
 - **Events come from Vessel's own state changes** inside the unit of work, never from re-read venue rows. A price touch is never a fill. Discrepancies are flagged, never corrected.
-- **Owner scope everywhere.** Every message carries `ownerId`; hosts validate Active/Suspended/Unknown through `IJournalOwnerDirectory` and create an assigned `IOwnerScopeFactory` scope. Token mode has one configured owner; Wallet mode has identity-backed users. A message never mutates an HTTP scope.
+- **Owner scope everywhere.** Every message carries `ownerId`; hosts validate Active/Suspended/Unknown through `IJournalOwnerDirectory` and create an assigned `IOwnerScopeFactory` scope. Owners are the identity users. A message never mutates an HTTP scope.
 
 ```mermaid
 flowchart LR
@@ -639,7 +639,7 @@ no owner liveness is carried forward. Recreate disposable databases that applied
 the old IDs; never rewrite migration-history rows.
 **Stop all API/worker replicas and back up before migration.** Old images require
 a pre-upgrade database restore, not a down migration. After restore, keep hosts
-stopped, run identity reset/reconciliation in Wallet mode and rotate the event
+stopped, run identity reset/reconciliation and rotate the event
 epoch before provisioning/starting. See the [deployment runbook](../../deploy/README.md).
 
 ## Notification Hub
@@ -746,9 +746,8 @@ Commands assume the default Compose project in the operator directory; add every
 ### Offline commands
 
 The API binary runs them without starting a host; they read `ConnectionStrings__Vessel`, `Vessel__Auth__OwnerId` and `Vessel__Messaging__*` and print only Vessel's own messages.
-Retain the private `VESSEL_AUTH_MODE` and full `COMPOSE_FILE` list, including
-the Wallet overlay, on offline commands too; all hosts need identical auth and
-identity settings. The packaged migration preflight must not be bypassed for an upgrade.
+Retain the full private `COMPOSE_FILE` list on offline commands too; all hosts
+need identical identity settings. The packaged migration preflight must not be bypassed for an upgrade.
 
 ```sh
 # EF migrations, then provisioning (the normal path):
