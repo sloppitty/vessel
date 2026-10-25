@@ -46,6 +46,14 @@
 .position-risk-summary dd[data-tone="gain"] { color: var(--positive); }
 .position-risk-summary dd[data-incomplete="true"],
 .position-risk-summary dd[data-warning="true"] { color: var(--warning); }
+.position-risk-summary .position-risk-costs,
+.plays-page .summary .position-risk-summary .position-risk-costs {
+  margin: 14px 0 0;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.position-risk-summary .position-risk-costs > span { color: var(--muted-foreground); }
+
 .position-risk-summary .position-risk-basis,
 .plays-page .summary .position-risk-summary .position-risk-basis {
   display: flex;

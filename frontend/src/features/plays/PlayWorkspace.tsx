@@ -33,6 +33,7 @@ import type { EvidenceImages } from './evidence-images'
 import { isNominalUsdQuote } from './stablecoins'
 import { defaultPlayTitle } from './default-title'
 import { PostHocBadge } from './PostHocBadge'
+import { useCostAssumptions } from './cost-assumptions'
 import './plays-workspace.css'
 import { NativeSelect } from '@/components/ui/native-select'
 import { pickerAccounts } from '@/features/workspace/account-picker-options'
@@ -147,6 +148,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const drawingKey = account && draft.instrument && draft.instrumentSource === 'venue' ? `${account.venueId}:${draft.instrument}` : ''
 
   const venues = useVenues()
+  const [costAssumptions] = useCostAssumptions()
   const catalog = useInstrumentCatalog(api, account)
   const instrumentInfo = draft.instrumentSource === 'venue' ? catalog.catalog?.instruments.find(item => item.contractId === draft.instrument) : undefined
   const instrumentName = instrumentInfo ? pairLabel(instrumentInfo) : draft.instrument
@@ -346,6 +348,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin} instrumentName={instrumentName} units={units} availableBudget={available} checkBudget={status === 'draft'}
         marks={marks} filledEntries={filled} />}
     </div>
-    {!retrospective && <PositionSummary draft={draft} units={units} instrumentName={instrumentName} riskReference={riskReference} fills={fills} />}
+    {!retrospective && <PositionSummary draft={draft} units={units} instrumentName={instrumentName} riskReference={riskReference} fills={fills}
+      costs={!paper && account && !venues.isManual(account.venueId) ? costAssumptions[account.venueId] ?? null : null} />}
   </section>
 }
