@@ -51,7 +51,7 @@ internal sealed class ReviewFixture : IReviewStore
         return account;
     }
     public ClosedPlayFacts Add(decimal net, DateTimeOffset? exit = null, Account? account = null,
-        string instrument = "BTC", decimal entryPrice = 100, bool risk = true, PlayPlanDocument? customPlan = null)
+        string instrument = "BTC", decimal entryPrice = 100, bool risk = true, PlayPlanDocument? customPlan = null, PlanRuleSeen? rule = null)
     {
         account ??= Accounts.FirstOrDefault() ?? Account();
         var at = exit ?? ReviewClock.Now.AddHours(-1);
@@ -60,7 +60,7 @@ internal sealed class ReviewFixture : IReviewStore
                 risk ? [new PlanExit("s", "price", "95", "100")] : [], [])], new PlanNotes("", "", "", ""));
         var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument(account.VenueId, instrument),
             InstrumentSource.Venue, PlayDocuments.Serialize(plan), at.AddDays(-2));
-        var revision = play.MarkPlanned(at.AddDays(-2)).Revision;
+        var revision = play.MarkPlanned(at.AddDays(-2), null, rule).Revision;
         play.MarkOpen("filled", at.AddDays(-1));
         play.MarkClosed("synced later", ReviewClock.Now);
         ImportedFill Fill(bool opening) => new()

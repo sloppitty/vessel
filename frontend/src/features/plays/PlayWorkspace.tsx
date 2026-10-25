@@ -1,4 +1,6 @@
 import { priceStepOf, type PriceStep } from '@/lib/price-step'
+import type { RuleControls } from './IfThenRule'
+import type { PlayRuleSeen } from '@/api/plays'
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import type { SizingDocument } from '@/api/sizing'
@@ -47,7 +49,7 @@ import '@/features/monitor/incidents.css'
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, revision = null,
   lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, sizingStatus = 'ready', onRetrySizing, onRiskChange,
   filledEntries, fills: entryFills, onUnits, onPriceStep, retrospective = false, incidents, stopEvidence, evidenceImages,
-  reviewReceipt, journalSave, retrospectiveReceipt, plannedAfterExecution = false, onPreflight, nextActions, onOpenPlay, log, reviewCompletion, mistakeTags, chartFills, playId = null, openRiskKey }: {
+  reviewReceipt, journalSave, retrospectiveReceipt, plannedAfterExecution = false, onPreflight, nextActions, onOpenPlay, log, reviewCompletion, mistakeTags, chartFills, playId = null, openRiskKey, ruleControls, planRule }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -121,6 +123,10 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   playId?: string | null
   /** Changes when the saved Play or the page reloads, so open risk is read again. */
   openRiskKey?: unknown
+  /** The mode's if-then rule and its actions, for the Thesis tab (Phase 2, item 3). */
+  ruleControls?: RuleControls | undefined
+  /** The rule this Play was planned under, for its review. */
+  planRule?: PlayRuleSeen | null | undefined
 }) {
   const paper = api.tradingMode === 'paper'
   const fieldId = useId()
@@ -350,7 +356,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
           structuredReview={draft.structuredReview}
           onStructuredReviewChange={structuredReview => onChange({ ...draft, structuredReview })}
           evidence={draft.evidence} onEvidenceChange={updateEvidence} evidenceImages={evidenceImages} evidenceRequest={evidenceRequest} executionRequest={executionRequest}
-          reviewReceipt={reviewReceipt} journalSave={journalSave} nextActions={offeredActions} log={log} reviewCompletion={reviewCompletion} mistakeTags={mistakeTags} />
+          reviewReceipt={reviewReceipt} journalSave={journalSave} nextActions={offeredActions} log={log} reviewCompletion={reviewCompletion} mistakeTags={mistakeTags}
+          rule={!readOnly && !retrospective && (status === 'draft' || status === 'planned' || status === 'paused') ? ruleControls : undefined} planRule={planRule ?? null} />
       </div>
       {retrospective ? <section className="panel retrospective-position" aria-label="No original plan"><h2>No original plan</h2>{retrospectiveReceipt}</section>
         : readOnly ? <fieldset className="plays-readonly-position" disabled><legend className="sr-only">Position (read-only)</legend>

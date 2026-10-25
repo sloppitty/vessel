@@ -15,9 +15,9 @@ public static class ReviewEndpoints
         // Phase 1.4b: one process cell, lane, mistake tag or skipped pre-flight check, with Review's filters.
         api.MapGet("/process", async (string? period, string? portfolio, Guid? accountId, string? instrument, int? offset,
             string? positions, int? minPlays, string? tradingMode, string? cell, string? lane, string? mistakeTag, string? skippedCheck,
-            string? week, ReviewService service, CancellationToken ct) =>
+            string? week, string? rule, ReviewService service, CancellationToken ct) =>
             Results.Ok(await service.ProcessAsync(new(new(period ?? "month", portfolio ?? "all", accountId, instrument, offset ?? 0,
-                positions ?? "exclude", minPlays ?? ReviewQuery.DefaultMinPlays, tradingMode, week), cell, lane, mistakeTag, skippedCheck), ct)));
+                positions ?? "exclude", minPlays ?? ReviewQuery.DefaultMinPlays, tradingMode, week), cell, lane, mistakeTag, skippedCheck, rule), ct)));
         // Every read takes an optional week (a yyyy-MM-dd date): the reporting week holding it replaces the period (Phase 2, item 2).
         // Phase 2, item 5a: the report's own rows as CSV, from one snapshot. Owner data, so never cached (the API default).
         api.MapGet("/export", async (string? period, string? portfolio, Guid? accountId, string? instrument,

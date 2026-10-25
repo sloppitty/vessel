@@ -92,7 +92,17 @@ public interface IReviewStore
 /// that was skipped (a check code, or <c>not-recorded</c>).
 /// </summary>
 public sealed record ReviewProcessQuery(ReviewQuery Filters, string? Cell = null, string? Lane = null, string? MistakeTag = null,
-    string? SkippedCheck = null);
+    string? SkippedCheck = null, string? Rule = null);
+
+/// <summary>One answer's Plays by outcome: wins, losses and scratches of scored Plays, and the unscored.</summary>
+public sealed record ReviewRuleRowDto(int Wins, int Losses, int Scratches, int Unscored);
+
+/// <summary>
+/// The if-then rule over the period's Plays planned under one (Phase 2, item 3): how many carried it, the answers at Plan it,
+/// and "Followed the rule?" by outcome. Counts and drill-down only; a winning deviation stays a deviation.
+/// </summary>
+public sealed record ReviewRuleDto(int Carried, int Acknowledged, int Exceptions, int NotAcknowledged, ReviewRuleRowDto Followed,
+    ReviewRuleRowDto Deviated, ReviewRuleRowDto NotApplicable, ReviewRuleRowDto Unanswered);
 
 public sealed record ReviewPortfolioDto(string Id, string Name);
 public sealed record ReviewAccountDto(Guid Id, string Name, Guid? PortfolioId, string VenueId,
@@ -209,6 +219,8 @@ public sealed record ReviewDto(DateTimeOffset AsOfUtc, DateTimeOffset? FromUtc, 
     public ReviewPreflightDto? Preflight { get; init; }
     /// <summary>Process and outcome as cases (phase 1, 1.4b).</summary>
     public ReviewProcessDto? Process { get; init; }
+    /// <summary>The if-then rule's answers over the same population (Phase 2, item 3).</summary>
+    public ReviewRuleDto? Rule { get; init; }
     /// <summary>The reporting week, when the report covers one instead of a rolling period (Phase 2, item 2).</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public ReviewWeekDto? Week { get; init; }
