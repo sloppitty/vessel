@@ -8,13 +8,14 @@ import { createWorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import { accountFixture, playCountsFrom, playsFrom, savedPlayFixture } from '@/test/workspace-fixture'
 import { OverviewPlays } from './OverviewPlays'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const summary = (status: PlaySummary['status'], hasReview = false): PlaySummary => ({
   ...savedPlayFixture.summary, id: status, title: `${status} idea`, status, hasReview,
 })
 const plays = ['draft', 'planned', 'paused', 'open', 'closed', 'cancelled'].map(status => summary(status as PlaySummary['status']))
 const api = (list: PlaySummary[] = plays, read = vi.fn(playsFrom(list))) =>
-  ({ ...createWorkspaceApi('test-only'), plays: read, playCounts: vi.fn(playCountsFrom(list)) })
+  ({ ...createWorkspaceApi(credentialsFixture), plays: read, playCounts: vi.fn(playCountsFrom(list)) })
 const props = { accounts: [accountFixture], reloadGeneration: 0, onBrowse: vi.fn(), onOpen: vi.fn().mockResolvedValue(undefined) }
 
 describe('Overview plays', () => {

@@ -24,7 +24,7 @@ export function PortfoliosPage({ accounts, portfolios, onAddAccount, onCreatePor
         style={slots.has(portfolio.id) ? { '--portfolio-color': `var(--series-${slots.get(portfolio.id)})` } as CSSProperties : undefined}>
         <button className="portfolio-open" aria-label={`Open ${portfolio.name}`} onClick={() => onOpen(portfolio.id)}>
           <span className="portfolio-icon"><PortfolioIcon icon={portfolio.icon} /></span>
-          <h2>{portfolio.name}</h2>{portfolio.tradingMode === 'paper' && <span className="workspace-badge">Paper</span>}<p>{portfolio.accountCount} {portfolio.accountCount === 1 ? 'account record' : 'account records'}</p>
+          <h2>{portfolio.name}</h2><p>{portfolio.accountCount} {portfolio.accountCount === 1 ? 'account record' : 'account records'}</p>
           <strong>{money(portfolio.balanceUsd === undefined ? portfolio.totalValueUsd : portfolio.balanceUsd)}</strong>
           <small>Available balance {money(portfolio.availableBalanceUsd ?? null)}</small>
         </button>

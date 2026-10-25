@@ -13,6 +13,7 @@ import { overviewAccounts, resolveOverviewScope } from './overview-scope'
 import { OverviewScope } from './OverviewScope'
 import { accountPicker, chooseInPicker } from '@/test/account-picker'
 import { render as renderWithVenues } from '@/test/render'
+import { credentialsFixture, shellIdentityFixture } from '@/test/identity-fixture'
 
 const other = { ...accountFixture, id: 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff', name: 'Other account', portfolioId: null, balanceUsd: '20' }
 const main = { ...accountFixture, balanceUsd: '10' }
@@ -37,7 +38,7 @@ const plays = [{ ...savedPlayFixture.summary, status: 'planned' as const, title:
 const inScope = (scope: string | undefined, accountId: string) => overviewAccounts(scope ?? 'all', overview.accounts).some(a => a.id === accountId)
 function client() {
   const playPage = (query: PlayListQuery) => playListPage(plays.filter(p => inScope(query.scope, p.accountId)), { ...query, scope: 'all' })
-  return { ...createWorkspaceApi('test'), overview: vi.fn().mockResolvedValue(overview), overviewSummary: vi.fn(async (q: OverviewQuery) => scopedSummary(q)),
+  return { ...createWorkspaceApi(credentialsFixture), overview: vi.fn().mockResolvedValue(overview), overviewSummary: vi.fn(async (q: OverviewQuery) => scopedSummary(q)),
     activity: vi.fn(async (q: ActivityQuery) => activityPage(operations.filter(op => inScope(q.scope, op.accountId)), { pageSize: q.pageSize })),
     plays: vi.fn(async (q: PlayListQuery) => playPage(q)),
     playCounts: vi.fn(async (q: { scope?: string }) => Object.fromEntries(playViews.map(view => [view, playPage({ ...q, view }).totalCount])) as PlayCounts) }
@@ -46,7 +47,7 @@ beforeEach(() => { window.history.replaceState(null, '', '/') })
 describe('Overview scope', () => {
   it('selects portfolio, unassigned and individual-account scope for totals, activity and Plays', async () => {
     const api = client()
-    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={api} />)
     await screen.findByRole('table', { name: 'Overview summary by portfolio' })
     const metrics = screen.getByRole('region', { name: 'Scoped overview totals' })
     expect(within(metrics).getByText('$30.00')).toBeInTheDocument()
@@ -69,7 +70,7 @@ describe('Overview scope', () => {
   })
   it('reloads the summary once per common generation when scope remains valid', async () => {
     const api = client()
-    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={api} />)
     await screen.findByRole('table', { name: 'Overview summary by portfolio' })
     expect(api.overviewSummary).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
@@ -80,7 +81,7 @@ describe('Overview scope', () => {
   })
   it('keeps grouping, period and row-selected scope in shell memory across navigation', async () => {
     const api = client()
-    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={api} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Scope overview to Unassigned' }))
     fireEvent.click(screen.getByRole('button', { name: 'By account' }))
     fireEvent.change(screen.getByLabelText('Result period'), { target: { value: '7' } })
@@ -97,7 +98,7 @@ describe('Overview scope', () => {
   })
   it.each(['account', 'portfolio', 'unassigned'])('falls back permanently to All when %s scope disappears after reload', async kind => {
     const api = client()
-    render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={api} />)
     const control = await screen.findByLabelText('Overview scope')
     const scope = kind === 'account' ? `account:${main.id}` : kind === 'portfolio' ? `portfolio:${portfolioFixture.id}` : 'unassigned'
     await pickScope(scope)
@@ -167,7 +168,7 @@ describe('Overview scope', () => {
     })
     it('returns the whole Overview to all accounts and keeps select, metrics and Allocation together', async () => {
       const api = client()
-      render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
+      render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={api} />)
       await screen.findByRole('table', { name: 'Overview summary by portfolio' })
       const metrics = screen.getByRole('region', { name: 'Scoped overview totals' })
       const scope = screen.getByLabelText('Overview scope')
@@ -190,7 +191,7 @@ describe('Overview scope', () => {
     const backName = 'Back to all accounts'
     const metricTotal = (text: string) => waitFor(() => expect(within(screen.getByRole('region', { name: 'Scoped overview totals' })).getByText(text)).toBeInTheDocument())
     it('shows all accounts when the Overview first loads, with no back arrow or View all', async () => {
-      render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client()} />)
+      render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={client()} />)
       await screen.findByRole('table', { name: 'Overview summary by portfolio' })
       expect(screen.getByLabelText('Overview scope')).toHaveAttribute('data-value', 'all')
       expect(screen.queryByRole('button', { name: backName })).not.toBeInTheDocument()
@@ -198,7 +199,7 @@ describe('Overview scope', () => {
       expect(screen.getByRole('img', { name: /^All accounts balance shares/ })).toBeInTheDocument()
     })
     it('stops the browser restoring the period select, which would show a stale option without telling React', async () => {
-      render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={client()} />)
+      render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={client()} />)
       await screen.findByRole('table', { name: 'Overview summary by portfolio' })
       expect(screen.getByLabelText('Result period')).toHaveAttribute('autocomplete', 'off')
     })
@@ -208,7 +209,7 @@ describe('Overview scope', () => {
       ['account', `account:${main.id}`, '$10.00'],
     ])('a %s scope goes back to all accounts, always named the same, with every section following the select', async (_name, from, fromTotal) => {
       const api = client()
-      render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
+      render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={api} />)
       await screen.findByRole('table', { name: 'Overview summary by portfolio' })
       const scope = screen.getByLabelText('Overview scope')
       await pickScope(from)
@@ -223,7 +224,7 @@ describe('Overview scope', () => {
     })
     it('returns an account opened from a one-account donut on All to All by slice again or by arrow, with the select following', async () => {
       const api = client()
-      render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
+      render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={api} />)
       await screen.findByRole('table', { name: 'Overview summary by portfolio' })
       const scope = screen.getByLabelText('Overview scope')
       const slice = () => screen.getByText('Other account: $20.00 · 100.00%')
@@ -241,7 +242,7 @@ describe('Overview scope', () => {
     })
     it('returns a lone Unassigned account to All when Unassigned came from the select or its card', async () => {
       const api = client()
-      render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
+      render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={api} />)
       await screen.findByRole('table', { name: 'Overview summary by portfolio' })
       const scope = screen.getByLabelText('Overview scope')
       const slice = () => screen.getByText('Other account: $20.00 · 100.00%')
@@ -262,7 +263,7 @@ describe('Overview scope', () => {
     it('goes back to all after choosing one account and then another of a portfolio picked in the select', async () => {
       const api = client()
       api.overview.mockResolvedValue({ ...overview, accounts: [main, second, other] })
-      render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
+      render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={api} />)
       await screen.findByRole('table', { name: 'Overview summary by portfolio' })
       const scope = screen.getByLabelText('Overview scope')
       await pickScope(portfolioScope)
@@ -278,7 +279,7 @@ describe('Overview scope', () => {
     it('deselects an account of a multi-account portfolio to all, not to the portfolio, by slice or legend item', async () => {
       const api = client()
       api.overview.mockResolvedValue({ ...overview, accounts: [main, second, other] })
-      render(<ApplicationShell system={systemFixture} disconnect={vi.fn()} api={api} />)
+      render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={vi.fn()} api={api} />)
       await screen.findByRole('table', { name: 'Overview summary by portfolio' })
       const scope = screen.getByLabelText('Overview scope')
       await pickScope(`account:${main.id}`)
