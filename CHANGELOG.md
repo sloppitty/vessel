@@ -4,6 +4,9 @@
 
 ### Added
 
+- Review's Week view shows one reporting week: its results, exclusions, process cases and
+  repeated mistake tags, your latest next actions and the Plays waiting for review. Settings →
+  Reporting week sets its time zone and first day (UTC and Monday until you change it).
 - Settings → Cost assumptions: your round-trip fee and slippage per venue. A Play's
   summary shows the assumed cost beside the planned figures, in R when the stops give a
   loss. Nothing else reads it.

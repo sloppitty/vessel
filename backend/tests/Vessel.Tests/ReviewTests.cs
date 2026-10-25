@@ -32,11 +32,16 @@ internal sealed class ReviewFixture : IReviewStore
     public ReviewService Service => new(this, new ReviewClock(), TestVenues.With());
     public ReviewQuery? LastQuery { get; private set; }
     public Task<IReadOnlyList<string>> MistakeTagsAsync(int limit, CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([]);
+    /// <summary>The owner's reporting setting (Phase 2, item 2); null reads as UTC and Monday.</summary>
+    public Vessel.Domain.Reporting.ReportingSettings? Reporting { get; set; }
+    /// <summary>The first Play created in scope in any status, as the store reads it; null for none beyond the lists above.</summary>
+    public DateTimeOffset? FirstPlay { get; set; }
+    public Task<Vessel.Domain.Reporting.ReportingSettings?> ReportingAsync(CancellationToken ct) => Task.FromResult(Reporting);
     public Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct)
     {
         LastQuery = query;
         return Task.FromResult(new ReviewFacts(Portfolios.ToList(), Accounts.ToList(), Closed.ToList(), 0, 0, null)
-            { CancelledPlays = Cancelled.ToList(), UnresolvedPlays = Unresolved.ToList() }); // A snapshot, like the store
+            { CancelledPlays = Cancelled.ToList(), UnresolvedPlays = Unresolved.ToList(), FirstPlayAtUtc = FirstPlay }); // A snapshot, like the store
     }
     public Account Account(string name = "Main", Guid? portfolio = null)
     {

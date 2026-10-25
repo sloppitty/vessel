@@ -64,7 +64,11 @@ covering F-05 and G-13.
   own when a daylight-saving change falls between them.
 - **Day boundaries.** Server filters keep UTC days until Phase 2. Activity's
   custom range is labelled "(UTC)", and Review's period line, chart buckets
-  and as-of time stay UTC and say so. Stored values never change.
+  and as-of time stay UTC and say so. Stored values never change. Phase 2,
+  item 2 adds one server-stored reporting setting (an IANA zone and a week
+  start, UTC and Monday by default) for the week page and the soft loss
+  limits only; it is separate from this display zone, and the rolling
+  periods and Activity keep UTC days (see `portfolio-review.md`).
 - **Chart ticks.** Lightweight Charts places ticks at UTC boundaries; in the
   local zone each tick is labelled with its own instant's local date or time.
 - **Numbers.** `numberFormat()` in `lib/format.ts` is the one en-US number

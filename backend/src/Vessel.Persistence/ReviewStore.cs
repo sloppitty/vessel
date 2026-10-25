@@ -1,5 +1,6 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
+using Vessel.Domain.Reporting;
 using Vessel.Application.Plays;
 using Vessel.Application.Review;
 using Vessel.Application.Sizing;
@@ -10,7 +11,12 @@ namespace Vessel.Persistence;
 
 public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IReviewStore
 {
-    public async Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct)
+    public Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct) =>
+        ReadAsync(query, asOf, new ReviewWindow(ReviewService.From(query.Period, asOf), asOf), ct);
+
+    public Task<ReportingSettings?> ReportingAsync(CancellationToken ct) => db.ReportingSettings.AsNoTracking().SingleOrDefaultAsync(ct);
+
+    public async Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, ReviewWindow window, CancellationToken ct)
     {
         var mode = TradingMode.Validate(query.TradingMode ?? TradingMode.Real);
         // One database snapshot for links, outcomes, membership and coverage during concurrent sync/management.
@@ -31,15 +37,23 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
                 e.OccurredAtUtc <= asOf && db.Plays.Any(p => p.Id == e.PlayId && p.TradingMode == mode &&
                     (query.Instrument == null || p.ContractId == query.Instrument)))
                 .Select(e => (DateTimeOffset?)e.OccurredAtUtc).MinAsync(ct);
+            var firstPaperPlay = await FirstPlayAsync(mode, ids, query.Instrument, ct);
             await transaction.CommitAsync(ct);
-            return new(portfolios, accounts, closed, open, 0, firstPaper, incomplete);
+            return new(portfolios, accounts, closed, open, 0, firstPaper, incomplete) { FirstPlayAtUtc = firstPaperPlay };
         }
         var fills = db.Fills.Where(f => ids.Contains(f.AccountId) && f.OccurredAtUtc <= asOf &&
             (query.Instrument == null || f.ContractId == query.Instrument));
         var first = await fills.Select(f => (DateTimeOffset?)f.OccurredAtUtc).MinAsync(ct);
-        var from = ReviewService.From(query.Period, asOf);
-        var unassigned = await fills.CountAsync(f => (from == null || f.OccurredAtUtc > from) &&
-            !db.OrderLinks.Any(l => l.AccountId == f.AccountId && l.State == OrderLinkState.Linked &&
+        // The window's own rule: a rolling period's (from, now], or a reporting week's [from, to) (Phase 2, item 2).
+        var windowed = fills;
+        if (window.From is { } from)
+            windowed = window.Week is null ? windowed.Where(f => f.OccurredAtUtc > from) : windowed.Where(f => f.OccurredAtUtc >= from);
+        if (window.Week is not null)
+        {
+            var to = window.To;
+            windowed = windowed.Where(f => f.OccurredAtUtc < to);
+        }
+        var unassigned = await windowed.CountAsync(f => !db.OrderLinks.Any(l => l.AccountId == f.AccountId && l.State == OrderLinkState.Linked &&
                 db.Orders.Any(o => o.OwnerId == l.OwnerId && o.AccountId == l.AccountId && o.Id == l.ImportedOrderId &&
                     o.ContractId == f.ContractId && o.ExternalOrderId == f.ExternalOrderId) &&
                 db.Plays.Any(p => p.Id == l.PlayId && p.TradingMode == mode && p.ContractId == f.ContractId)), ct);
@@ -63,9 +77,11 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
         var endedIds = unresolvedIds.Concat(cancelledPlays.Select(p => p.Id)).ToList();
         var firstRevisions = (await db.PlanRevisions.Where(r => endedIds.Contains(r.PlayId) && r.Number == 1).AsNoTracking().ToListAsync(ct))
             .ToLookup(r => r.PlayId);
+        var firstPlay = await FirstPlayAsync(mode, ids, query.Instrument, ct);
         await transaction.CommitAsync(ct);
         return new(portfolios, accounts, closed, open, unassigned, first, incomplete)
         {
+            FirstPlayAtUtc = firstPlay,
             UnresolvedPlays = unresolvedPlays.Select(p => new UnresolvedPlayFacts(p, PlayUnresolved.Latest(declarations[p.Id], p.EndedAtUtc))
             {
                 Revisions = firstRevisions[p.Id].ToList(), FirstExecutionAtUtc = firstExecution.TryGetValue(p.Id, out var at) ? at : null,
@@ -73,6 +89,11 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
             CancelledPlays = cancelledPlays.Select(p => new EndedPlayFacts(p, firstRevisions[p.Id].ToList())).ToList(),
         };
     }
+
+    /// <summary>The first Play created in scope, in any status, Drafts included (Phase 2, item 2, Sol round 1).</summary>
+    private Task<DateTimeOffset?> FirstPlayAsync(string mode, List<Guid> ids, string? instrument, CancellationToken ct) =>
+        db.Plays.Where(p => p.TradingMode == mode && ids.Contains(p.AccountId) && (instrument == null || p.ContractId == instrument))
+            .Select(p => (DateTimeOffset?)p.CreatedAtUtc).MinAsync(ct);
 
     public async Task<IReadOnlyList<string>> MistakeTagsAsync(int limit, CancellationToken ct)
     {

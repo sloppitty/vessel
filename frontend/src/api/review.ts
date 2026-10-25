@@ -1,5 +1,6 @@
 import { isTradingMode, type TradingMode } from './paper'
-import { isCount, isGuid, isListOf, isNonBlankText, isNullOr, isRecord, isReviewDecimal, isText, isTimestamp } from './guards'
+import { isCount, isFilledText, isGuid, isListOf, isNonBlankText, isNullOr, isRecord, isReviewDecimal, isText, isTimestamp } from './guards'
+import { isWeekStart, type WeekStart } from './reporting'
 import { isOptionalPlayLocalResult, type PlayLocalResult } from './local-result'
 import { isUnresolvedEvidence, preflightCodes, unresolvedReasons, type PreflightCode, type UnresolvedEvidence, type UnresolvedReason } from './plays'
 
@@ -15,7 +16,21 @@ export type ReviewPositionsMode = 'auto' | 'include' | 'exclude'
 export interface ReviewQuery {
   period: ReviewPeriod; portfolio: string; accountId?: string; instrument?: string; offset?: number
   positions?: ReviewPositionsMode; minPlays?: number
+  /** A local date (yyyy-MM-dd): the reporting week holding it replaces the rolling period (Phase 2, item 2). */
+  week?: string
 }
+/**
+ * The reporting week a report covers: its first local day, half-open UTC range, the reporting zone and week start.
+ * `data` is `some`, `empty` (data exists, but nothing closed, was cancelled or declared Unresolved in the week) or `none`
+ * (Vessel holds nothing that early in this scope).
+ */
+export interface ReviewWeek {
+  start: string; fromUtc: string; toUtc: string; timeZone: string; weekStart: WeekStart; data: 'some' | 'empty' | 'none'
+}
+const localDate = /^\d{4}-\d{2}-\d{2}$/
+export const isReviewWeek = (v: unknown): v is ReviewWeek => isRecord(v) && typeof v.start === 'string' && localDate.test(v.start) &&
+  isTimestamp(v.fromUtc, 64) && isTimestamp(v.toUtc, 64) && Date.parse(v.fromUtc) < Date.parse(v.toUtc) && isFilledText(v.timeZone, 64) &&
+  isWeekStart(v.weekStart) && (v.data === 'some' || v.data === 'empty' || v.data === 'none')
 export const defaultReviewQuery: ReviewQuery = { period: 'month', portfolio: 'all' }
 /** Authoritative statistics are decimal strings from the API, never recomputed from a paged sample. */
 export interface ReviewMetrics {
@@ -117,6 +132,8 @@ export interface ReviewDocument {
   process?: ReviewProcess
   /** Whether imported positions are in this report; absent from servers before October 20, 2026. */
   positions?: ReviewPositions
+  /** The reporting week, present only when the query names one (Phase 2, item 2). */
+  week?: ReviewWeek
 }
 export interface ReviewPositions {
   mode: ReviewPositionsMode; included: boolean; minPlays: number
@@ -197,6 +214,7 @@ export const isReviewDocument = (v: unknown): v is ReviewDocument => isRecord(v)
     isListOf(v.preflight.skipped, s => isRecord(s) && preflightCodes.includes(s.code as PreflightCode) && isCount(s.count) &&
       s.count <= ((v.preflight as Record<string, unknown>).recorded as number), preflightCodes.length)) &&
   (v.positions === undefined || isReviewPositions(v.positions)) &&
+  (v.week === undefined || isReviewWeek(v.week)) &&
   (v.tradingMode !== 'paper' ||
     (v.positions === undefined || v.positions.mode === 'exclude' && !v.positions.included) &&
     !(v.metrics as ReviewMetrics).positions &&
@@ -214,6 +232,7 @@ export function reviewPath(query: ReviewQuery): string {
   if (query.offset !== undefined) params.set('offset', String(query.offset))
   if (query.positions !== undefined) params.set('positions', query.positions)
   if (query.minPlays !== undefined) params.set('minPlays', String(query.minPlays))
+  if (query.week) params.set('week', query.week)
   return `/api/review?${params}`
 }
 

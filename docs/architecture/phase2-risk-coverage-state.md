@@ -164,7 +164,53 @@ October 21, 2026. Implemented on `t3/phase2-open-risk`.
 
 ## 2. Weekly review page
 
-Not started.
+October 21, 2026.
+
+**2. Weekly review page.** Implemented on `t3/phase2-weekly-review`.
+- **The setting.** One owner setting on the server (`reporting_settings`, migration
+  `20261022100811_ReportingSettings`): an IANA time zone and a week start, Monday or Sunday. It is UTC
+  and Monday until saved.
+  - `GET` and `PUT /api/settings/reporting` belong to neither trading mode. Windows IDs and zones this
+    server does not know are refused.
+  - Settings shows it as **Reporting week**, apart from the display zone (1.6e).
+- **The week.** Review's reads take `week`, a local `yyyy-MM-dd` date or `current`: the reporting
+  week holding it replaces the rolling period.
+  - It is half-open from local midnight of its first day. A skipped or repeated midnight starts the
+    day at its first instant, so weeks of 167 and 169 hours are handled.
+  - The chart has one point per local day, and later weeks are refused.
+  - The report's `week` block says whether the week has data: `none`, `empty` (no trades) or `some`.
+  - Rolling periods and Activity keep UTC days.
+- **The page.** Review's **Week** action opens it in its own dialog over the page's filters:
+  - the scorecard, with no rate below n = 10, its exclusions and the week's coverage;
+  - the process cases and the week's repeated mistake tags, each drilling into the same week;
+  - the latest next actions, and the current Needs review count in scope.
+- **Contract notes.** 1.5's next actions have no open or done state, so "the owner's open next
+  actions" are the latest ones written, as on the Plays page, and the page says so. The promoted
+  rule's answers arrive with item 3.
+- **Tests.**
+  - `ReportingWeekTests` and `ReviewWeekTests`: zones, DST weeks, Havana's skipped and repeated
+    midnight, boundaries, both week starts, data states, refused weeks, drill-downs and the export.
+  - The isolation case in both auth modes.
+  - The Settings panel, the week page and the validators.
+- **Migration.** It is applied explicitly, never to the owner's database.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `51e7f281`. Four findings, all fixed in
+  `087bb795`:
+  - A Draft, Planned or Open Play with no fills left the weeks after it
+    reading as without data. The store now reads the scope's first Play
+    created in any status.
+  - The page dropped Review's coverage disclosure, and its Excluded card left
+    out imported positions Review cannot score. It shows the week's coverage
+    and lists those positions apart from excluded Plays.
+  - Rates mixed Plays and imported positions without saying so. The counts
+    name them apart, with the weighting note.
+  - `week=9999-12-31` gave a 500. A date past the current week is refused
+    before its range is built.
+
+  Sol confirmed the rolling boundaries, week snapping and local-day buckets,
+  the DST and Havana cases, IANA aliases, `current` across UTC date
+  boundaries, concurrent first writes, the migration, isolation in both
+  auth modes and the owner SQL inventory.
+- **Check.** `scripts/check.sh` passed on `973efd36`: backend 4,136 passed, 5 skipped; frontend 182 files and 4,099 tests.
 
 ## 3. One promoted if-then rule
 
