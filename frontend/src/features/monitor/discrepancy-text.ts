@@ -7,6 +7,7 @@ const titles: Record<string, string> = {
   'protection.cancelled': 'The stop was cancelled',
   'protection.short': 'The stop covers less than the position',
   'protection.excess': 'Resting exits exceed the position',
+  'protection.beyond-liquidation': "The stop sits beyond the venue's liquidation price",
   'protection.orphaned': 'A stop or target still rests after the Play ended',
   'entry.orphaned': 'An entry order still rests after the Play ended',
   'level.drift': 'A linked order no longer matches its plan level',
@@ -23,6 +24,7 @@ const actions: Record<string, string> = {
   'protection.cancelled': 'Place a new stop at the venue, then Check.',
   'protection.short': 'Resize the stop at the venue to cover the open quantity, then Check.',
   'protection.excess': 'Reduce the extra exit orders at the venue to the open quantity.',
+  'protection.beyond-liquidation': 'Move the stop inside the liquidation price at the venue, or add margin, then Check. Under cross margin the price moves with the account.',
   'protection.orphaned': 'Cancel the leftover stop or target at the venue if you no longer want it.',
   'entry.orphaned': 'Cancel the leftover entry order at the venue if you no longer want it.',
   'level.drift': 'Move the order back to its plan level at the venue, or revise the plan.',
@@ -69,6 +71,12 @@ export function discrepancyFacts(record: MonitorDiscrepancy, time: (value: strin
   } else if (positionKinds.has(record.kind)) {
     facts.push({ label: 'Expected by open Plays', value: text(details.expectedQuantity) ?? unknown })
     facts.push({ label: 'Venue position', value: text(details.venueQuantity) ?? unknown })
+  } else if (record.kind === 'protection.beyond-liquidation') {
+    // The venue's own figures (phase 2, 8b); under cross margin the price moves with the account.
+    facts.push({ label: 'Venue liquidation', value: text(details.liquidationPrice) ?? unknown })
+    facts.push({ label: 'Margin mode', value: text(details.marginMode) ?? unknown })
+    const beyond = (Array.isArray(details.stops) ? details.stops : []).filter(isObject).filter(stop => stop.beyond === true)
+    facts.push({ label: 'Stops beyond it', value: beyond.length ? beyond.map(stop => text(stop.price) ?? unknown).join(', ') : unknown })
   } else if (record.kind === 'fill.unlinked') {
     facts.push({ label: 'Unlinked fills', value: typeof details.count === 'number' ? String(details.count) : unknown })
     facts.push({ label: 'Total quantity', value: text(details.totalQuantity) ?? unknown })
