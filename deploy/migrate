@@ -2,29 +2,9 @@
 # One-shot: EF migrations, then explicit messaging provisioning (envelope storage, broker topology and
 # insert-only subscription registrations). The API and workers never migrate or provision at startup.
 set -eu
-# Compose permits an empty token for Wallet mode. Refuse unsafe/missing auth
-# settings BEFORE either bundle can apply an irreversible schema migration.
-# Modes are case-sensitive, exactly as the API and workers parse Vessel:Auth:Mode.
-case "${Vessel__Auth__Mode:-Token}" in
-  Token)
-    if [ -z "$(printf '%s' "${Vessel__Auth__Token:-}" | tr -d '[:space:]')" ]; then
-      echo "Token mode requires Vessel__Auth__Token before migration." >&2
-      exit 1
-    fi
-    ;;
-  Wallet)
-    if [ -n "${Vessel__Auth__Token:-}" ] || [ -z "${Vessel__Identity__Origins__0:-}" ]; then
-      echo "Wallet migration requires an empty token and allowed origin; retain the Wallet overlay." >&2
-      exit 1
-    fi
-    ;;
-  *)
-    echo "Vessel__Auth__Mode must be Token or Wallet." >&2
-    exit 1
-    ;;
-esac
 cd /app
 # The application's own startup validation, without a database connection (first installs have no identity tables).
+# It refuses invalid sign-in settings, and the removed Token settings, BEFORE either bundle can apply a migration.
 if ! dotnet /app/Vessel.Api.dll check-config; then
   echo "Configuration rejected; no migration was applied." >&2
   exit 1

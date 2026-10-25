@@ -8,6 +8,7 @@ import { ApiError } from '@/api/errors'
 import { VenuesProvider } from '@/api/venues'
 import { credentialFixture, indexAccount, indexVenue } from '@/test/account-access-fixture'
 import { ManageAccountDialog } from './ManageDialogs'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 beforeEach(() => vi.stubEnv('DEV', false))
 
@@ -23,7 +24,7 @@ function frozenRetryAt(seconds: number) {
 
 function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
-    ...createWorkspaceApi('test-only'),
+    ...createWorkspaceApi(credentialsFixture),
     accountCredential: vi.fn().mockResolvedValue(credentialFixture),
     saveAccountCredential: vi.fn().mockResolvedValue(credentialFixture),
     deleteAccountCredential: vi.fn().mockResolvedValue(undefined),
@@ -126,7 +127,7 @@ describe('Account credential management', () => {
     expect(screen.getByText('Missing')).toBeInTheDocument()
   })
   it.each([
-    [401, /Reconnect with your Vessel API token/],
+    [401, /Your session ended. Sign in again, then retry./],
     [403, /trusted reverse proxy/],
     [409, /enable it before saving a token/],
     [503, /server credential vault/],

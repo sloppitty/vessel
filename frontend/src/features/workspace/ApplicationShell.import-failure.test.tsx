@@ -7,6 +7,7 @@ import type { PlaysSession } from '@/features/plays/saved'
 import { emptyOverview, playApiStubs } from '@/test/workspace-fixture'
 import { systemFixture } from '@/test/system-fixture'
 import { ApplicationShell } from './ApplicationShell'
+import { credentialsFixture, shellIdentityFixture } from '@/test/identity-fixture'
 
 const attempts = vi.hoisted(() => ({ review: 0, settings: 0, plays: 0, mounts: 0, unmounts: 0 }))
 vi.mock('@/features/review/ReviewPage', () => {
@@ -32,9 +33,9 @@ vi.mock('@/features/plays/PlaysPage', () => {
 
 it('shows honest import failure guidance without replacing healthy hidden Plays or losing its draft', async () => {
   window.history.replaceState(null, '', '/#plays')
-  const api = { ...createWorkspaceApi('synthetic-only'), ...playApiStubs(), overview: vi.fn().mockResolvedValue(emptyOverview) }
+  const api = { ...createWorkspaceApi(credentialsFixture), ...playApiStubs(), overview: vi.fn().mockResolvedValue(emptyOverview) }
   const user = userEvent.setup()
-  render(<ApplicationShell system={systemFixture} api={api} disconnect={vi.fn()} />, { onCaughtError: () => {} })
+  render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} api={api} disconnect={vi.fn()} />, { onCaughtError: () => {} })
   await user.type(await screen.findByRole('textbox', { name: 'Draft title' }), 'Unsaved idea survives import failures')
   await user.click(screen.getByRole('button', { name: 'Local owner 0' }))
 

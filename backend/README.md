@@ -21,7 +21,7 @@ dotnet run --project backend/src/Vessel.Api       # launch profile: Development,
 dotnet run --project backend/src/Vessel.Worker
 ```
 
-The API and worker need `ConnectionStrings__Vessel` and `Vessel__Messaging__RabbitMqUri`. The database connection is resolved lazily, so `GET /health/live` and `GET /api/system` answer without one. Outside Development the API refuses to start without a 32+ character `Vessel__Auth__Token` and a connection string. Development OpenAPI is at `/openapi/v1.json` behind the same bearer. Production packaging, TLS and proxies are in [deploy/README.md](../deploy/README.md).
+The API and worker need `ConnectionStrings__Vessel`, `Vessel__Messaging__RabbitMqUri` and at least one `Vessel__Identity__Origins__<n>`. Sign-in is by Ethereum wallet only: `identity ensure-owner` and `identity bind-wallet` (offline commands of the API binary, run by `pnpm db:migrate` and `pnpm dev:identity`) give the configured owner a wallet. The database connection is resolved lazily, so `GET /health/live` answers without one. Outside Development the API refuses to start without a connection string, a non-default owner GUID and `https://` origins; `Vessel__Auth__Token`, or a `Vessel__Auth__Mode` other than `Wallet`, refuses startup everywhere. Development OpenAPI is at `/openapi/v1.json` behind the same session. Production packaging, TLS and proxies are in [deploy/README.md](../deploy/README.md).
 
 ## Testing
 
@@ -61,9 +61,9 @@ Secrets go in the process environment or an ignored local file, never in tracked
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `ConnectionStrings__Vessel` | none | PostgreSQL connection for the API, worker, migrations and offline commands. |
-| `Vessel__Auth__Token` | none | Bearer secret. Without it protected routes answer 401; outside Development the API will not start without 32+ characters. |
-| `Vessel__Auth__OwnerId` | `11111111-1111-1111-1111-111111111111` | Owner the token stands for; a non-empty GUID. The worker uses the same setting. |
-| `Vessel__Auth__OwnerName` | `Owner` | Display name of that owner. |
+| `Vessel__Auth__OwnerId` | `11111111-1111-1111-1111-111111111111` (Development only) | The installation owner: `identity ensure-owner` creates the operator user with this ID, so a journal from before wallet sign-in keeps its owner. Required outside Development, where the default GUID needs `Vessel__Identity__AllowLegacyDefaultOwner=true`. Every host uses the same setting. |
+| `Vessel__Auth__OwnerName` | `Owner` | Display name `ensure-owner` gives that user. |
+| `Vessel__Identity__Origins__<n>` | none | Exact page origins allowed to sign in and write; `https://` outside Development. Other `Vessel__Identity__*` settings (registration policy, session lifetimes, cookie names) are in [deploy/README.md](../deploy/README.md#identity-settings). |
 | `Vessel__Credentials__ActiveKeyId`, `Vessel__Credentials__Keys__<id>` or `Vessel__Credentials__KeyFile` | none | Key ring for encrypted venue tokens; see [venue credentials](../docs/architecture/venue-credentials.md). |
 | `Vessel__ForwardedHeaders__KnownProxies__<n>`, `__KnownNetworks__<n>`, `__ForwardLimit` | loopback only | Trusted reverse proxies; explicit settings replace the loopback default. |
 | `Vessel__Venues__<Venue>__BaseUrl` (and `Hyperliquid__StreamUrl`) | production hosts | Venue hosts for `Hyperliquid`, `Risex`, `Lighter`, `LighterRh`. |

@@ -193,7 +193,7 @@ public sealed class AdministrationTests
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["Vessel:Auth:Mode"] = "Wallet", ["Vessel:Auth:OwnerId"] = Guid.NewGuid().ToString(),
+            ["Vessel:Auth:OwnerId"] = Guid.NewGuid().ToString(),
             ["Vessel:Identity:Origins:0"] = "https://vessel.test", ["ConnectionStrings:Vessel"] = "Host=unused"
         }).Build();
         Assert.Equal(2, await IdentityCommands.RunAsync(args, config, true, new StringWriter()));

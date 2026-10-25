@@ -1,3 +1,4 @@
+import { credentialsFixture } from '@/test/identity-fixture'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -33,7 +34,7 @@ describe('Data export (phase 2, 5b)', () => {
   it('never reads facts in Paper mode', async () => {
     const fetch = vi.fn()
     vi.stubGlobal('fetch', fetch)
-    await expect(createWorkspaceApi('synthetic-token', undefined, 'paper').accountFacts(accountFixture.id, 'funding', null, null))
+    await expect(createWorkspaceApi(credentialsFixture, undefined, 'paper').accountFacts(accountFixture.id, 'funding', null, null))
       .rejects.toMatchObject({ kind: 'unavailable' })
     expect(fetch).not.toHaveBeenCalled()
   })

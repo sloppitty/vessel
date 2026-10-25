@@ -1,3 +1,4 @@
+import { credentialsFixture } from '@/test/identity-fixture'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -19,7 +20,7 @@ const weekly = (overrides: Partial<Week> = {}, document: Partial<ReviewDocument>
 function client(review: (query: ReviewQuery) => ReviewDocument) {
   const reviewProcess = vi.fn<WorkspaceApi['reviewProcess']>().mockResolvedValue({ items: [], total: 0, offset: 0, nextOffset: null })
   const api: WorkspaceApi = {
-    ...createWorkspaceApi('test'),
+    ...createWorkspaceApi(credentialsFixture),
     review: vi.fn((query: ReviewQuery) => Promise.resolve(query.week ? review(query) : reviewFixture)),
     reviewProcess,
     nextActions: vi.fn().mockResolvedValue([{ playId: reviewFixture.plays[0]!.id!, title: 'BTC breakout', nextAction: 'Wait for the retest.',
