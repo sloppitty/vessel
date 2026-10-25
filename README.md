@@ -10,8 +10,10 @@ backups and isolated restores.
 Both images use `skorcius/vessel` with `api-` and `web-` tags.
 Read the [v0.3.3 release notes](docs/releases/v0.3.3.md) before upgrading.
 The order-identity migration has no retained-data upgrade path when imported
-orders, fills or Play order links exist. Token sign-in remains the default;
-Wallet mode is opt-in and real-wallet acceptance is still pending.
+orders, fills or Play order links exist. Sign-in is by Ethereum wallet only
+and needs HTTPS; an installation that used the API token must bind the owner's
+wallet before upgrading (see the deployment guide). Real-wallet acceptance is
+still pending.
 
 This repository contains the approved Graphite prototype and the React/Vite/TypeScript plus modular ASP.NET Core 10/PostgreSQL application. The default page is Overview. The app includes account/portfolio management, saved Plays and bounded read-only Hyperliquid, Lighter, Lighter · Robinhood and RISEx integration. The disposable prototype is separate from the application.
 

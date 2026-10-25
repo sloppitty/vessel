@@ -1,5 +1,9 @@
 # Multi-user wallet sign-in — delivery state
 
+October 25, 2026: Token sign-in was removed; see
+[Wallet-only sign-in](#wallet-only-sign-in--october-25-2026). The rest of this
+page records the October 18 delivery as it was verified then.
+
 October 18, 2026. P4 rebased onto D1 `a336bb3` (the integrated A1 → B1 → A2 →
 B2 → C1 → D1 stack on main `43ebaa0`), on `t3/mu-p4-deploy-docs`. This is implementation/verification
 state, not a merged release, a published image or a deployed installation.
@@ -341,6 +345,48 @@ packages were installed. Playwright's Firefox installer pruned the older shared 
 the supplied revision-1243 Chromium/headless-shell caches were restored from the
 official download, and the supplied shell launched and ran the smoke successfully.
 
+## Wallet-only sign-in — October 25, 2026
+
+The owner asked to remove the Token sign-in and keep wallets only, verified by
+Sol (Codex) reviews before the pull request. Branch `t3/remove-token-authentication`.
+
+- **API and hosts.** The bearer scheme, its wrong-token limiter and
+  `VesselAuthOptions` are deleted. `AddVesselIdentityDirectory` always replaces
+  the owner directory with `IdentityOwnerDirectory`; `AddVesselIdentityApi`
+  always registers the session scheme, `SessionPrincipal` stream validity and
+  the private fallback authorization policy (workers no longer register
+  authorization, so they also validate in Development). `IdentitySettings`
+  always applies the former Wallet-mode rules; `Vessel:Auth:Token` set, or a
+  `Vessel:Auth:Mode` other than `Wallet`, refuses the API, workers,
+  `check-config` and identity commands, naming the setting only. Readiness
+  always requires an active operator with a bound wallet. `/api/auth/config`
+  answers `{registration, originAccepted}`. The session principal's
+  authentication type is now `VesselSession`. `ConfiguredOwnerDirectory` and
+  `AlwaysValidPrincipal` moved to the test project. No migration.
+- **Browser.** `ApiCredentials` is `session | public`; the token connection
+  screen, the Token owner card and Settings panel are removed and the shell
+  always has an identity.
+- **Deploy and scripts.** `compose.yaml` carries the identity settings for
+  migrate, API and both workers (`VESSEL_IDENTITY_ORIGIN` required,
+  registration `Closed` by default); `compose.wallet.yaml` is removed and
+  `deploy/migrate` relies on `check-config`. The README has a Token-to-wallet
+  upgrade path that keeps the owner GUID. `scripts/dev.py` applies identity
+  migrations and `ensure-owner`, defaults the origin to the Vite page, runs dev
+  workers as Development and adds `pnpm dev:identity`. Release, storage and
+  end-to-end checks sign in with a synthetic EOA.
+- **Tests.** API tests authenticate through a test-only header scheme that
+  forwards to the real session scheme when its header is absent, with a fixed
+  single-owner directory where no identity schema exists. The isolation suite
+  keeps its two hosts (test scheme and real wallet sessions), which now map
+  identical routes.
+
+Verification (throwaway PostgreSQL 18 and RabbitMQ 4.3.6 containers, never the
+owner's database): full backend suite with `Vessel_TEST_POSTGRES`, then the
+broker-gated classes with `Vessel_TEST_EVENT_RABBIT`; frontend typecheck, lint
+and the full vitest suite (176 files, 4,087 tests); `scripts` unit tests.
+§10 is unchanged: still **not signed off**; the real-wallet/non-mainnet EOA
+check remains owner-pending and registration stays `Closed` by default.
+
 ## Deliberate limits and remaining work
 
 - The timing-sensitive frontend comparison in
@@ -348,9 +394,10 @@ official download, and the supplied shell launched and ran the smoke successfull
   fixtures built a millisecond apart) is fixed on old D1 `08d07e7` (now integrated at `a336bb3`): the unchanged
   signing state is now compared with the same fixture. P4 changed no
   frontend source; its only backend change is the `check-config` command.
-- The development runner from main is retained; use the packaged `/app/migrate`
-  sequence for the verified identity/journal/bootstrap path and the explicit
-  Wallet overlay for deployment. No automatic installation migration is added.
+- The development runner applies the identity and journal migrations and
+  `ensure-owner` (`pnpm db:migrate`), and binds a development wallet only through
+  the explicit `pnpm dev:identity bind-wallet …`. No automatic installation
+  migration is added.
 - No WalletConnect, smart-contract wallet verification, user/journal deletion,
   admin journal browsing or venue signing/trading.
 - Public market-data backoff and Lighter's process-local semaphore are not a
