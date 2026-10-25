@@ -113,6 +113,16 @@ export function mix(a: string, b: string, weight: number) {
   return `#${x.map((value, i) => Math.round(value * weight + y[i]! * (1 - weight)).toString(16).padStart(2, '0')).join('')}`
 }
 
+/** The navigation surface (`--sidebar`): halfway between the page and the panels. */
+export const sidebarColor = (colors: Pick<ThemeColors, 'background' | 'card'>) => mix(colors.background, colors.card, 0.5)
+
+type PaperColors = Pick<ThemeColors, 'background' | 'card' | 'mutedForeground' | 'warning'>
+/** Paper mode's ink (`--paper-ink` in styles.css): caution softened toward secondary text. */
+export const paperInk = (colors: PaperColors) => mix(colors.warning, colors.mutedForeground, 0.72)
+/** Where Paper mode writes that ink: the page, the navigation and the Paper strip (`--paper-wash`, 9% warning, over the page). */
+export const paperSurfaces = (colors: PaperColors) =>
+  ({ background: colors.background, navigation: sidebarColor(colors), 'the Paper strip': mix(colors.warning, colors.background, 0.09) })
+
 export function luminance(hex: string) {
   const [r, g, b] = channels(hex).map(value => value / 255).map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
   return r! * 0.2126 + g! * 0.7152 + b! * 0.0722
@@ -142,5 +152,8 @@ export function contrastChecks(colors: ThemeColors): ContrastCheck[] {
   const warningPopup = mix(colors.warning, colors.card, 0.07)
   checks.push({ label: 'Text on warning popups', ratio: contrastRatio(colors.foreground, warningPopup), minimum: 4.5 })
   checks.push({ label: 'Warning mark on warning popups', ratio: contrastRatio(colors.warning, warningPopup), minimum: 3 })
+  // Paper mode's chrome (sidebar subtitle, header mark, Paper strip title) is written in the derived Paper ink.
+  const ink = paperInk(colors)
+  for (const [surface, background] of Object.entries(paperSurfaces(colors))) checks.push({ label: `Paper mode ink on ${surface}`, ratio: contrastRatio(ink, background), minimum: 4.5 })
   return checks
 }

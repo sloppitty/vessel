@@ -22,9 +22,16 @@ Vite listens on `http://127.0.0.1:5180` and proxies `/api` and `/health` to
 VESSEL_API_TARGET=http://127.0.0.1:5081 pnpm dev:web
 ```
 
-`VESSEL_API_TARGET` is a server-only proxy setting, not a token. See the
+`VESSEL_API_TARGET` is a server-only proxy setting, not a credential. See the
 [development instructions](../README.md) for starting the API. Installing,
 checking or building the frontend does not require a database or venue access.
+
+Vessel signs in with an Ethereum wallet (EOA) only. The first screen asks the
+API for its registration policy, then probes the session cookie and shows wallet
+sign-in when there is none. Locally, the API's `Vessel:Identity:Origins` must
+list the page's origin (for example `http://127.0.0.1:5180`, allowed over HTTP
+in Development only), and your wallet address must be bound to the owner with
+the offline `identity bind-wallet` command.
 
 ## Check
 
@@ -44,8 +51,10 @@ for browser evidence and remaining gaps.
 
 ## Security
 
-- Keep the owner bearer token in the session client closure only. Never put it
-  in URLs, browser storage, frontend environment variables or logs.
+- Sessions ride the API's `HttpOnly` cookie; the browser only binds each request
+  to its user with `X-Vessel-User`. Never put session or wallet secrets in URLs,
+  browser storage, frontend environment variables or logs. Vessel only asks the
+  wallet to sign a text message, never a transaction.
 - Owner financial responses use `no-store`. The candle cache is session-only
   and must not survive reload, disconnect or API replacement.
 - Use the same-origin API for venue reads. The production browser must not call
