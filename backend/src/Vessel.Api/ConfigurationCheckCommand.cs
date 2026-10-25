@@ -40,12 +40,12 @@ public static class ConfigurationCheckCommand
             // Program.cs order: production settings outside Development, then the identity settings every host resolves.
             if (!development) ProductionConfiguration.Validate(configuration);
             var settings = IdentitySettings.Read(configuration, development);
-            if (settings.WalletMode && settings.LegacyOwnerOverride && settings.OwnerId == Vessel.Application.Ownership.JournalOwner.Default)
+            if (settings.LegacyOwnerOverride && settings.OwnerId == Vessel.Application.Ownership.JournalOwner.Default)
                 output.WriteLine("Warning: Vessel:Identity:AllowLegacyDefaultOwner permits the legacy default owner.");
             // Accepted by the code, but the delivery contract (§13) leaves them undocumented until per-user quotas exist.
-            if (settings.WalletMode && settings.Registration is "AllowList" or "Open")
+            if (settings.Registration is "AllowList" or "Open")
                 output.WriteLine($"Warning: Vessel:Identity:Registration={settings.Registration} is unsupported until per-user quotas exist; use Closed or Invitation.");
-            output.WriteLine($"Configuration is valid for {(settings.WalletMode ? "Wallet" : "Token")} mode.");
+            output.WriteLine("Configuration is valid for wallet sign-in.");
             return 0;
         }
         catch (Exception error) when (error is InvalidOperationException && error.Source is "Vessel.Api" or "Vessel.Identity")

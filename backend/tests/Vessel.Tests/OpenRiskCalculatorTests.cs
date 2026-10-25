@@ -46,6 +46,22 @@ public sealed class OpenRiskCalculatorTests
         Assert.Equal("33.3333333333333333333333333333", repeating.Risk.Value.ToString());
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("0")]
+    [InlineData("101")]
+    [InlineData("1.5")]
+    [InlineData("01")]
+    [InlineData(" 1")]
+    public void Unfinished_or_invalid_leverage_cannot_produce_a_numeric_preview(string leverage)
+    {
+        var plan = Plan(sizing: "margin", size: "100", leverage: leverage,
+            entries: Entry("e1", "100", "100", Stop("10", unit: "percent")));
+        var result = OpenRiskCalculator.Calculate(plan, [], true);
+        Assert.Equal((null, OpenRiskCalculator.NoQuantity),
+            (result.Risk, result.Reason));
+    }
+
     [Fact]
     public void A_managed_stop_at_or_beyond_the_fill_adds_nothing_and_never_offsets_another()
     {

@@ -5,8 +5,7 @@ using Vessel.Application.Common;
 namespace Vessel.Identity;
 
 /// <summary>
-/// Read-only startup warm-up: builds the Identity model and, in Wallet mode, runs the cookie-session and sign-in lookup
-/// shapes once and recovers a fixed public signature. Lookups use a never-issued token, a fresh random ID and the zero
+/// Read-only startup warm-up: builds the Identity model and runs the cookie-session and sign-in lookup shapes once and recovers a fixed public signature. Lookups use a never-issued token, a fresh random ID and the zero
 /// address, so they match nothing. It never issues or consumes a challenge or session, never saves, and keeps no
 /// result, so every request still authenticates against the database.
 /// </summary>
@@ -23,14 +22,12 @@ public static class IdentityWarmup
     /// <summary>Runs inside a caller-owned scope; the steps are named for the caller's safe failure log.</summary>
     public static async Task RunAsync(IServiceProvider services, Func<string, Func<Task>, Task> step, CancellationToken ct)
     {
-        var settings = services.GetRequiredService<IdentitySettings>();
         var contexts = services.GetRequiredService<IDbContextFactory<IdentityDbContext>>();
         await step("identity-model", async () =>
         {
             await using var db = await contexts.CreateDbContextAsync(ct);
             _ = db.Model;
         });
-        if (!settings.WalletMode) return;
         await step("identity-sessions", async () =>
         {
             var sessions = services.GetRequiredService<SessionStore>();

@@ -7,15 +7,14 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Vessel.Tests.Isolation;
 
 /// <summary>
-/// Every route mapped by the Token-mode and the Wallet-mode host is either named by a two-owner isolation case
-/// (<see cref="CoversAttribute"/>) or listed below, exactly, with the reason it holds no owner data. A new route fails
-/// this test until someone decides which it is. Each host is inventoried as it starts: Token mode maps a catch-all in
-/// place of the session routes, so only the Wallet-mode host shows them.
+/// Every route the API maps is either named by a two-owner isolation case (<see cref="CoversAttribute"/>) or listed
+/// below, exactly, with the reason it holds no owner data. A new route fails this test until someone decides which it
+/// is. Both suite hosts (the test scheme and real wallet sessions) are inventoried as they start and map the same routes.
 /// </summary>
 public sealed class EndpointInventoryTests(IsolationApi api, WalletIsolationApi wallet)
     : IClassFixture<IsolationApi>, IClassFixture<WalletIsolationApi>
 {
-    /// <summary>Routes of both hosts without owner-scoped data. Each entry says why.</summary>
+    /// <summary>Routes without owner-scoped data. Each entry says why.</summary>
     private static readonly Dictionary<string, string> Exempt = new()
     {
         // Anonymous liveness: a constant body, no database, no owner.
@@ -24,20 +23,8 @@ public sealed class EndpointInventoryTests(IsolationApi api, WalletIsolationApi 
         ["GET /health/ready"] = "anonymous health",
         // Development-only OpenAPI document: the API's shape, generated from code, never owner data.
         ["GET /openapi/{documentName}.json"] = "development API description",
-        // The mode and, in Wallet mode, the effective registration policy and an origin hint; anonymous by design.
+        // The effective registration policy and an origin hint; anonymous by design.
         ["GET /api/auth/config"] = "public auth configuration",
-    };
-
-    /// <summary>Routes only the Token-mode host maps.</summary>
-    private static readonly Dictionary<string, string> TokenExempt = new()
-    {
-        // Every other auth path answers 404 not-found in Token mode, anonymous requests included; no handler reads data.
-        ["* /api/auth/{**rest}"] = "Token-mode auth catch-all",
-    };
-
-    /// <summary>Routes only the Wallet-mode host maps.</summary>
-    private static readonly Dictionary<string, string> WalletExempt = new()
-    {
         // Public sign-in routes run before any session and are anonymous by design (contract §6, §7). They read users,
         // wallets and the allow-list only after a valid signature and return only the signer's own session.
         ["POST /api/auth/challenge"] = "public sign-in",
@@ -60,30 +47,24 @@ public sealed class EndpointInventoryTests(IsolationApi api, WalletIsolationApi 
         .SelectMany(method => method.GetCustomAttributes<CoversAttribute>()).Select(covers => covers.Route).ToHashSet(StringComparer.Ordinal);
 
     [PostgresFact]
-    public void Every_route_of_both_modes_is_covered_or_exactly_exempt()
+    public void Every_route_is_covered_or_exactly_exempt()
     {
-        var token = Routes(api.Factory.Services);
-        var walletRoutes = Routes(wallet.Factory.Services);
+        var routes = Routes(wallet.Factory.Services);
         var covered = Covered();
-        Assert.NotEmpty(token);
-        foreach (var (mode, routes, exempt) in new[] { ("Token", token, TokenExempt), ("Wallet", walletRoutes, WalletExempt) })
-        {
-            var missing = routes.Where(route => !covered.Contains(route) && !Exempt.ContainsKey(route) && !exempt.ContainsKey(route)).ToList();
-            Assert.True(missing.Count == 0, $"{mode}-mode routes without an isolation case or exemption:\n" + string.Join("\n", missing));
-            // A mode's exemption must name a route that mode maps.
-            var unmapped = exempt.Keys.Concat(Exempt.Keys).Where(route => !routes.Contains(route)).ToList();
-            Assert.True(unmapped.Count == 0, $"{mode}-mode exemptions for routes it does not map:\n" + string.Join("\n", unmapped));
-        }
-        // Stale names would claim coverage of a route that neither mode maps.
-        var stale = covered.Where(route => !token.Contains(route) && !walletRoutes.Contains(route)).ToList();
+        Assert.NotEmpty(routes);
+        // The test scheme only stands in for sessions: both hosts map exactly the same routes.
+        Assert.Equal(routes, Routes(api.Factory.Services));
+        var missing = routes.Where(route => !covered.Contains(route) && !Exempt.ContainsKey(route)).ToList();
+        Assert.True(missing.Count == 0, "Routes without an isolation case or exemption:\n" + string.Join("\n", missing));
+        // An exemption must name a mapped route.
+        var unmapped = Exempt.Keys.Where(route => !routes.Contains(route)).ToList();
+        Assert.True(unmapped.Count == 0, "Exemptions for routes that are not mapped:\n" + string.Join("\n", unmapped));
+        // Stale names would claim coverage of a route that is not mapped.
+        var stale = covered.Where(route => !routes.Contains(route)).ToList();
         Assert.True(stale.Count == 0, "Coverage for routes that are not mapped:\n" + string.Join("\n", stale));
-        // Outside /api/auth both modes map the same journal routes, so the journal cases cover both.
-        static IEnumerable<string> Journal(IEnumerable<string> routes) =>
-            routes.Where(route => !route[(route.IndexOf(' ') + 1)..].StartsWith("/api/auth/", StringComparison.Ordinal));
-        Assert.Equal(Journal(token), Journal(walletRoutes));
-        // Every session route exists only in Wallet mode and is covered there, never exempt.
-        var session = walletRoutes.Where(route => route[(route.IndexOf(' ') + 1)..].StartsWith("/api/auth/", StringComparison.Ordinal) &&
-            !Exempt.ContainsKey(route) && !WalletExempt.ContainsKey(route)).ToList();
+        // Every session route is covered by two-user cases, never exempt.
+        var session = routes.Where(route => route[(route.IndexOf(' ') + 1)..].StartsWith("/api/auth/", StringComparison.Ordinal) &&
+            !Exempt.ContainsKey(route)).ToList();
         Assert.Equal(SessionRoutes.Order(StringComparer.Ordinal), session);
         Assert.All(session, route => Assert.Contains(route, covered));
     }
@@ -112,12 +93,12 @@ public sealed class EndpointInventoryTests(IsolationApi api, WalletIsolationApi 
     }
 
     [PostgresFact]
-    public async Task Bearer_path_is_not_used_and_requests_without_an_owner_are_rejected()
+    public async Task Bearer_credentials_are_ignored_and_requests_without_an_owner_are_rejected()
     {
         using var anonymous = api.Factory.CreateClient();
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/portfolios")).StatusCode);
-        // The configured token would authenticate the default scheme of other API tests; here it is ignored.
-        anonymous.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CoreApiFactory.Token);
+        // Token sign-in was removed: a bearer header authenticates nobody.
+        anonymous.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-only-retired-bearer-secret");
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/portfolios")).StatusCode);
         using var invalid = api.Factory.CreateClient();
         invalid.DefaultRequestHeaders.Add(TestOwnerAuthHandler.Header, Guid.Empty.ToString("D"));
@@ -136,9 +117,9 @@ public sealed class EndpointInventoryTests(IsolationApi api, WalletIsolationApi 
             Assert.Equal(owner.Id, (await owner.GetJson("/api/auth/session")).GetProperty("user").GetProperty("id").GetGuid());
         }
         Assert.NotEqual(a.Id, b.Id);
-        // No bearer scheme is registered in Wallet mode: the configured test token authenticates nobody.
+        // No bearer scheme is registered: a bearer header authenticates nobody.
         using var bearer = wallet.Client();
-        bearer.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CoreApiFactory.Token);
+        bearer.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-only-retired-bearer-secret");
         Assert.Equal(HttpStatusCode.Unauthorized, (await bearer.GetAsync("/api/portfolios")).StatusCode);
     }
 }

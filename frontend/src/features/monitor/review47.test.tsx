@@ -13,6 +13,7 @@ import { useMonitorEvents } from '@/features/workspace/useMonitorEvents'
 import { AccountDetail } from '@/features/workspace/AccountDetail'
 import { usePlayExecution } from '@/features/plays/usePlayExecution'
 import { MonitorPanel } from './MonitorPanel'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 vi.mock('@/features/workspace/ActivityOperations', () => ({ ActivityOperations: () => null }))
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
@@ -95,7 +96,7 @@ describe('finding 7: 429 on Check', () => {
   it('shows a specific admission message instead of the generic fallback', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ title: 'This account check is running or cooling down.', status: 429 }),
       { status: 429, headers: { 'Retry-After': '30', 'Content-Type': 'application/problem+json' } })))
-    const failure = await createWorkspaceApi('test').runAccountMonitor(accountFixture.id).catch(error => error)
+    const failure = await createWorkspaceApi(credentialsFixture).runAccountMonitor(accountFixture.id).catch(error => error)
     expect(failure.message).not.toBe('The request could not be completed.')
   })
 })

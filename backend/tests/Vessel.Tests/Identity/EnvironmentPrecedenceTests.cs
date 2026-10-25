@@ -45,7 +45,7 @@ public sealed class EnvironmentPrecedenceTests
         }
         foreach (var argument in new[]
         {
-            "--Vessel:Auth:Mode=Wallet", "--Vessel:Auth:Token=", $"--Vessel:Auth:OwnerId={JournalOwner.Default}",
+            $"--Vessel:Auth:OwnerId={JournalOwner.Default}",
             "--Vessel:Identity:AllowLegacyDefaultOwner=false", "--Vessel:Identity:Origins:0=http://localhost",
             "--ConnectionStrings:Vessel=", "--Vessel:Messaging:RabbitMqUri="
         }) start.ArgumentList.Add(argument);

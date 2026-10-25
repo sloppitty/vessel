@@ -38,6 +38,12 @@ describe('Built-in themes', () => {
     for (const check of checks) expect(check.ratio, check.label).toBeGreaterThanOrEqual(check.minimum)
   })
 
+  it.each(themes.map(theme => [theme.name, theme] as const))('%s keeps Paper mode ink readable on the page, navigation and Paper strip', (_name, theme) => {
+    const checks = contrastChecks(theme.colors).filter(check => check.label.startsWith('Paper mode ink'))
+    expect(checks.map(check => check.label)).toEqual(['Paper mode ink on background', 'Paper mode ink on navigation', 'Paper mode ink on the Paper strip'])
+    for (const check of checks) expect(check.ratio, check.label).toBeGreaterThanOrEqual(4.5)
+  })
+
   it('applies Graphite tokens when nothing is stored', () => {
     expect(root.dataset.theme).toBe('graphite')
     expect(token('--background')).toBe('#0f1114')
