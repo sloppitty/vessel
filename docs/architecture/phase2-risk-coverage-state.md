@@ -701,11 +701,11 @@ October 23, 2026.
   Against PostgreSQL: the store reading markers and moving the revision; only the newest forced events loaded,
   with the rest counted; and a retrospective preview and confirmation refused across an omission Activity
   reports.
-- **Open question for the owner.** A marker on a market Vessel does not recognize breaks only the partition
-  keyed by its native ID. An older partition of the same market listed under another key (for example a
-  retired RISEx market whose old fills say `BTC` with no native ID) is not broken. Breaking every ID-less
-  partition of the account would close that, but then any marker on an unrecognized Hyperliquid market would
-  break every ordinary coin.
+- **Unrecognized markets (owner answer, October 23).** A marker on a market Vessel does not recognize breaks only
+  the partition keyed by its native ID. An older partition of the same market listed under another key (for
+  example a retired RISEx market whose old fills say `BTC` with no native ID) is not broken. Breaking every
+  ID-less partition of the account would close that, but any marker on an unrecognized Hyperliquid market would
+  then break every ordinary coin. The owner chose not to break them, so the rule stays as built.
 - **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `af35eb75`. Six findings, all fixed in
   `779efaed`:
   - A fill inside an omission's uncertainty window could prove flatness or a
@@ -975,7 +975,8 @@ October 21, 2026.
   ticks, the page budget), the keyset continuation against PostgreSQL, the Wallet-mode isolation case, the
   interval bounds and the reviewed SQL inventory.
 - **Migration.** It is applied explicitly, never to the owner's database.
-- **Open questions for the owner.**
+- **Owner answer (October 23).** Funding matters for the final figures, not in between, so the schedule stays as
+  built on every point below.
   - A run that stops at the read limit waits a full interval even while coverage is partial; the backfill
     brings its next run forward instead.
   - A Refresh does not push the scheduled read back.
@@ -1152,7 +1153,7 @@ October 23, 2026.
   - The allocated cases of `PlayFundingPostgresTests`, owner isolation, the paper refusal and the inventories.
   - In the browser: the dialog's live remainder, fee split, bounds and errors, older pages, and the panel.
 - **Migration.** It is applied explicitly, never to the owner's database.
-- **Open questions for the owner.**
+- **To revisit (owner, October 23).** These choices stay as built and are recorded to revisit later.
   - An allocation is allowed on a fill whose order is linked to no Play. A flip order can never be linked, and an
     order links to one Play only.
   - Fee precision follows the reported fee's own decimals, at least 6; there is no per-token table.
@@ -1163,9 +1164,11 @@ October 23, 2026.
   - Any allocated fill in a funding proof's span makes funding "shared", even before the Play's window.
   - The revisions are kept but not shown, and the migration's `Down` refuses while allocations exist.
   - Entries alone go beyond the contract's wording. They are limited to later opening fills of an order a flip
-    already split. Confirm this, or choose another way to attribute those executions.
+    already split; the alternatives are counting them for the Play that took the entry, or refusing a flip split
+    while its order still rests.
   - A shared exit does not split its order, so the order's other fills still count wholly for the Play holding
-    the link. Should it?
+    the link. A mismatch shows as an over-exit; splitting the order would make every later fill wait for an
+    allocation.
   - Each page offers at most 200 Plays for a new line.
 - **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `e7267e40`. Four findings, all fixed in
   `8148cfb6`:
@@ -1413,3 +1416,81 @@ October 21, 2026.
   - per-Play subjects, under which a replaced undersized stop rightly continues the sequence;
   - the tests and docs.
 - **Check.** `scripts/check.sh` passed on `9dd2b8ed`: backend 4,268 passed, 5 skipped; frontend 186 files and 4,141 tests.
+
+**14d. Benchmark.** Implemented on `t3/phase2-benchmark`.
+- **The script.** `scripts/benchmark.py` (Python standard library, with `scripts/test_benchmark.py`, plus the
+  external synthetic wallet signer). See the "Phase 2
+  benchmark (item 14d)" section of `performance-plan.md`.
+  - It runs only with `--disposable`, never under CI, never reads `.env` and takes no connection string.
+  - It starts its own labelled PostgreSQL 18 and RabbitMQ containers with per-run secrets passed through the
+    environment, migrates explicitly in `deploy/migrate`'s order, binds a synthetic operator wallet, and starts
+    the Release API in Production/Wallet mode over loopback HTTPS without worker modules. The ephemeral
+    certificate is trusted explicitly and reads use the real authenticated session. Cleanup removes everything
+    carrying the run's label, after errors and signals
+    too.
+- **The dataset.** It is deterministic from `--seed` and `--anchor`, and scaled by `--years` and `--scale`. It is
+  seeded in one COPY transaction, with every constraint and trigger, then the search projection is rebuilt.
+  - One owner with four portfolios and ten accounts across Hyperliquid, Lighter and RISEx, one disabled.
+  - Round trips, flips and partial fills, with funding, snapshots, leverage and risk observations.
+  - Plays in every status, with plans, links, reviews, log entries, evidence notes and if-then rules.
+  - Omission markers, forced events, coverage records, gaps, backfills and import conflicts.
+- **Historical Token-mode full run** (before wallet-only main; these timings have not been remeasured for
+  Wallet authentication): (`--years 3 --scale 1 --warmup 5 --rounds 20 --anchor 2026-10-23T12:00Z`), on `00cb8ceb`, on a
+  Ryzen 5 7640HS with 10 CPUs and 20 GB (13 GB free), in about 10 minutes.
+  - **The data.** 184,047 rows: 48,745 fills, 52,147 orders, 58,951 funding payments and 774 Plays. Activity
+    aggregates the 45,928 fills of enabled accounts into 15,532 operations.
+  - **Peaks.** The API's peak RSS was 1,016 MB and PostgreSQL's 170 MiB.
+  - **The method.** Times are ms to the last body byte. "After write" is the first read after a committed no-op
+    write moves the facts revision. Cached repeats are estimated hits at about 128 MiB of the 256 MiB cache.
+
+  | Read | p50 | p95 | After write p50 |
+  | --- | ---: | ---: | ---: |
+  | Activity, page 1 | 8.4 | 10.1 | 640.6 |
+  | Activity, page 79 of 100 rows | 8.8 | 10.4 | 611.1 |
+  | Activity, closed longs in 90 days | 8.5 | 13.1 | 653.1 |
+  | Activity, one operation's executions | 1.9 | 2.0 | 87.4 |
+  | Review, all | 1,577.7 | 1,649.3 | – |
+  | Review, year | 616.3 | 654.9 | – |
+  | Review, all with imported positions | 3,506.4 | 3,574.1 | 4,134.8 |
+  | Plays, All / In progress | 3.7 / 2.5 | 4.5 / 4.0 | – |
+  | Plays, Closed page 12 / counts / `q=BTC` | 3.2 / 1.4 / 3.0 | 4.4 / 1.8 / 4.5 | – |
+  | Overview | 12.3 | 13.2 | – |
+  | Overview summary by portfolio, all | 25.0 | 27.2 | 616.7 |
+  | Overview summary by account, 30 days | 12.1 | 12.7 | 609.9 |
+  | Open risk | 9.5 | 10.4 | – |
+  | Journal search: common word / offset 300 / rare word | 26.5 / 29.1 / 7.0 | 27.6 / 30.9 / 7.9 | – |
+- **What it shows.**
+  - Review is the slowest read: it is not cached, about 1.6 s over all time and 3.5 s with imported positions,
+    which also rebuild the Activity aggregate after a write (4.1 s).
+  - An Activity aggregate after a write takes about 0.6 s, and its cached repeats stay under 15 ms.
+  - The Plays list, Overview, open risk and search stay under 30 ms.
+  - No change is made here; caching Review is a candidate for later work.
+- **Not covered.** Monitor tables, events and notifications, manual executions, retrospective Plays,
+  allocations and most paper data are not seeded. Review's process, exclusion and CSV views, the week page,
+  and scoped Activity and Overview are not timed.
+- **Tests.** `test_benchmark.py` (29 after the October 25 wallet update): the generator's shape, determinism and order-before-fill times, the
+  percentiles, the safety guard, cleanup after an interrupted or failed start, the cache estimate, and deep-page
+  selection and rejection. They need no Docker.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `9baf1409`. Four findings, all fixed in
+  `00cb8ceb`:
+  - A container that Docker created before an error or a signal interrupted
+    its start was never tracked, so cleanup could leave it running. Each name
+    is now recorded before its start, and cleanup also removes every
+    container carrying the run's label, after checking the label.
+  - The repeat request after a miss was always reported as a cache hit,
+    though the Activity cache refuses an aggregate larger than its capacity,
+    as at large scales. The API exposes no cache diagnostics, so the report
+    now shows the first read after the write apart from the repeat, and a
+    Cache column estimated from the rows by the cache's own size rule: hit,
+    unconfirmed or not cached.
+  - The deep-page checks accepted empty or clamped pages, so a small dataset
+    timed page 1 or an empty page as a deep one. Each deep page is now the
+    middle page by the counts the API reports, must come back as requested
+    and with rows, and is skipped, by name, when the dataset cannot fill it.
+  - Some generated executions preceded their order's placement. Fill times
+    now come first, and the order is placed before its earliest fill.
+
+  Sol confirmed database isolation and secret handling, the timing
+  arithmetic (interleaving, warm-up exclusion and percentiles), determinism,
+  and that nothing runs in CI or needs Docker in the unit tests.
+- **Check.** `scripts/check.sh` passed on `00cb8ceb`: backend 4,314 passed, 5 skipped; frontend 189 files and 4,160 tests.
