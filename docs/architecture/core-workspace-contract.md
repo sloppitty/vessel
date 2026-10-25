@@ -213,6 +213,30 @@ Accounts were told apart by name only, so "main" on Hyperliquid and "main" on RI
 - **Account picker** (`AccountPicker`): replaces the native select for the Activity account filter, the Review account filter and the Overview scope (portfolios and Unassigned as grouped choices above the accounts). The trigger shows the logo and name, plus the source chip only when the name is blank or shared with another listed account (trimmed, case-insensitive). The popover (Radix Popover) has a search field over name, venue, source and portfolio, venue filter chips, rich rows with balance and portfolio, and a result count. Keyboard: arrow keys open and move, Enter chooses, Escape closes and returns focus to the trigger. The trigger is named by its field label followed by the value; options are named "name, venue, source, portfolio". Review reads sources from the shell's accounts because its own options do not carry them. The other selects stay `NativeSelect`.
 - **Account select** (`AccountSelect`, October 18): the same picker for choosing exactly one account in a form, used by the Play editor's Account field. It offers no aggregate choices (All accounts, portfolios), its trigger adds the venue tag beside the name (replacing the venue badge that sat beside the label; a trigger narrower than about 200px drops the tag and keeps the logo so the name stays readable), it is disabled when there is nothing to choose, and a value missing from the list reads as an explicit label ("Unavailable or disabled account" on a fixed Play). The Play editor uses the bare density to sit level with the Portfolio select; the Portfolio filter still narrows its list, and an account can be changed but not cleared. Options carry `data-value` for browser automation.
 
+## October 21, 2026: open risk
+
+Phase 2, item 1 (see `phase2-risk-coverage-contract.md`). In real mode an "Open
+risk" tile follows the existing metric tiles for the selected scope, so
+Allocation stays between the tiles and Summary.
+- It shows long and short open risk as shares of the scope's balance, or in
+  nominal USD without one. They are never netted.
+- It shows the unknown count, and the Plays not included (Paused,
+  Unresolved).
+- Open venue Plays are counted from 0.4c's recorded coverage: only confirmed
+  absence is "not covered at the venue"; unknown, unsupported, stale and
+  unchecked coverage are "unverified".
+- When only some accounts report a balance, shares say they divide by the
+  known balances of N of M accounts.
+- With an owner soft limit set, it says whether the total (long plus short)
+  is over it.
+- Its notice, in an `InfoTip`, states the rule.
+
+`GET /api/risk/open?scope=` takes the same scopes as the Overview summary and
+reads only enabled real accounts. Paused and Unresolved Plays are counted as
+not included. Paper requests get 409. The limit is stored per owner on the
+server by `GET`/`PUT /api/risk/settings`, blank by default. Settings has a
+"Risk limits" panel for it.
+
 ## October 24, 2026: shell header, breadcrumb trail and mode banner
 
 - The shell has a sticky, blurred header at every width. Its small breadcrumb

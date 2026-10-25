@@ -7,6 +7,8 @@ import { useVenues } from '@/api/venues'
 import { AccountSelect } from '@/components/accounts/AccountSelect'
 import { Input } from '@/components/ui/input'
 import { InfoTip } from '@/components/ui/info-tip'
+import { OpenRiskLine } from './OpenRiskLine'
+import { openRiskReadable } from './open-risk'
 import type { DraftEvidence, PlayDraft } from './draft'
 import { captureFileName, createEvidence, evidenceLimits } from './evidence'
 import { DirectionToggle } from './DirectionToggle'
@@ -41,7 +43,7 @@ import '@/features/monitor/incidents.css'
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, revision = null,
   lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, sizingStatus = 'ready', onRetrySizing, onRiskChange,
   filledEntries, fills: entryFills, onUnits, onPriceStep, retrospective = false, incidents, stopEvidence, evidenceImages,
-  reviewReceipt, journalSave, retrospectiveReceipt, plannedAfterExecution = false, onPreflight, nextActions, onOpenPlay, log, reviewCompletion, mistakeTags, chartFills }: {
+  reviewReceipt, journalSave, retrospectiveReceipt, plannedAfterExecution = false, onPreflight, nextActions, onOpenPlay, log, reviewCompletion, mistakeTags, chartFills, playId = null, openRiskKey }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -111,6 +113,10 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   mistakeTags?: readonly string[] | undefined
   /** The Play's fills to mark on the chart (phase 1, 1.1b). */
   chartFills?: readonly ChartFill[] | undefined
+  /** The saved Play, whose executions its open risk counts; null for an unsaved Draft. */
+  playId?: string | null
+  /** Changes when the saved Play or the page reloads, so open risk is read again. */
+  openRiskKey?: unknown
 }) {
   const paper = api.tradingMode === 'paper'
   const fieldId = useId()
@@ -302,7 +308,9 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
     </fieldset>
     {!retrospective && <PlanNotices draft={draft} onChange={onChange} readOnly={readOnly} lockDirection={lockDirection} maxLeverage={maxLeverage} maintenanceMargin={maintenanceMargin}
       filledEntries={filled} />}
-    <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} retrospective={retrospective} />
+    <CapitalContext accounts={enabledAccounts} portfolios={portfolios} draft={{ ...draft, accountId }} retrospective={retrospective}
+      {...(!paper && !retrospective && ['draft', 'planned', 'paused', 'open'].includes(status) && openRiskReadable(api) ? { openRisk: (scope: string, reference: string) =>
+        <OpenRiskLine api={api} scope={scope} reference={reference} playId={playId} accountId={accountId} draft={draft} reloadKey={openRiskKey} /> } : {})} />
     {!readOnly && (onRiskChange || paper) && (suggestions || sizingStatus === 'failed') && <SuggestionsPanel plan={suggestions} sizing={sizing}
       status={sizingStatus} onRetry={onRetrySizing} draft={draft} leverage={leverage} units={units}
       onSize={size => onChange({ ...draft, size })} onLevel={acceptLevel} {...(onRiskChange && !paper ? { onRiskChange } : {})}

@@ -90,11 +90,13 @@ export function AvailableBudget({ draft, onChange, available = null }: {
   </div>
 }
 
-export function CapitalContext({ accounts, portfolios, draft, retrospective = false }: {
+export function CapitalContext({ accounts, portfolios, draft, retrospective = false, openRisk }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   draft: PlayDraft
   retrospective?: boolean
+  /** Open risk across the scope with this Play's increment (Phase 2, item 1), one line under the figures. */
+  openRisk?: (scope: string, reference: string) => ReactNode
 }) {
   const zone = useDisplayZone()
   const account = accounts.find(item => item.id === draft.accountId && item.isEnabled !== false)
@@ -133,6 +135,7 @@ export function CapitalContext({ accounts, portfolios, draft, retrospective = fa
         {!retrospective && <><div title={`Committed margin as a share of the ${reference}`}><dt>Margin / {reference}</dt><dd data-placeholder={share(sized.margin) === '—'}>{share(sized.margin)}</dd></div>
           <div title={`Position size (notional) as a share of the ${reference}`}><dt>Exposure / {reference}</dt><dd data-placeholder={share(sized.notional) === '—'}>{share(sized.notional)}</dd></div></>}
       </dl>
+      {!retrospective && account && openRisk?.(portfolio ? `portfolio:${portfolio.id}` : `account:${account.id}`, reference)}
     </div>
   </section>
 }

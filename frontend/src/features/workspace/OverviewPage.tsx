@@ -10,6 +10,8 @@ import { ActivityOperations } from './ActivityOperations'
 import { OverviewScope } from './OverviewScope'
 import { overviewAccounts } from './overview-scope'
 import { OverviewSummary } from './OverviewSummary'
+import { OverviewOpenRisk } from './OverviewOpenRisk'
+import { openRiskReadable } from '@/features/plays/open-risk'
 import { OverviewPlays } from './OverviewPlays'
 import { OverviewAllocation } from './OverviewAllocation'
 import { OverviewIncidents } from './OverviewIncidents'
@@ -39,6 +41,7 @@ export function OverviewPage({ data, api, monitors = [], incidents = [], overvie
       onOpenPlay={id => { void viewPlay(id, new AbortController().signal) }} />
     <OverviewSummary api={api} query={overviewQuery} onQuery={setOverviewQuery} reloadGeneration={reloadKey}
       fallback={data} accountCount={scopedAccounts.length} workspaceNote={data.scopeNote}
+      {...(api.tradingMode === 'paper' || !openRiskReadable(api) ? {} : { extraMetric: <OverviewOpenRisk api={api} scope={overviewQuery.scope} reloadKey={reloadKey} /> })}
       beforeSummary={<OverviewAllocation accounts={accounts} portfolios={portfolios} scope={overviewQuery.scope}
         onScope={scope => setOverviewQuery(query => ({ ...query, scope }))} />} />
     {!accounts.length ? <section className="shell-panel workspace-start">
