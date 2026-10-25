@@ -39,9 +39,11 @@ internal sealed class AccountPositionConfiguration : IEntityTypeConfiguration<Ac
 {
     public void Configure(EntityTypeBuilder<AccountPosition> builder)
     {
-        builder.ToTable("account_positions");
+        builder.ToTable("account_positions", table => table.HasCheckConstraint("CK_account_positions_margin_mode",
+            "\"MarginMode\" IS NULL OR \"MarginMode\" IN ('cross', 'isolated')"));
         builder.HasKey(x => new { x.OwnerId, x.AccountId, x.ContractId });
         builder.Property(x => x.ContractId).HasMaxLength(128);
         builder.Property(x => x.VenueContractId).HasMaxLength(128);
+        builder.Property(x => x.MarginMode).HasMaxLength(16);
     }
 }

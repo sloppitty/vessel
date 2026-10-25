@@ -82,3 +82,50 @@ Two derived results now sit beside the facts; neither changes a fact.
   `signDiffers`. The Execution panel shows "Venue net" and "Play-local result"
   with a "Sign differs by basis" pill. Gates and reasons are in
   [Review's result bases](portfolio-review.md#result-bases-october-19-2026).
+
+## Position risk context (October 21, 2026)
+
+Phase 2, item 8a (see `phase2-risk-coverage-contract.md`). `VenuePosition` carries
+the venue's own `LiquidationPrice` and `MarginMode` (`cross` or `isolated`). Both
+are null when the venue reports none, and a reported zero price is null too. A
+negative price is an invalid response, never unknown.
+- **What each venue reports.**
+
+  | Venue | Liquidation price | Margin mode |
+  | --- | --- | --- |
+  | Hyperliquid | `liquidationPx` | `leverage.type` |
+  | Lighter | `liquidation_price` | `margin_mode` (0 cross, 1 isolated) |
+  | RISEx | `liquidation_price` | `margin_mode` (0 cross, 1 isolated) |
+
+  An unfamiliar mode value stays null. No venue reports a per-position
+  maintenance requirement, so none is stored; Hyperliquid and RISEx report
+  account totals only.
+- **Where they are kept.**
+  - The current snapshot (`account_positions`) always holds the latest
+    report.
+  - `account_risk_observations` keeps them when a position appears, when its
+    quantity, entry price or margin mode changes, when an isolated position's
+    liquidation price changes, or when its market has executions since the
+    last observation, newly imported or already retained. History can arrive
+    before the snapshot that observes a reopening, as for leverage.
+  - A cross-margin liquidation price that only drifts with the account is not
+    kept again.
+  - Positions reporting neither field are skipped.
+  - Account deletion removes the observations. Migration
+    `20261021164349_RiskContext`, applied explicitly.
+- **Where they show.**
+  - Account detail lists each position's venue liquidation price and mode.
+  - The Play execution read adds `venuePosition` and `riskAtFirstFill`. Both
+    are limited to the Play's own position:
+    - its direction;
+    - the one native market its linked fills name (several make it unknown);
+    - from its first entry fill to its last fill once it is flat;
+    - an enabled account. A disabled account shows neither, as in the
+      workspace.
+  - `venuePosition` is the current one, and `riskAtFirstFill` is the first
+    observation kept after the first entry fill.
+  - The Execution panel shows each with the time it was read, for example
+    "Venue liquidation 82.5 (cross) read … · first read after entry …".
+    After the position is flat it keeps the first-read value ("Flat now").
+  - These are the venue's figures, never mixed with the plan's isolated
+    estimate.

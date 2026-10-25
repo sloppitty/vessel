@@ -191,6 +191,10 @@ export interface AccountSnapshot {
     unrealizedPnlUsd: string
     marginUsedUsd: string
     leverage: number | null
+    /** The venue's reported liquidation price (Phase 2, item 8a); null or absent when it reports none. */
+    liquidationPrice?: string | null
+    /** `cross` or `isolated` as the venue reports it; null or absent when it does not. */
+    marginMode?: 'cross' | 'isolated' | null
   }>
   stablecoinWallet?: StablecoinWallet | null
 }
@@ -457,7 +461,9 @@ const snapshot = (v: unknown): v is AccountSnapshot | null => v === null || isRe
   (v.availableMarginUsd === undefined || isNullOr(v.availableMarginUsd, isPlainDecimal)) &&
   Array.isArray(v.positions) && v.positions.every(p => isRecord(p) && isText(p.contractId) &&
     ['signedQuantity', 'entryPrice', 'unrealizedPnlUsd', 'marginUsedUsd'].every(k => isPlainDecimal(p[k])) &&
-    (p.leverage === null || typeof p.leverage === 'number' && Number.isInteger(p.leverage) && p.leverage > 0)) &&
+    (p.leverage === null || typeof p.leverage === 'number' && Number.isInteger(p.leverage) && p.leverage > 0) &&
+    (p.liquidationPrice === undefined || isNullOr(p.liquidationPrice, isPlainDecimal)) &&
+    (p.marginMode === undefined || p.marginMode === null || p.marginMode === 'cross' || p.marginMode === 'isolated')) &&
   (v.stablecoinWallet === undefined || wallet(v.stablecoinWallet))
 const overview = (v: unknown): v is Overview => isRecord(v) && Array.isArray(v.portfolios) && v.portfolios.every(portfolio) &&
   Array.isArray(v.accounts) && v.accounts.every(account) && isRecord(v.totals) &&
