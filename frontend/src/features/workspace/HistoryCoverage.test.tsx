@@ -1,3 +1,4 @@
+import { credentialsFixture } from '@/test/identity-fixture'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -23,6 +24,21 @@ const coverage: Coverage = {
 }
 
 describe('history coverage (Phase 2, item 6)', () => {
+  it('labels a failed reread as stale, withholds backfill and retries the current coverage', async () => {
+    const historyCoverage = vi.fn().mockResolvedValueOnce({ ...coverage, backfillAvailable: true })
+      .mockRejectedValueOnce(new Error('private transport detail')).mockResolvedValue({ ...coverage, backfillAvailable: true })
+    const api = { historyCoverage, startBackfill: vi.fn() }
+    const { rerender } = render(<HistoryCoverage api={api} accountId="a" reloadKey="1" />)
+    await screen.findAllByRole('button', { name: 'Backfill' })
+    rerender(<HistoryCoverage api={api} accountId="a" reloadKey="2" />)
+    expect(await screen.findByRole('status')).toHaveTextContent('History coverage could not be refreshed. Showing the previous read.')
+    expect(screen.queryByRole('button', { name: 'Backfill' })).not.toBeInTheDocument()
+    expect(screen.queryByText('private transport detail')).not.toBeInTheDocument()
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry history coverage' }))
+    await screen.findAllByRole('button', { name: 'Backfill' })
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
   it('reads only ledgers whose ranges hold together', () => {
     expect(isHistoryCoverage(coverage)).toBe(true)
     const [first, second] = coverage.recent as [Coverage['recent'][number], Coverage['recent'][number]]
@@ -61,7 +77,7 @@ describe('history coverage (Phase 2, item 6)', () => {
     const venueAccount: BrokerAccount = { ...accountFixture, venueId: 'hyperliquid', address: '0x' + '1'.repeat(40),
       sourceId: '0x' + '1'.repeat(40), syncStatus: 'synced' }
     const updateAccount = vi.fn().mockResolvedValue({ ...venueAccount, keepExecutionHistory: true })
-    const api: WorkspaceApi = { ...createWorkspaceApi('test-only-token'), updateAccount }
+    const api: WorkspaceApi = { ...createWorkspaceApi(credentialsFixture), updateAccount }
     render(<ManageAccountDialog account={venueAccount} portfolios={[portfolioFixture]} api={api} onClose={vi.fn()} onChanged={vi.fn()} />)
     const keep = screen.getByRole('checkbox', { name: 'Keep execution history' })
     expect(keep).not.toBeChecked()

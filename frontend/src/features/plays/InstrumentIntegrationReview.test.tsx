@@ -8,9 +8,10 @@ import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { createDraft } from './draft'
 import { PlayWorkspace } from './PlayWorkspace'
 import { accountPicker, chooseInPicker } from '@/test/account-picker'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 it('does not restore an obsolete portfolio filter when changing the account after its portfolio changes', async () => {
-  const api = createWorkspaceApi('test-only')
+  const api = createWorkspaceApi(credentialsFixture)
   function Harness({ accounts }: { accounts: BrokerAccount[] }) {
     const [draft, setDraft] = useState(() => ({
       ...createDraft(), accountId: accountFixture.id, instrument: 'Manual contract',

@@ -76,6 +76,7 @@ public sealed class HostCompositionTests
         {
             ["ConnectionStrings:Vessel"] = UnusedDatabase,
             ["Vessel:Auth:OwnerId"] = owner.ToString(),
+            ["Vessel:Identity:Origins:0"] = TestAuthentication.Origin,
             ["Vessel:Messaging:RabbitMqUri"] = "amqp://unused:unused@127.0.0.1:1",
             ["Vessel:Messaging:Verification"] = "true",
             ["Vessel:Monitor:HeartbeatFile"] = Path.Combine(Path.GetTempPath(), "vessel-composition-test-" + Guid.NewGuid().ToString("N"))
@@ -85,10 +86,8 @@ public sealed class HostCompositionTests
         builder.Logging.ClearProviders();
         WorkerHost.Configure(builder);
         VesselEventTestHosting.ConfigureServices(builder.Services);
-        // Full ValidateOnBuild would trip over ASP.NET authorization services that AddVesselInfrastructure also
-        // registers in the worker (they need routing, which a worker never uses). Validate scopes for the whole
-        // container and construct every Vessel registration instead, which is what ValidateOnBuild would check.
-        builder.ConfigureContainer(new DefaultServiceProviderFactory(new ServiceProviderOptions { ValidateScopes = true }));
+        // As in Development: every registration must be constructible, and every Vessel service is then resolved.
+        builder.ConfigureContainer(new DefaultServiceProviderFactory(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true }));
         var vessel = builder.Services
             .Where(d => !d.IsKeyedService && !d.ServiceType.ContainsGenericParameters &&
                 d.ServiceType.Namespace?.StartsWith("Vessel.", StringComparison.Ordinal) == true)

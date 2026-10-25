@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Monitoring;
@@ -28,7 +27,7 @@ public sealed class MonitorDiscrepancyApiTests
         var accountUrl = $"/api/accounts/{f.Account.Id}/discrepancies/{id}/dismiss";
         var playUrl = $"/api/plays/{f.Play.Id}/discrepancies/{id}/dismiss";
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.PostAsJsonAsync(playUrl, new { note = "unauthenticated" })).StatusCode);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CoreApiFactory.Token);
+        TestAuthentication.SignIn(client.DefaultRequestHeaders, f.Account.OwnerId);
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync($"/api/plays/{unrelated.Id}/discrepancies/{id}/dismiss", new { })).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync($"/api/accounts/{Guid.NewGuid()}/discrepancies/{id}/dismiss", new { })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(playUrl, new { note = new string('a', 2001) })).StatusCode);
@@ -47,8 +46,7 @@ public sealed class MonitorDiscrepancyApiTests
             Assert.Equal("dismissed", events[1].Data.GetProperty("resolution").GetString());
         }
         await using var foreignFactory = new CoreApiFactory(Guid.NewGuid(), connection: database.ConnectionString);
-        using var foreign = foreignFactory.CreateClient();
-        foreign.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CoreApiFactory.Token);
+        using var foreign = foreignFactory.AuthorizedClient();
         Assert.Equal(HttpStatusCode.NotFound, (await foreign.PostAsJsonAsync(playUrl, new { })).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await foreign.PostAsJsonAsync(accountUrl, new { })).StatusCode);
     }
@@ -66,8 +64,7 @@ public sealed class MonitorDiscrepancyApiTests
             id = (await candidate.Db.Set<PlayDiscrepancy>().SingleAsync()).Id;
         }
         await using var factory = new CoreApiFactory(f.Account.OwnerId, connection: database.ConnectionString);
-        using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CoreApiFactory.Token);
+        using var client = factory.AuthorizedClient();
         var monitor = await client.GetFromJsonAsync<AccountMonitorDto>($"/api/accounts/{f.Account.Id}/monitor");
         Assert.Empty(monitor!.Discrepancies);
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync($"/api/accounts/{f.Account.Id}/discrepancies/{id}/dismiss", new { })).StatusCode);

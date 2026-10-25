@@ -22,6 +22,7 @@ import { ApplicationShell } from '@/features/workspace/ApplicationShell'
 import * as overviewActions from '@/features/workspace/OverviewActions'
 import * as savedChecks from './saved'
 import * as preflightChecks from './preflight'
+import { credentialsFixture, shellIdentityFixture } from '@/test/identity-fixture'
 
 const at = '2026-10-13T10:00:00Z'
 const otherId = '00000000-0000-4000-8000-000000000002'
@@ -77,7 +78,7 @@ function client(play = terminal, more: SavedPlay[] = []) {
       return Promise.resolve(current)
     }),
   }
-  return { methods, api: { ...createWorkspaceApi('test-only'), ...methods } as WorkspaceApi }
+  return { methods, api: { ...createWorkspaceApi(credentialsFixture), ...methods } as WorkspaceApi }
 }
 /** Replies to every later list and count read with these plays. */
 function serve(methods: ReturnType<typeof client>['methods'], plays: PlaySummary[]) {
@@ -1326,7 +1327,7 @@ describe('diary mutation ownership in the actual shell', () => {
     const api = shellClient()
     const saving = deferred<SavedPlay>()
     const user = userEvent.setup()
-    render(<ApplicationShell system={shellSystem} disconnect={vi.fn()} api={api} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={shellSystem} disconnect={vi.fn()} api={api} />)
     await enterShellManual(user)
     await user.click(screen.getByRole('button', { name: 'Discard execution edit' }))
     await user.click(screen.getByRole('link', { name: 'Overview' }))
@@ -1362,7 +1363,7 @@ describe('diary mutation ownership in the actual shell', () => {
     const saving = deferred<SavedPlay>()
     api.updatePlay.mockImplementation(() => saving.promise)
     const user = userEvent.setup()
-    render(<ApplicationShell system={shellSystem} disconnect={vi.fn()} api={api} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={shellSystem} disconnect={vi.fn()} api={api} />)
     await enterShellManual(user)
     await user.click(screen.getByRole('button', { name: 'Discard execution edit' }))
     expect(warnsOnUnload()).toBe(false)
@@ -1399,7 +1400,7 @@ describe('diary mutation ownership in the actual shell', () => {
     const recording = deferred<ManualExecutions>()
     api.addManualExecution.mockImplementation(() => recording.promise)
     const user = userEvent.setup()
-    render(<ApplicationShell system={shellSystem} disconnect={vi.fn()} api={api} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={shellSystem} disconnect={vi.fn()} api={api} />)
     await enterShellManual(user)
     await user.click(screen.getByRole('button', { name: 'Record execution' }))
     const attempted = api.addManualExecution.mock.calls[0]
@@ -1439,7 +1440,7 @@ describe('diary mutation ownership in the actual shell', () => {
     const api = shellClient()
     const recording = deferred<ManualExecutions>()
     api.addManualExecution.mockImplementationOnce(() => recording.promise)
-    render(<ApplicationShell system={shellSystem} disconnect={vi.fn()} api={api} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={shellSystem} disconnect={vi.fn()} api={api} />)
     const user = userEvent.setup()
     await enterShellManual(user)
     await user.click(screen.getByRole('button', { name: 'Record execution' }))
@@ -1471,7 +1472,7 @@ describe('diary mutation ownership in the actual shell', () => {
     const recording = deferred<ManualExecutions>()
     api.changePlayStatus.mockImplementation(() => pausing.promise)
     api.addManualExecution.mockImplementation(() => recording.promise)
-    render(<ApplicationShell system={shellSystem} disconnect={vi.fn()} api={api} />)
+    render(<ApplicationShell identity={shellIdentityFixture()} system={shellSystem} disconnect={vi.fn()} api={api} />)
     const user = userEvent.setup()
     await enterShellManual(user)
     await user.click(screen.getByRole('button', { name: 'Pause' }))
@@ -1494,17 +1495,18 @@ describe('diary mutation ownership in the actual shell', () => {
     const previous = deferred<ManualExecutions>()
     api.addManualExecution.mockImplementation(() => previous.promise)
     const disconnect = vi.fn()
-    const view = render(<ApplicationShell system={shellSystem} disconnect={disconnect} api={api} />)
+    const view = render(<ApplicationShell identity={shellIdentityFixture()} system={shellSystem} disconnect={disconnect} api={api} />)
     const user = userEvent.setup()
     await enterShellManual(user)
     await user.click(screen.getByRole('button', { name: 'Record execution' }))
     await user.click(screen.getByRole('link', { name: 'Settings' }))
     if (action === 'disconnect') {
+      await user.click(await screen.findByRole('tab', { name: 'Profile & sign-in' }))
       const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
-      await user.click(screen.getByRole('button', { name: 'Disconnect session' }))
+      await user.click(screen.getByRole('button', { name: 'Sign out' }))
       expect(disconnect).not.toHaveBeenCalled()
       expect(warnsOnUnload()).toBe(true)
-      await user.click(screen.getByRole('button', { name: 'Disconnect session' }))
+      await user.click(screen.getByRole('button', { name: 'Sign out' }))
       expect(confirm).toHaveBeenCalledTimes(2)
       expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('Already-sent changes may still complete.'))
     } else if (action === 'unmount') view.unmount()
@@ -1512,7 +1514,7 @@ describe('diary mutation ownership in the actual shell', () => {
       const nextApi = shellClient()
       const nextRequest = deferred<ManualExecutions>()
       nextApi.addManualExecution.mockImplementation(() => nextRequest.promise)
-      view.rerender(<ApplicationShell system={shellSystem} disconnect={disconnect} api={nextApi} />)
+      view.rerender(<ApplicationShell identity={shellIdentityFixture()} system={shellSystem} disconnect={disconnect} api={nextApi} />)
       await user.click(screen.getByRole('link', { name: 'Plays' }))
       expect(screen.queryByRole('button', { name: 'Continue editing' })).not.toBeInTheDocument()
       await enterShellManual(user)

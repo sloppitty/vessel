@@ -5,6 +5,7 @@ import { ApiError } from '@/api/errors'
 import { createWorkspaceApi, type MarketContext, type WorkspaceApi } from '@/api/workspace'
 import { candleCache } from './candleCache'
 import { useMarketContext } from './useMarketContext'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -26,7 +27,7 @@ function source() {
     requests.push(request)
     return request.promise
   })
-  return { api: { ...createWorkspaceApi('synthetic-only'), marketContext }, requests, marketContext }
+  return { api: { ...createWorkspaceApi(credentialsFixture), marketContext }, requests, marketContext }
 }
 
 type Props = { api: WorkspaceApi; accountId: string; instrument: string; enabled: boolean }
