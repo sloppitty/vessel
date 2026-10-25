@@ -6,6 +6,7 @@ import type { AccountSnapshot, BrokerAccount, WorkspaceApi } from '@/api/workspa
 import { errorMessage } from '@/api/errors'
 import { Button } from '@/components/ui/button'
 import { ActivityOperations } from './ActivityOperations'
+import { ImportConflicts } from './ImportConflicts'
 import { accountStatus, accountStatusTone, amount, money } from '@/lib/format'
 import { useVenues } from '@/api/venues'
 import { ArrowLeft, RefreshCw } from 'lucide-react'
@@ -107,5 +108,6 @@ export function AccountDetail({ account, api, refreshing, busy = refreshing, onS
         <div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Contract</th><th>Signed quantity</th><th>Entry price</th><th>Unrealized P&amp;L</th><th>Leverage</th><th>Liquidation (venue)</th></tr></thead><tbody>{snapshot.positions.map(p => <tr key={p.contractId}><td><strong>{p.contractId}</strong></td><td>{amount(p.signedQuantity)}</td><td>{money(p.entryPrice)}</td><td>{money(p.unrealizedPnlUsd)}</td><td>{p.leverage === null ? '—' : `${p.leverage}×`}</td><td>{p.liquidationPrice ? amount(p.liquidationPrice) : 'Not reported'}{p.marginMode ? <small> · {p.marginMode}</small> : null}</td></tr>)}</tbody></table></div>}
     </section>}
     <section className="shell-panel"><header className="shell-panel-heading"><h2>{paper ? 'Simulated operations' : 'Recent executions'}</h2></header>{account.isEnabled === false ? <div className="workspace-empty small-empty"><strong>Imported movements hidden while disabled</strong></div> : <ActivityOperations key={requestKey} api={api} accountId={account.id} accounts={[account]} reloadGeneration={reloadGeneration} {...(onOpenPlay ? { onOpenPlay } : {})} {...(onCreated ? { onCreated } : {})} />}</section>
+    {!paper && account.isEnabled !== false && <ImportConflicts api={api} accountId={account.id} reloadKey={requestKey} />}
   </div>
 }

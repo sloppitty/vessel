@@ -63,6 +63,13 @@ public sealed record FillDto(Guid Id, Guid AccountId, string ContractId, string 
     string Price, string Quantity, string Fee, string FeeToken, string ClosedPnlUsd, DateTimeOffset OccurredAtUtc,
     string OrderId, string SourceFillId, string TransactionHash, string PositionEffect, string FeeBasis, string PnlBasis,
     Guid? PlayId = null);
+/// <summary>
+/// A retained fill the venue later reported with different facts (Phase 2, item 14c). The first copy is kept; only the
+/// field names that differed are listed, never either value.
+/// </summary>
+public sealed record FillConflictDto(string ContractId, string SourceFillId, IReadOnlyList<string> Fields,
+    DateTimeOffset FirstSeenAtUtc, DateTimeOffset LastSeenAtUtc, int Reports);
+public sealed record FillConflictsDto(int Total, IReadOnlyList<FillConflictDto> Recent, string Notice);
 public sealed record OverviewTotals(int PortfolioCount, int AccountCount, string? TotalAccountValueUsd,
     int ValuedAccountCount, int OpenPositionCount, int ImportedFillCount,
     string? AvailableStablecoinNominalUsd = null, int StablecoinAccountCount = 0,
@@ -97,6 +104,9 @@ public interface IWorkspaceStore
     Task<bool> SourceExistsAsync(string venueId, string sourceId, CancellationToken ct);
     Task<List<AccountSnapshot>> SnapshotsAsync(CancellationToken ct);
     Task<List<ImportedFill>> FillsAsync(Guid? accountId, int limit, CancellationToken ct);
+    /// <summary>Retained fills the venue later reported differently (Phase 2, item 14c): the count and the latest ones.</summary>
+    Task<(int Total, IReadOnlyList<FillImportConflict> Recent)> FillConflictsAsync(Guid accountId, int limit, CancellationToken ct) =>
+        Task.FromResult<(int, IReadOnlyList<FillImportConflict>)>((0, []));
     Task<int> FillCountAsync(CancellationToken ct);
     Task AddPortfolioAsync(Portfolio portfolio, CancellationToken ct);
     Task AddAccountAsync(Account account, CancellationToken ct);
