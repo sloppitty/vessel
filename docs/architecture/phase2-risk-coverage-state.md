@@ -1216,3 +1216,38 @@ October 21, 2026.
   own tests could not run under the memory limit; the targeted runs and the
   check below cover the fixes.
 - **Check.** `scripts/check.sh` passed on `c9b9e625`: backend 4,113 passed, 5 skipped; frontend 179 files and 4,091 tests.
+
+**D-19. Undersized-stop confirmation.** Implemented on `t3/phase2-stop-confirmation`.
+- **The defect (M2).** The undersized-stop fingerprint covers the quantities and orders involved, so a stop
+  that stayed smaller than a changing position, or a stop whose quantity kept changing, restarted
+  confirmation on every check and never opened.
+- **The fix.** `protection.short` confirms on its condition (`ConfirmsOnCondition`): its kind and subject,
+  with the Play's linked stop covering less than its open quantity.
+  - The pending fingerprint, and a candidate's or open record's fingerprint and details, follow the latest
+    observation. An open record shows the current quantities without re-announcing, and a dismissed record
+    reopens only on changed evidence, after the same 60 s.
+  - An unknown, failed, discarded or interrupted check, a fresh absence, expiry and the dismissed evidence
+    returning still restart the sequence.
+  - Every other kind still confirms on its fingerprint, apart from 6c's `position.unprotected`, which uses
+    the same mechanism. Severity and announcements are unchanged. No migration.
+- **Contract notes.** The lifecycle mechanism and its tests landed in 6c (its Sol round 1), which needed it
+  first. This pull request applies it to `protection.short`.
+- **Open question for the owner.** Should other kinds also confirm on their condition? Those are
+  `protection.missing` (critical), `protection.excess`, `protection.cancelled`, `level.drift`,
+  `position.short`, `position.excess` and `fill.unlinked`. Only `protection.short` is in scope here.
+- **Tests.** `MonitorDiscrepancyStopConfirmationTests`:
+  - changing quantities confirming once, with the latest evidence;
+  - the condition ending resolving it;
+  - unknown and interrupted observations breaking the sequence;
+  - a dismissed record staying dismissed until changed evidence confirms, and reopening with its latest
+    evidence;
+  - other kinds still confirming on their evidence.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `cd1cafde`. No findings. Sol confirmed:
+  - the 60-second sequence surviving changing quantities, and every interruption restarting it;
+  - silent evidence updates without new revisions, dismissal and reopening;
+  - the Hub's relevance and withdrawal on published revisions;
+  - every other kind unchanged;
+  - no dependence on the position snapshot, so no earliest source time;
+  - per-Play subjects, under which a replaced undersized stop rightly continues the sequence;
+  - the tests and docs.
+- **Check.** `scripts/check.sh` passed on `9dd2b8ed`: backend 4,268 passed, 5 skipped; frontend 186 files and 4,141 tests.
