@@ -4,10 +4,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { render } from '@/test/render'
 import { createWorkspaceApi } from '@/api/workspace'
 import { CreateAccountDialog } from './CreateDialogs'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 describe('Create account venue picker', () => {
   it('offers creatable venues as logo cards in one keyboard-operable radio group', async () => {
-    render(<CreateAccountDialog open onOpenChange={vi.fn()} api={createWorkspaceApi('test-only-token')} portfolios={[]} onCreated={vi.fn()} />)
+    render(<CreateAccountDialog open onOpenChange={vi.fn()} api={createWorkspaceApi(credentialsFixture)} portfolios={[]} onCreated={vi.fn()} />)
     const group = screen.getByRole('group', { name: 'Venue' })
     const radios = within(group).getAllByRole('radio')
     expect(radios.map(radio => radio.getAttribute('aria-label'))).toEqual(['Hyperliquid · read-only perps', 'Lighter · Robinhood · read-only perps', 'Manual account'])

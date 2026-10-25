@@ -90,8 +90,8 @@ public abstract class EvidenceIsolationCases(IsolationHost api)
     }
 }
 
-/// <summary>The cases above in Token mode, with the suite's test scheme selecting the owner.</summary>
+/// <summary>The cases above with the suite's test scheme selecting the owner.</summary>
 public sealed class EvidenceIsolationTests(IsolationApi api) : EvidenceIsolationCases(api), IClassFixture<IsolationApi>;
 
-/// <summary>The same cases in Wallet mode: two signed-in users, each request mapped to its owner by the session scheme.</summary>
+/// <summary>The same cases through wallet sessions: two signed-in users, each request mapped to its owner by the session scheme.</summary>
 public sealed class WalletEvidenceIsolationTests(WalletIsolationApi api) : EvidenceIsolationCases(api), IClassFixture<WalletIsolationApi>;

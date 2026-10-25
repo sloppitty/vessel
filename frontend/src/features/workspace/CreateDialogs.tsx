@@ -117,11 +117,11 @@ export function CreateAccountDialog({ open, onOpenChange, api, portfolios, accou
         <legend>Venue</legend>
         <div className="venue-picker-grid">{choices.map(v => <label key={v.id} className="venue-card">
           <input type="radio" className="sr-only" name="account-venue" value={v.id} checked={venue === v.id}
-            aria-label={paper ? `${v.name} · Paper simulated` : venues.isManual(v.id) ? 'Manual account' : `${v.name} · read-only perps`}
+            aria-label={paper ? v.name : venues.isManual(v.id) ? 'Manual account' : `${v.name} · read-only perps`}
             onChange={() => { setVenue(v.id); setAddress(''); setError(null) }} />
           <VenueLogo venueId={v.id} size="lg" />
           <span><strong>{venues.isManual(v.id) ? 'Manual account' : v.name}</strong>
-            {!venues.isManual(v.id) && <small>{paper ? 'Paper · simulated' : `Read-only perps${v.quoteAsset ? ` · ${v.quoteAsset}` : ''}`}</small>}</span>
+            {!paper && !venues.isManual(v.id) && <small>{`Read-only perps${v.quoteAsset ? ` · ${v.quoteAsset}` : ''}`}</small>}</span>
         </label>)}</div>
       </fieldset>
       {canDiscover ? <WalletAccountImport key={venue} venueId={venue} api={api} portfolios={portfolios} accounts={accounts}

@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
 using Microsoft.Extensions.Configuration;
 using Vessel.Api;
 
@@ -7,51 +6,36 @@ namespace Vessel.Tests;
 
 public sealed class ProductionHardeningTests
 {
-    private static IConfiguration Config(string? token, string? connection, string? owner = null) =>
-        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+    private const string Owner = "22222222-2222-4222-8222-222222222222";
+
+    private static IConfiguration Config(params (string Key, string? Value)[] overrides)
+    {
+        var values = new Dictionary<string, string?>
         {
-            ["Vessel:Auth:Token"] = token, ["Vessel:Auth:OwnerId"] = owner, ["ConnectionStrings:Vessel"] = connection,
-        }).Build();
-
-    [Fact]
-    public void Production_requires_a_strong_token_an_owner_and_a_database_without_echoing_values()
-    {
-        const string weak = "short-secret-value";
-        var error = Assert.Throws<InvalidOperationException>(() => ProductionConfiguration.Validate(Config(weak, null, "not-a-guid")));
-        Assert.Contains("Vessel__Auth__Token", error.Message);
-        Assert.Contains("Vessel__Auth__OwnerId", error.Message);
-        Assert.Contains("ConnectionStrings__Vessel", error.Message);
-        Assert.DoesNotContain(weak, error.Message);
-        Assert.Throws<InvalidOperationException>(() => ProductionConfiguration.Validate(Config(null, "Host=db")));
-        ProductionConfiguration.Validate(Config(new string('k', ProductionConfiguration.MinimumTokenLength), "Host=db", Guid.NewGuid().ToString()));
+            ["Vessel:Auth:OwnerId"] = Owner, ["Vessel:Identity:Origins:0"] = "https://diary.example.test",
+            ["ConnectionStrings:Vessel"] = "Host=db"
+        };
+        foreach (var (key, value) in overrides) values[key] = value;
+        return new ConfigurationBuilder().AddInMemoryCollection(values).Build();
     }
 
     [Fact]
-    public async Task Repeated_wrong_tokens_get_429_with_retry_after_but_the_right_token_still_works()
-    {
-        await using var factory = new CoreApiFactory(Guid.NewGuid());
-        using var wrong = factory.CreateClient();
-        wrong.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "wrong-token");
-        for (var i = 0; i < Vessel.Infrastructure.Auth.AuthFailureLimiter.MaxFailures; i++)
-            Assert.Equal(HttpStatusCode.Unauthorized, (await wrong.GetAsync("/api/system")).StatusCode);
-        using var locked = await wrong.GetAsync("/api/system");
-        Assert.Equal(HttpStatusCode.TooManyRequests, locked.StatusCode);
-        Assert.True(locked.Headers.RetryAfter?.Delta > TimeSpan.Zero);
-        // The right token still works, so wrong guesses through a shared address cannot lock the owner out.
-        using var right = factory.AuthorizedClient();
-        Assert.Equal(HttpStatusCode.OK, (await right.GetAsync("/api/system")).StatusCode);
-        Assert.Equal(HttpStatusCode.TooManyRequests, (await wrong.GetAsync("/api/system")).StatusCode);
-    }
+    public void Production_accepts_a_complete_wallet_configuration() => ProductionConfiguration.Validate(Config());
 
-    [Fact]
-    public async Task Missing_header_is_not_counted_as_a_failed_guess()
+    [Theory]
+    [InlineData("Vessel:Auth:OwnerId", "not-a-guid", "Vessel:Auth:OwnerId")]
+    [InlineData("Vessel:Auth:OwnerId", null, "Vessel:Auth:OwnerId")]
+    [InlineData("Vessel:Identity:Origins:0", null, "Vessel:Identity:Origins")]
+    [InlineData("Vessel:Identity:Origins:0", "http://diary.example.test", "Vessel:Identity:Origins")]
+    [InlineData("Vessel:Auth:Token", "a-generated-secret-of-the-removed-token-mode", "Vessel:Auth:Token")]
+    [InlineData("Vessel:Auth:Mode", "Token", "Vessel:Auth:Mode")]
+    [InlineData("ConnectionStrings:Vessel", null, "ConnectionStrings__Vessel")]
+    public void Production_refuses_incomplete_wallet_settings_and_removed_token_settings_without_echoing_values(
+        string key, string? value, string named)
     {
-        await using var factory = new CoreApiFactory(Guid.NewGuid());
-        using var anonymous = factory.CreateClient();
-        for (var i = 0; i < Vessel.Infrastructure.Auth.AuthFailureLimiter.MaxFailures + 5; i++)
-            Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/system")).StatusCode);
-        using var right = factory.AuthorizedClient();
-        Assert.Equal(HttpStatusCode.OK, (await right.GetAsync("/api/system")).StatusCode);
+        var error = Assert.Throws<InvalidOperationException>(() => ProductionConfiguration.Validate(Config((key, value))));
+        Assert.Contains(named, error.Message);
+        if (value is not null && key != "Vessel:Auth:Mode") Assert.DoesNotContain(value, error.Message);
     }
 
     [Fact]
@@ -81,23 +65,6 @@ public sealed class ProductionHardeningTests
     }
 
     [Fact]
-    public async Task Limiter_pruning_is_safe_under_concurrent_failures_and_stays_bounded()
-    {
-        var limiter = new Vessel.Infrastructure.Auth.AuthFailureLimiter(TimeProvider.System);
-        var total = Vessel.Infrastructure.Auth.AuthFailureLimiter.MaxTracked * 3;
-        await Task.WhenAll(Enumerable.Range(0, 32).Select(worker => Task.Run(() =>
-        {
-            for (var i = worker; i < total; i += 32)
-            {
-                var address = new IPAddress(BitConverter.GetBytes(0x0A000000 + i));
-                limiter.RecordFailure(address);
-                _ = limiter.Blocked(address);
-            }
-        })));
-        Assert.InRange(limiter.Tracked, 1, Vessel.Infrastructure.Auth.AuthFailureLimiter.MaxTracked + 64);
-    }
-
-    [Fact]
     public async Task Readiness_is_anonymous_and_reports_unavailable_without_a_database()
     {
         await using var factory = new CoreApiFactory(Guid.NewGuid());
@@ -115,6 +82,13 @@ public sealed class ProductionHardeningTests
         await using var factory = new CoreApiFactory(Guid.NewGuid(), connection: database.ConnectionString,
             settings: new() { ["Vessel:Identity:Schema"] = identity.Schema.Name });
         using var client = factory.CreateClient();
+        // Nobody could sign in yet: an active operator needs a bound wallet (identity bind-wallet).
+        using (var unbound = await client.GetAsync("/health/ready"))
+        {
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, unbound.StatusCode);
+            Assert.Equal("""{"status":"unavailable","reason":"no-operator-wallet"}""", await unbound.Content.ReadAsStringAsync());
+        }
+        await identity.SeedAsync(Nethereum.Signer.EthECKey.GenerateKey());
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/ready")).StatusCode);
     }
 }
