@@ -13,6 +13,7 @@ import { createEntry, createExit, type DraftEntry } from './draft'
 import { ChartPanel } from './PlayChart'
 import type { ChartFill } from './chart-fills'
 import { plainDecimalRule } from './numbers'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 function fakeAdapter() {
   const state = {
@@ -43,7 +44,7 @@ function fakeAdapter() {
 
 function chartApi(candles: WorkspaceApi['candles'], marketContext: WorkspaceApi['marketContext'] = vi.fn().mockResolvedValue(marketContextFixture),
   marketStream: WorkspaceApi['marketStream'] = idleMarketStream) {
-  return { ...createWorkspaceApi('test-only'), candles, marketContext, marketStream }
+  return { ...createWorkspaceApi(credentialsFixture), candles, marketContext, marketStream }
 }
 
 beforeEach(() => localStorage.clear())

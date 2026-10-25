@@ -3,6 +3,7 @@ using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Review;
+using Vessel.Application.Risk;
 using Vessel.Application.Sizing;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
@@ -287,6 +288,11 @@ public sealed partial class ExecutionPostgresTests
         Assert.Equal(("open", "1"), (execution.Status, execution.Totals.EnteredQuantity));
         Assert.Contains(FillAllocations.UnallocatedProblem("24"), execution.Issues);
         Assert.Contains(FillAllocations.UnallocatedProblem("24"), (await h.Execution.GetAsync(a, default)).Issues);
+        var risk = new RiskStore(h.Db, TestUnitOfWork.For(h.Db));
+        Assert.Equal(OpenRiskCalculator.UnallocatedExecution,
+            Assert.Single(await risk.ActivePlaysAsync([c], default)).Problem);
+        Assert.Equal(OpenRiskCalculator.UnallocatedExecution,
+            Assert.Single(await risk.ActivePlaysAsync([a], default)).Problem);
         var later = Assert.Single(execution.SharedFills, f => f.Kind == "entry");
         Assert.Equal("f2", later.Fill.SourceFillId);
         // Entries alone are only for such an execution: on an order no flip split they are refused.
@@ -297,6 +303,34 @@ public sealed partial class ExecutionPostgresTests
         execution = await Allocating(h).AllocateAsync(c, await Allocation(h, later.FillId, 0, "flip", new AllocationLineInput(c, "entry", "entry-1", "1")), default);
         Assert.Equal(("open", "2", "1"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.ExitedQuantity));
         Assert.DoesNotContain(FillAllocations.UnallocatedProblem("24"), execution.Issues);
+        Assert.Null(Assert.Single(await risk.ActivePlaysAsync([c], default)).Problem);
+    }
+
+    [PostgresFact]
+    public async Task A_flip_cannot_be_removed_while_later_entries_depend_on_its_split_order()
+    {
+        var (database, h, account) = await SetUp();
+        await using var _ = database;
+        var a = (await PlannedPlay(h, account, "Long")).Summary.Id;
+        var c = (await PlannedShort(h, account, "Short")).Summary.Id;
+        var at = DateTimeOffset.UtcNow.AddMinutes(-5);
+        // Keep the long's entry order resting so the closing half of the flip does not make it final.
+        h.Orders.Orders.AddRange([Order("21", "buy", 100m, "open", size: 2m), Order("24", "sell", 100m, "filled", size: 3m)]);
+        AddFills(h, Fill("e1", "21", "Open Long", 100m, 1m, at),
+            Fill("f1", "24", "Long > Short", 100m, 2m, at.AddMinutes(1)),
+            Fill("f2", "24", "Open Short", 100m, 1m, at.AddMinutes(2)));
+        var flip = Assert.Single((await h.CheckAsync(a)).SharedFills, f => f.Fill.SourceFillId == "f1");
+        await Allocating(h).AllocateAsync(a, await Allocation(h, flip.FillId, 0, "flip", ExitLine(a, "1"),
+            new(c, "entry", "entry-1", "1")), default);
+        var later = Assert.Single((await h.Execution.GetAsync(c, default)).SharedFills, f => f.Fill.SourceFillId == "f2");
+        await Allocating(h).AllocateAsync(c, await Allocation(h, later.FillId, 0, "flip",
+            new AllocationLineInput(c, "entry", "entry-1", "1")), default);
+        var versions = new[] { new AllocationPlayVersion(a, await VersionOf(h, a)), new AllocationPlayVersion(c, await VersionOf(h, c)) };
+        var remove = new AllocateFillRequest(Guid.NewGuid(), flip.FillId, 1, "other", "Remove the first split.", versions, []);
+        var refused = await Assert.ThrowsAsync<ProblemException>(() => Allocating(h).AllocateAsync(a, remove, default));
+        Assert.Equal((409, "This flip still has later allocated entries on its order. Remove those allocations first."),
+            (refused.StatusCode, refused.Message));
+        Assert.Equal(1, (await h.Execution.GetAsync(a, default)).SharedFills.Single(f => f.FillId == flip.FillId).Revision);
     }
 
     [PostgresFact]

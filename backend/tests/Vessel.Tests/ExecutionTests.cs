@@ -249,8 +249,8 @@ public sealed partial class ExecutionPostgresTests
         public PlayService Plays { get; } = new(new PlayStore(db, TestUnitOfWork.For(db)), new MemoryObjectStore(), TimeProvider.System, TestUnitOfWork.For(db));
         public PlayExecutionService Execution => new(new PlayStore(db, TestUnitOfWork.For(db)), new ExecutionStore(db, TestUnitOfWork.For(db)), TestVenues.With(orders), TimeProvider.System, TestUnitOfWork.For(db));
         /// <summary>The owner's Check through the monitor: admission, then the worker's claim and run of that request.</summary>
-        public Task<PlayExecutionDto> CheckAsync(Guid playId, bool expectCompleted = true) => MonitorTestPaths.CheckAsync(db, owner,
-            TestVenues.With(MonitorTestPaths.Advancing(reader), orders), playId, expectCompleted: expectCompleted);
+        public Task<PlayExecutionDto> CheckAsync(Guid playId, bool expectCompleted = true, TimeProvider? time = null) => MonitorTestPaths.CheckAsync(db, owner,
+            TestVenues.With(MonitorTestPaths.Advancing(reader), orders), playId, expectCompleted: expectCompleted, time: time);
         public SizingService Sizing => new(new SizingStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.For(db));
     }
 
@@ -346,8 +346,9 @@ public sealed partial class ExecutionPostgresTests
         var play = await PlannedPlay(h, account);
         h.Orders.Orders.AddRange([Order("21", "buy", 100.01m, "filled", size: 0.5m), Order("23", "sell", 110m, reduceOnly: true, size: 0.5m)]);
         var at = DateTimeOffset.UtcNow;
+        var clock = new ManualTime(at);
         AddFills(h, Fill("r1", "21", "Open Long", 100.2m, 0.25m, at), Fill("r2", "21", "Open Long", 100.6m, 0.25m, at));
-        var execution = await h.CheckAsync(play.Summary.Id);
+        var execution = await h.CheckAsync(play.Summary.Id, time: clock);
         var entry = execution.Entries.Single();
         Assert.Equal(("open", "100", "7.5", 1), (execution.Status, entry.PlannedPrice, entry.PlannedQuantity, entry.PlanRevision));
         Assert.Equal(("0.5", "100.4"), (entry.FilledQuantity, entry.AverageFillPrice));
@@ -355,12 +356,14 @@ public sealed partial class ExecutionPostgresTests
 
         h.Orders.Orders[1] = Order("23", "sell", 110m, "filled", reduceOnly: true, size: 0.5m);
         AddFills(h, Fill("r3", "23", "Close Long", 110m, 0.5m, at.AddSeconds(1)));
-        execution = await h.CheckAsync(play.Summary.Id);
+        // Both checks use one monotonic clock; scoring follows the exit regardless of wall-clock speed.
+        clock.Advance(TimeSpan.FromSeconds(2));
+        execution = await h.CheckAsync(play.Summary.Id, time: clock);
         // Net 5 − 0.03 fees over 50.2 notional × 5% stop distance = 2.51 initial risk.
         Assert.Equal(("closed", ExactDecimal.Format(4.97m / 2.51m), "2.51", "100.4", "110", 3),
             (execution.Status, execution.Receipt!.EstimatedR, execution.Receipt.InitialRisk, execution.Receipt.AverageEntryPrice,
                 execution.Receipt.AverageExitPrice, execution.Receipt.FillCount));
-        var report = await new ReviewService(new ReviewStore(h.Db, new SizingStore(h.Db, TestUnitOfWork.For(h.Db))), TimeProvider.System)
+        var report = await new ReviewService(new ReviewStore(h.Db, new SizingStore(h.Db, TestUnitOfWork.For(h.Db))), clock)
             .GetAsync(new(Period: "all"), default);
         Assert.Equal(execution.Receipt.EstimatedR, Assert.Single(report.Plays).RMultiple);
     }

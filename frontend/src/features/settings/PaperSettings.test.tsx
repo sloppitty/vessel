@@ -5,6 +5,7 @@ import { ApiError } from '@/api/errors'
 import type { PaperSettings as Settings } from '@/api/paper'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { PaperSettings } from './PaperSettings'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 type Api = Pick<WorkspaceApi, 'paperSettings' | 'savePaperSettings'>
 const defaults: Settings = { enabled: false, checkIntervalMinutes: 60 }
@@ -259,7 +260,7 @@ describe('PaperSettings', () => {
       return new Response(JSON.stringify(body), { status: 200 })
     })
     vi.stubGlobal('fetch', fetcher)
-    const api = createWorkspaceApi('synthetic-paper-settings-token')
+    const api = createWorkspaceApi(credentialsFixture)
     render(<PaperSettings api={api} />)
     await waitFor(() => expect(screen.getByRole('switch')).toBeEnabled())
     await userEvent.click(screen.getByRole('switch'))

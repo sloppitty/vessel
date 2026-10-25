@@ -20,7 +20,7 @@ export function credentialFailureMessage(cause: unknown, fallback = credentialSa
   if (cause.kind === 'unavailable')
     return 'The credential request did not complete. Check the connection and retry. Refresh credential status before retrying a save.'
   switch (cause.status) {
-    case 401: return 'Vessel authentication was rejected. Reconnect with your Vessel API token, then retry.'
+    case 401: return 'Your session ended. Sign in again, then retry.'
     case 403: return 'The server could not confirm a secure connection for token entry. Use HTTPS; if this page already uses HTTPS, ask the operator to check the trusted reverse proxy.'
     case 404: return 'The account or credential endpoint is unavailable. Refresh the workspace and check that the frontend and API are on the same version.'
     case 409: return 'The account changed or is disabled. Refresh its settings and enable it before saving a token.'

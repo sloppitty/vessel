@@ -496,6 +496,34 @@ public sealed class JournalSearchPostgresTests
     }
 
     [PostgresFact]
+    public async Task Older_projection_texts_are_counted_as_unindexed_and_cannot_match()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Manual");
+        var play = TestPlays.Create(account, new("manual", "BTC"));
+        play.Annotate("Obsolete searchable phrase", "{}", "", T);
+        await using (var seed = database.Context(owner))
+        {
+            seed.Accounts.Add(account); seed.Plays.Add(play);
+            await seed.SaveChangesAsync();
+        }
+        await using (var db = database.Context(owner))
+        {
+            Assert.Equal(1, await RebuildAsync(db));
+            var row = await db.PlaySearch.SingleAsync();
+            row.Version = JournalSearch.Version - 1;
+            await db.SaveChangesAsync();
+        }
+        await using (var read = database.Context(owner))
+        {
+            var result = await Service(read, Projected(read)).SearchAsync("obsolete", null, default);
+            Assert.Equal((0, 1), (result.Total, result.NotIndexed));
+            Assert.Empty(result.Items);
+        }
+    }
+
+    [PostgresFact]
     public async Task Search_pages_by_fifty_newest_first_and_matches_wildcards_literally()
     {
         await using var database = await CoreDatabase.CreateAsync();

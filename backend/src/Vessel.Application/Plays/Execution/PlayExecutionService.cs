@@ -695,8 +695,16 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         // Sol round 1: an order another of whose fills opened a Play through an allocation is split. Its fills count only
         // through allocations, so its link decides nothing, and only its later opening executions may take entries alone.
         var siblings = await store.FillsAsync(accountId, [OrderKey.Of(order)], ct);
-        var split = (await store.AllocationsAsync(accountId, [], siblings.Where(f => f.Id != fill.Id).Select(f => f.Id).ToHashSet(), ct))
-            .Any(a => a.Allocation.Lines.Count > 0 && a.Splits);
+        var siblingAllocations = await store.AllocationsAsync(accountId, [], siblings.Where(f => f.Id != fill.Id).Select(f => f.Id).ToHashSet(), ct);
+        var split = siblingAllocations.Any(a => a.Allocation.Lines.Any(l => l.Role == AllocationRole.Entry) &&
+            a.Allocation.Lines.Any(l => l.Role == AllocationRole.Exit));
+        // Later entry-only allocations depend on a flip splitting this order. Removing its last split would leave those
+        // entries counted without the condition that allowed them and make the order's linked fills ambiguous again.
+        if (head is { Lines.Count: > 0 } && head.Lines.Any(l => l.Role == AllocationRole.Entry) &&
+            head.Lines.Any(l => l.Role == AllocationRole.Exit) &&
+            after.All(l => l.Role != AllocationRole.Entry) && !split &&
+            siblingAllocations.Any(a => a.Allocation.Lines.Count > 0 && a.Allocation.Lines.All(l => l.Role == AllocationRole.Entry)))
+            throw new ProblemException(409, "This flip still has later allocated entries on its order. Remove those allocations first.");
         if (after.Count > 0 && after.All(l => l.Role == AllocationRole.Entry) && !split)
             throw new ProblemException(409, "Entries alone are only for a later execution of an order a flip split; split a flip into an exit and an entry.");
         if (holder is not null && after.Count > 0 && !split)
