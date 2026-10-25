@@ -13,7 +13,7 @@ import { isAccountMonitor, isMonitorEventPage, isMonitorRunAccepted, isMonitorSu
   type AccountMonitor, type MonitorEventPage, type MonitorRunAccepted, type MonitorSummary, type MonitorStreamEvent } from './monitor'
 import { candleIntervals, type CandleInterval } from './candles'
 import { ApiError } from './errors'
-import { createApiCall, type ApiCredentials, type AuthFailure } from './request'
+import { createApiCall, type AuthFailure, type SessionCredentials } from './request'
 import { authErrorMessage } from './auth'
 import { emitApiEvent } from './events'
 import { isImportedFill, type ImportedFill } from './fills'
@@ -518,11 +518,10 @@ function assertResponseMode(value: unknown, mode: TradingMode, requireMode = fal
 }
 
 /**
- * A 401 on a session call ends the session. A 403 never does, except `user-suspended`; other refusals only explain
- * themselves. Token mode keeps treating both as a rejected token.
+ * A 401 ends the session. A 403 never does, except `user-suspended`; other refusals only explain themselves.
  */
-export function endsSession(credentials: string | ApiCredentials, failure: AuthFailure) {
-  return typeof credentials === 'string' || credentials.kind === 'bearer' || failure.status === 401 || failure.code === 'user-suspended'
+export function endsSession(failure: AuthFailure) {
+  return failure.status === 401 || failure.code === 'user-suspended'
 }
 
 /** `onAuthFailure` hears every 401 and 403 of this client, so the session owner can tear down or open a dialog. */
@@ -533,9 +532,9 @@ function withoutOffset(query: ReviewQuery): ReviewQuery {
   return rest
 }
 
-export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthFailure?: (failure: AuthFailure) => void, tradingMode?: TradingMode): WorkspaceApi {
+export function createWorkspaceApi(credentials: SessionCredentials, onAuthFailure?: (failure: AuthFailure) => void, tradingMode?: TradingMode): WorkspaceApi {
   const rawCall = createApiCall(credentials, failure => {
-    if (endsSession(credentials, failure)) emitApiEvent(api, { type: 'unauthorized' })
+    if (endsSession(failure)) emitApiEvent(api, { type: 'unauthorized' })
     onAuthFailure?.(failure)
   }, () => emitApiEvent(api, { type: 'session-changed' }))
   // Bind a mode to the client, not mutable global state: late responses can only return to their original shell.
@@ -552,7 +551,7 @@ export function createWorkspaceApi(credentials: string | ApiCredentials, onAuthF
     if (scoped) assertResponseMode(value, tradingMode ?? 'real', report)
     return value
   }
-  const generation = typeof credentials !== 'string' && credentials.kind === 'session' ? credentials.generation : undefined
+  const generation = credentials.generation
   /**
    * Runs one stream under the current session generation. A newer generation aborts it, so no frame read under the
    * old one reaches the caller, and opens it again under the new one; `open` reads only its own signal. The end of the

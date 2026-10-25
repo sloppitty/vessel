@@ -8,7 +8,7 @@ export function pickerAccounts(accounts: readonly BrokerAccount[], portfolios: r
   const names = new Map(portfolios.map(p => [p.id, p.name]))
   return accounts.map(a => ({
     id: a.id, name: a.name, venueId: a.venueId, source: a.tradingMode === 'paper' ? undefined : a.sourceId ?? a.address,
-    detail: `${a.tradingMode === 'paper' ? 'Paper · ' : ''}${a.portfolioId ? names.get(a.portfolioId) ?? 'Portfolio' : 'Unassigned'}`,
+    detail: a.portfolioId ? names.get(a.portfolioId) ?? 'Portfolio' : 'Unassigned',
     balance: a.balanceUsd ? money(a.balanceUsd) : null,
     ...(value ? { value: value(a) } : {}),
   }))

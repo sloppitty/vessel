@@ -9,6 +9,7 @@ import { isReviewDocument, type ReviewDocument } from './review'
 import { isSizingDocument } from './sizing'
 import type { PaperPlayState } from './paper'
 import { isPlayHistory, type PlayHistory, type StatusChange } from './plays'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const paperAccount = { ...accountFixture, tradingMode: 'paper', syncStatus: 'paper', venueId: 'hyperliquid', startingCapitalUsd: '4000', balanceUsd: '4000', availableBalanceUsd: '0', availableBalanceSource: 'paper' }
 const paperPortfolio = { ...portfolioFixture, tradingMode: 'paper' }
@@ -36,13 +37,13 @@ describe('financial report mode boundaries', () => {
 
   it.each(reports)('rejects an omitted $name discriminator on a Paper client', async ({ body, read }) => {
     response(body)
-    await expect(read(createWorkspaceApi('synthetic-token', undefined, 'paper'))).rejects.toMatchObject({ kind: 'invalid-response' })
+    await expect(read(createWorkspaceApi(credentialsFixture, undefined, 'paper'))).rejects.toMatchObject({ kind: 'invalid-response' })
   })
 
   it.each(reports)('preserves omitted-mode $name responses for default and explicit Real clients', async ({ body, read }) => {
     for (const mode of [undefined, 'real'] as const) {
       response(body)
-      await expect(read(createWorkspaceApi('synthetic-token', undefined, mode))).resolves.toEqual(body)
+      await expect(read(createWorkspaceApi(credentialsFixture, undefined, mode))).resolves.toEqual(body)
     }
   })
 
@@ -57,15 +58,15 @@ describe('financial report mode boundaries', () => {
     expect(isReviewDocument(actual)).toBe(true)
     expect(isReviewDocument({ ...actual, tradingMode: 'paper' })).toBe(false)
     response(actual)
-    await expect(createWorkspaceApi('synthetic-token').review({ period: 'month', portfolio: 'all', positions: 'include' })).resolves.toEqual(actual)
+    await expect(createWorkspaceApi(credentialsFixture).review({ period: 'month', portfolio: 'all', positions: 'include' })).resolves.toEqual(actual)
     response(actual)
-    await expect(createWorkspaceApi('synthetic-token', undefined, 'paper')
+    await expect(createWorkspaceApi(credentialsFixture, undefined, 'paper')
       .review({ period: 'month', portfolio: 'all', positions: 'exclude' })).rejects.toMatchObject({ kind: 'invalid-response' })
   })
 
   it('preserves the current unlabelled Overview root but checks any supplied root discriminator', async () => {
     const body = { ...emptyOverview, accounts: [paperAccount], portfolios: [paperPortfolio] }
-    const paper = createWorkspaceApi('synthetic-token', undefined, 'paper')
+    const paper = createWorkspaceApi(credentialsFixture, undefined, 'paper')
     response(body)
     await expect(paper.overview()).resolves.toEqual(body)
     response({ ...body, tradingMode: 'paper' })
@@ -73,11 +74,11 @@ describe('financial report mode boundaries', () => {
     response({ ...emptyOverview, tradingMode: 'real' })
     await expect(paper.overview()).rejects.toMatchObject({ kind: 'invalid-response' })
     response({ ...emptyOverview, tradingMode: 'paper' })
-    await expect(createWorkspaceApi('synthetic-token').overview()).rejects.toMatchObject({ kind: 'invalid-response' })
+    await expect(createWorkspaceApi(credentialsFixture).overview()).rejects.toMatchObject({ kind: 'invalid-response' })
   })
 
   it('does not require a discriminator on mode-neutral counts, exclusions or settings', async () => {
-    const paper = createWorkspaceApi('synthetic-token', undefined, 'paper')
+    const paper = createWorkspaceApi(credentialsFixture, undefined, 'paper')
     const counts = { drafts: 0, progress: 0, review: 0, reviewed: 0, closed: 0, cancelled: 0, all: 0 }
     response(counts)
     await expect(paper.playCounts({})).resolves.toEqual(counts)
@@ -93,7 +94,7 @@ describe('financial report mode boundaries', () => {
 describe('mode-bound workspace requests', () => {
   it('keeps old requests real by default, and explicitly binds independent clients', async () => {
     const fetch = response([])
-    const root = createWorkspaceApi('synthetic-token')
+    const root = createWorkspaceApi(credentialsFixture)
     await root.accounts()
     expect(fetch).toHaveBeenLastCalledWith('/api/accounts', expect.anything())
     const paper = root.forTradingMode!('paper'), real = root.forTradingMode!('real')
@@ -101,7 +102,7 @@ describe('mode-bound workspace requests', () => {
     expect(fetch.mock.calls.map(call => call[0])).toEqual(['/api/accounts', '/api/accounts?tradingMode=paper', '/api/accounts?tradingMode=real', '/api/accounts?tradingMode=paper'])
   })
   it('preserves mode on every financial report, counts and ID route', async () => {
-    const client = createWorkspaceApi('synthetic-token', undefined, 'paper')
+    const client = createWorkspaceApi(credentialsFixture, undefined, 'paper')
     const reads: Array<[unknown, () => Promise<unknown>]> = [
       [{ ...emptyOverview, accounts: [paperAccount], portfolios: [paperPortfolio] }, () => client.overview()],
       [[paperAccount], () => client.accounts()], [[paperPortfolio], () => client.portfolios()],
@@ -120,7 +121,7 @@ describe('mode-bound workspace requests', () => {
     }
   })
   it('uses owner paper settings and exact paper-state wire paths without real monitor calls', async () => {
-    const client = createWorkspaceApi('synthetic-token', undefined, 'paper')
+    const client = createWorkspaceApi(credentialsFixture, undefined, 'paper')
     let fetch = response({ enabled: false, checkIntervalMinutes: 60 })
     await client.paperSettings()
     expect(fetch.mock.calls[0]![0]).toBe('/api/paper/settings')
@@ -140,7 +141,7 @@ describe('mode-bound workspace requests', () => {
     fetch = response({ ...state, playId: accountFixture.id })
     await expect(client.paperState(state.playId)).rejects.toMatchObject({ kind: 'invalid-response' })
     fetch.mockClear()
-    await expect(createWorkspaceApi('synthetic-token').paperState(state.playId)).rejects.toBeDefined()
+    await expect(createWorkspaceApi(credentialsFixture).paperState(state.playId)).rejects.toBeDefined()
     expect(fetch).not.toHaveBeenCalled()
   })
   it.each(['blocked', 'suspended'] as const)('keeps %s audit facts strictly Paper-only and rejects malformed new wire fields', async status => {
@@ -149,7 +150,7 @@ describe('mode-bound workspace requests', () => {
       enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1', realizedPnlUsd: '-0.000000000001', issues: [], executions: [],
       declinedEntries: [{ entryId: 'local-entry-2', reason: 'Insufficient paper margin.', declinedAtUtc: '2026-10-20T12:00:00Z' }],
       suspensions: [{ reason: 'Paper settings disabled.', suspendedAtUtc: '2026-10-20T12:00:01Z', resumedAtUtc: null }], hasUnscoredHistory: true }
-    const client = createWorkspaceApi('synthetic-token', undefined, 'paper')
+    const client = createWorkspaceApi(credentialsFixture, undefined, 'paper')
     const fetch = response(state)
     expect(await client.paperState(state.playId)).toEqual(state)
     expect(fetch.mock.calls[0]![0]).toBe(`/api/plays/${state.playId}/paper-state?tradingMode=paper`)
@@ -160,21 +161,21 @@ describe('mode-bound workspace requests', () => {
     }
     const noReads = response(state)
     for (const mode of [undefined, 'real'] as const)
-      await expect(createWorkspaceApi('synthetic-token', undefined, mode).paperState(state.playId)).rejects.toMatchObject({ kind: 'unavailable' })
+      await expect(createWorkspaceApi(credentialsFixture, undefined, mode).paperState(state.playId)).rejects.toMatchObject({ kind: 'unavailable' })
     expect(noReads).not.toHaveBeenCalled()
   })
   it('rejects mismatched financial entities instead of relabelling them', async () => {
     response([accountFixture])
-    await expect(createWorkspaceApi('synthetic-token', undefined, 'paper').accounts()).rejects.toMatchObject({ kind: 'invalid-response' })
+    await expect(createWorkspaceApi(credentialsFixture, undefined, 'paper').accounts()).rejects.toMatchObject({ kind: 'invalid-response' })
     response([paperAccount])
-    await expect(createWorkspaceApi('synthetic-token', undefined, 'real').accounts()).rejects.toMatchObject({ kind: 'invalid-response' })
+    await expect(createWorkspaceApi(credentialsFixture, undefined, 'real').accounts()).rejects.toMatchObject({ kind: 'invalid-response' })
   })
   it('does not mutate a client or capture a newly selected mode in a late request', async () => {
     let finish!: (response: Response) => void
     const fetch = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve }))
       .mockResolvedValueOnce(new Response(JSON.stringify([paperAccount])))
     vi.stubGlobal('fetch', fetch)
-    const root = createWorkspaceApi('synthetic-token')
+    const root = createWorkspaceApi(credentialsFixture)
     const old = root.forTradingMode!('real').accounts()
     expect(await root.forTradingMode!('paper').accounts()).toEqual([paperAccount])
     finish(new Response(JSON.stringify([accountFixture])))
@@ -183,7 +184,7 @@ describe('mode-bound workspace requests', () => {
     expect(fetch.mock.calls[1]![0]).toBe('/api/accounts?tradingMode=paper')
   })
   it('blocks actual monitoring, imports, credentials, discovery and manual execution before HTTP', async () => {
-    const fetch = response(null), client = createWorkspaceApi('synthetic-token', undefined, 'paper')
+    const fetch = response(null), client = createWorkspaceApi(credentialsFixture, undefined, 'paper')
     const controller = new AbortController()
     for (const read of [() => client.monitor(), () => client.accountMonitor(accountFixture.id), () => client.runAccountMonitor(accountFixture.id),
       () => client.sync(accountFixture.id), () => client.fills(accountFixture.id), () => client.accountCredential(accountFixture.id),
@@ -194,7 +195,7 @@ describe('mode-bound workspace requests', () => {
   })
   it('creates exact immutable-capital accounts and mode-bound portfolios, without wallet fields', async () => {
     let fetch = response(paperAccount)
-    const client = createWorkspaceApi('synthetic-token', undefined, 'paper')
+    const client = createWorkspaceApi(credentialsFixture, undefined, 'paper')
     await client.createAccount({ name: 'Hypothesis 2', portfolioId: portfolioFixture.id, venueId: 'hyperliquid', tradingMode: 'paper', startingCapitalUsd: '0.00000000000000000000000001' })
     expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual({ name: 'Hypothesis 2', portfolioId: portfolioFixture.id, venueId: 'hyperliquid', tradingMode: 'paper', startingCapitalUsd: '0.00000000000000000000000001' })
     fetch = response(paperPortfolio)
@@ -248,26 +249,26 @@ describe('explicit simulated lifecycle history', () => {
     ] }
     expect(isPlayHistory(body)).toBe(true)
     const fetch = response(body)
-    expect(await createWorkspaceApi('synthetic-token', undefined, 'paper').playHistory(savedPlayFixture.summary.id)).toEqual(body)
+    expect(await createWorkspaceApi(credentialsFixture, undefined, 'paper').playHistory(savedPlayFixture.summary.id)).toEqual(body)
     expect(fetch.mock.calls[0]![0]).toBe(`/api/plays/${savedPlayFixture.summary.id}/history?tradingMode=paper`)
   })
 
   it.each([undefined, 'real'] as const)('rejects simulated history in mode %s', async mode => {
     response(history('paper'))
-    await expect(createWorkspaceApi('synthetic-token', undefined, mode).playHistory(savedPlayFixture.summary.id))
+    await expect(createWorkspaceApi(credentialsFixture, undefined, mode).playHistory(savedPlayFixture.summary.id))
       .rejects.toMatchObject({ kind: 'invalid-response' })
   })
 
   it.each(['venue', 'manual'] as const)('rejects %s facts in paper history rather than relabelling them', async source => {
     response(history(source))
-    await expect(createWorkspaceApi('synthetic-token', undefined, 'paper').playHistory(savedPlayFixture.summary.id))
+    await expect(createWorkspaceApi(credentialsFixture, undefined, 'paper').playHistory(savedPlayFixture.summary.id))
       .rejects.toMatchObject({ kind: 'invalid-response' })
   })
 
   it.each([undefined, 'owner', 'venue', 'manual'] as const)('preserves existing real history source %s', async source => {
     const body = history(source)
     response(body)
-    await expect(createWorkspaceApi('synthetic-token').playHistory(savedPlayFixture.summary.id)).resolves.toEqual(body)
+    await expect(createWorkspaceApi(credentialsFixture).playHistory(savedPlayFixture.summary.id)).resolves.toEqual(body)
   })
 
   it('still rejects an unknown history discriminator', () => {

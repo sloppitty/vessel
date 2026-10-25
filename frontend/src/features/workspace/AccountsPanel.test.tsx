@@ -7,6 +7,7 @@ import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api/workspace'
 import { AccountsPanel } from './AccountsPanel'
 import { emptyAccountFilters, type AccountFilters } from './account-filters'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const accounts = [
   { ...accountFixture, name: 'Manual savings' },
@@ -19,7 +20,7 @@ const accounts = [
 function Harness() {
   const [portfolio, setPortfolio] = useState('')
   const [filters, setFilters] = useState(emptyAccountFilters)
-  return <AccountsPanel api={createWorkspaceApi('test-only-token')} onChanged={vi.fn()} onReload={vi.fn()} accounts={accounts} portfolios={[portfolioFixture]} portfolioFilter={portfolio} onPortfolioFilter={setPortfolio}
+  return <AccountsPanel api={createWorkspaceApi(credentialsFixture)} onChanged={vi.fn()} onReload={vi.fn()} accounts={accounts} portfolios={[portfolioFixture]} portfolioFilter={portfolio} onPortfolioFilter={setPortfolio}
     filters={filters} onFiltersChange={setFilters}
     refreshing={null} refreshAction={null} onDetail={vi.fn()} onSync={vi.fn()} onManage={vi.fn()} onAdd={vi.fn()} />
 }
@@ -55,7 +56,7 @@ describe('Account filters', () => {
   it('shows venue logo chips with counts and an accessible venue name, falling back to the generic icon', async () => {
     const mixed = [...accounts, { ...accountFixture, id: 'rh', name: 'Robinhood main', venueId: 'lighter-rh', sourceId: '281474976710655', address: null, portfolioId: null },
       { ...accountFixture, id: 'other', name: 'Other', venueId: 'quantfury' }]
-    render(<AccountsPanel api={createWorkspaceApi('test-only-token')} onChanged={vi.fn()} onReload={vi.fn()} accounts={mixed} portfolios={[portfolioFixture]}
+    render(<AccountsPanel api={createWorkspaceApi(credentialsFixture)} onChanged={vi.fn()} onReload={vi.fn()} accounts={mixed} portfolios={[portfolioFixture]}
       portfolioFilter="" onPortfolioFilter={vi.fn()} filters={emptyAccountFilters} onFiltersChange={vi.fn()}
       refreshing={null} refreshAction={null} onDetail={vi.fn()} onSync={vi.fn()} onManage={vi.fn()} onAdd={vi.fn()} />)
     const chips = within(screen.getByRole('group', { name: 'Filter by venue' }))
@@ -71,7 +72,7 @@ describe('Account filters', () => {
   it('labels venue values in the venue quote stablecoin and manual values in USD', () => {
     const mixed = [{ ...accountFixture, name: 'Manual savings' },
       { ...accountFixture, id: 'rh', name: 'Robinhood main', venueId: 'lighter-rh', sourceId: '7', address: null, syncStatus: 'synced' as const }]
-    render(<AccountsPanel api={createWorkspaceApi('test-only-token')} onChanged={vi.fn()} onReload={vi.fn()} accounts={mixed} portfolios={[portfolioFixture]}
+    render(<AccountsPanel api={createWorkspaceApi(credentialsFixture)} onChanged={vi.fn()} onReload={vi.fn()} accounts={mixed} portfolios={[portfolioFixture]}
       portfolioFilter="" onPortfolioFilter={vi.fn()} filters={emptyAccountFilters} onFiltersChange={vi.fn()}
       refreshing={null} refreshAction={null} onDetail={vi.fn()} onSync={vi.fn()} onManage={vi.fn()} onAdd={vi.fn()} />)
     const row = (name: string) => screen.getByRole('button', { name: `View ${name}` }).closest('tr')!
@@ -108,7 +109,7 @@ const grouped = [
 function GroupHarness({ initial = {}, api }: { initial?: Partial<AccountFilters>; api?: WorkspaceApi }) {
   const [portfolio, setPortfolio] = useState('')
   const [filters, setFilters] = useState<AccountFilters>({ ...emptyAccountFilters, ...initial })
-  return <AccountsPanel api={api ?? createWorkspaceApi('test-only-token')} onChanged={vi.fn()} onReload={vi.fn()} accounts={grouped} portfolios={[portfolioFixture]}
+  return <AccountsPanel api={api ?? createWorkspaceApi(credentialsFixture)} onChanged={vi.fn()} onReload={vi.fn()} accounts={grouped} portfolios={[portfolioFixture]}
     portfolioFilter={portfolio} onPortfolioFilter={setPortfolio} filters={filters} onFiltersChange={setFilters}
     refreshing={null} refreshAction={null} onDetail={vi.fn()} onSync={vi.fn()} onManage={vi.fn()} onAdd={vi.fn()} />
 }
@@ -264,7 +265,7 @@ describe('Account grouping', () => {
     })
 
     it('moves exactly the selected group through the existing bulk bar', async () => {
-      const api = { ...createWorkspaceApi('test-only-token'), moveAccounts: vi.fn().mockResolvedValue(grouped) }
+      const api = { ...createWorkspaceApi(credentialsFixture), moveAccounts: vi.fn().mockResolvedValue(grouped) }
       render(<GroupHarness api={api} />)
       await chooseGroup('Venue')
       await userEvent.click(box('Select all Hyperliquid accounts'))
