@@ -196,6 +196,25 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
     }
 
     /// <summary>
+    /// The estimated R (planned-stop model) of real Plays closed in each half-open range, pooled across the owner's enabled real
+    /// accounts, from one snapshot (Phase 2, item 10b). A closed Play without R, unscorable or without a complete initial stop,
+    /// is counted apart and never as zero. Positions have no R and are left out.
+    /// </summary>
+    public async Task<IReadOnlyList<ClosedRSum>> ClosedRAsync(IReadOnlyList<(DateTimeOffset From, DateTimeOffset To)> ranges, CancellationToken ct)
+    {
+        var now = time.GetUtcNow();
+        var query = Validated(new ReviewQuery(Period: "all", Positions: "exclude", TradingMode: TradingMode.Real));
+        var selection = await SelectAsync(query, now, new ReviewWindow(null, now), ct);
+        return ranges.Select(range =>
+        {
+            var window = new ReviewWindow(range.From, range.To) { HalfOpen = true };
+            var closed = selection.Evaluated.Where(e => window.Contains(e.ClosedAt)).ToList();
+            var known = closed.Where(e => e.Result?.RMultiple is not null).ToList();
+            return new ClosedRSum(Sum(known.Select(e => e.Result!.RMultiple!.Value)), known.Count, closed.Count - known.Count);
+        }).ToList();
+    }
+
+    /// <summary>
     /// The earliest fact Vessel holds in scope: the first retained execution or the first Play created in any status, so a
     /// week before it reads as without data rather than without trades (Phase 2, item 2; active Plays since Sol round 1).
     /// </summary>

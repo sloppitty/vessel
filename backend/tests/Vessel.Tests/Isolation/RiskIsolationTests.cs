@@ -26,12 +26,13 @@ public abstract class RiskIsolationCases(IsolationHost api)
     [Covers("POST", "/api/risk/open/preview")]
     [Covers("GET", "/api/risk/settings")]
     [Covers("PUT", "/api/risk/settings")]
+    [Covers("GET", "/api/risk/loss")]
     public async Task Open_risk_previews_and_limits_stay_with_their_owner()
     {
         var (a, b) = await api.Owners();
         var (aAccount, aPlay) = await Planned(a);
         var (bAccount, bPlay) = await Planned(b);
-        await a.Send(HttpMethod.Put, "/api/risk/settings", new UpdateRiskSettingsRequest("2"));
+        await a.Send(HttpMethod.Put, "/api/risk/settings", new UpdateRiskSettingsRequest("2", "1.5", "4"));
         foreach (var (owner, play, limit) in new[] { (a, aPlay, "2"), (b, bPlay, (string?)null) })
         {
             var risk = await owner.GetJson("/api/risk/open");
@@ -39,6 +40,11 @@ public abstract class RiskIsolationCases(IsolationHost api)
             Assert.Equal("37.5", risk.GetProperty("long").GetProperty("knownUsd").GetString());
             Assert.Equal(limit, risk.GetProperty("limitPercent").GetString());
             Assert.Equal(limit, (await owner.GetJson("/api/risk/settings")).GetProperty("openRiskLimitPercent").GetString());
+            // Phase 2, item 10b: each owner's loss limits and losses are their own.
+            var loss = await owner.GetJson("/api/risk/loss");
+            Assert.Equal(limit is null ? null : "1.5", loss.GetProperty("day").GetProperty("limitR").GetString());
+            Assert.Equal(limit is null ? null : "4", loss.GetProperty("week").GetProperty("limitR").GetString());
+            Assert.Equal(("0", 0), (loss.GetProperty("day").GetProperty("netR").GetString(), loss.GetProperty("day").GetProperty("withR").GetInt32()));
         }
         // Another owner's account or Play reads as unknown: the preview measures nothing of theirs.
         foreach (var (caller, foreign) in new[] { (a, bAccount), (b, aAccount) })

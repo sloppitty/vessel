@@ -1,6 +1,7 @@
 using Vessel.Application.Plays;
 using Vessel.Application.Sizing;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Reporting;
 using Vessel.Domain.Workspace;
@@ -27,8 +28,13 @@ public sealed record ReviewQuery(string Period = "month", string Portfolio = "al
 public sealed record ReviewWindow(DateTimeOffset? From, DateTimeOffset To, ReportingWeek? Week = null, TimeZoneInfo? Zone = null,
     string? WeekStart = null)
 {
-    public bool Contains(DateTimeOffset at) => Week is { } week ? week.Contains(at) : at <= To && (From is null || at > From);
+    /// <summary>A reporting span's [From, To): a week's, or a day's for the loss limits (Phase 2, item 10b).</summary>
+    public bool HalfOpen { get; init; } = Week is not null;
+    public bool Contains(DateTimeOffset at) => HalfOpen ? at >= From && at < To : at <= To && (From is null || at > From);
 }
+
+/// <summary>Estimated R of the real Plays closed in one range: the exact sum over those with R, and how many have none.</summary>
+public sealed record ClosedRSum(ExactAmount NetR, int WithR, int WithoutR);
 
 /// <summary>
 /// The reporting week a report covers: its first local day, UTC range, zone and week start. <paramref name="Data"/> is

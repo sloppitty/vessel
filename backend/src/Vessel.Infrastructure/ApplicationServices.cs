@@ -43,6 +43,7 @@ public static class ApplicationServices
         services.AddScoped<PlayExecutionService>();
         services.AddScoped<SizingService>();
         services.AddScoped<Vessel.Application.Risk.OpenRiskService>();
+        services.AddScoped<Vessel.Application.Risk.LossLimitService>();
         services.AddScoped<Vessel.Application.Reporting.ReportingService>();
         services.AddScoped<Vessel.Application.Export.FactsExportService>();
         services.AddScoped<Vessel.Application.Export.PlayBundleService>();

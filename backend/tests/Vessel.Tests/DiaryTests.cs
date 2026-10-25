@@ -317,14 +317,15 @@ public sealed partial class DiaryPostgresTests
         var created = await client.PostAsJsonAsync("/api/plays", new CreatePlayRequest(account.Id, "BTC", "manual", "Unpriced stop", plan));
         created.EnsureSuccessStatusCode();
         var draft = (await created.Content.ReadFromJsonAsync<PlayDto>())!;
+        // Phase 2, item 10b: planned at a reached loss limit too, with a cooldown note.
         var planning = await client.PostAsJsonAsync($"/api/plays/{draft.Summary.Id}/status",
-            new ChangePlayStatusRequest(draft.Summary.Version, "planned", Preflight: SkippedStops));
+            new ChangePlayStatusRequest(draft.Summary.Version, "planned", Preflight: [.. SkippedStops, new("loss-limit", "skipped", "Cooldown first.")]));
         planning.EnsureSuccessStatusCode();
         var planned = (await planning.Content.ReadFromJsonAsync<PlayDto>())!;
         var history = (await client.GetFromJsonAsync<PlayHistoryDto>($"/api/plays/{draft.Summary.Id}/history"))!;
         var first = Assert.Single(history.Revisions);
         Assert.Equal(1, first.Number);
-        Assert.Equal(["priced-stops:skipped", "allocations:passed", "thesis:passed", "risk:unknown", "liquidation:unknown"],
+        Assert.Equal(["priced-stops:skipped", "allocations:passed", "thesis:passed", "risk:unknown", "liquidation:unknown", "loss-limit:skipped"],
             first.Preflight!.Select(c => $"{c.Code}:{c.Outcome}"));
 
         var entry = await Add(client, planned, Fact(planned.Summary.Version, "entry", "1", "100", 0));
@@ -339,8 +340,11 @@ public sealed partial class DiaryPostgresTests
         var report = await new ReviewService(new ReviewStore(verify, new SizingStore(verify, TestUnitOfWork.For(verify))), TimeProvider.System)
             .GetAsync(new(Period: "all"), default);
         Assert.Equal((1, 1), (report.Preflight!.Recorded, report.Preflight.NotRecorded));
-        Assert.Equal(["priced-stops:1", "allocations:0", "thesis:0", "risk:0", "liquidation:0"],
+        Assert.Equal(["priced-stops:1", "allocations:0", "thesis:0", "risk:0", "liquidation:0", "loss-limit:1"],
             report.Preflight.Skipped.Select(c => $"{c.Code}:{c.Count}"));
+        var reached = await new ReviewService(new ReviewStore(verify, new SizingStore(verify, TestUnitOfWork.For(verify))), TimeProvider.System)
+            .ProcessAsync(new(new(Period: "all"), SkippedCheck: "loss-limit"), default);
+        Assert.Equal([draft.Summary.Id], reached.Items.Select(i => i.Id));
     }
 
     [PostgresFact]
@@ -364,7 +368,8 @@ public sealed partial class DiaryPostgresTests
             Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
         }
         var planned = (await (await client.PostAsJsonAsync($"/api/plays/{draft.Summary.Id}/status",
-            new ChangePlayStatusRequest(draft.Summary.Version, "planned", Preflight: [new("thesis", "passed")]))).Content.ReadFromJsonAsync<PlayDto>())!;
+            new ChangePlayStatusRequest(draft.Summary.Version, "planned",
+                Preflight: [new("thesis", "passed"), new("loss-limit", "skipped", "  Walk away until Monday.  ")]))).Content.ReadFromJsonAsync<PlayDto>())!;
         Assert.Equal("planned", planned.Summary.Status);
         var paused = (await (await client.PostAsJsonAsync($"/api/plays/{draft.Summary.Id}/status",
             new ChangePlayStatusRequest(planned.Summary.Version, "paused"))).Content.ReadFromJsonAsync<PlayDto>())!;
@@ -374,8 +379,9 @@ public sealed partial class DiaryPostgresTests
         (await client.PostAsJsonAsync($"/api/plays/{draft.Summary.Id}/status", new ChangePlayStatusRequest(paused.Summary.Version, "planned")))
             .EnsureSuccessStatusCode();
         var revision = Assert.Single((await client.GetFromJsonAsync<PlayHistoryDto>($"/api/plays/{draft.Summary.Id}/history"))!.Revisions);
-        var kept = Assert.Single(revision.Preflight!);
-        Assert.Equal(("thesis", "passed"), (kept.Code, kept.Outcome));
+        Assert.Collection(revision.Preflight!, kept => Assert.Equal(("thesis", "passed", (string?)null), (kept.Code, kept.Outcome, kept.Note)),
+            // Phase 2, item 10b: a reached loss limit keeps the owner's cooldown note with revision 1.
+            loss => Assert.Equal(("loss-limit", "skipped", "Walk away until Monday."), (loss.Code, loss.Outcome, loss.Note)));
     }
 
     [PostgresFact]
