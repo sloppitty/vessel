@@ -381,9 +381,16 @@ Sol (Codex) reviews before the pull request. Branch `t3/remove-token-authenticat
   identical routes.
 
 Verification (throwaway PostgreSQL 18 and RabbitMQ 4.3.6 containers, never the
-owner's database): full backend suite with `Vessel_TEST_POSTGRES`, then the
-broker-gated classes with `Vessel_TEST_EVENT_RABBIT`; frontend typecheck, lint
-and the full vitest suite (176 files, 4,087 tests); `scripts` unit tests.
+owner's database): the full backend suite with `Vessel_TEST_POSTGRES` and
+`Vessel_TEST_EVENT_RABBIT` (3,996 passed, 5 live-venue/S3 skips); frontend
+typecheck, lint and the full vitest suite (176 files, 4,087 tests); `scripts`
+unit tests; and `verify-release.py --storage s3` with an external signer
+(199 checks over the TLS and plain-HTTP passes, wallet bootstrap, sign-in,
+bearer refusal, guarded writes and the restore reset; no browser smokes).
+Two Sol (Codex, `gpt-6.1-sol`) reviews: backend/deploy/dev raised two minor
+findings (stale Token settings ignored instead of refused; an empty
+`Vessel:Auth:Mode` accepted), both fixed; frontend/scripts/CI raised none.
+`e2e-full-stack.py` and the browser smokes were not run.
 §10 is unchanged: still **not signed off**; the real-wallet/non-mainnet EOA
 check remains owner-pending and registration stays `Closed` by default.
 
