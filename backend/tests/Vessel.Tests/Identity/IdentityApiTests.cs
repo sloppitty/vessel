@@ -16,29 +16,12 @@ namespace Vessel.Tests.Identity;
 
 public sealed class IdentityApiTests
 {
-    [Theory]
-    [InlineData("GET", "/api/auth/session")]
-    [InlineData("POST", "/api/auth/challenge")]
-    [InlineData("POST", "/api/auth/verify")]
-    [InlineData("POST", "/api/auth/register")]
-    [InlineData("POST", "/api/auth/sign-out")]
-    [InlineData("DELETE", "/api/auth/unknown")]
-    public async Task Token_mode_auth_routes_are_anonymous_404s(string method, string path)
-    {
-        await using var factory = new CoreApiFactory(Guid.NewGuid());
-        using var client = factory.CreateClient();
-        await IdentityHttpTest.Code(await client.SendAsync(new(new HttpMethod(method), path)), 404, "not-found");
-        var config = await client.GetFromJsonAsync<JsonElement>("/api/auth/config");
-        Assert.Equal("""{"mode":"token"}""", config.GetRawText());
-    }
-
     [Fact]
-    public async Task Wallet_config_does_not_reveal_origins_and_only_reports_the_query_hint_and_gate()
+    public async Task Config_does_not_reveal_origins_and_only_reports_the_query_hint_and_gate()
     {
-        await using var factory = new CoreApiFactory(Guid.NewGuid(), settings: new()
+        await using var factory = new CoreApiFactory(Guid.NewGuid(), testAuthentication: false, settings: new()
         {
-            ["Vessel:Auth:Mode"] = "Wallet", ["Vessel:Auth:Token"] = null, ["Vessel:Identity:Origins:0"] = "https://vessel.test",
-            ["Vessel:Identity:Registration"] = "Open"
+            ["Vessel:Identity:Origins:0"] = "https://vessel.test", ["Vessel:Identity:Registration"] = "Open"
         });
         using var client = factory.CreateClient();
         var without = await client.GetFromJsonAsync<JsonElement>("/api/auth/config");
@@ -46,13 +29,15 @@ public sealed class IdentityApiTests
         Assert.Equal("open", without.GetProperty("registration").GetString());
         var accepted = await client.GetFromJsonAsync<JsonElement>("/api/auth/config?origin=https%3A%2F%2Fvessel.test");
         Assert.True(accepted.GetProperty("originAccepted").GetBoolean());
-        Assert.Equal(3, accepted.EnumerateObject().Count());
+        Assert.Equal(["registration", "originAccepted"], accepted.EnumerateObject().Select(property => property.Name));
         var rejected = await client.GetFromJsonAsync<JsonElement>("/api/auth/config?origin=https%3A%2F%2Fevil.test");
         Assert.False(rejected.GetProperty("originAccepted").GetBoolean());
         using var scope = factory.Services.CreateScope();
         var schemes = scope.ServiceProvider.GetRequiredService<IAuthenticationSchemeProvider>();
+        // The removed Token sign-in's bearer scheme is gone; a bearer header is just an unauthenticated request.
         Assert.Null(await schemes.GetSchemeAsync("VesselBearer"));
-        client.DefaultRequestHeaders.Authorization = new("Bearer", CoreApiFactory.Token);
+        Assert.Equal([SessionAuthentication.SchemeName], (await schemes.GetAllSchemesAsync()).Select(scheme => scheme.Name));
+        client.DefaultRequestHeaders.Authorization = new("Bearer", "test-only-retired-bearer-secret");
         await IdentityHttpTest.Code(await client.GetAsync("/api/system"), 401, "session-required");
         client.DefaultRequestHeaders.Add("Cookie", "__Host-vessel-session=" + IdentityTokens.Create());
         await IdentityHttpTest.Code(await client.GetAsync("/api/system"), 503, "identity-unavailable");
@@ -60,7 +45,7 @@ public sealed class IdentityApiTests
     }
 
     [PostgresFact]
-    public async Task Session_scheme_preserves_the_legacy_principal_type_and_adds_the_session_claim()
+    public async Task Session_scheme_issues_the_owner_claims_and_the_session_claim()
     {
         await using var database = await IdentityDatabase.CreateAsync();
         var key = EthECKey.GenerateKey();
@@ -74,7 +59,7 @@ public sealed class IdentityApiTests
         var result = await context.AuthenticateAsync(SessionAuthentication.SchemeName);
         Assert.True(result.Succeeded);
         Assert.Equal(SessionAuthentication.SchemeName, result.Ticket!.AuthenticationScheme);
-        Assert.Equal("VesselBearer", result.Principal!.Identity!.AuthenticationType);
+        Assert.Equal(SessionAuthentication.SchemeName, result.Principal!.Identity!.AuthenticationType);
         Assert.Equal(seeded.User.DisplayName, result.Principal.Identity.Name);
         Assert.Equal(seeded.User.Id.ToString(), result.Principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
         Assert.Equal(issued.Session.Session.Id.ToString(), result.Principal.FindFirst(SessionAuthentication.SessionClaim)!.Value);
