@@ -351,9 +351,10 @@ Covers G-09, D-21 and V11. No decision.
 Covers D-23 and I-06.
 
 - **9a. Resumable windows (no decision).** Funding is read in smaller windows
-  that fit the venue's page budget, with a persisted per-account cursor. Each
-  Refresh resumes until the 30-day window is covered. Coverage stays partial,
-  and says so, until then. This needs a migration.
+  that fit the venue's page budget. The account's stored contiguous funding
+  coverage is the cursor, so no migration is needed. Each Refresh resumes
+  until the 30-day window is covered. Coverage stays partial, and says so,
+  until then.
 - **9b. Beside a Play (no decision; after item 6).** Settled funding is shown
   on a Play only with proven sole exposure. That requires, over the Play's
   holding window:
@@ -514,7 +515,7 @@ request's diff stays within its own item.
 main (Phase 1 merged October 21) → contract + state (this document)
   2a: 1 open risk (migration) → 4 earlier orders → 5a Review CSV → 5b raw facts
       → 5c bundle → 8a risk observations (migration) → 8b beyond liquidation
-      → 8c link this stop → 9a funding cursor (migration) → 10a assumptions
+      → 8c link this stop → 9a funding cursor → 10a assumptions
       → 14a RISEx → 14b Hyperliquid → 14c fill conflicts (migration)
   2b: 2 week page (migration) → 10b loss limits (migration) → 3 if-then rule (migration)
       → 6 retention (migration) → 7 forced events and omission markers (migration)
