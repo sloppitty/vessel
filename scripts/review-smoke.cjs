@@ -1,13 +1,17 @@
 // Production UI + real API smoke check. Run only against an explicitly synthetic, isolated
 // database. Playwright/axe may be supplied externally; neither is a production dependency.
+// It signs in with a publicly known synthetic EOA (scripts/wallet-test-signer.cjs, index VESSEL_REVIEW_SMOKE_WALLET,
+// default 1) that the isolated installation bound with `identity bind-wallet`; set VESSEL_RELEASE_SYNTHETIC=1 and an
+// external NOBLE_MODULE_DIR for the signer.
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const assert = require('node:assert/strict')
+const { signer, exposeSyntheticWallet, signInWithSyntheticWallet } = require('./wallet-test-signer.cjs')
 const { mkdir, writeFile } = require('node:fs/promises')
 const path = require('node:path')
 
 async function main() {
   assert.equal(process.env.VESSEL_REVIEW_SMOKE_SYNTHETIC, '1', 'Use an isolated synthetic database, not personal history.')
-  assert.ok(process.env.VESSEL_REVIEW_SMOKE_TOKEN, 'Supply the disposable API token through the environment.')
+  const wallet = await signer(Number(process.env.VESSEL_REVIEW_SMOKE_WALLET || '1'))
   const browser = await chromium.launch({
     headless: true, ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
   })
@@ -15,6 +19,7 @@ async function main() {
   await mkdir(out, { recursive: true })
   try {
     const page = await browser.newPage({ viewport: { width: 1512, height: 1120 }, reducedMotion: 'reduce' })
+    await exposeSyntheticWallet(page, wallet)
     const resize = async (width, height = 1000) => {
       await page.setViewportSize({ width, height })
       // Chromium can acknowledge the resize before media-query styles have been painted.
@@ -22,9 +27,7 @@ async function main() {
     }
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
-    await page.goto(process.env.REVIEW_PREVIEW_URL || 'http://127.0.0.1:5193')
-    await page.getByLabel('API token').fill(process.env.VESSEL_REVIEW_SMOKE_TOKEN)
-    await page.getByRole('button', { name: 'Connect', exact: true }).click()
+    await signInWithSyntheticWallet(page, process.env.REVIEW_PREVIEW_URL || 'http://127.0.0.1:5193')
     await page.getByRole('link', { name: 'Review', exact: true }).click()
     const ready = () => page.getByRole('region', { name: 'Performance scorecard' }).waitFor()
     await ready()

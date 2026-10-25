@@ -3,13 +3,14 @@ import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from '@/api/workspace'
 import { accountFixture } from '@/test/workspace-fixture'
 import { useAccountRefresh } from './useAccountRefresh'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const accounts = [accountFixture, { ...accountFixture, id: 'second' }]
 
 describe('account refresh session', () => {
   it.each(['cancel', 'unmount', 'API replacement'] as const)('suppresses rejected single refresh completion after %s', async action => {
     let reject!: (reason: Error) => void
-    const api = { ...createWorkspaceApi('synthetic-only'), sync: vi.fn().mockImplementation(() => new Promise((_resolve, fail) => { reject = fail })) }
+    const api = { ...createWorkspaceApi(credentialsFixture), sync: vi.fn().mockImplementation(() => new Promise((_resolve, fail) => { reject = fail })) }
     const notify = vi.fn(), reload = vi.fn()
     const view = renderHook(({ api }) => useAccountRefresh({ api, refreshable: accounts, notify, reload }), { initialProps: { api } })
     let pending!: Promise<void>
@@ -30,7 +31,7 @@ describe('account refresh session', () => {
 
   it('queues initial refreshes behind current work, deduplicates them and continues after a failure', async () => {
     let finishCurrent!: () => void, failSecond!: (reason: Error) => void
-    const api = { ...createWorkspaceApi('synthetic-only'), sync: vi.fn()
+    const api = { ...createWorkspaceApi(credentialsFixture), sync: vi.fn()
       .mockImplementationOnce(() => new Promise<void>(resolve => { finishCurrent = resolve }))
       .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { failSecond = reject }))
       .mockResolvedValue(accountFixture) }
@@ -58,7 +59,7 @@ describe('account refresh session', () => {
   })
 
   it('starts an initial refresh without requiring the new account in the last overview', async () => {
-    const api = { ...createWorkspaceApi('synthetic-only'), sync: vi.fn().mockResolvedValue(accountFixture) }
+    const api = { ...createWorkspaceApi(credentialsFixture), sync: vi.fn().mockResolvedValue(accountFixture) }
     const notify = vi.fn(), reload = vi.fn()
     const { result } = renderHook(() => useAccountRefresh({ api, refreshable: [], notify, reload }))
     act(() => result.current.enqueue(accountFixture))
@@ -68,7 +69,7 @@ describe('account refresh session', () => {
 
   it('does not let an old batch clear or advance a new API refresh', async () => {
     let completeOld!: () => void, completeNew!: () => void
-    const oldApi = { ...createWorkspaceApi('old-synthetic'), sync: vi.fn().mockImplementation(() => new Promise<void>(resolve => { completeOld = resolve })) }
+    const oldApi = { ...createWorkspaceApi(credentialsFixture), sync: vi.fn().mockImplementation(() => new Promise<void>(resolve => { completeOld = resolve })) }
     const nextApi = { ...oldApi, sync: vi.fn().mockImplementation(() => new Promise<void>(resolve => { completeNew = resolve })) }
     const notify = vi.fn(), reload = vi.fn()
     const { result, rerender } = renderHook(({ api }) => useAccountRefresh({ api, refreshable: accounts, notify, reload }), { initialProps: { api: oldApi } })

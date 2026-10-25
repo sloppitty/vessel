@@ -3,6 +3,7 @@ import { expect, it, vi } from 'vitest'
 import { ReviewPage } from '@/features/review/ReviewPage'
 import { reviewFixture } from '@/test/review-fixture'
 import { createWorkspaceApi } from './workspace'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 function realReportResponse() {
   vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify(reviewFixture)))))
@@ -10,7 +11,7 @@ function realReportResponse() {
 
 it('renders a legacy unlabelled real Review through the default Real client', async () => {
   realReportResponse()
-  render(<ReviewPage api={createWorkspaceApi('synthetic-token')} reloadGeneration={0} onOpenPlay={vi.fn().mockResolvedValue(undefined)} />)
+  render(<ReviewPage api={createWorkspaceApi(credentialsFixture)} reloadGeneration={0} onOpenPlay={vi.fn().mockResolvedValue(undefined)} />)
   expect(await screen.findByRole('button', { name: '3 Plays' })).toBeVisible()
   expect(screen.getByText('12 unassigned fills in this period.')).toBeInTheDocument()
   expect(screen.queryByRole('alert')).not.toBeInTheDocument()
@@ -18,7 +19,7 @@ it('renders a legacy unlabelled real Review through the default Real client', as
 
 it('shows an error rather than real results when a Paper-bound Review receives an unlabelled real report', async () => {
   realReportResponse()
-  render(<ReviewPage api={createWorkspaceApi('synthetic-token', undefined, 'paper')}
+  render(<ReviewPage api={createWorkspaceApi(credentialsFixture, undefined, 'paper')}
     reloadGeneration={0} onOpenPlay={vi.fn().mockResolvedValue(undefined)} />)
   await waitFor(() => expect(screen.queryByText('Loading review…')).not.toBeInTheDocument())
   expect(screen.getByRole('alert')).toHaveTextContent('different trading mode')

@@ -6,9 +6,10 @@ import { overviewFixture } from '@/test/workspace-fixture'
 import { overviewSummaryFixture, summaryAmount } from '@/test/overview-summary-fixture'
 import { OverviewSummary } from './OverviewSummary'
 import { balanceShare } from './overview-share'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const query: OverviewQuery = { groupBy: 'portfolio', period: '30', scope: 'all' }
-function api(document = overviewSummaryFixture()) { return { ...createWorkspaceApi('test'), overviewSummary: vi.fn().mockResolvedValue(document) } }
+function api(document = overviewSummaryFixture()) { return { ...createWorkspaceApi(credentialsFixture), overviewSummary: vi.fn().mockResolvedValue(document) } }
 describe('Overview summary', () => {
   it('renders nulls, per-account and excluded-operation coverage, reported signs and ratio shares', async () => {
     const document = overviewSummaryFixture()

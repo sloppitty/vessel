@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { overviewSummaryFixture } from '@/test/overview-summary-fixture'
 import { createWorkspaceApi } from './workspace'
 import { isOverviewSummary, overviewSummaryPath, type OverviewQuery } from './overview-summary'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const query: OverviewQuery = { groupBy: 'portfolio', period: '30', scope: 'all' }
 describe('Overview summary API', () => {
@@ -12,9 +13,9 @@ describe('Overview summary API', () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(document)))
     vi.stubGlobal('fetch', fetch)
     const controller = new AbortController()
-    expect(await createWorkspaceApi('test-token').overviewSummary(query, controller.signal)).toEqual(document)
+    expect(await createWorkspaceApi(credentialsFixture).overviewSummary(query, controller.signal)).toEqual(document)
     expect(fetch.mock.calls[0]![0]).toBe('/api/overview/summary?groupBy=portfolio&period=30&scope=all')
-    expect(fetch.mock.calls[0]![1].headers.Authorization).toBe('Bearer test-token')
+    expect(fetch.mock.calls[0]![1].headers['X-Vessel-User']).toBe(credentialsFixture.userId)
     controller.abort(); expect(fetch.mock.calls[0]![1].signal.aborted).toBe(true)
   })
   it.each(['7', '30', '90', 'all'] as const)('accepts the %s window', period => {
@@ -25,7 +26,7 @@ describe('Overview summary API', () => {
     { scope: 'all&scope=account:bad' }, { scope: null },
   ])('rejects an invalid query %j before fetching', fields => {
     const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
-    expect(() => createWorkspaceApi('test').overviewSummary({ ...query, ...fields } as OverviewQuery)).toThrow('request is invalid')
+    expect(() => createWorkspaceApi(credentialsFixture).overviewSummary({ ...query, ...fields } as OverviewQuery)).toThrow('request is invalid')
     expect(fetch).not.toHaveBeenCalled()
   })
   it.each(['account', 'portfolio'] as const)('rejects a mismatched %s scope row', kind => {
@@ -57,6 +58,6 @@ describe('Overview summary API', () => {
   ])('rejects malformed response %#', async mutate => {
     const document = overviewSummaryFixture(); mutate(document)
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(document))))
-    await expect(createWorkspaceApi('test').overviewSummary(query)).rejects.toMatchObject({ kind: 'invalid-response' })
+    await expect(createWorkspaceApi(credentialsFixture).overviewSummary(query)).rejects.toMatchObject({ kind: 'invalid-response' })
   })
 })

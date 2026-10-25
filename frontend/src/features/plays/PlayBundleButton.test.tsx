@@ -1,3 +1,4 @@
+import { credentialsFixture } from '@/test/identity-fixture'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -13,7 +14,7 @@ describe('Play download (phase 2, 5c)', () => {
       'content-type': 'application/zip', 'content-disposition': 'attachment; filename=vessel-play-range-11111111-20261021.zip' } }))
     vi.stubGlobal('fetch', fetch)
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
-    render(<PlayBundleButton api={createWorkspaceApi('synthetic-token', undefined, 'paper')} playId={id} dirty />)
+    render(<PlayBundleButton api={createWorkspaceApi(credentialsFixture, undefined, 'paper')} playId={id} dirty />)
     const button = screen.getByRole('button', { name: 'Download' })
     expect(button).toHaveAttribute('title', expect.stringContaining('unsaved changes are not included'))
     await userEvent.setup().click(button)
