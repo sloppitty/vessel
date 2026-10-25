@@ -527,7 +527,8 @@ main (Phase 1 merged October 21) → contract + state (this document)
       → 14a RISEx → 14b Hyperliquid → 14c fill conflicts (migration)
   2b: 2 week page (migration) → 10b loss limits (migration) → 3 if-then rule (migration)
       → 6a retention and coverage ledger (migration) → 6b backfill (migration)
-      → 6c no-stop check → 7 forced events and omission markers (migration)
+      → 6c no-stop check → 7a forced events and omission markers (migration)
+      → 7b gap-aware Activity
       → 9b funding beside a Play → 9c funding schedule → D-19 confirmation
       → 13 search (migration) → 11 allocation (migration) → 14d benchmark
 ```

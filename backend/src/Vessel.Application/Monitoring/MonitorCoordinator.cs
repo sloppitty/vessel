@@ -576,7 +576,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 {
                     // Only the page this run read on top of the backfill it saw.
                     if (backfill.Pages != active.Pages) return false;
-                    var added = await workspace.SaveHistoricalFillsAsync(account, read.Fills, now, ct);
+                    var added = await workspace.SaveHistoricalFillsAsync(account, read.Fills, now, ct, read.Omissions);
                     await events.ClaimHistoricalFillsAsync(added, ct);
                     if (backfill.Read(read.Raw.Select(r => (r.Id, r.At)).ToList(), from, added.Count, read.OmittedExecutions, expected,
                             to, reader.PageLimit, reader.Reach, now))

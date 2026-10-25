@@ -119,7 +119,8 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
 
             using var fills = await ReadJsonAsync(
                 new { type = "userFills", user = publicAddress, aggregateByTime = false }, token);
-            var executions = ReadFills(fills.RootElement, contracts, latestTimestamp, out var omitted);
+            var omissions = new List<VenueOmission>();
+            var executions = ReadFills(fills.RootElement, contracts, latestTimestamp, out var omitted, omissions);
             var fillCoverage = new RawFillReadCoverage();
             fillCoverage.Observe(fills.RootElement, row => Timestamp(Property(row, "time"), latestTimestamp));
 
@@ -146,7 +147,8 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
             return new PerpetualVenueReadResult(snapshot with { StablecoinWallet = wallet, AccountMode = accountMode }, instruments,
                 executions, notice,
                 PositionsComplete: positionsComplete, FillHistoryTruncated: fillCoverage.Count == MaxFills,
-                OldestRawFillAtUtc: fillCoverage.OldestAtUtc, OmittedExecutions: omitted);
+                OldestRawFillAtUtc: fillCoverage.OldestAtUtc, OmittedExecutions: omitted)
+            { Omissions = omissions.DistinctBy(o => o.SourceId).ToList() };
         }, cancellationToken);
     }
 
@@ -238,7 +240,9 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
     /// Primary-perpetual fills on a contract the catalogue does not list. Spot (<c>@…</c>, <c>A/B</c>) and HIP-3
     /// (<c>dex:…</c>) fills are proven out of scope; an unrecognized primary contract is an in-scope fact Vessel left out.
     /// </param>
-    internal static List<VenueFill> ReadFills(JsonElement root, HashSet<string> contracts, long latestTimestamp, out int omitted)
+    /// <param name="omissions">Phase 2, item 7: receives each omitted row's marker, keyed by its trade ID, which it must have.</param>
+    internal static List<VenueFill> ReadFills(JsonElement root, HashSet<string> contracts, long latestTimestamp, out int omitted,
+        List<VenueOmission>? omissions = null)
     {
         omitted = 0;
         var array = Array(root);
@@ -250,7 +254,15 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
             var name = Text(Property(fill, "coin"));
             if (!contracts.Contains(name))
             {
-                if (IsPrimaryContract(name)) omitted++;
+                if (IsPrimaryContract(name))
+                {
+                    omitted++;
+                    // An in-scope execution on a market the catalogue does not list: its canonical contract is unknown,
+                    // and its order and time are kept when valid. Its trade ID is required, as for any in-scope fill: a
+                    // row whose omission cannot leave a durable marker fails the read (Sol round 1).
+                    omissions?.Add(new(Identity(Property(fill, "tid")), ExecutionOmission.UnrecognizedMarket, "unrecognized market", null, name,
+                        Lenient(() => Identity(Property(fill, "oid"))), LenientTime(() => Timestamp(Property(fill, "time"), latestTimestamp))));
+                }
                 continue;
             }
             var side = Text(Property(fill, "side"));
@@ -270,6 +282,9 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         // Preserve venue side/direction as facts; they do not identify a journal play.
         return fills.OrderByDescending(fill => fill.OccurredAtUtc).ToList();
     }
+
+    private static string? Lenient(Func<string> read) { try { return read(); } catch (VenueReadException) { return null; } }
+    private static DateTimeOffset? LenientTime(Func<DateTimeOffset> read) { try { return read(); } catch (VenueReadException) { return null; } }
 
     /// <summary>Hyperliquid's B (bid) buys and A (ask) sells.</summary>
     public static string SideOf(string side) => side == "B" ? ExecutionFacts.Buy : ExecutionFacts.Sell;

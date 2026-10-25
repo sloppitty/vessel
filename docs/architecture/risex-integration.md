@@ -195,6 +195,12 @@ See `phase2-risk-coverage-contract.md`, item 14a.
   cancelled would leave the order looking complete, so its Play could close
   and be scored. Item 7's markers keep the trade's order, and a linked order
   with one has known missing executions whatever its status.
+- **October 22 (item 7a): D-22 lands.** A trade without reported PnL is now
+  set aside once its other fields validate, with a counted reason
+  ("Omitted executions: 1 without reported P&L.") and a durable marker that
+  keeps its order, so that order has known missing executions whatever its
+  status. The rest of the read applies. Trades on unrecognized markets leave
+  markers too. See `execution-facts.md`.
 - **Counted omissions.** Trades on unrecognized markets were already counted
   in `OmittedExecutions`; the history notice now ends with one sentence for
   them, for example "Omitted executions: 1 on an unrecognized market."

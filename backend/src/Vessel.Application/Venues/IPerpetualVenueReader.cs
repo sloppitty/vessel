@@ -136,6 +136,17 @@ public static class VenueFactChecks
 /// verified (for example unreported realized PnL or an unverified fee). These are known missing facts, separate from
 /// lifetime completeness and raw truncation; zero means none were knowingly omitted, not that history is complete.
 /// </param>
+/// <summary>
+/// Phase 2, item 7: an in-scope execution the adapter read but left out, for its durable marker. <paramref name="Kind"/>
+/// is one of <see cref="ExecutionOmission.Kinds"/>. Time and market are null when the venue gives none.
+/// </summary>
+public sealed record VenueOmission(string SourceId, string Kind, string Reason, string? ContractId, string? VenueContractId,
+    string? OrderId, DateTimeOffset? OccurredAtUtc);
+
+/// <summary>Phase 2, item 7: a venue-forced execution, never a fill. Unreported or unverifiable money is null.</summary>
+public sealed record VenueForcedEvent(string SourceId, string Kind, string ContractId, string? VenueContractId, string Side,
+    decimal Quantity, decimal? Price, DateTimeOffset OccurredAtUtc, string? OrderId, decimal? Fee, decimal? RealizedPnl);
+
 public sealed record PerpetualVenueReadResult(
     VenueSnapshot Snapshot,
     IReadOnlyList<VenueInstrument> Instruments,
@@ -148,6 +159,10 @@ public sealed record PerpetualVenueReadResult(
     int OmittedExecutions = 0)
 {
     public VenueFundingReadResult? Funding { get; init; }
+    /// <summary>Phase 2, item 7: every row counted in <see cref="OmittedExecutions"/>, for durable markers.</summary>
+    public IReadOnlyList<VenueOmission> Omissions { get; init; } = [];
+    /// <summary>Phase 2, item 7: venue-forced executions, each also an omission.</summary>
+    public IReadOnlyList<VenueForcedEvent> ForcedEvents { get; init; } = [];
 }
 
 public class VenueReadException(string message) : Exception(message)
