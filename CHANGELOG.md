@@ -37,6 +37,11 @@
   has an optional soft limit, blank until you set it, which is flagged and
   never enforced (G-06).
 
+### Fixed
+
+- RISEx: history pages share one fixed end time, so new trades cannot shift them, and
+  the history notice counts trades on unrecognized markets.
+
 ### Removed
 
 - **Breaking:** the API token (Token sign-in) is gone; Vessel signs in with
