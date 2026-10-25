@@ -1,6 +1,5 @@
 using Amazon.Runtime;
 using Amazon.S3;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,7 +26,6 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddVesselInfrastructure(this IServiceCollection services, IConfiguration config)
     {
-        services.Configure<VesselAuthOptions>(config.GetSection("Vessel:Auth"));
         services.AddSingleton(TimeProvider.System);
         AddVenueHosts(services, config);
         // Venue modules register their descriptor and adapter ports; use cases find them by venue ID.
@@ -76,12 +74,8 @@ public static class DependencyInjection
         services.AddHttpContextAccessor();
         services.AddScoped<IJournalOwnerContext, HttpJournalOwnerContext>();
         services.TryAddScoped<OwnerScopeAssignment>();
-        services.TryAddSingleton<IJournalOwnerDirectory>(
-            new ConfiguredOwnerDirectory(JournalOwner.Parse(config[JournalOwner.ConfigurationKey])));
-        services.AddSingleton<AuthFailureLimiter>();
-        if (config["Vessel:Auth:Mode"] != "Wallet")
-            services.AddAuthentication(BearerTokenHandler.SchemeName)
-                .AddScheme<AuthenticationSchemeOptions, BearerTokenHandler>(BearerTokenHandler.SchemeName, _ => { });
+        // Wallet sign-in is the only authentication: the identity module registers the session scheme and the
+        // owner directory (AddVesselIdentityDirectory / AddVesselIdentityApi).
         services.AddAuthorization(options =>
         {
             // New endpoints are private unless they explicitly opt out, such as liveness.

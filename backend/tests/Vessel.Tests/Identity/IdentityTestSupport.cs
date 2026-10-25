@@ -23,7 +23,7 @@ internal sealed class IdentityDatabase(string connection, IdentitySchema schema)
     public IdentitySchema Schema => schema;
     public IdentityClock Clock { get; } = new();
     public IInterceptor? Interceptor { get; set; }
-    public IdentitySettings Settings { get; set; } = new() { Schema = schema.Name, WalletMode = true, Origins = ["https://vessel.test"] };
+    public IdentitySettings Settings { get; set; } = new() { Schema = schema.Name, Origins = ["https://vessel.test"] };
     public IdentityDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<IdentityDbContext>();
@@ -70,7 +70,7 @@ internal sealed class IdentityDatabase(string connection, IdentitySchema schema)
 
     public Dictionary<string, string?> ConfigurationValues(Guid owner) => new()
     {
-        ["Vessel:Auth:Mode"] = "Wallet", ["Vessel:Auth:Token"] = null, ["Vessel:Auth:OwnerId"] = owner.ToString(),
+        ["Vessel:Auth:OwnerId"] = owner.ToString(),
         ["Vessel:Identity:Schema"] = schema.Name, ["Vessel:Identity:Origins:0"] = "https://vessel.test",
         ["Vessel:Identity:Origins:1"] = "http://localhost", ["ConnectionStrings:Vessel"] = connection
     };
@@ -89,7 +89,7 @@ internal static class IdentityHttpTest
 {
     public static CoreApiFactory Factory(IdentityDatabase database, Guid owner, string? registration = null,
         Action<IServiceCollection>? configure = null) =>
-        new(owner, connection: database.Connection, settings: database.ConfigurationValues(owner), configure: services =>
+        new(owner, connection: database.Connection, settings: database.ConfigurationValues(owner), testAuthentication: false, configure: services =>
         {
             services.AddSingleton<TimeProvider>(database.Clock);
             // Exercise registration's complete cookie/transaction path before B2 opens the production gate.

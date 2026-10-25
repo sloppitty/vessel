@@ -11,14 +11,9 @@ public sealed class ConfigurationCheckCommandTests
     // Unreachable on purpose: the check must never open it.
     private const string Connection = "Host=192.0.2.1;Port=1;Database=none;Username=none;Password=synthetic-password;Timeout=1";
 
-    private static IConfiguration Token(Dictionary<string, string?>? overrides = null) => Build(new()
-    {
-        ["Vessel:Auth:Mode"] = "Token", ["Vessel:Auth:Token"] = Secret, ["ConnectionStrings:Vessel"] = Connection
-    }, overrides);
-
     private static IConfiguration Wallet(Dictionary<string, string?>? overrides = null) => Build(new()
     {
-        ["Vessel:Auth:Mode"] = "Wallet", ["Vessel:Auth:OwnerId"] = "22222222-2222-4222-8222-222222222222",
+        ["Vessel:Auth:OwnerId"] = "22222222-2222-4222-8222-222222222222",
         ["Vessel:Identity:Origins:0"] = "https://diary.example.com", ["Vessel:Identity:Registration"] = "Closed",
         ["ConnectionStrings:Vessel"] = Connection
     }, overrides);
@@ -34,47 +29,41 @@ public sealed class ConfigurationCheckCommandTests
     }
 
     [Fact]
-    public void Valid_token_and_wallet_configurations_pass_without_a_database()
+    public void Valid_wallet_configurations_pass_without_a_database()
     {
-        var token = Check(Token());
-        Assert.Equal(0, token.Code);
-        Assert.Contains("valid for Token mode", token.Output);
         var wallet = Check(Wallet());
         Assert.Equal(0, wallet.Code);
-        Assert.Contains("valid for Wallet mode", wallet.Output);
-        // Development keeps the API's relaxed rules: no production token length, plain HTTP origins.
+        Assert.Contains("valid for wallet sign-in", wallet.Output);
+        // An explicit Wallet mode from an earlier opt-in stays valid.
+        Assert.Equal(0, Check(Wallet(new() { ["Vessel:Auth:Mode"] = "Wallet" })).Code);
+        // Development keeps the API's relaxed rules: plain HTTP origins, the default owner, no database.
         Assert.Equal(0, Check(Wallet(new() { ["Vessel:Identity:Origins:0"] = "http://localhost:5173",
             ["Vessel:Auth:OwnerId"] = null, ["ConnectionStrings:Vessel"] = null }), development: true).Code);
     }
 
-    public static TheoryData<string, string, string?, string> Invalid => new()
+    public static TheoryData<string, string?, string> Invalid => new()
     {
-        { "Token", "Vessel:Auth:Mode", "wallet", "Vessel:Auth:Mode" },
-        { "Wallet", "Vessel:Auth:Mode", "wallet", "Vessel:Auth:Mode" },
-        { "Token", "Vessel:Auth:Mode", "token", "Vessel:Auth:Mode" },
-        { "Token", "Vessel:Auth:Token", "short", "Vessel__Auth__Token" },
-        { "Token", "Vessel:Auth:Token", null, "Vessel__Auth__Token" },
-        { "Token", "ConnectionStrings:Vessel", null, "ConnectionStrings__Vessel" },
-        { "Token", "Vessel:Identity:Registration", "Clsoed", "Vessel:Identity:Registration" },
-        { "Wallet", "Vessel:Identity:Origins:0", "http://diary.example.com", "Vessel:Identity:Origins" },
-        { "Wallet", "Vessel:Identity:Origins:0", null, "Vessel:Identity:Origins" },
-        { "Wallet", "Vessel:Identity:Registration", "Clsoed", "Vessel:Identity:Registration" },
-        { "Wallet", "Vessel:Identity:AllowList:0", "not-an-address", "Vessel:Identity:AllowList" },
-        { "Wallet", "Vessel:Identity:Session:IdleHours", "48", "Vessel:Identity:Session" },
-        { "Wallet", "Vessel:Identity:MaxSessionsPerUser", "0", "Vessel:Identity:MaxSessionsPerUser" },
-        { "Wallet", "Vessel:Identity:CookieName", "vessel", "Vessel:Identity:CookieName" },
-        { "Wallet", "Vessel:Identity:Schema", "Bad-Schema", "Vessel:Identity:Schema" },
-        { "Wallet", "Vessel:Auth:Token", Secret, "Vessel:Auth:Token" },
-        { "Wallet", "Vessel:Auth:OwnerId", null, "Vessel:Auth:OwnerId" },
-        { "Wallet", "Vessel:Auth:OwnerId", "not-a-guid", "Vessel:Auth:OwnerId" },
+        { "Vessel:Auth:Mode", "Token", "Vessel:Auth:Mode" },
+        { "Vessel:Auth:Mode", "wallet", "Vessel:Auth:Mode" },
+        { "Vessel:Auth:Token", Secret, "Vessel:Auth:Token" },
+        { "ConnectionStrings:Vessel", null, "ConnectionStrings__Vessel" },
+        { "Vessel:Identity:Origins:0", "http://diary.example.com", "Vessel:Identity:Origins" },
+        { "Vessel:Identity:Origins:0", null, "Vessel:Identity:Origins" },
+        { "Vessel:Identity:Registration", "Clsoed", "Vessel:Identity:Registration" },
+        { "Vessel:Identity:AllowList:0", "not-an-address", "Vessel:Identity:AllowList" },
+        { "Vessel:Identity:Session:IdleHours", "48", "Vessel:Identity:Session" },
+        { "Vessel:Identity:MaxSessionsPerUser", "0", "Vessel:Identity:MaxSessionsPerUser" },
+        { "Vessel:Identity:CookieName", "vessel", "Vessel:Identity:CookieName" },
+        { "Vessel:Identity:Schema", "Bad-Schema", "Vessel:Identity:Schema" },
+        { "Vessel:Auth:OwnerId", null, "Vessel:Auth:OwnerId" },
+        { "Vessel:Auth:OwnerId", "not-a-guid", "Vessel:Auth:OwnerId" },
     };
 
     [Theory]
     [MemberData(nameof(Invalid))]
-    public void Configurations_the_application_rejects_fail_with_the_setting_name_only(string mode, string key, string? value, string named)
+    public void Configurations_the_application_rejects_fail_with_the_setting_name_only(string key, string? value, string named)
     {
-        var overrides = new Dictionary<string, string?> { [key] = value };
-        var (code, output) = Check(mode == "Token" ? Token(overrides) : Wallet(overrides));
+        var (code, output) = Check(Wallet(new() { [key] = value }));
         Assert.Equal(1, code);
         Assert.Contains(named, output);
         Assert.DoesNotContain(Secret, output);

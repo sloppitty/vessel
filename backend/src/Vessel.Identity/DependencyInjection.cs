@@ -23,19 +23,13 @@ public static class DependencyInjection
             new IdentityContextFactory(configuration, sp.GetRequiredService<IdentitySchema>()));
         services.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<IdentityDbContext>>().CreateDbContext());
         services.AddHostedService<IdentityStartupValidation>();
-        if (configuration["Vessel:Auth:Mode"] == "Wallet")
-            services.Replace(ServiceDescriptor.Singleton<IJournalOwnerDirectory, IdentityOwnerDirectory>());
+        services.Replace(ServiceDescriptor.Singleton<IJournalOwnerDirectory, IdentityOwnerDirectory>());
         return services;
     }
 
-    public static IServiceCollection AddVesselIdentityApi(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddVesselIdentityApi(this IServiceCollection services)
     {
         services.AddHostedService<IdentityCleanup>();
-        if (configuration["Vessel:Auth:Mode"] != "Wallet")
-        {
-            services.TryAddSingleton<IPrincipalValidity, AlwaysValidPrincipal>();
-            return services;
-        }
         services.AddAuthentication(SessionAuthentication.SchemeName)
             .AddScheme<AuthenticationSchemeOptions, SessionAuthentication>(SessionAuthentication.SchemeName, _ => { });
         services.AddSingleton<IWalletSignatureVerifier, WalletSignatures>();
@@ -79,10 +73,8 @@ internal sealed class IdentityStartupValidation(IdentitySettings settings, ILogg
 {
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        if (settings.WalletMode && !IdentityRegistrationGate.MultiOwnerReady)
-            logger.LogInformation("Wallet registration is closed by the multi-owner activation gate.");
-        if (settings.WalletMode && settings.OwnerId == JournalOwner.Default && settings.LegacyOwnerOverride)
-            logger.LogWarning("Vessel:Identity:AllowLegacyDefaultOwner permits the legacy default owner in Wallet mode.");
+        if (settings.OwnerId == JournalOwner.Default && settings.LegacyOwnerOverride)
+            logger.LogWarning("Vessel:Identity:AllowLegacyDefaultOwner permits the legacy default owner.");
         return Task.CompletedTask;
     }
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

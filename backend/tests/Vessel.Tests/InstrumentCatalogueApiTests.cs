@@ -14,7 +14,7 @@ public sealed class InstrumentCatalogueApiTests
     [Theory]
     [InlineData(null)]
     [InlineData("invalid-token")]
-    public async Task Instrument_catalogue_requires_authentication_before_venue_read(string? token)
+    public async Task Instrument_catalogue_requires_a_session_before_venue_read(string? token)
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "HL"); store.Accounts.Add(account);

@@ -13,7 +13,6 @@ public static class IdentityRegistrationGate
 
 public sealed record IdentitySettings
 {
-    public bool WalletMode { get; init; }
     public bool Development { get; init; }
     public Guid OwnerId { get; init; } = JournalOwner.Default;
     public string OwnerName { get; init; } = "Owner";
@@ -34,17 +33,16 @@ public sealed record IdentitySettings
 
     public static IdentitySettings Read(IConfiguration config, bool development)
     {
-        var mode = config["Vessel:Auth:Mode"] ?? "Token";
-        if (mode is not ("Token" or "Wallet")) throw Invalid("Vessel:Auth:Mode");
+        // Wallet sign-in is the only authentication. The retired Token mode's settings refuse startup rather than
+        // being ignored, so an installation that still configures them is told to finish moving to wallets.
+        if (config["Vessel:Auth:Mode"] is { Length: > 0 } mode && mode != "Wallet") throw Retired("Vessel:Auth:Mode");
+        if (!string.IsNullOrEmpty(config["Vessel:Auth:Token"])) throw Retired("Vessel:Auth:Token");
         var settings = new IdentitySettings();
         config.GetSection("Vessel:Identity").Bind(settings);
         settings = settings with
         {
-            WalletMode = mode == "Wallet",
             Development = development,
-            // Token's Development failure behaviour belongs to its unchanged bearer handler.
-            OwnerId = mode == "Wallet" ? WalletOwner(config["Vessel:Auth:OwnerId"]) :
-                Guid.TryParse(config["Vessel:Auth:OwnerId"], out var tokenOwner) ? tokenOwner : JournalOwner.Default,
+            OwnerId = WalletOwner(config["Vessel:Auth:OwnerId"]),
             OwnerName = config["Vessel:Auth:OwnerName"] ?? "Owner",
             IdleHours = Number(config, "Vessel:Identity:Session:IdleHours", 12, 1, 720),
             AbsoluteHours = Number(config, "Vessel:Identity:Session:AbsoluteHours", 24, 1, 720),
@@ -67,17 +65,13 @@ public sealed record IdentitySettings
         string[] allowList;
         try { allowList = settings.AllowList.Select(address => WalletSignatures.NormalizeAddress(address)).Distinct().ToArray(); }
         catch (ProblemException) { throw Invalid("Vessel:Identity:AllowList"); }
-        if (settings.WalletMode)
-        {
-            if (!string.IsNullOrEmpty(config["Vessel:Auth:Token"])) throw Invalid("Vessel:Auth:Token");
-            if (!development && config["Vessel:Auth:OwnerId"] is null) throw Invalid("Vessel:Auth:OwnerId");
-            if (!development && settings.OwnerId == JournalOwner.Default && !settings.LegacyOwnerOverride)
-                throw Invalid("Vessel:Auth:OwnerId / Vessel:Identity:AllowLegacyDefaultOwner");
-            if (origins.Length == 0 || (!development && origins.Any(origin => !origin.StartsWith("https://", StringComparison.Ordinal))))
-                throw Invalid("Vessel:Identity:Origins");
-            try { _ = IdentityText.DisplayName(settings.OwnerName); }
-            catch (ProblemException) { throw Invalid("Vessel:Auth:OwnerName"); }
-        }
+        if (!development && config["Vessel:Auth:OwnerId"] is null) throw Invalid("Vessel:Auth:OwnerId");
+        if (!development && settings.OwnerId == JournalOwner.Default && !settings.LegacyOwnerOverride)
+            throw Invalid("Vessel:Auth:OwnerId / Vessel:Identity:AllowLegacyDefaultOwner");
+        if (origins.Length == 0 || (!development && origins.Any(origin => !origin.StartsWith("https://", StringComparison.Ordinal))))
+            throw Invalid("Vessel:Identity:Origins");
+        try { _ = IdentityText.DisplayName(settings.OwnerName); }
+        catch (ProblemException) { throw Invalid("Vessel:Auth:OwnerName"); }
         return settings with
         {
             Origins = origins, AllowList = allowList,
@@ -114,7 +108,9 @@ public sealed record IdentitySettings
         try { return JournalOwner.Parse(configured); }
         catch (InvalidOperationException) { throw Invalid("Vessel:Auth:OwnerId"); }
     }
-    private static InvalidOperationException Invalid(string key) => new($"{key} is invalid for the configured authentication mode.");
+    private static InvalidOperationException Invalid(string key) => new($"{key} is invalid for wallet sign-in.");
+    private static InvalidOperationException Retired(string key) =>
+        new($"{key} must not be set: Token sign-in was removed and Vessel signs in with wallets only.");
 }
 
 public sealed class IdentitySchema
