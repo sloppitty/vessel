@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from './workspace'
 import { isPlayCounts, isPlayHistory, playCountsPath, playInView as isPlayInView, playListPath, type PlayCounts, type PlayListQuery, type PlaySummary } from './plays'
 import { accountFixture, savedPlayFixture } from '@/test/workspace-fixture'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 function response(value: unknown) { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(value), { status: 200 }))) }
 afterEach(() => vi.unstubAllGlobals())
@@ -25,13 +26,13 @@ describe('Plays list API', () => {
     { view: 'ended' }, { view: 'all', page: 0 }, { view: 'all', pageSize: 101 }, { view: 'all', q: 'x'.repeat(101) }, { view: 'all', scope: 'portfolio:x' },
   ])('rejects an invalid request %j without sending it', query => {
     response({})
-    expect(() => createWorkspaceApi('token').plays(query as PlayListQuery)).toThrow('The plays request is invalid.')
+    expect(() => createWorkspaceApi(credentialsFixture).plays(query as PlayListQuery)).toThrow('The plays request is invalid.')
     expect(fetch).not.toHaveBeenCalled()
   })
   it('accepts a page with exact counts and rows of the requested view', async () => {
     const plays = [closed(1), closed(2)]
     response({ plays, view: 'review', page: 2, pageSize: 2, totalCount: 4 })
-    await expect(createWorkspaceApi('token').plays({ view: 'review', page: 2, pageSize: 2 })).resolves.toMatchObject({ page: 2, totalCount: 4, plays })
+    await expect(createWorkspaceApi(credentialsFixture).plays({ view: 'review', page: 2, pageSize: 2 })).resolves.toMatchObject({ page: 2, totalCount: 4, plays })
     expect(fetch).toHaveBeenCalledWith('/api/plays?view=review&page=2&pageSize=2', expect.anything())
   })
   it.each([
@@ -45,26 +46,26 @@ describe('Plays list API', () => {
     ['a malformed row', { plays: [closed(1), { ...closed(2), status: 'ended' }] }],
   ])('rejects %s', async (_name, fields) => {
     response({ plays: [closed(1), closed(2)], view: 'review', page: 2, pageSize: 2, totalCount: 4, ...fields })
-    await expect(createWorkspaceApi('token').plays({ view: 'review', page: 2, pageSize: 2 })).rejects.toMatchObject({ kind: 'invalid-response' })
+    await expect(createWorkspaceApi(credentialsFixture).plays({ view: 'review', page: 2, pageSize: 2 })).rejects.toMatchObject({ kind: 'invalid-response' })
   })
   it('accepts unpaged views cut at 200 with an exact total, or the few rows Overview asks for', async () => {
     const plays = Array.from({ length: 200 }, (_, n) => play(n + 1, { status: 'planned' }))
     response({ plays, view: 'progress', page: 1, pageSize: 200, totalCount: 250 })
-    await expect(createWorkspaceApi('token').plays({ view: 'progress' })).resolves.toMatchObject({ totalCount: 250 })
+    await expect(createWorkspaceApi(credentialsFixture).plays({ view: 'progress' })).resolves.toMatchObject({ totalCount: 250 })
     response({ plays: plays.slice(0, 199), view: 'progress', page: 1, pageSize: 200, totalCount: 250 })
-    await expect(createWorkspaceApi('token').plays({ view: 'progress' })).rejects.toMatchObject({ kind: 'invalid-response' })
+    await expect(createWorkspaceApi(credentialsFixture).plays({ view: 'progress' })).rejects.toMatchObject({ kind: 'invalid-response' })
     response({ plays: plays.slice(0, 5), view: 'progress', page: 1, pageSize: 5, totalCount: 250 })
-    await expect(createWorkspaceApi('token').plays({ view: 'progress', pageSize: 5 })).resolves.toMatchObject({ totalCount: 250 })
+    await expect(createWorkspaceApi(credentialsFixture).plays({ view: 'progress', pageSize: 5 })).resolves.toMatchObject({ totalCount: 250 })
     response({ plays: [play(1)], view: 'drafts', page: 1, pageSize: 200, totalCount: 1 })
-    await expect(createWorkspaceApi('token').plays({ view: 'drafts', scope: `account:${other}` })).rejects.toMatchObject({ kind: 'invalid-response' })
+    await expect(createWorkspaceApi(credentialsFixture).plays({ view: 'drafts', scope: `account:${other}` })).rejects.toMatchObject({ kind: 'invalid-response' })
   })
   it('reads consistent counts', async () => {
     response(counts)
-    await expect(createWorkspaceApi('token').playCounts({ q: 'btc' })).resolves.toEqual(counts)
+    await expect(createWorkspaceApi(credentialsFixture).playCounts({ q: 'btc' })).resolves.toEqual(counts)
     expect(fetch).toHaveBeenCalledWith('/api/plays/counts?q=btc', expect.anything())
     for (const broken of [{ ...counts, all: 11 }, { ...counts, review: 5 }, { ...counts, drafts: -1 }, { ...counts, reviewed: undefined }]) {
       response(broken)
-      await expect(createWorkspaceApi('token').playCounts({})).rejects.toMatchObject({ kind: 'invalid-response' })
+      await expect(createWorkspaceApi(credentialsFixture).playCounts({})).rejects.toMatchObject({ kind: 'invalid-response' })
     }
   })
 })
@@ -76,16 +77,16 @@ describe('level rebind API (0.5b)', () => {
   it('posts the expected version, observed order and price with the reason, and returns the saved Play', async () => {
     const saved = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, version: 5 } }
     response(saved)
-    await expect(createWorkspaceApi('token').rebindLevel(base.id, link, request)).resolves.toEqual(saved)
+    await expect(createWorkspaceApi(credentialsFixture).rebindLevel(base.id, link, request)).resolves.toEqual(saved)
     expect(fetch).toHaveBeenCalledWith(`/api/plays/${base.id}/execution/links/${link}/rebind`,
       expect.objectContaining({ method: 'POST', body: JSON.stringify(request) }))
   })
 
   it('refuses another Play in the answer and an invalid link ID before sending', async () => {
     response({ ...savedPlayFixture, summary: { ...savedPlayFixture.summary, id: other } })
-    await expect(createWorkspaceApi('token').rebindLevel(base.id, link, request)).rejects.toMatchObject({ kind: 'invalid-response' })
+    await expect(createWorkspaceApi(credentialsFixture).rebindLevel(base.id, link, request)).rejects.toMatchObject({ kind: 'invalid-response' })
     vi.mocked(fetch).mockClear()
-    await expect(createWorkspaceApi('token').rebindLevel(base.id, '../links', request)).rejects.toMatchObject({ kind: 'invalid-response' })
+    await expect(createWorkspaceApi(credentialsFixture).rebindLevel(base.id, '../links', request)).rejects.toMatchObject({ kind: 'invalid-response' })
     expect(fetch).not.toHaveBeenCalled()
   })
 })

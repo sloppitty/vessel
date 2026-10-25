@@ -5,9 +5,10 @@ import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import { accountFixture, portfolioFixture } from '@/test/workspace-fixture'
 import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
-  return { ...createWorkspaceApi('test-only-token'),
+  return { ...createWorkspaceApi(credentialsFixture),
     updatePortfolio: vi.fn().mockResolvedValue(portfolioFixture), deletePortfolio: vi.fn().mockResolvedValue(undefined),
     updateAccount: vi.fn().mockResolvedValue(accountFixture), deleteAccount: vi.fn().mockResolvedValue(undefined),
     ...overrides,

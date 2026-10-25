@@ -33,7 +33,11 @@ The soul comes from five restrained ideas rather than more colour:
    written on faint ruled lines that scroll with the text.
 
 Motion is limited to opacity fades on page changes, hover transitions and a
-loading shimmer, and is removed under `prefers-reduced-motion`.
+loading shimmer, and is removed under `prefers-reduced-motion`. One
+owner-approved exception (October 24, 2026): after a trading mode switch made
+in the session, the brand mark sinks and the other mark rises inside its tile,
+using transform and opacity, never on load and not under reduced motion (see
+the [trading mode switch](../trading-mode-switch/README.md)).
 
 ## Tokens
 
@@ -50,6 +54,7 @@ follow automatically. Themes still change only colours and radius.
 | `--sheen`, `--elevation-1/2/3` | Light and shadow, with light-scheme variants |
 | `--radius-panel`, `--radius-control` | Panel and control corners from `--radius` |
 | `--contours` | The depth-chart texture |
+| `--paper-ink`, `--paper-wash`, `--paper-glow`, `--paper-line` | Paper mode's chrome (October 24, 2026), from `--warning` softened toward secondary text |
 
 Graphite's accent-and-focus colour moved from `#b9c9e4` to `#9ab5f2`
 (steel to cornflower) so the signature light is visible in the default theme.

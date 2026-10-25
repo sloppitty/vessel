@@ -11,6 +11,7 @@ import { createPlaysSession, draftFromSaved, savedState, type PlaysSession } fro
 import { accountFixture, emptyOverview, playApiStubs, savedPlayFixture } from '@/test/workspace-fixture'
 import { systemFixture } from '@/test/system-fixture'
 import { ApplicationShell } from './ApplicationShell'
+import { credentialsFixture, shellIdentityFixture } from '@/test/identity-fixture'
 
 type PlaysProps = { session: PlaysSession; onSession: (session: PlaysSession) => void; workRef: RefObject<symbol | null> }
 let plays: PlaysProps
@@ -26,7 +27,7 @@ vi.mock('@/features/review/ReviewPage', () => ({ ReviewPage: () => {
 } }))
 
 const client = (overrides: Partial<WorkspaceApi> = {}) => ({
-  ...createWorkspaceApi('synthetic-only'), ...playApiStubs(),
+  ...createWorkspaceApi(credentialsFixture), ...playApiStubs(),
   overview: vi.fn().mockResolvedValue(emptyOverview), ...overrides,
 })
 function unload() {
@@ -42,14 +43,22 @@ function cleanSaved(withEvidence = false): PlaysSession {
   return { view: 'editor', draft, saved: savedState(savedPlayFixture, draft) }
 }
 async function mount(api = client(), disconnect = vi.fn()) {
-  const view = render(<ApplicationShell system={systemFixture} api={api} disconnect={disconnect} />, { onCaughtError: () => {} })
+  const view = render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} api={api} disconnect={disconnect} />, { onCaughtError: () => {} })
   await screen.findByText('Test Play editor: blank')
   // The mock publishes its props in a passive effect, which can run a tick after its text appears.
   await waitFor(() => expect(plays).toBeDefined())
   return { ...view, api, disconnect, user: userEvent.setup() }
 }
-const ownerButton = () => screen.getByRole('button', { name: `Disconnect ${systemFixture.owner.displayName}'s session` })
-const settingsButton = () => screen.getByRole('button', { name: 'Disconnect session' })
+/** Sign out from the account menu or from Settings' Profile & sign-in tab, which must already be open. */
+async function signOut(user: ReturnType<typeof userEvent.setup>, entry: 'owner' | 'settings' = 'owner') {
+  if (entry === 'settings') { await user.click(screen.getByRole('button', { name: 'Sign out' })); return }
+  await user.click(screen.getByRole('button', { name: /^Sam Rivera, account menu/ }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Sign out' }))
+}
+async function openProfile(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('link', { name: 'Settings' }))
+  await user.click(await screen.findByRole('tab', { name: 'Profile & sign-in' }))
+}
 
 beforeEach(() => {
   plays = undefined as unknown as PlaysProps
@@ -67,7 +76,7 @@ describe('shell-owned Play exit protection', () => {
     expect(unload()).toBe(false)
     update(cleanSaved(true))
     expect(unload()).toBe(false)
-    await user.click(ownerButton())
+    await signOut(user)
     expect(confirm).not.toHaveBeenCalled()
     expect(disconnect).toHaveBeenCalledOnce()
     expect(unload()).toBe(false)
@@ -159,11 +168,9 @@ describe('shell-owned Play exit protection', () => {
     const guard = plays.workRef
     const session = plays.session
     guard.current = Symbol('save')
-    if (entry === 'settings') await user.click(screen.getByRole('link', { name: 'Settings' }))
-    if (entry === 'settings') await screen.findByRole('heading', { name: 'Private session' })
-    const button = entry === 'owner' ? ownerButton() : settingsButton()
+    if (entry === 'settings') await openProfile(user)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    await user.click(button)
+    await signOut(user, entry)
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Already-sent changes may still complete.'))
     expect(disconnect).not.toHaveBeenCalled()
     expect(plays.session).toBe(session)
@@ -171,7 +178,7 @@ describe('shell-owned Play exit protection', () => {
     expect(faults.unmounts).toBe(0)
     expect(unload()).toBe(true)
     confirm.mockReturnValue(true)
-    await user.click(button)
+    await signOut(user, entry)
     expect(disconnect).toHaveBeenCalledOnce()
     expect(faults.unmounts).toBe(1)
     expect(screen.queryByRole('main')).not.toBeInTheDocument()
@@ -193,14 +200,10 @@ describe('shell-owned Play exit protection', () => {
     await user.click(await screen.findByRole('button', { name: 'Refresh all' }))
     await waitFor(() => expect(sync).toHaveBeenCalledOnce())
     const signal = sync.mock.calls[0]![1]!
-    if (entry === 'settings') {
-      await user.click(screen.getByRole('link', { name: 'Settings' }))
-      await screen.findByRole('heading', { name: 'Private session' })
-    }
-    const button = entry === 'owner' ? ownerButton() : settingsButton()
+    if (entry === 'settings') await openProfile(user)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    await user.click(button)
-    expect(confirm).toHaveBeenCalledWith('Disconnect and discard unsaved Play work?')
+    await signOut(user, entry)
+    expect(confirm).toHaveBeenCalledWith('Sign out and discard unsaved Play work?')
     expect(signal.aborted).toBe(false)
     expect(plays.session).toBe(session)
     expect(disconnect).not.toHaveBeenCalled()
@@ -209,7 +212,7 @@ describe('shell-owned Play exit protection', () => {
     expect(sync.mock.calls[1]![0]).toBe('second')
     expect(sync.mock.calls[1]![1]).toBe(signal)
     confirm.mockReturnValue(true)
-    await user.click(button)
+    await signOut(user, entry)
     expect(signal.aborted).toBe(true)
     expect(disconnect).toHaveBeenCalledOnce()
     await act(async () => finish())
@@ -266,7 +269,7 @@ describe('shell-owned Play exit protection', () => {
     old.workRef.current = Symbol('pending save')
     expect(unload()).toBe(true)
     const replacement = client()
-    rerender(<ApplicationShell system={systemFixture} api={replacement} disconnect={disconnect} />)
+    rerender(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} api={replacement} disconnect={disconnect} />)
     await waitFor(() => expect(plays.workRef).not.toBe(old.workRef))
     expect(plays.session.draft.title).toBe('')
     expect(unload()).toBe(false)
@@ -293,10 +296,10 @@ describe('shell-owned Play exit protection', () => {
     update({ ...plays.session, manual: { ...emptyManualDraft(), source: 'Unsaved source' } })
     const replacement = client()
     vi.spyOn(window, 'confirm').mockImplementation(() => {
-      flushSync(() => rerender(<ApplicationShell system={systemFixture} api={replacement} disconnect={disconnect} />))
+      flushSync(() => rerender(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} api={replacement} disconnect={disconnect} />))
       return true
     })
-    await user.click(ownerButton())
+    await signOut(user)
     expect(disconnect).not.toHaveBeenCalled()
     expect(plays.session.draft.title).toBe('')
     expect(plays.session.manual).toBeUndefined()
@@ -307,7 +310,7 @@ describe('shell-owned Play exit protection', () => {
   it('does not leak listeners across StrictMode effect cleanup', async () => {
     const added = vi.spyOn(window, 'addEventListener')
     const removed = vi.spyOn(window, 'removeEventListener')
-    const view = render(<StrictMode><ApplicationShell system={systemFixture} api={client()} disconnect={vi.fn()} /></StrictMode>)
+    const view = render(<StrictMode><ApplicationShell identity={shellIdentityFixture()} system={systemFixture} api={client()} disconnect={vi.fn()} /></StrictMode>)
     await screen.findByText('Test Play editor: blank')
     update({ ...plays.session, manual: { ...emptyManualDraft(), source: 'Unsaved source' } })
     expect(unload()).toBe(true)

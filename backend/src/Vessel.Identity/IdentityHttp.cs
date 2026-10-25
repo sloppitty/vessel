@@ -18,7 +18,6 @@ public static partial class IdentityHttp
     public static void UseVesselIdentity(this WebApplication app)
     {
         var settings = app.Services.GetRequiredService<IdentitySettings>();
-        if (!settings.WalletMode) return;
         app.Use(async (context, next) =>
         {
             var request = context.Request;
@@ -49,18 +48,11 @@ public static partial class IdentityHttp
     {
         var settings = endpoints.ServiceProvider.GetRequiredService<IdentitySettings>();
         var group = endpoints.MapGroup("/api/auth");
-        group.MapGet("/config", (string? origin) => settings.WalletMode
-            ? Results.Ok((object)new
-            {
-                mode = "wallet", registration = PolicyName(settings.Registration),
-                originAccepted = settings.AcceptsOrigin(IdentitySettings.NormalizeOrigin(origin))
-            })
-            : Results.Ok((object)new { mode = "token" })).AllowAnonymous();
-        if (!settings.WalletMode)
+        group.MapGet("/config", (string? origin) => Results.Ok(new
         {
-            group.Map("/{**rest}", () => { throw IdentityErrors.Error(404, "not-found"); }).AllowAnonymous();
-            return endpoints;
-        }
+            registration = PolicyName(settings.Registration),
+            originAccepted = settings.AcceptsOrigin(IdentitySettings.NormalizeOrigin(origin))
+        })).AllowAnonymous();
         group.AddEndpointFilter(async (context, next) =>
         {
             // Also cap bodies on routes that need no JSON (for example revoke-others and DELETE).

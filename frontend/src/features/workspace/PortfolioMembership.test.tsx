@@ -14,6 +14,7 @@ import { ManageAccountDialog, ManagePortfolioDialog } from './ManageDialogs'
 import { WalletAccountImport } from './WalletAccountImport'
 import { AccountsPanel } from './AccountsPanel'
 import { emptyAccountFilters } from './account-filters'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const otherPortfolio = { ...portfolioFixture, id: '22222222-3333-4444-5555-666666666666', name: 'Other', accountCount: 0 }
 const otherAccount = { ...accountFixture, id: 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff', name: 'Other account', portfolioId: otherPortfolio.id, isEnabled: false }
@@ -21,7 +22,7 @@ const portfolios = [portfolioFixture, otherPortfolio]
 const accounts = [accountFixture, otherAccount]
 const expected = (records: BrokerAccount[]) => records.map(a => ({ accountId: a.id, settingsRevision: a.settingsRevision }))
 function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
-  return { ...createWorkspaceApi('test-only'),
+  return { ...createWorkspaceApi(credentialsFixture),
     createPortfolio: vi.fn().mockResolvedValue(otherPortfolio), createAccount: vi.fn().mockResolvedValue(accountFixture),
     updatePortfolio: vi.fn().mockResolvedValue(portfolioFixture), moveAccounts: vi.fn().mockResolvedValue(accounts),
     accounts: vi.fn().mockResolvedValue(accounts), portfolios: vi.fn().mockResolvedValue(portfolios),
