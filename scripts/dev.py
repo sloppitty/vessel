@@ -30,7 +30,8 @@ def configuration():
     # Explicit process environment takes precedence over the local development file.
     values.update(os.environ)
     env = dict(os.environ)
-    for key in ["Vessel__Auth__OwnerId", "Vessel__Auth__OwnerName"]:
+    # The retired Token settings are passed on too, so a stale .env makes the API refuse to start instead of ignoring them.
+    for key in ["Vessel__Auth__OwnerId", "Vessel__Auth__OwnerName", "Vessel__Auth__Token", "Vessel__Auth__Mode"]:
         if key in values:
             env[key] = values[key]
     for key, value in values.items():

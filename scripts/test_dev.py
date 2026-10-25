@@ -210,6 +210,17 @@ class DevelopmentEnvironmentTests(unittest.TestCase):
         self.assertEqual({"Vessel__Identity__Origins__0": "http://10.1.0.219:5180"},
                          dev.with_identity_origins({}, "10.1.0.219"))
 
+    def test_a_stale_token_reaches_the_server_so_it_refuses_to_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text("ConnectionStrings__Vessel=test-connection\n"
+                                       "Vessel__Auth__Token=stale-secret\nVessel__Auth__Mode=Token\n")
+            with patch.object(dev, "ROOT", root), patch.dict(os.environ, {}, clear=True):
+                environment = dev.configuration()
+                self.assertEqual(("stale-secret", "Token"),
+                                 (environment["Vessel__Auth__Token"], environment["Vessel__Auth__Mode"]))
+                self.assertEqual({}, dev.frontend_environment())
+
     def test_identity_mode_runs_an_offline_identity_command_without_the_broker(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

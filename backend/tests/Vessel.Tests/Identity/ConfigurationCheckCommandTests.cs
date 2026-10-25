@@ -45,6 +45,7 @@ public sealed class ConfigurationCheckCommandTests
     {
         { "Vessel:Auth:Mode", "Token", "Vessel:Auth:Mode" },
         { "Vessel:Auth:Mode", "wallet", "Vessel:Auth:Mode" },
+        { "Vessel:Auth:Mode", "", "Vessel:Auth:Mode" },
         { "Vessel:Auth:Token", Secret, "Vessel:Auth:Token" },
         { "ConnectionStrings:Vessel", null, "ConnectionStrings__Vessel" },
         { "Vessel:Identity:Origins:0", "http://diary.example.com", "Vessel:Identity:Origins" },

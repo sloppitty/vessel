@@ -35,7 +35,7 @@ public sealed record IdentitySettings
     {
         // Wallet sign-in is the only authentication. The retired Token mode's settings refuse startup rather than
         // being ignored, so an installation that still configures them is told to finish moving to wallets.
-        if (config["Vessel:Auth:Mode"] is { Length: > 0 } mode && mode != "Wallet") throw Retired("Vessel:Auth:Mode");
+        if (config["Vessel:Auth:Mode"] is { } mode && mode != "Wallet") throw Retired("Vessel:Auth:Mode");
         if (!string.IsNullOrEmpty(config["Vessel:Auth:Token"])) throw Retired("Vessel:Auth:Token");
         var settings = new IdentitySettings();
         config.GetSection("Vessel:Identity").Bind(settings);

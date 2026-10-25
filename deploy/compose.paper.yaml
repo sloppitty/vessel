@@ -19,6 +19,9 @@ services:
       - Vessel__Identity__Origins__0=${VESSEL_IDENTITY_ORIGIN:?Set the public HTTPS origin, without a path}
       - Vessel__Identity__Registration=${VESSEL_IDENTITY_REGISTRATION:-Closed}
       - Vessel__Identity__AllowLegacyDefaultOwner=${VESSEL_ALLOW_LEGACY_DEFAULT_OWNER:-false}
+      # Retired Token settings, passed on only so a stale .env refuses to start instead of being ignored.
+      - Vessel__Auth__Mode=${VESSEL_AUTH_MODE:-Wallet}
+      - Vessel__Auth__Token=${Vessel__Auth__Token:-}
     # Public candles only: no credential key-ring/evidence mount or published port.
     depends_on:
       migrate:

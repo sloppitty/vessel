@@ -39,8 +39,6 @@ class PaperDeploymentTests(unittest.TestCase):
             environment = dict(setting.split("=", 1) if "=" in setting else (setting, None) for setting in environment)
         self.assertEqual("paper", environment["Vessel__Worker__Modules__0"])
         self.assertEqual("paper", environment["Vessel__Worker__Deployment"])
-        self.assertNotIn("Vessel__Auth__Token", environment)
-        self.assertNotIn("Vessel__Auth__Mode", environment)
         self.assertIn("Vessel__Identity__Origins__0", environment)
         self.assertNotIn("ports", paper)
         self.assertNotIn("volumes", paper)
@@ -72,9 +70,16 @@ class PaperDeploymentTests(unittest.TestCase):
             self.assertEqual(api[key], paper[key], key)
         self.assertEqual("https://paper.invalid", paper["Vessel__Identity__Origins__0"])
         self.assertEqual("Closed", paper["Vessel__Identity__Registration"])
-        self.assertNotIn("Vessel__Auth__Mode", paper)
-        self.assertNotIn("Vessel__Auth__Token", paper)
+        self.assertEqual(("Wallet", ""), (paper["Vessel__Auth__Mode"], paper["Vessel__Auth__Token"]))
         self.assertNotIn("Vessel__Messaging__RabbitMqUri", paper)
+        # Leftovers of the removed Token sign-in reach the worker like the API, so both refuse to start.
+        stale = self.paper_config(VESSEL_AUTH_MODE="Token", Vessel__Auth__Token="synthetic-leftover")
+        self.assertEqual(0, stale.returncode, stale.stderr)
+        services = json.loads(stale.stdout)["services"]
+        for service in ("worker-paper", "api"):
+            environment = services[service]["environment"]
+            self.assertEqual(("Token", "synthetic-leftover"),
+                             (environment["Vessel__Auth__Mode"], environment["Vessel__Auth__Token"]), service)
 
     def test_paper_overlay_fails_closed_without_an_identity_origin(self):
         for origin in (None, ""):

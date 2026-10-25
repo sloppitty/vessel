@@ -9,6 +9,9 @@ x-identity-environment: &identity-environment
   # Closed admits linked wallets only; see README before choosing Invitation.
   Vessel__Identity__Registration: ${VESSEL_IDENTITY_REGISTRATION:-Closed}
   Vessel__Identity__AllowLegacyDefaultOwner: ${VESSEL_ALLOW_LEGACY_DEFAULT_OWNER:-false}
+  # Retired Token sign-in settings, passed on only so a stale .env refuses to start instead of being ignored.
+  Vessel__Auth__Mode: ${VESSEL_AUTH_MODE:-Wallet}
+  Vessel__Auth__Token: ${Vessel__Auth__Token:-}
 
 services:
   rustfs:

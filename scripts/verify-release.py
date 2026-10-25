@@ -629,8 +629,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
                     'notifications worker uses the module-aware heartbeat healthcheck', 'notifications')
         self.expect(inspected['State']['Health']['Status'] == 'healthy', 'notifications worker is healthy after a productive maintenance pass', 'notifications')
         environment = dict(value.split('=', 1) for value in inspected['Config']['Env'])
-        self.expect('Vessel__Auth__Mode' not in environment and 'Vessel__Auth__Token' not in environment,
-                    'notifications worker receives no setting of the removed Token sign-in', 'notifications')
+        self.expect(environment['Vessel__Auth__Mode'] == 'Wallet' and environment['Vessel__Auth__Token'] == '',
+                    'notifications worker receives no value of the removed Token sign-in', 'notifications')
         self.expect(environment['Vessel__Identity__Origins__0'] == self.url and environment['Vessel__Auth__OwnerId'] == self.owner and
                     environment['Vessel__Identity__Registration'] == 'Invitation',
                     'notifications worker shares the API sign-in settings for the identity owner directory', 'wallet')

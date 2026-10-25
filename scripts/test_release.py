@@ -378,7 +378,7 @@ class MigrationPreflightTests(unittest.TestCase):
             env = root / 'synthetic.env'
             common = ('POSTGRES_PASSWORD=synthetic\nRABBITMQ_USER=synthetic\nRABBITMQ_PASSWORD=synthetic\n'
                       'Vessel__Auth__OwnerId=11111111-1111-4111-8111-111111111111\nVESSEL_TLS_HOST=localhost\n'
-                      # Leftovers of the removed Token sign-in in an old private .env reach no container.
+                      # Leftovers of the removed Token sign-in in an old private .env reach every host, which refuses them.
                       'VESSEL_AUTH_MODE=Token\nVessel__Auth__Token=synthetic-leftover\n')
             files = ':'.join(str(verify_release.ROOT / 'deploy' / name) for name in ('compose.yaml', 'compose.tls.yaml'))
             for persisted in (True, False):
@@ -392,8 +392,8 @@ class MigrationPreflightTests(unittest.TestCase):
                     services = json.loads(result.stdout)['services']
                     for service in ('migrate', 'api', 'worker', 'worker-notifications'):
                         values = services[service]['environment']
-                        self.assertNotIn('Vessel__Auth__Mode', values)
-                        self.assertNotIn('Vessel__Auth__Token', values)
+                        self.assertEqual(('Token', 'synthetic-leftover'),
+                                         (values['Vessel__Auth__Mode'], values['Vessel__Auth__Token']))
                         self.assertEqual('11111111-1111-4111-8111-111111111111', values['Vessel__Auth__OwnerId'])
                         self.assertEqual('https://localhost', values['Vessel__Identity__Origins__0'])
                         self.assertEqual('Closed', values['Vessel__Identity__Registration'])

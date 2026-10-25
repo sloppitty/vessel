@@ -23,6 +23,7 @@ public sealed class ConfigurationAndCommandTests
     [Theory]
     [InlineData("Vessel:Auth:Mode", "wallet")]
     [InlineData("Vessel:Auth:Mode", "Token")]
+    [InlineData("Vessel:Auth:Mode", "")]
     [InlineData("Vessel:Auth:Token", "synthetic-must-never-echo")]
     [InlineData("Vessel:Auth:OwnerId", null)]
     [InlineData("Vessel:Auth:OwnerId", "11111111-1111-1111-1111-111111111111")]
