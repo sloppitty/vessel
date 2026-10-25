@@ -141,7 +141,10 @@ public interface IMonitorStore
     Task<IReadOnlyList<(MonitorAccount Row, string VenueId)>> SummaryAsync(IReadOnlyCollection<string> venueIds,
         DateTimeOffset now, CancellationToken ct);
     Task<MonitorAccount?> FindAsync(Guid accountId, CancellationToken ct);
-    /// <summary>The account's stored funding coverage and last attempt, read before a Refresh's funding windows; null when none.</summary>
+    /// <summary>
+    /// The account's stored funding coverage and last attempt, read before the funding windows of a Refresh or a scheduled
+    /// funding read (Phase 2, item 9c); null when none.
+    /// </summary>
     Task<FundingCursor?> FundingCursorAsync(Guid accountId, CancellationToken ct);
     Task<DateTimeOffset?> VenueRetryAtAsync(string venueId, CancellationToken ct);
     Task<IReadOnlyDictionary<string, DateTimeOffset>> VenueRetriesAsync(CancellationToken ct);
@@ -176,6 +179,18 @@ public interface IMonitorStore
     Task<MonitorLease?> ClaimBackfillAsync(Guid accountId, string workerId, DateTimeOffset now, CancellationToken ct);
     /// <summary>Inside a unit: releases a backfill run's own lease, leaving the check schedule as it was.</summary>
     Task ReleaseBackfillAsync(MonitorLease lease, DateTimeOffset now, CancellationToken ct);
+    /// <summary>
+    /// Phase 2, item 9c: claims a scheduled funding read (trigger <c>funding</c>) when it is due, the account is an enabled
+    /// real account with an Open venue Play or kept execution history, has no other run and no due check, its owner is
+    /// active, and the venue has no deadline and leaves the same headroom for protection checks as a kept-history read. The
+    /// caller offers only accounts on venues with a funding reader. Null otherwise.
+    /// </summary>
+    Task<MonitorLease?> ClaimFundingAsync(Guid accountId, string workerId, DateTimeOffset now, CancellationToken ct);
+    /// <summary>
+    /// Inside a unit: releases a funding run's own lease and, when <paramref name="nextAtUtc"/> is set, moves the account's
+    /// next funding read to it. The check schedule, state and cooldown stay as they were.
+    /// </summary>
+    Task ReleaseFundingAsync(MonitorLease lease, DateTimeOffset now, DateTimeOffset? nextAtUtc, CancellationToken ct);
     /// <summary>
     /// The newest time at or before <paramref name="atOrBefore"/> with a retained fill, and every fill source ID at it: the
     /// first backfill page's witnesses. Null when nothing is retained that early.
