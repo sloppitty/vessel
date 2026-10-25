@@ -1,6 +1,7 @@
 using Vessel.Application.Monitoring;
 using Vessel.Application.Venues;
 using Vessel.Domain.Monitoring;
+using Vessel.Domain.Plays;
 
 namespace Vessel.Tests;
 
@@ -147,20 +148,66 @@ public sealed class MonitorDiscrepancyStopConfirmationTests
         Assert.Equal(["discrepancy.opened", "discrepancy.resolved", "discrepancy.opened"], f.Events.Items.Select(x => x.Type).ToArray());
     }
 
-    [Fact] // D-19 changes the undersized stop only: an excess stop still confirms on its unchanged evidence.
-    public async Task Other_kinds_still_confirm_on_their_evidence()
+    [Theory] // D-19 and its follow-up change the size kinds only: every other kind still confirms on its unchanged evidence.
+    [InlineData("protection.cancelled")]
+    [InlineData("protection.orphaned")]
+    [InlineData("protection.beyond-liquidation")]
+    [InlineData("entry.orphaned")]
+    [InlineData("level.drift")]
+    [InlineData("position.missing")]
+    [InlineData("position.opposite")]
+    [InlineData("fill.unlinked")]
+    public async Task Other_kinds_still_confirm_on_their_evidence(string kind)
     {
         var f = new DiscrepancyFixture();
-        f.Stop(o => o with { RemainingSize = 2, ReduceOnly = false });
+        Fingerprinted(f, kind, 0);
         await f.Evaluate();
-        f.Advance(30); f.Stop(o => o with { RemainingSize = 2.5m });
+        f.Advance(30); Fingerprinted(f, kind, 1);
         await f.Evaluate();
-        f.Advance(30); f.Stop(o => o with { RemainingSize = 3 });
+        f.Advance(30); Fingerprinted(f, kind, 2);
         await f.Evaluate();
-        var row = f.Store.Rows.Single(x => x.Kind == "protection.excess");
+        var row = f.Store.Rows.Single(x => x.Kind == kind);
         Assert.Equal(("candidate", (DateTimeOffset?)f.Clock.Now), (row.State, row.PendingSinceUtc));
         f.Advance(60); await f.Evaluate();
         Assert.Equal("open", row.State);
+    }
+
+    /// <summary>The kind's condition, with evidence version <paramref name="version"/>: each version changes its fingerprint.</summary>
+    private static void Fingerprinted(DiscrepancyFixture f, string kind, int version)
+    {
+        void Grow() { f.Fill("entry-fill-" + f.Store.Fills.Count, "entry", .2m, f.Clock.Now.AddSeconds(-1)); f.Position += .2m; }
+        switch (kind)
+        {
+            case "protection.cancelled":
+                if (version == 0) f.Stop(o => o with { Status = VenueOrderStatus.Canceled }); else Grow();
+                break;
+            case "protection.orphaned":
+                if (version == 0) f.Play.MarkClosed("fixture", f.Clock.Now.AddMinutes(-1)); else f.Stop(o => o with { RemainingSize = 1 - .2m * version });
+                break;
+            case "protection.beyond-liquidation":
+                // Which stops sit beyond the liquidation price is its fingerprint.
+                if (version == 0) f.Liquidation = 95; else f.AddOrder("stop-" + version, OrderLinkRole.Stop, .1m, 90 + version);
+                break;
+            case "entry.orphaned":
+                if (version == 0)
+                {
+                    f.Position = 0;
+                    f.Play.MarkClosed("fixture", f.Clock.Now.AddMinutes(-1));
+                    f.VenueOrders.Clear();
+                    f.Store.Links.Add(f.Link(f.Play, "late-entry", OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, f.Clock.Now.AddMinutes(-15)));
+                    f.VenueOrders.Add(new("late-entry", "BTC", "buy", "Limit", 100, null, false, false, 1, 1, f.Clock.Now.AddMinutes(-15), VenueOrderStatus.Open, "open", f.Clock.Now));
+                }
+                else f.VenueOrders[0] = f.VenueOrders[0] with { RemainingSize = 1 - .2m * version };
+                break;
+            case "level.drift": f.Stop(o => o with { TriggerPrice = 80m - version }); break;
+            case "position.missing":
+                if (version == 0) f.Position = 0; else f.Fill("entry-fill-" + f.Store.Fills.Count, "entry", .2m, f.Clock.Now.AddSeconds(-1));
+                break;
+            case "position.opposite": f.Position = -1 - .5m * version; break;
+            case "fill.unlinked":
+                f.Fill("unlinked-" + version, "other-order-" + version, .2m, f.Clock.Now.AddMinutes(version == 0 ? -5 : 0).AddSeconds(-1));
+                break;
+        }
     }
 
     /// <summary>Adds an entry fill and the same venue position, and resizes the linked stop.</summary>

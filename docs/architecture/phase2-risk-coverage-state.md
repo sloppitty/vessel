@@ -164,7 +164,7 @@ October 21, 2026. Implemented on `t3/phase2-open-risk`.
 
 ## 2. Weekly review page
 
-October 21, 2026.
+October 22, 2026.
 
 **2. Weekly review page.** Implemented on `t3/phase2-weekly-review`.
 - **The setting.** One owner setting on the server (`reporting_settings`, migration
@@ -914,6 +914,11 @@ October 21, 2026.
     full backfill writes a complete ledger record. Keeping flat observations would need a migration.
   - **Play status.** It is not fenced; it only affects the `not-settled` check.
   - **Order lifetimes.** They follow Vessel's clock.
+- **Owner answer (October 23).** These stay as built for now; the owner will rethink them later. Old Plays
+  keep reading "coverage incomplete" until a flat start is proven, and no flat observations are kept.
+  - **To revisit (owner, October 23).** Opening a new Play could close an older one on the same market that
+    never filled, only where that makes sense. Nothing is built: concurrent Plays stay allowed, and a Play's
+    status changes only by the owner or its linked fills.
 - **Tests.** `PlayFundingPostgresTests` (27):
   - the sole sum with unchanged results;
   - each failing condition, with missing executions in, after and before the window;
@@ -1236,9 +1241,8 @@ October 23, 2026.
 - **Migration.** It is applied explicitly, never to the owner's database; run `play-search-rebuild --apply`
   once after it. It was regenerated on the restack (`20261023075337_JournalSearch`) so that it orders after
   9c's `FundingSchedule`; its operations are unchanged.
-- **Open question for the owner.** Outcomes past their recheck time are computed again on every read without
-  writing, until the next write or the rebuild stores them. Should a read store them instead, in a bounded
-  write?
+- **Owner answer (October 23).** Outcomes past their recheck time are computed again on every read without
+  writing, until the next write or the rebuild stores them. The owner chose to leave it as built.
 - **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `78581e97`. Three findings, all fixed in
   `b262ad07`:
   - An exclusion by an execution dated after now never expired: list and
@@ -1397,9 +1401,9 @@ October 21, 2026.
     the same mechanism. Severity and announcements are unchanged. No migration.
 - **Contract notes.** The lifecycle mechanism and its tests landed in 6c (its Sol round 1), which needed it
   first. This pull request applies it to `protection.short`.
-- **Open question for the owner.** Should other kinds also confirm on their condition? Those are
-  `protection.missing` (critical), `protection.excess`, `protection.cancelled`, `level.drift`,
-  `position.short`, `position.excess` and `fill.unlinked`. Only `protection.short` is in scope here.
+- **Owner answer (October 23).** Other kinds should confirm on their condition where a changing size is normal:
+  `protection.missing`, `protection.excess`, `position.short` and `position.excess`, delivered in D-19b below. The
+  rest stay on their fingerprint.
 - **Tests.** `MonitorDiscrepancyStopConfirmationTests`:
   - changing quantities confirming once, with the latest evidence;
   - the condition ending resolving it;
@@ -1494,3 +1498,93 @@ October 21, 2026.
   arithmetic (interleaving, warm-up exclusion and percentiles), determinism,
   and that nothing runs in CI or needs Docker in the unit tests.
 - **Check.** `scripts/check.sh` passed on `00cb8ceb`: backend 4,314 passed, 5 skipped; frontend 189 files and 4,160 tests.
+
+**D-19b. More warnings confirm on their condition.** Implemented on `t3/phase2-confirmation-kinds`.
+- **The owner's decision (October 23).** Four more kinds confirm on their condition (`ConfirmsOnCondition`), where a
+  changing size is normal while a trade is built. Their subjects are unchanged: per Play for the protection kinds,
+  per account and instrument for the position kinds.
+  - **`protection.missing` (critical).** A position that keeps growing through partial entry fills after the
+    grace used to restart the sequence on every check, so the warning never opened. It passes no earliest
+    source, since it becomes present only from linked fills and the book.
+  - **`protection.excess`.** It passes the snapshot's time as its earliest source when a whole-position stop or
+    target counts the open quantity because the snapshot agrees; a plain oversized order rests on the book alone.
+  - **`position.short` and `position.excess`.** They rest on the snapshot and linked fills, and pass none. They
+    stay separate kinds, so a switch between them starts the other's own sequence.
+- **Unchanged.** Every other kind still confirms on its fingerprint, and `protection.cancelled` still supersedes
+  missing and short. Severity and announcements are unchanged. No migration.
+- **Accepted as built.**
+  - A switch between an oversized stop and an oversized target on one Play continues `protection.excess`.
+  - An untracked position that flips without a flat read continues `position.excess`.
+  - A rare flip of the expected sign continues `position.short`.
+- **Tests.** `MonitorDiscrepancyConditionKindsTests`. For each kind: changing quantities confirming once with the
+  latest evidence; interruptions and a fresh absence restarting; and a dismissed record reopening only on changed
+  evidence, also against PostgreSQL. Also a growing position after the grace, the short-to-excess switch both
+  ways, and an excess resting on the snapshot. 32 of its 50 cases failed before the fix. The other kinds stay on
+  their evidence.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `2d4c1645`. No findings. Sol confirmed:
+  - the grace gating and every interruption restarting the sequence;
+  - each kind's earliest-source choice, given which reads decide it;
+  - the accepted switches keeping the kind-and-subject invariant;
+  - the fingerprint kinds unchanged, cancelled-stop supersession included;
+  - silent evidence updates changing no revision or relevance, with a critical missing stop announcing once on
+    opening;
+  - the docs.
+
+  It suggested more coverage: a whole-position target with split read times, the accepted switches and direct
+  revision assertions.
+- **Check.** `scripts/check.sh` passed on `2d4c1645`: backend 4,354 passed, 5 skipped; frontend 189 files and 4,160 tests.
+
+
+## October 25, 2026: deeper stack verification and corrections
+
+The owner requested another Sol investigation and fixes across the open Phase 2 stack, from PR #35 through
+#66 (29 PRs). The review pinned the original tip at `6499460a`, then integrated wallet-only main `adf521ef`.
+The existing PR branches keep their ancestry and receive the corrections in the layer that owns them.
+No installation database, deployment or release was changed.
+
+- **Open risk (#36, #64).** Invalid or unfinished leverage stays unknown instead of becoming 1x. A split order's
+  retained but unallocated execution also keeps risk unknown for its affected Plays, using the execution
+  reader's existing allocation rule. Regressions cover invalid leverage and risk before/after allocation.
+- **Review export (#38).** CSV receives the displayed request, including the owner's imported-position threshold.
+  A page-level regression uses a non-default threshold and checks both the report and download requests.
+- **Evidence integrity (#40).** A bundle verifies each included original's exact recorded length and SHA-256
+  before delivering the temporary archive. Short, oversized and same-length altered objects fail the download;
+  the existing explicit treatment of missing originals remains. Regressions exercise the copy and bundle paths.
+- **Changed Lighter fills (#48).** Meaningfully changed copies reach the shared conflict recorder instead of
+  disappearing under ID-only deduplication. Identical normalized facts collapse even when raw responses differ.
+  The first stored fact remains immutable. Adapter regressions cover both changed and repeated copies.
+- **History coverage (#52/#54).** A failed reread labels the retained information as the previous read and offers
+  Retry. Backfill controls wait for current coverage. Initial unavailable reads remain hidden; interrupted or
+  failed reads do not stop active-backfill polling. The regression covers failure, withheld controls and recovery.
+- **Search (#63).** Only the current projection version can supply matches; old versions count as unindexed.
+  The PostgreSQL regression covers a stale projection and the rebuilt version.
+- **Allocation dependencies (#64).** Entry-only fills depend on an actual flip allocation with both exit and
+  entry lines. Removing the last such split is refused while later allocated entries depend on it. The new
+  PostgreSQL regression keeps the source Play editable to exercise the removal path.
+- **Wallet-only integration (#35–#66).** Conflict resolution preserves main's shell navigation and mandatory
+  wallet identity while retaining Phase 2 settings. New frontend clients use session fixtures. Phase 2 changelog
+  entries stay in Unreleased; published 0.3.3 notes are unchanged.
+- **Benchmark (#65).** The script uses a temporary loopback certificate, Production wallet authentication,
+  offline synthetic operator binding, the actual signed challenge and its session cookie. Registration stays
+  Closed. A disposable smoke run passed with `--years 1 --scale 0.05 --warmup 0 --rounds 1 --no-build`: 4,472
+  seeded rows, 17 authenticated read scenarios, with two deep-page scenarios explicitly skipped because the
+  small dataset cannot populate them. Its API, PostgreSQL, RabbitMQ and temporary credentials were removed.
+  This verifies the HTTPS/sign-in path; it does not replace the historical full-size Token-mode timings above.
+
+**Sol verification.** Fresh `gpt-6-sol` investigations separately covered execution/risk, security/exports/search,
+monitor/history/funding and wallet benchmark compatibility. A fifth independent read-only adversarial review
+checked the combined fixes and the allocation guard: no further concrete code defect; it identified the
+historical benchmark description, now corrected. No authorization bypass or cross-owner disclosure was
+confirmed in these reviews. The initial targeted run caught and corrected an entry-only allocation being
+mistaken for a second flip, and raw-only Lighter response differences being retained as separate copies.
+A sixth independent Sol review checked all 29 propagated branches, original-head/base ancestry, conflict
+resolutions and unchanged released notes; no propagation defect. The final propagated code tree matches the
+integration tree that received the full test run.
+
+**Local checks.** The frontend passes typecheck, ESLint, production build and all 4,207 tests in 198 files.
+Each of the 28 code-bearing intermediate PR layers also passes frontend typecheck (#35 changes docs only).
+The frozen pnpm lockfile and locked NuGet restore pass. Python: 118 tests; prototype: 76 tests. The isolated
+Production/Wallet benchmark passes as described above.
+The Release backend run against a run-owned PostgreSQL database passes 4,342 tests with 17 explicit optional
+skips (live venues, RabbitMQ/worker end-to-end and S3 services were not enabled); no failures. No skipped check
+is counted as a pass. The new PostgreSQL regressions ran in this suite.
