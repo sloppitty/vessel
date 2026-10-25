@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -5,6 +6,8 @@ using Vessel.Application.Workspace;
 using Vessel.Application.Common;
 using Vessel.Application.Venues;
 using Vessel.Domain.Common;
+using Vessel.Domain.Workspace;
+using Vessel.Domain.Numerics;
 
 namespace Vessel.Application.Activity;
 
@@ -111,7 +114,27 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
         {
             s.AccountId, s.LastAttemptToUtc, s.LastReadComplete, s.PnlBasis, s.Notice
         }));
+        // Phase 2, item 7b: markers change the operations they break, and a newly seen one changes the page.
+        Append("omissions", facts.Omissions.OrderBy(m => m.Id).Select(m => new
+        {
+            m.Id, m.ContractId, m.VenueContractId, m.OccurredAtUtc, m.UncertainFromUtc, m.UncertainToUtc
+        }));
         return Convert.ToHexStringLower(hash.GetHashAndReset(), 0, 16);
+    }
+
+    /// <summary>Phase 2, item 7b: forced events shown as rows; the rest of each account's are counted.</summary>
+    public const int MaxForcedEventRows = 50;
+
+    /// <summary>One venue-forced execution, its facts as reported and why it is excluded; unknown money reads as unknown.</summary>
+    private static string ForcedText(ForcedEvent e)
+    {
+        var kind = e.Kind == ForcedEvent.Settlement ? "Market settlement" : e.Kind == ForcedEvent.Deleverage ? "Deleverage" : "Liquidation";
+        var price = e.Price is { } p ? $" at {ExactAmount.From(p)}" : ", price not reported";
+        var pnl = e.RealizedPnl is { } r ? ExactAmount.From(r).ToString() : "unknown";
+        var fee = e.Fee is { } f ? ExactAmount.From(f).ToString() : "unknown";
+        return string.Create(CultureInfo.InvariantCulture,
+            $"{kind} on {e.OccurredAtUtc:yyyy-MM-dd HH:mm:ss} UTC: {e.Side} {ExactAmount.From(e.Quantity)}{price}; realized P&L {pnl}, fee {fee}. ") +
+            "Excluded: venue-forced, kept beside the fills, never linked or scored.";
     }
 
     // Overview, Activity pages and the fills endpoint share these unbounded aggregate results; constituent DTOs
@@ -139,7 +162,15 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
             return paper with { Version = Version(paper.Operations.OrderBy(o => o.Id), paper.Facts, paper.Coverage) };
         }
         var fills = facts.Fills.Where(f => accounts.ContainsKey(f.AccountId)).ToList();
-        var positions = new ActivityPositions(fills, facts.Snapshots, facts.FundingPayments.Where(p => accounts.ContainsKey(p.AccountId)).ToList());
+        var omissions = facts.Omissions.Where(m => accounts.ContainsKey(m.AccountId)).ToList();
+        // Sol round 1 on 7b: the store reads only the newest rows and counts the rest; in-memory facts may hold them all.
+        var forced = facts.ForcedEvents.Where(e => accounts.ContainsKey(e.AccountId)).OrderByDescending(e => e.OccurredAtUtc)
+            .ThenBy(e => e.Id).Take(MaxForcedEventRows).ToList();
+        var forcedCounts = (facts.ForcedEventCounts?.Select(c => (Account: c.Key, Count: c.Value))
+                ?? facts.ForcedEvents.GroupBy(e => e.AccountId).Select(g => (Account: g.Key, Count: g.Count())))
+            .Where(c => accounts.ContainsKey(c.Account)).ToDictionary(c => c.Account, c => c.Count);
+        var positions = new ActivityPositions(fills, facts.Snapshots, facts.FundingPayments.Where(p => accounts.ContainsKey(p.AccountId)).ToList(),
+            omissions);
         var operations = OperationLeverage.Apply(OperationAggregator.AggregateSummaries(fills, facts.FillPlayIds, positions),
             facts with { LeverageObservations = facts.LeverageObservations.Where(o => accounts.ContainsKey(o.AccountId)).ToList() },
             positions);
@@ -187,9 +218,16 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
                 }
             }
         }
+        // Phase 2, item 7b: each venue-forced execution is a visible row with its exclusion, at most 50 with a count.
+        foreach (var e in forced)
+            coverage.Add(new(e.AccountId, e.ContractId, ForcedText(e)));
+        foreach (var (account, count) in forcedCounts.OrderBy(c => c.Key.ToString("D"), StringComparer.Ordinal))
+            if (count - forced.Count(e => e.AccountId == account) is > 0 and var more)
+                coverage.Add(new(account, null, $"{more} more venue-forced executions are retained and excluded."));
         facts = facts with
         {
             Accounts = accounts.Values.ToList(), Fills = fills,
+            Omissions = omissions, ForcedEvents = forced, ForcedEventCounts = forcedCounts,
             PaperPlays = [],
             FundingPayments = facts.FundingPayments.Where(p => accounts.ContainsKey(p.AccountId)).ToList(),
             FundingStates = facts.FundingStates.Where(s => accounts.ContainsKey(s.AccountId)).ToList()

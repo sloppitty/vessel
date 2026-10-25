@@ -302,4 +302,3 @@ public sealed class ForcedEvent : IOwned
     public DateTimeOffset FirstSeenAtUtc { get; set; }
     public DateTimeOffset LastSeenAtUtc { get; set; }
 }
-
