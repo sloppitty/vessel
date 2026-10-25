@@ -17,8 +17,8 @@ public sealed class PaperWorkerTests
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Vessel:Worker:Modules:0"] = "paper",
-            ["Vessel:Auth:Token"] = "test-paper-token-only-not-a-live-secret",
-            ["Vessel:Auth:OwnerId"] = Guid.NewGuid().ToString()
+            ["Vessel:Auth:OwnerId"] = Guid.NewGuid().ToString(),
+            ["Vessel:Identity:Origins:0"] = TestAuthentication.Origin
         });
         WorkerHost.Configure(builder);
         Assert.Contains(builder.Services, x => x.ServiceType == typeof(IPaperTradingService));

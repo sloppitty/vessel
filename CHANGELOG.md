@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Removed
+
+- **Breaking:** the API token (Token sign-in) is gone; Vessel signs in with
+  Ethereum wallets only. The API, workers, `check-config` and `migrate` refuse
+  to start while `Vessel__Auth__Token` is set or `Vessel__Auth__Mode` is
+  anything but `Wallet`, and readiness waits until the operator's wallet is
+  bound. Sign-in needs HTTPS. `compose.yaml` now carries the identity
+  settings (`VESSEL_IDENTITY_ORIGIN` is required) and `compose.wallet.yaml` is
+  removed. Token installations must follow "Moving from the API token to
+  wallet sign-in" in `deploy/README.md` before upgrading: keep the owner GUID,
+  migrate, bind the operator's wallet, then start. No journal migration.
+- The browser's API token screen, the Token-mode owner card and its Settings
+  panel; `/api/auth/config` no longer reports a mode.
+
+### Changed
+
+- Workers no longer register ASP.NET authorization, so they also start in the
+  Development environment. `scripts/dev.py` applies the identity migrations and
+  `identity ensure-owner` in `migrate`, allows sign-in from the Vite page and
+  adds `pnpm dev:identity` for binding a development wallet.
+
 ## 0.3.3 - October 22, 2026
 
 Release notes: [docs/releases/v0.3.3.md](docs/releases/v0.3.3.md).

@@ -33,7 +33,7 @@ import { OverviewActions } from './OverviewActions'
 import { VenuesProvider, useVenues } from '@/api/venues'
 import {
   Activity, BarChart3, Bell, CircleHelp, Compass, Folder, LayoutDashboard,
-  LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, Wallet, BookOpen, X,
+  Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, Wallet, BookOpen, X,
 } from 'lucide-react'
 import { PageErrorBoundary } from '@/components/PageErrorBoundary'
 import { OverviewPage } from './OverviewPage'
@@ -78,8 +78,7 @@ const paperNotice: ShellNotice = {
   id: 'paper', title: 'Paper mode', tone: 'paper',
   message: 'Simulated capital and executions only. Real accounts and results are excluded. Zero fees and slippage; candle touches can be ambiguous.',
 }
-/** `identity` is present in Wallet mode only; Token mode keeps the owner card that disconnects at once. */
-type ShellProps = { system: SystemInfo; disconnect: () => void; api: WorkspaceApi; identity?: ShellIdentity }
+type ShellProps = { system: SystemInfo; disconnect: () => void; api: WorkspaceApi; identity: ShellIdentity }
 
 /** Focuses an element of a page that may still be loading, for up to a second. */
 function focusWhenShown(id: string, tries = 20) {
@@ -186,7 +185,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null)
   const [trail, setTrail] = useState<ShellLocation[]>(() => {
     const initial = pages.find(item => `#${item.id}` === window.location.hash)?.id ?? 'overview'
-    return [pageLocation(initial), ...(initial === 'settings' && identity ? [settingsLocation('appearance')] : [])]
+    return [pageLocation(initial), ...(initial === 'settings' ? [settingsLocation('appearance')] : [])]
   })
   const [playsSession, setPlaysSession] = useState(createPlaysSession)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('appearance')
@@ -207,7 +206,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
       const parent = history.some(location => location.kind === 'page' && location.page === next)
         ? visitLocations(history, pageLocation(next)) : [pageLocation(next)]
       if (next === 'plays' && playsSession.view === 'editor') return visitLocations(parent, playLocation(playsSession))
-      return next === 'settings' && identity ? visitLocations(parent, settingsLocation(settingsTab)) : parent
+      return next === 'settings' ? visitLocations(parent, settingsLocation(settingsTab)) : parent
     })
   })
   const [playsList, setPlaysList] = useState(initialPlaysList)
@@ -233,8 +232,8 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     return () => { if (exitState.current === current) exitState.current = null }
   }, [api, disconnectedApi, playsSession, playsLifetime.work, page, requestedPlay])
   // A forced sign-out drops the exit state first, so the reload never asks about unsaved work.
-  const registerExitState = identity?.registerExitState
-  useLayoutEffect(() => registerExitState?.(() => { exitState.current = null; setDisconnectedApi(api) }), [api, registerExitState])
+  const registerExitState = identity.registerExitState
+  useLayoutEffect(() => registerExitState(() => { exitState.current = null; setDisconnectedApi(api) }), [api, registerExitState])
   useEffect(() => {
     if (disconnectedApi === api) return
     const work = playsLifetime.work
@@ -296,8 +295,8 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     notify({ tone: 'info', key: 'session-changed', message: 'Your session changed in another tab. Vessel reloaded your workspace; check your last change before trying again.' })
     reload()
   }), [api, notify, reload])
-  const startupNotice = identity?.notice ?? null
-  const noticePresented = identity?.noticePresented
+  const startupNotice = identity.notice ?? null
+  const noticePresented = identity.noticePresented
   useEffect(() => {
     if (!startupNotice) return
     notify({ tone: 'info', key: 'session-notice', message: startupNotice, duration: null })
@@ -359,7 +358,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     setRequestedPlay(null)
     const locations = [pageLocation(next)]
     if (next === 'plays' && playsSession.view === 'editor') locations.push(playLocation(playsSession))
-    if (next === 'settings' && identity) locations.push(settingsLocation(settingsTab))
+    if (next === 'settings') locations.push(settingsLocation(settingsTab))
     setTrail(history => drillDown ? visitLocations(history, ...locations) : locations)
   }
   function viewAccount(id: string) {
@@ -423,7 +422,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     setSelectedAccountId(null)
     setRequestedPlay(null)
     setTrail(history => visitLocations(history, location,
-      ...(location.kind === 'page' && location.page === 'settings' && identity ? [settingsLocation('appearance')] : [])))
+      ...(location.kind === 'page' && location.page === 'settings' ? [settingsLocation('appearance')] : [])))
   }
   const portfolios = data?.portfolios ?? [], accounts = data?.accounts ?? []
   useEffect(() => {
@@ -484,10 +483,9 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     const current = exitState.current
     if (current?.api !== api || current.work !== playsLifetime.work) return
     if (current.work.current || hasUnsavedPlayWork(current.session)) {
-      const verb = identity ? 'Sign out' : 'Disconnect'
       const message = current.work.current
-        ? `A Play request is still in progress. ${verb} and discard unsaved work? Already-sent changes may still complete.`
-        : `${verb} and discard unsaved Play work?`
+        ? 'A Play request is still in progress. Sign out and discard unsaved work? Already-sent changes may still complete.'
+        : 'Sign out and discard unsaved Play work?'
       if (!window.confirm(message)) return
     }
     if (exitState.current?.api !== api || exitState.current.work !== current.work) return
@@ -570,10 +568,9 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
       <div className="shell-sidebar-bottom">
         {tradingMode === 'real' && <a href="#notifications" className={`shell-nav-item ${page === 'notifications' ? 'active' : ''}`} aria-label={notificationsName} title={notificationsName} aria-current={page === 'notifications' ? 'page' : undefined} onClick={event => { event.preventDefault(); navigate('notifications') }}><Bell size={18} aria-hidden="true" /><span className="sidebar-copy">Notifications</span><NotificationBadge count={unread} /></a>}
         <a href="#settings" className={`shell-nav-item ${page === 'settings' ? 'active' : ''}`} aria-label="Settings" title="Settings" aria-current={page === 'settings' ? 'page' : undefined} onClick={event => { event.preventDefault(); navigate('settings') }}><Settings2 size={18} aria-hidden="true" /><span className="sidebar-copy">Settings</span></a>
-        {identity ? <AccountMenu identity={identity} onSignOut={disconnectSession}
+        <AccountMenu identity={identity} onSignOut={disconnectSession}
           onProfile={() => { navigate('settings'); changeSettingsTab('profile', true) }}
           onSessions={() => { navigate('settings'); changeSettingsTab('profile', true); focusWhenShown('sessions-heading') }} />
-          : <button className="owner-card" onClick={disconnectSession} aria-label={`Disconnect ${system.owner.displayName}'s session`} title={`Disconnect ${system.owner.displayName}'s browser session`}><span className="owner-avatar" aria-hidden="true">{system.owner.displayName.slice(0, 1).toUpperCase()}</span><span className="sidebar-copy"><strong>{system.owner.displayName}</strong></span><LogOut size={15} aria-hidden="true" /></button>}
       </div>
     </aside>
     <div className="shell-main" inert={menuOpen}>
@@ -641,7 +638,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
           state={notificationList} onStateChange={setNotificationList} eyebrow={logLine(page, system.owner.displayName)} onPreferences={() => navigate('settings', true)} /></Suspense>}
 
         {page === 'settings' && <Suspense fallback={<PageLoading />}><SettingsPage system={system} api={api} onPaperSettingsChange={onPaperSettingsChange} inApp={inApp} disconnectSession={disconnectSession} onAccounts={() => navigate('accounts', true)}
-          {...identity ? { identity, tab: settingsTab, onTab: changeSettingsTab } : {}} /></Suspense>}
+          identity={identity} tab={settingsTab} onTab={changeSettingsTab} /></Suspense>}
         </div></PageErrorBoundary>
       </main>
     </div>

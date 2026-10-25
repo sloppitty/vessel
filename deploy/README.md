@@ -14,13 +14,15 @@ Releases are published by the repository's Release workflow when an annotated
 [`vessel-release` skill](../.agents/skills/vessel-release/SKILL.md) and the
 [release notes](../docs/releases/). Publishing never upgrades an installation.
 
-## Sign-in mode
+## Sign-in
 
-**Token is still the default.** Existing installs need no identity settings and
-continue to use their configured owner and in-memory browser token. Wallet mode
-is an explicit operator opt-in, not a deployment or an automatic mode switch.
-These Wallet instructions require **both v0.3.0 images or newer**; do not apply
-this overlay to older published images.
+**Vessel signs in with Ethereum wallets only.** The API token (Token mode) was
+removed on October 25, 2026: images from that change refuse to start while
+`Vessel__Auth__Token` is set or `Vessel__Auth__Mode` is anything but `Wallet`.
+An installation that still uses the token must follow
+[Moving from the API token to wallet sign-in](#moving-from-the-api-token-to-wallet-sign-in)
+before upgrading. Sign-in needs HTTPS: use the bundled Caddy overlay or your
+own HTTPS proxy.
 The implementation and automated acceptance evidence are in
 [`multi-user-state.md`](../docs/architecture/multi-user-state.md). Complete its
 §10 checklist before enabling registration for real users: the real-wallet,
@@ -29,7 +31,7 @@ be treated as passed. Start with `Closed` until that acceptance is complete.
 The D1–D12 defaults are adopted, not additional owner answers; the owner can
 change them deliberately through settings or a small reviewed code change.
 
-Wallet mode signs in an externally owned Ethereum account (EOA), creates a
+Vessel signs in an externally owned Ethereum account (EOA), creates a
 separate journal per user and supports multiple linked wallets. A signature is
 not a transaction, approval or venue action. The signed message fixes **Chain
 ID 1**; no network switch is needed, including when the wallet is connected to
@@ -51,11 +53,11 @@ does not pass it into a container.
 
 | Key | Values and default | Rules |
 | --- | --- | --- |
-| `Vessel:Auth:Mode` | `Token` (default when absent) \| `Wallet` | Any other value refuses startup |
-| `Vessel:Auth:Token` | — | Token mode: required outside Development (unchanged). Wallet mode: absent or empty, otherwise refuse to start |
-| `Vessel:Auth:OwnerId` | GUID | Token mode: as today, and the default GUID stays accepted. Wallet mode: required outside Development; used by `ensure-owner` and legacy-preference adoption. In Wallet mode only, the well-known default GUID is refused outside Development unless `Vessel:Identity:AllowLegacyDefaultOwner=true` (logged at startup as a warning) |
+| `Vessel:Auth:Mode` | absent | Retired. Absent or `Wallet` (from an earlier opt-in) is accepted; any other value refuses startup |
+| `Vessel:Auth:Token` | — | Retired. Must be absent or empty; otherwise every host refuses to start |
+| `Vessel:Auth:OwnerId` | GUID | Required outside Development; used by `ensure-owner` and legacy-preference adoption. The well-known default GUID is refused outside Development unless `Vessel:Identity:AllowLegacyDefaultOwner=true` (logged at startup as a warning) |
 | `Vessel:Auth:OwnerName` | `Owner` | Display name given by `ensure-owner` |
-| `Vessel:Identity:Origins` | list | Wallet mode: required, at least one entry. Each entry is normalized to `scheme://host[:port]` (lower-case host, no path, no default port, no trailing slash). **Outside Development every origin must be `https://`.** In Development `http://` origins are allowed |
+| `Vessel:Identity:Origins` | list | Required, at least one entry. Each entry is normalized to `scheme://host[:port]` (lower-case host, no path, no default port, no trailing slash). **Outside Development every origin must be `https://`.** In Development `http://` origins are allowed |
 | `Vessel:Identity:Registration` | `Invitation` | Supported in this delivery: `Closed` and `Invitation`. B2 enabled registration; operator opt-in and the §10 acceptance checklist still apply. `AllowList` and `Open` are parsed but **unsupported** until per-user account/evidence quotas exist (delivery contract §13); `check-config` warns if either is set |
 | `Vessel:Identity:AllowList` | empty | `0x` addresses, normalized to lower case. Used only by the unsupported `AllowList` policy |
 | `Vessel:Identity:Session:IdleHours` / `AbsoluteHours` | 12 / 24 | 1–720; idle ≤ absolute |
@@ -77,10 +79,10 @@ work. Cookies use `__Host-`, `Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/` a
 no Domain. **Every installation needs its own hostname: different ports do not
 isolate cookies.** Only Development with an explicitly allowed HTTP origin drops
 `__Host-`/`Secure` (names `vessel-session` and `vessel-signin`). Never use that
-exception for an internet installation. Wallet startup refuses a nonempty
-`Vessel:Auth:Token`; the Wallet overlay explicitly clears the Token setting.
+exception for an internet installation. Every host refuses a nonempty
+`Vessel:Auth:Token`.
 
-### Opt in to Wallet mode
+### Set up sign-in
 
 Retain the installation's existing owner GUID: credential encryption binds it.
 A new installation must generate a fresh GUID; do not copy the well-known legacy
@@ -89,14 +91,12 @@ use the explicit `AllowLegacyDefaultOwner` override only after reviewing the
 startup warning. The database role needs `CREATE` on the database for identity's
 `CREATE SCHEMA`, in addition to journal migration privileges.
 
-Add to the **private operator** `.env`, not the source checkout or Vite:
+Set in the **private operator** `.env`, not the source checkout or Vite:
 
 ```dotenv
 # Use a separate hostname for each installation.
-VESSEL_AUTH_MODE=Wallet
-Vessel__Auth__Token=
 # Keep the complete overlay list here, including any storage/credential overlays:
-COMPOSE_FILE=compose.yaml:compose.tls.yaml:compose.wallet.yaml
+COMPOSE_FILE=compose.yaml:compose.tls.yaml
 VESSEL_IDENTITY_ORIGIN=https://diary.example.com
 VESSEL_IDENTITY_REGISTRATION=Closed
 # After completing the acceptance checklist, you may switch to Invitation (the
@@ -104,13 +104,12 @@ VESSEL_IDENTITY_REGISTRATION=Closed
 # VESSEL_ALLOW_LEGACY_DEFAULT_OWNER=true
 ```
 
-Wallet installs must blank `Vessel__Auth__Token`. Persist both `VESSEL_AUTH_MODE`
-and `COMPOSE_FILE` in the mode-600 private `.env` so bare `docker compose`
-commands (including backup/upgrade/recovery) keep the mode and overlays.
-Append e.g. `:compose.credentials.yaml` and the selected storage overlay to
-`COMPOSE_FILE` when needed. Explicit `-f` flags **replace** that file list:
-include every required overlay if using them. Omitting the Wallet overlay with
-`VESSEL_AUTH_MODE=Wallet` fails closed for missing origins, never as Token.
+Persist `COMPOSE_FILE` in the mode-600 private `.env` so bare `docker compose`
+commands (including backup/upgrade/recovery) keep the HTTPS, storage and
+credential overlays. Append e.g. `:compose.credentials.yaml` and the selected
+storage overlay to `COMPOSE_FILE` when needed. Explicit `-f` flags **replace**
+that file list: include every required overlay if using them. Compose refuses
+to start any host without `VESSEL_IDENTITY_ORIGIN`.
 With Caddy, `VESSEL_IDENTITY_ORIGIN` must equal `https://$VESSEL_TLS_HOST`,
 including the public HTTPS port if it is not 443 (e.g. `:8443`); do not use
 the proxy's internal port. The example uses the bundled Caddy overlay;
@@ -139,10 +138,9 @@ facts. `migrate` never binds a wallet automatically.
 ### Configuration check
 
 `deploy/migrate` first runs `dotnet /app/Vessel.Api.dll check-config`, which
-applies the API's startup validation (mode, Token length outside Development,
-owner GUID, connection string present, and the identity settings both workers
-also read: case-sensitive `Token`/`Wallet`, empty token and owner rules in Wallet
-mode, origins including the HTTPS-only rule outside Development, registration
+applies the API's startup validation (owner GUID, connection string present,
+and the identity settings both workers also read: refusal of the removed Token
+settings, owner rules, origins including the HTTPS-only rule outside Development, registration
 policy, allow-list addresses, session/stream limits, cookie names, schema and the
 legacy-owner flag) **without opening a database or broker connection**, so it
 works on a first install before the identity schema exists. A rejected setting
@@ -166,11 +164,10 @@ only `invite` prints a secret, once. Do not capture its output in shared logs.
 Keep a private, access-restricted operator log of **every** `identity` command
 and its output, with date, actor and target; protect invitation output as a
 secret and never include it in shared logs or acceptance evidence.
-Every command except `ensure-owner` refuses Token mode with exit **3**.
 
 | `identity` arguments | Effect / safeguard |
 | --- | --- |
-| `ensure-owner` | Wallet: create configured operator if absent. Token: no-op, exit 0. |
+| `ensure-owner` | Create the configured operator if absent. |
 | `bind-wallet --user <guid> --address 0x… [--label <label>]` | Idempotent for the same owner; refuses an unknown user, foreign address or a 21st wallet, exit 3. |
 | `invite [--note <note>] [--expires 7d] [--max-uses 1]` | Prints a code **once**; expiry is a positive integer number of days, max uses a positive integer. Give it privately to the intended user. |
 | `unbind-wallet --wallet <guid>` | Refuses last wallet; revokes that wallet's sessions. |
@@ -189,12 +186,12 @@ wallet, with a single-use five-minute grant; at most 20 wallets are linked.
 
 ### Shared limits and deployment maps
 
-Both auth modes enforce these **per API process**, in memory: four market
+The API enforces these **per API process**, in memory: four market
 streams per user (eight total); four event streams per user (`MaxStreams` total,
 64 default); one candle `refresh=true` per user/series/60 s; account discovery
 10/user/minute; credential verification 30/user/minute. Refusal is 429 with
 `Retry-After`. A server-wide venue deadline refusal consumes no user budget.
-Refresh keys are bounded to 256/user with a fair 8,192-key backstop. Cookie auth
+Refresh keys are bounded to 256/user with a fair 8,192-key backstop. Sign-in
 also limits challenge 10/client/minute (300/process), verify/register
 20/client/minute (600/process), invitation attempts 10/client/hour, and separate
 step-up/link buckets of 10/session/10 minutes each. IPv6 clients share a /64.
@@ -246,8 +243,8 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Generate the database password and Vessel login token directly into that private
-file. This example runs `openssl rand` and `uuidgen` with captured output rather
+Generate the database and broker passwords, the owner GUID and the storage keys
+directly into that private file. This example runs `openssl rand` and `uuidgen` with captured output rather
 than printing secrets to the terminal or shared logs. Do not enable shell tracing
 or record environment dumps.
 
@@ -264,8 +261,6 @@ replacements = {
         subprocess.check_output(["openssl", "rand", "-hex", "32"], text=True).strip(),
     "REPLACE_WITH_GENERATED_BROKER_PASSWORD":
         subprocess.check_output(["openssl", "rand", "-hex", "32"], text=True).strip(),
-    "REPLACE_WITH_GENERATED_TOKEN":
-        subprocess.check_output(["openssl", "rand", "-hex", "48"], text=True).strip(),
     "REPLACE_WITH_GENERATED_GUID":
         subprocess.check_output(["uuidgen"], text=True).strip(),
     "REPLACE_WITH_GENERATED_S3_ACCESS_KEY":
@@ -291,6 +286,8 @@ password must be hexadecimal because Compose places it in the private AMQP URI.
 Never use `guest`, print that URI, or publish AMQP outside the private network.
 Set `Vessel__Auth__OwnerName` if desired. Keep the generated owner GUID for the
 life of this installation. Changing it hides existing owner-scoped records.
+Then replace `VESSEL_IDENTITY_ORIGIN` with the installation's public HTTPS
+origin and keep `COMPOSE_FILE` with your HTTPS overlay; see [Sign-in](#sign-in).
 
 `VESSEL_WEB_BIND` defaults to `127.0.0.1:8080`. Keep it loopback-only, or restrict
 it to a private interface reachable only by your TLS proxy. Never expose plain
@@ -582,17 +579,29 @@ venue itself.
 
 ## Start and connect
 
-Without optional credential storage:
+With `COMPOSE_FILE` and `VESSEL_IDENTITY_ORIGIN` set as in [Sign-in](#sign-in),
+migrate first, bind the operator's wallet once, then start everything. Substitute
+the owner GUID from `.env` and the public address of a wallet you control;
+**never supply a private key or seed phrase**:
 
 ```sh
+docker compose config --quiet
+docker compose up -d --wait postgres rabbitmq
+docker compose run --rm migrate
+docker compose run --rm --no-deps \
+  --entrypoint dotnet migrate /app/Vessel.Api.dll identity bind-wallet \
+  --user <owner-guid> --address <0x-public-address> --label Operator
 docker compose up -d
 docker compose ps -a
 ```
 
-Compose waits for healthy PostgreSQL and RabbitMQ, then runs `/app/migrate` as a
-deliberate one-shot step. The wrapper runs the EF bundle, then messaging provisioning
-(envelope storage, broker topology and insert-only subscription registrations).
-It then starts API and both workers and waits for API readiness before starting web.
+`up` runs `/app/migrate` again as a deliberate one-shot step after healthy
+PostgreSQL and RabbitMQ. The wrapper validates the configuration, runs the
+identity and journal EF bundles, ensures the operator user, then runs messaging
+provisioning (envelope storage, broker topology and insert-only subscription
+registrations). It then starts API and both workers and waits for API readiness
+before starting web. Readiness stays 503 (`no-operator-wallet`) until an active
+operator has a bound wallet, so a first `up` without the binding never finishes.
 The EF bundle reads `ConnectionStrings__Vessel` from its environment through the
 design-time factory. The password is not an argument and the bundle does not
 print it. Neither API nor worker migrates or auto-provisions message storage at
@@ -605,9 +614,8 @@ first module), which names its envelope schema (`wolverine_monitor`) and service
 An unknown module stops startup. Replicas of one deployment share its schema.
 Every worker also runs subscription catch-up for the subscriptions it hosts and
 the hourly event retention sweep; both are claimed in PostgreSQL and safe with
-replicas. Journal operations resolve in fresh assigned owner scopes. Token
-mode uses the configured owner; Wallet mode validates each message through the
-identity directory. Unknown owners dead-letter, suspended owners' commands are
+replicas. Journal operations resolve in fresh assigned owner scopes, and each
+message is validated through the identity directory. Unknown owners dead-letter, suspended owners' commands are
 dropped/logged and their events acknowledged for later catch-up; new work starts
 only for active users. Logs contain IDs, never payloads.
 
@@ -633,11 +641,10 @@ row in `server_notification_heartbeats` (one per configured deployment, through
 the worker's first module is `notifications`. The API reports it as
 `workerOnline` in `GET /api/notifications/head`, separately from the monitor.
 
-Wallet mode gives `worker-notifications` the same `Vessel__Auth__Mode`, empty
-`Vessel__Auth__Token` and Wallet settings as `worker`; retain the Wallet overlay
-on every command. `WorkerHost.Configure` calls `AddVesselIdentityDirectory` for
-**every** module, replacing Token's fixed-owner directory with
-`IdentityOwnerDirectory` in Wallet mode. The Hub discovers active/new owners
+`worker-notifications` receives the same identity settings as `worker` (the
+`x-identity-environment` block of `compose.yaml`). `WorkerHost.Configure` calls
+`AddVesselIdentityDirectory` for **every** module, so each uses
+`IdentityOwnerDirectory`. The Hub discovers active/new owners
 without re-provisioning: registration is server-wide, but receipts/progress,
 notifications, preferences, feed cursors, unread counts, popup claims and API
 reads/writes are owner-scoped. Operator role never reads another journal.
@@ -665,17 +672,16 @@ entry.
 
 The paper playground requires a **paper-capable API/web build and its explicit
 journal migration**. No published older image gains this feature by adding an
-overlay. Set `VESSEL_VERSION` explicitly to the matching build and
-`VESSEL_AUTH_MODE` explicitly to the API's `Token` or `Wallet` mode, keep the
+overlay. Set `VESSEL_VERSION` explicitly to the matching build, keep the
 same database/project, and include `compose.paper.yaml` plus `--profile paper`
-alongside your existing storage, TLS, Wallet and credential overlays. For
+alongside your existing storage, TLS and credential overlays. For
 example, adding `-f compose.paper.yaml --profile paper` to your established
 Compose command enables the private `worker-paper` service.
 
 It runs the same `/app/worker` binary with only the `paper` module and deployment
 `paper`. This standalone scheduler does not use command queues, messaging
 envelope schemas or RabbitMQ; it needs no paper messaging provisioning, HTTP
-bearer, credential key ring, evidence mount or exposed port. Existing
+session, credential key ring, evidence mount or exposed port. Existing
 monitor/notifications deployments and their immutable module sets stay unchanged.
 Their normal migrations/provisioning requirements still apply to the full app.
 
@@ -709,9 +715,9 @@ open tranches.
 restore, identity reconciliation or event-epoch operation.** In paper-enabled
 installs, run `docker compose stop worker-paper` using the complete overlay/profile
 command before the stop/backup examples below. Do not leave another paper
-replica running. The paper worker still needs the same authentication mode and
-identity directory as the API; retain `VESSEL_AUTH_MODE=Wallet` and your complete
-Wallet/TLS overlays on every command in a Wallet installation.
+replica running. The paper worker still needs the same identity settings and
+identity directory as the API; retain your complete TLS/storage overlays on
+every command.
 
 ### Monitor and broker settings
 
@@ -818,13 +824,18 @@ The management page is published for troubleshooting and bound to loopback by
 default; it shows queue contents to anyone with broker credentials. Leave
 `VESSEL_RABBITMQ_MANAGEMENT_BIND` on loopback unless an HTTPS proxy fronts it.
 
-Open your HTTPS URL and connect with the configured Vessel API token from your
-private operator file. Do not confuse it with a Lighter read-only token. Vessel
-keeps this login token only in browser session memory, not local storage or URLs.
+Open your HTTPS URL and sign in with the bound wallet. Signing only proves the
+address: it is not a transaction or approval and needs no network switch. The
+session lives in an HttpOnly, `Secure`, host-only cookie.
 
 ## HTTPS and proxy trust
 
 ### Default HTTP mode
+
+Sign-in needs HTTPS: in this mode put your own HTTPS proxy in front of web (see
+[Host-local TLS proxy](#host-local-tls-proxy-weaker-alternative) or
+[Other API deployments](#other-api-deployments)) and set `VESSEL_IDENTITY_ORIGIN`
+to its public origin. Browsing to the plain HTTP address cannot sign in.
 
 Web overwrites `X-Forwarded-For` with its observed client address and
 `X-Forwarded-Proto` with its own HTTP scheme. It clears `X-Forwarded-Host` and
@@ -835,7 +846,7 @@ limiter. This is conservative, not an identity guarantee.
 
 The API trusts only the pinned `VESSEL_WEB_IP`, with `ForwardLimit=1`, not the
 bridge subnet or gateway. PostgreSQL and API are unpublished. Plain HTTP remains
-unsuitable for credentials and login tokens beyond a secured local host. The
+unsuitable for sessions and credentials beyond a secured local host. The
 production Lighter credential guard stays enabled.
 
 ### Preferred TLS mode, Caddy in Compose
@@ -940,6 +951,42 @@ unchanged and compresses static assets only.
 
 ## Upgrade
 
+### Moving from the API token to wallet sign-in
+
+Images built after October 25, 2026 have no API token: they refuse to start
+while `Vessel__Auth__Token` is set or `Vessel__Auth__Mode` is anything but
+`Wallet`, and readiness waits for an operator wallet. A Token installation
+moves over **before** starting such images. No journal migration is involved:
+the owner GUID maps the existing journal to the operator user, and the
+identity schema has been migrated since v0.3.0.
+
+1. Choose the installation's own public HTTPS hostname and decide between the
+   bundled Caddy overlay and your own HTTPS proxy (see
+   [HTTPS and proxy trust](#https-and-proxy-trust)). Sign-in cannot work over
+   plain HTTP.
+2. Stop web, every API and every worker (including `worker-notifications` and
+   any `worker-paper`), and take the usual verified backups.
+3. Replace the deploy files with this release's versions, and delete any
+   `compose.wallet.yaml`: its settings are now part of `compose.yaml`.
+4. In the private `.env`, delete `Vessel__Auth__Token` and `VESSEL_AUTH_MODE`.
+   Add `VESSEL_IDENTITY_ORIGIN`, `VESSEL_IDENTITY_REGISTRATION=Closed` and a
+   `COMPOSE_FILE` with your HTTPS/storage/credential overlays but without
+   `compose.wallet.yaml`. **Keep `Vessel__Auth__OwnerId` unchanged:** it owns
+   the journal and binds credential encryption. If it is the well-known
+   default `11111111-1111-1111-1111-111111111111`, set
+   `VESSEL_ALLOW_LEGACY_DEFAULT_OWNER=true` instead of changing it.
+5. Set `VESSEL_VERSION` and run the [start sequence](#start-and-connect):
+   `docker compose config --quiet`, `migrate`, then `identity bind-wallet` for
+   the owner GUID and the public address of the operator's wallet, then `up`.
+6. Sign in with that wallet and check that portfolios, accounts and Plays are
+   all there. The browser's existing appearance and chart preferences move to
+   the operator on first sign-in.
+
+Installations that already opted into Wallet mode only need step 3 and the
+`COMPOSE_FILE`/`VESSEL_AUTH_MODE` clean-up of step 4; a leftover blank
+`Vessel__Auth__Token=` or `VESSEL_AUTH_MODE=Wallet` is harmless. Rolling back
+means the previous images **and** the previous deploy files and `.env`.
+
 ### From v0.3.2 to v0.3.3
 
 Read the [release notes](../docs/releases/v0.3.3.md). Stop web, every API and
@@ -964,8 +1011,7 @@ the journal migrations after v0.3.2 are:
 
 Paper remains off by default. Opt in through Settings only after migrating;
 its scheduler additionally requires the optional `compose.paper.yaml` overlay
-and `--profile paper` with an explicit matching `VESSEL_AUTH_MODE` (see
-[Optional paper worker](#optional-paper-worker)). Keep that service stopped
+and `--profile paper` (see [Optional paper worker](#optional-paper-worker)). Keep that service stopped
 alongside every other writer during upgrades, backups and restores.
 
 Sizing now orders results by actual exit time and requires consecutive recovery
@@ -1154,10 +1200,9 @@ totals use nominal 1:1 values, with no FX or depeg valuation.
 
 ### Upgrade procedure
 
-Back up first, read the changelog, and set `VESSEL_VERSION` to the chosen release:
-Wallet installs must retain `VESSEL_AUTH_MODE=Wallet`, a blank token and their
-complete `COMPOSE_FILE` in the private `.env`. This applies to every bare
-command below; explicit `-f` lists must include all those overlays.
+Back up first, read the changelog, and set `VESSEL_VERSION` to the chosen release.
+Retain the complete `COMPOSE_FILE` in the private `.env`. This applies to every
+bare command below; explicit `-f` lists must include all those overlays.
 
 ```sh
 docker compose pull
@@ -1183,9 +1228,9 @@ Keep backups private and test restores in an isolated installation. Stop web, AP
 and both workers to keep database references and evidence consistent, then (the RabbitMQ
 volume is excluded: subscribers recover unsettled events from PostgreSQL):
 
-Wallet installs retain `VESSEL_AUTH_MODE=Wallet`, a blank token and the complete
-`COMPOSE_FILE` in the private `.env` for **all** commands below, including the
-final `up`. Never omit the Wallet/TLS/storage/credential overlays on restart.
+Retain the complete `COMPOSE_FILE` in the private `.env` for **all** commands
+below, including the final `up`. Never omit the TLS/storage/credential overlays
+on restart.
 
 ```sh
 umask 077
@@ -1223,7 +1268,7 @@ docker compose -f compose.yaml -f compose.storage-local.yaml run --rm --no-deps 
 Use a new private operator directory, a unique project name and **fresh** named
 volumes, not an existing installation. Copy the deploy files and create a private
 `.env` with a new database password, the **same** `Vessel__Auth__OwnerId`, and the
-saved operator settings. You may rotate the Vessel login token. Select the image
+saved operator settings. Select the image
 version that produced the backup first. Bind web to an unused loopback port and
 choose an unused subnet and pinned service IPs. Do not start web, API or worker yet. The
 broker volume is not restored; RabbitMQ starts empty and subscribers recover
@@ -1266,9 +1311,9 @@ for rootless/user-namespace deployments. Use a regular, non-symlink file. Set
 decrypt the restored credentials.
 
 ```sh
-# Wallet mode only: mandatory BEFORE any API/worker/provisioning host starts.
+# Mandatory BEFORE any API/worker/provisioning host starts.
 # Keep ONLY an independently confirmed reconciliation operator active (optional).
-# All commands need compose.wallet.yaml plus the same TLS/storage overlays.
+# All commands need the same TLS/storage overlays (COMPOSE_FILE).
 docker compose \
   -p vessel-restore-check run --rm --no-deps --entrypoint dotnet migrate \
   /app/Vessel.Api.dll identity reset-after-restore --keep-active <confirmed-operator-guid>
@@ -1289,7 +1334,7 @@ curl --fail http://127.0.0.1:YOUR_UNUSED_PORT/health/live
 curl --fail http://127.0.0.1:YOUR_UNUSED_PORT/health/ready
 ```
 
-For Wallet/TLS, use the restored installation's **own hostname** and HTTPS health
+With TLS, use the restored installation's **own hostname** and HTTPS health
 URLs instead of the default loopback HTTP probes above. Before provision/start,
 compare every reset-table user/role/status/wallet against independently trusted
 post-backup records. Reapply removals (`identity unbind-wallet --wallet <guid>`),
@@ -1310,7 +1355,7 @@ or an unverified message from the wallet being checked. The operator using
 on that exception. Wallets linked after the backup are absent from the restore
 and must be re-linked after confirmed recovery. Keep uncertain users suspended.
 
-Authenticate through the UI with the restored installation's selected mode (Token or a confirmed EOA). Check
+Sign in through the UI with a confirmed EOA. Check
 that portfolios/accounts and saved Plays are visible under the unchanged owner,
 that an original evidence image and its markup open, and that credential metadata
 reports configured storage. Readiness confirms database connectivity/migrations,
@@ -1329,10 +1374,16 @@ docker compose -p vessel-restore-check down -v
 
 From a source checkout, the scripted check builds throwaway amd64 images and
 uses its own temp operator directory, unique project/unused subnet, free loopback ports
-and synthetic owner/token. It never reads the repository `.env`, uses the owner's
-database, pushes images or calls a registry login. Public image pulls are needed.
+and a synthetic owner with a publicly known synthetic EOA that must never hold funds.
+It never reads the repository `.env`, uses the owner's database, pushes images or
+calls a registry login. Public image pulls are needed. Its signer needs
+`@noble/curves` and `@noble/hashes` in an external directory, never the app's
+packages (the Release workflow installs them the same way):
 
 ```sh
+# Once, outside any repository:
+pnpm --dir /absolute/tools add @noble/curves@2.4.0 @noble/hashes@2.4.0
+export NOBLE_MODULE_DIR=/absolute/tools/node_modules
 python3 scripts/verify-release.py
 # Retained local-folder deployment and restore:
 python3 scripts/verify-release.py --storage local
@@ -1344,7 +1395,10 @@ python3 scripts/verify-release.py --browser-module /absolute/path/to/playwright
 # compatible installed Chromium executable before invoking the same check.
 ```
 
-It checks HTTP and internal-CA TLS trust, spoofed scheme/address handling,
+It binds the operator wallet, signs in through the API and checks strict host
+cookies, guarded writes and that no bearer value authenticates. It checks the
+internal-CA TLS mode and the default plain-HTTP web (behind an operator's own
+HTTPS proxy, with the same public origin and session), spoofed scheme/address handling,
 compression, headers, unbuffered SSE via a local fixture, upload limits, unpublished
 web in TLS mode and a fresh-volume restore. For delivery it sets
 `Vessel__Messaging__Verification=true` on `migrate` and runs the `verification`
@@ -1359,11 +1413,11 @@ no real venue call. Run frontend/.NET checks separately as in `docs/development.
 
 ### Wallet acceptance checks
 
-Wallet mode is a documented opt-in, **not activated**: §10 is not signed off.
-Keep registration `Closed` until both-browser writes and the owner real-wallet/
+Wallet sign-in is the only sign-in, but §10 is **not signed off**. Keep
+registration `Closed` until both-browser writes and the owner real-wallet/
 non-mainnet EOA check pass and are recorded in `multi-user-state.md`.
-CI currently gates Token mode only. The packaged Wallet and browser check is
-a **manual pre-release step**, not a CI guarantee.
+The Release workflow runs the packaged wallet check without browsers. The
+browser check is a **manual pre-release step**, not a CI guarantee.
 
 Synthetic packaged HTTPS check (external signer dependencies, never app packages):
 
@@ -1372,7 +1426,7 @@ Synthetic packaged HTTPS check (external signer dependencies, never app packages
 pnpm --dir /absolute/tools add playwright@1.58.2 @noble/curves@2.4.0 @noble/hashes@2.4.0
 PLAYWRIGHT_SKIP_BROWSER_GC=1 pnpm --dir /absolute/tools exec playwright install chromium firefox
 NOBLE_MODULE_DIR=/absolute/tools/node_modules \
-  python3 scripts/verify-release.py --auth wallet \
+  python3 scripts/verify-release.py \
   --browser-module /absolute/tools/node_modules/playwright
 ```
 
@@ -1384,13 +1438,13 @@ published on loopback. Pull once, then run this exact manual pre-release check:
 docker pull mcr.microsoft.com/playwright:v1.58.2-noble
 export NOBLE_MODULE_DIR=/tmp/vessel-pw/node_modules
 export CHROMIUM_PATH=$HOME/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
-python3 scripts/verify-release.py --auth wallet \
+python3 scripts/verify-release.py \
   --browser-module /tmp/vessel-pw/node_modules/playwright \
   --wallet-browsers chromium,firefox \
   --wallet-browser-image mcr.microsoft.com/playwright:v1.58.2-noble
 ```
 
-`--wallet-browser-image` requires `--auth wallet --browser-module` and a
+`--wallet-browser-image` requires `--browser-module` and a
 pre-pulled image (`docker image inspect` runs before builds). The external
 client and image must both use Playwright 1.58.2. The read-only tools mount and
 single public forwarder file never expose `.env` or credential keys.
@@ -1402,12 +1456,13 @@ CA, but Secure/host-only binding and session cookie assertions stay mandatory.
 The browser server is removed even on failure and before Compose teardown;
 the pre-pulled image is retained for reuse.
 
-`--auth` defaults to `token`. Wallet mode uses its isolated TLS overlay, both EF
-bundles, `ensure-owner`, synthetic EOA binding, readiness, real API sign-in,
+The check uses its isolated TLS overlay, both EF bundles, `ensure-owner`,
+synthetic EOA binding, readiness (503 `no-operator-wallet` until bound), real API sign-in,
 strict host cookies, guarded writes, sign-out and an older-database restore
 whose backup **precedes session revocation**. The reset must prevent that session
-from authenticating again. With `--browser-module`, it seeds an invitation and
-runs `wallet-browser-smoke.cjs` in Chromium and Firefox, using an EIP-6963
+from authenticating again. With `--browser-module`, it runs
+`release-browser-smoke.cjs` (CSP, signed in as the operator), then seeds an
+invitation and runs `wallet-browser-smoke.cjs` in Chromium and Firefox, using an EIP-6963
 provider bridged to a Node noble signer. `--wallet-browsers chromium` selects a
 partial check explicitly; it never counts Firefox as passed. A browser launch
 failure fails the command and still cleans up the isolated Compose stack.
@@ -1438,8 +1493,12 @@ python3 scripts/e2e-full-stack.py --keep        # leave the stack, temp director
 It builds the API and web images as `vessel-e2e:api`/`vessel-e2e:web` and runs the
 real Compose stack (PostgreSQL, RabbitMQ with the least-privilege application user,
 RustFS, migrate, API, monitor and notifications workers, a `verifier` worker for the `verification`
-subscription and web) on its own project, unused subnet and loopback ports, with
-generated secrets and a synthetic owner. Only Docker and Python are needed on the
+subscription and web behind the Caddy TLS overlay with `tls internal`) on its own
+project, unused subnet and loopback ports, with generated secrets and a synthetic
+owner. The owner signs in with a publicly known synthetic EOA (signer index 1,
+never funded) bound by `identity bind-wallet`; the signer runs in the pinned
+Playwright image with `@noble` from `NOBLE_MODULE_DIR` or a run-owned install.
+Only Docker and Python are needed on the
 host: the fake venue's certificates are generated inside its pinned Python image. `scripts/e2e/fake_venue.py` is a
 deterministic Hyperliquid info-API fake on the Compose network. It serves TLS from
 a throwaway CA that only the API and worker containers trust (`SSL_CERT_FILE`), so
@@ -1487,7 +1546,7 @@ failure categories, not raw dependency details.
   (default `00:00:30`, at most `00:01:00` so it ends inside the healthcheck
   budget); a failed or slow warm-up never stops the API.
   `Vessel__Startup__Warmup__Enabled=false` turns it off.
-- If API does not start, check the generated token length, owner GUID, migration
+- If API does not start, check `VESSEL_IDENTITY_ORIGIN` (HTTPS), the owner GUID, a leftover `Vessel__Auth__Token`, migration
   exit status, database health and optional key-file mode/readability.
 - If Lighter reports insecure transport, check HTTPS and trusted proxy addresses.
   Do not switch production to Development to bypass the guard.
@@ -1521,7 +1580,7 @@ moving `sdk:10.0` tag can contain a different feature band that the SDK pin reje
 It uses locked NuGet
 restore and local EF tool manifest. It includes the migration bundle in the same
 runtime image. The web build uses Node 24, Corepack, the pinned pnpm and frozen
-workspace lockfile. Neither build needs the database, auth token or key ring.
+workspace lockfile. Neither build needs the database, sign-in settings or key ring.
 The root `.dockerignore` applies to both builds. Hashed assets are immutable for
 one year; `index.html` and SPA fallbacks use `no-cache`. API data remains
 `no-store`, and SSE proxy buffering is off.

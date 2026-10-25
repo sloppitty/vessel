@@ -3,6 +3,7 @@ import { createWorkspaceApi } from './workspace'
 import { isCreateRetrospectivePlayRequest, isRetrospectivePreview, retrospectivePlayPath, retrospectivePreviewPath } from './retrospective'
 import { retrospectiveFixture, retrospectiveSavedFixture } from '@/test/retrospective.fixtures'
 import { unknownPeakOperationFixture } from '@/test/activity-fixture'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const op = retrospectiveFixture.operation
 const request = { requestId: 'bbbbbbbb-1234-1234-1234-123456789abc', accountId: op.accountId, operationId: op.id,
@@ -42,11 +43,11 @@ describe('retrospective API contract', () => {
     const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(retrospectiveFixture)))
       .mockResolvedValueOnce(new Response(JSON.stringify(retrospectiveSavedFixture), { status }))
     vi.stubGlobal('fetch', fetch)
-    const api = createWorkspaceApi('synthetic-token')
+    const api = createWorkspaceApi(credentialsFixture)
     const controller = new AbortController()
     expect(await api.retrospectivePreview(op.accountId, op.id, controller.signal)).toEqual(retrospectiveFixture)
     expect(fetch).toHaveBeenNthCalledWith(1, retrospectivePreviewPath(op.accountId, op.id), expect.objectContaining({
-      cache: 'no-store', credentials: 'omit', headers: { Authorization: 'Bearer synthetic-token', Accept: 'application/json' },
+      cache: 'no-store', credentials: 'same-origin', referrerPolicy: 'same-origin', headers: { 'X-Vessel-User': credentialsFixture.userId, Accept: 'application/json' },
       signal: expect.any(AbortSignal),
     }))
     expect(await api.createRetrospectivePlay(request, controller.signal)).toEqual(retrospectiveSavedFixture)
@@ -57,7 +58,7 @@ describe('retrospective API contract', () => {
   })
   it('rejects a valid preview for a different requested account or operation', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify(retrospectiveFixture)))))
-    const api = createWorkspaceApi('synthetic-token')
+    const api = createWorkspaceApi(credentialsFixture)
     await expect(api.retrospectivePreview('bbbbbbbb-1234-1234-1234-123456789abc', op.id)).rejects.toThrow()
     await expect(api.retrospectivePreview(op.accountId, 'bbbbbbbb-1234-1234-1234-123456789abc:long')).rejects.toThrow()
   })

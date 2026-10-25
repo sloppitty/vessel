@@ -9,6 +9,7 @@ import { accountFixture, playApiStubs, portfolioFixture, savedPlayFixture } from
 import { PlaysPage } from './PlaysPage'
 import { draftFromSaved, savedState, type PlaysSession } from './saved'
 import { emptyManualDraft } from './manual'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 const first: SavedPlay = { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, status: 'open', planRevision: 1 } }
 const second = { ...first, summary: { ...first.summary, id: '33333333-4444-5555-6666-777777777777', title: 'Second saved Play' } }
@@ -17,7 +18,7 @@ function sessionFor(play: SavedPlay): PlaysSession {
   return { view: 'editor', draft, saved: savedState(play, draft) }
 }
 function client(): WorkspaceApi {
-  return { ...createWorkspaceApi('synthetic-only'), ...playApiStubs(),
+  return { ...createWorkspaceApi(credentialsFixture), ...playApiStubs(),
     play: vi.fn(id => Promise.resolve(id === second.summary.id ? second : first)) }
 }
 function Harness({ api, initial, onSession }: {
