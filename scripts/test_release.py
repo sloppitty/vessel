@@ -138,37 +138,45 @@ class WalletReleaseTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, check.temp)
         return check
 
-    def test_token_remains_the_default_and_uses_only_a_bearer(self):
-        check = self.check()
-        self.assertFalse(check.wallet)
-        self.assertEqual({'Authorization': 'Bearer ' + check.token}, check.auth_headers())
-        self.assertEqual({}, check.auth_headers(False))
+    def test_the_removed_token_option_is_rejected(self):
+        with patch('sys.stderr'), self.assertRaises(SystemExit) as error:
+            verify_release.parse_args(['--auth', 'token'])
+        self.assertEqual(2, error.exception.code)
 
-    def test_wallet_headers_never_send_the_token_and_bind_the_owner(self):
-        check = self.check('--auth', 'wallet')
-        check.tls = True
+    def test_headers_never_send_a_bearer_and_bind_the_owner(self):
+        check = self.check()
         check.session_cookie = '__Host-vessel-session=synthetic'
         headers = check.auth_headers()
         self.assertNotIn('Authorization', headers)
         self.assertEqual(check.owner, headers['X-Vessel-User'])
         self.assertEqual(check.session_cookie, headers['Cookie'])
         self.assertEqual(check.url, headers['Origin'])
+        self.assertTrue(check.url.startswith('https://localhost:'))
         self.assertEqual('1', headers['X-Vessel-Request'])
         self.assertNotIn('Cookie', check.auth_headers(False))
+        self.assertNotIn('Authorization', check.auth_headers(False))
 
-    def test_wallet_compose_applies_overlay_to_every_command_and_ignores_caller_secrets(self):
-        check = self.check('--auth', 'wallet')
-        check.tls = True
+    def test_compose_applies_the_tls_overlay_to_every_command_and_ignores_caller_secrets(self):
+        check = self.check()
         with patch.object(verify_release, 'run') as run, patch.dict('os.environ', {'Vessel__Auth__Token': 'caller-secret'}):
             check.compose('config')
         args = run.call_args.args
-        self.assertIn(str(check.temp / 'compose.wallet.yaml'), args)
         self.assertIn(str(check.temp / 'compose.tls.yaml'), args)
+        self.assertFalse(any(str(arg).endswith('compose.wallet.yaml') for arg in args))
         self.assertNotIn('Vessel__Auth__Token', run.call_args.kwargs['env'])
 
-    def test_notification_stream_uses_the_session_transport_in_wallet_mode(self):
-        check = self.check('--auth', 'wallet')
-        check.tls = True
+    def test_the_generated_environment_has_identity_settings_and_no_token_settings(self):
+        check = self.check()
+        check.write_env('172.29.200')
+        env = (check.temp / '.env').read_text()
+        self.assertIn(f'VESSEL_IDENTITY_ORIGIN=https://localhost:{check.https_port}\n', env)
+        self.assertIn('VESSEL_IDENTITY_REGISTRATION=Invitation\n', env)
+        self.assertNotIn('Vessel__Auth__Token', env)
+        self.assertNotIn('AUTH_MODE', env)
+        self.assertEqual(0o600, (check.temp / '.env').stat().st_mode & 0o777)
+
+    def test_notification_stream_uses_the_session_transport(self):
+        check = self.check()
         check.session_cookie = '__Host-vessel-session=synthetic'
         connection = Mock()
         connection.getresponse.return_value.readline.side_effect = [
@@ -193,7 +201,7 @@ class WalletReleaseTests(unittest.TestCase):
         connection.close.assert_called_once()
 
     def test_cookie_assertions_require_every_host_cookie_attribute(self):
-        check = self.check('--auth', 'wallet')
+        check = self.check()
         name = '__Host-vessel-session'
         value = name + '=synthetic; Path=/; Secure; HttpOnly; SameSite=Strict'
         with patch('builtins.print'):
@@ -205,7 +213,7 @@ class WalletReleaseTests(unittest.TestCase):
                 check.cookie([('Set-Cookie', value + '; Domain=localhost')], name)
 
     def test_bootstrap_requires_no_wallet_readiness_before_binding_synthetic_operator(self):
-        check = self.check('--auth', 'wallet')
+        check = self.check()
         check.compose = Mock(return_value=Mock(stdout='{"reason":"no-operator-wallet"}'))
         check.identity = Mock()
         check.wallet_signature = Mock(return_value={'address': '0x' + '1' * 40})
@@ -222,7 +230,7 @@ class WalletReleaseTests(unittest.TestCase):
         self.assertLess(probe, binding)
 
     def test_bootstrap_does_not_bind_if_no_operator_wallet_readiness_never_appears(self):
-        check = self.check('--auth', 'wallet')
+        check = self.check()
         check.compose = Mock(return_value=Mock(stdout='{"status":"unhealthy"}'))
         check.identity = Mock()
         with patch.object(verify_release.time, 'sleep'), patch('builtins.print'):
@@ -232,17 +240,16 @@ class WalletReleaseTests(unittest.TestCase):
         self.assertEqual(60, sum(call.args[:3] == ('exec', '-T', 'api')
                                  for call in check.compose.call_args_list))
 
-    def test_browser_image_requires_wallet_mode_and_browser_module(self):
+    def test_browser_image_requires_a_browser_module(self):
         for args in (['--wallet-browser-image', 'image'],
-                     ['--auth', 'wallet', '--wallet-browser-image', 'image'],
-                     ['--browser-module', '/tmp/vessel-pw/node_modules/playwright', '--wallet-browser-image', 'image']):
+                     ['--wallet-browsers', 'chromium', '--wallet-browser-image', 'image']):
             with self.subTest(args=args), patch('sys.stderr'):
                 with self.assertRaises(SystemExit) as error:
                     verify_release.parse_args(args)
                 self.assertEqual(2, error.exception.code)
 
     def remote_check(self):
-        return self.check('--auth', 'wallet', '--browser-module', '/tmp/vessel-pw/node_modules/playwright',
+        return self.check('--browser-module', '/tmp/vessel-pw/node_modules/playwright',
                           '--wallet-browser-image', 'mcr.microsoft.com/playwright:v1.58.2-noble')
 
     def test_browser_server_uses_isolated_network_loopback_resource_limits_and_only_readonly_mounts(self):
@@ -275,25 +282,31 @@ class WalletReleaseTests(unittest.TestCase):
         connection.request.assert_called_once_with('GET', '/json')
         connection.close.assert_called_once()
         self.assertNotIn('-e', args)
-        for secret in ('private-invite', 'private-token', check.token):
+        for secret in ('private-invite', 'private-token'):
             self.assertNotIn(secret, ' '.join(args))
             self.assertNotIn(secret, env.values())
 
-    def test_only_firefox_gets_our_endpoint_and_caller_endpoints_are_stripped(self):
+    def test_release_smoke_then_wallet_smokes_and_only_firefox_gets_our_endpoint(self):
         check = self.remote_check()
         check.chart_account = 'synthetic'
         check.identity = Mock(return_value=Mock(stdout='private-invitation\n'))
         check.start_browser_server = Mock(return_value='ws://127.0.0.1:3000/synthetic')
         check.stop_browser_server = Mock()
         with patch.dict('os.environ', {'PLAYWRIGHT_FIREFOX_WS_ENDPOINT': 'ws://foreign/firefox',
-                                      'PLAYWRIGHT_CHROMIUM_WS_ENDPOINT': 'ws://foreign/chromium',
-                                      'VESSEL_RELEASE_TOKEN': 'caller-token'}), patch.object(verify_release, 'run') as run:
+                                      'PLAYWRIGHT_CHROMIUM_WS_ENDPOINT': 'ws://foreign/chromium'}), \
+                patch.object(verify_release, 'run') as run:
             check.browser_smokes()
-        chromium, firefox = [call.kwargs['env'] for call in run.call_args_list]
+        release, chromium, firefox = [call.kwargs['env'] for call in run.call_args_list]
+        self.assertEqual(('node', str(verify_release.ROOT / 'scripts/release-browser-smoke.cjs')), run.call_args_list[0].args)
+        self.assertEqual({'node'}, {call.args[0] for call in run.call_args_list})
+        self.assertTrue(all(call.args[1].endswith('wallet-browser-smoke.cjs') for call in run.call_args_list[1:]))
+        for env in (release, chromium, firefox):
+            self.assertEqual('1', env['VESSEL_RELEASE_SYNTHETIC'])
+        self.assertNotIn('VESSEL_RELEASE_INVITATION', release)
+        self.assertFalse(any(key.endswith('_WS_ENDPOINT') for key in release))
         self.assertFalse(any(key.endswith('_WS_ENDPOINT') for key in chromium))
         self.assertEqual('ws://127.0.0.1:3000/synthetic', firefox['PLAYWRIGHT_FIREFOX_WS_ENDPOINT'])
         self.assertNotIn('PLAYWRIGHT_CHROMIUM_WS_ENDPOINT', firefox)
-        self.assertNotIn('VESSEL_RELEASE_TOKEN', firefox)
         check.stop_browser_server.assert_called_once()
 
     def test_failed_browser_smoke_still_removes_remote_container(self):
@@ -358,61 +371,42 @@ class WalletReleaseTests(unittest.TestCase):
 
 
 class MigrationPreflightTests(unittest.TestCase):
-    def test_invalid_auth_fails_before_any_migration(self):
-        for settings, message in (
-            ({}, 'Token mode requires'),
-            ({'Vessel__Auth__Token': ' \t '}, 'Token mode requires'),
-            ({'Vessel__Auth__Mode': 'Wallet'}, 'retain the Wallet overlay'),
-            ({'Vessel__Auth__Mode': 'Wallet', 'Vessel__Auth__Token': 'must-be-blank',
-              'Vessel__Identity__Origins__0': 'https://localhost'}, 'retain the Wallet overlay'),
-            ({'Vessel__Auth__Mode': 'other'}, 'must be Token or Wallet'),
-            # The application parses the mode case-sensitively; so does the preflight.
-            ({'Vessel__Auth__Mode': 'wallet', 'Vessel__Identity__Origins__0': 'https://localhost'}, 'must be Token or Wallet'),
-            ({'Vessel__Auth__Mode': 'token', 'Vessel__Auth__Token': 'synthetic'}, 'must be Token or Wallet'),
-        ):
-            with self.subTest(settings=settings):
-                result = subprocess.run(['/bin/sh', str(verify_release.ROOT / 'deploy/migrate')],
-                                        env={**verify_release.verification_environment(), **settings},
-                                        capture_output=True, text=True)
-                self.assertEqual(1, result.returncode)
-                self.assertIn(message, result.stderr)
-                self.assertNotIn('cd:', result.stderr)
-
     @unittest.skipUnless(shutil.which('docker'), 'Docker Compose is required to resolve deployment overlays')
-    def test_compose_auth_mode_and_wallet_settings_reach_both_workers(self):
+    def test_compose_sign_in_settings_reach_every_host_and_fail_closed_without_an_origin(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             env = root / 'synthetic.env'
             common = ('POSTGRES_PASSWORD=synthetic\nRABBITMQ_USER=synthetic\nRABBITMQ_PASSWORD=synthetic\n'
-                      'Vessel__Auth__OwnerId=11111111-1111-4111-8111-111111111111\n'
-                      'VESSEL_TLS_HOST=localhost\nVESSEL_IDENTITY_ORIGIN=https://localhost\n')
-            for mode, overlay in (('Token', False), ('Wallet', True), ('Wallet', False)):
-                with self.subTest(mode=mode, wallet_overlay=overlay):
-                    files = ':'.join(str(verify_release.ROOT / 'deploy' / name) for name in
-                                     ('compose.yaml', 'compose.tls.yaml', 'compose.wallet.yaml'))
-                    env.write_text(common + f'VESSEL_AUTH_MODE={mode}\nVessel__Auth__Token=' +
-                                   ('synthetic\n' if mode == 'Token' else f'\nCOMPOSE_FILE={files}\n'))
+                      'Vessel__Auth__OwnerId=11111111-1111-4111-8111-111111111111\nVESSEL_TLS_HOST=localhost\n'
+                      # Leftovers of the removed Token sign-in in an old private .env reach no container.
+                      'VESSEL_AUTH_MODE=Token\nVessel__Auth__Token=synthetic-leftover\n')
+            files = ':'.join(str(verify_release.ROOT / 'deploy' / name) for name in ('compose.yaml', 'compose.tls.yaml'))
+            for persisted in (True, False):
+                with self.subTest(persisted_compose_file=persisted):
+                    env.write_text(common + 'VESSEL_IDENTITY_ORIGIN=https://localhost\n' + (f'COMPOSE_FILE={files}\n' if persisted else ''))
                     command = ['docker', 'compose', '--project-directory', directory, '--env-file', str(env)]
-                    # Bare Wallet commands retain the persisted overlays. Explicit -f
-                    # overrides COMPOSE_FILE but must not downgrade its persisted mode.
-                    if not overlay:
+                    if not persisted:
                         command += ['-f', str(verify_release.ROOT / 'deploy/compose.yaml')]
                     result = subprocess.run([*command, 'config', '--format', 'json'], check=True,
                                             env=verify_release.verification_environment(), capture_output=True, text=True)
                     services = json.loads(result.stdout)['services']
                     for service in ('migrate', 'api', 'worker', 'worker-notifications'):
                         values = services[service]['environment']
-                        self.assertEqual(mode, values['Vessel__Auth__Mode'])
-                        self.assertEqual('synthetic' if mode == 'Token' else '', values['Vessel__Auth__Token'])
-                        if overlay:
-                            self.assertEqual('https://localhost', values['Vessel__Identity__Origins__0'])
-                            self.assertEqual('Closed', values['Vessel__Identity__Registration'])
-                        else:
-                            self.assertNotIn('Vessel__Identity__Origins__0', values)
+                        self.assertNotIn('Vessel__Auth__Mode', values)
+                        self.assertNotIn('Vessel__Auth__Token', values)
+                        self.assertEqual('11111111-1111-4111-8111-111111111111', values['Vessel__Auth__OwnerId'])
+                        self.assertEqual('https://localhost', values['Vessel__Identity__Origins__0'])
+                        self.assertEqual('Closed', values['Vessel__Identity__Registration'])
+                        self.assertEqual('false', values['Vessel__Identity__AllowLegacyDefaultOwner'])
                     self.assertEqual(['CMD', '/app/worker-health'],
                                      services['worker-notifications']['healthcheck']['test'])
-                    if overlay:
+                    if persisted:
                         self.assertFalse(services['web'].get('ports'))
+            env.write_text(common + f'COMPOSE_FILE={files}\n')
+            missing = subprocess.run(['docker', 'compose', '--project-directory', directory, '--env-file', str(env), 'config', '--quiet'],
+                                     env=verify_release.verification_environment(), capture_output=True, text=True)
+            self.assertNotEqual(0, missing.returncode)
+            self.assertIn('VESSEL_IDENTITY_ORIGIN', missing.stderr)
 
     @staticmethod
     def stub_bundles(root):
@@ -433,40 +427,37 @@ class MigrationPreflightTests(unittest.TestCase):
                               env={**environment, 'PATH': str(root) + os.pathsep + environment.get('PATH', os.defpath),
                                    'CALL_LOG': str(log), **settings})
 
-    def test_valid_modes_keep_identity_journal_bootstrap_provision_order(self):
+    def test_valid_configuration_keeps_identity_journal_bootstrap_provision_order(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             script = self.stub_bundles(root)
-            for mode in ('Token', 'Wallet'):
-                with self.subTest(mode=mode):
-                    log = root / mode
-                    result = self.run_stubbed(root, script, log, {
-                        'Vessel__Auth__Mode': mode, 'Vessel__Auth__Token': 'synthetic' if mode == 'Token' else '',
-                        'Vessel__Identity__Origins__0': 'https://localhost'})
-                    self.assertEqual(0, result.returncode, result.stderr)
-                    self.assertEqual([f'dotnet {root}/Vessel.Api.dll check-config', 'migrate-identity-ef ', 'migrate-ef ',
-                                      f'dotnet {root}/Vessel.Api.dll identity ensure-owner',
-                                      f'dotnet {root}/Vessel.Api.dll provision-messaging'], log.read_text().splitlines())
+            log = root / 'valid'
+            result = self.run_stubbed(root, script, log, {'Vessel__Identity__Origins__0': 'https://localhost'})
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual([f'dotnet {root}/Vessel.Api.dll check-config', 'migrate-identity-ef ', 'migrate-ef ',
+                              f'dotnet {root}/Vessel.Api.dll identity ensure-owner',
+                              f'dotnet {root}/Vessel.Api.dll provision-messaging'], log.read_text().splitlines())
 
     def test_configuration_the_application_rejects_runs_neither_bundle(self):
-        wallet = {'Vessel__Auth__Mode': 'Wallet', 'Vessel__Auth__Token': '', 'Vessel__Identity__Origins__0': 'https://localhost'}
+        # deploy/migrate has no shell preflight of its own: check-config, the application's own validation, decides.
+        valid = {'Vessel__Identity__Origins__0': 'https://localhost'}
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             script = self.stub_bundles(root)
-            for name, settings, rejected_by_app in (
-                ('lower-case mode', {**wallet, 'Vessel__Auth__Mode': 'wallet'}, False),
-                ('http origin in Production', {**wallet, 'Vessel__Identity__Origins__0': 'http://diary.example.com'}, True),
-                ('misspelt registration', {**wallet, 'Vessel__Identity__Registration': 'Clsoed'}, True),
+            for name, settings in (
+                ('removed token', {**valid, 'Vessel__Auth__Token': 'synthetic'}),
+                ('removed token mode', {**valid, 'Vessel__Auth__Mode': 'Token'}),
+                ('lower-case mode', {**valid, 'Vessel__Auth__Mode': 'wallet'}),
+                ('http origin in Production', {'Vessel__Identity__Origins__0': 'http://diary.example.com'}),
+                ('misspelt registration', {**valid, 'Vessel__Identity__Registration': 'Clsoed'}),
             ):
                 with self.subTest(name):
                     log = root / name.replace(' ', '-')
-                    result = self.run_stubbed(root, script, log,
-                                              {**settings, 'CHECK_CONFIG_EXIT': '1' if rejected_by_app else '0'})
+                    result = self.run_stubbed(root, script, log, {**settings, 'CHECK_CONFIG_EXIT': '1'})
                     self.assertEqual(1, result.returncode, result.stderr)
-                    calls = log.read_text().splitlines() if log.exists() else []
-                    self.assertEqual([f'dotnet {root}/Vessel.Api.dll check-config'] if rejected_by_app else [], calls)
-                    if rejected_by_app:
-                        self.assertIn('no migration was applied', result.stderr)
+                    self.assertEqual([f'dotnet {root}/Vessel.Api.dll check-config'], log.read_text().splitlines())
+                    self.assertIn('no migration was applied', result.stderr)
+                    self.assertNotIn('synthetic', result.stderr)
 
 
 if __name__ == '__main__':

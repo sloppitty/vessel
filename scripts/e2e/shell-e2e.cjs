@@ -1,5 +1,6 @@
 // Additional browser pass against a KEPT scripts/e2e-full-stack.py stack, with no route interception.
-// Supply E2E_URL, E2E_TOKEN (from that run's generated .env), E2E_IDS, E2E_OUT and PLAYWRIGHT_MODULE.
+// Supply E2E_URL (that run's https://localhost:<port>), E2E_IDS, E2E_OUT, PLAYWRIGHT_MODULE, NOBLE_MODULE_DIR and
+// VESSEL_RELEASE_SYNTHETIC=1: it signs in as the run's synthetic operator wallet (signer index 1).
 // E2E_IDS needs the suite's account/portfolio IDs and accountName: "E2E Hyperliquid".
 // Run with the packaged suite's pinned Playwright image/module and host networking.
 // Creates synthetic Paper records through the UI. Never use against an owner/development installation.
@@ -7,27 +8,32 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE)
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const { signer, exposeSyntheticWallet, signInWithSyntheticWallet } = require('../wallet-test-signer.cjs')
 
-const base = process.env.E2E_URL, token = process.env.E2E_TOKEN, out = process.env.E2E_OUT
+const base = process.env.E2E_URL, out = process.env.E2E_OUT
 const ids = JSON.parse(process.env.E2E_IDS || '{}')
-assert.ok(token && out && /^http:\/\/127\.0\.0\.1:\d+$/.test(base), 'An isolated loopback E2E run is required')
+assert.ok(out && /^https:\/\/localhost:\d+$/.test(base), 'An isolated loopback E2E run is required')
 assert.ok(!['5080', '5180', '55432'].includes(new URL(base).port), 'Never target development services')
 assert.ok(ids.accountName?.startsWith('E2E '), 'Synthetic account fixture required')
 const results = [], errors = [], violations = [], external = [], screenshots = [], layouts = []
 const started = Date.now()
 const tag = started.toString(36)
 const paperPortfolio = `E2E Shell paper portfolio ${tag}`, paperAccount = `E2E Shell paper account ${tag}`
-const clean = value => String(value).split(token).join('[redacted]')
-let page, context, browser
+const clean = value => String(value)
+let page, context, browser, user
 const crumb = () => page.getByRole('navigation', { name: 'Breadcrumb', exact: true })
 const title = () => page.getByRole('textbox', { name: 'Play title', exact: true })
 const switchName = mode => mode === 'real'
   ? 'Journal, switch to Paper playground' : 'Paper playground, switch to Journal'
 const switchButton = mode => page.getByRole('button', { name: switchName(mode), exact: true }).filter({ visible: true })
+// Reads through the signed-in page itself: its session cookie, accepted origin and tab binding.
 const api = async route => {
-  const response = await fetch(base + route, { headers: { Authorization: `Bearer ${token}` } })
+  const response = await page.evaluate(async ({ route, user }) => {
+    const answer = await fetch(route, { headers: user ? { 'X-Vessel-User': user } : {}, credentials: 'same-origin' })
+    return { status: answer.status, body: await answer.json() }
+  }, { route, user })
   assert.equal(response.status, 200, `GET ${route}`)
-  return response.json()
+  return response.body
 }
 async function until(check, message, timeout = 15_000) {
   const end = Date.now() + timeout
@@ -139,10 +145,15 @@ async function layout(width, paper, theme) {
 }
 async function main() {
   browser = await chromium.launch({ headless: true })
-  context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' })
+  // Caddy's internal CA is not trusted by the browser image; the run reaches only its own loopback stack.
+  context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce', ignoreHTTPSErrors: true })
+  await exposeSyntheticWallet(context, await signer(1))
   page = await context.newPage()
   page.setDefaultTimeout(12_000)
-  page.on('console', message => { if (message.type() === 'error') errors.push(clean(message.text())) })
+  // Before sign-in, the sign-in screen's session probe answers 401, which Chromium logs as a failed load.
+  page.on('console', message => {
+    if (message.type() === 'error' && (user || !/status of 401 \(Unauthorized\)/.test(message.text()))) errors.push(clean(message.text()))
+  })
   page.on('pageerror', error => errors.push(clean(error.message)))
   page.on('request', request => {
     if (new URL(request.url()).origin !== new URL(base).origin) external.push(clean(request.url()))
@@ -150,12 +161,10 @@ async function main() {
   await page.exposeFunction('recordShellCsp', entry => violations.push(entry))
   await page.addInitScript(() => document.addEventListener('securitypolicyviolation',
     event => window.recordShellCsp({ directive: event.violatedDirective, blocked: event.blockedURI })))
-  if (!await step('Login using the run-generated token, real API and packaged web image', async () => {
+  if (!await step('Operator wallet sign-in, real API and packaged web image', async () => {
+    await signInWithSyntheticWallet(page, base)
+    user = (await api('/api/auth/session')).user.id
     assert.equal((await api(`/api/accounts/${ids.account}`)).name, ids.accountName, 'Verify synthetic fixture before browser writes')
-    await page.goto(base)
-    await page.getByLabel('API token').fill(token)
-    await page.getByRole('button', { name: 'Connect', exact: true }).click()
-    await page.getByRole('region', { name: 'Overview summary', exact: true }).waitFor()
     await header()
   })) return
 

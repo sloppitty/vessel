@@ -39,7 +39,9 @@ class PaperDeploymentTests(unittest.TestCase):
             environment = dict(setting.split("=", 1) if "=" in setting else (setting, None) for setting in environment)
         self.assertEqual("paper", environment["Vessel__Worker__Modules__0"])
         self.assertEqual("paper", environment["Vessel__Worker__Deployment"])
-        self.assertEqual("", environment["Vessel__Auth__Token"])
+        self.assertNotIn("Vessel__Auth__Token", environment)
+        self.assertNotIn("Vessel__Auth__Mode", environment)
+        self.assertIn("Vessel__Identity__Origins__0", environment)
         self.assertNotIn("ports", paper)
         self.assertNotIn("volumes", paper)
         self.assertNotIn("Vessel__Credentials__KeyFile", environment)
@@ -48,47 +50,38 @@ class PaperDeploymentTests(unittest.TestCase):
         self.assertEqual("monitor", services["worker"]["environment"]["Vessel__Worker__Modules__0"])
         self.assertEqual("notifications", services["worker-notifications"]["environment"]["Vessel__Worker__Modules__0"])
 
-    def test_paper_wallet_overlay_preserves_the_identity_directory_without_a_bearer(self):
+    def paper_config(self, **overrides):
         command = ["docker", "compose", "--env-file", "/dev/null",
                    "-f", str(ROOT / "deploy/compose.yaml"),
-                   "-f", str(ROOT / "deploy/compose.wallet.yaml"),
                    "-f", str(ROOT / "deploy/compose.paper.yaml"),
                    "--profile", "paper", "config", "--format", "json"]
         env = {"PATH": os.environ["PATH"], "POSTGRES_PASSWORD": "synthetic",
                "RABBITMQ_USER": "synthetic", "RABBITMQ_PASSWORD": "synthetic",
                "Vessel__Auth__OwnerId": "00000000-0000-4000-8000-000000000001",
-               "VESSEL_AUTH_MODE": "Wallet", "VESSEL_VERSION": "synthetic-paper-build",
-               "VESSEL_IDENTITY_ORIGIN": "https://paper.invalid"}
-        result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, check=True)
+               "VESSEL_VERSION": "synthetic-paper-build", "VESSEL_IDENTITY_ORIGIN": "https://paper.invalid", **overrides}
+        return subprocess.run(command, cwd=ROOT, env={k: v for k, v in env.items() if v is not None},
+                              capture_output=True, text=True)
+
+    def test_paper_worker_shares_the_api_sign_in_settings_for_the_identity_directory(self):
+        result = self.paper_config()
+        self.assertEqual(0, result.returncode, result.stderr)
         services = json.loads(result.stdout)["services"]
-        paper = services["worker-paper"]["environment"]
-        self.assertEqual("Wallet", paper["Vessel__Auth__Mode"])
-        self.assertEqual(services["api"]["environment"]["Vessel__Identity__Origins__0"],
-                         paper["Vessel__Identity__Origins__0"])
+        paper, api = services["worker-paper"]["environment"], services["api"]["environment"]
+        for key in ("Vessel__Auth__OwnerId", "Vessel__Auth__OwnerName", "Vessel__Identity__Origins__0",
+                    "Vessel__Identity__Registration", "Vessel__Identity__AllowLegacyDefaultOwner"):
+            self.assertEqual(api[key], paper[key], key)
+        self.assertEqual("https://paper.invalid", paper["Vessel__Identity__Origins__0"])
         self.assertEqual("Closed", paper["Vessel__Identity__Registration"])
-        self.assertEqual("", paper["Vessel__Auth__Token"])
+        self.assertNotIn("Vessel__Auth__Mode", paper)
+        self.assertNotIn("Vessel__Auth__Token", paper)
         self.assertNotIn("Vessel__Messaging__RabbitMqUri", paper)
 
-    def test_paper_token_overlay_omits_an_unset_or_empty_wallet_origin(self):
-        command = ["docker", "compose", "--env-file", "/dev/null",
-                   "-f", str(ROOT / "deploy/compose.yaml"),
-                   "-f", str(ROOT / "deploy/compose.paper.yaml"),
-                   "--profile", "paper", "config", "--format", "json"]
-        env = {"PATH": os.environ["PATH"], "POSTGRES_PASSWORD": "synthetic",
-               "RABBITMQ_USER": "synthetic", "RABBITMQ_PASSWORD": "synthetic",
-               "Vessel__Auth__OwnerId": "00000000-0000-4000-8000-000000000001",
-               "VESSEL_AUTH_MODE": "Token", "VESSEL_VERSION": "synthetic-paper-build"}
+    def test_paper_overlay_fails_closed_without_an_identity_origin(self):
         for origin in (None, ""):
             with self.subTest(origin=origin):
-                configured = env if origin is None else {**env, "VESSEL_IDENTITY_ORIGIN": origin}
-                result = subprocess.run(command, cwd=ROOT, env=configured, capture_output=True, text=True, check=True)
-                paper = json.loads(result.stdout)["services"]["worker-paper"]["environment"]
-                self.assertEqual("Token", paper["Vessel__Auth__Mode"])
-                # Compose represents an absent pass-through variable as null;
-                # unlike an empty string, it is omitted from the container env.
-                self.assertIsNone(paper.get("Vessel__Identity__Origins__0"))
-                self.assertEqual("", paper["Vessel__Auth__Token"])
-
+                result = self.paper_config(VESSEL_IDENTITY_ORIGIN=origin)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("VESSEL_IDENTITY_ORIGIN", result.stderr)
 
 if __name__ == "__main__":
     unittest.main()

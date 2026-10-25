@@ -1374,10 +1374,16 @@ docker compose -p vessel-restore-check down -v
 
 From a source checkout, the scripted check builds throwaway amd64 images and
 uses its own temp operator directory, unique project/unused subnet, free loopback ports
-and synthetic owner/token. It never reads the repository `.env`, uses the owner's
-database, pushes images or calls a registry login. Public image pulls are needed.
+and a synthetic owner with a publicly known synthetic EOA that must never hold funds.
+It never reads the repository `.env`, uses the owner's database, pushes images or
+calls a registry login. Public image pulls are needed. Its signer needs
+`@noble/curves` and `@noble/hashes` in an external directory, never the app's
+packages (the Release workflow installs them the same way):
 
 ```sh
+# Once, outside any repository:
+pnpm --dir /absolute/tools add @noble/curves@2.4.0 @noble/hashes@2.4.0
+export NOBLE_MODULE_DIR=/absolute/tools/node_modules
 python3 scripts/verify-release.py
 # Retained local-folder deployment and restore:
 python3 scripts/verify-release.py --storage local
@@ -1389,7 +1395,10 @@ python3 scripts/verify-release.py --browser-module /absolute/path/to/playwright
 # compatible installed Chromium executable before invoking the same check.
 ```
 
-It checks HTTP and internal-CA TLS trust, spoofed scheme/address handling,
+It binds the operator wallet, signs in through the API and checks strict host
+cookies, guarded writes and that no bearer value authenticates. It checks the
+internal-CA TLS mode and the default plain-HTTP web (behind an operator's own
+HTTPS proxy, with the same public origin and session), spoofed scheme/address handling,
 compression, headers, unbuffered SSE via a local fixture, upload limits, unpublished
 web in TLS mode and a fresh-volume restore. For delivery it sets
 `Vessel__Messaging__Verification=true` on `migrate` and runs the `verification`
@@ -1404,11 +1413,11 @@ no real venue call. Run frontend/.NET checks separately as in `docs/development.
 
 ### Wallet acceptance checks
 
-Wallet mode is a documented opt-in, **not activated**: §10 is not signed off.
-Keep registration `Closed` until both-browser writes and the owner real-wallet/
+Wallet sign-in is the only sign-in, but §10 is **not signed off**. Keep
+registration `Closed` until both-browser writes and the owner real-wallet/
 non-mainnet EOA check pass and are recorded in `multi-user-state.md`.
-CI currently gates Token mode only. The packaged Wallet and browser check is
-a **manual pre-release step**, not a CI guarantee.
+The Release workflow runs the packaged wallet check without browsers. The
+browser check is a **manual pre-release step**, not a CI guarantee.
 
 Synthetic packaged HTTPS check (external signer dependencies, never app packages):
 
@@ -1417,7 +1426,7 @@ Synthetic packaged HTTPS check (external signer dependencies, never app packages
 pnpm --dir /absolute/tools add playwright@1.58.2 @noble/curves@2.4.0 @noble/hashes@2.4.0
 PLAYWRIGHT_SKIP_BROWSER_GC=1 pnpm --dir /absolute/tools exec playwright install chromium firefox
 NOBLE_MODULE_DIR=/absolute/tools/node_modules \
-  python3 scripts/verify-release.py --auth wallet \
+  python3 scripts/verify-release.py \
   --browser-module /absolute/tools/node_modules/playwright
 ```
 
@@ -1429,13 +1438,13 @@ published on loopback. Pull once, then run this exact manual pre-release check:
 docker pull mcr.microsoft.com/playwright:v1.58.2-noble
 export NOBLE_MODULE_DIR=/tmp/vessel-pw/node_modules
 export CHROMIUM_PATH=$HOME/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell
-python3 scripts/verify-release.py --auth wallet \
+python3 scripts/verify-release.py \
   --browser-module /tmp/vessel-pw/node_modules/playwright \
   --wallet-browsers chromium,firefox \
   --wallet-browser-image mcr.microsoft.com/playwright:v1.58.2-noble
 ```
 
-`--wallet-browser-image` requires `--auth wallet --browser-module` and a
+`--wallet-browser-image` requires `--browser-module` and a
 pre-pulled image (`docker image inspect` runs before builds). The external
 client and image must both use Playwright 1.58.2. The read-only tools mount and
 single public forwarder file never expose `.env` or credential keys.
@@ -1447,12 +1456,13 @@ CA, but Secure/host-only binding and session cookie assertions stay mandatory.
 The browser server is removed even on failure and before Compose teardown;
 the pre-pulled image is retained for reuse.
 
-`--auth` defaults to `token`. Wallet mode uses its isolated TLS overlay, both EF
-bundles, `ensure-owner`, synthetic EOA binding, readiness, real API sign-in,
+The check uses its isolated TLS overlay, both EF bundles, `ensure-owner`,
+synthetic EOA binding, readiness (503 `no-operator-wallet` until bound), real API sign-in,
 strict host cookies, guarded writes, sign-out and an older-database restore
 whose backup **precedes session revocation**. The reset must prevent that session
-from authenticating again. With `--browser-module`, it seeds an invitation and
-runs `wallet-browser-smoke.cjs` in Chromium and Firefox, using an EIP-6963
+from authenticating again. With `--browser-module`, it runs
+`release-browser-smoke.cjs` (CSP, signed in as the operator), then seeds an
+invitation and runs `wallet-browser-smoke.cjs` in Chromium and Firefox, using an EIP-6963
 provider bridged to a Node noble signer. `--wallet-browsers chromium` selects a
 partial check explicitly; it never counts Firefox as passed. A browser launch
 failure fails the command and still cleans up the isolated Compose stack.
@@ -1483,8 +1493,12 @@ python3 scripts/e2e-full-stack.py --keep        # leave the stack, temp director
 It builds the API and web images as `vessel-e2e:api`/`vessel-e2e:web` and runs the
 real Compose stack (PostgreSQL, RabbitMQ with the least-privilege application user,
 RustFS, migrate, API, monitor and notifications workers, a `verifier` worker for the `verification`
-subscription and web) on its own project, unused subnet and loopback ports, with
-generated secrets and a synthetic owner. Only Docker and Python are needed on the
+subscription and web behind the Caddy TLS overlay with `tls internal`) on its own
+project, unused subnet and loopback ports, with generated secrets and a synthetic
+owner. The owner signs in with a publicly known synthetic EOA (signer index 1,
+never funded) bound by `identity bind-wallet`; the signer runs in the pinned
+Playwright image with `@noble` from `NOBLE_MODULE_DIR` or a run-owned install.
+Only Docker and Python are needed on the
 host: the fake venue's certificates are generated inside its pinned Python image. `scripts/e2e/fake_venue.py` is a
 deterministic Hyperliquid info-API fake on the Compose network. It serves TLS from
 a throwaway CA that only the API and worker containers trust (`SSL_CERT_FILE`), so
