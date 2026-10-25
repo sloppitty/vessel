@@ -56,7 +56,8 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork, TimePro
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
         var all = Rows(new PlayListFilter(null, null, tradingMode));
         var notIndexed = await all.CountAsync(x => !db.PlaySearch.Any(s => s.PlayId == x.Id && s.Version == JournalSearch.Version), ct);
-        var matching = all.Where(x => db.PlaySearchTexts.Any(t => t.PlayId == x.Id && EF.Functions.Like(t.Folded, pattern, @"\")));
+        var matching = all.Where(x => db.PlaySearch.Any(s => s.PlayId == x.Id && s.Version == JournalSearch.Version) &&
+            db.PlaySearchTexts.Any(t => t.PlayId == x.Id && EF.Functions.Like(t.Folded, pattern, @"\")));
         var total = await matching.CountAsync(ct);
         var page = total == 0 || offset >= total ? [] : await WithOutcomesAsync(await matching.OrderByDescending(x => x.UpdatedAtUtc)
             .ThenBy(x => x.Id).Skip(offset).Take(limit).ToListAsync(ct), ct);

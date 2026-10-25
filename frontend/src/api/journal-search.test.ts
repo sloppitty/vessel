@@ -1,3 +1,4 @@
+import { credentialsFixture } from '@/test/identity-fixture'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from './workspace'
 import { isJournalSearchPage, isPlayOutcome, isPlaySummary, journalSearchPath, type JournalSearchPage, type PlayOutcome, type PlaySummary } from './plays'
@@ -55,11 +56,11 @@ describe('Journal search API', () => {
 
   it('searches in the client’s mode and refuses another mode’s Play', async () => {
     response(page({ items: [{ ...hit(1), play: play(1, { tradingMode: 'paper' }) }] }))
-    const result = await createWorkspaceApi('test-only', undefined, 'paper').searchJournal({ q: 'weekly' })
+    const result = await createWorkspaceApi(credentialsFixture, undefined, 'paper').searchJournal({ q: 'weekly' })
     expect(fetch).toHaveBeenCalledWith('/api/plays/search?q=weekly&tradingMode=paper', expect.anything())
     expect(result.items[0]!.field).toBe('thesis')
     response(page({ items: [{ ...hit(1), play: play(1, { tradingMode: 'real' }) }] }))
-    await expect(createWorkspaceApi('test-only', undefined, 'paper').searchJournal({ q: 'weekly' })).rejects.toThrow()
-    await expect(createWorkspaceApi('test-only').searchJournal({ q: 'w' })).rejects.toThrow()
+    await expect(createWorkspaceApi(credentialsFixture, undefined, 'paper').searchJournal({ q: 'weekly' })).rejects.toThrow()
+    await expect(createWorkspaceApi(credentialsFixture).searchJournal({ q: 'w' })).rejects.toThrow()
   })
 })
