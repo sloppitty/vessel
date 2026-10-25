@@ -3,13 +3,12 @@ using Vessel.Application.Metadata;
 
 namespace Vessel.Infrastructure.Auth;
 
-/// <summary>The claims that carry the configured owner: issued by <see cref="BearerTokenHandler"/> and read back here only.</summary>
+/// <summary>
+/// Reads the journal owner back from the signed-in principal. The wallet session scheme issues the user's ID as
+/// <see cref="ClaimTypes.NameIdentifier"/> and the display name as <see cref="ClaimTypes.Name"/>; the user ID is the owner.
+/// </summary>
 public static class JournalOwnerClaims
 {
-    public static ClaimsIdentity Identity(Guid ownerId, string ownerName, string authenticationType) => new([
-        new Claim(ClaimTypes.NameIdentifier, ownerId.ToString()),
-        new Claim(ClaimTypes.Name, ownerName)], authenticationType);
-
     /// <summary>The authenticated owner's ID. Throws when the principal is not an authenticated owner.</summary>
     public static Guid OwnerId(ClaimsPrincipal? user) =>
         user?.Identity?.IsAuthenticated == true &&

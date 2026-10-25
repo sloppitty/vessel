@@ -9,6 +9,7 @@ import { credentialFixture, discoveryFixture, indexAccount, indexVenue } from '@
 import { portfolioFixture } from '@/test/workspace-fixture'
 import { systemFixture } from '@/test/system-fixture'
 import { CreateAccountDialog } from './CreateDialogs'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 beforeEach(() => vi.stubEnv('DEV', false))
 
@@ -24,7 +25,7 @@ function frozenRetryAt(seconds: number) {
 
 function client(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
   return {
-    ...createWorkspaceApi('test-only'),
+    ...createWorkspaceApi(credentialsFixture),
     discoverAccounts: vi.fn().mockResolvedValue(discoveryFixture),
     createAccount: vi.fn().mockImplementation(body => Promise.resolve({
       ...indexAccount, ...body, id: body.sourceId === indexAccount.sourceId ? indexAccount.id : portfolioFixture.id,

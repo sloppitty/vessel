@@ -5,8 +5,7 @@ using Vessel.Application.Workspace;
 namespace Vessel.Tests.Isolation;
 
 /// <summary>
-/// Contract §9.4 per-user caps in Wallet mode with two signed-in users: one user exhausting a budget never refuses the
-/// other. In Token mode the same caps apply per installation, because every request has the one configured owner.
+/// Contract §9.4 per-user caps with two signed-in users: one user exhausting a budget never refuses the other.
 /// Budgets and stream slots live in the API process, not the journal, so they outlast the owners of earlier cases on
 /// this host; each case uses fresh users, and the class has its own host so no other case holds a slot. Server-wide
 /// venue capacity and deadlines are shared by design and are not asserted here.

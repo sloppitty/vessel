@@ -15,6 +15,7 @@ vi.mock('./IndicatorControls', async importOriginal => ({
   IndicatorOverlay: vi.fn(() => null),
 }))
 import { IndicatorOverlay } from './IndicatorControls'
+import { credentialsFixture } from '@/test/identity-fixture'
 
 function fakeAdapter() {
   let callbacks: ChartCallbacks
@@ -32,7 +33,7 @@ function chartApi() {
     emit = handler
     return new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }))
   })
-  const api = { ...createWorkspaceApi('test-only'), candles: vi.fn().mockResolvedValue(candleSeriesFixture),
+  const api = { ...createWorkspaceApi(credentialsFixture), candles: vi.fn().mockResolvedValue(candleSeriesFixture),
     marketContext: vi.fn().mockResolvedValue(marketContextFixture), marketStream }
   return { api, marketStream, emit: (event: MarketStreamEvent) => emit(event) }
 }
