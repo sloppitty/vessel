@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.3.4 - October 25, 2026
+
+Release notes: [docs/releases/v0.3.4.md](docs/releases/v0.3.4.md).
+
+### Added
+
+- A sticky shell header keeps a session-only route breadcrumb and shared
+  notices on every page. Drill-downs retain their context, and returning to a
+  saved Play respects unsaved-work protection and ignores superseded requests.
+- The brand subtitle switches between Journal and Paper playground, with a
+  confirmation dialog before discarding unsaved or in-flight Play work.
+  Paper has its own boat mark and theme-derived accents; the disclosure appears
+  once in the header instead of repeated per-item chips. Reduced motion skips
+  the switch animation.
+
 ### Removed
 
 - **Breaking:** the API token (Token sign-in) is gone; Vessel signs in with
@@ -22,6 +37,22 @@
   Development environment. `scripts/dev.py` applies the identity migrations and
   `identity ensure-owner` in `migrate`, allows sign-in from the Vite page and
   adds `pnpm dev:identity` for binding a development wallet.
+
+### Upgrade
+
+- **Wallet sign-in and HTTPS are required.** Stop web, every API and every
+  worker/replica, including notifications and optional paper workers, and back
+  up both database schemas, evidence, credential keys and private configuration.
+  Use matching v0.3.4 images and this release's deploy files.
+- Token installations must remove retired token/mode settings, configure their
+  public HTTPS origin, run the explicit `migrate` service and bind the operator
+  wallet before starting. Preserve the existing owner GUID; remove the obsolete
+  `compose.wallet.yaml` overlay. Existing Wallet installations retain their
+  wallet bindings but must also update the deploy files and overlay list.
+- No new identity or journal migrations from v0.3.3. Keep registration `Closed`
+  until the outstanding real-wallet/non-mainnet acceptance is recorded. Earlier
+  upgrade requirements still apply. Rollback requires the previous deploy files
+  and private configuration as well as matching previous images.
 
 ## 0.3.3 - October 22, 2026
 
