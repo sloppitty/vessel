@@ -1,4 +1,6 @@
-import type { Challenge, SessionDto, SessionRow, WalletDto } from '@/api/auth'
+import { createSessionAuthApi, type Challenge, type SessionDto, type SessionRow, type WalletDto } from '@/api/auth'
+import type { SessionCredentials } from '@/api/request'
+import type { ShellIdentity } from '@/features/identity/types'
 
 /** Synthetic people and addresses only. */
 export const walletFixture: WalletDto = {
@@ -19,6 +21,18 @@ export const sessionFixture: SessionDto = {
     idleExpiresAt: '2026-10-17T21:41:12.000Z', absoluteExpiresAt: '2026-10-18T09:41:12.000Z', remember: false,
   },
   adoptsLegacyPreferences: false,
+}
+
+/** The session transport of `sessionFixture`, for API clients under test. */
+export const credentialsFixture: SessionCredentials = { kind: 'session', userId: sessionFixture.user.id, sessionId: sessionFixture.session.id }
+
+/** A signed-in shell identity whose callbacks do nothing. Tests of the session itself use a `SessionController`. */
+export function shellIdentityFixture(overrides: Partial<ShellIdentity> = {}): ShellIdentity {
+  return {
+    session: sessionFixture, walletName: null, auth: createSessionAuthApi(credentialsFixture),
+    registerExitState: () => () => {}, profileRead: () => ({ generation: 0, epoch: 0 }), onProfile: () => true,
+    checkSession: async () => 'current', onSessionChange: () => () => {}, ...overrides,
+  }
 }
 
 export const sessionRowsFixture: SessionRow[] = [

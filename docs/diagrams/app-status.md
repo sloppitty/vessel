@@ -11,7 +11,7 @@ Arrows show common journeys, not restrictions on navigation.
 
 ```mermaid
 flowchart TD
-    Connect["Connect with Vessel API token"] --> Overview["Overview<br/>Balances, recent operations, saved Plays"]
+    Connect["Sign in with a wallet"] --> Overview["Overview<br/>Balances, recent operations, saved Plays"]
     Overview --> Accounts["Accounts<br/>Add, inspect, refresh"]
     Accounts --- Portfolios["Portfolios<br/>Optional grouping"]
     Accounts --> Activity["Activity<br/>Imported position operations"]
@@ -35,7 +35,7 @@ Application modules share one API process; these are not separate services.
 flowchart TD
     Browser["Browser<br/>React + TypeScript + Lightweight Charts"]
     subgraph Host["Self-hosted server boundary"]
-        API["ASP.NET Core 10 API<br/>Bearer authentication and owner scope"]
+        API["ASP.NET Core 10 API<br/>Wallet session and owner scope"]
         Modules["Application modules<br/>Workspace, Plays, Diary, Activity, Overview, Review, Sizing"]
         Market["Market data and evidence services"]
         Stores["EF Core persistence stores"]

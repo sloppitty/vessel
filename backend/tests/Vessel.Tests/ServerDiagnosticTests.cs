@@ -84,7 +84,7 @@ public sealed class ServerDiagnosticTests
         var output = body + diagnostic.Text + JsonSerializer.Serialize(diagnostic.Fields);
         foreach (var forbidden in new[] { Secret, "private-token", "private-db", "private-password", "private-value",
                      "private-data", PrivateId.ToString(), "private-wallet-address", "private-untrusted-correlation",
-                     "private-request-body", CoreApiFactory.Token, "Authorization", "raw-provider-body",
+                     "private-request-body", "Authorization", "raw-provider-body",
                      "ConnectionStrings", ".cs:line", "/home/" })
             Assert.DoesNotContain(forbidden, output);
         Assert.DoesNotContain(error.GetType().Name, body);
@@ -187,6 +187,7 @@ public sealed class ServerDiagnosticTests
 
     private sealed class DiagnosticFactory(Exception? error, bool cancelCaller = false, string? connection = null) : WebApplicationFactory<Program>
     {
+        private readonly Guid owner = Guid.NewGuid();
         public CaptureLoggerProvider Logs { get; } = new();
         protected override IHost CreateHost(IHostBuilder builder)
         {
@@ -198,8 +199,8 @@ public sealed class ServerDiagnosticTests
             builder.UseEnvironment("Development");
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Vessel:Auth:Token"] = CoreApiFactory.Token,
-                ["Vessel:Auth:OwnerId"] = Guid.NewGuid().ToString(),
+                ["Vessel:Auth:OwnerId"] = owner.ToString(),
+                ["Vessel:Identity:Origins:0"] = TestAuthentication.Origin,
                 ["Vessel:Evidence:Storage:Provider"] = "Local",
                 ["ConnectionStrings:Vessel"] = connection
             }));
@@ -207,6 +208,7 @@ public sealed class ServerDiagnosticTests
             builder.ConfigureServices(services =>
             {
                 VesselEventTestHosting.ConfigureServices(services);
+                TestAuthentication.Add(services);
                 if (error is not null)
                 {
                     services.AddSingleton<IWorkspaceStore>(new ThrowingStore(error));
@@ -218,7 +220,7 @@ public sealed class ServerDiagnosticTests
         public HttpClient AuthorizedClient()
         {
             var client = CreateClient();
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", CoreApiFactory.Token);
+            TestAuthentication.SignIn(client.DefaultRequestHeaders, owner);
             return client;
         }
     }
