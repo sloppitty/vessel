@@ -27,13 +27,14 @@ public sealed class StartupWarmup : BackgroundService
 {
     private readonly IServiceProvider services;
     private readonly ILogger<StartupWarmup> logger;
+    private readonly TimeProvider time;
     private readonly bool enabled;
     private readonly TimeSpan timeout;
     private readonly TaskCompletionSource<StartupWarmupOutcome> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public StartupWarmup(IServiceProvider services, IConfiguration configuration, IHostEnvironment environment, ILogger<StartupWarmup> logger)
+    public StartupWarmup(IServiceProvider services, IConfiguration configuration, IHostEnvironment environment, ILogger<StartupWarmup> logger, TimeProvider time)
     {
-        (this.services, this.logger) = (services, logger);
+        (this.services, this.logger, this.time) = (services, logger, time);
         // Development hosts and tests restart often and are not behind the readiness gate: opt in there.
         enabled = configuration.GetValue("Vessel:Startup:Warmup:Enabled", !environment.IsDevelopment());
         timeout = configuration.GetValue("Vessel:Startup:Warmup:Timeout", TimeSpan.FromSeconds(30));
@@ -81,7 +82,7 @@ public sealed class StartupWarmup : BackgroundService
         try
         {
             // WaitAsync bounds readiness even when a database call ignores cancellation (a stalled handshake).
-            await work.WaitAsync(timeout, stoppingToken);
+            await work.WaitAsync(timeout, time, stoppingToken);
             var outcome = Outcome(false);
             logger.LogInformation(new EventId(1100, "StartupWarmupFinished"),
                 "Startup warm-up finished in {ElapsedMs} ms; {FailedCount} steps failed.", elapsed.ElapsedMilliseconds, outcome.FailedSteps.Count);

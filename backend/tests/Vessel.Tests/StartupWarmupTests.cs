@@ -1,9 +1,9 @@
 using System.Collections.Concurrent;
 using System.Net;
-using System.Net.Sockets;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Nethereum.Signer;
 using Npgsql;
@@ -50,33 +50,53 @@ public sealed class StartupWarmupTests
     [Fact]
     public async Task Readiness_reports_warming_up_until_the_timeout_then_its_usual_checks()
     {
-        // Accepts TCP connections (kernel backlog) but never answers the PostgreSQL startup message.
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
+        var clock = new WarmupClock();
+        var startup = new DelayedHostStart();
+        using var contexts = new BlockingWarmupContexts(callbackThrows: false);
+        var logs = new Logs();
+        await using var factory = new CoreApiFactory(Guid.NewGuid(), settings: new()
+        {
+            ["Vessel:Startup:Warmup:Enabled"] = "true", ["Vessel:Startup:Warmup:Timeout"] = "00:00:03"
+        }, configure: services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(provider => ActivatorUtilities.CreateInstance<StartupWarmup>(provider, clock)));
+            services.AddSingleton<ILoggerProvider>(logs);
+            services.AddSingleton<IHostedService>(startup);
+            services.Replace(ServiceDescriptor.Singleton<IDbContextFactory<IdentityDbContext>>(contexts));
+        });
+        var starting = Task.Run(() => factory.CreateClient());
         try
         {
-            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-            var connection = $"Host=127.0.0.1;Port={port};Database=unused;Username=unused;Password=unused;Timeout=60;Pooling=false";
-            var logs = new Logs();
-            await using var factory = new CoreApiFactory(Guid.NewGuid(), connection: connection, settings: new()
-            {
-                ["Vessel:Startup:Warmup:Enabled"] = "true", ["Vessel:Startup:Warmup:Timeout"] = "00:00:03"
-            }, configure: services => services.AddSingleton<ILoggerProvider>(logs));
-            using var client = factory.CreateClient();
+            await startup.Started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await clock.TimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await contexts.CallbackRegistered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            // Deliberately hold host startup until one tick before the deadline. Neither startup nor
+            // scheduling the first request consumes virtual time, regardless of real runner delays.
+            clock.Advance(TimeSpan.FromSeconds(3) - TimeSpan.FromTicks(1));
+            Assert.False(starting.IsCompleted);
+            startup.Release.TrySetResult();
+            using var client = await starting.WaitAsync(TimeSpan.FromSeconds(30));
             var warmup = factory.Services.GetRequiredService<StartupWarmup>();
+            Assert.False(warmup.Completed);
             var warming = await client.GetAsync("/health/ready");
             Assert.Equal(HttpStatusCode.ServiceUnavailable, warming.StatusCode);
             Assert.Equal("""{"status":"unavailable","reason":"warming-up"}""", await warming.Content.ReadAsStringAsync());
             Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
+            clock.Advance(TimeSpan.FromTicks(1));
             var outcome = await warmup.Completion.WaitAsync(TimeSpan.FromSeconds(30));
             Assert.True(outcome.TimedOut);
             Assert.Contains(logs.Entries, entry => entry.Id.Name == "StartupWarmupTimedOut");
-            listener.Stop();
             var ready = await client.GetAsync("/health/ready");
             Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
             Assert.Equal("""{"status":"unavailable"}""", await ready.Content.ReadAsStringAsync());
         }
-        finally { listener.Stop(); }
+        finally
+        {
+            startup.Release.TrySetResult();
+            contexts.ReleaseCallback.Set();
+            contexts.ReleaseWork.TrySetResult();
+        }
+        await contexts.WorkFinished.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Theory]
@@ -84,17 +104,23 @@ public sealed class StartupWarmupTests
     [InlineData(true)]
     public async Task Deadline_completes_before_slow_cancellation_callbacks_and_callback_failures_cannot_stop_the_host(bool callbackThrows)
     {
+        var clock = new WarmupClock();
         using var contexts = new BlockingWarmupContexts(callbackThrows);
         await using var factory = new CoreApiFactory(Guid.NewGuid(), settings: new()
         {
             ["Vessel:Startup:Warmup:Enabled"] = "true", ["Vessel:Startup:Warmup:Timeout"] = "00:00:01"
-        }, configure: services => services.Replace(
-            ServiceDescriptor.Singleton<IDbContextFactory<IdentityDbContext>>(contexts)));
+        }, configure: services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(provider => ActivatorUtilities.CreateInstance<StartupWarmup>(provider, clock)));
+            services.Replace(ServiceDescriptor.Singleton<IDbContextFactory<IdentityDbContext>>(contexts));
+        });
         using var client = factory.CreateClient();
         var warmup = factory.Services.GetRequiredService<StartupWarmup>();
         try
         {
-            await contexts.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await contexts.CallbackRegistered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await clock.TimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            clock.Advance(TimeSpan.FromSeconds(1));
             await contexts.CallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
             var outcome = await warmup.Completion.WaitAsync(TimeSpan.FromSeconds(3));
             Assert.True(outcome.TimedOut);
@@ -123,17 +149,23 @@ public sealed class StartupWarmupTests
     [Fact]
     public async Task Deadline_also_bounds_work_that_blocks_before_its_first_await()
     {
+        var clock = new WarmupClock();
         using var contexts = new BlockingWarmupContexts(callbackThrows: false, blockSynchronously: true);
         await using var factory = new CoreApiFactory(Guid.NewGuid(), settings: new()
         {
             ["Vessel:Startup:Warmup:Enabled"] = "true", ["Vessel:Startup:Warmup:Timeout"] = "00:00:01"
-        }, configure: services => services.Replace(
-            ServiceDescriptor.Singleton<IDbContextFactory<IdentityDbContext>>(contexts)));
+        }, configure: services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton(provider => ActivatorUtilities.CreateInstance<StartupWarmup>(provider, clock)));
+            services.Replace(ServiceDescriptor.Singleton<IDbContextFactory<IdentityDbContext>>(contexts));
+        });
         using var client = factory.CreateClient();
         var warmup = factory.Services.GetRequiredService<StartupWarmup>();
         try
         {
             await contexts.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await clock.TimerCreated.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            clock.Advance(TimeSpan.FromSeconds(1));
             var outcome = await warmup.Completion.WaitAsync(TimeSpan.FromSeconds(3));
             Assert.True(outcome.TimedOut);
             Assert.False(contexts.WorkFinished.Task.IsCompleted);
@@ -200,10 +232,41 @@ public sealed class StartupWarmupTests
             && error.Message == "Vessel:Startup:Warmup:Timeout must be between 00:00:01 and 00:01:00.");
     }
 
+    // Only the warm-up uses this clock: TimerCreated must not observe unrelated hosted-service timers.
+    private sealed class WarmupClock : TimeProvider
+    {
+        private readonly ManualTime time = new(DateTimeOffset.UnixEpoch);
+        public TaskCompletionSource TimerCreated { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override DateTimeOffset GetUtcNow() => time.GetUtcNow();
+        public override long TimestampFrequency => time.TimestampFrequency;
+        public override long GetTimestamp() => time.GetTimestamp();
+        public void Advance(TimeSpan delta) => time.Advance(delta);
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = time.CreateTimer(callback, state, dueTime, period);
+            TimerCreated.TrySetResult();
+            return timer;
+        }
+    }
+
+    private sealed class DelayedHostStart : IHostedService
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task StartAsync(CancellationToken cancellationToken)
+        {
+            Started.TrySetResult();
+            return Release.Task.WaitAsync(cancellationToken);
+        }
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
     private sealed class BlockingWarmupContexts(bool callbackThrows, bool blockSynchronously = false)
         : IDbContextFactory<IdentityDbContext>, IDisposable
     {
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource CallbackRegistered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource CallbackStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource CallbackFinished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource WorkFinished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -228,6 +291,7 @@ public sealed class StartupWarmupTests
                 }
                 finally { CallbackFinished.TrySetResult(); }
             });
+            CallbackRegistered.TrySetResult();
             try
             {
                 await ReleaseWork.Task;
