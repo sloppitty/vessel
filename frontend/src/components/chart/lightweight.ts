@@ -635,7 +635,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   }
   // A resize ends any press: a release outside the window may never arrive (seen in Firefox).
   const containerObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
-    cancelLevelDrag()
+    cancelDrags()
     if (pressed !== false) onRelease()
     queueLayout()
   })
@@ -760,6 +760,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   }
 
   chart.subscribeClick(event => {
+    if (drawings.measuring || event.sourceEvent?.shiftKey) return
     if (typeof event.hoveredObjectId === 'string' && levels.find(event.hoveredObjectId)) callbacks.onLevelSelect(event.hoveredObjectId)
   })
   const onRange = (range: LogicalRange | null) => {
@@ -784,6 +785,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   // Drawings and level drags are handled before the chart sees the pointer, so panning stays off while they move.
   let drag: { id: string; pointerId: number; price: number; moved: boolean; edit: FrameEdit<number>; autoScale: boolean; offsetY: number } | null = null
   let drawingPointer: number | null = null
+  let measurementAutoScale: boolean | null = null
   // While picking, a click on the pane reports its price instead of panning, drawing or dragging.
   let picking = false
   const pane = (event: PointerEvent) => {
@@ -813,21 +815,41 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     levels.dragPreview(null)
   }
   const cancelLevelDrag = () => finishLevelDrag(true)
+  const cancelMeasurement = () => {
+    if (measurementAutoScale === null) return
+    const pointer = drawingPointer
+    drawingPointer = null
+    drawings.cancel()
+    series.priceScale().applyOptions({ autoScale: measurementAutoScale })
+    measurementAutoScale = null
+    container.style.cursor = picking ? 'crosshair' : ''
+    lockChart(false)
+    updateGuide()
+    if (pointer !== null && container.hasPointerCapture?.(pointer)) container.releasePointerCapture(pointer)
+  }
+  const cancelDrags = () => { cancelMeasurement(); cancelLevelDrag() }
   const consume = (event: PointerEvent) => { event.preventDefault(); event.stopPropagation() }
   const onPointerDown = (event: PointerEvent) => {
-    if (event.button !== 0 || drag) return
+    if (event.button !== 0 || drag || drawingPointer !== null) return
     const { x, y } = pane(event)
     // Drawings, levels and picking belong to the price pane; indicator panes and the axes keep the chart's own handling.
     if (x > chart.timeScale().width() || y > chart.paneSize(0).height) return
     container.focus({ preventScroll: true })
-    if (picking) {
+    if (event.shiftKey && index.empty) { consume(event); return }
+    if (picking && !event.shiftKey) {
       consume(event)
       const point = space.point(x, y, drawings.magnet)
       if (point) callbacks.onPricePick(point.price)
       return
     }
-    if (!index.empty && drawings.pointerDown(x, y)) {
+    if (!index.empty && drawings.pointerDown(x, y, event.shiftKey)) {
       consume(event)
+      if (drawings.measuring) {
+        measurementAutoScale = series.priceScale().options().autoScale
+        series.priceScale().applyOptions({ autoScale: false })
+        container.style.cursor = 'crosshair'
+        updateGuide()
+      }
       drawingPointer = event.pointerId
       container.setPointerCapture?.(event.pointerId)
       lockChart(true)
@@ -855,14 +877,16 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   // While a tool is active, the chart's crosshair (which jumps from bar to bar) gives way to a free guide.
   let guiding = false
   const updateGuide = () => {
-    const active = picking || drawings.tool !== null
+    const active = picking || drawings.tool !== null || drawings.measuring
     if (active === guiding) return
     guiding = active
     chart.applyOptions({ crosshair: { vertLine: { visible: !active, labelVisible: !active } } })
     if (!active) drawings.setGuide(null)
   }
   const onPointerMove = (event: PointerEvent) => {
-    if (guiding) drawings.setGuide(pane(event).x)
+    if (drawingPointer !== null && drawingPointer !== event.pointerId) return
+    if (measurementAutoScale !== null && event.buttons === 0) { consume(event); cancelMeasurement(); return }
+    if (guiding && !drawings.measuring) drawings.setGuide(pane(event).x)
     if (drawings.busy) {
       const { x, y } = pricePane(event)
       if (drawings.pointerMove(x, y)) consume(event)
@@ -881,6 +905,14 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   const endDrag = (event: PointerEvent) => {
     if (drawingPointer === event.pointerId) {
       event.stopPropagation()
+      if (measurementAutoScale !== null) {
+        if (event.type === 'pointerup') {
+          const { x, y } = pricePane(event)
+          drawings.pointerUp(x, y)
+        }
+        cancelMeasurement()
+        return
+      }
       drawingPointer = null
       container.releasePointerCapture?.(event.pointerId)
       const { x, y } = pricePane(event)
@@ -899,13 +931,21 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   }
   /** Ends level and drawing gestures on reset or destroy; state is cleared before capture is released. */
   const releaseGestures = () => {
+    cancelMeasurement()
     const pointer = drawingPointer
     drawingPointer = null
     cancelLevelDrag()
     if (pointer !== null) container.releasePointerCapture?.(pointer)
     drawings.cancel()
   }
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== 'Escape' || measurementAutoScale === null || !(event.target instanceof Node) || !container.contains(event.target)) return
+    event.preventDefault()
+    event.stopPropagation()
+    cancelMeasurement()
+  }
   const onDoubleClick = (event: MouseEvent) => {
+    if (event.shiftKey || drawings.measuring) return
     const rect = container.getBoundingClientRect()
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
@@ -922,7 +962,9 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
   container.addEventListener('pointercancel', endDrag, true)
   // Capture taken away without a pointerup ends the gesture like a cancel; after our own release nothing matches.
   container.addEventListener('lostpointercapture', endDrag, true)
-  window.addEventListener('blur', cancelLevelDrag)
+  // Radix dialogs dismiss on document capture: cancel the active ruler before that listener sees Escape.
+  window.addEventListener('keydown', onKeyDown, true)
+  window.addEventListener('blur', cancelDrags)
   const onPointerLeave = () => drawings.setGuide(null)
   container.addEventListener('pointerleave', onPointerLeave)
 
@@ -995,6 +1037,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     setDrawingTool(tool, magnet) {
       drawings.magnet = magnet
       if (tool !== drawings.tool) {
+        cancelMeasurement()
         drawings.setTool(tool)
         lockChart(false)
       }
@@ -1002,6 +1045,7 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
     },
     setIndicators,
     setPricePicker(active) {
+      if (active !== picking) cancelMeasurement()
       picking = active
       container.style.cursor = active ? 'crosshair' : ''
       updateGuide()
@@ -1061,7 +1105,8 @@ export const createLightweightAdapter: ChartAdapterFactory = (container, callbac
       container.removeEventListener('pointerup', endDrag, true)
       container.removeEventListener('pointercancel', endDrag, true)
       container.removeEventListener('lostpointercapture', endDrag, true)
-      window.removeEventListener('blur', cancelLevelDrag)
+      window.removeEventListener('keydown', onKeyDown, true)
+      window.removeEventListener('blur', cancelDrags)
       container.removeEventListener('pointerleave', onPointerLeave)
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange)
       chart.unsubscribeCrosshairMove(onCrosshair)

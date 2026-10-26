@@ -15,6 +15,39 @@ const space: DrawingSpace = {
 }
 const callbacks = () => ({ onDrawingCreate: vi.fn(), onDrawingChange: vi.fn(), onDrawingSelect: vi.fn(), onDrawingCancel: vi.fn() })
 
+it('keeps a Shift-drag measurement through the editor with undo, redo and delete', () => {
+  const { result } = renderHook(() => {
+    const [drawings, setDrawings] = useState<ChartDrawing[]>([])
+    const history = useChartHistory('instrument')
+    return { drawings, history, editor: useDrawingEditor(drawings, setDrawings, 'instrument', history) }
+  })
+  const controller = new DrawingController(space, {
+    ...callbacks(), onDrawingCreate: drawing => result.current.editor.create(drawing),
+  }, vi.fn())
+  act(() => {
+    controller.pointerDown(100, 500, true)
+    controller.pointerMove(200, 510)
+    expect(result.current.drawings).toEqual([])
+    controller.pointerUp(220, 510)
+  })
+  const measurement = result.current.drawings[0]!
+  expect(measurement).toMatchObject({
+    kind: 'date-range', points: [{ time: 100, price: 500 }, { time: 220, price: 490 }],
+  })
+  expect(result.current.editor.selectedId).toBe(measurement.id)
+  expect(result.current.history.undoLabel).toBe('Add drawing')
+  act(() => result.current.history.undo())
+  expect(result.current.drawings).toEqual([])
+  expect(result.current.history.canUndo).toBe(false)
+  act(() => result.current.history.redo())
+  expect(result.current.drawings).toEqual([measurement])
+  act(() => result.current.editor.remove())
+  expect(result.current.drawings).toEqual([])
+  expect(result.current.history.undoLabel).toBe('Delete drawing')
+  act(() => result.current.history.undo())
+  expect(result.current.drawings).toEqual([measurement])
+})
+
 describe('frame-batched drawing gestures', () => {
   it('publishes the latest time-only move once per frame and previews it immediately', () => {
     const frames = testFrames(); const events = callbacks(); const redraw = vi.fn()

@@ -214,6 +214,130 @@ describe('drawing controller', () => {
   })
 })
 
+describe('direction-sensitive measurement', () => {
+  const render = (drawings: DrawingController) => {
+    const context = {
+      save: vi.fn(), restore: vi.fn(), setLineDash: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(),
+      stroke: vi.fn(), fill: vi.fn(), arc: vi.fn(), fillRect: vi.fn(), strokeRect: vi.fn(), fillText: vi.fn(),
+      measureText: (text: string) => ({ width: text.length * 6 }),
+    }
+    drawings.render(context as unknown as CanvasRenderingContext2D, {
+      line: '#8fb8ff', text: '#ffffff', muted: '#aaaaaa', background: '#111111',
+      positive: '#00ff00', negative: '#ff0000', font: 'sans-serif',
+    })
+    return context
+  }
+
+  it.each([
+    ['right', 520, 500, '2 bars · 2h'],
+    ['left', 280, 500, '2 bars · 2h'],
+    ['up', 400, 400, '+100.00 (+20.00%)'],
+    ['down', 400, 600, '−100.00 (−20.00%)'],
+  ] as const)('measures %s, then keeps an editable drawing on release', (_, x, y, text) => {
+    const { callbacks, drawings } = controller()
+    expect(drawings.pointerDown(400, 500, true)).toBe(true)
+    drawings.pointerMove(x, y)
+    expect(drawings.measuring).toBe(true)
+    expect(drawings.cursor(x, y)).toBe('crosshair')
+    const context = render(drawings)
+    expect(context.fillText).toHaveBeenCalledWith(text, expect.any(Number), expect.any(Number))
+    expect(context.arc).not.toHaveBeenCalled() // Editing handles appear after release.
+    const [, tagX, tagY] = context.fillText.mock.lastCall!
+    expect(tagX).toBeGreaterThanOrEqual(text.length * 3 + 7)
+    expect(tagX).toBeLessThanOrEqual(space.width() - text.length * 3 - 7)
+    expect(tagY).toBeGreaterThanOrEqual(12)
+    expect(tagY).toBeLessThanOrEqual(space.height() - 12)
+    drawings.pointerUp(x, y)
+    expect(drawings.busy).toBe(false)
+    expect(callbacks.onDrawingCreate).toHaveBeenCalledOnce()
+    const created = callbacks.onDrawingCreate.mock.lastCall![0] as ChartDrawing
+    expect(created).toMatchObject({
+      kind: x === 400 ? 'price-range' : 'date-range',
+      points: [{ time: 400 * 60_000, price: 500 }, { time: x * 60_000, price: 1000 - y }],
+    })
+    expect(isChartDrawing(created)).toBe(true)
+    drawings.drawings = [created]
+    drawings.selectedId = created.id
+    const kept = render(drawings)
+    expect(kept.fillText).toHaveBeenCalledWith(text, expect.any(Number), expect.any(Number))
+    expect(kept.arc).toHaveBeenCalledTimes(2)
+    expect(callbacks.onDrawingChange).not.toHaveBeenCalled()
+    expect(callbacks.onDrawingSelect).not.toHaveBeenCalled()
+  })
+
+  it('uses the release coordinates and gives each measurement its own ID', () => {
+    const { callbacks, drawings } = controller()
+    drawings.setTool('text')
+    drawings.pointerDown(400, 500, true)
+    drawings.pointerMove(520, 500)
+    drawings.pointerUp(405, 400)
+    const first = callbacks.onDrawingCreate.mock.lastCall![0] as ChartDrawing
+    expect(first).toMatchObject({ kind: 'price-range', points: [{ time: 24_000_000, price: 500 }, { time: 24_300_000, price: 600 }] })
+    expect(first.text).toBeUndefined()
+    drawings.drawings = [first]
+    drawings.pointerDown(400, 500, true)
+    drawings.pointerUp(520, 500)
+    const second = callbacks.onDrawingCreate.mock.lastCall![0] as ChartDrawing
+    expect(second.kind).toBe('date-range')
+    expect(second.id).not.toBe(first.id)
+    expect(callbacks.onDrawingCreate).toHaveBeenCalledTimes(2)
+  })
+
+  it('respects the existing drawing limit when keeping a measurement', () => {
+    const { callbacks, drawings } = controller()
+    drawings.drawings = Array.from({ length: 200 }, (_, index) => ({
+      id: `drawing-${index}`, schemaVersion: 1, kind: 'vertical-line', points: [{ time: 1, price: 500 }],
+    }))
+    drawings.pointerDown(400, 500, true)
+    drawings.pointerMove(520, 500)
+    drawings.pointerUp(520, 500)
+    expect(drawings.busy).toBe(false)
+    expect(callbacks.onDrawingCreate).not.toHaveBeenCalled()
+  })
+
+  it('switches axes with the dominant displacement and hides the readout back at the start', () => {
+    const { drawings } = controller()
+    drawings.pointerDown(400, 500, true)
+    drawings.pointerMove(520, 490)
+    expect(render(drawings).fillText).toHaveBeenCalledWith('2 bars · 2h', expect.any(Number), expect.any(Number))
+    drawings.pointerMove(405, 400)
+    expect(render(drawings).fillText).toHaveBeenCalledWith('+100.00 (+20.00%)', expect.any(Number), expect.any(Number))
+    drawings.pointerMove(400, 500)
+    expect(render(drawings).fillText).not.toHaveBeenCalled()
+  })
+
+  it('temporarily overrides the active tool and magnet without changing selection or cancelling an edit', () => {
+    const events = { onDrawingCreate: vi.fn(), onDrawingChange: vi.fn(), onDrawingSelect: vi.fn(), onDrawingCancel: vi.fn() }
+    const point = vi.fn(space.point)
+    const drawings = new DrawingController({ ...space, point }, events, vi.fn())
+    drawings.setTool('text')
+    drawings.magnet = true
+    drawings.drawings = [{ id: 'selected', schemaVersion: 1, kind: 'vertical-line', points: [{ time: 6_000_000, price: 500 }] }]
+    drawings.selectedId = 'selected'
+    drawings.pointerDown(130, 500, true)
+    drawings.pointerMove(135, 400)
+    expect(point.mock.calls.every(([, , snap]) => snap === false)).toBe(true)
+    drawings.cancel()
+    expect(drawings.tool).toBe('text')
+    expect(drawings.selectedId).toBe('selected')
+    expect(drawings.drawings).toHaveLength(1)
+    for (const callback of Object.values(events)) expect(callback).not.toHaveBeenCalled()
+    drawings.pointerDown(130, 500)
+    expect(events.onDrawingCreate).toHaveBeenCalledWith(expect.objectContaining({ kind: 'text' }))
+  })
+
+  it('does not turn a Shift-click into a pending two-click drawing', () => {
+    const { callbacks, drawings } = controller()
+    drawings.setTool('trend-line')
+    drawings.pointerDown(400, 500, true)
+    drawings.pointerUp(400, 500)
+    expect(drawings.busy).toBe(false)
+    drawings.pointerMove(500, 400)
+    expect(render(drawings).fillText).not.toHaveBeenCalled()
+    expect(callbacks.onDrawingCreate).not.toHaveBeenCalled()
+  })
+})
+
 describe('drawing hit areas', () => {
   it('keeps drawings inside a Fibonacci reachable and selects the Fibonacci elsewhere in it', () => {
     const { callbacks, drawings } = controller()

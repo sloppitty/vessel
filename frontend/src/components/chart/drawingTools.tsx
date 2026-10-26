@@ -30,7 +30,11 @@ export const drawingToolHints: Record<DrawingKind, string> = {
 
 const tool = (id: DrawingKind, icon: ReactNode): ChartTool => ({ id, label: drawingToolLabels[id], description: drawingToolHints[id], icon, available: true })
 
-export const crosshairTool: ChartTool = { id: 'crosshair', label: 'Crosshair', description: 'Select, move and resize drawings and levels.', icon: toolIcons.crosshair, available: true }
+export const crosshairTool: ChartTool = {
+  id: 'crosshair', label: 'Crosshair',
+  description: 'Select, move and resize drawings and levels. Hold Shift and drag sideways to measure time, or vertically to measure price and %. Release to keep the drawing.',
+  icon: toolIcons.crosshair, available: true,
+}
 
 /** Every drawing tool by kind. */
 export const drawingToolsByKind: Record<DrawingKind, ChartTool> = {
