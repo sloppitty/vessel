@@ -529,8 +529,10 @@ describe('Chart panel level editing', () => {
   function LevelHarness({ factory, onSelect = vi.fn(), initial, leverage = 1 }: { factory: ChartAdapterFactory; onSelect?: (id: string) => void; initial: DraftEntry[]; leverage?: number }) {
     const [list, setList] = useState(initial)
     const [selected, setSelected] = useState(initial[0]!.id)
+    const [drawings, setDrawings] = useState<ChartDrawing[]>([])
     return <>
       <ChartPanel entries={list} selectedId={selected} onSelect={id => { setSelected(id); onSelect(id) }} instrument="BTC" leverage={leverage} onEntriesChange={setList}
+        drawings={drawings} onDrawingsChange={setDrawings}
         source={{ api: chartApi(vi.fn().mockResolvedValue(candleSeriesFixture)), accountId: accountFixture.id }} createAdapter={factory} />
       <output data-testid="entries">{JSON.stringify(list.map(e => ({ price: e.price, stop: e.stops[0], stops: e.stops.map(s => [s.unit, s.value, s.share]), targets: e.targets.map(t => [t.unit, t.value, t.share]), share: e.share })))}</output>
       <button type="button" onClick={() => setList(current => current.map((e, i) => i === 1 ? { ...e, share: '25' } : e))}>side edit</button>
@@ -718,6 +720,30 @@ describe('Chart panel level editing', () => {
     await userEvent.keyboard('{Escape}')
     expect(state.picking).toBe(false)
     expect(shown()[0]!.targets).toEqual([])
+  })
+
+  it('disarms the plan picker after a measurement is kept, but not after cancellation', async () => {
+    const { state, factory } = fakeAdapter()
+    render(<LevelHarness factory={factory} initial={two()} />)
+    await screen.findByText(/Updated/)
+    await userEvent.click(screen.getByRole('button', { name: 'Add a target to Entry 1 on the chart' }))
+    expect(state.picking).toBe(true)
+    act(() => state.callbacks!.onDrawingCancel?.())
+    expect(state.picking).toBe(true)
+
+    const measurement: ChartDrawing = {
+      id: 'measurement', schemaVersion: 1, kind: 'price-range',
+      points: [{ time: 1_000, price: 100 }, { time: 2_000, price: 110 }],
+    }
+    const before = shown()
+    act(() => state.callbacks!.onDrawingCreate(measurement))
+    expect(state.drawings).toEqual([measurement])
+    expect(state.selectedDrawingId).toBe(measurement.id)
+    expect(state.picking).toBe(false)
+    expect(screen.getByRole('button', { name: 'Delete drawing' })).toBeInTheDocument()
+    expect(screen.queryByText(/Click to add a target to Entry 1/)).not.toBeInTheDocument()
+    act(() => state.callbacks!.onPricePick(550))
+    expect(shown()).toEqual(before)
   })
 
   it('treats an entry price that is not plan text as unpriced, as its chart line does', async () => {
