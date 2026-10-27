@@ -22,7 +22,7 @@ public sealed record IdentitySettings
     public string[] AllowList { get; init; } = [];
     public int IdleHours { get; init; } = 12;
     public int AbsoluteHours { get; init; } = 24;
-    public int RememberIdleDays { get; init; } = 14;
+    public int RememberIdleDays { get; init; } = 10;
     public int RememberAbsoluteDays { get; init; } = 30;
     public int MaxSessionsPerUser { get; init; } = 20;
     public int MaxPendingRegistrations { get; init; } = 10000;
@@ -46,7 +46,7 @@ public sealed record IdentitySettings
             OwnerName = config["Vessel:Auth:OwnerName"] ?? "Owner",
             IdleHours = Number(config, "Vessel:Identity:Session:IdleHours", 12, 1, 720),
             AbsoluteHours = Number(config, "Vessel:Identity:Session:AbsoluteHours", 24, 1, 720),
-            RememberIdleDays = Number(config, "Vessel:Identity:Session:RememberIdleDays", 14, 1, 365),
+            RememberIdleDays = Number(config, "Vessel:Identity:Session:RememberIdleDays", 10, 1, 365),
             RememberAbsoluteDays = Number(config, "Vessel:Identity:Session:RememberAbsoluteDays", 30, 1, 365),
             MaxSessionsPerUser = Number(config, "Vessel:Identity:MaxSessionsPerUser", 20, 1, 200),
             MaxPendingRegistrations = Number(config, "Vessel:Identity:MaxPendingRegistrations", 10000, 1, int.MaxValue),

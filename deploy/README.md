@@ -61,7 +61,7 @@ does not pass it into a container.
 | `Vessel:Identity:Registration` | `Invitation` | Supported in this delivery: `Closed` and `Invitation`. B2 enabled registration; operator opt-in and the §10 acceptance checklist still apply. `AllowList` and `Open` are parsed but **unsupported** until per-user account/evidence quotas exist (delivery contract §13); `check-config` warns if either is set |
 | `Vessel:Identity:AllowList` | empty | `0x` addresses, normalized to lower case. Used only by the unsupported `AllowList` policy |
 | `Vessel:Identity:Session:IdleHours` / `AbsoluteHours` | 12 / 24 | 1–720; idle ≤ absolute |
-| `Vessel:Identity:Session:RememberIdleDays` / `RememberAbsoluteDays` | 14 / 30 | 1–365; idle ≤ absolute |
+| `Vessel:Identity:Session:RememberIdleDays` / `RememberAbsoluteDays` | 10 / 30 | 1–365; idle ≤ absolute |
 | `Vessel:Identity:MaxSessionsPerUser` | 20 | 1–200. Issuing a session above the cap atomically revokes the oldest live sessions |
 | `Vessel:Identity:MaxPendingRegistrations` | 10000 | At the cap, the oldest are evicted |
 | `Vessel:Identity:CookieName` | `__Host-vessel-session` | Must start with `__Host-` |
