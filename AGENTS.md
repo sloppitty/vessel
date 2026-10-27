@@ -88,6 +88,8 @@ is authorized.
 
 October 20, 2026: the owner asked Review to include imported positions when there are no Plays. Follow the Imported positions section of `docs/architecture/portfolio-review.md`: closed unassigned Activity operations by the sizing fallback's eligibility rule, `positions=exclude|include|auto` with a `minPlays` threshold (default 5, a browser preference in Settings), auto on while the selection has fewer scored Plays, a switch with Automatic/Manual state, and a Play weighing 2 positions in batting, average gain/loss, payoff and expectancy only; dollar totals, drawdown, streaks and counts are never weighted. Positions never become Plays or links, and R, reviews and Play-local figures cover Plays only.
 
+October 27, 2026: the owner replaced the Activity table's Play column with Unrealized P&L in both real and Paper modes. Follow the Unrealized P&L column section of `docs/architecture/activity-operations.md`. Open operations are marked server-side at the venue's current mark through the shared market-context cache. Venues without one (Lighter) use a matching snapshot that is not stale. Failures stay null, never zero. Marks are read per page outside the version hash, and never enter results. The Play link and Journal this trade now live in the expanded row.
+
 ## Project tracking
 
 October 19, 2026: the owner restricted GitHub Actions to release tags to conserve

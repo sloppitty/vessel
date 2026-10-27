@@ -503,7 +503,7 @@ describe('Main application shell', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Add entry' }))
     await userEvent.click(screen.getByRole('link', { name: 'Activity' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Expand BTC operation' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Inspect BTC retrospective eligibility' }))
+    await userEvent.click(screen.getByRole('button', { name: /^(Journal this trade, BTC|Inspect BTC retrospective eligibility)$/ }))
     await userEvent.type(await screen.findByLabelText('Retrospective title'), 'Confirmed history')
     await userEvent.click(screen.getByRole('button', { name: 'Confirm retrospective Play' }))
     expect(await screen.findByText(/A Play was requested from another screen/)).toBeInTheDocument()
@@ -535,7 +535,7 @@ describe('Main application shell', () => {
     render(<ApplicationShell identity={shellIdentityFixture()} system={systemFixture} disconnect={disconnect} api={client} />)
     await userEvent.click(screen.getByRole('link', { name: 'Activity' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Expand BTC operation' }))
-    await userEvent.click(screen.getByRole('button', { name: 'Inspect BTC retrospective eligibility' }))
+    await userEvent.click(screen.getByRole('button', { name: /^(Journal this trade, BTC|Inspect BTC retrospective eligibility)$/ }))
     await userEvent.type(await screen.findByLabelText('Retrospective title'), 'Pending confirmation')
     await userEvent.click(screen.getByRole('button', { name: 'Confirm retrospective Play' }))
     // Close the disclosure while its request is pending, then disconnect the actual shell.
