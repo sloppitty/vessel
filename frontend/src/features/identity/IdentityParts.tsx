@@ -1,9 +1,9 @@
-import type { CSSProperties, ReactNode } from 'react'
+import { useState, type CSSProperties, type ReactNode } from 'react'
 import { Check, ChevronRight, Clock } from 'lucide-react'
 import { sourceHue } from '@/components/accounts/identity'
 import { VesselMark } from '@/components/brand/VesselMark'
 import { Button } from '@/components/ui/button'
-import { clock } from './countdown'
+import { clock, useCountdown } from './countdown'
 import type { BrowserWallet } from './wallets/discovery'
 import './identity.css'
 
@@ -81,4 +81,17 @@ export function StateCard({ icon, tone = 'plain', title, children, actions = [] 
       <Button key={action.label} size="sm" variant={action.disabled ? 'outline' : action.primary ? 'default' : 'ghost'} onClick={action.onClick}
         disabled={action.disabled} className={action.disabled ? 'identity-waiting' : undefined}>{action.label}</Button>)}</div>}
   </div>
+}
+
+/** Both sides of a pairing read the server every two seconds. */
+export const pairingPollMs = 2_000
+/** Every pairing deadline is two minutes from the start of its state. */
+const pairingDeadlineMs = 120_000
+
+/** Time left until a pairing deadline, measured from when the answer arrived; the server decides when it really ends. */
+export function Deadline({ expiresAt, onExpired }: { expiresAt: string; onExpired: () => void }) {
+  const [lifetime] = useState(() => Math.max(0, Math.min(pairingDeadlineMs, Date.parse(expiresAt) - Date.now() || 0)))
+  const seconds = useCountdown(lifetime, onExpired)
+  return <span className="message-timer pairing-timer" role="timer" aria-label={`Expires in ${clock(seconds ?? 0)}`}>
+    <Clock size={13} aria-hidden="true" />{clock(seconds ?? 0)}</span>
 }

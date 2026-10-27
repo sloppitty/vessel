@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Lock, Plug } from 'lucide-react'
+import { Lock, Plug, ShieldCheck } from 'lucide-react'
 import { createPublicAuthApi, createSessionAuthApi, type PublicAuthApi, type RegistrationPolicy, type SessionDto, type UserDto } from '@/api/auth'
 import { ApiError, errorMessage } from '@/api/errors'
 import { getSystem, type SystemInfo } from '@/api/system'
@@ -7,6 +7,8 @@ import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { clearCandleCache } from '@/features/market/candleCache'
 import { scopePreferences } from '@/lib/preference-scope'
 import { SignInBrand, StateCard } from './IdentityParts'
+import { takePairingSecret } from './pairing-link'
+import { PairingScreen, type PairingSource } from './PairingScreen'
 import { SignInScreen } from './SignInScreen'
 import { clearNotice, readNotice, reloadToSignIn, SessionController, takeLanding, workspaceNotices, type Notice, type SessionChannelFactory, type SessionCheck } from './session'
 import type { ProfileRead, ShellIdentity } from './types'
@@ -17,6 +19,10 @@ type Ready = { session: SessionDto; system: SystemInfo; api: WorkspaceApi; contr
 type GateState =
   | { kind: 'probing' }
   | { kind: 'sign-in' }
+  /** A phone with no wallet: a scanned or linked pairing secret, or a typed code already claimed. */
+  | { kind: 'pairing'; source: PairingSource }
+  /** A pairing link opened on a device that already has a session: nothing is paired. */
+  | { kind: 'already-signed-in'; session: SessionDto }
   | { kind: 'loading' }
   | { kind: 'ready'; ready: Ready }
   | { kind: 'failed'; message: string; retry: { session: SessionDto; walletName: string | null } | null }
@@ -43,11 +49,18 @@ interface SignInGateProps {
  *
  * A teardown's notice stays stored until a screen shows it: the sign-in card, or the workspace when the probe
  * finds that another tab signed in meanwhile.
+ *
+ * A `#pair=` fragment (a phone opened the desktop's QR link) is read and removed from the address on the first
+ * render. When the probe finds no session the pairing screen replaces the chooser; when it finds one, nothing is
+ * paired and the device says it is already signed in.
  */
 export function SignInGate({ registration, originAccepted, children, channels, navigate, publicApi }: SignInGateProps) {
   const api = useMemo(() => publicApi ?? createPublicAuthApi(), [publicApi])
   const [landing] = useState(takeLanding)
-  const [state, setState] = useState<GateState>(() => landing ? { kind: 'sign-in' } : { kind: 'probing' })
+  const [fragment] = useState(takePairingSecret)
+  const [state, setState] = useState<GateState>(() => landing
+    ? fragment ? { kind: 'pairing', source: { kind: 'secret', secret: fragment } } : { kind: 'sign-in' }
+    : { kind: 'probing' })
   // Cleared once the sign-in card or the workspace has shown it.
   const [notice, setNotice] = useState<Notice | null>(readNotice)
   const controllerRef = useRef<SessionController | null>(null)
@@ -150,12 +163,16 @@ export function SignInGate({ registration, originAccepted, children, channels, n
   }, [channels, navigate, checkSession])
 
   const settleProbe = useCallback((result: { session: SessionDto } | { cause: unknown }) => {
-    if ('session' in result) { void enter(result.session, false, null); return }
+    if ('session' in result) {
+      if (fragment) setState({ kind: 'already-signed-in', session: result.session })
+      else void enter(result.session, false, null)
+      return
+    }
     const { cause } = result
-    if (cause instanceof ApiError && cause.status === 401) setState({ kind: 'sign-in' })
+    if (cause instanceof ApiError && cause.status === 401) setState(fragment ? { kind: 'pairing', source: { kind: 'secret', secret: fragment } } : { kind: 'sign-in' })
     else if (cause instanceof ApiError && cause.code === 'user-suspended') setState({ kind: 'suspended' })
     else setState({ kind: 'failed', message: errorMessage(cause, 'Vessel is unreachable.'), retry: null })
-  }, [enter])
+  }, [enter, fragment])
   // Every probe, a manual Retry included, belongs to the gate: a newer one, unmount or a replaced client aborts it.
   const probing = useRef<AbortController | null>(null)
   const probe = useCallback(() => {
@@ -213,7 +230,10 @@ export function SignInGate({ registration, originAccepted, children, channels, n
 
   if (state.kind === 'ready' && identity) return children(state.ready.system, () => signOut(state.ready), state.ready.api, identity)
   if (state.kind === 'sign-in') return <SignInScreen api={api} registration={registration} originAccepted={originAccepted} notice={notice}
-    onSignedIn={(session: SessionDto, wallet: BrowserWallet) => { setNotice(null); void enter(session, true, wallet.name) }} />
+    onSignedIn={(session: SessionDto, wallet: BrowserWallet) => { setNotice(null); void enter(session, true, wallet.name) }}
+    onPair={source => setState({ kind: 'pairing', source })} />
+  if (state.kind === 'pairing') return <PairingScreen key={state.source.kind === 'secret' ? 'secret' : state.source.claim.code} api={api} source={state.source}
+    onSignedIn={session => { setNotice(null); void enter(session, true, null) }} onBack={() => setState({ kind: 'sign-in' })} />
   return <main className="connection-page sign-in-page">
     <section className="panel connection-card sign-in-card" aria-labelledby="gate-title">
       <div className="sign-in-head"><SignInBrand /></div>
@@ -225,6 +245,10 @@ export function SignInGate({ registration, originAccepted, children, channels, n
           if (state.retry) void enter(state.retry.session, false, state.retry.walletName)
           else { setState({ kind: 'probing' }); probe() }
         } }]}>{state.message}</StateCard></>}
+      {state.kind === 'already-signed-in' && <><h1 id="gate-title" className="sr-only">Vessel</h1>
+        <StateCard icon={<ShieldCheck size={16} />} tone="info" title="This device is already signed in" actions={[
+          { label: 'Open Vessel', primary: true, onClick: () => { void enter(state.session, false, null) } }]}>
+          The code was not used, so nothing was paired.</StateCard></>}
       {state.kind === 'suspended' && <><h1 id="gate-title" className="sr-only">Vessel</h1>
         <StateCard icon={<Lock size={16} />} tone="bad" title="Journal suspended" actions={[{ label: 'Use another wallet', onClick: () => reloadToSignIn(navigate) }]}>
           The operator of this server has suspended this journal. Contact them to restore access.</StateCard></>}
