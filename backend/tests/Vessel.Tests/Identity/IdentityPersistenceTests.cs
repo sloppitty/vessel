@@ -36,10 +36,10 @@ public sealed class IdentityPersistenceTests
         Assert.Equal(before, await Inventory());
         Assert.Equal(first.Schema.Name, db.Model.GetDefaultSchema());
         Assert.Equal(second.Schema.Name, other.Model.GetDefaultSchema());
-        Assert.Single(await db.Database.GetAppliedMigrationsAsync());
+        Assert.Equal(["20261017155708_InitialIdentity", "20261027213124_DevicePairing"], await db.Database.GetAppliedMigrationsAsync());
         Assert.Empty(await db.Database.GetPendingMigrationsAsync());
         Assert.False(db.Database.HasPendingModelChanges());
-        Assert.Equal(6, db.Model.GetEntityTypes().Count());
+        Assert.Equal(7, db.Model.GetEntityTypes().Count());
         Assert.All(db.Model.GetEntityTypes(), entity => Assert.Equal(first.Schema.Name, entity.GetSchema()));
         Assert.All(db.Model.GetEntityTypes().SelectMany(entity => entity.GetForeignKeys()),
             key => Assert.Equal(first.Schema.Name, key.PrincipalEntityType.GetSchema()));

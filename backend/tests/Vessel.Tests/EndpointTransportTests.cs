@@ -65,7 +65,8 @@ public sealed class EndpointTransportTests
         var endpoints = Endpoints(factory);
         Assert.Equal(
             ["GET /api/auth/config", "GET /health/live", "GET /health/ready",
-             "POST /api/auth/challenge", "POST /api/auth/register", "POST /api/auth/verify"],
+             "POST /api/auth/challenge", "POST /api/auth/pairings/claim", "POST /api/auth/pairings/complete",
+             "POST /api/auth/register", "POST /api/auth/verify"],
             endpoints.Where(endpoint => endpoint.Metadata.GetMetadata<IAllowAnonymous>() is not null)
                 .Select(Name).Order(StringComparer.Ordinal));
         Assert.All(endpoints.Where(endpoint => endpoint.RoutePattern.RawText!.StartsWith("/api/", StringComparison.Ordinal) &&
