@@ -1,6 +1,6 @@
 # Device pairing — sign in on a phone without a wallet
 
-October 27, 2026. Plan for owner review; all open questions answered. It does not authorize implementation.
+October 27, 2026. The owner answered every open question and authorized implementation the same day, delegated to Sonnet developers with orchestrator verification. Verified progress is in [device-pairing-state.md](device-pairing-state.md).
 
 The owner wants to sign in to the same Vessel account on a phone that has no
 wallet. A signed-in desktop shows a QR code; the phone scans it and receives
@@ -337,6 +337,31 @@ One PR, with one adversarial Sol (Codex) review before it opens:
 - **State:** recorded in `device-pairing-state.md`.
 
 No deployment, live migration or release is implied.
+
+## Implementation choices — October 27, 2026
+
+Settled during implementation, within the decisions above:
+
+- **Rate buckets.** Create and approve share their own per-session bucket
+  (10 per 10 minutes), separate from step-up and wallet linking, so pairing
+  attempts never use up a step-up.
+- **Typed codes never contest.** A typed code is only valid while its pairing
+  is `pending`, so a typed claim on a claimed pairing answers
+  `pairing-invalid`. A blind guess therefore cannot cancel a real claim; a
+  second **secret** claim still contests.
+- **Malformed approval codes** (not six digits) answer `request-invalid` and do
+  not count as an attempt; only wrong six-digit codes do.
+- **Wallet removal** cancels all of the user's open pairings, not only those
+  signed by the removed wallet.
+- **Desktop.** The step-up is asked every time Connect a phone starts, even if
+  a grant is still live. A paired session does not show Connect a phone,
+  because it cannot sign a step-up.
+- **Browser check.** The release stack serves `https://localhost`, where the
+  dialog correctly shows the loopback explanation instead of a QR. The browser
+  smoke therefore signs a real `device.pair` step-up and creates and approves
+  pairings through the session API, while the phone side runs the real
+  screens: the link, the typed code and a contested claim. The dialog's
+  QR → approve flow is covered by Vitest, which decodes the rendered QR.
 
 ## Open questions
 
