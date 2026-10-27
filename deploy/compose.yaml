@@ -89,7 +89,7 @@ services:
     restart: unless-stopped
 
   migrate:
-    image: skorcius/vessel:api-${VESSEL_VERSION:-0.3.4}
+    image: skorcius/vessel:api-${VESSEL_VERSION:-0.3.5}
     # EF migrations, then explicit messaging provisioning with the broker administrator.
     # Nothing is migrated or provisioned at API or worker startup.
     entrypoint: ["/app/migrate"]
@@ -107,7 +107,7 @@ services:
     restart: "no"
 
   api:
-    image: skorcius/vessel:api-${VESSEL_VERSION:-0.3.4}
+    image: skorcius/vessel:api-${VESSEL_VERSION:-0.3.5}
     environment:
       <<: *identity-environment
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
@@ -135,7 +135,7 @@ services:
   # The monitor module and the replica-safe event maintenance. worker-notifications runs the same
   # image with the notifications module (deploy/README.md).
   worker:
-    image: skorcius/vessel:api-${VESSEL_VERSION:-0.3.4}
+    image: skorcius/vessel:api-${VESSEL_VERSION:-0.3.5}
     entrypoint: ["/app/worker"]
     environment:
       <<: *identity-environment
@@ -161,7 +161,7 @@ services:
   # The Notification Hub: the notifications subscription, in-app notifications and their retention.
   # It never opens venue tokens, so it needs no credential key ring.
   worker-notifications:
-    image: skorcius/vessel:api-${VESSEL_VERSION:-0.3.4}
+    image: skorcius/vessel:api-${VESSEL_VERSION:-0.3.5}
     entrypoint: ["/app/worker"]
     environment:
       <<: *identity-environment
@@ -183,7 +183,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: skorcius/vessel:web-${VESSEL_VERSION:-0.3.4}
+    image: skorcius/vessel:web-${VESSEL_VERSION:-0.3.5}
     environment:
       VESSEL_API_UPSTREAM: ${VESSEL_API_UPSTREAM:-http://api:8080}
       VESSEL_TRUSTED_PROXY: ${VESSEL_TRUSTED_PROXY:-}

@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+## 0.3.5 - October 27, 2026
+
+Release notes: [docs/releases/v0.3.5.md](docs/releases/v0.3.5.md).
+
+### Added
+
+- Activity shows **Unrealized P&L** for open operations, in Journal and Paper
+  playground, replacing the table's Play column. Hyperliquid, RISEx and Paper
+  (through Hyperliquid) mark the remaining quantity at the venue's current mark
+  price, read server-side through the shared 10-second market-context cache.
+  Lighter, which has no market context, uses the latest refresh's
+  venue-reported figure, and only when that snapshot is newer than the last
+  execution and holds exactly the remaining position. Closed operations show
+  "—"; an open operation that cannot be priced shows "Unavailable", never zero.
+  The tooltip gives the exact value, its source and time, and states that it is
+  before fees and funding. The values are observations: they are read per page
+  outside the Activity version, so a moving price never flags changed history,
+  and they never enter Review, sizing, Overview or Play results.
+
+### Changed
+
+- The linked Play, and Journal this trade, moved into the expanded operation
+  row. Journal this trade replaces "Inspect retrospective eligibility" on closed
+  operations that are not on a Play, since both opened the same preview.
+- The compact Overview and account-detail operation tables are unchanged.
+- Activity page rows gain optional `unrealizedPnlUsd`, `unrealizedPnlSource`,
+  `unrealizedPnlMarkPrice` and `unrealizedPnlAsOfUtc` fields.
+
+### Fixed
+
+- The startup warm-up readiness tests no longer race the three-second warm-up
+  deadline on a busy runner; the deadline now uses the registered
+  `TimeProvider`. Production behaviour is unchanged.
+
+No identity or journal migrations. No configuration changes.
+
 ## 0.3.4 - October 25, 2026
 
 Release notes: [docs/releases/v0.3.4.md](docs/releases/v0.3.4.md).

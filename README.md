@@ -4,11 +4,11 @@ A trading diary for recording decisions, executions, and reflection.
 
 ## Deploy with Docker
 
-See the [Docker deployment guide](deploy/README.md) for the v0.3.4 API and web
+See the [Docker deployment guide](deploy/README.md) for the v0.3.5 API and web
 images, Compose setup, explicit migrations, opt-in Caddy TLS, credential keys,
 backups and isolated restores.
 Both images use `skorcius/vessel` with `api-` and `web-` tags.
-Read the [v0.3.4 release notes](docs/releases/v0.3.4.md) before upgrading.
+Read the [v0.3.5 release notes](docs/releases/v0.3.5.md) before upgrading.
 The order-identity migration has no retained-data upgrade path when imported
 orders, fills or Play order links exist. Sign-in is by Ethereum wallet only
 and needs HTTPS; an installation that used the API token must bind the owner's
