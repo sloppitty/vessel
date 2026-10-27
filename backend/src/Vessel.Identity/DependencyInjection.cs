@@ -39,6 +39,7 @@ public static class DependencyInjection
         services.AddScoped<IdentityTransaction>();
         services.AddScoped<IdentityService>();
         services.AddScoped<IdentityAccountService>();
+        services.AddScoped<DevicePairingService>();
         services.AddScoped(sp => new SessionStore(() => sp.GetRequiredService<IDbContextFactory<IdentityDbContext>>(),
             sp.GetRequiredService<IdentitySettings>(), sp.GetRequiredService<TimeProvider>()));
         services.AddScoped<SessionPrincipal>();

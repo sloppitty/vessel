@@ -17,7 +17,7 @@ public sealed class IdentityAccountService(IdentityTransaction transactions, IDb
                           select new { Session = session, wallet.Address }).ToListAsync(ct);
         return rows.Select(row => new SessionRowDto(row.Session.Id, row.Session.Id == authenticated.Session.Id,
             row.Session.CreatedAt, row.Session.LastSeenAt, row.Session.Remember, row.Session.UserAgentSummary,
-            WalletSignatures.Checksum(row.Address))).ToArray();
+            WalletSignatures.Checksum(row.Address), row.Session.Source)).ToArray();
     }
 
     public Task<bool> RevokeSessionAsync(AuthenticatedSession authenticated, Guid id, CancellationToken ct) =>
@@ -73,7 +73,7 @@ public sealed class IdentityAccountService(IdentityTransaction transactions, IDb
         string origin, CancellationToken ct)
     {
         var address = WalletSignatures.NormalizeAddress(request.Address);
-        if (request.Action is not ("wallet.link" or "wallet.remove") ||
+        if (request.Action is not ("wallet.link" or "wallet.remove" or "device.pair") ||
             (request.Action == "wallet.remove" ? request.Target is null || request.Target == Guid.Empty : request.Target is not null))
             throw IdentityErrors.Error(400, "request-invalid");
         return WithSessionAsync(authenticated, async (db, current, now) =>
@@ -93,8 +93,8 @@ public sealed class IdentityAccountService(IdentityTransaction transactions, IDb
         WithSessionAsync(authenticated, async (db, current, now) =>
         {
             var challenge = await ChallengeAsync(db, current, request.ChallengeId, origin, "step-up", now, ct);
-            if (challenge.Action is not ("wallet.link" or "wallet.remove") ||
-                (challenge.Action == "wallet.link" ? challenge.Target is not null : challenge.Target is null))
+            if (challenge.Action is not ("wallet.link" or "wallet.remove" or "device.pair") ||
+                (challenge.Action == "wallet.remove" ? challenge.Target is null : challenge.Target is not null))
                 throw IdentityErrors.Error(400, "challenge-invalid");
             var signer = await db.Wallets.SingleOrDefaultAsync(x => x.UserId == current.User.Id && x.Address == challenge.Address, ct)
                 ?? throw IdentityErrors.Error(400, "address-invalid");
@@ -156,8 +156,14 @@ public sealed class IdentityAccountService(IdentityTransaction transactions, IDb
             return current.Session.WalletId == id;
         }, ct);
 
-    private async Task<T> WithSessionAsync<T>(AuthenticatedSession authenticated,
+    private Task<T> WithSessionAsync<T>(AuthenticatedSession authenticated,
         Func<IdentityDbContext, AuthenticatedSession, DateTimeOffset, Task<T>> action, CancellationToken ct) =>
+        WithSessionAsync(transactions, clock, authenticated, action, ct);
+
+    // One identity transaction under the user's row lock, with the caller's session and wallet re-read inside it.
+    internal static async Task<T> WithSessionAsync<T>(IdentityTransaction transactions, TimeProvider clock,
+        AuthenticatedSession authenticated, Func<IdentityDbContext, AuthenticatedSession, DateTimeOffset, Task<T>> action,
+        CancellationToken ct) =>
         await transactions.RunAsync(async db =>
         {
             var user = await IdentityTransaction.LockUserAsync(db, authenticated.User.Id, ct)
@@ -172,7 +178,7 @@ public sealed class IdentityAccountService(IdentityTransaction transactions, IDb
             return await action(db, new(session, user, wallet), now);
         }, ct);
 
-    private static async Task RequireGrantAsync(IdentityDbContext db, AuthenticatedSession current, string action,
+    internal static async Task RequireGrantAsync(IdentityDbContext db, AuthenticatedSession current, string action,
         string? target, DateTimeOffset now, CancellationToken ct)
     {
         var session = current.Session;
@@ -221,6 +227,8 @@ internal static class IdentityWalletRemoval
     internal static async Task RemoveAsync(IdentityDbContext db, UserWallet wallet, DateTimeOffset now, CancellationToken ct)
     {
         await RequireRemovableAsync(db, wallet, ct);
+        // An open pairing names this user's signer wallet; cancel them all (as revoked sessions are) before the wallet goes.
+        await DevicePairings.CancelOpenAsync(db, wallet.UserId, ct);
         await db.Sessions.Where(x => x.UserId == wallet.UserId && x.StepUpWalletId == wallet.Id).ExecuteUpdateAsync(update => update
             .SetProperty(x => x.StepUpAction, (string?)null).SetProperty(x => x.StepUpTarget, (string?)null)
             .SetProperty(x => x.StepUpWalletId, (Guid?)null).SetProperty(x => x.StepUpExpiresAt, (DateTimeOffset?)null), ct);

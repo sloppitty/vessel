@@ -17,7 +17,12 @@ public static class IdentityTokens
 
 public static class InvitationCodes
 {
-    private const string Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    internal const string Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+    /// <summary>Crockford folding shared with pairing codes: dashes and whitespace dropped, upper case, I and L read as 1, O as 0.</summary>
+    internal static string Fold(string code) =>
+        new string(code.Where(c => c != '-' && !char.IsWhiteSpace(c)).Select(char.ToUpperInvariant).ToArray())
+            .Replace('I', '1').Replace('L', '1').Replace('O', '0');
     public static string Create()
     {
         var number = new BigInteger(RandomNumberGenerator.GetBytes(16), isUnsigned: true, isBigEndian: true);
@@ -35,8 +40,7 @@ public static class InvitationCodes
     {
         if (code is null) throw IdentityErrors.Error(403, "invitation-required");
         if (code.StartsWith("VSL-", StringComparison.OrdinalIgnoreCase)) code = code[4..];
-        code = new string(code.Where(c => c != '-' && !char.IsWhiteSpace(c)).Select(char.ToUpperInvariant).ToArray())
-            .Replace('I', '1').Replace('L', '1').Replace('O', '0');
+        code = Fold(code);
         if (code.Length != 26 || code.Any(c => !Alphabet.Contains(c))) throw IdentityErrors.Error(403, "invitation-invalid");
         return code;
     }
