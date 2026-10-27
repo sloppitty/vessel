@@ -59,6 +59,15 @@ export interface ActivityOperation {
   playAssociation: 'linked' | 'unassigned' | 'mixed' | 'paper'
   /** The linked Play's current title on Activity pages; null when unlinked or unreadable, absent in a preview. */
   playTitle?: string | null
+  /**
+   * The remaining position's unrealized P&L for an open operation on an Activity page, before fees and funding: the
+   * venue's current mark (`mark`, with the price) or the latest refresh's venue-reported figure (`snapshot`), with the
+   * time it was read. Null when closed, incomplete or unmarked; absent in a preview.
+   */
+  unrealizedPnlUsd?: string | null
+  unrealizedPnlSource?: 'mark' | 'snapshot' | null
+  unrealizedPnlMarkPrice?: string | null
+  unrealizedPnlAsOfUtc?: string | null
   coverage: string[]
 }
 /** An operation with its constituent rows, as a retrospective preview carries it. */
@@ -202,6 +211,15 @@ const validLeverage = (op: Record<string, unknown>) => op.leverageMin === null &
 const isCoverage = (c: unknown): c is ActivityCoverage => isRecord(c) && isGuid(c.accountId) &&
   isNullOr(c.contractId, x => isFilledText(x, 128)) && isFilledText(c.notice, 2000)
 
+// Absent in previews and older fixtures. A value needs its source and time, and only a mark carries a price.
+const validUnrealized = (op: Record<string, unknown>) => {
+  const value = op.unrealizedPnlUsd ?? null, source = op.unrealizedPnlSource ?? null
+  const price = op.unrealizedPnlMarkPrice ?? null, at = op.unrealizedPnlAsOfUtc ?? null
+  if (value === null) return source === null && price === null && at === null
+  return isPlainDecimal(value, decimalLength) && isIsoTimestamp(at) && op.status === 'open' &&
+    (source === 'mark' ? isNonNegativeDecimal(price, decimalLength) : source === 'snapshot' && price === null)
+}
+
 /** One operation row: its facts and the invariants between them, without execution rows. */
 export function isActivityOperation(op: unknown): op is ActivityOperation {
   if (!isRecord(op)) return false
@@ -227,7 +245,8 @@ export function isActivityOperation(op: unknown): op is ActivityOperation {
     !Array.isArray(op.otherFees) || !op.otherFees.every(f => isRecord(f) && isFilledText(f.token, 64) && isPlainDecimal(f.amount, decimalLength)) ||
     !isCount(executionCount) || executionCount === 0 || (op.entryOrderCount as number) > executionCount || (op.exitOrderCount as number) > executionCount ||
     (paper || op.playAssociation === 'linked') !== (op.playId !== null) ||
-    op.playTitle !== undefined && !isNullOr(op.playTitle, x => typeof x === 'string' && x.length <= 200) || op.playTitle != null && op.playId === null) return false
+    op.playTitle !== undefined && !isNullOr(op.playTitle, x => typeof x === 'string' && x.length <= 200) || op.playTitle != null && op.playId === null ||
+    !validUnrealized(op)) return false
   if (paper && (!/^0(?:\.0+)?$/.test(String(op.stablecoinFeesNominalUsd)) || op.otherFees.length !== 0 || op.fundingPaymentCount !== 0 ||
     op.fundingNetUsd !== null || op.totalResultUsd !== null || op.leverage !== null || op.leverageMin !== null || op.leverageMax !== null)) return false
   if (paper && op.status === 'incomplete') return op.coverage.length > 0 && op.netResultUsd === null

@@ -118,6 +118,15 @@ public sealed record ActivityOperationSummaryDto(string Id, Guid AccountId, stri
     public int? LeverageMax { get; init; }
     /// <summary>The linked Play's title, read for the page's rows only; null when unlinked or not readable.</summary>
     public string? PlayTitle { get; init; }
+    /// <summary>
+    /// The remaining position's unrealized P&amp;L for an open operation on this page, before fees and funding: the venue's
+    /// current mark (<c>mark</c>, with the price) or the latest snapshot's venue-reported figure (<c>snapshot</c>), with
+    /// the time it was read. Null when closed, incomplete or unmarked. Read per page; never part of the version.
+    /// </summary>
+    public string? UnrealizedPnlUsd { get; init; }
+    public string? UnrealizedPnlSource { get; init; }
+    public string? UnrealizedPnlMarkPrice { get; init; }
+    public DateTimeOffset? UnrealizedPnlAsOfUtc { get; init; }
     public static ActivityOperationSummaryDto From(ActivityOperationDto o) => new(o.Id, o.AccountId, o.ContractId, o.Direction, o.Status,
         o.OpenedAtUtc, o.ClosedAtUtc, o.LastOccurredAtUtc, o.Quantity, o.TotalEnteredQuantity, o.TotalExitedQuantity, o.OpenQuantity,
         o.AverageEntryPrice, o.AverageExitPrice, o.EntryOrderCount, o.ExitOrderCount, o.FillCount, o.ReportedClosedPnlUsd,
