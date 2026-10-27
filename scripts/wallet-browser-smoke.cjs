@@ -417,6 +417,12 @@ async function main() {
     const pageStranger = await stranger.newPage()
     await pageStranger.goto(base)
     assert.equal((await call(pageStranger, '/api/auth/pairings/complete', 'POST', { remember: true }, undefined, publicRequest)).status, 400, 'no binding cookie, no completion')
+    // Revoking from the desktop signs the paired phones out; the release restore check expects no live session but the operator's.
+    assert.equal((await call(pagePair, '/api/auth/sessions/revoke-others', 'POST', undefined, ownerA)).status, 204)
+    assert.equal((await call(pagePhone, '/api/auth/session')).status, 401)
+    assert.equal((await call(pagePhoneTwo, '/api/auth/session')).status, 401)
+    assert.equal((await call(pagePair, '/api/auth/sign-out', 'POST', { expectedSessionId: pairSession.session.id }, ownerA)).status, 204)
+    pass('revoking other sessions on the desktop signs both paired phones out')
 
     assert.deepEqual(errors, [])
     assert.deepEqual(violations, [])
