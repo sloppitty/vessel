@@ -1,0 +1,54 @@
+# Device pairing — delivery state
+
+October 27, 2026. Branch `t3/device-pairing`. Authority:
+[device-pairing-plan.md](device-pairing-plan.md), including its implementation
+choices. This is implementation and verification state, not a release, a
+deployment or a migration of any installation.
+
+## Implemented
+
+| Area | Delivered |
+| --- | --- |
+| Identity schema | Migration `20261027213124_DevicePairing`: `device_pairings` (hashed secret, typed code, binding and confirmation code; per-state 2-minute deadlines) and `sessions.source` (`wallet` \| `pairing`). Identity schema only; nothing in the journal changes. |
+| API | `device.pair` step-up; create, status, approve, cancel (creating session only); public claim and complete behind the sign-in request guard and binding cookie; `attemptsLeft` on wrong codes; `source` in the sessions list; rate limits; 1,000 unfinished-pairing cap; cleanup; cancellation on suspension, wallet removal and `revoke-sessions`; deletion in the restore reset. |
+| Sessions | `RememberIdleDays` default 10 for every sign-in (30 days absolute unchanged). A paired session uses the step-up signer's wallet and the normal lifetimes. |
+| Desktop | Settings → Sessions → Connect a phone: step-up, QR (always black on white), Show a code to type, approval with the phone's code, cancel on close; loopback origins get an explanation instead of a QR; paired sessions labelled "Paired · …". |
+| Phone | `#pair=` read and stripped on first render; Scan a code from your desktop (`BarcodeDetector`, else lazily loaded `jsqr`; same-origin links only; camera stopped on read, close, unmount and hidden page); Enter a code instead; confirmation screen with Keep me signed in checked by default; "This device is already signed in" when a session exists. |
+| Headers | `Permissions-Policy: camera=(self), microphone=(), geolocation=()`, checked by `verify-release.py`. CSP unchanged. |
+| Dependencies | `uqr` 0.1.3 (MIT) and `jsqr` 1.4.0 (Apache-2.0), exact-pinned, zero-dependency. |
+
+Development used two Sonnet developers with disjoint write scopes (backend and
+frontend); the orchestrator reviewed the diff and ran the checks below.
+
+## Verification
+
+| Command | Result |
+| --- | --- |
+| `dotnet test backend/Vessel.slnx -c Release` with a disposable `Vessel_TEST_POSTGRES` | 4,030 passed, 0 failed, 17 skipped (RabbitMQ-only tests without `Vessel_TEST_EVENT_RABBIT`). Includes 40 device-pairing tests and the endpoint inventory/isolation cases for the new routes. |
+| `pnpm --filter vessel-frontend typecheck`, `lint`, `build` | Passed. |
+| `pnpm --filter vessel-frontend test` | 4,217 passed in three consecutive full runs. One earlier run, made while the backend suite loaded the host, reported a failure that did not reproduce (its output was not kept). |
+| `python3 -m unittest discover -s scripts -p 'test_*.py'`; `git diff --check` | 90 passed; clean. |
+| `python3 scripts/verify-release.py --browser-module … --wallet-browsers chromium,firefox --wallet-browser-image mcr.microsoft.com/playwright:v1.58.2-noble` | **253 passed**, exit 0. Matrix: HTTP 45, TLS 48, image 5, monitor 26, notifications 22, restore 15, security 8, wallet 28, worker 10. Chromium 145 (local) and Firefox 146.0.1 (remote container), 16 browser checks each. |
+
+Browser checks added to `scripts/wallet-browser-smoke.cjs`, in both engines:
+the loopback explanation; the QR link (secret stripped from the address, Keep
+me signed in checked by default, a wrong code counted, approval, signed in,
+"Paired" in Sessions, no second completion); the typed code entered in lower
+case with a space and Keep me signed in unchecked; a contested claim shown on
+both phones; completion refused without a binding cookie; and revoking other
+sessions on the desktop signing both phones out.
+
+## Not verified
+
+- **Adversarial Sol (Codex) review.** It was started but could not run: the
+  provider answered `503 auth_unavailable: no candidate accounts with usable
+  quota` for `gpt-6.1-sol`.
+- **Scanner with a camera.** The in-app scanner is covered by Vitest with
+  mocked `getUserMedia`/`BarcodeDetector`; no Chromium fake-camera run was
+  made.
+- **Desktop QR in a browser.** The packaged stack is served on `localhost`, so
+  the dialog shows the loopback explanation there. Its QR → approve flow is
+  covered by Vitest (which decodes the rendered QR).
+- **A real phone.** Owner check pending on an HTTPS origin the phone can reach
+  (the in-app camera needs HTTPS; a plain-HTTP origin can use the system camera
+  app or the typed code).

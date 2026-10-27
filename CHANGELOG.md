@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Added
+
+- **Connect a phone.** Sign in on a phone or tablet without a wallet: Settings
+  → Sessions → Connect a phone asks for one wallet signature and shows a
+  single-use QR code, valid for two minutes, with an optional code to type.
+  The phone scans it from Vessel's sign-in screen (Scan a code from your
+  desktop) or with its camera app, then shows a six-digit code that must be
+  typed on the computer to approve it. The phone gets its own session, listed
+  as "Paired" and revocable like any other. A second device scanning the same
+  code cancels it.
+
+### Changed
+
+- "Keep me signed in" now lasts 10 days idle instead of 14 (30 days absolute,
+  unchanged). Installations that set `Vessel:Identity:Session:RememberIdleDays`
+  keep their value.
+- The web server sends `Permissions-Policy: camera=(self), microphone=(),
+  geolocation=()`.
+
+### Upgrade
+
+- New identity migration `20261027213124_DevicePairing`; apply it with the
+  usual explicit `migrate` step.
+
 ## 0.3.5 - October 27, 2026
 
 Release notes: [docs/releases/v0.3.5.md](docs/releases/v0.3.5.md).
