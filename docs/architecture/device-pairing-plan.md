@@ -141,7 +141,50 @@ All routes are `no-store`, use ProblemDetails `code`s and have bodies capped at
 | `POST /api/auth/pairings/complete` | public + binding cookie | `{remember}` | `{status}`; on `signed-in` also `SessionDto` and the session cookie |
 
 - `status`: `pending`, `claimed`, `approved`, `completed`, `expired`,
-  `cancelled`, `contested`.
+  `cancelled`, `contested`. `expired` is reported for any unfinished pairing
+  past its current deadline; the row may still hold the earlier status.
+
+**Exact shapes** (camelCase JSON; times ISO-8601 UTC):
+
+- **Deadlines.** `pending`: `created_at + 2 min`. `claimed`: `claimed_at + 2
+  min` for approval. `approved`: `approved_at + 2 min` for completion. Every
+  `expiresAt` in a response is the deadline of the current state.
+- **Create** `POST /api/auth/pairings` (no body): 201
+  `{id: uuid, secret: string, typedCode: string, expiresAt}`. `secret` is 32
+  random bytes in base64url without padding (43 characters). `typedCode` is 10
+  Crockford base32 characters shown as `XXXXX-XXXXX`.
+- **Desktop status** `GET /api/auth/pairings/{id:guid}`:
+  `{status, expiresAt, device: string | null}`. `device` is the claiming
+  phone's user-agent summary, present from `claimed` on.
+- **Approve** `POST /api/auth/pairings/{id:guid}/approve` `{code: "123456"}`:
+  204 and status `approved`. Only valid while `claimed`, otherwise 400
+  `pairing-invalid` (or `pairing-expired` past the deadline). A wrong code is
+  400 `pairing-code-invalid` with an `attemptsLeft` extension; the third wrong
+  code answers `attemptsLeft: 0` and cancels the pairing.
+- **Cancel** `DELETE /api/auth/pairings/{id:guid}`: 204, idempotent for
+  unfinished pairings of the creating session.
+- **Claim** `POST /api/auth/pairings/claim` `{secret}` or `{typedCode}`: 200
+  `{code: "123456", expiresAt, journal: {displayName, wallet}}`, where
+  `wallet` is the signer's EIP-55 address and `expiresAt` the approval
+  deadline. Unknown, used, wrong-origin, finished or mistyped →
+  400 `pairing-invalid`; past the claim deadline → 400 `pairing-expired`; a
+  pairing that is already claimed → 409 `pairing-contested` and the pairing
+  becomes `contested`. Sets or reuses the binding cookie.
+- **Complete** `POST /api/auth/pairings/complete` `{remember: boolean}`, polled
+  by the phone: 200 `{status: "waiting"}` while `claimed`; 200
+  `{status: "signed-in", session: SessionDto}` with the session cookie set and
+  the binding cookie cleared once `approved`; 200 `{status: "expired" |
+  "cancelled" | "contested"}` for the claiming phone when the pairing ended.
+  No binding cookie, or one that matches no claimed pairing → 400
+  `pairing-invalid`.
+- **Sessions list** `GET /api/auth/sessions` rows gain
+  `source: "wallet" | "pairing"`.
+- **Step-up.** The challenge accepts `action: "device.pair"` with no `target`;
+  `POST /api/auth/pairings` without a live `device.pair` grant answers 403
+  `step-up-required` with `action: "device.pair"`.
+- **Already signed-in phone.** If the phone already has a valid session when
+  it opens a `#pair=` link, the frontend removes the fragment and shows
+  "This device is already signed in" instead of pairing.
 - **New codes:** 400 `pairing-invalid` (unknown, used or wrong binding), 400
   `pairing-expired`, 400 `pairing-code-invalid` (with `attemptsLeft`), 409
   `pairing-contested`.
