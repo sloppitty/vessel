@@ -243,6 +243,11 @@ schema only. Nothing in the journal schema changes.
 - The hourly identity cleanup deletes finished and expired pairings after a day.
 - Suspension, wallet removal and `identity revoke-sessions` cancel the user's
   open pairings in the same transaction.
+- Ending the creating session (sign-out, revoking it or Sign out other
+  sessions) cancels the pairings it started, in the same transaction. Completion
+  also requires that session to be still signed in, so an approval never
+  outlives the desktop that gave it (for example after an idle lapse). Sessions
+  already issued to a phone stay independent of the desktop.
 - The restore reset deletes all pairings.
 - Plus `sessions.source text not null default 'wallet'`.
 

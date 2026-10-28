@@ -28,6 +28,7 @@ public sealed class IdentityAccountService(IdentityTransaction transactions, IDb
             session.RevokedAt ??= now;
             session.RevokeReason ??= session.Id == current.Session.Id ? "sign-out" : "revoked";
             IdentityWalletRemoval.ClearGrant(session);
+            await DevicePairings.CancelOpenAsync(db, x => x.UserId == current.User.Id && x.CreatedSessionId == session.Id, ct);
             return session.Id == current.Session.Id;
         }, ct);
 
@@ -36,6 +37,7 @@ public sealed class IdentityAccountService(IdentityTransaction transactions, IDb
         {
             await db.Sessions.Where(x => x.UserId == current.User.Id && x.Id != current.Session.Id && x.RevokedAt == null)
                 .ExecuteUpdateAsync(update => update.SetProperty(x => x.RevokedAt, now).SetProperty(x => x.RevokeReason, "revoked"), ct);
+            await DevicePairings.CancelOpenAsync(db, x => x.UserId == current.User.Id && x.CreatedSessionId != current.Session.Id, ct);
             return true;
         }, ct);
 

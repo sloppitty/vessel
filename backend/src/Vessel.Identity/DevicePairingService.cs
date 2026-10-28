@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Common;
@@ -18,6 +19,11 @@ internal static class DevicePairings
     // Callers hold the identity write lock. A null user cancels every user's open pairings.
     internal static Task<int> CancelOpenAsync(IdentityDbContext db, Guid? userId, CancellationToken ct) =>
         db.Pairings.Where(x => (userId == null || x.UserId == userId) && Open.Contains(x.Status))
+            .ExecuteUpdateAsync(update => update.SetProperty(x => x.Status, "cancelled"), ct);
+
+    // Callers hold the identity write lock. Ending a session (sign-out, revocation) cancels the pairings it started.
+    internal static Task<int> CancelOpenAsync(IdentityDbContext db, Expression<Func<DevicePairing, bool>> created, CancellationToken ct) =>
+        db.Pairings.Where(created).Where(x => Open.Contains(x.Status))
             .ExecuteUpdateAsync(update => update.SetProperty(x => x.Status, "cancelled"), ct);
 
     // The 6-digit code is salted by the pairing so equal codes never share a hash.
@@ -205,7 +211,10 @@ public sealed class DevicePairingService(IdentityTransaction transactions, IDbCo
             var user = await IdentityTransaction.LockUserAsync(db, pairing.UserId, ct);
             var wallet = pairing.SignerWalletId is { } signer
                 ? await db.Wallets.SingleOrDefaultAsync(x => x.UserId == pairing.UserId && x.Id == signer, ct) : null;
-            if (user is not { Status: "active" } || wallet is null)
+            // The approving desktop must still be signed in: a revoked or ended session's approval grants nothing.
+            var creator = await db.Sessions.AnyAsync(x => x.Id == pairing.CreatedSessionId && x.UserId == pairing.UserId &&
+                x.RevokedAt == null && x.IdleExpiresAt > now && x.AbsoluteExpiresAt > now, ct);
+            if (user is not { Status: "active" } || wallet is null || !creator)
             {
                 pairing.Status = "cancelled";
                 return new PairingCompletionResult("cancelled");

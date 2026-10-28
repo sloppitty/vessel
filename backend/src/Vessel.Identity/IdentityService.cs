@@ -125,6 +125,7 @@ public sealed class IdentityService(IdentityTransaction transactions, IdentitySe
             var now = clock.GetUtcNow();
             await db.Sessions.Where(x => x.Id == expectedSession && x.UserId == authenticated.User.Id && x.RevokedAt == null)
                 .ExecuteUpdateAsync(update => update.SetProperty(x => x.RevokedAt, now).SetProperty(x => x.RevokeReason, "sign-out"), ct);
+            await DevicePairings.CancelOpenAsync(db, x => x.UserId == authenticated.User.Id && x.CreatedSessionId == expectedSession, ct);
             return true;
         }, ct);
     }
