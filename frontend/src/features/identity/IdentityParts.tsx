@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Check, ChevronRight, Clock } from 'lucide-react'
 import { sourceHue } from '@/components/accounts/identity'
 import { VesselMark } from '@/components/brand/VesselMark'
@@ -88,10 +88,18 @@ export const pairingPollMs = 2_000
 /** Every pairing deadline is two minutes from the start of its state. */
 const pairingDeadlineMs = 120_000
 
-/** Time left until a pairing deadline, measured from when the answer arrived; the server decides when it really ends. */
+/**
+ * Time left until a pairing deadline, measured from when the answer arrived; the server decides when it really ends.
+ * `onExpired` runs once per deadline (the countdown repeats it every second at zero); key the component by the deadline.
+ */
 export function Deadline({ expiresAt, onExpired }: { expiresAt: string; onExpired: () => void }) {
   const [lifetime] = useState(() => Math.max(0, Math.min(pairingDeadlineMs, Date.parse(expiresAt) - Date.now() || 0)))
-  const seconds = useCountdown(lifetime, onExpired)
+  const fired = useRef(false)
+  const seconds = useCountdown(lifetime, useCallback(() => {
+    if (fired.current) return
+    fired.current = true
+    onExpired()
+  }, [onExpired]))
   return <span className="message-timer pairing-timer" role="timer" aria-label={`Expires in ${clock(seconds ?? 0)}`}>
     <Clock size={13} aria-hidden="true" />{clock(seconds ?? 0)}</span>
 }

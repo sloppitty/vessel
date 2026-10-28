@@ -56,6 +56,8 @@ export function PairingScreen({ api, source, onSignedIn, onBack }: PairingScreen
   const [state, setState] = useState<State>(() => source.kind === 'claimed' ? { step: 'waiting', claim: source.claim } : { step: 'claiming' })
   const [remember, setRemember] = useState(true)
   const rememberNow = useRef(remember)
+  // A completion in flight may issue the session with the choice it carried, so the box holds still until it answers.
+  const completing = useRef(false)
   const signedIn = useRef(onSignedIn)
   useEffect(() => { rememberNow.current = remember; signedIn.current = onSignedIn }, [remember, onSignedIn])
 
@@ -81,6 +83,7 @@ export function PairingScreen({ api, source, onSignedIn, onBack }: PairingScreen
     let busy = false
     const tick = async () => {
       busy = true
+      completing.current = true
       try {
         const result = await api.completePairing({ remember: rememberNow.current }, controller.signal)
         if (controller.signal.aborted) return
@@ -94,6 +97,7 @@ export function PairingScreen({ api, source, onSignedIn, onBack }: PairingScreen
         if (!retry || ++failures >= 5) { setState(pairingFailure(cause)); return }
       } finally {
         busy = false
+        completing.current = false
       }
       timer = setTimeout(() => { void tick() }, pairingPollMs)
     }
@@ -117,7 +121,11 @@ export function PairingScreen({ api, source, onSignedIn, onBack }: PairingScreen
             <p className="pairing-digits"><span className="sr-only">Confirmation code: </span>{groupedCode(state.claim.code)}</p>
             <p className="pairing-instruction">Type this code in Vessel on your computer.</p>
           </div>
-          <label className="sign-in-remember"><input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)} />Keep me signed in on this device</label>
+          <label className="sign-in-remember"><input type="checkbox" checked={remember} onChange={event => {
+            if (completing.current) return
+            rememberNow.current = event.target.checked
+            setRemember(event.target.checked)
+          }} />Keep me signed in on this device</label>
           <p className="muted pairing-wait" role="status"><span className="identity-spinner" aria-hidden="true" />Waiting for approval…
             <Deadline key={state.claim.expiresAt} expiresAt={state.claim.expiresAt} onExpired={expired} /></p>
           <div className="sign-in-actions"><Button size="lg" variant="outline" onClick={onBack}>Cancel</Button></div>
