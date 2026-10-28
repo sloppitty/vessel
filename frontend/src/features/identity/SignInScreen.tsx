@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { AlertTriangle, ArrowLeft, ArrowLeftRight, Ban, CircleAlert, Clock, KeyRound, Lock, Plug, ShieldCheck, Ticket, Unplug, WalletMinimal, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowLeftRight, Ban, CircleAlert, Clock, Keyboard, KeyRound, Lock, Plug, ScanLine, ShieldCheck, Ticket, Unplug, WalletMinimal, X } from 'lucide-react'
 import { challengeAddress, displayNameLimit, type PublicAuthApi, type RegistrationPolicy, type SessionDto } from '@/api/auth'
 import { ApiError } from '@/api/errors'
 import { SourceChip } from '@/components/accounts/AccountIdentity'
@@ -7,6 +7,10 @@ import { Button } from '@/components/ui/button'
 import { InfoTip } from '@/components/ui/info-tip'
 import { checksumAddress } from '@/lib/eip55'
 import { Input } from '@/components/ui/input'
+import { cameraUsable } from './pairing-link'
+import { PairingScanner } from './PairingScanner'
+import type { PairingSource } from './PairingScreen'
+import { TypedCodeEntry } from './TypedCodeEntry'
 import { initialSignIn, signIn, type SignInError, type SignInEvent, type SignInState } from './sign-in-machine'
 import { challengeLifetime, clock, useCountdown } from './countdown'
 import { MessagePreview, SignInBrand, SignInSteps, StateCard, UserAvatar, WalletButton, WalletMark, type StateAction } from './IdentityParts'
@@ -23,13 +27,16 @@ interface SignInScreenProps {
   originAccepted: boolean
   notice: string | null
   onSignedIn: (session: SessionDto, wallet: BrowserWallet) => void
+  /** A phone with no wallet pairs with a signed-in desktop: a scanned secret or a typed code's claim opens the pairing screen. */
+  onPair?: (source: PairingSource) => void
   /** Tests start from a given state; the app always starts at choose. */
   initialState?: SignInState
 }
 
 /** Wallet sign-in: choose → connecting → signing → verifying → signed in, or create a journal for a new wallet. */
-export function SignInScreen({ api, registration, originAccepted, notice, onSignedIn, initialState = initialSignIn }: SignInScreenProps) {
+export function SignInScreen({ api, registration, originAccepted, notice, onSignedIn, onPair, initialState = initialSignIn }: SignInScreenProps) {
   const [state, dispatchState] = useReducer(signIn, initialState)
+  const [view, setView] = useState<'wallet' | 'scan' | 'type'>('wallet')
   const [remember, setRemember] = useState(false)
   const { wallets, settled } = useBrowserWallets()
   const [lastRdns] = useState(readLastWallet)
@@ -144,11 +151,15 @@ export function SignInScreen({ api, registration, originAccepted, notice, onSign
 
   const step = state.step === 'registration' ? 'create' : state.step === 'signing' || state.step === 'verifying' ? 'sign'
     : state.step === 'failed' && state.address ? 'sign' : 'connect'
+  const pairingView = onPair && state.step === 'choose' && view !== 'wallet' ? view : null
   return <main className="connection-page sign-in-page">
     <section className="panel connection-card sign-in-card" aria-labelledby="sign-in-title" aria-busy={state.step === 'connecting' || state.step === 'verifying'}>
-      <div className="sign-in-head"><SignInBrand /><SignInSteps current={step} withCreate={state.step === 'registration'} /></div>
-      {state.step === 'choose' && <ChooseWallet wallets={wallets} settled={settled} lastRdns={lastRdns} registration={registration}
-        originAccepted={originAccepted} notice={notice} onChoose={wallet => { void connect(wallet) }} />}
+      {pairingView === 'scan' && onPair && <PairingScanner onSecret={secret => onPair({ kind: 'secret', secret })} onType={() => setView('type')} onBack={() => setView('wallet')} />}
+      {pairingView === 'type' && onPair && <TypedCodeEntry api={api} onClaimed={claim => onPair({ kind: 'claimed', claim })} onBack={() => setView('wallet')} />}
+      {!pairingView && <div className="sign-in-head"><SignInBrand /><SignInSteps current={step} withCreate={state.step === 'registration'} /></div>}
+      {state.step === 'choose' && !pairingView && <ChooseWallet wallets={wallets} settled={settled} lastRdns={lastRdns} registration={registration}
+        originAccepted={originAccepted} notice={notice} onChoose={wallet => { void connect(wallet) }}
+        {...onPair ? { pairing: { camera: cameraUsable(), onScan: () => setView('scan'), onType: () => setView('type') } } : {}} />}
       {state.step === 'connecting' && <Pending wallet={state.wallet} title={`Open ${state.wallet.name} to connect`}
         detail="Approve the connection request in the wallet. Vessel only reads your address."
         actions={<><Button variant="ghost" onClick={reset}><ArrowLeft size={15} aria-hidden="true" />Other wallets</Button><Button variant="outline" onClick={reset}>Cancel</Button></>} />}
@@ -163,9 +174,11 @@ export function SignInScreen({ api, registration, originAccepted, notice, onSign
   </main>
 }
 
-function ChooseWallet({ wallets, settled, lastRdns, registration, originAccepted, notice, onChoose }: {
+function ChooseWallet({ wallets, settled, lastRdns, registration, originAccepted, notice, onChoose, pairing }: {
   wallets: BrowserWallet[]; settled: boolean; lastRdns: string | null; registration: RegistrationPolicy; originAccepted: boolean
   notice: string | null; onChoose: (wallet: BrowserWallet) => void
+  /** Present when pairing is offered: whether this browser can use a camera, and the two ways in. */
+  pairing?: { camera: boolean; onScan: () => void; onType: () => void }
 }) {
   return <>
     <h1 id="sign-in-title">Sign in to Vessel</h1>
@@ -180,6 +193,15 @@ function ChooseWallet({ wallets, settled, lastRdns, registration, originAccepted
       </div> : settled ? <StateCard icon={<WalletMinimal size={16} />} title="No browser wallet found" actions={[{ label: 'Reload', primary: true, onClick: () => window.location.reload() }]}>
         Install a wallet extension, or open Vessel in your wallet app's browser, then reload this page.
       </StateCard> : <p className="muted wallet-searching" role="status">Looking for browser wallets…</p>}
+      {pairing && <>
+        <div className="identity-separator" id="pairing-heading">Signed in on a computer?</div>
+        {pairing.camera
+          ? <Button variant="outline" size="lg" onClick={pairing.onScan}><ScanLine size={16} aria-hidden="true" />Scan a code from your desktop</Button>
+          : <div className="pairing-fallback" role="group" aria-labelledby="pairing-heading">
+            <p className="muted">This browser can’t use the camera here. Scan the code from your computer with your phone’s camera app, or</p>
+            <Button variant="outline" onClick={pairing.onType}><Keyboard size={16} aria-hidden="true" />Enter a code instead</Button>
+          </div>}
+      </>}
       <div className="sign-in-foot">
         <span className="sign-in-assure"><ShieldCheck size={15} aria-hidden="true" />No transaction, no gas, no approvals.
           <InfoTip label="What signing in means">{signingMeaning}</InfoTip></span>

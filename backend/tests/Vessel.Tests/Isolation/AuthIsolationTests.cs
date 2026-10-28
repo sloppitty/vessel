@@ -199,6 +199,44 @@ public sealed class AuthIsolationTests(WalletIsolationApi api) : IClassFixture<W
     }
 
     [PostgresFact]
+    [Covers("POST", "/api/auth/pairings")]
+    [Covers("GET", "/api/auth/pairings/{id:guid}")]
+    [Covers("POST", "/api/auth/pairings/{id:guid}/approve")]
+    [Covers("DELETE", "/api/auth/pairings/{id:guid}")]
+    public async Task Pairings_are_visible_and_actionable_only_by_the_session_that_created_them()
+    {
+        var (a, b) = await api.Owners();
+        await Grant(a, "device.pair");
+        var created = await a.Post("/api/auth/pairings", expected: HttpStatusCode.Created);
+        var id = created.GetProperty("id").GetGuid();
+        var secret = created.GetProperty("secret").GetString()!;
+        using var phone = api.Client();
+        var claim = await phone.PostAsJsonAsync("/api/auth/pairings/claim", new { secret });
+        var code = (await Isolated.Json(claim, HttpStatusCode.OK)).GetProperty("code").GetString()!;
+
+        // B's status, approval (with the right code) and cancel of A's pairing answer exactly like an unknown one.
+        await Isolated.NotFound(b, id, Isolated.Request(HttpMethod.Get, pairing => $"/api/auth/pairings/{pairing}"), code: "not-found");
+        await Isolated.NotFound(b, id, Isolated.Request(HttpMethod.Post, pairing => $"/api/auth/pairings/{pairing}/approve", _ => new { code }), code: "not-found");
+        await Isolated.NotFound(b, id, Isolated.Request(HttpMethod.Delete, pairing => $"/api/auth/pairings/{pairing}"), code: "not-found");
+        Assert.Equal("claimed", (await a.GetJson($"/api/auth/pairings/{id}")).GetProperty("status").GetString());
+
+        // B's own pairing neither cancels A's nor shows up in A's views; A's secret and typed code reveal nothing of B's.
+        await Grant(b, "device.pair");
+        var other = await b.Post("/api/auth/pairings", expected: HttpStatusCode.Created);
+        Isolated.NoLeak(await a.GetText($"/api/auth/pairings/{id}"), other.GetProperty("id").GetGuid(), other.GetProperty("secret").GetString()!);
+        Assert.Equal("claimed", (await a.GetJson($"/api/auth/pairings/{id}")).GetProperty("status").GetString());
+        await Isolated.NotFound(a, other.GetProperty("id").GetGuid(), Isolated.Request(HttpMethod.Get, pairing => $"/api/auth/pairings/{pairing}"), code: "not-found");
+        await a.Post($"/api/auth/pairings/{id}/approve", new { code }, HttpStatusCode.NoContent);
+        using var completed = await phone.PostAsJsonAsync("/api/auth/pairings/complete", new { remember = false });
+        var session = (await Isolated.Json(completed, HttpStatusCode.OK)).GetProperty("session");
+        // The phone belongs to A: its session is A's user, never B's.
+        Assert.Equal(a.Id, session.GetProperty("user").GetProperty("id").GetGuid());
+        Assert.Equal("pending", (await b.GetJson($"/api/auth/pairings/{other.GetProperty("id").GetGuid()}")).GetProperty("status").GetString());
+        await b.Send(HttpMethod.Delete, $"/api/auth/pairings/{other.GetProperty("id").GetGuid()}", expected: HttpStatusCode.NoContent);
+        Assert.Equal("completed", (await a.GetJson($"/api/auth/pairings/{id}")).GetProperty("status").GetString());
+    }
+
+    [PostgresFact]
     [Covers("PATCH", "/api/auth/profile")]
     [Covers("POST", "/api/auth/sessions/revoke-others")]
     [Covers("POST", "/api/auth/sign-out")]

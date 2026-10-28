@@ -90,6 +90,7 @@ public static class SignInMessage
             "link" when sessionWallet is not null =>
                 $"Link this wallet to the Vessel journal signed in with {WalletSignatures.Checksum(sessionWallet)}. This is not a transaction.",
             "step-up" when action == "wallet.link" => "Confirm adding a sign-in wallet to your Vessel journal. This is not a transaction.",
+            "step-up" when action == "device.pair" => "Confirm connecting a new device to your Vessel journal. This is not a transaction.",
             "step-up" when action == "wallet.remove" && targetWallet is not null =>
                 $"Confirm removing sign-in wallet {WalletSignatures.Checksum(targetWallet)} from your Vessel journal. This is not a transaction.",
             _ => throw new ArgumentException("Invalid signature purpose.")

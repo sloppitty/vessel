@@ -49,7 +49,7 @@ public sealed class IdentityService(IdentityTransaction transactions, IdentitySe
                     var user = await IdentityTransaction.LockUserAsync(db, wallet.UserId, ct);
                     if (user is null || user.Status != "active") throw IdentityErrors.Error(403, "user-suspended");
                     wallet.LastUsedAt = now;
-                    var issued = await IssueSessionAsync(db, user, wallet, request.Remember, previousSession, userAgent, now, ct);
+                    var issued = await IssueSessionAsync(settings, db, user, wallet, request.Remember, previousSession, userAgent, now, "wallet", ct);
                     return (new VerificationResult("signed-in", issued), (ProblemException?)null);
                 }
                 CheckRegistrationPolicy(challenge.Address);
@@ -113,7 +113,7 @@ public sealed class IdentityService(IdentityTransaction transactions, IdentitySe
             var wallet = new UserWallet { Id = Guid.NewGuid(), UserId = user.Id, Address = pending.Address, AddedAt = now, LastUsedAt = now };
             db.Users.Add(user);
             db.Wallets.Add(wallet);
-            return await IssueSessionAsync(db, user, wallet, request.Remember, previousSession, userAgent, now, ct);
+            return await IssueSessionAsync(settings, db, user, wallet, request.Remember, previousSession, userAgent, now, "wallet", ct);
         }, ct);
     }
 
@@ -125,6 +125,7 @@ public sealed class IdentityService(IdentityTransaction transactions, IdentitySe
             var now = clock.GetUtcNow();
             await db.Sessions.Where(x => x.Id == expectedSession && x.UserId == authenticated.User.Id && x.RevokedAt == null)
                 .ExecuteUpdateAsync(update => update.SetProperty(x => x.RevokedAt, now).SetProperty(x => x.RevokeReason, "sign-out"), ct);
+            await DevicePairings.CancelOpenAsync(db, x => x.UserId == authenticated.User.Id && x.CreatedSessionId == expectedSession, ct);
             return true;
         }, ct);
     }
@@ -154,8 +155,9 @@ public sealed class IdentityService(IdentityTransaction transactions, IdentitySe
             throw IdentityErrors.Error(403, "registration-closed");
     }
 
-    private async Task<IssuedSession> IssueSessionAsync(IdentityDbContext db, IdentityUser user, UserWallet wallet,
-        bool remember, string? previous, string? userAgent, DateTimeOffset now, CancellationToken ct)
+    // Shared with device pairing, which issues the same row with source "pairing" and the signer's wallet.
+    internal static async Task<IssuedSession> IssueSessionAsync(IdentitySettings settings, IdentityDbContext db, IdentityUser user,
+        UserWallet wallet, bool remember, string? previous, string? userAgent, DateTimeOffset now, string source, CancellationToken ct)
     {
         if (IdentityTokens.Valid(previous))
         {
@@ -173,7 +175,8 @@ public sealed class IdentityService(IdentityTransaction transactions, IdentitySe
         {
             Id = Guid.NewGuid(), UserId = user.Id, WalletId = wallet.Id, TokenHash = IdentityTokens.Hash(token),
             Remember = remember, CreatedAt = now, LastSeenAt = now, IdleExpiresAt = now + settings.IdleLifetime(remember),
-            AbsoluteExpiresAt = now + settings.AbsoluteLifetime(remember), UserAgentSummary = IdentityText.UserAgent(userAgent)
+            AbsoluteExpiresAt = now + settings.AbsoluteLifetime(remember), UserAgentSummary = IdentityText.UserAgent(userAgent),
+            Source = source
         };
         db.Sessions.Add(session);
         return new(token, new AuthenticatedSession(session, user, wallet).ToDto(settings));

@@ -75,6 +75,35 @@ public sealed class IdentitySession
     public Guid? StepUpWalletId { get; set; }
     public DateTimeOffset? StepUpExpiresAt { get; set; }
     public string? UserAgentSummary { get; set; }
+    /// <summary>How the session was issued, for labels only: <c>wallet</c> (signature) or <c>pairing</c> (device pairing).</summary>
+    public string Source { get; set; } = "wallet";
+}
+
+/// <summary>
+/// A signed-in desktop connecting a new device without a wallet (device-pairing-plan.md). Only SHA-256 hashes of the
+/// secrets are kept. <see cref="ExpiresAt"/> is the deadline of the current <see cref="Status"/>; an unfinished row
+/// past it is reported as <c>expired</c> even while it still holds its earlier status.
+/// </summary>
+public sealed class DevicePairing
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public Guid CreatedSessionId { get; set; }
+    /// <summary>The wallet that signed the <c>device.pair</c> step-up; null only once the wallet was removed and the pairing cancelled.</summary>
+    public Guid? SignerWalletId { get; set; }
+    public byte[] SecretHash { get; set; } = [];
+    public byte[] TypedCodeHash { get; set; } = [];
+    public string Origin { get; set; } = "";
+    public string Status { get; set; } = "pending";
+    public byte[]? BindingHash { get; set; }
+    public byte[]? CodeHash { get; set; }
+    public int CodeAttempts { get; set; }
+    public string? DeviceSummary { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset? ClaimedAt { get; set; }
+    public DateTimeOffset? ApprovedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
 }
 
 public sealed class Invitation
@@ -98,6 +127,7 @@ public sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> option
     public DbSet<PendingRegistration> Registrations => Set<PendingRegistration>();
     public DbSet<IdentitySession> Sessions => Set<IdentitySession>();
     public DbSet<Invitation> Invitations => Set<Invitation>();
+    public DbSet<DevicePairing> Pairings => Set<DevicePairing>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -127,13 +157,34 @@ public sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> option
         registrations.HasIndex(x => x.ExpiresAt);
         var sessions = modelBuilder.Entity<IdentitySession>();
         sessions.ToTable("sessions", table =>
-            table.HasCheckConstraint("ck_sessions_live_wallet", "revoked_at IS NOT NULL OR wallet_id IS NOT NULL"));
+        {
+            table.HasCheckConstraint("ck_sessions_live_wallet", "revoked_at IS NOT NULL OR wallet_id IS NOT NULL");
+            table.HasCheckConstraint("ck_sessions_source", "source IN ('wallet', 'pairing')");
+        });
         sessions.Property(x => x.UserAgentSummary).HasMaxLength(80);
+        sessions.Property(x => x.Source).HasDefaultValue("wallet");
         sessions.HasIndex(x => x.TokenHash).IsUnique();
         sessions.HasIndex(x => new { x.UserId, x.CreatedAt });
         sessions.HasOne<IdentityUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
         sessions.HasOne<UserWallet>().WithMany().HasForeignKey(x => x.WalletId).OnDelete(DeleteBehavior.SetNull);
         sessions.HasOne<UserWallet>().WithMany().HasForeignKey(x => x.StepUpWalletId).OnDelete(DeleteBehavior.SetNull);
+        var pairings = modelBuilder.Entity<DevicePairing>();
+        pairings.ToTable("device_pairings", table =>
+        {
+            table.HasCheckConstraint("ck_device_pairings_status",
+                "status IN ('pending', 'claimed', 'approved', 'completed', 'cancelled', 'contested', 'expired')");
+            // Like sessions.wallet_id: an unfinished pairing always names the wallet that signed for it.
+            table.HasCheckConstraint("ck_device_pairings_live_wallet",
+                "signer_wallet_id IS NOT NULL OR status NOT IN ('pending', 'claimed', 'approved')");
+        });
+        pairings.Property(x => x.DeviceSummary).HasMaxLength(80);
+        pairings.HasIndex(x => x.SecretHash).IsUnique();
+        pairings.HasIndex(x => x.TypedCodeHash).IsUnique().HasFilter("status IN ('pending', 'claimed', 'approved')");
+        pairings.HasIndex(x => x.ExpiresAt);
+        pairings.HasIndex(x => new { x.UserId, x.Status });
+        pairings.HasOne<IdentityUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+        pairings.HasOne<IdentitySession>().WithMany().HasForeignKey(x => x.CreatedSessionId).OnDelete(DeleteBehavior.Cascade);
+        pairings.HasOne<UserWallet>().WithMany().HasForeignKey(x => x.SignerWalletId).OnDelete(DeleteBehavior.SetNull);
         var invitations = modelBuilder.Entity<Invitation>();
         invitations.ToTable("invitations", table =>
             table.HasCheckConstraint("ck_invitations_uses", "max_uses > 0 AND uses >= 0 AND uses <= max_uses"));

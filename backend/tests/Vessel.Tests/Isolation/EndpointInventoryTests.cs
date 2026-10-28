@@ -30,6 +30,10 @@ public sealed class EndpointInventoryTests(IsolationApi api, WalletIsolationApi 
         ["POST /api/auth/challenge"] = "public sign-in",
         ["POST /api/auth/verify"] = "public sign-in",
         ["POST /api/auth/register"] = "public sign-in",
+        // Device pairing's phone side runs before any session. Both routes answer only to a pairing's one-time secret or
+        // the claiming browser's binding cookie and return that pairing's own state (device-pairing-plan.md).
+        ["POST /api/auth/pairings/claim"] = "public pairing",
+        ["POST /api/auth/pairings/complete"] = "public pairing",
     };
 
     private static List<string> Routes(IServiceProvider services) =>
@@ -75,7 +79,8 @@ public sealed class EndpointInventoryTests(IsolationApi api, WalletIsolationApi 
         "GET /api/auth/session", "POST /api/auth/sign-out", "GET /api/auth/sessions", "DELETE /api/auth/sessions/{id}",
         "POST /api/auth/sessions/revoke-others", "PATCH /api/auth/profile", "GET /api/auth/wallets",
         "POST /api/auth/step-up/challenge", "POST /api/auth/step-up", "POST /api/auth/wallets/challenge", "POST /api/auth/wallets",
-        "PATCH /api/auth/wallets/{id}", "DELETE /api/auth/wallets/{id}"
+        "PATCH /api/auth/wallets/{id}", "DELETE /api/auth/wallets/{id}",
+        "POST /api/auth/pairings", "GET /api/auth/pairings/{id:guid}", "POST /api/auth/pairings/{id:guid}/approve", "DELETE /api/auth/pairings/{id:guid}"
     ];
 
     [PostgresFact]

@@ -32,14 +32,27 @@ public sealed class IdentityRateLimits : IDisposable
             return global || session is null ? RateLimitPartition.GetNoLimiter("none") :
                 RateLimitPartition.GetFixedWindowLimiter(bucket + session, _ => Window(10, TimeSpan.FromMinutes(10)));
         }
+        // Create and approve spend one per-session bucket, independent of the step-up and link buckets.
+        if (path == "/api/auth/pairings" || (path is not null && path.StartsWith("/api/auth/pairings/", StringComparison.Ordinal) &&
+            path.EndsWith("/approve", StringComparison.Ordinal)))
+        {
+            var session = context.User.FindFirst(SessionAuthentication.SessionClaim)?.Value;
+            return global || session is null ? RateLimitPartition.GetNoLimiter("none") :
+                RateLimitPartition.GetFixedWindowLimiter("pair:" + session, _ => Window(10, TimeSpan.FromMinutes(10)));
+        }
         var kind = path switch
         {
             "/api/auth/challenge" => "challenge",
             "/api/auth/verify" or "/api/auth/register" => "complete",
+            "/api/auth/pairings/claim" => "claim",
+            "/api/auth/pairings/complete" => "pairing-complete",
             _ => null
         };
         if (kind is null) return RateLimitPartition.GetNoLimiter("none");
-        var cap = global ? kind == "challenge" ? 300 : 600 : kind == "challenge" ? 10 : 20;
+        // The phone polls complete every 2 s, so it has a per-client limit only; claim also has a global one that bounds typed-code guessing.
+        if (global && kind == "pairing-complete") return RateLimitPartition.GetNoLimiter("none");
+        var cap = global ? kind switch { "challenge" => 300, "claim" => 300, _ => 600 } :
+            kind switch { "challenge" => 10, "claim" => 10, "pairing-complete" => 60, _ => 20 };
         return RateLimitPartition.GetFixedWindowLimiter(global ? kind : kind + ":" + Client(context.Connection.RemoteIpAddress),
             _ => Window(cap, TimeSpan.FromMinutes(1)));
     }

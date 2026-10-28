@@ -42,6 +42,7 @@ public static partial class IdentityCommands
                     .SetProperty(x => x.StepUpWalletId, (Guid?)null).SetProperty(x => x.StepUpExpiresAt, (DateTimeOffset?)null), ct);
                 await db.Challenges.ExecuteDeleteAsync(ct);
                 await db.Registrations.ExecuteDeleteAsync(ct);
+                await db.Pairings.ExecuteDeleteAsync(ct);
                 await db.Invitations.Where(x => x.RevokedAt == null && x.ExpiresAt > now && x.Uses < x.MaxUses)
                     .ExecuteUpdateAsync(update => update.SetProperty(x => x.RevokedAt, now), ct);
                 return true;
@@ -128,9 +129,13 @@ public static partial class IdentityCommands
         db.Users.AnyAsync(user => (excludingUser == null || user.Id != excludingUser) &&
             user.Role == "operator" && user.Status == "active" && db.Wallets.Any(wallet => wallet.UserId == user.Id), ct);
 
-    private static Task<int> RevokeSessionsAsync(IdentityDbContext db, Guid? userId, string reason, DateTimeOffset now, CancellationToken ct) =>
-        db.Sessions.Where(x => (userId == null || x.UserId == userId) && x.RevokedAt == null)
+    private static async Task<int> RevokeSessionsAsync(IdentityDbContext db, Guid? userId, string reason, DateTimeOffset now, CancellationToken ct)
+    {
+        // Suspension and revoke-sessions also end any phone being connected, in the same transaction.
+        await DevicePairings.CancelOpenAsync(db, userId, ct);
+        return await db.Sessions.Where(x => (userId == null || x.UserId == userId) && x.RevokedAt == null)
             .ExecuteUpdateAsync(update => update.SetProperty(x => x.RevokedAt, now).SetProperty(x => x.RevokeReason, reason)
                 .SetProperty(x => x.StepUpAction, (string?)null).SetProperty(x => x.StepUpTarget, (string?)null)
                 .SetProperty(x => x.StepUpWalletId, (Guid?)null).SetProperty(x => x.StepUpExpiresAt, (DateTimeOffset?)null), ct);
+    }
 }
