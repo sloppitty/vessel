@@ -16,8 +16,14 @@ Releases are published by the repository's Release workflow when an annotated
 
 ## Sign-in
 
-**Vessel signs in with Ethereum wallets only.** The API token (Token mode) was
-removed on October 25, 2026: images from that change refuse to start while
+**Vessel uses Ethereum wallets for sign-in.** A signed-in computer can also
+connect a phone without a wallet on it through Settings → Sessions → Connect
+a phone. The computer signs a wallet approval, then confirms the phone's
+six-digit code. The phone gets its own full-access, revocable session.
+Both devices need access to the same HTTPS origin.
+
+The API token (Token mode) was removed on October 25, 2026: images from that
+change refuse to start while
 `Vessel__Auth__Token` is set or `Vessel__Auth__Mode` is anything but `Wallet`.
 An installation that still uses the token must follow
 [Moving from the API token to wallet sign-in](#moving-from-the-api-token-to-wallet-sign-in)
@@ -954,12 +960,18 @@ unchanged and compresses static assets only.
 ### From v0.3.4 to v0.3.5
 
 Read the [release notes](../docs/releases/v0.3.5.md). Set `VESSEL_VERSION=0.3.5`
-and use matching API/web images with this release's deploy files. There are no
-new identity or journal migrations and no configuration changes. Stop every
-writer, take your usual backups and run the explicit `migrate` service as in
-every upgrade; it applies nothing new. Upgrade the API and web images
-together: the Activity response gains optional unrealized P&L fields that the
-new web image displays. Earlier upgrade requirements below still apply.
+and use matching API/web images with this release's deploy files. Stop every
+writer, including `worker-notifications` and any optional Paper worker, and
+back up both schemas, evidence and the credential key ring. Run the explicit
+`migrate` service before restarting hosts. It applies identity migration
+`20261027213124_DevicePairing`; there are no new journal migrations or required
+configuration settings.
+
+Upgrade API and web together for phone pairing and the Activity unrealized
+P&L fields. Pairing needs an HTTPS origin the phone can reach, not a desktop
+loopback address. Remembered sessions now default to 10 days idle instead of
+14; an explicit `Vessel:Identity:Session:RememberIdleDays` keeps its value.
+Earlier upgrade requirements below still apply.
 
 ### From v0.3.3 to v0.3.4
 

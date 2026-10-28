@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.3.5 - October 28, 2026
+
+Release notes: [docs/releases/v0.3.5.md](docs/releases/v0.3.5.md).
+
 ### Added
 
 - **Connect a phone.** Sign in on a phone or tablet without a wallet: Settings
@@ -12,26 +16,6 @@
   typed on the computer to approve it. The phone gets its own session, listed
   as "Paired" and revocable like any other. A second device scanning the same
   code cancels it.
-
-### Changed
-
-- "Keep me signed in" now lasts 10 days idle instead of 14 (30 days absolute,
-  unchanged). Installations that set `Vessel:Identity:Session:RememberIdleDays`
-  keep their value.
-- The web server sends `Permissions-Policy: camera=(self), microphone=(),
-  geolocation=()`.
-
-### Upgrade
-
-- New identity migration `20261027213124_DevicePairing`; apply it with the
-  usual explicit `migrate` step.
-
-## 0.3.5 - October 27, 2026
-
-Release notes: [docs/releases/v0.3.5.md](docs/releases/v0.3.5.md).
-
-### Added
-
 - Activity shows **Unrealized P&L** for open operations, in Journal and Paper
   playground, replacing the table's Play column. Hyperliquid, RISEx and Paper
   (through Hyperliquid) mark the remaining quantity at the venue's current mark
@@ -47,6 +31,11 @@ Release notes: [docs/releases/v0.3.5.md](docs/releases/v0.3.5.md).
 
 ### Changed
 
+- "Keep me signed in" now lasts 10 days idle instead of 14, with the 30-day
+  absolute limit unchanged. Installations that set
+  `Vessel:Identity:Session:RememberIdleDays` keep their value.
+- The web server sends `Permissions-Policy: camera=(self), microphone=(),
+  geolocation=()`.
 - The linked Play, and Journal this trade, moved into the expanded operation
   row. Journal this trade replaces "Inspect retrospective eligibility" on closed
   operations that are not on a Play, since both opened the same preview.
@@ -60,7 +49,13 @@ Release notes: [docs/releases/v0.3.5.md](docs/releases/v0.3.5.md).
   deadline on a busy runner; the deadline now uses the registered
   `TimeProvider`. Production behaviour is unchanged.
 
-No identity or journal migrations. No configuration changes.
+### Upgrade
+
+- New identity migration `20261027213124_DevicePairing`; stop every writer,
+  back up both schemas and apply it with the explicit `migrate` service before
+  starting the new hosts. No new journal migrations.
+- No new required configuration. Phone pairing needs an HTTPS origin the phone
+  can reach, not a desktop loopback address.
 
 ## 0.3.4 - October 25, 2026
 
