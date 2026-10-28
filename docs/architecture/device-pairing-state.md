@@ -9,7 +9,7 @@ deployment or a migration of any installation.
 
 | Area | Delivered |
 | --- | --- |
-| Identity schema | Migration `20261027213124_DevicePairing`: `device_pairings` (hashed secret, typed code, binding and confirmation code; per-state 2-minute deadlines) and `sessions.source` (`wallet` \| `pairing`). Identity schema only; nothing in the journal changes. |
+| Identity schema | Migration `20261027213124_DevicePairing`: `device_pairings` (hashed secret, typed code, binding and confirmation code; per-state 5-minute deadlines (2 minutes until October 28)) and `sessions.source` (`wallet` \| `pairing`). Identity schema only; nothing in the journal changes. |
 | API | `device.pair` step-up; create, status, approve, cancel (creating session only); public claim and complete behind the sign-in request guard and binding cookie; `attemptsLeft` on wrong codes; `source` in the sessions list; rate limits; 1,000 unfinished-pairing cap; cleanup; cancellation on suspension, wallet removal and `revoke-sessions`, and when the creating session signs out or is revoked; completion refused once the creating session has ended; deletion in the restore reset. |
 | Sessions | `RememberIdleDays` default 10 for every sign-in (30 days absolute unchanged). A paired session uses the step-up signer's wallet and the normal lifetimes. |
 | Desktop | Settings → Sessions → Connect a phone: step-up, QR (always black on white), Show a code to type, approval with the phone's code, cancel on close; loopback origins get an explanation instead of a QR; paired sessions labelled "Paired · …". |
@@ -56,6 +56,27 @@ The reviewers' reproduction tests are kept as regressions
 skipped (RabbitMQ); frontend 4,228 passed; typecheck and lint pass. The packaged
 `verify-release.py` run above predates these fixes and is repeated by the
 release checks.
+
+## October 28 follow-up
+
+The owner tried the scanner on a phone (Brave on Android) and asked for three
+changes:
+
+- **Five-minute deadlines.** Every pairing state now lasts five minutes
+  (`DevicePairings.Window`, the browser countdown cap and the expiry copy). No
+  migration: deadlines are stored per row.
+- **Primary action no longer clipped.** On a narrow phone "Try the camera
+  again" was cut off because the primary sign-in action had a zero flex basis.
+  It is now sized from its label (`flex: 1 1 auto`), so the other actions wrap
+  under it; a long wallet name still truncates.
+- **Camera blocked by the site, not the browser.** The phone never saw a
+  permission prompt because the homelab Traefik `secure-headers` middleware
+  replaces Vessel's header with `Permissions-Policy: camera=(), …`; Chromium
+  then refuses `getUserMedia` without asking. Where the browser exposes
+  `document.featurePolicy`, the scanner now detects this before asking, says
+  the site does not allow the camera and offers only the camera app and the
+  typed code. The installation itself needs its proxy to pass `camera=(self)`
+  (or Vessel's own header) for the in-app scanner to work.
 
 ## Not verified
 

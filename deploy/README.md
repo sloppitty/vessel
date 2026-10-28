@@ -843,6 +843,11 @@ Sign-in needs HTTPS: in this mode put your own HTTPS proxy in front of web (see
 [Other API deployments](#other-api-deployments)) and set `VESSEL_IDENTITY_ORIGIN`
 to its public origin. Browsing to the plain HTTP address cannot sign in.
 
+Pass web's response headers through unchanged. In particular, a proxy that sets
+its own `Permissions-Policy` (Traefik's `permissionsPolicy`, for example) must
+allow `camera=(self)`, or phones cannot use the in-app scanner when pairing and
+must fall back to the system camera app or the typed code.
+
 Web overwrites `X-Forwarded-For` with its observed client address and
 `X-Forwarded-Proto` with its own HTTP scheme. It clears `X-Forwarded-Host` and
 `Forwarded`. `VESSEL_TRUSTED_PROXY` is empty, so no caller can claim HTTPS or

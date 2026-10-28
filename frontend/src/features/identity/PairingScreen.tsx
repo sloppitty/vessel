@@ -19,7 +19,7 @@ type State =
   | ({ step: 'ended' } & Ended)
 
 const endedBy = (status: 'expired' | 'cancelled' | 'contested'): State => ({ step: 'ended', kind: status, ...{
-  expired: { title: 'Request expired', message: 'Pairing requests last two minutes. Start again on your computer.' },
+  expired: { title: 'Request expired', message: 'Pairing requests last five minutes. Start again on your computer.' },
   cancelled: { title: 'Request cancelled', message: 'The request was cancelled on your computer. Start again there if you still want to sign in.' },
   contested: { title: 'Another device used this code', message: 'Someone else used this code too, so Vessel cancelled it for safety. Start again on your computer.' },
 }[status] })

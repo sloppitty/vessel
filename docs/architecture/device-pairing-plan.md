@@ -41,7 +41,7 @@ Desktop (signed in)                    Server                         Phone (no 
 1 Connect a phone
   step-up device.pair  ──signature──▶  grant (5 min)
 2 POST /pairings       ────────────▶  pairing: secret hash,
-  ◀── id, secret, expiresAt ───────   status pending, 2 min
+  ◀── id, secret, expiresAt ───────   status pending, 5 min
   show QR https://origin/#pair=secret
                                                                  3 camera opens the URL
                                                                    fragment read, then removed
@@ -62,7 +62,7 @@ Desktop (signed in)                    Server                         Phone (no 
    `Confirm connecting a new device to your Vessel journal. This is not a transaction.`
 2. **Create.** `POST /api/auth/pairings` consumes the grant atomically and
    creates a pairing: 32 random bytes, of which only the SHA-256 is stored, with
-   a 2-minute claim window. It records the desktop session, the user and the
+   a 5-minute claim window. It records the desktop session, the user and the
    step-up signer's wallet. Creating a pairing cancels the user's earlier
    pending pairings. The desktop renders `{origin}/#pair={secret}` as a QR code.
    Under it, **Show a code to type** reveals the typed fallback
@@ -88,7 +88,7 @@ Desktop (signed in)                    Server                         Phone (no 
    then shows "Safari on iPhone wants to connect". The user types the phone's
    code into `POST /api/auth/pairings/{id}/approve`. A wrong code counts as an
    attempt; three wrong codes cancel the pairing. The claim must be approved
-   within 2 minutes.
+   within 5 minutes.
 5. **Complete.** The phone polls `POST /api/auth/pairings/complete` with its
    binding cookie every 2 s. Once the pairing is approved, one identity
    transaction consumes it, issues the phone's session (cookie set, binding
@@ -146,8 +146,8 @@ All routes are `no-store`, use ProblemDetails `code`s and have bodies capped at
 
 **Exact shapes** (camelCase JSON; times ISO-8601 UTC):
 
-- **Deadlines.** `pending`: `created_at + 2 min`. `claimed`: `claimed_at + 2
-  min` for approval. `approved`: `approved_at + 2 min` for completion. Every
+- **Deadlines.** `pending`: `created_at + 5 min`. `claimed`: `claimed_at + 5
+  min` for approval. `approved`: `approved_at + 5 min` for completion. Every
   `expiresAt` in a response is the deadline of the current state.
 - **Create** `POST /api/auth/pairings` (no body): 201
   `{id: uuid, secret: string, typedCode: string, expiresAt}`. `secret` is 32
@@ -263,7 +263,7 @@ schema only. Nothing in the journal schema changes.
   phone cameras can read it. It is drawn as SVG by a small, dependency-free
   encoder.
 - **Deadlines belong to the server.** A claim and an approval each restart the
-  two-minute window, so a countdown reaching zero on either screen only asks the
+  five-minute window, so a countdown reaching zero on either screen only asks the
   server at once; the request ends when the server says it expired, never from
   the local clock alone. A reply to an approval is dropped once its pairing has
   ended or Try again replaced it.

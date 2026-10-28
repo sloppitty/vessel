@@ -101,7 +101,9 @@
 .sign-in-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .sign-in-actions.is-split { justify-content: space-between; margin-top: 20px; }
 .sign-in-actions.is-end { justify-content: flex-end; }
-.sign-in-actions .sign-in-primary { flex: 1; min-width: 0; }
+/* Sized from its label, so on a narrow phone the other actions wrap under it rather than clipping it; a label wider
+   than the card (a long wallet name) still shrinks and truncates. */
+.sign-in-actions .sign-in-primary { flex: 1 1 auto; min-width: 0; }
 /* A countdown button: readable muted text instead of the faded disabled fill. */
 .identity-waiting:disabled { opacity: 1; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 

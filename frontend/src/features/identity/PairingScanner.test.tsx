@@ -159,6 +159,18 @@ describe('PairingScanner', () => {
     expect(screen.getByRole('button', { name: 'Try the camera again' })).toBeVisible()
   })
 
+  it('says when the site policy forbids the camera instead of sending the person to browser settings', async () => {
+    Object.defineProperty(document, 'featurePolicy', { configurable: true, value: { allowsFeature: (feature: string) => feature !== 'camera' } })
+    try {
+      const { user } = mount()
+      await user.click(screen.getByRole('button', { name: 'Start camera' }))
+      expect(await screen.findByRole('alert')).toHaveTextContent('This site does not allow the camera')
+      expect(getUserMedia).not.toHaveBeenCalled()
+      expect(screen.queryByRole('button', { name: /camera/ })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Enter a code instead' })).toBeVisible()
+    } finally { Reflect.deleteProperty(document, 'featurePolicy') }
+  })
+
   it('reports another camera failure without claiming a refusal', async () => {
     getUserMedia.mockRejectedValueOnce(new DOMException('none', 'NotFoundError'))
     const { user } = mount()

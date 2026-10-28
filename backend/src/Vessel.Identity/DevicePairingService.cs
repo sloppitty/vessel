@@ -12,7 +12,7 @@ internal static class DevicePairings
     internal const int MaxUnfinished = 1000;
     internal const int MaxCodeAttempts = 3;
     /// <summary>Every state's deadline, measured from its own transition.</summary>
-    internal static readonly TimeSpan Window = TimeSpan.FromMinutes(2);
+    internal static readonly TimeSpan Window = TimeSpan.FromMinutes(5);
 
     internal static bool IsOpen(DevicePairing pairing) => Open.Contains(pairing.Status);
 

@@ -26,7 +26,7 @@ const ended = (title: string, message: string): Phase => ({ step: 'ended', title
 /** The end of a pairing the server reports, in the person's words. */
 function endedBy(status: 'expired' | 'cancelled' | 'contested'): Phase {
   switch (status) {
-    case 'expired': return ended('Request expired', 'Pairing requests last two minutes. Start a new one.')
+    case 'expired': return ended('Request expired', 'Pairing requests last five minutes. Start a new one.')
     case 'cancelled': return ended('Request cancelled', 'This request was cancelled. Start a new one.')
     case 'contested': return ended('Another device used the code', 'Someone else scanned this code too, so Vessel cancelled it for safety. Start a new one and scan it yourself.')
   }
