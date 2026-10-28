@@ -121,12 +121,16 @@ export function ConnectPhoneDialog({ auth, accept, onConnected, onClose, onClose
   }, [onConnected])
 
   // Poll the pairing while it is open. A few failed reads in a row end it; a 404 means it is already gone.
+  // The server owns the deadlines (a claim restarts them), so a countdown reaching zero only asks it now.
+  const checkNow = useRef(() => {})
   useEffect(() => {
     if (!pairingId) return
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     let failures = 0
+    let busy = false
     const tick = async () => {
+      busy = true
       try {
         const state = await auth.pairingStatus(pairingId, controller.signal)
         if (controller.signal.aborted) return
@@ -144,23 +148,31 @@ export function ConnectPhoneDialog({ auth, accept, onConnected, onClose, onClose
           setPhase(ended('Vessel is unreachable', errorMessage(cause, 'The request could not be checked. Start a new one.')))
           return
         }
+      } finally {
+        busy = false
       }
       timer = setTimeout(() => { void tick() }, pairingPollMs)
     }
     timer = setTimeout(() => { void tick() }, pairingPollMs)
-    return () => { controller.abort(); clearTimeout(timer) }
+    checkNow.current = () => { if (!busy && !controller.signal.aborted) { clearTimeout(timer); void tick() } }
+    return () => { controller.abort(); clearTimeout(timer); checkNow.current = () => {} }
   }, [auth, pairingId])
 
   async function approve(code: string) {
     if (phase.step !== 'approve' || phase.submitting) return
     const { pairing: target } = phase
+    const current = run.current
     setPhase({ ...phase, submitting: true, error: null })
+    // A reply only answers for its own pairing: after it ended (or Try again replaced it) the reply is dropped.
+    const still = () => run.current === current && live.current === target.id
+    const update = (next: (phase: Extract<Phase, { step: 'approve' }>) => Phase) =>
+      setPhase(phase => phase.step === 'approve' && phase.pairing.id === target.id ? next(phase) : phase)
     try {
       await auth.approvePairing(target.id, code)
-      setPhase(phase => phase.step === 'approve' ? { step: 'finishing', pairing: phase.pairing, device: phase.device } : phase)
+      if (still()) update(phase => ({ step: 'finishing', pairing: phase.pairing, device: phase.device }))
     } catch (cause) {
-      const rejected = (error: string, attempt = 1) => setPhase(phase => phase.step === 'approve'
-        ? { ...phase, submitting: false, error, attempt: phase.attempt + attempt } : phase)
+      if (!still()) return
+      const rejected = (error: string, attempt = 1) => update(phase => ({ ...phase, submitting: false, error, attempt: phase.attempt + attempt }))
       if (cause instanceof ApiError && cause.code === 'pairing-code-invalid') {
         if (cause.attemptsLeft === 0) finish(ended('Request cancelled', pairingCodeMessage(cause)))
         else rejected(pairingCodeMessage(cause))
@@ -170,9 +182,7 @@ export function ConnectPhoneDialog({ auth, accept, onConnected, onClose, onClose
     }
   }
 
-  const expired = useCallback(() => {
-    finish(endedBy('expired'))
-  }, [finish])
+  const expired = useCallback(() => { checkNow.current() }, [])
 
   const description = {
     loopback: 'A phone needs a web address it can reach.',

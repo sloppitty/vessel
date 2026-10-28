@@ -70,13 +70,17 @@ export function PairingScreen({ api, source, onSignedIn, onBack }: PairingScreen
     return () => { alive = false }
   }, [api, source])
 
+  // The server owns the deadline (the desktop's approval restarts it), so a countdown reaching zero only asks it now.
+  const checkNow = useRef(() => {})
   const waiting = state.step === 'waiting'
   useEffect(() => {
     if (!waiting) return
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     let failures = 0
+    let busy = false
     const tick = async () => {
+      busy = true
       try {
         const result = await api.completePairing({ remember: rememberNow.current }, controller.signal)
         if (controller.signal.aborted) return
@@ -88,14 +92,17 @@ export function PairingScreen({ api, source, onSignedIn, onBack }: PairingScreen
         // A wait notice or an unreachable server is retried a few times; anything else ends the request.
         const retry = cause instanceof ApiError && (cause.status === 429 || cause.kind === 'unavailable' || (cause.status ?? 0) >= 500)
         if (!retry || ++failures >= 5) { setState(pairingFailure(cause)); return }
+      } finally {
+        busy = false
       }
       timer = setTimeout(() => { void tick() }, pairingPollMs)
     }
     timer = setTimeout(() => { void tick() }, pairingPollMs)
-    return () => { controller.abort(); clearTimeout(timer) }
+    checkNow.current = () => { if (!busy && !controller.signal.aborted) { clearTimeout(timer); void tick() } }
+    return () => { controller.abort(); clearTimeout(timer); checkNow.current = () => {} }
   }, [api, waiting])
 
-  const expired = useCallback(() => setState(endedBy('expired')), [])
+  const expired = useCallback(() => { checkNow.current() }, [])
   return <main className="connection-page sign-in-page">
     <section className="panel connection-card sign-in-card" aria-labelledby="pairing-title" aria-busy={state.step === 'claiming' || state.step === 'signing-in'}>
       <div className="sign-in-head"><SignInBrand /></div>

@@ -164,13 +164,16 @@ describe('Connect a phone', () => {
     expect(await within(dialog).findByRole('button', { name: /Rabby Wallet/ })).toBeVisible()
   })
 
-  it('runs its own countdown to the end', async () => {
-    routes['POST /api/auth/pairings'] = () => json({ ...created, expiresAt: new Date(Date.now() + 4_000).toISOString() }, 201)
+  it('asks the server when its countdown ends and ends on its answer', async () => {
+    const deadline = Date.now() + 4_000
+    routes['POST /api/auth/pairings'] = () => json({ ...created, expiresAt: new Date(deadline).toISOString() }, 201)
+    routes[statusPath] = () => json({ status: Date.now() >= deadline ? 'expired' : 'pending', expiresAt: new Date(deadline).toISOString(), device: null })
     const { user } = mount()
     const dialog = await showQr(user)
     await poll(5_000)
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Request expired')
-    expect(sent('DELETE', `/api/auth/pairings/${pairingId}`).length).toBeGreaterThan(0)
+    // The server expired it already: nothing to cancel.
+    expect(sent('DELETE', `/api/auth/pairings/${pairingId}`)).toHaveLength(0)
   })
 
   it('tells the owner when another device used the code', async () => {

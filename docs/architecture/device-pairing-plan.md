@@ -257,6 +257,11 @@ schema only. Nothing in the journal schema changes.
   The QR is always dark on light with a quiet zone, whatever the theme, so
   phone cameras can read it. It is drawn as SVG by a small, dependency-free
   encoder.
+- **Deadlines belong to the server.** A claim and an approval each restart the
+  two-minute window, so a countdown reaching zero on either screen only asks the
+  server at once; the request ends when the server says it expired, never from
+  the local clock alone. A reply to an approval is dropped once its pairing has
+  ended or Try again replaced it.
 - **The origin must be reachable from the phone.** If the page's origin is
   loopback (`localhost`, `127.0.0.1`, `[::1]`), the dialog explains that a phone
   cannot open it and offers no QR.

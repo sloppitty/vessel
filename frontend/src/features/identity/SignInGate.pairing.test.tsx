@@ -110,9 +110,11 @@ describe('a pairing link opened on a device with no session', () => {
     expect(await screen.findByRole('heading', { name: 'Sign in to Vessel' })).toBeVisible()
   })
 
-  it('ends when the confirmation window passes', async () => {
+  it('ends when the server says the confirmation window passed', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
-    routes['/api/auth/pairings/claim'] = () => json({ ...claim, expiresAt: new Date(Date.now() + 5_000).toISOString() })
+    const deadline = Date.now() + 5_000
+    routes['/api/auth/pairings/claim'] = () => json({ ...claim, expiresAt: new Date(deadline).toISOString() })
+    routes['/api/auth/pairings/complete'] = () => json({ status: Date.now() >= deadline ? 'expired' : 'waiting' })
     mount()
     await screen.findByText('482 913')
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000) })
