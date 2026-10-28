@@ -38,11 +38,27 @@ case with a space and Keep me signed in unchecked; a contested claim shown on
 both phones; completion refused without a binding cookie; and revoking other
 sessions on the desktop signing both phones out.
 
+## Sol (Codex) reviews — October 28, 2026
+
+Two independent adversarial `gpt-6.1-sol` reviews, backend/security and
+frontend/flows, each run until it approved:
+
+| Round | Finding | Fix |
+| --- | --- | --- |
+| Backend 1 | An approved pairing could still complete after the creating desktop session was signed out or revoked. | `a0629af1`: ending the creating session cancels its pairings; completion requires it to be still signed in. |
+| Frontend 1 | A local countdown ended pairings the server had extended; a late approval reply could cancel the pairing Try again created. | `5c1b0f7e`: the server decides expiry; replies answer only for their own pairing. |
+| Frontend 2 | The expiry check repeated every second at zero (doubling polls against the shared completion limit); an in-flight completion could issue a remembered session after the box was unticked. | `e7893322`: one check per deadline; the box holds still while a completion is in flight. |
+| Backend 2, frontend 3 | None: **APPROVE**. | |
+
+The reviewers' reproduction tests are kept as regressions
+(`DevicePairingRevocationTests.cs`, `pairing-races.test.tsx`,
+`pairing-polls.test.tsx`). After the fixes: backend 4,038 passed, 0 failed, 17
+skipped (RabbitMQ); frontend 4,228 passed; typecheck and lint pass. The packaged
+`verify-release.py` run above predates these fixes and is repeated by the
+release checks.
+
 ## Not verified
 
-- **Adversarial Sol (Codex) review.** It was started but could not run: the
-  provider answered `503 auth_unavailable: no candidate accounts with usable
-  quota` for `gpt-6.1-sol`.
 - **Scanner with a camera.** The in-app scanner is covered by Vitest with
   mocked `getUserMedia`/`BarcodeDetector`; no Chromium fake-camera run was
   made.
