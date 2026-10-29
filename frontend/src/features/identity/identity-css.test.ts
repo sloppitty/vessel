@@ -25,6 +25,8 @@ describe('sign-in styles', () => {
     expect(rule(identity, '.identity-truncate')).toMatch(/min-width: 0;.*text-overflow: ellipsis;.*white-space: nowrap/)
     expect(rule(identity, '.identity-row-meta strong')).toContain('text-overflow: ellipsis')
     expect(rule(identity, '.sign-in-actions .sign-in-primary')).toContain('min-width: 0')
+    // A content-sized basis lets the other actions wrap under the primary one instead of clipping its label.
+    expect(rule(identity, '.sign-in-actions .sign-in-primary')).toContain('flex: 1 1 auto')
     expect(rule(identity, '.message-timer')).toContain('white-space: nowrap')
   })
 

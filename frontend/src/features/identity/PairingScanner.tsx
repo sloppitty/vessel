@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { classifyScan } from './pairing-link'
 import { SignInBrand } from './IdentityParts'
 
-type CameraState = 'idle' | 'starting' | 'scanning' | 'denied' | 'failed'
+type CameraState = 'idle' | 'starting' | 'scanning' | 'denied' | 'policy' | 'failed'
 type Reader = (video: HTMLVideoElement) => Promise<string[]>
 
 interface NativeDetector { detect(source: HTMLVideoElement): Promise<Array<{ rawValue: string }>> }
@@ -42,6 +42,15 @@ async function createReader(): Promise<Reader> {
     const code = jsQR(frame.data, frame.width, frame.height, { inversionAttempts: 'dontInvert' })
     return code ? [code.data] : []
   }
+}
+
+/**
+ * False when the page's Permissions-Policy (sent by Vessel or a proxy in front of it) forbids the camera. The browser
+ * then refuses without asking, so no browser setting helps. Only Chromium-based browsers can tell; elsewhere null.
+ */
+function cameraAllowedByPolicy(): boolean | null {
+  const policy = (document as unknown as { featurePolicy?: { allowsFeature(feature: string): boolean } }).featurePolicy
+  try { return policy ? policy.allowsFeature('camera') : null } catch { return null }
 }
 
 const scanEvery = 250
@@ -89,6 +98,7 @@ export function PairingScanner({ origin = window.location.origin, onSecret, onTy
   async function start() {
     stop()
     setNotice(null)
+    if (cameraAllowedByPolicy() === false) { setCamera('policy'); return }
     setCamera('starting')
     const current: NonNullable<typeof active.current> = { stream: null, stopped: false, timer: undefined }
     active.current = current
@@ -141,16 +151,17 @@ export function PairingScanner({ origin = window.location.origin, onSecret, onTy
     <div className="sign-in-body">
       <div className={`pairing-camera${camera === 'scanning' ? ' is-live' : ''}`}>
         <video ref={video} playsInline muted aria-label="Camera preview" />
-        {camera !== 'scanning' && <span className="pairing-camera-idle" aria-hidden="true">{camera === 'denied' || camera === 'failed' ? <CameraOff size={28} /> : <Camera size={28} />}</span>}
+        {camera !== 'scanning' && <span className="pairing-camera-idle" aria-hidden="true">{camera === 'denied' || camera === 'policy' || camera === 'failed' ? <CameraOff size={28} /> : <Camera size={28} />}</span>}
       </div>
       <div aria-live="polite">
         {camera === 'starting' && <p className="muted">Starting the camera…</p>}
         {notice && <p className="sign-in-notice" role="status">{notice}</p>}
         {camera === 'denied' && <p className="error" role="alert">Camera access is blocked for this site. Allow it in your browser settings, or scan the code with your phone’s camera app.</p>}
+        {camera === 'policy' && <p className="error" role="alert">This site does not allow the camera, so your browser cannot ask for it. Scan the code with your phone’s camera app, or enter a code instead.</p>}
         {camera === 'failed' && <p className="error" role="alert">The camera could not start. Try again, or enter a code instead.</p>}
       </div>
       <div className="sign-in-actions">
-        {!running && <Button size="lg" className="sign-in-primary" onClick={() => { void start() }}><Camera size={16} aria-hidden="true" />
+        {!running && camera !== 'policy' && <Button size="lg" className="sign-in-primary" onClick={() => { void start() }}><Camera size={16} aria-hidden="true" />
           {camera === 'denied' || camera === 'failed' ? 'Try the camera again' : 'Start camera'}</Button>}
         <Button size="lg" variant="outline" onClick={onType}><Keyboard size={16} aria-hidden="true" />Enter a code instead</Button>
         <Button size="lg" variant="ghost" onClick={onBack}>Back</Button>

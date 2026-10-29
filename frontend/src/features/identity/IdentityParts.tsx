@@ -85,8 +85,8 @@ export function StateCard({ icon, tone = 'plain', title, children, actions = [] 
 
 /** Both sides of a pairing read the server every two seconds. */
 export const pairingPollMs = 2_000
-/** Every pairing deadline is two minutes from the start of its state. */
-const pairingDeadlineMs = 120_000
+/** Every pairing deadline is five minutes from the start of its state. */
+const pairingDeadlineMs = 300_000
 
 /**
  * Time left until a pairing deadline, measured from when the answer arrived; the server decides when it really ends.

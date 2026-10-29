@@ -16,7 +16,7 @@ namespace Vessel.Tests.Identity;
 public sealed class DevicePairingTests
 {
     private const string PhoneAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
-    private static readonly TimeSpan Window = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan Window = TimeSpan.FromMinutes(5);
 
     /// <summary>A signed-in desktop over a disposable identity schema, with the injected clock shared by sessions and pairings.</summary>
     private sealed class Rig : IAsyncDisposable
@@ -430,7 +430,7 @@ public sealed class DevicePairingTests
     [InlineData("pending")]
     [InlineData("claimed")]
     [InlineData("approved")]
-    public async Task Each_state_expires_two_minutes_after_it_began(string state)
+    public async Task Each_state_expires_five_minutes_after_it_began(string state)
     {
         await using var rig = await Rig.CreateAsync();
         var created = await CreateAsync(rig.Desktop, rig.Key);
@@ -761,7 +761,7 @@ public sealed class DevicePairingTests
         await rig.Desktop.DeleteAsync($"/api/auth/pairings/{next.GetProperty("id").GetGuid()}");
         await cleanup.CleanAsync(default);
         await using (var db = rig.Db.CreateDbContext()) Assert.Equal(1, await db.Pairings.CountAsync(x => x.Id == next.GetProperty("id").GetGuid()));
-        rig.Db.Clock.Now += TimeSpan.FromMinutes(10);
+        rig.Db.Clock.Now += Window + TimeSpan.FromMinutes(10);
         await cleanup.CleanAsync(default);
         await using (var db = rig.Db.CreateDbContext()) Assert.Empty(await db.Pairings.ToListAsync());
     }
