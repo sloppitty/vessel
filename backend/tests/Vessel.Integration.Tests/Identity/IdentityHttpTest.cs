@@ -46,11 +46,5 @@ internal static class IdentityHttpTest
         return session;
     }
 
-    public static async Task Code(HttpResponseMessage response, int status, string code)
-    {
-        Assert.Equal(status, (int)response.StatusCode);
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(code, body.GetProperty("code").GetString());
-        Assert.True(response.Headers.CacheControl?.NoStore);
-    }
+    public static Task Code(HttpResponseMessage response, int status, string code) => IdentityResponse.Code(response, status, code);
 }

@@ -50,7 +50,7 @@ public sealed class StreamRevalidationApiTests : StreamRevalidationTestsSupport
             else rejected = await client.GetAsync("/api/events/stream?after=0", stop.Token);
             using (rejected)
             {
-                await IdentityHttpTest.Code(rejected, 429, "rate-limited");
+                await IdentityResponse.Code(rejected, 429, "rate-limited");
                 Assert.Equal(TimeSpan.FromSeconds(5), rejected.Headers.RetryAfter?.Delta);
             }
         }
