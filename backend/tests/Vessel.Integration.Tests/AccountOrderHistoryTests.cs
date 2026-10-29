@@ -1,0 +1,273 @@
+using Microsoft.EntityFrameworkCore;
+using Vessel.Application.Common;
+using Vessel.Application.Credentials;
+using Vessel.Application.Venues;
+using Vessel.Application.Workspace;
+using Vessel.Domain.Accounts;
+using Vessel.Persistence;
+
+namespace Vessel.Tests;
+
+/// <summary>
+/// Order-history retention on the owner's account Refresh, through the production monitor path: the public read
+/// commits first, then the optional order read is retained without linking orders or changing Plays.
+/// </summary>
+public sealed class AccountOrderHistoryTests
+{
+    private const string OrderRetryNotice = "Public account data refreshed; order coverage is unavailable. Retry the account check later.";
+    private const string CredentialNotice = "Public account data refreshed; order coverage is unavailable. Update the read-only credential.";
+    private const string InterruptedNotice = "Public account data refreshed; order coverage is unavailable because the order check did not complete.";
+    private const string DeferredNotice = "Public account data refreshed; the venue rate limit deferred the order check.";
+
+    private sealed class History(CoreDatabase database, Guid owner, Account account, FixtureReader reader, VenueRegistry venues) : IAsyncDisposable
+    {
+        public Account Account => account;
+        public FixtureReader Reader => reader;
+        public VesselDbContext Context() => database.Context(owner);
+        public async Task<AccountDto> RefreshAsync(IAccountCredentialReader? credentials = null, CancellationToken ct = default)
+        {
+            await using var db = Context();
+            return await MonitorTestPaths.RefreshAsync(db, owner, venues, account.Id, credentials, ct);
+        }
+        public ValueTask DisposeAsync() => database.DisposeAsync();
+    }
+
+    private static async Task<History> Harness(AccountHistoryOrders orders, bool enabled = true, bool foreign = false,
+        bool supportsOrders = true, bool readerAvailable = true, bool hasSource = true, Action<Account>? seed = null)
+    {
+        var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var accountOwner = foreign ? Guid.NewGuid() : owner;
+        var account = new Account(Guid.NewGuid(), accountOwner, orders.VenueId, "History");
+        account.Configure(null, null, null, hasSource ? "42" : null);
+        if (!enabled) account.UpdateSettings(account.Name, null, false);
+        seed?.Invoke(account);
+        await using (var db = database.Context(accountOwner)) { db.Accounts.Add(account); await db.SaveChangesAsync(); }
+        var reader = AccountHistoryOrders.PublicReader(orders.VenueId);
+        var descriptor = AccountHistoryOrders.Descriptor(orders.VenueId);
+        var venues = new VenueRegistry([VenueDescriptor.Manual, descriptor with { Capabilities = descriptor.Capabilities with { Orders = supportsOrders } }],
+            [reader], readerAvailable ? [orders] : [], [], [], [], [], []);
+        return new(database, owner, account, reader, venues);
+    }
+
+    [PostgresFact]
+    public async Task Retains_old_orders_for_every_instrument_without_active_plays_or_matching()
+    {
+        var orders = new AccountHistoryOrders();
+        orders.Result = orders.Result with { Orders = [..orders.Result.Orders,
+            orders.Result.Orders[0] with { OrderId = "other-instrument", ContractId = "ETH", VenueContractId = "ETH", Status = VenueOrderStatus.Rejected }] };
+        await using var h = await Harness(orders);
+        var refreshed = await h.RefreshAsync();
+        Assert.Equal(h.Reader.Result.HistoryNotice + "\nOrder history: " + orders.Result.Notice, refreshed.HistoryNotice);
+        Assert.Equal(1, orders.Reads);
+        Assert.Equal(h.Account.Id, orders.Account!.Id);
+        await using var verify = h.Context();
+        Assert.Equal(orders.Result.Orders.Select(o => o.OrderId).Order(), (await verify.Orders.Select(o => o.ExternalOrderId).ToListAsync()).Order());
+        Assert.Empty(await verify.OrderLinks.ToListAsync());
+        Assert.Empty(await verify.Plays.ToListAsync());
+    }
+
+    [PostgresTheory]
+    [InlineData("http")]
+    [InlineData("timeout")]
+    [InlineData("adapter")]
+    [InlineData("invalid-side")]
+    public async Task Optional_failure_is_a_safe_notice_and_never_partially_retains_orders(string failure)
+    {
+        var orders = new AccountHistoryOrders();
+        orders.Failure = failure switch
+        {
+            "http" => new HttpRequestException("ro:synthetic-secret provider response"),
+            "timeout" => new OperationCanceledException("ro:synthetic-secret"),
+            "adapter" => new VenueReadException("ro:synthetic-secret"),
+            _ => null
+        };
+        if (failure == "invalid-side")
+            orders.Result = orders.Result with { Orders = [orders.Result.Orders[0], orders.Result.Orders[1] with { Side = "B" }] };
+        await using var h = await Harness(orders);
+        var refreshed = await h.RefreshAsync();
+        Assert.Equal(1, orders.Reads);
+        Assert.Contains(OrderRetryNotice, refreshed.HistoryNotice);
+        Assert.DoesNotContain("ro:", refreshed.HistoryNotice);
+        Assert.Equal(("synced", (string?)null), (refreshed.SyncStatus, refreshed.LastSyncError));
+        await using var verify = h.Context();
+        Assert.Empty(await verify.Orders.ToListAsync());
+    }
+
+    [PostgresFact]
+    public async Task Caller_cancellation_propagates_before_retention_even_if_reader_returns()
+    {
+        using var cancelled = new CancellationTokenSource();
+        var orders = new AccountHistoryOrders { AfterRead = cancelled.Cancel };
+        await using var h = await Harness(orders);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.RefreshAsync(ct: cancelled.Token));
+        Assert.Equal(1, orders.Reads);
+        await using var verify = h.Context();
+        Assert.Empty(await verify.Orders.ToListAsync());
+        // The public refresh committed before the order read; only its order coverage is reported incomplete.
+        var account = await verify.Accounts.SingleAsync();
+        Assert.Equal("synced", account.SyncStatus);
+        Assert.EndsWith("\nOrder history: " + InterruptedNotice, account.HistoryNotice);
+    }
+
+    [PostgresFact]
+    public async Task Already_cancelled_request_does_not_read_the_venue()
+    {
+        var orders = new AccountHistoryOrders();
+        await using var h = await Harness(orders);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.RefreshAsync(ct: new(true)));
+        Assert.Equal((0, 0), (h.Reader.Reads, orders.Reads));
+        await using var verify = h.Context();
+        Assert.Empty(await verify.Orders.ToListAsync());
+        Assert.Empty(await verify.Snapshots.ToListAsync());
+    }
+
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Lighter_missing_or_unusable_credential_skips_order_read(bool readerRegistered)
+    {
+        var orders = new AccountHistoryOrders("lighter");
+        var credential = readerRegistered ? new AccountHistoryCredential(null) : null;
+        await using var h = await Harness(orders);
+        var refreshed = await h.RefreshAsync(credential);
+        Assert.Contains(CredentialNotice, refreshed.HistoryNotice);
+        Assert.Equal("synced", refreshed.SyncStatus);
+        Assert.Equal(0, orders.Reads);
+        await using var verify = h.Context();
+        Assert.Empty(await verify.Orders.ToListAsync());
+        if (credential is not null) Assert.Equal(h.Account.Id, credential.AccountId);
+    }
+
+    [PostgresFact]
+    public async Task Lighter_usable_credential_uses_account_aware_order_reader()
+    {
+        var orders = new AccountHistoryOrders("lighter");
+        await using var h = await Harness(orders);
+        await h.RefreshAsync(new AccountHistoryCredential("ro:synthetic-only"));
+        Assert.Equal(h.Account.Id, orders.Account!.Id);
+        Assert.Equal(1, orders.Reads);
+        await using var verify = h.Context();
+        Assert.Equal(2, await verify.Orders.CountAsync());
+    }
+
+    [PostgresFact]
+    public async Task Cancellation_during_credential_lookup_propagates_without_order_reads()
+    {
+        using var cancelled = new CancellationTokenSource();
+        var orders = new AccountHistoryOrders("lighter");
+        var credential = new AccountHistoryCredential(null) { AfterRead = cancelled.Cancel };
+        await using var h = await Harness(orders);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.RefreshAsync(credential, cancelled.Token));
+        Assert.Equal(h.Account.Id, credential.AccountId);
+        Assert.Equal(0, orders.Reads);
+        await using var verify = h.Context();
+        Assert.Empty(await verify.Orders.ToListAsync());
+    }
+
+    [PostgresTheory]
+    [InlineData(false, true, 400)]
+    [InlineData(true, false, 404)]
+    public async Task Disabled_or_foreign_account_does_not_read_credentials_or_orders(bool enabled, bool owned, int status)
+    {
+        var orders = new AccountHistoryOrders("lighter");
+        var credential = new AccountHistoryCredential("ro:synthetic-only");
+        await using var h = await Harness(orders, enabled, !owned);
+        var error = await Assert.ThrowsAsync<ProblemException>(() => h.RefreshAsync(credential));
+        Assert.Equal(status, error.StatusCode);
+        Assert.Null(credential.AccountId);
+        Assert.Equal((0, 0), (h.Reader.Reads, orders.Reads));
+    }
+
+    [PostgresTheory]
+    [InlineData(false, true, null)]
+    [InlineData(true, false, OrderRetryNotice)]
+    public async Task Descriptor_capability_and_missing_reader_never_read_orders(bool supportsOrders, bool available, string? notice)
+    {
+        var orders = new AccountHistoryOrders();
+        await using var h = await Harness(orders, supportsOrders: supportsOrders, readerAvailable: available);
+        var refreshed = await h.RefreshAsync();
+        // A venue without order history adds no order section; a missing order reader is unavailable coverage.
+        Assert.Equal(h.Reader.Result.HistoryNotice + (notice is null ? "" : "\nOrder history: " + notice), refreshed.HistoryNotice);
+        Assert.Equal(0, orders.Reads);
+        await using var verify = h.Context();
+        Assert.Empty(await verify.Orders.ToListAsync());
+    }
+
+    [PostgresFact]
+    public async Task Missing_source_is_rejected_before_reading()
+    {
+        var orders = new AccountHistoryOrders();
+        await using var h = await Harness(orders, hasSource: false);
+        var error = await Assert.ThrowsAsync<ProblemException>(() => h.RefreshAsync());
+        Assert.Equal((400, "This account cannot be refreshed."), (error.StatusCode, error.Message));
+        Assert.Equal((0, 0), (h.Reader.Reads, orders.Reads));
+    }
+
+    [PostgresFact]
+    public async Task A_failed_public_refresh_keeps_retained_notices_and_settings_and_never_reads_orders()
+    {
+        var orders = new AccountHistoryOrders();
+        await using var h = await Harness(orders, seed: account =>
+        {
+            account.RecordSync(AccountHistoryOrders.At, "Retained public coverage.");
+            account.RecordOrderHistoryNotice("Retained order coverage.");
+        });
+        h.Reader.Fail = true;
+        var error = await Assert.ThrowsAsync<ProblemException>(() => h.RefreshAsync());
+        Assert.Equal((502, MonitorTestPaths.RefreshFailed), (error.StatusCode, error.Message));
+        Assert.Equal(0, orders.Reads);
+        await using (var verify = h.Context())
+        {
+            var failed = await verify.Accounts.SingleAsync();
+            Assert.Equal("Retained public coverage.\nOrder history: Retained order coverage.", failed.HistoryNotice);
+            Assert.Equal(("error", AccountHistoryOrders.At, h.Account.SettingsRevision),
+                (failed.SyncStatus, failed.LastSyncedAtUtc, failed.SettingsRevision));
+        }
+        // The next successful refresh replaces both sections without a settings change.
+        h.Reader.Fail = false;
+        var refreshed = await h.RefreshAsync();
+        Assert.Equal(h.Reader.Result.HistoryNotice + "\nOrder history: " + orders.Result.Notice, refreshed.HistoryNotice);
+        Assert.Equal(("synced", (string?)null, h.Account.SettingsRevision), (refreshed.SyncStatus, refreshed.LastSyncError, refreshed.SettingsRevision));
+    }
+
+    [PostgresTheory]
+    [InlineData("hyperliquid", 488)]
+    [InlineData("risex", 312)]
+    // Lighter's single omission sentence names liquidations, deleverages and market settlements as well (Phase 0, D-25).
+    [InlineData("lighter", 877)]
+    [InlineData("lighter-rh", 877)]
+    public async Task Optional_failure_notice_fits_with_each_venues_maximum_public_coverage(string venue, int combinedLength)
+    {
+        var coverage = AccountHistoryNoticeBudget.CombinedCases().Where(c => c.Venue == venue).MaxBy(c => c.Public.Length);
+        var orders = new AccountHistoryOrders(venue) { Failure = new HttpRequestException("synthetic optional failure") };
+        await using var h = await Harness(orders, seed: account =>
+        {
+            account.RecordSync(AccountHistoryOrders.At, coverage.Public);
+            account.RecordOrderHistoryNotice(coverage.Orders);
+        });
+        h.Reader.Result = h.Reader.Result with { HistoryNotice = coverage.Public };
+        var refreshed = await h.RefreshAsync(new AccountHistoryCredential("ro:synthetic-only"));
+        Assert.Equal(1, orders.Reads);
+        Assert.Equal(coverage.Public + "\nOrder history: " + OrderRetryNotice, refreshed.HistoryNotice);
+        Assert.Equal(combinedLength, refreshed.HistoryNotice!.Length);
+        // Every order notice the monitor can record also fits the stored column with that public coverage.
+        foreach (var notice in new[] { OrderRetryNotice, CredentialNotice, InterruptedNotice, DeferredNotice })
+            Assert.True((coverage.Public + "\nOrder history: " + notice).Length <= 1000);
+    }
+}
+
+internal sealed class AccountHistoryCredential(string? token) : IAccountCredentialReader
+{
+    public string? Token { get; set; } = token;
+    public Guid? AccountId { get; private set; }
+    public Action? AfterRead { get; set; }
+    public Task<string?> ReadAsync(Guid accountId, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested(); AccountId = accountId; AfterRead?.Invoke();
+        return Task.FromResult(Token);
+    }
+    public async Task<CredentialAttempt?> ReadAttemptAsync(Guid accountId, CancellationToken ct) =>
+        await ReadAsync(accountId, ct) is { } token ? new(token, "synthetic-revision") : null;
+    public Task MarkRefusedAsync(Guid accountId, string attemptedRevision, CancellationToken ct) => throw new NotSupportedException();
+}

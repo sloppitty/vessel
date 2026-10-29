@@ -26,10 +26,39 @@ The API and worker need `ConnectionStrings__Vessel`, `Vessel__Messaging__RabbitM
 ## Testing
 
 ```sh
-dotnet test backend/Vessel.slnx
+pnpm test:backend                         # all backend tests
+pnpm test:unit                            # value-only rules and calculators
+pnpm test:usecases                        # Application services with in-memory fakes
+pnpm test:venues                          # venue adapters, recorded payloads and caches
+pnpm test:api                             # in-process HTTP hosts, no external services
+pnpm test:integration                     # infrastructure, plus opt-in service tests
 ```
 
-One xUnit project, `tests/Vessel.Tests`, holds rule, adapter, API (`WebApplicationFactory` with fake venues) and PostgreSQL/broker tests. External services are opt-in by environment variable; without them those tests are reported as skipped with the variable named:
+All projects live under `backend/tests/` and belong to `backend/Vessel.slnx`.
+The scripts above call `dotnet test` on the corresponding project. The solution
+command remains `dotnet test backend/Vessel.slnx`; append `-c Release` to select
+Release, or use `--filter` to narrow a run further.
+
+| Project | What belongs here |
+| --- | --- |
+| `Vessel.Unit.Tests` | Domain types and pure Application rules/calculators over values. No I/O ports, fake stores, unit of work, host, database or HTTP adapters. Architecture and ownership-rule source checks also live here. References only Domain and Application. |
+| `Vessel.UseCases.Tests` | Application services/use cases over in-memory stores, fake venues, fake clocks and fake units of work. No web host, real venue HTTP adapters or external services. |
+| `Vessel.Venues.Tests` | Venue adapters and venue-common code, recorded JSON, fake HTTP/WebSocket transports, registry, catalogue/candle caches and market streams. Live venue reads stay opt-in. |
+| `Vessel.Api.Tests` | In-process `WebApplicationFactory`/`TestServer` HTTP tests with no external service, including contracts, auth, transport, compression, SSE and diagnostics. |
+| `Vessel.Integration.Tests` | PostgreSQL, RabbitMQ and S3 tests, including API/worker tests over PostgreSQL, isolation, multi-owner and migrations. Also non-venue infrastructure without external services, such as filesystem evidence, persistence/messaging helpers, credentials, identity and host composition. |
+| `Vessel.TestKit` | A non-test class library for support needed by more than one project, environment-gated attributes and shared fixtures. Single-project helpers stay beside their users. Unit links the value-only support sources rather than referencing the hosting/infrastructure support assembly. |
+
+Choose by the heaviest dependency: external service → Integration; web host →
+Api; real venue adapter → Venues; Application service with fakes → UseCases;
+otherwise Unit. Split mixed files method by method. Keep the existing namespaces
+and method names; give secondary classes a descriptive suffix. End-to-end tests
+remain the full-stack and browser scripts, not a .NET project.
+
+Integration needs explicit `Vessel_TEST_*` service settings for its service-gated
+tests. Without them those tests skip, naming the missing variable; its
+service-free infrastructure tests still run. S3 uses the uppercase
+`VESSEL_TEST_S3_*` names below. These switches and their skip behaviour are
+unchanged:
 
 | Variable | Enables |
 | --- | --- |
@@ -38,7 +67,21 @@ One xUnit project, `tests/Vessel.Tests`, holds rule, adapter, API (`WebApplicati
 | `VESSEL_TEST_S3_ENDPOINT`, `VESSEL_TEST_S3_ACCESS_KEY`, `VESSEL_TEST_S3_SECRET_KEY` | S3-compatible evidence store tests. |
 | `Vessel_TEST_RISEX_ADDRESS`, `Vessel_TEST_LIGHTER_PUBLIC=1` | Live public venue reads. |
 
-CI sets the first two (see `.github/workflows/checks.yml`); `pnpm check` runs the full repository check as CI does. Never point these at the owner's database or broker.
+For example, with throwaway PostgreSQL and RabbitMQ containers published on
+non-default loopback ports:
+
+```sh
+Vessel_TEST_POSTGRES='Host=127.0.0.1;Port=25432;Database=vessel_tests;Username=vessel_tests;Password=disposable-only' \
+Vessel_TEST_EVENT_RABBIT='amqp://vessel_tests:disposable-only@127.0.0.1:25672' \
+pnpm test:integration
+```
+
+Release CI sets the first two, see `.github/workflows/checks.yml`. `pnpm check`
+still builds and tests the whole solution. Shared fixtures live in
+`Vessel.TestKit/Fixtures`; project references copy them, including the linked
+original evidence JPEG, into consumers' output directories at the same
+`Fixtures/...` paths. Never point tests at the owner's database, broker or
+object store, and never load the repository's `.env` for test runs.
 
 ## Migrating
 

@@ -33,10 +33,15 @@ backend/
     Vessel.Identity/          separate identity schema, EOA/session auth and offline administration
     Vessel.Api/               composition root, middleware and HTTP endpoints
     Vessel.Worker/            background host (monitor scheduler, subscription catch-up, event retention)
-  tests/Vessel.Tests/         one xUnit project: unit, API (WebApplicationFactory) and PostgreSQL tests
+  tests/Vessel.TestKit/       shared support and fixtures, not a test project
+  tests/Vessel.Unit.Tests/    Domain and pure Application rules over values
+  tests/Vessel.UseCases.Tests/ Application services over in-memory fakes
+  tests/Vessel.Venues.Tests/  venue adapters, recorded payloads and market-data caches
+  tests/Vessel.Api.Tests/     in-process HTTP hosts without external services
+  tests/Vessel.Integration.Tests/ real services and other non-venue infrastructure
 ```
 
-Dependencies point inward. `tests/Vessel.Tests/ArchitectureTests.cs` enforces the project references and keeps Domain and Application free of package references.
+Dependencies point inward. `tests/Vessel.Unit.Tests/ArchitectureTests.cs` enforces the project references and keeps Domain and Application free of package references.
 
 ```mermaid
 flowchart LR
@@ -376,7 +381,9 @@ Development setup is in [`docs/development.md`](../development.md); production i
 dotnet test backend/Vessel.slnx
 ```
 
-- `tests/Vessel.Tests` contains pure rule tests, adapter tests over recorded JSON, API tests through `WebApplicationFactory` with fake venues, and PostgreSQL tests.
+- The five test projects separate value-only rules, fake-backed Application use cases, venue adapters, service-free API hosts and integration infrastructure. Choose by the heaviest dependency: external service → Integration; web host → Api; real venue adapter → Venues; Application service with fakes → UseCases; otherwise Unit. Mixed files split by method, retaining namespaces and method names.
+- `tests/Vessel.TestKit` holds support shared across projects, gated attributes and recorded/evidence fixtures. Unit compiles only its value-only shared support sources and references Domain/Application, not the hosting support assembly. Helpers used by one project stay there.
+- Run `pnpm test:unit`, `pnpm test:usecases`, `pnpm test:venues`, `pnpm test:api` or `pnpm test:integration`; `pnpm test:backend` and `dotnet test backend/Vessel.slnx` run all five. Integration's PostgreSQL/RabbitMQ/S3 tests skip without the explicit disposable-service variables documented in [backend/README.md](../../backend/README.md). Live venue tests remain opt-in in Venues. End-to-end tests remain scripts.
 - `[PostgresFact]` tests need `Vessel_TEST_POSTGRES` (CI provides it). Each test migrates a random schema and drops it afterwards; they never touch the development tables. Broker tests need `Vessel_TEST_EVENT_RABBIT`.
 - Live venue tests are opt-in (`Vessel_TEST_RISEX_ADDRESS`, `Vessel_TEST_LIGHTER_PUBLIC=1`).
 - `pnpm check` runs the full repository check, as CI does.

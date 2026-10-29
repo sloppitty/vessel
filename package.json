@@ -17,6 +17,12 @@
     "db:migrate": "python3 scripts/dev.py migrate",
     "db:stop": "docker compose stop postgres",
     "check": "bash scripts/check.sh",
-    "test:prototype": "node --test prototype/*.test.mjs"
+    "test:prototype": "node --test prototype/*.test.mjs",
+    "test:unit": "dotnet test backend/tests/Vessel.Unit.Tests",
+    "test:usecases": "dotnet test backend/tests/Vessel.UseCases.Tests",
+    "test:venues": "dotnet test backend/tests/Vessel.Venues.Tests",
+    "test:api": "dotnet test backend/tests/Vessel.Api.Tests",
+    "test:integration": "dotnet test backend/tests/Vessel.Integration.Tests",
+    "test:backend": "dotnet test backend/Vessel.slnx"
   }
 }
