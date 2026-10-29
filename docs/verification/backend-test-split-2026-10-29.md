@@ -108,10 +108,10 @@ The same environment was used for both whole-solution service runs. The standalo
 | Project | Physical C# files, excluding generated output |
 | --- | ---: |
 | `Vessel.Unit.Tests` | 49 |
-| `Vessel.UseCases.Tests` | 51 |
-| `Vessel.Venues.Tests` | 35 |
+| `Vessel.UseCases.Tests` | 52 |
+| `Vessel.Venues.Tests` | 34 |
 | `Vessel.Api.Tests` | 34 |
-| `Vessel.Integration.Tests` | 154 |
+| `Vessel.Integration.Tests` | 155 |
 | `Vessel.TestKit` | 89 |
 
 Unit additionally compiles 17 value-only TestKit sources through explicit linked `Compile` entries. It references Domain and Application only, with no infrastructure, hosting, database or fake I/O ports. Its local `ReviewClock` repeats only the fixed timestamp, not TestKit's `TimeProvider` fake. Other projects reference TestKit normally. TestKit references Api for shared host support, but not Worker. Direct `Mvc.Testing` references exist only in TestKit, Api and Integration.
@@ -142,3 +142,5 @@ An independent Sol (Codex) review on October 29, 2026 repeated the syntax and di
 - `IdentityDatabase`, `IdentityClock` and the database-backed `IdentityHttpTest` helpers serve Integration only and moved there. The shared identity error assertion stays in TestKit as `IdentityResponse.Code`; Api calls it directly and Integration's `IdentityHttpTest.Code` forwards to it.
 
 The 65 split files and the per-file mapping are in the commit history (`git show --stat` of the split commit), not repeated here.
+
+A second independent Sol review of the PR head ran both complete solutions against throwaway PostgreSQL 18, RabbitMQ 4.3.6 and RustFS 1.0.1 containers: 4,052 passed, 3 skipped (live venues) and 0 failed for `2cddae9f` and for the split, with all 4,055 TRX result rows matching by method, theory arguments and outcome. It found that `AccountSecurityTests` exercised no venue adapter: its five fake-backed methods moved unchanged to `Vessel.UseCases.Tests/AccountSecurityTests.cs` and its six methods using the real `AesGcmCredentialVault` to `Vessel.Integration.Tests/AccountSecurityVaultTests.cs`. Without services the suites then report Unit 797, UseCases 548, Venues 946 passed and 3 skipped, Api 420, Integration 388 passed and 761 skipped: still 3,099 passed and 764 skipped in total. The per-script table above predates both placement fixes.
