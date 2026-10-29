@@ -10,6 +10,11 @@
     <Project Path="src/Vessel.Worker/Vessel.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/Vessel.Tests/Vessel.Tests.csproj" />
+    <Project Path="tests/Vessel.TestKit/Vessel.TestKit.csproj" />
+    <Project Path="tests/Vessel.Unit.Tests/Vessel.Unit.Tests.csproj" />
+    <Project Path="tests/Vessel.UseCases.Tests/Vessel.UseCases.Tests.csproj" />
+    <Project Path="tests/Vessel.Venues.Tests/Vessel.Venues.Tests.csproj" />
+    <Project Path="tests/Vessel.Api.Tests/Vessel.Api.Tests.csproj" />
+    <Project Path="tests/Vessel.Integration.Tests/Vessel.Integration.Tests.csproj" />
   </Folder>
 </Solution>

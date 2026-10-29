@@ -3,7 +3,9 @@
     <ProjectReference Include="../Vessel.Application/Vessel.Application.csproj" />
     <ProjectReference Include="../Vessel.Persistence/Vessel.Persistence.csproj" />
   </ItemGroup>
-  <ItemGroup><InternalsVisibleTo Include="Vessel.Tests" /></ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Vessel.TestKit" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="WolverineFx" Version="6.50.0" />
     <PackageReference Include="WolverineFx.EntityFrameworkCore" Version="6.50.0" />

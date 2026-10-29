@@ -69,7 +69,7 @@ flowchart TD
     Application["Vessel.Application<br/>use cases, ports"] --> Domain["Vessel.Domain<br/>entities, DiscrepancyLifecycle"]
 ```
 
-Arrows point to what a project references. `backend/tests/Vessel.Tests/ArchitectureTests.cs` checks these exact references, that Domain and Application have no package references, and that no project except Messaging references a `WolverineFx*` or `RabbitMQ*` package.
+Arrows point to what a project references. `backend/tests/Vessel.Unit.Tests/ArchitectureTests.cs` checks these exact references, that Domain and Application have no package references, and that no project except Messaging references a `WolverineFx*` or `RabbitMQ*` package.
 
 | Project | Messaging and monitor parts |
 |---|---|
@@ -897,7 +897,19 @@ Recreate every other service that uses the same user too, for example additional
 
 ## Testing map
 
-Backend suites run with `dotnet test backend/tests/Vessel.Tests` against disposable services only: `Vessel_TEST_POSTGRES` for PostgreSQL tests and `Vessel_TEST_EVENT_RABBIT` (RabbitMQ 4.3) for broker tests; without them those tests skip. `.github/workflows/checks.yml` provides both.
+Run all backend suites with `pnpm test:backend` or `dotnet test backend/Vessel.slnx`.
+The messaging, worker, persistence and service-backed API tests live in
+`backend/tests/Vessel.Integration.Tests`, run separately with
+`pnpm test:integration`. Use disposable services only: `Vessel_TEST_POSTGRES`
+for PostgreSQL and `Vessel_TEST_EVENT_RABBIT` for RabbitMQ 4.3. Without them,
+service-gated tests skip; service-free infrastructure tests still run.
+S3 evidence tests use the explicit `VESSEL_TEST_S3_*` settings in
+`backend/README.md`. Release's reusable `.github/workflows/checks.yml` supplies
+PostgreSQL and RabbitMQ. Value-only rules, fake-backed use cases, venue adapters
+and service-free HTTP hosts have their own Unit, UseCases, Venues and Api
+projects, with shared support in the non-test `Vessel.TestKit` library. Place
+mixed tests by their heaviest dependency in that order: external service,
+web host, real venue adapter, Application service with fakes, then pure rules.
 
 | Area | Tests |
 |---|---|
