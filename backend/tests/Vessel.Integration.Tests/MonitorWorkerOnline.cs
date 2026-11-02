@@ -27,12 +27,15 @@ internal sealed class MonitorWorkerOnline(IMonitorStore inner, TimeProvider cloc
     public Task<IReadOnlyList<MonitorCandidate>> DiscoveryCandidatesAsync(IReadOnlyCollection<string> venueIds, DateTimeOffset now,
         Guid? after, int limit, CancellationToken ct) => inner.DiscoveryCandidatesAsync(venueIds, now, after, limit, ct);
     public Task<bool> EligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct) => inner.EligibleAsync(accountId, now, ct);
+    public Task<bool> ProtectionEligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct) =>
+        inner.ProtectionEligibleAsync(accountId, now, ct);
+    public Task RecordCoverageAsync(FillCoverageRecord record, CancellationToken ct) => inner.RecordCoverageAsync(record, ct);
     public Task<T> LockedAsync<T>(Guid accountId, Func<Account, MonitorAccount, Task<T>> action, CancellationToken ct) =>
         inner.LockedAsync(accountId, action, ct);
     public Task<IReadOnlyList<MonitorLease>> ClaimDueAsync(string workerId, DateTimeOffset now, int limit, CancellationToken ct) =>
         inner.ClaimDueAsync(workerId, now, limit, ct);
-    public Task<MonitorLease?> ClaimAsync(Guid accountId, Guid? requestId, string workerId, DateTimeOffset now, CancellationToken ct) =>
-        inner.ClaimAsync(accountId, requestId, workerId, now, ct);
+    public Task<MonitorLease?> ClaimAsync(Guid accountId, Guid? requestId, string workerId, DateTimeOffset now, CancellationToken ct,
+        bool protectionOnly = false) => inner.ClaimAsync(accountId, requestId, workerId, now, ct, protectionOnly);
     public Task<bool> RenewAsync(MonitorLease lease, DateTimeOffset now, CancellationToken ct) => inner.RenewAsync(lease, now, ct);
     public Task UpdateWatchesAsync(Guid accountId, VenueOrderReadResult? orders, DateTimeOffset now, CancellationToken ct) =>
         inner.UpdateWatchesAsync(accountId, orders, now, ct);
@@ -46,5 +49,6 @@ internal sealed class MonitorWorkerOnline(IMonitorStore inner, TimeProvider cloc
         inner.UncheckedPlaysAsync(accountIds, ct);
     public Task<bool> VenueAtCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct) => inner.VenueAtCapacityAsync(venueId, now, ct);
     public Task<bool> OwnerAtCapacityAsync(DateTimeOffset now, CancellationToken ct) => inner.OwnerAtCapacityAsync(now, ct);
-    public Task<bool> ReadCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct) => inner.ReadCapacityAsync(venueId, now, ct);
+    public Task<bool> ReadCapacityAsync(string venueId, DateTimeOffset now, CancellationToken ct, int headroom = 0) =>
+        inner.ReadCapacityAsync(venueId, now, ct, headroom);
 }

@@ -17,6 +17,9 @@ internal sealed class AccountConfiguration : IEntityTypeConfiguration<Account>
             table.HasCheckConstraint("CK_accounts_trading_mode", "\"TradingMode\" IN ('real','paper')");
             table.HasCheckConstraint("CK_accounts_paper",
                 """("TradingMode"='real' AND "StartingCapitalUsd" IS NULL) OR ("TradingMode"='paper' AND "PortfolioId" IS NOT NULL AND "VenueId"='hyperliquid' AND "Address" IS NULL AND "SourceId" IS NULL AND "ManualAccountValueUsd" IS NULL AND "StartingCapitalUsd" IS NOT NULL AND "StartingCapitalUsd">=0)""");
+            // Phase 2, item 6: only a real venue account with a source keeps its execution history.
+            table.HasCheckConstraint("CK_accounts_keep_history",
+                """NOT "KeepExecutionHistory" OR "TradingMode"='real' AND "SourceId" IS NOT NULL AND "VenueId" <> 'manual'""");
             table.HasCheckConstraint("CK_accounts_source_identity",
                 """("Address" IS NULL OR "SourceId" IS NOT NULL AND "SourceId" = "Address") AND CASE WHEN "SourceId" IS NULL OR "Address" IS NOT NULL THEN true WHEN "SourceId" ~ '^(0|[1-9][0-9]{0,18})$' THEN "SourceId"::numeric <= 9223372036854775807 ELSE false END""");
         });

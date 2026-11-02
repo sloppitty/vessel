@@ -5,6 +5,13 @@ public sealed class MonitorOptions
     public const string Section = "Vessel:Monitor";
     public int WorkerConcurrency { get; set; } = 2;
     public int VenueReadConcurrency { get; set; } = 4;
+    /// <summary>
+    /// Venue read slots kept free for protection checks when an account is read only because it keeps its execution
+    /// history (Phase 2, item 6); such a read also leaves one of the owner's two slots free. It never takes a venue's whole
+    /// capacity: at most <see cref="VenueReadConcurrency"/> − 1 slots are kept. The scheduler also claims protection work
+    /// first in each tick and keeps one of its own worker slots free when it has more than one.
+    /// </summary>
+    public int ProtectionHeadroom { get; set; } = 1;
     public TimeSpan Interval { get; set; } = TimeSpan.FromMinutes(10);
     public TimeSpan ProtectionGrace { get; set; } = TimeSpan.FromMinutes(10);
     /// <summary>Gates manual Check and Refresh only, never a scheduled claim. At most <see cref="Interval"/>.</summary>
@@ -23,6 +30,8 @@ public sealed class MonitorOptions
     {
         if (WorkerConcurrency is < 1 or > 64 || VenueReadConcurrency is < 1 or > 64)
             throw new InvalidOperationException("Monitor concurrency must be between 1 and 64.");
+        if (ProtectionHeadroom is < 0 or > 64)
+            throw new InvalidOperationException("Vessel:Monitor:ProtectionHeadroom must be between 0 and 64.");
         if (Interval < TimeSpan.FromMinutes(1) || Interval > TimeSpan.FromMinutes(60))
             throw new InvalidOperationException("Vessel:Monitor:Interval must be between 1 and 60 minutes.");
         if (ManualCooldown < TimeSpan.Zero || ManualCooldown > Interval)

@@ -4,6 +4,9 @@
 
 ### Added
 
+- Accounts can keep their execution history (Manage account → Keep execution history): the
+  monitor reads them on its schedule even without a Play, after protection checks. Account
+  detail shows what each import covered and any gap it may have skipped.
 - One if-then rule per trading mode. Write one, or promote a next action, from the Thesis
   tab. Plan it shows it for an acknowledgement or an exception with a reason, never blocking;
   the review asks whether you followed it, and Review counts the answers.

@@ -122,6 +122,10 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
   const [name, setName] = useState(account.name)
   const [portfolioId, setPortfolioId] = useState(account.portfolioId ?? '')
   const [enabled, setEnabled] = useState(account.isEnabled !== false)
+  const [keep, setKeep] = useState(account.keepExecutionHistory === true)
+  // Phase 2, item 6: a real account on a venue the monitor checks can keep its execution history.
+  const canKeep = account.tradingMode !== 'paper' && !!(account.sourceId ?? account.address) &&
+    venues.can(account.venueId, 'sync') && venues.can(account.venueId, 'orders')
   const [deleting, setDeleting] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -137,7 +141,7 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
       if (current.settingsRevision === undefined) throw new ApiError('invalid-response', 'Current settings version is unavailable. Reload after the API update.')
       setReloadedPortfolios({ source: portfolios, options: currentPortfolios })
       setName(current.name); setPortfolioId(current.portfolioId ?? '')
-      setEnabled(current.isEnabled !== false); setRevision(current.settingsRevision); setConflict(false)
+      setEnabled(current.isEnabled !== false); setKeep(current.keepExecutionHistory === true); setRevision(current.settingsRevision); setConflict(false)
     } catch (cause) { setError(errorMessage(cause, 'The change could not be confirmed. Reload current settings before retrying.')) }
     finally { setPending(false) }
   }
@@ -148,7 +152,8 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
     if (conflict || revision === undefined) { setError('Reload current settings before saving.'); return }
     setPending(true)
     try {
-      await api.updateAccount(account.id, { name: name.trim(), portfolioId: portfolioId || null, isEnabled: enabled, expectedRevision: revision })
+      await api.updateAccount(account.id, { name: name.trim(), portfolioId: portfolioId || null, isEnabled: enabled, expectedRevision: revision,
+        ...(canKeep ? { keepExecutionHistory: keep } : {}) })
       onChanged({ kind: 'account-updated', id: account.id, message: enabled ? 'Account settings saved.' : 'Account disabled. Its retained imports are hidden until enabled again.' })
       onClose()
     } catch (cause) {
@@ -185,6 +190,10 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
         {!enabled && <p className="field-help">{account.tradingMode === 'paper' ?
           'Disabling suspends this account’s paper checks; re-enabling resumes at a fresh minute boundary without replaying disabled touches. Unevaluated time before disabling is also skipped and remains unscored. Any position open at suspension keeps new entries blocked after re-enabling until that exposure closes. Touches during the hold are declined, not replayed. The affected history remains unscored. Records are kept but hidden and excluded from totals while disabled.' :
           'Records are kept; history and positions are hidden and excluded from totals, and refresh is blocked.'}</p>}
+        {canKeep && <><label className="account-enabled-control"><input type="checkbox" checked={keep} onChange={event => setKeep(event.target.checked)}
+          disabled={pending} aria-describedby="keep-history-help" />Keep execution history</label>
+          <p id="keep-history-help" className="field-help">Read on the monitor&apos;s schedule even without a Play, after protection checks.
+            Each import records what it covered and any gap it may have skipped.</p></>}
         {conflict && <div className="workspace-form"><p className="field-help">These settings may be outdated. Reload the latest saved values and review them; your changes are not replayed.</p><Button type="button" variant="outline" onClick={() => { void reloadSettings() }} disabled={pending}>Reload current settings</Button></div>}
         {error && <p className="error" role="alert">{error}</p>}
         <div className="management-actions"><Button type="button" variant="ghost" className="danger-action" onClick={() => { setDeleting(true); setError(null) }} disabled={pending || credentialPending}><Trash2 size={14} />Delete</Button><Button type="submit" disabled={pending || credentialPending || conflict}>{pending ? 'Saving…' : 'Save settings'}</Button></div>

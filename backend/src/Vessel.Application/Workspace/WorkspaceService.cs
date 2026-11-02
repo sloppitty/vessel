@@ -231,7 +231,13 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
                 throw new ProblemException(409, "Account settings changed. Reload the current settings before saving.");
             await ValidatePortfolio(request.PortfolioId, ct, mode);
             var wasEnabled = account.IsEnabled;
-            account.UpdateSettings(request.Name, request.PortfolioId, request.IsEnabled);
+            // Phase 2, item 6: the opt-in reads venue facts, so it is real-only and needs a venue the monitor checks.
+            if (request.KeepExecutionHistory == true && !account.KeepExecutionHistory)
+            {
+                if (account.TradingMode == TradingMode.Paper) throw new ProblemException(409, "Paper accounts have no venue history to keep.");
+                if (!KeepsHistory(account)) throw new ProblemException(400, "This account's venue history cannot be kept.");
+            }
+            account.UpdateSettings(request.Name, request.PortfolioId, request.IsEnabled, request.KeepExecutionHistory);
             await store.SaveAsync(ct);
             if (wasEnabled != account.IsEnabled) await store.AccountVisibilityChangedAsync(id, account.IsEnabled, ct);
             return await AccountAsync(id, ct, mode);
@@ -350,6 +356,30 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     public const string FillConflictsNotice = "The venue later reported these fills with different values. Vessel keeps the " +
         "first copy it stored and never overwrites it; only the names of the fields that differed are recorded.";
 
+    public const string HistoryCoverageNotice = "Each import records what it asked the venue for, the span it proves continuous " +
+        "and any gap it may have skipped. A gap closes only when a later read proves that span covered.";
+
+    /// <summary>A real venue account whose venue the monitor checks (reads and orders) can keep its history.</summary>
+    private bool KeepsHistory(Account account) => account.TradingMode == TradingMode.Real && account.SourceId is not null &&
+        venues.Descriptor(account.VenueId) is { Capabilities.Sync: true, Capabilities.Orders: true };
+
+    /// <summary>
+    /// Phase 2, item 6: the opt-in and the coverage ledger, newest first, at most 50 of each list. A disabled account
+    /// hides its imports, so it shows none.
+    /// </summary>
+    public async Task<HistoryCoverageDto> HistoryCoverageAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
+    {
+        var account = await RequireAccount(id, ValidateTradingMode(tradingMode), ct);
+        if (account.TradingMode == TradingMode.Paper) throw new ProblemException(409, "Paper accounts have no venue history.");
+        if (!account.IsEnabled) return new(account.KeepExecutionHistory, KeepsHistory(account), 0, [], [], 0, [], HistoryCoverageNotice);
+        var facts = await store.HistoryCoverageAsync(id, 50, ct);
+        static HistoryGapDto Gap(Vessel.Domain.Monitoring.AccountHistoryGap g) => new(g.Id, g.FromUtc, g.ToUtc, g.OpenedAtUtc, g.ClosedAtUtc);
+        return new(account.KeepExecutionHistory, KeepsHistory(account), facts.OpenGapCount, facts.OpenGaps.Select(Gap).ToList(),
+            facts.ClosedGaps.Select(Gap).ToList(), facts.RecordCount, facts.Recent.Select(r => new FillCoverageDto(r.Source,
+                r.FirstObservedAtUtc, r.LastObservedAtUtc, r.ImportCount, r.RequestedFromUtc, r.RequestedToUtc, r.Truncated, r.Complete,
+                r.CoveredFromUtc, r.CoveredToUtc, r.GapFromUtc, r.GapToUtc)).ToList(), HistoryCoverageNotice);
+    }
+
     /// <summary>Phase 2, item 14c: retained fills reported again with different venue facts, newest first, at most 50.</summary>
     public async Task<FillConflictsDto> FillConflictsAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
     {
@@ -428,7 +458,8 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         s?.StablecoinScope, s?.AccountMode,
         s?.StablecoinsObservedAtUtc is null ? null : ExactDecimal.Sum(s.Stablecoins.Select(balance => balance.Total)),
         Balance(a, s) is { } balance ? ExactDecimal.Sum(balance) : null, a.SourceId,
-        AvailableBalance(a, s) is { } available ? ExactDecimal.Sum(available) : null, AvailableSource(a, s), a.TradingMode);
+        AvailableBalance(a, s) is { } available ? ExactDecimal.Sum(available) : null, AvailableSource(a, s), a.TradingMode,
+        KeepExecutionHistory: a.KeepExecutionHistory);
     }
 
     /// <summary>

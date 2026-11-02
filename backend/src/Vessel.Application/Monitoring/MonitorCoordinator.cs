@@ -154,7 +154,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             var now = time.GetUtcNow();
             if (account.TradingMode != "real" || !account.IsEnabled || account.SourceId is null || !EligibleVenue(account.VenueId) ||
                 !await store.EligibleAsync(accountId, now, ct))
-                throw new ProblemException(409, "This account has no eligible venue Plays, pending linked orders or discrepancy work.");
+                throw new ProblemException(409, "This account has no eligible venue Plays, pending linked orders, discrepancy work or kept history.");
             row.ReleaseAbandonedRefresh(now);
             var expired = ReleaseUnclaimed(row, now);
             var retry = await RetryAfterAsync(account.VenueId, row, now, ct);
@@ -207,6 +207,9 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         {
             if (!refresh && !await store.EligibleAsync(lease.AccountId, time.GetUtcNow(), ct))
                 return await SupersedeAsync(lease, ct, attempted: false);
+            // Phase 2, item 6: whether the run has protection work, as it stood when the run began. A watch that ends
+            // during this run still gets the comparison it was admitted for.
+            var protection = refresh || await store.ProtectionEligibleAsync(lease.AccountId, time.GetUtcNow(), ct);
             // Commit the watched-history baseline before any adapter call.
             await unitOfWork.ExecuteAsync(async () =>
             {
@@ -304,7 +307,8 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 }
             }
             ct.ThrowIfCancellationRequested();
-            return await ApplyAsync(lease, capture, new(sync, orders, orderError, credentialError), ct, snapshotApplied: snapshotApplied);
+            return await ApplyAsync(lease, capture, new(sync, orders, orderError, credentialError), ct, snapshotApplied: snapshotApplied,
+                protection: protection);
         }
         catch (Exception ex) when (ex is VenueCredentialRejectedException or CredentialStorageException)
         {
@@ -339,8 +343,10 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         }
     }
 
+    /// <param name="protection">Whether the run had protection work when it began; without it, and without any now, a run
+    /// only for kept history compares nothing.</param>
     private Task<bool> ApplyAsync(MonitorLease lease, MonitorCapture captured, MonitorRead read, CancellationToken ct,
-        bool snapshotOnly = false, bool snapshotApplied = false) =>
+        bool snapshotOnly = false, bool snapshotApplied = false, bool protection = true) =>
         unitOfWork.ExecuteAsync(() => store.LockedAsync(lease.AccountId, async (account, row) =>
         {
             var refresh = lease.Trigger == "refresh";
@@ -387,6 +393,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                     if (!read.Sync.FillHistoryComplete && ObservedGap(read.Sync, boundary)) row.HasHistoryGap = true;
                     AdvanceWatermark(row, read.Sync, boundary);
                 }
+                await RecordCoverageAsync(account, FillCoverageRecord.Refresh, read.Sync, boundary, ct);
                 return true;
             }
             if (refresh)
@@ -419,6 +426,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             // Only a check clears a gap, and only when the adapter reports complete history.
             var gap = !read.Sync.FillHistoryComplete && (row.HasHistoryGap || ObservedGap(read.Sync, previousFill));
             row.HasHistoryGap = gap;
+            await RecordCoverageAsync(account, FillCoverageRecord.Check, read.Sync, previousFill, ct);
             if (read.Orders is { } orders)
             {
                 await executions.RetainAsync(account, orders, ct);
@@ -438,7 +446,10 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             // A venue whose order reader does not return the current book is labelled, not degraded: its book-dependent
             // checks do not run, and its history-only order read is not missing evidence.
             var currentBook = venues.Descriptor(account.VenueId)?.Capabilities.CurrentOrderBook == true;
-            var evaluation = evaluator is null ? new MonitorEvaluationResult(null) : await evaluator.EvaluateAsync(
+            // Phase 2, item 6: an account read only because it keeps its history has no protection work, so its run
+            // imports and records coverage without comparing positions or opening discrepancies.
+            var compare = protection || await store.ProtectionEligibleAsync(account.Id, now, ct);
+            var evaluation = evaluator is null || !compare ? new MonitorEvaluationResult(null) : await evaluator.EvaluateAsync(
                 new(lease.RequestId, account, read, previousSuccess, previousFill, gap, lease.Trigger, currentBook), ct);
             if (evaluation.Coverage is { } coverage)
                 await store.SaveCoverageAsync(account.Id, coverage.Select(x => new MonitorCoverage
@@ -480,6 +491,14 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                     JsonSerializer.SerializeToElement(new { expiresAtUtc = expires })), ct);
             return true;
         }, ct), ct);
+
+    /// <summary>
+    /// Phase 2, item 6: one import's coverage by the 0.4b rule, in the unit that retains its fills. An import of unknown
+    /// truncation records its request only.
+    /// </summary>
+    private Task RecordCoverageAsync(Account account, string source, PerpetualVenueReadResult read, DateTimeOffset? boundary,
+        CancellationToken ct) => store.RecordCoverageAsync(FillCoverageRecord.For(owner.OwnerId, account.Id, source,
+            read.Snapshot.ObservedAtUtc, read.FillHistoryTruncated, read.FillHistoryComplete, read.OldestRawFillAtUtc, boundary), ct);
 
     /// <summary>
     /// The newest fill known before an import: the continuity watermark or the newest retained fill, whichever is later.

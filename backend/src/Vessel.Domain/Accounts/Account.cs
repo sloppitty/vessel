@@ -20,6 +20,11 @@ public sealed class Account : IOwned
     public string? LastSyncError { get; private set; }
     public string? HistoryNotice { get; private set; }
     public bool IsEnabled { get; private set; } = true;
+    /// <summary>
+    /// "Keep execution history" (Phase 2, item 6): the monitor reads this real account on its schedule even without an
+    /// eligible Play, after protection checks. Off until the owner sets it.
+    /// </summary>
+    public bool KeepExecutionHistory { get; private set; }
     public long SettingsRevision { get; private set; } = 1;
     private Account() { }
 
@@ -35,13 +40,17 @@ public sealed class Account : IOwned
         SyncStatus = TradingMode == Common.TradingMode.Paper ? "paper" : VenueId == ManualVenue.Id ? "manual" : "not-synced";
     }
 
-    public void UpdateSettings(string name, Guid? portfolioId, bool isEnabled)
+    /// <param name="keepExecutionHistory">The retention opt-in; null keeps it. Only a real venue account can keep history.</param>
+    public void UpdateSettings(string name, Guid? portfolioId, bool isEnabled, bool? keepExecutionHistory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         if (name.Length > 200 || portfolioId == Guid.Empty || TradingMode == Common.TradingMode.Paper && portfolioId is null)
             throw new DomainValidationException("Invalid account settings.");
+        if (keepExecutionHistory == true && (TradingMode != Common.TradingMode.Real || VenueId == ManualVenue.Id || SourceId is null))
+            throw new DomainValidationException("Only a real venue account can keep its execution history.");
         var nextRevision = checked(SettingsRevision + 1);
         Name = name.Trim(); PortfolioId = portfolioId; IsEnabled = isEnabled;
+        KeepExecutionHistory = keepExecutionHistory ?? KeepExecutionHistory;
         SettingsRevision = nextRevision;
     }
 
