@@ -4,6 +4,7 @@ import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { ExecutionOrder, PlayExecution } from '@/api/plays'
+import type { PlayFunding } from '@/api/play-funding'
 import { ExecutionPanel } from './ExecutionPanel'
 import { createDraft } from './draft'
 import { PlayJournal } from './WorkspacePanels'
@@ -124,6 +125,48 @@ describe('execution panel', () => {
     view.rerender(<ExecutionPanel execution={execution} {...props} />)
     expect(screen.queryByText('Venue net')).not.toBeInTheDocument()
     expect(screen.queryByText('Play-local result')).not.toBeInTheDocument()
+  })
+
+  it('shows settled funding beside the results in each state and changes neither result (phase 2, 9b)', () => {
+    const closed: PlayExecution = { ...execution, status: 'closed', totals: { ...execution.totals, enteredQuantity: '1', exitedQuantity: '1', openQuantity: '0',
+      closedPnlUsd: '3', venueNetUsd: '2.9', local: { netUsd: '2.8', basis: 'executions', reason: null, signDiffers: false } } }
+    const props = { error: null, busy: false, entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn() }
+    const value = (term: string) => screen.getByText(term).closest('div')!.querySelector('dd')!
+    const results = () => {
+      expect(value('Venue net')).toHaveTextContent(/^2\.9 USD$/)
+      expect(value('Play-local result')).toHaveTextContent(/^2\.8 USD$/)
+      expect(value('Venue closed PnL')).toHaveTextContent(/^3 USD$/)
+    }
+    const none = { amountUsd: null, asset: null, paymentCount: null, fromUtc: null, toUtc: null }
+    const sole: PlayFunding = { state: 'sole', reason: null, amountUsd: '-0.1234567890123456789012345678', asset: 'USDC', paymentCount: 2,
+      fromUtc: '2026-10-03T10:01:00Z', toUtc: '2026-10-03T13:01:00Z' }
+    const view = render(<ExecutionPanel execution={{ ...closed, funding: sole }} {...props} />)
+    // The exact sum, its count and its window, never rounded.
+    expect(value('Settled funding')).toHaveTextContent(/^-0\.1234567890123456789012345678 USDC 2 settlements · .+ – .+$/)
+    expect(value('Settled funding').querySelectorAll('time')).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'About settled funding' })).toHaveAccessibleDescription(/this play alone held the position.*never added to either\. Whether venue-reported P&L includes funding is unverified\./)
+    results()
+
+    view.rerender(<ExecutionPanel execution={{ ...closed, funding: { state: 'shared', reason: 'other-play', ...none } }} {...props} />)
+    expect(screen.getByRole('button', { name: 'Shared, not allocated settled funding' }))
+      .toHaveAccessibleDescription('Another play traded this position during the holding window.')
+    expect(within(value('Settled funding')).getByRole('button')).toHaveTextContent(/^Shared, not allocated$/)
+    results()
+
+    view.rerender(<ExecutionPanel execution={{ ...closed, funding: { state: 'incomplete', reason: 'flat-start-unproven', ...none } }} {...props} />)
+    expect(screen.getByRole('button', { name: 'Coverage incomplete settled funding' }))
+      .toHaveAccessibleDescription('Nothing on record proves the position was flat before the first entry. Missing funding is not zero.')
+    expect(within(value('Settled funding')).getByRole('button')).toHaveTextContent(/^Coverage incomplete$/)
+    results()
+
+    view.rerender(<ExecutionPanel execution={{ ...closed, funding: { state: 'unavailable', reason: 'no-funding-read', ...none } }} {...props} />)
+    expect(screen.getByRole('button', { name: 'Not available settled funding' })).toHaveAccessibleDescription('Settled funding is not read for this venue.')
+    results()
+
+    // No holding window (or an older server): no line at all.
+    view.rerender(<ExecutionPanel execution={closed} {...props} />)
+    expect(screen.queryByText('Settled funding')).not.toBeInTheDocument()
+    results()
   })
 
   it('shows linked fills, asks about ambiguous orders and links others by hand', async () => {

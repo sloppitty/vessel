@@ -112,7 +112,56 @@ public sealed record PlayExecutionDto(Guid PlayId, string Status, bool Tracked, 
     public VenueRiskDto? VenuePosition { get; init; }
     /// <summary>The first risk context the venue reported at or after the Play's first entry fill; null when none was kept.</summary>
     public VenueRiskDto? RiskAtFirstFill { get; init; }
+    /// <summary>
+    /// Settled funding beside the Play (Phase 2, item 9b), shown only with proven sole exposure. Absent for a manual
+    /// instrument and before the first linked entry fill. Never added to the venue or Play-local result.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PlayFundingDto? Funding { get; init; }
 }
+
+/// <summary>
+/// Settled funding beside a Play (Phase 2, item 9b). <see cref="State"/> is one of:
+/// <list type="bullet">
+/// <item><c>sole</c>: the Play alone held the position over its holding window (<see cref="FromUtc"/> to <see cref="ToUtc"/>),
+/// with the exact nominal sum of the settlements in it, their asset when they share one, and their count;</item>
+/// <item><c>shared</c>: shared, not allocated, because other exposure was on the position;</item>
+/// <item><c>incomplete</c>: coverage incomplete, because a condition of the proof is not shown;</item>
+/// <item><c>unavailable</c>: the venue's funding is not read, or the account is disabled.</item>
+/// </list>
+/// Every state but <c>sole</c> has a <see cref="Reason"/> code and no amount, count or window. The amount is never added to
+/// the venue or Play-local result, and no execution P&amp;L funding basis moves from unknown.
+/// </summary>
+public sealed record PlayFundingDto(string State, string? Reason, string? AmountUsd, string? Asset, int? PaymentCount,
+    DateTimeOffset? FromUtc, DateTimeOffset? ToUtc);
+
+/// <summary>
+/// A span of an account's execution history (Phase 2, item 9b reads the item 6 ledger). As a covered span, a null start is
+/// verified complete history from the account's start; as an open gap, a null end is unbounded on that side.
+/// </summary>
+public readonly record struct LedgerSpan(DateTimeOffset? FromUtc, DateTimeOffset? ToUtc);
+
+/// <summary>
+/// What the funding proof asks the store for (Phase 2, item 9b): one account and Play, the canonical contracts of the Play's
+/// partition and its native market (null for a canonical-only one, where every market of the contract counts), and the
+/// earliest time evidence can matter for the window and the snapshot anchor.
+/// </summary>
+public sealed record FundingEvidenceRequest(Guid AccountId, Guid PlayId, IReadOnlyCollection<string> ContractIds, string? VenueContractId,
+    DateTimeOffset FromUtc);
+
+/// <summary>An order on the instrument with known missing executions, by the shared rule, and the life its executions lie in.</summary>
+public sealed record MissingExecutionOrder(string ContractId, string? VenueContractId, DateTimeOffset PlacedAtUtc, DateTimeOffset? EndedAtUtc);
+
+/// <summary>
+/// The evidence the funding proof reads besides Activity's aggregate (Phase 2, item 9b), in one repeatable-read snapshot:
+/// the owner's Activity facts revision at its start and end, the Play's linked orders, the coverage spans the ledger proves
+/// continuous, the open history gaps, and the venue-forced executions and orders with known missing executions on the
+/// instrument. Rows before <see cref="FundingEvidenceRequest.FromUtc"/> are read only when a complete ledger record could
+/// make them matter; none is ever truncated.
+/// </summary>
+public sealed record FundingEvidence(long Revision, long RevisionAfter, IReadOnlyList<(OrderLinkRole Role, ImportedOrder Order)> Links,
+    IReadOnlyList<LedgerSpan> Covered, IReadOnlyList<LedgerSpan> OpenGaps,
+    IReadOnlyList<Vessel.Application.Activity.ActivityOmission> ForcedEvents, IReadOnlyList<MissingExecutionOrder> MissingExecutions);
 
 /// <summary>
 /// A position's venue-reported risk context (Phase 2, item 8a): signed quantity and entry as reported, the venue's
@@ -205,6 +254,11 @@ public interface IPlayExecutionStore
     Task<VenueRiskDto?> RiskSinceAsync(Guid accountId, string contractId, string? venueContractId, int direction, DateTimeOffset since,
         DateTimeOffset? until, CancellationToken ct) =>
         Task.FromResult<VenueRiskDto?>(null);
+    /// <summary>
+    /// Phase 2, item 9b: the funding proof's evidence, read-only, in one snapshot (<see cref="FundingEvidence"/>). Null when
+    /// the store keeps no ledger, which proves nothing.
+    /// </summary>
+    Task<FundingEvidence?> FundingEvidenceAsync(FundingEvidenceRequest request, CancellationToken ct) => Task.FromResult<FundingEvidence?>(null);
     void Add(PlayOrderLink link);
     void Add(PlayStatusChange change);
     /// <summary>

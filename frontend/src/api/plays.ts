@@ -5,6 +5,7 @@ import { isImageMarkup, type ImageMarkup } from './markup'
 import { validOverviewScope } from './overview-summary'
 import { isAccountMonitor, isMonitorDiscrepancy, isMonitorWatch, type AccountMonitor, type MonitorDiscrepancy, type MonitorWatch } from './monitor'
 import { isOptionalPlayLocalResult, type PlayLocalResult } from './local-result'
+import { isOptionalPlayFunding, type PlayFunding } from './play-funding'
 
 export const playStatuses = ['draft', 'planned', 'paused', 'open', 'closed', 'cancelled', 'unresolved'] as const
 export type PlayStatus = typeof playStatuses[number]
@@ -431,6 +432,11 @@ export interface PlayExecution {
   venuePosition?: VenueRisk | null
   /** The first risk context the venue reported at or after the Play's first entry fill. */
   riskAtFirstFill?: VenueRisk | null
+  /**
+   * Settled funding beside the Play, only with proven sole exposure (Phase 2, item 9b); never added to a result. Absent for a
+   * manual instrument, before the first entry fill and from older servers.
+   */
+  funding?: PlayFunding
   notice: string
   /** Why linked fills cannot settle the play: missing executions, contradicting fills, or exits before or beyond the entries. */
   issues: string[]
@@ -514,7 +520,7 @@ export const isPlayExecution = (v: unknown): v is PlayExecution => isRecord(v) &
   Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(executionOrder) &&
   (v.earlierOrders === undefined || Array.isArray(v.earlierOrders) && v.earlierOrders.length <= 20 && v.earlierOrders.every(executionOrder)) &&
   (v.venuePosition === undefined || isNullOr(v.venuePosition, isVenueRisk)) && (v.riskAtFirstFill === undefined || isNullOr(v.riskAtFirstFill, isVenueRisk)) &&
-  isText(v.notice, 1000) &&
+  isOptionalPlayFunding(v.funding) && isText(v.notice, 1000) &&
   Array.isArray(v.issues) && v.issues.every(issue => isText(issue, 1000)) &&
   (v.monitor === null || isAccountMonitor(v.monitor)) && Array.isArray(v.discrepancies) && v.discrepancies.every(isMonitorDiscrepancy) &&
   Array.isArray(v.watches) && v.watches.every(w => isMonitorWatch(w) && w.playId === v.playId)
