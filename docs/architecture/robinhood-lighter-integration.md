@@ -103,7 +103,7 @@ The mainnet ID, host, strings, scope, notices and descriptor are unchanged, and 
 
 **Logos (item 4, backend).** `VenueDescriptor.Logo` is an optional key from `VenueLogos` (`hyperliquid`, `lighter`, `lighter-rh`, `risex`, `manual`). Hyperliquid, RISEx, both Lighter exchanges and the manual venue set theirs. `VenueRegistry` throws when a descriptor uses any other key. `/api/system` emits `logo`, which is null for planned venues.
 
-**Tests.** `LighterRobinhoodTests` uses fixtures captured from the public RH `orderBookDetails`, `orderBooks` and `assetDetails` (`backend/tests/Vessel.Tests/Fixtures/LighterRh`, trimmed to BTC, AAPL, XAU, OPENAI and two spot markets). It covers:
+**Tests.** `LighterRobinhoodTests` uses fixtures captured from the public RH `orderBookDetails`, `orderBooks` and `assetDetails` (`backend/tests/Vessel.TestKit/Fixtures/LighterRh`, trimmed to BTC, AAPL, XAU, OPENAI and two spot markets). It covers:
 
 - catalogue parsing with USDG quotes, ticks and leverage, with spot IDs ignored;
 - USDG asset-3 identity taken from `assetDetails`, and refusal of AMZN, USDC and misplaced-USDG margin;

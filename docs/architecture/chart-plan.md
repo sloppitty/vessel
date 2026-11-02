@@ -332,6 +332,27 @@ Verified: frontend tests (indicator math against Wilder's reference values, sett
 
 Expanded Suggestions could change height as a stop approached entry, moving the chart beneath the pointer; autoscaling the dragged level then amplified the price jumps. Entry/SL/TP gestures now preview only in the chart, committing the editor, suggestions and notices once on release (one undo step). The price scale is held during the gesture and its previous autoscale setting restored afterwards. Pointer cancellation, lost capture, window blur, resize or chart reset discard the preview instead of saving an accidental price. This applies to both inline and expanded charts; percentage exits still switch to price units on a completed drag.
 
+### October 25–26: Shift-drag ruler
+
+- Hold Shift and drag with the primary mouse button on the price pane. The dominant displacement from the starting
+  point selects the existing date-range overlay (left/right: bars and duration) or price-range overlay
+  (up/down: signed price and unlevered percentage change); it can switch while dragging.
+- October 26 owner correction: release keeps the measurement as a normal date-range or price-range drawing,
+  selected for editing and included in the existing drawing history (undo/redo, move, resize and delete).
+  It follows the same draft/save lifecycle as other drawings, never a plan edit, return at leverage or execution.
+  Escape, cancellation, lost capture, blur, resize and source/tool changes discard only the unfinished measurement
+  and restore chart interaction. An un-dragged Shift-click neither creates a drawing nor starts a two-click drawing.
+- Measurement takes precedence over drawing tools, price picking and planned levels. On completion it uses the
+  normal drawing-creation selection; cancellation leaves the previous tool, selection and picker alone.
+  It uses free pointer coordinates even with the magnet on and holds the price scale until
+  release so incoming candles do not move the reference. Indicator panes and axes keep their normal interactions.
+- The shortcut is described in the Crosshair tooltip. The existing Measure rail tools remain available.
+- October 26 adversarial reviews: two independent Sol reviewers checked the gesture and retained-drawing paths.
+  The integration review caught an armed plan-price picker after creation and document-capture Escape closing the
+  expanded dialog. Creation now disarms that picker (cancellation does not); scoped window-capture Escape cancels
+  only the unfinished ruler before Radix can dismiss the dialog. Both regressions were reproduced in tests before
+  the fixes, including the real Radix dialog; a later Escape still dismisses normally.
+
 ## Fills on the chart (October 20, 2026)
 
 Phase 1.1b of the [learning-loop contract](phase1-learning-loop-contract.md). It covers G-03 and the F-06 chart.
