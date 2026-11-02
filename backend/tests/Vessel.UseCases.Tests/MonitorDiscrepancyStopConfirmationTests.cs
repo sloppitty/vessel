@@ -1,3 +1,4 @@
+using static Vessel.Tests.StopConfirmationTestSupport;
 using Vessel.Application.Monitoring;
 using Vessel.Application.Venues;
 using Vessel.Domain.Monitoring;
@@ -208,13 +209,5 @@ public sealed class MonitorDiscrepancyStopConfirmationTests
                 f.Fill("unlinked-" + version, "other-order-" + version, .2m, f.Clock.Now.AddMinutes(version == 0 ? -5 : 0).AddSeconds(-1));
                 break;
         }
-    }
-
-    /// <summary>Adds an entry fill and the same venue position, and resizes the linked stop.</summary>
-    internal static void ScaleIn(DiscrepancyFixture f, decimal added, decimal stop)
-    {
-        f.Fill("entry-fill-" + f.Store.Fills.Count, "entry", added, f.Clock.Now.AddSeconds(-1));
-        f.Position += added;
-        f.Stop(o => o with { RemainingSize = stop });
     }
 }
