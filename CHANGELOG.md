@@ -4,6 +4,10 @@
 
 ### Added
 
+- History gaps on Hyperliquid accounts can be backfilled from Account detail. The monitor
+  reads the gap's executions in its own runs behind protection checks, proves each page continues
+  the last, and closes only the part of a gap it proves; what the venue no longer serves is marked
+  beyond its reach. Backfilled executions never raise notifications.
 - Accounts can keep their execution history (Manage account → Keep execution history): the
   monitor reads them on its schedule even without a Play, after protection checks. Account
   detail shows what each import covered and any gap it may have skipped.

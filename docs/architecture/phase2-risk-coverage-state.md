@@ -496,6 +496,78 @@ October 22, 2026.
   work after reconciliation and watch updates.
 - **Check.** `scripts/check.sh` passed on `e4cfdbe0`: backend 4,156 passed, 5 skipped; frontend 185 files and 4,121 tests.
 
+**6b. Backfill.** Implemented on `t3/phase2-backfill`.
+- **Starting it.** `POST /api/accounts/{id}/history-gaps/{gapId}/backfill` (real only) starts a backfill of
+  one open gap, one at a time per account (`account_history_backfills`, migration `HistoryBackfill`). A
+  closed gap, one beyond the venue's reach, or a venue without the new `FillHistory` capability is
+  refused. Account detail offers **Backfill** on each such gap and shows the backfills' progress.
+- **Runs of its own.** Hyperliquid's `userFillsByTime` serves at most 2,000 fills a page and only the
+  latest 10,000. The scheduler claims due backfills last, after protection checks and kept-history reads,
+  with the same headroom and free worker slot (trigger `backfill`). A run reads up to five pages, each in
+  its own unit fenced by the lease, and releases it; it never moves the check schedule, attempt time,
+  state or cooldown. The next run waits a minute.
+- **Witnesses.** Every page reads to now. The first starts at the newest execution Vessel retained at or
+  before the gap's start and must return it again; each later page must return the rows the previous one
+  ended on, by trade ID. Only a page with nothing newer ends the window; a full page at one time, or more
+  rows than the venue serves, stops the backfill.
+- **Proof.** A served start and kept continuity prove the span from the gap's start to the last page. An
+  unserved start proves only from the oldest row read, and the span before it is beyond the venue's
+  reach. A missing witness proves nothing after the cursor. A gap of unknown range is proven only when the
+  window is exhausted with continuity kept and fewer rows than the venue serves; that proof covers every
+  open gap. Executions the adapter could not verify keep the gap open.
+- **Conclusion.** The gaps are revalidated as they stand: each covered gap closes with a `backfill`
+  coverage record, and the rest stays open as its own gap, beyond the venue's reach before the span or
+  open to another backfill after it. The gap flag clears only when no gap is left open.
+- **No notifications.** Backfilled fills are deduplicated like any import, without touching the snapshot,
+  marked `Backfilled` and claimed as history in their unit: no `execution.filled`, now or when their
+  order is linked later. A Play a later check opens or closes from a backfilled deciding fill gets the
+  `history` event source, which no notification announces. A backfill creates no Play or thesis.
+- **Tests.**
+  - `HistoryBackfillTests`: windows, witnesses, exhaustion, the page and reach limits, and the proof for
+    known and unknown starts and broken continuity.
+  - The Hyperliquid page reader's raw rows; the `history` lifecycle source in `VesselEventTests`.
+  - `MonitorPostgresTests`: a gap closed over two runs without moving the check schedule, one narrowed
+    beyond the venue's reach, one whose reach moved between pages, and whole history closing every gap.
+  - The scheduler leaving a due backfill behind a protection check; the isolation case in both auth modes;
+    the panel's Backfill action, progress and polling after a failed read in the browser.
+- **Migration.** It is applied explicitly, never to the owner's database.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `b7ebbd06`. Eight findings, all fixed in
+  `89854857`:
+  - The venue's reach could move past the cursor between pages, so a page
+    could skip fills and the gap still close. Every page must now return the
+    rows the previous page ended on, by trade ID; a page without them proves
+    nothing after the cursor, which stays open as its own gap.
+  - A window frozen at the start could not prove a gap of unknown range
+    complete: later fills use up the reach without appearing. Every page now
+    reads to now, and whole history is proven only by a window exhausted
+    with continuity kept and fewer rows than the venue serves.
+  - Matching the start by time did not prove the starting execution was
+    still served. The first page starts at the newest retained execution at
+    or before the gap's start, and must return every retained execution at
+    that time again.
+  - Completion closed the gap as it stood, even after it widened. The
+    conclusion now revalidates the current gaps: the proven span closes what
+    it covers, and the rest stays open as its own gap, beyond the venue's
+    reach only before the span.
+  - A backfilled fill could later open or close a Play and notify. Fills are
+    marked as backfilled; such a lifecycle change gets the `history` event
+    source, which no notification announces, and backfill units run under
+    the owner's trigger.
+  - Backfill pages ran inside protection checks, delaying them and using
+    their capacity. A backfill now runs on its own lease, claimed last by the
+    scheduler with the kept-history headroom and free slot, at most five
+    pages a run, without moving the check schedule.
+  - The browser rejected the `backfill` coverage record and stopped polling
+    after one failed read. Both are fixed.
+
+  Sol confirmed isolation in both auth modes, the capability and real-only
+  guards, account locking and the unique active backfill, the shared fill
+  deduplication and conflict rules without snapshot or sync changes, that
+  historical claims precede execution capture and survive later linking,
+  that omitted executions prevent closure, and that venue deadlines are
+  checked between pages.
+- **Check.** `scripts/check.sh` passed on `89854857`: backend 4,175 passed, 5 skipped; frontend 185 files and 4,124 tests.
+
 ## 7. Lighter forced events
 
 Not started.

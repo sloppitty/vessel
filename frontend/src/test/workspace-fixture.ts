@@ -107,7 +107,7 @@ export const lossLimitsFixture: LossLimits = {
 }
 
 export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' | 'playCounts' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' | 'nextActions' | 'completeReview' | 'reopenReview' | 'noReviewNeeded' | 'declareUnresolved' | 'returnToOpen' | 'playNotes' | 'addPlayNote' |
-  'deletePlay' | 'playExecution' | 'monitor' | 'accountMonitor' | 'runAccountMonitor' | 'monitorEvents' | 'monitorStream' | 'dismissPlayDiscrepancy' | 'dismissAccountDiscrepancy' | 'linkOrder' | 'unlinkOrder' | 'rejectOrder' | 'rebindLevel' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'openRisk' | 'openRiskPreview' | 'riskSettings' | 'updateRiskSettings' | 'playRule' | 'setPlayRule' | 'archivePlayRule' | 'lossLimits' | 'reportingSettings' | 'updateReportingSettings' | 'review' | 'reviewExclusions' | 'reviewExport' | 'accountFacts' | 'importConflicts' | 'historyCoverage' | 'playBundle' | 'reviewProcess' | 'mistakeTags' | 'retrospectivePreview' | 'createRetrospectivePlay' | 'manualExecutions' | 'addManualExecution' | 'correctManualExecution' | 'correctManualExecutions' |
+  'deletePlay' | 'playExecution' | 'monitor' | 'accountMonitor' | 'runAccountMonitor' | 'monitorEvents' | 'monitorStream' | 'dismissPlayDiscrepancy' | 'dismissAccountDiscrepancy' | 'linkOrder' | 'unlinkOrder' | 'rejectOrder' | 'rebindLevel' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'openRisk' | 'openRiskPreview' | 'riskSettings' | 'updateRiskSettings' | 'playRule' | 'setPlayRule' | 'archivePlayRule' | 'lossLimits' | 'reportingSettings' | 'updateReportingSettings' | 'review' | 'reviewExclusions' | 'reviewExport' | 'accountFacts' | 'importConflicts' | 'historyCoverage' | 'startBackfill' | 'playBundle' | 'reviewProcess' | 'mistakeTags' | 'retrospectivePreview' | 'createRetrospectivePlay' | 'manualExecutions' | 'addManualExecution' | 'correctManualExecution' | 'correctManualExecutions' |
   'notificationHead' | 'notifications' | 'claimNotifications' | 'readNotification' | 'readAllNotifications' | 'notificationPreferences' |
   'saveNotificationPreferences' | 'requestTestNotification' | 'paperSettings' | 'savePaperSettings' | 'paperState'> {
   const unexpected = () => Promise.reject(new Error('Unexpected play API call in this test.'))
@@ -144,6 +144,7 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
     importConflicts: vi.fn().mockResolvedValue({ total: 0, recent: [], notice: 'No conflicts.' }),
     historyCoverage: vi.fn().mockResolvedValue({ keepExecutionHistory: false, available: true, openGapCount: 0, openGaps: [], closedGaps: [],
       recordCount: 0, recent: [], notice: 'Coverage.' }),
+    startBackfill: vi.fn(unexpected),
     reviewProcess: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, nextOffset: null }),
     mistakeTags: vi.fn().mockResolvedValue([]),
     retrospectivePreview: vi.fn(unexpected), createRetrospectivePlay: vi.fn(unexpected),

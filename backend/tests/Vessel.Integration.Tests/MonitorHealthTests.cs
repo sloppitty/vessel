@@ -61,6 +61,8 @@ public sealed class MonitorHealthTests
             Returned.Add(page[^1].Key);
             return Task.FromResult<IReadOnlyList<DueMonitorCandidate>>(page);
         }
+        public Task<IReadOnlyList<DueMonitorCandidate>> DueBackfillsAsync(int limit, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<DueMonitorCandidate>>([]);
     }
     private sealed class RecordingState : IServerStateStore
     {
@@ -79,6 +81,8 @@ public sealed class MonitorHealthTests
     {
         public Task<IReadOnlyList<DueMonitorCandidate>> DueCandidatesAsync(DueMonitorKey? after, DateTimeOffset dueBy, int limit, CancellationToken ct) =>
             productive ? Task.FromResult<IReadOnlyList<DueMonitorCandidate>>([]) : throw new InvalidOperationException("Synthetic query failure");
+        public Task<IReadOnlyList<DueMonitorCandidate>> DueBackfillsAsync(int limit, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<DueMonitorCandidate>>([]);
     }
     private sealed class FailingState : IServerStateStore
     {

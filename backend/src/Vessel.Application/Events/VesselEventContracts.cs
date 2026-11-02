@@ -10,6 +10,16 @@ public sealed record VesselEventSubject(Guid? AccountId = null, string? VenueId 
     Guid? PlayId = null, string? EntryId = null, string? LevelId = null, Guid? DiscrepancyId = null);
 public sealed record VesselEventSource(string Trigger, string[]? OrderIds = null, string[]? FillIds = null);
 
+/// <summary>Event source triggers beside a run's own <c>owner</c> or <c>monitor</c>.</summary>
+public static class VesselEventSources
+{
+    /// <summary>
+    /// Phase 2, item 6b: a lifecycle change decided by a backfilled fill. It happened in the past: recorded, never
+    /// announced, since only <c>monitor</c> events notify.
+    /// </summary>
+    public const string History = "history";
+}
+
 public sealed record VesselEventDraft(string Type, Guid RunId, string DedupKey, string Severity,
     DateTimeOffset OccurredAt, DateTimeOffset DetectedAt, VesselEventSubject Subject, VesselEventSource Source,
     JsonElement Data, string Timeliness = "timely", string Relevance = "current", DateTimeOffset? ExpiresAt = null,
@@ -31,6 +41,12 @@ public interface IVesselEventSink
     Task SetRunAsync(Guid runId, string trigger, CancellationToken cancellationToken);
     /// <summary>Call and commit before the first venue read; already imported fills are historical.</summary>
     Task EnsureMonitoringBaselineAsync(Guid accountId, CancellationToken cancellationToken);
+    /// <summary>
+    /// Phase 2, item 6b: fills a backfill added, in the active unit, are history and never a fresh execution. They are
+    /// claimed now, so no execution event is drafted for them, in this unit or when their order is linked later.
+    /// </summary>
+    Task ClaimHistoricalFillsAsync(IReadOnlyCollection<Vessel.Domain.Workspace.ImportedFill> fills, CancellationToken cancellationToken) =>
+        Task.CompletedTask;
 }
 
 public interface IVesselEventReader

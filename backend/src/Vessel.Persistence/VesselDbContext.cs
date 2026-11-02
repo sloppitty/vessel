@@ -38,6 +38,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<AccountFundingState> FundingStates => Set<AccountFundingState>();
     public DbSet<FillCoverageRecord> FillCoverage => Set<FillCoverageRecord>();
     public DbSet<AccountHistoryGap> HistoryGaps => Set<AccountHistoryGap>();
+    public DbSet<HistoryBackfill> HistoryBackfills => Set<HistoryBackfill>();
     public DbSet<PlayEvidence> Evidence => Set<PlayEvidence>();
     public DbSet<PlayPlanRevision> PlanRevisions => Set<PlayPlanRevision>();
     public DbSet<PlayStatusChange> StatusChanges => Set<PlayStatusChange>();

@@ -70,6 +70,7 @@ public static class TradingModeBoundary
         // Phase 2, item 14c: retained fills reported again with different venue facts.
         parts is [_, "accounts", _, "import-conflicts"] ||
         parts is [_, "accounts", _, "history-coverage"] ||
+        parts is [_, "accounts", _, "history-gaps", _, "backfill"] ||
         parts is [_, "activity" or "plays", "retrospective"];
     private static string Mode(HttpContext context)
     {

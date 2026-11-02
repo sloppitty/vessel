@@ -101,6 +101,9 @@ public sealed class OwnerScopeArchitectureTests
             // System due-candidate discovery (§9.1): keys only, every owner in (due, owner, account) order with no per-owner
             // cut; each claim then rechecks status, deadlines and budgets inside that owner's scope.
             "Vessel.Persistence/SystemMonitorStore.cs|d006eb6260b4719db6fcb5d4b50581c7496ae0e5bd6dbbebf9df0fdb498e664d",
+            // Phase 2, item 6b: due backfill discovery, keys only in (due, owner, account) order; each claim rechecks the
+            // owner's status, the account's run, pacing, deadlines and budgets inside that owner's scope.
+            "Vessel.Persistence/SystemMonitorStore.cs|4e18af27c6db281fb8ca13a870b07611896bc9810b6bd03d5ec9d99f7876297e",
             "Vessel.Persistence/ServerStateStore.cs|40c74c937dd0eb512282090d98087bea4726000d71185d726dbbdd89e80b5b51",
             "Vessel.Persistence/ServerStateStore.cs|4de6036152e376cb02952ca7410a4db74f2a434f16091e168cf64995f90293f8",
             "Vessel.Persistence/ServerStateStore.cs|ee73f5478e13936ed833caed3737b495efb924b2d70cbf4c9d46ca0f8ff1593a",
@@ -200,7 +203,6 @@ public sealed class OwnerScopeArchitectureTests
             // Not SQL: "refresh" monitor trigger value.
             "Vessel.Application/Monitoring/MonitorCoordinator.cs|d6cc0a088c07683c65cd266860cab8d94b3a1937b17420d9da30ca299c09fb77",
             "Vessel.Domain/Monitoring/MonitorAccount.cs|d6cc0a088c07683c65cd266860cab8d94b3a1937b17420d9da30ca299c09fb77",
-            "Vessel.Persistence/MonitorStore.cs|d6cc0a088c07683c65cd266860cab8d94b3a1937b17420d9da30ca299c09fb77",
             // Not SQL: "close" position-effect constant and RISEx candle field name.
             "Vessel.Domain/Workspace/AccountFacts.cs|310ff200149b44a32f124023d7caba19a1a890763a980606813d3a3d4a085d36",
             "Vessel.Infrastructure/Venues/Risex/RisexReader.cs|310ff200149b44a32f124023d7caba19a1a890763a980606813d3a3d4a085d36",

@@ -7,7 +7,7 @@ October 5, 2026, slice S1 of the RISEx-first plan ([risex-integration.md](risex-
 **Application** (`Vessel.Application.Venues`):
 
 - `VenueDescriptor(Id, Name, Status, Source, Capabilities, QuoteAsset?, TradeUrlTemplate?)` describes a venue. `Source` is how an account is identified: `evm-address` or `none` (manual and planned venues). `TradeUrlTemplate` contains an `{instrument}` placeholder.
-- `VenueCapabilities(Sync, Instruments, Orders, Candles, MarketContext, Stream, StablecoinWallet)`, with optional `AccountDiscovery`, `ReadOnlyCredential`, `ManualExecutions` and `CurrentOrderBook`. Use cases and the browser check these, never a venue name.
+- `VenueCapabilities(Sync, Instruments, Orders, Candles, MarketContext, Stream, StablecoinWallet)`, with optional `AccountDiscovery`, `ReadOnlyCredential`, `ManualExecutions`, `CurrentOrderBook` and `FillHistory` (Phase 2, item 6b: executions by time window, for a gap backfill; Hyperliquid only). Use cases and the browser check these, never a venue name.
 - `IVenueRegistry` returns a venue's descriptor and its adapters: `Reader`, `Orders`, `Candles`, `MarketContext`, `Stream`. A missing adapter means the venue does not offer that capability. Each service turns that into its own safe error (502 or 503, with the same messages as before). When one venue has several registrations of a port, the last wins, as with a single injected service.
 - `WorkspaceService`, `CandleService`, `MarketContextService`, `MarketStreamService` and `PlayExecutionService` resolve adapters through the registry. No `"hyperliquid"` literal remains in `Vessel.Application` except the two Hyperliquid-specific notices and comments scheduled for slice S3 (candle limit text and the matcher's price rule).
 

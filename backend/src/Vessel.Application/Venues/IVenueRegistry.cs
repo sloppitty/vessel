@@ -12,6 +12,9 @@ public interface IVenueRegistry
     VenueDescriptor? Descriptor(string venueId);
     IPerpetualVenueReader? Reader(string venueId);
     IVenueFundingReader? Funding(string venueId) => Reader(venueId) as IVenueFundingReader;
+    /// <summary>Phase 2, item 6b: time-window execution pages for an owner-started backfill, where the venue offers them.</summary>
+    IVenueFillHistoryReader? FillHistory(string venueId) => Descriptor(venueId)?.Capabilities.FillHistory == true
+        ? Reader(venueId) as IVenueFillHistoryReader : null;
     IVenueOrderReader? Orders(string venueId);
     ICandleReader? Candles(string venueId);
     IMarketContextReader? MarketContext(string venueId);

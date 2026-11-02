@@ -75,6 +75,9 @@ public static class WorkspaceEndpoints
             Results.Ok(await service.FillsAsync(id, ct, tradingMode)));
         api.MapGet("/accounts/{id:guid}/history-coverage", async (Guid id, string? tradingMode, WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.HistoryCoverageAsync(id, ct, tradingMode)));
+        // Phase 2, item 6b: the owner starts a backfill of one gap; the monitor worker reads it behind protection checks.
+        api.MapPost("/accounts/{id:guid}/history-gaps/{gapId:guid}/backfill", async (Guid id, Guid gapId, MonitorCoordinator monitor,
+            CancellationToken ct) => Results.Accepted(value: await monitor.StartBackfillAsync(id, gapId, ct)));
         api.MapGet("/accounts/{id:guid}/import-conflicts", async (Guid id, string? tradingMode, WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.FillConflictsAsync(id, ct, tradingMode)));
         api.MapGet("/accounts/{id:guid}/instruments", async (Guid id, string? tradingMode, WorkspaceService service, CancellationToken ct) =>

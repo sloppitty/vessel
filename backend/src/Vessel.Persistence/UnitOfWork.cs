@@ -282,6 +282,13 @@ public sealed class UnitOfWork(VesselDbContext db, IEnumerable<IUnitOfWorkPartic
             throw new ProblemException(409, "An account for this venue and source already exists. Manage or re-enable that account.");
         }
         catch (DbUpdateException error) when (error.InnerException is PostgresException
+            { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: HistoryBackfillIndexes.Active })
+        {
+            // Phase 2, item 6b: another backfill of this account was started first.
+            failure ??= error;
+            throw new ProblemException(409, "A backfill is already running for this account.");
+        }
+        catch (DbUpdateException error) when (error.InnerException is PostgresException
             { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: PlayRuleIndexes.Version or PlayRuleIndexes.Active })
         {
             // Phase 2, item 3: another change of the if-then rule committed first.

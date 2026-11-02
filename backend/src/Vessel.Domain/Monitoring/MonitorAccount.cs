@@ -66,7 +66,7 @@ public sealed class MonitorAccount : IOwned
         RequestId = requestId;
         Trigger = trigger;
         ManualState = "pending";
-        if (trigger != "refresh") NextRunAtUtc = now;
+        if (!Background(trigger)) NextRunAtUtc = now;
     }
 
     public bool Claim(Guid requestId, string holder, DateTimeOffset now, TimeSpan lease)
@@ -77,8 +77,8 @@ public sealed class MonitorAccount : IOwned
         Generation = checked(Generation + 1);
         LeaseHolder = holder;
         LeaseUntilUtc = now + lease;
-        // An owner refresh is not a check attempt.
-        if (Trigger != "refresh") LastAttemptAtUtc = now;
+        // An owner refresh or a backfill (Phase 2, item 6b) is not a check attempt.
+        if (!Background(Trigger)) LastAttemptAtUtc = now;
         ManualState = "running";
         return true;
     }
@@ -92,7 +92,8 @@ public sealed class MonitorAccount : IOwned
     /// </summary>
     public bool ReleaseAbandonedRefresh(DateTimeOffset now)
     {
-        if (Trigger != "refresh" || ManualState == "idle" || ManualState == "running" && LeaseUntilUtc > now) return false;
+        // An abandoned backfill run (Phase 2, item 6b) is released the same way; its backfill stays queued.
+        if (!Background(Trigger) || ManualState == "idle" || ManualState == "running" && LeaseUntilUtc > now) return false;
         Release();
         return true;
     }
@@ -105,11 +106,17 @@ public sealed class MonitorAccount : IOwned
     /// </summary>
     public bool ReleaseUnclaimedWork(DateTimeOffset now, TimeSpan unclaimedAfter)
     {
-        if (ManualState != "pending" || Trigger == "refresh" || LeaseUntilUtc is not null ||
+        if (ManualState != "pending" || Background(Trigger) || LeaseUntilUtc is not null ||
             NextRunAtUtc is not { } due || now - due < unclaimedAfter) return false;
         Release();
         return true;
     }
+
+    /// <summary>
+    /// Runs that never touch the check schedule: an owner Refresh, and a backfill run (Phase 2, item 6b), which reads behind
+    /// protection checks on its own lease.
+    /// </summary>
+    public static bool Background(string trigger) => trigger is "refresh" or "backfill";
 
     public void Release()
     {
