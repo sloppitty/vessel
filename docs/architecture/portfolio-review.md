@@ -546,4 +546,3 @@ Phase 2, item 3 of the [risk and coverage contract](phase2-risk-coverage-contrac
 - **Counts only.** No share, ranking or cost is shown, and a winning deviation
   stays a deviation. The section is absent while no Play carries a rule, and
   the week page shows the same section for its week.
-
