@@ -143,6 +143,8 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             var snapshot = ReadSnapshot(Data(portfolio), catalogue, timeProvider.GetUtcNow(), out var positionsComplete);
             var fills = new List<VenueFill>();
             var omitted = new HashSet<(string Market, string Trade)>();
+            // Phase 2, item 7: the markers of every row left out, unrecognized markets and empty P&L (D-22) alike.
+            var omissions = new Dictionary<(string, string), VenueOmission>();
             var fillCoverage = new RawFillReadCoverage();
             var hasNextPage = false;
             // Phase 2, item 14a (F-13): every page shares one end cut taken before the first, so a trade arriving between
@@ -152,7 +154,9 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             {
                 using var history = await GetAsync($"/v1/trade-history?account={address}&end_time={cut}&limit={PageSize}&page={page}", token);
                 var data = Data(history);
-                fills.AddRange(ReadFills(data, catalogue, latest, omitted, cut));
+                var pageOmissions = new List<VenueOmission>();
+                fills.AddRange(ReadFills(data, catalogue, latest, omitted, cut, pageOmissions));
+                foreach (var left in pageOmissions) omissions.TryAdd((left.Kind, left.SourceId), left);
                 fillCoverage.Observe(Json.Property(data, "trades"), row => Nanoseconds(Json.Property(row, "time"), latest));
                 hasNextPage = Json.Boolean(Json.Property(data, "has_next_page"));
                 if (!hasNextPage) break;
@@ -161,10 +165,11 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
                 catalogue.Markets.Where(m => m.Active).Select(m => m.Instrument).ToList(),
                 // Identical copies across pages collapse; a changed copy is kept for the store to record as a conflict (14c).
                 fills.GroupBy(f => (f.ContractId, f.SourceFillId)).SelectMany(g => g.Distinct()).OrderByDescending(f => f.OccurredAtUtc).ToList(),
-                OmissionNotice(omitted.Count) is { } omission ? HistoryNotice + " " + omission : HistoryNotice,
+                OmissionNotice(omitted.Count, MissingPnl(omissions.Values)) is { } omission ? HistoryNotice + " " + omission : HistoryNotice,
                 PositionsComplete: positionsComplete,
                 FillHistoryTruncated: hasNextPage || fillCoverage.Count == MaxFillPages * PageSize,
-                OldestRawFillAtUtc: fillCoverage.OldestAtUtc, OmittedExecutions: omitted.Count);
+                OldestRawFillAtUtc: fillCoverage.OldestAtUtc, OmittedExecutions: omitted.Count + MissingPnl(omissions.Values))
+            { Omissions = omissions.Values.ToList() };
         }, cancellationToken);
     }
 
@@ -252,21 +257,27 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
     internal static List<VenueFill> ReadFills(JsonElement data, RisexCatalogue catalogue, DateTimeOffset latest) =>
         ReadFills(data, catalogue, latest, new HashSet<(string, string)>());
 
+    private static int MissingPnl(IEnumerable<VenueOmission> omissions) => omissions.Count(o => o.Kind == ExecutionOmission.MissingPnl);
+
     /// <summary>
     /// One sentence counting the in-scope executions left out, for example "Omitted executions: 2 on unrecognized
-    /// markets." Null when nothing was left out.
+    /// markets, 1 without reported P&amp;L." Null when nothing was left out.
     /// </summary>
-    internal static string? OmissionNotice(int unrecognized) => unrecognized switch
+    internal static string? OmissionNotice(int unrecognized, int missingPnl = 0)
     {
-        0 => null,
-        1 => "Omitted executions: 1 on an unrecognized market.",
-        _ => $"Omitted executions: {unrecognized} on unrecognized markets.",
-    };
+        var parts = new[]
+        {
+            unrecognized switch { 0 => null, 1 => "1 on an unrecognized market", _ => $"{unrecognized} on unrecognized markets" },
+            missingPnl switch { 0 => null, _ => $"{missingPnl} without reported P&L" }
+        }.OfType<string>().ToArray();
+        return parts.Length == 0 ? null : $"Omitted executions: {string.Join(", ", parts)}.";
+    }
 
     /// <param name="omitted">Receives (market, trade) of fills on a market the catalogue neither lists nor proves out of scope.</param>
     /// <param name="cut">The read's end cut in nanoseconds; a row after it belongs to the next refresh and is skipped.</param>
+    /// <param name="omissions">Phase 2, item 7: receives the marker of each row left out.</param>
     internal static List<VenueFill> ReadFills(JsonElement data, RisexCatalogue catalogue, DateTimeOffset latest,
-        ISet<(string Market, string Trade)> omitted, long? cut = null)
+        ISet<(string Market, string Trade)> omitted, long? cut = null, List<VenueOmission>? omissions = null)
     {
         var trades = Json.Array(Json.Property(data, "trades"));
         if (trades.GetArrayLength() > PageSize) throw Json.Invalid();
@@ -278,29 +289,49 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             {
                 // A row of an excluded market is not otherwise validated; its time only decides whether it is past the cut.
                 var later = cut is { } bound && trade.TryGetProperty("time", out var time) && time.ValueKind == JsonValueKind.String &&
-                    long.TryParse(time.GetString(), NumberStyles.None, CultureInfo.InvariantCulture, out var at) && at > bound;
-                if (!later && !catalogue.OutOfScope(marketId)) omitted.Add((marketId, Json.Text(Json.Property(trade, "id"))));
+                    long.TryParse(time.GetString(), NumberStyles.None, CultureInfo.InvariantCulture, out var nanoseconds) && nanoseconds > bound;
+                if (!later && !catalogue.OutOfScope(marketId))
+                {
+                    var tradeId = Json.Text(Json.Property(trade, "id"));
+                    omitted.Add((marketId, tradeId));
+                    omissions?.Add(new(tradeId, ExecutionOmission.UnrecognizedMarket, "unrecognized market", null, marketId,
+                        Lenient(() => Json.Text(Json.Property(trade, "order_id"))), LenientTime(() => Nanoseconds(Json.Property(trade, "time"), latest))));
+                }
                 continue;
             }
             if (cut is { } end && RawNanoseconds(Json.Property(trade, "time")) > end) continue;
             var side = Side(Json.Property(trade, "side"));
             var positionSide = Side(Json.Property(trade, "position_side"));
             var fee = Json.Nonnegative(Json.Property(trade, "fee"));
-            // Unlike Lighter's non-reducing fills, an empty RISEx PnL has no verified net-of-fee zero meaning. Setting the
-            // trade aside (D-22) waits for item 7's durable omission markers, which keep its order (Sol round 1 on 14a).
-            var pnl = Json.OptionalAmount(trade, "realized_pnl") ?? throw new VenueReadException(
-                "RISEx omitted realized PnL for an execution. Its net-of-fee result is unknown; this refresh was not imported.");
-            var effect = Effect(side, positionSide, pnl, fee);
+            // Every other field is validated first, so a malformed row still fails the read (Sol round 1 on 14a).
+            var id = Json.Text(Json.Property(trade, "id"));
+            var price = Json.Positive(Json.Property(trade, "price"));
+            var size = Json.Positive(Json.Property(trade, "size"));
+            var at = Nanoseconds(Json.Property(trade, "time"), latest);
+            var orderId = Json.Text(Json.Property(trade, "order_id"));
             var liquidation = Json.Boolean(Json.Property(trade, "is_liquidation"));
             var chain = Json.Property(trade, "blockchain_data");
-            fills.Add(new VenueFill(Json.Text(Json.Property(trade, "id")), market.Key, side,
-                Direction(side, positionSide, effect, liquidation), Json.Positive(Json.Property(trade, "price")),
-                Json.Positive(Json.Property(trade, "size")), fee, QuoteAsset, pnl, Nanoseconds(Json.Property(trade, "time"), latest),
-                Json.Text(Json.Property(trade, "order_id")), Json.TextOrEmpty(Json.Property(chain, "tx_hash"), 256), trade.GetRawText(),
-                effect, ExecutionFacts.FeeReported, ExecutionFacts.PnlNetOfFee, marketId, FillLeverage(trade)));
+            var hash = Json.TextOrEmpty(Json.Property(chain, "tx_hash"), 256);
+            var leverage = FillLeverage(trade);
+            // Phase 2, item 7 (D-22): unlike Lighter's non-reducing fills, an empty RISEx PnL has no verified net-of-fee
+            // zero meaning. The trade is set aside with a counted reason and a durable marker that keeps its order, so that
+            // order's executions are known to be missing; the rest of the read still applies. It is never zero.
+            if (Json.OptionalAmount(trade, "realized_pnl") is not { } pnl)
+            {
+                omissions?.Add(new(id, ExecutionOmission.MissingPnl, "no reported realized P&L", market.Key, marketId, orderId, at));
+                continue;
+            }
+            var effect = Effect(side, positionSide, pnl, fee);
+            fills.Add(new VenueFill(id, market.Key, side,
+                Direction(side, positionSide, effect, liquidation), price, size, fee, QuoteAsset, pnl, at,
+                orderId, hash, trade.GetRawText(),
+                effect, ExecutionFacts.FeeReported, ExecutionFacts.PnlNetOfFee, marketId, leverage));
         }
         return fills;
     }
+
+    private static string? Lenient(Func<string> read) { try { return read(); } catch (VenueReadException) { return null; } }
+    private static DateTimeOffset? LenientTime(Func<DateTimeOffset> read) { try { return read(); } catch (VenueReadException) { return null; } }
 
     /// <summary>
     /// The trade's documented <c>leverage</c> ("Leverage of position"), kept only as a whole number from 1 to 1000 like

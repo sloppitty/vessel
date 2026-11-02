@@ -22,8 +22,9 @@ public sealed partial class HyperliquidAdapterTests : HyperliquidAdapterTestsSup
             node["side"] = "A";
             node["dir"] = "Open Short";
         });
+        // An unlisted primary market needs only its trade ID to leave a marker (Phase 2, item 7, Sol round 1).
         var response = $"[{olderFill},{Fill},{{\"coin\":\"@123\"}},{{\"coin\":\"PURR/USDC\"}}," +
-            "{\"coin\":\"xyz:BTC\"},{\"coin\":\"UNKNOWN\"}]";
+            "{\"coin\":\"xyz:BTC\"},{\"coin\":\"UNKNOWN\",\"tid\":7}]";
         using var handler = Fixtures(Meta, State, response);
         using var client = Client(handler);
         var reader = new HyperliquidPerpetualReader(client, new TestClock());
@@ -54,6 +55,7 @@ public sealed partial class HyperliquidAdapterTests : HyperliquidAdapterTestsSup
             Assert.Single(result.Snapshot.Positions));
 
         Assert.Equal(2, result.Fills.Count);
+        Assert.Equal(("7", "UNKNOWN"), (Assert.Single(result.Omissions).SourceId, result.Omissions[0].VenueContractId));
         var fill = result.Fills[0];
         Assert.Equal("18446744073709551615", fill.SourceFillId);
         Assert.Equal("9007199254740993", fill.OrderId);

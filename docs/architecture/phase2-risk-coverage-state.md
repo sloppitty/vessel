@@ -614,7 +614,61 @@ October 22, 2026.
 
 ## 7. Lighter forced events
 
-Not started.
+October 23, 2026.
+
+**7a. Omission markers and forced events.** Implemented on `t3/phase2-omissions`.
+- **Markers.** Every in-scope row an import leaves out leaves a durable marker (`execution_omissions`,
+  migration `ExecutionOmissions`): trade ID, kind, reason, market, order ID and time, and no money.
+  - The kinds are `forced`, `fee`, `missing-pnl` and `unrecognized-market`, from Lighter, RISEx and
+    Hyperliquid alike.
+  - Markers are deduplicated by kind and trade ID, and a later read that no longer returns the row
+    erases nothing.
+  - An unreported time is bounded by the read's window, which ends when the read was recorded.
+  - Refresh, checks and backfill pages all write them. A Hyperliquid row on an unlisted market needs its
+    trade ID; without one the read fails rather than count an omission it cannot mark.
+- **Known missing executions.** A marker naming an order flags that retained order, whichever arrived
+  first. The shared `MissingExecutions` rule then counts it as missing executions whatever its status, so
+  its Play can neither settle nor be scored. The scored basis is unchanged.
+  - `ExecutionOmission.Names` follows the order identity rule: on a recognized market, the canonical
+    contract and venue order ID with agreeing native markets; on an unrecognized market, the order on that
+    native market; with no market, every order with the ID. A known order named on another native market
+    fails the import closed.
+- **Forced events.** Lighter liquidations, deleverages and market settlements are kept as facts
+  (`imported_forced_events`) with side, quantity, price, time, native IDs, an exclusion reason and nullable
+  money. They are never fills, links or scored results.
+- **RISEx D-22.** A trade with an empty `realized_pnl` is set aside after its other fields validate, with a
+  counted reason and a marker keeping its order; the rest of the read applies. It is never zero.
+- **Contract notes.** Item 7 ships in two pull requests: 7a (this) and 7b, gap-aware Activity with forced
+  events as visible rows.
+- **Tests.** The Lighter, Hyperliquid and RISEx adapters' markers and forced events, and a Hyperliquid
+  row without a trade ID failing the read; the shared rule for every status; the naming rule's cases;
+  markers surviving later reads, flagging orders in either order, unrecognized markets and a conflicting
+  native market failing closed either way, against PostgreSQL.
+- **Migration.** It is applied explicitly, never to the owner's database.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `4edf5368`. Four findings, all fixed in
+  `8da6be1d`:
+  - A marker on a market Vessel no longer recognizes has no canonical
+    contract, so it never flagged its order: a cancelled, partly filled order
+    could still settle and score. Markers now name orders by the order
+    identity rule (`ExecutionOmission.Names`), through the native market for
+    an unrecognized one, in both arrival orders.
+  - Attribution ignored the native market, so a marker on another native
+    market mapped to the same instrument flagged an unrelated order. A known
+    order named on another native market now fails the import closed, like
+    an order reported on another market, either way round.
+  - A Hyperliquid row on an unlisted market without a trade ID was counted
+    as omitted with no marker. Its trade ID is now required, as for any
+    in-scope fill, so the read fails instead.
+  - An unreported time was bounded by the snapshot, though Lighter reads its
+    trades later. The bound is now when the read was recorded.
+
+  Sol confirmed owner isolation, ordinary deduplication and durability,
+  deletion and locking, forced-event sides, quantities, nullable money and
+  wording, RISEx D-22's validation and count, backfill forwarding, the
+  migration's indexes, keys, triggers and `Down`, and that the shared rule
+  blocks flagged orders in lifecycle, Review, sizing and the monitor.
+- **Check.** `scripts/check.sh` passed on `8da6be1d` after one rerun (the first run's only failure was
+  the HyperliquidMarketStream idle-timeout flake, which passed alone): backend 4,204 passed, 5 skipped; frontend 185 files and 4,125 tests.
 
 ## 8. Venue-reported risk context
 

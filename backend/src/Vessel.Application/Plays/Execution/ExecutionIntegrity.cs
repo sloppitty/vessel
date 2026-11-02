@@ -49,7 +49,11 @@ public static class ExecutionIntegrity
     public static bool MissingExecutions(ImportedOrder order, IEnumerable<ImportedFill> fills) =>
         MissingExecutions(order, Quantity(fills));
 
-    private static bool MissingExecutions(ImportedOrder order, ExactAmount retained) =>
+    /// <summary>
+    /// A filled order whose retained executions fall short of its size, or any order an import left an execution of out
+    /// (Phase 2, item 7), whatever its status.
+    /// </summary>
+    private static bool MissingExecutions(ImportedOrder order, ExactAmount retained) => order.ExecutionsOmitted ||
         order.Status == "filled" && !order.IsPositionTpsl && ExactAmount.From(order.OriginalSize).CompareTo(retained) > 0;
 
     internal static ExactAmount Quantity(IEnumerable<ImportedFill> fills) =>

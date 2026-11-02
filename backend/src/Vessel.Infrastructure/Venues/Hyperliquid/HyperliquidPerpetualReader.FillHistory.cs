@@ -35,7 +35,8 @@ public sealed partial class HyperliquidPerpetualReader : IVenueFillHistoryReader
                 .Select(i => i.VenueContractId ?? i.ContractId).ToHashSet(StringComparer.Ordinal);
             using var document = await ReadJsonAsync(
                 new { type = "userFillsByTime", user = source, startTime = start, endTime = end, aggregateByTime = false }, token);
-            var fills = ReadFills(document.RootElement, contracts, end, out var omitted);
+            var omissions = new List<VenueOmission>();
+            var fills = ReadFills(document.RootElement, contracts, end, out var omitted, omissions);
             var raw = new List<VenueRawRow>();
             foreach (var row in Array(document.RootElement).EnumerateArray())
             {
@@ -45,7 +46,7 @@ public sealed partial class HyperliquidPerpetualReader : IVenueFillHistoryReader
                 // tid is an in-scope fill's source ID; a row without one cannot witness continuity.
                 raw.Add(new(Identity(Property(row, "tid")), at));
             }
-            return new VenueFillPage(fills, raw, omitted);
+            return new VenueFillPage(fills, raw, omitted) { Omissions = omissions.DistinctBy(o => o.SourceId).ToList() };
         }, ct);
     }
 }

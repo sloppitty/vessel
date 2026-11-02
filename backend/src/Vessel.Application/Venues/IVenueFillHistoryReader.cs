@@ -25,6 +25,8 @@ public interface IVenueFillHistoryReader
 public sealed record VenueFillPage(IReadOnlyList<VenueFill> Fills, IReadOnlyList<VenueRawRow> Raw, int OmittedExecutions)
 {
     public int RawCount => Raw.Count;
+    /// <summary>Phase 2, item 7: the page's omitted rows, for durable markers.</summary>
+    public IReadOnlyList<VenueOmission> Omissions { get; init; } = [];
 }
 
 /// <summary>One raw execution row of a fill history page.</summary>

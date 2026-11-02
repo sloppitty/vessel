@@ -4,6 +4,11 @@
 
 ### Added
 
+- Executions an import leaves out (Lighter liquidations, deleverages, settlements and
+  fee-bearing trades, rows without reported P&L, unrecognized markets) now leave durable
+  markers. An order with an omitted execution is known to be missing executions, so its Play
+  is neither settled nor scored. A RISEx trade without reported P&L no longer fails the whole
+  refresh.
 - Accounts that keep their execution history warn of an open position with no resting stop
   and no Open Play.
 - History gaps on Hyperliquid accounts can be backfilled from Account detail. The monitor

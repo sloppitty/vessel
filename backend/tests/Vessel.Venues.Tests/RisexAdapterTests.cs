@@ -156,24 +156,50 @@ public sealed partial class RisexAdapterTests
     }
 
     [Theory]
-    [InlineData("fee", "missing")]
-    [InlineData("fee", "null")]
-    [InlineData("fee", "empty")]
-    [InlineData("realized_pnl", "missing")]
-    [InlineData("realized_pnl", "null")]
-    [InlineData("realized_pnl", "empty")]
-    public async Task Missing_execution_money_is_not_zeroed_even_on_an_opening_trade(string field, string value)
+    [InlineData("missing")]
+    [InlineData("null")]
+    [InlineData("empty")]
+    public async Task A_missing_fee_is_not_zeroed_even_on_an_opening_trade(string value)
     {
-        // D-22's set-aside of a trade without PnL waits for item 7's durable omission markers (Sol round 1 on 14a).
         var history = JsonNode.Parse(Trades)!;
         var trade = history["data"]!["trades"]![0]!.AsObject();
-        if (value == "missing") trade.Remove(field);
-        else trade[field] = value == "null" ? null : JsonValue.Create("");
+        if (value == "missing") trade.Remove("fee");
+        else trade["fee"] = value == "null" ? null : JsonValue.Create("");
         var reader = Reader(new() { ["/v1/trade-history"] = history.ToJsonString() }).Reader;
         var error = await Assert.ThrowsAsync<VenueReadException>(() => reader.ReadAsync(Address, default));
-        Assert.Equal(field == "realized_pnl"
-            ? "RISEx omitted realized PnL for an execution. Its net-of-fee result is unknown; this refresh was not imported."
-            : "RISEx returned an invalid or unsupported response.", error.Message);
+        Assert.Equal("RISEx returned an invalid or unsupported response.", error.Message);
+    }
+
+    /// <summary>
+    /// Phase 2, item 7 (D-22, probe V5): a trade with an empty realized P&amp;L is set aside with a counted reason and a
+    /// durable marker that keeps its order, once its other fields validate; the snapshot and the other fills still apply.
+    /// It is never zero.
+    /// </summary>
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("null")]
+    [InlineData("empty")]
+    public async Task A_trade_without_reported_PnL_is_set_aside_with_its_order_and_the_read_still_applies(string value)
+    {
+        var history = JsonNode.Parse(Trades)!;
+        var trade = history["data"]!["trades"]![0]!.AsObject();
+        var id = trade["id"]!.GetValue<string>();
+        if (value == "missing") trade.Remove("realized_pnl");
+        else trade["realized_pnl"] = value == "null" ? null : JsonValue.Create("");
+        var result = await Reader(new() { ["/v1/trade-history"] = history.ToJsonString() }).Reader.ReadAsync(Address, default);
+        Assert.DoesNotContain(result.Fills, f => f.SourceFillId == id);
+        Assert.NotEmpty(result.Snapshot.Positions);
+        var omission = Assert.Single(result.Omissions, o => o.Kind == Vessel.Domain.Workspace.ExecutionOmission.MissingPnl);
+        Assert.Equal((id, trade["order_id"]!.GetValue<string>(), "1"), (omission.SourceId, omission.OrderId, omission.VenueContractId));
+        Assert.NotNull(omission.OccurredAtUtc);
+        // Counted beside the fixture's own row on an unrecognized market, which keeps its marker too.
+        var baseline = await Reader(new() { ["/v1/trade-history"] = Trades }).Reader.ReadAsync(Address, default);
+        Assert.Equal(baseline.OmittedExecutions + 1, result.OmittedExecutions);
+        Assert.Equal(baseline.Omissions.Count + 1, result.Omissions.Count);
+        Assert.Contains("1 without reported P&L.", result.HistoryNotice);
+        // Its other fields still validate first.
+        trade["price"] = "not a price";
+        await Assert.ThrowsAsync<VenueReadException>(() => Reader(new() { ["/v1/trade-history"] = history.ToJsonString() }).Reader.ReadAsync(Address, default));
     }
 
     [Fact]

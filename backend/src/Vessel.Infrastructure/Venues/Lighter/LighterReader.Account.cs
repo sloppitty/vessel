@@ -101,6 +101,9 @@ public sealed partial class LighterReader
             var fees = 0;
             var selfTrades = 0;
             var (liquidations, deleverages, settlements) = (0, 0, 0);
+            // Phase 2, item 7: the rows left out, once each across pages, for durable markers and forced-event facts.
+            var omissions = new Dictionary<(string, string), VenueOmission>();
+            var forced = new Dictionary<string, VenueForcedEvent>(StringComparer.Ordinal);
             string? cursor = null;
             if (fillsAllowed)
                 // Each exchange's budget respects its trades weight (Robinhood's is three times mainnet's).
@@ -144,6 +147,8 @@ public sealed partial class LighterReader
                         liquidations += result.Liquidations;
                         deleverages += result.Deleverages;
                         settlements += result.Settlements;
+                        foreach (var omission in result.Omissions) omissions.TryAdd((omission.Kind, omission.SourceId), omission);
+                        foreach (var forcedEvent in result.ForcedEvents) forced.TryAdd(forcedEvent.SourceId, forcedEvent);
                         cursor = Cursor(json, trades.RootElement);
                     }
                     if (cursor is null) break;
@@ -157,7 +162,8 @@ public sealed partial class LighterReader
                 FillHistoryTruncated: historyAvailable ? cursor is not null || fillCoverage.Count == venue.TradePages * PageSize : null,
                 OldestRawFillAtUtc: historyAvailable ? fillCoverage.OldestAtUtc : null,
                 // Self-trades are out of scope (they leave the position unchanged); these are in-scope facts left out.
-                OmittedExecutions: missingPnl + fees + liquidations + deleverages + settlements), refused);
+                OmittedExecutions: missingPnl + fees + liquidations + deleverages + settlements)
+            { Omissions = omissions.Values.ToList(), ForcedEvents = forced.Values.ToList() }, refused);
         }, cancellationToken);
 
     internal static VenueSnapshot ReadSnapshot(JsonElement account, Catalogue catalogue, DateTimeOffset observed)
@@ -224,7 +230,12 @@ public sealed partial class LighterReader
     }
 
     internal sealed record FillPage(IReadOnlyList<VenueFill> Fills, int MissingPnl, int Fees, int SelfTrades = 0,
-        int Liquidations = 0, int Deleverages = 0, int Settlements = 0);
+        int Liquidations = 0, int Deleverages = 0, int Settlements = 0)
+    {
+        /// <summary>Phase 2, item 7: every in-scope row left out, and the venue-forced ones as facts.</summary>
+        public IReadOnlyList<VenueOmission> Omissions { get; init; } = [];
+        public IReadOnlyList<VenueForcedEvent> ForcedEvents { get; init; } = [];
+    }
 
     internal static string Effect(string side, decimal before, decimal quantity) =>
         before == 0 || (before > 0) == (side == ExecutionFacts.Buy) ? ExecutionFacts.Open
@@ -243,6 +254,8 @@ public sealed partial class LighterReader
         var fees = 0;
         var selfTrades = 0;
         var (liquidations, deleverages, settlements) = (0, 0, 0);
+        var omissions = new List<VenueOmission>();
+        var forced = new List<VenueForcedEvent>();
         foreach (var row in Rows(json, root, "trades", PageSize).EnumerateArray())
         {
             var marketId = Identity(json, json.Property(row, "market_id"));
@@ -272,20 +285,41 @@ public sealed partial class LighterReader
             var rateValue = hasFee ? json.Integer(rate) : 0;
             var integratorRate = row.TryGetProperty("integrator_" + role + "_fee", out var integrator) &&
                 integrator.ValueKind != JsonValueKind.Null ? json.Integer(integrator) : 0;
+            var pnlName = ask ? "ask_account_pnl" : "bid_account_pnl";
+            // Phase 2, item 7: a row left out keeps its identity, so its marker is durable and deduplicated. The trade ID
+            // is required; its order, time, price and P&L are kept when they are valid and are otherwise unknown.
+            var id = ExactId(json, row, "trade_id", "trade_id_str");
+            T? Lenient<T>(Func<T> read) where T : struct { try { return read(); } catch (VenueReadException) { return null; } }
+            string? OmittedOrder() { try { return ExactId(json, row, ask ? "ask_id" : "bid_id", ask ? "ask_id_str" : "bid_id_str"); } catch (VenueReadException) { return null; } }
+            DateTimeOffset? OmittedTime() => Lenient(() => json.Timestamp(json.Property(row, "timestamp"), latest.ToUnixTimeMilliseconds()));
+            void Omit(string kind, string reason) => omissions.Add(new(id, kind, reason, market.Key, marketId, OmittedOrder(), OmittedTime()));
             // Venue-forced executions are omitted whatever their (still validated) fee, and counted by kind, not as fee-bearing.
-            if (type == "liquidation") { liquidations++; continue; }
-            if (type == "deleverage") { deleverages++; continue; }
-            if (type == "market-settlement") { settlements++; continue; }
+            // Each is also kept as a forced-event fact. Lighter reports fee rates, not amounts, so the fee stays unknown.
+            if (type is "liquidation" or "deleverage" or "market-settlement")
+            {
+                var (kind, reason) = type switch
+                {
+                    "liquidation" => (ForcedEvent.Liquidation, "liquidation"),
+                    "deleverage" => (ForcedEvent.Deleverage, "deleverage"),
+                    _ => (ForcedEvent.Settlement, "market settlement")
+                };
+                if (type == "liquidation") liquidations++; else if (type == "deleverage") deleverages++; else settlements++;
+                Omit(ExecutionOmission.Forced, reason);
+                // Without a valid time the marker's read window bounds it; there is then no forced-event fact to place.
+                if (OmittedTime() is { } forcedAt)
+                    forced.Add(new(id, kind, market.Key, marketId, side, quantity, Lenient(() => json.Positive(json.Property(row, "price"))),
+                        forcedAt, OmittedOrder(), null, Lenient(() => json.OptionalAmount(row, pnlName) ?? throw json.Invalid())));
+                continue;
+            }
             if (rateValue != 0 || integratorRate != 0)
             {
                 fees++;
+                Omit(ExecutionOmission.Fee, "fee-bearing or unverified fee");
                 continue;
             }
-            var pnlName = ask ? "ask_account_pnl" : "bid_account_pnl";
             var reportedPnl = json.OptionalAmount(row, pnlName);
-            if (reportedPnl is null && effect != ExecutionFacts.Open) { missingPnl++; continue; }
+            if (reportedPnl is null && effect != ExecutionFacts.Open) { missingPnl++; Omit(ExecutionOmission.MissingPnl, "no reported realized P&L"); continue; }
             var pnl = reportedPnl ?? 0m;
-            var id = ExactId(json, row, "trade_id", "trade_id_str");
             var orderId = ExactId(json, row, ask ? "ask_id" : "bid_id", ask ? "ask_id_str" : "bid_id_str");
             var at = json.Timestamp(json.Property(row, "timestamp"), latest.ToUnixTimeMilliseconds());
             var price = json.Positive(json.Property(row, "price"));
@@ -312,6 +346,6 @@ public sealed partial class LighterReader
                 effect, standardTier ? ExecutionFacts.FeeStandardAccountFree : ExecutionFacts.FeeReported,
                 ExecutionFacts.PnlGross, marketId));
         }
-        return new(fills, missingPnl, fees, selfTrades, liquidations, deleverages, settlements);
+        return new(fills, missingPnl, fees, selfTrades, liquidations, deleverages, settlements) { Omissions = omissions, ForcedEvents = forced };
     }
 }
