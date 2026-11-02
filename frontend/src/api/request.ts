@@ -63,7 +63,7 @@ interface RequestOptions {
   codeMessage?: (code: string, status: number) => string | undefined
 }
 
-interface Problem { code?: string; detail?: string; title?: string }
+interface Problem { code?: string; detail?: string; title?: string; attemptsLeft?: number }
 
 const codePattern = /^[a-z][a-z-]{0,63}$/
 
@@ -75,6 +75,8 @@ async function readProblem(response: Response): Promise<Problem> {
       ...typeof problem.code === 'string' && codePattern.test(problem.code) ? { code: problem.code } : {},
       ...isText(problem.detail, 500) && problem.detail.trim() ? { detail: problem.detail } : {},
       ...isText(problem.title, 500) && problem.title.trim() ? { title: problem.title } : {},
+      ...typeof problem.attemptsLeft === 'number' && Number.isInteger(problem.attemptsLeft) && problem.attemptsLeft >= 0 && problem.attemptsLeft <= 10
+        ? { attemptsLeft: problem.attemptsLeft } : {},
     }
   } catch { return {} /* Keep the safe default for non-JSON proxy responses. */ }
 }
@@ -112,7 +114,7 @@ async function httpError(response: Response, options: RequestOptions): Promise<A
   if (response.status === 503 && !coded) detail = options.serviceUnavailable ?? 'The service is unavailable. Check the database and server configuration.'
   const reference = response.headers.get('X-Correlation-ID')
   if (response.status >= 500 && reference && /^[\da-f]{32}$/.test(reference)) detail += ` Reference: ${reference}`
-  return new ApiError('http', detail, response.status, retryAt(response), problem.code)
+  return new ApiError('http', detail, response.status, retryAt(response), problem.code, problem.attemptsLeft)
 }
 
 function transport(credentials: ApiCredentials): { headers: Record<string, string>; init: RequestInit } {

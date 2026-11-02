@@ -31,6 +31,8 @@ public sealed class IdentityCleanup(IDbContextFactory<IdentityDbContext> factory
             // Preserve the full verification skew; cleanup must not shorten a challenge's accepted lifetime.
             await db.Challenges.Where(x => x.ExpiresAt < now.AddSeconds(-30)).ExecuteDeleteAsync(ct);
             await db.Registrations.Where(x => x.ExpiresAt < now).ExecuteDeleteAsync(ct);
+            // Finished and expired pairings linger a day after their last deadline; unfinished ones are never cut short.
+            await db.Pairings.Where(x => x.ExpiresAt < now.AddDays(-1)).ExecuteDeleteAsync(ct);
             var cutoff = now.AddDays(-30);
             await db.Sessions.Where(x => x.RevokedAt < cutoff ||
                 x.IdleExpiresAt < cutoff || x.AbsoluteExpiresAt < cutoff).ExecuteDeleteAsync(ct);

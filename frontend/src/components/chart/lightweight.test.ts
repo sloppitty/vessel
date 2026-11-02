@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createElement } from 'react'
+import { act, fireEvent, render } from '@testing-library/react'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { computeIndicators, defaultIndicators } from './indicators'
+import type { DrawingController } from './drawingController'
 import type { ChartAdapter, ChartCallbacks, ChartCandle, PriceOverlay } from './types'
 import { testFrames } from '@/test/testFrames'
 
@@ -19,7 +23,7 @@ function makeSeries(kind: string) {
       options: () => ({ autoScale }),
       applyOptions: vi.fn((options: { autoScale?: boolean }) => { if (options.autoScale !== undefined) autoScale = options.autoScale }),
     }
-    const primitives: { find?: (id: string) => PriceOverlay | undefined }[] = []
+    const primitives: { find?: (id: string) => PriceOverlay | undefined; controller?: DrawingController }[] = []
     const current = {
       kind, primitives, data: () => data,
       setData: vi.fn((next: Point[]) => { data = [...next] }),
@@ -61,10 +65,14 @@ const events = (): ChartCallbacks => ({
   onLevelDrag: vi.fn(), onLevelSelect: vi.fn(), onLevelCancel: vi.fn(), onNeedOlder: vi.fn(), onDrawingCreate: vi.fn(),
   onDrawingChange: vi.fn(), onDrawingSelect: vi.fn(), onDrawingCancel: vi.fn(), onLevelEdit: vi.fn(), onPricePick: vi.fn(), onCrosshairMove: vi.fn(), onPaneLayout: vi.fn(), onMarkerHover: vi.fn(),
 })
-function pointer(container: HTMLElement, type: string, price: number, x = 400) {
-  const event = new MouseEvent(type, { clientX: x, clientY: 1000 - price, bubbles: true, button: 0, buttons: type === 'pointermove' ? 1 : 0 })
-  Object.defineProperty(event, 'pointerId', { value: 1 })
+function pointer(container: HTMLElement, type: string, price: number, x = 400, options: MouseEventInit & { pointerId?: number } = {}) {
+  const event = new MouseEvent(type, {
+    clientX: x, clientY: 1000 - price, bubbles: true, cancelable: true, button: 0,
+    buttons: type === 'pointerdown' || type === 'pointermove' ? 1 : 0, ...options,
+  })
+  Object.defineProperty(event, 'pointerId', { value: options.pointerId ?? 1 })
   container.dispatchEvent(event)
+  return event
 }
 let adapter: ChartAdapter
 let frames: ReturnType<typeof testFrames>
@@ -73,10 +81,19 @@ let container: HTMLDivElement
 let callbacks: ChartCallbacks
 beforeEach(() => {
   frames = testFrames(); chart = fakeChart(); container = document.createElement('div'); callbacks = events()
+  container.tabIndex = 0
+  document.body.appendChild(container)
+  let captured: number | null = null
+  container.setPointerCapture = id => { captured = id }
+  container.hasPointerCapture = id => captured === id
+  container.releasePointerCapture = id => {
+    captured = null
+    pointer(container, 'lostpointercapture', 500, 400, { pointerId: id })
+  }
   adapter = createLightweightAdapter(container, callbacks)
   adapter.setCandles(candles, true)
 })
-afterEach(() => adapter.destroy())
+afterEach(() => { adapter.destroy(); container.remove() })
 
 const variants = [
   { name: 'forming', next: [...candles.slice(0, -1), { ...candles.at(-1)!, close: 106, volume: 13 }], incremental: true },
@@ -179,6 +196,159 @@ describe('adapter drawing gesture cancellation', () => {
     expect(callbacks.onDrawingChange).not.toHaveBeenCalled()
     expect(callbacks.onDrawingCancel).toHaveBeenCalledTimes(1)
     if (how === 'destroy') adapter = { ...adapter, destroy: vi.fn() }
+  })
+})
+
+describe('Shift-drag measurement routing', () => {
+  const controller = () => chart.series[0]!.primitives[1]!.controller!
+  const start = () => pointer(container, 'pointerdown', 500, 400, { shiftKey: true })
+  const expectNoEdits = (created = false) => {
+    if (!created) expect(callbacks.onDrawingCreate).not.toHaveBeenCalled()
+    for (const callback of [callbacks.onDrawingChange, callbacks.onDrawingSelect,
+      callbacks.onDrawingCancel, callbacks.onLevelDrag, callbacks.onLevelSelect, callbacks.onLevelEdit,
+      callbacks.onLevelCancel, callbacks.onPricePick]) expect(callback).not.toHaveBeenCalled()
+  }
+
+  it('takes precedence over a drawing, a plan level and the price picker, then preserves them', () => {
+    adapter.setDrawings([{ id: 'drawing', schemaVersion: 1, kind: 'vertical-line', points: [{ time: 300_000, price: 500 }] }], 'drawing')
+    adapter.setDrawingTool('text', true)
+    adapter.setPricePicker(true)
+    adapter.setOverlays([{ id: 'entry', label: 'Entry', price: 500, color: '#ffffff', emphasis: 'selected', kind: 'entry', draggable: true }])
+    expect(start().defaultPrevented).toBe(true)
+    expect(controller().measuring).toBe(true)
+    expect(chart.series[0]!.priceScale().options().autoScale).toBe(false)
+    expect(chart.applyOptions).toHaveBeenCalledWith({ handleScroll: false, handleScale: false })
+    pointer(container, 'pointermove', 600, 410)
+    pointer(container, 'pointerup', 600, 410)
+    frames.run()
+    expect(controller().busy).toBe(false)
+    expect(controller().tool).toBe('text')
+    expect(controller().selectedId).toBe('drawing')
+    expect(container.hasPointerCapture(1)).toBe(false)
+    expect(callbacks.onDrawingCreate).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'price-range' }))
+    expectNoEdits(true)
+    pointer(container, 'pointerdown', 600)
+    expect(callbacks.onPricePick).toHaveBeenCalledExactlyOnceWith(600)
+  })
+
+  it.each([true, false])('holds the price scale through live candle updates and restores autoscale=%s', autoScale => {
+    const scale = chart.series[0]!.priceScale()
+    scale.applyOptions({ autoScale })
+    start()
+    adapter.setCandles([...candles.slice(0, -1), { ...candles.at(-1)!, close: 125 }], false)
+    expect(scale.options().autoScale).toBe(false)
+    pointer(container, 'pointerup', 550)
+    expect(scale.options().autoScale).toBe(autoScale)
+  })
+
+  it('does not select or edit a level from a Shift-click or Shift-double-click', () => {
+    adapter.setOverlays([{ id: 'entry', label: 'Entry', price: 500, color: '#ffffff', emphasis: 'selected', kind: 'entry', draggable: true }])
+    start()
+    pointer(container, 'pointerup', 500)
+    const click = chart.subscribeClick.mock.calls[0]![0] as (event: unknown) => void
+    click({ hoveredObjectId: 'entry', sourceEvent: { shiftKey: true } })
+    container.dispatchEvent(new MouseEvent('dblclick', { clientX: 400, clientY: 500, shiftKey: true, bubbles: true }))
+    expectNoEdits()
+  })
+
+  it.each(['pointercancel', 'lostpointercapture', 'blur', 'buttons-up', 'source', 'tool', 'picker', 'Escape', 'destroy'])(
+    '%s clears the measurement, releases capture and unlocks the chart without edits', how => {
+      start()
+      pointer(container, 'pointermove', 600, 410)
+      if (how === 'blur') window.dispatchEvent(new Event('blur'))
+      else if (how === 'buttons-up') pointer(container, 'pointermove', 600, 410, { buttons: 0 })
+      else if (how === 'source') adapter.setCandles(candles, true)
+      else if (how === 'tool') adapter.setDrawingTool('zone', false)
+      else if (how === 'picker') adapter.setPricePicker(true)
+      else if (how === 'Escape') {
+        const bubble = vi.fn()
+        container.addEventListener('keydown', bubble)
+        const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+        container.dispatchEvent(event)
+        expect(event.defaultPrevented).toBe(true)
+        expect(bubble).not.toHaveBeenCalled()
+      } else if (how === 'destroy') adapter.destroy()
+      else pointer(container, how, 600, 410)
+      frames.run()
+      expect(controller().busy).toBe(false)
+      expect(container.hasPointerCapture(1)).toBe(false)
+      expect(chart.series[0]!.priceScale().options().autoScale).toBe(true)
+      expect(chart.applyOptions).toHaveBeenCalledWith({ handleScroll: true, handleScale: true })
+      expectNoEdits()
+      if (how === 'destroy') adapter = { ...adapter, destroy: vi.fn() }
+    },
+  )
+
+  it('ignores secondary pointers without ending the primary measurement', () => {
+    start()
+    pointer(container, 'pointerdown', 600, 500, { pointerId: 2, shiftKey: true })
+    pointer(container, 'pointermove', 600, 500, { pointerId: 2, buttons: 0 })
+    pointer(container, 'pointerup', 600, 500, { pointerId: 2 })
+    expect(controller().measuring).toBe(true)
+    expect(container.hasPointerCapture(1)).toBe(true)
+    pointer(container, 'pointerup', 500)
+    expect(controller().busy).toBe(false)
+    expectNoEdits()
+  })
+
+  it('clears the measurement and restores interaction when the chart resizes', () => {
+    adapter.destroy()
+    const observers: ResizeObserverCallback[] = []
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) { observers.push(callback) }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+    chart = fakeChart()
+    adapter = createLightweightAdapter(container, callbacks)
+    adapter.setCandles(candles, true)
+    start()
+    pointer(container, 'pointermove', 600)
+    observers.at(-1)!([], {} as ResizeObserver)
+    expect(controller().busy).toBe(false)
+    expect(container.hasPointerCapture(1)).toBe(false)
+    expect(chart.series[0]!.priceScale().options().autoScale).toBe(true)
+    expect(chart.applyOptions).toHaveBeenCalledWith({ handleScroll: true, handleScale: true })
+    expectNoEdits()
+  })
+
+  it('cancels only the active measurement before the expanded dialog handles Escape', () => {
+    const onOpenChange = vi.fn()
+    render(createElement(Dialog, { open: true, onOpenChange },
+      createElement(DialogContent, { 'aria-describedby': undefined },
+        createElement(DialogTitle, null, 'BTC chart'),
+        createElement('div', { ref: node => { node?.appendChild(container) } }))))
+    act(() => { start(); pointer(container, 'pointermove', 600) })
+    expect(controller().measuring).toBe(true)
+    fireEvent.keyDown(container, { key: 'Escape' })
+    expect(controller().busy).toBe(false)
+    expect(onOpenChange).not.toHaveBeenCalled()
+    expectNoEdits()
+    // Once no measurement is active, normal dialog dismissal still works.
+    fireEvent.keyDown(container, { key: 'Escape' })
+    expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false)
+  })
+
+  it('does not consume Escape outside the chart with the active measurement', () => {
+    start()
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    document.body.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(false)
+    expect(controller().measuring).toBe(true)
+  })
+
+  it('leaves axes, indicator panes and non-primary buttons alone, and cannot measure without candles', () => {
+    vi.spyOn(chart, 'paneSize').mockReturnValue({ width: 800, height: 600 })
+    pointer(container, 'pointerdown', 500, 850, { shiftKey: true }) // Price axis.
+    pointer(container, 'pointerdown', 350, 400, { shiftKey: true }) // Indicator pane.
+    pointer(container, 'pointerdown', 50, 400, { shiftKey: true }) // Time axis.
+    pointer(container, 'pointerdown', 500, 400, { shiftKey: true, button: 2 })
+    expect(controller().busy).toBe(false)
+    adapter.setCandles([], true)
+    start()
+    expect(controller().busy).toBe(false)
+    expectNoEdits()
   })
 })
 

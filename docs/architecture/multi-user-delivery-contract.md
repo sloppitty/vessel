@@ -11,6 +11,8 @@ Every required edit is applied or explicitly decided in §14, and the round-3 fi
 
 **October 25, 2026 amendment: wallet sign-in only.** The owner removed Token sign-in. D3 is superseded: `Vessel:Auth:Mode` is retired (absent or `Wallet` is accepted, any other value refuses startup) and a nonempty `Vessel:Auth:Token` refuses startup in every environment, including `check-config` and the identity commands. The Token rows of §3, the bearer scheme and its limiter, the configured-owner directory (§9.1), `AlwaysValidPrincipal` (§9.5) and the `bearer` transport and Token gate of §11 no longer exist; `/api/auth/config` answers `{registration, originAccepted}`. Readiness always requires an active operator with a bound wallet. Workers no longer register authorization. Everything else stands, and §10 is still not signed off. State: [multi-user-state.md](multi-user-state.md#wallet-only-sign-in--october-25-2026).
 
+**October 27, 2026 amendment: device pairing.** The owner approved signing in on a phone without a wallet by scanning a QR from a signed-in desktop. D8 and §3 now use **10 days idle** (was 14) for every remembered session, desktop included; deployments that set `RememberIdleDays` keep their value. Device pairing adds the `device.pair` step-up action (no target; statement `Confirm connecting a new device to your Vessel journal. This is not a transaction.`), the `device_pairings` identity table, `sessions.source` (`wallet` or `pairing`, labels only), the `/api/auth/pairings` routes (public `claim` and `complete`) and the `DevicePairing` identity migration. Routes, shapes, deadlines, rate limits and security notes are in [device-pairing-plan.md](device-pairing-plan.md), which is the authority for pairing; everything else here stands.
+
 Where this contract and [the analysis](multi-user-wallet-auth.md) disagree, this contract wins. The screens are in [`docs/design/wallet-sign-in/`](../design/wallet-sign-in/README.md).
 
 Implementers must not decide anything this contract leaves open. Ask the orchestrator instead.
@@ -28,7 +30,7 @@ The owner has not answered D1–D12. These are the working defaults, adopted fro
 | D5 | Regular wallets (EOAs) only. Unsupported signature formats get their own code; Vessel never claims to know the wallet type. |
 | D6 | Several wallets per user; the last one cannot be removed. Wallet changes are serialized per user. |
 | D7 | Operator tasks are offline commands first. "The operator cannot see journals" is application authorization only, not protection from whoever administers the host or database. |
-| D8 | **"Keep me signed in on this device"**, unchecked by default. Unchecked: a browser-session cookie with 12 h idle and 24 h absolute expiry. Checked: a persistent cookie with 14 days idle and 30 days absolute expiry. Browsers may restore session cookies; the server-side bounds are the real limit. |
+| D8 | **"Keep me signed in on this device"**, unchecked by default. Unchecked: a browser-session cookie with 12 h idle and 24 h absolute expiry. Checked: a persistent cookie with 10 days idle and 30 days absolute expiry. Browsers may restore session cookies; the server-side bounds are the real limit. |
 | D9 | The same venue account may be followed by several journals. Venue deadlines are server-wide (§9.4). |
 | D10 | Per-user preference keys, plus a device-level theme key. Only the migrated owner adopts the legacy keys. A full reload on sign-out and on a user change. |
 | D11 | No user or journal deletion. Suspension is defined (§9.6). |
@@ -119,7 +121,7 @@ All keys are read identically by the API, the worker and offline commands. Valid
 | `Vessel:Identity:Registration` | `Invitation` | `Closed`, `Invitation`, `AllowList`, `Open`. Forced to `Closed` while the §10 gate is in place |
 | `Vessel:Identity:AllowList` | empty | `0x` addresses, normalized to lower case |
 | `Vessel:Identity:Session:IdleHours` / `AbsoluteHours` | 12 / 24 | 1–720; idle ≤ absolute |
-| `Vessel:Identity:Session:RememberIdleDays` / `RememberAbsoluteDays` | 14 / 30 | 1–365; idle ≤ absolute |
+| `Vessel:Identity:Session:RememberIdleDays` / `RememberAbsoluteDays` | 10 / 30 | 1–365; idle ≤ absolute |
 | `Vessel:Identity:MaxSessionsPerUser` | 20 | 1–200. Issuing a session above the cap atomically revokes the oldest live sessions |
 | `Vessel:Identity:MaxPendingRegistrations` | 10000 | At the cap, the oldest are evicted |
 | `Vessel:Identity:CookieName` | `__Host-vessel-session` | Must start with `__Host-` |

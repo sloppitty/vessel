@@ -160,3 +160,37 @@ covering F-05 and the F-06 preview:
 - **Default title.** The title field starts with the blank-title rule on the
   operation's opening day in UTC, for example `BTC Long · 12 Oct 2026`. A
   cleared field saves that default.
+
+## Unrealized P&L column (October 27, 2026)
+
+The owner judged the Play column to add nothing to the Activity table and
+asked for unrealized P&L in its place, in both real and Paper modes.
+- **Column.** The last full-table column is now "Unrealized P&L". The compact
+  Overview and account tables are unchanged. Values colour by sign. A closed
+  operation shows "—". An open one without a usable value shows "—" with
+  "Unavailable", never zero. The tooltip gives the exact value, its source and
+  time, and "Before fees and funding".
+- **Mark source.** Page rows carry `unrealizedPnlUsd`, `unrealizedPnlSource`
+  (`mark` or `snapshot`), `unrealizedPnlMarkPrice` and
+  `unrealizedPnlAsOfUtc`. They are set only for `open` operations with a
+  direction, positive remaining quantity and known average entry. Venues
+  with market context (Hyperliquid, RISEx, and Paper through its Hyperliquid
+  account) mark the remainder at the venue's current `markPx`:
+  direction × remaining × (mark − average entry), exact and rounded once to 28
+  places. The read goes through the shared 10-second `MarketContextCache`,
+  once per venue per page. Paper mode reads this server-side; the browser's
+  Paper market-stream deny-list is unchanged. A venue without market context
+  (Lighter) uses the latest snapshot's venue-reported figure. That snapshot
+  must be no older than the operation's latest execution, and must hold
+  exactly the remaining signed quantity on the same native contract. A failed
+  or timed-out venue read, an unknown or ambiguous market, or a mismatch leaves
+  the fields null without failing the page.
+- **Not part of history.** Marks are read after the cached aggregate, for the
+  shown rows only. `version` does not hash them, so a moving price never flags
+  Activity as changed. They are observations, not fills, and do not enter
+  Review, sizing, Overview or Play results.
+- **Play and journalling.** The Play line moves into the expanded row. It shows
+  a linked Play's title as a link, "Journal this trade" for a closed,
+  unassigned operation, or "Unassigned"/"Mixed". "Journal this trade" replaces
+  that row's "Inspect retrospective eligibility", which opens the same preview,
+  so the two never appear side by side. Other operations keep the inspection.
