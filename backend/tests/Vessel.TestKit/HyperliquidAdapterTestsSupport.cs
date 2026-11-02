@@ -23,7 +23,7 @@ public partial class HyperliquidAdapterTestsSupport
           "assetPositions":[
             {"type":"oneWay","position":{
               "coin":"BTC","szi":"-0.01234567890123456789","entryPx":"61234.1234567890123456",
-              "unrealizedPnl":"-12.987654321","marginUsed":"250.123456789",
+              "unrealizedPnl":"-12.987654321","marginUsed":"250.123456789","liquidationPx":"73336.0123456789",
               "leverage":{"type":"isolated","value":5,"rawUsd":"-5.1"}
             }},
             {"type":"oneWay","position":{"coin":"ETH","szi":"0","entryPx":null}},

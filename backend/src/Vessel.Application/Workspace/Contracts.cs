@@ -45,8 +45,12 @@ public static class InstrumentCatalogScopes
 {
     public const string Venue = "venue-perpetuals", Manual = "manual";
 }
+/// <summary>
+/// One snapshot position. <paramref name="LiquidationPrice"/> and <paramref name="MarginMode"/> are the venue's own figures
+/// (Phase 2, item 8a); null when it reports none.
+/// </summary>
 public sealed record PositionDto(string ContractId, string SignedQuantity, string EntryPrice,
-    string UnrealizedPnlUsd, string MarginUsedUsd, int? Leverage);
+    string UnrealizedPnlUsd, string MarginUsedUsd, int? Leverage, string? LiquidationPrice = null, string? MarginMode = null);
 public sealed record SnapshotDto(DateTimeOffset ObservedAtUtc, string ValueScope, string? AccountValueUsd,
     string? WithdrawableUsd, string? MarginUsedUsd, IReadOnlyList<PositionDto> Positions,
     StablecoinWalletDto? StablecoinWallet = null, string? AvailableMarginUsd = null);

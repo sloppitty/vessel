@@ -1468,6 +1468,13 @@ namespace Vessel.Persistence.Migrations
                     b.Property<int?>("Leverage")
                         .HasColumnType("integer");
 
+                    b.Property<decimal?>("LiquidationPrice")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("MarginMode")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<decimal>("MarginUsedUsd")
                         .HasColumnType("numeric");
 
@@ -1483,7 +1490,10 @@ namespace Vessel.Persistence.Migrations
 
                     b.HasKey("OwnerId", "AccountId", "ContractId");
 
-                    b.ToTable("account_positions", (string)null);
+                    b.ToTable("account_positions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_account_positions_margin_mode", "\"MarginMode\" IS NULL OR \"MarginMode\" IN ('cross', 'isolated')");
+                        });
                 });
 
             modelBuilder.Entity("Vessel.Domain.Workspace.AccountSnapshot", b =>
@@ -1886,6 +1896,57 @@ namespace Vessel.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Vessel.Domain.Workspace.RiskObservation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContractId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<decimal>("EntryPrice")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal?>("LiquidationPrice")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("MarginMode")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTimeOffset>("ObservedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("SignedQuantity")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("VenueContractId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "AccountId", "ContractId", "ObservedAtUtc");
+
+                    b.ToTable("account_risk_observations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_account_risk_observations_liquidation", "\"LiquidationPrice\" IS NULL OR \"LiquidationPrice\" > 0");
+
+                            t.HasCheckConstraint("CK_account_risk_observations_margin_mode", "\"MarginMode\" IS NULL OR \"MarginMode\" IN ('cross', 'isolated')");
+
+                            t.HasCheckConstraint("CK_account_risk_observations_reported", "\"LiquidationPrice\" IS NOT NULL OR \"MarginMode\" IS NOT NULL");
+                        });
+                });
+
             modelBuilder.Entity("Vessel.Domain.Accounts.Account", b =>
                 {
                     b.HasOne("Vessel.Domain.Workspace.Portfolio", null)
@@ -2220,6 +2281,16 @@ namespace Vessel.Persistence.Migrations
                 });
 
             modelBuilder.Entity("Vessel.Domain.Workspace.LeverageObservation", b =>
+                {
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Workspace.RiskObservation", b =>
                 {
                     b.HasOne("Vessel.Domain.Accounts.Account", null)
                         .WithMany()

@@ -4,6 +4,8 @@
 
 ### Added
 
+- Positions keep the venue's reported liquidation price and margin mode, and a Play's
+  Execution panel shows them now and at its first entry fill. Unknown stays unknown.
 - A saved Play can be downloaded as a zip: its plan revisions, history, executions,
   review, log and evidence notes as JSON, with every evidence original unchanged.
 - Settings → Data export downloads an account's retained executions or funding as CSV,

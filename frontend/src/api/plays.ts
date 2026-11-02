@@ -349,6 +349,18 @@ export interface OrderLink {
   /** On a suggestion: its order is also offered to another active Play (phase 1, 1.6d); absent from an older server. */
   otherPlay?: boolean | null
 }
+/** A position's venue-reported risk context: the venue's figures, never the plan's estimate; null is not reported. */
+export interface VenueRisk {
+  signedQuantity: string
+  entryPrice: string
+  liquidationPrice: string | null
+  marginMode: 'cross' | 'isolated' | null
+  observedAtUtc: string
+}
+const isVenueRisk = (v: unknown): v is VenueRisk => isRecord(v) && isPlainDecimal(v.signedQuantity) && isPlainDecimal(v.entryPrice) &&
+  isNullOr(v.liquidationPrice, isPlainDecimal) && (v.marginMode === null || v.marginMode === 'cross' || v.marginMode === 'isolated') &&
+  isTimestamp(v.observedAtUtc)
+
 export interface PlayExecution {
   playId: string
   status: PlayStatus
@@ -376,6 +388,10 @@ export interface PlayExecution {
    * the owner to link by hand; the automatic matcher never reaches back. Absent from older servers.
    */
   earlierOrders?: ExecutionOrder[]
+  /** The account's current venue position on the Play's contract with its reported risk context (Phase 2, item 8a). */
+  venuePosition?: VenueRisk | null
+  /** The first risk context the venue reported at or after the Play's first entry fill. */
+  riskAtFirstFill?: VenueRisk | null
   notice: string
   /** Why linked fills cannot settle the play: missing executions, contradicting fills, or exits before or beyond the entries. */
   issues: string[]
@@ -457,6 +473,7 @@ export const isPlayExecution = (v: unknown): v is PlayExecution => isRecord(v) &
   Array.isArray(v.links) && v.links.every(orderLink) && Array.isArray(v.suggestions) && v.suggestions.every(orderLink) &&
   Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(executionOrder) &&
   (v.earlierOrders === undefined || Array.isArray(v.earlierOrders) && v.earlierOrders.length <= 20 && v.earlierOrders.every(executionOrder)) &&
+  (v.venuePosition === undefined || isNullOr(v.venuePosition, isVenueRisk)) && (v.riskAtFirstFill === undefined || isNullOr(v.riskAtFirstFill, isVenueRisk)) &&
   isText(v.notice, 1000) &&
   Array.isArray(v.issues) && v.issues.every(issue => isText(issue, 1000)) &&
   (v.monitor === null || isAccountMonitor(v.monitor)) && Array.isArray(v.discrepancies) && v.discrepancies.every(isMonitorDiscrepancy) &&

@@ -100,7 +100,18 @@ public sealed record PlayExecutionDto(Guid PlayId, string Status, bool Tracked, 
     /// (Phase 2, item 4). The owner may link one; the automatic matcher never does.
     /// </summary>
     public IReadOnlyList<ExecutionOrderDto> EarlierOrders { get; init; } = [];
+    /// <summary>The account's current venue position on the Play's contract, with its reported risk context (Phase 2, item 8a).</summary>
+    public VenueRiskDto? VenuePosition { get; init; }
+    /// <summary>The first risk context the venue reported at or after the Play's first entry fill; null when none was kept.</summary>
+    public VenueRiskDto? RiskAtFirstFill { get; init; }
 }
+
+/// <summary>
+/// A position's venue-reported risk context (Phase 2, item 8a): signed quantity and entry as reported, the venue's
+/// liquidation price and margin mode (null when not reported) and when Vessel read them. The venue's figures, never the
+/// plan's isolated estimate; a cross-margin liquidation price moves with the whole account.
+/// </summary>
+public sealed record VenueRiskDto(string SignedQuantity, string EntryPrice, string? LiquidationPrice, string? MarginMode, DateTimeOffset ObservedAtUtc);
 
 // Application owns this bounded port; EF details stay in Persistence. Reads are owner-filtered.
 public interface IPlayExecutionStore
@@ -173,6 +184,19 @@ public interface IPlayExecutionStore
         (await LinksAsync(accountId, ct)).Where(l => l.State == OrderLinkState.Linked).Select(l => l.ImportedOrderId).ToHashSet();
     /// <summary>Read-only fills of the account belonging to one of <paramref name="orders"/>, by time then ID.</summary>
     Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<OrderKey> orders, CancellationToken ct);
+    /// <summary>
+    /// The enabled account's current snapshot position in the Play's <paramref name="direction"/> (1 long, −1 short) on its
+    /// native market, with the snapshot's time; null when flat, opposite, ambiguous or unknown.
+    /// </summary>
+    Task<VenueRiskDto?> PositionAsync(Guid accountId, string contractId, string? venueContractId, int direction, CancellationToken ct) =>
+        Task.FromResult<VenueRiskDto?>(null);
+    /// <summary>
+    /// The first kept risk observation of the Play's own position: its direction and native market, from its first entry
+    /// fill to its last exit when it has closed; null when none or when the market cannot be told apart.
+    /// </summary>
+    Task<VenueRiskDto?> RiskSinceAsync(Guid accountId, string contractId, string? venueContractId, int direction, DateTimeOffset since,
+        DateTimeOffset? until, CancellationToken ct) =>
+        Task.FromResult<VenueRiskDto?>(null);
     void Add(PlayOrderLink link);
     void Add(PlayStatusChange change);
     /// <summary>

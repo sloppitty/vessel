@@ -25,6 +25,11 @@ public interface IPerpetualVenueReader
 public sealed record VenueInstrument(string ContractId, int QuantityDecimals, int MaxLeverage, string QuoteAsset,
     decimal? PriceStep = null, string? Category = null, string? VenueContractId = null, decimal? MaintenanceMarginFraction = null);
 
+/// <summary>
+/// One open position as the venue reports it. <paramref name="LiquidationPrice"/> and <paramref name="MarginMode"/>
+/// (<c>cross</c> or <c>isolated</c>) are the venue's own figures when it states them (Phase 2, item 8a); null is not
+/// reported, never estimated. A reported price of zero means no liquidation price and is null too.
+/// </summary>
 public sealed record VenuePosition(
     string ContractId,
     decimal SignedQuantity,
@@ -32,7 +37,14 @@ public sealed record VenuePosition(
     decimal UnrealizedPnlUsd,
     decimal MarginUsedUsd,
     int? Leverage,
-    string? VenueContractId = null);
+    string? VenueContractId = null,
+    decimal? LiquidationPrice = null,
+    string? MarginMode = null);
+
+public static class MarginModes
+{
+    public const string Cross = "cross", Isolated = "isolated";
+}
 
 public sealed record VenueSnapshot(
     DateTimeOffset ObservedAtUtc,

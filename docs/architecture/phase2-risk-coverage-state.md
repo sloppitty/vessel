@@ -336,7 +336,45 @@ Not started.
 
 ## 8. Venue-reported risk context
 
-Not started.
+October 21, 2026.
+
+**8a. Liquidation price and margin mode.** Implemented on `t3/phase2-risk-context`.
+- **The facts.** Each venue's reported liquidation price and margin mode are kept with the
+  snapshot's positions.
+  - A reported zero liquidation price means none, so it reads null.
+  - Nothing is estimated.
+- **Observations.** `account_risk_observations` (migration `20261021164349_RiskContext`) records them
+  when a position appears or changes, or when its market receives new executions. A cross-margin
+  price that only drifts with the account is not kept again.
+- **Where it shows.**
+  - The Execution panel shows "Venue liquidation" now and at the first entry fill.
+  - Account detail adds the column.
+- **Tests.**
+  - `RiskObservationPostgresTests` (2): when observations are kept, and the current and first-fill
+    reads.
+  - The adapter mappings.
+  - The Execution panel test.
+  - A regenerated monitor contract fixture.
+- **Migration.** It is applied explicitly, never to the owner's database.
+- **Check.** `scripts/check.sh` passed on `42010626`: backend 4,050 passed, 5 skipped; frontend 174 files and 4,071 tests.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `187d2561`. Seven findings, all fixed in
+  `d0d87215`:
+  - **High.** The first-fill read could take another position: the opposite
+    direction, another native market, or one opened after the Play closed.
+    Both reads now take only the Play's own position: its direction, the one
+    native market its fills name (several make it unknown), its lifetime once
+    flat, and an enabled account. A disabled account's position no longer
+    shows through Plays.
+  - An isolated position's liquidation change was dropped. Only cross-margin
+    drift is skipped.
+  - A reopening seen in earlier history lost its context. Retained executions
+    since the last observation count, as for leverage.
+  - Once flat, the panel hid the first-read context. It keeps it now.
+  - The panel did not say when each value was read. It does, and the context
+    reads "first read after entry", not a measurement at the fill.
+  - A negative liquidation price from Lighter or RISEx became unknown. It is
+    an invalid response now.
+- **Check after round 1.** `scripts/check.sh` passed on `4cb06c01` (before documentation-only commits were restacked beneath it): backend 4,064 passed, 5 skipped; frontend 174 files and 4,071 tests.
 
 ## 9. Funding
 

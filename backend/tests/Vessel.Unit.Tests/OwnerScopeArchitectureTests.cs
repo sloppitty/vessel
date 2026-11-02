@@ -77,7 +77,7 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Worker/PaperScheduler.cs|0bd82837aabbbd4c1ff5587c1b31d0a7c2f139b7b41ec238ba794e40b6c872b9",
             "Vessel.Worker/PaperScheduler.cs|e83477b56188aca19b8fe5b167e717c77061df36b5e9555b425734927803888f",
             // System discovery returns owner IDs only, including every notification table and suspended owners.
-            "Vessel.Persistence/JournalOwnerInventory.cs|e56ae370320fa430a6d25b9a66b56a037fb48a6455014338b0c717dad4219b3e",
+            "Vessel.Persistence/JournalOwnerInventory.cs|5b331c2e2976398122197f9609eb633e348703851c0d1c70e635bb2a344a75cd",
             // Notification paging assembles both statements with the constant `visible` fragment, which
             // includes n.owner_id=@owner; parameters always bind the current scope's owner.
             "Vessel.Persistence/Notifications/NotificationStore.cs|d03c88d4e53ec73a5f089f774c05085e0223717c18d88d256fe7b673ca4ec6c7",
