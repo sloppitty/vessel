@@ -38,6 +38,7 @@ export interface DrawingTheme {
 
 type Gesture =
   | { type: 'create'; start: DrawingPoint; startX: number; startY: number; moved: boolean; awaiting: boolean }
+  | { type: 'measure'; start: DrawingPoint; startX: number; startY: number }
   | { type: 'move'; drawing: ChartDrawing; x: number; y: number; moved: boolean }
   | { type: 'handle'; drawing: ChartDrawing; index: number; moved: boolean }
 
@@ -83,6 +84,7 @@ export class DrawingController {
   }
 
   get busy() { return this.gesture !== null }
+  get measuring() { return this.gesture?.type === 'measure' }
 
   setGuide(x: number | null) {
     if (x === this.guide) return
@@ -96,7 +98,7 @@ export class DrawingController {
   }
 
   cancel() {
-    if (this.gesture && this.gesture.type !== 'create') this.callbacks.onDrawingCancel?.()
+    if (this.gesture?.type === 'move' || this.gesture?.type === 'handle') this.callbacks.onDrawingCancel?.()
     this.edit.cancel()
     this.gesture = null
     this.preview = null
@@ -104,7 +106,14 @@ export class DrawingController {
   }
 
   /** Returns true when the event belongs to drawings and must not pan the chart. */
-  pointerDown(x: number, y: number) {
+  pointerDown(x: number, y: number, measure = false) {
+    if (measure) {
+      this.cancel()
+      this.setGuide(null)
+      const start = this.space.point(x, y, false)
+      if (start) this.gesture = { type: 'measure', start, startX: x, startY: y }
+      return true
+    }
     const gesture = this.gesture
     if (gesture?.type === 'create' && gesture.awaiting) return this.finishCreate(x, y)
     if (this.tool) {
@@ -139,6 +148,18 @@ export class DrawingController {
   pointerMove(x: number, y: number) {
     const gesture = this.gesture
     if (!gesture) return false
+    if (gesture.type === 'measure') {
+      const end = this.space.point(x, y, false)
+      if (end && Math.hypot(x - gesture.startX, y - gesture.startY) > 4) {
+        this.preview = {
+          id: 'measurement', schemaVersion: drawingSchemaVersion,
+          kind: Math.abs(x - gesture.startX) >= Math.abs(y - gesture.startY) ? 'date-range' : 'price-range',
+          points: [gesture.start, end],
+        }
+      } else this.preview = null
+      this.requestUpdate()
+      return true
+    }
     if (gesture.type === 'create') {
       if (Math.hypot(x - gesture.startX, y - gesture.startY) > 4) gesture.moved = true
       const end = this.space.point(x, y, this.magnet)
@@ -163,6 +184,13 @@ export class DrawingController {
   pointerUp(x: number, y: number) {
     const gesture = this.gesture
     if (!gesture) return false
+    if (gesture.type === 'measure') {
+      this.pointerMove(x, y)
+      const measurement = this.preview
+      this.cancel()
+      if (measurement) this.create(measurement.points, measurement.kind)
+      return true
+    }
     if (gesture.type === 'create') {
       if (gesture.moved) return this.finishCreate(x, y)
       // A click places a long or short box of a default size, ready to adjust by its handles.
@@ -201,7 +229,7 @@ export class DrawingController {
   }
 
   cursor(x: number, y: number) {
-    if (this.tool || this.gesture?.type === 'create') return 'crosshair'
+    if (this.tool || this.gesture?.type === 'create' || this.measuring) return 'crosshair'
     const selected = this.drawings.find(drawing => drawing.id === this.selectedId)
     if (selected && !selected.locked && this.handleAt(selected, x, y) !== null) return 'grab'
     const hit = this.drawingAt(x, y)
@@ -219,9 +247,9 @@ export class DrawingController {
     return true
   }
 
-  private create(points: DrawingPoint[]) {
-    if (!this.tool || this.drawings.length >= maxDrawings) return
-    const drawing = this.draft(points)
+  private create(points: DrawingPoint[], kind: DrawingKind | null = this.tool) {
+    if (!kind || this.drawings.length >= maxDrawings) return
+    const drawing = this.draft(points, kind)
     this.callbacks.onDrawingCreate(drawing)
     this.requestUpdate()
   }
@@ -236,8 +264,8 @@ export class DrawingController {
     return [entry, { time: target.time, price: target.price }, { time: target.time, price: stop.price }]
   }
 
-  private draft(points: DrawingPoint[]): ChartDrawing {
-    return { id: drawingId(), schemaVersion: drawingSchemaVersion, kind: this.tool!, points, ...(this.tool === 'text' ? { text: 'Note' } : {}) }
+  private draft(points: DrawingPoint[], kind: DrawingKind = this.tool!): ChartDrawing {
+    return { id: drawingId(), schemaVersion: drawingSchemaVersion, kind, points, ...(kind === 'text' ? { text: 'Note' } : {}) }
   }
 
   private resize(drawing: ChartDrawing, index: number, point: DrawingPoint): ChartDrawing {
@@ -331,7 +359,7 @@ export class DrawingController {
     context.lineCap = 'round'
     context.font = `500 ${textFont - 1}px ${theme.font}`
     context.textBaseline = 'middle'
-    for (const drawing of all) this.renderOne(context, theme, drawing, drawing.id === this.selectedId || drawing === this.preview)
+    for (const drawing of all) this.renderOne(context, theme, drawing, drawing.id === this.selectedId || drawing === this.preview && !this.measuring)
     if (this.guide !== null) {
       context.strokeStyle = theme.muted
       context.lineWidth = 1
@@ -395,7 +423,14 @@ export class DrawingController {
           text = `${stats.change >= 0 ? '+' : '−'}${this.space.formatPrice(Math.abs(stats.change))} (${stats.percent >= 0 ? '+' : '−'}${Math.abs(stats.percent).toFixed(2)}%)`
         }
         const below = y1! >= y0!
-        tag(context, theme, text, (x0! + x1!) / 2, below ? Math.max(y0!, y1!) + 14 : top - 14, color)
+        let tagX = (x0! + x1!) / 2
+        let tagY = below ? Math.max(y0!, y1!) + 14 : top - 14
+        if (this.measuring && drawing === this.preview) {
+          const half = context.measureText(text).width / 2 + 7
+          tagX = Math.max(half, Math.min(tagX, width - half))
+          tagY = Math.max(12, Math.min(tagY, this.space.height() - 12))
+        }
+        tag(context, theme, text, tagX, tagY, color)
         break
       }
       case 'zone':
