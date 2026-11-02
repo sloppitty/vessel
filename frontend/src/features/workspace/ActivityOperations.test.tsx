@@ -47,7 +47,7 @@ describe('operation table', () => {
     await userEvent.click(screen.getByText(accountFixture.name))
     const button = screen.getByRole('button', { name: 'Collapse BTC operation' })
     expect(button).toHaveAttribute('aria-expanded', 'true')
-    await userEvent.click(screen.getByRole('button', { name: /Inspect BTC retrospective/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Journal this trade, BTC' }))
     expect(preview).toHaveBeenCalledExactlyOnceWith(closed)
     expect(button).toHaveAttribute('aria-expanded', 'true')
     await userEvent.click(screen.getByText('$2.00'))
@@ -58,7 +58,7 @@ describe('operation table', () => {
     await userEvent.keyboard(' ')
     expect(button).toHaveAttribute('aria-expanded', 'false')
   })
-  it('names a linked Play by its title and offers to journal a closed unassigned trade, never a UUID prefix (F-05)', async () => {
+  it('names a linked Play by its title in the expanded row and offers to journal a closed unassigned trade (F-05)', async () => {
     const preview = vi.fn(), openPlay = vi.fn()
     const playId = '33345678-1234-1234-1234-123456789abc', otherPlay = '43345678-1234-1234-1234-123456789abc'
     const linked: ActivityOperation = { ...closed, id: '32345678-1234-1234-1234-123456789abc:short', playId, playAssociation: 'linked', playTitle: 'BTC breakout' }
@@ -66,24 +66,30 @@ describe('operation table', () => {
     const mixed: ActivityOperation = { ...closed, id: '52345678-1234-1234-1234-123456789abc:short', playAssociation: 'mixed' }
     const view = render(<OperationsTable api={client()} operations={[linked, untitled, closed, operationFixture, mixed]} accounts={[accountFixture]}
       onPreview={preview} onOpenPlay={openPlay} />)
+    expect(screen.queryByRole('columnheader', { name: 'Play' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /open Play|^Journal this/ })).not.toBeInTheDocument()
+    for (const toggle of screen.getAllByRole('button', { name: /^Expand / })) await userEvent.click(toggle)
     expect(screen.queryByText(/^Play [\da-f]{8}$/)).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: 'BTC breakout, open Play' }))
     expect(openPlay).toHaveBeenCalledExactlyOnceWith(playId)
     expect(screen.getByRole('button', { name: 'Untitled play, open Play' })).toHaveAttribute('title', 'Untitled play')
-    // Only the closed unassigned operation can be journalled; open and mixed ones say how they are associated.
+    // Only the closed unassigned operation can be journalled, in place of its eligibility inspection; open and mixed
+    // ones say how they are associated and keep the inspection.
     await userEvent.click(screen.getByRole('button', { name: 'Journal this trade, BTC' }))
     expect(preview).toHaveBeenCalledExactlyOnceWith(closed)
     expect(screen.getAllByRole('button', { name: /^Journal this/ })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /^Inspect BTC retrospective/ })).toHaveLength(4)
     // Each accessible name starts with the button's visible text.
     for (const name of ['BTC breakout, open Play', 'Untitled play, open Play', 'Journal this trade, BTC']) {
       const button = screen.getByRole('button', { name })
       expect(name.startsWith(button.textContent!)).toBe(true)
     }
-    expect(screen.getAllByText('Unassigned')).toHaveLength(1)
-    expect(screen.getAllByText('Mixed')).toHaveLength(1)
-    // Neither action expands its row.
-    for (const toggle of screen.getAllByRole('button', { name: /^Expand / })) expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    const plays = [...document.querySelectorAll('.operation-play')].map(p => p.textContent)
+    expect(plays.filter(p => p === 'PlayUnassigned')).toHaveLength(1)
+    expect(plays.filter(p => p === 'PlayMixed')).toHaveLength(1)
+    // Neither action collapses its row.
+    for (const toggle of screen.getAllByRole('button', { name: /^Collapse / })) expect(toggle).toHaveAttribute('aria-expanded', 'true')
 
     view.rerender(<OperationsTable api={client()} operations={[linked, untitled]} accounts={[accountFixture]} onOpenPlay={openPlay} opening={playId} />)
     expect(screen.getByRole('button', { name: 'BTC breakout, open Play' })).toBeDisabled()
@@ -92,12 +98,29 @@ describe('operation table', () => {
     view.rerender(<OperationsTable api={client()} operations={[linked]} accounts={[accountFixture]} />)
     expect(screen.getByText('BTC breakout')).not.toHaveRole('button')
   })
+  it('shows unrealized P&L for open operations from the mark or the last refresh, and none for closed ones', () => {
+    const marked: ActivityOperation = { ...operationFixture, unrealizedPnlUsd: '-12.5', unrealizedPnlSource: 'mark',
+      unrealizedPnlMarkPrice: '93.75', unrealizedPnlAsOfUtc: '2026-10-12T12:00:00Z' }
+    const view = render(<OperationsTable api={client()} operations={[marked, closed]} accounts={[accountFixture]} />)
+    expect(screen.getByRole('columnheader', { name: 'Unrealized P&L' })).toBeInTheDocument()
+    const value = screen.getByText('-$12.50')
+    expect(value).toHaveClass('negative')
+    expect(value.getAttribute('title')).toMatch(/^-12\.5 · Mark 93\.75 at .+\. Before fees and funding\.$/)
+    expect(screen.getByTitle('No open position')).toHaveTextContent('—')
+    view.rerender(<OperationsTable api={client()} operations={[{ ...marked, unrealizedPnlUsd: '4', unrealizedPnlSource: 'snapshot',
+      unrealizedPnlMarkPrice: null }]} accounts={[accountFixture]} />)
+    expect(screen.getByText('$4.00').getAttribute('title')).toMatch(/Venue-reported at the refresh of /)
+    view.rerender(<OperationsTable api={client()} operations={[operationFixture]} accounts={[accountFixture]} />)
+    expect(screen.getByTitle('No current mark or matching refreshed position')).toHaveTextContent('—')
+    expect(screen.getByTitle('No current mark or matching refreshed position').closest('td')).toHaveTextContent('—Unavailable')
+  })
   it('opens a linked Play from the Activity page and reports a failed open', async () => {
     const playId = '33345678-1234-1234-1234-123456789abc'
     const linked: ActivityOperation = { ...closed, playId, playAssociation: 'linked', playTitle: 'BTC breakout' }
     const onOpenPlay = vi.fn().mockRejectedValueOnce(new ApiError('http', 'Play not found.', 404)).mockResolvedValueOnce(undefined)
     render(<ActivityOperations api={client(vi.fn().mockResolvedValue(activityPage([linked])))} accounts={[accountFixture]} onOpenPlay={onOpenPlay} />)
-    await userEvent.click(await screen.findByRole('button', { name: 'BTC breakout, open Play' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Expand BTC operation' }))
+    await userEvent.click(screen.getByRole('button', { name: 'BTC breakout, open Play' }))
     expect(onOpenPlay).toHaveBeenCalledWith(playId, expect.any(AbortSignal))
     expect(await screen.findByRole('alert')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'BTC breakout, open Play' }))
@@ -129,7 +152,6 @@ describe('operation table', () => {
     render(<OperationsTable api={client(undefined, activityFills)} operations={[operationFixture]} accounts={[accountFixture]} />)
     expect(screen.getByText('Long')).toHaveClass('long')
     expect(screen.getByText('-$0.01')).toHaveClass('negative')
-    expect(screen.getByText('Unassigned')).toBeInTheDocument()
     expect(screen.getByTitle('100.123456789123456789')).toHaveTextContent('$100.12')
     expect(activityFills).not.toHaveBeenCalled()
     const button = screen.getByRole('button', { name: 'Expand BTC operation' })
@@ -137,6 +159,7 @@ describe('operation table', () => {
     await userEvent.click(button)
     expect(screen.getByRole('button', { name: 'Collapse BTC operation' })).toHaveAttribute('aria-expanded', 'true')
     expect(await screen.findByRole('columnheader', { name: 'Side' })).toBeInTheDocument()
+    expect(document.querySelector('.operation-play')).toHaveTextContent('PlayUnassigned')
     expect(activityFills).toHaveBeenCalledExactlyOnceWith(accountFixture.id, operationFixture.id, expect.any(AbortSignal))
     expect(screen.queryByRole('columnheader', { name: /Orders/ })).not.toBeInTheDocument()
     expect(screen.queryByText(/constituent fills/)).not.toBeInTheDocument()
