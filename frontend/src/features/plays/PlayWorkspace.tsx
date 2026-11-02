@@ -18,6 +18,7 @@ import type { DraftEvidence, PlayDraft } from './draft'
 import { captureFileName, createEvidence, evidenceLimits } from './evidence'
 import { DirectionToggle } from './DirectionToggle'
 import { InstrumentPicker } from './InstrumentPicker'
+import { assetName } from './instruments-cascade'
 import { pairLabel, useInstrumentCatalog } from './instruments'
 import { leverageOf, type StopEvidenceOf } from './levels'
 import { positivePlanNumber } from './numbers'
@@ -167,7 +168,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const priceStep = priceStepOf(instrumentInfo?.priceStep, instrumentInfo?.maxPriceDecimals)
   const manualUsd = !!account && venues.can(account.venueId, 'manualExecutions')
   const units: SizeUnits = instrumentInfo
-    ? { quote: instrumentInfo.quoteAsset, base: instrumentInfo.contractId, quantityDecimals: instrumentInfo.quantityDecimals }
+    ? { quote: instrumentInfo.quoteAsset, base: assetName(instrumentInfo.contractId), quantityDecimals: instrumentInfo.quantityDecimals }
     : manualUsd ? { quote: 'USD', base: draft.instrument, quantityDecimals: null } : defaultSizeUnits
   // The Summary's risk share divides by the same account balance the size suggestion uses; an explicit
   // manual budget is a labelled fallback. Without either the share stays unknown.

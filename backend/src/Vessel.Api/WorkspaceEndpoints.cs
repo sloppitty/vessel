@@ -1,4 +1,5 @@
 using Vessel.Application.Activity;
+using Vessel.Application.MarketSources;
 using Vessel.Application.Common;
 using Vessel.Application.MarketData;
 using Vessel.Application.Workspace;
@@ -80,8 +81,8 @@ public static class WorkspaceEndpoints
             CancellationToken ct) => Results.Accepted(value: await monitor.StartBackfillAsync(id, gapId, ct)));
         api.MapGet("/accounts/{id:guid}/import-conflicts", async (Guid id, string? tradingMode, WorkspaceService service, CancellationToken ct) =>
             Results.Ok(await service.FillConflictsAsync(id, ct, tradingMode)));
-        api.MapGet("/accounts/{id:guid}/instruments", async (Guid id, string? tradingMode, WorkspaceService service, CancellationToken ct) =>
-            Results.Ok(await service.InstrumentsAsync(id, ct, tradingMode))).WithMetadata(new CompressMarketData());
+        api.MapGet("/accounts/{id:guid}/instruments", async (Guid id, string? tradingMode, WorkspaceService service, MarketSourceService sources, CancellationToken ct) =>
+            Results.Ok(await sources.ApplyAsync(await service.InstrumentsAsync(id, ct, tradingMode), ct))).WithMetadata(new CompressMarketData());
         api.MapGet("/accounts/{id:guid}/candles", async (Guid id, string? instrument, string? interval, long? endTime,
             string? refresh, CandleService service, CancellationToken ct) =>
             Results.Ok(await service.CandlesAsync(id, instrument, interval, endTime, ct, refresh)))

@@ -57,6 +57,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<SizingSettings> SizingSettings => Set<SizingSettings>();
     public DbSet<Vessel.Domain.Risk.RiskSettings> RiskSettings => Set<Vessel.Domain.Risk.RiskSettings>();
     public DbSet<Vessel.Domain.Reporting.ReportingSettings> ReportingSettings => Set<Vessel.Domain.Reporting.ReportingSettings>();
+    public DbSet<Vessel.Domain.MarketSources.DisabledMarketSource> DisabledMarketSources => Set<Vessel.Domain.MarketSources.DisabledMarketSource>();
     public DbSet<PlayRule> PlayRules => Set<PlayRule>();
     public DbSet<PlaySearchEntry> PlaySearch => Set<PlaySearchEntry>();
     public DbSet<PlaySearchText> PlaySearchTexts => Set<PlaySearchText>();

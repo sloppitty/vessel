@@ -14,8 +14,8 @@ public sealed partial class HyperliquidPerpetualReader
     public Task<IReadOnlyList<VenueCandle>> ReadCandlesAsync(
         string contractId, string interval, long fromMs, long toMs, CancellationToken cancellationToken)
     {
-        if (!IsPrimaryContract(contractId) || fromMs < 0 || toMs < fromMs)
-            throw new VenueReadException("A primary perpetual contract and valid window are required.") { IsDeterministicSourceFailure = true };
+        if (!IsPerpetualContract(contractId) || fromMs < 0 || toMs < fromMs)
+            throw new VenueReadException("A perpetual contract and valid window are required.") { IsDeterministicSourceFailure = true };
         var venueContractId = HyperliquidInstruments.Native(contractId);
         return ReadBoundedAsync<IReadOnlyList<VenueCandle>>(async token =>
         {

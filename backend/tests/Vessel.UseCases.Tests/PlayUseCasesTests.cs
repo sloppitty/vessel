@@ -172,7 +172,7 @@ public sealed class PlayServiceTests
     {
         Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => Create(new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Foreign")))).StatusCode);
         Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Create(manual, "BTC", "venue"))).StatusCode);
-        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Create(instrument: "dex:BTC"))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Create(instrument: "dex:a:BTC"))).StatusCode);
         Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Create(manual, " BTC", "manual"))).StatusCode);
         Assert.Equal("BTC-PERP", (await Create(manual, "BTC-PERP", "manual")).Summary.Instrument);
         Assert.Equal("manual", (await Create(venue, "Some label", "manual")).Summary.InstrumentSource);

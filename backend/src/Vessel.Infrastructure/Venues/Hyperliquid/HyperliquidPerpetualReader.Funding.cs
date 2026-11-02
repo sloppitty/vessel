@@ -62,8 +62,8 @@ public sealed partial class HyperliquidPerpetualReader
                     if (milliseconds < last) throw new VenueReadException(InvalidResponse);
                     last = milliseconds;
                     var hash = Text(Property(row, "hash"), 66);
-                    if (hash.Length != 66 || !hash.StartsWith("0x", StringComparison.Ordinal) ||
-                        !hash[2..].All(char.IsAsciiHexDigit) || hash[2..].All(c => c == '0'))
+                    // Builder-market payments carry an all-zero hash; the coin and time still identify them.
+                    if (hash.Length != 66 || !hash.StartsWith("0x", StringComparison.Ordinal) || !hash[2..].All(char.IsAsciiHexDigit))
                         throw new VenueReadException(InvalidResponse);
                     var delta = Property(row, "delta");
                     if (Text(Property(delta, "type")) != "funding")

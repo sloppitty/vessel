@@ -76,7 +76,7 @@ The owner authorized starting chart implementation: candles endpoint, reusable c
 `GET /api/accounts/{id}/candles?instrument={contractId}&interval={interval}&endTime={ms?}` under the authorized API group.
 
 - Owner-scoped account lookup; disabled account → 409; manual account → 409 with "No market data provider for manual accounts."; venue reader mismatch or venue failure → generic 502.
-- `instrument` must be a primary-perpetual contract id (1–32 chars of letters, digits, `-`, `_`; no `dex:` prefix in this pass). `interval` ∈ 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 8h, 12h, 1d, 3d, 1w, 1M. Invalid → 400.
+- `instrument` must be a contract id (1–32 chars of letters, digits, `-`, `_`, with one `dex:` prefix allowed since November 2, 2026; see [market-sources.md](market-sources.md)). `interval` ∈ 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 8h, 12h, 1d, 3d, 1w, 1M. Invalid → 400.
 - `endTime` defaults to now; window is at most 500 candles ending at `endTime` (1M uses 31 days). Paging older: pass the oldest `openTime - 1`.
 - Response: `{ venueId, instrument, interval, priceSource: "trades", candles: [{ openTime, closeTime, open, high, low, close, volume, trades }], requestedFrom, requestedTo, retrievedAt, historyExhausted, notice }`. Times are UTC ms (retrievedAt ISO). OHLCV are exact decimal strings as received and validated; candles are sorted ascending and deduplicated by open time.
 - `historyExhausted` is true when the venue returned no candles for the window; the notice states that Hyperliquid exposes only the latest 5,000 candles per interval.
@@ -96,7 +96,7 @@ The owner authorized starting chart implementation: candles endpoint, reusable c
 
 October 1, 2026. Implemented on branch `t3code/3826a317`; not yet published.
 
-- Backend: `ICandleReader` and `CandleService` in Application (`MarketData/`), Hyperliquid `candleSnapshot` in the existing reader, `GET /api/accounts/{id}/candles`. Owner, enabled and manual checks precede the 10-second bounded cache. OHLC consistency and exact decimals are validated in the reader. `dex:` coins are rejected.
+- Backend: `ICandleReader` and `CandleService` in Application (`MarketData/`), Hyperliquid `candleSnapshot` in the existing reader, `GET /api/accounts/{id}/candles`. Owner, enabled and manual checks precede the 10-second bounded cache. OHLC consistency and exact decimals are validated in the reader. `dex:` coins were rejected until November 2, 2026.
 - Frontend: `lightweight-charts@5.2.1` (adds `fancy-canvas@2.1.0`) behind `components/chart` (`CandleChart`, `ChartAdapter`, `createLightweightAdapter`), lazy-loaded as a separate ~54 kB gzip chunk. `features/market/useCandles` loads, refreshes manually and pages older windows. `features/plays/PlayChart` and `levels.ts` map draft entries to overlays and dragged prices back to the draft. jsdom tests use a fake adapter; `src/test/setup.ts` replaces the canvas renderer globally.
 - Placeholder remains for manual accounts, manual labels and no instrument. Capture stays disabled until evidence storage. TradingView attribution logo is shown.
 - Verified with a throwaway PostgreSQL and API against live Hyperliquid in headless Chromium 151 at 1402 × 877, 1001 and 390 px: real BTC candles, entry/stop/target tags and axis labels, stop drag updated the editor (83335 → 82681), timeframe switch, older-window paging on pan without a view jump, expanded dialog with Escape focus restoration, no page overflow and no console errors.

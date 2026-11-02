@@ -148,7 +148,7 @@ public sealed class CandleApiTests(CandleApiTests.InvalidParameterHost host) : I
     [InlineData("interval=1h")]
     [InlineData("instrument=BTC")]
     [InlineData("instrument=BT%20C&interval=1h")]
-    [InlineData("instrument=xyz:BTC&interval=1h")]
+    [InlineData("instrument=xyz:a:BTC&interval=1h")]
     [InlineData("instrument=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&interval=1h")]
     [InlineData("instrument=BTC&interval=2m")]
     [InlineData("instrument=BTC&interval=1H")]

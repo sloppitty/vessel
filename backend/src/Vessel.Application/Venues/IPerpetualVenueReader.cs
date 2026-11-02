@@ -24,10 +24,16 @@ public interface IPerpetualVenueReader
 /// <paramref name="MaxPriceDecimals"/> caps a significant-figure venue's price decimals (Phase 2, item 14b, F-11):
 /// Hyperliquid perpetuals take at most five significant figures, integers whatever their length, and at most
 /// <c>6 − szDecimals</c> decimals. Null when the venue states no cap.
+/// <paramref name="Category"/> is a <see cref="MarketCategories"/> value, or null when the venue states none.
+/// <paramref name="Source"/> names the market within the venue that lists the contract, such as a Hyperliquid builder DEX,
+/// with <paramref name="SourceName"/> for people; null is the venue's own market. <paramref name="DisplayName"/> and
+/// <paramref name="Keywords"/> are the venue's label and search terms when they differ from the contract ID.
+/// <paramref name="IsolatedOnly"/> says the venue states this market takes isolated margin only; false is not stated.
 /// </summary>
 public sealed record VenueInstrument(string ContractId, int QuantityDecimals, int MaxLeverage, string QuoteAsset,
     decimal? PriceStep = null, string? Category = null, string? VenueContractId = null, decimal? MaintenanceMarginFraction = null,
-    int? MaxPriceDecimals = null);
+    int? MaxPriceDecimals = null, string? Source = null, string? SourceName = null, string? DisplayName = null,
+    IReadOnlyList<string>? Keywords = null, bool IsolatedOnly = false);
 
 /// <summary>
 /// One open position as the venue reports it. <paramref name="LiquidationPrice"/> and <paramref name="MarginMode"/>

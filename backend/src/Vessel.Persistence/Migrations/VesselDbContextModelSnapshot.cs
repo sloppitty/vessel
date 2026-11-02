@@ -241,6 +241,27 @@ namespace Vessel.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Vessel.Domain.MarketSources.DisabledMarketSource", b =>
+                {
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("VenueId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SourceId")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTimeOffset>("DisabledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("OwnerId", "VenueId", "SourceId");
+
+                    b.ToTable("disabled_market_sources", (string)null);
+                });
+
             modelBuilder.Entity("Vessel.Domain.Monitoring.AccountHistoryGap", b =>
                 {
                     b.Property<Guid>("Id")

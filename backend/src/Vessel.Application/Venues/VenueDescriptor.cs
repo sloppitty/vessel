@@ -57,9 +57,12 @@ public static class VenueLogos
 /// The reader serves executions by time window (<see cref="IVenueFillHistoryReader"/>), so the owner can backfill a
 /// history gap (Phase 2, item 6b). Defaults to false.
 /// </param>
+/// <param name="MarketSources">
+/// The catalogue lists markets from several sources within the venue, which the owner can hide from the selector.
+/// </param>
 public sealed record VenueCapabilities(bool Sync, bool Instruments, bool Orders, bool Candles, bool MarketContext, bool Stream, bool StablecoinWallet,
     bool AccountDiscovery = false, bool ReadOnlyCredential = false, bool ManualExecutions = false, bool CurrentOrderBook = false,
-    bool PaperExecution = false, bool FillHistory = false)
+    bool PaperExecution = false, bool FillHistory = false, bool MarketSources = false)
 {
     public static readonly VenueCapabilities None = new(false, false, false, false, false, false, false);
 }

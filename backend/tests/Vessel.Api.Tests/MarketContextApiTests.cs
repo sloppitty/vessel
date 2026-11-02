@@ -69,7 +69,7 @@ public sealed class MarketContextApiTests : MarketContextApiTestsSupport
         Assert.Equal("0.0000125", root.GetProperty("fundingRate").GetString());
         Assert.Equal("-0.00031774", root.GetProperty("premium").GetString());
         Assert.True(DateTimeOffset.TryParse(root.GetProperty("observedAt").GetString(), out _));
-        Assert.Equal("Venue market context for the primary perpetual DEX. Funding is the current hourly rate; open interest is in base units. Not a fill or valuation.",
+        Assert.Equal("Venue market context. Funding is the current hourly rate; open interest is in base units. Not a fill or valuation.",
             root.GetProperty("notice").GetString());
 
         var eth = await client.GetAsync(Url(account.Id, "instrument=ETH"));
@@ -86,7 +86,7 @@ public sealed class MarketContextApiTests : MarketContextApiTestsSupport
     [Theory]
     [InlineData("")]
     [InlineData("instrument=BT%20C")]
-    [InlineData("instrument=xyz:BTC")]
+    [InlineData("instrument=xyz:a:BTC")]
     [InlineData("instrument=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
     public async Task Invalid_instrument_returns_400_without_venue_read(string query)
     {

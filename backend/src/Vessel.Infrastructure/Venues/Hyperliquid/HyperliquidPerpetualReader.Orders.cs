@@ -11,6 +11,8 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
     private const int MaxOrders = 2000;
     private const string OrdersNotice =
         "Primary perpetual orders only. Order history is the latest 2,000 status updates; older orders are not available.";
+    private const string BuilderOrdersNotice =
+        "Perpetual orders. Order history is the latest 2,000 status updates; older orders are not available.";
 
     public Task<VenueOrderReadResult> ReadOrdersAsync(string sourceId, CancellationToken cancellationToken)
     {
@@ -18,8 +20,8 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
         var latestTimestamp = Math.Min(253402300799999L, timeProvider.GetUtcNow().ToUnixTimeMilliseconds() + 300000);
         return ReadBoundedAsync(async token =>
         {
-            var contracts = (await CatalogueAsync(token, refresh: true)).All.Select(i => i.VenueContractId ?? i.ContractId)
-                .ToHashSet(StringComparer.Ordinal);
+            var catalogue = await CatalogueAsync(token, refresh: true);
+            var contracts = catalogue.All.Select(i => i.VenueContractId ?? i.ContractId).ToHashSet(StringComparer.Ordinal);
             using var history = await ReadJsonAsync(new { type = "historicalOrders", user = publicAddress }, token);
             using var open = await ReadJsonAsync(new { type = "frontendOpenOrders", user = publicAddress, dex = "" }, token);
             // Keyed by (canonical contract, oid): the same venue ID on another contract is another order.
@@ -34,28 +36,43 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
                 if (order is not null && (!orders.TryGetValue((order.ContractId, order.OrderId), out var known) || order.StatusAtUtc >= known.StatusAtUtc))
                     orders[(order.ContractId, order.OrderId)] = order;
             }
-            var book = Array(open.RootElement);
-            if (book.GetArrayLength() > MaxOrders) throw new VenueReadException(InvalidResponse);
-            var openOrdersComplete = book.GetArrayLength() < MaxOrders;
-            var openIds = new HashSet<(string ContractId, string OrderId)>();
-            var observed = timeProvider.GetUtcNow();
-            foreach (var item in book.EnumerateArray())
+            // Unlike history, the open book is per DEX.
+            var books = new List<JsonDocument> { open };
+            try
             {
-                // The open book is the current truth and overrides an older history entry.
-                var order = ReadOrder(item, contracts, latestTimestamp, "open", VenueOrderStatus.Open, observed);
-                if (order is not null)
+                foreach (var dex in catalogue.Dexes)
+                    books.Add(await ReadJsonAsync(new { type = "frontendOpenOrders", user = publicAddress, dex }, token));
+                var openOrdersComplete = !catalogue.BuildersUnavailable;
+                var openIds = new HashSet<(string ContractId, string OrderId)>();
+                var observed = timeProvider.GetUtcNow();
+                foreach (var document in books)
                 {
-                    if (!openIds.Add((order.ContractId, order.OrderId))) openOrdersComplete = false;
-                    orders[(order.ContractId, order.OrderId)] = order;
+                    var book = Array(document.RootElement);
+                    if (book.GetArrayLength() > MaxOrders) throw new VenueReadException(InvalidResponse);
+                    openOrdersComplete &= book.GetArrayLength() < MaxOrders;
+                    foreach (var item in book.EnumerateArray())
+                    {
+                        // The open book is the current truth and overrides an older history entry.
+                        var order = ReadOrder(item, contracts, latestTimestamp, "open", VenueOrderStatus.Open, observed);
+                        if (order is not null)
+                        {
+                            if (!openIds.Add((order.ContractId, order.OrderId))) openOrdersComplete = false;
+                            orders[(order.ContractId, order.OrderId)] = order;
+                        }
+                        else if (IsPerpetualContract(Text(Property(item, "coin")))) openOrdersComplete = false;
+                        // Nested children are not projected by ReadOrder. Never claim their absence.
+                        if (item.TryGetProperty("children", out var children) &&
+                            (children.ValueKind != JsonValueKind.Array || children.GetArrayLength() > 0))
+                            openOrdersComplete = false;
+                    }
                 }
-                else if (IsPrimaryContract(Text(Property(item, "coin")))) openOrdersComplete = false;
-                // Nested children are not projected by ReadOrder. Never claim their absence.
-                if (item.TryGetProperty("children", out var children) &&
-                    (children.ValueKind != JsonValueKind.Array || children.GetArrayLength() > 0))
-                    openOrdersComplete = false;
+                return new VenueOrderReadResult(orders.Values.OrderByDescending(o => o.PlacedAtUtc).ToList(), observed,
+                    catalogue.Dexes.Count > 0 ? BuilderOrdersNotice : OrdersNotice, OpenOrdersComplete: openOrdersComplete);
             }
-            return new VenueOrderReadResult(orders.Values.OrderByDescending(o => o.PlacedAtUtc).ToList(), observed, OrdersNotice,
-                OpenOrdersComplete: openOrdersComplete);
+            finally
+            {
+                foreach (var document in books.Skip(1)) document.Dispose();
+            }
         }, cancellationToken);
     }
 

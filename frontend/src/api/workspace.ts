@@ -32,6 +32,7 @@ import { isSizingDocument, type SizingDocument } from './sizing'
 import { attachmentName, type DownloadedFile } from '@/lib/download'
 import { isLossLimits, isOpenRisk, isOpenRiskPreview, isRiskSettings, lossLimitsPath, openRiskPath, type LossLimits, type OpenRisk, type OpenRiskPreview, type OpenRiskPreviewRequest, type RiskSettings } from './risk'
 import { isReportingSettings, reportingSettingsPath, type ReportingSettings, type WeekStart } from './reporting'
+import { isMarketSources, marketSourcePath, marketSourcesPath, type VenueMarketSources } from './market-sources'
 import { isReviewDocument, reviewPath, isReviewExclusions, reviewExclusionsPath, isReviewProcessPage, reviewProcessPath, type ReviewDocument, type ReviewQuery, type ReviewExclusions, type ReviewProcessPage, type ReviewProcessSelection } from './review'
 import {
   isRetrospectivePreview, isCreateRetrospectivePlayRequest, retrospectivePreviewPath, retrospectivePlayPath,
@@ -68,8 +69,18 @@ export interface VenueInstrument {
   quoteAsset: string
   /** Price tick when the venue has one; prices placed on the chart round to it. */
   priceStep?: number | null
-  /** Market category such as stocks or commodity; absent for venues that do not label markets. */
+  /** One of the shared market categories, such as stocks; absent for venues that do not label markets. */
   category?: string | null
+  /** The market within the venue that lists this contract, such as a Hyperliquid builder DEX; absent for the venue's own. */
+  source?: string | null
+  /** The source's name for people. */
+  sourceName?: string | null
+  /** The venue's label when it differs from the contract key, e.g. GOLD for xyz:GOLD. */
+  displayName?: string | null
+  /** The venue's search terms, e.g. xau. */
+  keywords?: string[] | null
+  /** The venue states this market takes isolated margin only. */
+  isolatedOnly?: boolean | null
   /** The venue's own identifier when it differs from the contract key, e.g. a numeric market ID. */
   venueContractId?: string | null
   /** Maintenance margin as a fraction of notional when the venue states it; liquidation estimates otherwise assume one. */
@@ -185,6 +196,8 @@ export interface InstrumentCatalog {
   scope: 'venue-perpetuals' | 'manual'
   instruments: VenueInstrument[]
   notice: string
+  /** Sources the owner hid from the selector. Their instruments stay listed, so saved Plays still resolve. */
+  disabledSources?: string[]
 }
 /** Venue trade candle. OHLCV stay exact decimal strings; times are UTC Unix milliseconds. */
 export interface VenueCandle {
@@ -497,6 +510,9 @@ export interface WorkspaceApi {
   lossLimits(signal?: AbortSignal): Promise<LossLimits>
   /** The owner's reporting zone and week start (Phase 2, item 2); mode-neutral, so Paper reads and saves it too. */
   reportingSettings(signal?: AbortSignal): Promise<ReportingSettings>
+  /** The market sources of each venue that has several, and whether the owner's selector offers them. */
+  marketSources(signal?: AbortSignal): Promise<VenueMarketSources[]>
+  setMarketSource(venueId: string, sourceId: string, enabled: boolean): Promise<void>
   updateReportingSettings(settings: { timeZone: string; weekStart: WeekStart }): Promise<ReportingSettings>
 }
 
@@ -514,12 +530,16 @@ const instrumentCatalog = (v: unknown): v is InstrumentCatalog => isRecord(v) &&
     isText(i.quoteAsset) && /^[A-Za-z0-9]{1,16}$/.test(i.quoteAsset) &&
     (i.priceStep == null || typeof i.priceStep === 'number' && Number.isFinite(i.priceStep) && i.priceStep > 0) &&
     (i.category == null || isText(i.category, 32)) &&
+    (i.source == null || isText(i.source, 16)) && (i.sourceName == null || isText(i.sourceName, 128)) &&
+    (i.displayName == null || isText(i.displayName, 32)) && (i.isolatedOnly == null || typeof i.isolatedOnly === 'boolean') &&
+    (i.keywords == null || Array.isArray(i.keywords) && i.keywords.length <= 8 && i.keywords.every((k: unknown) => isText(k, 32))) &&
     (i.venueContractId == null || isText(i.venueContractId, 128)) &&
     (i.maintenanceMarginFraction == null || typeof i.maintenanceMarginFraction === 'number' && i.maintenanceMarginFraction > 0 &&
       i.maintenanceMarginFraction < 1) &&
     (i.maxPriceDecimals == null || isCount(i.maxPriceDecimals) && i.maxPriceDecimals <= 28)) &&
   new Set(v.instruments.map((i: VenueInstrument) => i.contractId)).size === v.instruments.length &&
-  (v.scope !== 'manual' || v.instruments.length === 0) && isText(v.notice, 1000)
+  (v.scope !== 'manual' || v.instruments.length === 0) && isText(v.notice, 1000) &&
+  (v.disabledSources === undefined || Array.isArray(v.disabledSources) && v.disabledSources.every((s: unknown) => isText(s, 16)))
 const candle = (v: unknown): v is VenueCandle => isRecord(v) && isPositiveCount(v.openTime) && isPositiveCount(v.closeTime) &&
   v.closeTime >= v.openTime && ['open', 'high', 'low', 'close', 'volume'].every(k => isNonNegativeDecimal(v[k])) &&
   isNullOr(v.trades, isCount)
@@ -537,7 +557,7 @@ const marketContext = (instrument: string) => (v: unknown): v is MarketContext =
 const streamStatus = (v: unknown): v is MarketStreamStatus => isRecord(v) &&
   ['live', 'reconnecting', 'stale'].includes(String(v.state)) && isTimestamp(v.observedAt, 40)
 const streamLimit = 1024 * 1024
-const instrumentPattern = /^[A-Za-z0-9_-]{1,32}$/
+const instrumentPattern = /^(?=.{1,32}$)[A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?$/
 const portfolio = (v: unknown): v is Portfolio => isRecord(v) && optionalTradingMode(v) && isGuid(v.id) && isText(v.name) &&
   isCount(v.accountCount) && isNullOr(v.totalValueUsd, isPlainDecimal) &&
   coverages.includes(String(v.valueCoverage)) &&
@@ -990,6 +1010,9 @@ export function createWorkspaceApi(credentials: SessionCredentials, onAuthFailur
       body: JSON.stringify({ openRiskLimitPercent: settings.openRiskLimitPercent, dailyLossLimitR: settings.dailyLossLimitR ?? null,
         weeklyLossLimitR: settings.weeklyLossLimitR ?? null }) }),
     lossLimits: signal => call(lossLimitsPath, { ...playRequest, validate: isLossLimits, ...withSignal(signal) }),
+    marketSources: signal => call(marketSourcesPath, { ...playRequest, validate: isMarketSources, ...withSignal(signal) }),
+    setMarketSource: (venueId, sourceId, enabled) => call(marketSourcePath(venueId, sourceId), { ...playRequest, method: 'PUT',
+      body: JSON.stringify({ enabled }), read: async () => undefined }),
     reportingSettings: signal => call(reportingSettingsPath, { ...playRequest, validate: isReportingSettings, ...withSignal(signal) }),
     updateReportingSettings: settings => call(reportingSettingsPath, { ...playRequest, validate: isReportingSettings, method: 'PUT',
       body: JSON.stringify({ timeZone: settings.timeZone, weekStart: settings.weekStart }) }),

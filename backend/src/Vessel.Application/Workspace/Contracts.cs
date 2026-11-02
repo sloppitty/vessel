@@ -41,7 +41,12 @@ public sealed record AccountDto(Guid Id, Guid? PortfolioId, string Name, string 
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? StartingCapitalUsd = null,
     bool KeepExecutionHistory = false);
 public sealed record AccountInstrumentsDto(string VenueId, string MarketScope, string Scope,
-    IReadOnlyList<VenueInstrument> Instruments, string Notice);
+    IReadOnlyList<VenueInstrument> Instruments, string Notice)
+{
+    /// <summary>Market sources the owner hid from the selector. Their instruments stay listed, so saved Plays still resolve.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? DisabledSources { get; init; }
+}
 /// <summary>Where a catalogue comes from: the venue's selectable perpetuals, or none for a manual account.</summary>
 public static class InstrumentCatalogScopes
 {

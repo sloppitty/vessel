@@ -1,4 +1,5 @@
 import { isEndedStatus, type PlayStatus } from '@/api/plays'
+import { assetName } from './instruments-cascade'
 
 /** The API and the title input both limit a Play title to this many characters. */
 export const maxPlayTitleLength = 200
@@ -25,14 +26,15 @@ function clip(text: string, max: number) {
 
 /**
  * Name given to a Play saved without one: the asset, the direction and the local date, e.g.
- * `BTC Long · 15 Oct 2026`. The asset is the instrument as the editor shows it, the venue contract key
- * such as `BTC` or a manual label. Missing parts are left out without stray separators, and an overlong
+ * `BTC Long · 15 Oct 2026`. The asset is the venue contract's asset, such as `BTC` or `GOLD` for
+ * `xyz:GOLD`, or a manual label as entered. Missing parts are left out without stray separators, and an overlong
  * manual label is shortened so the whole title stays within the limit.
  */
-export function defaultPlayTitle(play: { instrument?: string | null; direction?: string | null }, now: Date = new Date(), zone: 'local' | 'utc' = 'local') {
+export function defaultPlayTitle(play: { instrument?: string | null; instrumentSource?: string | null; direction?: string | null }, now: Date = new Date(), zone: 'local' | 'utc' = 'local') {
   const date = titleDate(now, zone)
   const direction = directionLabel(play.direction)
-  const asset = (play.instrument ?? '').replace(/\s+/g, ' ').trim()
+  const label = (play.instrument ?? '').replace(/\s+/g, ' ').trim()
+  const asset = play.instrumentSource === 'manual' ? label : assetName(label)
   const reserved = (direction ? direction.length + 1 : 0) + ' · '.length + date.length
   const head = [clip(asset, maxPlayTitleLength - reserved).trimEnd(), direction].filter(Boolean).join(' ')
   return [head, date].filter(Boolean).join(' · ')

@@ -242,21 +242,21 @@ public sealed class MonitorEndToEndTests
         // No HTTP route in this flow produces a discrepancy; serialize one with the API's own options.
         var json = fixture.ApiJsonOptions();
         var discrepancy = JsonSerializer.SerializeToElement(new MonitorDiscrepancyDto(Guid.NewGuid(), fixture.AccountId, fixture.BtcPlay,
-            "BTC", "position.excess", "warning", "open", fixture.Clock.GetUtcNow(), fixture.Clock.GetUtcNow(), null, null, null,
+            "xyz:GOLD", "position.excess", "warning", "open", fixture.Clock.GetUtcNow(), fixture.Clock.GetUtcNow(), null, null, null,
             JsonSerializer.SerializeToElement(new { venueQuantity = "0.100000000000000001", playQuantity = "0.1" }),
             LastObservedAtUtc: fixture.Clock.GetUtcNow()), json);
         // Outcomes that need lifetimes to pass: a publicly unverifiable candidate and an unverifiable exit watch.
         var unverifiable = JsonSerializer.SerializeToElement(new MonitorDiscrepancyDto(Guid.NewGuid(), fixture.AccountId, fixture.BtcPlay,
-            "BTC", "position.missing", "warning", "candidate", fixture.Clock.GetUtcNow(), null, null, null, null,
+            "xyz:GOLD", "position.missing", "warning", "candidate", fixture.Clock.GetUtcNow(), null, null, null, null,
             JsonSerializer.SerializeToElement(new { venueQuantity = "0", playQuantity = "0.1" }), "unverifiable", fixture.Clock.GetUtcNow(),
             fixture.Clock.GetUtcNow().AddMinutes(-30)), json);
         var watch = JsonSerializer.SerializeToElement(new MonitorWatchDto(Guid.NewGuid(), fixture.BtcPlay, "exit-order", "stop", "unverifiable",
             fixture.Clock.GetUtcNow(), fixture.Clock.GetUtcNow()), json);
         // Stop coverage needs an Open Play: a known covered outcome whose stop rests away from its planned price, and a
         // stale unsupported one.
-        var coverage = JsonSerializer.SerializeToElement(new MonitorCoverageDto(fixture.BtcPlay, "BTC", "known", "known", true, "stop-orders",
+        var coverage = JsonSerializer.SerializeToElement(new MonitorCoverageDto(fixture.BtcPlay, "xyz:GOLD", "known", "known", true, "stop-orders",
             fixture.Clock.GetUtcNow(), [new("entry-1", "stop-1", "resting-elsewhere", "stop-order", fixture.Clock.GetUtcNow(), "94.5", "95")]), json);
-        var coverageUnsupported = JsonSerializer.SerializeToElement(new MonitorCoverageDto(fixture.BtcPlay, "BTC", "stale", "unsupported", null,
+        var coverageUnsupported = JsonSerializer.SerializeToElement(new MonitorCoverageDto(fixture.BtcPlay, "xyz:GOLD", "stale", "unsupported", null,
             "current-book-not-read", fixture.Clock.GetUtcNow().AddMinutes(-30), [new("entry-1", "stop-1", "not-read", null, null, null, "95")]), json);
         var document = new JsonObject
         {
@@ -437,7 +437,7 @@ public sealed class MonitorEndToEndTests
         {
             await using var db = Database.Context(Owner);
             var account = Account(Owner);
-            var btc = Planned(account, "BTC");
+            var btc = Planned(account, "xyz:GOLD");
             var eth = Planned(account, "ETH");
             eth.MarkOpen("Pre-watch position", Clock.GetUtcNow().AddDays(-1));
             // The pre-watch orders were retained by an earlier import, as links require; the venue reads keep them current.
@@ -461,7 +461,7 @@ public sealed class MonitorEndToEndTests
             var owner = Guid.NewGuid();
             await using var db = Database.Context(owner);
             var account = Account(owner);
-            var play = Planned(account, "BTC");
+            var play = Planned(account, "xyz:GOLD");
             db.AddRange(account, play);
             await db.SaveChangesAsync();
             return (account.Id, play.Id);
@@ -476,7 +476,7 @@ public sealed class MonitorEndToEndTests
         private Play Planned(Account account, string instrument)
         {
             var at = Clock.GetUtcNow().AddDays(-2);
-            var plan = instrument == "BTC" ? TestPlays.Plan() : TestPlays.Plan("200", "190");
+            var plan = instrument == "xyz:GOLD" ? TestPlays.Plan() : TestPlays.Plan("200", "190");
             if (instrument == "ETH")
                 plan = plan with { Entries = [plan.Entries[0] with { Targets = [new("target-1", "price", "210", "100")] }] };
             var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", instrument),
@@ -653,7 +653,7 @@ public sealed class MonitorEndToEndTests
         public string VenueId => "hyperliquid";
         private readonly DateTimeOffset old = clock.GetUtcNow().AddDays(-1);
         private readonly DateTimeOffset placed = clock.GetUtcNow().AddMinutes(-5);
-        private readonly VenueInstrument[] instruments = [new("BTC", 5, 50, "USDC"), new("ETH", 5, 50, "USDC")];
+        private readonly VenueInstrument[] instruments = [new("xyz:GOLD", 5, 50, "USDC"), new("ETH", 5, 50, "USDC")];
         public Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<VenueInstrument>>(instruments);
         public ReadGate BlockNextRead(bool fail = false)
@@ -673,11 +673,11 @@ public sealed class MonitorEndToEndTests
             }
             var now = clock.GetUtcNow();
             var fills = new List<VenueFill> { Fill("pre-watch", "ETH", "eth-entry", "buy", 200, 1, 0.02m, old) };
-            if (Phase >= 1) fills.Add(Fill("entry-partial", "BTC", "btc-entry", "buy", 100, 0.4m, 0.04m, placed.AddMinutes(6)));
-            if (Phase >= 2) fills.Add(Fill("entry-rest", "BTC", "btc-entry", "buy", 100, 0.6m, 0.06m, placed.AddMinutes(7)));
-            if (Phase >= 3) fills.Add(Fill("stop-fill", "BTC", "btc-stop", "sell", 95, 1, 0.1m, placed.AddMinutes(8), -5));
+            if (Phase >= 1) fills.Add(Fill("entry-partial", "xyz:GOLD", "btc-entry", "buy", 100, 0.4m, 0.04m, placed.AddMinutes(6)));
+            if (Phase >= 2) fills.Add(Fill("entry-rest", "xyz:GOLD", "btc-entry", "buy", 100, 0.6m, 0.06m, placed.AddMinutes(7)));
+            if (Phase >= 3) fills.Add(Fill("stop-fill", "xyz:GOLD", "btc-stop", "sell", 95, 1, 0.1m, placed.AddMinutes(8), -5));
             var positions = new List<VenuePosition> { new("ETH", 1, 200, 0, 50, 3) };
-            if (Phase is 1 or 2) positions.Add(new("BTC", Phase == 1 ? 0.4m : 1m, 100, 0, 25, 3));
+            if (Phase is 1 or 2) positions.Add(new("xyz:GOLD", Phase == 1 ? 0.4m : 1m, 100, 0, 25, 3));
             return new(new(now, "synthetic", 1000, 900, 75, positions), instruments, fills, "Complete synthetic history",
                 PositionsComplete: true, FillHistoryComplete: true, FillHistoryTruncated: false, OldestRawFillAtUtc: old);
         }
@@ -694,8 +694,8 @@ public sealed class MonitorEndToEndTests
                     stop ? price : null, stop, false, 1, remaining, at,
                     filled ? VenueOrderStatus.Filled : VenueOrderStatus.Open, filled ? "filled" : "open", now);
             return Task.FromResult(new VenueOrderReadResult([
-                Order("btc-entry", "BTC", false, 100, Phase == 0 ? 1 : Phase == 1 ? 0.6m : 0, Phase >= 2, placed),
-                Order("btc-stop", "BTC", true, 95, Phase >= 3 ? 0 : 1, Phase >= 3, placed),
+                Order("btc-entry", "xyz:GOLD", false, 100, Phase == 0 ? 1 : Phase == 1 ? 0.6m : 0, Phase >= 2, placed),
+                Order("btc-stop", "xyz:GOLD", true, 95, Phase >= 3 ? 0 : 1, Phase >= 3, placed),
                 Order("eth-entry", "ETH", false, 200, 0, true, old),
                 Order("eth-stop", "ETH", true, 190, 1, false, old)
             ], now, "Complete synthetic orders", OpenOrdersComplete: true));

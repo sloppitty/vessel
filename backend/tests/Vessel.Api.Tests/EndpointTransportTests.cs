@@ -47,7 +47,7 @@ public sealed class EndpointTransportTests
         Assert.Equal(
             ["POST /api/plays/retrospective", "POST /api/plays/{id:guid}/manual-executions",
              "POST /api/plays/{id:guid}/manual-executions/corrections", "POST /api/risk/open/preview",
-             "PUT /api/plays/rule", "PUT /api/plays/{id:guid}/manual-executions/{executionId:guid}", "PUT /api/risk/settings", "PUT /api/settings/reporting"],
+             "PUT /api/plays/rule", "PUT /api/plays/{id:guid}/manual-executions/{executionId:guid}", "PUT /api/risk/settings", "PUT /api/settings/market-sources/{venueId}/{sourceId}", "PUT /api/settings/reporting"],
             limits.Keys.Order(StringComparer.Ordinal));
         Assert.All(limits.Where(pair => pair.Key.Contains("/api/plays/", StringComparison.Ordinal)),
             pair => Assert.Equal("Diary request is too large.", pair.Value.TooLargeMessage));

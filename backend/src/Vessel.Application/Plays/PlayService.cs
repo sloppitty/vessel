@@ -466,6 +466,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         : new(rule.Version, rule.If, rule.Then, rule.SourcePlayId,
             rule.SourcePlayId is { } source ? await store.TitleAsync(source, mode, ct) : null, rule.CreatedAtUtc);
 
-    [GeneratedRegex("^[A-Za-z0-9_-]{1,32}$")]
+    // A native key may carry one source prefix, as in xyz:GOLD.
+    [GeneratedRegex(@"^(?=.{1,32}$)[A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?$")]
     private static partial Regex ContractPattern();
 }

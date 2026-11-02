@@ -21,7 +21,7 @@ public sealed class MarketStreamApiTests : MarketStreamApiTestsSupport
     [InlineData("hyperliquid", false, true, "instrument=BTC&interval=1m", 409)]
     [InlineData("hyperliquid", false, true, "instrument=bad%20coin&interval=nope", 409)]
     [InlineData("hyperliquid", false, false, "interval=1m", 400)]
-    [InlineData("hyperliquid", false, false, "instrument=xyz:BTC&interval=1m", 400)]
+    [InlineData("hyperliquid", false, false, "instrument=xyz:a:BTC&interval=1m", 400)]
     [InlineData("hyperliquid", false, false, "instrument=BTC", 400)]
     [InlineData("hyperliquid", false, false, "instrument=BTC&interval=2m", 400)]
     public async Task Invalid_requests_return_problem_details_before_subscribing(string venue, bool foreign, bool disabled, string query, int status)

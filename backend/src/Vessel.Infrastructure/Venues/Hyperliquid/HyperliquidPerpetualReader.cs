@@ -14,7 +14,7 @@ namespace Vessel.Infrastructure.Venues.Hyperliquid;
 /// HttpClient with BaseAddress https://api.hyperliquid.xyz/ (and no signing credentials).
 /// </summary>
 public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, TimeProvider timeProvider,
-    HyperliquidCatalogueCache? catalogueCache = null)
+    HyperliquidCatalogueCache? catalogueCache = null, bool builderMarkets = false)
     : IPerpetualVenueReader, ICandleReader, IVenueFundingReader
 {
     // Official schemas and bounds, checked October 1, 2026:
@@ -31,6 +31,11 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         "userFills returns at most the latest 2,000 fills across markets before filtering; older fills, spot, " +
         "other DEXs and unrecognized contracts are excluded. This is not complete lifetime history. " +
         "Account value is primary perpetual margin only, not total spot/unified account equity.";
+    private const string BuilderHistoryNotice =
+        "Incomplete history: only USDC-margined perpetual contracts recognized by current metadata are included. " +
+        "userFills returns at most the latest 2,000 fills across markets before filtering; older fills, spot, " +
+        "other collateral and unrecognized contracts are excluded. This is not complete lifetime history. " +
+        "Account value is primary perpetual margin only, not total spot/unified account equity or builder market margin.";
     // Curated identities checked October 1, 2026. Indices come from metadata;
     // names and isCanonical alone are not token identity or stablecoin approval.
     private static readonly Dictionary<string, string> Stablecoins = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -45,12 +50,12 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
 
     public static readonly VenueDescriptor Descriptor = new(Id, "Hyperliquid", "read-only", VenueSources.EvmAddress,
         new VenueCapabilities(Sync: true, Instruments: true, Orders: true, Candles: true, MarketContext: true, Stream: true, StablecoinWallet: true,
-            CurrentOrderBook: true, PaperExecution: true, FillHistory: true),
+            CurrentOrderBook: true, PaperExecution: true, FillHistory: true, MarketSources: true),
         QuoteAsset: PrimaryQuoteAsset, TradeUrlTemplate: "https://app.hyperliquid.xyz/trade/{venueContractId}",
         Intervals: ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "3d", "1w", "1M"],
         PriceRule: PriceRules.SignificantFigures,
         CandleNotice: "Hyperliquid exposes only the latest 5,000 candles per interval. Prices are trade candles, not fills.",
-        MarketContextNotice: "Venue market context for the primary perpetual DEX. Funding is the current hourly rate; open interest is in base units. Not a fill or valuation.",
+        MarketContextNotice: "Venue market context. Funding is the current hourly rate; open interest is in base units. Not a fill or valuation.",
         Logo: VenueLogos.Hyperliquid);
 
     public string VenueId => Id;
@@ -88,15 +93,36 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
     private static void RejectDuplicateProperties(JsonElement element) => Json.RejectDuplicateProperties(element);
 
     private readonly HyperliquidCatalogueCache catalogues = catalogueCache ?? new(timeProvider);
-    internal sealed record Catalogue(IReadOnlyList<VenueInstrument> All, IReadOnlyList<VenueInstrument> Selectable);
+    /// <param name="ActiveDexes">Builder DEXes with a selectable market: their positions, books and contexts need one read each.</param>
+    /// <param name="BuildersUnavailable">Builder metadata failed, so this catalogue is primary only and coverage is partial.</param>
+    internal sealed record Catalogue(IReadOnlyList<VenueInstrument> All, IReadOnlyList<VenueInstrument> Selectable,
+        IReadOnlyList<string>? ActiveDexes = null, bool BuildersUnavailable = false)
+    {
+        public IReadOnlyList<string> Dexes => ActiveDexes ?? [];
+    }
 
     // Imports pass refresh so a market listed within the cache lifetime is not filtered out of their facts.
-    private Task<Catalogue> CatalogueAsync(CancellationToken ct, bool refresh = false) => catalogues.GetAsync(token =>
-        ReadBoundedAsync(async bounded =>
+    private async Task<Catalogue> CatalogueAsync(CancellationToken ct, bool refresh = false)
+    {
+        var primary = await catalogues.GetAsync(token =>
+            ReadBoundedAsync(async bounded =>
+            {
+                using var meta = await ReadJsonAsync(new { type = "meta", dex = "" }, bounded);
+                return new Catalogue(ReadInstruments(meta.RootElement), ReadInstruments(meta.RootElement, selectableOnly: true));
+            }, token), ct, refresh);
+        if (!builderMarkets) return primary;
+        try
         {
-            using var meta = await ReadJsonAsync(new { type = "meta", dex = "" }, bounded);
-            return new Catalogue(ReadInstruments(meta.RootElement), ReadInstruments(meta.RootElement, selectableOnly: true));
-        }, token), ct, refresh);
+            // Builder metadata changes slowly and costs three reads, so a refresh does not force it.
+            var builders = await catalogues.GetBuildersAsync(token => ReadBoundedAsync(ReadBuildersAsync, token), ct);
+            return new([.. primary.All, .. builders.All], [.. primary.Selectable, .. builders.Selectable], builders.ActiveDexes);
+        }
+        catch (Exception error) when (WalletFailure(error) && !ct.IsCancellationRequested)
+        {
+            // Third-party markets never stop the primary read; the result says its coverage is partial.
+            return primary with { BuildersUnavailable = true };
+        }
+    }
 
     public async Task<IReadOnlyList<VenueInstrument>> ReadInstrumentsAsync(CancellationToken cancellationToken) =>
         (await CatalogueAsync(cancellationToken)).Selectable;
@@ -109,13 +135,22 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
 
         return await ReadBoundedAsync(async token =>
         {
-            var instruments = (await CatalogueAsync(token, refresh: true)).All;
+            var catalogue = await CatalogueAsync(token, refresh: true);
+            var instruments = catalogue.All;
             var contracts = instruments.Select(instrument => instrument.VenueContractId ?? instrument.ContractId)
                 .ToHashSet(StringComparer.Ordinal);
 
             using var state = await ReadJsonAsync(
                 new { type = "clearinghouseState", user = publicAddress, dex = "" }, token);
             var snapshot = ReadSnapshot(state.RootElement, contracts, latestTimestamp, out var positionsComplete);
+            positionsComplete &= !catalogue.BuildersUnavailable;
+            foreach (var dex in catalogue.Dexes)
+            {
+                using var dexState = await ReadJsonAsync(new { type = "clearinghouseState", user = publicAddress, dex }, token);
+                var builder = ReadSnapshot(dexState.RootElement, contracts, latestTimestamp, out var dexComplete);
+                positionsComplete &= dexComplete;
+                snapshot = snapshot with { Positions = [.. snapshot.Positions, .. builder.Positions] };
+            }
 
             using var fills = await ReadJsonAsync(
                 new { type = "userFills", user = publicAddress, aggregateByTime = false }, token);
@@ -127,7 +162,7 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
             using var abstraction = await ReadJsonAsync(new { type = "userAbstraction", user = publicAddress }, token);
             var accountMode = ReadAccountMode(abstraction.RootElement);
             VenueStablecoinWallet? wallet;
-            var notice = HistoryNotice;
+            var notice = catalogue.Dexes.Count > 0 ? BuilderHistoryNotice : HistoryNotice;
             try
             {
                 using var spotMeta = await ReadJsonAsync(new { type = "spotMeta" }, token);
@@ -179,12 +214,15 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
             if (!selectableOnly || delisted.ValueKind != JsonValueKind.True)
                 // Hyperliquid's maintenance margin is half the initial margin at the contract's maximum leverage. Perpetual
                 // prices take at most 6 − szDecimals decimals besides five significant figures (Phase 2, item 14b, F-11).
-                result.Add(new(canonical, decimals, leverage, PrimaryQuoteAsset,
+                result.Add(new(canonical, decimals, leverage, PrimaryQuoteAsset, Category: MarketCategories.Crypto,
                     VenueContractId: canonical == name ? null : name, MaintenanceMarginFraction: 1m / (2 * leverage),
-                    MaxPriceDecimals: Math.Max(0, MaxPerpetualPriceDecimals - decimals)));
+                    MaxPriceDecimals: Math.Max(0, MaxPerpetualPriceDecimals - decimals), IsolatedOnly: IsIsolatedOnly(item)));
         }
         return result;
     }
+
+    private static bool IsIsolatedOnly(JsonElement item) =>
+        item.TryGetProperty("onlyIsolated", out var isolated) && isolated.ValueKind == JsonValueKind.True;
 
     private static VenueSnapshot ReadSnapshot(JsonElement state, HashSet<string> contracts, long latestTimestamp,
         out bool positionsComplete)
@@ -199,7 +237,7 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
             var name = Text(Property(position, "coin"));
             if (!contracts.Contains(name))
             {
-                if (IsPrimaryContract(name)) positionsComplete = false;
+                if (IsPerpetualContract(name)) positionsComplete = false;
                 continue;
             }
             var quantity = Number(Property(position, "szi"));
@@ -322,8 +360,10 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
     /// </summary>
     private static bool SeparateLedgers(string accountMode) => accountMode is not ("unifiedAccount" or "portfolioMargin");
 
-    internal static bool IsPrimaryContract(string name) =>
-        !name.StartsWith('@') && !name.Contains('/') && !name.Contains(':');
+    internal static bool IsPrimaryContract(string name) => IsPerpetualContract(name) && !name.Contains(':');
+
+    /// <summary>A perpetual on the primary or a builder DEX (<c>xyz:GOLD</c>), not a spot name (<c>@1</c>, <c>A/B</c>).</summary>
+    internal static bool IsPerpetualContract(string name) => !name.StartsWith('@') && !name.Contains('/');
 
     private static string ReadAccountMode(JsonElement root)
     {
@@ -423,6 +463,10 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
 public sealed class HyperliquidCatalogueCache(TimeProvider time)
 {
     private readonly BoundedMarketDataCache<HyperliquidPerpetualReader.Catalogue> entries = new(time, 1, 1, _ => 1);
+    private readonly BoundedMarketDataCache<HyperliquidPerpetualReader.Catalogue> builders = new(time, 1, 1, _ => 1);
+    internal Task<HyperliquidPerpetualReader.Catalogue> GetBuildersAsync(
+        Func<CancellationToken, Task<HyperliquidPerpetualReader.Catalogue>> load, CancellationToken ct) =>
+        builders.GetAsync("builders", load, _ => TimeSpan.FromMinutes(5), ct);
     internal Task<HyperliquidPerpetualReader.Catalogue> GetAsync(
         Func<CancellationToken, Task<HyperliquidPerpetualReader.Catalogue>> load, CancellationToken ct, bool refresh = false) =>
         entries.GetAsync("primary", load, _ => TimeSpan.FromSeconds(60), ct, refresh);
