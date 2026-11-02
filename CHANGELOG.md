@@ -4,6 +4,9 @@
 
 ### Added
 
+- Settings → Data export downloads an account's retained executions or funding as CSV,
+  with native IDs, exact amounts and fees kept apart, for reconciliation tools. Nothing is
+  computed, and it is not a tax report.
 - Review can download its current selection as CSV: the scored Plays and imported
   positions, then the exclusions with their reasons. Amounts stay exact, unknown stays
   empty, and text cells are protected against spreadsheet formulas. It is not a tax

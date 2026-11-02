@@ -1,0 +1,4 @@
+.data-export-settings .data-export-fields { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+.data-export-settings .data-export-field { display: grid; gap: 6px; min-width: 160px; font-size: var(--text-sm); }
+.data-export-settings .data-export-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.data-export-settings .data-export-error { margin: 10px 0 0; color: var(--warning); font-size: var(--text-xs); }

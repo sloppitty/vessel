@@ -272,6 +272,8 @@ export interface WorkspaceApi {
   activityFills(accountId: string, operationId: string, signal?: AbortSignal): Promise<ActivityFills>
   review(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewDocument>
   reviewExclusions(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewExclusions>
+  /** One real account's retained executions or funding as CSV (Phase 2, item 5b), optionally between UTC days; not a tax report. */
+  accountFacts(accountId: string, kind: 'executions' | 'funding', from: string | null, to: string | null, signal?: AbortSignal): Promise<DownloadedFile>
   /** Review's selection as a CSV file (Phase 2, item 5a): the report's rows and exclusions; not a tax report. */
   reviewExport(query: ReviewQuery, signal?: AbortSignal): Promise<DownloadedFile>
   /** One process cell, lane, mistake tag or skipped check, paged (phase 1, 1.4b). */
@@ -503,7 +505,7 @@ export function createWorkspaceApi(credentials: SessionCredentials, onAuthFailur
   }, () => emitApiEvent(api, { type: 'session-changed' }))
   // Bind a mode to the client, not mutable global state: late responses can only return to their original shell.
   const call: typeof rawCall = async (path, options) => {
-    if (tradingMode === 'paper' && /^\/api\/(?:accounts\/[^/?]+\/(?:sync|fills|credential|monitor|discrepancies|market-context|market-stream|stream)|plays\/[^/?]+\/(?:manual-executions|execution|discrepancies)|plays\/retrospective|monitor|events|venues|risk)(?:[/?]|$)/.test(path)) {
+    if (tradingMode === 'paper' && /^\/api\/(?:accounts\/[^/?]+\/(?:sync|fills|facts|credential|monitor|discrepancies|market-context|market-stream|stream)|plays\/[^/?]+\/(?:manual-executions|execution|discrepancies)|plays\/retrospective|monitor|events|venues|risk)(?:[/?]|$)/.test(path)) {
       throw new ApiError('unavailable', 'This real-account feature is unavailable in Paper mode.')
     }
     const scoped = /^\/api\/(?:overview|accounts|portfolios|plays|activity|review|sizing|evidence)(?:[/?]|$)/.test(path)
@@ -798,6 +800,14 @@ export function createWorkspaceApi(credentials: SessionCredentials, onAuthFailur
     deleteEvidence: id => call(evidencePath(id), { ...playRequest, validate: none, method: 'DELETE' }),
     sizing: signal => call('/api/sizing', { ...playRequest, validate: isSizingDocument, ...withSignal(signal) }),
     review: (query, signal) => call(reviewPath(query), { ...playRequest, validate: isReviewDocument, ...withSignal(signal) }),
+    accountFacts: (accountId, kind, from, to, signal) => {
+      const params = new URLSearchParams({ kind })
+      if (from) params.set('from', from)
+      if (to) params.set('to', to)
+      return call(`/api/accounts/${resourceId(accountId)}/facts?${params}`, { ...workspaceRequest, ...withSignal(signal), timeout: 120_000,
+        accept: 'text/csv', read: async response => ({
+          fileName: attachmentName(response.headers.get('content-disposition'), `vessel-${kind}.csv`), blob: await response.blob() }) })
+    },
     reviewExport: (query, signal) => call(reviewPath(withoutOffset(query)).replace('/api/review?', '/api/review/export?'), { ...playRequest,
       ...withSignal(signal), timeout: 60_000, accept: 'text/csv', read: async response => ({
         fileName: attachmentName(response.headers.get('content-disposition'), 'vessel-review.csv'), blob: await response.blob() }) }),

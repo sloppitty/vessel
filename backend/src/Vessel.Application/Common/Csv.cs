@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Vessel.Application.Common;
@@ -12,12 +11,14 @@ namespace Vessel.Application.Common;
 /// </summary>
 public sealed partial class Csv
 {
-    private readonly StringBuilder text = new();
+    private readonly TextWriter text;
     private readonly int columns;
     private int cells;
 
-    public Csv(IReadOnlyList<string> header)
+    /// <summary>Rows go to <paramref name="writer"/>, so a large export streams; without one they are kept for <see cref="ToString"/>.</summary>
+    public Csv(IReadOnlyList<string> header, TextWriter? writer = null)
     {
+        text = writer ?? new StringWriter(CultureInfo.InvariantCulture);
         columns = header.Count;
         foreach (var name in header) Text(name);
         End();
@@ -46,18 +47,18 @@ public sealed partial class Csv
     public Csv End()
     {
         if (cells != columns) throw new InvalidOperationException($"A CSV row has {cells} cells; the header has {columns}.");
-        text.Append("\r\n");
+        text.Write("\r\n");
         cells = 0;
         return this;
     }
 
-    public override string ToString() => text.ToString();
+    public override string ToString() => text.ToString() ?? "";
 
     private Csv Cell(string value)
     {
-        if (cells++ > 0) text.Append(',');
-        if (value.IndexOfAny([',', '"', '\r', '\n']) >= 0) text.Append('"').Append(value.Replace("\"", "\"\"")).Append('"');
-        else text.Append(value);
+        if (cells++ > 0) text.Write(',');
+        if (value.IndexOfAny([',', '"', '\r', '\n']) >= 0) text.Write('"' + value.Replace("\"", "\"\"") + '"');
+        else text.Write(value);
         return this;
     }
 
