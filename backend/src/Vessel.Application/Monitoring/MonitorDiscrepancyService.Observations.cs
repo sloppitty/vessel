@@ -229,8 +229,13 @@ public sealed partial class MonitorDiscrepancyService
             // Displayed Plays are bounded; the fingerprint covers all of them. InvolvedPlayIds keeps the complete list.
             var details = Details(MaxListedPlays);
             var identity = Details(int.MaxValue);
+            // Phase 2, D-19 follow-up (owner, October 23): a venue position smaller or larger than expected confirms on its
+            // condition, so a position that keeps changing while a trade is built still confirms; the fingerprint keeps the
+            // quantities. They are two kinds, so a switch between them starts the other record's own sequence. Both rest on
+            // the snapshot and the linked fills alone, so the snapshot time is their only source time.
             foreach (var type in PositionKinds.Where(x => x != "fill.unlinked"))
-                scan.Add(new(type, Subject(instrument), null, instrument.ContractId, Native(instrument), Severity(type), valid ? type == kind : null, snapshotAt, ids, details, identity));
+                scan.Add(new(type, Subject(instrument), null, instrument.ContractId, Native(instrument), Severity(type), valid ? type == kind : null, snapshotAt, ids, details, identity,
+                    OnCondition: type is "position.short" or "position.excess"));
             var earliest = involved.Where(x => x.FirstEntry is not null).Select(x => x.FirstEntry!.Value).DefaultIfEmpty(DateTimeOffset.MaxValue).Min();
             // A fill allocated between Plays is theirs (Phase 2, item 11), whether or not its order is linked.
             var after = fillsByContract[instrument.ContractId].Where(x => x.OccurredAtUtc > earliest && !assigned.Contains(OrderKey.Of(x)) &&
@@ -354,9 +359,10 @@ public sealed partial class MonitorDiscrepancyService
                     remainingQuantity = x.Order is null ? null : ExactAmount.From(x.Order.RemainingSize).ToString(), wholePosition = x.Order?.IsPositionTpsl }).ToArray() };
             var protection = Identity([OrderLinkRole.Stop, OrderLinkRole.Target]);
             // Every per-Play kind depends on the current book; without one it does not run (structural, never missing).
-            void Add(string kind, bool? present, bool undecidable = false, object? data = null, object? identity = null, bool onCondition = false) =>
+            void Add(string kind, bool? present, bool undecidable = false, object? data = null, object? identity = null, bool onCondition = false,
+                DateTimeOffset? earliest = null) =>
                 scan.Add(new(kind, "play:" + play.Id, play.Id, p.Instrument.ContractId, Native(p.Instrument), Severity(kind), bookRead ? present : null, at,
-                    [play.Id], data ?? details, identity ?? protection, !bookRead || present is null && undecidable, onCondition));
+                    [play.Id], data ?? details, identity ?? protection, !bookRead || present is null && undecidable, onCondition, earliest));
             var graceAt = guarded.FirstEntry + options.ProtectionGrace;
             // Without a current book a missing stop is never decided, so the grace deadline needs no confirmation run.
             if (bookRead && open && graceAt > at) scan.Next = Earlier(scan.Next, graceAt.Value);
@@ -374,7 +380,11 @@ public sealed partial class MonitorDiscrepancyService
             Add("protection.cancelled", cancelledPresent, stopPresenceKnown && cancelKnown && mechanicsKnown && structural);
             bool? missing = !open ? completeOrders ? false : null : !stopPresenceKnown ? null : superseded || stops.Length > 0 ? false :
                 !mechanicsKnown ? null : siblingWholeStop ? shared ? false : null : graceAt <= at;
-            Add("protection.missing", missing, stopPresenceKnown && mechanicsKnown && structural);
+            // Phase 2, D-19 follow-up (owner, October 23): a missing stop confirms on its condition (an open quantity past the
+            // grace with no resting stop covering it), so an entry that keeps filling after the grace still confirms; the
+            // fingerprint keeps the quantities. Only the linked fills and the book make it present: the one snapshot-dependent
+            // case, a sibling's whole-position stop, never does, so it needs no earliest source time.
+            Add("protection.missing", missing, stopPresenceKnown && mechanicsKnown && structural, onCondition: true);
             // Phase 2, D-19: a persistent undersized stop confirms on its condition (this Play's linked stop covers less than its
             // open quantity), so a position or stop that keeps changing still confirms. Its fingerprint and details keep the
             // quantities, so an open record shows the latest and a dismissed one reopens only on changed evidence.
@@ -411,9 +421,14 @@ public sealed partial class MonitorDiscrepancyService
                 identity: new { beyond = beyond.Select(x => External(x.Link)).Order(StringComparer.Ordinal).ToArray() });
             var excess = Compare(Covered(stops, ownWholeStop, true), guarded.Quantity, p.Instrument) > 0 ||
                 Compare(Covered(targets, ownWholeTarget, true), guarded.Quantity, p.Instrument) > 0;
+            // D-19 follow-up: an oversized stop or target confirms on its condition too (this Play's resting linked exits
+            // exceed its open quantity), so stops placed at full size before the entries fill still confirm. A whole-position
+            // order counts the open quantity only when the snapshot agrees: the observation then rests on the snapshot and the
+            // book, and passes the earlier as its earliest source (item 6c).
             Add("protection.excess", !open ? completeOrders ? false : null :
                 knownOrders && freshQuantity && excess ? true : stopPresenceKnown && stopExcessKnown && targetCoverageKnown ? false : null,
-                stopPresenceKnown && ownMechanicsKnown && structural);
+                stopPresenceKnown && ownMechanicsKnown && structural, onCondition: true,
+                earliest: established && (ownWholeStop || ownWholeTarget) && snapshotAt < at ? snapshotAt : null);
             // Orphan checks do not depend on lifetime fills or Play execution settlement.
             // Any resting linked exit can close another Play's position, whatever its side or mechanics.
             Add("protection.orphaned", knownOrders && terminal && play.EndedAtUtc <= at && resting.Any(x => x.Link.Role is OrderLinkRole.Stop or OrderLinkRole.Target) ? true :
