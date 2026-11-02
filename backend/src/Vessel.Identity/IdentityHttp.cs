@@ -13,7 +13,8 @@ public static partial class IdentityHttp
     private static readonly object BodyKey = new();
 
     public static bool PublicRoute(PathString path) => path.Value?.TrimEnd('/').ToLowerInvariant() is
-        "/api/auth/config" or "/api/auth/challenge" or "/api/auth/verify" or "/api/auth/register";
+        "/api/auth/config" or "/api/auth/challenge" or "/api/auth/verify" or "/api/auth/register" or
+        "/api/auth/pairings/claim" or "/api/auth/pairings/complete";
 
     public static void UseVesselIdentity(this WebApplication app)
     {
@@ -105,6 +106,7 @@ public static partial class IdentityHttp
             return Results.NoContent();
         }).RequireAuthorization();
         MapAccountEndpoints(group);
+        MapPairingEndpoints(group);
         return endpoints;
     }
 
