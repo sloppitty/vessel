@@ -3,13 +3,14 @@ using System.Text;
 using System.Text.Json;
 using Vessel.Application.Workspace;
 using Vessel.Application.Common;
+using Vessel.Application.MarketData;
 using Vessel.Application.Venues;
 using Vessel.Domain.Common;
 
 namespace Vessel.Application.Activity;
 
 public sealed class ActivityService(IActivityStore store, IWorkspaceStore workspace, TimeProvider time, IVenueRegistry? venues = null,
-    IActivitySummaryReader? summaries = null)
+    IActivitySummaryReader? summaries = null, MarketContextCache? marks = null)
 {
     /// <summary>Retrospective preview limit; whole-order attribution beyond it is refused.</summary>
     public const int MaxFillsPerOperation = 200;
@@ -50,7 +51,9 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
             .ThenBy(o => o.AccountId.ToString("D"), StringComparer.Ordinal).ThenBy(o => o.Id, StringComparer.Ordinal).ToList();
         var filtered = scoped.Where(o => filter.Matches(o, portfolioOf.GetValueOrDefault(o.AccountId))).ToList();
         page = ListPaging.Clamp(page, pageSize, filtered.Count);
-        var rows = filtered.Skip(ListPaging.Skip(page, pageSize)).Take(pageSize).Select(ActivityOperationSummaryDto.From).ToList();
+        // Marks are read for the shown open rows only, after the cached aggregate, so they never change the version.
+        var rows = await OperationUnrealized.ApplyAsync(filtered.Skip(ListPaging.Skip(page, pageSize)).Take(pageSize).ToList(),
+            summary.Facts, venues, marks, ct);
         // Titles are read for the shown rows only, after the cached aggregate, so a renamed Play shows its current title.
         var linked = rows.Where(r => r.PlayId is not null).Select(r => r.PlayId!.Value).Distinct().ToList();
         if (linked.Count > 0)
