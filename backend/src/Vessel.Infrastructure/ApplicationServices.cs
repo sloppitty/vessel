@@ -42,6 +42,7 @@ public static class ApplicationServices
         services.AddScoped<DiaryService>();
         services.AddScoped<PlayExecutionService>();
         services.AddScoped<SizingService>();
+        services.AddScoped<Vessel.Application.Risk.OpenRiskService>();
         // Review resolves Activity (and the database) only when a report includes imported positions.
         services.AddScoped<ActivityReviewPositions>();
         services.AddScoped<IReviewPositionSource>(sp =>
