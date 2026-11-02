@@ -447,11 +447,12 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             // A venue whose order reader does not return the current book is labelled, not degraded: its book-dependent
             // checks do not run, and its history-only order read is not missing evidence.
             var currentBook = venues.Descriptor(account.VenueId)?.Capabilities.CurrentOrderBook == true;
-            // Phase 2, item 6: an account read only because it keeps its history has no protection work, so its run
-            // imports and records coverage without comparing positions or opening discrepancies.
+            // Phase 2, items 6 and 6c: an account read only because it keeps its history has no protection work. Its run
+            // imports and records coverage, and checks only for an open position with no resting stop and no Play: the
+            // other comparisons would flag every untracked position.
             var compare = protection || await store.ProtectionEligibleAsync(account.Id, now, ct);
-            var evaluation = evaluator is null || !compare ? new MonitorEvaluationResult(null) : await evaluator.EvaluateAsync(
-                new(lease.RequestId, account, read, previousSuccess, previousFill, gap, lease.Trigger, currentBook), ct);
+            var evaluation = evaluator is null ? new MonitorEvaluationResult(null) : await evaluator.EvaluateAsync(
+                new(lease.RequestId, account, read, previousSuccess, previousFill, gap, lease.Trigger, currentBook, compare), ct);
             if (evaluation.Coverage is { } coverage)
                 await store.SaveCoverageAsync(account.Id, coverage.Select(x => new MonitorCoverage
                 {

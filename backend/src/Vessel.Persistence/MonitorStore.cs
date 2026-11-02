@@ -94,7 +94,8 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         e.EndedAtUtc != null && e.LinkRevisionAtUtc >= x.Link.UpdatedAtUtc && (x.EndedAtUtc == null || x.EndedAtUtc <= e.StartedAtUtc)));
 
     public async Task<bool> EligibleAsync(Guid accountId, DateTimeOffset now, CancellationToken ct) =>
-        await KeepsHistoryAsync(accountId, ct) || await ProtectionEligibleAsync(accountId, now, ct);
+        await KeepsHistoryAsync(accountId, ct) || await ProtectionEligibleAsync(accountId, now, ct) ||
+        await AwaitsDiscrepancyAsync(accountId, keptHistory: true, ct);
 
     /// <summary>An enabled real venue account that keeps its execution history (Phase 2, item 6).</summary>
     private Task<bool> KeepsHistoryAsync(Guid accountId, CancellationToken ct) => db.Accounts.AnyAsync(a => a.Id == accountId &&
@@ -199,7 +200,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         // The watch starts at the later of the Play's end and the link change; it is live while that is after the cutoff.
         return await ActivePlays.AnyAsync(p => p.AccountId == accountId, ct) ||
             await Watching.AnyAsync(x => x.Link.AccountId == accountId && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff), ct) ||
-            await AwaitsDiscrepancyAsync(accountId, ct);
+            await AwaitsDiscrepancyAsync(accountId, keptHistory: false, ct);
     }
 
     /// <summary>
@@ -218,13 +219,20 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
     /// in progress whatever the public state, including across interrupted sequences, or an open warning awaiting fresh
     /// clearance. An unverifiable record no longer does. Rows changed in this unit of work but not yet saved take precedence.
     /// </summary>
-    private async Task<bool> AwaitsDiscrepancyAsync(Guid accountId, CancellationToken ct)
+    /// <param name="keptHistory">
+    /// Phase 2, item 6c: the kept-history check's own work, or every other kind's. Its open warning is not protection work,
+    /// so it never brings back the full comparison on an account without Plays; it still keeps the account checked until it
+    /// resolves, even after the opt-in is turned off.
+    /// </param>
+    private async Task<bool> AwaitsDiscrepancyAsync(Guid accountId, bool keptHistory, CancellationToken ct)
     {
+        const string kept = MonitorDiscrepancyService.UnprotectedKind;
         var local = db.ChangeTracker.Entries<PlayDiscrepancy>()
-            .Where(e => e.Entity.AccountId == accountId && e.State != EntityState.Deleted).Select(e => e.Entity).ToArray();
+            .Where(e => e.Entity.AccountId == accountId && e.State != EntityState.Deleted && (e.Entity.Kind == kept) == keptHistory)
+            .Select(e => e.Entity).ToArray();
         if (local.Any(x => x.HasWork)) return true;
         var tracked = local.Select(x => x.Id).ToArray();
-        return await AwaitingDiscrepancies.AnyAsync(d => d.AccountId == accountId && !tracked.Contains(d.Id), ct);
+        return await AwaitingDiscrepancies.AnyAsync(d => d.AccountId == accountId && (d.Kind == kept) == keptHistory && !tracked.Contains(d.Id), ct);
     }
 
     public async Task<IReadOnlyList<MonitorCandidate>> DiscoveryCandidatesAsync(IReadOnlyCollection<string> venueIds,
@@ -315,7 +323,8 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
                 var headroom = 0;
                 if (scheduled && !await ProtectionEligibleAsync(account.Id, now, ct))
                 {
-                    if (!await KeepsHistoryAsync(account.Id, ct)) { row.NextRunAtUtc = null; return null; }
+                    if (!await KeepsHistoryAsync(account.Id, ct) && !await AwaitsDiscrepancyAsync(account.Id, keptHistory: true, ct))
+                    { row.NextRunAtUtc = null; return null; }
                     // Phase 2, item 6: a read only for kept history runs behind protection checks: the scheduler offers it
                     // only after them, and it leaves headroom, never all of a venue's capacity (Sol round 1).
                     if (protectionOnly) return null;

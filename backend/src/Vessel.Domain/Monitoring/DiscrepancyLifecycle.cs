@@ -12,9 +12,22 @@ public sealed record DiscrepancyInput(DiscrepancyInputKind Kind, DateTimeOffset 
     public Guid[] PlayIds { get; init; } = [];
     public TimeSpan Lifetime { get; init; }
     public string? Note { get; init; }
+    /// <summary>
+    /// The record's kind and subject are the condition's whole invariant (Phase 2, D-19): a fresh present observation
+    /// continues the confirmation sequence even when its evidence changed. Otherwise the evidence itself must persist.
+    /// </summary>
+    public bool ConfirmsOnCondition { get; init; }
+    /// <summary>
+    /// Phase 2, item 6c: the earliest source time of an observation drawn from several reads (a position snapshot and the
+    /// order book), when it differs from <see cref="ObservedAtUtc"/>, its latest. A sequence starts at the latest and
+    /// confirms only when every source of the confirming observation is at least the delay later.
+    /// </summary>
+    public DateTimeOffset? EarliestSourceAtUtc { get; init; }
 
-    public static DiscrepancyInput Present(DateTimeOffset now, DateTimeOffset at, string fingerprint, string details, Guid[] plays) =>
-        new(DiscrepancyInputKind.FreshPresent, now) { ObservedAtUtc = at, Fingerprint = fingerprint, Details = details, PlayIds = plays };
+    public static DiscrepancyInput Present(DateTimeOffset now, DateTimeOffset at, string fingerprint, string details, Guid[] plays,
+        bool onCondition = false, DateTimeOffset? earliest = null) => new(DiscrepancyInputKind.FreshPresent, now)
+        { ObservedAtUtc = at, Fingerprint = fingerprint, Details = details, PlayIds = plays, ConfirmsOnCondition = onCondition,
+          EarliestSourceAtUtc = earliest };
     public static DiscrepancyInput Absent(DateTimeOffset now, DateTimeOffset at, string fingerprint, string details, Guid[] plays) =>
         new(DiscrepancyInputKind.FreshAbsent, now) { ObservedAtUtc = at, Fingerprint = fingerprint, Details = details, PlayIds = plays };
     public static DiscrepancyInput Unknown(DateTimeOffset now) => new(DiscrepancyInputKind.Incomplete, now);
@@ -71,13 +84,13 @@ public static class DiscrepancyLifecycle
         }
         // A candidate's evidence is its baseline. Resolved and dismissed records keep theirs until confirmation.
         if (row.State == Candidate) Baseline(row, input);
-        if (row.PendingFingerprint != input.Fingerprint || row.PendingSinceUtc is null)
-        {
-            row.PendingFingerprint = input.Fingerprint;
+        // A condition confirmed on its invariant keeps its sequence while the evidence changes. The pending evidence
+        // follows the latest observation either way, so a dismissal still dismisses what was last seen.
+        if (row.PendingSinceUtc is null || row.PendingFingerprint != input.Fingerprint && !input.ConfirmsOnCondition)
             row.PendingSinceUtc = input.ObservedAtUtc;
-        }
+        row.PendingFingerprint = input.Fingerprint;
         var due = row.PendingSinceUtc.Value + ConfirmationDelay;
-        if (input.ObservedAtUtc < due) return new(ConfirmationDueAtUtc: due);
+        if ((input.EarliestSourceAtUtc ?? input.ObservedAtUtc) < due) return new(ConfirmationDueAtUtc: due);
         var first = row.PendingSinceUtc.Value;
         Settle(row);
         Baseline(row, input);

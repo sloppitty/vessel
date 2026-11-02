@@ -147,8 +147,9 @@ Phase 2, item 6a of the [risk and coverage contract](phase2-risk-coverage-contra
 - **What it does.** The monitor reads the account on its schedule even without
   an eligible Play, behind protection checks (see the
   [workers reference](messaging-and-workers.md#scheduler-leases-and-fencing)).
-  Such a run imports and records coverage; it opens no discrepancy. A disabled
-  account is not read.
+  Such a run imports and records coverage and checks one thing (6c): an open
+  position with no Open Play and no resting stop, a warning. A disabled account
+  is not read.
 - **History coverage.** Account detail shows the opt-in, the open gaps (an
   unknown end reads as such) and what each import covered. A gap closes only
   when a read proves its span covered. Deleting an account deletes its ledger
