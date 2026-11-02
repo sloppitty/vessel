@@ -78,4 +78,3 @@ internal static class HistoryBackfillIndexes
 {
     public const string Active = "UX_account_history_backfills_active";
 }
-

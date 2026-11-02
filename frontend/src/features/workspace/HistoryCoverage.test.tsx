@@ -135,4 +135,3 @@ describe('history coverage (Phase 2, item 6)', () => {
     } finally { vi.useRealTimers() }
   })
 })
-
