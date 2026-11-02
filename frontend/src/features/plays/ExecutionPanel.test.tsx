@@ -177,6 +177,19 @@ describe('execution panel', () => {
     expect(options('23')).toEqual(['Link as…', 'Entry 1 stop', 'Entry 1 target 1', 'Unplanned exit'])
   })
 
+  it('lists orders placed before the Play was saved apart, for the owner to link (phase 2, item 4)', async () => {
+    const user = userEvent.setup()
+    const onLink = vi.fn().mockResolvedValue(undefined)
+    render(<ExecutionPanel execution={{ ...execution, status: 'planned', links: [], suggestions: [], unlinkedOrders: [],
+      earlierOrders: [order('31', { status: 'filled', placedAtUtc: '2026-10-03T09:58:00Z' })] }}
+      error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={onLink} onUnlink={vi.fn()} />)
+    const earlier = screen.getByRole('region', { name: 'Placed before this Play was saved' })
+    expect(screen.queryByRole('region', { name: 'Other orders on this instrument' })).not.toBeInTheDocument()
+    await user.selectOptions(within(earlier).getByRole('combobox', { name: 'Level for order 31' }), 'Entry 1')
+    await user.click(within(earlier).getByRole('button', { name: 'Link' }))
+    expect(onLink).toHaveBeenLastCalledWith({ orderId: '31', role: 'entry', entryId: 'e1' })
+  })
+
   it('explains untracked and closed plays without edit controls', () => {
     const view = render(<ExecutionPanel execution={{ ...execution, tracked: false, monitor: null, status: 'planned', reason: 'Manual instruments are not tracked at a venue.',
       links: [], suggestions: [], unlinkedOrders: [] }} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)

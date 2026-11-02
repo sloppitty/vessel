@@ -64,6 +64,10 @@ public static class ApplicationServices
         configuration.GetSection("Vessel:Monitor").Bind(options);
         options.Validate();
         services.AddSingleton(options);
+        var plays = new PlayExecutionOptions();
+        configuration.GetSection(PlayExecutionOptions.Section).Bind(plays);
+        plays.Validate();
+        services.AddSingleton(plays);
         services.TryAddSingleton(TimeProvider.System);
         var deployments = configuration.GetSection("Vessel:Messaging:Deployments").GetChildren().ToArray();
         services.TryAddSingleton(new MonitorDeployments(deployments.Length == 0 ? ["monitor"] : deployments

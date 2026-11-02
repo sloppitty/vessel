@@ -88,6 +88,11 @@ public sealed record PlayExecutionDto(Guid PlayId, string Status, bool Tracked, 
     public IReadOnlyList<MonitorWatchDto> Watches { get; init; } = [];
     /// <summary>Times, averages and estimated R by Review's rules, over the facts Review reads.</summary>
     public PlayReceiptDto? Receipt { get; init; }
+    /// <summary>
+    /// Compatible orders on the Play's contract placed in the lookback before it was created and not linked to any Play
+    /// (Phase 2, item 4). The owner may link one; the automatic matcher never does.
+    /// </summary>
+    public IReadOnlyList<ExecutionOrderDto> EarlierOrders { get; init; } = [];
 }
 
 // Application owns this bounded port; EF details stay in Persistence. Reads are owner-filtered.

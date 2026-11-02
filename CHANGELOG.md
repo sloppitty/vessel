@@ -4,6 +4,11 @@
 
 ### Added
 
+- A Play's Execution tab also lists compatible orders placed shortly before
+  you saved it (24 hours by default), under "Placed before this Play was
+  saved", so a fast entry you journaled afterwards can be linked by hand.
+  Vessel never links them by itself (D-20).
+
 - Open risk: the loss if every current stop fills across your Planned and
   Open Plays, long and short shown apart and never netted. A stop at or
   beyond its entry adds nothing, and a Play that cannot be measured is
@@ -11,6 +16,8 @@
   own increment as you edit it, Overview has an Open risk tile, and Settings
   has an optional soft limit, blank until you set it, which is flagged and
   never enforced (G-06).
+
+
 
 ## 0.3.5 - October 28, 2026
 
