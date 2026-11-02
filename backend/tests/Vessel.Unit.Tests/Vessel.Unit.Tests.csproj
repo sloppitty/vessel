@@ -31,4 +31,7 @@
     <Compile Include="../Vessel.TestKit/TestPlays.cs" Link="Support/TestPlays.cs" />
     <Compile Include="../Vessel.TestKit/VesselEventTestsValues.cs" Link="Support/VesselEventTestsValues.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../Vessel.TestKit/CsvTestRows.cs" Link="Support/CsvTestRows.cs" />
+  </ItemGroup>
 </Project>
