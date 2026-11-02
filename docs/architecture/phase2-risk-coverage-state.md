@@ -1621,9 +1621,11 @@ refer to the shared monitor setup. Current main adds 40 methods, for 2,252 metho
 Methods are not discovered-case counts. The per-layer inventory and limits are in
 [the source audit](../verification/phase2-test-preservation-2026-11-02.md).
 
-**Runtime validation.** Locked NuGet restore and Release builds pass for every prepared layer, with zero
-warnings/errors; the root and tip backend trees are identical to their earlier clean builds. Frozen pnpm
-install and frontend typecheck pass on all 25 layers. The full frontend passes ESLint, production build and
+**Runtime validation.** Locked NuGet restore and Release builds pass for all 25 prepared layers, with zero
+warnings/errors. Frozen pnpm install and frontend typecheck pass on all 25 layers. A final full-range diff
+check removes surplus EOF newlines in eight existing Phase 2 paths; per-layer comparison proves those
+changes are EOF-newline-only, with no changed tokens. The tip is rebuilt and typechecked again after that
+cleanup. All layers then pass `git diff --check origin/main...HEAD`. The full frontend passes ESLint, production build and
 4,349 tests in 205 files. Python scripts: 119 passed; prototype: 76 passed; release consistency check: 0.3.5.
 
 All five backend projects pass with the following discovered-case results:
