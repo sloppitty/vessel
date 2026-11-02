@@ -170,6 +170,7 @@ public static class NotificationComposer
         "protection.cancelled" => "its stop was cancelled",
         "protection.short" => "its stop covers less than the position",
         "protection.excess" => "resting exits exceed the position",
+        "protection.beyond-liquidation" => "its stop sits beyond the venue's liquidation price",
         "protection.orphaned" => "a stop or target still rests after the Play ended",
         "entry.orphaned" => "an entry order still rests after the Play ended",
         "level.drift" => "a linked order no longer matches its plan level",

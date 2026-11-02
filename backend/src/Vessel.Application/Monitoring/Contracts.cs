@@ -48,7 +48,11 @@ public sealed record MonitorCoverageOutcome(Guid PlayId, string ContractId, stri
 public sealed record AccountMonitorDto(Guid AccountId, string State, DateTimeOffset? LastAttemptAtUtc,
     DateTimeOffset? LastSuccessAtUtc, DateTimeOffset? NextRunAtUtc, string ManualState, string? RunTrigger,
     DateTimeOffset? NextManualAllowedAtUtc, string? Error, bool WorkerOnline, IReadOnlyList<MonitorDiscrepancyDto> Discrepancies,
-    bool DiscrepanciesTruncated = false, IReadOnlyList<MonitorCoverageDto>? Coverage = null, int UncheckedPlays = 0);
+    bool DiscrepanciesTruncated = false, IReadOnlyList<MonitorCoverageDto>? Coverage = null, int UncheckedPlays = 0)
+{
+    /// <summary>The configured check cadence (<c>Vessel:Monitor:Interval</c>) in whole minutes, so the panel can state it (I-08).</summary>
+    public int? IntervalMinutes { get; init; }
+}
 /// <summary>
 /// Visible records, outstanding incidents (open, or unverifiable and not dismissed since) first, then the rest by
 /// confirmation time, newest first; at most <see cref="MaxRecords"/>. <paramref name="Truncated"/> says the cap left some out.

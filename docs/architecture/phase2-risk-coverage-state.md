@@ -376,6 +376,60 @@ October 21, 2026.
     an invalid response now.
 - **Check after round 1.** `scripts/check.sh` passed on `4cb06c01` (before documentation-only commits were restacked beneath it): backend 4,064 passed, 5 skipped; frontend 174 files and 4,071 tests.
 
+**8b. `protection.beyond-liquidation`.** Implemented on `t3/phase2-beyond-liquidation`.
+- **The rule.** An Open Play's stop that sits at or beyond the venue's reported liquidation price on
+  the losing side opens a critical incident.
+  - It is identified by its stop IDs.
+  - A drifting cross-margin price keeps confirming the same incident.
+  - A stop inside the liquidation price, or a position with no reported price, opens nothing.
+- **Unchanged.** Severity by uncovered fraction and re-announcing.
+- **Where it shows.** Notification text and the browser's discrepancy title, action and facts.
+- **Tests.**
+  - Two `MonitorDiscrepancyTests` cases.
+  - `discrepancy-text.test.ts`.
+- **Check.** `scripts/check.sh` passed on `53c029f1`: backend 4,054 passed, 5 skipped; frontend 175 files and 4,073 tests.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `d29aaec3`. Two findings, both fixed in
+  `49de89e0`:
+  - **High.** An incomplete order book that omitted the stop resolved a
+    critical incident. Only the complete book, or a fresh snapshot without
+    the Play's position, clears it.
+  - The position lookup ignored direction. Only a position in the Play's
+    direction counts; an opposite one leaves the check undecidable, for
+    `position.opposite` to report.
+
+  Sol confirmed equality at the boundary, cross and isolated prices, the
+  resting order's acting price, quiet cross drift and the stale-read and
+  capability guards.
+- **Check after round 1.** `scripts/check.sh` passed on `5c278dd6` (before documentation-only commits were restacked beneath it): backend 4,070 passed, 5 skipped; frontend 175 files and 4,073 tests.
+
+**8c. Link this stop, and check timing.** Implemented on `t3/phase2-link-stop`.
+- **Link this stop.** A `protection.missing` or `protection.short` record offers **Link this stop** for
+  each compatible unlinked order.
+  - The order must rest on the Play's instrument on the exit side, with stop mechanics (never a
+    take-profit) as `OrderMechanics` decides.
+  - The link goes through the existing endpoint, chosen by the owner, never automatic.
+- **Check timing (I-08).** The monitor panel's timing line explains that checks are periodic and are
+  not stop protection.
+- **Tests.**
+  - The Execution panel cases.
+  - The stop-mechanism helper.
+- **Check.** `scripts/check.sh` passed on `a8c7c85d` (before item 5a's round-1 fixes were restacked beneath it): backend 4,054 passed, 5 skipped; frontend 175 files and 4,074 tests.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `b127ede6`. Four findings, all fixed in
+  `77119bbd`:
+  - Resolved and dismissed warnings still offered the link. Only an open
+    incident does.
+  - A stop order that contradicts a retained fill could be offered, then
+    refused with 409. The execution read states each offered order's roles by
+    side, mechanics and retained fills (`RoleConflict`), and only an order
+    that can be a stop is offered. The general Link choices follow the same
+    roles.
+  - With unsaved plan edits the shortcut sent an unsaved stop. It waits until
+    the edits are saved, as rebinding does.
+  - The cadence was unstated. The monitor panel always states the configured
+    interval (`intervalMinutes`) and "not stop protection" (I-08). The
+    contract fixture was regenerated.
+- **Check after round 1.** `scripts/check.sh` passed on `3fe2334e` (before documentation-only commits were restacked beneath it): backend 4,071 passed, 5 skipped; frontend 175 files and 4,076 tests.
+
 ## 9. Funding
 
 Not started.

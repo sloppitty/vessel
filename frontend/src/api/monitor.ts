@@ -99,6 +99,8 @@ export interface AccountMonitor {
    * one, until the next check). Optional, like `coverage`; absent reads as none.
    */
   uncheckedPlays?: number
+  /** The configured check cadence in whole minutes (I-08), stated beside "not stop protection". */
+  intervalMinutes?: number
 }
 
 export interface MonitorSummary {
@@ -184,7 +186,8 @@ export const isAccountMonitor = (v: unknown): v is AccountMonitor => object(v) &
   (v.discrepanciesTruncated === undefined || typeof v.discrepanciesTruncated === 'boolean') &&
   (v.coverage === undefined || Array.isArray(v.coverage) && v.coverage.length <= 500 && v.coverage.every(isMonitorCoverage) &&
     new Set(v.coverage.map(c => c.playId)).size === v.coverage.length) &&
-  (v.uncheckedPlays === undefined || isCount(v.uncheckedPlays))
+  (v.uncheckedPlays === undefined || isCount(v.uncheckedPlays)) &&
+  (v.intervalMinutes === undefined || isCount(v.intervalMinutes) && v.intervalMinutes <= 1440)
 
 export const isMonitorSummary = (v: unknown): v is MonitorSummary => object(v) && typeof v.workerOnline === 'boolean' &&
   nullableDate(v.heartbeatAtUtc) && Array.isArray(v.accounts) && v.accounts.length <= 200 && v.accounts.every(isAccountMonitor) &&

@@ -13,6 +13,7 @@ public sealed class MonitorDiscrepancyTests
     [InlineData("protection.cancelled")]
     [InlineData("protection.short")]
     [InlineData("protection.excess")]
+    [InlineData("protection.beyond-liquidation")]
     [InlineData("protection.orphaned")]
     [InlineData("level.drift")]
     [InlineData("position.missing")]
@@ -29,6 +30,7 @@ public sealed class MonitorDiscrepancyTests
             case "protection.cancelled": f.Stop(o => o with { Status = VenueOrderStatus.Canceled }); break;
             case "protection.short": f.Stop(o => o with { RemainingSize = .5m }); break;
             case "protection.excess": f.Stop(o => o with { RemainingSize = 2m, ReduceOnly = false }); break;
+            case "protection.beyond-liquidation": f.Liquidation = 95; break;
             case "protection.orphaned": f.Play.MarkClosed("fixture", f.Clock.Now.AddMinutes(-1)); break;
             case "level.drift": f.Stop(o => o with { TriggerPrice = 80m }); break;
             case "position.missing": f.Position = 0; break;
@@ -50,6 +52,59 @@ public sealed class MonitorDiscrepancyTests
         Assert.Equal(kind, opened.Data.GetProperty("kind").GetString());
         f.Advance(61); await f.Evaluate();
         Assert.Single(f.Events.Items, x => x.Subject.DiscrepancyId == row.Id);
+    }
+
+    [Fact]
+    public async Task A_stop_beyond_liquidation_is_critical_and_a_drifting_cross_price_keeps_confirming()
+    {
+        // C12 / D-21: a long's stop at 90 sits below its venue liquidation price of 95, so it cannot act before liquidation.
+        var f = new DiscrepancyFixture { Liquidation = 95 };
+        await f.Evaluate();
+        // Under cross margin the price moves with the account; the condition holds, so confirmation is not restarted.
+        f.Advance(60); f.Liquidation = 95.5m; await f.Evaluate();
+        var row = Assert.Single(await f.Service.ReadAsync(f.Account.Id, null, default), x => x.Kind == "protection.beyond-liquidation");
+        Assert.Equal(("open", "critical"), (row.State, row.Severity));
+        Assert.Equal("95.5", row.Details.GetProperty("liquidationPrice").GetString());
+        Assert.Equal("cross", row.Details.GetProperty("marginMode").GetString());
+        Assert.True(row.Details.GetProperty("stops")[0].GetProperty("beyond").GetBoolean());
+    }
+
+    [Fact]
+    public async Task An_incomplete_book_never_resolves_a_stop_beyond_liquidation()
+    {
+        // Sol round 1 on #42: a fresh but incomplete book omitting the stop proved nothing, yet resolved the critical incident.
+        var f = new DiscrepancyFixture { Liquidation = 95 };
+        await f.Evaluate();
+        f.Advance(60); await f.Evaluate();
+        Assert.Equal("open", Assert.Single(await f.Service.ReadAsync(f.Account.Id, null, default), x => x.Kind == "protection.beyond-liquidation").State);
+        f.OrdersComplete = false;
+        f.VenueOrders.RemoveAll(o => o.OrderId == "stop");
+        f.Advance(60); await f.Evaluate();
+        Assert.Equal("open", Assert.Single(await f.Service.ReadAsync(f.Account.Id, null, default), x => x.Kind == "protection.beyond-liquidation").State);
+        Assert.DoesNotContain(f.Events.Items, x => x.Type == "discrepancy.resolved");
+    }
+
+    [Fact]
+    public async Task An_opposite_position_never_stands_for_the_plays_exposure()
+    {
+        // Sol round 1 on #42: a long Play's sell-stop at 90 was compared with a short position's liquidation at 105.
+        var f = new DiscrepancyFixture { Liquidation = 105, Position = -1 };
+        await f.Evaluate();
+        f.Advance(60); await f.Evaluate();
+        Assert.DoesNotContain(await f.Service.ReadAsync(f.Account.Id, null, default), x => x.Kind == "protection.beyond-liquidation");
+    }
+
+    [Theory]
+    [InlineData(80, false)]   // the stop at 90 acts first
+    [InlineData(null, true)]  // the venue reports no liquidation price: undecidable by design, never missing
+    public async Task A_stop_inside_liquidation_or_no_reported_price_opens_nothing(int? liquidation, bool undecided)
+    {
+        var f = new DiscrepancyFixture { Liquidation = liquidation };
+        var result = await f.Evaluate();
+        f.Advance(60); await f.Evaluate();
+        Assert.DoesNotContain(await f.Service.ReadAsync(f.Account.Id, null, default), x => x.Kind == "protection.beyond-liquidation");
+        // Neither case degrades the run.
+        Assert.False(result.Incomplete, undecided ? "an unreported price must not degrade the run" : "a decided check must not degrade the run");
     }
 
     [Fact]

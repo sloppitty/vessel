@@ -18,6 +18,9 @@ internal sealed class DiscrepancyFixture
     public readonly List<VenueOrder> VenueOrders = [];
     public decimal Position = 1;
     public decimal? PriceStep;
+    /// <summary>The venue's reported liquidation price for the position (Phase 2, item 8b); null when it reports none.</summary>
+    public decimal? Liquidation;
+    public string? MarginMode = "cross";
     public bool PositionsComplete = true, OrdersComplete = true, HistoryGap, StampOpenOrders = true, Retired, CurrentOrderBook = true;
     public bool? Truncated;
     public int Omitted;
@@ -85,7 +88,7 @@ internal sealed class DiscrepancyFixture
     {
         var at = Clock.Now + ObservationOffset;
         return new(Guid.NewGuid(), Account, new(new(new(at, "primary-perpetuals", 100, 100, 0,
-            Position == 0 || Retired ? [] : [new("BTC", Position, 100, 0, 0, 1)]), Retired ? [] : [new("BTC", 4, 10, "USDC", PriceStep)], [], "bounded",
+            Position == 0 || Retired ? [] : [new("BTC", Position, 100, 0, 0, 1, LiquidationPrice: Liquidation, MarginMode: MarginMode)]), Retired ? [] : [new("BTC", 4, 10, "USDC", PriceStep)], [], "bounded",
             PositionsComplete, false, Truncated, OmittedExecutions: Omitted), new(VenueOrders.Select(x => StampOpenOrders && x.Status == VenueOrderStatus.Open ? x with { StatusAtUtc = at } : x).ToArray(), at, "bounded", OrdersComplete)),
             null, null, HistoryGap, "scheduled", CurrentOrderBook);
     }
