@@ -6,4 +6,3 @@ export function riskLimitText(text: string): string | null | undefined {
   const number = Number(value)
   return number > 0 && number <= 100 ? value : undefined
 }
-
