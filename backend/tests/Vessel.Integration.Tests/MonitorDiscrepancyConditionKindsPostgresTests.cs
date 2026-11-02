@@ -17,14 +17,14 @@ public sealed class MonitorDiscrepancyConditionKindsPostgresTests
     public async Task Changing_quantities_confirm_once_with_the_latest_evidence(string kind)
     {
         await using var database = await DiscrepancyDatabase.Create();
-        var f = MonitorDiscrepancyConditionKindsTests.Arrange(kind);
+        var f = ConditionKindsTestSupport.Arrange(kind);
         await database.Seed(f);
         var start = f.Clock.Now;
         async Task<MonitorEvaluationResult> Check() { await using var scope = database.Scope(f); return await scope.Evaluate(f.Observation()); }
         async Task Change(int version)
         {
             var count = f.Store.Fills.Count;
-            MonitorDiscrepancyConditionKindsTests.Evidence(f, kind, version);
+            ConditionKindsTestSupport.Evidence(f, kind, version);
             Assert.True(f.Store.Fills.Count >= count);
             await using var scope = database.Scope(f);
             scope.Db.AddRange(f.Store.Fills.Skip(count));
@@ -36,8 +36,8 @@ public sealed class MonitorDiscrepancyConditionKindsPostgresTests
             var row = Assert.Single(await read.Service.ReadAsync(f.Account.Id, null, default), x => x.Kind == kind);
             var events = (await EventReads.ReadAsync(read.Db, 0, 100, default)).Events.Where(x => x.Subject.DiscrepancyId == row.Id).ToArray();
             if (events.Length > 0)
-                Assert.Equal(MonitorDiscrepancyConditionKindsTests.Latest(kind, 2),
-                    MonitorDiscrepancyConditionKindsTests.Shown(kind, events[0].Data.GetProperty("details")));
+                Assert.Equal(ConditionKindsTestSupport.Latest(kind, 2),
+                    ConditionKindsTestSupport.Shown(kind, events[0].Data.GetProperty("details")));
             return (row, events.Select(x => x.Type).ToArray());
         }
 
@@ -47,20 +47,20 @@ public sealed class MonitorDiscrepancyConditionKindsPostgresTests
         f.Advance(30); await Change(2);
         Assert.False((await Check()).Incomplete);
         var (row, events) = await Read();
-        Assert.Equal(("open", start, MonitorDiscrepancyConditionKindsTests.Latest(kind, 2)),
-            (row.State, row.OpenedAtUtc, MonitorDiscrepancyConditionKindsTests.Shown(kind, row.Details)));
+        Assert.Equal(("open", start, ConditionKindsTestSupport.Latest(kind, 2)),
+            (row.State, row.OpenedAtUtc, ConditionKindsTestSupport.Shown(kind, row.Details)));
         Assert.Equal(["discrepancy.opened"], events);
 
         // Open: the details follow the evidence in place and nothing more is announced.
         f.Advance(60); await Change(3);
         await Check();
         (row, events) = await Read();
-        Assert.Equal(("open", start, MonitorDiscrepancyConditionKindsTests.Latest(kind, 3)),
-            (row.State, row.OpenedAtUtc, MonitorDiscrepancyConditionKindsTests.Shown(kind, row.Details)));
+        Assert.Equal(("open", start, ConditionKindsTestSupport.Latest(kind, 3)),
+            (row.State, row.OpenedAtUtc, ConditionKindsTestSupport.Shown(kind, row.Details)));
         Assert.Equal(["discrepancy.opened"], events);
 
         // The condition clears: resolved and announced, as before.
-        f.Advance(60); MonitorDiscrepancyConditionKindsTests.Clear(f, kind);
+        f.Advance(60); ConditionKindsTestSupport.Clear(f, kind);
         await Check();
         (row, events) = await Read();
         Assert.Equal("resolved", row.State);
