@@ -1,3 +1,4 @@
+using static Vessel.Tests.CsvTestRows;
 using Vessel.Application.Common;
 using Vessel.Application.Review;
 using Vessel.Domain.Plays;
@@ -12,53 +13,8 @@ public sealed class ReviewExportTests
 {
     private readonly ReviewFixture f = new();
 
-    /// <summary>The rows as cells, parsing RFC 4180 quoting.</summary>
-    private static List<string[]> Rows(string csv)
-    {
-        var rows = new List<string[]>();
-        var cells = new List<string>();
-        var cell = new System.Text.StringBuilder();
-        var quoted = false;
-        for (var i = 0; i < csv.Length; i++)
-        {
-            var c = csv[i];
-            if (quoted)
-            {
-                if (c == '"' && i + 1 < csv.Length && csv[i + 1] == '"') { cell.Append('"'); i++; }
-                else if (c == '"') quoted = false;
-                else cell.Append(c);
-            }
-            else if (c == '"') quoted = true;
-            else if (c == ',') { cells.Add(cell.ToString()); cell.Clear(); }
-            else if (c == '\r' && i + 1 < csv.Length && csv[i + 1] == '\n') { cells.Add(cell.ToString()); cell.Clear(); rows.Add([.. cells]); cells.Clear(); i++; }
-            else cell.Append(c);
-        }
-        return rows;
-    }
-
     private static Dictionary<string, string> Named(string[] header, string[] row) =>
         header.Select((name, i) => (name, i)).ToDictionary(x => x.name, x => row[x.i]);
-
-    [Fact]
-    public void Text_that_would_be_a_formula_is_neutralized_and_numbers_stay_exact()
-    {
-        var csv = new Csv(["text", "number"]);
-        foreach (var dangerous in new[] { "=HYPERLINK(\"x\")", "+1", "-1", "@SUM(A1)", "\tx", "\rx" })
-            csv.Text(dangerous).Number("-12.5").End();
-        var rows = Rows(csv.ToString());
-        Assert.All(rows.Skip(1), row => Assert.StartsWith("'", row[0]));
-        Assert.All(rows.Skip(1), row => Assert.Equal("-12.5", row[1]));
-        Assert.Equal("'=HYPERLINK(\"x\")", rows[1][0]);
-        // A plain decimal is written as is; anything else is refused, never rewritten.
-        Assert.Throws<InvalidOperationException>(() => new Csv(["n"]).Number("1e2"));
-        Assert.Throws<InvalidOperationException>(() => new Csv(["n"]).Number("=1"));
-        // Sol round 1 on #38: no trailing newline and no other scripts' digits.
-        Assert.Throws<InvalidOperationException>(() => new Csv(["n"]).Number("1\n"));
-        Assert.Throws<InvalidOperationException>(() => new Csv(["n"]).Number("\u0661"));
-        // Unknown is an empty cell, never zero; a short row is refused.
-        Assert.Equal(["", ""], Rows(new Csv(["a", "b"]).Number(null).Text(null).End().ToString())[1]);
-        Assert.Throws<InvalidOperationException>(() => new Csv(["a", "b"]).Text("x").End());
-    }
 
     [Fact]
     public async Task The_export_holds_the_reports_scored_rows_then_its_exclusions()
