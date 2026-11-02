@@ -95,7 +95,7 @@ public sealed partial class LighterReader
             var fills = new List<VenueFill>();
             var fillCoverage = new RawFillReadCoverage();
             var historyAvailable = fillsAllowed;
-            var ids = new HashSet<string>(StringComparer.Ordinal);
+            var copies = new HashSet<VenueFill>();
             var cursors = new HashSet<string>(StringComparer.Ordinal);
             var missingPnl = 0;
             var fees = 0;
@@ -135,8 +135,9 @@ public sealed partial class LighterReader
                         var result = ReadFills(trades.RootElement, catalogue, source, latest, feeFreeTier);
                         fillCoverage.Observe(Rows(json, trades.RootElement, "trades", PageSize),
                             row => json.Timestamp(json.Property(row, "timestamp"), latest.ToUnixTimeMilliseconds()));
+                        // Keep changed facts for the shared import-conflict recorder; raw-response differences alone are not new facts.
                         foreach (var fill in result.Fills)
-                            if (ids.Add(fill.SourceFillId)) fills.Add(fill);
+                            if (copies.Add(fill with { RawJson = "" })) fills.Add(fill);
                         missingPnl += result.MissingPnl;
                         fees += result.Fees;
                         selfTrades += result.SelfTrades;

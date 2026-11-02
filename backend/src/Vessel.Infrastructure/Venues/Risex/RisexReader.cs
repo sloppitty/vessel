@@ -159,7 +159,8 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             }
             return new PerpetualVenueReadResult(snapshot,
                 catalogue.Markets.Where(m => m.Active).Select(m => m.Instrument).ToList(),
-                fills.GroupBy(f => (f.ContractId, f.SourceFillId)).Select(g => g.First()).OrderByDescending(f => f.OccurredAtUtc).ToList(),
+                // Identical copies across pages collapse; a changed copy is kept for the store to record as a conflict (14c).
+                fills.GroupBy(f => (f.ContractId, f.SourceFillId)).SelectMany(g => g.Distinct()).OrderByDescending(f => f.OccurredAtUtc).ToList(),
                 OmissionNotice(omitted.Count) is { } omission ? HistoryNotice + " " + omission : HistoryNotice,
                 PositionsComplete: positionsComplete,
                 FillHistoryTruncated: hasNextPage || fillCoverage.Count == MaxFillPages * PageSize,

@@ -599,3 +599,44 @@ October 21, 2026.
   typed levels are never rewritten, and that unknown modes, unified and
   portfolio-margin accounts, rate limits and deadlines still fail the read.
 - **Check.** `scripts/check.sh` passed on `b91d8ea9`: backend 4,106 passed, 5 skipped; frontend 178 files and 4,090 tests.
+
+**14c. Fill conflicts (F-12, probe V10).** Implemented on `t3/phase2-fill-conflicts`.
+- **The rule.** A retained fill ID reported again with different venue facts keeps its first copy,
+  never overwritten.
+  - It is recorded in `fill_import_conflicts` (migration `20261021180627_FillImportConflicts`), one row
+    per fill, with the differing field names only, first and last seen, and a report count.
+  - The venue's direction wording is compared. Vessel's own readings are not: canonical label,
+    position effect and bases.
+  - A changed later copy within one read is compared with the copy stored from it, and RISEx
+    collapses only identical copies.
+  - A venue contract or leverage newly stated where none was is not a change.
+- **The read.** `GET /api/accounts/{id}/import-conflicts` returns the count and the latest 50. A
+  disabled account returns none, and a paper request gets 409.
+- **The page.** Account detail shows them only when there are some.
+- **Lifecycle.** Account deletion removes them, and the fill foreign key cascades. The owner inventory
+  already reaches them through `imported_fills`.
+- **Tests.**
+  - `FillConflictPostgresTests` (4), and a RISEx adapter case for identical and changed copies.
+  - The isolation case in both auth modes.
+  - The Account detail panel test.
+- **Migration.** It is applied explicitly, never to the owner's database.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `f32f731e`. Four findings, all fixed in
+  `c9b9e625`:
+  - Deleting the account in a context that had recorded a conflict hit the
+    account relationship, since the conflict stayed tracked. Deletion detaches
+    it with the account's other facts.
+  - A changed second copy within the first read was dropped silently. It is
+    compared with the copy stored from it, and RISEx collapses only identical
+    copies, so the change reaches the store.
+  - The venue's direction wording was not compared: a buy reported again as
+    Close Short instead of Open Long was no conflict. It is compared now;
+    derived effects and bases still are not.
+  - A disabled account's conflicts stayed readable through the API. It
+    returns none now.
+
+  Sol confirmed that changed repeats used to be ignored and originals stay
+  untouched, the decimal and time precision, owner scope, account locking,
+  the paper refusal, DTOs without values or payloads, and the migration. Its
+  own tests could not run under the memory limit; the targeted runs and the
+  check below cover the fixes.
+- **Check.** `scripts/check.sh` passed on `c9b9e625`: backend 4,113 passed, 5 skipped; frontend 179 files and 4,091 tests.

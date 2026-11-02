@@ -1574,6 +1574,62 @@ namespace Vessel.Persistence.Migrations
                     b.ToTable("account_stablecoins", (string)null);
                 });
 
+            modelBuilder.Entity("Vessel.Domain.Workspace.FillImportConflict", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContractId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Fields")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<Guid>("FillId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("FirstSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("LastSeenAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Reports")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SourceFillId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FillId");
+
+                    b.HasIndex("OwnerId", "FillId")
+                        .IsUnique();
+
+                    b.HasIndex("OwnerId", "AccountId", "LastSeenAtUtc");
+
+                    b.ToTable("fill_import_conflicts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_fill_import_conflicts_reports", "\"Reports\" >= 1");
+
+                            t.HasCheckConstraint("CK_fill_import_conflicts_seen", "\"FirstSeenAtUtc\" <= \"LastSeenAtUtc\"");
+                        });
+                });
+
             modelBuilder.Entity("Vessel.Domain.Workspace.FundingPayment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2247,6 +2303,22 @@ namespace Vessel.Persistence.Migrations
                         .WithMany("Stablecoins")
                         .HasForeignKey("OwnerId", "AccountId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Workspace.FillImportConflict", b =>
+                {
+                    b.HasOne("Vessel.Domain.Workspace.ImportedFill", null)
+                        .WithMany()
+                        .HasForeignKey("FillId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 
