@@ -99,8 +99,10 @@ app.Use(async (context, next) =>
         if (ex is ProblemException problem)
         {
             if (problem.Code is not null) extensions["code"] = problem.Code;
-            if (problem.Code == "step-up-required" && problem.Data["action"] is "wallet.link" or "wallet.remove")
+            if (problem.Code == "step-up-required" && problem.Data["action"] is "wallet.link" or "wallet.remove" or "device.pair")
                 extensions["action"] = problem.Data["action"];
+            if (problem.Code == "pairing-code-invalid" && problem.Data["attemptsLeft"] is int attemptsLeft)
+                extensions["attemptsLeft"] = attemptsLeft;
             if (problem.RetryAfterSeconds is { } retryAfter)
                 context.Response.Headers.RetryAfter = retryAfter.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }

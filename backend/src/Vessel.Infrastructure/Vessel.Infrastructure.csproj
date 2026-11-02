@@ -3,7 +3,11 @@
     <ProjectReference Include="../Vessel.Application/Vessel.Application.csproj" />
   </ItemGroup>
   <ItemGroup><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup>
-  <ItemGroup><InternalsVisibleTo Include="Vessel.Tests" /></ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Vessel.TestKit" />
+    <InternalsVisibleTo Include="Vessel.Venues.Tests" />
+    <InternalsVisibleTo Include="Vessel.Integration.Tests" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="AWSSDK.S3" Version="4.0.104.4" />
   </ItemGroup>

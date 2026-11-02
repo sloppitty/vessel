@@ -101,6 +101,7 @@ describe('shell route history', () => {
       { ...operationFixture, playId: play.summary.id, playAssociation: 'linked', playTitle: play.summary.title },
     ])) }))
     await user.click(await screen.findByRole('button', { name: 'View Main account' }))
+    await user.click(await screen.findByRole('button', { name: 'Expand BTC operation' }))
     await user.click(await screen.findByRole('button', { name: `${play.summary.title}, open Play` }))
     await screen.findByRole('textbox', { name: 'Play title' })
     expect(labels()).toEqual(['Overview', '…', 'Plays', play.summary.title])
