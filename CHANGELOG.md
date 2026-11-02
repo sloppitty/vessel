@@ -39,7 +39,10 @@
   has an optional soft limit, blank until you set it, which is flagged and
   never enforced (G-06).
 
+### Fixed
 
+- RISEx: history pages share one fixed end time, so new trades cannot shift them, and
+  the history notice counts trades on unrecognized markets.
 
 ## 0.3.5 - October 28, 2026
 

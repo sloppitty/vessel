@@ -524,4 +524,37 @@ Not started.
 
 ## 14. Venue robustness and benchmark
 
-Not started.
+October 21, 2026.
+
+**14a. RISEx.** Implemented on `t3/phase2-risex-robustness`.
+- **F-13 (probe V9).** Every trade-history page carries one `end_time` cut, the snapshot's observation.
+  - A trade arriving between pages cannot shift page 2.
+  - Later rows wait for the next refresh, whose window overlaps.
+- **Counted omissions.** The history notice ends with one sentence for trades on unrecognized
+  markets, for example "Omitted executions: 1 on an unrecognized market."
+- **D-22 moved to item 7.** A trade without reported PnL still fails the read, as before.
+  - Setting it aside left only a count. The shared `MissingExecutions` rule checks only orders
+    with status filled, so a cancelled or still-open order with a set-aside trade looked complete,
+    and its Play could close and be scored (Sol round 1, below).
+  - Item 7's durable omission markers keep the trade's order. A linked order with a marker will
+    have known missing executions whatever its status, which also covers Lighter's existing
+    omissions. The contract is corrected here.
+- **Tests.** RISEx adapter cases for the cut and its paging request shapes, the counted notice, and
+  missing PnL still failing the read.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `1b7620d7`. Two findings, both settled in
+  `ddf801e7`:
+  - **High.** A trade set aside for missing PnL left only a count. The shared
+    `MissingExecutions` rule checks only filled orders, so a cancelled or
+    still-open order with a set-aside trade looked complete, and its Play
+    could close and be scored with a unit still open. The set-aside (D-22)
+    moves to item 7, whose durable omission markers keep the trade's order;
+    until then such a trade fails the read, as before.
+  - The set-aside returned before the trade's other required fields were
+    validated, so a malformed row was accepted. The revert removes that path,
+    and item 7 validates first.
+
+  Sol confirmed that every history request carries the same nanosecond cut,
+  that a row at the cut is kept and a later one skipped without counting as
+  an omission, and that net-of-fee handling and the history-gap rule are
+  unchanged.
+- **Check.** `scripts/check.sh` passed on `ddf801e7`: backend 4,094 passed, 5 skipped; frontend 177 files and 4,085 tests.

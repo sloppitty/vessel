@@ -304,6 +304,13 @@ Covers I-01, V1, D-16 and D-25. **Decision 11 accepted.**
   that no longer returns the row cannot erase the evidence. When a venue
   gives no time or market for an omission, the marker records an explicit
   uncertainty range instead.
+  - A marker also keeps the omitted row's native order ID when the venue
+    gives one. A linked order with a marker has known missing executions
+    whatever its status, under the shared rule, so its Play can neither
+    settle nor be scored. The scored basis is unchanged.
+  - RISEx's D-22 (from item 14a) lands here: one trade with an empty
+    `realized_pnl` is set aside with a counted reason after its other
+    fields validate, and the snapshot still applies. It is never zero.
 - **Activity becomes gap-aware.** An account partition with omission
   markers or forced events after its earliest retained fill is not anchored
   across them; markers feed the aggregation, the detail reads and the
@@ -446,8 +453,9 @@ Covers G-12. **Owner decision accepted:** a separate projection.
 No decision.
 
 - **14a. RISEx.**
-  - D-22: one trade with an empty `realized_pnl` is set aside with a counted
-    reason, and the snapshot still applies. It is never zero.
+  - D-22 moved to item 7 (Sol round 1 on 14a): a set-aside trade must keep
+    its order, which needs the durable omission markers. Until then a trade
+    with an empty `realized_pnl` still fails the read.
   - F-13: paging uses a fixed end-time cut with overlap.
 - **14b. Hyperliquid.**
   - F-11: prices follow the venue rule through a venue-provided price rule,
