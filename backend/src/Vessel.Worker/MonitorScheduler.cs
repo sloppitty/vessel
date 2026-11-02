@@ -8,7 +8,7 @@ using Vessel.Application.Venues;
 using Vessel.Infrastructure.Monitoring;
 using Vessel.Application.Ownership;
 
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Vessel.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Vessel.Integration.Tests")]
 
 namespace Vessel.Worker;
 
