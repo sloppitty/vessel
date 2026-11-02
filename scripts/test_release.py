@@ -133,6 +133,32 @@ class ReleasePublishTests(unittest.TestCase):
 
 
 class WalletReleaseTests(unittest.TestCase):
+    def test_browser_console_allows_only_the_expected_401_before_sign_in(self):
+        result = subprocess.run(['node', '-e', '''
+const assert = require('node:assert/strict')
+const { unexpectedConsoleError } = require('./scripts/release-browser-smoke.cjs')
+const message = (text, type = 'error') => ({ type: () => type, text: () => text })
+for (const reason of ['Unauthorized', '']) {
+  const probe = message(`Failed to load resource: the server responded with a status of 401 (${reason})`)
+  assert.equal(unexpectedConsoleError(probe, false), false)
+  assert.equal(unexpectedConsoleError(probe, true), true)
+}
+for (const text of [
+  'Failed to load resource: the server responded with a status of 403 (Forbidden)',
+  'Failed to load resource: the server responded with a status of 500 ()',
+  'Application error: status of 401 (Unauthorized)',
+  'Failed to load resource: the server responded with a status of 401 () unexpected error',
+  'Unexpected application error',
+]) {
+  for (const signedIn of [false, true]) {
+    assert.equal(unexpectedConsoleError(message(text), signedIn), true, text)
+  }
+}
+assert.equal(unexpectedConsoleError(message('Informational message', 'log'), false), false)
+assert.equal(unexpectedConsoleError(message('Informational message', 'log'), true), false)
+'''], cwd=release.ROOT, capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
     def check(self, *args):
         check = verify_release.Check(verify_release.parse_args(list(args)))
         self.addCleanup(shutil.rmtree, check.temp)
