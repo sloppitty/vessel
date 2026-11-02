@@ -89,6 +89,10 @@ async function main() {
     assert.ok(!/;\s*domain\s*=/i.test(values[0]), `${name} must omit Domain`)
   }
 
+  async function issuedCookieIn(context, name) {
+    hostCookie(await context.cookies(base), name)
+  }
+
   async function signIn(page, name) {
     await page.goto(base)
     await page.getByRole('button', { name: /Synthetic wallet/ }).click()
@@ -112,11 +116,12 @@ async function main() {
   }
 
   // These requests execute in a real browser, including its Origin and Fetch Metadata.
-  async function call(page, path, method = 'GET', body, user) {
-    return page.evaluate(async ({ path, method, body, user }) => {
+  async function call(page, path, method = 'GET', body, user, extra = {}) {
+    return page.evaluate(async ({ path, method, body, user, extra }) => {
       const response = await fetch(path, {
         method, credentials: 'same-origin', referrerPolicy: 'same-origin',
         headers: {
+          ...extra,
           ...(user ? { 'X-Vessel-User': user } : {}),
           ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         },
@@ -124,7 +129,7 @@ async function main() {
       })
       const text = await response.text()
       return { status: response.status, body: text ? JSON.parse(text) : null }
-    }, { path, method, body, user })
+    }, { path, method, body, user, extra })
   }
 
   try {
@@ -280,6 +285,145 @@ async function main() {
     await revokerPage.getByRole('heading', { name: 'Sign in to Vessel', exact: true }).waitFor()
     assert.equal((await call(revokerPage, '/api/auth/session')).status, 401)
     pass('voluntary frontend sign-out revokes its session and returns to the chooser')
+    // ---- Device pairing: a phone with no wallet signs in to the same journal ----
+    // The packaged stack is served on localhost, which a phone cannot open, so the desktop's Connect a phone dialog
+    // explains instead of drawing a QR (checked below). The pairing itself is created and approved through the very
+    // session API the dialog uses, after a real device.pair step-up signature; the phone side is the real screen.
+    const pairer = await contextWithWallet(first + 1)
+    const pagePair = await pairer.newPage()
+    const pairSession = await signIn(pagePair)
+    assert.equal(pairSession.user.id, ownerA)
+    const pairWallet = await signer(first + 1)
+    await pagePair.getByRole('button', { name: /account menu$/ }).click()
+    await pagePair.getByRole('menuitem', { name: 'Profile & sign-in', exact: true }).click()
+    await pagePair.getByRole('button', { name: 'Connect a phone', exact: true }).click()
+    const connect = pagePair.getByRole('dialog', { name: 'Connect a phone', exact: true })
+    await connect.getByRole('note').waitFor()
+    assert.match(await connect.getByRole('note').innerText(), /A phone can.t open this address/)
+    assert.equal(await connect.getByRole('img').count(), 0)
+    await connect.getByRole('button', { name: 'Close', exact: true }).first().click()
+    pass('desktop Connect a phone explains a loopback address and draws no QR')
+
+    // The public auth routes insist on this header, as the frontend's public client sends it.
+    const publicRequest = { 'X-Vessel-Request': '1' }
+
+    async function stepUpPair() {
+      const challenge = await call(pagePair, '/api/auth/step-up/challenge', 'POST', { action: 'device.pair', address: pairWallet.address }, ownerA)
+      assert.equal(challenge.status, 200)
+      const done = await call(pagePair, '/api/auth/step-up', 'POST',
+        { challengeId: challenge.body.challengeId, signature: pairWallet.sign(challenge.body.message) }, ownerA)
+      assert.equal(done.status, 204)
+      const created = await call(pagePair, '/api/auth/pairings', 'POST', undefined, ownerA)
+      assert.equal(created.status, 201)
+      assert.equal(created.body.secret.length, 43)
+      assert.match(created.body.typedCode, /^[0-9A-Z]{5}-[0-9A-Z]{5}$/)
+      return created.body
+    }
+
+    async function phoneContext() {
+      // A phone: narrow touch viewport, no wallet and no camera permission. `isMobile` is not available in Firefox.
+      const context = await browser.newContext({
+        ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 }, hasTouch: true, ...engine === 'chromium' ? { isMobile: true } : {},
+      })
+      contexts.push(context)
+      await context.exposeFunction('recordWalletCsp', entry => violations.push(entry))
+      await context.addInitScript(() => document.addEventListener('securitypolicyviolation', event => window.recordWalletCsp({
+        directive: event.violatedDirective, blocked: event.blockedURI,
+      })))
+      await context.route(url => url.origin !== new URL(base).origin, route => {
+        errors.push('Unexpected external browser connection: ' + new URL(route.request().url()).origin)
+        return route.abort()
+      })
+      context.on('page', page => page.on('pageerror', error => errors.push(error.message)))
+      return context
+    }
+
+    async function confirmationCode(page) {
+      await page.getByRole('heading', { name: 'Confirm on your computer', exact: true }).waitFor()
+      const text = await page.locator('.pairing-digits').textContent()
+      const match = /(\d{3}) (\d{3})/.exec(text)
+      assert.ok(match, 'the phone shows a grouped six-digit confirmation code')
+      return match[1] + match[2]
+    }
+
+    // 1. The link the QR carries: secret in the fragment, removed from the address at once.
+    const link = await stepUpPair()
+    const phoneOne = await phoneContext()
+    const pagePhone = await phoneOne.newPage()
+    const landing = await pagePhone.goto(`${base}/#pair=${link.secret}`)
+    assert.equal(landing.headers()['permissions-policy'], 'camera=(self), microphone=(), geolocation=()')
+    const codeOne = await confirmationCode(pagePhone)
+    assert.ok(!pagePhone.url().includes('pair='), 'the secret is removed from the address')
+    assert.ok(await pagePhone.getByRole('checkbox', { name: 'Keep me signed in on this device', exact: true }).isChecked(), 'keep me signed in is checked by default on the phone')
+    const claimed = await call(pagePair, '/api/auth/pairings/' + link.id, 'GET', undefined, ownerA)
+    assert.equal(claimed.status, 200)
+    assert.equal(claimed.body.status, 'claimed')
+    assert.ok(claimed.body.device)
+    const wrong = await call(pagePair, `/api/auth/pairings/${link.id}/approve`, 'POST', { code: codeOne === '000000' ? '111111' : '000000' }, ownerA)
+    assert.equal(wrong.status, 400)
+    assert.equal(wrong.body.code, 'pairing-code-invalid')
+    assert.equal(wrong.body.attemptsLeft, 2)
+    assert.equal((await call(pagePair, `/api/auth/pairings/${link.id}/approve`, 'POST', { code: codeOne }, ownerA)).status, 204)
+    await pagePhone.getByRole('region', { name: 'Overview summary', exact: true }).waitFor({ timeout: 20000 })
+    await issuedCookieIn(phoneOne, '__Host-vessel-session')
+    const phoneSession = await call(pagePhone, '/api/auth/session')
+    assert.equal(phoneSession.status, 200)
+    assert.equal(phoneSession.body.user.id, ownerA)
+    assert.equal(phoneSession.body.session.remember, true)
+    const rows = await call(pagePair, '/api/auth/sessions', 'GET', undefined, ownerA)
+    assert.equal(rows.body.find(row => row.id === phoneSession.body.session.id)?.source, 'pairing')
+    await pagePair.reload()
+    await pagePair.getByRole('button', { name: /account menu$/ }).click()
+    await pagePair.getByRole('menuitem', { name: 'Profile & sign-in', exact: true }).click()
+    await pagePair.getByText(/^Paired · /).first().waitFor()
+    pass('QR link: phone claims the fragment secret, the desktop approves its code (wrong code counted), the phone lands signed in and Sessions says Paired')
+    assert.equal((await call(pagePair, '/api/auth/pairings/' + link.id, 'GET', undefined, ownerA)).body.status, 'completed')
+    assert.equal((await call(pagePhone, '/api/auth/pairings/complete', 'POST', { remember: true }, undefined, publicRequest)).status, 400, 'the used pairing cannot complete twice')
+
+    // 2. The typed code, from the sign-in screen, with Keep me signed in turned off.
+    const typed = await stepUpPair()
+    const phoneTwo = await phoneContext()
+    const pagePhoneTwo = await phoneTwo.newPage()
+    await pagePhoneTwo.goto(base)
+    await pagePhoneTwo.getByRole('heading', { name: 'Sign in to Vessel', exact: true }).waitFor()
+    // A browser that can use a camera offers the scanner first; otherwise the typed code is offered directly.
+    const scan = pagePhoneTwo.getByRole('button', { name: 'Scan a code from your desktop', exact: true })
+    if (await scan.count()) await scan.click()
+    await pagePhoneTwo.getByRole('button', { name: 'Enter a code instead', exact: true }).click()
+    await pagePhoneTwo.getByLabel('Code from your computer', { exact: true }).fill(typed.typedCode.toLowerCase().replace('-', ' '))
+    await pagePhoneTwo.getByRole('button', { name: 'Continue', exact: true }).click()
+    const codeTwo = await confirmationCode(pagePhoneTwo)
+    await pagePhoneTwo.getByRole('checkbox', { name: 'Keep me signed in on this device', exact: true }).uncheck()
+    assert.equal((await call(pagePair, `/api/auth/pairings/${typed.id}/approve`, 'POST', { code: codeTwo }, ownerA)).status, 204)
+    await pagePhoneTwo.getByRole('region', { name: 'Overview summary', exact: true }).waitFor({ timeout: 20000 })
+    const typedSession = await call(pagePhoneTwo, '/api/auth/session')
+    assert.equal(typedSession.body.user.id, ownerA)
+    assert.equal(typedSession.body.session.remember, false)
+    pass('typed code: phone enters a lower-case spaced code, the desktop approves, and the unchecked Keep me signed in is honoured')
+
+    // 3. A second device claiming the same secret contests it: neither phone gets in.
+    const shared = await stepUpPair()
+    const phoneThree = await phoneContext()
+    const pageThree = await phoneThree.newPage()
+    await pageThree.goto(`${base}/#pair=${shared.secret}`)
+    await confirmationCode(pageThree)
+    const phoneFour = await phoneContext()
+    const pageFour = await phoneFour.newPage()
+    await pageFour.goto(`${base}/#pair=${shared.secret}`)
+    await pageFour.getByText('Another device used this code', { exact: true }).waitFor()
+    await pageThree.getByText('Another device used this code', { exact: true }).waitFor({ timeout: 20000 })
+    pass('a second claim contests the pairing and both phones say so')
+    const stranger = await phoneContext()
+    const pageStranger = await stranger.newPage()
+    await pageStranger.goto(base)
+    assert.equal((await call(pageStranger, '/api/auth/pairings/complete', 'POST', { remember: true }, undefined, publicRequest)).status, 400, 'no binding cookie, no completion')
+    // Revoking from the desktop signs the paired phones out; the release restore check expects no live session but the operator's.
+    assert.equal((await call(pagePair, '/api/auth/sessions/revoke-others', 'POST', undefined, ownerA)).status, 204)
+    assert.equal((await call(pagePhone, '/api/auth/session')).status, 401)
+    assert.equal((await call(pagePhoneTwo, '/api/auth/session')).status, 401)
+    assert.equal((await call(pagePair, '/api/auth/sign-out', 'POST', { expectedSessionId: pairSession.session.id }, ownerA)).status, 204)
+    pass('revoking other sessions on the desktop signs both paired phones out')
+
     assert.deepEqual(errors, [])
     assert.deepEqual(violations, [])
     pass('zero page errors, CSP violations or outbound venue requests')

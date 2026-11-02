@@ -25,7 +25,7 @@ function setup(preview: RetrospectivePreview = retrospectiveFixture, overrides: 
 }
 async function inspect() {
   await userEvent.click(await screen.findByRole('button', { name: 'Expand BTC operation' }))
-  await userEvent.click(screen.getByRole('button', { name: 'Inspect BTC retrospective eligibility' }))
+  await userEvent.click(screen.getByRole('button', { name: /^(Journal this trade, BTC|Inspect BTC retrospective eligibility)$/ }))
   return screen.getByRole('dialog')
 }
 describe('Activity retrospective inspection', () => {
@@ -161,7 +161,7 @@ describe('Activity retrospective inspection', () => {
     await inspect()
     await user.keyboard('{Escape}')
     expect((preview.mock.calls[0]![2] as AbortSignal).aborted).toBe(true)
-    expect(screen.getByRole('button', { name: 'Inspect BTC retrospective eligibility' })).toHaveFocus()
+    expect(screen.getByRole('button', { name: /^(Journal this trade, BTC|Inspect BTC retrospective eligibility)$/ })).toHaveFocus()
     await act(async () => finish(retrospectiveFixture))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })

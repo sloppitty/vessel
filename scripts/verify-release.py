@@ -566,7 +566,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         for path, expected in (('/', 200), ('/plays/deep-link', 200), (asset, 200), ('/assets/missing.js', 404)):
             status, headers, _ = self.request(path)
             self.expect(status == expected, path + ' status')
-            for name, value in (('X-Content-Type-Options', 'nosniff'), ('X-Frame-Options', 'DENY'), ('Referrer-Policy', 'no-referrer')):
+            for name, value in (('X-Content-Type-Options', 'nosniff'), ('X-Frame-Options', 'DENY'), ('Referrer-Policy', 'no-referrer'),
+                               ('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()')):
                 self.expect([v for k, v in headers if k.lower() == name.lower()] == [value], path + ' ' + name)
             self.expect(sum(k.lower() == 'content-security-policy' for k, _ in headers) == 1, path + ' CSP')
         _, headers, data = self.request(asset, headers={'Accept-Encoding': 'gzip'})
