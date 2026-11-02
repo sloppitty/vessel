@@ -17,7 +17,7 @@ public sealed class MonitorDiscrepancyStopConfirmationPostgresTests
         async Task<MonitorEvaluationResult> Check() { await using var scope = database.Scope(f); return await scope.Evaluate(f.Observation()); }
         async Task ScaleIn(decimal added, decimal stop)
         {
-            MonitorDiscrepancyStopConfirmationTests.ScaleIn(f, added, stop);
+            StopConfirmationTestSupport.ScaleIn(f, added, stop);
             await using var scope = database.Scope(f);
             scope.Db.Add(f.Store.Fills[^1]);
             await scope.Db.SaveChangesAsync();
