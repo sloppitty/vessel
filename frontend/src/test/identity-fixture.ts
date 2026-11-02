@@ -37,9 +37,9 @@ export function shellIdentityFixture(overrides: Partial<ShellIdentity> = {}): Sh
 
 export const sessionRowsFixture: SessionRow[] = [
   { id: sessionFixture.session.id, current: true, createdAt: '2026-10-17T09:41:12.000Z', lastSeenAt: '2026-10-17T09:41:12.000Z', remember: false,
-    userAgent: 'Firefox on Linux', walletAddress: walletFixture.address },
+    userAgent: 'Firefox on Linux', walletAddress: walletFixture.address, source: 'wallet' },
   { id: '1e7c3b9a-6d2f-4a58-8b04-c9e5f1a7d362', current: false, createdAt: '2026-10-14T08:00:00.000Z', lastSeenAt: '2026-10-15T08:00:00.000Z', remember: true,
-    userAgent: 'Safari on iOS', walletAddress: secondWalletFixture.address },
+    userAgent: 'Safari on iOS', walletAddress: secondWalletFixture.address, source: 'wallet' },
 ]
 
 /** A server-written sign-in message for `address`, issued at `issued` and valid for five minutes. */
