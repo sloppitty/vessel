@@ -432,7 +432,48 @@ October 21, 2026.
 
 ## 9. Funding
 
-Not started.
+October 21, 2026.
+
+**9a. Resumable windows.** Implemented on `t3/phase2-funding-windows`.
+- **The cursor.** Refresh reads settled funding in windows (`FundingWindows`, `Vessel:Funding`)
+  that extend the account's stored contiguous coverage.
+  - The stored coverage is the cursor, so **no migration** was needed. The contract's "needs a
+    migration" is corrected here.
+  - The span after it is read oldest first, and the span before it newest first.
+  - The last day of stored coverage is re-read (`Recheck`), so a late settlement is kept and a changed
+    one still fails closed.
+- **Halving.** A window halves only when an adapter marks the result `Truncated`, meaning its page or
+  row budget alone stopped it. Other incompleteness ends the read.
+- **Bounds.** At most 8 reads, 10,000 payments and 20 seconds per Refresh. The single read it replaces
+  had the same 20-second deadline, so the browser's Refresh keeps its time.
+- **Failures.** Completed windows survive a later failure or rate limit, and the rate limit still
+  defers the venue.
+- **The notice.** Partial coverage says "refresh again to read the rest"; missing funding is not zero.
+- **Tests.**
+  - `FundingWindowsTests` (12), including the probe's case: 720 hourly rows against Lighter's
+    500-row budget, covered over two Refreshes.
+  - A PostgreSQL resume test.
+  - Truncation flags in the Hyperliquid, Lighter and RISEx reader tests.
+- **Check.** `scripts/check.sh` passed on `8aa3f35c` (before item 5a's round-1 fixes were restacked beneath it): backend 4,074 passed, 5 skipped; frontend 175 files and 4,074 tests.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `6b00008d`. Two findings, both fixed in
+  `e76c04be`:
+  - Window sizes were relearned every Refresh: 100 hourly markets against
+    Lighter's 500-row budget spent all eight reads halving, every time. The
+    funding state's last attempt is now the widest window the Refresh
+    completed, or the last one tried when it completed none. The next
+    Refresh starts from it, or half of it after an incomplete read, and a
+    failed read keeps it. Still no migration.
+  - Rechecks could starve new coverage with one-hour windows. The uncovered
+    spans are read first, and the recheck uses only the reads left.
+
+  A window also doubles only after a full-size success now, since one cut at
+  a boundary proves nothing larger. `FundingWindowsTests` has 14 tests, and
+  the PostgreSQL resume test's second Refresh takes six reads, not three
+  halvings again. Sol confirmed the rounding, the gap-free merging, the
+  inclusive recheck boundary and the failure handling. It noted that a
+  one-day settlement delay is unproven: a settlement reported later than the
+  recheck is not read again.
+- **Check after round 1.** `scripts/check.sh` passed on `834004c2` (before documentation-only commits were restacked beneath it): backend 4,093 passed, 5 skipped; frontend 175 files and 4,076 tests.
 
 ## 10. Planning assumptions and soft limits
 

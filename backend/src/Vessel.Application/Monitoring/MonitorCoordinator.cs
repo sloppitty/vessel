@@ -13,7 +13,7 @@ namespace Vessel.Application.Monitoring;
 public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore workspace, IMonitorImporter executions,
     IVenueRegistry venues, IAccountCredentialReader credentials, IUnitOfWork unitOfWork,
     IVesselEventSink events, IMonitorCommandSink commands, IJournalOwnerContext owner, MonitorOptions options,
-    TimeProvider time, IMonitorEvaluator? evaluator = null, IMonitorRunLog? log = null)
+    TimeProvider time, IMonitorEvaluator? evaluator = null, IMonitorRunLog? log = null, FundingOptions? funding = null)
 {
     public async Task<MonitorSummaryDto> SummaryAsync(CancellationToken ct)
     {
@@ -233,27 +233,38 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             {
                 if (venues.Funding(capture.Account.VenueId) is { } fundingReader)
                 {
-                    // Read outside the unit of work; apply facts only after the lease/settings fence.
+                    // Read outside the unit of work; apply facts only after the lease/settings fence. Phase 2, item 9a: in
+                    // bounded windows that extend the stored coverage (FundingWindows).
                     var to = DateTimeOffset.FromUnixTimeMilliseconds(sync.Snapshot.ObservedAtUtc.ToUnixTimeMilliseconds());
-                    var from = to.AddDays(-30);
-                    VenueFundingReadResult funding;
+                    var settings = funding ?? new FundingOptions();
+                    var from = to - settings.Lookback;
+                    VenueFundingReadResult fundingRead;
+                    FundingCursor? cursor = null;
                     try
                     {
-                        var retryAt = await store.VenueRetryAtAsync(capture.Account.VenueId, ct);
-                        if (retryAt > time.GetUtcNow()) throw new VenueRateLimitException(retryAt.Value);
-                        funding = await fundingReader.ReadFundingAsync(capture.Account, from, to, ct);
-                        ct.ThrowIfCancellationRequested();
-                        VenueFundingChecks.Validate(funding, from, to);
+                        cursor = await store.FundingCursorAsync(capture.Account.Id, ct);
+                        var read = await FundingWindows.ReadAsync(fundingReader, capture.Account, to, cursor, settings, async token =>
+                        {
+                            var retryAt = await store.VenueRetryAtAsync(capture.Account.VenueId, token);
+                            if (retryAt > time.GetUtcNow()) throw new VenueRateLimitException(retryAt.Value);
+                        }, time, ct);
+                        fundingRead = read.Result;
+                        VenueFundingChecks.Validate(fundingRead, fundingRead.FromUtc, fundingRead.ToUtc);
+                        // A rate limit after some windows completed keeps them; the venue still waits.
+                        if (read.RetryAtUtc is { } retry)
+                            await store.DeferVenueAsync(capture.Account.VenueId, retry, time.GetUtcNow(), CancellationToken.None);
                     }
                     catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
                         ex is OperationCanceledException && !ct.IsCancellationRequested)
                     {
                         if (ex is VenueRateLimitException limited)
                             await store.DeferVenueAsync(capture.Account.VenueId, limited.RetryAtUtc, time.GetUtcNow(), CancellationToken.None);
-                        funding = new([], from, to, false,
-                            "Funding history could not be refreshed. Retained payments are unchanged; missing funding is not zero.");
+                        // A failed read keeps the last window, so the next Refresh starts from half of it, not the lookback.
+                        fundingRead = new([], from, to, false,
+                            "Funding history could not be refreshed. Retained payments are unchanged; missing funding is not zero.")
+                        { WindowFromUtc = cursor?.LastAttemptFromUtc, WindowToUtc = cursor?.LastAttemptToUtc };
                     }
-                    sync = sync with { Funding = funding };
+                    sync = sync with { Funding = fundingRead };
                 }
                 // Preserve the public Refresh commit even if the later optional order read is cancelled.
                 // This is a short fenced transaction; the lease, not a DB lock, spans the order read.

@@ -137,6 +137,8 @@ public interface IMonitorStore
     Task<IReadOnlyList<(MonitorAccount Row, string VenueId)>> SummaryAsync(IReadOnlyCollection<string> venueIds,
         DateTimeOffset now, CancellationToken ct);
     Task<MonitorAccount?> FindAsync(Guid accountId, CancellationToken ct);
+    /// <summary>The account's stored funding coverage and last attempt, read before a Refresh's funding windows; null when none.</summary>
+    Task<FundingCursor?> FundingCursorAsync(Guid accountId, CancellationToken ct);
     Task<DateTimeOffset?> VenueRetryAtAsync(string venueId, CancellationToken ct);
     Task<IReadOnlyDictionary<string, DateTimeOffset>> VenueRetriesAsync(CancellationToken ct);
     /// <summary>

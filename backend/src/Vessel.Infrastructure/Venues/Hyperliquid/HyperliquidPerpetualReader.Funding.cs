@@ -40,6 +40,7 @@ public sealed partial class HyperliquidPerpetualReader
             var readRows = 0;
             var excluded = false;
             var exhausted = false;
+            var budget = true; // Cleared when a non-advancing timestamp, not the page/row budget, stops the read.
 
             for (var page = 0; page < MaxFundingPages; page++)
             {
@@ -97,7 +98,7 @@ public sealed partial class HyperliquidPerpetualReader
                     break;
                 }
                 // Never skip a possibly truncated same-millisecond group by incrementing the cursor.
-                if (last == cursor) break;
+                if (last == cursor) { budget = false; break; }
                 cursor = last;
             }
             var complete = exhausted && !excluded;
@@ -108,7 +109,8 @@ public sealed partial class HyperliquidPerpetualReader
                 notice += " Incomplete funding: unrecognized or non-primary contracts were excluded.";
             return new VenueFundingReadResult(payments.Values.OrderBy(p => p.OccurredAtUtc)
                 .ThenBy(p => p.SourceId, StringComparer.Ordinal).ToList(), fromUtc, toUtc, complete, notice,
-                PnlBasis: FundingFacts.Unknown); // Official docs do not establish the API closedPnl funding basis.
+                PnlBasis: FundingFacts.Unknown) // Official docs do not establish the API closedPnl funding basis.
+            { Truncated = !exhausted && budget && !excluded };
         }, cancellationToken);
     }
 }

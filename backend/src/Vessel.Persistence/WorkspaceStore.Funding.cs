@@ -49,8 +49,10 @@ public sealed partial class WorkspaceStore
             state.CoveredFromUtc = overlaps && state.CoveredFromUtc < result.FromUtc ? state.CoveredFromUtc : result.FromUtc.ToUniversalTime();
             state.CoveredToUtc = overlaps && state.CoveredToUtc > result.ToUtc ? state.CoveredToUtc : result.ToUtc.ToUniversalTime();
         }
-        state.LastAttemptFromUtc = result.FromUtc.ToUniversalTime();
-        state.LastAttemptToUtc = result.ToUtc.ToUniversalTime();
+        // A windowed read records its widest window, so the next Refresh does not relearn the venue's budget.
+        var window = result is { WindowFromUtc: { } wf, WindowToUtc: { } wt } && wf <= wt ? (From: wf, To: wt) : (From: result.FromUtc, To: result.ToUtc);
+        state.LastAttemptFromUtc = window.From.ToUniversalTime();
+        state.LastAttemptToUtc = window.To.ToUniversalTime();
         state.LastReadComplete = result.Complete;
         state.PnlBasis = result.PnlBasis;
         state.Notice = result.Notice;

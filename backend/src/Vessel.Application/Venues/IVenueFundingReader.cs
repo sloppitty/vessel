@@ -20,7 +20,21 @@ public sealed record VenueFundingPayment(string SourceId, string ContractId, str
 
 /// <summary>Complete means every payment in this exact window was read, including a verified empty result.</summary>
 public sealed record VenueFundingReadResult(IReadOnlyList<VenueFundingPayment> Payments,
-    DateTimeOffset FromUtc, DateTimeOffset ToUtc, bool Complete, string Notice, string PnlBasis = FundingFacts.Unknown);
+    DateTimeOffset FromUtc, DateTimeOffset ToUtc, bool Complete, string Notice, string PnlBasis = FundingFacts.Unknown)
+{
+    /// <summary>
+    /// Incomplete only because the reader's page or row budget ran out before the window was exhausted, so a
+    /// narrower window may complete (Phase 2, item 9a). False for every other kind of incompleteness.
+    /// </summary>
+    public bool Truncated { get; init; }
+    /// <summary>
+    /// Set by the windowed read (Phase 2, item 9a): the window whose length the next Refresh starts from, kept as the
+    /// account's last attempt. It is the widest window the read completed or, when none completed, the last one tried.
+    /// Null records the result's own span.
+    /// </summary>
+    public DateTimeOffset? WindowFromUtc { get; init; }
+    public DateTimeOffset? WindowToUtc { get; init; }
+}
 
 public static class VenueFundingChecks
 {
