@@ -395,10 +395,9 @@ public sealed class HyperliquidMarketStreamTests
     }
 
     [Theory]
-    [InlineData("xyz:BTC")]
     [InlineData("@107")]
     [InlineData("PURR/USDC")]
-    public async Task Rejects_non_primary_contracts(string coin)
+    public async Task Rejects_spot_contracts(string coin)
     {
         var (stream, sockets, _) = Create();
         await using var _stream = stream;

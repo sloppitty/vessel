@@ -151,7 +151,7 @@ public sealed partial class HyperliquidOrderTests
     [Theory]
     [InlineData("UNKNOWN", false)]
     [InlineData("@123", true)]
-    [InlineData("xyz:BTC", true)]
+    [InlineData("xyz:BTC", false)]
     public async Task Coverage_known_out_of_scope_orders_are_distinct_from_unrecognized_primary_orders(string coin, bool complete)
     {
         var result = await ReadCoverageOrders($"[{Order(1)},{Order(2, coin: coin)}]");

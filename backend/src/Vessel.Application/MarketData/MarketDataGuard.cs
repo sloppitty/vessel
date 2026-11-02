@@ -17,7 +17,8 @@ internal static partial class MarketDataGuard
         ["1w"] = 7 * 86_400_000L, ["1M"] = 31 * 86_400_000L
     };
 
-    [GeneratedRegex("^[A-Za-z0-9_-]{1,32}$")]
+    // A native key may carry one source prefix, as in xyz:GOLD.
+    [GeneratedRegex(@"^(?=.{1,32}$)[A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?$")]
     private static partial Regex InstrumentPattern();
 
     public static async Task<MarketDataAccount> AccountAsync(IWorkspaceStore store, Guid accountId, CancellationToken ct)
@@ -34,7 +35,7 @@ internal static partial class MarketDataGuard
     public static string Instrument(string? instrument) =>
         instrument is not null && InstrumentPattern().IsMatch(instrument)
             ? instrument
-            : throw new ProblemException(400, "Instrument must be 1 to 32 letters, digits, hyphens or underscores.");
+            : throw new ProblemException(400, "Instrument must be 1 to 32 letters, digits, hyphens or underscores, with at most one colon.");
 
     /// <summary>An interval the venue serves natively. Others are refused rather than approximated.</summary>
     public static (string Interval, long Step) Interval(string? interval, VenueDescriptor? venue)

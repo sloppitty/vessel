@@ -112,7 +112,7 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             var category = Json.TextOrEmpty(Json.Property(item, "category"), 32);
             markets.Add(new(id, key, active, new VenueInstrument(key, Decimals(Json.Positive(Json.Property(config, "step_size"))),
                 (int)leverage, QuoteAsset, Json.Positive(Json.Property(config, "step_price")),
-                category.Length == 0 ? null : category, id)));
+                MarketCategories.Normalize(category), id)));
         }
         return new(markets, outOfScope);
     }

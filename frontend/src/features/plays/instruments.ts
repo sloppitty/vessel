@@ -3,8 +3,9 @@ import type { BrokerAccount, InstrumentCatalog, VenueInstrument, WorkspaceApi } 
 import { errorMessage } from '@/api/errors'
 import { useVenues } from '@/api/venues'
 
-/** Trading pair label, e.g. BTC/USDC. */
-export const pairLabel = (instrument: Pick<VenueInstrument, 'contractId' | 'quoteAsset'>) => `${instrument.contractId}/${instrument.quoteAsset}`
+/** Trading pair label, e.g. BTC/USDC, or GOLD/USDC for a contract the venue labels. */
+export const pairLabel = (instrument: Pick<VenueInstrument, 'contractId' | 'quoteAsset' | 'displayName'>) =>
+  `${instrument.displayName ?? instrument.contractId}/${instrument.quoteAsset}`
 
 /** The base and quote of a displayed instrument: a venue contract gets the venue's quote asset, a manual label stays whole. */
 export function instrumentParts(quote: string | null, instrument: string, source: 'venue' | 'manual') {
@@ -61,19 +62,23 @@ export function useInstrumentCatalog(api: WorkspaceApi, account: BrokerAccount |
   }
 }
 
-const maxSuggestions = 60
+/** Enough for any one category or source; the columns narrow the rest. */
+const maxSuggestions = 500
 
 /**
- * Contracts whose name or pair contains the query: exact matches, then names that start with it, then
+ * Contracts matching the query by name, pair, venue keyword or source: exact matches, then names that start with it, then
  * the rest. Ties keep the venue's catalogue order, which lists the major contracts first.
  */
 export function searchInstruments(instruments: readonly VenueInstrument[], query: string) {
   const text = query.trim().toUpperCase().replace(/\s+/g, '')
   if (!text) return instruments.slice(0, maxSuggestions)
   const scored = instruments.flatMap(instrument => {
-    const name = instrument.contractId.toUpperCase()
+    const names = [instrument.contractId, instrument.displayName ?? ''].map(name => name.toUpperCase())
     const pair = pairLabel(instrument).toUpperCase()
-    const score = name === text || pair === text ? 0 : name.startsWith(text) || pair.startsWith(text) ? 1 : pair.includes(text) ? 2 : -1
+    const terms = [...(instrument.keywords ?? []), instrument.source ?? '', instrument.sourceName ?? ''].map(term => term.toUpperCase().replace(/\s+/g, ''))
+    const score = names.includes(text) || pair === text ? 0
+      : names.some(name => name.startsWith(text)) || pair.startsWith(text) || terms.includes(text) ? 1
+        : pair.includes(text) || names.some(name => name.includes(text)) || terms.some(term => term.includes(text)) ? 2 : -1
     return score < 0 ? [] : [{ instrument, score }]
   })
   return scored.sort((a, b) => a.score - b.score)

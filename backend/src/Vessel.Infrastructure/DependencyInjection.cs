@@ -35,7 +35,7 @@ public static class DependencyInjection
         {
             client.BaseAddress = Hosts(sp).BaseUri(nameof(VenueHostOptions.Hyperliquid));
             client.Timeout = TimeSpan.FromSeconds(20);
-        }, (sp, client) => ActivatorUtilities.CreateInstance<HyperliquidPerpetualReader>(sp, client));
+        }, (sp, client) => ActivatorUtilities.CreateInstance<HyperliquidPerpetualReader>(sp, client, true));
         // RISEx: public reads by address, no credential. The API's firewall rejects some default user agents.
         services.AddSingleton<RisexCatalogueCache>();
         services.AddVenueModule(RisexReader.Descriptor, (sp, client) =>

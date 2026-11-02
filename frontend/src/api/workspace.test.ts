@@ -291,7 +291,7 @@ describe('Candle requests', () => {
       expect.objectContaining({ credentials: 'same-origin', referrerPolicy: 'same-origin', headers: { 'X-Vessel-User': credentialsFixture.userId, Accept: 'application/json' } }))
   })
   it.each([
-    { instrument: 'xyz:BTC', interval: '1h' as const },
+    { instrument: 'xyz:a:BTC', interval: '1h' as const },
     { instrument: 'BTC', interval: '2m' as unknown as '1h' },
     { instrument: 'BTC', interval: '1h' as const, endTime: -1 },
   ])('rejects invalid queries before sending them', async query => {
@@ -390,7 +390,7 @@ describe('Market stream', () => {
 
   it('rejects invalid queries before connecting', async () => {
     vi.stubGlobal('fetch', vi.fn())
-    await expect(createWorkspaceApi(credentialsFixture).marketStream(accountFixture.id, { instrument: 'xyz:BTC', interval: '1h' }, new AbortController().signal, vi.fn()))
+    await expect(createWorkspaceApi(credentialsFixture).marketStream(accountFixture.id, { instrument: 'xyz:a:BTC', interval: '1h' }, new AbortController().signal, vi.fn()))
       .rejects.toMatchObject({ kind: 'invalid-response' })
     expect(fetch).not.toHaveBeenCalled()
   })

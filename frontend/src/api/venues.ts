@@ -2,7 +2,7 @@ import { createContext, createElement, useContext, useMemo, type ReactNode } fro
 import { manualVenueId, isTradeUrlTemplate, type VenueCapabilities, type VenueInfo } from './system'
 import { isVenueLogoKey, type VenueLogoKey } from './venue-logos'
 
-const instrumentPattern = /^[A-Za-z0-9_-]{1,32}$/
+const instrumentPattern = /^(?=.{1,32}$)[A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?$/
 
 /** Lookups over the venues the API reported. Unknown venue IDs fall back to the ID and no capabilities. */
 export class Venues {

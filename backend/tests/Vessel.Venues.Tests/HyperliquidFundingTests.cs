@@ -207,7 +207,6 @@ public sealed class HyperliquidFundingTests
 
     [Theory]
     [InlineData("hash", "\"private-invalid-hash\"")]
-    [InlineData("hash", "\"0x0000000000000000000000000000000000000000000000000000000000000000\"")]
     [InlineData("hash", "\"0xgggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg\"")]
     [InlineData("time", "-1")]
     [InlineData("time", "1")]

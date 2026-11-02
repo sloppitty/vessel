@@ -4,6 +4,13 @@
 
 ### Added
 
+- Hyperliquid builder markets, such as gold (`xyz:GOLD`), stocks and indices, can be planned,
+  charted and tracked, including their positions, orders, fills and funding. USDC-margined
+  builder DEXes only; balances stay the primary DEX's. Settings has a Market sources section to
+  hide a source from the selector; Plays on its markets stay. Apply the `MarketSources`
+  migration.
+- One instrument selector for every venue, with Category, Source and Instrument columns that
+  appear when a venue has them, and search by the venue's keywords (`xau` finds gold).
 - `scripts/benchmark.py` times Activity, Review, the Plays list, Overview, open risk and search
   over a synthetic multi-year dataset in throwaway containers; it never runs in CI.
 - Several Plays closed by one exit fill, or a flip fill that closes one Play and opens another,

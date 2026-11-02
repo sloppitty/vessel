@@ -10,7 +10,7 @@ October 5, 2026, slice S3 of the RISEx-first plan ([risex-integration.md](risex-
 - **`VenueContractId`** is the venue's own identifier when it differs, such as RISEx's numeric `market_id`. Imported fills and orders store it beside the key (nullable column on both tables, migration `VenueContractIds`). Hyperliquid leaves it null because its coin name is the key.
 - **`PriceStep`** is the instrument's tick when the venue has one.
 - **`MaintenanceMarginFraction`** (October 7, 2026) is the maintenance margin as a fraction of notional when the venue states it. The Hyperliquid adapter reports its rule, half the initial margin at the contract's maximum leverage (0.0125 at 40×). RISEx leaves it null until R1.8 confirms the unit of `maintenance_margin_factor`. The frontend's liquidation estimate (`estimatedLiquidation`) uses it, and the leverage suggestion and stop warnings use that estimate. Without it the estimate assumes the same half-of-initial-margin rule and stays labelled as an estimate.
-- **`Category`** labels non-crypto markets (`stocks`, `commodity`, `index_etf`). The instrument picker shows a tag for them (decision: include every RISEx category, tagged).
+- **`Category`** is one normalized set for all venues, and `Source`, `SourceName`, `DisplayName` and `Keywords` describe where a market is listed and how to find it (November 2, 2026; see [market-sources.md](market-sources.md)).
 
 Deferred to the Lighter phase: the multiplier part of the canonical key and the Hyperliquid `k…` → `1000…` data migration, since RISEx has no multiplier contracts.
 

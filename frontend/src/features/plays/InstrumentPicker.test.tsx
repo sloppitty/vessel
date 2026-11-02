@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import { act, screen, waitFor } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { createWorkspaceApi, type BrokerAccount, type InstrumentCatalog, type WorkspaceApi } from '@/api/workspace'
+import { createWorkspaceApi, type BrokerAccount, type InstrumentCatalog, type VenueInstrument, type WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import { accountFixture, instrumentCatalogFixture } from '@/test/workspace-fixture'
 import { InstrumentPicker } from './InstrumentPicker'
+import { defaultPlayTitle } from './default-title'
+import { assetName } from './instruments-cascade'
 import { instrumentLabel, searchInstruments, useInstrumentCatalog } from './instruments'
 import { credentialsFixture } from '@/test/identity-fixture'
 
@@ -90,6 +92,101 @@ describe('Venue instrument picker', () => {
     expect(screen.getByText('No perpetual matches “xyz”.')).toBeInTheDocument()
     await user.click(document.body)
     expect(field()).toHaveValue('')
+  })
+  describe('cascade', () => {
+    const market = (contractId: string, extra: Partial<VenueInstrument>): VenueInstrument => ({ contractId, quantityDecimals: 2, maxLeverage: 20, quoteAsset: 'USDC', ...extra })
+    const builders: InstrumentCatalog = { ...instrumentCatalogFixture, instruments: [
+      market('BTC', { category: 'crypto' }), market('ETH', { category: 'crypto' }),
+      market('xyz:GOLD', { category: 'commodities', source: 'xyz', sourceName: 'XYZ', displayName: 'GOLD', keywords: ['xau'] }),
+      market('xyz:NVDA', { category: 'stocks', source: 'xyz', sourceName: 'XYZ', displayName: 'NVDA' }),
+      market('io:NVDA', { category: 'stocks', source: 'io', sourceName: 'EntropyIO', displayName: 'NVDA' }),
+    ] }
+    const option = (name: RegExp) => screen.getByRole('option', { name })
+    const names = () => screen.getAllByRole('option').map(item => item.textContent)
+    const column = (name: string) => within(screen.getByRole('group', { name }))
+
+    it('narrows by category and source, with counts of what each choice shows', async () => {
+      const client = api(), user = userEvent.setup(), onChange = vi.fn()
+      client.instruments.mockResolvedValue(builders)
+      render(<Harness client={client} onChange={onChange} />)
+      await waitFor(() => expect(field()).toBeEnabled())
+      await user.click(field())
+      await user.click(column('Category').getByRole('button', { name: 'Stocks 2' }))
+      expect(names()).toEqual(['NVDA/USDCXYZ20×', 'NVDA/USDCIO20×'])
+      expect(column('Source').getByRole('button', { name: 'XYZ 1' })).toBeInTheDocument()
+      expect(column('Source').queryByRole('button', { name: /Hyperliquid/ })).not.toBeInTheDocument()
+      await user.click(column('Source').getByRole('button', { name: 'EntropyIO 1' }))
+      expect(names()).toEqual(['NVDA/USDCIO20×'])
+      await user.click(option(/IO/))
+      expect(onChange).toHaveBeenLastCalledWith('io:NVDA', 'venue')
+      expect(field()).toHaveValue('NVDA/USDC')
+    })
+    it('finds a market by the keyword the venue gives it', async () => {
+      const client = api(), user = userEvent.setup(), onChange = vi.fn()
+      client.instruments.mockResolvedValue(builders)
+      render(<Harness client={client} onChange={onChange} />)
+      await waitFor(() => expect(field()).toBeEnabled())
+      await user.type(field(), 'xau{Enter}')
+      expect(onChange).toHaveBeenLastCalledWith('xyz:GOLD', 'venue')
+    })
+    it('moves through categories with the side keys while the search is empty', async () => {
+      const client = api(), user = userEvent.setup()
+      client.instruments.mockResolvedValue(builders)
+      render(<Harness client={client} />)
+      await waitFor(() => expect(field()).toBeEnabled())
+      await user.click(field())
+      await user.keyboard('{ArrowRight}')
+      expect(column('Category').getByRole('button', { name: 'Crypto 2' })).toHaveAttribute('aria-pressed', 'true')
+      expect(names()).toEqual(['BTC/USDC20×', 'ETH/USDC20×'])
+      await user.keyboard('{ArrowLeft}')
+      expect(screen.getAllByRole('option')).toHaveLength(5)
+    })
+    it('leaves out columns a venue has nothing to narrow with', async () => {
+      const client = api(), user = userEvent.setup()
+      render(<Harness client={client} />)
+      await waitFor(() => expect(field()).toBeEnabled())
+      await user.click(field())
+      expect(screen.queryByRole('group', { name: 'Category' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('group', { name: 'Source' })).not.toBeInTheDocument()
+      expect(screen.getAllByRole('option')).toHaveLength(2)
+    })
+    it('counts a market with no label as Other beside labelled ones', async () => {
+      const client = api(), user = userEvent.setup()
+      client.instruments.mockResolvedValue({ ...builders, instruments: [market('RISEX', { category: 'crypto' }), market('MYSTERY', {})] })
+      render(<Harness client={client} />)
+      await waitFor(() => expect(field()).toBeEnabled())
+      await user.click(field())
+      expect(column('Category').getByRole('button', { name: 'Other 1' })).toBeInTheDocument()
+      expect(screen.queryByRole('group', { name: 'Source' })).not.toBeInTheDocument()
+    })
+    it('tags a market the venue states is isolated-only', async () => {
+      const client = api(), user = userEvent.setup()
+      client.instruments.mockResolvedValue({ ...builders, instruments: [market('xyz:AMD', { displayName: 'AMD', source: 'xyz', sourceName: 'XYZ', isolatedOnly: true }), market('BTC', {})] })
+      render(<Harness client={client} />)
+      await waitFor(() => expect(field()).toBeEnabled())
+      await user.click(field())
+      expect(names()).toEqual(['AMD/USDCXYZIsolated20×', 'BTC/USDC20×'])
+    })
+    it('hides a disabled source from the selector but keeps a saved market on it', async () => {
+      const client = api(), user = userEvent.setup()
+      client.instruments.mockResolvedValue({ ...builders, disabledSources: ['xyz'] })
+      render(<Fixed client={client} value="xyz:GOLD" />)
+      await waitFor(() => expect(field()).toBeEnabled())
+      expect(field()).toHaveValue('GOLD/USDC')
+      expect(screen.getByText(/XYZ is off in Settings/)).toBeInTheDocument()
+      expect(screen.queryByText(/not in the current catalogue/)).not.toBeInTheDocument()
+      await user.click(field())
+      expect(names()).toEqual(['BTC/USDC20×', 'ETH/USDC20×', 'NVDA/USDCIO20×'])
+    })
+  })
+  it('names a builder contract by its asset, leaving other labels alone', () => {
+    expect(assetName('xyz:GOLD')).toBe('GOLD')
+    expect(assetName('BTC')).toBe('BTC')
+    expect(assetName('1000PEPE')).toBe('1000PEPE')
+    expect(assetName('NOT A:KEY')).toBe('NOT A:KEY')
+    const now = new Date(2026, 10, 2)
+    expect(defaultPlayTitle({ instrument: 'xyz:GOLD', direction: 'long' }, now)).toBe('GOLD Long · 2 Nov 2026')
+    expect(defaultPlayTitle({ instrument: 'desk:ES', instrumentSource: 'manual', direction: 'long' }, now)).toBe('desk:ES Long · 2 Nov 2026')
   })
   it('labels venue contracts as pairs in lists and keeps manual labels as entered', () => {
     expect(instrumentLabel('USDC', 'BTC', 'venue')).toBe('BTC/USDC')

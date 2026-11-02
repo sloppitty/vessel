@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Instrument selector options</title>
+<!-- Disposable comparison, November 2, 2026. Nothing here is implemented in the app. Instruments, categories and market
+     figures are a static snapshot of Hyperliquid's public /info API embedded in this file; the page makes no venue
+     requests. Graphite and Daylight values are copied from frontend/src/features/settings/themes.ts. Layout idea: every
+     option opens from the same instrument field in a simplified Play page, so only the selector differs. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+:root {
+  color-scheme: dark;
+  --background: #0f1114; --foreground: #e9edf2; --card: #171a1f; --secondary: #1e2229; --accent: #242932;
+  --field: #111419; --muted-foreground: #abb3c0; --border: #394350; --primary: #c5cfdd; --primary-foreground: #11161d;
+  --ring: #9ab5f2; --positive: #a9d6b6; --negative: #f2b3ac; --warning: #edd49e; --shadow: rgb(0 0 0 / .55);
+  --radius: 7px; --font: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+:root[data-skin="daylight"] {
+  color-scheme: light;
+  --background: #edf2f8; --foreground: #0f1b2d; --card: #fbfdff; --secondary: #e4ebf5; --accent: #d7e1ef;
+  --field: #ffffff; --muted-foreground: #46566c; --border: #b9c7d9; --primary: #2353b0; --primary-foreground: #ffffff;
+  --ring: #2353b0; --positive: #13774a; --negative: #b3262f; --warning: #7f5200; --shadow: rgb(15 27 45 / .22);
+  --radius: 8px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--background); }
+body { color: var(--foreground); font: 400 14px/1.5 var(--font); -webkit-font-smoothing: antialiased; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.num { font-variant-numeric: tabular-nums; }
+.up { color: var(--positive); } .down { color: var(--negative); } .dim { color: var(--muted-foreground); }
+
+/* Comparison bar */
+.bar { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); position: relative; z-index: 60; }
+.bar h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.opts { display: flex; gap: 4px; flex-wrap: wrap; }
+.opts button { display: flex; gap: 7px; align-items: baseline; padding: 6px 11px; border: 1px solid transparent; border-radius: var(--radius); background: none; color: var(--muted-foreground); font-size: 13px; font-weight: 500; }
+.opts button b { font-size: 11px; font-weight: 600; opacity: .75; }
+.opts button:hover { background: var(--secondary); color: var(--foreground); }
+.opts button[aria-selected="true"] { background: var(--accent); border-color: var(--border); color: var(--foreground); }
+.tools { margin-left: auto; display: flex; gap: 8px; align-items: center; position: relative; }
+.tool { padding: 6px 11px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--secondary); font-size: 13px; font-weight: 500; }
+.tool:hover { background: var(--accent); }
+.sources { position: absolute; top: calc(100% + 8px); right: 0; width: 320px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); box-shadow: 0 18px 44px var(--shadow); }
+.sources h2 { margin: 0 0 2px; font-size: 13px; font-weight: 600; }
+.sources p { margin: 0 0 10px; font-size: 12px; color: var(--muted-foreground); }
+.sources label { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: center; padding: 5px 0; font-size: 13px; cursor: pointer; }
+.sources label small { color: var(--muted-foreground); font-size: 12px; }
+.sources label.fixed { cursor: default; }
+
+/* Simplified Play page */
+.stage { position: relative; display: grid; grid-template-columns: 200px minmax(0, 1fr); min-height: 860px; overflow: hidden; }
+.side { border-right: 1px solid var(--border); padding: 20px 14px; display: grid; align-content: start; gap: 4px; background: var(--card); font-size: 13px; color: var(--muted-foreground); }
+.side strong { font-size: 16px; color: var(--foreground); padding: 0 8px 14px; font-weight: 700; letter-spacing: -.02em; }
+.side span { padding: 6px 8px; border-radius: var(--radius); }
+.side .on { background: var(--accent); color: var(--foreground); }
+.page { padding: 22px 26px; display: grid; gap: 14px; align-content: start; min-width: 0; }
+.page h2 { margin: 0; font-size: 26px; font-weight: 650; letter-spacing: -.03em; }
+.ctx { position: relative; border: 1px solid var(--border); border-radius: calc(var(--radius) * 1.8); background: var(--card); padding: 16px 20px; display: grid; gap: 14px; }
+.ctx-row { display: grid; grid-template-columns: 1fr 1.3fr 1.3fr 1fr; gap: 22px; }
+.fld { display: grid; gap: 6px; min-width: 0; align-content: start; }
+.fld > span { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-foreground); }
+.fake { padding: 8px 0; font-size: 14px; font-weight: 500; }
+.dirs { display: flex; gap: 6px; }
+.dirs i { font-style: normal; padding: 6px 12px; border-radius: var(--radius); border: 1px solid var(--border); font-size: 13px; font-weight: 600; }
+.dirs i:first-child { color: var(--positive); }
+.dirs i:last-child { color: var(--negative); border-color: transparent; }
+.trigger { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 38px; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--field); text-align: left; font-weight: 600; }
+.trigger:hover { border-color: var(--ring); }
+.trigger[aria-expanded="true"] { border-color: var(--ring); }
+.trigger svg { margin-left: auto; flex: none; color: var(--muted-foreground); }
+.note { display: block; font-size: 12px; color: var(--warning); line-height: 1.4; }
+.badge { display: inline-block; padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px; font-weight: 600; line-height: 16px; letter-spacing: .02em; color: var(--muted-foreground); white-space: nowrap; }
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.tiles div { display: grid; gap: 7px; padding: 4px 12px; font-size: 12px; color: var(--muted-foreground); border-right: 1px solid var(--border); }
+.tiles div:last-child { border: 0; }
+.tiles i { display: block; height: 16px; width: 64%; border-radius: 4px; background: var(--secondary); }
+.work { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 14px; }
+.box { border: 1px solid var(--border); border-radius: calc(var(--radius) * 1.8); background: var(--card); }
+.chart { padding: 14px; min-height: 420px; display: grid; gap: 8px; align-content: start; }
+.chart svg { width: 100%; height: 370px; display: block; }
+.chart header { font-size: 13px; color: var(--muted-foreground); display: flex; gap: 14px; flex-wrap: wrap; }
+.chart header b { color: var(--foreground); font-weight: 600; }
+.editor { padding: 16px; display: grid; gap: 12px; align-content: start; }
+.editor i { display: block; height: 34px; border-radius: var(--radius); background: var(--secondary); }
+.editor i.s { height: 12px; width: 40%; }
+
+/* Shared selector pieces */
+.search { width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--field); outline-offset: 0; }
+.search::placeholder { color: var(--muted-foreground); }
+.scrim { position: absolute; inset: 0; z-index: 30; background: color-mix(in srgb, var(--background) 62%, transparent); }
+.panel { position: absolute; z-index: 40; border: 1px solid var(--border); border-radius: calc(var(--radius) * 1.5); background: var(--card); box-shadow: 0 22px 60px var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.chip { padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: none; font-size: 12px; font-weight: 500; color: var(--muted-foreground); white-space: nowrap; }
+.chip:hover { color: var(--foreground); background: var(--secondary); }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--foreground); border-color: var(--ring); }
+.chip small { font-size: 11px; opacity: .78; margin-left: 3px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pick { cursor: pointer; }
+.pick.hl { background: var(--accent); }
+.pick.cur .sym { color: var(--ring); }
+.sym { font-weight: 600; }
+.empty { padding: 24px 14px; color: var(--muted-foreground); font-size: 13px; text-align: center; }
+kbd { padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font: 500 11px/16px var(--font); color: var(--muted-foreground); }
+.hints { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 12px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted-foreground); }
+
+/* 1 Cascade */
+.cascade { left: var(--anchor, 240px); top: 170px; width: min(760px, calc(100% - var(--anchor, 240px) - 24px)); height: 470px; }
+.cascade .top { padding: 10px; border-bottom: 1px solid var(--border); }
+.cols { flex: 1; min-height: 0; display: grid; grid-template-columns: 170px 170px minmax(0, 1fr); }
+.col { overflow: auto; border-right: 1px solid var(--border); padding: 6px; display: grid; align-content: start; gap: 1px; }
+.col:last-child { border: 0; }
+.col h3 { margin: 4px 8px 6px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-foreground); }
+.step { display: flex; justify-content: space-between; gap: 8px; padding: 6px 8px; border: 0; border-radius: var(--radius); background: none; text-align: left; font-size: 13px; color: var(--muted-foreground); }
+.step:hover { background: var(--secondary); color: var(--foreground); }
+.step[aria-pressed="true"] { background: var(--accent); color: var(--foreground); font-weight: 600; }
+.step small { font-size: 12px; font-variant-numeric: tabular-nums; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 8px; border-radius: var(--radius); font-size: 13px; }
+.row > span { min-width: 0; display: flex; gap: 6px; align-items: center; }
+.row small { font-size: 12px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+
+/* 2 Palette */
+.palette { left: 50%; top: 60px; transform: translateX(-50%); width: min(860px, calc(100% - 32px)); height: 560px; }
+.palette .top { padding: 12px 14px 10px; border-bottom: 1px solid var(--border); display: grid; gap: 10px; }
+.palette .search { border: 0; background: none; padding: 4px 2px; font-size: 19px; font-weight: 500; letter-spacing: -.01em; outline: none; }
+.split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 280px; }
+.res { overflow: auto; padding: 6px; }
+.res h3 { margin: 10px 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-foreground); }
+.res h3:first-child { margin-top: 4px; }
+.peek { border-left: 1px solid var(--border); padding: 18px; display: grid; gap: 12px; align-content: start; background: var(--secondary); overflow: auto; }
+.peek strong { font-size: 24px; font-weight: 650; letter-spacing: -.02em; line-height: 1.1; }
+.peek dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px; }
+.peek dt { color: var(--muted-foreground); }
+.peek dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap: anywhere; }
+
+/* 3 Market map */
+.mapd { inset: 16px; }
+.mapd .top { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.mapd .search { width: 220px; }
+.legend { margin-left: auto; font-size: 12px; color: var(--muted-foreground); display: flex; gap: 6px; align-items: center; }
+.legend i { width: 14px; height: 10px; border-radius: 2px; display: inline-block; }
+.treemap { position: relative; flex: 1; min-height: 0; margin: 8px; }
+.block { position: absolute; }
+.block > button { position: absolute; left: 0; right: 0; top: 0; height: 22px; display: flex; gap: 6px; align-items: center; padding: 0 4px; border: 0; background: none; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); }
+.block > button:hover { color: var(--foreground); }
+.tile { position: absolute; display: flex; flex-direction: column; justify-content: center; align-items: center; overflow: hidden; border: 1px solid var(--card); border-radius: 3px; padding: 2px; color: var(--foreground); text-align: center; line-height: 1.2; }
+.tile:hover, .tile.hl { outline: 2px solid var(--ring); outline-offset: -2px; z-index: 2; }
+.tile.cur { box-shadow: inset 0 0 0 2px var(--foreground); }
+.tile .sym { font-size: var(--fs, 12px); font-weight: 650; }
+.tile small { font-size: 11px; font-variant-numeric: tabular-nums; }
+.tile.more { background: var(--secondary); color: var(--muted-foreground); font-size: 12px; font-weight: 500; }
+.tile.fade { opacity: .22; }
+
+/* 4 Screener */
+.drawer { top: 0; right: 0; bottom: 0; width: min(820px, 100%); border-radius: 0; border-width: 0 0 0 1px; }
+.drawer .top { padding: 14px; display: grid; gap: 10px; border-bottom: 1px solid var(--border); }
+.drawer .top h3 { margin: 0; font-size: 15px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+.x { border: 1px solid var(--border); background: none; border-radius: var(--radius); padding: 2px 9px; font-size: 12px; color: var(--muted-foreground); }
+.scroll { flex: 1; min-height: 0; overflow: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { position: sticky; top: 0; z-index: 2; background: var(--card); padding: 0; border-bottom: 1px solid var(--border); text-align: right; }
+th:first-child, td:first-child { text-align: left; padding-left: 14px; }
+th button { width: 100%; padding: 8px 10px; border: 0; background: none; text-align: inherit; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); }
+th[aria-sort] button { color: var(--foreground); }
+th:first-child button { padding-left: 0; }
+td { padding: 7px 10px; text-align: right; border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.l, th.l { text-align: left; }
+tbody tr:hover { background: var(--secondary); }
+
+/* 5 Shelf */
+.shelf { display: grid; gap: 12px; padding-top: 14px; border-top: 1px solid var(--border); }
+.shelf-head { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; justify-content: space-between; }
+.seg { display: flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.seg button { padding: 6px 12px; border: 0; border-right: 1px solid var(--border); background: none; font-size: 13px; font-weight: 500; color: var(--muted-foreground); }
+.seg button:last-child { border: 0; }
+.seg button:hover { color: var(--foreground); background: var(--secondary); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--foreground); font-weight: 600; }
+.seg small { font-size: 11px; opacity: .75; margin-left: 3px; }
+.recent { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted-foreground); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 6px; max-height: 300px; overflow: auto; padding: 1px; }
+.cardlet { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--field); display: grid; gap: 2px; font-size: 13px; }
+.cardlet:hover { border-color: var(--ring); }
+.cardlet.hl { border-color: var(--ring); background: var(--accent); }
+.cardlet div { display: flex; justify-content: space-between; gap: 6px; align-items: center; }
+.cardlet small { font-size: 12px; font-variant-numeric: tabular-nums; }
+.shelf-in { font-weight: 600; }
+
+/* Notes */
+.notes { padding: 20px 26px 30px; border-top: 1px solid var(--border); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; background: var(--card); }
+.notes h2 { grid-column: 1 / -1; margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.015em; }
+.notes h3 { margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-foreground); }
+.notes p { margin: 0; font-size: 13px; max-width: 46ch; }
+.source-line { grid-column: 1 / -1; font-size: 12px; color: var(--muted-foreground); }
+
+@media (max-width: 1080px) { .work { grid-template-columns: 1fr; } .editor { display: none; } }
+@media (max-width: 760px) {
+  .bar { padding: 10px 16px; } .tools { margin-left: 0; }
+  .opts { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; }
+  .opts button { white-space: nowrap; }
+  .sources { right: auto; left: 0; width: min(320px, calc(100vw - 32px)); }
+  .stage { grid-template-columns: minmax(0, 1fr); min-height: 780px; }
+  .side { display: none; }
+  .page { padding: 16px; }
+  .ctx-row { grid-template-columns: 1fr 1fr; gap: 14px; }
+  .tiles { grid-template-columns: repeat(2, 1fr); }
+  .tiles div:nth-child(2) { border: 0; }
+  .chart svg { height: 200px; } .chart { min-height: 0; }
+  .cascade, .palette, .mapd { inset: 0; width: 100%; height: 100%; transform: none; border-radius: 0; border-width: 0; }
+  .cols { display: flex; flex-direction: column; }
+  .col { flex: none; display: flex; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 6px 10px; gap: 4px; }
+  .col h3 { display: none; }
+  .col .step { flex: none; }
+  .col:last-child { flex: 1; display: grid; overflow: auto; border: 0; }
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .peek { display: none; }
+  .legend { display: none; }
+  .mapd .search { width: 100%; }
+  .col-hide { display: none; }
+  .notes { grid-template-columns: 1fr; padding: 16px; gap: 14px; }
+  .bar h1 { width: 100%; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .panel { animation: rise .12s ease-out; }
+  @keyframes rise { from { opacity: .4; } to { opacity: 1; } }
+}
+</style>
+</head>
+<body>
+<div class="bar">
+  <h1>Instrument selector options</h1>
+  <div class="opts" role="tablist" aria-label="Selector options" id="opts"></div>
+  <div class="tools">
+    <button class="tool" id="skin" type="button">Daylight</button>
+    <button class="tool" id="srcBtn" type="button" aria-expanded="false" aria-haspopup="dialog">Market sources</button>
+    <div class="sources" id="sources" role="dialog" aria-label="Market sources" hidden></div>
+  </div>
+</div>
+<div class="stage" id="stage">
+  <nav class="side" aria-hidden="true"><strong>vessel</strong><span>Overview</span><span class="on">Plays</span><span>Review</span><span>Portfolios</span><span>Accounts</span><span>Activity</span></nav>
+  <main class="page">
+    <h2>New play</h2>
+    <section class="ctx" id="ctx"></section>
+    <div class="tiles" aria-hidden="true"><div>Swing book balance<i></i></div><div>Wallet total<i></i></div><div>Available<i></i></div><div>Perps equity<i></i></div></div>
+    <div class="work">
+      <section class="box chart"><header id="chartHead"></header><svg id="chartSvg" viewBox="0 0 800 370" preserveAspectRatio="none" aria-hidden="true"></svg></section>
+      <aside class="box editor" aria-hidden="true"><i class="s"></i><i></i><i class="s"></i><i></i><i></i><i class="s"></i><i></i><i></i></aside>
+    </div>
+  </main>
+  <div id="layer"></div>
+</div>
+<section class="notes" id="notes"></section>
+<script id="snapshot" type="application/json">{"dexes":{"":"Hyperliquid","xyz":"XYZ","flx":"Felix Exchange","vntl":"Ventuals","hyna":"HyENA","km":"Markets by Kinetiq","abcd":"ABCDEx","cash":"dreamcash","para":"Paragon","mkts":"Markets By Kinetiq","io":"EntropyIO"},"instruments":[{"id":"BTC","dex":"","sym":"BTC","cat":"crypto","kw":[],"lev":40,"px":"78013.0","chg":0.11,"vol":1232803798,"iso":false},{"id":"ETH","dex":"","sym":"ETH","cat":"crypto","kw":[],"lev":25,"px":"2292.5","chg":1.08,"vol":427759372,"iso":false},{"id":"ATOM","dex":"","sym":"ATOM","cat":"crypto","kw":[],"lev":5,"px":"1.4625","chg":-0.11,"vol":527909,"iso":false},{"id":"DYDX","dex":"","sym":"DYDX","cat":"crypto","kw":[],"lev":5,"px":"0.1037","chg":-1.65,"vol":100074,"iso":false},{"id":"SOL","dex":"","sym":"SOL","cat":"crypto","kw":[],"lev":20,"px":"94.496","chg":-0.75,"vol":241358814,"iso":false},{"id":"AVAX","dex":"","sym":"AVAX","cat":"crypto","kw":[],"lev":10,"px":"8.614","chg":-1.44,"vol":5601664,"iso":false},{"id":"BNB","dex":"","sym":"BNB","cat":"crypto","kw":[],"lev":10,"px":"706.12","chg":-1.01,"vol":19291067,"iso":false},{"id":"APE","dex":"","sym":"APE","cat":"crypto","kw":[],"lev":5,"px":"0.11055","chg":-2.22,"vol":88712,"iso":false},{"id":"OP","dex":"","sym":"OP","cat":"crypto","kw":[],"lev":5,"px":"0.11422","chg":0.36,"vol":523866,"iso":false},{"id":"LTC","dex":"","sym":"LTC","cat":"crypto","kw":[],"lev":10,"px":"55.028","chg":-1.62,"vol":926455,"iso":false},{"id":"ARB","dex":"","sym":"ARB","cat":"crypto","kw":[],"lev":10,"px":"0.15959","chg":-2.39,"vol":3117064,"iso":false},{"id":"DOGE","dex":"","sym":"DOGE","cat":"crypto","kw":[],"lev":10,"px":"0.075685","chg":-0.16,"vol":7478552,"iso":false},{"id":"INJ","dex":"","sym":"INJ","cat":"crypto","kw":[],"lev":5,"px":"7.2122","chg":-0.16,"vol":1738873,"iso":false},{"id":"SUI","dex":"","sym":"SUI","cat":"crypto","kw":[],"lev":10,"px":"0.89027","chg":-1.22,"vol":6075218,"iso":false},{"id":"kPEPE","dex":"","sym":"kPEPE","cat":"crypto","kw":[],"lev":10,"px":"0.004874","chg":-0.83,"vol":21020896,"iso":false},{"id":"CRV","dex":"","sym":"CRV","cat":"crypto","kw":[],"lev":10,"px":"0.27206","chg":-4.31,"vol":4365331,"iso":false},{"id":"LDO","dex":"","sym":"LDO","cat":"crypto","kw":[],"lev":5,"px":"0.33643","chg":-0.39,"vol":1284282,"iso":false},{"id":"LINK","dex":"","sym":"LINK","cat":"crypto","kw":[],"lev":10,"px":"11.351","chg":-2.97,"vol":6487020,"iso":false},{"id":"STX","dex":"","sym":"STX","cat":"crypto","kw":[],"lev":5,"px":"0.31886","chg":-0.75,"vol":775918,"iso":false},{"id":"CFX","dex":"","sym":"CFX","cat":"crypto","kw":[],"lev":5,"px":"0.046443","chg":-0.36,"vol":100311,"iso":false},{"id":"GMX","dex":"","sym":"GMX","cat":"crypto","kw":[],"lev":3,"px":"8.0328","chg":-1.29,"vol":242187,"iso":false},{"id":"SNX","dex":"","sym":"SNX","cat":"crypto","kw":[],"lev":3,"px":"0.17931","chg":-2.12,"vol":80310,"iso":false},{"id":"XRP","dex":"","sym":"XRP","cat":"crypto","kw":[],"lev":20,"px":"1.254229","chg":0.03,"vol":25744418,"iso":false},{"id":"BCH","dex":"","sym":"BCH","cat":"crypto","kw":[],"lev":10,"px":"278.4","chg":-1.49,"vol":1706471,"iso":false},{"id":"APT","dex":"","sym":"APT","cat":"crypto","kw":[],"lev":10,"px":"0.6354","chg":-0.24,"vol":1471096,"iso":false},{"id":"AAVE","dex":"","sym":"AAVE","cat":"crypto","kw":[],"lev":10,"px":"131.98","chg":-4.08,"vol":15804455,"iso":false},{"id":"COMP","dex":"","sym":"COMP","cat":"crypto","kw":[],"lev":5,"px":"20.194","chg":-1.76,"vol":147502,"iso":false},{"id":"WLD","dex":"","sym":"WLD","cat":"crypto","kw":[],"lev":10,"px":"0.38731","chg":-2.48,"vol":6655246,"iso":false},{"id":"YGG","dex":"","sym":"YGG","cat":"crypto","kw":[],"lev":3,"px":"0.02341","chg":-2.5,"vol":62019,"iso":false},{"id":"TRX","dex":"","sym":"TRX","cat":"crypto","kw":[],"lev":10,"px":"0.31622","chg":1.78,"vol":1947443,"iso":false},{"id":"kSHIB","dex":"","sym":"kSHIB","cat":"crypto","kw":[],"lev":10,"px":"0.004651","chg":-0.83,"vol":267984,"iso":false},{"id":"UNI","dex":"","sym":"UNI","cat":"crypto","kw":[],"lev":10,"px":"7.2157","chg":-0.4,"vol":12726175,"iso":false},{"id":"SEI","dex":"","sym":"SEI","cat":"crypto","kw":[],"lev":5,"px":"0.047744","chg":-0.55,"vol":1031169,"iso":false},{"id":"RUNE","dex":"","sym":"RUNE","cat":"crypto","kw":[],"lev":5,"px":"0.53477","chg":-13.54,"vol":3321034,"iso":false},{"id":"ZRO","dex":"","sym":"ZRO","cat":"crypto","kw":[],"lev":5,"px":"1.76451","chg":-5.11,"vol":13437599,"iso":false},{"id":"DOT","dex":"","sym":"DOT","cat":"crypto","kw":[],"lev":10,"px":"0.94286","chg":-0.27,"vol":1325498,"iso":false},{"id":"BANANA","dex":"","sym":"BANANA","cat":"crypto","kw":[],"lev":3,"px":"3.154","chg":-1.7,"vol":33757,"iso":false},{"id":"TRB","dex":"","sym":"TRB","cat":"crypto","kw":[],"lev":3,"px":"16.465","chg":-1.62,"vol":121861,"iso":false},{"id":"BIGTIME","dex":"","sym":"BIGTIME","cat":"crypto","kw":[],"lev":3,"px":"0.006727","chg":-1.36,"vol":64525,"iso":false},{"id":"KAS","dex":"","sym":"KAS","cat":"crypto","kw":[],"lev":3,"px":"0.03262","chg":-1.79,"vol":100486,"iso":false},{"id":"BLUR","dex":"","sym":"BLUR","cat":"crypto","kw":[],"lev":3,"px":"0.007646","chg":-4.11,"vol":172165,"iso":false},{"id":"TIA","dex":"","sym":"TIA","cat":"crypto","kw":[],"lev":5,"px":"0.46144","chg":-4.07,"vol":1000202,"iso":false},{"id":"BSV","dex":"","sym":"BSV","cat":"crypto","kw":[],"lev":3,"px":"16.965","chg":-1.31,"vol":32862,"iso":false},{"id":"ADA","dex":"","sym":"ADA","cat":"crypto","kw":[],"lev":10,"px":"0.19166","chg":-0.81,"vol":3108351,"iso":false},{"id":"MINA","dex":"","sym":"MINA","cat":"crypto","kw":[],"lev":3,"px":"0.056692","chg":-3.81,"vol":227137,"iso":false},{"id":"POLYX","dex":"","sym":"POLYX","cat":"crypto","kw":[],"lev":3,"px":"0.032095","chg":-4.51,"vol":72473,"iso":false},{"id":"GAS","dex":"","sym":"GAS","cat":"crypto","kw":[],"lev":3,"px":"1.1661","chg":-2.92,"vol":44525,"iso":false},{"id":"PENDLE","dex":"","sym":"PENDLE","cat":"crypto","kw":[],"lev":5,"px":"1.8006","chg":-3.59,"vol":785884,"iso":false},{"id":"FET","dex":"","sym":"FET","cat":"crypto","kw":[],"lev":5,"px":"0.159376","chg":-1.89,"vol":408298,"iso":false},{"id":"NEAR","dex":"","sym":"NEAR","cat":"crypto","kw":[],"lev":10,"px":"4.1485","chg":-5.24,"vol":94946308,"iso":false},{"id":"MEME","dex":"","sym":"MEME","cat":"crypto","kw":[],"lev":3,"px":"0.000429","chg":-2.5,"vol":445293,"iso":false},{"id":"ORDI","dex":"","sym":"ORDI","cat":"crypto","kw":[],"lev":3,"px":"3.4577","chg":-1.62,"vol":84473,"iso":false},{"id":"NEO","dex":"","sym":"NEO","cat":"crypto","kw":[],"lev":5,"px":"1.9603","chg":-1.16,"vol":59845,"iso":false},{"id":"ZEN","dex":"","sym":"ZEN","cat":"crypto","kw":[],"lev":5,"px":"5.2217","chg":-2.19,"vol":81337,"iso":false},{"id":"FIL","dex":"","sym":"FIL","cat":"crypto","kw":[],"lev":5,"px":"0.86918","chg":-1.01,"vol":792045,"iso":false},{"id":"PYTH","dex":"","sym":"PYTH","cat":"crypto","kw":[],"lev":5,"px":"0.063685","chg":-5.0,"vol":1380387,"iso":false},{"id":"SUSHI","dex":"","sym":"SUSHI","cat":"crypto","kw":[],"lev":3,"px":"0.19132","chg":-1.53,"vol":81136,"iso":false},{"id":"IMX","dex":"","sym":"IMX","cat":"crypto","kw":[],"lev":5,"px":"0.12029","chg":-3.23,"vol":111586,"iso":false},{"id":"kBONK","dex":"","sym":"kBONK","cat":"crypto","kw":[],"lev":10,"px":"0.002868","chg":-2.52,"vol":339226,"iso":false},{"id":"GMT","dex":"","sym":"GMT","cat":"crypto","kw":[],"lev":3,"px":"0.00645","chg":-2.86,"vol":64006,"iso":false},{"id":"SUPER","dex":"","sym":"SUPER","cat":"crypto","kw":[],"lev":3,"px":"0.16609","chg":-6.84,"vol":259222,"iso":false},{"id":"JUP","dex":"","sym":"JUP","cat":"crypto","kw":[],"lev":10,"px":"0.25411","chg":-2.0,"vol":772374,"iso":false},{"id":"kLUNC","dex":"","sym":"kLUNC","cat":"crypto","kw":[],"lev":3,"px":"0.04155","chg":-2.64,"vol":32260,"iso":false},{"id":"RSR","dex":"","sym":"RSR","cat":"crypto","kw":[],"lev":3,"px":"0.001433","chg":-4.72,"vol":273123,"iso":false},{"id":"GALA","dex":"","sym":"GALA","cat":"crypto","kw":[],"lev":3,"px":"0.001674","chg":-2.56,"vol":108478,"iso":false},{"id":"JTO","dex":"","sym":"JTO","cat":"crypto","kw":[],"lev":5,"px":"0.364946","chg":-3.3,"vol":286232,"iso":false},{"id":"ACE","dex":"","sym":"ACE","cat":"crypto","kw":[],"lev":3,"px":"0.134","chg":-4.35,"vol":182516,"iso":false},{"id":"WIF","dex":"","sym":"WIF","cat":"crypto","kw":[],"lev":5,"px":"0.17452","chg":-2.61,"vol":392061,"iso":false},{"id":"CAKE","dex":"","sym":"CAKE","cat":"crypto","kw":[],"lev":3,"px":"1.8902","chg":-3.09,"vol":186777,"iso":false},{"id":"PEOPLE","dex":"","sym":"PEOPLE","cat":"crypto","kw":[],"lev":3,"px":"0.006669","chg":-1.05,"vol":84442,"iso":false},{"id":"ENS","dex":"","sym":"ENS","cat":"crypto","kw":[],"lev":5,"px":"4.9023","chg":-0.23,"vol":131202,"iso":false},{"id":"ETC","dex":"","sym":"ETC","cat":"crypto","kw":[],"lev":5,"px":"7.0551","chg":-1.34,"vol":258335,"iso":false},{"id":"XAI","dex":"","sym":"XAI","cat":"crypto","kw":[],"lev":3,"px":"0.00694","chg":-1.84,"vol":57901,"iso":false},{"id":"MANTA","dex":"","sym":"MANTA","cat":"crypto","kw":[],"lev":3,"px":"0.0583","chg":-2.31,"vol":56611,"iso":false},{"id":"UMA","dex":"","sym":"UMA","cat":"crypto","kw":[],"lev":3,"px":"0.33965","chg":-2.25,"vol":27064,"iso":false},{"id":"ONDO","dex":"","sym":"ONDO","cat":"crypto","kw":[],"lev":10,"px":"0.39509","chg":-3.57,"vol":3030340,"iso":false},{"id":"ALT","dex":"","sym":"ALT","cat":"crypto","kw":[],"lev":3,"px":"0.005646","chg":-3.32,"vol":148706,"iso":false},{"id":"ZETA","dex":"","sym":"ZETA","cat":"crypto","kw":[],"lev":3,"px":"0.03626","chg":-5.62,"vol":71876,"iso":false},{"id":"DYM","dex":"","sym":"DYM","cat":"crypto","kw":[],"lev":3,"px":"0.01511","chg":-3.39,"vol":85793,"iso":false},{"id":"W","dex":"","sym":"W","cat":"crypto","kw":[],"lev":5,"px":"0.01102","chg":-2.48,"vol":182390,"iso":false},{"id":"STRK","dex":"","sym":"STRK","cat":"crypto","kw":[],"lev":5,"px":"0.04186","chg":-3.84,"vol":2636032,"iso":false},{"id":"TAO","dex":"","sym":"TAO","cat":"crypto","kw":[],"lev":5,"px":"230.5","chg":-2.3,"vol":3014601,"iso":false},{"id":"AR","dex":"","sym":"AR","cat":"crypto","kw":[],"lev":5,"px":"3.1551","chg":0.31,"vol":371303,"iso":false},{"id":"kFLOKI","dex":"","sym":"kFLOKI","cat":"crypto","kw":[],"lev":5,"px":"0.022865","chg":-2.33,"vol":157155,"iso":false},{"id":"BOME","dex":"","sym":"BOME","cat":"crypto","kw":[],"lev":3,"px":"0.000585","chg":-4.41,"vol":76575,"iso":false},{"id":"ETHFI","dex":"","sym":"ETHFI","cat":"crypto","kw":[],"lev":5,"px":"0.59333","chg":-4.08,"vol":1210580,"iso":false},{"id":"ENA","dex":"","sym":"ENA","cat":"crypto","kw":[],"lev":10,"px":"0.17993","chg":-3.57,"vol":19874062,"iso":false},{"id":"MNT","dex":"","sym":"MNT","cat":"crypto","kw":[],"lev":5,"px":"0.47523","chg":0.17,"vol":269929,"iso":false},{"id":"TNSR","dex":"","sym":"TNSR","cat":"crypto","kw":[],"lev":3,"px":"0.02764","chg":-2.57,"vol":16814,"iso":false},{"id":"SAGA","dex":"","sym":"SAGA","cat":"crypto","kw":[],"lev":3,"px":"0.01643","chg":-2.84,"vol":75367,"iso":false},{"id":"MERL","dex":"","sym":"MERL","cat":"crypto","kw":[],"lev":3,"px":"0.02957","chg":-2.87,"vol":220251,"iso":false},{"id":"HBAR","dex":"","sym":"HBAR","cat":"crypto","kw":[],"lev":5,"px":"0.07111","chg":-0.96,"vol":382714,"iso":false},{"id":"POPCAT","dex":"","sym":"POPCAT","cat":"crypto","kw":[],"lev":3,"px":"0.039831","chg":-1.71,"vol":113956,"iso":false},{"id":"EIGEN","dex":"","sym":"EIGEN","cat":"crypto","kw":[],"lev":5,"px":"0.182","chg":-3.55,"vol":166257,"iso":false},{"id":"REZ","dex":"","sym":"REZ","cat":"crypto","kw":[],"lev":3,"px":"0.004","chg":-4.4,"vol":309597,"iso":false},{"id":"NOT","dex":"","sym":"NOT","cat":"crypto","kw":[],"lev":3,"px":"0.000352","chg":-3.03,"vol":10273,"iso":false},{"id":"TURBO","dex":"","sym":"TURBO","cat":"crypto","kw":[],"lev":3,"px":"0.000776","chg":-1.02,"vol":65639,"iso":false},{"id":"BRETT","dex":"","sym":"BRETT","cat":"crypto","kw":[],"lev":3,"px":"0.004296","chg":-3.33,"vol":101037,"iso":false},{"id":"IO","dex":"","sym":"IO","cat":"crypto","kw":[],"lev":3,"px":"0.12903","chg":-2.34,"vol":136200,"iso":false},{"id":"ZK","dex":"","sym":"ZK","cat":"crypto","kw":[],"lev":5,"px":"0.010355","chg":-1.16,"vol":222965,"iso":false},{"id":"RENDER","dex":"","sym":"RENDER","cat":"crypto","kw":[],"lev":5,"px":"1.5593","chg":-1.12,"vol":275997,"iso":false},{"id":"POL","dex":"","sym":"POL","cat":"crypto","kw":[],"lev":5,"px":"0.08967","chg":-2.59,"vol":508050,"iso":false},{"id":"CELO","dex":"","sym":"CELO","cat":"crypto","kw":[],"lev":3,"px":"0.072961","chg":-4.23,"vol":105108,"iso":false},{"id":"HMSTR","dex":"","sym":"HMSTR","cat":"crypto","kw":[],"lev":3,"px":"0.000137","chg":-2.84,"vol":10299,"iso":false},{"id":"kNEIRO","dex":"","sym":"kNEIRO","cat":"crypto","kw":[],"lev":3,"px":"0.06266","chg":-2.49,"vol":36904,"iso":false},{"id":"GOAT","dex":"","sym":"GOAT","cat":"crypto","kw":[],"lev":3,"px":"0.013783","chg":-2.72,"vol":113164,"iso":false},{"id":"MOODENG","dex":"","sym":"MOODENG","cat":"crypto","kw":[],"lev":3,"px":"0.035164","chg":-2.44,"vol":50976,"iso":false},{"id":"GRASS","dex":"","sym":"GRASS","cat":"crypto","kw":[],"lev":3,"px":"0.57809","chg":-3.06,"vol":2388684,"iso":false},{"id":"PURR","dex":"","sym":"PURR","cat":"crypto","kw":[],"lev":3,"px":"0.119118","chg":-0.95,"vol":556082,"iso":false},{"id":"PNUT","dex":"","sym":"PNUT","cat":"crypto","kw":[],"lev":3,"px":"0.03921","chg":-2.92,"vol":59587,"iso":false},{"id":"XLM","dex":"","sym":"XLM","cat":"crypto","kw":[],"lev":5,"px":"0.16809","chg":-0.4,"vol":1522073,"iso":false},{"id":"SAND","dex":"","sym":"SAND","cat":"crypto","kw":[],"lev":5,"px":"0.04563","chg":-1.49,"vol":192975,"iso":false},{"id":"IOTA","dex":"","sym":"IOTA","cat":"crypto","kw":[],"lev":3,"px":"0.039413","chg":-0.4,"vol":82836,"iso":false},{"id":"ALGO","dex":"","sym":"ALGO","cat":"crypto","kw":[],"lev":5,"px":"0.093287","chg":-1.64,"vol":364346,"iso":false},{"id":"HYPE","dex":"","sym":"HYPE","cat":"crypto","kw":[],"lev":10,"px":"86.059","chg":-2.17,"vol":411616290,"iso":false},{"id":"ME","dex":"","sym":"ME","cat":"crypto","kw":[],"lev":3,"px":"0.05314","chg":-5.09,"vol":44930,"iso":false},{"id":"MOVE","dex":"","sym":"MOVE","cat":"crypto","kw":[],"lev":3,"px":"0.006125","chg":-2.2,"vol":60488,"iso":false},{"id":"VIRTUAL","dex":"","sym":"VIRTUAL","cat":"crypto","kw":[],"lev":5,"px":"0.59096","chg":-0.58,"vol":521609,"iso":false},{"id":"PENGU","dex":"","sym":"PENGU","cat":"crypto","kw":[],"lev":5,"px":"0.00719","chg":-2.11,"vol":469107,"iso":false},{"id":"USUAL","dex":"","sym":"USUAL","cat":"crypto","kw":[],"lev":3,"px":"0.01032","chg":-1.24,"vol":144532,"iso":false},{"id":"FARTCOIN","dex":"","sym":"FARTCOIN","cat":"crypto","kw":[],"lev":10,"px":"0.12088","chg":-0.93,"vol":2307398,"iso":false},{"id":"AIXBT","dex":"","sym":"AIXBT","cat":"crypto","kw":[],"lev":3,"px":"0.016186","chg":-3.03,"vol":60696,"iso":false},{"id":"BIO","dex":"","sym":"BIO","cat":"crypto","kw":[],"lev":3,"px":"0.021165","chg":-6.56,"vol":652108,"iso":false},{"id":"GRIFFAIN","dex":"","sym":"GRIFFAIN","cat":"crypto","kw":[],"lev":3,"px":"0.011741","chg":-4.65,"vol":326207,"iso":false},{"id":"SPX","dex":"","sym":"SPX","cat":"crypto","kw":[],"lev":5,"px":"0.36013","chg":1.16,"vol":1143605,"iso":false},{"id":"S","dex":"","sym":"S","cat":"crypto","kw":[],"lev":5,"px":"0.03859","chg":-3.65,"vol":137802,"iso":false},{"id":"MORPHO","dex":"","sym":"MORPHO","cat":"crypto","kw":[],"lev":5,"px":"2.2315","chg":-2.82,"vol":1080670,"iso":false},{"id":"TRUMP","dex":"","sym":"TRUMP","cat":"crypto","kw":[],"lev":10,"px":"1.6445","chg":2.58,"vol":12858112,"iso":false},{"id":"MELANIA","dex":"","sym":"MELANIA","cat":"crypto","kw":[],"lev":3,"px":"0.07571","chg":1.24,"vol":681164,"iso":false},{"id":"ANIME","dex":"","sym":"ANIME","cat":"crypto","kw":[],"lev":3,"px":"0.002679","chg":-3.81,"vol":53664,"iso":false},{"id":"VVV","dex":"","sym":"VVV","cat":"crypto","kw":[],"lev":3,"px":"22.403","chg":-4.12,"vol":3761352,"iso":false},{"id":"BERA","dex":"","sym":"BERA","cat":"crypto","kw":[],"lev":5,"px":"0.13411","chg":-3.59,"vol":92328,"iso":false},{"id":"LAYER","dex":"","sym":"LAYER","cat":"crypto","kw":[],"lev":3,"px":"0.058544","chg":-2.79,"vol":39694,"iso":false},{"id":"KAITO","dex":"","sym":"KAITO","cat":"crypto","kw":[],"lev":5,"px":"0.23667","chg":-1.46,"vol":165613,"iso":false},{"id":"NIL","dex":"","sym":"NIL","cat":"crypto","kw":[],"lev":3,"px":"0.065562","chg":-8.08,"vol":648194,"iso":false},{"id":"PAXG","dex":"","sym":"PAXG","cat":"crypto","kw":[],"lev":10,"px":"3914.3","chg":0.45,"vol":858511,"iso":false},{"id":"BABY","dex":"","sym":"BABY","cat":"crypto","kw":[],"lev":3,"px":"0.01185","chg":-3.31,"vol":96678,"iso":false},{"id":"WCT","dex":"","sym":"WCT","cat":"crypto","kw":[],"lev":3,"px":"0.033518","chg":-3.25,"vol":33182,"iso":false},{"id":"HYPER","dex":"","sym":"HYPER","cat":"crypto","kw":[],"lev":3,"px":"0.059478","chg":-0.68,"vol":79624,"iso":false},{"id":"ZORA","dex":"","sym":"ZORA","cat":"crypto","kw":[],"lev":3,"px":"0.00574","chg":-2.79,"vol":207444,"iso":false},{"id":"INIT","dex":"","sym":"INIT","cat":"crypto","kw":[],"lev":3,"px":"0.162195","chg":-17.21,"vol":2854048,"iso":false},{"id":"NXPC","dex":"","sym":"NXPC","cat":"crypto","kw":[],"lev":3,"px":"0.16701","chg":-2.48,"vol":47320,"iso":false},{"id":"SOPH","dex":"","sym":"SOPH","cat":"crypto","kw":[],"lev":3,"px":"0.001548","chg":13.32,"vol":237607,"iso":false},{"id":"RESOLV","dex":"","sym":"RESOLV","cat":"crypto","kw":[],"lev":3,"px":"0.015083","chg":-1.68,"vol":66809,"iso":false},{"id":"SYRUP","dex":"","sym":"SYRUP","cat":"crypto","kw":[],"lev":3,"px":"0.15868","chg":-1.31,"vol":514012,"iso":false},{"id":"PUMP","dex":"","sym":"PUMP","cat":"crypto","kw":[],"lev":10,"px":"0.004133","chg":-2.78,"vol":23779716,"iso":false},{"id":"PROVE","dex":"","sym":"PROVE","cat":"crypto","kw":[],"lev":3,"px":"0.19096","chg":-6.81,"vol":65242,"iso":false},{"id":"XPL","dex":"","sym":"XPL","cat":"crypto","kw":[],"lev":10,"px":"0.070528","chg":-3.29,"vol":19161726,"iso":false},{"id":"WLFI","dex":"","sym":"WLFI","cat":"crypto","kw":[],"lev":5,"px":"0.05016","chg":-0.39,"vol":3014195,"iso":false},{"id":"LINEA","dex":"","sym":"LINEA","cat":"crypto","kw":[],"lev":3,"px":"0.002344","chg":-2.41,"vol":99630,"iso":false},{"id":"SKY","dex":"","sym":"SKY","cat":"crypto","kw":[],"lev":3,"px":"0.066508","chg":-3.52,"vol":202245,"iso":false},{"id":"ASTER","dex":"","sym":"ASTER","cat":"crypto","kw":[],"lev":5,"px":"0.700598","chg":0.25,"vol":1544478,"iso":false},{"id":"AVNT","dex":"","sym":"AVNT","cat":"crypto","kw":[],"lev":5,"px":"0.089713","chg":-4.34,"vol":183756,"iso":false},{"id":"STBL","dex":"","sym":"STBL","cat":"crypto","kw":[],"lev":3,"px":"0.024614","chg":-3.15,"vol":232707,"iso":false},{"id":"0G","dex":"","sym":"0G","cat":"crypto","kw":[],"lev":3,"px":"0.16343","chg":-4.02,"vol":113357,"iso":false},{"id":"HEMI","dex":"","sym":"HEMI","cat":"crypto","kw":[],"lev":3,"px":"0.004747","chg":-1.41,"vol":497441,"iso":false},{"id":"APEX","dex":"","sym":"APEX","cat":"crypto","kw":[],"lev":3,"px":"0.20637","chg":-1.11,"vol":37563,"iso":false},{"id":"2Z","dex":"","sym":"2Z","cat":"crypto","kw":[],"lev":3,"px":"0.024496","chg":-3.08,"vol":874883,"iso":false},{"id":"ZEC","dex":"","sym":"ZEC","cat":"crypto","kw":[],"lev":10,"px":"1256.4","chg":1.06,"vol":297221150,"iso":false},{"id":"MON","dex":"","sym":"MON","cat":"crypto","kw":[],"lev":5,"px":"0.018545","chg":-5.25,"vol":982918,"iso":false},{"id":"MET","dex":"","sym":"MET","cat":"crypto","kw":[],"lev":3,"px":"0.280068","chg":-1.52,"vol":235699,"iso":false},{"id":"MEGA","dex":"","sym":"MEGA","cat":"crypto","kw":[],"lev":3,"px":"0.044865","chg":2.61,"vol":3715009,"iso":false},{"id":"CC","dex":"","sym":"CC","cat":"crypto","kw":[],"lev":3,"px":"0.095255","chg":-2.06,"vol":546414,"iso":false},{"id":"ICP","dex":"","sym":"ICP","cat":"crypto","kw":[],"lev":5,"px":"2.5292","chg":1.06,"vol":522287,"iso":false},{"id":"AERO","dex":"","sym":"AERO","cat":"crypto","kw":[],"lev":3,"px":"0.62155","chg":-2.7,"vol":2651823,"iso":false},{"id":"STABLE","dex":"","sym":"STABLE","cat":"crypto","kw":[],"lev":3,"px":"0.026649","chg":0.51,"vol":138151,"iso":false},{"id":"FOGO","dex":"","sym":"FOGO","cat":"crypto","kw":[],"lev":3,"px":"0.002539","chg":-5.33,"vol":107740,"iso":false},{"id":"LIT","dex":"","sym":"LIT","cat":"crypto","kw":[],"lev":5,"px":"3.12765","chg":-3.94,"vol":31648802,"iso":false},{"id":"XMR","dex":"","sym":"XMR","cat":"crypto","kw":[],"lev":5,"px":"611.37","chg":1.05,"vol":36473026,"iso":false},{"id":"AXS","dex":"","sym":"AXS","cat":"crypto","kw":[],"lev":5,"px":"0.85271","chg":-1.79,"vol":139424,"iso":false},{"id":"DASH","dex":"","sym":"DASH","cat":"crypto","kw":[],"lev":5,"px":"48.253","chg":-1.6,"vol":293801,"iso":false},{"id":"SKR","dex":"","sym":"SKR","cat":"crypto","kw":[],"lev":3,"px":"0.012417","chg":-3.29,"vol":934530,"iso":false},{"id":"AZTEC","dex":"","sym":"AZTEC","cat":"crypto","kw":[],"lev":3,"px":"0.014758","chg":-3.31,"vol":615076,"iso":false},{"id":"CHIP","dex":"","sym":"CHIP","cat":"crypto","kw":[],"lev":3,"px":"0.041108","chg":-5.12,"vol":707331,"iso":false},{"id":"GRAM","dex":"","sym":"GRAM","cat":"crypto","kw":[],"lev":5,"px":"1.1985","chg":-2.27,"vol":1239653,"iso":false},{"id":"CASHCAT","dex":"","sym":"CASHCAT","cat":"crypto","kw":[],"lev":3,"px":"0.10141","chg":5.84,"vol":3642267,"iso":false},{"id":"PONS","dex":"","sym":"PONS","cat":"crypto","kw":[],"lev":3,"px":"0.23377","chg":-3.89,"vol":2739077,"iso":false},{"id":"USELESS","dex":"","sym":"USELESS","cat":"crypto","kw":[],"lev":3,"px":"0.126254","chg":-4.19,"vol":2327502,"iso":false},{"id":"XTEN","dex":"","sym":"XTEN","cat":"crypto","kw":[],"lev":3,"px":"0.27686","chg":-0.52,"vol":136452,"iso":true},{"id":"xyz:XYZ100","dex":"xyz","sym":"XYZ100","cat":"indices","kw":["nasdaq","qqq"],"lev":30,"px":"28634.0","chg":0.29,"vol":171919405,"iso":false},{"id":"xyz:TSLA","dex":"xyz","sym":"TSLA","cat":"stocks","kw":["tesla","ev"],"lev":20,"px":"403.72","chg":0.93,"vol":9974514,"iso":false},{"id":"xyz:NVDA","dex":"xyz","sym":"NVDA","cat":"stocks","kw":["nvidia","semis"],"lev":20,"px":"207.07","chg":1.2,"vol":26372106,"iso":false},{"id":"xyz:GOLD","dex":"xyz","sym":"GOLD","cat":"commodities","kw":["xau","bullion"],"lev":25,"px":"3907.3","chg":0.46,"vol":42350227,"iso":false},{"id":"xyz:HOOD","dex":"xyz","sym":"HOOD","cat":"stocks","kw":["robinhood","tech"],"lev":10,"px":"85.91","chg":-0.05,"vol":2596246,"iso":true},{"id":"xyz:INTC","dex":"xyz","sym":"INTC","cat":"stocks","kw":["intel","semis"],"lev":10,"px":"65.263","chg":-1.46,"vol":40339037,"iso":false},{"id":"xyz:PLTR","dex":"xyz","sym":"PLTR","cat":"stocks","kw":["palantir","ai"],"lev":10,"px":"186.3","chg":0.66,"vol":3919745,"iso":true},{"id":"xyz:COIN","dex":"xyz","sym":"COIN","cat":"stocks","kw":["coinbase","crypto"],"lev":10,"px":"142.52","chg":-2.76,"vol":4193680,"iso":true},{"id":"xyz:META","dex":"xyz","sym":"META","cat":"stocks","kw":["facebook","tech"],"lev":20,"px":"611.96","chg":-0.37,"vol":7084281,"iso":false},{"id":"xyz:AAPL","dex":"xyz","sym":"AAPL","cat":"stocks","kw":["apple","tech"],"lev":20,"px":"344.0","chg":-0.21,"vol":11340442,"iso":false},{"id":"xyz:MSFT","dex":"xyz","sym":"MSFT","cat":"stocks","kw":["microsoft","tech"],"lev":20,"px":"524.25","chg":-0.05,"vol":3504282,"iso":false},{"id":"xyz:ORCL","dex":"xyz","sym":"ORCL","cat":"stocks","kw":["oracle","cloud"],"lev":10,"px":"132.34","chg":0.83,"vol":3399952,"iso":true},{"id":"xyz:GOOGL","dex":"xyz","sym":"GOOGL","cat":"stocks","kw":["google","alphabet"],"lev":20,"px":"282.69","chg":-0.46,"vol":40346748,"iso":false},{"id":"xyz:AMZN","dex":"xyz","sym":"AMZN","cat":"stocks","kw":["amazon","aws"],"lev":20,"px":"241.8","chg":0.27,"vol":5971255,"iso":false},{"id":"xyz:AMD","dex":"xyz","sym":"AMD","cat":"stocks","kw":["advanced","semis"],"lev":10,"px":"513.98","chg":0.06,"vol":7899003,"iso":true},{"id":"xyz:MU","dex":"xyz","sym":"MU","cat":"stocks","kw":["micron","memory"],"lev":10,"px":"904.88","chg":-0.45,"vol":69877263,"iso":false},{"id":"xyz:SNDK","dex":"xyz","sym":"SNDK","cat":"stocks","kw":["sandisk","memory"],"lev":10,"px":"1178.7","chg":0.73,"vol":80063552,"iso":false},{"id":"xyz:MSTR","dex":"xyz","sym":"MSTR","cat":"stocks","kw":["strategy","micro"],"lev":10,"px":"133.38","chg":-0.91,"vol":6144752,"iso":true},{"id":"xyz:CRCL","dex":"xyz","sym":"CRCL","cat":"stocks","kw":["circle","usdc"],"lev":10,"px":"73.374","chg":0.5,"vol":10667026,"iso":false},{"id":"xyz:NFLX","dex":"xyz","sym":"NFLX","cat":"stocks","kw":["netflix","tech"],"lev":10,"px":"62.035","chg":-0.29,"vol":418520,"iso":true},{"id":"xyz:COST","dex":"xyz","sym":"COST","cat":"stocks","kw":["costco","retail"],"lev":20,"px":"1010.2","chg":-0.28,"vol":31060,"iso":true},{"id":"xyz:LLY","dex":"xyz","sym":"LLY","cat":"stocks","kw":["elililly","pharma"],"lev":10,"px":"1411.8","chg":-0.88,"vol":1155352,"iso":true},{"id":"xyz:SKHX","dex":"xyz","sym":"SKHYNIX","cat":"stocks","kw":["000660","memory"],"lev":10,"px":"1100.2","chg":3.25,"vol":284003757,"iso":false},{"id":"xyz:TSM","dex":"xyz","sym":"TSM","cat":"stocks","kw":["taiwan","semis"],"lev":10,"px":"414.02","chg":0.89,"vol":812646,"iso":true},{"id":"xyz:JPY","dex":"xyz","sym":"USDJPY","cat":"fx","kw":["yen","currency"],"lev":50,"px":"157.85","chg":0.27,"vol":971984,"iso":true},{"id":"xyz:EUR","dex":"xyz","sym":"EURUSD","cat":"fx","kw":["euro","currency"],"lev":50,"px":"1.1213","chg":0.47,"vol":3119691,"iso":true},{"id":"xyz:SILVER","dex":"xyz","sym":"SILVER","cat":"commodities","kw":["xag","bullion"],"lev":25,"px":"50.219","chg":1.18,"vol":104538847,"iso":false},{"id":"xyz:RIVN","dex":"xyz","sym":"RIVN","cat":"stocks","kw":["rivian","ev"],"lev":10,"px":"12.602","chg":3.33,"vol":122409,"iso":true},{"id":"xyz:BABA","dex":"xyz","sym":"BABA","cat":"stocks","kw":["alibaba","china"],"lev":10,"px":"101.36","chg":2.53,"vol":2570840,"iso":true},{"id":"xyz:CL","dex":"xyz","sym":"WTIOIL","cat":"commodities","kw":["crude","cl"],"lev":20,"px":"99.903","chg":-2.69,"vol":166532908,"iso":false},{"id":"xyz:COPPER","dex":"xyz","sym":"COPPER","cat":"commodities","kw":["hg","cu"],"lev":20,"px":"6.5302","chg":0.04,"vol":1850580,"iso":true},{"id":"xyz:NATGAS","dex":"xyz","sym":"NATGAS","cat":"commodities","kw":["henryhub","ng"],"lev":10,"px":"2.9383","chg":1.89,"vol":5271973,"iso":true},{"id":"xyz:SMSN","dex":"xyz","sym":"SAMSUNG","cat":"stocks","kw":["005930","smsn"],"lev":10,"px":"170.51","chg":3.6,"vol":26120023,"iso":true},{"id":"xyz:PLATINUM","dex":"xyz","sym":"PLATINUM","cat":"commodities","kw":["xpt","metals"],"lev":20,"px":"1434.7","chg":-0.26,"vol":962494,"iso":true},{"id":"xyz:USAR","dex":"xyz","sym":"USAR","cat":"stocks","kw":["rareearth","mining"],"lev":10,"px":"9.8007","chg":1.76,"vol":312094,"iso":true},{"id":"xyz:CRWV","dex":"xyz","sym":"CRWV","cat":"stocks","kw":["coreweave","ai"],"lev":10,"px":"56.592","chg":2.53,"vol":3769364,"iso":true},{"id":"xyz:URNM","dex":"xyz","sym":"URNM","cat":"stocks","kw":["uranium","miners"],"lev":10,"px":"43.089","chg":1.35,"vol":32869,"iso":true},{"id":"xyz:PALLADIUM","dex":"xyz","sym":"PALLADIUM","cat":"commodities","kw":["xpd","metals"],"lev":20,"px":"977.93","chg":-1.09,"vol":450126,"iso":true},{"id":"xyz:GME","dex":"xyz","sym":"GME","cat":"stocks","kw":["gamestop","meme"],"lev":10,"px":"24.313","chg":0.76,"vol":317822,"iso":true},{"id":"xyz:KR200","dex":"xyz","sym":"KR200","cat":"indices","kw":["kospi200","korea"],"lev":20,"px":"920.52","chg":4.26,"vol":1059576,"iso":true},{"id":"xyz:SOFTBANK","dex":"xyz","sym":"SOFTBANK","cat":"stocks","kw":["9984","japan"],"lev":10,"px":"28.077","chg":1.49,"vol":451688,"iso":true},{"id":"xyz:JP225","dex":"xyz","sym":"JP225","cat":"indices","kw":["nikkei","japan"],"lev":20,"px":"63237.0","chg":1.55,"vol":2450668,"iso":true},{"id":"xyz:HYUNDAI","dex":"xyz","sym":"HYUNDAI","cat":"stocks","kw":["005380","korea"],"lev":10,"px":"213.84","chg":2.7,"vol":1217556,"iso":true},{"id":"xyz:KIOXIA","dex":"xyz","sym":"KIOXIA","cat":"stocks","kw":["285a","memory"],"lev":10,"px":"72.269","chg":-9.77,"vol":12612409,"iso":true},{"id":"xyz:EWY","dex":"xyz","sym":"EWY","cat":"stocks","kw":["korea","etf"],"lev":20,"px":"158.96","chg":3.21,"vol":45716917,"iso":true},{"id":"xyz:EWJ","dex":"xyz","sym":"EWJ","cat":"stocks","kw":["japan","etf"],"lev":20,"px":"92.938","chg":-0.14,"vol":677735,"iso":true},{"id":"xyz:BRENTOIL","dex":"xyz","sym":"BRENTOIL","cat":"commodities","kw":["brent","bz"],"lev":20,"px":"109.03","chg":-2.65,"vol":93502305,"iso":false},{"id":"xyz:HIMS","dex":"xyz","sym":"HIMS","cat":"stocks","kw":["himshers","pharma"],"lev":10,"px":"28.085","chg":0.89,"vol":136677,"iso":true},{"id":"xyz:SP500","dex":"xyz","sym":"S&P500","cat":"indices","kw":["spx","es"],"lev":50,"px":"7612.9","chg":0.24,"vol":118765838,"iso":false},{"id":"xyz:DKNG","dex":"xyz","sym":"DKNG","cat":"stocks","kw":["draftkings","sportsbet"],"lev":10,"px":"20.975","chg":0.46,"vol":15292,"iso":true},{"id":"xyz:LITE","dex":"xyz","sym":"LITE","cat":"stocks","kw":["lumentum","photonics"],"lev":10,"px":"938.75","chg":10.36,"vol":13245647,"iso":true},{"id":"xyz:XLE","dex":"xyz","sym":"XLE","cat":"stocks","kw":["energy","etf"],"lev":20,"px":"69.258","chg":-1.54,"vol":129026,"iso":true},{"id":"xyz:BX","dex":"xyz","sym":"BX","cat":"stocks","kw":["blackstone","credit"],"lev":10,"px":"118.32","chg":-0.85,"vol":2468436,"iso":true},{"id":"xyz:PURRDAT","dex":"xyz","sym":"PURRDAT","cat":"stocks","kw":["purr","hyperliq"],"lev":10,"px":"10.9","chg":1.09,"vol":1613513,"iso":true},{"id":"xyz:MRVL","dex":"xyz","sym":"MRVL","cat":"stocks","kw":["marvell","semis"],"lev":10,"px":"202.11","chg":1.84,"vol":9982137,"iso":true},{"id":"xyz:RKLB","dex":"xyz","sym":"RKLB","cat":"stocks","kw":["rocketlab","space"],"lev":10,"px":"55.75","chg":0.52,"vol":1092274,"iso":true},{"id":"xyz:BIRD","dex":"xyz","sym":"BIRD","cat":"stocks","kw":["smartbird","allbirds"],"lev":10,"px":"1.9718","chg":0.42,"vol":10214,"iso":true},{"id":"xyz:DRAM","dex":"xyz","sym":"DRAM","cat":"stocks","kw":["etf","memory"],"lev":20,"px":"49.83","chg":1.01,"vol":44645139,"iso":false},{"id":"xyz:CBRS","dex":"xyz","sym":"CBRS","cat":"stocks","kw":["cerebras","ai"],"lev":10,"px":"110.25","chg":0.45,"vol":1605975,"iso":true},{"id":"xyz:EWZ","dex":"xyz","sym":"EWZ","cat":"stocks","kw":["brazil","etf"],"lev":20,"px":"32.543","chg":0.66,"vol":1330215,"iso":true},{"id":"xyz:ZM","dex":"xyz","sym":"ZM","cat":"stocks","kw":["zoom","tech"],"lev":10,"px":"96.17","chg":0.33,"vol":62685,"iso":true},{"id":"xyz:EBAY","dex":"xyz","sym":"EBAY","cat":"stocks","kw":["auctions","ecommerce"],"lev":10,"px":"121.73","chg":-0.4,"vol":60994,"iso":true},{"id":"xyz:NIFTY","dex":"xyz","sym":"NIFTY","cat":"indices","kw":["india"],"lev":20,"px":"23259.0","chg":0.95,"vol":84087,"iso":true},{"id":"xyz:ARM","dex":"xyz","sym":"ARM","cat":"stocks","kw":["cpu","semis"],"lev":10,"px":"211.12","chg":1.52,"vol":1240013,"iso":true},{"id":"xyz:EWT","dex":"xyz","sym":"EWT","cat":"stocks","kw":["taiwan","etf"],"lev":20,"px":"102.82","chg":0.75,"vol":70660,"iso":true},{"id":"xyz:GBP","dex":"xyz","sym":"GBPUSD","cat":"fx","kw":["pound","currency"],"lev":50,"px":"1.3411","chg":0.37,"vol":73390,"iso":true},{"id":"xyz:SPCX","dex":"xyz","sym":"SPCX","cat":"stocks","kw":["spacex","ai"],"lev":20,"px":"137.09","chg":-0.44,"vol":45764580,"iso":false},{"id":"xyz:ASML","dex":"xyz","sym":"ASML","cat":"stocks","kw":["litho","semis"],"lev":10,"px":"1589.6","chg":0.79,"vol":401166,"iso":true},{"id":"xyz:MINIMAX","dex":"xyz","sym":"MINIMAX","cat":"stocks","kw":["0100","china"],"lev":10,"px":"21.611","chg":6.16,"vol":2795539,"iso":true},{"id":"xyz:BB","dex":"xyz","sym":"BB","cat":"stocks","kw":["blackberry","tech"],"lev":10,"px":"8.5553","chg":1.77,"vol":995781,"iso":true},{"id":"xyz:QNT","dex":"xyz","sym":"QNT","cat":"stocks","kw":["quantum","iontrap"],"lev":10,"px":"34.36","chg":1.22,"vol":83631,"iso":true},{"id":"xyz:DELL","dex":"xyz","sym":"DELL","cat":"stocks","kw":["tech","enterprise"],"lev":10,"px":"431.81","chg":1.47,"vol":978824,"iso":true},{"id":"xyz:IBM","dex":"xyz","sym":"IBM","cat":"stocks","kw":["tech","enterprise"],"lev":10,"px":"257.86","chg":0.02,"vol":246074,"iso":true},{"id":"xyz:AVGO","dex":"xyz","sym":"AVGO","cat":"stocks","kw":["broadcom","semis"],"lev":10,"px":"327.73","chg":-0.04,"vol":1066180,"iso":true},{"id":"xyz:NOW","dex":"xyz","sym":"NOW","cat":"stocks","kw":["service","cloud"],"lev":10,"px":"105.56","chg":-0.17,"vol":352502,"iso":true},{"id":"xyz:NBIS","dex":"xyz","sym":"NBIS","cat":"stocks","kw":["nebius","aicloud"],"lev":10,"px":"158.12","chg":0.85,"vol":7604795,"iso":true},{"id":"xyz:WDC","dex":"xyz","sym":"WDC","cat":"stocks","kw":["hdd","storage"],"lev":10,"px":"375.71","chg":0.72,"vol":642062,"iso":true},{"id":"xyz:NOK","dex":"xyz","sym":"NOK","cat":"stocks","kw":["nokia","telecom"],"lev":10,"px":"8.8459","chg":2.93,"vol":129564,"iso":true},{"id":"xyz:SMH","dex":"xyz","sym":"SMH","cat":"stocks","kw":["semis","etf"],"lev":20,"px":"531.61","chg":0.73,"vol":244252,"iso":true},{"id":"xyz:BE","dex":"xyz","sym":"BE","cat":"stocks","kw":["bloom","energy"],"lev":10,"px":"208.6","chg":1.14,"vol":1466093,"iso":true},{"id":"xyz:ZHIPU","dex":"xyz","sym":"ZHIPU","cat":"stocks","kw":["2513","knowledge"],"lev":10,"px":"61.557","chg":-0.38,"vol":6842764,"iso":true},{"id":"xyz:QCOM","dex":"xyz","sym":"QCOM","cat":"stocks","kw":["qualcomm","semis"],"lev":10,"px":"166.26","chg":0.45,"vol":217850,"iso":true},{"id":"xyz:STRC","dex":"xyz","sym":"STRC","cat":"stocks","kw":["strategy","stretch"],"lev":10,"px":"99.165","chg":0.05,"vol":460707,"iso":true},{"id":"xyz:BOT","dex":"xyz","sym":"BOT","cat":"stocks","kw":["robot","robostrat"],"lev":10,"px":"21.752","chg":3.92,"vol":451497,"iso":true},{"id":"xyz:AMAT","dex":"xyz","sym":"AMAT","cat":"stocks","kw":["applied","semis"],"lev":10,"px":"398.39","chg":1.11,"vol":345089,"iso":true},{"id":"xyz:GIGADEV","dex":"xyz","sym":"GIGADEV","cat":"stocks","kw":["603986","memory"],"lev":10,"px":"39.884","chg":-0.86,"vol":1508363,"iso":true},{"id":"xyz:SHAZ","dex":"xyz","sym":"SHAZ","cat":"stocks","kw":["sharonai","aicloud"],"lev":10,"px":"23.497","chg":2.8,"vol":45278,"iso":true},{"id":"xyz:SKHY","dex":"xyz","sym":"SKHY","cat":"stocks","kw":["skhynix","memory"],"lev":10,"px":"155.85","chg":2.1,"vol":77538708,"iso":false},{"id":"xyz:KSTR","dex":"xyz","sym":"KSTR","cat":"stocks","kw":["etf","china"],"lev":10,"px":"17.451","chg":1.04,"vol":1390880,"iso":true},{"id":"xyz:CXMT","dex":"xyz","sym":"CXMT","cat":"stocks","kw":["688825","changxin"],"lev":10,"px":"6.2865","chg":-1.77,"vol":19184015,"iso":true},{"id":"xyz:GEV","dex":"xyz","sym":"GEV","cat":"stocks","kw":["vernova","energy"],"lev":10,"px":"871.62","chg":1.3,"vol":37665,"iso":true},{"id":"xyz:KORU","dex":"xyz","sym":"KORU","cat":"stocks","kw":["korea","3x"],"lev":10,"px":"11.868","chg":10.6,"vol":17483865,"iso":true},{"id":"xyz:UNITREE","dex":"xyz","sym":"UNITREE","cat":"stocks","kw":["688836","yushu"],"lev":10,"px":"96.767","chg":0.5,"vol":38770785,"iso":true},{"id":"xyz:LYTE","dex":"xyz","sym":"LYTE","cat":"stocks","kw":["photonics","optics"],"lev":10,"px":"18.896","chg":7.52,"vol":207616,"iso":true},{"id":"xyz:NCLD","dex":"xyz","sym":"NCLD","cat":"stocks","kw":["neocloud","etf"],"lev":10,"px":"15.693","chg":1.03,"vol":122588,"iso":true},{"id":"xyz:SOXL","dex":"xyz","sym":"SOXL","cat":"stocks","kw":["etf","semis"],"lev":10,"px":"81.222","chg":2.88,"vol":93340289,"iso":true},{"id":"xyz:MAGS","dex":"xyz","sym":"MAGS","cat":"stocks","kw":["roundhill","etf"],"lev":10,"px":"68.987","chg":0.3,"vol":19207,"iso":true},{"id":"xyz:IREN","dex":"xyz","sym":"IREN","cat":"stocks","kw":["compute","cloud"],"lev":10,"px":"24.583","chg":0.67,"vol":1129436,"iso":true},{"id":"xyz:NET","dex":"xyz","sym":"NET","cat":"stocks","kw":["cloudflare","security"],"lev":10,"px":"286.25","chg":1.71,"vol":802667,"iso":true},{"id":"xyz:CRWD","dex":"xyz","sym":"CRWD","cat":"stocks","kw":["crowdstrik","security"],"lev":10,"px":"259.49","chg":3.55,"vol":397053,"iso":true},{"id":"xyz:RDDT","dex":"xyz","sym":"RDDT","cat":"stocks","kw":["reddit","tech"],"lev":10,"px":"91.962","chg":-1.37,"vol":485026,"iso":true},{"id":"xyz:AAOI","dex":"xyz","sym":"AAOI","cat":"stocks","kw":["optics","photonics"],"lev":10,"px":"72.743","chg":4.3,"vol":1541134,"iso":true},{"id":"xyz:MRNA","dex":"xyz","sym":"MRNA","cat":"stocks","kw":["moderna","pharma"],"lev":10,"px":"224.07","chg":2.11,"vol":3099549,"iso":true},{"id":"xyz:XBI","dex":"xyz","sym":"XBI","cat":"stocks","kw":["biotech","etf"],"lev":10,"px":"156.44","chg":0.28,"vol":24833,"iso":true},{"id":"xyz:SHEIN","dex":"xyz","sym":"SHEIN","cat":"stocks","kw":["consumer","china"],"lev":10,"px":"4.594","chg":-0.41,"vol":226224,"iso":true},{"id":"xyz:BMNR","dex":"xyz","sym":"BMNR","cat":"stocks","kw":["ETH","Bitmine"],"lev":10,"px":"20.653","chg":1.21,"vol":180731,"iso":true},{"id":"xyz:SNXX","dex":"xyz","sym":"SNXX","cat":"stocks","kw":["sandisk","etf"],"lev":10,"px":"7.1175","chg":1.36,"vol":4795179,"iso":true},{"id":"xyz:CVX","dex":"xyz","sym":"CVX","cat":"stocks","kw":["chevron","energy"],"lev":10,"px":"233.04","chg":-1.07,"vol":35968,"iso":true},{"id":"xyz:TLT","dex":"xyz","sym":"TLT","cat":"stocks","kw":["treasury","etf"],"lev":20,"px":"81.495","chg":0.45,"vol":320074,"iso":true},{"id":"xyz:HO","dex":"xyz","sym":"DIESEL","cat":"commodities","kw":["ho","ulsd"],"lev":10,"px":"4.4978","chg":-2.73,"vol":1955080,"iso":true},{"id":"xyz:OURA","dex":"xyz","sym":"OURA","cat":"preipo","kw":["consumer","health"],"lev":5,"px":"48.594","chg":-0.01,"vol":2193,"iso":true},{"id":"xyz:LRCX","dex":"xyz","sym":"LRCX","cat":"stocks","kw":["lamresearc","semis"],"lev":10,"px":"244.18","chg":1.02,"vol":13122,"iso":true},{"id":"xyz:UMC","dex":"xyz","sym":"UMC","cat":"stocks","kw":["unitedmicr","semis"],"lev":10,"px":"17.189","chg":2.03,"vol":3760,"iso":true},{"id":"xyz:CAMBRICON","dex":"xyz","sym":"CAMBRICON","cat":"stocks","kw":["688256","hanwuji"],"lev":10,"px":"128.39","chg":-2.45,"vol":21211,"iso":true},{"id":"xyz:TWST","dex":"xyz","sym":"TWST","cat":"stocks","kw":["twist","dna"],"lev":10,"px":"156.76","chg":2.97,"vol":4023,"iso":true},{"id":"xyz:GLW","dex":"xyz","sym":"GLW","cat":"stocks","kw":["corning","gorilla"],"lev":10,"px":"126.79","chg":2.38,"vol":101145,"iso":true},{"id":"xyz:RELIANCE","dex":"xyz","sym":"RELIANCE","cat":"stocks","kw":["ril","india"],"lev":10,"px":"13.286","chg":5.72,"vol":73964,"iso":true},{"id":"xyz:JIO","dex":"xyz","sym":"JIO","cat":"stocks","kw":["jpl","india"],"lev":10,"px":"14.349","chg":1.06,"vol":749342,"iso":true},{"id":"xyz:ANT","dex":"xyz","sym":"ANT","cat":"preipo","kw":["anthropic","claude"],"lev":10,"px":"112.99","chg":1.06,"vol":5223742,"iso":false},{"id":"xyz:ICE","dex":"xyz","sym":"ICE","cat":"stocks","kw":["nyse","exchanges"],"lev":10,"px":"168.98","chg":1.65,"vol":17323,"iso":true},{"id":"para:TOTAL2","dex":"para","sym":"TOTAL2","cat":"crypto","kw":["altcoin","index"],"lev":20,"px":"1028.74","chg":-0.09,"vol":118783,"iso":false},{"id":"para:OTHERS","dex":"para","sym":"OTHERS","cat":"crypto","kw":["altcoin","index"],"lev":10,"px":"195.5196","chg":0.04,"vol":14681,"iso":false},{"id":"para:BTCD","dex":"para","sym":"BTC.D","cat":"crypto","kw":["dominance","index"],"lev":20,"px":"60.385","chg":-0.3,"vol":8331,"iso":false},{"id":"para:AVGO","dex":"para","sym":"AVGO","cat":"stocks","kw":["broadcom","ai"],"lev":10,"px":"327.47","chg":-0.86,"vol":972,"iso":true},{"id":"para:COHR","dex":"para","sym":"COHR","cat":"stocks","kw":["coherent","photonics"],"lev":10,"px":"224.1883","chg":4.75,"vol":184364,"iso":true},{"id":"para:GLW","dex":"para","sym":"GLW","cat":"stocks","kw":["corning","optics"],"lev":10,"px":"126.6957","chg":2.23,"vol":4033,"iso":true},{"id":"para:CRDO","dex":"para","sym":"CRDO","cat":"stocks","kw":["credo","networking"],"lev":10,"px":"155.825","chg":2.39,"vol":35984,"iso":true},{"id":"para:LRCX","dex":"para","sym":"LRCX","cat":"stocks","kw":["lam","wafer fab"],"lev":10,"px":"244.18","chg":0.8,"vol":1358,"iso":true},{"id":"para:NET","dex":"para","sym":"NET","cat":"stocks","kw":["cloudflare","cybersec"],"lev":10,"px":"285.92","chg":1.57,"vol":40258,"iso":true},{"id":"para:STX","dex":"para","sym":"STX","cat":"stocks","kw":["seagate","storage"],"lev":10,"px":"660.89","chg":1.71,"vol":3923,"iso":true},{"id":"para:IREN","dex":"para","sym":"IREN","cat":"stocks","kw":["iren","neoclouds"],"lev":10,"px":"24.5651","chg":1.1,"vol":59932,"iso":true},{"id":"para:VST","dex":"para","sym":"VST","cat":"stocks","kw":["vistra","energy"],"lev":10,"px":"140.0","chg":0.55,"vol":77108,"iso":true},{"id":"para:TER","dex":"para","sym":"TER","cat":"stocks","kw":["teradyne","test"],"lev":10,"px":"280.5","chg":1.48,"vol":10010,"iso":true},{"id":"para:AAOI","dex":"para","sym":"AAOI","cat":"stocks","kw":["applied","optics"],"lev":10,"px":"72.755","chg":4.26,"vol":30350,"iso":true},{"id":"para:10Y","dex":"para","sym":"10Y","cat":"rates","kw":["treasury","yields"],"lev":20,"px":"4.944","chg":-0.36,"vol":484966,"iso":true},{"id":"para:CIEN","dex":"para","sym":"CIEN","cat":"stocks","kw":["networking","optics"],"lev":10,"px":"334.9664","chg":3.64,"vol":6902,"iso":true},{"id":"para:RDDT","dex":"para","sym":"RDDT","cat":"stocks","kw":["reddit","media"],"lev":10,"px":"91.9182","chg":-1.11,"vol":71464,"iso":true},{"id":"para:UNITREE","dex":"para","sym":"UNITREE","cat":"stocks","kw":["robotics","688836"],"lev":10,"px":"96.9378","chg":0.78,"vol":1850989,"iso":true},{"id":"para:CRWD","dex":"para","sym":"CRWD","cat":"stocks","kw":["cybersec","security"],"lev":10,"px":"259.4773","chg":3.65,"vol":43273,"iso":true},{"id":"para:MELI","dex":"para","sym":"MELI","cat":"stocks","kw":["mercado","e-commerce"],"lev":10,"px":"1636.875","chg":0.29,"vol":14179,"iso":true},{"id":"para:SMCI","dex":"para","sym":"SMCI","cat":"stocks","kw":["supermicro","ai servers"],"lev":10,"px":"33.6245","chg":2.09,"vol":57485,"iso":true},{"id":"para:ANSEM","dex":"para","sym":"ANSEM","cat":"crypto","kw":["black bull","memecoin"],"lev":3,"px":"0.045013","chg":-2.92,"vol":96007,"iso":true},{"id":"para:30Y","dex":"para","sym":"30Y","cat":"rates","kw":["treasury","yields"],"lev":20,"px":"5.2988","chg":-0.84,"vol":48303,"iso":true},{"id":"para:2Y","dex":"para","sym":"2Y","cat":"rates","kw":["treasury","yields"],"lev":20,"px":"4.635","chg":-0.69,"vol":476965,"iso":true},{"id":"para:IGV","dex":"para","sym":"IGV","cat":"stocks","kw":["ishares","software"],"lev":10,"px":"105.7625","chg":0.81,"vol":507,"iso":true},{"id":"para:SOFI","dex":"para","sym":"SOFI","cat":"stocks","kw":["lending","fintech"],"lev":10,"px":"16.987","chg":1.18,"vol":4211,"iso":true},{"id":"para:ANTH","dex":"para","sym":"ANT","cat":"preipo","kw":["claude","anthropic"],"lev":10,"px":"112.5","chg":1.35,"vol":7402,"iso":true},{"id":"para:TTWO","dex":"para","sym":"TTWO","cat":"stocks","kw":["gaming","software"],"lev":10,"px":"192.8316","chg":-0.36,"vol":36184,"iso":true},{"id":"para:CIFR","dex":"para","sym":"CIFR","cat":"stocks","kw":["cipher","neocloud"],"lev":10,"px":"7.4167","chg":-0.4,"vol":217666,"iso":true},{"id":"para:TREAD","dex":"para","sym":"TREAD","cat":"crypto","kw":["treadfi","ai trading"],"lev":5,"px":"0.82678","chg":1.66,"vol":72997,"iso":true},{"id":"para:DRV","dex":"para","sym":"DRV","cat":"crypto","kw":["derive","options"],"lev":5,"px":"0.31799","chg":-1.54,"vol":13869,"iso":true},{"id":"para:GDX","dex":"para","sym":"GDX","cat":"stocks","kw":["gold","miners"],"lev":10,"px":"78.355","chg":1.63,"vol":6203,"iso":true},{"id":"para:SMH","dex":"para","sym":"SMH","cat":"stocks","kw":["semis","etf"],"lev":10,"px":"531.57","chg":0.58,"vol":15677,"iso":true},{"id":"mkts:BVIV","dex":"mkts","sym":"BVIV","cat":"other","kw":[],"lev":5,"px":"40.11","chg":-2.86,"vol":130227,"iso":true},{"id":"io:OAI","dex":"io","sym":"OPENAI","cat":"preipo","kw":["openai","oai"],"lev":6,"px":"1408.4","chg":0.28,"vol":1066822,"iso":true},{"id":"io:ANTH","dex":"io","sym":"ANT","cat":"preipo","kw":["anthropic"],"lev":15,"px":"1788.7","chg":-1.0,"vol":17414745,"iso":true},{"id":"io:SNDK","dex":"io","sym":"SNDK","cat":"stocks","kw":["sandisk","memory"],"lev":15,"px":"1179.1","chg":0.7,"vol":10561743,"iso":true},{"id":"io:IONQ","dex":"io","sym":"IONQ","cat":"stocks","kw":["quantum","ionq"],"lev":10,"px":"30.496","chg":-0.01,"vol":28436,"iso":true},{"id":"io:NBIS","dex":"io","sym":"NBIS","cat":"stocks","kw":["nebius"],"lev":15,"px":"158.14","chg":0.6,"vol":708723,"iso":true},{"id":"io:EWY","dex":"io","sym":"EWY","cat":"other","kw":[],"lev":25,"px":"159.03","chg":3.33,"vol":356041,"iso":true},{"id":"io:GPRO","dex":"io","sym":"GOPRO","cat":"stocks","kw":["gopro","gpro"],"lev":5,"px":"0.93978","chg":-2.35,"vol":8549,"iso":true},{"id":"io:TCNT","dex":"io","sym":"TENCENT","cat":"stocks","kw":["hk700","tencent"],"lev":10,"px":"49.992","chg":1.63,"vol":115697,"iso":true},{"id":"io:DRAM","dex":"io","sym":"DRAM","cat":"stocks","kw":["memory","dram"],"lev":25,"px":"49.823","chg":1.01,"vol":1797219,"iso":true},{"id":"io:PRL","dex":"io","sym":"PEARL","cat":"crypto","kw":["prl","pearl"],"lev":3,"px":"1.5585","chg":0.52,"vol":855032,"iso":true},{"id":"io:XIAOMI","dex":"io","sym":"XIAOMI","cat":"stocks","kw":["xiaomi","hk1810"],"lev":10,"px":"3.6237","chg":7.33,"vol":30692,"iso":true},{"id":"io:NVDA","dex":"io","sym":"NVDA","cat":"other","kw":[],"lev":25,"px":"207.18","chg":1.25,"vol":1267188,"iso":true}],"captured":"2026-11-02"}</script>
+<script>
+'use strict'
+const DATA = JSON.parse(document.getElementById('snapshot').textContent)
+const ALL = DATA.instruments
+const CATS = [['crypto', 'Crypto'], ['stocks', 'Stocks'], ['commodities', 'Commodities'], ['indices', 'Indices'], ['fx', 'FX'], ['rates', 'Rates'], ['preipo', 'Pre-IPO'], ['other', 'Other']]
+const catName = Object.fromEntries(CATS)
+const RECENT = ['BTC', 'xyz:GOLD', 'ETH', 'xyz:NVDA', 'SOL']
+const OPTIONS = [
+  { id: 'cascade', name: 'Cascade', fit: 'You think "stock, then which market, then which ticker". Each step narrows the next, and the counts show what each source offers.', cost: 'Three columns take a wide popover, and picking takes more clicks than typing. Least exciting, cheapest to build.', needs: 'Catalogue and categories only. Rows work without live prices; ordering by volume needs market data.' },
+  { id: 'palette', name: 'Command palette', fit: 'You know what you want. Type xau, nvda or @stocks, and the keyboard does everything. Tab cycles the categories, and the preview tells two NVDA markets apart.', cost: 'Weakest for browsing, and the @ shortcuts must be learned. Covers the whole page while open.', needs: 'Catalogue and categories, plus market data for the preview figures. Recents need one small stored list per user.' },
+  { id: 'map', name: 'Market map', fit: 'You want to see what is moving before choosing. Tile size follows volume and colour follows the 24-hour move, so ideas come from the market, not from search.', cost: 'Small markets collapse into a "more" tile, and long names do not fit small tiles. It needs the most screen and the most data.', needs: 'Live mark, previous-day price and 24h volume for every enabled source on each open.' },
+  { id: 'screener', name: 'Screener drawer', fit: 'You compare markets by leverage, volume or move, and want the chart beside the list while you do. It is the most complete view of the data.', cost: 'A heavy tool for picking BTC again. It needs a phone layout with fewer columns, and repeats part of the Activity table style.', needs: 'Live market data for sorting; without it only Asset, Category, Source and Max leverage remain.' },
+  { id: 'shelf', name: 'Inline shelf', fit: 'You want no popup. The field becomes the search box and the context card grows in place, so recents and categories stay one click away and nothing covers the page.', cost: 'Opening pushes the chart down, which briefly moves approved sections. Holds fewer rows at once than the other options.', needs: 'Catalogue and categories. Prices on the cards are optional. Recents need one small stored list per user.' },
+]
+const S = { opt: 'cascade', open: true, cat: 'all', dex: 'all', q: '', sel: 'xyz:GOLD', on: { xyz: true, para: true, io: true }, srcOpen: false, sort: 'vol', dir: -1, facets: new Set(), mapCat: null, active: 0 }
+const $ = s => document.querySelector(s)
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+const money = v => v == null ? '–' : v >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(0)}K` : `$${v}`
+const pct = v => v == null ? '–' : `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(2)}%`
+const tone = v => v > 0 ? 'up' : v < 0 ? 'down' : 'dim'
+const dexOn = i => !i.dex || S.on[i.dex]
+const pool = () => ALL.filter(dexOn)
+const byId = id => ALL.find(i => i.id === id)
+const source = i => i.dex ? i.dex.toUpperCase() : ''
+const sourceFull = i => DATA.dexes[i.dex] || 'Hyperliquid'
+const badge = i => i.dex ? `<span class="badge">${esc(source(i))}</span>` : ''
+const hay = i => [i.id, i.sym, ...i.kw, i.dex, sourceFull(i), catName[i.cat]].join(' ').toLowerCase()
+
+function search(items, q) {
+  const words = q.toLowerCase().trim().split(/\s+/).filter(Boolean)
+  const scopes = words.filter(w => w.startsWith('@')).map(w => w.slice(1))
+  const terms = words.filter(w => !w.startsWith('@'))
+  const out = []
+  for (const i of items) {
+    if (scopes.some(w => !w || !(i.dex.startsWith(w) || i.cat.startsWith(w) || catName[i.cat].toLowerCase().startsWith(w)))) continue
+    const h = hay(i)
+    if (!terms.every(t => h.includes(t))) continue
+    const t = terms[0] || ''; const sym = i.sym.toLowerCase()
+    const score = !t ? 2 : sym === t ? 0 : sym.startsWith(t) || i.kw.includes(t) ? 1 : 2
+    out.push([score, i])
+  }
+  return out.sort((a, b) => a[0] - b[0] || b[1].vol - a[1].vol).map(x => x[1])
+}
+const countBy = (items, key) => items.reduce((m, i) => (m[i[key]] = (m[i[key]] || 0) + 1, m), {})
+const filtered = () => {
+  let items = search(pool(), S.q)
+  if (S.cat !== 'all') items = items.filter(i => i.cat === S.cat)
+  if (S.dex !== 'all') items = items.filter(i => i.dex === S.dex)
+  return items
+}
+const curClass = i => i.id === S.sel ? ' cur' : ''
+const pickAttr = (i, label) => `data-pick="${esc(i.id)}" role="option" aria-selected="${i.id === S.sel}" aria-label="${esc(label || `${i.sym}/USDC${i.dex ? ` on ${source(i)}` : ''}`)}"`
+const row = (i, right) => `<div class="row pick${curClass(i)}" ${pickAttr(i)}><span><b class="sym">${esc(i.sym)}</b><span class="dim">/USDC</span>${badge(i)}</span><small>${right ?? `${i.lev}×`}</small></div>`
+
+/* Page chrome */
+function renderCtx() {
+  const i = byId(S.sel)
+  const off = i && !dexOn(i)
+  const shelf = S.opt === 'shelf' && S.open
+  const label = i ? `<span>${esc(i.sym)}/USDC</span>${badge(i)}` : '<span class="dim">Select an instrument</span>'
+  const control = shelf
+    ? `<input class="search shelf-in" id="q" aria-label="Search instruments" placeholder="${i ? `${esc(i.sym)}/USDC selected. ` : ''}Search, e.g. xau" autocomplete="off" spellcheck="false" value="${esc(S.q)}">`
+    : `<button class="trigger" id="trigger" type="button" aria-haspopup="dialog" aria-expanded="${S.open}">${label}<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>`
+  $('#ctx').innerHTML = `<div class="ctx-row">
+    <div class="fld"><span>Portfolio</span><div class="fake">All accounts</div></div>
+    <div class="fld"><span>Account</span><div class="fake">Hyperliquid main</div></div>
+    <div class="fld" id="fieldWrap"><span>Instrument</span>${control}${off ? `<small class="note">${esc(source(i))} is off in Market sources. Saved Plays keep this market, but new Plays can't pick it.</small>` : ''}</div>
+    <div class="fld"><span>Direction</span><div class="dirs" aria-hidden="true"><i>↑ Long</i><i>↓ Short</i></div></div>
+  </div>${shelf ? shelfHtml() : ''}`
+  $('#trigger')?.addEventListener('click', () => { S.open = !S.open; S.active = 0; render(true) })
+  const w = $('#fieldWrap').getBoundingClientRect(); const s = $('#stage').getBoundingClientRect()
+  $('#stage').style.setProperty('--anchor', `${Math.round(w.left - s.left)}px`)
+  if (matchMedia('(min-width: 761px)').matches) $('.cascade')?.style.setProperty('top', `${Math.round(w.bottom - s.top + 6)}px`)
+  const h = i ? [`<b>${esc(i.sym)}/USDC</b>`, `Mark <span class="num">${esc(i.px)}</span>`, `<span class="${tone(i.chg)} num">${pct(i.chg)}</span>`, `24h volume <span class="num">${money(i.vol)}</span>`] : []
+  $('#chartHead').innerHTML = h.map(x => `<span>${x}</span>`).join('')
+}
+function renderChart() {
+  let y = 200, out = ''
+  for (let n = 0; n < 72; n++) {
+    const d = Math.sin(n * 1.7) * 13 + Math.cos(n * .41) * 9
+    const a = y, b = Math.max(40, Math.min(330, y - d)); y = b
+    const top = Math.min(a, b), h = Math.max(2, Math.abs(a - b)), x = n * 11 + 4
+    out += `<line x1="${x + 3}" x2="${x + 3}" y1="${top - 9}" y2="${top + h + 9}" stroke="var(--muted-foreground)" opacity=".5"/><rect x="${x}" width="7" y="${top}" height="${h}" fill="${b < a ? 'var(--foreground)' : 'var(--border)'}" opacity=".62"/>`
+  }
+  $('#chartSvg').innerHTML = out
+}
+function renderBar() {
+  $('#opts').innerHTML = OPTIONS.map((o, n) => `<button role="tab" type="button" aria-selected="${o.id === S.opt}" data-opt="${o.id}"><b>${n + 1}</b>${o.name}</button>`).join('')
+  const box = $('#sources'); box.hidden = !S.srcOpen; $('#srcBtn').setAttribute('aria-expanded', S.srcOpen)
+  const counts = countBy(ALL, 'dex')
+  box.innerHTML = `<h2>Market sources</h2><p>Hyperliquid builder markets, set in Settings. Turning one off hides it here; saved Plays stay.</p>
+    <label class="fixed"><input type="checkbox" checked disabled><span>Hyperliquid</span><small>${counts['']} active</small></label>` +
+    Object.entries(DATA.dexes).filter(([k]) => k).map(([k, n]) => `<label><input type="checkbox" data-dex="${k}" ${S.on[k] ? 'checked' : ''}><span>${esc(n)}</span><small>${counts[k] || 0} active</small></label>`).join('')
+}
+function renderNotes() {
+  const n = OPTIONS.findIndex(o => o.id === S.opt), o = OPTIONS[n]
+  $('#notes').innerHTML = `<h2>${n + 1}. ${o.name}</h2>
+    <div><h3>Best when</h3><p>${o.fit}</p></div><div><h3>Trade-off</h3><p>${o.cost}</p></div><div><h3>Needs from the backend</h3><p>${o.needs}</p></div>
+    <div class="source-line">Live Hyperliquid catalogue, captured ${DATA.captured}: ${ALL.length} active markets. Recent instruments are sample data. Press Esc to close a selector, or click the instrument field to reopen it.</div>`
+}
+
+/* 1 Cascade */
+function cascadeHtml() {
+  const base = search(pool(), S.q)
+  const inDex = S.dex === 'all' ? base : base.filter(i => i.dex === S.dex)
+  const inCat = S.cat === 'all' ? base : base.filter(i => i.cat === S.cat)
+  const cc = countBy(inDex, 'cat'), dc = countBy(inCat, 'dex')
+  const items = filtered().slice(0, 120)
+  const dexes = ['', ...Object.keys(S.on).filter(k => S.on[k])]
+  return `<div class="panel cascade" role="dialog" aria-label="Choose an instrument">
+    <div class="top"><input class="search" id="q" aria-label="Search instruments" placeholder="Search name, ticker or keyword" autocomplete="off" spellcheck="false" value="${esc(S.q)}"></div>
+    <div class="cols">
+      <div class="col"><h3>Category</h3><button class="step" type="button" data-cat="all" aria-pressed="${S.cat === 'all'}">All <small>${inDex.length}</small></button>
+        ${CATS.filter(([k]) => cc[k]).map(([k, n]) => `<button class="step" type="button" data-cat="${k}" aria-pressed="${S.cat === k}">${n} <small>${cc[k]}</small></button>`).join('')}</div>
+      <div class="col"><h3>Source</h3><button class="step" type="button" data-dex="all" aria-pressed="${S.dex === 'all'}">All <small>${inCat.length}</small></button>
+        ${dexes.filter(k => dc[k]).map(k => `<button class="step" type="button" data-dexf="${k}" aria-pressed="${S.dex === k}">${k ? esc(DATA.dexes[k]) : 'Hyperliquid'} <small>${dc[k]}</small></button>`).join('')}</div>
+      <div class="col" role="listbox" aria-label="Instruments"><h3>Instrument</h3>${items.map(i => row(i)).join('') || '<div class="empty">Nothing matches. Clear a filter or check Market sources.</div>'}</div>
+    </div>
+    <div class="hints"><span><kbd>↑</kbd> <kbd>↓</kbd> Move</span><span><kbd>←</kbd> <kbd>→</kbd> Category</span><span><kbd>Enter</kbd> Choose</span></div>
+  </div>`
+}
+
+/* 2 Palette */
+function paletteHtml() {
+  const hits = filtered()
+  const counts = countBy(search(pool(), S.q), 'cat')
+  let body = ''
+  if (!S.q.trim() && S.cat === 'all') {
+    const recent = RECENT.map(byId).filter(i => i && dexOn(i))
+    body = `<h3>Recent</h3>${recent.map(i => row(i, `${i.lev}×`)).join('')}` +
+      CATS.filter(([k]) => counts[k]).map(([k, n]) => {
+        const top = hits.filter(i => i.cat === k).slice(0, 4).filter(i => !RECENT.includes(i.id))
+        return top.length ? `<h3>${n}</h3>${top.map(i => row(i)).join('')}` : ''
+      }).join('')
+  } else {
+    body = hits.length ? hits.slice(0, 80).map(i => row(i)).join('') : '<div class="empty">Nothing matches. Clear the filter or check Market sources.</div>'
+  }
+  return `<div class="scrim" data-close></div><div class="panel palette" role="dialog" aria-label="Choose an instrument">
+    <div class="top"><input class="search" id="q" aria-label="Search instruments" placeholder="Search, or narrow with @stocks or @xyz" autocomplete="off" spellcheck="false" value="${esc(S.q)}">
+      <div class="chips"><button class="chip" type="button" data-cat="all" aria-pressed="${S.cat === 'all'}">All</button>${CATS.filter(([k]) => counts[k]).map(([k, n]) => `<button class="chip" type="button" data-cat="${k}" aria-pressed="${S.cat === k}">${n}<small>${counts[k]}</small></button>`).join('')}</div></div>
+    <div class="split"><div class="res" role="listbox" aria-label="Instruments">${body}</div><aside class="peek" id="peek"></aside></div>
+    <div class="hints"><span><kbd>↑</kbd> <kbd>↓</kbd> Move</span><span><kbd>Tab</kbd> Next category</span><span><kbd>Enter</kbd> Choose</span><span><kbd>Esc</kbd> Close</span></div>
+  </div>`
+}
+function peek(i) {
+  const el = $('#peek'); if (!el) return
+  el.innerHTML = i ? `<strong>${esc(i.sym)}<span class="dim">/USDC</span></strong>
+    <div class="chips">${i.dex ? `<span class="badge">${esc(source(i))}</span>` : ''}<span class="badge">${esc(catName[i.cat])}</span>${i.iso ? '<span class="badge">Isolated only</span>' : ''}</div>
+    <dl><dt>Mark</dt><dd>${esc(i.px)}</dd><dt>24h</dt><dd class="${tone(i.chg)}">${pct(i.chg)}</dd><dt>24h volume</dt><dd>${money(i.vol)}</dd><dt>Max leverage</dt><dd>${i.lev}×</dd><dt>Source</dt><dd>${esc(sourceFull(i))}</dd><dt>Contract</dt><dd>${esc(i.id)}</dd></dl>` : '<span class="dim">Nothing selected</span>'
+}
+
+/* 3 Market map */
+function squarify(items, x, y, w, h) {
+  const total = items.reduce((s, i) => s + i.w, 0), scale = (w * h) / (total || 1)
+  const out = []; let rest = items.map(i => ({ ...i, a: i.w * scale })), X = x, Y = y, W = w, H = h
+  const worst = (r, s) => { const sum = r.reduce((t, i) => t + i.a, 0), mx = Math.max(...r.map(i => i.a)), mn = Math.min(...r.map(i => i.a)); return Math.max(s * s * mx / (sum * sum), sum * sum / (s * s * mn)) }
+  while (rest.length) {
+    const side = Math.min(W, H) || 1; const r = [rest[0]]; let n = 1
+    while (n < rest.length && worst([...r, rest[n]], side) <= worst(r, side)) { r.push(rest[n]); n++ }
+    const sum = r.reduce((t, i) => t + i.a, 0)
+    if (W >= H) { const cw = sum / (H || 1); let cy = Y; for (const i of r) { const ch = i.a / (cw || 1); out.push({ ...i, x: X, y: cy, w: cw, h: ch }); cy += ch } X += cw; W -= cw }
+    else { const ch = sum / (W || 1); let cx = X; for (const i of r) { const cw = i.a / (ch || 1); out.push({ ...i, x: cx, y: Y, w: cw, h: ch }); cx += cw } Y += ch; H -= ch }
+    rest = rest.slice(n)
+  }
+  return out
+}
+const heat = v => {
+  if (v == null || v === 0) return 'var(--secondary)'
+  const p = Math.round(Math.min(42, 10 + Math.abs(v) * 7))
+  return `color-mix(in srgb, var(--${v > 0 ? 'positive' : 'negative'}) ${p}%, var(--card))`
+}
+function tile(i, x, y, w, h, faded) {
+  const big = w > 62 && h > 40
+  const fs = Math.max(11, Math.min(20, Math.sqrt(w * h) / 5.4))
+  const show = w > 34 && h > 17
+  return `<button type="button" class="tile pick${curClass(i)}${faded ? ' fade' : ''}" ${pickAttr(i, `${i.sym}/USDC${i.dex ? ` on ${source(i)}` : ''}, ${pct(i.chg)}, volume ${money(i.vol)}`)} title="${esc(`${i.sym}/USDC ${pct(i.chg)} · ${money(i.vol)}`)}" style="left:${x.toFixed(1)}px;top:${y.toFixed(1)}px;width:${w.toFixed(1)}px;height:${h.toFixed(1)}px;background:${heat(i.chg)};--fs:${fs.toFixed(1)}px">${show ? `<span class="sym">${esc(i.sym)}</span>` : ''}${big ? `<small>${pct(i.chg)}${i.dex ? ` · ${esc(source(i))}` : ''}</small>` : ''}</button>`
+}
+function mapHtml() {
+  const counts = countBy(pool(), 'cat')
+  return `<div class="scrim" data-close></div><div class="panel mapd" role="dialog" aria-label="Choose an instrument">
+    <div class="top"><input class="search" id="q" aria-label="Highlight instruments" placeholder="Highlight, e.g. gold" autocomplete="off" spellcheck="false" value="${esc(S.q)}">
+      <div class="chips"><button class="chip" type="button" data-map="" aria-pressed="${!S.mapCat}">All markets</button>${CATS.filter(([k]) => counts[k]).map(([k, n]) => `<button class="chip" type="button" data-map="${k}" aria-pressed="${S.mapCat === k}">${n}<small>${counts[k]}</small></button>`).join('')}</div>
+      <div class="legend"><span>Size: 24h volume</span><span>−5%</span><i style="background:${heat(-5)}"></i><i style="background:${heat(-1)}"></i><i style="background:var(--secondary)"></i><i style="background:${heat(1)}"></i><i style="background:${heat(5)}"></i><span>+5%</span></div>
+      <button class="x" type="button" data-close>Close</button></div>
+    <div class="treemap" id="treemap" role="listbox" aria-label="Instruments"></div></div>`
+}
+function drawMap() {
+  const el = $('#treemap'); if (!el) return
+  const W = el.clientWidth, H = el.clientHeight
+  const small = W < 600
+  const limit = S.mapCat ? 200 : small ? 12 : 42
+  const hits = S.q.trim() ? new Set(search(pool(), S.q).map(i => i.id)) : null
+  const groups = CATS.map(([k, n]) => {
+    const all = pool().filter(i => i.cat === k && (!S.mapCat || S.mapCat === k)).sort((a, b) => b.vol - a.vol)
+    return { k, n, all, top: all.slice(0, limit), w: Math.sqrt(all.reduce((s, i) => s + Math.sqrt(i.vol + 1e4), 0)) ** 1.4 }
+  }).filter(g => g.all.length).sort((a, b) => b.w - a.w)
+  el.innerHTML = squarify(groups, 0, 0, W, H).map(g => {
+    const pad = 22, innerH = Math.max(0, g.h - pad - 3), innerW = Math.max(0, g.w - 3)
+    const more = g.all.length - g.top.length
+    const leaves = g.top.map(i => ({ i, w: Math.sqrt(i.vol + 1e4) }))
+    if (more) leaves.push({ more, w: Math.max(leaves.at(-1).w * 3, leaves[0].w * .08) })
+    leaves.sort((a, b) => b.w - a.w)
+    const inner = squarify(leaves, 0, pad, innerW, innerH).map(t => t.more
+      ? `<button type="button" class="tile more" data-map="${g.k}" style="left:${t.x.toFixed(1)}px;top:${t.y.toFixed(1)}px;width:${t.w.toFixed(1)}px;height:${t.h.toFixed(1)}px">+${t.more}</button>`
+      : tile(t.i, t.x, t.y, t.w, t.h, hits && !hits.has(t.i.id))).join('')
+    return `<div class="block" style="left:${g.x.toFixed(1)}px;top:${g.y.toFixed(1)}px;width:${g.w.toFixed(1)}px;height:${g.h.toFixed(1)}px"><button type="button" data-map="${g.k}">${g.n} <span class="dim">${g.all.length}</span></button>${inner}</div>`
+  }).join('')
+}
+
+/* 4 Screener */
+function screenerHtml() {
+  let items = search(pool(), S.q)
+  if (S.facets.size) items = items.filter(i => S.facets.has(i.cat))
+  if (S.dex !== 'all') items = items.filter(i => i.dex === S.dex)
+  if (S.sort) items = [...items].sort((a, b) => {
+    const k = S.sort, x = a[k] ?? -Infinity, y = b[k] ?? -Infinity
+    return (typeof x === 'string' ? x.localeCompare(y) : x - y) * S.dir
+  })
+  const counts = countBy(search(pool(), S.q), 'cat')
+  const dexes = ['', ...Object.keys(S.on).filter(k => S.on[k])]
+  const th = (k, label, cls = '') => `<th class="${cls}"${S.sort === k ? ` aria-sort="${S.dir > 0 ? 'ascending' : 'descending'}"` : ''}><button type="button" data-sort="${k}">${label}${S.sort === k ? (S.dir > 0 ? ' ↑' : ' ↓') : ''}</button></th>`
+  return `<div class="panel drawer" role="dialog" aria-label="Choose an instrument">
+    <div class="top"><h3>Choose an instrument <button class="x" type="button" data-close>Close</button></h3>
+      <input class="search" id="q" aria-label="Search instruments" placeholder="Search name, ticker or keyword" autocomplete="off" spellcheck="false" value="${esc(S.q)}">
+      <div class="chips">${CATS.filter(([k]) => counts[k]).map(([k, n]) => `<button class="chip" type="button" data-facet="${k}" aria-pressed="${S.facets.has(k)}">${n}<small>${counts[k]}</small></button>`).join('')}</div>
+      <div class="chips"><button class="chip" type="button" data-dex="all" aria-pressed="${S.dex === 'all'}">All sources</button>${dexes.map(k => `<button class="chip" type="button" data-dexf="${k}" aria-pressed="${S.dex === k}">${k ? esc(DATA.dexes[k]) : 'Hyperliquid'}</button>`).join('')}</div></div>
+    <div class="scroll"><table><thead><tr>${th('sym', 'Asset')}${th('cat', 'Category', 'l col-hide')}${th('dex', 'Source', 'l col-hide')}${th('lev', 'Max lev')}${th('chg', '24h')}${th('vol', 'Volume', 'col-hide')}</tr></thead>
+      <tbody role="listbox" aria-label="Instruments">${items.slice(0, 150).map(i => `<tr class="pick${curClass(i)}" ${pickAttr(i)}><td><b class="sym">${esc(i.sym)}</b> <span class="dim">/USDC</span></td><td class="l dim col-hide">${esc(catName[i.cat])}</td><td class="l dim col-hide">${i.dex ? esc(source(i)) : 'HL'}</td><td>${i.lev}×</td><td class="${tone(i.chg)}">${pct(i.chg)}</td><td class="col-hide">${money(i.vol)}</td></tr>`).join('')}</tbody></table>
+      ${items.length ? '' : '<div class="empty">Nothing matches. Clear a filter or check Market sources.</div>'}</div></div>`
+}
+
+/* 5 Shelf */
+function shelfHtml() {
+  const base = search(pool(), S.q)
+  const counts = countBy(base, 'cat')
+  const items = (S.cat === 'all' ? base : base.filter(i => i.cat === S.cat)).slice(0, 96)
+  const recent = RECENT.map(byId).filter(i => i && dexOn(i))
+  return `<div class="shelf" role="region" aria-label="Choose an instrument">
+    <div class="shelf-head"><div class="seg"><button type="button" data-cat="all" aria-pressed="${S.cat === 'all'}">All<small>${base.length}</small></button>${CATS.filter(([k]) => counts[k]).map(([k, n]) => `<button type="button" data-cat="${k}" aria-pressed="${S.cat === k}">${n}<small>${counts[k]}</small></button>`).join('')}</div>
+      <div class="recent"><span>Recent</span>${recent.map(i => `<button class="chip" type="button" data-choose="${esc(i.id)}">${esc(i.sym)}${i.dex ? `<small>${esc(source(i))}</small>` : ''}</button>`).join('')}</div></div>
+    <div class="grid" role="listbox" aria-label="Instruments">${items.map(i => `<div class="cardlet pick${curClass(i)}" ${pickAttr(i)}><div><b class="sym">${esc(i.sym)}</b>${badge(i)}</div><div><small class="dim">${i.lev}×</small><small class="${tone(i.chg)}">${pct(i.chg)}</small></div></div>`).join('') || '<div class="empty">Nothing matches. Clear the filter or check Market sources.</div>'}</div>
+  </div>`
+}
+
+/* Rendering and interaction */
+const picks = () => [...document.querySelectorAll('.pick')]
+function hilite(n, scroll) {
+  const all = picks(); if (!all.length) { peek(null); return }
+  S.active = Math.max(0, Math.min(all.length - 1, n))
+  all.forEach((e, x) => e.classList.toggle('hl', x === S.active))
+  if (scroll) all[S.active].scrollIntoView({ block: 'nearest' })
+  peek(byId(all[S.active].dataset.pick))
+}
+function render(focus) {
+  const prev = document.activeElement?.id === 'q' ? document.activeElement.selectionStart : null
+  renderBar(); renderNotes()
+  const html = !S.open ? '' : { cascade: cascadeHtml, palette: paletteHtml, map: mapHtml, screener: screenerHtml, shelf: () => '' }[S.opt]()
+  $('#layer').innerHTML = html
+  renderCtx()
+  if (S.open && S.opt === 'map') drawMap()
+  if (S.open) hilite(S.active)
+  const q = $('#q')
+  if (q && (focus || prev !== null)) { q.focus({ preventScroll: true }); if (prev !== null) q.setSelectionRange(prev, prev) }
+  else if (!S.open && focus) $('#trigger')?.focus({ preventScroll: true })
+}
+function choose(id) { S.sel = id; S.open = false; S.q = ''; S.active = 0; render(true) }
+function setOpt(id) { S.opt = id; S.open = true; S.q = ''; S.cat = 'all'; S.dex = 'all'; S.facets.clear(); S.mapCat = null; S.active = 0; try { history.replaceState(null, '', `#${id}`) } catch { /* framed viewers */ } render() }
+function reset() { S.active = 0; render() }
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-opt],[data-pick],[data-choose],[data-cat],[data-dexf],[data-dex="all"],[data-facet],[data-sort],[data-map],[data-close]')
+  if (e.target.closest('#srcBtn')) { S.srcOpen = !S.srcOpen; renderBar(); return }
+  if (S.srcOpen && !e.target.closest('#sources')) { S.srcOpen = false; renderBar() }
+  if (!t) {
+    if (e.target.closest('.bar')) return
+    if (S.open && S.opt !== 'shelf' && !e.target.closest('.panel,.trigger')) { S.open = false; render() }
+    else if (S.open && S.opt === 'shelf' && !e.target.closest('.ctx,.trigger')) { S.open = false; render() }
+    return
+  }
+  const d = t.dataset
+  if (d.opt) return setOpt(d.opt)
+  if (d.pick) return choose(d.pick)
+  if (d.choose) return choose(d.choose)
+  if ('close' in d) { S.open = false; return render(true) }
+  if (d.cat) { S.cat = d.cat; return reset() }
+  if (d.dex === 'all') { S.dex = 'all'; return reset() }
+  if ('dexf' in d) { S.dex = d.dexf; return reset() }
+  if (d.facet) { S.facets.has(d.facet) ? S.facets.delete(d.facet) : S.facets.add(d.facet); return reset() }
+  if (d.sort) { if (S.sort === d.sort) S.dir = -S.dir; else { S.sort = d.sort; S.dir = d.sort === 'sym' || d.sort === 'cat' || d.sort === 'dex' ? 1 : -1 } return reset() }
+  if ('map' in d) { S.mapCat = d.map || null; return reset() }
+})
+document.addEventListener('change', e => {
+  const d = e.target.dataset?.dex
+  if (!d) return
+  if (e.target.checked) S.on[d] = true; else delete S.on[d]
+  if (S.dex === d) S.dex = 'all'
+  S.active = 0; render()
+})
+document.addEventListener('input', e => { if (e.target.id === 'q') { S.q = e.target.value; S.active = 0; render() } })
+document.addEventListener('focusin', e => { if (e.target.id === 'q' && !S.open) { S.open = true; render() } })
+document.addEventListener('keydown', e => {
+  if (!S.open) return
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); hilite(S.active + (e.key === 'ArrowDown' ? 1 : -1), true) }
+  else if (e.key === 'Enter') { const el = picks()[S.active]; if (el && document.activeElement?.closest('button') == null) { e.preventDefault(); choose(el.dataset.pick) } }
+  else if (e.key === 'Escape') { e.preventDefault(); S.open = false; S.q = ''; render(true) }
+  else if (e.key === 'Tab' && S.opt === 'palette') { e.preventDefault(); cycle(e.shiftKey ? -1 : 1) }
+  else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && S.opt === 'cascade' && !S.q) { e.preventDefault(); cycle(e.key === 'ArrowRight' ? 1 : -1) }
+})
+function cycle(step) {
+  const counts = countBy(search(pool(), S.q), 'cat')
+  const list = ['all', ...CATS.map(c => c[0]).filter(k => counts[k])]
+  S.cat = list[(list.indexOf(S.cat) + step + list.length) % list.length]
+  reset()
+}
+$('#skin').addEventListener('click', e => {
+  const r = document.documentElement, day = r.dataset.skin === 'daylight'
+  if (day) delete r.dataset.skin; else r.dataset.skin = 'daylight'
+  e.target.textContent = day ? 'Daylight' : 'Graphite'
+})
+addEventListener('resize', () => { if (S.open && S.opt === 'map') drawMap(); renderCtx() })
+addEventListener('hashchange', () => { const id = location.hash.slice(1); if (OPTIONS.some(o => o.id === id) && id !== S.opt) setOpt(id) })
+renderChart()
+const initial = location.hash.slice(1)
+if (OPTIONS.some(o => o.id === initial)) S.opt = initial
+render()
+document.fonts?.ready.then(() => renderCtx())
+</script>
+</body>
+</html>

@@ -65,6 +65,7 @@ public static class DependencyInjection
         services.AddScoped<Vessel.Application.Sizing.ISizingStore, SizingStore>();
         services.AddScoped<Vessel.Application.Risk.IOpenRiskStore, RiskStore>();
         services.AddScoped<Vessel.Application.Reporting.IReportingStore, ReportingStore>();
+        services.AddScoped<Vessel.Application.MarketSources.IMarketSourceStore, MarketSourceStore>();
         services.AddScoped<Vessel.Application.Export.IFactsExportStore, ExportStore>();
         services.AddScoped<Vessel.Application.Review.IReviewStore, ReviewStore>();
         services.AddScoped<Vessel.Application.Monitoring.IMonitorStore, MonitorStore>();

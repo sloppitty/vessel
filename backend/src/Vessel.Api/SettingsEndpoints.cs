@@ -1,3 +1,4 @@
+using Vessel.Application.MarketSources;
 using Vessel.Application.Reporting;
 
 namespace Vessel.Api;
@@ -13,5 +14,12 @@ public static class SettingsEndpoints
         api.MapGet("/reporting", async (ReportingService service, CancellationToken ct) => Results.Ok(await service.SettingsAsync(ct)));
         api.MapPut("/reporting", async (UpdateReportingSettingsRequest request, ReportingService service, CancellationToken ct) =>
             Results.Ok(await service.UpdateAsync(request, ct))).WithBodyLimit(ReportingBodyBytes, "Reporting settings request is too large.");
+        api.MapGet("/market-sources", async (MarketSourceService service, CancellationToken ct) => Results.Ok(await service.ListAsync(ct)));
+        api.MapPut("/market-sources/{venueId}/{sourceId}", async (string venueId, string sourceId, UpdateMarketSourceRequest request,
+            MarketSourceService service, CancellationToken ct) =>
+        {
+            await service.SetAsync(venueId, sourceId, request, ct);
+            return Results.NoContent();
+        }).WithBodyLimit(ReportingBodyBytes, "Market source request is too large.");
     }
 }

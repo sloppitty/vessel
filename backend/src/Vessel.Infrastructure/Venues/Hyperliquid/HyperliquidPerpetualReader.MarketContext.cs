@@ -12,10 +12,23 @@ public sealed partial class HyperliquidPerpetualReader : IMarketContextReader
         ReadBoundedAsync<IReadOnlyList<VenueMarketContext>>(async token =>
         {
             using var response = await ReadJsonAsync(new { type = "metaAndAssetCtxs" }, token);
-            return ReadMarketContexts(response.RootElement);
+            var contexts = ReadMarketContexts(response.RootElement);
+            foreach (var dex in builderMarkets ? (await CatalogueAsync(token)).Dexes : [])
+            {
+                try
+                {
+                    using var builder = await ReadJsonAsync(new { type = "metaAndAssetCtxs", dex }, token);
+                    contexts.AddRange(ReadMarketContexts(builder.RootElement, dex));
+                }
+                catch (Exception error) when (WalletFailure(error) && !token.IsCancellationRequested)
+                {
+                    // A market with no context shows none; one builder DEX never hides the primary marks.
+                }
+            }
+            return contexts;
         }, cancellationToken);
 
-    private static List<VenueMarketContext> ReadMarketContexts(JsonElement root)
+    private static List<VenueMarketContext> ReadMarketContexts(JsonElement root, string? dex = null)
     {
         if (Array(root).GetArrayLength() != 2)
             throw new VenueReadException(InvalidResponse);
@@ -28,7 +41,7 @@ public sealed partial class HyperliquidPerpetualReader : IMarketContextReader
         for (var i = 0; i < universe.GetArrayLength(); i++)
         {
             var name = Text(Property(universe[i], "name"));
-            if (!IsPrimaryContract(name))
+            if (dex is null ? !IsPrimaryContract(name) : !name.StartsWith(dex + ":", StringComparison.Ordinal))
                 continue;
             var canonical = HyperliquidInstruments.Canonical(name);
             if (!names.Add(canonical) || HyperliquidInstruments.Native(canonical) != name)

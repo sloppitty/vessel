@@ -1,4 +1,5 @@
 import type { PriceStep } from '@/lib/price-step'
+import { assetName } from './instruments-cascade'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import { ArrowRightToLine, Camera, ChartNoAxesCombined, ChartSpline, Layers, Maximize2, OctagonX, RefreshCw, Star, Target } from 'lucide-react'
 import { Popover } from 'radix-ui'
@@ -420,7 +421,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
     { label: 'Oracle', value: market.context?.oraclePrice ?? '—' },
     { label: '24h change', value: described?.change ?? '—', ...(described && described.direction !== 'flat' ? { tone: described.direction } : {}) },
     { label: '24h volume', hint: 'notional', value: described?.volume ?? '—' },
-    { label: 'Open interest', value: described ? `${described.openInterest} ${instrument}` : '—' },
+    { label: 'Open interest', value: described ? `${described.openInterest} ${assetName(instrument)}` : '—' },
     { label: 'Funding', hint: '1h', value: described?.funding ?? '—' },
   ]
   // The instrument is already chosen and shown in the play fields, so the header carries statistics only.

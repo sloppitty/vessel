@@ -65,9 +65,9 @@ public sealed class HyperliquidMarketStream : IMarketStream, IAsyncDisposable
 
     public IMarketStreamSubscription Subscribe(string contractId, string interval)
     {
-        if (string.IsNullOrWhiteSpace(contractId) || !HyperliquidPerpetualReader.IsPrimaryContract(contractId) ||
+        if (string.IsNullOrWhiteSpace(contractId) || !HyperliquidPerpetualReader.IsPerpetualContract(contractId) ||
             string.IsNullOrWhiteSpace(interval))
-            throw new VenueReadException("A primary perpetual contract and interval are required.");
+            throw new VenueReadException("A perpetual contract and interval are required.");
         var listener = new Listener(this, HyperliquidInstruments.Native(contractId), interval);
         lock (gate)
         {

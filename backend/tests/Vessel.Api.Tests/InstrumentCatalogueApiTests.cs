@@ -100,7 +100,7 @@ public sealed class InstrumentCatalogueApiTests
         var response = await client.GetAsync($"/api/accounts/{account.Id}/instruments");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal(new[] { "venueId", "marketScope", "scope", "instruments", "notice" },
+        Assert.Equal(new[] { "venueId", "marketScope", "scope", "instruments", "notice", "disabledSources" },
             json.RootElement.EnumerateObject().Select(p => p.Name));
         var root = json.RootElement;
         Assert.Equal("hyperliquid", root.GetProperty("venueId").GetString());
@@ -110,9 +110,11 @@ public sealed class InstrumentCatalogueApiTests
             root.GetProperty("notice").GetString());
         var instrument = Assert.Single(root.GetProperty("instruments").EnumerateArray());
         Assert.Equal(new[] { "contractId", "quantityDecimals", "maxLeverage", "quoteAsset", "priceStep", "category", "venueContractId", "maintenanceMarginFraction",
-            "maxPriceDecimals" }, instrument.EnumerateObject().Select(p => p.Name));
-        // Hyperliquid rounds to significant figures, labels no categories and keys contracts by name.
-        Assert.All(new[] { "priceStep", "category", "venueContractId" }, name => Assert.Equal(JsonValueKind.Null, instrument.GetProperty(name).ValueKind));
+            "maxPriceDecimals", "source", "sourceName", "displayName", "keywords", "isolatedOnly" }, instrument.EnumerateObject().Select(p => p.Name));
+        // Hyperliquid rounds to significant figures and keys contracts by name; its primary market is crypto.
+        Assert.All(new[] { "priceStep", "venueContractId", "source" }, name => Assert.Equal(JsonValueKind.Null, instrument.GetProperty(name).ValueKind));
+        Assert.Equal("crypto", instrument.GetProperty("category").GetString());
+        Assert.Empty(root.GetProperty("disabledSources").EnumerateArray());
         Assert.Equal("MiXeD", instrument.GetProperty("contractId").GetString());
         Assert.Equal(5, instrument.GetProperty("quantityDecimals").GetInt32());
         Assert.Equal(40, instrument.GetProperty("maxLeverage").GetInt32());

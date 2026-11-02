@@ -59,6 +59,8 @@ internal sealed class CoreApiFactory(Guid owner, IWorkspaceStore? store = null, 
                 // In-memory workspace fixtures use their supplied facts store, without a database revision probe.
                 services.RemoveAll<Vessel.Application.Activity.IActivitySummaryReader>();
                 services.AddSingleton<Vessel.Application.Ownership.IUnitOfWork>(TestUnitOfWork.None);
+                services.RemoveAll<Vessel.Application.MarketSources.IMarketSourceStore>();
+                services.AddSingleton<Vessel.Application.MarketSources.IMarketSourceStore, MemoryMarketSourceStore>();
             }
             if (reader is not null) services.AddSingleton<IPerpetualVenueReader>(reader);
             else if (candles is not null)

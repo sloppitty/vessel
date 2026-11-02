@@ -45,6 +45,7 @@ public static class ApplicationServices
         services.AddScoped<Vessel.Application.Risk.OpenRiskService>();
         services.AddScoped<Vessel.Application.Risk.LossLimitService>();
         services.AddScoped<Vessel.Application.Reporting.ReportingService>();
+        services.AddScoped<Vessel.Application.MarketSources.MarketSourceService>();
         services.AddScoped<Vessel.Application.Export.FactsExportService>();
         services.AddScoped<Vessel.Application.Export.PlayBundleService>();
         // Review resolves Activity (and the database) only when a report includes imported positions.
