@@ -4,7 +4,9 @@ export type ApiErrorKind = 'unauthorized' | 'unavailable' | 'invalid-response' |
 export class ApiError extends Error {
   constructor(public readonly kind: ApiErrorKind, message: string, public readonly status?: number, public readonly retryAtUtc?: string,
     /** The ProblemDetails `code`, e.g. `step-up-required`; never shown as text. */
-    public readonly code?: string) {
+    public readonly code?: string,
+    /** The ProblemDetails `attemptsLeft` extension (a wrong pairing confirmation code); a small count, never text. */
+    public readonly attemptsLeft?: number) {
     super(message)
     this.name = 'ApiError'
   }

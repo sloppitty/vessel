@@ -420,3 +420,36 @@ describe('wallet signing flow', () => {
     expect(onDone).not.toHaveBeenCalled()
   })
 })
+
+describe('device pairing in Sessions', () => {
+  const pairedRow = { ...sessionRowsFixture[1]!, id: '5a3f1c88-2b7d-4e90-8c14-d6e0b9a47f21', userAgent: 'Safari on iPhone', source: 'pairing' as const, remember: true }
+
+  it('labels a paired device as such, with a sign-out that says the same', async () => {
+    routes['GET /api/auth/sessions'] = () => json([...sessionRowsFixture, pairedRow])
+    mount()
+    expect(await screen.findByText('Paired · Safari on iPhone')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Sign out Paired · Safari on iPhone session' })).toBeVisible()
+    // A wallet session keeps its plain label.
+    expect(screen.getByText('Safari on iOS')).toBeVisible()
+  })
+
+  it('offers Connect a phone, which opens the dialog and sends nothing before the wallet signs', async () => {
+    const { user } = mount()
+    const button = await screen.findByRole('button', { name: 'Connect a phone' })
+    await waitFor(() => expect(button).toBeEnabled())
+    await user.click(button)
+    // Under test the page is on a loopback address, so the dialog explains instead of showing a QR.
+    const dialog = await screen.findByRole('dialog', { name: 'Connect a phone' })
+    expect(within(dialog).getByRole('note')).toHaveTextContent('A phone can’t open this address')
+    expect(sent('/api/auth/pairings')).toHaveLength(0)
+    await user.click(within(dialog).getAllByRole('button', { name: 'Close' })[0]!)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('does not offer Connect a phone on a paired device, which cannot sign for the step-up', async () => {
+    routes['GET /api/auth/sessions'] = () => json([{ ...sessionRowsFixture[0]!, source: 'pairing' }, sessionRowsFixture[1]])
+    mount()
+    expect(await screen.findByText('Paired · Firefox on Linux')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'Connect a phone' })).not.toBeInTheDocument()
+  })
+})
