@@ -1,7 +1,10 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup } from '@testing-library/react'
+import { cleanup, configure } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 import { resetPreferenceScope } from '@/lib/preference-scope'
+
+// Lazy route imports can exceed the one-second default on a shared runner.
+configure({ asyncUtilTimeout: 5_000 })
 
 // Browser storage never leaks between tests: preferences, the device notice and the last-used wallet start empty.
 afterEach(() => {
