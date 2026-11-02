@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { InfoTip } from '@/components/ui/info-tip'
 import { Input } from '@/components/ui/input'
+import { ConnectPhoneDialog } from './ConnectPhoneDialog'
 import { UserAvatar } from './IdentityParts'
 import { cleanDisplayName, cleanLabel } from './profile-rules'
 import { focusedControl, openDialog, returnFocus } from './return-focus'
@@ -27,10 +28,12 @@ function ago(at: string, now = Date.now()) {
   const days = Math.round(hours / 24)
   return `${days} day${days === 1 ? '' : 's'} ago`
 }
+/** A paired device is labelled as such: "Paired · Safari on iPhone". */
+const sessionLabel = (row: SessionRow) => row.source === 'pairing' ? `Paired · ${row.userAgent ?? 'Unknown device'}` : row.userAgent ?? 'Unknown browser'
 const mobile = (agent: string | null) => !!agent && /\b(iOS|iPhone|iPad|Android)\b/i.test(agent)
 
 /** `opener` is what had focus when the step-up opened, usually a control in the dialog underneath. */
-type StepUpRequest = { action: StepUpAction; target?: WalletDto; opener: HTMLElement | null; resolve: (done: boolean) => void }
+type StepUpRequest = { action: Exclude<StepUpAction, 'device.pair'>; target?: WalletDto; opener: HTMLElement | null; resolve: (done: boolean) => void }
 
 /**
  * Settings → Profile & sign-in in Wallet mode (mockup screens 8–9): display name, sign-in wallets and sessions.
@@ -50,6 +53,8 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
   const reload = useCallback(() => setReloadKey(key => key + 1), [])
   const [stepUp, setStepUp] = useState<StepUpRequest | null>(null)
   const [linking, setLinking] = useState(false)
+  const [connecting, setConnecting] = useState(false)
+  const connectButton = useRef<HTMLButtonElement>(null)
   const [removing, setRemoving] = useState<WalletDto | null>(null)
   // These dialogs open from state, so they remember where focus goes back to.
   const linkButton = useRef<HTMLButtonElement>(null)
@@ -80,13 +85,13 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
     reload()
   }), [onSessionChange, reload])
 
-  const requestStepUp = useCallback((action: StepUpAction, target?: WalletDto) => new Promise<boolean>(resolve => {
+  const requestStepUp = useCallback((action: StepUpRequest['action'], target?: WalletDto) => new Promise<boolean>(resolve => {
     setStepUp({ action, ...target ? { target } : {}, opener: focusedControl(), resolve })
   }), [])
   const finishStepUp = (done: boolean) => { stepUp?.resolve(done); setStepUp(null) }
 
   /** Runs `action`; a `step-up-required` refusal opens the step-up and retries once. */
-  async function withStepUp<T>(action: StepUpAction, target: WalletDto | undefined, run: () => Promise<T>): Promise<T | null> {
+  async function withStepUp<T>(action: StepUpRequest['action'], target: WalletDto | undefined, run: () => Promise<T>): Promise<T | null> {
     try { return await run() } catch (cause) {
       if (!(cause instanceof ApiError && cause.code === 'step-up-required')) throw cause
       if (!await requestStepUp(action, target)) return null
@@ -124,6 +129,9 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
   const linked = wallets ?? []
   const walletLimitReached = linked.length >= signInWalletLimit
   const others = (sessions ?? []).filter(row => !row.current)
+  // A paired device cannot sign for a step-up, so it cannot connect another one.
+  const pairedHere = (sessions ?? []).some(row => row.current && row.source === 'pairing')
+  const onConnected = useCallback(() => { reload() }, [reload])
   return <div className="profile-settings">
     <ProfilePanel identity={identity} />
     {loadError && <div className="workspace-alert" role="alert"><span>{loadError}</span><Button variant="ghost" size="sm" onClick={reload}>Try again</Button></div>}
@@ -142,18 +150,22 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
       <section className="shell-panel profile-section" aria-labelledby="sessions-heading">
         <header>
           <h2 id="sessions-heading" tabIndex={-1}>Sessions</h2>
-          <Button variant="outline" size="sm" disabled={stale || !others.length} onClick={() => {
-            auth.revokeOtherSessions().then(() => { notify({ tone: 'success', message: 'Other sessions signed out.' }); reload() },
-              (cause: unknown) => notify({ tone: 'error', message: errorMessage(cause, 'Other sessions could not be signed out.') }))
-          }}>Sign out other sessions</Button>
+          <span className="profile-row-actions">
+            {!pairedHere && <Button ref={connectButton} variant="outline" size="sm" disabled={stale || !sessions || !wallets} onClick={() => setConnecting(true)}>
+              <Smartphone size={15} aria-hidden="true" />Connect a phone</Button>}
+            <Button variant="outline" size="sm" disabled={stale || !others.length} onClick={() => {
+              auth.revokeOtherSessions().then(() => { notify({ tone: 'success', message: 'Other sessions signed out.' }); reload() },
+                (cause: unknown) => notify({ tone: 'error', message: errorMessage(cause, 'Other sessions could not be signed out.') }))
+            }}>Sign out other sessions</Button>
+          </span>
         </header>
         {sessions === null && !loadError ? <p className="muted profile-loading" role="status">Loading sessions…</p>
           : <ul className="profile-rows">{(sessions ?? []).map(row => <li key={row.id} className="profile-row">
             <span className="profile-device" aria-hidden="true">{mobile(row.userAgent) ? <Smartphone size={16} /> : <Monitor size={16} />}</span>
-            <span className="profile-row-meta"><strong>{row.userAgent ?? 'Unknown browser'}</strong>
+            <span className="profile-row-meta"><strong>{sessionLabel(row)}</strong>
               <small>Signed in <Time at={row.createdAt} style="date" /> · active {ago(row.lastSeenAt)}{row.remember ? ' · kept signed in' : ''}</small></span>
             {row.current ? <span className="identity-pill is-brand">This browser</span>
-              : <Button variant="ghost" size="sm" disabled={stale} aria-label={`Sign out ${row.userAgent ?? 'unknown browser'} session`} onClick={() => {
+              : <Button variant="ghost" size="sm" disabled={stale} aria-label={`Sign out ${sessionLabel(row)} session`} onClick={() => {
                 auth.revokeSession(row.id).then(() => { notify({ tone: 'success', message: 'Session signed out.' }); reload() },
                   (cause: unknown) => { notify({ tone: 'error', message: errorMessage(cause, 'The session could not be signed out.') }); reload() })
               }}>Sign out</Button>}
@@ -175,6 +187,8 @@ export function ProfileSettings({ identity, onSignOut }: { identity: ShellIdenti
       onCloseAutoFocus={event => returnFocus(() => linkRefused.current || linkButton.current?.disabled ? null : linkButton.current, () => walletsHeading.current)(event)}
       onLimit={message => { linkRefused.current = true; setLinking(false); notify({ tone: 'error', message }); reload() }}
       onClose={() => setLinking(false)} onLinked={() => { setLinking(false); notify({ tone: 'success', message: 'Wallet linked. It can now sign in to this journal.' }); reload() }} />}
+    {connecting && <ConnectPhoneDialog auth={auth} accept={linkedOnly(linked)} onConnected={onConnected} onClose={() => setConnecting(false)}
+      onCloseAutoFocus={event => returnFocus(() => connectButton.current, () => walletsHeading.current)(event)} />}
     {stepUp && <StepUpDialog identity={identity} wallets={linked} request={stepUp} onFinish={finishStepUp} />}
   </div>
 }
@@ -265,7 +279,7 @@ function WalletRow({ wallet, only, stale, auth, onRemove, onChanged }: {
   </li>
 }
 
-const stepUpCopy: Record<StepUpAction, (target?: WalletDto) => ReactNode> = {
+const stepUpCopy: Record<Exclude<StepUpAction, 'device.pair'>, (target?: WalletDto) => ReactNode> = {
   'wallet.link': () => 'Sign with a wallet already linked to this journal before adding another.',
   'wallet.remove': target => <>Sign with a wallet already linked to this journal to remove {target ? <SourceChip source={target.address} /> : 'this wallet'}.</>,
 }
