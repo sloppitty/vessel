@@ -75,5 +75,3 @@ public sealed class JournalSearchTests
         Assert.True(JournalSearch.Position("nextAction", 0) < JournalSearch.Position("log", 0));
     }
 }
-
-///
