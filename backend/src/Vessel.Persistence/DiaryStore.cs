@@ -31,8 +31,11 @@ public sealed class DiaryStore(VesselDbContext db, UnitOfWork unitOfWork) : IDia
         var links = await db.LinkedOrders(db.OrderLinks.Where(l => l.AccountId == accountId && l.State == OrderLinkState.Linked))
             .Select(x => new { x.Order.AccountId, x.Order.ContractId, x.Order.ExternalOrderId, x.Link.PlayId }).AsNoTracking().ToListAsync(ct);
         var byOrder = links.ToDictionary(l => new OrderKey(l.AccountId, l.ContractId, l.ExternalOrderId), l => l.PlayId);
+        // Phase 2, item 7b (Sol round 1): the same omission markers Activity reads, so a preview never rebuilds an operation
+        // across a gap. Forced events need no separate read here: each one also leaves a marker.
+        var omissions = await ActivityStore.OmissionsAsync(db, [accountId], ct);
         return new(accounts, fills, snapshots, fills.Where(f => byOrder.ContainsKey(OrderKey.Of(f))).ToDictionary(f => f.Id, f => byOrder[OrderKey.Of(f)]))
-        { FundingPayments = funding };
+        { FundingPayments = funding, Omissions = omissions };
     }
     public Task<List<ImportedOrder>> OrdersAsync(Guid accountId, CancellationToken ct) =>
         db.Orders.Where(o => o.AccountId == accountId).AsNoTracking().ToListAsync(ct);

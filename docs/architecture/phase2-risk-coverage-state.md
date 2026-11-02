@@ -670,6 +670,73 @@ October 23, 2026.
 - **Check.** `scripts/check.sh` passed on `8da6be1d` after one rerun (the first run's only failure was
   the HyperliquidMarketStream idle-timeout flake, which passed alone): backend 4,204 passed, 5 skipped; frontend 185 files and 4,125 tests.
 
+**7b. Gap-aware Activity.** Implemented on `t3/phase2-gap-activity`.
+- **Never across an omission.** A marker at or after a partition's first retained fill breaks Activity's walk
+  there. An operation still open at it reads "direction unknown: executions omitted", with unknown
+  boundaries, instead of the phantom opposite operation an anchor across it used to produce (probe C6).
+  - The walk after it needs a new proof of flatness after the marker's window ends, or the snapshot anchor,
+    which applies only to fills after the partition's last marker. Every unknown operation until then carries
+    the same explanation.
+  - A marker without a reported time is bounded by its read window on both sides; an unknown end never
+    recovers.
+- **Partitions.** A marker breaks every partition it could belong to and never moves a fill between them:
+  - one without a market breaks every partition of its account;
+  - a canonical-only marker breaks every partition of that contract;
+  - a native marker breaks its partition and the ID-less one of its contract, or, on a market Vessel does not
+    recognize, the partition keyed by its native ID (7a's order rule).
+- **One set of inputs.** Activity, Overview, the sizing fallback, Review's imported positions and the
+  retrospective preview, confirmation and fingerprint aggregate the same markers, so a round trip across an
+  omission is never eligible to become a Play.
+- **Forced events** are coverage rows on the page with their facts as reported and their exclusion. The newest
+  50 are shown, and the rest are counted in SQL per account.
+- **Freshness.** Markers and forced events move the cached facts revision, and markers are part of the version
+  token.
+- Review, sizing and the ladder are unchanged.
+- **Tests.** `ActivityOmissionTests`:
+  - the C6 probe; an omission after the last fill, before the first, on another market and without a time;
+  - nothing inside a window proving flatness; markers without a market or a canonical contract; markers
+    breaking every candidate partition without merging fills; the explanation on every unknown operation;
+  - the forced-event rows and version.
+
+  Against PostgreSQL: the store reading markers and moving the revision; only the newest forced events loaded,
+  with the rest counted; and a retrospective preview and confirmation refused across an omission Activity
+  reports.
+- **Open question for the owner.** A marker on a market Vessel does not recognize breaks only the partition
+  keyed by its native ID. An older partition of the same market listed under another key (for example a
+  retired RISEx market whose old fills say `BTC` with no native ID) is not broken. Breaking every ID-less
+  partition of the account would close that, but then any marker on an unrecognized Hyperliquid market would
+  break every ordinary coin.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `af35eb75`. Six findings, all fixed in
+  `779efaed`:
+  - A fill inside an omission's uncertainty window could prove flatness or a
+    direction, so a close in the window ended the unknown operation and
+    Activity reported a closed round trip across the omission. Only fills
+    after the window's end count now; an exact time is a window of one
+    instant, and a window without a known end never recovers.
+  - A marker without a market broke no partition, so the walk crossed it.
+    It now breaks every partition of its account, and a marker with only a
+    native market breaks that market by 7a's order rule.
+  - A native marker missed the ID-less legacy partition of its contract, and
+    a canonical-only marker missed the native ones. A marker now breaks
+    every partition it could belong to, and fills never move between them.
+  - The retrospective preview, confirmation and fingerprint aggregated
+    without markers, so a closed round trip across an omission was eligible
+    and could become a Play. The diary now reads the markers Activity reads
+    through the same aggregation.
+  - Only an operation already open at the marker carried the omission
+    notice: one that started unknown at or after it read as generic missing
+    history. Every unknown operation from a marker on now explains it until
+    the walk recovers or the snapshot anchors it.
+  - Every read loaded all retained forced events to show 50. The store now
+    reads the newest 51 and counts the rest in SQL only past the cap, and
+    markers load as a minimal record.
+
+  Sol confirmed owner isolation, disabled-account exclusion, filter and page
+  ordering, exact money formatting, nullable forced-event money, leverage
+  suppression for broken operations, cache revision invalidation and the
+  triggers.
+- **Check.** `scripts/check.sh` passed on `779efaed`: backend 4,215 passed, 5 skipped; frontend 185 files and 4,125 tests.
+
 ## 8. Venue-reported risk context
 
 October 21, 2026.

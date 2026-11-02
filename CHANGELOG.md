@@ -4,6 +4,10 @@
 
 ### Added
 
+- Activity no longer walks across executions an import left out: the operation they interrupt reads
+  "direction unknown: executions omitted" instead of a phantom opposite operation, and
+  venue-forced executions show as rows with their exclusion. A round trip across an omission
+  can no longer become a retrospective Play.
 - Executions an import leaves out (Lighter liquidations, deleverages, settlements and
   fee-bearing trades, rows without reported P&L, unrecognized markets) now leave durable
   markers. An order with an omitted execution is known to be missing executions, so its Play

@@ -42,6 +42,18 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         var funding = await db.FundingPayments.Where(p => ids.Contains(p.AccountId)).AsNoTracking().ToListAsync(ct);
         var fundingStates = await db.FundingStates.Where(s => ids.Contains(s.AccountId)).AsNoTracking().ToListAsync(ct);
         var leverage = await db.LeverageObservations.Where(o => ids.Contains(o.AccountId)).AsNoTracking().ToListAsync(ct);
+        // Phase 2, item 7b: what imports left out, so Activity never anchors or walks across it.
+        var omissions = await OmissionsAsync(db, ids, ct);
+        // Only the forced events Activity shows are read; the rest are counted in SQL when there are more (Sol round 1).
+        var forced = await db.ForcedEvents.Where(e => ids.Contains(e.AccountId)).OrderByDescending(e => e.OccurredAtUtc).ThenBy(e => e.Id)
+            .Take(ActivityService.MaxForcedEventRows + 1).AsNoTracking().ToListAsync(ct);
+        Dictionary<Guid, int>? forcedCounts = null;
+        if (forced.Count > ActivityService.MaxForcedEventRows)
+        {
+            forced.RemoveAt(forced.Count - 1);
+            forcedCounts = await db.ForcedEvents.Where(e => ids.Contains(e.AccountId)).GroupBy(e => e.AccountId)
+                .Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(g => g.Key, g => g.Count, ct);
+        }
         var links = await db.LinkedOrders(db.OrderLinks.Where(l => ids.Contains(l.AccountId) && l.State == OrderLinkState.Linked &&
             db.Plays.Any(p => p.Id == l.PlayId && p.TradingMode == TradingMode.Real)))
             .Select(x => new { x.Order.AccountId, x.Order.ContractId, x.Order.ExternalOrderId, x.Link.PlayId }).AsNoTracking().ToListAsync(ct);
@@ -50,8 +62,21 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         var playIds = fills.Where(f => byOrder.ContainsKey(OrderKey.Of(f)))
             .ToDictionary(f => f.Id, f => byOrder[OrderKey.Of(f)]);
         if (transaction is not null) await transaction.CommitAsync(ct);
-        return new(accounts, fills, snapshots, playIds) { FundingPayments = funding, FundingStates = fundingStates, LeverageObservations = leverage };
+        return new(accounts, fills, snapshots, playIds)
+        {
+            FundingPayments = funding, FundingStates = fundingStates, LeverageObservations = leverage, Omissions = omissions,
+            ForcedEvents = forced, ForcedEventCounts = forcedCounts
+        };
     }
+
+    /// <summary>
+    /// Phase 2, item 7b: every omission marker of these accounts, with only the columns the walk reads (time or window and
+    /// market). Activity and the retrospective preview share this read, so both aggregate the same gaps.
+    /// </summary>
+    internal static Task<List<ActivityOmission>> OmissionsAsync(VesselDbContext db, Guid[] accountIds, CancellationToken ct) =>
+        db.ExecutionOmissions.Where(m => accountIds.Contains(m.AccountId))
+            .Select(m => new ActivityOmission(m.Id, m.AccountId, m.ContractId, m.VenueContractId, m.OccurredAtUtc, m.UncertainFromUtc, m.UncertainToUtc))
+            .ToListAsync(ct);
 
     public async Task<IReadOnlyDictionary<Guid, string>> PlayTitlesAsync(IReadOnlyCollection<Guid> playIds, CancellationToken ct)
     {
