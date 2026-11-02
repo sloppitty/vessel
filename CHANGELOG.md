@@ -4,6 +4,8 @@
 
 ### Added
 
+- A missing-stop warning offers "Link this stop" for a compatible resting stop order, and
+  the monitor panel explains that checks are periodic, not stop protection.
 - The monitor flags a stop beyond the venue's reported liquidation price as critical:
   the position would be liquidated before that stop could act.
 - Positions keep the venue's reported liquidation price and margin mode, and a Play's

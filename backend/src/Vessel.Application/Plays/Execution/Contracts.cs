@@ -31,7 +31,15 @@ public sealed record RebindLevelRequest(
 
 public sealed record ExecutionOrderDto(string OrderId, string Side, string OrderType, string LimitPrice, string? TriggerPrice,
     bool ReduceOnly, bool IsPositionTpsl, string OriginalSize, string RemainingSize, DateTimeOffset PlacedAtUtc,
-    string Status, string VenueStatus, DateTimeOffset StatusAtUtc);
+    string Status, string VenueStatus, DateTimeOffset StatusAtUtc)
+{
+    /// <summary>
+    /// For an order offered to link: the roles the link endpoint would accept on this Play, by its side, mechanics and
+    /// retained fills (<see cref="ExecutionIntegrity.RoleConflict"/>). Absent on linked orders.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Roles { get; init; }
+}
 
 public sealed record ExecutionFillDto(string SourceFillId, string Direction, string Price, string Quantity, string Fee,
     string FeeToken, string ClosedPnlUsd, DateTimeOffset OccurredAtUtc, string Side, string PositionEffect, string PnlBasis);

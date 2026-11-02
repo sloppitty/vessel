@@ -316,6 +316,8 @@ export interface ExecutionOrder {
   status: 'open' | 'filled' | 'triggered' | 'canceled' | 'rejected' | 'other'
   venueStatus: string
   statusAtUtc: string
+  /** For an order offered to link: the roles the server would accept on this Play, by its side, mechanics and fills. */
+  roles?: LinkRole[]
 }
 export interface ExecutionFill {
   sourceFillId: string
@@ -444,7 +446,8 @@ const executionOrder = (v: unknown): v is ExecutionOrder => isRecord(v) && isTex
   isText(v.orderType, 32) && isPlainDecimal(v.limitPrice) && (v.triggerPrice === null || isPlainDecimal(v.triggerPrice)) &&
   typeof v.reduceOnly === 'boolean' && typeof v.isPositionTpsl === 'boolean' && isPlainDecimal(v.originalSize) && isPlainDecimal(v.remainingSize) &&
   isTimestamp(v.placedAtUtc, timeLength) && ['open', 'filled', 'triggered', 'canceled', 'rejected', 'other'].includes(v.status as string) &&
-  isText(v.venueStatus, 64) && isTimestamp(v.statusAtUtc, timeLength)
+  isText(v.venueStatus, 64) && isTimestamp(v.statusAtUtc, timeLength) &&
+  (v.roles === undefined || Array.isArray(v.roles) && v.roles.length <= 4 && v.roles.every(r => ['entry', 'stop', 'target', 'exit'].includes(r as string)))
 const executionFill = (v: unknown): v is ExecutionFill => isRecord(v) && isText(v.sourceFillId, 128) && isText(v.direction, 128) &&
   isPlainDecimal(v.price) && isPlainDecimal(v.quantity) && isPlainDecimal(v.fee) && isText(v.feeToken, 64) && isPlainDecimal(v.closedPnlUsd) && isTimestamp(v.occurredAtUtc, timeLength) &&
   (v.side === 'buy' || v.side === 'sell') && ['open', 'close', 'flip', 'unknown'].includes(v.positionEffect as string) &&

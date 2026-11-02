@@ -50,6 +50,13 @@ export function orderFitsRole(order: ExecutionOrder, role: LinkRole, direction: 
   return role === 'entry' ? order.side === entrySide && !order.reduceOnly && !order.isPositionTpsl : order.side !== entrySide
 }
 
+/** The server's stop classification (`OrderMechanics`): a trigger order whose type names a stop and not a take-profit. */
+export const isStopMechanism = (order: ExecutionOrder) => {
+  if (order.triggerPrice === null) return false
+  const words = order.orderType.toLowerCase().replace(/[-_]/g, ' ')
+  return !words.includes('take profit') && words.includes('stop')
+}
+
 export function levelOptions(entries: readonly DraftEntry[], open: boolean) {
   const options: Array<{ value: string; label: string; request: Omit<LinkOrder, 'orderId'> }> = []
   for (const entry of entries) {

@@ -36,7 +36,8 @@
           ]
         }
       ],
-      "uncheckedPlays": 0
+      "uncheckedPlays": 0,
+      "intervalMinutes": 10
     }
   },
   "accountMonitorRunning": {
@@ -74,7 +75,8 @@
         ]
       }
     ],
-    "uncheckedPlays": 0
+    "uncheckedPlays": 0,
+    "intervalMinutes": 10
   },
   "accountMonitorIdle": {
     "accountId": "00000000-0000-4000-8000-000000000002",
@@ -111,7 +113,8 @@
         ]
       }
     ],
-    "uncheckedPlays": 0
+    "uncheckedPlays": 0,
+    "intervalMinutes": 10
   },
   "summary": {
     "workerOnline": true,
@@ -152,7 +155,8 @@
             ]
           }
         ],
-        "uncheckedPlays": 0
+        "uncheckedPlays": 0,
+        "intervalMinutes": 10
       }
     ]
   },
@@ -281,7 +285,8 @@
           ]
         }
       ],
-      "uncheckedPlays": 0
+      "uncheckedPlays": 0,
+      "intervalMinutes": 10
     },
     "discrepancies": [],
     "watches": [],

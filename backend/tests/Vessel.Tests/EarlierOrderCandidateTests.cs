@@ -118,6 +118,31 @@ public sealed class EarlierOrderCandidateTests
         {
             var execution = await Service(db).GetAsync(playId, default);
             Assert.Equal(["fast", "resting"], execution.EarlierOrders.Select(o => o.OrderId));
+            // Each offered order states the roles the link endpoint accepts (Sol round 1 on #43).
+            Assert.Contains("entry", execution.EarlierOrders.Single(o => o.OrderId == "fast").Roles!);
+        }
+    }
+
+    [PostgresFact]
+    public async Task An_offered_order_whose_fill_contradicts_a_stop_is_not_offered_as_one()
+    {
+        // Sol round 1 on #43: a resting sell stop with a retained sell-to-open fill was offered as a long's stop, then refused.
+        var (database, owner, account, playId) = await Seed();
+        await using var _ = database;
+        await using (var db = database.Context(owner))
+        {
+            var stop = Order(account, "stop-like", 90, Created.AddMinutes(5), "open");
+            stop.Side = "sell"; stop.OrderType = "Stop Market"; stop.TriggerPrice = 90; stop.ReduceOnly = true;
+            db.Orders.Add(stop);
+            var fill = Fill(account, "stop-like", Created.AddMinutes(6));
+            fill.Side = "sell";
+            db.Fills.Add(fill);
+            await db.SaveChangesAsync();
+        }
+        await using (var db = database.Context(owner))
+        {
+            var offered = (await Service(db).GetAsync(playId, default)).UnlinkedOrders.Single(o => o.OrderId == "stop-like");
+            Assert.DoesNotContain("stop", offered.Roles!);
         }
     }
 
