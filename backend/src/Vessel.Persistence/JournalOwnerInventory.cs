@@ -32,6 +32,7 @@ public sealed class JournalOwnerInventory(NpgsqlDataSource data) : IJournalOwner
                 UNION SELECT "OwnerId" FROM manual_execution_history
                 UNION SELECT "OwnerId" FROM diary_requests
                 UNION SELECT "OwnerId" FROM sizing_settings
+                UNION SELECT "OwnerId" FROM risk_settings
                 UNION SELECT "OwnerId" FROM monitor_accounts
                 UNION SELECT "OwnerId" FROM monitor_exit_watches
                 UNION SELECT "OwnerId" FROM play_discrepancies

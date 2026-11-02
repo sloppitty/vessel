@@ -63,7 +63,7 @@ public static class TradingModeBoundary
 
     private static string[]? Parts(HttpContext context) => context.Request.Path.Value?
         .Split('/', StringSplitOptions.RemoveEmptyEntries).Select(segment => segment.ToLowerInvariant()).ToArray();
-    private static bool ActualOnly(string[] parts) => parts[1] == "monitor" ||
+    private static bool ActualOnly(string[] parts) => parts[1] is "monitor" or "risk" ||
         parts is [_, "venues", _, "accounts", ..] ||
         parts is [_, "activity" or "plays", "retrospective"];
     private static string Mode(HttpContext context)

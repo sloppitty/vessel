@@ -77,7 +77,7 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Worker/PaperScheduler.cs|0bd82837aabbbd4c1ff5587c1b31d0a7c2f139b7b41ec238ba794e40b6c872b9",
             "Vessel.Worker/PaperScheduler.cs|e83477b56188aca19b8fe5b167e717c77061df36b5e9555b425734927803888f",
             // System discovery returns owner IDs only, including every notification table and suspended owners.
-            "Vessel.Persistence/JournalOwnerInventory.cs|bb06887355cced7bbc1fff79100360708d49bf80f3cc431f57d1891bb7aa623b",
+            "Vessel.Persistence/JournalOwnerInventory.cs|e56ae370320fa430a6d25b9a66b56a037fb48a6455014338b0c717dad4219b3e",
             // Notification paging assembles both statements with the constant `visible` fragment, which
             // includes n.owner_id=@owner; parameters always bind the current scope's owner.
             "Vessel.Persistence/Notifications/NotificationStore.cs|d03c88d4e53ec73a5f089f774c05085e0223717c18d88d256fe7b673ca4ec6c7",
@@ -175,6 +175,8 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Persistence/PlayStore.cs|92f5878e0e7c1be5bfd533b89b1af2f1d7c245edb9c8fc3f6981d2b3541b3f7d",
             // First sizing row: initial.OwnerId is checked equal to db.CurrentOwnerId just before; DO NOTHING.
             "Vessel.Persistence/SizingStore.cs|a9ceddf772233bbe66f61445850ce916446ce6f3013950049716c2e75596eaf5",
+            // Risk settings first write: the current owner's row only, inserted then locked FOR UPDATE, like sizing settings.
+            "Vessel.Persistence/RiskStore.cs|24f46de69ab4d3902c2b6df44d48bd4fe30691666e6e9fe239bfd3b5bd21f7cb",
             // Portfolio row lock and its member accounts: "Id"/"PortfolioId" and "OwnerId" = db.CurrentOwnerId.
             "Vessel.Persistence/WorkspaceStore.cs|0c09a808bbe318f68eea1bda7d6dae1ac6ae5f56b4e988575a2787a457df5d2a",
             "Vessel.Persistence/WorkspaceStore.cs|029e4ce40dd7db519f675a99000b2f0e8cde631a8dd888f38f14cfd2f9e09a80",

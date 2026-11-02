@@ -324,3 +324,34 @@ covering F-01, F-03 and F-04.
     a stop kept beyond a filled entry, or legacy plan text, is flagged until
     fixed.
 - **Confirm rows (1.6d).** See the linking section of `play-lifecycle.md`.
+
+## Open risk (October 21, 2026)
+
+Phase 2, item 1 (see `phase2-risk-coverage-contract.md`). Capital context gains
+one line under its figures, for Draft, Planned, Paused and Open real Plays. It
+is not shown for retrospective or paper Plays.
+- **What it shows.** "Open risk: long 1.8% · short 0.6% of Main balance · 1
+  unknown — this Play +1.0% (limit 3%)":
+  - the loss if every current stop of the scope's Planned and Open Plays
+    fills, long and short apart and never netted;
+  - the Plays that cannot be measured, as a count;
+  - this Play's own risk;
+  - the owner's soft limit when one is set.
+- **The scope** is the Play's portfolio, or the account itself when
+  unassigned. Shares divide by that scope's balance, the capital-context
+  reference. Without a balance, the line shows nominal USD.
+- **Computed on the server.** The server computes every Play's risk
+  (`GET /api/risk/open`). The plan being edited is measured by
+  `POST /api/risk/open/preview`, a moment after the last keystroke, against
+  the saved Play's executions. The browser only replaces the saved Play's
+  own contribution with the preview and forms exact shares.
+- **Coverage and freshness.**
+  - The line also counts Open venue Plays not covered at the venue (confirmed
+    absence only) and those with unverified stops, from the monitor's
+    recorded coverage.
+  - When only some accounts report a balance, it names the known balances.
+  - The preview is read again whenever the saved Play reloads, so new fills
+    count.
+- **The limit is flagged, never enforced.** Going over it adds "over the 3%
+  limit" in the warning colour. Nothing is blocked.
+- **Failures.** A failed read says "unavailable", never a guess.

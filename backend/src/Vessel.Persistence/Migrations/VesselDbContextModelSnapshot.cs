@@ -675,9 +675,9 @@ namespace Vessel.Persistence.Migrations
 
                     b.HasIndex("OwnerId", "AccountId", "TradingMode");
 
-                    b.HasIndex("OwnerId", "ExecutionId", "AccountId", "PlayId");
-
                     b.HasIndex("OwnerId", "PlayId", "TradingMode");
+
+                    b.HasIndex("OwnerId", "ExecutionId", "AccountId", "PlayId");
 
                     b.ToTable("paper_ledger_entries", null, t =>
                         {
@@ -804,16 +804,6 @@ namespace Vessel.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("jsonb");
 
-                    b.Property<DateTimeOffset?>("SourceFailureSinceUtc")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("SuspensionsJson")
-                        .IsRequired()
-                        .HasColumnType("jsonb");
-
-                    b.Property<DateTimeOffset?>("PreviousCloseAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("IssuesJson")
                         .IsRequired()
                         .HasColumnType("jsonb");
@@ -827,10 +817,20 @@ namespace Vessel.Persistence.Migrations
                     b.Property<decimal?>("PreviousClose")
                         .HasColumnType("numeric");
 
+                    b.Property<DateTimeOffset?>("PreviousCloseAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("SourceFailureSinceUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("State")
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
+
+                    b.Property<string>("SuspensionsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
 
                     b.Property<string>("TradingMode")
                         .IsRequired()
@@ -1101,8 +1101,6 @@ namespace Vessel.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasAlternateKey("OwnerId", "Id", "TradingMode");
-
                     b.HasIndex("OwnerId", "UpdatedAtUtc");
 
                     b.HasIndex("OwnerId", "AccountId", "TradingMode");
@@ -1365,6 +1363,27 @@ namespace Vessel.Persistence.Migrations
                     b.HasIndex("OwnerId", "PlayId", "OccurredAtUtc");
 
                     b.ToTable("play_status_changes", (string)null);
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Risk.RiskSettings", b =>
+                {
+                    b.Property<Guid>("OwnerId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("OpenRiskLimitPercent")
+                        .HasPrecision(7, 4)
+                        .HasColumnType("numeric");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("OwnerId");
+
+                    b.ToTable("risk_settings", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_risk_settings_open_risk_limit", "\"OpenRiskLimitPercent\" IS NULL OR (\"OpenRiskLimitPercent\" > 0 AND \"OpenRiskLimitPercent\" <= 100)");
+                        });
                 });
 
             modelBuilder.Entity("Vessel.Domain.Sizing.SizingSettings", b =>
@@ -1981,16 +2000,16 @@ namespace Vessel.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Vessel.Domain.Paper.PaperExecution", null)
-                        .WithMany()
-                        .HasForeignKey("OwnerId", "ExecutionId", "AccountId", "PlayId")
-                        .HasPrincipalKey("OwnerId", "Id", "AccountId", "PlayId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("Vessel.Domain.Plays.Play", null)
                         .WithMany()
                         .HasForeignKey("OwnerId", "PlayId", "TradingMode")
                         .HasPrincipalKey("OwnerId", "Id", "TradingMode")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Vessel.Domain.Paper.PaperExecution", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "ExecutionId", "AccountId", "PlayId")
+                        .HasPrincipalKey("OwnerId", "Id", "AccountId", "PlayId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 

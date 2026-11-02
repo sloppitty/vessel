@@ -47,9 +47,16 @@ public sealed class EndpointTransportTests
 
         Assert.Equal(
             ["POST /api/plays/retrospective", "POST /api/plays/{id:guid}/manual-executions",
-             "POST /api/plays/{id:guid}/manual-executions/corrections", "PUT /api/plays/{id:guid}/manual-executions/{executionId:guid}"],
+             "POST /api/plays/{id:guid}/manual-executions/corrections", "POST /api/risk/open/preview",
+             "PUT /api/plays/{id:guid}/manual-executions/{executionId:guid}", "PUT /api/risk/settings"],
             limits.Keys.Order(StringComparer.Ordinal));
-        Assert.All(limits, pair => Assert.Equal("Diary request is too large.", pair.Value.TooLargeMessage));
+        Assert.All(limits.Where(pair => pair.Key.Contains("/api/plays/", StringComparison.Ordinal)),
+            pair => Assert.Equal("Diary request is too large.", pair.Value.TooLargeMessage));
+        // Phase 2, item 1: a preview holds at most 20 entries of 10 stops; the settings body is one limit.
+        Assert.Equal((131_072L, "Open-risk preview is too large."),
+            (limits["POST /api/risk/open/preview"].MaxBytes, limits["POST /api/risk/open/preview"].TooLargeMessage));
+        Assert.Equal((1_024L, "Risk settings request is too large."),
+            (limits["PUT /api/risk/settings"].MaxBytes, limits["PUT /api/risk/settings"].TooLargeMessage));
         Assert.All(Endpoints(factory), endpoint => Assert.Null(endpoint.Metadata.GetMetadata<IRequestSizeLimitMetadata>()));
         Assert.Equal(131_072, limits["POST /api/plays/retrospective"].MaxBytes);
         Assert.Equal(16_384, limits["POST /api/plays/{id:guid}/manual-executions"].MaxBytes);
