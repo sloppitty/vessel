@@ -20,7 +20,8 @@ using Vessel.Persistence;
 using Vessel.Persistence.Search;
 
 namespace Vessel.Tests;
- <summary>Phase 2, item 13 against PostgreSQL: every write path, rollbacks, modes, paging and the one-time initialization.</summary>
+
+/// <summary>Phase 2, item 13 against PostgreSQL: every write path, rollbacks, modes, paging and the one-time initialization.</summary>
 public sealed class JournalSearchPostgresTests
 {
     private static readonly DateTimeOffset T = DateTimeOffset.Parse("2026-10-01T10:00:00Z");
