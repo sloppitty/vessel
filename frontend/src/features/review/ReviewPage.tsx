@@ -49,7 +49,7 @@ const groupTabs = [['portfolios', 'Portfolios', 'Portfolio'], ['accounts', 'Acco
 /** Every Play the period leaves out: incomplete fees or executions, and Unresolved (1.3a) and Cancelled (1.4b) Plays, which
  * have no result. */
 const excludedCount = (coverage: ReviewDocument['coverage']) =>
-  coverage.incompleteFees + coverage.incompleteExecutions + (coverage.unresolved ?? 0) + (coverage.cancelled ?? 0)
+  coverage.incompleteFees + coverage.incompleteExecutions + (coverage.unresolved ?? 0) + (coverage.cancelled ?? 0) + (coverage.notAllocated ?? 0)
 
 /** A breakdown cell's mark when its own denominator is below `smallSample`: batting and profit factor count decided
  * Plays, average gain / loss the smaller of wins and losses. */
@@ -254,7 +254,7 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay, workspaceAccount
       {report.process && <ProcessSection process={report.process} onInspect={inspectProcess} />}
       {report.rule && <RuleSection rule={report.rule} onInspect={inspectProcess} />}
       <section className="pr-coverage" aria-label="Data coverage"><ShieldCheck size={16} /><details><summary>{stats.count} scored · {excludedCount(report.coverage)} excluded · {stats.reviewed} {stats.reviewed === 1 ? 'review' : 'reviews'} complete</summary>
-        <p><button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteFees} incomplete fees</button> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteExecutions} incomplete executions</button>{report.coverage.unresolved ? <> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.unresolved} unresolved</button></> : null}{report.coverage.cancelled ? <> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.cancelled} cancelled</button></> : null} · {report.coverage.openPlays} currently open</p>
+        <p><button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteFees} incomplete fees</button> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteExecutions} incomplete executions</button>{report.coverage.unresolved ? <> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.unresolved} unresolved</button></> : null}{report.coverage.cancelled ? <> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.cancelled} cancelled</button></> : null}{report.coverage.notAllocated ? <> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.notAllocated} not allocated</button></> : null} · {report.coverage.openPlays} currently open</p>
         <p>{report.coverage.unassignedFills} unassigned fills in this period.</p>
         <p>Initial planned-risk inputs for {stats.riskCount} of {stats.count - (stats.positions ?? 0)} scored Plays.</p>
         {positions?.included && <p>{positions.positions ?? 0} imported {positions.positions === 1 ? 'position' : 'positions'} included{positions.omitted ? `; ${positions.omitted} closed ${positions.omitted === 1 ? 'position' : 'positions'} could not be scored` : ''}.</p>}

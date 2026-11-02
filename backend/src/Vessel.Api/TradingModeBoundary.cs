@@ -71,7 +71,9 @@ public static class TradingModeBoundary
         parts is [_, "accounts", _, "import-conflicts"] ||
         parts is [_, "accounts", _, "history-coverage"] ||
         parts is [_, "accounts", _, "history-gaps", _, "backfill"] ||
-        parts is [_, "activity" or "plays", "retrospective"];
+        parts is [_, "activity" or "plays", "retrospective"] ||
+        // Phase 2, item 11: an allocation splits an actual imported fill.
+        parts is [_, "plays", _, "execution", "allocations", ..];
     private static string Mode(HttpContext context)
     {
         var values = context.Request.Query["tradingMode"];

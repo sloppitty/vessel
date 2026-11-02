@@ -183,6 +183,156 @@ decision 4. It covers D-06.
   it back is refused while any Play or history row names Unresolved; restore
   the pre-upgrade backup instead.
 
+## Shared-exit allocation (October 23, 2026)
+
+Phase 2, item 11 of the [risk and coverage contract](phase2-risk-coverage-contract.md)
+(G-18, C2). The owner accepted it. It is the remedy for Plays declared
+Unresolved with the reasons `shared-close` and `flip`.
+- **What it is.** The owner splits one imported fill between Plays:
+  - a **shared exit** gives every line the `exit` role, on Plays of the
+    direction the fill closes (a sell closes longs). The fill's effect is
+    `close` or `unknown`;
+  - a **flip** has exactly one `exit` line, on a Play the fill closes, and
+    one `entry` line, on a Play of the other direction, naming one of its
+    plan entries. The fill's effect is `flip`. The exit line must equal the
+    exit Play's open quantity exactly: what its other counted fills entered
+    minus what they exited;
+  - **entries alone** (Sol round 1) are only for a later execution of an
+    order a flip split (below): `entry` lines on Plays of the direction the
+    fill opens, on an opening fill (`open` or `unknown`). Any other fill is
+    refused with 409.
+- **The record.** One allocation per fill (`fill_allocations`, unique by
+  owner and fill): owner, account, fill, reason (`shared-close`, `flip` or
+  `other`), note, revision, created and updated times, and the fee
+  remainder. Its lines (`fill_allocation_lines`) each hold a Play, a role,
+  the entry for an entry line, an exact quantity, an exact fee share, and
+  whether that line took the remainder. Every change appends a snapshot to
+  `fill_allocation_revisions`, so earlier revisions stay.
+- **Conservation.** Line quantities are positive plain decimals, one line per
+  Play, at most 20. They sum exactly to the fill's quantity, compared as
+  28-place integers; off by any amount is refused with 400. `flip` needs the
+  flip shape or entries alone, `shared-close` the shared-exit shape; `other`
+  fits any.
+- **Fees.** Each line's share is the fee × its quantity ÷ the fill's quantity,
+  truncated toward zero to the fee's precision: the decimals the venue
+  reported, and at least 6 (the USDC unit). The remainder, the fee minus
+  the shares, goes to the line with the largest quantity; a tie goes to the
+  lowest Play ID as lowercase text. The record and the panel say which line
+  took it and how much. A fee without a known basis is unknown on every
+  line, never split.
+- **The request.** `POST /api/plays/{id}/execution/allocations` with
+  `requestId`, `fillId` (the internal fill ID), `expectedRevision` (0 when
+  there is none), `reason`, `note`, `plays` (each `playId` and
+  `expectedVersion`) and `lines` (`playId`, `role`, `entryId`, `quantity`).
+  Empty `lines` removes the allocation, as a revision with no lines; a
+  later allocation continues its numbering.
+  - **Real-only.** A `?tradingMode=paper` request is refused with 409 before
+    any read, and a paper Play with 409 in the service.
+  - **Atomic.** One unit of work under the account lock, which every Play
+    write takes first, with the account's active Plays locked. A retry with
+    the same `requestId` returns the current execution view without writing
+    again; the same ID with another payload is 409.
+  - **Versions.** Every Play on the current or the new lines is listed once
+    with its `expectedVersion`. A stale version or revision is 409 and
+    nothing is written. The route's Play must be on the lines or hold the
+    fill's order link. Plays whose line changes get a new version.
+  - **Plays.** The owner's real venue Plays, planned origin, on the fill's
+    account and contract. Exit lines need Open or Unresolved, an entry line
+    Planned, Paused or Open.
+  - **The final ledger,** as the manual correction batch checks it. A Closed
+    Play on the current lines keeps an identical line (role, entry, quantity
+    and fee share), so it stays closed. Removing an allocation with a line
+    on a Closed Play is refused. No Open or Unresolved Play may be left
+    without a counted entry.
+  - The answer is the route Play's execution view.
+- **Order links.** An allocation never creates, changes or removes an order
+  link, and an order still belongs to at most one Play. The fill's order
+  must be retained. When it is linked, its Play must be on the lines with a
+  matching role: an entry link takes an entry line, a stop, target or exit
+  link an exit line. It may be unlinked: a flip order cannot be linked,
+  since its fills contradict both roles. **The read rule:** an allocated
+  fill counts for a Play only through its own line, whatever the links say;
+  fills without an allocation count through links as before. The matcher,
+  suggestions and the link endpoint are unchanged.
+- **Split orders** (Sol round 1). An order whose allocated fill opened a Play
+  (an entry line) is split, and its other fills count for no Play, not even
+  through a link, until the owner allocates them:
+  - every Play with a line on it shows "Not reconciled" ("Order … has an
+    execution that is not allocated yet"), which keeps it from settling;
+  - the Play it opened offers each such execution under **Allocate** as
+    entries alone; the link rule above does not apply to a split order;
+  - while the order still rests, the Play it opened cannot close, as with a
+    resting linked entry order, and its entry progress counts it as a
+    resting order.
+- **Effect on each Play.** Every reader of a Play's executions applies the
+  read rule: execution totals and entry progress, the integrity problems
+  (over-exit, chronology, contradiction), settlement, the exit time, the
+  Play-local result and the receipt, the Unresolved evidence, open risk, the
+  plan-edit checks on filled entries, the `play.closed` event's data and
+  source time, Review, sizing and search.
+  - A line counts as the fill with the line's quantity and fee share. A
+    flip's exit line closes and its entry line opens. The venue's closed P&L
+    is not carried.
+  - When the fill's order is known to miss executions, every Play on its
+    lines is incomplete.
+  - After the write, the existing transitions run for the active Plays on
+    the lines: Planned or Paused → Open from an entry line, Open → Closed,
+    and Unresolved → Closed when the lines settle it. They use the same
+    events, and a completed review is cleared as before.
+  - Nothing moves a Play backwards. An Unresolved Play that an allocation
+    does not settle stays Unresolved; the owner can return it to Open.
+  - Settled funding beside a Play (item 9b) reads `shared` (`allocated`)
+    whenever an allocated fill lies in its holding window or in a span its
+    proof walks, its own or another Play's ([venue funding](venue-funding.md#beside-a-play-phase-2-item-9b)).
+  - **The monitor's protection checks** (Sol round 1) compare stops with the
+    Play's quantity by the read rule, so a Play a flip opened without an
+    entry link is checked for `protection.missing` after its grace, and a
+    shared exit leaves `protection.short` and `protection.excess` the Play's
+    own part. A split order's unallocated execution leaves that quantity
+    unknown. An allocated fill is never `fill.unlinked`. The position
+    comparison (`position.*`) still reads linked fills only, as accepted: a
+    Play reached only through lines leaves it unknown rather than showing a
+    false mismatch. See [messaging and workers](messaging-and-workers.md#coverage-signals).
+  - **Imported positions** (Sol round 1). Review's imported positions and
+    the sizing fallback, which share one eligibility rule, leave out every
+    Activity operation that holds a fill with a current allocation: it is
+    those Plays' trade, though Activity, whose aggregation is unchanged, may
+    still show it unassigned.
+- **Scoring.** The venue's average-cost P&L cannot be split, so a Play with an
+  allocated fill has no venue result: "not allocated".
+  - Review leaves a settled one out with the code `not-allocated` and a
+    reason, counts it in `coverage.notAllocated` and lists it in the
+    exclusion drill-down and the CSV.
+  - Sizing leaves it out of the record and the ladder, and
+    `record.notAllocated` counts it beside them.
+  - Search shows the state `not-allocated`.
+  - The Play-local result is shown. The scored basis, decision 8, the ladder
+    and the 20-decided window are unchanged.
+- **Events.** No new event type. Transitions emit the existing `play.opened`
+  and `play.closed`. The `play.closed` data uses the allocated quantities
+  and fees, with `closedPnlUsd` null for a Play with an allocated fill. An
+  allocation that changes no status emits nothing, as manual corrections do.
+- **Unchanged.** The automatic matcher, order retention, Activity operations
+  (venue position facts, not Plays), the monitor's position comparison and
+  every P&L basis.
+- **Browser.** The Execution panel gains a "Shared fills" section. It lists
+  this Play's allocated fills, the exit fills of its linked orders when they
+  over-exit, unallocated flip fills that close its direction after its first
+  entry, and a split order's unallocated executions, with **Allocate**,
+  **Split flip** or **Edit**. The dialog takes a quantity per Play with the
+  remainder live, a reason and a note. It shows the fee split and where the
+  remainder went, and the server's error when it refuses.
+- **Bounds** (Sol round 1). The execution view lists the newest 20 allocated
+  fills (`sharedFills`, with `sharedFillCount` and `sharedFillsNextOffset`)
+  and at most 20 offered ones. `GET /api/plays/{id}/execution/allocations?offset=`
+  (real-only, paper 409) returns the next 20, newest first, so every
+  allocation stays reachable for editing; the panel's **Show older
+  allocations** reads them. Each page lists up to 200 Plays that may take a
+  new line, plus every Play on its lines and the Play itself; the browser
+  accepts exactly those bounds.
+- **Migration.** The explicit `FillAllocations` migration adds the three
+  tables. Apply it explicitly, never at startup.
+
 ## Managed stops
 
 October 19, 2026, Phase 0 item 0.5b of the [trust and correctness contract](phase0-trust-correctness-contract.md#05-managed-stops), under the owner's decision 2.
@@ -282,7 +432,7 @@ The browser checks a tracked Play when it is opened or its status changes, and e
 
 ### October 13 integrity corrections
 
-Automatic matching checks retained fill side/effect and the time of an exit's first execution against this Play's first compatible entry fill. A resting bracket may be placed before entry and execute afterward. Existing incompatible links remain inspectable, but their fills are excluded from progress totals and block closure. A flip cannot be assigned wholly to an entry or exit; split-fill attribution remains unsupported.
+Automatic matching checks retained fill side/effect and the time of an exit's first execution against this Play's first compatible entry fill. A resting bracket may be placed before entry and execute afterward. Existing incompatible links remain inspectable, but their fills are excluded from progress totals and block closure. A flip cannot be assigned wholly to an entry or exit; since October 23, 2026 the owner can split it, and a shared exit, through an allocation (see [Shared-exit allocation](#shared-exit-allocation-october-23-2026)).
 
 Execution responses include an `issues` list, displayed as "Not reconciled". The shared integrity checks cover role contradictions, chronology, over-exits and known missing fixed-size filled-order executions. Cancelled/rejected remaining quantity does not prove an execution, and position-sized TP/SL orders do not establish a fixed missing-fill bound.
 

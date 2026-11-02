@@ -5,6 +5,7 @@ using Vessel.Application.Common;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 using Vessel.Domain.Monitoring;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
@@ -100,6 +101,40 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
             .OrderBy(f => f.OccurredAtUtc).ThenBy(f => f.Id).AsNoTracking().ToListAsync(ct);
         return rows.Where(f => keys.Contains(OrderKey.Of(f))).ToList();
     }
+    public Task<List<AllocatedFill>> AllocationsAsync(Guid accountId, IReadOnlyCollection<Guid> playIds, IReadOnlyCollection<Guid> fillIds,
+        CancellationToken ct) => AllocatedFills.ForAsync(db, playIds, fillIds, ct, accountId);
+
+    public Task<FillAllocation?> AllocationForUpdateAsync(Guid accountId, Guid fillId, CancellationToken ct)
+    {
+        unitOfWork.RequireActive();
+        return db.FillAllocations.Include(a => a.Lines).SingleOrDefaultAsync(a => a.AccountId == accountId && a.FillId == fillId, ct);
+    }
+
+    public Task<ImportedFill?> FillAsync(Guid accountId, Guid fillId, CancellationToken ct) =>
+        db.Fills.AsNoTracking().SingleOrDefaultAsync(f => f.Id == fillId && f.AccountId == accountId, ct);
+
+    public Task<List<ImportedFill>> FlipFillsAsync(Guid accountId, string contractId, string side, DateTimeOffset since, int limit, CancellationToken ct) =>
+        db.Fills.Where(f => f.AccountId == accountId && f.ContractId == contractId && f.Side == side && f.PositionEffect == ExecutionFacts.Flip &&
+                f.OccurredAtUtc >= since && !db.FillAllocations.Any(a => a.FillId == f.Id && a.Lines.Any()))
+            .OrderByDescending(f => f.OccurredAtUtc).ThenBy(f => f.Id).Take(limit).AsNoTracking().ToListAsync(ct);
+
+    public Task<List<Play>> AllocationCandidatesAsync(Guid accountId, string contractId, IReadOnlyCollection<Guid> named, CancellationToken ct)
+    {
+        var ids = named.Distinct().ToArray();
+        return db.Plays.Where(p => p.AccountId == accountId && p.TradingMode == TradingMode.Real && (ids.Contains(p.Id) ||
+                p.ContractId == contractId && p.InstrumentSource == InstrumentSource.Venue && p.Origin == PlayOrigin.Planned &&
+                (p.Status == PlayStatus.Planned || p.Status == PlayStatus.Paused || p.Status == PlayStatus.Open || p.Status == PlayStatus.Unresolved)))
+            .AsNoTracking().ToListAsync(ct);
+    }
+
+    public Task<List<Play>> PlaysAsync(Guid accountId, IReadOnlyCollection<Guid> ids, CancellationToken ct)
+    {
+        var wanted = ids.Distinct().ToArray();
+        return db.Plays.Where(p => p.AccountId == accountId && wanted.Contains(p.Id)).ToListAsync(ct);
+    }
+
+    public void Add(FillAllocation allocation) { unitOfWork.RequireActive(); db.FillAllocations.Add(allocation); }
+    public void Add(FillAllocationRevision revision) { unitOfWork.RequireActive(); db.FillAllocationRevisions.Add(revision); }
     public void Add(PlayOrderLink link) { unitOfWork.RequireActive(); db.OrderLinks.Add(link); }
     public void Add(PlayStatusChange change) { unitOfWork.RequireActive(); db.StatusChanges.Add(change); }
     public async Task ForgetWatchesAsync(Guid playId, CancellationToken ct)
@@ -254,6 +289,13 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
                 Retained = db.Fills.Where(f => f.AccountId == o.AccountId && f.ContractId == o.ContractId && f.ExternalOrderId == o.ExternalOrderId)
                     .Sum(f => (decimal?)f.Quantity) ?? 0m
             }).AsNoTracking().ToListAsync(ct);
+        // Phase 2, item 11: the instrument's fills with a current allocation, in this snapshot. Allocations move no Activity
+        // revision (Activity does not read them), so the snapshot fences them; scoped like the forced events.
+        var allocated = await db.FillAllocations.Where(a => a.AccountId == account && a.Lines.Any())
+            .Join(db.Fills, a => a.FillId, f => f.Id, (a, f) => f)
+            .Where(f => (contracts.Contains(f.ContractId) || native != null && f.VenueContractId == native) &&
+                (rowsFrom == null || f.OccurredAtUtc >= rowsFrom))
+            .Select(f => new { f.ContractId, f.VenueContractId, f.OccurredAtUtc }).AsNoTracking().ToListAsync(ct);
         var after = await ActivityStore.RevisionAsync(db, db.CurrentOwnerId, ct);
         if (transaction is not null) await transaction.CommitAsync(ct);
         return new(revision, after, links.Select(l => (l.Role, l.Order)).ToList(),
@@ -262,6 +304,9 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
             forced.Select(e => new Vessel.Application.Activity.ActivityOmission(e.Id, account, e.ContractId, e.VenueContractId, e.OccurredAtUtc, null, null)).ToList(),
             candidates.Where(c => ExecutionIntegrity.MissingExecutions(c.Order, c.Retained)).Select(c => new MissingExecutionOrder(c.Order.ContractId,
                 c.Order.VenueContractId, c.Order.PlacedAtUtc, terminal.Contains(c.Order.Status)
-                    ? c.Order.StatusAtUtc > c.Order.ObservedAtUtc ? c.Order.StatusAtUtc : c.Order.ObservedAtUtc : null)).ToList());
+                    ? c.Order.StatusAtUtc > c.Order.ObservedAtUtc ? c.Order.StatusAtUtc : c.Order.ObservedAtUtc : null)).ToList())
+        {
+            Allocated = allocated.Select(f => new AllocatedExecution(f.ContractId, f.VenueContractId, f.OccurredAtUtc)).ToList(),
+        };
     }
 }

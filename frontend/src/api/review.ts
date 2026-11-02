@@ -140,6 +140,8 @@ export interface ReviewDocument {
     unresolved?: number
     /** Plays cancelled in the period, listed with the exclusions (phase 1, 1.4b); absent from an older server. */
     cancelled?: number
+    /** Closed Plays with a fill allocated between Plays: venue result not allocated (Phase 2, item 11); absent from older servers. */
+    notAllocated?: number
   }
   plays: ReviewPlay[]; offset: number; nextOffset: number | null
   /**
@@ -228,7 +230,8 @@ export const isReviewDocument = (v: unknown): v is ReviewDocument => isRecord(v)
   isRecord(v.coverage) && ['closedCandidates', 'incompleteFees', 'incompleteExecutions', 'openPlays', 'unassignedFills'].every(key => isCount((v.coverage as Record<string, unknown>)[key])) &&
   isNullOr(v.coverage.firstFillAtUtc, x => isTimestamp(x, 64)) && isText(v.coverage.notice, 4000) &&
   (v.coverage.unresolved === undefined || isCount(v.coverage.unresolved)) &&
-  (v.coverage.cancelled === undefined || isCount(v.coverage.cancelled)) && isListOf(v.plays, play, 50) &&
+  (v.coverage.cancelled === undefined || isCount(v.coverage.cancelled)) &&
+  (v.coverage.notAllocated === undefined || isCount(v.coverage.notAllocated)) && isListOf(v.plays, play, 50) &&
   (v.plays as ReviewPlay[]).every(p => (p.executionSource === 'paper') === (v.tradingMode === 'paper')) &&
   isCount(v.offset) && (v.nextOffset === null || isCount(v.nextOffset) && v.nextOffset > v.offset) &&
   (v.preflight === undefined || isRecord(v.preflight) && isCount(v.preflight.recorded) && isCount(v.preflight.notRecorded) &&

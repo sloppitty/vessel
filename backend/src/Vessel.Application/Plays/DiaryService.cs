@@ -292,6 +292,9 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
             reasons.Add("Constituent rows are omitted or split/flip allocations; whole-order attribution is unsafe.");
         if (own.Values.Any(f => f.PositionEffect is not (ExecutionFacts.Open or ExecutionFacts.Close)))
             reasons.Add("Some fills have unknown or flip position effects.");
+        // A fill the owner allocated between Plays already belongs to them (Phase 2, item 11).
+        if ((await diary.AllocatedFillIdsAsync(relevant.Select(f => f.Id).ToList(), ct)).Count > 0)
+            reasons.Add("Some fills are allocated between Plays.");
         if (own.Values.Any(f => f.Quantity <= 0 || f.Price <= 0 || f.OccurredAtUtc > time.GetUtcNow()))
             reasons.Add("Some retained fills have nonpositive amounts/prices or future timestamps.");
         foreach (var key in orderKeys.OrderBy(k => k.ExternalOrderId, StringComparer.Ordinal).ThenBy(k => k.ContractId, StringComparer.Ordinal))

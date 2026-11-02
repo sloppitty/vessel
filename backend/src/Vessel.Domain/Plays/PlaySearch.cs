@@ -14,7 +14,7 @@ public sealed class PlaySearchEntry : IOwned
     /// <summary>The projection rules that wrote it; an older version reads as not indexed until it is rebuilt.</summary>
     public int Version { get; set; }
     public DateTimeOffset ProjectedAtUtc { get; set; }
-    /// <summary>active, scored, executions, fees, unresolved or cancelled (<see cref="PlaySearchStates"/>).</summary>
+    /// <summary>active, scored, executions, fees, unresolved, cancelled or not-allocated (<see cref="PlaySearchStates"/>).</summary>
     public string State { get; set; } = PlaySearchStates.Active;
     /// <summary>The latest actual exit execution of a Closed Play; null without one.</summary>
     public DateTimeOffset? ExitAtUtc { get; set; }
@@ -48,5 +48,7 @@ public sealed class PlaySearchText : IOwned
 public static class PlaySearchStates
 {
     public const string Active = "active", Scored = "scored", Executions = "executions", Fees = "fees",
-        Unresolved = "unresolved", Cancelled = "cancelled";
+        Unresolved = "unresolved", Cancelled = "cancelled",
+        /// <summary>A fill of the Play is allocated between Plays, so its venue result is not allocated (Phase 2, item 11).</summary>
+        NotAllocated = "not-allocated";
 }

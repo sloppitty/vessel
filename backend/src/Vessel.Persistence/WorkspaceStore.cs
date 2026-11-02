@@ -94,6 +94,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         await db.HistoryBackfills.Where(b => b.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.HistoryGaps.Where(g => g.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.FillCoverage.Where(r => r.AccountId == account.Id).ExecuteDeleteAsync(ct);
+        // No Play holds the account, so no allocation has lines; removed ones go before their fills (Phase 2, item 11).
+        await db.FillAllocations.Where(a => a.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.Fills.Where(f => f.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.Orders.Where(o => o.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.FundingPayments.Where(p => p.AccountId == account.Id).ExecuteDeleteAsync(ct);

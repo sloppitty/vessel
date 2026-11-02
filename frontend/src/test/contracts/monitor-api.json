@@ -179,7 +179,8 @@
         "basis": "executions",
         "reason": "The play is not closed.",
         "signDiffers": false
-      }
+      },
+      "venueNotAllocated": false
     },
     "entries": [
       {
@@ -303,7 +304,11 @@
     },
     "earlierOrders": [],
     "venuePosition": null,
-    "riskAtFirstFill": null
+    "riskAtFirstFill": null,
+    "sharedFills": [],
+    "allocationPlays": [],
+    "sharedFillCount": 0,
+    "sharedFillsNextOffset": null
   },
   "runCompletedEvent": {
     "id": "00000000-0000-4000-8000-000000000007",

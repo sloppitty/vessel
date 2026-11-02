@@ -183,6 +183,7 @@ public static class JournalSearch
             var latest = facts.Paper is { } simulated ? simulated.Executions.Select(e => (DateTimeOffset?)e.OccurredAtUtc).Max()
                 : facts.Fills.Select(f => (DateTimeOffset?)f.Fill.OccurredAtUtc).Max();
             return score.Exclusion == "fees" ? new(PlaySearchStates.Fees, exit, null, null, null)
+                : score.Exclusion == ReviewService.NotAllocated ? new(PlaySearchStates.NotAllocated, exit, null, null, null)
                 : new(PlaySearchStates.Executions, exit, null, null, null, latest > now ? latest : null);
         }
         string? reason = null;
@@ -204,6 +205,7 @@ public static class JournalSearch
             PlaySearchStates.Executions => PlayReceipts.ExecutionsReason,
             PlaySearchStates.Fees => PlayReceipts.FeesReason,
             PlaySearchStates.Unresolved => PlayReceipts.UnresolvedNote,
+            PlaySearchStates.NotAllocated => PlayReceipts.NotAllocatedNote,
             PlaySearchStates.Cancelled => CancelledReason,
             PlaySearchStates.Scored => facts.RReason switch
             {

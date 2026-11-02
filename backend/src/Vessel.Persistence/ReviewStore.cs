@@ -56,7 +56,9 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
         var unassigned = await windowed.CountAsync(f => !db.OrderLinks.Any(l => l.AccountId == f.AccountId && l.State == OrderLinkState.Linked &&
                 db.Orders.Any(o => o.OwnerId == l.OwnerId && o.AccountId == l.AccountId && o.Id == l.ImportedOrderId &&
                     o.ContractId == f.ContractId && o.ExternalOrderId == f.ExternalOrderId) &&
-                db.Plays.Any(p => p.Id == l.PlayId && p.TradingMode == mode && p.ContractId == f.ContractId)), ct);
+                db.Plays.Any(p => p.Id == l.PlayId && p.TradingMode == mode && p.ContractId == f.ContractId)) &&
+            // A fill allocated between Plays is theirs (Phase 2, item 11), whether or not its order is linked.
+            !db.FillAllocations.Any(a => a.FillId == f.Id && a.Lines.Any(l => db.Plays.Any(p => p.Id == l.PlayId && p.TradingMode == mode))), ct);
         // Unresolved Plays are never scored; Review counts and lists them with their latest declaration (1.3a).
         var enabled = accounts.Select(a => a.Id).ToList();
         var unresolvedPlays = await db.Plays.Where(p => p.Status == PlayStatus.Unresolved && p.TradingMode == mode && enabled.Contains(p.AccountId))

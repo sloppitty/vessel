@@ -228,6 +228,7 @@ function RecordColumn({ sizing, onRiskChange }: { sizing: SizingDocument; onRisk
       <strong>{exposure.level === 'full' ? 'Full size' : exposureLabels[exposure.level]}</strong> · {exposure.reason}
       {/* Unresolved Plays have no result, so the ladder never counts them; the count sits beside it (phase 1, 1.3a). */}
       {record.unresolved ? <span className="record-unresolved" data-testid="record-unresolved"> · {record.unresolved} unresolved not counted</span> : null}
+      {record.notAllocated ? <span className="record-unresolved" data-testid="record-not-allocated"> · {record.notAllocated} with a shared fill not counted</span> : null}
     </p>
     <div className="record-limits">
       {onRiskChange ? <RiskSetting sizing={sizing} onRiskChange={onRiskChange} /> : <span>Risk {decimal(sizing.settings.riskPercent)}% · shared preference, read-only in Paper. Edit in Real mode.</span>}

@@ -173,7 +173,8 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork, TimePro
     {
         var orders = db.Orders.Where(o => db.OrderLinks.Any(l => l.PlayId == playId && l.State == OrderLinkState.Linked &&
             l.AccountId == o.AccountId && l.ImportedOrderId == o.Id));
-        return await db.FillsOf(orders).AnyAsync(ct) || await db.ManualExecutions.AnyAsync(r => r.PlayId == playId, ct);
+        return await db.FillsOf(orders).AnyAsync(ct) || await db.ManualExecutions.AnyAsync(r => r.PlayId == playId, ct) ||
+            await db.FillAllocationLines.AnyAsync(l => l.PlayId == playId, ct);
     }
 
     public Task<List<PlayReviewRevision>> ReviewsAsync(Guid playId, CancellationToken ct) =>
@@ -184,6 +185,8 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork, TimePro
         var ids = await db.OrderLinks.Where(l => l.PlayId == playId && l.State == OrderLinkState.Linked && l.Role == OrderLinkRole.Entry)
             .Select(l => l.EntryId!).Distinct().ToListAsync(ct);
         ids.AddRange(await db.ManualExecutions.Where(r => r.PlayId == playId && r.Role == "entry").Select(r => r.EntryId!).Distinct().ToListAsync(ct));
+        // A flip's entry line fills its entry as a linked entry fill does (Phase 2, item 11).
+        ids.AddRange(await db.FillAllocationLines.Where(l => l.PlayId == playId && l.Role == AllocationRole.Entry).Select(l => l.EntryId!).Distinct().ToListAsync(ct));
         return ids.ToHashSet(StringComparer.Ordinal);
     }
     public async Task<List<EntryExecution>> EntryExecutionsAsync(Guid playId, CancellationToken ct)
@@ -192,7 +195,11 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork, TimePro
         var linked = await db.LinkedFills(entries).AsNoTracking().Select(x => new { x.Link.EntryId, x.Fill }).ToListAsync(ct);
         var manual = await db.ManualExecutions.Where(r => r.PlayId == playId && r.Role == "entry" && r.EntryId != null)
             .Select(r => r.EntryId!).Distinct().ToListAsync(ct);
-        return [.. linked.Select(x => new EntryExecution(x.EntryId!, x.Fill)), .. manual.Select(id => new EntryExecution(id, null))];
+        // A flip's entry line is an executed entry (Phase 2, item 11); its opening part fits the entry side by construction.
+        var allocated = await db.FillAllocationLines.Where(l => l.PlayId == playId && l.Role == AllocationRole.Entry && l.EntryId != null)
+            .Select(l => l.EntryId!).Distinct().ToListAsync(ct);
+        return [.. linked.Select(x => new EntryExecution(x.EntryId!, x.Fill)), .. manual.Select(id => new EntryExecution(id, null)),
+            .. allocated.Select(id => new EntryExecution(id, null))];
     }
     public void Add(Play play) { unitOfWork.RequireActive(); db.Plays.Add(play); }
     public async Task<List<LinkedPlanReference>> LinkedPlanReferencesAsync(Guid playId, CancellationToken ct) =>

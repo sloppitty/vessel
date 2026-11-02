@@ -16,6 +16,8 @@ public sealed class DiaryStore(VesselDbContext db, UnitOfWork unitOfWork) : IDia
         var result = await action();
         return result;
     }, ct);
+    public async Task<IReadOnlySet<Guid>> AllocatedFillIdsAsync(IReadOnlyCollection<Guid> fillIds, CancellationToken ct) =>
+        await AllocatedFills.AllocatedIdsAsync(db, fillIds, ct);
     public Task<DiaryRequest?> RequestAsync(Guid requestId, CancellationToken ct) =>
         db.DiaryRequests.AsNoTracking().SingleOrDefaultAsync(r => r.Id == requestId, ct);
     public Task<List<ManualExecution>> ManualAsync(Guid playId, CancellationToken ct) =>

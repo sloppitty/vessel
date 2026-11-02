@@ -36,6 +36,8 @@ internal sealed class PlaySearchCapture
                 case PlayNote note: plays.Add(note.PlayId); break;
                 case ManualExecution execution: plays.Add(execution.PlayId); break;
                 case PlayOrderLink link: plays.Add(link.PlayId); break;
+                // A Play's part of an allocated fill (Phase 2, item 11), added, changed or removed.
+                case FillAllocationLine line: plays.Add(line.PlayId); break;
                 case PaperExecution execution: plays.Add(execution.PlayId); break;
                 // Markup alone is not searchable; a new, removed or renoted image is.
                 case PlayEvidence evidence when entry.State != EntityState.Modified || Changed(entry, nameof(PlayEvidence.Note)):

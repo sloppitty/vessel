@@ -1090,6 +1090,155 @@ namespace Vessel.Persistence.Migrations
                     b.ToTable("diary_requests", (string)null);
                 });
 
+            modelBuilder.Entity("Vessel.Domain.Plays.FillAllocation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal?>("FeeRemainder")
+                        .HasColumnType("numeric");
+
+                    b.Property<Guid>("FillId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FillId");
+
+                    b.HasIndex("OwnerId", "AccountId");
+
+                    b.HasIndex("OwnerId", "FillId")
+                        .IsUnique();
+
+                    b.ToTable("fill_allocations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_fill_allocations_reason", "\"Reason\" IN ('SharedClose', 'Flip', 'Other')");
+
+                            t.HasCheckConstraint("CK_fill_allocations_revision", "\"Revision\" >= 1");
+                        });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.FillAllocationLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AllocationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EntryId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<decimal?>("Fee")
+                        .HasColumnType("numeric");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PlayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)");
+
+                    b.Property<bool>("TookRemainder")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AllocationId", "PlayId")
+                        .IsUnique();
+
+                    b.HasIndex("OwnerId", "PlayId");
+
+                    b.ToTable("fill_allocation_lines", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_fill_allocation_lines_entry", "(\"Role\" = 'Entry') = (\"EntryId\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_fill_allocation_lines_quantity", "\"Quantity\" > 0");
+
+                            t.HasCheckConstraint("CK_fill_allocation_lines_role", "\"Role\" IN ('Exit', 'Entry')");
+                        });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.FillAllocationRevision", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AllocationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal?>("FeeRemainder")
+                        .HasColumnType("numeric");
+
+                    b.Property<string>("Lines")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AllocationId", "Revision")
+                        .IsUnique();
+
+                    b.HasIndex("OwnerId", "AllocationId");
+
+                    b.ToTable("fill_allocation_revisions", (string)null);
+                });
+
             modelBuilder.Entity("Vessel.Domain.Plays.ManualExecution", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1641,7 +1790,7 @@ namespace Vessel.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_play_search_recheck", "\"RecheckAtUtc\" IS NULL OR \"State\" = 'executions'");
 
-                            t.HasCheckConstraint("CK_play_search_state", "\"State\" IN ('active', 'scored', 'executions', 'fees', 'unresolved', 'cancelled')");
+                            t.HasCheckConstraint("CK_play_search_state", "\"State\" IN ('active', 'scored', 'executions', 'fees', 'unresolved', 'cancelled', 'not-allocated')");
                         });
                 });
 
@@ -2781,6 +2930,47 @@ namespace Vessel.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Vessel.Domain.Plays.FillAllocation", b =>
+                {
+                    b.HasOne("Vessel.Domain.Workspace.ImportedFill", null)
+                        .WithMany()
+                        .HasForeignKey("FillId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Vessel.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "AccountId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.FillAllocationLine", b =>
+                {
+                    b.HasOne("Vessel.Domain.Plays.FillAllocation", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("AllocationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Vessel.Domain.Plays.Play", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId", "PlayId")
+                        .HasPrincipalKey("OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.FillAllocationRevision", b =>
+                {
+                    b.HasOne("Vessel.Domain.Plays.FillAllocation", null)
+                        .WithMany()
+                        .HasForeignKey("AllocationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Vessel.Domain.Plays.ManualExecution", b =>
                 {
                     b.HasOne("Vessel.Domain.Plays.Play", null)
@@ -3009,6 +3199,11 @@ namespace Vessel.Persistence.Migrations
                         .HasPrincipalKey("OwnerId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.FillAllocation", b =>
+                {
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("Vessel.Domain.Workspace.AccountSnapshot", b =>

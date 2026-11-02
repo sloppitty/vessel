@@ -46,6 +46,9 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<PlayStatusChange> StatusChanges => Set<PlayStatusChange>();
     public DbSet<ImportedOrder> Orders => Set<ImportedOrder>();
     public DbSet<PlayOrderLink> OrderLinks => Set<PlayOrderLink>();
+    public DbSet<FillAllocation> FillAllocations => Set<FillAllocation>();
+    public DbSet<FillAllocationLine> FillAllocationLines => Set<FillAllocationLine>();
+    public DbSet<FillAllocationRevision> FillAllocationRevisions => Set<FillAllocationRevision>();
     public DbSet<ManualExecution> ManualExecutions => Set<ManualExecution>();
     public DbSet<ManualExecutionHistory> ManualExecutionHistory => Set<ManualExecutionHistory>();
     public DbSet<PlayReviewRevision> ReviewRevisions => Set<PlayReviewRevision>();
@@ -96,7 +99,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
         foreach (var entry in ChangeTracker.Entries())
         {
             if (entry.State == EntityState.Modified &&
-                entry.Entity is Vessel.Domain.Plays.ManualExecutionHistory or PlayReviewRevision or DiaryRequest)
+                entry.Entity is Vessel.Domain.Plays.ManualExecutionHistory or PlayReviewRevision or DiaryRequest or FillAllocationRevision)
                 throw new InvalidOperationException("Diary audit and request records are append-only.");
             var owned = entry.Entity as IOwned ?? throw new InvalidOperationException(
                 $"Entity type '{entry.Metadata.DisplayName()}' has no owner and cannot be saved.");

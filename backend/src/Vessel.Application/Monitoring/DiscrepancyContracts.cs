@@ -1,3 +1,4 @@
+using Vessel.Application.Plays.Execution;
 using Vessel.Application.Common;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Monitoring;
@@ -24,7 +25,14 @@ public sealed record DismissMonitorDiscrepancyRequest(string? Note = null);
 public sealed record MonitorDiscrepancyFacts(IReadOnlyList<Play> Plays, IReadOnlyList<PlayOrderLink> Links,
     IReadOnlyList<ImportedOrder> Orders, IReadOnlyList<ImportedFill> Fills, bool Complete = true,
     IReadOnlyList<PlayOrderLink>? AssignmentLinks = null, bool AssignmentLinksComplete = false,
-    IReadOnlySet<string>? TruncatedFillContracts = null);
+    IReadOnlySet<string>? TruncatedFillContracts = null)
+{
+    /// <summary>
+    /// Owner-confirmed allocations naming the loaded Plays or on the loaded fills (Phase 2, item 11, Sol round 1): the protection
+    /// checks read a Play's part of them, and an allocated fill is not unlinked. The position comparison does not read them.
+    /// </summary>
+    public IReadOnlyList<AllocatedFill> Allocations { get; init; } = [];
+}
 
 public interface IMonitorDiscrepancyStore
 {

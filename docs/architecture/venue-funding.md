@@ -224,8 +224,8 @@ paper execution view is refused with 409 as before). It is one of:
 - `sole`: the exact nominal sum of the settlements in the holding window
   (`amountUsd`), their asset when they share one, their count and the window
   (`fromUtc`, `toUtc`);
-- `shared` ("shared, not allocated"): `other-play`, `unlinked-fill` or
-  `open-position`;
+- `shared` ("shared, not allocated"): `other-play`, `unlinked-fill`,
+  `open-position` or `allocated` (Phase 2, item 11, below);
 - `incomplete` ("coverage incomplete"), with a reason code (`changing` when
   the facts moved while they were read);
 - `unavailable`: `no-funding-read` when the venue has no funding reader (a
@@ -327,6 +327,30 @@ today, so most Plays rely on the latest snapshot and on the ledger proving
 continuity from the first entry to it. An account with a gap from before the
 ledger existed (an open gap of unknown range) reads `history-gap` until a read
 proves it covered. No migration is needed.
+
+**Allocated fills** (Phase 2, item 11, October 23, 2026). The owner can split
+one fill between Plays, a shared exit or a flip ([play lifecycle](play-lifecycle.md#shared-exit-allocation-october-23-2026)).
+Activity's fill-to-Play map knows only order links, so an allocated fill could
+still read as the linked Play's own. The proof therefore reads `shared`
+(`allocated`) whenever a fill with a current allocation lies where it relies on
+sole exposure:
+- the Play itself has a part of an allocated fill (this also answers a flip's
+  entry Play, which has no linked fill in Activity at all);
+- an allocated fill of the partition lies in the holding window (from the first
+  fill on while a position is open), checked before step 2, whoever's it is;
+- or an allocated fill lies in the span a proof of step 5 walks: from the
+  account's start to the window's end for covered history, from the window's
+  start to the snapshot for the snapshot anchor.
+
+The evidence read takes the instrument's fills with a current allocation in the
+same repeatable-read snapshot, scoped like the forced events (the account, the
+partition's contracts and native market, from the first fill's millisecond on
+unless a complete ledger record exists), and the proof keeps them to the
+partition as it does orders with missing executions. An allocation is not an
+Activity fact and Activity never reads it, so allocation writes do not move the
+facts revision and the Activity cache keeps its invalidation; the snapshot
+itself fences them, as it does ledger and gap writes. The amount is never split
+by an allocation: a split position has no sole funding.
 
 ## Activity presentation and bounds
 

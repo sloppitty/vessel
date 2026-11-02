@@ -89,7 +89,7 @@ export function ReviewWeek({ api, filters, onOpenPlay }: {
   const decided = stats ? stats.wins + stats.losses : 0
   // Plays only: positions Review cannot score are counted apart, never as excluded Plays (Sol round 1 on item 2).
   const excluded = report ? report.coverage.incompleteFees + report.coverage.incompleteExecutions + (report.coverage.unresolved ?? 0) +
-    (report.coverage.cancelled ?? 0) : 0
+    (report.coverage.cancelled ?? 0) + (report.coverage.notAllocated ?? 0) : 0
   const positions = report?.positions
   const omitted = positions?.included ? positions.omitted ?? 0 : 0
   // Repeated: a tag on at least two of the week's Plays.
@@ -133,7 +133,7 @@ export function ReviewWeek({ api, filters, onOpenPlay }: {
         onInspect={(title, selection) => setDrill({ kind: 'process', title, selection })} />}
       <section className="pr-coverage" aria-label="Week coverage"><ShieldCheck size={16} /><details>
         <summary>{results(stats.count, stats.positions)} scored · {excluded} excluded {excluded === 1 ? 'Play' : 'Plays'}{omitted ? ` · ${omitted} ${omitted === 1 ? 'position' : 'positions'} not scored` : ''} · {stats.reviewed} {stats.reviewed === 1 ? 'review' : 'reviews'} complete</summary>
-        <p>{report.coverage.incompleteFees} incomplete fees · {report.coverage.incompleteExecutions} incomplete executions · {report.coverage.unresolved ?? 0} Unresolved · {report.coverage.cancelled ?? 0} cancelled.</p>
+        <p>{report.coverage.incompleteFees} incomplete fees · {report.coverage.incompleteExecutions} incomplete executions · {report.coverage.unresolved ?? 0} Unresolved · {report.coverage.cancelled ?? 0} cancelled{report.coverage.notAllocated ? ` · ${report.coverage.notAllocated} not allocated` : ''}.</p>
         <p>{report.coverage.unassignedFills} unassigned fills in this week.</p>
         {positions?.included && <p>{positions.positions ?? 0} imported {positions.positions === 1 ? 'position' : 'positions'} included{omitted ? `; ${omitted} closed ${omitted === 1 ? 'position' : 'positions'} could not be scored` : ''}.</p>}
         <p>{report.coverage.notice}</p>

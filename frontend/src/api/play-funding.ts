@@ -2,7 +2,8 @@ import { isCount, isNullOr, isPlainDecimal, isRecord, isText, isTimestamp } from
 
 /** Why settled funding is not shown as the Play's own, by state (Phase 2, item 9b). */
 export const playFundingReasons = {
-  shared: ['other-play', 'unlinked-fill', 'open-position'],
+  // `allocated`: a fill the proof relies on is split between plays (Phase 2, item 11).
+  shared: ['other-play', 'unlinked-fill', 'open-position', 'allocated'],
   incomplete: ['identity', 'missing-executions', 'not-settled', 'omitted-executions', 'history-gap', 'history-unproven',
     'flat-start-unproven', 'flat-end-unproven', 'operation-boundaries', 'funding-coverage', 'funding-ambiguous', 'funding-asset',
     'changing'],

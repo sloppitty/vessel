@@ -40,6 +40,11 @@ internal static class PlayFunding
     public static readonly PlayFundingDto Changing = Not(Incomplete, "changing");
     /// <summary>The store keeps no ledger, which proves nothing.</summary>
     public static readonly PlayFundingDto NoLedger = Not(Incomplete, "history-unproven");
+    /// <summary>
+    /// Phase 2, item 11: a fill the funding proof relies on is allocated between Plays (a shared exit or a flip split), so the
+    /// position was not this Play's alone; its funding is shared and not allocated.
+    /// </summary>
+    public static readonly PlayFundingDto SplitFill = Not(Shared, "allocated");
 
     /// <summary>
     /// What to read besides the aggregate, from the aggregate's own view of the Play's linked fills: the canonical contracts
@@ -93,6 +98,15 @@ internal static class PlayFunding
         // Imports may keep only millisecond precision, so the first and last milliseconds belong to the window.
         var (from, to) = (Floor(start), Floor(end).AddTicks(TimeSpan.TicksPerMillisecond - 1));
 
+        // Phase 2, item 11: a fill allocated between Plays in the window (one of this Play's or not) means the position was
+        // shared, whatever the links say. Scoped like the missing executions: an ID-less fill of the contracts could be this
+        // market's.
+        var allocated = evidence.Allocated.Where(f => key.IsNative
+            ? f.VenueContractId == key.Identity || f.VenueContractId is null && partition.Contracts.Contains(f.ContractId)
+            : partition.Contracts.Contains(f.ContractId)).ToList();
+        bool AllocatedIn(DateTimeOffset a, DateTimeOffset b) => allocated.Any(f => f.OccurredAtUtc >= a && f.OccurredAtUtc <= b);
+        if (AllocatedIn(from, flat ? to : DateTimeOffset.MaxValue)) return SplitFill;
+
         // 2. Sole exposure: every retained fill of the partition in the window is this Play's. Another Play's fills, or fills
         // linked to none, mean the funding is shared and not allocated.
         var others = partition.Between(start, flat ? end : DateTimeOffset.MaxValue).Where(f => !ids.Contains(f.Id)).ToList();
@@ -136,18 +150,28 @@ internal static class PlayFunding
         if (partition.Between(from, start).Any(f => f.OccurredAtUtc < start && !ids.Contains(f.Id)))
             return Not(Incomplete, "flat-start-unproven");
         var proofs = new List<ExactAmount>();
+        // The spans each proof walks, for the allocation rule below.
+        var walked = new List<(DateTimeOffset From, DateTimeOffset To)>();
         // Covered history: complete from the account's start, which was flat, with nothing omitted, missing or open since.
         if (Covered(null, end) && !Omitted(DateTimeOffset.MinValue, to) && !Missing(DateTimeOffset.MinValue, to) &&
             !Gap(DateTimeOffset.MinValue, to))
+        {
             proofs.Add(partition.Before(start));
+            walked.Add((DateTimeOffset.MinValue, to));
+        }
         // The latest snapshot, walked back as Activity anchors it (observed at or after every fill of the partition) over a
         // covered span with nothing omitted, missing or open.
         if (snapshot is not null && positions.Quantity(key) is { } observed && partition.Last <= snapshot.ObservedAtUtc && partition.AllPositive &&
             Covered(start, snapshot.ObservedAtUtc) && !Omitted(from, snapshot.ObservedAtUtc) && !Missing(from, snapshot.ObservedAtUtc) &&
             !Gap(from, snapshot.ObservedAtUtc))
+        {
             proofs.Add(observed - partition.From(start));
+            walked.Add((from, snapshot.ObservedAtUtc));
+        }
         if (proofs.Count == 0 || proofs.Any(p => p.Units.IsZero) && !proofs.All(p => p.Units.IsZero))
             return Not(Incomplete, "flat-start-unproven");
+        // Phase 2, item 11: a proof that walks over a fill allocated between Plays does not show this Play alone held it.
+        if (walked.Any(span => AllocatedIn(span.From, span.To))) return SplitFill;
         // A position proven open at the first entry is someone else's exposure.
         if (!proofs[0].Units.IsZero) return Not(Shared, "open-position");
 

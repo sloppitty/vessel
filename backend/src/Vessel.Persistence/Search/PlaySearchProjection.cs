@@ -137,8 +137,13 @@ internal static class PlaySearchProjection
         }
         if (orders.Count == 0) return [];
         var ids = orders.Distinct().ToList();
-        return await db.OrderLinks.Where(l => ids.Contains(l.ImportedOrderId) && l.State == OrderLinkState.Linked)
+        var linked = await db.OrderLinks.Where(l => ids.Contains(l.ImportedOrderId) && l.State == OrderLinkState.Linked)
             .Select(l => l.PlayId).Distinct().ToListAsync(ct);
+        // Plays on the lines of an allocated fill of those orders (Phase 2, item 11), by the same OrderKey rule.
+        var allocated = await db.FillsOf(db.Orders.Where(o => ids.Contains(o.Id)))
+            .Join(db.FillAllocations, f => f.Id, a => a.FillId, (f, a) => a.Id)
+            .Join(db.FillAllocationLines, a => a, l => l.AllocationId, (a, l) => l.PlayId).Distinct().ToListAsync(ct);
+        return linked.Union(allocated).ToList();
     }
 }
 

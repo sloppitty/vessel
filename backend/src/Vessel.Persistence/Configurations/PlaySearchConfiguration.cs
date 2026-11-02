@@ -12,7 +12,7 @@ internal sealed class PlaySearchEntryConfiguration : IEntityTypeConfiguration<Pl
         builder.ToTable("play_search", table =>
         {
             table.HasCheckConstraint("CK_play_search_state",
-                "\"State\" IN ('active', 'scored', 'executions', 'fees', 'unresolved', 'cancelled')");
+                "\"State\" IN ('active', 'scored', 'executions', 'fees', 'unresolved', 'cancelled', 'not-allocated')");
             // Figures exist only for a scored Play, and R never without its result.
             table.HasCheckConstraint("CK_play_search_figures",
                 "(\"State\" = 'scored') = (\"ResultUsd\" IS NOT NULL) AND (\"EstimatedR\" IS NULL OR \"ResultUsd\" IS NOT NULL) AND " +

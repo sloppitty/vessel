@@ -4,6 +4,12 @@
 
 ### Added
 
+- `scripts/benchmark.py` times Activity, Review, the Plays list, Overview, open risk and search
+  over a synthetic multi-year dataset in throwaway containers; it never runs in CI.
+- Several Plays closed by one exit fill, or a flip fill that closes one Play and opens another,
+  can now be split between them by the owner, conserving the fill's quantity and splitting its
+  fee pro rata. Such a Play closes with its own local result; its venue result reads "Not
+  allocated" and it is left out of Review's scores and sizing.
 - The journal can be searched: titles, theses, invalidations, strategies, evidence notes,
   reviews, log entries and image notes, with the matching field and an excerpt. Ended Plays in
   the list show their exit, result and estimated R. After the migration, run

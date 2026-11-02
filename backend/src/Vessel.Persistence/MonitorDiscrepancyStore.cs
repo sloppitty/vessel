@@ -99,6 +99,8 @@ public sealed class MonitorDiscrepancyStore(VesselDbContext db, UnitOfWork work)
             .Select(x => new LinkedOrderRow { Link = x, Order = assignedOrders[x.ImportedOrderId] }).ToList();
         // The checks resolve each assignment's order by internal ID, so its order comes with the facts.
         orders.AddRange(assigned.Select(x => x.Order).Where(x => !ordersById.ContainsKey(x.Id)).DistinctBy(x => x.Id));
-        return new(plays, links, orders, fills, true, assigned.Select(x => x.Link).ToList(), true, truncated);
+        // Phase 2, item 11 (Sol round 1): allocations naming these Plays or on the loaded fills, read in the same transaction.
+        var allocations = await AllocatedFills.ForAsync(db, ids, fills.Select(x => x.Id).ToList(), ct, accountId);
+        return new(plays, links, orders, fills, true, assigned.Select(x => x.Link).ToList(), true, truncated) { Allocations = allocations };
     }
 }
