@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.4.0 - November 2, 2026
+
+Release notes: [docs/releases/v0.4.0.md](docs/releases/v0.4.0.md).
+
 ### Added
 
 - Hyperliquid builder markets, such as gold (`xyz:GOLD`), stocks and indices, can be planned,
@@ -109,6 +113,29 @@
   unknown until the wallet is read again.
 - RISEx: history pages share one fixed end time, so new trades cannot shift them, and
   the history notice counts trades on unrecognized markets.
+
+### Upgrade
+
+- Stop web, every API and every worker/replica (including notifications and
+  optional paper workers), then back up both database schemas, evidence,
+  credential keys and private configuration. Use matching v0.4.0 images and
+  apply the explicit migration service before restarting. No new identity
+  migration is included.
+- Journal migrations, in order: `20261021144248_RiskSettings`,
+  `20261021164349_RiskContext`, `20261021180627_FillImportConflicts`,
+  `20261022100811_ReportingSettings`, `20261022104353_LossLimits`,
+  `20261022124043_IfThenRule`, `20261022143200_HistoryRetention`,
+  `20261022182854_HistoryBackfill`, `20261022185700_ExecutionOmissions`,
+  `20261022193325_FundingSchedule`, `20261023075337_JournalSearch`,
+  `20261023083202_FillAllocations` and `20261102123723_MarketSources`.
+- After `migrate`, run `play-search-rebuild --apply` once so existing Plays are
+  searchable (dry-run by default; see the deployment guide).
+- No new required configuration. Limits, history retention and market sources
+  keep their off or blank defaults; the monitor's funding read runs about
+  every 6 hours (`Vessel:Funding:Interval`).
+- Roll back with the pre-upgrade backup and matching previous images; the down
+  migrations of `FillAllocations` and `UnresolvedStatus` refuse to run once
+  allocations or Unresolved history exist.
 
 ## 0.3.5 - October 28, 2026
 
