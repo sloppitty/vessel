@@ -1588,3 +1588,69 @@ Production/Wallet benchmark passes as described above.
 The Release backend run against a run-owned PostgreSQL database passes 4,342 tests with 17 explicit optional
 skips (live venues, RabbitMQ/worker end-to-end and S3 services were not enabled); no failures. No skipped check
 is counted as a pass. The new PostgreSQL regressions ran in this suite.
+
+## November 2, 2026: reconciliation with current main
+
+The owner authorized fixing and merging the Phase 2 stack, leaving Extended #61 and Pacifica #62 open.
+The reconciliation starts from `main` at `d3d3d1f72b5d01385ca31214b4223bd26eaed6ef` and retains the original
+stack tip `07a18823005b2eb26fcc2e69d6f21a01311b18b0`. The verified code tip is `f3fdfd8ca1c59e0617c92465683018e33da3130a`;
+the following commit records verification only.
+
+- All 25 open Phase 2 layers incorporate current main and retain their original heads and updated parents as
+  ancestors. The work squash-merged into feature parents on November 2 is retained: #36 in #35, #43 in #42,
+  #48 in #47 and #65 in #64. Those four earlier merges did not themselves deliver the work to main.
+- The test-project split is preserved. Pure rules/calculators are in Unit, fake-backed services in UseCases,
+  adapters in Venues, HTTP-only tests in Api and persisted/infrastructure tests in Integration. Shared CSV and
+  monitor setup lives in TestKit; Unit links only its value-only CSV source, not TestKit's hosting assembly.
+  No source tests remain under the removed `Vessel.Tests` project.
+- The ports retain liquidation and margin fixtures, reporting and first-Play facts, rule snapshots, allocated
+  execution facts and the `keepExecutionHistory` API assertion. Current main's wallet-only authentication,
+  phone pairing, Activity unrealized P&L and chart measurements remain. Published changelog sections are
+  unchanged. Neither new venue implementation is included.
+- The frontend's one-second Testing Library wait could expire on the lazy route's loading screen. A single
+  cold-route case reproduced it. Shared `asyncUtilTimeout` is now 5 seconds, below Vitest's existing 15-second
+  interaction-test limit. Assertions, service gates, cleanup and production behavior are unchanged. The 67
+  affected shell/Paper regression cases pass, followed by the entire frontend suite.
+
+**Independent Sol verification.** One read-only adversarial review checked the integration resolutions and
+all 25 branch ancestries at the pre-harness tip `c91d1a11da944e4b465f0cc5910ee6648d99ba90`: no blockers.
+A separate Sol audit checked every layer's test preservation and placement, including the final harness
+change: no blockers. All 2,212 original attributed methods, 2,230 InlineData attributes and 11 MemberData uses
+survive. Of the original bodies, 2,196 are token-identical, 14 retain main's intentional changes, and two only
+refer to the shared monitor setup. Current main adds 40 methods, for 2,252 methods in the prepared tip.
+Methods are not discovered-case counts. The per-layer inventory and limits are in
+[the source audit](../verification/phase2-test-preservation-2026-11-02.md).
+
+**Runtime validation.** Locked NuGet restore and Release builds pass for every prepared layer, with zero
+warnings/errors; the root and tip backend trees are identical to their earlier clean builds. Frozen pnpm
+install and frontend typecheck pass on all 25 layers. The full frontend passes ESLint, production build and
+4,349 tests in 205 files. Python scripts: 119 passed; prototype: 76 passed; release consistency check: 0.3.5.
+
+All five backend projects pass with the following discovered-case results:
+
+| Project | Passed | Skipped | Failed |
+| --- | ---: | ---: | ---: |
+| Unit | 896 | 0 | 0 |
+| UseCases | 647 | 0 | 0 |
+| Venues | 965 | 3 | 0 |
+| Api | 420 | 0 | 0 |
+| Integration | 1,480 | 0 | 0 |
+| Total | 4,408 | 3 | 0 |
+
+The first simultaneous backend/frontend/build attempt ran under severe shared-runner contention. Two
+unchanged API tests timed out: `StartupWarmupTests.Deadline_also_bounds_work_that_blocks_before_its_first_await`
+and `InstrumentCatalogueApiTests.Aborted_catalogue_waiter_does_not_cancel_shared_read_or_record_sync_failure_or_write`.
+The complete 420-test API project then passed with `DOTNET_PROCESSOR_COUNT=4` and xUnit MaxParallelThreads=2.
+The totals above combine the four successful original project reports with that complete API rerun; the
+original one-shot command is not recorded as a pass. No backend assertion, timeout or gate was changed.
+The 1,480 Integration cases exercised run-owned PostgreSQL 18, RabbitMQ 4.3.6 and RustFS 1.0.1, including the
+new migrations. Only the three opt-in live RISEx/Lighter reads were skipped, never counted as passes.
+
+The disposable Production/Wallet benchmark smoke also passes with `--years 1 --scale 0.05 --warmup 0
+--rounds 1 --no-build`: 4,642 synthetic rows and 17 authenticated read scenarios. The two deep-page
+scenarios are explicitly not exercised because the small dataset cannot populate them. This is an
+HTTPS/sign-in/API smoke check, not a new large-history performance claim. Its API, database, broker and
+temporary credentials were removed.
+
+No owner data, live migration, deployment, publication, new release or real venue write is authorized or
+performed here. The 12 Phase 2 journal migrations remain explicit operator work for a later upgrade.
