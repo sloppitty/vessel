@@ -76,47 +76,10 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         var from = From(query.Period, now);
         query = Validated(query);
 
-        ReviewFacts facts;
-        Dictionary<Guid, Account> accounts;
-        List<Evaluated> accepted, candidates;
-        List<ReviewPosition> read;
-        int playCount;
-        bool include;
-        HashSet<Guid> scoped;
-        List<Evaluated> evaluated;
-        for (var attempt = 1; ; attempt++)
-        {
-            facts = await store.ReadAsync(query, now, ct);
-            accounts = facts.Accounts.Where(a => a.IsEnabled && a.TradingMode == query.TradingMode).ToDictionary(a => a.Id);
-            scoped = accounts.Values.Where(a =>
-                (query.AccountId is null || a.Id == query.AccountId) &&
-                (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||
-                    a.PortfolioId?.ToString() == query.Portfolio)).Select(a => a.Id).ToHashSet();
-            evaluated = facts.ClosedPlays.Where(f => f.Play.TradingMode == query.TradingMode && scoped.Contains(f.Play.AccountId) &&
-                (query.Instrument is null || f.Play.ContractId == query.Instrument))
-                .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true || f.IncompleteOrders is { Count: > 0 })).ToList();
-            accepted = evaluated.Where(e => e.Result is not null).ToList();
-            candidates = evaluated.Where(e => InPeriod(e.ClosedAt, from, now)).ToList();
-            // Auto counts the scored Plays of the selected scope and period, and the decision applies to every period total.
-            playCount = accepted.Count(e => InPeriod(e.ClosedAt, from, now));
-            include = positionSource is not null &&
-                (query.Positions == "include" || query.Positions == "auto" && playCount < query.MinPlays);
-            read = [];
-            if (!include) break;
-            read = (await positionSource!.ReadAsync(scoped, ct)).Where(p => accounts.ContainsKey(p.AccountId)).ToList();
-            // Plays and position claims come from separate reads. A Play created or linked in between (a retrospective
-            // conversion) would hide its result or count it twice, so the Play snapshot must be unchanged around them.
-            if (Claims(facts) == Claims(await store.ReadAsync(query, now, ct))) break;
-            if (attempt == 3) throw new ProblemException(409, "Plays changed while Review read imported positions. Reload Review.");
-        }
-        var positions = read.Where(p => query.Instrument is null || p.ContractId == query.Instrument)
-            .Select(p => new Evaluated(null, p.ClosedAtUtc, p.Outcome, p.Outcome is null ? "position" : null)
-            {
-                Position = p, PositionVenue = accounts[p.AccountId].VenueId
-            }).ToList();
-        accepted = accepted.Concat(positions.Where(p => p.Result is not null))
-            .OrderBy(e => e.ClosedAt).ThenBy(e => e.Facts?.Play.Id ?? Guid.Empty).ThenBy(e => e.Position?.OperationId, StringComparer.Ordinal).ToList();
-        var current = accepted.Where(e => InPeriod(e.ClosedAt, from, now)).ToList();
+        var selection = await SelectAsync(query, now, from, ct);
+        var (facts, accounts, scoped, evaluated, candidates, accepted, current) =
+            (selection.Facts, selection.Accounts, selection.Scoped, selection.Evaluated, selection.Candidates, selection.Accepted, selection.Current);
+        var (read, positions, playCount, include) = (selection.Read, selection.Positions, selection.PlayCount, selection.Include);
         var unresolved = Unresolved(facts, scoped, query.Instrument, query.TradingMode!).Count(u => InPeriod(u.EndedAt, from, now));
         var cancelled = Cancelled(facts, scoped, query.Instrument, query.TradingMode!).Count(c => InPeriod(CancelledAt(c.Play), from, now));
         var portfolios = facts.Portfolios.Where(p => p.TradingMode == query.TradingMode).ToList();
@@ -198,6 +161,60 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
                 include ? current.Count(e => e.Position is not null) : null,
                 include ? positions.Count(e => e.Result is null && InPeriod(e.ClosedAt, from, now)) : null, PlayWeight.ToString(CultureInfo.InvariantCulture)),
         };
+    }
+
+    /// <summary>
+    /// The report's selection from one snapshot: the scoped enabled accounts, every evaluated closed Play, imported
+    /// positions when they are included, and the period's scored rows. The report and its CSV export share it.
+    /// </summary>
+    private sealed record Selection(ReviewFacts Facts, Dictionary<Guid, Account> Accounts, HashSet<Guid> Scoped, List<Evaluated> Evaluated,
+        List<Evaluated> Candidates, List<Evaluated> Accepted, List<Evaluated> Current, List<ReviewPosition> Read, List<Evaluated> Positions,
+        int PlayCount, bool Include);
+
+    private async Task<Selection> SelectAsync(ReviewQuery query, DateTimeOffset now, DateTimeOffset? from, CancellationToken ct)
+    {
+        ReviewFacts facts;
+        Dictionary<Guid, Account> accounts;
+        List<Evaluated> accepted, candidates;
+        List<ReviewPosition> read;
+        int playCount;
+        bool include;
+        HashSet<Guid> scoped;
+        List<Evaluated> evaluated;
+        for (var attempt = 1; ; attempt++)
+        {
+            facts = await store.ReadAsync(query, now, ct);
+            accounts = facts.Accounts.Where(a => a.IsEnabled && a.TradingMode == query.TradingMode).ToDictionary(a => a.Id);
+            scoped = accounts.Values.Where(a =>
+                (query.AccountId is null || a.Id == query.AccountId) &&
+                (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||
+                    a.PortfolioId?.ToString() == query.Portfolio)).Select(a => a.Id).ToHashSet();
+            evaluated = facts.ClosedPlays.Where(f => f.Play.TradingMode == query.TradingMode && scoped.Contains(f.Play.AccountId) &&
+                (query.Instrument is null || f.Play.ContractId == query.Instrument))
+                .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true || f.IncompleteOrders is { Count: > 0 })).ToList();
+            accepted = evaluated.Where(e => e.Result is not null).ToList();
+            candidates = evaluated.Where(e => InPeriod(e.ClosedAt, from, now)).ToList();
+            // Auto counts the scored Plays of the selected scope and period, and the decision applies to every period total.
+            playCount = accepted.Count(e => InPeriod(e.ClosedAt, from, now));
+            include = positionSource is not null &&
+                (query.Positions == "include" || query.Positions == "auto" && playCount < query.MinPlays);
+            read = [];
+            if (!include) break;
+            read = (await positionSource!.ReadAsync(scoped, ct)).Where(p => accounts.ContainsKey(p.AccountId)).ToList();
+            // Plays and position claims come from separate reads. A Play created or linked in between (a retrospective
+            // conversion) would hide its result or count it twice, so the Play snapshot must be unchanged around them.
+            if (Claims(facts) == Claims(await store.ReadAsync(query, now, ct))) break;
+            if (attempt == 3) throw new ProblemException(409, "Plays changed while Review read imported positions. Reload Review.");
+        }
+        var positions = read.Where(p => query.Instrument is null || p.ContractId == query.Instrument)
+            .Select(p => new Evaluated(null, p.ClosedAtUtc, p.Outcome, p.Outcome is null ? "position" : null)
+            {
+                Position = p, PositionVenue = accounts[p.AccountId].VenueId
+            }).ToList();
+        accepted = accepted.Concat(positions.Where(p => p.Result is not null))
+            .OrderBy(e => e.ClosedAt).ThenBy(e => e.Facts?.Play.Id ?? Guid.Empty).ThenBy(e => e.Position?.OperationId, StringComparer.Ordinal).ToList();
+        var current = accepted.Where(e => InPeriod(e.ClosedAt, from, now)).ToList();
+        return new(facts, accounts, scoped, evaluated, candidates, accepted, current, read, positions, playCount, include);
     }
 
     /// <summary>
@@ -333,6 +350,19 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         var accounts = facts.Accounts.Where(a => a.IsEnabled && a.TradingMode == query.TradingMode && (query.AccountId is null || a.Id == query.AccountId) &&
             (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||
                 a.PortfolioId?.ToString() == query.Portfolio)).ToDictionary(a => a.Id);
+        var all = Excluded(facts, accounts, query, from, now);
+        var items = all.Skip(query.Offset).Take(PageSize).Select(x => x.Item()).ToList();
+        return new(items, all.Count, query.Offset, query.Offset + items.Count < all.Count ? query.Offset + items.Count : null,
+            query.TradingMode == TradingMode.Paper ? PaperNotice : Notice);
+    }
+
+    /// <summary>
+    /// The period's excluded Plays in the scoped <paramref name="accounts"/>, newest first: closed Plays Review cannot score,
+    /// Unresolved ones by their declaration and Cancelled ones by their cancellation.
+    /// </summary>
+    private List<(DateTimeOffset At, Play Play, string Status, Func<ReviewExclusionDto> Item)> Excluded(ReviewFacts facts,
+        Dictionary<Guid, Account> accounts, ReviewQuery query, DateTimeOffset? from, DateTimeOffset now)
+    {
         var excluded = facts.ClosedPlays.Where(f => f.Play.TradingMode == query.TradingMode && accounts.ContainsKey(f.Play.AccountId) &&
             (query.Instrument is null || f.Play.ContractId == query.Instrument))
             .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true || f.IncompleteOrders is { Count: > 0 }))
@@ -340,20 +370,92 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             .OrderByDescending(e => e.ClosedAt).ThenBy(e => e.Facts!.Play.Id).ToList();
         // Unresolved Plays join the drill-down by their declaration time, with its reason, note and execution facts; Cancelled
         // Plays by their cancellation time, so an unscored Play without answers is never missing from every list (1.4b).
-        var all = excluded.Select(e => (At: e.ClosedAt, e.Facts!.Play, Item: (Func<ReviewExclusionDto>)(() => new ReviewExclusionDto(e.Facts.Play.Id,
+        return excluded.Select(e => (At: e.ClosedAt, e.Facts!.Play, Status: "closed", Item: (Func<ReviewExclusionDto>)(() => new ReviewExclusionDto(e.Facts.Play.Id,
                 e.Facts.Play.Title, e.Facts.Play.AccountId, accounts[e.Facts.Play.AccountId].Name,
                 e.Facts.Play.ContractId ?? "", ExclusionReasons(e.Facts, now, e.Exclusion!)))))
             .Concat(Unresolved(facts, accounts.Keys.ToHashSet(), query.Instrument, query.TradingMode!).Where(u => InPeriod(u.EndedAt, from, now))
-                .Select(u => (At: u.EndedAt, u.Play, Item: (Func<ReviewExclusionDto>)(() => new ReviewExclusionDto(u.Play.Id, u.Play.Title,
+                .Select(u => (At: u.EndedAt, u.Play, Status: "unresolved", Item: (Func<ReviewExclusionDto>)(() => new ReviewExclusionDto(u.Play.Id, u.Play.Title,
                     u.Play.AccountId, accounts[u.Play.AccountId].Name, u.Play.ContractId ?? "", [UnresolvedReason(u.Declaration)])
                     { Unresolved = u.Declaration }))))
             .Concat(Cancelled(facts, accounts.Keys.ToHashSet(), query.Instrument, query.TradingMode!).Where(c => InPeriod(CancelledAt(c.Play), from, now))
-                .Select(c => (At: CancelledAt(c.Play), c.Play, Item: (Func<ReviewExclusionDto>)(() => new ReviewExclusionDto(c.Play.Id,
+                .Select(c => (At: CancelledAt(c.Play), c.Play, Status: "cancelled", Item: (Func<ReviewExclusionDto>)(() => new ReviewExclusionDto(c.Play.Id,
                     c.Play.Title, c.Play.AccountId, accounts[c.Play.AccountId].Name, c.Play.ContractId ?? "", [CancelledReason(c.Play)])))))
             .OrderByDescending(x => x.At).ThenBy(x => x.Play.Id).ToList();
-        var items = all.Skip(query.Offset).Take(PageSize).Select(x => x.Item()).ToList();
-        return new(items, all.Count, query.Offset, query.Offset + items.Count < all.Count ? query.Offset + items.Count : null,
-            query.TradingMode == TradingMode.Paper ? PaperNotice : Notice);
+    }
+
+    public static readonly IReadOnlyList<string> ExportColumns = ["kind", "play_id", "operation_id", "title", "account", "venue", "instrument",
+        "direction", "origin", "execution_source", "status", "at_utc", "net_usd", "return_percent", "play_local_net_usd", "play_local_basis",
+        "play_local_reason", "sign_differs", "fees", "estimated_r", "estimated_r_reason", "plan_written_after_first_execution", "adherence",
+        "mistake_tag", "review_completion", "exclusion_reasons"];
+
+    public const string ExportNotice = "Not a tax report. Review's own rows in the selection: scored Plays and imported positions, then exclusions. " +
+        "Amounts are exact decimal strings in nominal USD; an empty cell is unknown, never zero. Net is the scored venue result; the Play-local " +
+        "result is shown beside it and never scored. Separate funding is not added.";
+
+    /// <summary>
+    /// Review's selection as CSV (Phase 2, item 5a): the scored rows of the report, newest first, then its exclusions, from one
+    /// snapshot. Fees are by token; estimated R carries its reason. Text cells are formula-neutralized.
+    /// </summary>
+    public async Task<ReviewExportDto> ExportAsync(ReviewQuery query, CancellationToken ct)
+    {
+        var now = time.GetUtcNow();
+        var from = From(query.Period, now);
+        query = Validated(query) with { Offset = 0 };
+        var selection = await SelectAsync(query, now, from, ct);
+        var accounts = selection.Accounts;
+        var scoped = accounts.Where(a => selection.Scoped.Contains(a.Key)).ToDictionary(a => a.Key, a => a.Value);
+        var csv = new Csv(ExportColumns);
+        void Row(string kind, Guid? playId, string? operationId, string title, Guid accountId, string venue, string instrument, string? direction,
+            string origin, string source, string status, DateTimeOffset at, string? net, string? returnPercent, PlayLocalResultDto? local,
+            string? fees, string? r, string? rReason, bool? postHoc, Play? play, string? reasons)
+        {
+            csv.Text(kind).Text(playId?.ToString()).Text(operationId).Text(title).Text(accounts[accountId].Name).Text(venue).Text(instrument)
+                .Text(direction).Text(origin).Text(source).Text(status).Time(at).Number(net).Number(returnPercent).Number(local?.NetUsd)
+                .Text(local?.Basis).Text(local?.Reason).Flag(local is null ? null : local.SignDiffers).Text(fees).Number(r).Text(rReason)
+                .Flag(postHoc).Text(play?.ReviewAdherence).Text(play?.ReviewMistakeTag).Text(PlayService.CompletionName(play?.ReviewCompletion))
+                .Text(reasons).End();
+        }
+        csv.Text("notice");
+        for (var i = 1; i < ExportColumns.Count; i++) csv.Text(i == 3 ? $"{ExportNotice} Period {query.Period}, {query.TradingMode} mode, as of " +
+            now.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture) + "." : null);
+        csv.End();
+        foreach (var e in selection.Current.OrderByDescending(e => e.ClosedAt).ThenBy(e => e.Facts?.Play.Id ?? Guid.Empty)
+                     .ThenBy(e => e.Position?.OperationId, StringComparer.Ordinal))
+        {
+            if (e.Facts is { } facts)
+            {
+                var play = facts.Play;
+                var paper = facts.Paper is not null;
+                // Paper executions are simulated without fees (the paper contract): a known zero, never unknown.
+                var fees = paper ? "0 (simulated, no fees)" : string.Join("; ", facts.Fills.GroupBy(f => f.Fill.FeeToken, StringComparer.Ordinal).OrderBy(g => g.Key, StringComparer.Ordinal)
+                    .Select(g => $"{g.Key}={g.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Fill.Fee))}"));
+                Row("scored", play.Id, null, play.Title, play.AccountId, play.VenueId, play.ContractId!, play.Direction, OriginName(play),
+                    paper ? "paper" : facts.ManualSource ? "manual" : "imported", "closed", e.ClosedAt, ExactDecimal.Format(e.Result!.NetResult),
+                    ExactDecimal.Format(e.Result.ReturnPercent), e.Local!.ToDto(e.Result.NetResult), fees, ExactDecimal.Format(e.Result.RMultiple),
+                    e.Result.RMultiple is null && !paper ? PlayReceipts.Build(facts, now).EstimatedRReason : null,
+                    PlayReceipts.PlannedAfterExecution(facts), play, null);
+            }
+            else
+                Row("position", null, e.Position!.OperationId, $"{e.ContractId} {(e.Position.Direction == "short" ? "Short" : "Long")}", e.AccountId,
+                    e.VenueId, e.ContractId, e.Position.Direction, "position", "imported", "closed", e.ClosedAt,
+                    ExactDecimal.Format(e.Result!.NetResult), ExactDecimal.Format(e.Result.ReturnPercent), null, e.Position.Fees, null, null, null, null, null);
+        }
+        foreach (var x in Excluded(selection.Facts, scoped, query, from, now))
+        {
+            var item = x.Item();
+            Row("excluded", x.Play.Id, null, x.Play.Title, x.Play.AccountId, x.Play.VenueId, x.Play.ContractId ?? "", x.Play.Direction,
+                OriginName(x.Play), x.Play.TradingMode == TradingMode.Paper ? "paper" : "", x.Status, x.At, null, null, null, null, null, null,
+                null, x.Play, string.Join("; ", item.Reasons));
+        }
+        // Sol round 1 on #38: closed positions Review cannot score are listed too, by their close time, with no amounts.
+        foreach (var e in selection.Positions.Where(p => p.Result is null && InPeriod(p.ClosedAt, from, now))
+                     .OrderByDescending(p => p.ClosedAt).ThenBy(p => p.Position!.OperationId, StringComparer.Ordinal))
+            Row("excluded", null, e.Position!.OperationId, e.Position.Direction is null ? $"{e.ContractId} position"
+                    : $"{e.ContractId} {(e.Position.Direction == "short" ? "Short" : "Long")}", e.AccountId,
+                e.VenueId, e.ContractId, e.Position.Direction, "position", "imported", "closed", e.ClosedAt, null, null, null, null, null, null,
+                null, null, e.Position.Omission ?? "Review cannot score this closed position.");
+        var mode = query.TradingMode == TradingMode.Paper ? "paper-" : "";
+        return new($"vessel-review-{mode}{query.Period}-{now.UtcDateTime:yyyyMMdd}.csv", csv.ToString());
     }
 
     /// <summary>Unresolved Plays in the scope's mode, accounts and instrument; they are excluded with the reason "unresolved".</summary>

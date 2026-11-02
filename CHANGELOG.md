@@ -4,6 +4,10 @@
 
 ### Added
 
+- Review can download its current selection as CSV: the scored Plays and imported
+  positions, then the exclusions with their reasons. Amounts stay exact, unknown stays
+  empty, and text cells are protected against spreadsheet formulas. It is not a tax
+  report.
 - A Play's Execution tab also lists compatible orders placed shortly before
   you saved it (24 hours by default), under "Placed before this Play was
   saved", so a fast entry you journaled afterwards can be linked by hand.

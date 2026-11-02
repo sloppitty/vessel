@@ -141,6 +141,8 @@ public sealed record ReviewExclusionDto(Guid PlayId, string Title, Guid AccountI
     /// <summary>An Unresolved Play's declaration: its reason, note and execution facts (phase 1, 1.3a).</summary>
     public UnresolvedDeclarationDto? Unresolved { get; init; }
 }
+/// <summary>Review's selection as one CSV file (Phase 2, item 5a); not a tax report.</summary>
+public sealed record ReviewExportDto(string FileName, string Content);
 public sealed record ReviewExclusionsDto(IReadOnlyList<ReviewExclusionDto> Items, int Total, int Offset, int? NextOffset, string Notice);
 public sealed record ReviewCoverageDto(int ClosedCandidates, int IncompleteFees, int IncompleteExecutions, int OpenPlays,
     int UnassignedFills, DateTimeOffset? FirstFillAtUtc, string Notice)

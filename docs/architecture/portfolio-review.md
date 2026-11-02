@@ -438,3 +438,42 @@ decision 9. It covers G-01.
     "Imported position" (`position`), after Planned and Retrospective.
   - Direction groups count positions by their own direction.
   - Position rows carry their `direction` and null answers.
+
+## CSV export (October 21, 2026)
+
+Phase 2, item 5a (see `phase2-risk-coverage-contract.md`).
+
+`GET /api/review/export` takes the report's filters and returns its own rows as a
+CSV file, `vessel-review-<period>-<yyyyMMdd>.csv` (`paper-` before the period in
+paper mode). The report and its exclusions come from one snapshot; the export
+pages nothing. Review has a **Download CSV** button beside Definitions.
+- **Rows.**
+  - A first `notice` row: not a tax report, plus the period, mode and as-of
+    time.
+  - The period's scored Plays and imported positions, newest first, as on
+    the report.
+  - Then the exclusions: closed, unresolved and cancelled Plays, and closed
+    imported positions Review cannot score (by their close time, when
+    positions are read), with their reasons.
+- **Columns:** kind, Play ID, operation ID, title, account, venue,
+  instrument, direction, origin, execution source, status and time (UTC
+  ISO-8601). Then:
+  - the scored venue net and return;
+  - the Play-local net with its basis, reason and "sign differs";
+  - fees by token (an imported position's as Activity totals them, with
+    stablecoins at nominal USD; a paper Play's simulated zero is written as
+    such);
+  - estimated R with its reason when unknown;
+  - "plan written after first execution";
+  - adherence, mistake tag and review completion;
+  - exclusion reasons.
+- **Cells.**
+  - Amounts are the report's exact decimal strings, written as they are.
+  - An empty cell is unknown, never zero.
+  - Text cells starting with `=`, `+`, `-`, `@`, tab or carriage return get a
+    leading `'`.
+  - Numbers must be plain ASCII decimals; anything else is refused, never
+    rewritten.
+- **What it leaves out.** Excluded rows carry no amounts, and imported
+  positions carry no plan, R or review. Separate funding is not added. Owner
+  data is never cached (`no-store`). Both auth modes isolate it by owner.
