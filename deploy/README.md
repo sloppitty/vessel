@@ -3,8 +3,8 @@
 Vessel is a self-hosted trading diary. These examples use the
 API and web images in one Docker Hub repository:
 
-- `skorcius/vessel:api-0.3.3` and `skorcius/vessel:api-latest`
-- `skorcius/vessel:web-0.3.3` and `skorcius/vessel:web-latest`
+- `skorcius/vessel:api-0.3.5` and `skorcius/vessel:api-latest`
+- `skorcius/vessel:web-0.3.5` and `skorcius/vessel:web-latest`
 
 Use versioned tags for deployments. The `latest` tags move with each release.
 This release targets Linux amd64.
@@ -16,8 +16,14 @@ Releases are published by the repository's Release workflow when an annotated
 
 ## Sign-in
 
-**Vessel signs in with Ethereum wallets only.** The API token (Token mode) was
-removed on October 25, 2026: images from that change refuse to start while
+**Vessel uses Ethereum wallets for sign-in.** A signed-in computer can also
+connect a phone without a wallet on it through Settings → Sessions → Connect
+a phone. The computer signs a wallet approval, then confirms the phone's
+six-digit code. The phone gets its own full-access, revocable session.
+Both devices need access to the same HTTPS origin.
+
+The API token (Token mode) was removed on October 25, 2026: images from that
+change refuse to start while
 `Vessel__Auth__Token` is set or `Vessel__Auth__Mode` is anything but `Wallet`.
 An installation that still uses the token must follow
 [Moving from the API token to wallet sign-in](#moving-from-the-api-token-to-wallet-sign-in)
@@ -61,7 +67,7 @@ does not pass it into a container.
 | `Vessel:Identity:Registration` | `Invitation` | Supported in this delivery: `Closed` and `Invitation`. B2 enabled registration; operator opt-in and the §10 acceptance checklist still apply. `AllowList` and `Open` are parsed but **unsupported** until per-user account/evidence quotas exist (delivery contract §13); `check-config` warns if either is set |
 | `Vessel:Identity:AllowList` | empty | `0x` addresses, normalized to lower case. Used only by the unsupported `AllowList` policy |
 | `Vessel:Identity:Session:IdleHours` / `AbsoluteHours` | 12 / 24 | 1–720; idle ≤ absolute |
-| `Vessel:Identity:Session:RememberIdleDays` / `RememberAbsoluteDays` | 14 / 30 | 1–365; idle ≤ absolute |
+| `Vessel:Identity:Session:RememberIdleDays` / `RememberAbsoluteDays` | 10 / 30 | 1–365; idle ≤ absolute |
 | `Vessel:Identity:MaxSessionsPerUser` | 20 | 1–200. Issuing a session above the cap atomically revokes the oldest live sessions |
 | `Vessel:Identity:MaxPendingRegistrations` | 10000 | At the cap, the oldest are evicted |
 | `Vessel:Identity:CookieName` | `__Host-vessel-session` | Must start with `__Host-` |
@@ -837,6 +843,11 @@ Sign-in needs HTTPS: in this mode put your own HTTPS proxy in front of web (see
 [Other API deployments](#other-api-deployments)) and set `VESSEL_IDENTITY_ORIGIN`
 to its public origin. Browsing to the plain HTTP address cannot sign in.
 
+Pass web's response headers through unchanged. In particular, a proxy that sets
+its own `Permissions-Policy` (Traefik's `permissionsPolicy`, for example) must
+allow `camera=(self)`, or phones cannot use the in-app scanner when pairing and
+must fall back to the system camera app or the typed code.
+
 Web overwrites `X-Forwarded-For` with its observed client address and
 `X-Forwarded-Proto` with its own HTTP scheme. It clears `X-Forwarded-Host` and
 `Forwarded`. `VESSEL_TRUSTED_PROXY` is empty, so no caller can claim HTTPS or
@@ -951,10 +962,37 @@ unchanged and compresses static assets only.
 
 ## Upgrade
 
+### From v0.3.4 to v0.3.5
+
+Read the [release notes](../docs/releases/v0.3.5.md). Set `VESSEL_VERSION=0.3.5`
+and use matching API/web images with this release's deploy files. Stop every
+writer, including `worker-notifications` and any optional Paper worker, and
+back up both schemas, evidence and the credential key ring. Run the explicit
+`migrate` service before restarting hosts. It applies identity migration
+`20261027213124_DevicePairing`; there are no new journal migrations or required
+configuration settings.
+
+Upgrade API and web together for phone pairing and the Activity unrealized
+P&L fields. Pairing needs an HTTPS origin the phone can reach, not a desktop
+loopback address. Remembered sessions now default to 10 days idle instead of
+14; an explicit `Vessel:Identity:Session:RememberIdleDays` keeps its value.
+Earlier upgrade requirements below still apply.
+
+### From v0.3.3 to v0.3.4
+
+Read the [release notes](../docs/releases/v0.3.4.md). Wallet sign-in is now the
+only sign-in, and it requires HTTPS. Follow the token-to-wallet procedure below
+before starting the new images; it also lists the deploy-file cleanup for
+installations that already use wallets. Set `VESSEL_VERSION=0.3.5`, preserve
+the owner GUID, and use matching API/web images and this release's deploy files.
+There are no new identity or journal migrations from v0.3.3. Keep registration
+`Closed` until the outstanding real-wallet/non-mainnet acceptance is recorded.
+Earlier upgrade requirements below still apply.
+
 ### Moving from the API token to wallet sign-in
 
-Images built after October 25, 2026 have no API token: they refuse to start
-while `Vessel__Auth__Token` is set or `Vessel__Auth__Mode` is anything but
+Starting with v0.3.4 (October 25, 2026), images have no API token: they refuse
+to start while `Vessel__Auth__Token` is set or `Vessel__Auth__Mode` is anything but
 `Wallet`, and readiness waits for an operator wallet. A Token installation
 moves over **before** starting such images. No journal migration is involved:
 the owner GUID maps the existing journal to the operator user, and the
@@ -1568,11 +1606,11 @@ From the repository root, with no populated secret files in the build context:
 ```sh
 REVISION=$(git rev-parse HEAD)
 docker build --platform linux/amd64 -f backend/Dockerfile \
-  --build-arg VERSION=0.3.3 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:api-0.3.3 .
+  --build-arg VERSION=0.3.5 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:api-0.3.5 .
 docker build --platform linux/amd64 -f frontend/Dockerfile \
-  --build-arg VERSION=0.3.3 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:web-0.3.3 .
+  --build-arg VERSION=0.3.5 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:web-0.3.5 .
 ```
 
 The API build pins SDK `10.0.302` to match the repository's `global.json`. The

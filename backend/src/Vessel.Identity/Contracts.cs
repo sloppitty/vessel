@@ -31,5 +31,13 @@ public sealed record StepUpChallengeRequest([property: JsonRequired] string? Act
 public sealed record StepUpRequest([property: JsonRequired] Guid ChallengeId, [property: JsonRequired] string? Signature);
 public sealed record LinkWalletRequest([property: JsonRequired] Guid ChallengeId, [property: JsonRequired] string? Signature, string? Label = null);
 public sealed record SessionRowDto(Guid Id, bool Current, DateTimeOffset CreatedAt, DateTimeOffset LastSeenAt,
-    bool Remember, string? UserAgent, string WalletAddress);
+    bool Remember, string? UserAgent, string WalletAddress, string Source);
+public sealed record ClaimPairingRequest(string? Secret = null, string? TypedCode = null);
+public sealed record ApprovePairingRequest([property: JsonRequired] string? Code);
+public sealed record CompletePairingRequest([property: JsonRequired] bool Remember);
+public sealed record PairingCreatedDto(Guid Id, string Secret, string TypedCode, DateTimeOffset ExpiresAt);
+public sealed record PairingStatusDto(string Status, DateTimeOffset ExpiresAt, string? Device);
+public sealed record PairingJourneyDto(string DisplayName, string Wallet);
+public sealed record PairingClaimedDto(string Code, DateTimeOffset ExpiresAt, PairingJourneyDto Journal);
+public sealed record PairingCompletionResult(string Status, IssuedSession? SignedIn = null);
 public sealed record IdentityVerificationUser(Guid Id, bool HasWallet);
