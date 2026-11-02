@@ -92,4 +92,3 @@ export function withThisPlay(risk: OpenRisk, playId: string | null, preview: Ope
   }
   return { totals, own }
 }
-
