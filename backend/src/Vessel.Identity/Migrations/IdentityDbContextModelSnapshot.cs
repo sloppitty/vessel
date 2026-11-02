@@ -94,6 +94,107 @@ namespace Vessel.Identity.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Vessel.Identity.DevicePairing", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at");
+
+                    b.Property<byte[]>("BindingHash")
+                        .HasColumnType("bytea")
+                        .HasColumnName("binding_hash");
+
+                    b.Property<DateTimeOffset?>("ClaimedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("claimed_at");
+
+                    b.Property<int>("CodeAttempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("code_attempts");
+
+                    b.Property<byte[]>("CodeHash")
+                        .HasColumnType("bytea")
+                        .HasColumnName("code_hash");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("CreatedSessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_session_id");
+
+                    b.Property<string>("DeviceSummary")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("device_summary");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("origin");
+
+                    b.Property<byte[]>("SecretHash")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("secret_hash");
+
+                    b.Property<Guid?>("SignerWalletId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("signer_wallet_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<byte[]>("TypedCodeHash")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("typed_code_hash");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedSessionId");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("SecretHash")
+                        .IsUnique();
+
+                    b.HasIndex("SignerWalletId");
+
+                    b.HasIndex("TypedCodeHash")
+                        .IsUnique()
+                        .HasFilter("status IN ('pending', 'claimed', 'approved')");
+
+                    b.HasIndex("UserId", "Status");
+
+                    b.ToTable("device_pairings", Schema.Name, t =>
+                        {
+                            t.HasCheckConstraint("ck_device_pairings_live_wallet", "signer_wallet_id IS NOT NULL OR status NOT IN ('pending', 'claimed', 'approved')");
+
+                            t.HasCheckConstraint("ck_device_pairings_status", "status IN ('pending', 'claimed', 'approved', 'completed', 'cancelled', 'contested', 'expired')");
+                        });
+                });
+
             modelBuilder.Entity("Vessel.Identity.IdentitySession", b =>
                 {
                     b.Property<Guid>("Id")
@@ -128,6 +229,13 @@ namespace Vessel.Identity.Migrations
                     b.Property<DateTimeOffset?>("RevokedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("revoked_at");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValue("wallet")
+                        .HasColumnName("source");
 
                     b.Property<string>("StepUpAction")
                         .HasColumnType("text")
@@ -177,6 +285,8 @@ namespace Vessel.Identity.Migrations
                     b.ToTable("sessions", Schema.Name, t =>
                         {
                             t.HasCheckConstraint("ck_sessions_live_wallet", "revoked_at IS NOT NULL OR wallet_id IS NOT NULL");
+
+                            t.HasCheckConstraint("ck_sessions_source", "source IN ('wallet', 'pairing')");
                         });
                 });
 
@@ -363,6 +473,26 @@ namespace Vessel.Identity.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("user_wallets", Schema.Name);
+                });
+
+            modelBuilder.Entity("Vessel.Identity.DevicePairing", b =>
+                {
+                    b.HasOne("Vessel.Identity.IdentitySession", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedSessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Vessel.Identity.UserWallet", null)
+                        .WithMany()
+                        .HasForeignKey("SignerWalletId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Vessel.Identity.IdentityUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Vessel.Identity.IdentitySession", b =>

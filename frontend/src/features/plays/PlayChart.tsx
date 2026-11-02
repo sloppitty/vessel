@@ -286,7 +286,8 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   const drawingProps = {
     drawings, selectedDrawingId: editor.selectedId, tool: editor.tool, magnet: preferences.magnet,
     pricePicker: planTool !== null, onPricePick: pickPrice,
-    onDrawingCreate: editor.create, onDrawingChange: editor.change, onDrawingSelect: editor.select, onDrawingCancel: editor.cancelGesture, onKeyDown: onChartKeyDown,
+    onDrawingCreate: (drawing: ChartDrawing) => { setPlanTool(null); editor.create(drawing) },
+    onDrawingChange: editor.change, onDrawingSelect: editor.select, onDrawingCancel: editor.cancelGesture, onKeyDown: onChartKeyDown,
     indicators: preferences.indicators, onIndicatorsChange: (indicators: typeof preferences.indicators) => setPreferences({ indicators }),
     ...levelProps,
   }

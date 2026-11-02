@@ -23,6 +23,7 @@
   you saved it (24 hours by default), under "Placed before this Play was
   saved", so a fast entry you journaled afterwards can be linked by hand.
   Vessel never links them by itself (D-20).
+
 - Open risk: the loss if every current stop fills across your Planned and
   Open Plays, long and short shown apart and never netted. A stop at or
   beyond its entry adds nothing, and a Play that cannot be measured is
@@ -30,6 +31,78 @@
   own increment as you edit it, Overview has an Open risk tile, and Settings
   has an optional soft limit, blank until you set it, which is flagged and
   never enforced (G-06).
+
+
+
+## 0.3.5 - October 28, 2026
+
+Release notes: [docs/releases/v0.3.5.md](docs/releases/v0.3.5.md).
+
+### Added
+
+- **Connect a phone.** Sign in on a phone or tablet without a wallet: Settings
+  → Sessions → Connect a phone asks for one wallet signature and shows a
+  single-use QR code, valid for two minutes, with an optional code to type.
+  The phone scans it from Vessel's sign-in screen (Scan a code from your
+  desktop) or with its camera app, then shows a six-digit code that must be
+  typed on the computer to approve it. The phone gets its own session, listed
+  as "Paired" and revocable like any other. A second device scanning the same
+  code cancels it.
+- Activity shows **Unrealized P&L** for open operations, in Journal and Paper
+  playground, replacing the table's Play column. Hyperliquid, RISEx and Paper
+  (through Hyperliquid) mark the remaining quantity at the venue's current mark
+  price, read server-side through the shared 10-second market-context cache.
+  Lighter, which has no market context, uses the latest refresh's
+  venue-reported figure, and only when that snapshot is newer than the last
+  execution and holds exactly the remaining position. Closed operations show
+  "—"; an open operation that cannot be priced shows "Unavailable", never zero.
+  The tooltip gives the exact value, its source and time, and states that it is
+  before fees and funding. The values are observations: they are read per page
+  outside the Activity version, so a moving price never flags changed history,
+  and they never enter Review, sizing, Overview or Play results.
+
+### Changed
+
+- "Keep me signed in" now lasts 10 days idle instead of 14, with the 30-day
+  absolute limit unchanged. Installations that set
+  `Vessel:Identity:Session:RememberIdleDays` keep their value.
+- The web server sends `Permissions-Policy: camera=(self), microphone=(),
+  geolocation=()`.
+- The linked Play, and Journal this trade, moved into the expanded operation
+  row. Journal this trade replaces "Inspect retrospective eligibility" on closed
+  operations that are not on a Play, since both opened the same preview.
+- The compact Overview and account-detail operation tables are unchanged.
+- Activity page rows gain optional `unrealizedPnlUsd`, `unrealizedPnlSource`,
+  `unrealizedPnlMarkPrice` and `unrealizedPnlAsOfUtc` fields.
+
+### Fixed
+
+- The startup warm-up readiness tests no longer race the three-second warm-up
+  deadline on a busy runner; the deadline now uses the registered
+  `TimeProvider`. Production behaviour is unchanged.
+
+### Upgrade
+
+- New identity migration `20261027213124_DevicePairing`; stop every writer,
+  back up both schemas and apply it with the explicit `migrate` service before
+  starting the new hosts. No new journal migrations.
+- No new required configuration. Phone pairing needs an HTTPS origin the phone
+  can reach, not a desktop loopback address.
+
+## 0.3.4 - October 25, 2026
+
+Release notes: [docs/releases/v0.3.4.md](docs/releases/v0.3.4.md).
+
+### Added
+
+- A sticky shell header keeps a session-only route breadcrumb and shared
+  notices on every page. Drill-downs retain their context, and returning to a
+  saved Play respects unsaved-work protection and ignores superseded requests.
+- The brand subtitle switches between Journal and Paper playground, with a
+  confirmation dialog before discarding unsaved or in-flight Play work.
+  Paper has its own boat mark and theme-derived accents; the disclosure appears
+  once in the header instead of repeated per-item chips. Reduced motion skips
+  the switch animation.
 
 ### Removed
 
@@ -51,6 +124,22 @@
   Development environment. `scripts/dev.py` applies the identity migrations and
   `identity ensure-owner` in `migrate`, allows sign-in from the Vite page and
   adds `pnpm dev:identity` for binding a development wallet.
+
+### Upgrade
+
+- **Wallet sign-in and HTTPS are required.** Stop web, every API and every
+  worker/replica, including notifications and optional paper workers, and back
+  up both database schemas, evidence, credential keys and private configuration.
+  Use matching v0.3.4 images and this release's deploy files.
+- Token installations must remove retired token/mode settings, configure their
+  public HTTPS origin, run the explicit `migrate` service and bind the operator
+  wallet before starting. Preserve the existing owner GUID; remove the obsolete
+  `compose.wallet.yaml` overlay. Existing Wallet installations retain their
+  wallet bindings but must also update the deploy files and overlay list.
+- No new identity or journal migrations from v0.3.3. Keep registration `Closed`
+  until the outstanding real-wallet/non-mainnet acceptance is recorded. Earlier
+  upgrade requirements still apply. Rollback requires the previous deploy files
+  and private configuration as well as matching previous images.
 
 ## 0.3.3 - October 22, 2026
 
