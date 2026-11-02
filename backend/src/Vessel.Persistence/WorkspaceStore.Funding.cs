@@ -2,14 +2,28 @@ using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Common;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Persistence;
 
 public sealed partial class WorkspaceStore
 {
+    /// <summary>
+    /// Phase 2, item 9c: a scheduled funding read on its own, by the same rules as a Refresh's. The caller holds the account
+    /// row lock and the run's unit of work.
+    /// </summary>
+    public Task SaveFundingAsync(Account account, VenueFundingReadResult result, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
+    {
+        if (account.TradingMode != TradingMode.Real)
+            throw new ProblemException(409, "Paper accounts cannot import real venue facts.");
+        await ApplyFundingAsync(account, result, ct);
+        await unitOfWork.SaveChangesAsync(ct);
+        return true;
+    }, ct);
+
     // The caller holds the account row lock and refresh transaction, including deduplication and coverage updates.
-    private async Task SaveFundingAsync(Account account, VenueFundingReadResult result, CancellationToken ct)
+    private async Task ApplyFundingAsync(Account account, VenueFundingReadResult result, CancellationToken ct)
     {
         VenueFundingChecks.Validate(result, result.FromUtc, result.ToUtc);
         var ids = result.Payments.Select(p => p.SourceId).Distinct().ToArray();

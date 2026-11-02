@@ -162,6 +162,46 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         return Task.FromResult(true);
     }, ct);
 
+    /// <summary>Phase 2, item 9c: Open Plays on a venue instrument, of any origin, whose account's funding the schedule reads.</summary>
+    private IQueryable<Play> OpenVenuePlays => db.Plays.Where(p => p.TradingMode == "real" && p.InstrumentSource == InstrumentSource.Venue &&
+        p.Status == PlayStatus.Open);
+
+    public Task<MonitorLease?> ClaimFundingAsync(Guid accountId, string workerId, DateTimeOffset now, CancellationToken ct) =>
+        unitOfWork.ExecuteAsync(async () =>
+        {
+            var account = (await db.Accounts.FromSqlInterpolated($"""
+                SELECT * FROM accounts WHERE "Id" = {accountId} AND "OwnerId" = {db.CurrentOwnerId} FOR UPDATE SKIP LOCKED
+                """).ToListAsync(ct)).SingleOrDefault();
+            if (account is null) return null;
+            return await MonitorLockedAsync<MonitorLease?>(account, async (account, row) =>
+            {
+                if (await owners.StatusAsync(db.CurrentOwnerId, ct) != JournalOwnerStatus.Active || account.TradingMode != "real" ||
+                    !account.IsEnabled || account.SourceId is null) return null;
+                row.ReleaseAbandonedRefresh(now);
+                // Never beside another run of this account, and never ahead of its own due check.
+                if (row.ManualState != "idle" || row.NextRunAtUtc <= now || row.NextFundingAtUtc > now) return null;
+                if (!account.KeepExecutionHistory && !await OpenVenuePlays.AnyAsync(p => p.AccountId == account.Id, ct)) return null;
+                if (await server.VenueRetryAtAsync(account.VenueId, ct) > now) return null;
+                // Behind protection checks: the same headroom as a read for kept history.
+                if (!await ReadCapacityAsync(account.VenueId, now, ct, Math.Min(settings.ProtectionHeadroom, settings.VenueReadConcurrency - 1)))
+                    return null;
+                var request = Guid.CreateVersion7();
+                row.Admit(request, "funding", now, scheduled: true);
+                return row.Claim(request, workerId, now, MonitorOptions.Lease)
+                    ? new MonitorLease(db.CurrentOwnerId, accountId, request, row.Generation, workerId, "funding") : null;
+            }, ct);
+        }, ct);
+
+    public Task ReleaseFundingAsync(MonitorLease lease, DateTimeOffset now, DateTimeOffset? nextAtUtc, CancellationToken ct) =>
+        LockedAsync(lease.AccountId, (_, row) =>
+        {
+            // Only the run's own lease; a funding run never moves the check schedule, state or cooldown.
+            if (!row.Owns(lease.Generation, lease.WorkerId, now) || row.Trigger != "funding") return Task.FromResult(false);
+            row.Release();
+            if (nextAtUtc is { } next) row.NextFundingAtUtc = next;
+            return Task.FromResult(true);
+        }, ct);
+
     public Task<HistoryBackfill?> BackfillAsync(Guid accountId, Guid backfillId, CancellationToken ct)
     {
         unitOfWork.RequireActive();

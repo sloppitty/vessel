@@ -121,7 +121,12 @@ public sealed partial class MonitorPostgresTests
         Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => s.Coordinator.StartBackfillAsync(s.AccountId, gap.Id, default))).StatusCode);
         // The scheduler finds it due; checks never read it.
         await using (var data = NpgsqlDataSource.Create(database.ConnectionString))
-            Assert.Equal(s.AccountId, Assert.Single(await new SystemMonitorStore(data, s.Clock).DueBackfillsAsync(10, default)).AccountId);
+        {
+            var due = Assert.Single(await new SystemMonitorStore(data, s.Clock).DueBackfillsAsync(null, 10, default));
+            Assert.Equal(s.AccountId, due.AccountId);
+            // Item 9c (Sol round 1): a page continues after the key the scheduler last examined.
+            Assert.Empty(await new SystemMonitorStore(data, s.Clock).DueBackfillsAsync(due.Key, 10, default));
+        }
         // Never beside another run of the account.
         var check = await s.Store.ClaimAsync(s.AccountId, null, "checker", before.NextRunAtUtc!.Value.AddSeconds(1), default);
         Assert.NotNull(check);

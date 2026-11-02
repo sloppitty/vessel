@@ -4,6 +4,9 @@
 
 ### Added
 
+- The monitor worker now reads settled funding about every 6 hours (`Vessel:Funding:Interval`)
+  for accounts with an Open Play or kept history, after protection checks and without
+  delaying them.
 - A Play shows the funding it settled when it is provably the only position on its market over
   its holding window; otherwise the line says the funding is shared or its coverage incomplete.
   Funding is never added to a result.

@@ -24,6 +24,11 @@ public sealed class FundingOptions
     /// replaces had the venue clients' 20-second deadline.
     /// </summary>
     public TimeSpan TimeBudget { get; set; } = TimeSpan.FromSeconds(20);
+    /// <summary>
+    /// Phase 2, item 9c: how often the monitor worker reads the funding of an account with an Open venue Play or kept
+    /// execution history, behind protection checks, with the same windows, bounds and cursor as a Refresh.
+    /// </summary>
+    public TimeSpan Interval { get; set; } = TimeSpan.FromHours(6);
 
     public void Validate()
     {
@@ -33,6 +38,9 @@ public sealed class FundingOptions
             Recheck < TimeSpan.Zero || Recheck > Lookback || TimeBudget < TimeSpan.FromSeconds(1) || TimeBudget > TimeSpan.FromSeconds(60))
             throw new InvalidOperationException($"{Section}: Lookback up to 31 days, Window up to Lookback, " +
                 "MinimumWindow from 1 minute up to Window, MaxReads 1 to 100, Recheck 0 up to Lookback, TimeBudget 1 to 60 seconds.");
+        // Slow, and short enough that the next read still continues the stored coverage within the lookback.
+        if (Interval < TimeSpan.FromHours(1) || Interval > TimeSpan.FromDays(7) || Interval > Lookback)
+            throw new InvalidOperationException($"{Section}:Interval must be between 1 hour and 7 days, and at most Lookback.");
     }
 }
 

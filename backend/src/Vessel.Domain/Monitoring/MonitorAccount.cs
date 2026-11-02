@@ -31,6 +31,11 @@ public sealed class MonitorAccount : IOwned
     public string? Error { get; set; }
     public string? CredentialRevision { get; set; }
     public DateTimeOffset? ConfirmationAtUtc { get; set; }
+    /// <summary>
+    /// Phase 2, item 9c: when the slow schedule next reads the account's settled funding; null when it never has, which is
+    /// due. Only a funding run moves it, never a check or a Refresh.
+    /// </summary>
+    public DateTimeOffset? NextFundingAtUtc { get; set; }
 
     /// <returns>Whether the state changed, and so took a new <see cref="StateRevision"/>.</returns>
     public bool SetState(string state)
@@ -77,7 +82,7 @@ public sealed class MonitorAccount : IOwned
         Generation = checked(Generation + 1);
         LeaseHolder = holder;
         LeaseUntilUtc = now + lease;
-        // An owner refresh or a backfill (Phase 2, item 6b) is not a check attempt.
+        // An owner refresh, a backfill (Phase 2, item 6b) or a funding read (item 9c) is not a check attempt.
         if (!Background(Trigger)) LastAttemptAtUtc = now;
         ManualState = "running";
         return true;
@@ -92,7 +97,7 @@ public sealed class MonitorAccount : IOwned
     /// </summary>
     public bool ReleaseAbandonedRefresh(DateTimeOffset now)
     {
-        // An abandoned backfill run (Phase 2, item 6b) is released the same way; its backfill stays queued.
+        // An abandoned backfill or funding run (Phase 2, items 6b and 9c) is released the same way; its work stays due.
         if (!Background(Trigger) || ManualState == "idle" || ManualState == "running" && LeaseUntilUtc > now) return false;
         Release();
         return true;
@@ -113,10 +118,10 @@ public sealed class MonitorAccount : IOwned
     }
 
     /// <summary>
-    /// Runs that never touch the check schedule: an owner Refresh, and a backfill run (Phase 2, item 6b), which reads behind
-    /// protection checks on its own lease.
+    /// Runs that never touch the check schedule: an owner Refresh, a backfill run (Phase 2, item 6b) and a scheduled funding
+    /// read (item 9c), the last two reading behind protection checks on their own lease.
     /// </summary>
-    public static bool Background(string trigger) => trigger is "refresh" or "backfill";
+    public static bool Background(string trigger) => trigger is "refresh" or "backfill" or "funding";
 
     public void Release()
     {

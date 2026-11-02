@@ -102,9 +102,14 @@ public sealed class OwnerScopeArchitectureTests
             // System due-candidate discovery (§9.1): keys only, every owner in (due, owner, account) order with no per-owner
             // cut; each claim then rechecks status, deadlines and budgets inside that owner's scope.
             "Vessel.Persistence/SystemMonitorStore.cs|d006eb6260b4719db6fcb5d4b50581c7496ae0e5bd6dbbebf9df0fdb498e664d",
-            // Phase 2, item 6b: due backfill discovery, keys only in (due, owner, account) order; each claim rechecks the
-            // owner's status, the account's run, pacing, deadlines and budgets inside that owner's scope.
-            "Vessel.Persistence/SystemMonitorStore.cs|4e18af27c6db281fb8ca13a870b07611896bc9810b6bd03d5ec9d99f7876297e",
+            // Phase 2, item 6b: due backfill discovery, keys only in (due, owner, account) order after the scheduler's
+            // continuation (item 9c, Sol round 1); each claim rechecks the owner's status, the account's run, pacing,
+            // deadlines and budgets inside that owner's scope.
+            "Vessel.Persistence/SystemMonitorStore.cs|9c75c43f0fc1bd7770b85ace910442f76c4c7cb66c4d9d17903bd0a4a0389c3b",
+            // Phase 2, item 9c: due scheduled-funding discovery, keys only in (due, owner, account) order after the
+            // scheduler's continuation, joined on the composite owner keys; each claim rechecks the owner's status,
+            // eligibility, the account's run and due check, pacing, deadlines and budgets inside that owner's scope.
+            "Vessel.Persistence/SystemMonitorStore.cs|b7f7d0da98b3123605e030eea700758d3d55888336c4febe16d64a05b5069fc4",
             "Vessel.Persistence/ServerStateStore.cs|40c74c937dd0eb512282090d98087bea4726000d71185d726dbbdd89e80b5b51",
             "Vessel.Persistence/ServerStateStore.cs|4de6036152e376cb02952ca7410a4db74f2a434f16091e168cf64995f90293f8",
             "Vessel.Persistence/ServerStateStore.cs|ee73f5478e13936ed833caed3737b495efb924b2d70cbf4c9d46ca0f8ff1593a",

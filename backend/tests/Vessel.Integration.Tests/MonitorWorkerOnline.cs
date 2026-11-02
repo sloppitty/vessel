@@ -35,6 +35,10 @@ internal sealed class MonitorWorkerOnline(IMonitorStore inner, TimeProvider cloc
     public Task<MonitorLease?> ClaimBackfillAsync(Guid accountId, string workerId, DateTimeOffset now, CancellationToken ct) =>
         inner.ClaimBackfillAsync(accountId, workerId, now, ct);
     public Task ReleaseBackfillAsync(MonitorLease lease, DateTimeOffset now, CancellationToken ct) => inner.ReleaseBackfillAsync(lease, now, ct);
+    public Task<MonitorLease?> ClaimFundingAsync(Guid accountId, string workerId, DateTimeOffset now, CancellationToken ct) =>
+        inner.ClaimFundingAsync(accountId, workerId, now, ct);
+    public Task ReleaseFundingAsync(MonitorLease lease, DateTimeOffset now, DateTimeOffset? nextAtUtc, CancellationToken ct) =>
+        inner.ReleaseFundingAsync(lease, now, nextAtUtc, ct);
     public Task<(DateTimeOffset At, IReadOnlyList<string> Ids)?> FillWitnessAsync(Guid accountId, DateTimeOffset atOrBefore, CancellationToken ct) =>
         inner.FillWitnessAsync(accountId, atOrBefore, ct);
     public Task<IReadOnlyList<AccountHistoryGap>> OpenGapsAsync(Guid accountId, CancellationToken ct) => inner.OpenGapsAsync(accountId, ct);
