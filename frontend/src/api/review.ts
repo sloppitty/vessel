@@ -84,7 +84,26 @@ export const processLanes = ['retrospective', 'unscored', 'unanswered', 'not-app
 /** One drill-down: exactly one cell, lane, mistake tag or skipped pre-flight check. */
 export type ReviewProcessSelection =
   | { cell: typeof processCells[number] } | { lane: typeof processLanes[number] } | { mistakeTag: string }
-  | { skippedCheck: PreflightCode | 'not-recorded' }
+  | { skippedCheck: PreflightCode | 'not-recorded' } | { rule: typeof ruleSelectors[number] }
+/** The if-then rule's drill-downs (Phase 2, item 3): a review answer, unanswered, or the answer at Plan it. */
+export const ruleSelectors = ['followed', 'deviated', 'not-applicable', 'unanswered', 'acknowledged', 'exception', 'not-acknowledged'] as const
+/** One answer's Plays by outcome. */
+export interface ReviewRuleRow { wins: number; losses: number; scratches: number; unscored: number }
+/**
+ * The if-then rule over the period's Plays planned under one (Phase 2, item 3): how many carried it, the answers at Plan it,
+ * and "Followed the rule?" by outcome. Counts and drill-down only.
+ */
+export interface ReviewRule {
+  carried: number; acknowledged: number; exceptions: number; notAcknowledged: number
+  followed: ReviewRuleRow; deviated: ReviewRuleRow; notApplicable: ReviewRuleRow; unanswered: ReviewRuleRow
+}
+const ruleRow = (v: unknown): v is ReviewRuleRow => isRecord(v) && ['wins', 'losses', 'scratches', 'unscored'].every(k => isCount(v[k]))
+const rowTotal = (row: ReviewRuleRow) => row.wins + row.losses + row.scratches + row.unscored
+export const isReviewRule = (v: unknown): v is ReviewRule => isRecord(v) &&
+  ['carried', 'acknowledged', 'exceptions', 'notAcknowledged'].every(k => isCount(v[k])) &&
+  ruleRow(v.followed) && ruleRow(v.deviated) && ruleRow(v.notApplicable) && ruleRow(v.unanswered) &&
+  (v.acknowledged as number) + (v.exceptions as number) + (v.notAcknowledged as number) === v.carried &&
+  [v.followed, v.deviated, v.notApplicable, v.unanswered].reduce((sum: number, row) => sum + rowTotal(row as ReviewRuleRow), 0) === v.carried
 export interface ReviewProcessPlay {
   id: string; title: string; accountId: string; accountName: string; venueId: string; instrument: string
   status: 'closed' | 'cancelled' | 'unresolved'; origin: 'planned' | 'retrospective'; direction: string; atUtc: string
@@ -132,6 +151,8 @@ export interface ReviewDocument {
   process?: ReviewProcess
   /** Whether imported positions are in this report; absent from servers before October 20, 2026. */
   positions?: ReviewPositions
+  /** The if-then rule's answers over the same Plays (Phase 2, item 3); absent from older servers. */
+  rule?: ReviewRule
   /** The reporting week, present only when the query names one (Phase 2, item 2). */
   week?: ReviewWeek
 }
@@ -203,7 +224,7 @@ export const isReviewDocument = (v: unknown): v is ReviewDocument => isRecord(v)
   isCount(v.bucketDays) && v.bucketDays > 0 &&
   isRecord(v.groups) && isListOf(v.groups.portfolios, group, listLimit) && isListOf(v.groups.accounts, group, listLimit) && isListOf(v.groups.assets, group, listLimit) &&
   (v.groups.origins === undefined || isListOf(v.groups.origins, group, 3)) && (v.groups.directions === undefined || isListOf(v.groups.directions, group, 2)) &&
-  (v.process === undefined || isReviewProcess(v.process)) &&
+  (v.process === undefined || isReviewProcess(v.process)) && (v.rule === undefined || isReviewRule(v.rule)) &&
   isRecord(v.coverage) && ['closedCandidates', 'incompleteFees', 'incompleteExecutions', 'openPlays', 'unassignedFills'].every(key => isCount((v.coverage as Record<string, unknown>)[key])) &&
   isNullOr(v.coverage.firstFillAtUtc, x => isTimestamp(x, 64)) && isText(v.coverage.notice, 4000) &&
   (v.coverage.unresolved === undefined || isCount(v.coverage.unresolved)) &&

@@ -16,7 +16,7 @@ import { preflightLabels } from '@/features/plays/preflight'
 import { ReviewChart } from './ReviewChart'
 import { ReviewExclusions } from './ReviewExclusions'
 import { ReviewWeek } from './ReviewWeek'
-import { minimumRateN, ProcessSection, ReviewProcessList } from './ReviewProcess'
+import { minimumRateN, ProcessSection, ReviewProcessList, RuleSection } from './ReviewProcess'
 import { reviewDate, reviewMoney, reviewMultiple, reviewPercent, reviewResult } from '@/lib/format'
 import { negative, tone } from './format'
 import './review.css'
@@ -252,6 +252,7 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay, workspaceAccount
         </tbody>{groups.length > 0 && <tfoot><tr><th scope="row">Combined result</th><td>{stats.positions ? resultCount(stats.count, stats.positions) : stats.count}</td><td><Rate fixed={fixedGroup} value={reviewPercent(stats.batting, true)} n={decided} /></td><td><Rate fixed={fixedGroup} value={reviewMultiple(stats.payoff)} n={Math.min(stats.wins, stats.losses)} /></td><td><Rate fixed={fixedGroup} value={reviewMultiple(stats.profitFactor)} n={decided} /></td><td className={tone(stats.net)}>{reviewMoney(stats.net, true)}</td><td /></tr></tfoot>}</table></div>
       </section>
       {report.process && <ProcessSection process={report.process} onInspect={inspectProcess} />}
+      {report.rule && <RuleSection rule={report.rule} onInspect={inspectProcess} />}
       <section className="pr-coverage" aria-label="Data coverage"><ShieldCheck size={16} /><details><summary>{stats.count} scored · {excludedCount(report.coverage)} excluded · {stats.reviewed} {stats.reviewed === 1 ? 'review' : 'reviews'} complete</summary>
         <p><button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteFees} incomplete fees</button> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.incompleteExecutions} incomplete executions</button>{report.coverage.unresolved ? <> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.unresolved} unresolved</button></> : null}{report.coverage.cancelled ? <> · <button className="pr-count-link" onClick={inspectExclusions}>{report.coverage.cancelled} cancelled</button></> : null} · {report.coverage.openPlays} currently open</p>
         <p>{report.coverage.unassignedFills} unassigned fills in this period.</p>

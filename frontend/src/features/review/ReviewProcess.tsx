@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ReviewProcess, ReviewProcessPage, ReviewProcessSelection, ReviewQuery } from '@/api/review'
+import type { ReviewProcess, ReviewProcessPage, ReviewProcessSelection, ReviewQuery, ReviewRule } from '@/api/review'
 import type { WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
 import { InfoTip } from '@/components/ui/info-tip'
@@ -68,6 +68,34 @@ export function ProcessSection({ process, onInspect }: { process: ReviewProcess;
         })}</tbody></table></div>
       {process.mistakeTagCount > process.mistakeTags.length && <p className="pr-muted">Showing {process.mistakeTags.length} of {process.mistakeTagCount} tags.</p>}
     </>}
+  </section>
+}
+
+const ruleRows = [['followed', 'Followed', 'followed'], ['deviated', 'Deviated', 'deviated'],
+  ['notApplicable', 'Not applicable', 'not-applicable'], ['unanswered', 'Not answered', 'unanswered']] as const
+
+/**
+ * The if-then rule (Phase 2, item 3) over the period's Plays planned under one: the answers at Plan it, and "Followed the
+ * rule?" by outcome. Counts and drill-down only, with no share; a winning deviation stays a deviation.
+ */
+export function RuleSection({ rule, onInspect }: { rule: ReviewRule; onInspect: InspectProcess }) {
+  if (rule.carried === 0) return null
+  const atPlan = [['acknowledged', 'acknowledged', rule.acknowledged], ['exception', rule.exceptions === 1 ? 'exception' : 'exceptions', rule.exceptions],
+    ['not-acknowledged', 'not answered', rule.notAcknowledged]] as const
+  return <section className="pr-panel pr-process" aria-label="If-then rule">
+    <header className="pr-panel-heading"><h2>If-then rule<InfoTip label="About the if-then rule">The period&apos;s Closed, Cancelled and
+      Unresolved Plays planned under an if-then rule, each with the rule as it stood at Plan it. Counts only: no share is shown.</InfoTip></h2></header>
+    <p>{rule.carried} {rule.carried === 1 ? 'Play' : 'Plays'} planned under a rule. At Plan it: {atPlan.map(([key, label, n], index) =>
+      <span key={key}>{index > 0 && ' · '}<Count n={n} label={`${label} at Plan it`} onInspect={() => onInspect(`Rule at Plan it · ${label}`, { rule: key })} /> {label}</span>)}.</p>
+    <div className="pr-table-scroll"><table className="pr-process-table"><caption className="sr-only">Followed the rule, by outcome, in a fixed order</caption>
+      <thead><tr><th>Followed the rule?</th><th>Plays</th><th>Wins</th><th>Losses</th><th>Scratches</th><th>Unscored</th></tr></thead>
+      <tbody>{ruleRows.map(([key, name, selector]) => {
+        const row = rule[key]
+        const total = row.wins + row.losses + row.scratches + row.unscored
+        return <tr key={key}><th scope="row">{name}</th>
+          <td><Count n={total} label={`${name.toLowerCase()} the rule`} onInspect={() => onInspect(`Rule · ${name.toLowerCase()}`, { rule: selector })} /></td>
+          <td>{row.wins}</td><td>{row.losses}</td><td>{row.scratches}</td><td>{row.unscored}</td></tr>
+      })}</tbody></table></div>
   </section>
 }
 

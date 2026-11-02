@@ -9,7 +9,7 @@ import { InfoTip } from '@/components/ui/info-tip'
 import { Time } from '@/components/ui/time'
 import { reviewDate, reviewMoney, reviewPercent } from '@/lib/format'
 import { tone } from './format'
-import { minimumRateN, ProcessSection, ReviewProcessList } from './ReviewProcess'
+import { minimumRateN, ProcessSection, ReviewProcessList, RuleSection } from './ReviewProcess'
 import { ReviewExclusions } from './ReviewExclusions'
 
 const localDate = /^\d{4}-\d{2}-\d{2}$/
@@ -128,6 +128,8 @@ export function ReviewWeek({ api, filters, onOpenPlay }: {
       {shown.data === 'some' && stats.positions ? <p className="pr-weight-note">Imported positions are included. Plays weigh {positions?.playWeight ?? '2'}×
         a position in batting average and expectancy; P&L is not weighted.</p> : null}
       {report.process && shown.data === 'some' && <ProcessSection process={report.process}
+        onInspect={(title, selection) => setDrill({ kind: 'process', title, selection })} />}
+      {report.rule && shown.data === 'some' && <RuleSection rule={report.rule}
         onInspect={(title, selection) => setDrill({ kind: 'process', title, selection })} />}
       <section className="pr-coverage" aria-label="Week coverage"><ShieldCheck size={16} /><details>
         <summary>{results(stats.count, stats.positions)} scored · {excluded} excluded {excluded === 1 ? 'Play' : 'Plays'}{omitted ? ` · ${omitted} ${omitted === 1 ? 'position' : 'positions'} not scored` : ''} · {stats.reviewed} {stats.reviewed === 1 ? 'review' : 'reviews'} complete</summary>

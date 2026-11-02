@@ -4,6 +4,9 @@
 
 ### Added
 
+- One if-then rule per trading mode. Write one, or promote a next action, from the Thesis
+  tab. Plan it shows it for an acknowledgement or an exception with a reason, never blocking;
+  the review asks whether you followed it, and Review counts the answers.
 - Daily and weekly loss limits in R (Settings → Risk limits). Today's and this week's loss, by
   your reporting week, shows beside open risk; a reached limit is flagged in Suggestions and at
   Plan it, where you can add a cooldown note. Nothing is blocked.

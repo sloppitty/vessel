@@ -54,13 +54,13 @@ describe('soft loss limits (Phase 2, item 10b)', () => {
     expect(screen.getByRole('note')).toHaveTextContent('reached your 2R daily limit')
     await user.type(screen.getByRole('textbox', { name: 'Cooldown note (optional)' }), '  Walk away until Monday.  ')
     await user.click(screen.getByRole('button', { name: 'Plan it anyway' }))
-    expect(onPlan).toHaveBeenCalledWith('Walk away until Monday.')
+    expect(onPlan).toHaveBeenCalledWith('Walk away until Monday.', null)
     view.unmount()
     // Without a reached limit there is no note to write.
     render(<PreflightDialog checks={[{ code: 'loss-limit', outcome: 'passed' }]} pending={false} error={null} onPlan={onPlan} onClose={vi.fn()} />)
     expect(screen.queryByRole('textbox', { name: 'Cooldown note (optional)' })).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Plan it anyway' }))
-    expect(onPlan).toHaveBeenLastCalledWith(null)
+    expect(onPlan).toHaveBeenLastCalledWith(null, null)
   })
 
   it('lists the cooldown note in the plan history', async () => {

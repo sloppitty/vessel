@@ -214,7 +214,62 @@ October 21, 2026.
 
 ## 3. One promoted if-then rule
 
-Not started.
+October 22, 2026.
+
+**3. One promoted if-then rule.** Implemented on `t3/phase2-if-then-rule`.
+- **The rule.** Each trading mode keeps at most one active rule, "If …, then …", each part 1–500
+  characters (`play_rules`, migration `20261022124043_IfThenRule`). It is versioned: a change adds the
+  next version and archives the active one, and archiving leaves none.
+  - `GET`, `PUT` and `DELETE /api/plays/rule` work in the mode they are asked for. Each write names
+    the version the owner saw; a different one, or a concurrent change, is a 409.
+  - The Thesis tab of a Draft, Planned or Paused Play shows it, with Write, Change and Archive. A next
+    action offers **Make this the rule**, which fills its Then and names its source Play.
+- **At Plan it.** The pre-flight dialog shows the rule. The owner may mark it acknowledged, or an
+  exception with a reason of at most 500 characters. No answer never blocks. The request names the
+  version shown, so a rule changed meanwhile is a 409 and is asked again.
+- **The snapshot.** Revision 1 keeps the rule shown at Plan it (version, text, source) with the
+  answer, beside the pre-flight; History lists it. The Play keeps the version and text for its review.
+  A request that names no shown rule keeps none. Changing or archiving the rule never rewrites a
+  snapshot. Retrospective Plays have none.
+- **In the review.** A Closed, Cancelled or Unresolved Play planned under a rule asks "Followed the
+  rule?": followed, deviated or not applicable. It is stored with the structured review and its
+  history; a Play planned without a rule refuses an answer.
+- **In Review and the week page.** Counts and drill-down only: the Plays planned under a rule, the
+  answers at Plan it, and "Followed the rule?" by wins, losses, scratches and unscored Plays. No share
+  is shown, and a winning deviation stays a deviation. `GET /api/review/process` takes `rule`.
+- **Tests.**
+  - `IfThenRuleTests`: the rule's text, the Plan it snapshot with and without an answer, stale and
+    invalid answers, and Review's counts and drill-downs.
+  - The isolation case in both auth modes: versions, stale writes, archiving, paper apart from real,
+    another owner's source Play, and a planned Play keeping its version. The `PUT` body limit.
+  - In the browser: the Thesis line, promotion, the dialog, the pre-flight answer, History, the review
+    question and Review's section.
+- **Migration.** It is applied explicitly, never to the owner's database.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `fa81a948`. Five findings, all fixed in
+  `d48b8ea8`:
+  - An archive and a replacement that both read version 1 could both
+    succeed, leaving the reply and the stored rule apart. Archiving now
+    updates only a row still active, so the second gets a 409, in either
+    order.
+  - Plan it kept the active rule even when the owner was not shown it: after
+    a failed read, from an older client, or after an unanswered rule changed.
+    The request now names the version shown; without it nothing is kept, and
+    a shown version no longer active is a 409, answered or not.
+  - After a 409 the editor saved again against the version read in the
+    background, replacing a rule the owner had not seen. It saves against
+    the version it was opened on, and offers **Load the current rule** first.
+  - A rule read still pending when the owner saved a new version could
+    replace it in the page afterwards. A read answered after a later read or
+    write began is dropped.
+  - A promoted rule named its source Play as plain text. It links to it.
+
+  Sol confirmed that the archive is flushed before the new version is added,
+  owner and mode scoping of the source Play, real and paper apart, stale
+  answers refused, resume and later revisions keeping revision 1, the review
+  answer's rules and history, Review's and the week page's counts against
+  their drill-downs with positions left out and no rates, that the bundle
+  carries the snapshot and that the CSV needs no rule columns.
+- **Check.** `scripts/check.sh` passed on `d48b8ea8`: backend 4,146 passed, 5 skipped; frontend 184 files and 4,117 tests.
 
 ## 4. Earlier-order link candidates
 

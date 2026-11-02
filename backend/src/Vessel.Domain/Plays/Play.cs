@@ -18,11 +18,16 @@ public enum PlayOrigin { Planned, Retrospective }
 /// </summary>
 public enum ReviewCompletionKind { Completed, NotNeeded, Legacy }
 
-public sealed record ReviewAnswers(string? Adherence = null, string? MistakeTag = null, string Lesson = "", string NextAction = "")
+/// <summary>
+/// The structured review. <paramref name="Rule"/> answers "Followed the rule?" (followed, deviated or not-applicable) for a
+/// Play planned under an if-then rule (Phase 2, item 3).
+/// </summary>
+public sealed record ReviewAnswers(string? Adherence = null, string? MistakeTag = null, string Lesson = "", string NextAction = "",
+    string? Rule = null)
 {
     [JsonIgnore]
     public bool IsAnswered => Adherence is not null || !string.IsNullOrWhiteSpace(MistakeTag) ||
-        !string.IsNullOrWhiteSpace(Lesson) || !string.IsNullOrWhiteSpace(NextAction);
+        !string.IsNullOrWhiteSpace(Lesson) || !string.IsNullOrWhiteSpace(NextAction) || Rule is not null;
 }
 
 public enum CancelReason { Invalidated, Missed, ChangedMind, Expired, Mistake, Other }
@@ -62,13 +67,22 @@ public sealed class Play : IOwned
     public string? ReviewMistakeTag { get; private set; }
     public string ReviewLesson { get; private set; } = "";
     public string ReviewNextAction { get; private set; } = "";
+    /// <summary>"Followed the rule?" (Phase 2, item 3); null when unanswered or planned without a rule.</summary>
+    public string? ReviewRule { get; private set; }
+    /// <summary>
+    /// The if-then rule active when the Play was planned (Phase 2, item 3): its version and text, fixed at Plan it; null
+    /// without one. Revision 1 keeps the owner's answer beside them.
+    /// </summary>
+    public int? RuleVersion { get; private set; }
+    public string? RuleIf { get; private set; }
+    public string? RuleThen { get; private set; }
     public int ReviewRevision { get; private set; }
     /// <summary>When the review text or answers last changed; it never completes the review.</summary>
     public DateTimeOffset? ReviewedAtUtc { get; private set; }
     /// <summary>The review's completion, only ever set explicitly; null means it still needs review once the Play ends.</summary>
     public ReviewCompletionKind? ReviewCompletion { get; private set; }
     public DateTimeOffset? ReviewCompletedAtUtc { get; private set; }
-    public ReviewAnswers Answers => new(ReviewAdherence, ReviewMistakeTag, ReviewLesson, ReviewNextAction);
+    public ReviewAnswers Answers => new(ReviewAdherence, ReviewMistakeTag, ReviewLesson, ReviewNextAction, ReviewRule);
     public bool HasReview => !string.IsNullOrWhiteSpace(Review) || Answers.IsAnswered;
     /// <summary>A Play whose review can be completed: it has ended, as Closed, Cancelled or Unresolved.</summary>
     public bool IsReviewable => Status is PlayStatus.Closed or PlayStatus.Cancelled or PlayStatus.Unresolved;
@@ -128,6 +142,7 @@ public sealed class Play : IOwned
         answers ??= Answers;
         if (answers.Lesson is null || answers.NextAction is null ||
             answers.Adherence is not (null or "followed" or "deviated" or "not-applicable") ||
+            answers.Rule is not (null or "followed" or "deviated" or "not-applicable") ||
             answers.MistakeTag?.Length > 100 || answers.Lesson.Length > 4000 || answers.NextAction.Length > 4000 ||
             answers.MistakeTag?.Any(char.IsControl) == true ||
             new[] { answers.Lesson, answers.NextAction }.Any(s => s.Any(c => char.IsControl(c) && c is not ('\r' or '\n'))))
@@ -138,6 +153,8 @@ public sealed class Play : IOwned
             throw new DomainRuleException("Structured review answers are only available for closed, cancelled or unresolved Plays.");
         if (Origin == PlayOrigin.Retrospective && answers.Adherence is not (null or "not-applicable"))
             throw new DomainRuleException("A retrospective Play has no contemporaneous plan to assess adherence against.");
+        if (answers.Rule is not null && RuleVersion is null)
+            throw new DomainRuleException("This Play was planned without an if-then rule, so there is none to answer.");
         var previousAnswers = Answers;
         var changedReview = review != Review || answers != previousAnswers;
         var sameDrawings = SameDocument(drawings, Drawings);
@@ -151,6 +168,7 @@ public sealed class Play : IOwned
         ReviewMistakeTag = answers.MistakeTag;
         ReviewLesson = answers.Lesson;
         ReviewNextAction = answers.NextAction;
+        ReviewRule = answers.Rule;
         var completes = answers != previousAnswers && answers.IsAnswered && IsReviewable && ReviewCompletion is null;
         Touch(now);
         if (!changedReview) return null;
@@ -266,14 +284,16 @@ public sealed class Play : IOwned
     /// Plans a Draft as revision 1. <paramref name="preflight"/> is the checklist the owner saw at Plan it, as validated
     /// JSON; it never blocks planning (phase 1, 1.5).
     /// </summary>
-    public (PlayStatusChange Change, PlayPlanRevision Revision) MarkPlanned(DateTimeOffset now, string? preflight = null)
+    public (PlayStatusChange Change, PlayPlanRevision Revision) MarkPlanned(DateTimeOffset now, string? preflight = null, PlanRuleSeen? rule = null)
     {
         if (Status != PlayStatus.Draft) throw new DomainRuleException("Only a Draft can be planned.");
         if (ContractId is null) throw new DomainRuleException("Choose an instrument before planning.");
         var change = Transition(PlayStatus.Planned, null, null, now);
         PlannedAtUtc = now;
         PlanRevision = 1;
-        return (change, new PlayPlanRevision(this, 1, "Planned", now) { Preflight = preflight });
+        // The rule active at Plan it stays with the Play (Phase 2, item 3); later changes to the rule never reach it.
+        if (rule is not null) (RuleVersion, RuleIf, RuleThen) = (rule.Version, rule.If, rule.Then);
+        return (change, new PlayPlanRevision(this, 1, "Planned", now) { Preflight = preflight, Rule = rule?.Snapshot });
     }
 
     public PlayStatusChange Pause(DateTimeOffset now) => Status == PlayStatus.Planned
@@ -432,6 +452,11 @@ public sealed class PlayPlanRevision : IOwned
     public DateTimeOffset CreatedAtUtc { get; private set; }
     /// <summary>The pre-flight checklist recorded with revision 1 at Plan it, as JSON; null on later revisions and older plans.</summary>
     public string? Preflight { get; internal init; }
+    /// <summary>
+    /// The if-then rule active at Plan it and the owner's answer, as JSON, on revision 1 only (Phase 2, item 3); null without
+    /// a rule.
+    /// </summary>
+    public string? Rule { get; internal init; }
     private PlayPlanRevision() { }
 
     internal PlayPlanRevision(Play play, int number, string reason, DateTimeOffset now)

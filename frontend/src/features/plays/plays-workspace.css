@@ -875,6 +875,15 @@
 .journal-tabs .next-actions li { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--journal-paper); }
 .journal-tabs .next-actions p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .journal-tabs .next-action-source { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--muted-foreground); font-size: var(--text-xs); }
+/* The if-then rule in the Thesis tab and at Plan it (Phase 2, item 3). */
+.journal-tabs .if-then-rule { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin: 0 0 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-sunken); font-size: var(--text-xs); }
+.journal-tabs .if-then-rule p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.journal-tabs .if-then-rule small { color: var(--muted-foreground); }
+.journal-tabs .if-then-rule-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.preflight-rule { margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-control); }
+.preflight-rule legend { padding: 0 4px; font-size: var(--text-xs); font-weight: 600; }
+.preflight-rule p { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.preflight-rule > label:has(input[type='radio']) { display: flex; align-items: center; gap: 6px; }
 /* Review completion under the review, and the in-trade log tab (phase 1, 1.2). */
 .journal-tabs .review-completion { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: 10px 0 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-sunken); font-size: var(--text-xs); }
 .journal-tabs p.review-completion { display: block; background: none; border-style: dashed; }

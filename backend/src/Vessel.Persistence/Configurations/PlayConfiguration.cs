@@ -23,6 +23,10 @@ internal sealed class PlayConfiguration : IEntityTypeConfiguration<Play>
         builder.Property(x => x.ReviewCompletion).HasConversion<string>().HasMaxLength(16);
         builder.Property(x => x.ReviewAdherence).HasMaxLength(32);
         builder.Property(x => x.ReviewMistakeTag).HasMaxLength(100);
+        // Phase 2, item 3: the if-then rule the Play was planned under, and its review answer.
+        builder.Property(x => x.ReviewRule).HasMaxLength(32);
+        builder.Property(x => x.RuleIf).HasMaxLength(PlayRule.MaxPartLength);
+        builder.Property(x => x.RuleThen).HasMaxLength(PlayRule.MaxPartLength);
         builder.Property(x => x.ReviewLesson).HasMaxLength(4000);
         builder.Property(x => x.ReviewNextAction).HasMaxLength(4000);
         builder.Ignore(x => x.Answers);
@@ -59,6 +63,7 @@ internal sealed class PlayPlanRevisionConfiguration : IEntityTypeConfiguration<P
         builder.Property(x => x.Plan).HasColumnType("jsonb");
         builder.Property(x => x.Reason).HasMaxLength(PlayPlanRevision.MaxReasonLength);
         builder.Property(x => x.Preflight).HasColumnType("jsonb");
+        builder.Property(x => x.Rule).HasColumnType("jsonb");
     }
 }
 
