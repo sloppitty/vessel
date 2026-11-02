@@ -189,4 +189,3 @@ public sealed partial class MonitorPostgresTests
         Assert.False((await db.HistoryGaps.AsNoTracking().SingleAsync()).IsOpen);
     }
 }
-
