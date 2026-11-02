@@ -533,4 +533,3 @@ next actions.
   rule asks **Followed the rule?**: followed, deviated or not applicable,
   stored with the structured review and listed in its history. A Play planned
   without a rule refuses an answer.
-
