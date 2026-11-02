@@ -477,7 +477,42 @@ October 21, 2026.
 
 ## 10. Planning assumptions and soft limits
 
-Not started.
+October 21, 2026.
+
+**10a. Assumed costs.** Implemented on `t3/phase2-cost-assumptions`.
+- **The setting.** Settings gains **Cost assumptions**: per venue, a round-trip fee and a slippage
+  percentage of the position size.
+  - Each is 0 to 10 with up to four decimals; blank is not set. There are no defaults.
+  - They are kept in the browser per user (`costs.assumptions.v1`), so no migration. The contract's
+    chain lists none.
+  - They are hidden in paper mode. The Manual venue has none, since one manual account can stand
+    for any broker.
+- **The summary.** A real Play's summary shows one line beside the planned figures, never inside
+  them, for example "Assumed costs ≈ −0.03R (fees 0.09%, slippage 0.05%)".
+  - It is stated in R only against a known loss at the stops, otherwise in the quote asset.
+  - An unset part reads "not set", never zero.
+- **Unchanged.** Sizing, Review, open risk and stored results never read them.
+- **Tests.**
+  - `cost-assumptions.test.ts`: validation, stored values, exact position size and R.
+  - The summary line.
+  - The Settings panel.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `d501cea8`. Three findings, all fixed in
+  `b4343e74`:
+  - The cost went through a float before rounding: 1% of
+    100.49999999999999999999999 showed 1.01 instead of 1. It is rounded once
+    to cents from the exact value.
+  - On a 1024-pixel desktop with the navigation open, the six-column form
+    did not fit its panel, which clipped the slippage field and Save. The
+    fields now wrap within the panel at any width.
+  - The Manual venue could hold an assumption, and its Plays then showed the
+    line. Settings no longer lists it, and its Plays show no line even with
+    one stored.
+
+  Sol confirmed that blank and zero stay distinct, that invalid text and
+  stored JSON are rejected, the per-user scopes, the R denominator, the
+  paper exclusion, that nothing else reads the assumptions, and the theme
+  tokens and layout.
+- **Check.** `scripts/check.sh` passed on `b4343e74`: backend 4,093 passed, 5 skipped; frontend 177 files and 4,085 tests.
 
 ## 11. Shared-exit allocation
 

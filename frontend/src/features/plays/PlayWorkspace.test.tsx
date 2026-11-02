@@ -13,6 +13,7 @@ import type { PlayStatus } from '@/api/plays'
 import { systemFixture } from '@/test/system-fixture'
 import { accountPicker, chooseInPicker } from '@/test/account-picker'
 import { credentialsFixture } from '@/test/identity-fixture'
+import { preferenceKey } from '@/lib/preference-scope'
 
 function Workspace({ disabled = false, status = 'draft', retrospective = false }: { disabled?: boolean; status?: PlayStatus; retrospective?: boolean }) {
   const [draft, setDraft] = useState(createDraft)
@@ -140,6 +141,19 @@ describe('Play draft workspace', () => {
     render(<PlayWorkspace accounts={[accountFixture, second]} portfolios={[portfolioFixture]} api={createWorkspaceApi(credentialsFixture)} draft={draft} onChange={onChange} />)
     await chooseInPicker('Account', second.name)
     expect(onChange).toHaveBeenCalledWith({ ...draft, accountId: second.id, instrument: '', instrumentSource: 'manual', budgetOverride: null })
+  })
+
+  it('shows no assumed costs on the Manual venue, even with one stored for it (Sol round 1 on 10a)', () => {
+    localStorage.setItem(preferenceKey('costs.assumptions.v1'), JSON.stringify({ manual: { feePercent: '1', slippagePercent: null } }))
+    try {
+      const draft = { ...createDraft(), accountId: accountFixture.id, size: '100', leverage: '1' }
+      draft.entries[0]!.price = '100'
+      render(<PlayWorkspace accounts={[accountFixture]} portfolios={[portfolioFixture]} api={createWorkspaceApi(credentialsFixture)} draft={draft} onChange={vi.fn()} />)
+      expect(screen.getByRole('group', { name: 'Planned position money summary' })).toBeInTheDocument()
+      expect(screen.queryByTestId('assumed-costs')).toBeNull()
+    } finally {
+      localStorage.removeItem(preferenceKey('costs.assumptions.v1'))
+    }
   })
 
   it('does not display a selected account balance after that account becomes disabled', () => {
