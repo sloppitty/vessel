@@ -272,6 +272,8 @@ export interface WorkspaceApi {
   activityFills(accountId: string, operationId: string, signal?: AbortSignal): Promise<ActivityFills>
   review(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewDocument>
   reviewExclusions(query: ReviewQuery, signal?: AbortSignal): Promise<ReviewExclusions>
+  /** One saved Play as a zip (Phase 2, item 5c): its record as JSON and its evidence originals; not a tax report. */
+  playBundle(playId: string, signal?: AbortSignal): Promise<DownloadedFile>
   /** One real account's retained executions or funding as CSV (Phase 2, item 5b), optionally between UTC days; not a tax report. */
   accountFacts(accountId: string, kind: 'executions' | 'funding', from: string | null, to: string | null, signal?: AbortSignal): Promise<DownloadedFile>
   /** Review's selection as a CSV file (Phase 2, item 5a): the report's rows and exclusions; not a tax report. */
@@ -800,6 +802,9 @@ export function createWorkspaceApi(credentials: SessionCredentials, onAuthFailur
     deleteEvidence: id => call(evidencePath(id), { ...playRequest, validate: none, method: 'DELETE' }),
     sizing: signal => call('/api/sizing', { ...playRequest, validate: isSizingDocument, ...withSignal(signal) }),
     review: (query, signal) => call(reviewPath(query), { ...playRequest, validate: isReviewDocument, ...withSignal(signal) }),
+    playBundle: (playId, signal) => call(`${playPath(playId)}/bundle`, { ...playRequest, ...withSignal(signal), timeout: 300_000,
+      accept: 'application/zip', read: async response => ({
+        fileName: attachmentName(response.headers.get('content-disposition'), 'vessel-play.zip'), blob: await response.blob() }) }),
     accountFacts: (accountId, kind, from, to, signal) => {
       const params = new URLSearchParams({ kind })
       if (from) params.set('from', from)

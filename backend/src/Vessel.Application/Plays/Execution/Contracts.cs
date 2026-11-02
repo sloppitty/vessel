@@ -36,6 +36,13 @@ public sealed record ExecutionOrderDto(string OrderId, string Side, string Order
 public sealed record ExecutionFillDto(string SourceFillId, string Direction, string Price, string Quantity, string Fee,
     string FeeToken, string ClosedPnlUsd, DateTimeOffset OccurredAtUtc, string Side, string PositionEffect, string PnlBasis);
 
+/// <summary>
+/// One retained link of a Play in any state, for the Play bundle (Phase 2, item 5c): a removed or rejected link stays in
+/// the record with when it was made and last changed, and its venue order ID.
+/// </summary>
+public sealed record LinkRecordDto(Guid Id, string Role, string? EntryId, string? LevelId, string State, string Source, string? OrderId,
+    string? ContractId, DateTimeOffset CreatedAtUtc, DateTimeOffset UpdatedAtUtc);
+
 public sealed record OrderLinkDto(Guid Id, string Role, string? EntryId, string? LevelId, string State, string Source,
     ExecutionOrderDto? Order, string FilledQuantity, IReadOnlyList<ExecutionFillDto> Fills)
 {

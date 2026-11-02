@@ -220,6 +220,25 @@ public sealed class PaperTradingService(IPaperStore store, IUnitOfWork work, IJo
             declined, suspensions, suspensions.Count > 0);
     }
 
+    public const string ExportNotice = "Simulated executions: full eligible allocations at touched planned prices with zero fees and " +
+        "slippage, by the stated model version. Never actual fills; a touch is never an actual fill.";
+
+    /// <summary>The simulation record of one paper Play for its bundle (Phase 2, item 5c), read through the paper store.</summary>
+    public async Task<PaperPlayExport> ExportAsync(Guid id, CancellationToken ct)
+    {
+        var state = await StateAsync(id, ct);
+        var executions = await store.ExecutionsAsync(id, ct);
+        var activations = await store.ActivationsAsync(id, ct);
+        return new(state, executions.OrderBy(x => x.OccurredAtUtc).ThenBy(x => x.Id).Select(x => new PaperExecutionRecordDto(x.Id,
+                x.ModelVersion, x.PlanVersion, x.EntryId, x.LevelId, x.Role, Text(x.Price), Text(x.Quantity), Text(x.PnlUsd), Text(x.MarginUsd),
+                x.OccurredAtUtc, x.CandleOpenAtUtc, x.CandleCloseAtUtc)).ToList(),
+            activations.OrderBy(a => a.PlanVersion).ThenBy(a => a.EffectiveAtUtc).Select(a =>
+            {
+                using var plan = JsonDocument.Parse(a.PlanJson);
+                return new PaperActivationDto(a.PlanVersion, a.EffectiveAtUtc, plan.RootElement.Clone());
+            }).ToList(), ExportNotice);
+    }
+
     /// <summary>Discovery uses bounded keyset reads but includes every active sibling, even when not yet due.</summary>
     public async Task<PaperAccountCandidate> PrepareAccountAsync(Guid accountId, CancellationToken ct) =>
         new(store.OwnerId, accountId, await AccountCandidatesAsync(accountId, ct));

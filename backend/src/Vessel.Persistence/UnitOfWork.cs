@@ -44,7 +44,17 @@ public sealed class UnitOfWork(VesselDbContext db, IEnumerable<IUnitOfWorkPartic
         return work;
     }
 
-    public async Task<T> ExecuteAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken)
+    public Task<T> ExecuteAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken) =>
+        RunAsync(operation, IsolationLevel.ReadCommitted, cancellationToken);
+
+    /// <summary>One repeatable-read snapshot for related reads; it must be the outermost unit, so its isolation holds.</summary>
+    public Task<T> ReadSnapshotAsync<T>(Func<Task<T>> read, CancellationToken cancellationToken)
+    {
+        if (IsActive) throw new InvalidOperationException("A read snapshot must be the outermost unit of work.");
+        return RunAsync(read, IsolationLevel.RepeatableRead, cancellationToken);
+    }
+
+    private async Task<T> RunAsync<T>(Func<Task<T>> operation, IsolationLevel isolation, CancellationToken cancellationToken)
     {
         if (unusable)
             throw new InvalidOperationException("The failed transaction requires a new scope.");
@@ -70,8 +80,9 @@ public sealed class UnitOfWork(VesselDbContext db, IEnumerable<IUnitOfWorkPartic
             if (db.Database.CurrentTransaction is not null)
                 throw new InvalidOperationException("The unit of work must own the database transaction.");
             cancellationToken.ThrowIfCancellationRequested();
-            // Facts revisions share a row per owner; stricter writer snapshots can fail on unrelated fact writes.
-            transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+            // Facts revisions share a row per owner; stricter writer snapshots can fail on unrelated fact writes, so
+            // only read snapshots ask for repeatable read.
+            transaction = await db.Database.BeginTransactionAsync(isolation, cancellationToken);
             var result = await operation();
             RequireAwaited(root);
             await SaveChangesAsync(cancellationToken);

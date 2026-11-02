@@ -12,6 +12,16 @@ public sealed record PaperPlayState(Guid PlayId, string Status, DateTimeOffset? 
     string EnteredQuantity, string ExitedQuantity, string OpenQuantity, string RealizedPnlUsd, IReadOnlyList<string> Issues,
     IReadOnlyList<PaperExecutionDto> Executions, IReadOnlyList<PaperDeclinedEntry> DeclinedEntries,
     IReadOnlyList<PaperSuspension> Suspensions, bool HasUnscoredHistory);
+/// <summary>
+/// A paper Play's simulation record for its bundle (Phase 2, item 5c): its state, every typed simulated execution with the
+/// model and plan version that produced it, and the plan activations it ran against. Simulated, never actual fills.
+/// </summary>
+public sealed record PaperPlayExport(PaperPlayState State, IReadOnlyList<PaperExecutionRecordDto> Executions,
+    IReadOnlyList<PaperActivationDto> Activations, string Notice);
+public sealed record PaperExecutionRecordDto(Guid Id, int ModelVersion, int PlanVersion, string EntryId, string? LevelId, string Role,
+    string Price, string Quantity, string PnlUsd, string MarginUsd, DateTimeOffset OccurredAtUtc, DateTimeOffset CandleOpenAtUtc,
+    DateTimeOffset CandleCloseAtUtc);
+public sealed record PaperActivationDto(int PlanVersion, DateTimeOffset EffectiveAtUtc, System.Text.Json.JsonElement Plan);
 public sealed record PaperExecutionProof(DateTimeOffset? FirstEntryAtUtc, int? FirstEntryPlanVersion, decimal EnteredQuantity,
     decimal ExitedQuantity, decimal OpenQuantity, ExactAmount RealizedPnlUsd, bool HasIssues, IReadOnlySet<string> ExecutedEntryIds);
 

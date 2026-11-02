@@ -41,6 +41,25 @@ public abstract class ExportIsolationCases(IsolationHost api)
             await Isolated.NotFound(caller, foreign, id => new HttpRequestMessage(HttpMethod.Get, $"/api/accounts/{id}/facts?kind=funding"),
                 "Account not found.");
     }
+
+    [PostgresFact]
+    [Covers("GET", "/api/plays/{id:guid}/bundle")]
+    public async Task A_play_bundle_is_only_the_owners()
+    {
+        var (a, b) = await api.Owners();
+        var plays = new Dictionary<Owner, Guid>();
+        foreach (var owner in new[] { a, b })
+        {
+            var account = (await owner.ManualAccount(Isolated.Marker("bundle"))).GetProperty("id").GetGuid();
+            var draft = await owner.Post("/api/plays", new Vessel.Application.Plays.CreatePlayRequest(account, "BTC", "manual",
+                Isolated.Marker("bundle-play"), TestPlays.Plan()), System.Net.HttpStatusCode.Created);
+            plays[owner] = draft.GetProperty("summary").GetProperty("id").GetGuid();
+        }
+        foreach (var (caller, foreign) in new[] { (a, plays[b]), (b, plays[a]) })
+            await Isolated.NotFound(caller, foreign, id => new HttpRequestMessage(HttpMethod.Get, $"/api/plays/{id}/bundle"), "Play not found.");
+        using var mine = await a.Http.GetAsync($"/api/plays/{plays[a]}/bundle");
+        Assert.Equal(System.Net.HttpStatusCode.OK, mine.StatusCode);
+    }
 }
 
 /// <summary>The cases above in Token mode.</summary>
