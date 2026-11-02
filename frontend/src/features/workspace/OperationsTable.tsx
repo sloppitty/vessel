@@ -10,8 +10,8 @@ import { NominalUsdTag } from './CoverageBadge'
 import { duration, operationDates, operationPriceReturn, operationStatus, resultSign } from './activity-format'
 import { amount, money } from '@/lib/format'
 import './activity-operations.css'
-import { useDisplayZone } from '@/lib/display-zone'
-import { otherZoneTime } from '@/lib/time'
+import { useDisplayZone, type DisplayZone } from '@/lib/display-zone'
+import { formatTime, otherZoneTime } from '@/lib/time'
 import { Time } from '@/components/ui/time'
 
 function Result({ value }: { value: string | null }) {
@@ -19,7 +19,19 @@ function Result({ value }: { value: string | null }) {
 }
 
 /**
- * The operation's Play: a linked Play by its title, opening it; a closed unassigned operation offers to journal it
+ * An open operation's unrealized P&L at the venue's current mark or the last refresh, with its source in the tooltip.
+ * Closed operations have none; an open one without a usable mark says so rather than showing zero.
+ */
+function Unrealized({ operation: op, zone }: { operation: ActivityOperation; zone: DisplayZone }) {
+  const value = op.unrealizedPnlUsd ?? null
+  if (value === null) return op.status === 'open' ? <><span title="No current mark or matching refreshed position">—</span><small>Unavailable</small></> : <span title="No open position">—</span>
+  const at = op.unrealizedPnlAsOfUtc ? formatTime(op.unrealizedPnlAsOfUtc, zone, 'datetime-seconds') : 'unknown time'
+  const source = op.unrealizedPnlSource === 'mark' ? `Mark ${op.unrealizedPnlMarkPrice} at ${at}` : `Venue-reported at the refresh of ${at}`
+  return <span className={`operation-result ${resultSign(value)}`} title={`${value} · ${source}. Before fees and funding.`}>{money(value)}</span>
+}
+
+/**
+ * The operation's Play, in the expanded row: a linked Play by its title, opening it; a closed unassigned operation offers to journal it
  * (the retrospective preview checks eligibility); anything else says how it is associated.
  */
 function PlayCell({ operation: op, onOpenPlay, opening, onJournal }: {
@@ -33,14 +45,16 @@ function PlayCell({ operation: op, onOpenPlay, opening, onJournal }: {
     return <><button type="button" className="text-action operation-play-link" title={title} disabled={opening !== null}
       aria-label={`${title}, open Play`} onClick={() => onOpenPlay(playId)}>{title}</button>{opening === playId && <small role="status">Opening…</small>}</>
   }
-  if (onJournal && op.status === 'closed' && op.playAssociation === 'unassigned')
+  if (onJournal && journals(op))
     return <button type="button" className="text-action operation-journal" aria-label={`Journal this trade, ${op.contractId}`} onClick={() => onJournal(op)}>Journal this trade</button>
   return <span className="workspace-badge">{op.playAssociation === 'mixed' ? 'Mixed' : 'Unassigned'}</span>
 }
 
+const journals = (op: ActivityOperation) => op.status === 'closed' && op.playAssociation === 'unassigned'
+
 function OperationsHead({ compact }: { compact: boolean }) {
   return <thead><tr>
-    <th>Operation</th><th>Account / time</th><th title="Peak position quantity">Size</th>{!compact && <><th>Average entry</th><th>Average exit</th><th title="Before reported fees; venue-reported P&L is preserved in the executions">Closed P&amp;L</th><th title="Stablecoin fees in nominal USD; other tokens listed separately">Fees</th><th title="Settled funding in nominal USD: positive received, negative paid. Partial coverage is not zero.">Funding</th></>}<th title="Fee-adjusted reported execution P&L. Funding inclusion may be unverified; expand for the separate combined total.">Net result</th>{!compact && <th>Play</th>}
+    <th>Operation</th><th>Account / time</th><th title="Peak position quantity">Size</th>{!compact && <><th>Average entry</th><th>Average exit</th><th title="Before reported fees; venue-reported P&L is preserved in the executions">Closed P&amp;L</th><th title="Stablecoin fees in nominal USD; other tokens listed separately">Fees</th><th title="Settled funding in nominal USD: positive received, negative paid. Partial coverage is not zero.">Funding</th></>}<th title="Fee-adjusted reported execution P&L. Funding inclusion may be unverified; expand for the separate combined total.">Net result</th>{!compact && <th title="Open position at the venue's current mark, or the last refresh's venue-reported figure, before fees and funding">Unrealized P&amp;L</th>}
   </tr></thead>
 }
 
@@ -66,7 +80,7 @@ export function OperationsSkeleton({ compact = false, rows, note = false }: { co
             <td className="numeric"><div className="operation-pnl">{bar('skeleton-money')}{!open && <Skeleton className="skeleton-return" />}</div></td>
             <td className="numeric">{bar('skeleton-fee')}</td><td className="numeric">{bar('skeleton-fee')}</td></>}
           <td className="numeric">{bar('skeleton-money')}</td>
-          {!compact && <td><Skeleton className="skeleton-badge" /></td>}
+          {!compact && <td className="numeric">{open ? bar('skeleton-money') : bar('skeleton-fee')}</td>}
         </tr>
       })}</tbody>
     </table></div>
@@ -110,9 +124,10 @@ export function OperationsTable({ operations, accounts, compact = false, onPrevi
       <td className="numeric operation-fees"><span title={op.stablecoinFeesNominalUsd}>{money(op.stablecoinFeesNominalUsd)}</span>{op.otherFees.map(f => <small key={f.token}>{amount(f.amount)} {f.token}</small>)}</td>
       <td className="numeric"><Result value={op.fundingNetUsd} />{op.fundingStatus !== 'complete' && <small>{op.fundingStatus === 'not-applicable' ? 'Not simulated' : op.fundingStatus === 'partial' ? 'Partial' : 'Unavailable'}</small>}</td></>}
       <td className="numeric operation-net"><Result value={op.netResultUsd} /></td>
-      {!compact && <td className="operation-play"><PlayCell operation={op} onOpenPlay={onOpenPlay} opening={opening} onJournal={onPreview} /></td>}
+      {!compact && <td className="numeric operation-unrealized"><Unrealized operation={op} zone={zone} /></td>}
     </tr>{open && <tr id={`operation-${op.id}`}><td colSpan={compact ? 4 : 10} className="operation-expanded">
-      {api.tradingMode !== 'paper' && onPreview && <button className="text-action" aria-label={`Inspect ${op.contractId} retrospective eligibility`} onClick={() => onPreview(op)}>Inspect retrospective eligibility</button>}
+      {!compact && <p className="operation-play"><span>Play</span><PlayCell operation={op} onOpenPlay={onOpenPlay} opening={opening} onJournal={onPreview} /></p>}
+      {api.tradingMode !== 'paper' && onPreview && (compact || !journals(op)) && <button className="text-action" aria-label={`Inspect ${op.contractId} retrospective eligibility`} onClick={() => onPreview(op)}>Inspect retrospective eligibility</button>}
       <p className="workspace-scope-note operation-details">Entered {op.totalEnteredQuantity === null ? 'unknown' : amount(op.totalEnteredQuantity)} · Exited {op.totalExitedQuantity === null ? 'unknown' : amount(op.totalExitedQuantity)} · Remaining {op.openQuantity === null ? 'unknown' : amount(op.openQuantity)}</p>
       {op.tradingMode !== 'paper' && <dl className="operation-funding-summary">
         <div><dt>{op.fundingStatus === 'complete' ? 'Settled funding' : 'Known settled funding'}</dt><dd><Result value={op.fundingNetUsd} /> <NominalUsdTag detail="Stablecoins at 1:1, with no FX/depeg valuation." /></dd></div>
