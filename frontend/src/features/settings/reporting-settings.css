@@ -1,0 +1,7 @@
+/* Reporting week section of Settings (Phase 2, item 2). Theme tokens only. */
+.reporting-settings form { display: grid; justify-items: start; gap: 14px; margin-top: 16px; }
+.reporting-settings fieldset { display: grid; gap: 8px; width: 100%; min-width: 0; margin: 0; padding: 0; border: 0; font-size: var(--text-sm); }
+.reporting-settings fieldset:disabled { opacity: .6; }
+.reporting-settings-zone { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.reporting-settings-zone input { width: 16rem; max-width: 100%; }
+.reporting-settings form p { margin: 0; font-size: var(--text-xs); line-height: 1.6; }

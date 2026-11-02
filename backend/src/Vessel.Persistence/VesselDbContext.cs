@@ -47,6 +47,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<DiaryRequest> DiaryRequests => Set<DiaryRequest>();
     public DbSet<SizingSettings> SizingSettings => Set<SizingSettings>();
     public DbSet<Vessel.Domain.Risk.RiskSettings> RiskSettings => Set<Vessel.Domain.Risk.RiskSettings>();
+    public DbSet<Vessel.Domain.Reporting.ReportingSettings> ReportingSettings => Set<Vessel.Domain.Reporting.ReportingSettings>();
 
     // Unconstrained PostgreSQL numeric preserves every .NET decimal digit and scale. This also covers decimal?.
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder) =>

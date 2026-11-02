@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { ReviewExportButton } from './ReviewExportButton'
-import { ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, ChevronRight, Info, RefreshCw, ShieldCheck, SlidersHorizontal } from 'lucide-react'
+import { ArrowDownRight, ArrowRight, ArrowUpRight, BarChart3, CalendarRange, ChevronRight, Info, RefreshCw, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import type { BrokerAccount, WorkspaceApi } from '@/api/workspace'
 import { AccountPicker } from '@/components/accounts/AccountPicker'
@@ -15,6 +15,7 @@ import { PostHocBadge } from '@/features/plays/PostHocBadge'
 import { preflightLabels } from '@/features/plays/preflight'
 import { ReviewChart } from './ReviewChart'
 import { ReviewExclusions } from './ReviewExclusions'
+import { ReviewWeek } from './ReviewWeek'
 import { minimumRateN, ProcessSection, ReviewProcessList } from './ReviewProcess'
 import { reviewDate, reviewMoney, reviewMultiple, reviewPercent, reviewResult } from '@/lib/format'
 import { negative, tone } from './format'
@@ -37,7 +38,7 @@ const definitions = [
   ['Imports and coverage', 'Linked imported fills contribute to saved Plays. Unassigned fills are not scored Plays. Activity can preview a completed operation for owner-confirmed retrospective creation when its full facts and associations permit it. Missing openings, unmatched quantities, flips, unsupported fees and incomplete links are excluded, not treated as zero. Retained history may be bounded and is not lifetime performance.'],
   ['Imported positions', 'Include imported positions adds closed Activity round trips whose fills belong to no Play, scored by the same net P&L and return rules. They have no plan, initial-risk R or review and never become Plays. Automatic adds them while the selection has fewer scored Plays than the threshold in Settings; the toggle overrides it. A Play weighs twice a position in batting average, average gain and loss, payoff and expectancy. Net P&L, profit factor, drawdown, streaks and the chart are real amounts and are never weighted. Positions that cannot be scored (missing executions, unknown fees, ambiguous identity) are counted, not treated as zero.'],
   ['Record sources', 'A retrospective Play has original execution times and a separate creation/review time, not an invented pre-trade plan or initial-risk R. Manual execution facts belong to their saved Play and eligible Review results only. They do not change venue balances or imported Activity. Account balances, retained operations and saved-Play performance are separate scopes.'],
-  ['Time', '1D, 7D, Month and Year mean rolling 24-hour, 7-day, 30-day and 365-day windows ending at the displayed report time, in UTC. All means all retained eligible results. Open-play counts describe current state. Drill-down pages read a fresh snapshot; results may change after sync or link edits.'],
+  ['Time', '1D, 7D, Month and Year mean rolling 24-hour, 7-day, 30-day and 365-day windows ending at the displayed report time, in UTC. All means all retained eligible results. The Week view uses the reporting week from Settings instead: local days in its zone, from its first day. Open-play counts describe current state. Drill-down pages read a fresh snapshot; results may change after sync or link edits.'],
 ]
 
 /** Below this many cases a metric is marked "Small sample", measured by its own denominator (F-08). */
@@ -164,6 +165,7 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay, workspaceAccount
   const [reload, setReload] = useState(0)
   const [group, setGroup] = useState<ReviewGroupBy>('portfolios')
   const [methods, setMethods] = useState(false)
+  const [weekOpen, setWeekOpen] = useState(false)
   const [detail, setDetail] = useState<{ title: string; query: ReviewQuery } | null>(null)
   const [exclusions, setExclusions] = useState<ReviewQuery | null>(null)
   const [process, setProcess] = useState<{ title: string; query: ReviewQuery; selection: ReviewProcessSelection } | null>(null)
@@ -198,7 +200,7 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay, workspaceAccount
   const groupDetail = (row: ReviewGroup) => group === 'accounts' ? venues.name(options?.accounts.find(a => a.id === row.id)?.venueId ?? row.detail) :
     group === 'assets' ? row.detail.split(', ').map(id => venues.name(id)).join(', ') : row.detail
   return <section className="portfolio-review review-workspace" aria-label="Portfolio review">
-    <div className="pr-heading"><h1>Portfolio review</h1><div className="pr-heading-actions"><ReviewExportButton api={api} query={requested} /><button className="pr-outline-button" onClick={() => { remember(); setMethods(true) }}><Info size={15} />Definitions</button><button className="pr-outline-button" disabled={loading} onClick={() => setReload(n => n + 1)} aria-label="Reload review"><RefreshCw size={15} /></button></div></div>
+    <div className="pr-heading"><h1>Portfolio review</h1><div className="pr-heading-actions"><ReviewExportButton api={api} query={requested} /><button className="pr-outline-button" onClick={() => { remember(); setWeekOpen(true) }}><CalendarRange size={15} />Week</button><button className="pr-outline-button" onClick={() => { remember(); setMethods(true) }}><Info size={15} />Definitions</button><button className="pr-outline-button" disabled={loading} onClick={() => setReload(n => n + 1)} aria-label="Reload review"><RefreshCw size={15} /></button></div></div>
     <section className="pr-filters" aria-label="Review filters">
       <label><span>Portfolio</span><NativeSelect value={query.portfolio} onChange={e => setQuery(previous => { const next = { ...previous, portfolio: e.target.value }; delete next.accountId; return next })}><option value="all">All portfolios</option>{options?.portfolios.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}<option value="unassigned">Unassigned accounts</option>{query.portfolio !== 'all' && query.portfolio !== 'unassigned' && !options?.portfolios.some(p => p.id === query.portfolio) && <option value={query.portfolio}>Unavailable portfolio</option>}</NativeSelect></label>
       <div className="pr-filter-field"><span id={`${fieldId}-account`}>Account</span><AccountPicker labelledBy={`${fieldId}-account`} value={query.accountId ?? ''}
@@ -261,6 +263,12 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay, workspaceAccount
         <ul>{activeAccounts.map(a => <li key={a.id}><strong>{a.name}</strong> · {venues.name(a.venueId)} · {a.syncStatus} · {a.lastSyncedAtUtc ? <>last refreshed <Time at={a.lastSyncedAtUtc} /></> : 'not refreshed'}{a.historyNotice && <p>{a.historyNotice}</p>}</li>)}</ul>
       </details><button className="pr-outline-button" onClick={inspectExclusions} aria-label={`Inspect exclusions (${excludedCount(report.coverage)})`}>{excludedCount(report.coverage)} excluded</button></section>
     </>}
+    {/* Phase 2, item 2: the week page, on demand over the same filters; Review's own sections stay in place. */}
+    <Dialog open={weekOpen} onOpenChange={setWeekOpen}><DialogContent className="pr-dialog pr-detail-dialog pr-week-dialog" onCloseAutoFocus={restore}>
+      <DialogHeader><DialogTitle>Week review</DialogTitle><DialogDescription className="sr-only">Review&apos;s results for one reporting week in this
+        scope, its repeated mistake tags, your latest next actions and the Needs review count.</DialogDescription></DialogHeader>
+      {weekOpen && <ReviewWeek api={api} filters={requested} onOpenPlay={onOpenPlay} />}
+    </DialogContent></Dialog>
     <Dialog open={methods} onOpenChange={setMethods}><DialogContent className="pr-dialog" onCloseAutoFocus={restore}><DialogHeader><DialogTitle>Definitions</DialogTitle><DialogDescription className="sr-only">Closed-Play results from retained execution facts.</DialogDescription></DialogHeader><div className="pr-methods">{definitions.filter(([title]) => !paper || title !== 'Imported positions').map(([title, text]) => <section key={title}><h3>{title}</h3><p>{api.tradingMode === 'paper' && (title === 'Closed-play P&L' || title === 'Result bases') ? 'Simulated paper executions only, isolated from real fills and funds. Zero fees and slippage. Starting capital is not profit. Unresolved ambiguity and candle-history gaps are not scored. Results use simulated exit times and the same shared metric formulas.' : text}</p></section>)}</div></DialogContent></Dialog>
     <Dialog open={detail !== null} onOpenChange={open => { if (!open) setDetail(null) }}><DialogContent className="pr-dialog pr-detail-dialog" onCloseAutoFocus={restore}><DialogHeader><DialogTitle>{detail?.title}</DialogTitle><DialogDescription className="sr-only">Contributing closed Plays. Select a Play to open its journal.</DialogDescription></DialogHeader>
       {detail && <ReviewPlays api={api} initialQuery={detail.query} onOpenPlay={onOpenPlay} />}
