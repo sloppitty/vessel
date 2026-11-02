@@ -4,6 +4,10 @@
 
 ### Added
 
+- The journal can be searched: titles, theses, invalidations, strategies, evidence notes,
+  reviews, log entries and image notes, with the matching field and an excerpt. Ended Plays in
+  the list show their exit, result and estimated R. After the migration, run
+  `play-search-rebuild --apply` once to index existing Plays.
 - The monitor worker now reads settled funding about every 6 hours (`Vessel:Funding:Interval`)
   for accounts with an Open Play or kept history, after protection checks and without
   delaying them.

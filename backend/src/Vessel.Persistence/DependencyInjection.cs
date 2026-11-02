@@ -48,6 +48,9 @@ public static class DependencyInjection
         });
         services.AddScoped<UnitOfWork>();
         services.AddScoped<Vessel.Application.Ownership.IUnitOfWork>(sp => sp.GetRequiredService<UnitOfWork>());
+        // Phase 2, item 13: every host's units of work keep the journal search projection in step with what they change.
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IUnitOfWorkParticipant, Search.PlaySearchProjector>());
+        services.AddScoped<Search.PlaySearchRebuild>();
         services.AddScoped<Vessel.Application.Workspace.IWorkspaceStore, WorkspaceStore>();
         services.AddScoped<Vessel.Application.Activity.IActivityStore, ActivityStore>();
         var activityCacheBytes = config.GetValue<long?>("Vessel:Activity:CacheCapacityBytes") ?? 256L * 1024 * 1024;

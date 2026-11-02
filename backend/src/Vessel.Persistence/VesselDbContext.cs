@@ -55,6 +55,11 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<Vessel.Domain.Risk.RiskSettings> RiskSettings => Set<Vessel.Domain.Risk.RiskSettings>();
     public DbSet<Vessel.Domain.Reporting.ReportingSettings> ReportingSettings => Set<Vessel.Domain.Reporting.ReportingSettings>();
     public DbSet<PlayRule> PlayRules => Set<PlayRule>();
+    public DbSet<PlaySearchEntry> PlaySearch => Set<PlaySearchEntry>();
+    public DbSet<PlaySearchText> PlaySearchTexts => Set<PlaySearchText>();
+
+    /// <summary>What saves on this context touched that a journal search projection reads (Phase 2, item 13).</summary>
+    internal Search.PlaySearchCapture SearchCapture { get; } = new();
 
     // Unconstrained PostgreSQL numeric preserves every .NET decimal digit and scale. This also covers decimal?.
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder) =>
@@ -104,12 +109,15 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         ValidateOwnership();
+        SearchCapture.Capture(ChangeTracker);
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         ValidateOwnership();
+        // Every save, whichever store makes it; the unit's PlaySearchProjector projects the touched Plays before its commit.
+        SearchCapture.Capture(ChangeTracker);
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 }

@@ -46,7 +46,39 @@ public sealed record PlaySummaryDto(Guid Id, string Title, string Status, Guid A
     /// <summary>completed, not-needed or legacy once the review is complete; null while it still needs review (phase 1, 1.2).</summary>
     public string? ReviewCompletion { get; init; }
     public DateTimeOffset? ReviewCompletedAtUtc { get; init; }
+    /// <summary>
+    /// The Play's outcome from its search projection (Phase 2, item 13, F-07), on list and search rows only; the Play's own
+    /// read has its receipt instead.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PlayOutcomeSummaryDto? Outcome { get; init; }
 }
+
+/// <summary>
+/// An ended Play's real exit time, scored result and estimated R, by Review's rules, from the search projection, so the list
+/// never reads plans (F-07). <paramref name="State"/> is not-indexed, active, scored, executions, fees, unresolved or
+/// cancelled. Unknown values are null, never zero; <paramref name="Reason"/> says why the result or R is unknown.
+/// </summary>
+public sealed record PlayOutcomeSummaryDto(string State, DateTimeOffset? ExitAtUtc, string? ResultUsd, string? EstimatedR, string? Reason);
+
+/// <summary>
+/// One Play a journal search found (Phase 2, item 13): the field of its first match, an excerpt of about 160 characters
+/// around it and where the match sits in the excerpt.
+/// </summary>
+public sealed record PlaySearchHitDto(PlaySummaryDto Play, string Field, string Excerpt, int MatchStart, int MatchLength);
+
+/// <summary>
+/// A page of journal search results, 50 per page like Review's drill-downs, newest updated first. <paramref name="NotIndexed"/>
+/// counts the mode's Plays the projection does not hold yet: search cannot find them.
+/// </summary>
+public sealed record PlaySearchPageDto(string Query, IReadOnlyList<PlaySearchHitDto> Items, int Total, int Offset, int? NextOffset,
+    int NotIndexed);
+
+/// <summary>A stored match: the Play's list row and its first matching text, normalized and folded.</summary>
+public sealed record PlaySearchMatch(PlayListRow Play, string Field, string Text, string Folded);
+
+/// <summary>One page of matches with the exact total and the count of Plays not indexed yet.</summary>
+public sealed record PlaySearchResult(int Total, int NotIndexed, IReadOnlyList<PlaySearchMatch> Matches);
 
 /// <summary>Complete review, Review again and No review needed: each answers the Play the owner last saw.</summary>
 public sealed record ReviewCompletionRequest([property: JsonRequired] long ExpectedVersion);
@@ -100,6 +132,8 @@ public sealed record PlayListRow
     public DateTimeOffset? ReviewedAtUtc { get; init; }
     public ReviewCompletionKind? ReviewCompletion { get; init; }
     public DateTimeOffset? ReviewCompletedAtUtc { get; init; }
+    /// <summary>The search projection's outcome columns (F-07); null while the Play is not indexed.</summary>
+    public PlayOutcomeFacts? Outcome { get; init; }
 }
 
 /// <summary>Row counts by status and whether the Play counts as reviewed, from one grouped query.</summary>
@@ -151,6 +185,13 @@ public interface IPlayStore
     /// </summary>
     Task<PlayListPage> PageAsync(PlayListView view, PlayListFilter filter, int page, int pageSize, CancellationToken ct);
     Task<List<PlayCountRow>> CountsAsync(PlayListFilter filter, CancellationToken ct);
+    /// <summary>
+    /// The owner's Plays in the mode with a projected text matching the LIKE <paramref name="pattern"/> (Phase 2, item 13),
+    /// every Play of theirs as the unscoped list keeps them: the exact total, the count not indexed yet and one page, newest
+    /// updated first, each with its first matching text. One snapshot.
+    /// </summary>
+    Task<PlaySearchResult> SearchAsync(string pattern, string tradingMode, int offset, int limit, CancellationToken ct) =>
+        throw new NotSupportedException();
     Task<Play?> FindAsync(Guid id, CancellationToken ct);
     Task<Account?> AccountAsync(Guid id, CancellationToken ct);
     Task<List<PlayPlanRevision>> RevisionsAsync(Guid playId, CancellationToken ct);

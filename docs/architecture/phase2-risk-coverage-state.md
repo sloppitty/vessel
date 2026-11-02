@@ -1096,7 +1096,67 @@ Not started.
 
 ## 13. Journal-wide search
 
-Not started.
+October 23, 2026.
+
+**13. Journal-wide search and list outcomes (F-07).** Implemented on `t3/phase2-search`.
+- **The projection.** `play_search` holds one row per Play: its outcome state, latest actual exit, Review's
+  scored result, estimated R and the reason R is missing. `play_search_texts` holds each searchable text,
+  normalized and lower-cased: title, thesis, invalidation, strategy and evidence notes; the review note,
+  lesson, mistake tag and next action; log entries; image notes (migration `JournalSearch`). Both are
+  deleted with their Play.
+- **Written with every change.** Each save records the Plays it touched directly (revisions, status
+  changes, log entries, image notes, manual executions, order links, paper executions and simulations)
+  and through imported fills and changed orders, by the shared `OrderKey` rule. A unit participant
+  rewrites those Plays from the same transaction before commit, under per-Play advisory locks taken in ID
+  order as the unit's last lock, then `FOR KEY SHARE` on the Plays, so a concurrent Draft deletion waits
+  and a deleted Play is skipped. Read-only snapshot units write nothing.
+- **Outcomes.** Review's own rules (`ReviewService.Score`, `PlayExitTime.LatestExit`), so list and
+  search figures equal `/api/review`. An exclusion by an execution dated after now carries a recheck time;
+  past it, reads compute the outcome again from the page's snapshot without writing, until the next write
+  or the rebuild stores it.
+- **The endpoint.** `GET /api/plays/search?q=&offset=&tradingMode=` takes 2–100 characters, escapes `%`,
+  `_` and `\`, pages 50 at a time with `nextOffset`, and returns the matched field, an excerpt and the
+  match position, with how many Plays are not indexed yet. List rows gain `outcome`; a Play without a
+  projection reads as not indexed, never as zero. The paged list is otherwise unchanged.
+- **The browser.** "Search the journal" sits beside New play; its results replace the tabs and list while
+  a query is active, and read again after any finished action or stored-state reload. Ended rows show the
+  exit, result and estimated R, with unknown values and their reason.
+- **Initialization.** The offline `play-search-rebuild [--apply] [--all] [--batch 1-500]` command dry-runs
+  by default, walks every owner in bounded batches under the same locks, is idempotent, and also stores
+  outcomes past their recheck time. See `deploy/README.md`.
+- **Tests.** `JournalSearchTests` and `JournalSearchPostgresTests`: every write path through the API, a
+  rollback, fills and orders reaching a closed Play, paper evaluation, trading-mode separation, paging and
+  escaping, the rebuild's idempotence, an exclusion expiring without a write, and a Draft deleted while it is
+  projected. `SearchIsolationTests` in both auth modes. The browser's search, its reload and validators.
+- **Migration.** It is applied explicitly, never to the owner's database; run `play-search-rebuild --apply`
+  once after it. It was regenerated on the restack (`20261023075337_JournalSearch`) so that it orders after
+  9c's `FundingSchedule`; its operations are unchanged.
+- **Open question for the owner.** Outcomes past their recheck time are computed again on every read without
+  writing, until the next write or the rebuild stores them. Should a read store them instead, in a bounded
+  write?
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `78581e97`. Three findings, all fixed in
+  `b262ad07`:
+  - An exclusion by an execution dated after now never expired: list and
+    search kept the outcome unknown after Review scored it. The projection
+    now keeps a recheck time, and reads past it compute the outcome again
+    without writing; the rebuild stores it.
+  - Visible search results ignored stored-state reloads, so a Play the
+    monitor closed kept its old status and result. Search now reads again
+    with every finished action and reload.
+  - A Draft deleted while the rebuild projected it failed the parent key and
+    ended the command. The projection now takes `FOR KEY SHARE` on the Plays
+    after its advisory locks, so the deletion waits, and a Play deleted
+    earlier is skipped.
+
+  Sol confirmed capture completeness across saves, reviews, logs, evidence
+  deletion, manual corrections, retrospective creation, links, imports, the
+  monitor and paper evaluation; that the figures match Review with exact
+  strings and unknowns kept; the unit of work and locks; owner and
+  trading-mode isolation; escaping and paging; the migration and rebuild;
+  and the browser's validators, debounce, cancellation and layout. It judged
+  disabled-account figures, an excluded Play keeping its exit and the
+  unsearched notes acceptable.
+- **Check.** `scripts/check.sh` passed on `b262ad07`: backend 4,286 passed, 5 skipped; frontend 188 files and 4,149 tests.
 
 ## 14. Venue robustness and benchmark
 

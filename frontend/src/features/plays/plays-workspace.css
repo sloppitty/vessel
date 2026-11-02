@@ -619,9 +619,27 @@
 .play-history time { color: var(--muted-foreground); font-size: var(--text-xs); }
 .play-history ul { margin: 4px 0 0; padding-left: 16px; color: var(--muted-foreground); font-size: var(--text-xs); }
 
+/* F-07: an ended Play's exit, result and R stack above the review line in the meta column; the grid is unchanged. */
+.plays-list-meta { display: grid; gap: 3px; justify-items: end; }
+.plays-list-outcome { font-feature-settings: var(--figures); }
+.plays-outcome-result { color: var(--foreground); font-weight: 600; }
+.plays-outcome-result.positive { color: var(--positive); }
+.plays-outcome-result.negative { color: var(--negative); }
+/* Journal search (Phase 2, item 13): the box beside New play, and its results in place of the list. */
+.plays-page .plays-heading-actions .journal-search { flex: 0 1 280px; min-width: 200px; }
+.journal-results-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 12px; }
+.journal-results-head p { min-height: 1.4em; margin: 0; color: var(--muted-foreground); font-size: var(--text-sm); }
+.journal-not-indexed { margin: 0 0 12px; }
+.journal-hit-match { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; color: var(--muted-foreground); font-size: var(--text-xs); line-height: 1.45; }
+.journal-hit-field { flex-shrink: 0; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-sunken); color: var(--foreground); font-size: var(--text-2xs); font-weight: 600; }
+.journal-hit-excerpt { min-width: 0; overflow-wrap: anywhere; }
+.journal-hit-excerpt mark { padding: 0 2px; border-radius: 3px; background: var(--brand-wash); color: var(--foreground); font-weight: 600; }
+.journal-pages { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 12px; color: var(--muted-foreground); font-size: var(--text-xs); }
+
 @media (max-width: 640px) {
   .plays-list-item { grid-template-columns: minmax(0, 1fr) auto; }
-  .plays-list-meta { grid-column: 1 / -1; text-align: left; }
+  .plays-list-meta { grid-column: 1 / -1; text-align: left; justify-items: start; }
+  .plays-page .plays-heading-actions .journal-search { flex-basis: 100%; }
   .plays-list-skeleton .skeleton-meta { grid-column: 1 / -1; justify-self: start; }
   .plays-search { flex-basis: 100%; }
 }

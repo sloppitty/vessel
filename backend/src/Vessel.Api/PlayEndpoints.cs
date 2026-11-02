@@ -17,6 +17,9 @@ public static class PlayEndpoints
             Results.Ok(await service.ListAsync(view, q, scope, page, pageSize, ct, tradingMode)));
         api.MapGet("/counts", async (string? q, string? scope, string? tradingMode, PlayService service, CancellationToken ct) =>
             Results.Ok(await service.CountsAsync(q, scope, ct, tradingMode)));
+        // Phase 2, item 13: journal-wide search over the search projection, in the requested mode, paged by offset.
+        api.MapGet("/search", async (string? q, int? offset, string? tradingMode, PlayService service, CancellationToken ct) =>
+            Results.Ok(await service.SearchAsync(q, offset, ct, tradingMode)));
         api.MapPost("", async (CreatePlayRequest request, string? tradingMode, PlayService service, CancellationToken ct) =>
         {
             var result = await service.CreateAsync(request, ct, tradingMode);

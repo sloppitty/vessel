@@ -134,12 +134,15 @@ public sealed class PlayListPostgresTests
         var c2 = list.Plays.Single(p => names[p.Id] == "c2");
         Assert.False(c2.HasReview); Assert.Null(c2.ReviewedAtUtc);
         var detail = await service.GetAsync(c2.Id, default);
-        Assert.Equal(detail.Summary, c2);
+        // List rows add the search projection's outcome (Phase 2, item 13); these Plays were seeded outside any unit, so none is indexed.
+        Assert.Equal("not-indexed", c2.Outcome!.State);
+        Assert.Equal(detail.Summary, c2 with { Outcome = null });
         var retro = list.Plays[^1];
         Assert.Equal(("closed", "short", "retrospective"), (retro.Status, retro.Direction, retro.Origin));
         Assert.Equal(T0.AddMinutes(5), retro.EndedAtUtc);
         foreach (var (key, id) in seeded.Plays.Where(p => p.Key != "hidden"))
-            Assert.Equal((await service.GetAsync(id, default)).Summary, (await service.ListAsync("all", null, null, null, "100", default)).Plays.Single(p => p.Id == id));
+            Assert.Equal((await service.GetAsync(id, default)).Summary,
+                (await service.ListAsync("all", null, null, null, "100", default)).Plays.Single(p => p.Id == id) with { Outcome = null });
 
         Assert.Equal(new PlayCountsDto(2, 3, 4, 2, 4, 2, 11), await service.CountsAsync(null, "all", default));
         // The unscoped Plays page also lists Plays on disabled accounts; Overview scopes never do.

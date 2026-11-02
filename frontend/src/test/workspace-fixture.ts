@@ -106,7 +106,7 @@ export const lossLimitsFixture: LossLimits = {
   timeZone: 'UTC', weekStart: 'monday', notice: 'Soft limits, never enforced.',
 }
 
-export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' | 'playCounts' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' | 'nextActions' | 'completeReview' | 'reopenReview' | 'noReviewNeeded' | 'declareUnresolved' | 'returnToOpen' | 'playNotes' | 'addPlayNote' |
+export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' | 'playCounts' | 'searchJournal' | 'play' | 'createPlay' | 'updatePlay' | 'changePlayStatus' | 'playHistory' | 'nextActions' | 'completeReview' | 'reopenReview' | 'noReviewNeeded' | 'declareUnresolved' | 'returnToOpen' | 'playNotes' | 'addPlayNote' |
   'deletePlay' | 'playExecution' | 'monitor' | 'accountMonitor' | 'runAccountMonitor' | 'monitorEvents' | 'monitorStream' | 'dismissPlayDiscrepancy' | 'dismissAccountDiscrepancy' | 'linkOrder' | 'unlinkOrder' | 'rejectOrder' | 'rebindLevel' | 'evidence' | 'evidenceImage' | 'uploadEvidence' | 'updateEvidenceNote' | 'updateEvidenceMarkup' | 'deleteEvidence' | 'sizing' | 'updateSizingSettings' | 'openRisk' | 'openRiskPreview' | 'riskSettings' | 'updateRiskSettings' | 'playRule' | 'setPlayRule' | 'archivePlayRule' | 'lossLimits' | 'reportingSettings' | 'updateReportingSettings' | 'review' | 'reviewExclusions' | 'reviewExport' | 'accountFacts' | 'importConflicts' | 'historyCoverage' | 'startBackfill' | 'playBundle' | 'reviewProcess' | 'mistakeTags' | 'retrospectivePreview' | 'createRetrospectivePlay' | 'manualExecutions' | 'addManualExecution' | 'correctManualExecution' | 'correctManualExecutions' |
   'notificationHead' | 'notifications' | 'claimNotifications' | 'readNotification' | 'readAllNotifications' | 'notificationPreferences' |
   'saveNotificationPreferences' | 'requestTestNotification' | 'paperSettings' | 'savePaperSettings' | 'paperState'> {
@@ -115,7 +115,7 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
     paperSettings: vi.fn().mockResolvedValue({ enabled: false, checkIntervalMinutes: 60 }), savePaperSettings: vi.fn(unexpected), paperState: vi.fn(unexpected),
     // Tests outside Overview keep this unrelated read pending unless they supply a summary fixture.
     overviewSummary: vi.fn().mockImplementation(() => new Promise(() => {})),
-    plays: vi.fn(playsFrom([])), playCounts: vi.fn(playCountsFrom([])), play: vi.fn(unexpected), createPlay: vi.fn(unexpected), updatePlay: vi.fn(unexpected),
+    plays: vi.fn(playsFrom([])), playCounts: vi.fn(playCountsFrom([])), searchJournal: vi.fn(unexpected), play: vi.fn(unexpected), createPlay: vi.fn(unexpected), updatePlay: vi.fn(unexpected),
     changePlayStatus: vi.fn(unexpected), playHistory: vi.fn().mockResolvedValue({ revisions: [], statusChanges: [] }),
     nextActions: vi.fn().mockResolvedValue([]),
     completeReview: vi.fn(unexpected), reopenReview: vi.fn(unexpected), noReviewNeeded: vi.fn(unexpected),

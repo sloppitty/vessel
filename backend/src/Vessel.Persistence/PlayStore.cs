@@ -7,7 +7,7 @@ using Vessel.Domain.Plays;
 
 namespace Vessel.Persistence;
 
-public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlayStore
+public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork, TimeProvider? time = null) : IPlayStore
 {
     public Task<bool> ScopeExistsAsync(ListScope scope, CancellationToken ct) => ScopeExistsAsync(scope, "real", ct);
     public Task<bool> ScopeExistsAsync(ListScope scope, string tradingMode, CancellationToken ct) => scope.Kind switch
@@ -28,7 +28,48 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork) : IPlay
         var ordered = view is PlayListView.Drafts or PlayListView.Progress or PlayListView.All
             ? rows.OrderByDescending(x => x.UpdatedAtUtc).ThenBy(x => x.Id)
             : rows.OrderByDescending(x => x.EndedAtUtc).ThenByDescending(x => x.UpdatedAtUtc).ThenBy(x => x.Id);
-        return new(total, page, await ordered.Skip(ListPaging.Skip(page, pageSize)).Take(pageSize).ToListAsync(ct));
+        return new(total, page, await WithOutcomesAsync(await ordered.Skip(ListPaging.Skip(page, pageSize)).Take(pageSize).ToListAsync(ct), ct));
+    }
+
+    /// <summary>
+    /// The page's outcomes from the search projection (Phase 2, item 13, F-07), in the caller's snapshot: projection columns
+    /// only, never the plan. A Play without a current projection keeps a null outcome: not indexed yet. An outcome past its
+    /// recheck time, an exclusion by an execution dated after it was projected, is computed again by the same rules instead
+    /// (Sol round 1 on item 13): Review scores it once that time has passed, and no write may come to reproject it.
+    /// </summary>
+    private async Task<List<PlayListRow>> WithOutcomesAsync(List<PlayListRow> rows, CancellationToken ct)
+    {
+        if (rows.Count == 0) return rows;
+        var ids = rows.Select(r => r.Id).ToList();
+        var outcomes = await db.PlaySearch.Where(s => ids.Contains(s.PlayId) && s.Version == JournalSearch.Version).AsNoTracking()
+            .ToDictionaryAsync(s => s.PlayId, s => new PlayOutcomeFacts(s.State, s.ExitAtUtc, s.ResultUsd, s.EstimatedR, s.RReason, s.RecheckAtUtc), ct);
+        var now = (time ?? TimeProvider.System).GetUtcNow();
+        var expired = outcomes.Where(o => o.Value.RecheckAtUtc <= now).Select(o => o.Key).ToList();
+        if (expired.Count > 0)
+            foreach (var (id, live) in await Search.PlaySearchProjection.LiveOutcomesAsync(db, expired, now, ct)) outcomes[id] = live;
+        return rows.Select(r => outcomes.TryGetValue(r.Id, out var outcome) ? r with { Outcome = outcome } : r).ToList();
+    }
+
+    public async Task<PlaySearchResult> SearchAsync(string pattern, string tradingMode, int offset, int limit, CancellationToken ct)
+    {
+        // Total, the not-indexed count, the page and its excerpts share one snapshot.
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
+        var all = Rows(new PlayListFilter(null, null, tradingMode));
+        var notIndexed = await all.CountAsync(x => !db.PlaySearch.Any(s => s.PlayId == x.Id && s.Version == JournalSearch.Version), ct);
+        var matching = all.Where(x => db.PlaySearch.Any(s => s.PlayId == x.Id && s.Version == JournalSearch.Version) &&
+            db.PlaySearchTexts.Any(t => t.PlayId == x.Id && EF.Functions.Like(t.Folded, pattern, @"\")));
+        var total = await matching.CountAsync(ct);
+        var page = total == 0 || offset >= total ? [] : await WithOutcomesAsync(await matching.OrderByDescending(x => x.UpdatedAtUtc)
+            .ThenBy(x => x.Id).Skip(offset).Take(limit).ToListAsync(ct), ct);
+        var ids = page.Select(p => p.Id).ToList();
+        // Each Play's first match, lowest position first: the field order, then the item's.
+        var first = db.PlaySearchTexts.Where(t => ids.Contains(t.PlayId) && EF.Functions.Like(t.Folded, pattern, @"\"))
+            .GroupBy(t => t.PlayId).Select(g => new { PlayId = g.Key, Position = g.Min(t => t.Position) });
+        var texts = ids.Count == 0 ? [] : await db.PlaySearchTexts
+            .Where(t => first.Any(f => f.PlayId == t.PlayId && f.Position == t.Position)).AsNoTracking().ToDictionaryAsync(t => t.PlayId, ct);
+        await transaction.CommitAsync(ct);
+        return new(total, notIndexed, page.Where(p => texts.ContainsKey(p.Id))
+            .Select(p => new PlaySearchMatch(p, texts[p.Id].Field, texts[p.Id].Text, texts[p.Id].Folded)).ToList());
     }
 
     public async Task<List<PlayCountRow>> CountsAsync(PlayListFilter filter, CancellationToken ct) =>

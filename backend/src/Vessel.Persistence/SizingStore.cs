@@ -30,13 +30,23 @@ public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISi
             db.Accounts.Any(a => a.Id == p.AccountId && a.IsEnabled && a.TradingMode == tradingMode))
             .AsNoTracking().ToListAsync(ct);
         if (plays.Count == 0) return [];
-        if (tradingMode == TradingMode.Paper)
-        {
-            var facts = (await PaperFactsAsync(db, plays, ct)).Select(f => new ClosedPlayFacts(f.Play, f.Revisions, []) { Paper = f }).ToList();
-            if (transaction is not null) await transaction.CommitAsync(ct);
-            return facts;
-        }
-        var ids = plays.Select(p => p.Id).ToList();
+        var facts = await FactsAsync(db, plays, ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
+        return facts;
+    }
+
+    /// <summary>
+    /// The facts Review and sizing score, for any of the owner's Plays, in their order: a paper Play's simulation, or a real
+    /// Play's plan revisions with the fills of its linked orders and the orders known to miss executions, or its manual
+    /// ledger. The journal search projection reads the same facts (Phase 2, item 13), so its outcomes follow these rules.
+    /// </summary>
+    internal static async Task<List<ClosedPlayFacts>> FactsAsync(VesselDbContext db, IReadOnlyList<Play> plays, CancellationToken ct)
+    {
+        var paper = plays.Any(p => p.TradingMode == TradingMode.Paper)
+            ? (await PaperFactsAsync(db, plays, ct)).ToDictionary(f => f.Play.Id) : [];
+        var real = plays.Where(p => p.TradingMode != TradingMode.Paper).ToList();
+        if (real.Count == 0) return plays.Select(p => Paper(paper[p.Id])).ToList();
+        var ids = real.Select(p => p.Id).ToList();
         var revisions = (await db.PlanRevisions.Where(r => ids.Contains(r.PlayId)).AsNoTracking().ToListAsync(ct)).ToLookup(r => r.PlayId);
         var links = await db.OrderLinks.Where(l => ids.Contains(l.PlayId) && l.State == OrderLinkState.Linked).AsNoTracking().ToListAsync(ct);
         var orderIds = links.Select(l => l.ImportedOrderId).Distinct().ToList();
@@ -47,12 +57,15 @@ public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISi
         IEnumerable<ImportedFill> FillsOf(PlayOrderLink link) => known.TryGetValue(link.ImportedOrderId, out var order) ? fills[OrderKey.Of(order)] : [];
         var linked = links.ToLookup(l => l.PlayId);
         var manual = (await db.ManualExecutions.Where(r => ids.Contains(r.PlayId)).AsNoTracking().ToListAsync(ct)).ToLookup(r => r.PlayId);
-        return plays.Select(p => manual[p.Id].Any() ? ManualFacts(p, revisions[p.Id].ToList(), manual[p.Id]) :
+        return plays.Select(p => paper.TryGetValue(p.Id, out var simulated) ? Paper(simulated) :
+            manual[p.Id].Any() ? ManualFacts(p, revisions[p.Id].ToList(), manual[p.Id]) :
             new ClosedPlayFacts(p, revisions[p.Id].ToList(),
             linked[p.Id].SelectMany(l => FillsOf(l).Select(f => new LinkedFill(l.Role, f))).ToList(),
             linked[p.Id].Where(l => known.TryGetValue(l.ImportedOrderId, out var order) &&
                 ExecutionIntegrity.MissingExecutions(order, FillsOf(l))).Select(l => known[l.ImportedOrderId].ExternalOrderId).ToList())).ToList();
     }
+
+    private static ClosedPlayFacts Paper(PaperPlayFacts facts) => new(facts.Play, facts.Revisions, []) { Paper = facts };
 
     public Task<int> UnresolvedPlaysAsync(CancellationToken ct) =>
         db.Plays.CountAsync(p => p.Status == PlayStatus.Unresolved && p.TradingMode == TradingMode.Real &&
