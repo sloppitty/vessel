@@ -22,11 +22,28 @@ export interface SessionRow {
   /** Browser family and OS, e.g. `Firefox on Linux`, when the server could tell. */
   userAgent: string | null
   walletAddress: string | null
+  /** `pairing`: a device connected by scanning a code from a signed-in session; shown as "Paired" in the list. */
+  source: SessionSource
 }
+export type SessionSource = 'wallet' | 'pairing'
 export type VerifyResult =
   | { status: 'signed-in'; session: SessionDto }
   | { status: 'registration-required'; registration: string; requiresInvitation: boolean; expiresAt: string }
-export type StepUpAction = 'wallet.link' | 'wallet.remove'
+export type StepUpAction = 'wallet.link' | 'wallet.remove' | 'device.pair'
+
+/** Device pairing: `completed` and the terminal statuses only ever come from the desktop's status read. */
+export type PairingStatus = 'pending' | 'claimed' | 'approved' | 'completed' | 'expired' | 'cancelled' | 'contested'
+/** `POST /api/auth/pairings`: `secret` goes into the QR link's fragment, `typedCode` is the `XXXXX-XXXXX` fallback. */
+export interface PairingCreated { id: string; secret: string; typedCode: string; expiresAt: string }
+/** `device` is the claiming phone's browser and OS, present from `claimed` on. `expiresAt` is the current state's deadline. */
+export interface PairingState { status: PairingStatus; expiresAt: string; device: string | null }
+/** What the phone learns by claiming: the confirmation code to type on the desktop and the journal it would join. */
+export interface PairingClaim { code: string; expiresAt: string; journal: { displayName: string; wallet: string } }
+export type PairingClaimRequest = { secret: string } | { typedCode: string }
+export type PairingCompletion =
+  | { status: 'waiting' }
+  | { status: 'signed-in'; session: SessionDto }
+  | { status: 'expired' | 'cancelled' | 'contested' }
 
 /** The tab's session: `X-Vessel-User` carries the user, `sessionId` names the session sign-out expects. */
 export interface SessionIdentity { userId: string; sessionId: string; generation?: SessionGeneration }
@@ -68,6 +85,18 @@ const codeCopy: Record<string, string> = {
   'request-too-large': 'This request is too large.',
   'rate-limited': 'Too many attempts. Wait a moment before trying again.',
   'identity-unavailable': 'Sign-in is unavailable right now. Try again shortly.',
+  'pairing-invalid': 'This code is not valid, was already used or has ended. Start again on your computer.',
+  'pairing-expired': 'This code expired. Start again on your computer.',
+  'pairing-code-invalid': 'That confirmation code is not right.',
+  'pairing-contested': 'Another device used this code first, so it was cancelled. Start again on your computer.',
+}
+
+/** The wrong-code message with the attempts the server says are left; the server cancels the pairing at zero. */
+export function pairingCodeMessage(error: ApiError): string {
+  const base = authErrorMessage('pairing-code-invalid')!
+  const left = error.attemptsLeft
+  if (left === undefined) return base
+  return left === 0 ? `${base} Too many wrong codes, so this request was cancelled.` : `${base} ${left} ${left === 1 ? 'attempt' : 'attempts'} left.`
 }
 
 /** Vessel's wording for an auth error code; the server sends stable codes and the browser owns the copy. */
@@ -97,7 +126,7 @@ export function isSession(v: unknown): v is SessionDto {
 function isSessionRow(v: unknown): v is SessionRow {
   return isRecord(v) && isGuid(v.id) && typeof v.current === 'boolean' && isUtc(v.createdAt) && isUtc(v.lastSeenAt) &&
     typeof v.remember === 'boolean' && isNullOr(v.userAgent, item => isNonBlankText(item, 80) && hasNoControlCharacters(item as string)) &&
-    isNullOr(v.walletAddress, isAddress)
+    isNullOr(v.walletAddress, isAddress) && (v.source === 'wallet' || v.source === 'pairing')
 }
 function isConfig(v: unknown): v is AuthConfig {
   return isRecord(v) && ['closed', 'invitation', 'allow-list', 'open'].includes(String(v.registration)) && typeof v.originAccepted === 'boolean'
@@ -112,6 +141,25 @@ function isVerifyResult(v: unknown): v is VerifyResult {
   if (v.status === 'signed-in') return isSession(v.session)
   return v.status === 'registration-required' && isText(v.registration, 512) && /^[\x21-\x7e]+$/.test(v.registration) &&
     typeof v.requiresInvitation === 'boolean' && isUtc(v.expiresAt)
+}
+const pairingStatuses: readonly string[] = ['pending', 'claimed', 'approved', 'completed', 'expired', 'cancelled', 'contested']
+export const pairingSecretPattern = /^[A-Za-z0-9_-]{43}$/
+const isDevice = (v: unknown) => isNonBlankText(v, 80) && hasNoControlCharacters(v as string)
+function isPairingCreated(v: unknown): v is PairingCreated {
+  return isRecord(v) && isGuid(v.id) && typeof v.secret === 'string' && pairingSecretPattern.test(v.secret) &&
+    typeof v.typedCode === 'string' && /^[0-9A-Z]{5}-[0-9A-Z]{5}$/.test(v.typedCode) && isUtc(v.expiresAt)
+}
+function isPairingState(v: unknown): v is PairingState {
+  return isRecord(v) && typeof v.status === 'string' && pairingStatuses.includes(v.status) && isUtc(v.expiresAt) && isNullOr(v.device, isDevice)
+}
+function isPairingClaim(v: unknown): v is PairingClaim {
+  return isRecord(v) && typeof v.code === 'string' && /^\d{6}$/.test(v.code) && isUtc(v.expiresAt) && isRecord(v.journal) &&
+    isDisplayName(v.journal.displayName) && isAddress(v.journal.wallet)
+}
+function isPairingCompletion(v: unknown): v is PairingCompletion {
+  if (!isRecord(v)) return false
+  if (v.status === 'signed-in') return isSession(v.session)
+  return v.status === 'waiting' || v.status === 'expired' || v.status === 'cancelled' || v.status === 'contested'
 }
 const isCreated = (v: unknown): v is { session: SessionDto } => isRecord(v) && isSession(v.session)
 const none = (v: unknown): v is undefined => v === undefined
@@ -147,6 +195,12 @@ export function createPublicAuthApi() {
       call('/api/auth/verify', { ...authRequest, method: 'POST', ...json(request), validate: isVerifyResult, ...withSignal(signal) }),
     register: (request: { registration: string; displayName: string; invitation?: string; remember: boolean }, signal?: AbortSignal) =>
       call('/api/auth/register', { ...authRequest, method: 'POST', ...json(request), validate: isCreated, ...withSignal(signal) }),
+    /** The phone redeems the secret from the QR (or the typed code) for a confirmation code. A second claim contests the pairing. */
+    claimPairing: (request: PairingClaimRequest, signal?: AbortSignal) =>
+      call('/api/auth/pairings/claim', { ...authRequest, method: 'POST', ...json(request), validate: isPairingClaim, ...withSignal(signal) }),
+    /** Polled by the phone with its binding cookie; `signed-in` sets the session cookie. */
+    completePairing: (request: { remember: boolean }, signal?: AbortSignal) =>
+      call('/api/auth/pairings/complete', { ...authRequest, method: 'POST', ...json(request), validate: isPairingCompletion, ...withSignal(signal) }),
   }
 }
 export type PublicAuthApi = ReturnType<typeof createPublicAuthApi>
@@ -181,6 +235,15 @@ export function createSessionAuthApi(identity: SessionIdentity, onUnauthorized?:
     updateWallet: (walletId: string, label: string | null) =>
       call(`/api/auth/wallets/${id(walletId)}`, { ...authRequest, method: 'PATCH', ...json({ label }), validate: isWallet }),
     removeWallet: (walletId: string) => call(`/api/auth/wallets/${id(walletId)}`, { ...authRequest, method: 'DELETE', validate: none }),
+    /** Needs a live `device.pair` grant (403 `step-up-required` otherwise); consumes it. */
+    createPairing: (signal?: AbortSignal) =>
+      call('/api/auth/pairings', { ...authRequest, method: 'POST', validate: isPairingCreated, ...withSignal(signal) }),
+    pairingStatus: (pairingId: string, signal?: AbortSignal) =>
+      call(`/api/auth/pairings/${id(pairingId)}`, { ...authRequest, validate: isPairingState, ...withSignal(signal) }),
+    approvePairing: (pairingId: string, code: string) =>
+      call(`/api/auth/pairings/${id(pairingId)}/approve`, { ...authRequest, method: 'POST', ...json({ code }), validate: none }),
+    cancelPairing: (pairingId: string) =>
+      call(`/api/auth/pairings/${id(pairingId)}`, { ...authRequest, method: 'DELETE', validate: none }),
   }
 }
 export type SessionAuthApi = ReturnType<typeof createSessionAuthApi>
