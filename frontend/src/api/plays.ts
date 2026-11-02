@@ -110,9 +110,11 @@ export interface PlanRevision {
   preflight?: PreflightCheck[] | null
 }
 /** The non-blocking checks shown at Plan it, in display order (phase 1, 1.5). */
-export const preflightCodes = ['priced-stops', 'allocations', 'thesis', 'risk', 'liquidation'] as const
+export const preflightCodes = ['priced-stops', 'allocations', 'thesis', 'risk', 'liquidation', 'loss-limit'] as const
 export type PreflightCode = typeof preflightCodes[number]
-export interface PreflightCheck { code: PreflightCode; outcome: 'passed' | 'skipped' | 'unknown' }
+/** `note` is the owner's optional cooldown note, only on a reached loss limit (Phase 2, item 10b). */
+export interface PreflightCheck { code: PreflightCode; outcome: 'passed' | 'skipped' | 'unknown'; note?: string }
+export const maxPreflightNote = 500
 /** One of the owner's recent next actions and the Play it was written for. */
 export interface NextAction { playId: string; title: string; nextAction: string; reviewedAtUtc: string | null }
 export interface StatusChange {
@@ -180,7 +182,8 @@ export const isSavedPlay = (v: unknown): v is SavedPlay => isRecord(v) && isPlay
   isRecord(v.drawings) && Object.values(v.drawings).every(Array.isArray) && isText(v.review, noteLength) &&
   (v.structuredReview == null || isStructuredReview(v.structuredReview))
 export const isPreflightCheck = (v: unknown): v is PreflightCheck => isRecord(v) && preflightCodes.includes(v.code as PreflightCode) &&
-  ['passed', 'skipped', 'unknown'].includes(v.outcome as string)
+  ['passed', 'skipped', 'unknown'].includes(v.outcome as string) &&
+  (v.note === undefined || v.code === 'loss-limit' && v.outcome === 'skipped' && isText(v.note, maxPreflightNote) && v.note.trim() !== '')
 export const isNextAction = (v: unknown): v is NextAction => isRecord(v) && isGuid(v.playId) && isText(v.title, 200) &&
   isText(v.nextAction, 4000) && v.nextAction.trim() !== '' && isNullOr(v.reviewedAtUtc, x => isTimestamp(x, timeLength))
 const isEvidenceAmount = (v: unknown) => typeof v === 'string' && /^-?[0-9]+(\.[0-9]+)?$/.test(v) && v.length <= 80

@@ -52,7 +52,7 @@ function SuggestionRow({ title, value, current, label, onAccept, testId, childre
  * is stale or could not be loaded, rows only inform: nothing offers Accept until a read succeeds.
  */
 export function SuggestionsPanel({ plan, sizing, status = 'ready', onRetry, draft, leverage, units, onSize, onLevel, onLeverage, onRiskChange,
-  defaultOpen = false }: {
+  defaultOpen = false, lossLimit = null }: {
   /** Null only when the record could not be loaded. */
   plan: PlanSuggestions | null
   sizing: SizingDocument | null
@@ -66,6 +66,8 @@ export function SuggestionsPanel({ plan, sizing, status = 'ready', onRetry, draf
   onLeverage: (leverage: number) => void
   onRiskChange?: ((riskPercent: string) => Promise<void>) | undefined
   defaultOpen?: boolean
+  /** A reached soft loss limit (Phase 2, item 10b), always visible; nothing is blocked. */
+  lossLimit?: string | null
 }) {
   const id = useId()
   const [open, setOpen] = useState(defaultOpen)
@@ -83,6 +85,7 @@ export function SuggestionsPanel({ plan, sizing, status = 'ready', onRetry, draf
       <span className="sizing-suggestions-title"><strong>Suggestions</strong></span>
     </div>
     {freshness}
+    {lossLimit && <p className="sizing-suggestions-loss" role="note">{lossLimit}</p>}
   </section>
 
   const count = suggestionCount(plan)
@@ -115,6 +118,7 @@ export function SuggestionsPanel({ plan, sizing, status = 'ready', onRetry, draf
       <ChevronDown size={16} aria-hidden="true" className="sizing-suggestions-chevron" />
     </button>
     {freshness}
+    {lossLimit && <p className="sizing-suggestions-loss" role="note">{lossLimit}</p>}
     {open && <div id={`${id}-body`} className="sizing-suggestions-body">
       <div className="sizing-suggestions-list">
         <h3>For this plan</h3>

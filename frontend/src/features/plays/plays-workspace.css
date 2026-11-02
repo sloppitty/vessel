@@ -765,6 +765,8 @@
 .plays-page .sizing-suggestions-headline { margin-left: auto; overflow: hidden; color: var(--warning); font-size: var(--text-xs); font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .plays-page .sizing-suggestions-unavailable { cursor: default; }
 /* A stale or missing record: the block says so beside Retry, collapsed or open. */
+/* Phase 2, item 10b: a reached soft loss limit, always visible, theme tokens only. */
+.plays-page .sizing-suggestions-loss { margin: 0; padding: 0 16px 11px 44px; color: var(--warning); font-size: var(--text-xs); line-height: 1.5; }
 .plays-page .sizing-suggestions-freshness { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 0 16px 11px 44px; color: var(--muted-foreground); font-size: var(--text-xs); line-height: 1.5; }
 .plays-page .sizing-suggestions-freshness button { height: 24px; padding: 0 10px; border-color: color-mix(in srgb, var(--warning) 50%, var(--border)); color: var(--warning); font-size: var(--text-xs); }
 .plays-page .sizing-suggestions-chevron { flex: none; color: var(--warning); transition: transform .15s; }

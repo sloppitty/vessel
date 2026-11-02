@@ -43,8 +43,40 @@ public sealed record OpenRiskDto(DateTimeOffset AsOfUtc, string Scope, OpenRiskB
     OpenRiskProtectionDto Protection, IReadOnlyList<OpenRiskPlayDto> Plays, string? LimitPercent, string Notice);
 
 /// <summary>The owner's soft risk limits; null is unset.</summary>
-public sealed record RiskSettingsDto(string? OpenRiskLimitPercent);
-public sealed record UpdateRiskSettingsRequest(string? OpenRiskLimitPercent);
+/// <summary>The soft limits; each is null until the owner sets it. Loss limits are in R (Phase 2, item 10b).</summary>
+public sealed record RiskSettingsDto(string? OpenRiskLimitPercent, string? DailyLossLimitR = null, string? WeeklyLossLimitR = null);
+/// <summary>
+/// The soft limits to save. A property present replaces its limit, null clearing it; a property left out keeps the stored
+/// limit, so an older client that knows only the open-risk limit never clears the loss limits (Sol round 1 on 10b).
+/// </summary>
+public sealed class UpdateRiskSettingsRequest
+{
+    private readonly string? open, daily, weekly;
+
+    public UpdateRiskSettingsRequest() { }
+    public UpdateRiskSettingsRequest(string? openRiskLimitPercent) => OpenRiskLimitPercent = openRiskLimitPercent;
+    public UpdateRiskSettingsRequest(string? openRiskLimitPercent, string? dailyLossLimitR, string? weeklyLossLimitR) : this(openRiskLimitPercent)
+    {
+        DailyLossLimitR = dailyLossLimitR;
+        WeeklyLossLimitR = weeklyLossLimitR;
+    }
+
+    public string? OpenRiskLimitPercent { get => open; init { open = value; HasOpenRiskLimit = true; } }
+    public string? DailyLossLimitR { get => daily; init { daily = value; HasDailyLossLimit = true; } }
+    public string? WeeklyLossLimitR { get => weekly; init { weekly = value; HasWeeklyLossLimit = true; } }
+    [JsonIgnore] public bool HasOpenRiskLimit { get; private init; }
+    [JsonIgnore] public bool HasDailyLossLimit { get; private init; }
+    [JsonIgnore] public bool HasWeeklyLossLimit { get; private init; }
+}
+
+/// <summary>
+/// One reporting day or week's loss (Phase 2, item 10b): the exact sum of estimated R of real Plays closed in it
+/// (<paramref name="NetR"/>, "0" with none), how many have R and how many have none, which are never counted as zero, and
+/// whether the known loss reached the limit.
+/// </summary>
+public sealed record LossWindowDto(string Start, DateTimeOffset FromUtc, DateTimeOffset ToUtc, string? LimitR, string NetR, int WithR,
+    int WithoutR, bool Breached);
+public sealed record LossLimitsDto(LossWindowDto Day, LossWindowDto Week, string TimeZone, string WeekStart, string Notice);
 
 /// <summary>A stop of one entry, as the editor holds it: a price or a percent return on margin, and its share of the entry.</summary>
 public sealed record RiskStopDto(string Id, string Unit, string Value, string Share);

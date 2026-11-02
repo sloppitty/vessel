@@ -1,4 +1,4 @@
-import { isCount, isGuid, isIsoTimestamp, isListOf, isNullOr, isRecord, isSummaryDecimal, isText } from './guards'
+import { isCount, isGuid, isIsoTimestamp, isListOf, isNullOr, isRecord, isSummaryDecimal, isText, isTimestamp } from './guards'
 
 /**
  * Open risk (heat) across the owner's Planned and Open real Plays (`GET /api/risk/open`, Phase 2 item 1). Amounts are
@@ -41,7 +41,17 @@ export interface OpenRisk {
   limitPercent: string | null
   notice: string
 }
-export interface RiskSettings { openRiskLimitPercent: string | null }
+/** The soft limits, each null until set. Loss limits are in R and absent from servers before Phase 2, item 10b. */
+export interface RiskSettings { openRiskLimitPercent: string | null; dailyLossLimitR?: string | null; weeklyLossLimitR?: string | null }
+/**
+ * One reporting day or week's loss (Phase 2, item 10b): the exact sum of estimated R of real Plays closed in it, how many
+ * have R and how many have none (never counted as zero), and whether the known loss reached the limit.
+ */
+export interface LossWindow {
+  start: string; fromUtc: string; toUtc: string; limitR: string | null; netR: string; withR: number; withoutR: number; breached: boolean
+}
+export interface LossLimits { day: LossWindow; week: LossWindow; timeZone: string; weekStart: 'monday' | 'sunday'; notice: string }
+export const lossLimitsPath = '/api/risk/loss'
 
 /** The parts of a plan open risk reads; numbers are the editor's text and may be blank in a Draft. */
 export interface RiskPlan {
@@ -80,7 +90,15 @@ export const isOpenRisk = (v: unknown, scope: string): v is OpenRisk => isRecord
   v.protection.unverified === v.plays.filter(p => unverifiedStates.includes((p as OpenRiskPlay).protection ?? '')).length &&
   isNullOr(v.limitPercent, isSummaryDecimal) && isText(v.notice, 4000)
 
-export const isRiskSettings = (v: unknown): v is RiskSettings => isRecord(v) && isNullOr(v.openRiskLimitPercent, isSummaryDecimal)
+export const isRiskSettings = (v: unknown): v is RiskSettings => isRecord(v) && isNullOr(v.openRiskLimitPercent, isSummaryDecimal) &&
+  (v.dailyLossLimitR === undefined || isNullOr(v.dailyLossLimitR, isSummaryDecimal)) &&
+  (v.weeklyLossLimitR === undefined || isNullOr(v.weeklyLossLimitR, isSummaryDecimal))
+const lossWindow = (v: unknown): v is LossWindow => isRecord(v) && typeof v.start === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.start) &&
+  isTimestamp(v.fromUtc, 64) && isTimestamp(v.toUtc, 64) && Date.parse(v.fromUtc) < Date.parse(v.toUtc) &&
+  isNullOr(v.limitR, isSummaryDecimal) && isSummaryDecimal(v.netR) && isCount(v.withR) && isCount(v.withoutR) &&
+  typeof v.breached === 'boolean' && (!v.breached || v.limitR !== null) && (v.withR > 0 || v.netR === '0')
+export const isLossLimits = (v: unknown): v is LossLimits => isRecord(v) && lossWindow(v.day) && lossWindow(v.week) &&
+  isText(v.timeZone, 64) && v.timeZone.length > 0 && (v.weekStart === 'monday' || v.weekStart === 'sunday') && isText(v.notice, 4000)
 
 export const isOpenRiskPreview = (v: unknown, request: OpenRiskPreviewRequest): v is OpenRiskPreview => isRecord(v) &&
   v.playId === request.playId && v.direction === request.plan.direction && risk(v.riskUsd) && reason(v.reason) &&

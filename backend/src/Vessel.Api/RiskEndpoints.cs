@@ -15,6 +15,8 @@ public static class RiskEndpoints
         api.MapGet("/open", async (string? scope, OpenRiskService service, CancellationToken ct) => Results.Ok(await service.GetAsync(scope, ct)));
         api.MapPost("/open/preview", async (OpenRiskPreviewRequest request, OpenRiskService service, CancellationToken ct) =>
             Results.Ok(await service.PreviewAsync(request, ct))).WithBodyLimit(PreviewBodyBytes, "Open-risk preview is too large.");
+        // Phase 2, item 10b: today's and this week's loss in R against the soft limits, in the reporting zone.
+        api.MapGet("/loss", async (LossLimitService service, CancellationToken ct) => Results.Ok(await service.GetAsync(ct)));
         api.MapGet("/settings", async (OpenRiskService service, CancellationToken ct) => Results.Ok(await service.SettingsAsync(ct)));
         api.MapPut("/settings", async (UpdateRiskSettingsRequest request, OpenRiskService service, CancellationToken ct) =>
             Results.Ok(await service.UpdateSettingsAsync(request, ct))).WithBodyLimit(SettingsBodyBytes, "Risk settings request is too large.");

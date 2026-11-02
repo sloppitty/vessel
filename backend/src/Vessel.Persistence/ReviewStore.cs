@@ -47,8 +47,8 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
         // The window's own rule: a rolling period's (from, now], or a reporting week's [from, to) (Phase 2, item 2).
         var windowed = fills;
         if (window.From is { } from)
-            windowed = window.Week is null ? windowed.Where(f => f.OccurredAtUtc > from) : windowed.Where(f => f.OccurredAtUtc >= from);
-        if (window.Week is not null)
+            windowed = window.HalfOpen ? windowed.Where(f => f.OccurredAtUtc >= from) : windowed.Where(f => f.OccurredAtUtc > from);
+        if (window.HalfOpen)
         {
             var to = window.To;
             windowed = windowed.Where(f => f.OccurredAtUtc < to);

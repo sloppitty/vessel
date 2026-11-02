@@ -6,6 +6,7 @@ import type { WorkspaceApi } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
+import { lossLimitsChanged } from '@/features/plays/loss-limits'
 import './reporting-settings.css'
 
 type ReportingSettingsApi = Pick<WorkspaceApi, 'reportingSettings' | 'updateReportingSettings'>
@@ -57,6 +58,8 @@ export function ReportingSettings({ api }: { api: ReportingSettingsApi }) {
     setSaving(true)
     try {
       const settings = await api.updateReportingSettings({ timeZone: zone, weekStart: current.draft.weekStart })
+      // The loss limits' days and weeks follow this setting.
+      lossLimitsChanged()
       if (!controller.signal.aborted) setLoaded({ ...current, saved: settings, draft: { timeZone: settings.timeZone, weekStart: settings.weekStart },
         error: null, message: 'Reporting setting saved.' })
     } catch (cause) {

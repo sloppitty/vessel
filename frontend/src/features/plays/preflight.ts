@@ -18,6 +18,7 @@ export const preflightLabels: Record<PreflightCode, string> = {
   thesis: 'Thesis and invalidation are written',
   risk: 'Risk within the sizing setting at the current ladder level',
   liquidation: 'The estimated liquidation lies beyond every stop',
+  'loss-limit': "Today's and this week's losses within your loss limits",
 }
 
 export interface PreflightInput {
@@ -28,6 +29,8 @@ export interface PreflightInput {
   sizing: SizingDocument | null
   /** The estimated liquidation price, or null when it cannot be estimated. */
   liquidation: number | null
+  /** The soft loss limits' check (Phase 2, item 10b), or null while no limit is set. */
+  lossLimit?: PreflightCheck | null
 }
 
 const hundred = exactInteger(100)
@@ -38,7 +41,7 @@ const total = (shares: readonly string[]): Exact | null => shares.reduce<Exact |
 const isHundred = (shares: readonly string[]) => { const sum = total(shares); return sum !== null && exactCompare(sum, hundred) === 0 }
 
 /** Every check, in display order, as it stands for this plan now. */
-export function preflightChecks({ draft, risk, sizing, liquidation }: PreflightInput): PreflightCheck[] {
+export function preflightChecks({ draft, risk, sizing, liquidation, lossLimit = null }: PreflightInput): PreflightCheck[] {
   const leverage = positivePlanNumber(draft.leverage) ?? 1
   const outcome = (code: PreflightCode, value: PreflightCheck['outcome']): PreflightCheck => ({ code, outcome: value })
   // Each priced entry needs a stop that resolves to a price. Shares are the allocation check's concern, so an entry with
@@ -65,6 +68,7 @@ export function preflightChecks({ draft, risk, sizing, liquidation }: PreflightI
     outcome('thesis', draft.notes.thesis.trim() && draft.notes.invalidation.trim() ? 'passed' : 'skipped'),
     outcome('risk', riskOutcome),
     outcome('liquidation', liquidationOutcome),
+    ...(lossLimit ? [lossLimit] : []),
   ]
 }
 

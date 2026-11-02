@@ -30,7 +30,7 @@ import {
 } from './plays'
 import { isSizingDocument, type SizingDocument } from './sizing'
 import { attachmentName, type DownloadedFile } from '@/lib/download'
-import { isOpenRisk, isOpenRiskPreview, isRiskSettings, openRiskPath, type OpenRisk, type OpenRiskPreview, type OpenRiskPreviewRequest, type RiskSettings } from './risk'
+import { isLossLimits, isOpenRisk, isOpenRiskPreview, isRiskSettings, lossLimitsPath, openRiskPath, type LossLimits, type OpenRisk, type OpenRiskPreview, type OpenRiskPreviewRequest, type RiskSettings } from './risk'
 import { isReportingSettings, reportingSettingsPath, type ReportingSettings, type WeekStart } from './reporting'
 import { isReviewDocument, reviewPath, isReviewExclusions, reviewExclusionsPath, isReviewProcessPage, reviewProcessPath, type ReviewDocument, type ReviewQuery, type ReviewExclusions, type ReviewProcessPage, type ReviewProcessSelection } from './review'
 import {
@@ -393,6 +393,8 @@ export interface WorkspaceApi {
   riskSettings(signal?: AbortSignal): Promise<RiskSettings>
   /** Saves the open-risk soft limit (a decimal percentage above 0 and at most 100), or clears it with null. */
   updateRiskSettings(settings: RiskSettings): Promise<RiskSettings>
+  /** Today's and this week's loss in R against the soft limits (Phase 2, item 10b). Real only. */
+  lossLimits(signal?: AbortSignal): Promise<LossLimits>
   /** The owner's reporting zone and week start (Phase 2, item 2); mode-neutral, so Paper reads and saves it too. */
   reportingSettings(signal?: AbortSignal): Promise<ReportingSettings>
   updateReportingSettings(settings: { timeZone: string; weekStart: WeekStart }): Promise<ReportingSettings>
@@ -868,7 +870,9 @@ export function createWorkspaceApi(credentials: SessionCredentials, onAuthFailur
       method: 'POST', body: JSON.stringify(request), ...withSignal(signal) }),
     riskSettings: signal => call('/api/risk/settings', { ...playRequest, validate: isRiskSettings, ...withSignal(signal) }),
     updateRiskSettings: settings => call('/api/risk/settings', { ...playRequest, validate: isRiskSettings, method: 'PUT',
-      body: JSON.stringify({ openRiskLimitPercent: settings.openRiskLimitPercent }) }),
+      body: JSON.stringify({ openRiskLimitPercent: settings.openRiskLimitPercent, dailyLossLimitR: settings.dailyLossLimitR ?? null,
+        weeklyLossLimitR: settings.weeklyLossLimitR ?? null }) }),
+    lossLimits: signal => call(lossLimitsPath, { ...playRequest, validate: isLossLimits, ...withSignal(signal) }),
     reportingSettings: signal => call(reportingSettingsPath, { ...playRequest, validate: isReportingSettings, ...withSignal(signal) }),
     updateReportingSettings: settings => call(reportingSettingsPath, { ...playRequest, validate: isReportingSettings, method: 'PUT',
       body: JSON.stringify({ timeZone: settings.timeZone, weekStart: settings.weekStart }) }),
