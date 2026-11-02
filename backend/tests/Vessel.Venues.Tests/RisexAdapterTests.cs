@@ -177,6 +177,22 @@ public sealed partial class RisexAdapterTests
     }
 
     [Fact]
+    public async Task Identical_copies_of_a_trade_collapse_and_a_changed_copy_reaches_the_store()
+    {
+        // Phase 2, item 14c, Sol round 1: the store records a changed copy as a conflict, so the adapter must not drop it.
+        var history = JsonNode.Parse(Trades)!;
+        var trades = history["data"]!["trades"]!.AsArray();
+        trades.Add(JsonNode.Parse(trades[0]!.ToJsonString()));
+        var identical = await Reader(new() { ["/v1/trade-history"] = history.ToJsonString() }).Reader.ReadAsync(Address, default);
+        Assert.Single(identical.Fills, f => f.SourceFillId == "0xopen");
+        var changed = JsonNode.Parse(trades[0]!.ToJsonString())!;
+        changed["price"] = "86001";
+        trades.Add(changed);
+        var result = await Reader(new() { ["/v1/trade-history"] = history.ToJsonString() }).Reader.ReadAsync(Address, default);
+        Assert.Equal([86000.5m, 86001m], result.Fills.Where(f => f.SourceFillId == "0xopen").Select(f => f.Price).Order());
+    }
+
+    [Fact]
     public async Task Every_history_page_shares_one_end_cut_and_a_later_trade_waits_for_the_next_refresh()
     {
         // Phase 2, item 14a (F-13, probe V9): a trade arriving between pages can no longer shift page 2.

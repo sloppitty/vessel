@@ -1,3 +1,4 @@
+import type { PriceStep } from '@/lib/price-step'
 import type { CandleSpan } from './intervals'
 import type { DisplayZone } from '@/lib/display-zone'
 import type { ChartDrawing, DrawingKind } from './drawings'
@@ -31,7 +32,7 @@ export interface PriceOverlay {
   emphasis: 'selected' | 'normal'
   draggable: boolean
   /** Venue tick for suppressing equivalent drag publications; absent uses five significant figures. */
-  priceStep?: number | null
+  priceStep?: PriceStep
   /**
    * True when the level has no confirmed counterpart, e.g. a planned stop not seen resting at the venue: drawn with a
    * hollow tag and a fainter line. False or absent draws it as usual.

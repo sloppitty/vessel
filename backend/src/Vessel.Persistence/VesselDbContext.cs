@@ -32,6 +32,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<ImportedFill> Fills => Set<ImportedFill>();
     public DbSet<LeverageObservation> LeverageObservations => Set<LeverageObservation>();
     public DbSet<RiskObservation> RiskObservations => Set<RiskObservation>();
+    public DbSet<FillImportConflict> FillImportConflicts => Set<FillImportConflict>();
     public DbSet<FundingPayment> FundingPayments => Set<FundingPayment>();
     public DbSet<AccountFundingState> FundingStates => Set<AccountFundingState>();
     public DbSet<PlayEvidence> Evidence => Set<PlayEvidence>();

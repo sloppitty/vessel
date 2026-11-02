@@ -73,7 +73,30 @@ export interface VenueInstrument {
   venueContractId?: string | null
   /** Maintenance margin as a fraction of notional when the venue states it; liquidation estimates otherwise assume one. */
   maintenanceMarginFraction?: number | null
+  /** A significant-figure venue's price decimal cap (Hyperliquid: 6 − szDecimals; Phase 2, item 14b). */
+  maxPriceDecimals?: number | null
 }
+/** The venue fields compared when a retained fill ID is reported again (`FillConflictFields` on the server). */
+export const fillConflictFields = ['side', 'price', 'quantity', 'fee', 'feeToken', 'closedPnl', 'time', 'orderId', 'transactionHash',
+  'venueContract', 'leverage', 'direction'] as const
+export type FillConflictField = typeof fillConflictFields[number]
+export interface FillConflict {
+  contractId: string
+  sourceFillId: string
+  /** Only the names of the fields that differed; never either value. */
+  fields: FillConflictField[]
+  firstSeenAtUtc: string
+  lastSeenAtUtc: string
+  reports: number
+}
+export interface FillConflicts { total: number; recent: FillConflict[]; notice: string }
+const isFillConflict = (v: unknown): v is FillConflict => isRecord(v) && isFilledText(v.contractId, 128) && isFilledText(v.sourceFillId, 128) &&
+  Array.isArray(v.fields) && v.fields.length > 0 && v.fields.every(f => (fillConflictFields as readonly unknown[]).includes(f)) &&
+  new Set(v.fields).size === v.fields.length && isTimestamp(v.firstSeenAtUtc) && isTimestamp(v.lastSeenAtUtc) &&
+  Date.parse(v.firstSeenAtUtc) <= Date.parse(v.lastSeenAtUtc) && isPositiveCount(v.reports)
+const isFillConflicts = (v: unknown): v is FillConflicts => isRecord(v) && isCount(v.total) && Array.isArray(v.recent) &&
+  v.recent.length <= 50 && v.recent.length <= v.total && v.recent.every(isFillConflict) && isText(v.notice, 1000)
+
 export interface InstrumentCatalog {
   venueId: string
   marketScope: 'perpetuals'
@@ -313,6 +336,8 @@ export interface WorkspaceApi {
   deleteAccount(id: string): Promise<void>
   snapshot(id: string, signal?: AbortSignal): Promise<AccountSnapshot | null>
   fills(id: string, signal?: AbortSignal): Promise<ImportedFill[]>
+  /** Retained fills the venue later reported with different values (Phase 2, item 14c); the first copy is kept. */
+  importConflicts(id: string, signal?: AbortSignal): Promise<FillConflicts>
   sync(id: string, signal?: AbortSignal): Promise<BrokerAccount>
   /** One view of saved Plays: Drafts and In progress in full (at most 200), the others paged. */
   plays(query: PlayListQuery, signal?: AbortSignal): Promise<PlayList>
@@ -385,7 +410,8 @@ const instrumentCatalog = (v: unknown): v is InstrumentCatalog => isRecord(v) &&
     (i.category == null || isText(i.category, 32)) &&
     (i.venueContractId == null || isText(i.venueContractId, 128)) &&
     (i.maintenanceMarginFraction == null || typeof i.maintenanceMarginFraction === 'number' && i.maintenanceMarginFraction > 0 &&
-      i.maintenanceMarginFraction < 1)) &&
+      i.maintenanceMarginFraction < 1) &&
+    (i.maxPriceDecimals == null || isCount(i.maxPriceDecimals) && i.maxPriceDecimals <= 28)) &&
   new Set(v.instruments.map((i: VenueInstrument) => i.contractId)).size === v.instruments.length &&
   (v.scope !== 'manual' || v.instruments.length === 0) && isText(v.notice, 1000)
 const candle = (v: unknown): v is VenueCandle => isRecord(v) && isPositiveCount(v.openTime) && isPositiveCount(v.closeTime) &&
@@ -513,7 +539,7 @@ export function createWorkspaceApi(credentials: SessionCredentials, onAuthFailur
   }, () => emitApiEvent(api, { type: 'session-changed' }))
   // Bind a mode to the client, not mutable global state: late responses can only return to their original shell.
   const call: typeof rawCall = async (path, options) => {
-    if (tradingMode === 'paper' && /^\/api\/(?:accounts\/[^/?]+\/(?:sync|fills|facts|credential|monitor|discrepancies|market-context|market-stream|stream)|plays\/[^/?]+\/(?:manual-executions|execution|discrepancies)|plays\/retrospective|monitor|events|venues|risk)(?:[/?]|$)/.test(path)) {
+    if (tradingMode === 'paper' && /^\/api\/(?:accounts\/[^/?]+\/(?:sync|fills|facts|import-conflicts|credential|monitor|discrepancies|market-context|market-stream|stream)|plays\/[^/?]+\/(?:manual-executions|execution|discrepancies)|plays\/retrospective|monitor|events|venues|risk)(?:[/?]|$)/.test(path)) {
       throw new ApiError('unavailable', 'This real-account feature is unavailable in Paper mode.')
     }
     const scoped = /^\/api\/(?:overview|accounts|portfolios|plays|activity|review|sizing|evidence)(?:[/?]|$)/.test(path)
@@ -918,6 +944,7 @@ export function createWorkspaceApi(credentials: SessionCredentials, onAuthFailur
     },
     snapshot: (id, signal) => call(`${accountPath(id)}/snapshot`, { ...workspaceRequest, validate: snapshot, ...withSignal(signal) }),
     fills: (id, signal) => call(`${accountPath(id)}/fills`, { ...workspaceRequest, validate: (v): v is ImportedFill[] => Array.isArray(v) && v.every(isImportedFill), ...withSignal(signal) }),
+    importConflicts: (id, signal) => call(`${accountPath(id)}/import-conflicts`, { ...workspaceRequest, validate: isFillConflicts, ...withSignal(signal) }),
     // History, funding and order retention each allow 20s; leave room for account locking and persistence.
     sync: (id, signal) => call(`${accountPath(id)}/sync`, { ...workspaceRequest, validate: account, method: 'POST', ...withSignal(signal), timeout: 90_000, badGateway: 'The venue refresh failed. Previous account data is still available.' }),
   }

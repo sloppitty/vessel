@@ -1,4 +1,5 @@
 import type { PriceOverlay } from '@/components/chart/types'
+import { decimalCapOf, significantDecimals, tickOf, type PriceStep } from '@/lib/price-step'
 import { createExit, type DraftEntry, type DraftExit, type PlayDraft } from './draft'
 import {
   exactAbs, exactAdd, exactDecimal, exactDiv, exactInteger, exactMul, exactNumber, exactSignOf, exactSub, type Exact,
@@ -70,11 +71,14 @@ export function exactLevelPrice(entry: DraftEntry, level: DraftExit, kind: ExitK
  * within one step of the fifth significant figure of the planned price (1 at 84,541; 0.01 at 100), or within one tick
  * when the instrument's tick is coarser.
  */
-export function pricesMatch(actual: Exact, planned: Exact, tick: number | null = null) {
+export function pricesMatch(actual: Exact, planned: Exact, rule: PriceStep = null) {
   if (exactSignOf(planned) <= 0) return false
   const magnitude = Math.floor(Math.log10(exactNumber(planned))) - 4
   let step = magnitude >= 0 ? exactInteger(10n ** BigInt(magnitude)) : { n: 1n, d: 10n ** BigInt(-magnitude) }
-  const coarser = tick !== null && tick > 0 ? exactDecimal(formatPlanNumber(tick, 20)) : null
+  // A tick, or a significant-figure venue's last allowed decimal (Phase 2, item 14b), when it is coarser.
+  const tick = tickOf(rule)
+  const cap = decimalCapOf(rule)
+  const coarser = tick !== null ? exactDecimal(formatPlanNumber(tick, 20)) : cap !== null ? { n: 1n, d: 10n ** BigInt(cap) } : null
   if (coarser !== null && exactSignOf(exactSub(coarser, step)) > 0) step = coarser
   return exactSignOf(exactSub(step, exactAbs(exactSub(actual, planned)))) >= 0
 }
@@ -165,19 +169,20 @@ export function stepDecimals(step: number) {
 
 /**
  * A chart price as the venue would accept it: rounded to the instrument's tick when there is one, otherwise to
- * five significant figures (the rule of venues without ticks), at most eight decimals, no exponent.
+ * five significant figures (the rule of venues without ticks; any integer is allowed), at most eight decimals and at
+ * most the venue's decimal cap, no exponent.
  */
-export function formatDraggedPrice(price: number, step?: number | null) {
-  if (step != null && step > 0) {
-    const places = stepDecimals(step)
-    return formatPlanNumber(Math.round(price / step) * step, places)
+export function formatDraggedPrice(price: number, step?: PriceStep) {
+  const tick = tickOf(step)
+  if (tick !== null) {
+    const places = stepDecimals(tick)
+    return formatPlanNumber(Math.round(price / tick) * tick, places)
   }
-  const decimals = Math.min(8, Math.max(0, 4 - Math.floor(Math.log10(price))))
-  return formatPlanNumber(price, decimals)
+  return formatPlanNumber(price, significantDecimals(price, step))
 }
 
 /** A chart drag chooses a fixed price, switching percentage stops and targets to price units. */
-export function applyLevelDrag(entries: readonly DraftEntry[], id: string, price: number, step?: number | null): DraftEntry[] {
+export function applyLevelDrag(entries: readonly DraftEntry[], id: string, price: number, step?: PriceStep): DraftEntry[] {
   const ref = parseOverlayId(id)
   if (!ref || !Number.isFinite(price) || price <= 0) return [...entries]
   return entries.map(entry => {
@@ -205,7 +210,7 @@ export function overlayPrice(entry: DraftEntry, id: string, direction: PlayDraft
  * Puts a stop or target at `price`: fills the first blank one of that kind, or adds another. A new
  * level is in price units; the first one of its kind closes the whole entry.
  */
-export function placeExit(entry: DraftEntry, kind: ExitKind, price: number, step?: number | null): DraftEntry {
+export function placeExit(entry: DraftEntry, kind: ExitKind, price: number, step?: PriceStep): DraftEntry {
   const exits = exitsOf(entry, kind)
   const value = formatDraggedPrice(price, step)
   const blank = exits.find(exit => exit.value.trim() === '')
@@ -214,13 +219,13 @@ export function placeExit(entry: DraftEntry, kind: ExitKind, price: number, step
 }
 
 /** Sets an entry price, or a stop or target as `placeExit` does, from a price picked on the chart. */
-export function placeLevel(entry: DraftEntry, kind: 'entry' | ExitKind, price: number, step?: number | null): DraftEntry {
+export function placeLevel(entry: DraftEntry, kind: 'entry' | ExitKind, price: number, step?: PriceStep): DraftEntry {
   if (!Number.isFinite(price) || price <= 0) return entry
   return kind === 'entry' ? { ...entry, price: formatDraggedPrice(price, step) } : placeExit(entry, kind, price, step)
 }
 
 /** Adds a stop or target a step beyond the last one, or null without an entry price. */
-export function addChartExit(entry: DraftEntry, kind: ExitKind, direction: PlayDraft['direction'], leverage = 1, step?: number | null): DraftEntry | null {
+export function addChartExit(entry: DraftEntry, kind: ExitKind, direction: PlayDraft['direction'], leverage = 1, step?: PriceStep): DraftEntry | null {
   const entryPrice = positive(entry.price)
   if (entryPrice === null) return null
   const plotted = exitsOf(entry, kind).filter(exit => levelPrice(entryPrice, exit, kind, direction, leverage) !== null).length

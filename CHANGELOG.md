@@ -41,6 +41,12 @@
 
 ### Fixed
 
+- When a venue later reports a retained fill with different values, Vessel keeps the first
+  copy and lists the fill and the fields that differed in Account detail.
+- Hyperliquid: chart and suggestion prices follow the venue's decimal limit, so a planned
+  low-priced level matches the order the venue accepts. A wallet read failure on a
+  default-mode account no longer blocks the perpetuals refresh; the account balance shows as
+  unknown until the wallet is read again.
 - RISEx: history pages share one fixed end time, so new trades cannot shift them, and
   the history notice counts trades on unrecognized markets.
 

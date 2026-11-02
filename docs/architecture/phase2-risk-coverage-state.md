@@ -558,3 +558,85 @@ October 21, 2026.
   an omission, and that net-of-fee handling and the history-gap rule are
   unchanged.
 - **Check.** `scripts/check.sh` passed on `ddf801e7`: backend 4,094 passed, 5 skipped; frontend 177 files and 4,085 tests.
+
+**14b. Hyperliquid.** Implemented on `t3/phase2-hyperliquid-robustness`.
+- **F-11 (probe C9).** Instruments state `MaxPriceDecimals` (`6 − szDecimals`).
+  - Matching and the monitor's drift and level checks take one unit of the last allowed decimal as a
+    minimum step. A planned 0.051234 at `szDecimals = 1` now matches an order at 0.05123.
+  - The browser's chart and suggestion rounding keep five significant figures within the cap.
+  - Prices of six digits or more stay whole numbers.
+  - Nothing becomes stricter, and typed prices are kept as entered.
+- **F-14 (probe V6).** On separate-ledger accounts (`default`, `disabled`, `dexAbstraction`) a failed,
+  dropped or malformed wallet read degrades only the wallet.
+  - Perps and fills still apply, and the last observed wallet is kept with its own read time.
+  - The account mode read with the perps is kept even when the wallet failed, so availability
+    follows the current mode.
+  - The balance is unknown until a wallet is read with the perps again. Separate ledgers add up only
+    when the wallet was read with the perps or after them: an older wallet could hold funds since
+    moved into perps. Account detail shows the wallet's own read time.
+  - Unified and portfolio-margin accounts, rate limits and the shared deadline still fail the read.
+- **Tests.**
+  - `PriceRuleTests` (2, one on PostgreSQL).
+  - Wallet degrade cases, the stale-wallet balance, and the transfer case on PostgreSQL.
+  - `price-step.test.ts` and the Account detail stale-wallet note.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `fd157150`. Three findings, all fixed in
+  `68b8933d`:
+  - A dropped connection or a malformed wallet body escaped the wallet
+    boundary and discarded the perps and fills already read. They degrade the
+    wallet like an invalid response; a rate limit, cancellation or the read's
+    deadline still stops the read.
+  - **High.** A kept wallet looked current and could count funds twice: with
+    1,000 in the wallet moved into perps and the next wallet read failing, the
+    balance read 2,000. Separate ledgers now add up only when the wallet was
+    read with the perps or after them; otherwise the balance is unknown, and
+    Account detail shows the wallet's own read time.
+  - **High.** The account mode lived only in the wallet, so a failed wallet
+    read kept the old mode and its stale availability. The mode read with the
+    perps is kept on its own.
+
+  Sol confirmed that the decimal cap reaches instruments, matching, the
+  monitor's checks and the browser's rounding without venue-name checks, that
+  typed levels are never rewritten, and that unknown modes, unified and
+  portfolio-margin accounts, rate limits and deadlines still fail the read.
+- **Check.** `scripts/check.sh` passed on `b91d8ea9`: backend 4,106 passed, 5 skipped; frontend 178 files and 4,090 tests.
+
+**14c. Fill conflicts (F-12, probe V10).** Implemented on `t3/phase2-fill-conflicts`.
+- **The rule.** A retained fill ID reported again with different venue facts keeps its first copy,
+  never overwritten.
+  - It is recorded in `fill_import_conflicts` (migration `20261021180627_FillImportConflicts`), one row
+    per fill, with the differing field names only, first and last seen, and a report count.
+  - The venue's direction wording is compared. Vessel's own readings are not: canonical label,
+    position effect and bases.
+  - A changed later copy within one read is compared with the copy stored from it, and RISEx
+    collapses only identical copies.
+  - A venue contract or leverage newly stated where none was is not a change.
+- **The read.** `GET /api/accounts/{id}/import-conflicts` returns the count and the latest 50. A
+  disabled account returns none, and a paper request gets 409.
+- **The page.** Account detail shows them only when there are some.
+- **Lifecycle.** Account deletion removes them, and the fill foreign key cascades. The owner inventory
+  already reaches them through `imported_fills`.
+- **Tests.**
+  - `FillConflictPostgresTests` (4), and a RISEx adapter case for identical and changed copies.
+  - The isolation case in both auth modes.
+  - The Account detail panel test.
+- **Migration.** It is applied explicitly, never to the owner's database.
+- **Sol (Codex) round 1 (`gpt-6.1-sol`, high),** on `f32f731e`. Four findings, all fixed in
+  `c9b9e625`:
+  - Deleting the account in a context that had recorded a conflict hit the
+    account relationship, since the conflict stayed tracked. Deletion detaches
+    it with the account's other facts.
+  - A changed second copy within the first read was dropped silently. It is
+    compared with the copy stored from it, and RISEx collapses only identical
+    copies, so the change reaches the store.
+  - The venue's direction wording was not compared: a buy reported again as
+    Close Short instead of Open Long was no conflict. It is compared now;
+    derived effects and bases still are not.
+  - A disabled account's conflicts stayed readable through the API. It
+    returns none now.
+
+  Sol confirmed that changed repeats used to be ignored and originals stay
+  untouched, the decimal and time precision, owner scope, account locking,
+  the paper refusal, DTOs without values or payloads, and the migration. Its
+  own tests could not run under the memory limit; the targeted runs and the
+  check below cover the fixes.
+- **Check.** `scripts/check.sh` passed on `c9b9e625`: backend 4,113 passed, 5 skipped; frontend 179 files and 4,091 tests.

@@ -21,6 +21,12 @@ Deferred to the Lighter phase: the multiplier part of the canonical key and the 
 - **Matching:** `ExecutionMatcher.Near` accepts the larger of one fifth-significant-figure step and one tick. On October 5, four RISEx markets (DOGE, PUMP, CRCL and a retired DOGE) had a tick coarser than that step. A tick finer than the step never tightens the tolerance. For `tick-size` venues the execution check reads the catalogue for ticks. If that read fails, matching falls back to the significant-figure step instead of failing the check.
 - **Chart:** prices placed or dragged on the chart round to the instrument's tick when there is one (`formatDraggedPrice(price, step)`), otherwise to five significant figures. Typed prices are kept as entered.
 - **Suggestions:** suggested stop and target prices round to the tick in the direction that keeps them within their limit (`roundPrice(price, way, step)`), otherwise to five significant figures.
+- **Decimal cap (October 21, 2026; Phase 2, item 14b, F-11).** A significant-figure venue may state a cap per instrument as `VenueInstrument.MaxPriceDecimals`. Hyperliquid perpetuals take at most five significant figures, any integer whatever its length, and at most `6 − szDecimals` decimals.
+  - **Matching.** `PriceRules.MinimumStep` gives one unit of the last allowed decimal, which joins the tick in `ExecutionMatcher.Near` and the monitor's drift and level checks. A planned 0.051234 at `szDecimals = 1` can only be placed as 0.05123, and now matches it (probe C9). The fifth-significant-figure step is otherwise unchanged, so nothing becomes stricter.
+  - **The browser.** It reads the cap as a `PriceStep` (`lib/price-step.ts`): a tick, or `{ maxDecimals }`.
+    - Chart placement and drags (`formatDraggedPrice`, `roundedLevelPrice`) and suggestions (`roundPrice`) keep five significant figures within the cap. Prices of six digits or more stay whole numbers.
+    - `pricesMatch` uses the same minimum step as the server.
+    - Typed prices are still kept as entered.
 
 ## Market data
 

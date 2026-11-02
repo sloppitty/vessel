@@ -347,6 +347,21 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         return ToDto(account, await store.SnapshotAsync(id, ct));
     }
 
+    public const string FillConflictsNotice = "The venue later reported these fills with different values. Vessel keeps the " +
+        "first copy it stored and never overwrites it; only the names of the fields that differed are recorded.";
+
+    /// <summary>Phase 2, item 14c: retained fills reported again with different venue facts, newest first, at most 50.</summary>
+    public async Task<FillConflictsDto> FillConflictsAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
+    {
+        var account = await RequireAccount(id, ValidateTradingMode(tradingMode), ct);
+        if (account.TradingMode == TradingMode.Paper) throw new ProblemException(409, "Paper accounts have simulated executions, not imported fills.");
+        // Disabled accounts hide their imported activity, so their conflicts too (Sol round 1 on 14c).
+        if (!account.IsEnabled) return new(0, [], FillConflictsNotice);
+        var (total, recent) = await store.FillConflictsAsync(id, 50, ct);
+        return new(total, recent.Select(c => new FillConflictDto(c.ContractId, c.SourceFillId, c.Fields.Split(','), c.FirstSeenAtUtc,
+            c.LastSeenAtUtc, c.Reports)).ToList(), FillConflictsNotice);
+    }
+
     public async Task<IReadOnlyList<FillDto>> FillsAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
     {
         var account = await RequireAccount(id, ValidateTradingMode(tradingMode), ct);
@@ -428,6 +443,9 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         if (s is null) return null;
         List<decimal>? wallet = s.StablecoinsObservedAtUtc is null ? null : s.Stablecoins.Select(balance => balance.Total).ToList();
         if (s.AccountMode is "unifiedAccount" or "portfolioMargin") return wallet;
+        // Separate ledgers add up only when the wallet was read with the perps or after them. A wallet left from an earlier
+        // read could still hold funds since moved into perps, so the balance is unknown (Phase 2, item 14b, Sol round 1).
+        if (wallet is not null && s.StablecoinsObservedAtUtc < s.ObservedAtUtc) return null;
         return s.AccountValueUsd is { } perps ? [perps, ..wallet ?? []] : wallet;
     }
 

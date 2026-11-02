@@ -1,3 +1,4 @@
+import { priceStepOf, type PriceStep } from '@/lib/price-step'
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import type { SizingDocument } from '@/api/sizing'
@@ -90,7 +91,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   /** The size units in use, so the page can word its own messages in the instrument's quote asset. */
   onUnits?: (units: SizeUnits) => void
   /** The instrument's tick, or null, so the page can match order prices as the server does. */
-  onPriceStep?: (step: number | null) => void
+  onPriceStep?: (step: PriceStep) => void
   /** Saved originals of the open Play, which load after it opens. */
   evidenceImages?: EvidenceImages | undefined
   /** The outcome at the top of the journal's Review tab. */
@@ -154,7 +155,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const instrumentName = instrumentInfo ? pairLabel(instrumentInfo) : draft.instrument
   const maxLeverage = instrumentInfo?.maxLeverage ?? null
   const maintenanceMargin = instrumentInfo?.maintenanceMarginFraction ?? null
-  const priceStep = instrumentInfo?.priceStep ?? null
+  // The tick, or a significant-figure venue's decimal cap (Phase 2, item 14b); one stable value per instrument.
+  const priceStep = priceStepOf(instrumentInfo?.priceStep, instrumentInfo?.maxPriceDecimals)
   const manualUsd = !!account && venues.can(account.venueId, 'manualExecutions')
   const units: SizeUnits = instrumentInfo
     ? { quote: instrumentInfo.quoteAsset, base: instrumentInfo.contractId, quantityDecimals: instrumentInfo.quantityDecimals }

@@ -92,9 +92,10 @@ public static class ExecutionMatcher
     }
 
     /// <summary>
-    /// Same price within one step of the fifth significant figure (1 at 84,541, 0.01 at 100), or within one tick when
-    /// the instrument's tick is coarser (RISEx DOGE trades in 0.00001 at 0.09). A planned 82,850.18 from a percentage
-    /// still matches an order at 82,850.
+    /// Same price within one step of the fifth significant figure (1 at 84,541, 0.01 at 100), or within the instrument's
+    /// minimum step when it is coarser: a tick (RISEx DOGE trades in 0.00001 at 0.09), or Hyperliquid's last allowed decimal
+    /// (0.00001 at <c>szDecimals = 1</c>, so a planned 0.051234 matches an order at 0.05123). A planned 82,850.18 from a
+    /// percentage still matches an order at 82,850.
     /// </summary>
     public static bool Near(decimal actual, decimal planned, decimal? tick = null)
     {

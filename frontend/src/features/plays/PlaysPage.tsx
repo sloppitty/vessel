@@ -1,3 +1,4 @@
+import type { PriceStep } from '@/lib/price-step'
 import { PlayBundleButton } from './PlayBundleButton'
 import type { PaperPlayState, PaperSettings as PaperSettingsDocument } from '@/api/paper'
 import { PaperExecutionPanel } from './PaperExecutionPanel'
@@ -285,7 +286,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   // until the facts say which entry, none gets one.
   const opened = status === 'open' || venueStatus === 'open'
   const filledEntries: ReadonlySet<string> | 'all' = fills === 'unknown' ? opened ? 'all' : noFilledEntries : fills.filled
-  const [priceStep, setPriceStep] = useState<number | null>(null)
+  const [priceStep, setPriceStep] = useState<PriceStep>(null)
   // The Draft's pre-flight as the workspace last evaluated it; Plan it records it with revision 1 (phase 1, 1.5).
   const [preflight, setPreflight] = useState<PreflightCheck[] | null>(null)
   // The owner's recent next actions, offered while a Play is not yet under way. They are context, so a failed read shows none.
