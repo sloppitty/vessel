@@ -370,7 +370,8 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     const { id, version } = closedPlay.summary
     const controller = new AbortController()
     api.playHistory(id, controller.signal).then(history => { if (!controller.signal.aborted) setClosedHistory({ api, id, version, history }) })
-      .catch(() => { /* The stop changes are extra context; the Play still opens without them. */ })
+      // The stop changes are extra context: a failed read shows none, not an earlier read's, and the Play still opens.
+      .catch(() => { if (!controller.signal.aborted) setClosedHistory(null) })
     return () => controller.abort()
   }, [api, closedPlay])
   const stopChanges = useMemo(() => closedPlay && closedHistory?.api === api && closedHistory.id === closedPlay.summary.id &&

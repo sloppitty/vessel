@@ -1,8 +1,7 @@
 import type { PriceOverlay } from '@/components/chart/types'
 import type { PlanEntry, PlanExit, PlanRevision, PlayPlan } from '@/api/plays'
-import { exactCompare, exactNumber, type Exact } from '@/lib/decimal'
+import { exactCompare, exactFixed, exactNumber, type Exact } from '@/lib/decimal'
 import { exactLevelPrice, leverageOf } from './levels'
-import { formatPlanNumber } from './numbers'
 
 /*
  * How a closed Play's stops moved: each entry's stops as first planned beside the stops it ended with. Everything comes
@@ -72,11 +71,13 @@ export function stopHistory(revisions: readonly PlanRevision[], final: PlayPlan)
 /** True when any entry's stops changed after they were first planned. */
 export const stopsMoved = (history: readonly EntryStopHistory[]) => history.some(entry => entry.moves > 0)
 
-/** A stop for display: its price, or its percentage with the price it stands for. */
+/**
+ * A stop for display: a price stop exactly as saved, or a percentage with the price it stands for, printed from the exact
+ * value (never through a floating-point number, which would merge or change distinct prices).
+ */
 export function stopText(level: StopLevel) {
-  const price = level.price === null ? null : formatPlanNumber(exactNumber(level.price), 12)
-  if (level.unit === 'price') return price ?? level.value
-  return price === null ? `${level.value} %` : `${level.value} % (${price})`
+  if (level.unit === 'price') return level.value
+  return level.price === null ? `${level.value} %` : `${level.value} % (${exactFixed(level.price, 20)})`
 }
 
 export const originalStopOverlayPrefix = 'original-stop:'
