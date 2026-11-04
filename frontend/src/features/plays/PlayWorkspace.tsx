@@ -39,6 +39,7 @@ import type { EvidenceImages } from './evidence-images'
 import { isNominalUsdQuote } from './stablecoins'
 import { defaultPlayTitle } from './default-title'
 import { PostHocBadge } from './PostHocBadge'
+import type { EntryStopHistory } from './stop-history'
 import { useCostAssumptions } from './cost-assumptions'
 import './plays-workspace.css'
 import { NativeSelect } from '@/components/ui/native-select'
@@ -50,7 +51,7 @@ import '@/features/monitor/incidents.css'
 export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onReload, loading = false, status = 'draft', actions, revision = null,
   lockInstrument = false, lockDirection = false, readOnly = false, execution, sizing = null, sizingStatus = 'ready', onRetrySizing, onRiskChange,
   filledEntries, fills: entryFills, onUnits, onPriceStep, retrospective = false, incidents, stopEvidence, evidenceImages,
-  reviewReceipt, journalSave, retrospectiveReceipt, plannedAfterExecution = false, onPreflight, nextActions, onOpenPlay, log, reviewCompletion, mistakeTags, chartFills, playId = null, openRiskKey, ruleControls, planRule }: {
+  reviewReceipt, journalSave, retrospectiveReceipt, plannedAfterExecution = false, onPreflight, nextActions, onOpenPlay, log, reviewCompletion, mistakeTags, chartFills, stopHistory, playId = null, openRiskKey, ruleControls, planRule }: {
   accounts: BrokerAccount[]
   portfolios: Portfolio[]
   api: WorkspaceApi
@@ -118,6 +119,8 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   /** Review completion under the review. */
   reviewCompletion?: ReactNode
   mistakeTags?: readonly string[] | undefined
+  /** A closed Play's stop history; the chart draws original stops it no longer has. */
+  stopHistory?: readonly EntryStopHistory[] | undefined
   /** The Play's fills to mark on the chart (phase 1, 1.1b). */
   chartFills?: readonly ChartFill[] | undefined
   /** The saved Play, whose executions its open risk counts; null for an unsaved Draft. */
@@ -351,7 +354,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
         drawings={drawingKey ? draft.drawings[drawingKey] : undefined}
         onDrawingsChange={drawings => { if (drawingKey) planChange({ ...draft, drawings: { ...draft.drawings, [drawingKey]: drawings } }) }}
         editable={!readOnly} onCapture={addCapture} onShowEvidence={showEvidence} stopEvidence={retrospective ? undefined : stopEvidence}
-        fills={chartFills} tradeDates={isEndedStatus(status) && !!chartFills?.length} />
+        fills={chartFills} tradeDates={isEndedStatus(status) && !!chartFills?.length} stopHistory={retrospective ? undefined : stopHistory} />
         <PlayJournal notes={draft.notes} onChange={notes => onChange({ ...draft, notes: readOnly ? { ...draft.notes, review: notes.review } : notes })}
           execution={execution} keepExecutionMounted={paper} readOnly={readOnly} retrospective={retrospective} status={status}
           structuredReview={draft.structuredReview}

@@ -5,7 +5,7 @@ import { PaperExecutionPanel } from './PaperExecutionPanel'
 import { ApiError, errorMessage } from '@/api/errors'
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
-import { isEndedStatus, isJournalQuery, isReviewed, journalSearchMax, pagedPlayViews, playSearchLength, statusLabels, type NextAction, type PlayCounts, type PlayList as PlayListPage, type PreflightCheck, type PlayListQuery, type PlayStatus, type UnresolvedReason, type PlayView, type SavedPlay, type StatusRequest, type PlayRule, type PlayRuleState, type PlanRuleAnswer } from '@/api/plays'
+import { isEndedStatus, isJournalQuery, isReviewed, journalSearchMax, pagedPlayViews, playSearchLength, statusLabels, type NextAction, type PlayCounts, type PlayHistory, type PlayList as PlayListPage, type PreflightCheck, type PlayListQuery, type PlayStatus, type UnresolvedReason, type PlayView, type SavedPlay, type StatusRequest, type PlayRule, type PlayRuleState, type PlanRuleAnswer } from '@/api/plays'
 import type { AccountMonitor } from '@/api/monitor'
 import { Button } from '@/components/ui/button'
 import { Pager } from '@/components/ui/pager'
@@ -34,6 +34,8 @@ import { useSizing } from './useSizing'
 import { noFilledEntries, planIssues, planIssueSummary } from './planChecks'
 import { executionFills, manualLedgerFills, paperEntryFills, useManualLedger } from './entry-fills'
 import { RetrospectiveReceipt, ReviewReceipt } from './Receipt'
+import { stopHistory, stopsMoved } from './stop-history'
+import { StopChanges } from './StopChanges'
 import { PlayLog, ReviewCompletionBar, type ReviewAction } from './ReviewCompletion'
 import type { PlayLogChange } from './log-draft'
 import { noEntryFills, type EntryFills } from './position-risk-summary'
@@ -360,6 +362,20 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
     onArchive: (active: PlayRule) => { void writeRule(() => api.archivePlayRule(active.version), 'The rule could not be archived.') },
     onOpenSource: id => { void open(id) },
   } : undefined
+  // A closed Play's plan revisions, for its original stops beside the final ones. A failed read shows neither.
+  const closedPlay = visible && session.view === 'editor' && !!saved && saved.summary.status === 'closed' && !retrospective ? saved : null
+  const [closedHistory, setClosedHistory] = useState<{ api: WorkspaceApi; id: string; version: number; history: PlayHistory } | null>(null)
+  useEffect(() => {
+    if (!closedPlay) return
+    const { id, version } = closedPlay.summary
+    const controller = new AbortController()
+    api.playHistory(id, controller.signal).then(history => { if (!controller.signal.aborted) setClosedHistory({ api, id, version, history }) })
+      .catch(() => { /* The stop changes are extra context; the Play still opens without them. */ })
+    return () => controller.abort()
+  }, [api, closedPlay])
+  const stopChanges = useMemo(() => closedPlay && closedHistory?.api === api && closedHistory.id === closedPlay.summary.id &&
+    closedHistory.version === closedPlay.summary.version ? stopHistory(closedHistory.history.revisions, closedPlay.plan) : undefined,
+  [api, closedPlay, closedHistory])
   // The owner's earlier mistake tags, offered while reviewing an ended Play (phase 1, 1.4b). A failed read offers none.
   const [mistakeTags, setMistakeTags] = useState<{ api: WorkspaceApi; tags: string[] } | null>(null)
   const offersMistakeTags = visible && session.view === 'editor' && !!saved && isEndedStatus(saved.summary.status)
@@ -735,12 +751,14 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const staleOutcome = tracking.stale ? tracking.error
     ? <p className="error" role="alert">The outcome could not be read again. {tracking.error}</p>
     : <p className="muted" role="status">Reading the outcome…</p> : undefined
-  const reviewReceipt = manual
+  const outcomeReceipt = manual
     ? manualLedger && manualLedger !== 'unknown' && manualLedger.receipt
       ? <ReviewReceipt receipt={manualLedger.receipt} result={{ kind: 'manual', totals: manualLedger.totals, fees: manualLedger }}
         status={manualLedger.play.summary.status} /> : undefined
     : shownExecution?.receipt ? staleOutcome ?? <ReviewReceipt receipt={shownExecution.receipt} result={{ kind: 'venue', totals: shownExecution.totals }} status={shownExecution.status} />
       : undefined
+  const movedStops = stopChanges && stopsMoved(stopChanges) ? <StopChanges history={stopChanges} entries={draft.entries} /> : undefined
+  const reviewReceipt = outcomeReceipt || movedStops ? <>{outcomeReceipt}{movedStops}</> : undefined
   const retrospectiveReceipt = retrospective && shownExecution ? staleOutcome ?? <RetrospectiveReceipt execution={shownExecution} direction={draft.direction} /> : undefined
 
   // The status badge, a revision pill and the buttons say what the owner can do; no banner restates them.
@@ -766,7 +784,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
           else onLogChange?.(change)
         }} /> : undefined}
       mistakeTags={offersMistakeTags && mistakeTags?.api === api ? mistakeTags.tags : undefined}
-      chartFills={chartFills}
+      chartFills={chartFills} stopHistory={stopChanges}
       playId={saved?.summary.id ?? null} openRiskKey={[saved?.summary.version ?? 0, reloadGeneration]}
       reviewCompletion={saved ? <ReviewCompletionBar summary={saved.summary} dirty={dirty} busy={pending}
         filled={(playReceipt?.fillCount ?? 0) > 0} onAction={action => { void reviewAction(action) }} /> : undefined}
