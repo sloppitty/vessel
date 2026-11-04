@@ -548,3 +548,14 @@ See `list-paging.md` for the projection, the endpoint and the rules.
 - Ended rows show their exit time, result and estimated R (F-07) in the meta
   column, from the projection. The Play editor and its approved section
   positions are unchanged.
+
+## November 4, 2026: original and final stops of a closed Play
+
+The owner asked to see where a stop started once it has been moved (for example to break-even after the entry filled), and only for closed Plays.
+
+- A Closed Play (not Cancelled, Unresolved or retrospective) reads its own `GET /api/plays/{id}/history` when opened. No new endpoint, migration or stored field: the plan revisions already hold every stop.
+- For each entry of the final plan, the original stops are those of the first revision that holds the entry (revision 1 unless the entry was added later). A move is a later revision whose stops for that entry differ in count, order or resolved price; a percentage stop is resolved with that revision's entry price, direction and leverage, so the same price in another unit is not a move. Revisions that change only other fields are not moves.
+- The chart draws each original priced stop that no final stop of its entry still sits at as a faint, hollow, fixed `SL orig` reference line (`E2 SL1 orig` with several entries or stops), following the entry legend's view. It is never draggable or selectable.
+- The Review tab lists the entries whose stops moved under "Stops moved": entry, how many times, the original stops with their revision, and the final stops. Nothing is shown when no stop moved or the history cannot be read; it never changes initial R, the scored result or any figure.
+
+The chart's active timeframe is now a filled, outlined, bold chip in the brand tint rather than a colour change alone.
