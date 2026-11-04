@@ -3,8 +3,8 @@
 Vessel is a self-hosted trading diary. These examples use the
 API and web images in one Docker Hub repository:
 
-- `skorcius/vessel:api-0.4.0` and `skorcius/vessel:api-latest`
-- `skorcius/vessel:web-0.4.0` and `skorcius/vessel:web-latest`
+- `skorcius/vessel:api-0.4.1` and `skorcius/vessel:api-latest`
+- `skorcius/vessel:web-0.4.1` and `skorcius/vessel:web-latest`
 
 Use versioned tags for deployments. The `latest` tags move with each release.
 This release targets Linux amd64.
@@ -992,6 +992,14 @@ docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dl
 
 ## Upgrade
 
+### From v0.4.0 to v0.4.1
+
+Read the [release notes](../docs/releases/v0.4.1.md). Set `VESSEL_VERSION=0.4.1`
+and use matching API/web images with this release's deploy files. There are no
+new identity or journal migrations and no configuration changes; running
+`migrate` finds nothing to apply. Upgrade API and web together. Earlier upgrade
+requirements below still apply.
+
 ### From v0.3.5 to v0.4.0
 
 Read the [release notes](../docs/releases/v0.4.0.md). Set `VESSEL_VERSION=0.4.0`
@@ -1038,7 +1046,7 @@ Earlier upgrade requirements below still apply.
 Read the [release notes](../docs/releases/v0.3.4.md). Wallet sign-in is now the
 only sign-in, and it requires HTTPS. Follow the token-to-wallet procedure below
 before starting the new images; it also lists the deploy-file cleanup for
-installations that already use wallets. Set `VESSEL_VERSION=0.4.0`, preserve
+installations that already use wallets. Set `VESSEL_VERSION=0.4.1`, preserve
 the owner GUID, and use matching API/web images and this release's deploy files.
 There are no new identity or journal migrations from v0.3.3. Keep registration
 `Closed` until the outstanding real-wallet/non-mainnet acceptance is recorded.
@@ -1661,11 +1669,11 @@ From the repository root, with no populated secret files in the build context:
 ```sh
 REVISION=$(git rev-parse HEAD)
 docker build --platform linux/amd64 -f backend/Dockerfile \
-  --build-arg VERSION=0.4.0 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:api-0.4.0 .
+  --build-arg VERSION=0.4.1 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:api-0.4.1 .
 docker build --platform linux/amd64 -f frontend/Dockerfile \
-  --build-arg VERSION=0.4.0 --build-arg REVISION="$REVISION" \
-  -t skorcius/vessel:web-0.4.0 .
+  --build-arg VERSION=0.4.1 --build-arg REVISION="$REVISION" \
+  -t skorcius/vessel:web-0.4.1 .
 ```
 
 The API build pins SDK `10.0.302` to match the repository's `global.json`. The
