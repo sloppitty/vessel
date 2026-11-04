@@ -80,6 +80,7 @@ async function monitorFixture(page, accountId) {
     await page.getByRole('link', { name: 'Accounts', exact: true }).click()
     await page.getByRole('button', { name: 'View Synthetic chart', exact: true }).click()
     const panel = page.getByRole('region', { name: 'Background monitor', exact: true })
+    const checkButton = panel.getByRole('button', { name: /^Check/ })
     await panel.getByText('Worker offline.', { exact: false }).waitFor()
     await panel.getByText('Monitor stale', { exact: true }).waitFor()
     await panel.getByText('Needs attention · 2 warnings', { exact: true }).waitFor()
@@ -95,19 +96,19 @@ async function monitorFixture(page, accountId) {
 
     await panel.getByRole('button', { name: 'Check', exact: true }).click()
     await panel.getByRole('button', { name: 'Checking…', exact: true }).waitFor()
-    assert.ok(await panel.getByRole('button').isDisabled())
+    assert.ok(await checkButton.isDisabled())
     await checkStarted
     assert.equal(checks, 1)
     finishCheck()
     await panel.getByRole('button', { name: /^(Check pending…|Checking…)$/ }).waitFor()
-    assert.ok(await panel.getByRole('button').isDisabled())
+    assert.ok(await checkButton.isDisabled())
     // No stream event arrives for this synthetic run; the bounded status read must still end it.
     await panel.getByRole('button', { name: /^Check in \d+s$/ }).waitFor({ timeout: 20_000 })
     // The run is live again, but open records still head the panel: never "Monitored" beside them.
     await panel.getByText('Monitor stale', { exact: true }).waitFor({ state: 'detached' })
     await panel.getByText('Needs attention · 2 warnings', { exact: true }).waitFor()
     assert.equal(await panel.getByText('Monitored', { exact: true }).count(), 0)
-    assert.ok(await panel.getByRole('button').isDisabled())
+    assert.ok(await checkButton.isDisabled())
     assert.equal(checks, 1)
     pass('Check is explicit, stays pending until stored status completes, and is blocked during the server cooldown')
 
@@ -131,7 +132,7 @@ async function monitorFixture(page, accountId) {
     await page.setViewportSize({ width: 390, height: 844 })
     await panel.scrollIntoViewIfNeeded()
     assert.ok(await panel.isVisible())
-    assert.ok(await panel.getByRole('button').isDisabled())
+    assert.ok(await checkButton.isDisabled())
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     await capture('monitor-mobile-light')
     assert.equal(checks, 1)

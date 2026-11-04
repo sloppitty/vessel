@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.4.1 - November 4, 2026
+
+Release notes: [docs/releases/v0.4.1.md](docs/releases/v0.4.1.md).
+
+### Added
+
+- A Closed Play shows where its stops started once they were moved, for example to break-even
+  after the entry filled. The chart draws each original stop the entry no longer has as a
+  faint, fixed `SL orig` line, and the Review tab's "Stops moved" section lists each moved
+  entry with how many times it moved, its original stops (with their plan revision) and its
+  final stops. It is read from the existing plan revisions; Cancelled, Unresolved and
+  retrospective Plays show nothing, and no result, R or sizing figure changes.
+
+### Changed
+
+- The chart's active timeframe is a filled, outlined, bold chip instead of a text colour change
+  alone, readable in every built-in theme.
+
+No migrations and no configuration changes.
+
 ## 0.4.0 - November 2, 2026
 
 Release notes: [docs/releases/v0.4.0.md](docs/releases/v0.4.0.md).
