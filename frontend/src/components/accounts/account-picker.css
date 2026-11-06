@@ -81,7 +81,6 @@
 .account-picker-trigger[data-density="bare"][data-state="open"] { border-color: transparent; box-shadow: none; }
 .account-picker-trigger[data-density="bare"][data-state="open"] .account-name { color: var(--brand); }
 .account-picker-trigger[data-density="bare"] .account-avatar { --avatar-gap: var(--card); }
-.account-picker-value-marks > .venue-tag { flex-shrink: 1; }
-/* A narrow trigger keeps the account name readable: the logo already shows the venue, so its tag goes first. */
-.account-picker-value:has(> .account-picker-value-marks > .venue-tag) { container-type: inline-size; }
-@container (max-width: 200px) { .account-picker-value-marks > .venue-tag { display: none; } }
+/* A narrow trigger keeps the account name readable: the logo already shows the venue, so its tag shrinks first.
+   No container query here: Brave left a :has()-applied inline-size container 0px tall, hiding the selected account. */
+.account-picker-value-marks > .venue-tag { flex-shrink: 8; }
