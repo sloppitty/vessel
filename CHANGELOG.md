@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.4.2 - November 7, 2026
+
+Release notes: [docs/releases/v0.4.2.md](docs/releases/v0.4.2.md).
+
+### Fixed
+
+- The Play editor's Account field showed nothing for the selected account in Brave: its
+  trigger turned the value into a container through `:has()` and Brave laid it out 0px tall.
+  The container query is gone; the venue tag now shrinks before the account name instead.
+
+No migrations and no configuration changes.
+
 ## 0.4.1 - November 4, 2026
 
 Release notes: [docs/releases/v0.4.1.md](docs/releases/v0.4.1.md).
