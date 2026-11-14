@@ -1,0 +1,832 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vessel health review</title>
+<style>
+/* Layout: one reading column for prose, full-width bands for tables and diagrams, a sticky section bar on top. */
+:root {
+  color-scheme: dark;
+  --bg: #0f1114; --panel: #171a1f; --panel-2: #1e2229; --line: #2c333d; --line-strong: #394350;
+  --fg: #e9edf2; --muted: #abb3c0; --accent: #9ab5f2;
+  --pos: #a9d6b6; --neg: #f2b3ac; --warn: #edd49e; --info: #8fb8ff;
+  --pos-wash: rgba(169,214,182,.10); --neg-wash: rgba(242,179,172,.10); --warn-wash: rgba(237,212,158,.10); --accent-wash: rgba(154,181,242,.10);
+  --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --radius: 8px;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f5f6f8; --panel: #ffffff; --panel-2: #eceff3; --line: #d9dee6; --line-strong: #bcc4cf;
+    --fg: #171b21; --muted: #56616f; --accent: #2c52ad;
+    --pos: #1c7443; --neg: #b03a2e; --warn: #86600a; --info: #2c62c4;
+    --pos-wash: rgba(28,116,67,.08); --neg-wash: rgba(176,58,46,.07); --warn-wash: rgba(134,96,10,.08); --accent-wash: rgba(44,82,173,.07);
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f5f6f8; --panel: #ffffff; --panel-2: #eceff3; --line: #d9dee6; --line-strong: #bcc4cf;
+  --fg: #171b21; --muted: #56616f; --accent: #2c52ad;
+  --pos: #1c7443; --neg: #b03a2e; --warn: #86600a; --info: #2c62c4;
+  --pos-wash: rgba(28,116,67,.08); --neg-wash: rgba(176,58,46,.07); --warn-wash: rgba(134,96,10,.08); --accent-wash: rgba(44,82,173,.07);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 64px; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+a { color: var(--accent); text-underline-offset: 3px; }
+a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+code { font: 0.86em var(--mono); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+h1, h2, h3, h4 { line-height: 1.2; text-wrap: balance; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+h1 { font-size: clamp(28px, 4.4vw, 40px); letter-spacing: -0.025em; }
+h2 { font-size: 24px; padding-top: 8px; }
+h3 { font-size: 17px; }
+h4 { font-size: 14px; }
+p { margin: 0; max-width: 72ch; }
+ul, ol { margin: 0; padding-left: 20px; max-width: 72ch; }
+li + li { margin-top: 6px; }
+.muted { color: var(--muted); }
+.eyebrow { font: 600 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+
+.head { padding-block: 48px 28px; display: grid; gap: 16px; }
+.head .lede { font-size: 17px; color: var(--muted); max-width: 68ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font: 12px var(--mono); color: var(--muted); }
+
+.bar { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); border-block: 1px solid var(--line); }
+.bar .wrap { display: flex; gap: 4px; overflow-x: auto; padding-block: 8px; scrollbar-width: none; }
+.bar a { flex: none; color: var(--muted); text-decoration: none; font-size: 13px; padding: 5px 10px; border-radius: 6px; }
+.bar a:hover { color: var(--fg); background: var(--panel-2); }
+
+section { padding-block: 40px 8px; display: grid; gap: 18px; }
+section > .stack, .stack { display: grid; gap: 14px; }
+.cols { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
+.cols > * { min-width: 0; }
+.cols.two { grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; display: grid; gap: 8px; align-content: start; }
+.card p, .card ul { max-width: none; font-size: 14px; }
+.take { border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 16px 18px; background: var(--accent-wash); display: grid; gap: 8px; }
+.take > .eyebrow { color: var(--accent); }
+.take p { max-width: 80ch; }
+
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; line-height: 1.5; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+th { font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); background: var(--panel-2); white-space: nowrap; }
+td.id { font: 12px var(--mono); color: var(--muted); white-space: nowrap; }
+td.where { font: 12px var(--mono); color: var(--muted); min-width: 250px; }
+td.what { min-width: 320px; }
+td.what b, .take b { font-weight: 600; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pill { display: inline-block; font: 600 11px var(--mono); padding: 2px 8px; border-radius: 999px; white-space: nowrap; border: 1px solid transparent; }
+.p-high { color: var(--neg); background: var(--neg-wash); border-color: color-mix(in srgb, var(--neg) 35%, transparent); }
+.p-med { color: var(--warn); background: var(--warn-wash); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+.p-low { color: var(--muted); background: var(--panel-2); border-color: var(--line); }
+.p-done { color: var(--pos); background: var(--pos-wash); border-color: color-mix(in srgb, var(--pos) 35%, transparent); }
+.p-info { color: var(--accent); background: var(--accent-wash); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+
+figure { margin: 0; display: grid; gap: 10px; }
+figure .scroll { padding: 14px; }
+figure svg { display: block; width: 100%; min-width: 760px; height: auto; }
+figcaption { font-size: 13px; color: var(--muted); max-width: 84ch; }
+svg text { fill: var(--fg); font: 12px var(--sans); }
+svg .t-muted { fill: var(--muted); }
+svg .t-small { font-size: 11px; }
+svg .t-head { font: 600 11px var(--mono); letter-spacing: .1em; fill: var(--muted); }
+svg .box { fill: var(--panel-2); stroke: var(--line-strong); stroke-width: 1; }
+svg .box-bad { fill: var(--neg-wash); stroke: var(--neg); }
+svg .box-warn { fill: var(--warn-wash); stroke: var(--warn); }
+svg .box-good { fill: var(--pos-wash); stroke: var(--pos); }
+svg .box-new { fill: var(--accent-wash); stroke: var(--accent); }
+svg .box-gone { fill: none; stroke: var(--muted); stroke-dasharray: 5 4; }
+svg .ln { stroke: var(--muted); stroke-width: 1.4; fill: none; }
+svg .ln-accent { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+svg .ln-dash { stroke: var(--muted); stroke-width: 1.2; fill: none; stroke-dasharray: 4 4; }
+svg .ah { fill: var(--muted); }
+svg .ah-accent { fill: var(--accent); }
+svg .t-bad { fill: var(--neg); }
+svg .t-good { fill: var(--pos); }
+svg .t-warn { fill: var(--warn); }
+svg .t-accent { fill: var(--accent); }
+
+.bars { display: grid; gap: 8px; font-size: 13px; }
+.bars .row { display: grid; grid-template-columns: minmax(120px, 190px) 1fr 76px; gap: 12px; align-items: center; }
+.bars .track { display: flex; height: 18px; gap: 2px; }
+.bars .seg { height: 100%; border-radius: 3px; min-width: 3px; }
+.bars .s-high { background: var(--neg); }
+.bars .s-med { background: var(--warn); }
+.bars .s-low { background: var(--line-strong); }
+.bars .n { text-align: right; font: 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+
+.grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.grade .card { gap: 6px; }
+.grade .state { font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.st-good { color: var(--pos); } .st-mid { color: var(--warn); } .st-bad { color: var(--neg); }
+
+.plan { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.plan .card h3 { font-size: 15px; }
+.plan ol { padding-left: 18px; font-size: 13.5px; }
+details { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+details > summary { cursor: pointer; padding: 12px 16px; font-weight: 600; }
+details > .inner { padding: 0 16px 16px; display: grid; gap: 12px; }
+details .scroll { border-radius: 6px; }
+footer { padding-block: 40px 64px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); margin-top: 40px; }
+@media (max-width: 560px) { .bars .row { grid-template-columns: 104px 1fr 66px; } body { font-size: 14.5px; } }
+</style>
+</head>
+<body>
+<header class="wrap head">
+  <div class="eyebrow">Codebase health review · 13 November 2026 · v0.4.2 at b0eaed4b</div>
+  <h1>Vessel health review</h1>
+  <p class="lede">The foundations are better than I expected from six weeks of agent-written code. The part you care about most, the numbers, is where I found the real defects. This report says what to keep, what to fix first, what to simplify, and what I already changed.</p>
+  <div class="meta"><span>191k lines reviewed</span><span>15 focused audits, 2 model families</span><span>3 review rounds</span><span>10 small fixes applied, 3 reverted</span></div>
+</header>
+<nav class="bar" aria-label="Sections"><div class="wrap">
+  <a href="#verdict">Verdict</a><a href="#applied">What I changed</a><a href="#numbers">Numbers</a><a href="#protection">Protection</a><a href="#reliability">Import and workers</a><a href="#quick">Quick wins</a><a href="#big">Big improvements</a><a href="#refactor">Refactors</a><a href="#security">Security</a><a href="#performance">Performance</a><a href="#agents">Agents and releases</a><a href="#keep">Keep</a><a href="#plan">Plan</a><a href="#method">Method</a>
+</div></nav>
+<main class="wrap">
+
+<section id="verdict">
+  <h2>Verdict</h2>
+  <p>Vessel is in good shape where discipline was written down early. Amounts stay exact decimals from the venue to the screen. Every table is filtered by owner, and the model refuses to build without that filter. Venue reads are bounded and strict. Lease fencing in the monitor is correct. Two independent security audits, one from Claude and one from Sol, found no critical or high issue.</p>
+  <p>The weak points are the ones that matter for a tool you will use to judge your own trading.</p>
+  <div class="cols two">
+    <div class="card"><h3>1. Some numbers are wrong or disagree</h3><p>Each calculation is tested alone with hand-computed values. Nothing checks that Overview, Activity and Review agree on one dataset, and they do not. I read the code behind the main defects, and a second model then tried to refute them. Most held.</p><p><a href="#numbers">Numbers</a></p></div>
+    <div class="card"><h3>2. Protection checks fail quietly</h3><p>One history gap, or one open order the adapter cannot read, turns off stop checks for the whole account. You get a single "degraded" warning and then silence, including for Plays opened weeks later.</p><p><a href="#protection">Protection</a></p></div>
+    <div class="card"><h3>3. Nothing verifies main</h3><p>CI runs only on release tags. Locally, 827 of 2,269 backend tests skip without a database variable and <code>check.sh</code> still reports green. Eight releases shipped in 19 days on that basis.</p><p><a href="#agents">Agents and releases</a></p></div>
+    <div class="card"><h3>4. Some complexity has not paid for itself</h3><p>RabbitMQ and Wolverine carry events that PostgreSQL already stores and replays. Trading mode is a string passed through 30 defaulted parameters. Five services are over 800 lines.</p><p><a href="#big">Big improvements</a> and <a href="#refactor">refactors</a></p></div>
+  </div>
+
+  <h3>Where each area stands</h3>
+  <div class="grade">
+    <div class="card"><span class="state st-good">Strong</span><h4>Security</h4><p>No critical or high finding. Sign-in, sessions, pairing, vault, owner isolation and raw SQL all held up. What remains is denial of service by a signed-in user and hardening.</p></div>
+    <div class="card"><span class="state st-bad">Fix first</span><h4>Statistics and display</h4><p>Unrealized P&amp;L basis, partial position reads, balances during a refresh, prices rounded to two decimals.</p></div>
+    <div class="card"><span class="state st-mid">Good, two gaps</span><h4>Venue import</h4><p>No float parsing, sound dedup and paging. Builder-market fills can vanish, and one unknown row blocks an account.</p></div>
+    <div class="card"><span class="state st-bad">Fix first</span><h4>Protection monitor</h4><p>The mechanics are right. The policy of going "unknown" account-wide is too broad.</p></div>
+    <div class="card"><span class="state st-mid">Good, one risk</span><h4>Workers and messaging</h4><p>No lost or duplicated work found. RabbitMQ is a startup dependency of every host and buys little.</p></div>
+    <div class="card"><span class="state st-mid">Fine today</span><h4>Performance</h4><p>Fast at 49k fills. Somewhere past 100k the Activity aggregate stops fitting its cache at the default size, and every page then recomputes from all history.</p></div>
+    <div class="card"><span class="state st-mid">Good bones</span><h4>Backend structure</h4><p>Layering is enforced by tests. Growth piled into five large classes and string-typed modes and statuses.</p></div>
+    <div class="card"><span class="state st-mid">Good bones</span><h4>Frontend</h4><p>One transport, strict types, token CSS. One fetch pattern is copied 42 times and <code>PlaysPage</code> does too much.</p></div>
+    <div class="card"><span class="state st-bad">Needs work</span><h4>Agents, CI and deploy</h4><p>The release script is careful. Everything around it relies on prose: a 57 KB instruction log, a 98 KB runbook, no guardrails.</p></div>
+  </div>
+
+  <h3>Findings by area</h3>
+  <div class="card">
+    <div class="bars" role="img" aria-label="Open findings by area and severity. Structure and performance have the most items; statistics and protection have the most that affect what you see.">
+      <div class="row"><span>Statistics and display</span><span class="track" style="width:100%"><span class="seg s-high" style="flex:5" title="5 high"></span><span class="seg s-med" style="flex:8" title="8 medium"></span><span class="seg s-low" style="flex:9" title="9 low"></span></span><span class="n">5 · 8 · 9</span></div>
+      <div class="row"><span>Protection warnings</span><span class="track" style="width:59%"><span class="seg s-high" style="flex:2" title="2 high"></span><span class="seg s-med" style="flex:6" title="6 medium"></span><span class="seg s-low" style="flex:5" title="5 low"></span></span><span class="n">2 · 6 · 5</span></div>
+      <div class="row"><span>Import, workers, open tab</span><span class="track" style="width:59%"><span class="seg s-med" style="flex:6" title="6 medium"></span><span class="seg s-low" style="flex:7" title="7 low"></span></span><span class="n">0 · 6 · 7</span></div>
+      <div class="row"><span>Security</span><span class="track" style="width:50%"><span class="seg s-med" style="flex:5" title="5 medium"></span><span class="seg s-low" style="flex:6" title="6 low"></span></span><span class="n">0 · 5 · 6</span></div>
+      <div class="row"><span>Performance</span><span class="track" style="width:68%"><span class="seg s-high" style="flex:2" title="2 high"></span><span class="seg s-med" style="flex:7" title="7 medium"></span><span class="seg s-low" style="flex:6" title="6 low"></span></span><span class="n">2 · 7 · 6</span></div>
+      <div class="row"><span>Backend structure</span><span class="track" style="width:55%"><span class="seg s-high" style="flex:4" title="4 high"></span><span class="seg s-med" style="flex:8" title="8 medium"></span></span><span class="n">4 · 8 · 0</span></div>
+      <div class="row"><span>Frontend structure</span><span class="track" style="width:36%"><span class="seg s-high" style="flex:2" title="2 high"></span><span class="seg s-med" style="flex:6" title="6 medium"></span></span><span class="n">2 · 6 · 0</span></div>
+      <div class="row"><span>Tests</span><span class="track" style="width:36%"><span class="seg s-high" style="flex:3" title="3 high"></span><span class="seg s-med" style="flex:4" title="4 medium"></span><span class="seg s-low" style="flex:1" title="1 low"></span></span><span class="n">3 · 4 · 1</span></div>
+      <div class="row"><span>Agents, CI and deploy</span><span class="track" style="width:55%"><span class="seg s-high" style="flex:5" title="5 high"></span><span class="seg s-med" style="flex:5" title="5 medium"></span><span class="seg s-low" style="flex:2" title="2 low"></span></span><span class="n">5 · 5 · 2</span></div>
+    </div>
+    <div class="legend"><span><i style="background:var(--neg)"></i>High</span><span><i style="background:var(--warn)"></i>Medium</span><span><i style="background:var(--line-strong)"></i>Low</span><span>Numbers are high · medium · low, after merging duplicates between reviewers and leaving out what is already fixed. Structural items are rated by maintenance cost, not by risk.</span></div>
+  </div>
+
+  <div class="take"><span class="eyebrow">My opinion</span>
+    <p>Stop adding features for two or three weeks. Build one hand-checked "golden journal" dataset, assert every screen against it, and fix what it exposes. That one fixture would have caught most of the number defects below, and it protects every later refactor. Then cut the messaging stack down, because it is the largest piece of code and operations that buys you nothing today.</p>
+  </div>
+</section>
+
+<section id="applied">
+  <h2>What I changed</h2>
+  <p>These ship in the same pull request as this report. Each is small and either corrective or behaviour-preserving. I verified them with the checks named in the last column.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Change</th><th>Why</th><th>Files</th><th>Verified by</th></tr></thead>
+    <tbody>
+      <tr><td class="what"><b>Release skill is visible to Claude Code.</b> <code>.claude/skills</code> now links to <code>.agents/skills</code>.</td><td>Claude Code only discovers skills under <code>.claude/skills</code>, so it never saw <code>vessel-release</code>.</td><td class="where">.claude/<wbr>skills</td><td>The skill appeared in this session's skill list after the change.</td></tr>
+      <tr><td class="what"><b>40-second stop grace</b> for the API and the three workers.</td><td>Docker kills after 10 s, the .NET host drains for up to 30 s. A killed run leaves its lease "running".</td><td class="where">deploy/<wbr>compose.yaml, compose.paper.yaml</td><td><code>docker compose config</code> with synthetic values, 119 script tests.</td></tr>
+      <tr><td class="what"><b>Ignore files.</b> Backups, dumps, key-ring files and browser reports are git-ignored. <code>docs</code> and <code>spikes</code> leave the image build context.</td><td>The runbook writes <code>backups/vessel.dump</code> next to a clone. The build context carried 166 MB of docs.</td><td class="where">.gitignore, .dockerignore</td><td>Neither Dockerfile copies those paths.</td></tr>
+      <tr><td class="what"><b>One rule for "the venue read failed".</b> <code>VenueFailures.IsReadFailure</code> replaces eight copies of the same exception filter.</td><td>A change to the rule had to be made in eight places.</td><td class="where">Application/<wbr>Venues/<wbr>VenueFailures.cs and 7 callers</td><td>0 warnings; 2,536 tests in Unit, UseCases and Venues.</td></tr>
+      <tr><td class="what"><b>Secret-bearing identity records no longer print their secret.</b> Seven records override <code>ToString</code>.</td><td>A future log line or exception message that interpolates one would print a session token or pairing secret.</td><td class="where">Identity/<wbr>Contracts.cs</td><td>Same suites.</td></tr>
+      <tr><td class="what"><b>Removed a dead constant</b>, <code>SizingSettings.WarnRiskPercent</code>.</td><td>No reference in source, tests, frontend or docs.</td><td class="where">Domain/<wbr>Sizing/<wbr>TrackRecord.cs</td><td>Build.</td></tr>
+      <tr><td class="what"><b>Cached number formatters.</b> <code>money</code>, <code>amount</code> and the Review formatters reuse <code>numberFormat()</code>.</td><td>Each call built a new <code>Intl.NumberFormat</code>. A 100-row Activity page built several hundred.</td><td class="where">frontend/<wbr>src/<wbr>lib/<wbr>format.ts</td><td>Typecheck, lint and 4,402 frontend tests in a <code>node:24</code> container.</td></tr>
+      <tr><td class="what"><b>Instrument picker keeps the keyboard highlight in view.</b></td><td>Arrow keys moved the highlight off screen in a list of up to 500 markets.</td><td class="where">features/<wbr>plays/<wbr>InstrumentPicker.tsx</td><td>Typecheck, lint and 4,402 frontend tests in a <code>node:24</code> container.</td></tr>
+      <tr><td class="what"><b>Pages recover after an outage.</b> The shell reloads once when the event stream returns after a fallback reload.</td><td>After an API restart every open tab kept its load error until the next event or a manual retry.</td><td class="where">features/<wbr>workspace/<wbr>useMonitorEvents.ts (+ test)</td><td>Typecheck, lint and 4,402 frontend tests in a <code>node:24</code> container.</td></tr>
+      <tr><td class="what"><b>Download link is released after 10 s</b>, not at once.</td><td>Safari on iOS can cancel a download whose object URL is revoked before it starts.</td><td class="where">frontend/<wbr>src/<wbr>lib/<wbr>download.ts</td><td>Typecheck, lint and 4,402 frontend tests in a <code>node:24</code> container.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="take"><span class="eyebrow">Tried and reverted</span>
+    <p>Three of my changes did not survive verification. I count that as the process working.</p>
+    <ul>
+      <li><b>Tie-break between the sizing window and the exposure ladder.</b> A use-case test failed, and it pins a documented decision ("ties are disclosed, not ordered", decision 7). Now N-16, a decision for you.</li>
+      <li><b>An unconditional HSTS header in the Caddyfile.</b> The Sol review pointed out that the documented <code>localhost</code> test setup with Caddy's internal CA would pin HTTPS on <code>localhost</code> for a year, on every port. It needs to be opt-in. Now Q-20.</li>
+      <li><b>Clamping the funding window to the host clock.</b> The same review showed it can replace newer verified coverage with an older interval when the host clock trails, and it broke a database test that uses future dates. Now W-8.</li>
+    </ul>
+  </div>
+  <p class="muted">Backend, after the reverts: 0 build warnings; 896 unit, 656 use-case and 984 venue tests pass (5 opt-in skips); the funding, identity and monitor-refresh integration tests (317) pass against a throwaway PostgreSQL 18. The full database-backed suites ran once on an earlier version of the change set: 1,467 integration tests passed with 14 opt-in skips and one failure, which was my funding clamp. The API project passed 419 of 420; the one failure is a timing test that then passed three times on its own.</p>
+</section>
+
+<section id="numbers">
+  <h2>Numbers you cannot fully trust yet</h2>
+  <p>This is the section to read if you read only one. A figure passes through six stages before you see it. The venue side and the arithmetic itself are sound. The defects sit where a rule was decided once per feature and never reconciled with its neighbours.</p>
+
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1180 300" role="img" aria-label="The path of a number from venue to screen, with the defect found at each stage. Nothing was found in venue parsing; defects cluster in stored facts, aggregation and display.">
+      <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ah"/></marker></defs>
+      <g>
+        <rect class="box" x="10" y="14" width="180" height="46" rx="6"/><text x="100" y="42" text-anchor="middle">Venue API</text>
+        <rect class="box" x="206" y="14" width="180" height="46" rx="6"/><text x="296" y="42" text-anchor="middle">Adapter</text>
+        <rect class="box" x="402" y="14" width="180" height="46" rx="6"/><text x="492" y="42" text-anchor="middle">Stored facts</text>
+        <rect class="box" x="598" y="14" width="180" height="46" rx="6"/><text x="688" y="42" text-anchor="middle">Aggregation</text>
+        <rect class="box" x="794" y="14" width="180" height="46" rx="6"/><text x="884" y="42" text-anchor="middle">Cache and API</text>
+        <rect class="box" x="990" y="14" width="180" height="46" rx="6"/><text x="1080" y="42" text-anchor="middle">Screen</text>
+        <line class="ln" x1="190" y1="37" x2="204" y2="37" marker-end="url(#a1)"/><line class="ln" x1="386" y1="37" x2="400" y2="37" marker-end="url(#a1)"/><line class="ln" x1="582" y1="37" x2="596" y2="37" marker-end="url(#a1)"/><line class="ln" x1="778" y1="37" x2="792" y2="37" marker-end="url(#a1)"/><line class="ln" x1="974" y1="37" x2="988" y2="37" marker-end="url(#a1)"/>
+      </g>
+      <g>
+        <rect class="box-good" x="10" y="84" width="180" height="44" rx="5"/><text class="t-small" x="20" y="102">Strict JSON, exact decimals,</text><text class="t-small" x="20" y="117">bounded reads. Nothing found.</text>
+
+        <rect class="box-bad" x="206" y="84" width="180" height="44" rx="5"/><text class="t-small" x="216" y="102">Builder-market fills dropped</text><text class="t-small" x="216" y="117">when builder metadata fails</text>
+        <rect class="box-warn" x="206" y="138" width="180" height="44" rx="5"/><text class="t-small" x="216" y="156">One unknown row stops the</text><text class="t-small" x="216" y="171">whole account import</text>
+
+        <rect class="box-bad" x="402" y="84" width="180" height="44" rx="5"/><text class="t-small" x="412" y="102">Partial position read is</text><text class="t-small" x="412" y="117">saved as if complete</text>
+        <rect class="box-warn" x="402" y="138" width="180" height="44" rx="5"/><text class="t-small" x="412" y="156">A balance read can mix two</text><text class="t-small" x="412" y="171">refreshes and double count</text>
+
+        <rect class="box-bad" x="598" y="84" width="180" height="44" rx="5"/><text class="t-small" x="608" y="102">Unrealized P&amp;L averages all</text><text class="t-small" x="608" y="117">entries, not what is left</text>
+        <rect class="box-warn" x="598" y="138" width="180" height="44" rx="5"/><text class="t-small" x="608" y="156">Overview counts operations</text><text class="t-small" x="608" y="171">Review rejects as incomplete</text>
+        <rect class="box-warn" x="598" y="192" width="180" height="44" rx="5"/><text class="t-small" x="608" y="210">Part-filled stop counted as</text><text class="t-small" x="608" y="225">fully executed in open risk</text>
+
+        <rect class="box-warn" x="794" y="84" width="180" height="44" rx="5"/><text class="t-small" x="804" y="102">Retired RISEx market valued</text><text class="t-small" x="804" y="117">at its successor's mark</text>
+        <rect class="box-bad" x="794" y="138" width="180" height="44" rx="5"/><text class="t-small" x="804" y="156">Plays list keeps a result</text><text class="t-small" x="804" y="171">that Review now rejects</text>
+
+        <rect class="box-bad" x="990" y="84" width="180" height="44" rx="5"/><text class="t-small" x="1000" y="102">Prices shown as money:</text><text class="t-small" x="1000" y="117">DOGE 0.1634 reads $0.16</text>
+        <rect class="box-warn" x="990" y="138" width="180" height="44" rx="5"/><text class="t-small" x="1000" y="156">Two different "unrealized"</text><text class="t-small" x="1000" y="171">figures under one word</text>
+        <rect class="box-warn" x="990" y="192" width="180" height="44" rx="5"/><text class="t-small" x="1000" y="210">Coverage notices sit two</text><text class="t-small" x="1000" y="225">clicks deep in a row</text>
+      </g>
+      <g>
+        <rect class="box-bad" x="10" y="268" width="14" height="14" rx="3"/><text class="t-small t-muted" x="30" y="279">wrong or missing number</text>
+        <rect class="box-warn" x="190" y="268" width="14" height="14" rx="3"/><text class="t-small t-muted" x="210" y="279">misleading or fragile</text>
+        <rect class="box-good" x="350" y="268" width="14" height="14" rx="3"/><text class="t-small t-muted" x="370" y="279">checked and sound</text>
+      </g>
+    </svg>
+    </div>
+    <figcaption>Where each defect enters. Nothing was found in venue parsing. The defects cluster in what gets stored, how it is aggregated, what stays cached and how it is shown.</figcaption>
+  </figure>
+
+  <h3>Fix these first</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>What happens</th><th>Where</th><th>Severity</th><th>Effort</th></tr></thead>
+    <tbody>
+      <tr><td class="id">N-1</td><td class="what"><b>Unrealized P&amp;L uses the average of every entry, not the cost of what is still open.</b> Buy 10 at 100, sell 5 at 110, buy 5 at 120, mark 130. Vessel shows +233.33. The venue's own average-cost figure is +200. Lighter (snapshot path) and the Overview tile show about 200 for the same position, so two screens disagree. The quantity-weighted entry average is a documented display figure, and that is fine. Using it as the cost basis of what remains is the defect. <span class="muted">Three reviewers and I agree on the arithmetic. Sol rates it medium because the formula is written in the Activity contract; I keep it high because the venue shows a different number for the same position.</span></td><td class="where">Application/<wbr>Activity/<wbr>OperationUnrealized.cs:67<br>Application/<wbr>Activity/<wbr>OperationAggregator.cs:339</td><td><span class="pill p-high">high</span></td><td>S–M</td></tr>
+      <tr><td class="id">N-2</td><td class="what"><b>Hyperliquid builder-market fills are dropped without a trace while builder metadata is unavailable.</b> <code>xyz:GOLD</code>-style fills are skipped with no omission marker. On Refresh the run is at least marked degraded. On a history backfill page nothing checks, so the gap can be closed as complete and is never read again. <span class="muted">Confirmed by the refutation pass: the backfill conclusion only refuses its proof when omissions are counted, and none are.</span></td><td class="where">Infrastructure/<wbr>Venues/<wbr>Hyperliquid/<wbr>HyperliquidPerpetualReader.cs:293<br>Infrastructure/<wbr>Venues/<wbr>Hyperliquid/<wbr>HyperliquidPerpetualReader.FillHistory.cs:34</td><td><span class="pill p-high">high</span></td><td>S</td></tr>
+      <tr><td class="id">N-3</td><td class="what"><b>A partial position read replaces the stored positions and is then treated as complete.</b> The reader reports <code>PositionsComplete = false</code>, but that flag is never stored. After one failed builder read, Overview shows 0 positions and $0 unrealized as known values. <span class="muted">Confirmed by the refutation pass.</span></td><td class="where">Persistence/<wbr>WorkspaceStore.cs:212<br>Application/<wbr>Overview/<wbr>OverviewSummaryService.cs:70</td><td><span class="pill p-high">high</span></td><td>M</td></tr>
+      <tr><td class="id">N-4</td><td class="what"><b>Overview's realized total counts operations whose executions are known to be incomplete.</b> If a filled order's retained fills add up to less than its size, Review and Sizing exclude the operation. Overview is deliberately not the scored record, and it does show a generic "limited history" reason. It has no reason for this stronger evidence, so the operation is counted as a known result. Found independently by Claude and Sol.</td><td class="where">Application/<wbr>Overview/<wbr>OverviewSummaryService.cs:49<br>Application/<wbr>Sizing/<wbr>SizingService.cs:118</td><td><span class="pill p-med">medium</span></td><td>M</td></tr>
+      <tr><td class="id">N-5</td><td class="what"><b>Prices are formatted as money with two decimals.</b> Extra digits only appear below $0.01. An entry at 0.0123 and an exit at 0.0127 both read "$0.01" beside a +3.25% return. A test pins <code>money('0.123456')</code> as <code>'$0.12'</code>.</td><td class="where">lib/<wbr>format.ts:26<br>features/<wbr>workspace/<wbr>OperationsTable.tsx:123</td><td><span class="pill p-high">high</span></td><td>S</td></tr>
+      <tr><td class="id">N-6</td><td class="what"><b>A part-filled stop is treated as fully executed in open risk.</b> Long 10 at 100, stops for 5 at 90 and 5 at 99. The 90 stop fills one unit and still rests for four. Open risk drops that stop and reports $9. The stops that still rest carry $45. <span class="muted">The Phase 2 contract says a filled stop "has done its part", so this follows the written rule. The rule does not cover a partial fill, and the error can go either way.</span></td><td class="where">Application/<wbr>Risk/<wbr>OpenRiskCalculator.cs:87, 134</td><td><span class="pill p-med">medium</span></td><td>M</td></tr>
+      <tr><td class="id">N-7</td><td class="what"><b>A retired RISEx market can be valued at its replacement's mark.</b> Activity partitions by native market, but the mark lookup matches only the shared canonical key. <span class="muted">Confirmed by the refutation pass. The snapshot path checks the native market; the mark path does not.</span></td><td class="where">Application/<wbr>Activity/<wbr>OperationUnrealized.cs:63<br>Infrastructure/<wbr>Venues/<wbr>Risex/<wbr>RisexReader.cs:518</td><td><span class="pill p-med">medium</span></td><td>M</td></tr>
+      <tr><td class="id">N-10</td><td class="what"><b>Overview "unrealized" and Activity "Unrealized P&amp;L" are different figures.</b> Overview sums the venue's figures from the last refresh. Activity marks at the current price. The Overview tile shows no as-of time.</td><td class="where">features/<wbr>workspace/<wbr>OverviewSummary.tsx:58</td><td><span class="pill p-med">medium</span></td><td>S</td></tr>
+      <tr><td class="id">N-11</td><td class="what"><b>An unknown net result looks like a clean row.</b> A closed operation with an unsupported fee shows "—" with only a hover title. Operation coverage notices sit in a collapsed block inside the expanded row.</td><td class="where">features/<wbr>workspace/<wbr>OperationsTable.tsx:126</td><td><span class="pill p-med">medium</span></td><td>S</td></tr>
+      <tr><td class="id">N-12</td><td class="what"><b>Review rounds small values to a signed zero</b> and prints R with "×". A return of −0.04% reads "-0.0%". The same Play reads "+1.98R" on its receipt and "1.98×" in Review.</td><td class="where">features/<wbr>review/<wbr>ReviewPage.tsx:145</td><td><span class="pill p-med">medium</span></td><td>S</td></tr>
+      <tr><td class="id">N-20</td><td class="what"><b>A balance read that races a refresh can mix two snapshots and double count.</b> The snapshot and its wallet rows load in two queries with no shared transaction. Perps equity 100 and wallet 0, then a transfer and a refresh: a read caught between them adds the old equity to the new wallet and shows 200 with full coverage. The next load corrects it. <span class="muted">Found by Sol in round two; I confirmed the split query.</span></td><td class="where">Persistence/<wbr>WorkspaceStore.cs:26-29<br>Application/<wbr>Workspace/<wbr>WorkspaceService.cs:477</td><td><span class="pill p-med">medium</span></td><td>S</td></tr>
+      <tr><td class="id">N-21</td><td class="what"><b>The Plays list can keep showing a scored result that Review now rejects.</b> When a later import marks an order as having omitted executions and nothing else changes, the list projection is not refreshed. The list shows +10 and 2R. Review excludes the Play and its execution view withholds the result. It stays that way until another write or a full rebuild. <span class="muted">Found by Sol in round two; I confirmed the missing field.</span></td><td class="where">Persistence/<wbr>Search/<wbr>PlaySearchCapture.cs:51</td><td><span class="pill p-high">high</span></td><td>S</td></tr>
+      <tr><td class="id">N-22</td><td class="what"><b>A first failed wallet read becomes a known perps-only balance.</b> On a separate-ledger Hyperliquid account whose wallet has never been read, a missing wallet is treated as an empty one. Perps equity 0 and 100 in spot reads as a balance of "0" with complete coverage. The stale-wallet guard covers only a wallet that was observed before.</td><td class="where">Application/<wbr>Workspace/<wbr>WorkspaceService.cs:481-486</td><td><span class="pill p-med">medium</span></td><td>S</td></tr>
+    </tbody>
+  </table></div>
+
+  <details><summary>Lower-severity inconsistencies and decisions for you</summary><div class="inner">
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>What happens</th><th>Where</th><th>Severity</th><th>Effort</th></tr></thead>
+    <tbody>
+      <tr><td class="id">N-13</td><td class="what"><b>Lighter omission counts count page copies.</b> A liquidation returned on two cursor pages is stored once but the notice says "2 liquidations".</td><td class="where">Infrastructure/<wbr>Venues/<wbr>Lighter/<wbr>LighterReader.Account.cs:144</td><td><span class="pill p-low">low</span></td><td>S</td></tr>
+      <tr><td class="id">N-14</td><td class="what"><b>Overview flags nearly every account as "limited history".</b> The count includes the funding-state row every funding-capable account always has, so the warning means nothing.</td><td class="where">Application/<wbr>Overview/<wbr>OverviewSummaryService.cs:61</td><td><span class="pill p-low">low</span></td><td>S</td></tr>
+      <tr><td class="id">N-15</td><td class="what"><b>The same rolling period has three boundary rules.</b> Review uses (from, now], Overview [from, now], Activity [from, …). Two tests pin the opposite edges.</td><td class="where">Application/<wbr>Review/<wbr>Contracts.cs:33<br>Application/<wbr>Overview/<wbr>OverviewSummaryService.cs:51</td><td><span class="pill p-low">low</span></td><td>S</td></tr>
+      <tr><td class="id">N-16</td><td class="what"><b>Sizing window and exposure ladder break same-instant ties differently.</b> At the edge of the 20-result window, the record keeps the lower Play ID while the ladder walks it first. Neither ID says which result really came last. Decision 7 keeps the stable order and discloses the tie, and the refutation pass calls this a policy, not a defect. I agree. Change it only if you want one total order.</td><td class="where">Domain/<wbr>Sizing/<wbr>TrackRecord.cs:44, 137</td><td><span class="pill p-low">decision</span></td><td>S</td></tr>
+      <tr><td class="id">N-17</td><td class="what"><b>R treats a missing or invalid leverage as 1x, open risk refuses it.</b> Only legacy plans are exposed. Speculative.</td><td class="where">Application/<wbr>Plays/<wbr>Execution/<wbr>ExecutionMatcher.cs:32</td><td><span class="pill p-low">low</span></td><td>S</td></tr>
+      <tr><td class="id">N-18</td><td class="what"><b>With imported positions on, weighted figures sit under Play-only labels.</b> One Play win and two position losses read "50.0%" beside "1W 2L". The chart counts positions as "Plays".</td><td class="where">features/<wbr>review/<wbr>ReviewPage.tsx:232</td><td><span class="pill p-low">low</span></td><td>S</td></tr>
+      <tr><td class="id">N-19</td><td class="what"><b>Sign and colour slips in Review.</b> Average loss reads "10.0%" in red without a sign beside "-$15". Max drawdown is red at "$0". A period net of 0.00004 reads "$0" in green.</td><td class="where">features/<wbr>review/<wbr>ReviewPage.tsx:233, 241</td><td><span class="pill p-low">low</span></td><td>S</td></tr>
+      <tr><td class="id">N-8</td><td class="what"><b>A market rename that changes the asset part of the name would import the same native trades twice.</b> Dedup uses the derived canonical key plus the trade ID. The documented "deprecated" suffix does not change the key, and nobody found evidence that RISEx renames a live market this way. Guard it when you next touch the import.</td><td class="where">Persistence/<wbr>WorkspaceStore.cs:196, 288</td><td><span class="pill p-low">low, unproven</span></td><td>M</td></tr>
+      <tr><td class="id">N-9</td><td class="what"><b>A funding window that contains a payment on a non-USDC builder DEX is never certified.</b> This is deliberate and tested: an unknown coin keeps the window incomplete. Clean windows around it still extend coverage. The improvement is to tell "proven out of scope" from "unknown", as fills already do.</td><td class="where">Infrastructure/<wbr>Venues/<wbr>Hyperliquid/<wbr>HyperliquidPerpetualReader.Funding.cs:73</td><td><span class="pill p-low">low</span></td><td>S–M</td></tr>
+
+    </tbody>
+  </table></div></div></details>
+
+  <h3>Why the test suite missed these</h3>
+  <p>The suite is large and mostly honest. Expected values are hand-computed literals, not recomputed with the code under test. Fee handling on both bases, flips, exact sums and the manual ledger are well covered. Four things let the defects through.</p>
+  <div class="cols">
+    <div class="card"><h4>No test loads one dataset through two screens</h4><p>Overview, Activity and Review each pass their own tests. Two of those tests pin opposite window edges, and both are green.</p></div>
+    <div class="card"><h4>Fixtures are long, one unit, two fills</h4><p>Review metrics are never computed for a short Play. Flipping the short branch of the initial-risk check fails no test. Open risk has one short case.</p></div>
+    <div class="card"><h4>Some figures are never asserted</h4><p><code>AverageR</code> has no assertion anywhere. The snapshot guards of unrealized P&amp;L are untested. "Scratches do not break streaks" has no win, scratch, win case.</p></div>
+    <div class="card"><h4>A third of the suite skips silently</h4><p>827 of 2,269 test methods need the test database (12 of them the broker too). Without <code>Vessel_TEST_POSTGRES</code> they skip, <code>check.sh</code> still passes, and CI runs only on tags.</p></div>
+  </div>
+
+  <div class="take"><span class="eyebrow">Proposal: a golden journal</span>
+    <p>One small dataset, checked by hand once, loaded once, asserted through Activity, Overview, Review, Sizing and Open risk at a fixed clock. Two accounts on different P&amp;L bases, one disabled account with a large win, a long with exit-then-add, a short, an exact-zero scratch between two wins, a fee-only loss, an unlisted fee token, a flip, an order with a known missing execution, an open position with a supplied mark, two closes at the same instant and one exactly on the 7-day boundary.</p>
+    <p>Then assert identities, not only values. Overview realized equals the sum of Activity's closed nets for the scope. Review net with positions included equals Overview realized minus a listed set of exclusions. Group nets sum to the total. Two days of work, and N-1, N-4, N-15 and N-21 can no longer pass unnoticed.</p>
+  </div>
+</section>
+
+<section id="protection">
+  <h2>Protection warnings</h2>
+  <p>You rely on Vessel to tell you when a live position is not protected the way the plan says. The mechanics are careful. Nothing resolves on a failed read, a candidate needs two observations a minute apart, the grace period counts from the first entry fill and never restarts, and wrong-side stops never count as protection. The problem is what happens when the monitor is unsure.</p>
+
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1180 290" role="img" aria-label="Timeline from a stop being cancelled at the venue to the popup in the browser: up to eleven minutes waiting for the next check, sixty to ninety seconds of confirmation, then under three seconds to the browser. Four conditions switch the check off without telling you.">
+      <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ah"/></marker></defs>
+      <text class="t-head" x="10" y="18">FROM VENUE CONDITION TO POPUP, WORST CASE ABOUT 13 MINUTES</text>
+      <rect class="box" x="10" y="32" width="150" height="50" rx="6"/><text x="85" y="54" text-anchor="middle">Stop cancelled</text><text class="t-small t-muted" x="85" y="70" text-anchor="middle">at the venue</text>
+      <rect class="box-warn" x="184" y="32" width="330" height="50" rx="6"/><text x="349" y="54" text-anchor="middle">Wait for the next check</text><text class="t-small t-muted" x="349" y="70" text-anchor="middle">0 to 11 min (10 min interval, jittered)</text>
+      <rect class="box" x="538" y="32" width="130" height="50" rx="6"/><text x="603" y="54" text-anchor="middle">Read, link, observe</text><text class="t-small t-muted" x="603" y="70" text-anchor="middle">seconds</text>
+      <rect class="box" x="692" y="32" width="150" height="50" rx="6"/><text x="767" y="54" text-anchor="middle">Confirmation run</text><text class="t-small t-muted" x="767" y="70" text-anchor="middle">60 to 90 s</text>
+      <rect class="box" x="866" y="32" width="130" height="50" rx="6"/><text x="931" y="54" text-anchor="middle">Notification Hub</text><text class="t-small t-muted" x="931" y="70" text-anchor="middle">under 1 s, 30 s fallback</text>
+      <rect class="box" x="1020" y="32" width="150" height="50" rx="6"/><text x="1095" y="54" text-anchor="middle">Browser popup</text><text class="t-small t-muted" x="1095" y="70" text-anchor="middle">2 s poll, focused tab only</text>
+      <line class="ln" x1="160" y1="57" x2="182" y2="57" marker-end="url(#a2)"/><line class="ln" x1="514" y1="57" x2="536" y2="57" marker-end="url(#a2)"/><line class="ln" x1="668" y1="57" x2="690" y2="57" marker-end="url(#a2)"/><line class="ln" x1="842" y1="57" x2="864" y2="57" marker-end="url(#a2)"/><line class="ln" x1="996" y1="57" x2="1018" y2="57" marker-end="url(#a2)"/>
+
+      <text class="t-head" x="10" y="128">WHAT SWITCHES THE CHECK OFF WITHOUT TELLING YOU</text>
+      <rect class="box-bad" x="10" y="142" width="270" height="62" rx="6"/><text x="22" y="164">A history gap or one omitted execution</text><text class="t-small t-muted" x="22" y="181">Every stop check on the account goes</text><text class="t-small t-muted" x="22" y="195">"unknown" until you backfill. MON-1</text>
+      <rect class="box-bad" x="300" y="142" width="270" height="62" rx="6"/><text x="312" y="164">One open order the adapter cannot read</text><text class="t-small t-muted" x="312" y="181">A BTC order with attached TP/SL hides a</text><text class="t-small t-muted" x="312" y="195">missing ETH stop. MON-2</text>
+      <rect class="box-warn" x="590" y="142" width="270" height="62" rx="6"/><text x="602" y="164">The only open tab is in Paper mode</text><text class="t-small t-muted" x="602" y="181">No stream, no badge, no popup for real</text><text class="t-small t-muted" x="602" y="195">warnings. MON-3</text>
+      <rect class="box-warn" x="880" y="142" width="290" height="62" rx="6"/><text x="892" y="164">The monitor worker is down</text><text class="t-small t-muted" x="892" y="181">No event and no notification. Only an</text><text class="t-small t-muted" x="892" y="195">in-page banner in an open tab. MON-6</text>
+      <text class="t-small t-muted" x="10" y="238">Critical popups last 20 seconds in a focused, visible tab. After that the warning is an unread badge. There is no external channel and no dead-man check yet (decision 12, deferred).</text>
+      <text class="t-small t-muted" x="10" y="256">Any unknown observation restarts the two-step confirmation. A fourth simultaneous critical shows only as an info toast "N more unread".</text>
+    </svg>
+    </div>
+    <figcaption>The detection path and its delays, and the four conditions that leave you unprotected without a notification. The first two are the ones to fix.</figcaption>
+  </figure>
+
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>What happens</th><th>Where</th><th>Severity</th><th>Effort</th></tr></thead>
+    <tbody>
+      <tr><td class="id">MON-1</td><td class="what"><b>A history gap or one omitted execution turns off stop checks for the whole account.</b> A capped 2,000-fill read after downtime, or one Lighter liquidation in the window, sets <code>gap</code>. From then on missing, short, cancelled and excess stops are "unknown" for every Open Play on the account, including Plays opened weeks later. You see one "monitoring degraded" warning. The plan documents the rule but not that a Play with no stop at all goes unflagged.<br><span class="muted">Fix: decide "no linked stop rests and the venue shows the position" without the fill quantity. Scope a gap to Plays whose first entry is not after the gap's end, and an omission to its contract.</span></td><td class="where">Application/<wbr>Monitoring/<wbr>MonitorDiscrepancyService.Observations.cs:80, 307, 347</td><td><span class="pill p-high">high</span></td><td>M</td></tr>
+      <tr><td class="id">MON-2</td><td class="what"><b>One unreadable open order makes every Play's stop coverage unknown.</b> A Hyperliquid order with attached TP/SL children, or a Lighter TWAP or flagged order, marks the book incomplete for as long as it rests.<br><span class="muted">Fix: track book completeness per contract. A skipped BTC order says nothing about ETH stops.</span></td><td class="where">Infrastructure/<wbr>Venues/<wbr>Hyperliquid/<wbr>HyperliquidPerpetualReader.Orders.cs:64<br>Infrastructure/<wbr>Venues/<wbr>Lighter/<wbr>LighterReader.Orders.cs:47</td><td><span class="pill p-high">high</span></td><td>M</td></tr>
+      <tr><td class="id">MON-3</td><td class="what"><b>A tab in Paper mode shows no real warnings.</b> The event stream only runs when the trading mode is "real".</td><td class="where">features/<wbr>workspace/<wbr>ApplicationShell.tsx:307</td><td><span class="pill p-med">medium</span></td><td>S–M</td></tr>
+      <tr><td class="id">MON-4</td><td class="what"><b>An entry filled away from the planned price never opens the Play, so no stop check runs.</b> A planned long at 100 entered by market at 101.3 is not linked. You get an account-level "position larger than expected" warning with no Play link.</td><td class="where">Application/<wbr>Plays/<wbr>Execution/<wbr>ExecutionMatcher.cs:74</td><td><span class="pill p-med">medium</span></td><td>M</td></tr>
+      <tr><td class="id">MON-5</td><td class="what"><b>Any stop, however small, clears the critical.</b> A stop for 1 contract against 1,000 open resolves "missing stop" and withdraws the unread critical. A "covers less" warning follows. Severities are your decision.</td><td class="where">Application/<wbr>Monitoring/<wbr>MonitorDiscrepancyService.Observations.cs:381</td><td><span class="pill p-med">medium</span></td><td>S</td></tr>
+      <tr><td class="id">MON-6</td><td class="what"><b>"Monitoring stopped" is only ever a warning, and a dead worker is not announced.</b> A refused Lighter token stops checks until the token changes. A minimum severity of critical hides that. A crashed worker produces nothing.<br><span class="muted">Fix: exempt credential errors and stale monitoring from the minimum severity, and let the notification worker announce a stale monitor heartbeat.</span></td><td class="where">Application/<wbr>Notifications/<wbr>NotificationHub.cs:164</td><td><span class="pill p-med">medium</span></td><td>M</td></tr>
+      <tr><td class="id">MON-7</td><td class="what"><b>Preferences drop critical warnings permanently, with no caution.</b> With the channel off the event is recorded as handled and no row is created. Re-enabling brings nothing back.</td><td class="where">Application/<wbr>Notifications/<wbr>NotificationHub.cs:129</td><td><span class="pill p-med">medium</span></td><td>S</td></tr>
+      <tr><td class="id">MON-8</td><td class="what"><b>Every untracked position is flagged once the account has one Play.</b> One planned Play plus five positions you do not journal gives five warnings, and each reopens on a size change. Intended by the plan, but it trains you to ignore the list.</td><td class="where">Application/<wbr>Monitoring/<wbr>MonitorDiscrepancyService.Observations.cs:220</td><td><span class="pill p-med">medium</span></td><td>M</td></tr>
+      <tr><td class="id">MON-9 to 13</td><td class="what">Five smaller ones. A popup claim can be consumed without being shown. A warning that becomes verifiable again after "could not be verified" says nothing. One incomplete run flips the account to degraded and notifies. A fourth simultaneous critical gets an info toast. A host clock behind the venue makes position checks permanently unknown (speculative).</td><td class="where">Persistence/<wbr>Notifications/<wbr>NotificationStore.cs:289<br>Domain/<wbr>Monitoring/<wbr>DiscrepancyLifecycle.cs:73</td><td><span class="pill p-low">low</span></td><td>S each</td></tr>
+    </tbody>
+  </table></div>
+  <div class="take"><span class="eyebrow">My opinion</span>
+    <p>"Unknown" is the honest answer for a quantity comparison when history has a gap. It is the wrong answer for "does any stop rest at all". Fix MON-1 and MON-2 before anything else in this section. Then bring decision 12 forward: a tool that guards open positions needs one channel that reaches you when no tab is open, and a dead-man check for its own worker. A single webhook is enough.</p>
+  </div>
+</section>
+
+<section id="reliability">
+  <h2>Import, workers and the long-lived tab</h2>
+  <p>No lost or duplicated work turned up in the monitor, the event log or the paper engine. These are the places where something stalls, or keeps showing you old data, without saying so.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>What happens</th><th>Where</th><th>Severity</th><th>Effort</th></tr></thead>
+    <tbody>
+      <tr><td class="id">W-1</td><td class="what"><b>One unknown or malformed row stops an account's whole import</b>, and keeps stopping it while that row stays in the venue's newest window: up to 500 trades on Lighter, 2,000 fills on Hyperliquid. A new Lighter trade type, a RISEx maker rebate (a negative fee) or an unknown Hyperliquid side would do it. You see "The venue check failed. Monitoring will retry." The fix, an omission marker for the one row, loosens a documented rule, so it is your decision.</td><td class="where">Infrastructure/<wbr>Venues/<wbr>Lighter/<wbr>LighterReader.Account.cs:277<br>Infrastructure/<wbr>Venues/<wbr>Risex/<wbr>RisexReader.cs:305</td><td><span class="pill p-med">medium</span></td><td>M</td></tr>
+      <tr><td class="id">W-2</td><td class="what"><b>RabbitMQ may be a hard startup dependency of the API and the monitor worker.</b> Both register Wolverine with the broker and there is no switch to run without it. Whether a host actually fails to start while the broker is down could not be settled by reading. The October research note says that case was never tested. Write the cold-start test before deciding anything. See B-3.</td><td class="where">Messaging/<wbr>MessagingHosting.cs:76<br>Worker/<wbr>Program.cs:86</td><td><span class="pill p-med">medium, unproven</span></td><td>S to test</td></tr>
+      <tr><td class="id">W-3</td><td class="what"><b>A check left "running" by a killed worker blocks your Refresh.</b> Admission releases abandoned background refreshes and unclaimed pending checks, but not a claimed check whose lease has expired. Refresh answers 429 "retry in 1 s" until a worker reclaims the row. Confirmed by two reviewers. See Q-4.</td><td class="where">Domain/<wbr>Monitoring/<wbr>MonitorAccount.cs:59<br>Application/<wbr>Monitoring/<wbr>MonitorCoordinator.cs:184</td><td><span class="pill p-med">medium</span></td><td>S</td></tr>
+      <tr><td class="id">W-4</td><td class="what"><b>The paper worker holds the shared Hyperliquid budget lock across an HTTP read.</b> The monitor takes the same lock, blocking, inside its claim and Refresh-admission transactions. A slow candle read of up to 20 s stalls protection claims for every owner and makes a Refresh wait while holding an account row lock. Only with the optional paper worker running.</td><td class="where">Worker/<wbr>PaperScheduler.cs:229<br>Persistence/<wbr>MonitorStore.cs:396</td><td><span class="pill p-med">medium</span></td><td>S–M</td></tr>
+      <tr><td class="id">W-5</td><td class="what"><b>A half-open connection shows "Live" with frozen prices.</b> Neither event-stream reader has an idle timeout although the server sends a keepalive every 15 s. After a Wi-Fi or NAT change, fills and notifications stop arriving until the operating system notices. See Q-14.</td><td class="where">api/<wbr>sse.ts:98</td><td><span class="pill p-med">medium</span></td><td>S</td></tr>
+      <tr><td class="id">W-6</td><td class="what"><b>Dragging a stop or target line on a phone is probably cancelled by page scrolling.</b> The chart allows vertical panning (<code>touch-action: pan-y</code>) and the drag handler cancels on <code>pointercancel</code>. The chart plan lists touch dragging as "not verified". Needs a real device.</td><td class="where">components/<wbr>chart/<wbr>chart.css:2<br>components/<wbr>chart/<wbr>lightweight.ts:925</td><td><span class="pill p-med">medium, likely</span></td><td>S</td></tr>
+      <tr><td class="id">W-7</td><td class="what"><b>Pages kept their load error after an outage.</b> <span class="pill p-done">fixed</span></td><td class="where">features/<wbr>workspace/<wbr>useMonitorEvents.ts</td><td><span class="pill p-med">medium</span></td><td>done</td></tr>
+      <tr><td class="id">W-8</td><td class="what"><b>Refresh fails its funding read when the host clock trails the venue's.</b> The window ends at the venue's snapshot time and the funding reader refuses an end in the future. My one-line clamp to local time was wrong: the reviewer showed it can replace newer verified coverage with an older interval, and it broke a database test. The fix needs a guard in the coverage update too.</td><td class="where">Application/<wbr>Monitoring/<wbr>MonitorCoordinator.cs:243<br>Persistence/<wbr>WorkspaceStore.Funding.cs:57</td><td><span class="pill p-low">low</span></td><td>S–M</td></tr>
+      <tr><td class="id">W-9</td><td class="what"><b>Lighter read slots are waited for inside the 20 s read deadline.</b> Two slots per exchange are shared by Refresh, checks, orders, funding and discovery, while the worker allows four concurrent reads. Queued reads end as "Lighter read timed out" and are recorded as venue failures with backoff.</td><td class="where">Infrastructure/<wbr>Venues/<wbr>Lighter/<wbr>LighterReader.cs:57</td><td><span class="pill p-low">low</span></td><td>S</td></tr>
+      <tr><td class="id">W-10</td><td class="what">Smaller ones. A narrow exception filter in the paper scheduler lets one account abort a whole tick (speculative). Three places use the wall clock instead of <code>TimeProvider</code>. The root error boundary's "Try again" silently discards an unsaved Play draft. Review filters are lost on navigation while Activity's are kept. A 60 s timeout covers a 10 MB upload on a weak uplink.</td><td class="where">Worker/<wbr>PaperScheduler.cs:186<br>main.tsx:13</td><td><span class="pill p-low">low</span></td><td>S each</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="quick">
+  <h2>Quick wins still open</h2>
+  <p>Each is half a day or less and low risk. I did not apply them because they change behaviour you should approve, touch the monitor's state machine, or need a migration.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Change</th><th>Where</th><th>What it buys</th></tr></thead>
+    <tbody>
+      <tr><td class="id">Q-1</td><td class="what"><b>Make <code>check.sh</code> fail when the test database variable is unset</b>, unless <code>--no-db</code> is passed, and print the skipped count.</td><td class="where">scripts/<wbr>check.sh:9</td><td>No more "green" with 827 tests not run.</td></tr>
+      <tr><td class="id">Q-2</td><td class="what"><b>Fail a backfill page and report fill coverage as unknown while builder metadata is unavailable</b> (N-2). About ten lines, plus the three tests that build the reader with builder markets on, as production does.</td><td class="where">Infrastructure/<wbr>Venues/<wbr>Hyperliquid/<wbr>HyperliquidPerpetualReader.FillHistory.cs:34<br>Infrastructure/<wbr>Venues/<wbr>Hyperliquid/<wbr>HyperliquidPerpetualReader.cs:184</td><td>Builder fills can no longer be lost for good.</td></tr>
+      <tr><td class="id">Q-3</td><td class="what"><b>A <code>price()</code> formatter</b> with at least five significant digits or the instrument tick, used for entry, exit and fill prices (N-5).</td><td class="where">lib/<wbr>format.ts</td><td>Prices read as prices.</td></tr>
+      <tr><td class="id">Q-4</td><td class="what"><b>Release an expired "running" check at admission</b>, the same way unclaimed pending work is released.</td><td class="where">Domain/<wbr>Monitoring/<wbr>MonitorAccount.cs:59<br>Application/<wbr>Monitoring/<wbr>MonitorCoordinator.cs:184</td><td>Refresh no longer answers 429 forever after a worker is killed mid-check.</td></tr>
+      <tr><td class="id">Q-5</td><td class="what"><b>Refresh the Plays list projection when an order's "executions omitted" flag changes</b> (N-21), and run the rebuild once so existing stale rows are repaired.</td><td class="where">Persistence/<wbr>Search/<wbr>PlaySearchCapture.cs:51</td><td>The list stops showing results Review rejects.</td></tr>
+      <tr><td class="id">Q-6</td><td class="what"><b>Label Overview's unrealized figure "at last refresh" with its time</b> (N-10), put a coverage badge on Activity rows (N-11), and count only history rows in "limited history" (N-14).</td><td class="where">features/<wbr>workspace/<wbr>OverviewSummary.tsx:58<br>features/<wbr>workspace/<wbr>OperationsTable.tsx:126</td><td>Three misleading displays gone.</td></tr>
+      <tr><td class="id">Q-7</td><td class="what"><b>Pin the missing test cases.</b> <code>AverageR</code>, a short Play with R in Review, a short percent stop in open risk, win-scratch-win, the snapshot guards of unrealized P&amp;L.</td><td class="where">tests/<wbr>Vessel.Unit.Tests, UseCases.Tests</td><td>Five single-token mutations stop surviving.</td></tr>
+      <tr><td class="id">Q-8</td><td class="what"><b>Use one connection pool.</b> Pass the existing <code>NpgsqlDataSource</code> to <code>UseNpgsql</code>.</td><td class="where">Persistence/<wbr>DependencyInjection.cs:25, 40</td><td>Halves pooled connections per process. API plus three workers can pass PostgreSQL's default 100 today.</td></tr>
+      <tr><td class="id">Q-9</td><td class="what"><b>Set <code>lock_timeout</code> and <code>statement_timeout</code></b> and map error 55P03 to a clear 503 or 409. Deferred since October.</td><td class="where">Persistence/<wbr>DependencyInjection.cs</td><td>Lock waits fail fast and say why.</td></tr>
+      <tr><td class="id">Q-10</td><td class="what"><b>Refuse startup on a schema newer than the image.</b> One shared check for readiness and worker start: fail if applied migrations contain IDs the image does not know.</td><td class="where">Api/<wbr>Program.cs:134</td><td>An image rollback without a restore stops being silent.</td></tr>
+      <tr><td class="id">Q-11</td><td class="what"><b>Pin every GitHub Action to a commit SHA</b> with <code>persist-credentials: false</code>, and commit a lockfile for the synthetic wallet signer.</td><td class="where">.github/<wbr>workflows/<wbr>release.yml:27, 72</td><td>A third-party checkout action no longer holds a write token by tag.</td></tr>
+      <tr><td class="id">Q-12</td><td class="what"><b>Release the bundle build slot before streaming the response</b>, with one slot per owner and a wait timeout. Found by both security reviewers.</td><td class="where">Application/<wbr>Export/<wbr>PlayBundleService.cs:62</td><td>Two slow downloads no longer block every export.</td></tr>
+      <tr><td class="id">Q-13</td><td class="what"><b>Report credential status without decrypting the token.</b> Open since October.</td><td class="where">Application/<wbr>Credentials/<wbr>AccountCredentialService.cs:128</td><td>No plaintext token in memory on every Manage account view.</td></tr>
+      <tr><td class="id">Q-14</td><td class="what"><b>Add an idle watchdog to the SSE reader</b> (45 s without a chunk aborts and reconnects) and use the shared reader for the market stream.</td><td class="where">api/<wbr>sse.ts:98</td><td>A half-open connection no longer shows "Live" with frozen prices.</td></tr>
+      <tr><td class="id">Q-15</td><td class="what"><b>Two indexes</b>, by migration: <code>imported_fills (OwnerId, AccountId, OccurredAtUtc)</code> and a trigram index for journal search.</td><td class="where">Persistence/<wbr>MonitorStore.cs:30<br>Persistence/<wbr>PlayStore.cs:60</td><td>Every monitor check and export stops scanning.</td></tr>
+      <tr><td class="id">Q-16</td><td class="what"><b>Delete the standalone Review mock</b> and the non-compiling probe project, and archive <code>prototype/</code> and <code>spikes/</code> to a tag.</td><td class="where">frontend/<wbr>src/<wbr>design/<wbr>portfolio-review<br>docs/<wbr>…/<wbr>backend-probe</td><td>Less code built, linted and tested for nothing.</td></tr>
+      <tr><td class="id">Q-17</td><td class="what"><b>Log rotation in Compose</b>, a web healthcheck, and a worker that exits when its heartbeat goes stale so the restart policy applies.</td><td class="where">deploy/<wbr>compose.yaml</td><td>The disk cannot fill with logs and a wedged worker restarts.</td></tr>
+      <tr><td class="id">Q-18</td><td class="what"><b>Read a snapshot and its positions and wallet rows in one statement</b> (N-20), and <b>keep the combined balance unknown until a wallet has been observed</b> on separate-ledger accounts (N-22).</td><td class="where">Persistence/<wbr>WorkspaceStore.cs:26-29<br>Application/<wbr>Workspace/<wbr>WorkspaceService.cs:481</td><td>No doubled or falsely zero balance.</td></tr>
+      <tr><td class="id">Q-19</td><td class="what"><b>Fix the stale docs</b>: the API token in README and <code>development.md</code>, the October 18 stack in <code>app-status.md</code>, the repository URL in AGENTS.md.</td><td class="where">README.md:82<br>docs/<wbr>development.md:239</td><td>Agents and people stop reading rules that no longer hold.</td></tr>
+      <tr><td class="id">Q-20</td><td class="what"><b>HSTS as an opt-in for the Caddy overlay</b>, off for the documented <code>localhost</code> and internal-CA setups, and documented for anyone running their own TLS proxy.</td><td class="where">deploy/<wbr>Caddyfile</td><td>A stripped HTTP page can no longer pass the wallet's domain check.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="big">
+  <h2>Big improvements</h2>
+  <p>Six pieces of work that change how safe or how cheap Vessel is to run. Each needs your agreement before anyone starts.</p>
+
+  <div class="stack">
+  <h3>B-1. A golden journal and a cheap check on main</h3>
+  <p>Described under <a href="#numbers">numbers</a>. Pair it with the smallest CI that respects your runner budget: a path-filtered job on pull requests that runs typecheck, lint, vitest, the build and the Unit and UseCases tests with no services. That is 6 to 9 minutes on the current runner. Add a local pre-push hook that runs a changed-files subset. The history since you restricted CI shows the cost of not having it: about 700 commits and 8 releases in 19 days (0.3.1 to 0.4.2), about 160 of those commits being fixes or test repairs, and one smoke-test fix that landed inside a release pull request.</p>
+  </div>
+
+  <div class="stack">
+  <h3>B-2. An Activity read model</h3>
+  <p>Activity, the Overview summary, row expansion and a Play's funding all read one in-memory aggregate of every retained fill. It is cached by a "facts revision" that database triggers bump. Two things work against it as history grows. Every monitor check that saves a newer snapshot bumps the revision, even when quantities and money are unchanged, so with several monitored accounts many visits are a cache miss. And an entry larger than the cache capacity (256 MiB by default, configurable) is never stored, so every request recomputes. The repository has two measurements: about 128 MiB charged at 46k fills in one benchmark and 165 MiB at 100k fills plus 40k funding rows in another. The limit is therefore crossed somewhere between roughly 90k and 155k fills, depending on the shape of your data. Review is not cached at all and already takes 1.6 s at 774 Plays.</p>
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1180 320" role="img" aria-label="Today every Activity request can load and aggregate all fills. Proposed: each commit re-aggregates only the account and contract it touched into a table, and requests read pages with SQL.">
+      <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ah"/></marker><marker id="a3b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ah-accent"/></marker></defs>
+      <text class="t-head" x="10" y="20">TODAY: ON EVERY CACHE MISS</text>
+      <rect class="box" x="10" y="34" width="120" height="50" rx="6"/><text x="70" y="63" text-anchor="middle">Request</text>
+      <rect class="box-warn" x="160" y="34" width="200" height="50" rx="6"/><text x="260" y="56" text-anchor="middle">Cache keyed by</text><text x="260" y="72" text-anchor="middle">facts revision</text>
+      <rect class="box-bad" x="390" y="34" width="240" height="50" rx="6"/><text x="510" y="56" text-anchor="middle">Load every fill, funding</text><text x="510" y="72" text-anchor="middle">payment and snapshot</text>
+      <rect class="box-bad" x="660" y="34" width="210" height="50" rx="6"/><text x="765" y="56" text-anchor="middle">Aggregate all operations</text><text x="765" y="72" text-anchor="middle">in memory</text>
+      <rect class="box" x="900" y="34" width="270" height="50" rx="6"/><text x="1035" y="56" text-anchor="middle">Sort everything, filter,</text><text x="1035" y="72" text-anchor="middle">return one page of 25</text>
+      <line class="ln" x1="130" y1="59" x2="158" y2="59" marker-end="url(#a3)"/><line class="ln" x1="360" y1="59" x2="388" y2="59" marker-end="url(#a3)"/><line class="ln" x1="630" y1="59" x2="658" y2="59" marker-end="url(#a3)"/><line class="ln" x1="870" y1="59" x2="898" y2="59" marker-end="url(#a3)"/>
+      <text class="t-small t-warn" x="160" y="104">A check that saves a newer snapshot</text><text class="t-small t-warn" x="160" y="119">bumps the revision.</text>
+      <text class="t-small t-bad" x="390" y="104">About 0.6 s at 46k fills (measured).</text><text class="t-small t-bad" x="390" y="119">Roughly 2.5 s at 200k (estimate).</text>
+      <text class="t-small t-bad" x="660" y="104">Above the cache capacity (256 MiB</text><text class="t-small t-bad" x="660" y="119">by default) nothing is stored.</text>
+      <text class="t-small t-muted" x="900" y="104">Runs on every request,</text><text class="t-small t-muted" x="900" y="119">hit or miss.</text>
+
+      <text class="t-head" x="10" y="178">PROPOSED: WORK MOVES TO THE WRITE</text>
+      <rect class="box" x="10" y="192" width="210" height="50" rx="6"/><text x="115" y="214" text-anchor="middle">Import, link or</text><text x="115" y="230" text-anchor="middle">allocation commits</text>
+      <rect class="box-new" x="250" y="192" width="260" height="50" rx="6"/><text x="380" y="214" text-anchor="middle">Re-aggregate only the touched</text><text x="380" y="230" text-anchor="middle">account × contract</text>
+      <rect class="box-new" x="540" y="192" width="210" height="50" rx="6"/><text x="645" y="214" text-anchor="middle">activity_operations</text><text class="t-small t-muted" x="645" y="230" text-anchor="middle">one row per operation</text>
+      <rect class="box-new" x="800" y="192" width="210" height="50" rx="6"/><text x="905" y="214" text-anchor="middle">SQL page, filters</text><text x="905" y="230" text-anchor="middle">and sums</text>
+      <rect class="box" x="1050" y="192" width="120" height="50" rx="6"/><text x="1110" y="221" text-anchor="middle">Request</text>
+      <line class="ln-accent" x1="220" y1="217" x2="248" y2="217" marker-end="url(#a3b)"/><line class="ln-accent" x1="510" y1="217" x2="538" y2="217" marker-end="url(#a3b)"/>
+      <line class="ln-accent" x1="1050" y1="217" x2="1012" y2="217" marker-end="url(#a3b)"/><line class="ln-accent" x1="800" y1="217" x2="752" y2="217" marker-end="url(#a3b)"/>
+      <text class="t-small t-muted" x="250" y="262">Same OperationAggregator, same transaction.</text><text class="t-small t-muted" x="250" y="277">Snapshot comparison moves to read time, so a</text><text class="t-small t-muted" x="250" y="292">routine monitor check invalidates nothing.</text>
+      <text class="t-small t-muted" x="540" y="262">An offline verify command recomputes</text><text class="t-small t-muted" x="540" y="277">everything and diffs each operation.</text>
+      <text class="t-small t-muted" x="800" y="262">Review's unassigned count and the</text><text class="t-small t-muted" x="800" y="277">sizing fallback read the same rows.</text>
+    </svg>
+    </div>
+    <figcaption>The aggregation code does not change. It runs per touched partition when facts are written, not over all history when a page is read. Keep the in-memory path until the verify command passes on your real data.</figcaption>
+  </figure>
+  <p>Before the read model, three smaller steps buy time. Separate the snapshot-dependent checks from the execution aggregate, so a new observation time does not discard the expensive part. Snapshot freshness is a real input to the proofs, so do not simply ignore those writes. Store the sorted list and facets with the cached entry. Keep only the columns later reads need, not whole fill entities. Run <code>scripts/benchmark.py --scale 4</code> first to confirm the cliff. It does not yet time <code>/api/sizing</code>, a Play's executions or realistic drawing sizes.</p>
+  </div>
+
+  <div class="stack">
+  <h3>B-3. Cut the messaging stack down</h3>
+  <p>In this design correctness already lives in PostgreSQL: events, receipts, the dispatcher, catch-up and retention. RabbitMQ only shortens latency from the 30-second catch-up to under a second for notifications, on checks that run every ten minutes. It costs about 1,100 lines in <code>Vessel.Messaging</code>, a broker container with its own users and password rotation, per-deployment Wolverine schemas, a provisioning step and a large part of the runbook. It is also a startup dependency of every host. If a host cannot start while the broker is down, a broker outage followed by a worker restart stops protection checks for everyone, although nothing they need is missing. The last point is unproven: a second reviewer could not confirm the startup failure by reading, and the October research note says that case was never tested. Write the cold-start test first.</p>
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1180 300" role="img" aria-label="Today an event travels through the Wolverine outbox, a RabbitMQ topic, a quorum queue and a listener before the dispatcher records a receipt in PostgreSQL, while a catch-up loop already reads PostgreSQL directly. Proposed: the commit calls pg_notify and the worker's LISTEN connection wakes the same dispatcher.">
+      <defs><marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ah"/></marker><marker id="a4b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ah-accent"/></marker></defs>
+      <text class="t-head" x="10" y="20">TODAY</text>
+      <rect class="box" x="10" y="34" width="180" height="52" rx="6"/><text x="100" y="56" text-anchor="middle">Change + event row</text><text class="t-small t-muted" x="100" y="73" text-anchor="middle">one PostgreSQL transaction</text>
+      <rect class="box-gone" x="214" y="34" width="150" height="52" rx="6"/><text x="289" y="56" text-anchor="middle">Wolverine</text><text class="t-small t-muted" x="289" y="73" text-anchor="middle">outbox relay</text>
+      <rect class="box-gone" x="388" y="34" width="170" height="52" rx="6"/><text x="473" y="56" text-anchor="middle">RabbitMQ topic</text><text class="t-small t-muted" x="473" y="73" text-anchor="middle">vessel.events</text>
+      <rect class="box-gone" x="582" y="34" width="190" height="52" rx="6"/><text x="677" y="56" text-anchor="middle">Quorum queue</text><text class="t-small t-muted" x="677" y="73" text-anchor="middle">per subscription, plus DLQ</text>
+      <rect class="box-gone" x="796" y="34" width="150" height="52" rx="6"/><text x="871" y="56" text-anchor="middle">Inline listener</text><text class="t-small t-muted" x="871" y="73" text-anchor="middle">always acknowledges</text>
+      <rect class="box" x="970" y="34" width="200" height="52" rx="6"/><text x="1070" y="56" text-anchor="middle">Dispatcher</text><text class="t-small t-muted" x="1070" y="73" text-anchor="middle">receipt in PostgreSQL</text>
+      <line class="ln" x1="190" y1="60" x2="212" y2="60" marker-end="url(#a4)"/><line class="ln" x1="364" y1="60" x2="386" y2="60" marker-end="url(#a4)"/><line class="ln" x1="558" y1="60" x2="580" y2="60" marker-end="url(#a4)"/><line class="ln" x1="772" y1="60" x2="794" y2="60" marker-end="url(#a4)"/><line class="ln" x1="946" y1="60" x2="968" y2="60" marker-end="url(#a4)"/>
+      <path class="ln-accent" d="M100 86 V118 H1070 V88" marker-end="url(#a4b)"/>
+      <text class="t-small t-accent" x="586" y="134" text-anchor="middle">catch-up reads PostgreSQL directly every 30 s: this is already the real retry path</text>
+
+      <text class="t-head" x="10" y="186">PROPOSED</text>
+      <rect class="box" x="10" y="200" width="230" height="52" rx="6"/><text x="125" y="222" text-anchor="middle">Change + event row + pg_notify</text><text class="t-small t-muted" x="125" y="239" text-anchor="middle">delivered only if the commit succeeds</text>
+      <rect class="box-new" x="300" y="200" width="230" height="52" rx="6"/><text x="415" y="222" text-anchor="middle">Worker LISTEN connection</text><text class="t-small t-muted" x="415" y="239" text-anchor="middle">wakes catch-up at once</text>
+      <rect class="box" x="590" y="200" width="200" height="52" rx="6"/><text x="690" y="222" text-anchor="middle">Dispatcher</text><text class="t-small t-muted" x="690" y="239" text-anchor="middle">receipt in PostgreSQL</text>
+      <line class="ln-accent" x1="240" y1="226" x2="298" y2="226" marker-end="url(#a4b)"/><line class="ln-accent" x1="530" y1="226" x2="588" y2="226" marker-end="url(#a4b)"/>
+      <rect class="box-gone" x="840" y="192" width="330" height="92" rx="6"/><text class="t-small" x="852" y="212">Removed</text><text class="t-small t-muted" x="852" y="229">RabbitMQ container, users and rotation</text><text class="t-small t-muted" x="852" y="244">Wolverine and its per-deployment schemas</text><text class="t-small t-muted" x="852" y="259">Provisioning step, dead-letter queues</text><text class="t-small t-muted" x="852" y="274">About 1,100 lines and a startup dependency</text>
+      <text class="t-small t-muted" x="10" y="278">Kept: at-least-once delivery, receipt dedup, attempt caps, lagging and gap rules, the 30 s catch-up as safety net.</text>
+    </svg>
+    </div>
+    <figcaption>Dashed boxes are what goes away. The dispatcher, receipts and catch-up stay exactly as they are. Only the wake-up signal changes.</figcaption>
+  </figure>
+  <div class="take"><span class="eyebrow">My opinion</span>
+    <p>You chose RabbitMQ in October with external channels in mind. None exists, and decision 12 is deferred. I would remove the broker now and add it back the day a consumer outside the process needs it. If you keep it, make it a soft dependency so the monitor and the API start without it. One caveat: <code>LISTEN/NOTIFY</code> does not pass through a transaction-pooling proxy such as PgBouncer. The Compose deployment has none.</p>
+  </div>
+  </div>
+
+  <div class="stack">
+  <h3>B-4. Publish the image you verified</h3>
+  <p>The release workflow builds the images three times: once in each storage verification job and again in the publish job, on separate runners. The runtime bases float by tag (<code>aspnet:10.0</code>, <code>nginx-unprivileged:alpine</code>, <code>node:24-bookworm-slim</code>), so the bytes you ship were never the bytes you tested. There is also no test that upgrades from the previous release, although every upgrade you run does exactly that. The published bytes are not proven different. They are also not proven to be the tested ones.</p>
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1180 230" role="img" aria-label="Today the release workflow builds three separate image sets. Proposed: build once, run every check and an upgrade test against that digest, then push the same digest.">
+      <defs><marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ah"/></marker><marker id="a5b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ah-accent"/></marker></defs>
+      <text class="t-head" x="10" y="20">TODAY</text>
+      <rect class="box" x="10" y="34" width="110" height="48" rx="6"/><text x="65" y="62" text-anchor="middle">Tag vX.Y.Z</text>
+      <rect class="box-warn" x="150" y="34" width="210" height="48" rx="6"/><text x="255" y="55" text-anchor="middle">Verify, S3 storage</text><text class="t-small t-muted" x="255" y="71" text-anchor="middle">builds image set A</text>
+      <rect class="box-warn" x="390" y="34" width="210" height="48" rx="6"/><text x="495" y="55" text-anchor="middle">Verify, local storage</text><text class="t-small t-muted" x="495" y="71" text-anchor="middle">builds image set B</text>
+      <rect class="box-bad" x="630" y="34" width="210" height="48" rx="6"/><text x="735" y="55" text-anchor="middle">Publish</text><text class="t-small t-muted" x="735" y="71" text-anchor="middle">builds image set C and pushes it</text>
+      <line class="ln" x1="120" y1="58" x2="148" y2="58" marker-end="url(#a5)"/><line class="ln" x1="360" y1="58" x2="388" y2="58" marker-end="url(#a5)"/><line class="ln" x1="600" y1="58" x2="628" y2="58" marker-end="url(#a5)"/>
+      <text class="t-small t-bad" x="870" y="52">Base images float by tag, so A, B</text><text class="t-small t-bad" x="870" y="67">and C can differ. C is never run.</text>
+
+      <text class="t-head" x="10" y="130">PROPOSED</text>
+      <rect class="box" x="10" y="144" width="110" height="48" rx="6"/><text x="65" y="172" text-anchor="middle">Tag vX.Y.Z</text>
+      <rect class="box-new" x="150" y="144" width="170" height="48" rx="6"/><text x="235" y="165" text-anchor="middle">Build once</text><text class="t-small t-muted" x="235" y="181" text-anchor="middle">bases pinned by digest</text>
+      <rect class="box-new" x="350" y="144" width="420" height="48" rx="6"/><text x="560" y="165" text-anchor="middle">Checks, both storage verifications and an upgrade from the</text><text x="560" y="181" text-anchor="middle">previous release, all against that one image</text>
+      <rect class="box-new" x="800" y="144" width="190" height="48" rx="6"/><text x="895" y="165" text-anchor="middle">Push the same digest</text><text class="t-small t-muted" x="895" y="181" text-anchor="middle">sign it, then move latest</text>
+      <rect class="box" x="1020" y="144" width="150" height="48" rx="6"/><text x="1095" y="165" text-anchor="middle">Release notes</text><text class="t-small t-muted" x="1095" y="181" text-anchor="middle">list the digests</text>
+      <line class="ln-accent" x1="120" y1="168" x2="148" y2="168" marker-end="url(#a5b)"/><line class="ln-accent" x1="320" y1="168" x2="348" y2="168" marker-end="url(#a5b)"/><line class="ln-accent" x1="770" y1="168" x2="798" y2="168" marker-end="url(#a5b)"/><line class="ln-accent" x1="990" y1="168" x2="1018" y2="168" marker-end="url(#a5b)"/>
+    </svg>
+    </div>
+    <figcaption>One build, saved as a workflow artifact or pushed to a run-scoped tag, then verified and promoted. Dependabot can open the pull requests that bump the pinned digests and action SHAs. It uses no runner minutes.</figcaption>
+  </figure>
+  </div>
+
+  <div class="stack">
+  <h3>B-5. An operator command for upgrades</h3>
+  <p>The upgrade procedure is prose spread over about 1,700 lines and 17 per-version sections of a 98 KB runbook. The generic command block says "back up first" and then does not back up. The stop lists leave out the paper worker. The backup overwrites the previous one. Post-migration steps such as the search rebuild in 0.4.0 exist only inside version notes. I would replace the procedure with a <code>deploy/vessel</code> script: <code>preflight</code>, <code>backup</code>, <code>upgrade --to X</code>, <code>restore --from DIR</code>, <code>status</code>, <code>rollback</code>. Each step prints what it will do and needs <code>--yes</code>. A small <code>docs/releases/vX.Y.Z.upgrade.json</code> per release lists migrations, post-steps and config changes. <code>verify-release.py</code> then drives the script, so the procedure is tested on every release and safe for an agent to run.</p>
+  </div>
+
+  <div class="stack">
+  <h3>B-6. One version handshake between web and API</h3>
+  <p>The frontend guards carry 113 "field may be absent on older servers" checks and 60 comments about them. The backend always sends those fields. Nothing compares the two versions, so a tab left open across an upgrade fails with "incompatible workspace data" and no hint that a reload fixes it. Put the API version in <code>/api/system</code>, compare it on stream reconnect, show a "new version, reload" notice that respects unsaved work, and then delete the fallbacks.</p>
+  </div>
+</section>
+
+<section id="refactor">
+  <h2>Refactors worth doing</h2>
+  <p>The October review listed most of these and most are still open, some larger than before. I rank them by how much they reduce the chance of the next defect, not by how untidy the code looks. Do them one at a time behind the golden journal.</p>
+
+  <h3>Backend</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Refactor</th><th>Evidence</th><th>Cost</th><th>Risk</th></tr></thead>
+    <tbody>
+      <tr><td class="id">R-1</td><td class="what"><b>Make trading mode a required type, not a string.</b> Add <code>play.RequireReal()</code> and <code>account.RequireReal()</code> in Domain, and replace path matching in <code>TradingModeBoundary</code> with <code>.RealOnly()</code> endpoint metadata.</td><td class="where">117 "real"/<wbr>"paper" literals, 55 inline comparisons, 30 parameters defaulting to <code>tradingMode = "real"</code>, 21 message variants</td><td>M</td><td>medium</td></tr>
+      <tr><td class="id">R-2</td><td class="what"><b>Remove default interface members from store ports.</b> About 50 defaults return null or empty, or load everything, so a 32-line test fake compiles. A production store that misses an override would silently ignore allocations. Move defaults to TestKit fakes and add a reflection test.</td><td class="where">Application/<wbr>Plays/<wbr>Execution/<wbr>Contracts.cs:217-311</td><td>M</td><td>low</td></tr>
+      <tr><td class="id">R-3</td><td class="what"><b>Split <code>PlayExecutionService</code> (1,051 lines).</b> Extract the reader first: the sequence links, orders, fills, allocations, settle is rebuilt five times. Then the reconciler, link commands, unresolved commands and allocation service.</td><td class="where">lines 67, 445, 560, 586, 909</td><td>M–L</td><td>medium</td></tr>
+      <tr><td class="id">R-4</td><td class="what"><b>One lease fence in <code>MonitorCoordinator</code> (982 lines).</b> The "still mine and unchanged" predicate is written four times with three variants. Confirm the variants are intended, then one <code>MonitorFence.Holds</code>. Split into admission, run, backfill and funding afterwards.</td><td class="where">lines 334, 674, 690, 799</td><td>S, then M</td><td>medium</td></tr>
+      <tr><td class="id">R-5</td><td class="what"><b>One function per discrepancy kind.</b> <code>Observe</code> is a 433-line method. MON-1 and MON-2 are hard to fix safely inside it.</td><td class="where">Application/<wbr>Monitoring/<wbr>MonitorDiscrepancyService.Observations.cs:76</td><td>M</td><td>medium</td></tr>
+      <tr><td class="id">R-6</td><td class="what"><b>Typed statuses and one wire-name helper.</b> Start with direction and imported-order status. About 20 inline <code>.ToString().ToLowerInvariant()</code> calls, some in event payloads, mean renaming an enum member changes the wire format.</td><td class="where">58 "long"/<wbr>"short" literals in 21 files</td><td>M–L</td><td>medium</td></tr>
+      <tr><td class="id">R-7</td><td class="what"><b>Parse the plan once.</b> <code>PlayDocuments.Read</code> went from 16 call sites to 32, four of them in Persistence. Cache a <code>Play.ParsedPlan</code>.</td><td class="where">Application/<wbr>Plays/<wbr>PlayPlanDocument.cs</td><td>M</td><td>medium</td></tr>
+      <tr><td class="id">R-8</td><td class="what"><b>One lock helper.</b> A dozen copies of the advisory-lock SQL, nine <code>With…LockAsync</code> helpers in six stores, stores constructing other stores to borrow locks, and raw lock SQL in the paper scheduler.</td><td class="where">Persistence/<wbr>*Store.cs<br>Worker/<wbr>PaperScheduler.cs:229</td><td>S, then M</td><td>low</td></tr>
+      <tr><td class="id">R-9</td><td class="what"><b>Required constructor dependencies.</b> 27 optional null-default dependencies in 18 production classes exist for tests. One throws at runtime when null.</td><td class="where">Application/<wbr>Plays/<wbr>Execution/<wbr>PlayExecutionService.cs:23, 622</td><td>S–M</td><td>low</td></tr>
+      <tr><td class="id">R-10</td><td class="what"><b>Split <code>WorkspaceService</code> and its 30-member store port.</b> Extract a pure <code>AccountBalances</code> calculator first. Hyperliquid account-mode names still sit in shared code.</td><td class="where">Application/<wbr>Workspace/<wbr>WorkspaceService.cs:477-507</td><td>M</td><td>low</td></tr>
+      <tr><td class="id">R-11</td><td class="what"><b>Shared venue helpers.</b> Three identical catalogue caches, the past-window check copied four times, two omission notice builders. A fourth venue costs 600 to 900 lines today. Do not abstract the paging loops; the venues differ there.</td><td class="where">Infrastructure/<wbr>Venues/<wbr>*</td><td>M</td><td>low</td></tr>
+      <tr><td class="id">R-12</td><td class="what"><b>Test database template.</b> 503 fixture calls each create a schema and apply every migration (53 journal, 5 identity). Migrate once into a template database and clone it per test. Keep one fixture in TestKit, not three.</td><td class="where">tests/<wbr>Vessel.TestKit</td><td>M</td><td>low</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Frontend</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Refactor</th><th>Evidence</th><th>Cost</th><th>Risk</th></tr></thead>
+    <tbody>
+      <tr><td class="id">R-13</td><td class="what"><b>One <code>useApiRead</code> hook.</b> The abort-controller fetch effect is copied 42 times in 32 files, with 82 <code>.api === api</code> identity checks. Migrate the simple reads first. Leave Activity and Review, which keep previous data, until last.</td><td class="where">features/<wbr>plays/<wbr>PlaysPage.tsx:203 and 41 more</td><td>M</td><td>medium</td></tr>
+      <tr><td class="id">R-14</td><td class="what"><b>Take <code>PlaysPage</code> apart in safe steps.</b> 1,001 lines, 23 effects, 16 refs, and <code>PlayWorkspace</code> takes 42 props. Move <code>PlayList</code> out, then the read hooks, then the mutations as a reducer.</td><td class="where">features/<wbr>plays/<wbr>PlaysPage.tsx</td><td>L</td><td>high after step 2</td></tr>
+      <tr><td class="id">R-15</td><td class="what"><b>A complete fake API for tests.</b> Production code has twelve <code>typeof api.x === 'function'</code> branches for incomplete test doubles. About 35 test files build their own client.</td><td class="where">api/<wbr>workspace.ts:364<br>features/<wbr>workspace/<wbr>ImportConflicts.tsx:19</td><td>M</td><td>low</td></tr>
+      <tr><td class="id">R-16</td><td class="what"><b>Split <code>WorkspaceApi</code> into clients.</b> One 105-method interface and a 440-line factory. Paper or real routing is two path regexes.</td><td class="where">api/<wbr>workspace.ts:363-1106</td><td>M</td><td>medium</td></tr>
+      <tr><td class="id">R-17</td><td class="what"><b>Adopt a formatter.</b> No Prettier or Biome. 387 production lines exceed 200 characters and <code>ReviewPage.tsx</code> has a line of 1,843. Add the type-aware lint rules for floating promises at the same time.</td><td class="where">frontend/<wbr>eslint.config.js</td><td>S</td><td>low, large diff</td></tr>
+      <tr><td class="id">R-18</td><td class="what"><b>Recorded contract fixtures per area.</b> Generating types from OpenAPI would remove little, because enums and decimals are plain strings in the DTOs. The monitor area already validates a JSON file the backend tests write. Extend that to workspace, plays, activity, review and sizing.</td><td class="where">frontend/<wbr>src/<wbr>test/<wbr>contracts</td><td>M</td><td>low</td></tr>
+      <tr><td class="id">R-19</td><td class="what"><b>Keep the last good Review and Overview summary while a reload runs.</b> A background event unmounts the whole report to "Loading review…" and scroll jumps. Activity and the Plays list already keep the previous page.</td><td class="where">features/<wbr>review/<wbr>ReviewPage.tsx:110</td><td>S–M</td><td>low</td></tr>
+      <tr><td class="id">R-20</td><td class="what"><b>Organise tests by behaviour.</b> 27 backend and 11 frontend test files are named after review rounds. About 260 backend assertions check notice wording, so a copy edit breaks tests while a numeric change does not.</td><td class="where">tests/<wbr>**/<wbr>…Round2…7*</td><td>M</td><td>low</td></tr>
+    </tbody>
+  </table></div>
+  <div class="take"><span class="eyebrow">My opinion</span>
+    <p>Do R-1, R-2 and R-13 first. Each removes a whole class of mistake and makes the next agent's change smaller. Skip three October proposals. Generated API contracts are not worth it, as explained in R-18. URL state was superseded by your shell-memory breadcrumb. A migration squash only helps compile time. And I would not split <code>Play.cs</code> or <code>ReviewService</code>: both are long but cohesive.</p>
+  </div>
+</section>
+
+<section id="security">
+  <h2>Security</h2>
+  <p>Two reviewers from different model families looked for an authentication bypass, cross-owner access, operator escalation, credential disclosure, SQL injection and server-side request forgery. Neither found one. All 133 routes require authorization except the two health probes. What remains is a signed-in or anonymous user consuming shared limits, plus hardening.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Finding</th><th>Where</th><th>Severity</th><th>Effort</th></tr></thead>
+    <tbody>
+      <tr><td class="id">S-1</td><td class="what"><b>About 30 addresses can block sign-in, or phone pairing, for everyone.</b> Anonymous challenge requests share one global bucket of 300 per minute, and claims share another. QR claims with a 256-bit secret sit in the same bucket as typed-code guesses. Existing sessions keep working. The global caps are a documented anti-guessing decision, so treat this as a risky decision, not a bug. Splitting QR claims from typed-code claims removes most of it.</td><td class="where">Identity/<wbr>IdentityRateLimits.cs:54</td><td><span class="pill p-med">medium</span></td><td>S</td></tr>
+      <tr><td class="id">S-2</td><td class="what"><b>Unbounded concurrent venue reads through candle windows.</b> The candle cache key includes the caller's <code>endTime</code> to the millisecond. The per-user limiter only runs for <code>refresh=true</code>, and in-flight loads are not capped. One signed-in user can start as many upstream reads as they like and get the venue to throttle everyone. Lighter's adapter has a two-slot limit of its own. Hyperliquid and RISEx have none on this path. Found by Sol and confirmed by its refutation pass, which rates it high. With registration closed and one owner, I rate it medium.</td><td class="where">Application/<wbr>MarketData/<wbr>CandleService.cs:69-73<br>Application/<wbr>MarketData/<wbr>BoundedMarketDataCache.cs:71</td><td><span class="pill p-med">medium</span></td><td>M</td></tr>
+      <tr><td class="id">S-3</td><td class="what"><b>Two slow bundle downloads block every export.</b> A static two-permit semaphore is held while the response streams. See Q-12.</td><td class="where">Application/<wbr>Export/<wbr>PlayBundleService.cs:62</td><td><span class="pill p-med">medium</span></td><td>S</td></tr>
+      <tr><td class="id">S-4</td><td class="what"><b>No HSTS anywhere.</b> An attacker on your network who intercepts a first plain-HTTP visit can serve the sign-in page from the same host name, and the wallet's domain check passes. My unconditional header was reverted (see "What I changed"). It should be opt-in. See Q-20.</td><td class="where">deploy/<wbr>Caddyfile</td><td><span class="pill p-med">medium</span></td><td>S</td></tr>
+      <tr><td class="id">S-5</td><td class="what"><b>Most JSON write routes have no body limit of their own.</b> They fall back to nginx's 10 MB (sized for images) or Kestrel's 30 MB. The 1 MB drawings cap applies only after the whole document is parsed.</td><td class="where">Api/<wbr>EndpointTransport.cs:61</td><td><span class="pill p-low">low</span></td><td>S</td></tr>
+      <tr><td class="id">S-6</td><td class="what"><b>Anonymous pairing completion takes the server-wide identity lock before it knows the binding exists.</b> The cookie's syntax is checked first, its existence only inside the locked transaction, and <code>binding_hash</code> has no index. Well-formed bogus bindings contend with every sign-in.</td><td class="where">Identity/<wbr>DevicePairingService.cs:200</td><td><span class="pill p-low">low</span></td><td>S</td></tr>
+      <tr><td class="id">S-7</td><td class="what"><b>No per-user evidence quota, and registration modes that need one only warn.</b> Make <code>check-config</code> refuse AllowList or Open until quotas exist. Plain memory copies of each upload add pressure (two per 10 MB image, no concurrency bound).</td><td class="where">Application/<wbr>Evidence/<wbr>EvidenceService.cs:35, 102</td><td><span class="pill p-low">low</span></td><td>S, then M</td></tr>
+      <tr><td class="id">S-8</td><td class="what"><b>Stream caps are small and shared.</b> Two users with four chart tabs each use all eight live-chart slots for up to an hour.</td><td class="where">Application/<wbr>MarketData/<wbr>MarketStreamService.cs:20</td><td><span class="pill p-low">low</span></td><td>S</td></tr>
+      <tr><td class="id">S-9</td><td class="what"><b>The public readiness probe says why it is not ready</b>, including "no operator wallet" during the setup window.</td><td class="where">Api/<wbr>Program.cs:130, 142</td><td><span class="pill p-low">low</span></td><td>S</td></tr>
+      <tr><td class="id">S-10</td><td class="what"><b>Secret-bearing records print their secret.</b> <span class="pill p-done">fixed</span></td><td class="where">Identity/<wbr>Contracts.cs</td><td><span class="pill p-low">low</span></td><td>done</td></tr>
+      <tr><td class="id">S-11</td><td class="what"><b>The pairing secret stays in the address bar until the config request answers.</b> Single-use, five minutes, and it still needs the desktop code, so exposure is small.</td><td class="where">pages/<wbr>WorkspacePage.tsx:57</td><td><span class="pill p-low">low</span></td><td>S</td></tr>
+      <tr><td class="id">S-12</td><td class="what"><b>Supply chain of the release.</b> Actions pinned by tag, a third-party checkout holding a write token, unsigned images without digests in the notes, floating base images. See Q-11 and B-4.</td><td class="where">.github/<wbr>workflows/<wbr>release.yml</td><td><span class="pill p-med">medium</span></td><td>S–M</td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted">Not covered by any reviewer: the frontend wallet-provider flow, dependency vulnerability lookup, image codec fuzzing, and the effective TLS and proxy configuration of your installation.</p>
+</section>
+
+<section id="performance">
+  <h2>Performance</h2>
+  <p>Planned for one active owner with about 200,000 fills, 30,000 orders and 3,000 Plays on a small VPS. Today's figures come from the repository's own benchmark at 48,745 fills and 774 Plays. Estimates beyond that are marked.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Endpoint</th><th>What it loads</th><th>Grows with</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td><code>GET /activity</code>, <code>/overview/summary</code></td><td>On a miss: every fill, funding payment, snapshot and omission of the scoped accounts</td><td>all fills</td><td>Fine on a hit. See B-2.</td></tr>
+      <tr><td><code>GET /review</code></td><td>Every closed Play as a full row with all plan revisions, links, orders and fills. Filters run in memory.</td><td>all closed Plays</td><td>Slowest read, uncached. 1.6 s today, 3.5 s with imported positions.</td></tr>
+      <tr><td><code>GET /sizing</code></td><td>The same closed-Play read</td><td>all closed Plays</td><td>Wide.</td></tr>
+      <tr><td><code>GET /plays/{id}/executions</code></td><td>One Play, plus the account's Activity aggregate for funding</td><td>one Play, or all the account's fills on a miss</td><td>Hidden aggregate miss.</td></tr>
+      <tr><td><code>GET /plays</code>, counts, search</td><td>Projected columns and one page</td><td>one page</td><td>Good: 1.4 to 4.4 ms.</td></tr>
+      <tr><td>Event stream</td><td>Two cheap queries every 2 s per tab</td><td>constant</td><td>Sound.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Finding</th><th>Where</th><th>Severity</th><th>Effort</th></tr></thead>
+    <tbody>
+      <tr><td class="id">P-1</td><td class="what"><b>The Activity aggregate can outgrow its cache.</b> An entry above the capacity (256 MiB by default) is never stored. Two documented measurements put that between roughly 90k and 155k fills. The capacity is configurable, which buys time on a host with memory to spare. See B-2.</td><td class="where">Persistence/<wbr>ActivitySummaryCache.cs:94</td><td><span class="pill p-med">medium, high at scale</span></td><td>S to configure, L to fix</td></tr>
+      <tr><td class="id">P-2</td><td class="what"><b>Monitor checks invalidate the cache when only the observation time changed.</b> A check that saves a newer snapshot bumps the facts revision even when positions and money are identical. Freshness is a real input to the snapshot proofs, so the fix is to split those from the execution aggregate, not to ignore the writes.</td><td class="where">Persistence/<wbr>Migrations/<wbr>20261019100000_ActivityFactsRevision.cs<br>Persistence/<wbr>WorkspaceStore.cs:214</td><td><span class="pill p-med">medium</span></td><td>M</td></tr>
+      <tr><td class="id">P-3</td><td class="what"><b>Review and Sizing read every closed Play on every request</b>, all revisions included, and filter in memory. Read only the revisions used, push the scope into SQL, cache the scored facts.</td><td class="where">Persistence/<wbr>SizingStore.cs:26<br>Persistence/<wbr>ReviewStore.cs:29</td><td><span class="pill p-high">high</span></td><td>M</td></tr>
+      <tr><td class="id">P-4</td><td class="what"><b>Drawings load with every Play read.</b> The column allows a megabyte per Play and six read paths pull full rows. Move it to its own table. Deferred since October. The benchmark seeds small drawings, so it understates this.</td><td class="where">Persistence/<wbr>Configurations/<wbr>PlayConfiguration.cs:20</td><td><span class="pill p-high">high</span></td><td>M, migration</td></tr>
+      <tr><td class="id">P-5</td><td class="what"><b>Several cache keys hold copies of the same facts.</b> Expanding a row or opening a closed Play misses and re-reads an account the owner-wide entry already holds.</td><td class="where">Application/<wbr>Activity/<wbr>ActivityService.cs:51, 87</td><td><span class="pill p-med">medium</span></td><td>S–M</td></tr>
+      <tr><td class="id">P-6</td><td class="what"><b>Every Activity request re-sorts all operations</b>, even on a hit, and rebuilds the facets.</td><td class="where">Application/<wbr>Activity/<wbr>ActivityService.cs:53</td><td><span class="pill p-med">medium</span></td><td>S</td></tr>
+      <tr><td class="id">P-7</td><td class="what"><b>Review's unassigned count is an anti-join over all fills.</b> Needs <code>EXPLAIN ANALYZE</code> before anyone acts.</td><td class="where">Persistence/<wbr>ReviewStore.cs:56</td><td><span class="pill p-med">medium</span></td><td>S–M</td></tr>
+      <tr><td class="id">P-8</td><td class="what"><b>Missing index for per-account time queries</b>, run on every monitor check. See Q-15.</td><td class="where">Persistence/<wbr>MonitorStore.cs:30</td><td><span class="pill p-med">medium</span></td><td>S, migration</td></tr>
+      <tr><td class="id">P-9</td><td class="what"><b>Every draft keystroke re-renders the whole shell</b>, and drawing drags set shell state on each frame. Jank is likely on a phone with a large Play.</td><td class="where">features/<wbr>workspace/<wbr>ApplicationShell.tsx:251<br>features/<wbr>plays/<wbr>PlaysPage.tsx:107</td><td><span class="pill p-med">medium</span></td><td>M</td></tr>
+      <tr><td class="id">P-10</td><td class="what">Smaller ones: two connection pools per process (Q-8), no lock or statement timeout (Q-9), the refresh dedup query cannot seek on the unique index, Overview counts every fill on each load, hot account reads are change-tracked, nginx gzip at level 1.</td><td class="where">Persistence/<wbr>DependencyInjection.cs:25<br>Persistence/<wbr>WorkspaceStore.cs:30, 197</td><td><span class="pill p-low">low</span></td><td>S each</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="agents">
+  <h2>Agents, releases and deployment</h2>
+  <p>You asked how to make the agents that handle deployment better. The agents are not the weak part. What they are given is. They read a 57 KB chronological log as their instructions, they had one skill that Claude Code could not see, and nothing mechanical stops a mistake. The release script itself is careful and well tested.</p>
+
+  <h3>The instruction file is a diary</h3>
+  <p><code>AGENTS.md</code> is 56,893 bytes, about 14,000 tokens, loaded into every session and every subagent. It has 47 dated paragraphs and two headings. It has no section on how to build, test or run one test, no definition of done and no directory map. At least fourteen entries are superseded by later ones that sit elsewhere in the file. An agent has to read to the end to learn which rule won.</p>
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1180 300" role="img" aria-label="Today one 57 kilobyte chronological file carries every rule and every superseded rule. Proposed: a short current-state file, three area files, a dated decision log and six skills.">
+      <defs><marker id="a6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ah-accent"/></marker></defs>
+      <text class="t-head" x="10" y="20">TODAY</text>
+      <rect class="box-bad" x="10" y="34" width="330" height="240" rx="6"/>
+      <text x="26" y="60">AGENTS.md</text><text class="t-small t-muted" x="26" y="78">57 KB, about 14k tokens per session</text>
+      <text class="t-small t-muted" x="26" y="106">Sep 30: "current phase is scaffolding"</text>
+      <text class="t-small t-muted" x="26" y="124">Oct 7: "import does not refresh history"</text>
+      <text class="t-small t-muted" x="26" y="142">Oct 13: "releases are manual"</text>
+      <text class="t-small t-muted" x="26" y="160">Oct 15: "CI publishes on tag"</text>
+      <text class="t-small t-muted" x="26" y="178">Oct 16: "creation queues one refresh"</text>
+      <text class="t-small t-muted" x="26" y="196">Oct 17: "Token remains the default"</text>
+      <text class="t-small t-muted" x="26" y="214">Oct 19: "CI only on release tags"</text>
+      <text class="t-small t-muted" x="26" y="232">Oct 25: "wallet-only sign-in"</text>
+      <text class="t-small t-bad" x="26" y="258">14 superseded rules still stated as current</text>
+
+      <line class="ln-accent" x1="352" y1="154" x2="418" y2="154" marker-end="url(#a6)"/>
+      <text class="t-head" x="430" y="20">PROPOSED</text>
+      <rect class="box-new" x="430" y="34" width="350" height="110" rx="6"/>
+      <text x="446" y="58">AGENTS.md, under 8 KB, no dates</text>
+      <text class="t-small t-muted" x="446" y="78">What Vessel is. Hard rules (about 12 "never").</text>
+      <text class="t-small t-muted" x="446" y="95">Layout. Build, run, test one thing.</text>
+      <text class="t-small t-muted" x="446" y="112">Definition of done. Workflow. Where decisions live.</text>
+      <text class="t-small t-muted" x="446" y="129">Changes only when a hard rule changes.</text>
+      <rect class="box" x="430" y="158" width="350" height="54" rx="6"/>
+      <text x="446" y="181">backend/ frontend/ deploy/ AGENTS.md</text><text class="t-small t-muted" x="446" y="198">Area rules, loaded only when working there</text>
+      <rect class="box" x="430" y="226" width="350" height="48" rx="6"/>
+      <text x="446" y="248">docs/decisions.md</text><text class="t-small t-muted" x="446" y="264">Every dated paragraph, newest first, with "superseded by"</text>
+      <rect class="box-new" x="810" y="34" width="360" height="178" rx="6"/>
+      <text x="826" y="58">Skills, loaded on demand</text>
+      <text class="t-small t-muted" x="826" y="80">vessel-release (exists)</text>
+      <text class="t-small t-muted" x="826" y="98">vessel-upgrade: preflight, backup, migrate, verify, roll back</text>
+      <text class="t-small t-muted" x="826" y="116">vessel-check: the right checks for the files changed</text>
+      <text class="t-small t-muted" x="826" y="134">vessel-review: the adversarial Sol review, recorded</text>
+      <text class="t-small t-muted" x="826" y="152">vessel-migration: disposable database only, upgrade notes</text>
+      <text class="t-small t-muted" x="826" y="170">vessel-venue-adapter: descriptor, normalized facts, fixtures</text>
+      <text class="t-small t-muted" x="826" y="188">vessel-decision: append to the log, update the contract</text>
+      <rect class="box" x="810" y="226" width="360" height="48" rx="6"/>
+      <text x="826" y="248">Mechanical guardrails</text><text class="t-small t-muted" x="826" y="264">Permission denies, a pre-tool hook, a pre-push hook, tag rules</text>
+    </svg>
+    </div>
+    <figcaption>The content does not shrink. It moves to where it is read on purpose. The top-level file keeps only what is true today and applies to every task.</figcaption>
+  </figure>
+
+  <details><summary>Superseded rules still present in AGENTS.md</summary><div class="inner">
+  <div class="scroll"><table>
+    <thead><tr><th>Old rule still stated</th><th>Rule that replaced it</th><th>Dates</th></tr></thead>
+    <tbody>
+      <tr><td>Releases are manual; the agent runs the Docker pushes</td><td>CI publishes on tag; manual push is a fallback</td><td>Oct 13/15 → Oct 15</td></tr>
+      <tr><td>Pull requests touching packaging rehearse publication</td><td>CI runs only on release tags</td><td>Oct 15 → Oct 19</td></tr>
+      <tr><td>Token remains the default; Wallet is opt-in and not activated</td><td>Wallet-only sign-in; Token refused at startup</td><td>Oct 17–18 → Oct 25</td></tr>
+      <tr><td>Importing an account does not refresh history automatically</td><td>One initial bounded refresh on creation</td><td>Oct 7 → Oct 16</td></tr>
+      <tr><td>Plane and Outline IDs and URLs as project tracking</td><td>Repository-only tracking</td><td>Oct 1 → Oct 14</td></tr>
+      <tr><td>Repository is <code>jcarcaboso/vessel</code></td><td>Origin, the skill and image labels say <code>sloppitty/vessel</code></td><td>undated</td></tr>
+      <tr><td>The browser polls while a Play is open until the monitor exists</td><td>The monitor worker exists</td><td>Oct 3 → Oct 14</td></tr>
+      <tr><td>First refresh is not a background job</td><td>Monitor, funding schedule and paper workers</td><td>Oct 1 → Oct 14/21</td></tr>
+      <tr><td>Activity has a Play column</td><td>Replaced by Unrealized P&amp;L; the link moved to the expanded row</td><td>Oct 12 → Oct 27</td></tr>
+      <tr><td>Never push to or rebase Phase 0 branches</td><td>Phase 0 merged; no longer applies</td><td>Oct 20</td></tr>
+      <tr><td>Pairing QR lasts 2 minutes</td><td>5 minutes</td><td>Oct 27 → Oct 28</td></tr>
+      <tr><td>Current phase is core development after scaffolding</td><td>Shipping 0.4.x releases</td><td>Sep 30 → Nov</td></tr>
+      <tr><td>"Two Sol reviews" (diary, icons)</td><td>"One adversarial Sol review" (Phase 1 and 2). Needs one rule.</td><td>Oct 10/13 vs Oct 20/21</td></tr>
+      <tr><td>Lighter fee-bearing fills are simply excluded</td><td>Durable omission markers and forced events</td><td>Oct 7 → Oct 21</td></tr>
+    </tbody>
+  </table></div></div></details>
+
+  <h3>Findings</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>ID</th><th>Finding</th><th>Where</th><th>Severity</th><th>Effort</th></tr></thead>
+    <tbody>
+      <tr><td class="id">O-1</td><td class="what"><b>Claude Code could not see the release skill.</b> <span class="pill p-done">fixed</span> No checked-in permission rules or hooks exist. "Never read <code>.env</code>" and "never migrate the owner's database" rest on prose alone.</td><td class="where">.agents/<wbr>skills, .claude/<wbr></td><td><span class="pill p-high">high</span></td><td>S</td></tr>
+      <tr><td class="id">O-2</td><td class="what"><b>AGENTS.md is a chronological log.</b> Restructure as drawn above.</td><td class="where">AGENTS.md</td><td><span class="pill p-high">high</span></td><td>M</td></tr>
+      <tr><td class="id">O-3</td><td class="what"><b>Main is never machine-verified.</b> Problems surface at tag time, and a pushed tag can never be moved. See B-1 and Q-1.</td><td class="where">.github/<wbr>workflows/<wbr>checks.yml:4</td><td><span class="pill p-high">high</span></td><td>S–M</td></tr>
+      <tr><td class="id">O-4</td><td class="what"><b>The published images are not the verified images.</b> See B-4.</td><td class="where">scripts/<wbr>release.py:119<br>scripts/<wbr>verify-release.py:893</td><td><span class="pill p-high">high</span></td><td>M</td></tr>
+      <tr><td class="id">O-5</td><td class="what"><b>The upgrade is prose, and its command block skips the backup.</b> See B-5.</td><td class="where">deploy/<wbr>README.md:993-1333</td><td><span class="pill p-high">high</span></td><td>L</td></tr>
+      <tr><td class="id">O-6</td><td class="what"><b>An unhealthy container is never restarted and nobody is told.</b> Compose restarts on exit only. The web service has no healthcheck. See Q-17.</td><td class="where">deploy/<wbr>compose.yaml:153</td><td><span class="pill p-high">high</span></td><td>M</td></tr>
+      <tr><td class="id">O-7</td><td class="what"><b>The release skill misses known failure modes.</b> It tells the agent to read about 155 KB first. Doc-example versions are left to the agent. Nothing freezes main after release prep: pull request #70 merged between "prepare v0.3.4" and the release merge and is in neither the changelog nor the notes. It does not say what to do when the tag run fails.</td><td class="where">.agents/<wbr>skills/<wbr>vessel-release/<wbr>SKILL.md</td><td><span class="pill p-med">medium</span></td><td>S</td></tr>
+      <tr><td class="id">O-8</td><td class="what"><b>No log rotation, resource limits or container hardening.</b> Default json-file logs have no size cap. No <code>no-new-privileges</code>, <code>cap_drop</code> or read-only root.</td><td class="where">deploy/<wbr>compose.yaml</td><td><span class="pill p-med">medium</span></td><td>S–M</td></tr>
+      <tr><td class="id">O-9</td><td class="what"><b>An old image on a newer schema reports ready.</b> Readiness checks for pending migrations, not for applied ones the image does not know. Workers check their messaging deployment but not the schema. See Q-10.</td><td class="where">Api/<wbr>Program.cs:134</td><td><span class="pill p-med">medium</span></td><td>S</td></tr>
+      <tr><td class="id">O-10</td><td class="what"><b>166 MB of docs with 1,163 PNG files, about 82% unreferenced.</b> 110 MB is one verification folder. Move captures to a release asset and keep a manifest of hashes.</td><td class="where">docs/<wbr>product-review/<wbr>verification</td><td><span class="pill p-med">medium</span></td><td>M</td></tr>
+      <tr><td class="id">O-11</td><td class="what"><b>Stale docs contradict 0.4.2.</b> README and <code>development.md</code> still mention the API token. <code>app-status.md</code> describes the October 18 stack.</td><td class="where">README.md:82<br>docs/<wbr>development.md:239</td><td><span class="pill p-med">medium</span></td><td>S</td></tr>
+      <tr><td class="id">O-12</td><td class="what"><b>Frontend tests need a Node with full locale data.</b> On this machine 16 tests fail on untouched code because Node has no <code>en-GB</code> formats ("Oct 15" for "15 Oct"). They pass in the <code>node:24</code> image. Say so in the docs or run them in the container.</td><td class="where">lib/<wbr>time.ts</td><td><span class="pill p-low">low</span></td><td>S</td></tr>
+      <tr><td class="id">O-13</td><td class="what"><b>Backend Dockerfile defeats layer caching</b> (source is copied before restore) and installs curl only for the healthcheck.</td><td class="where">backend/<wbr>Dockerfile:5, 32</td><td><span class="pill p-low">low</span></td><td>S</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Guardrails that do not depend on reading</h3>
+  <div class="cols">
+    <div class="card"><h4>Permission rules</h4><p>A checked-in <code>.claude/settings.json</code> (and the Codex equivalent) that denies reading <code>.env</code> files, <code>docker push</code>, forced pushes, <code>git tag -f</code> and <code>--tags</code>.</p></div>
+    <div class="card"><h4>A pre-tool hook</h4><p>Block any command that combines the development database port with <code>migrate</code>, <code>database update</code> or <code>psql</code>, and any test run whose database variable points at the live database name.</p></div>
+    <div class="card"><h4>A pre-push hook</h4><p>Run the changed-files check. Refuse to push a <code>v*</code> tag unless <code>release.py check --tag</code> passes.</p></div>
+    <div class="card"><h4>Repository settings</h4><p>Branch protection requiring the fast job, a tag ruleset that forbids moving or deleting <code>v*</code>, and code owners on <code>.github/</code>, <code>deploy/</code> and <code>scripts/release.py</code>.</p></div>
+  </div>
+  <div class="take"><span class="eyebrow">My opinion</span>
+    <p>The upgrade skill and the operator script are one piece of work, and they are what "better deployment agents" means in practice. An agent with a tested <code>vessel upgrade --to 0.4.3</code> cannot skip the backup or forget the paper worker. An agent with a 98 KB runbook can. Do that before any further skill.</p>
+  </div>
+</section>
+
+<section id="keep">
+  <h2>What to keep and protect</h2>
+  <p>These are the decisions that make the rest fixable. Any refactor that weakens one of them is a bad trade.</p>
+  <div class="cols">
+    <div class="card"><h4>Exact numbers end to end</h4><p><code>ExactDecimal</code> and <code>ExactAmount</code> keep sums in 10⁻²⁸ units on big integers and round once. Venue JSON that a decimal cannot hold exactly is rejected. The browser formats the original string and uses <code>BigInt</code> for shares.</p></div>
+    <div class="card"><h4>Owner isolation in depth</h4><p>Every entity implements <code>IOwned</code> or the model refuses to build. A save guard rejects foreign rows. Raw SQL repeats the owner predicate. Workers open a scope per owner.</p></div>
+    <div class="card"><h4>Unknown stays unknown</h4><p>Open risk makes a whole Play unknown rather than partly summing it. Funding totals stay null without a verified basis. Division by zero is null, not zero.</p></div>
+    <div class="card"><h4>Layering enforced by tests</h4><p>Domain and Application have no package references. An architecture test fails the build on a wrong project reference. The frontend has the same for <code>api</code>, <code>components</code> and <code>features</code>.</p></div>
+    <div class="card"><h4>Strict, bounded venue reads</h4><p>One deadline per multi-request read, a byte cap while reading, duplicate-key rejection, fixed HTTPS hosts, no redirects, IDs never parsed as numbers.</p></div>
+    <div class="card"><h4>Sign-in and the credential vault</h4><p>Challenges are single-use even when they fail. Sessions are revalidated on every request. Three-layer CSRF defence. AES-GCM with the owner, account and purpose bound into the associated data.</p></div>
+    <div class="card"><h4>Lease fencing and the event log</h4><p>Every monitor write checks generation, holder and expiry under row locks. Venue reads run with no transaction open. Event sequences are allocated at commit, so order equals commit order.</p></div>
+    <div class="card"><h4>The release script and the restore drill</h4><p><code>release.py</code> refuses to overwrite a version built from another commit and moves "latest" only after both images verify. <code>verify-release.py</code> restores a dump into fresh volumes on every release.</p></div>
+    <div class="card"><h4>One transport in the browser</h4><p>A single <code>fetch</code> wrapper owns timeouts, session-generation discard and safe error text. Pure static calculators on the backend are where logic is cheapest to test. Keep writing new logic that way.</p></div>
+  </div>
+</section>
+
+<section id="plan">
+  <h2>The order I would do it in</h2>
+  <p>Four passes. Each one makes the next cheaper. Nothing in the first two needs a migration of your live database except the two indexes.</p>
+  <div class="plan">
+    <div class="card"><span class="eyebrow">This week</span><h3>Stop the bleeding</h3><ol>
+      <li>Review and commit the 10 applied fixes.</li>
+      <li>Q-1: make the check fail without a test database.</li>
+      <li>Q-2: builder-market fills (N-2).</li>
+      <li>Q-3: a price formatter (N-5).</li>
+      <li>Q-4: release an expired running check.</li>
+      <li>MON-3: real warnings in a Paper tab, or say so.</li>
+    </ol></div>
+    <div class="card"><span class="eyebrow">Weeks 2 and 3</span><h3>Make the numbers provable</h3><ol>
+      <li>B-1: the golden journal and the reconciliation identities.</li>
+      <li>N-1, N-3, N-4: fix what it exposes, with the intended rule written down.</li>
+      <li>MON-1 and MON-2: scope "unknown" to the Play and the contract.</li>
+      <li>The fast pull-request job and the pre-push hook.</li>
+      <li>O-2: restructure AGENTS.md. Add the permission rules.</li>
+    </ol></div>
+    <div class="card"><span class="eyebrow">Weeks 4 to 8</span><h3>Remove what you do not need</h3><ol>
+      <li>B-3: replace the broker with <code>LISTEN/NOTIFY</code>, or make it optional.</li>
+      <li>B-4 and B-5: build once, the upgrade test, the operator script and the upgrade skill.</li>
+      <li>R-1, R-2, R-13: trading mode as a type, store ports without defaults, one read hook.</li>
+      <li>Decision 12: one external alert channel and a dead-man check.</li>
+    </ol></div>
+    <div class="card"><span class="eyebrow">Before history grows</span><h3>Keep it fast</h3><ol>
+      <li>Run the benchmark at four times today's size.</li>
+      <li>P-2 and P-6: stop needless invalidation, store the sorted list.</li>
+      <li>P-3 and P-4: narrow Review and Sizing reads, move drawings out.</li>
+      <li>B-2: the Activity read model, with its verify command.</li>
+      <li>R-3 to R-5 as those files next change.</li>
+    </ol></div>
+  </div>
+</section>
+
+<section id="method">
+  <h2>How this review was done</h2>
+  <p>I mapped the repository, read the October reviews so nobody repeated them, and ran three rounds. Reviewers had read-only instructions, no network and no access to any <code>.env</code> file. No reviewer built or ran the code. I did, for the changes I applied.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Round</th><th>Who</th><th>Scope</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>8 Claude reviewers (5 Opus, 3 Fable after an Opus rate limit) and 2 Sol reviewers</td><td>Identity and sessions. Data plane and owner isolation. Statistics. Venue import. Workers and messaging. Performance. Backend structure. Frontend structure. Frontend runtime. Agents, CI and deployment. Sol ran two independent adversarial passes on numbers and on security.</td></tr>
+      <tr><td>2</td><td>2 Sol and 2 Claude reviewers</td><td>An attempt to refute 20 round-one claims. Balances, manual ledger, settlement and paper arithmetic. Protection warnings and notifications. Whether the tests and the screens protect the statistics.</td></tr>
+      <tr><td>3</td><td>1 Sol reviewer</td><td>An adversarial review of my own uncommitted changes, which found two of them unsafe.</td></tr>
+      <tr><td>Me</td><td>Lead</td><td>Read the code behind the high-severity claims before accepting them. Applied small fixes, kept ten and reverted three. Ran the checks below. Wrote this report.</td></tr>
+    </tbody>
+  </table></div>
+  <h3>What was run</h3>
+  <ul>
+    <li>Backend build in the pinned SDK container: 0 warnings before and after.</li>
+    <li>Unit, UseCases and Venues projects: 896, 656 and 984 passed (5 opt-in skips), before and after.</li>
+    <li>Database-backed tests against a throwaway PostgreSQL 18 container: see the note under "What I changed". RabbitMQ, S3 and live-venue tests were skipped.</li>
+    <li>Frontend typecheck and lint clean. 4,402 tests in 209 files passed in a <code>node:24</code> container, including one new test.</li>
+    <li>119 operator-script tests passed. Compose files validated with synthetic values.</li>
+    <li>Not run: <code>verify-release.py</code>, the browser smoke checks, any live venue, any deployment.</li>
+    <li>Two delegated fact-checks of this report did not finish: one hit a rate limit and one ran for two hours without reporting. I recounted the headline figures myself and corrected four of them.</li>
+  </ul>
+  <h3>How sure each claim is</h3>
+  <p>"Confirmed" in the tables means a reviewer traced the path end to end by reading. I re-read N-1, N-2, N-3, N-4, N-6, N-20, N-21, N-22, W-3, Q-8, Q-10 and S-2 myself. The refutation pass confirmed 6 of 20 round-one claims outright, narrowed 12, rejected one as a documented policy (N-16) and could not settle one without running it (W-2). The tables carry the narrowed versions. Performance figures past 49k fills are estimates until the benchmark is run at scale. Claims that depend on how a venue or a wallet behaves live are marked speculative where they appear.</p>
+  <h3>Not covered</h3>
+  <ul>
+    <li>The frontend wallet-provider and sign-in state machine, chart touch behaviour on a real phone, and real bundle sizes.</li>
+    <li>Live venue behaviour: RISEx maker rebates, Lighter rate-limit signalling, Hyperliquid builder fees inside <code>fee</code>.</li>
+    <li>Dependency vulnerability lookup, query plans, and the configuration of your running installation.</li>
+    <li>Migration bodies and the Wolverine runtime under a broker outage at startup.</li>
+  </ul>
+</section>
+</main>
+<footer class="wrap">
+  <p>Review of branch <code>t3/deep-codebase-health-review</code> at <code>b0eaed4b</code> (v0.4.2). Backend paths are relative to <code>backend/src</code> with the <code>Vessel.</code> project prefix dropped, so <code>Persistence/WorkspaceStore.cs</code> is <code>backend/src/Vessel.Persistence/WorkspaceStore.cs</code>. Frontend paths are relative to <code>frontend/src</code>. Other paths start at the repository root. All 131 references were resolved against the tree by script. The applied changes are in the same pull request as this report.</p>
+</footer>
+</body>
+</html>

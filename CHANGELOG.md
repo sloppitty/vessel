@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Fixed
+
+- After an API outage, open pages kept their load error until the next event. The shell now
+  reloads once when the event stream returns.
+- The instrument selector keeps the keyboard highlight in view in long lists.
+- A file download on iOS Safari could be cancelled because its link was released at once.
+- Docker stopped the API and the workers after 10 seconds although they drain for up to 30.
+  Compose now allows 40 seconds, so a stopping worker no longer leaves a check "running".
+- Identity records that carry a session token or pairing secret no longer print it when
+  turned into text.
+
+### Changed
+
+- One shared rule decides that a venue read failed (`VenueFailures.IsReadFailure`).
+- Number formatters are created once and reused.
+- Backups, dumps and key-ring files are git-ignored, and `docs` and `spikes` are left out of
+  the image build context.
+- Claude Code can see the repository skills through `.claude/skills`.
+- Added the November 2026 codebase health review under `docs/architecture`.
+
+No migrations and no configuration changes.
+
 ## 0.4.2 - November 7, 2026
 
 Release notes: [docs/releases/v0.4.2.md](docs/releases/v0.4.2.md).
