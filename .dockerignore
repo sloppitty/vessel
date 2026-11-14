@@ -6,6 +6,9 @@
 .git
 **/.git
 prototype
+# Neither image copies these; keep them out of the build context (docs alone is about 166 MB).
+docs
+spikes
 **/TestResults
 **/coverage
 **/playwright-report

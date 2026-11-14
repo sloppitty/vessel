@@ -124,8 +124,7 @@ public static class FundingWindows
                 stop = "the venue asked Vessel to wait";
                 return Outcome.Stop;
             }
-            catch (Exception error) when (completed > 0 && (error is VenueReadException or HttpRequestException ||
-                error is OperationCanceledException && !ct.IsCancellationRequested))
+            catch (Exception error) when (completed > 0 && VenueFailures.IsReadFailure(error, ct))
             {
                 stop = budget.IsCancellationRequested ? "the Refresh's time for funding ran out" : "a later window could not be read";
                 return Outcome.Stop;

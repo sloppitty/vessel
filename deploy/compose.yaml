@@ -130,6 +130,8 @@ services:
         condition: service_completed_successfully
       storage-init:
         condition: service_completed_successfully
+    # Longer than the host's 30-second shutdown timeout, so Docker never kills a draining request or run.
+    stop_grace_period: 40s
     restart: unless-stopped
 
   # The monitor module and the replica-safe event maintenance. worker-notifications runs the same
@@ -156,6 +158,8 @@ services:
       timeout: 5s
       start_period: 30s
       retries: 6
+    # Longer than the host's 30-second shutdown timeout, so an in-flight run can release its lease.
+    stop_grace_period: 40s
     restart: unless-stopped
 
   # The Notification Hub: the notifications subscription, in-app notifications and their retention.
@@ -180,6 +184,8 @@ services:
       timeout: 5s
       start_period: 30s
       retries: 6
+    # Longer than the host's 30-second shutdown timeout, so an in-flight run can release its lease.
+    stop_grace_period: 40s
     restart: unless-stopped
 
   web:

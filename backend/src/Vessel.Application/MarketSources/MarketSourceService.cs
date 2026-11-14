@@ -34,8 +34,7 @@ public sealed partial class MarketSourceService(IMarketSourceStore store, IVenue
         {
             IReadOnlyList<VenueInstrument> instruments;
             try { instruments = await (venues.Reader(venue.Id) ?? throw new VenueReadException("No reader.")).ReadInstrumentsAsync(ct); }
-            catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
-                ex is OperationCanceledException && !ct.IsCancellationRequested)
+            catch (Exception ex) when (VenueFailures.IsReadFailure(ex, ct))
             {
                 result.Add(new(venue.Id, venue.Name, false, []));
                 continue;

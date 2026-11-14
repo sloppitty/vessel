@@ -426,8 +426,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             instruments = await reader.ReadInstrumentsAsync(ct);
             ct.ThrowIfCancellationRequested();
         }
-        catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
-            ex is OperationCanceledException && !ct.IsCancellationRequested)
+        catch (Exception ex) when (VenueFailures.IsReadFailure(ex, ct))
         {
             throw new ProblemException(502, "The venue instrument read failed. Try again later.");
         }

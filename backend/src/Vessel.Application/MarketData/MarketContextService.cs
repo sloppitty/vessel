@@ -54,8 +54,7 @@ public sealed class MarketContextService(IWorkspaceStore store, IVenueRegistry v
         {
             snapshot = await cache.GetAsync(account.VenueId, reader, ct);
         }
-        catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
-            ex is OperationCanceledException && !ct.IsCancellationRequested)
+        catch (Exception ex) when (VenueFailures.IsReadFailure(ex, ct))
         {
             throw new ProblemException(502, VenueFailure);
         }

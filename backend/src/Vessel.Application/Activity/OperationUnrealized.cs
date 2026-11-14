@@ -50,8 +50,7 @@ internal static class OperationUnrealized
         {
             return await marks.GetAsync(venueId, reader, ct);
         }
-        catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
-            ex is OperationCanceledException && !ct.IsCancellationRequested)
+        catch (Exception ex) when (VenueFailures.IsReadFailure(ex, ct))
         {
             return null;
         }
