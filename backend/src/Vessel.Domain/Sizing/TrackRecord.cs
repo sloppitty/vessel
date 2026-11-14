@@ -202,7 +202,6 @@ public sealed class SizingSettings : IOwned
     public const decimal DefaultRiskPercent = 1.25m;
     public const decimal MinRiskPercent = 0.1m;
     public const decimal MaxRiskPercent = 5m;
-    public const decimal WarnRiskPercent = 2.5m;
 
     public Guid OwnerId { get; private set; }
     public decimal RiskPercent { get; private set; }

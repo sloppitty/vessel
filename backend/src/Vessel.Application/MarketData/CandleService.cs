@@ -60,8 +60,7 @@ public sealed class CandleService(IWorkspaceStore store, IVenueRegistry venues, 
             market = (await catalogue.ReadInstrumentsAsync(ct)).FirstOrDefault(i => i.ContractId == instrument)
                 ?? throw new ProblemException(409, "This market is no longer listed.");
         }
-        catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
-            ex is OperationCanceledException && !ct.IsCancellationRequested)
+        catch (Exception ex) when (VenueFailures.IsReadFailure(ex, ct))
         {
             throw new ProblemException(502, VenueFailure);
         }
@@ -87,8 +86,7 @@ public sealed class CandleService(IWorkspaceStore store, IVenueRegistry venues, 
                     time.GetUtcNow(), candles.Count == 0, venue?.CandleNotice ?? Notice);
             }, ct);
         }
-        catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
-            ex is OperationCanceledException && !ct.IsCancellationRequested)
+        catch (Exception ex) when (VenueFailures.IsReadFailure(ex, ct))
         {
             throw new ProblemException(502, VenueFailure);
         }

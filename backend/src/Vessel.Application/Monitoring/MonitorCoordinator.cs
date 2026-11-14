@@ -595,8 +595,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 await store.DeferVenueAsync(account.VenueId, retry, time.GetUtcNow(), CancellationToken.None);
             return (read.Result, null, read.RetryAtUtc is not null);
         }
-        catch (Exception ex) when (ex is VenueReadException or HttpRequestException ||
-            ex is OperationCanceledException && !ct.IsCancellationRequested)
+        catch (Exception ex) when (VenueFailures.IsReadFailure(ex, ct))
         {
             if (ex is VenueRateLimitException limited)
                 await store.DeferVenueAsync(account.VenueId, limited.RetryAtUtc, time.GetUtcNow(), CancellationToken.None);
