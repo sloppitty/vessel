@@ -32,4 +32,6 @@ services:
       timeout: 5s
       start_period: 30s
       retries: 6
+    # Longer than the host's 30-second shutdown timeout, so an in-flight run can release its lease.
+    stop_grace_period: 40s
     restart: unless-stopped

@@ -17,3 +17,16 @@ __pycache__/
 
 # Default local evidence storage
 backend/src/Vessel.Api/data/
+
+# Operator artefacts that must never be committed: backups, exported objects and key material
+backups/
+*.dump
+objects.tar.gz
+*credential-keys*.json
+
+# Browser check output
+playwright-report/
+test-results/
+
+# Per-developer agent settings
+.claude/settings.local.json
