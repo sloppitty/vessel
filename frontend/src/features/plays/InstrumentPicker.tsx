@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { VenueInstrument } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -107,6 +107,12 @@ function InstrumentSearch({ id, choices, value, selected, venueName, disabled, l
     if (overflow > 0) element.style.setProperty('--instrument-shift', `${-Math.ceil(overflow)}px`)
   }, [open, showCategories, showSources])
 
+  // Arrow keys can move the highlight past the visible rows of a long list; keep it in view.
+  const highlightedId = open && highlighted ? optionId(highlighted.contractId) : undefined
+  useEffect(() => {
+    if (highlightedId) document.getElementById(highlightedId)?.scrollIntoView?.({ block: 'nearest' })
+  }, [highlightedId])
+
   const close = () => setQuery(null)
   const start = () => { setQuery(''); setActive(0); setCategory(null); setSource(null) }
   const choose = (instrument: VenueInstrument) => {
@@ -138,7 +144,7 @@ function InstrumentSearch({ id, choices, value, selected, venueName, disabled, l
 
   return <div className="instrument-search" data-open={open}>
     <Input id={id} role="combobox" aria-label="Perpetual instrument" aria-expanded={open} aria-controls={listId}
-      aria-autocomplete="list" aria-activedescendant={open && highlighted ? optionId(highlighted.contractId) : undefined}
+      aria-autocomplete="list" aria-activedescendant={highlightedId}
       autoComplete="off" spellCheck={false} disabled={disabled} aria-busy={loading}
       placeholder={loading ? 'Loading venue instruments…' : choices.length ? 'Search, e.g. BTC' : 'Catalogue unavailable'}
       value={open ? query : display}

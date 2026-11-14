@@ -224,6 +224,23 @@ describe('one shell monitor subscription', () => {
     expect(api.monitor).toHaveBeenCalledTimes(2)
     expect(api.sync).not.toHaveBeenCalled()
   })
+  it('reloads once when the stream returns after a fallback reload, so a failed reload does not stay on screen', async () => {
+    const { api, connections } = client()
+    const reload = vi.fn()
+    renderHook(() => useMonitorEvents(api, true, reload, 0))
+    await advance(0)
+    // The stream never became ready: the fallback reloads stored data, which fails while the API is down.
+    await advance(60_250)
+    expect(reload).toHaveBeenCalledOnce()
+    // The stream connects with no events to catch up on; nothing else would clear the failed reload.
+    act(() => connections[0]!.emit(ready()))
+    await advance(250)
+    expect(reload).toHaveBeenCalledTimes(2)
+    // A later status of the same healthy stream adds nothing.
+    act(() => connections[0]!.emit(ready()))
+    await advance(250)
+    expect(reload).toHaveBeenCalledTimes(2)
+  })
   it('aborts on API replacement, disconnect and unmount and ignores late callbacks and queued reloads', async () => {
     const first = client(), second = client()
     const reload = vi.fn()

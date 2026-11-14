@@ -101,6 +101,8 @@ export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: ()
     let connection: AbortController | null = null
     let headRequests = 0
     let ready = false
+    // A fallback reload ran while the stream was down; it may have failed, so the next clean connection reloads once.
+    let reloadOnReady = false
     let failures = 0
     let refusals = 0
     let retry: ReturnType<typeof setTimeout> | undefined
@@ -149,10 +151,14 @@ export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: ()
           }
           if (frame.type === 'status') {
             ready = true
+            const missed = reloadOnReady
+            reloadOnReady = false
             // Without a known head, stored reads may predate this stream: take its head and reload once.
             if (isUnknownCursor(cursor)) { cursor = frame.status.nextCursor; refresh(); return }
             // Ready only confirms the cursor; its catch-up events follow. A reset means stored state must reload.
             if (frame.status.state === 'reset') { cursor = frame.status.nextCursor; refresh() }
+            // After an outage with no events to catch up on, nothing else would clear a failed fallback reload.
+            else if (missed) refresh()
           } else if (frame.type === 'event') {
             failures = 0
             // Each event frame names its own resume cursor; a reconnect resumes after the last one handled.
@@ -191,7 +197,7 @@ export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: ()
     void connect()
     const fallback = setInterval(() => {
       if (ready) setHealthGeneration(value => value + 1)
-      else refresh()
+      else { reloadOnReady = true; refresh() }
       // Keeps the notifications worker status current, and retries a head that could not be read.
       readNotificationHead()
     }, 60_000)

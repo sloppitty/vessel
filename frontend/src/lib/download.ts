@@ -11,7 +11,10 @@ export function attachmentName(header: string | null, fallback: string): string 
   return name && name.length <= 200 ? name : fallback
 }
 
-/** Hands the file to the browser's download, then releases the object URL. Nothing is stored in the browser. */
+/**
+ * Hands the file to the browser's download, then releases the object URL. Nothing is stored in the browser. The release
+ * waits: Safari on iOS can cancel a download whose URL is revoked before it has started.
+ */
 export function saveFile(file: DownloadedFile) {
   const url = URL.createObjectURL(file.blob)
   const link = document.createElement('a')
@@ -21,5 +24,5 @@ export function saveFile(file: DownloadedFile) {
   document.body.append(link)
   link.click()
   link.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
