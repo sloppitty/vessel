@@ -53,10 +53,12 @@ if not reports:
     sys.exit("Cannot count backend skips: no TRX reports were produced.")
 skipped = 0
 for report in reports:
-    counters = ET.parse(report).find(".//{*}ResultSummary/{*}Counters")
+    root = ET.parse(report)
+    counters = root.find(".//{*}ResultSummary/{*}Counters")
     if counters is None:
         sys.exit("Cannot count backend skips: a TRX report has no counters.")
-    skipped += int(counters.attrib["notExecuted"])
+    skipped += sum(result.get("outcome") == "NotExecuted"
+                   for result in root.findall("./{*}Results/{*}UnitTestResult"))
 print(skipped)
 PY
 )

@@ -26,9 +26,13 @@ if tool == "node":
 if tool == "dotnet" and args[0] == "test":
     destination = Path(args[args.index("--results-directory") + 1])
     for index, skipped in enumerate(json.loads(os.environ.get("SKIPS", "[3, 12]"))):
+        # xUnit writes skipped outcomes while the TRX summary's notExecuted stays zero.
+        results = '<UnitTestResult outcome="Passed" />' + \
+            '<UnitTestResult outcome="NotExecuted" />' * skipped
         (destination / f"{index}.trx").write_text(
             '<TestRun xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">'
-            f'<ResultSummary><Counters notExecuted="{skipped}" /></ResultSummary></TestRun>')
+            f'<Results>{results}</Results><ResultSummary>'
+            f'<Counters total="{skipped + 1}" executed="1" notExecuted="0" /></ResultSummary></TestRun>')
     print("Intentionally irrelevant console summary: Skipped: 9999")
     sys.exit(int(os.environ.get("BACKEND_EXIT", "0")))
 if tool == "pnpm":
