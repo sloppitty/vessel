@@ -130,9 +130,10 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     /// </summary>
     private TimeSpan UnclaimedAfter => MonitorOptions.Lease + options.HeartbeatTimeout;
 
-    /// <returns>The released request and its trigger, when unclaimed check work stopped gating admission.</returns>
+    /// <returns>The released request and its trigger, when abandoned check work stopped gating admission.</returns>
     private (Guid RequestId, string Trigger)? ReleaseUnclaimed(MonitorAccount row, DateTimeOffset now) =>
-        row.RequestId is { } request && row.Trigger is var trigger && row.ReleaseUnclaimedWork(now, UnclaimedAfter)
+        row.RequestId is { } request && row.Trigger is var trigger &&
+        (row.ReleaseExpiredLease(now) || row.ReleaseUnclaimedWork(now, UnclaimedAfter))
             ? (request, trigger) : null;
 
     /// <summary>
@@ -182,7 +183,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             if (venues.Reader(account.VenueId) is null) throw new ProblemException(503, "Venue reader is unavailable.");
             var now = time.GetUtcNow();
             row.ReleaseAbandonedRefresh(now);
-            // Check work nobody claimed (worker down or not deployed) must not refuse Refresh indefinitely.
+            // Abandoned check work (unclaimed or with an expired lease) must not refuse Refresh indefinitely.
             var expired = ReleaseUnclaimed(row, now);
             var retry = await RetryAfterAsync(account.VenueId, row, now, ct);
             if (retry > 0) throw new MonitorAdmissionException(retry);

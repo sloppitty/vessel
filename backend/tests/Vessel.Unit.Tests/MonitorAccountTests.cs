@@ -57,6 +57,74 @@ public sealed class MonitorAccountTests
         Assert.True(row.Owns(row.Generation, "recovery", Now.AddMinutes(6)));
     }
 
+    [Theory]
+    [InlineData("manual", "refresh", 0)]
+    [InlineData("monitor", "refresh", 1)]
+    [InlineData("confirmation", "refresh", 0)]
+    [InlineData("manual", "manual", 0)]
+    public void Admission_releases_an_expired_check_lease_without_dropping_due_work(
+        string trigger, string replacementTrigger, int millisecondsAfterExpiry)
+    {
+        var row = new MonitorAccount();
+        var oldRequest = Guid.NewGuid();
+        row.Admit(oldRequest, trigger, Now);
+        Assert.True(row.Claim(oldRequest, "worker", Now, MonitorOptions.Lease));
+        var generation = row.Generation;
+        var at = Now + MonitorOptions.Lease + TimeSpan.FromMilliseconds(millisecondsAfterExpiry);
+        var replacement = Guid.NewGuid();
+
+        row.Admit(replacement, replacementTrigger, at);
+
+        Assert.Equal("pending", row.ManualState);
+        Assert.Null(row.LeaseHolder);
+        Assert.Null(row.LeaseUntilUtc);
+        Assert.Equal(replacementTrigger == "refresh" ? Now : at, row.NextRunAtUtc);
+        Assert.Equal(Now, row.LastAttemptAtUtc);
+        Assert.Null(row.LastSuccessAtUtc);
+        Assert.Equal(0, row.ConsecutiveFailures);
+        Assert.Equal(generation, row.Generation);
+        Assert.False(row.Owns(generation, "worker", at));
+        Assert.False(row.Claim(oldRequest, "worker", at, MonitorOptions.Lease));
+        Assert.True(row.Claim(replacement, "worker", at, MonitorOptions.Lease));
+        Assert.Equal(generation + 1, row.Generation);
+        Assert.False(row.Owns(generation, "worker", at));
+        Assert.False(row.Owns(row.Generation, "other", at));
+        Assert.True(row.Owns(row.Generation, "worker", at));
+        Assert.False(row.Owns(row.Generation, "worker", at + MonitorOptions.Lease));
+    }
+
+    [Fact]
+    public void Admission_preserves_a_live_check_lease_and_its_real_retry_after()
+    {
+        var row = new MonitorAccount();
+        var request = Guid.NewGuid();
+        row.Admit(request, "manual", Now);
+        Assert.True(row.Claim(request, "worker", Now, MonitorOptions.Lease));
+        var generation = row.Generation;
+        var at = Now.AddSeconds(37.25);
+
+        Assert.Equal(263, row.RetryAfter(at));
+        Assert.Throws<InvalidOperationException>(() => row.Admit(Guid.NewGuid(), "refresh", at));
+        Assert.Equal(request, row.RequestId);
+        Assert.True(row.Owns(generation, "worker", at));
+        Assert.Equal(1, row.RetryAfter(Now + MonitorOptions.Lease - TimeSpan.FromMilliseconds(1)));
+    }
+
+    [Fact]
+    public void Expired_check_lease_does_not_bypass_manual_cooldown()
+    {
+        var row = new MonitorAccount();
+        row.Admit(Guid.NewGuid(), "monitor", Now, scheduled: true);
+        Assert.True(row.Claim(row.RequestId!.Value, "worker", Now, MonitorOptions.Lease));
+        var at = Now + MonitorOptions.Lease;
+        row.NextManualAllowedAtUtc = at.AddSeconds(20);
+
+        Assert.Throws<InvalidOperationException>(() => row.Admit(Guid.NewGuid(), "refresh", at));
+        Assert.Equal("idle", row.ManualState);
+        Assert.Equal(Now, row.NextRunAtUtc);
+        Assert.Equal(20, row.RetryAfter(at));
+    }
+
     [Fact]
     public void Delayed_command_with_an_old_request_id_cannot_claim_new_request()
     {

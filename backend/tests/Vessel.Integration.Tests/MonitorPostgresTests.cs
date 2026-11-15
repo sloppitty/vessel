@@ -1,5 +1,7 @@
+using System.Net;
 using Vessel.Application.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Vessel.Application.Credentials;
 using Vessel.Application.Events;
 using Vessel.Application.Monitoring;
@@ -493,6 +495,100 @@ public sealed partial class MonitorPostgresTests
         var refused = await Assert.ThrowsAsync<MonitorAdmissionException>(() =>
             Coordinator(next, owner, new Reader()).AdmitRefreshAsync(id, "next-tab", default));
         Assert.InRange(refused.RetryAfter, 1, 60);
+    }
+
+    [PostgresFact]
+    public async Task Refresh_with_a_live_check_lease_returns_429_with_the_remaining_lease_time()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        await using var db = database.Context(owner);
+        await SeedPlannedAsync(db, clock.Now);
+        var request = await Coordinator(db, owner, new Reader(), clock: clock).RequestAsync(id, default);
+        var lease = (await MonitorTestPaths.Store(db, TestUnitOfWork.For(db))
+            .ClaimAsync(id, request.RequestId, "worker", clock.Now, default))!;
+        clock.Now += TimeSpan.FromSeconds(37.25);
+        await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString,
+            configure: services => services.AddSingleton<TimeProvider>(clock));
+        using var client = factory.AuthorizedClient();
+
+        using var response = await client.PostAsync($"/api/accounts/{id}/sync", null);
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+        Assert.Equal(TimeSpan.FromSeconds(263), response.Headers.RetryAfter!.Delta);
+        var row = (await RowAsync(database, owner))!;
+        Assert.Equal(lease.RequestId, row.RequestId);
+        Assert.True(row.Owns(lease.Generation, lease.WorkerId, clock.Now));
+    }
+
+    [PostgresFact]
+    public async Task Refresh_releases_an_expired_running_check_keeps_it_due_and_fences_its_late_write()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid(); var id = (await AccountsAsync(database, owner, 1)).Single();
+        var clock = new Clock(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        var due = clock.Now;
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reader = new Reader { BeforeRead = async ct => { entered.SetResult(); await gate.Task.WaitAsync(ct); } };
+        await using var worker = database.Context(owner);
+        await SeedPlannedAsync(worker, clock.Now);
+        var importer = new Importer();
+        var monitor = Coordinator(worker, owner, reader, clock: clock, importer: importer);
+        var accepted = await monitor.RequestAsync(id, default);
+        var original = (await MonitorTestPaths.Store(worker, TestUnitOfWork.For(worker))
+            .ClaimAsync(id, accepted.RequestId, "lost-worker", clock.Now, default))!;
+        var running = monitor.RunAsync(original, default);
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            clock.Now = due + MonitorOptions.Lease - TimeSpan.FromMilliseconds(1250);
+            await using (var refused = database.Context(owner))
+            {
+                var busy = await Assert.ThrowsAsync<MonitorAdmissionException>(() =>
+                    Coordinator(refused, owner, new Reader(), clock: clock).AdmitRefreshAsync(id, "api", default));
+                Assert.Equal(2, busy.RetryAfter);
+            }
+            clock.Now = due + MonitorOptions.Lease;
+            await using var api = database.Context(owner);
+            var sink = new EventSink();
+            var refresh = Coordinator(api, owner, new Reader(), sink, clock);
+            var replacement = await refresh.AdmitRefreshAsync(id, "api", default);
+            Assert.Equal(original.Generation + 1, replacement.Generation);
+            var row = (await RowAsync(database, owner))!;
+            Assert.Equal((replacement.RequestId, "running", "api"), (row.RequestId!.Value, row.ManualState, row.LeaseHolder));
+            Assert.Equal(due, row.NextRunAtUtc);
+            var completion = Assert.Single(sink.Drafts, d => d.Type == "monitor.run-completed");
+            Assert.Equal(original.RequestId, completion.RunId);
+            Assert.Equal("superseded", completion.Data.GetProperty("outcome").GetString());
+
+            gate.SetResult();
+            Assert.False(await running);
+            Assert.Equal(0, importer.Retained);
+            Assert.Equal(0, importer.Reconciled);
+            Assert.Empty(await api.Snapshots.ToListAsync());
+            row = (await RowAsync(database, owner))!;
+            Assert.True(row.Owns(replacement.Generation, "api", clock.Now));
+            Assert.Equal(due, row.NextRunAtUtc);
+            Assert.Null(row.LastSuccessAtUtc);
+
+            Assert.True(await refresh.RunAsync(replacement, default));
+            Assert.Single(await api.Snapshots.ToListAsync());
+            row = (await RowAsync(database, owner))!;
+            Assert.Equal(due, row.NextRunAtUtc);
+            Assert.Equal(due, row.LastAttemptAtUtc);
+            Assert.Null(row.LastSuccessAtUtc);
+            var scheduled = Assert.Single(await MonitorTestPaths.Store(api, TestUnitOfWork.For(api))
+                .ClaimDueAsync("returning-worker", clock.Now, 1, default));
+            Assert.Equal("monitor", scheduled.Trigger);
+            Assert.Equal(replacement.Generation + 1, scheduled.Generation);
+        }
+        finally
+        {
+            gate.TrySetResult();
+            await running;
+        }
     }
 
     [PostgresFact]
