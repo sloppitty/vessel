@@ -49,7 +49,7 @@ describe('memoized candle subtree', () => {
     const renders = vi.mocked(IndicatorOverlay).mock.calls.length
     expect(renders).toBeGreaterThan(0)
     act(() => data.emit({ type: 'context', context: { ...marketContextFixture, markPrice: '105.25', observedAt: '2026-10-11T08:00:08Z' } }))
-    expect(screen.getByText('105.25')).toBeInTheDocument()
+    expect(screen.getByText('$105.25')).toBeInTheDocument()
     expect(IndicatorOverlay).toHaveBeenCalledTimes(renders)
     act(() => data.emit({ type: 'status', status: { state: 'stale', observedAt: '2026-10-11T08:00:09Z' } }))
     expect(IndicatorOverlay).toHaveBeenCalledTimes(renders)
