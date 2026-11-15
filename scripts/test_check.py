@@ -65,10 +65,10 @@ class ScriptTests(unittest.TestCase):
             path.write_text(f"#!{sys.executable}\n{STUB}")
             path.chmod(0o755)
 
-    def run_script(self, name, *args, **env):
+    def run_script(self, name, *args, timeout=20, **env):
         return subprocess.run(
             ["bash", str(self.root / "scripts" / name), *args],
-            env={**self.env, **env}, text=True, capture_output=True, timeout=20)
+            env={**self.env, **env}, text=True, capture_output=True, timeout=timeout)
 
     def calls(self, tool=None):
         calls = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
@@ -185,7 +185,7 @@ class TestDatabaseTests(ScriptTests):
         self.assertEqual("", result.stdout)
 
     def test_readiness_timeout_removes_container_and_network(self):
-        result = self.run_script("test-db.sh", DOCKER_FAIL="exec")
+        result = self.run_script("test-db.sh", DOCKER_FAIL="exec", timeout=120)
         self.assertNotEqual(0, result.returncode)
         self.assertIn("60 seconds", result.stderr)
         calls = [call[1] for call in self.calls("docker")]
