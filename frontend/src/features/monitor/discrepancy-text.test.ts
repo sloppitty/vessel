@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { MonitorDiscrepancy } from '@/api/monitor'
-import { discrepancyAction, discrepancyFacts, discrepancyTitle } from './discrepancy-text'
+import { discrepancyAction, discrepancyFacts, discrepancyOrders, discrepancyTitle } from './discrepancy-text'
 
 const record = (details: Record<string, unknown>) => ({ kind: 'protection.beyond-liquidation', details, lastObservedAtUtc: null }) as unknown as MonitorDiscrepancy
+
+it('keeps drifted and planned prices distinguishable at the known tick', () => {
+  const drift = { ...record({ levels: [{ orderId: '1', actualPrice: '0.163441', plannedPrice: '0.163439' }] }), kind: 'level.drift' }
+  expect(discrepancyOrders(drift, undefined, '0.000001')).toEqual(['Order 1 · at $0.163441, plan $0.163439'])
+})
 
 describe('beyond-liquidation wording (phase 2, 8b)', () => {
   it('names the venue liquidation price, mode and the stops beyond it', () => {

@@ -237,10 +237,11 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   const monitorRun = useMonitorRun(api, executionMonitor ? accountMonitors.find(item => item.accountId === executionMonitor.accountId) ?? executionMonitor : null, monitorChanged)
   // The chart labels this Play's planned stops with the venue evidence of the newest stored monitor read.
   const trackedExecution = tracking.execution?.playId === saved?.summary.id ? tracking.execution : null
+  const [priceStep, setPriceStep] = useState<PriceStep>(null)
   const zone = useDisplayZone()
   const stopEvidence = useMemo(() => stopEvidenceFor(trackedExecution && monitorRun.monitor?.accountId === trackedExecution.monitor?.accountId
-    ? { ...trackedExecution, monitor: monitorRun.monitor } : trackedExecution, value => formatTime(value, zone, 'day-time')),
-  [trackedExecution, monitorRun.monitor, zone])
+    ? { ...trackedExecution, monitor: monitorRun.monitor } : trackedExecution, value => formatTime(value, zone, 'day-time'), tickOf(priceStep)),
+  [trackedExecution, monitorRun.monitor, zone, priceStep])
 
   // Linked fills move a play to Open or Closed on the server; take the new status and version.
   const venueStatus = tracking.execution?.playId === saved?.summary.id ? tracking.execution?.status : undefined
@@ -294,7 +295,6 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   // until the facts say which entry, none gets one.
   const opened = status === 'open' || venueStatus === 'open'
   const filledEntries: ReadonlySet<string> | 'all' = fills === 'unknown' ? opened ? 'all' : noFilledEntries : fills.filled
-  const [priceStep, setPriceStep] = useState<PriceStep>(null)
   // The Draft's pre-flight as the workspace last evaluated it; Plan it records it with revision 1 (phase 1, 1.5).
   const [preflight, setPreflight] = useState<PreflightCheck[] | null>(null)
   const [lossLimitMessage, setLossLimitMessage] = useState<string | null>(null)

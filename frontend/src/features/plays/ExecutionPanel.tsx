@@ -151,7 +151,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
       coverage={coverage} unchecked={execution.status === 'open' && execution.tracked && coverage.length === 0 ? 1 : 0} currentBookRead={currentBookRead}
       busy={busy || monitorBusy} error={monitorError}
       retryAtUtc={retryAtUtc} statusUnavailable={monitorUnavailable} onCheck={onCheck} onManageCredential={onManageCredential} />}
-    {onDismiss && <MonitorDiscrepancies discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss} levelName={recordLevel}
+    {onDismiss && <MonitorDiscrepancies tick={tick} discrepancies={execution.discrepancies} busy={busy} onDismiss={onDismiss} levelName={recordLevel}
       action={editable ? item => <>
         {onRebind && version !== undefined && <LevelDriftAction discrepancy={item} links={execution.links} entries={entries}
           context={{ direction, leverage, tick: priceStep }} origin={origin} playId={execution.playId} version={version} blocked={busy ? 'Wait for the current change to finish.' : rebindBlocked}

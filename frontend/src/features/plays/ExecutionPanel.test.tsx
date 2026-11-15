@@ -33,6 +33,17 @@ const execution: PlayExecution = {
 }
 
 describe('execution panel', () => {
+  it('keeps liquidation and stop prices distinguishable at the known tick', () => {
+    const discrepancy = { ...missingStopFixture, kind: 'protection.beyond-liquidation', details: {
+      liquidationPrice: '0.163441', marginMode: 'cross', stops: [{ price: '0.163439', beyond: true }],
+    } }
+    render(<ExecutionPanel execution={{ ...execution, discrepancies: [discrepancy] }} error={null} busy={false}
+      entries={entries} direction="long" priceStep={0.000001} onCheck={vi.fn()} onLink={vi.fn()}
+      onUnlink={vi.fn()} onDismiss={vi.fn()} />)
+    expect(screen.getByText('$0.163441')).toBeInTheDocument()
+    expect(screen.getByText('$0.163439')).toBeInTheDocument()
+  })
+
   it('uses the instrument tick for order and fill prices without rounding through a float', () => {
     const link = execution.links[0]!
     const precise = { ...execution, links: [{ ...link, order: order('11', { limitPrice: '0.1634' }),
