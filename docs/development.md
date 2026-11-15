@@ -281,7 +281,44 @@ pnpm check
 
 That runs the existing prototype tests, locked NuGet restore, backend Release build/tests, frozen pnpm install, TypeScript checks, lint, frontend tests and production build.
 
-Set `Vessel_TEST_POSTGRES` to a real PostgreSQL test connection to execute database integration tests. Without it, 40 PostgreSQL tests explicitly skip; an invalid supplied connection fails. Tests migrate unique temporary schemas and drop only those schemas, not the shared database. The CI definition supplies a separate ephemeral PostgreSQL service.
+Checks require `Vessel_TEST_POSTGRES` and stop before running tests or building
+when it is missing or blank. Never use the development or live database.
+Start a throwaway PostgreSQL 18 with Docker:
+
+```sh
+bash scripts/test-db.sh
+```
+
+The helper creates a uniquely named `postgres:18-alpine` container on its own
+private Docker bridge network, publishes a random port on `127.0.0.1` only, and
+keeps its data in tmpfs. It prints the connection export on stdout and the exact
+container/network cleanup command on stderr. Run the printed export in your
+shell, then `pnpm check`. Run the cleanup command and
+`unset Vessel_TEST_POSTGRES` when finished. A failed startup cleans up its own
+resources. The helper never reads `.env`, invokes development Compose, accepts
+an existing database target or reuses containers.
+
+The backend tests migrate unique temporary schemas and drop only those schemas.
+An invalid supplied connection fails. CI supplies separate ephemeral PostgreSQL
+and RabbitMQ services; the release workflow is unchanged.
+
+For a deliberate partial check without database tests:
+
+```sh
+pnpm check --no-db
+```
+
+`--no-db` removes `Vessel_TEST_POSTGRES` from the check process even if it was
+already set. Every backend run reports its skipped count from fresh TRX results,
+and a successful check repeats it on the last line. The count includes any other
+opt-in tests, such as live venue, broker and S3 tests. This is not a substitute
+for the normal database-backed check.
+
+Node must have full ICU locale data. Before any build, the check verifies that
+`Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' })` formats
+October 15 as `15 Oct`, not `Oct 15`. Use a full-ICU build, such as
+`node:24-bookworm-slim`, with the pinned pnpm version if the host's Node lacks
+this data. Merely having the required Node version is not enough.
 
 Useful focused commands:
 
