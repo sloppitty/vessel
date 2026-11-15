@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Vessel.Application.Venues;
+using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 
 namespace Vessel.Tests;
@@ -97,16 +98,90 @@ public sealed class HyperliquidBuilderMarketTests
         Assert.Equal("GOLD", gold.DisplayName);
     }
 
-    [Fact]
-    public async Task Builder_metadata_failure_keeps_the_primary_read_and_marks_coverage_partial()
+    [Theory]
+    [InlineData("allPerpMetas")]
+    [InlineData("perpDexs")]
+    public async Task Builder_metadata_failure_keeps_the_primary_read_and_marks_coverage_partial(string failedRead)
     {
-        var handler = new Routes((type, dex) => type == "allPerpMetas" ? null : Default(type, dex));
+        var handler = new Routes((type, dex) => type == failedRead ? null : Default(type, dex));
         var reader = Reader(handler);
         Assert.Equal(["BTC"], (await reader.ReadInstrumentsAsync(CancellationToken.None)).Select(i => i.ContractId));
         var result = await reader.ReadAsync(Address, CancellationToken.None);
         Assert.False(result.PositionsComplete);
+        Assert.False(result.FillHistoryComplete);
+        Assert.Null(result.FillHistoryTruncated);
+        Assert.Null(result.OldestRawFillAtUtc);
         Assert.Empty(result.Fills);
         Assert.False((await reader.ReadOrdersAsync(Address, CancellationToken.None)).OpenOrdersComplete);
+    }
+
+    [Theory]
+    [InlineData("allPerpMetas")]
+    [InlineData("perpDexs")]
+    public async Task Fill_history_fails_before_reading_a_page_when_builder_scope_is_unknown(string failedRead)
+    {
+        using var handler = new Routes((type, dex) => type == failedRead ? null :
+            type == "userFillsByTime" ? GoldFill : Default(type, dex));
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "History");
+        account.Configure(null, Address, null);
+        var to = DateTimeOffset.FromUnixTimeMilliseconds(1700000000000);
+        await Assert.ThrowsAsync<VenueReadException>(() =>
+            Reader(handler).ReadFillPageAsync(account, to.AddMinutes(-1), to, default));
+        Assert.DoesNotContain(handler.Requests, r => r.Type == "userFillsByTime");
+    }
+
+    [Fact]
+    public async Task Fill_history_imports_usdc_builder_fills_and_keeps_other_collateral_out_of_scope()
+    {
+        using var handler = new Routes((type, dex) => type == "userFillsByTime" ? GoldFill : Default(type, dex));
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "History");
+        account.Configure(null, Address, null);
+        var to = DateTimeOffset.FromUnixTimeMilliseconds(1700000000000);
+        var page = await Reader(handler).ReadFillPageAsync(account, to.AddMinutes(-1), to, default);
+        Assert.Equal("xyz:GOLD", Assert.Single(page.Fills).ContractId);
+        Assert.Equal(2, page.RawCount);
+        Assert.Equal(0, page.OmittedExecutions);
+        Assert.Empty(page.Omissions);
+    }
+
+    [Theory]
+    [InlineData("\"collateralToken\":null")]
+    [InlineData("\"collateralToken\":\"0\"")]
+    [InlineData("\"collateralToken\":-1")]
+    [InlineData("")]
+    public async Task Unknown_collateral_is_not_proven_out_of_scope(string collateral)
+    {
+        var metadata = collateral.Length == 0 ? AllMetas.Replace(",\"collateralToken\":0", "")
+            : AllMetas.Replace("\"collateralToken\":0", collateral);
+        using var handler = new Routes((type, dex) => type == "allPerpMetas" ? metadata : Default(type, dex));
+        var reader = Reader(handler);
+        var read = await reader.ReadAsync(Address, default);
+        Assert.Null(read.FillHistoryTruncated);
+        Assert.Empty(read.Fills);
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "History");
+        account.Configure(null, Address, null);
+        var to = DateTimeOffset.FromUnixTimeMilliseconds(1700000000000);
+        await Assert.ThrowsAsync<VenueReadException>(() =>
+            reader.ReadFillPageAsync(account, to.AddMinutes(-1), to, default));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_warm_catalogue_cannot_silently_exclude_a_new_builder_market(bool history)
+    {
+        using var handler = new Routes((type, dex) => type is "userFills" or "userFillsByTime"
+            ? GoldFill.Replace("xyz:GOLD", "xyz:NEW") : Default(type, dex));
+        var reader = Reader(handler);
+        await reader.ReadInstrumentsAsync(default);
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "History");
+        account.Configure(null, Address, null);
+        var to = DateTimeOffset.FromUnixTimeMilliseconds(1700000000000);
+        if (history)
+            await Assert.ThrowsAsync<VenueReadException>(() =>
+                reader.ReadFillPageAsync(account, to.AddMinutes(-1), to, default));
+        else
+            await Assert.ThrowsAsync<VenueReadException>(() => reader.ReadAsync(Address, default));
     }
 
     [Fact]
@@ -117,6 +192,8 @@ public sealed class HyperliquidBuilderMarketTests
         var position = Assert.Single(result.Snapshot.Positions);
         Assert.Equal(("xyz:GOLD", 0.4608m, 20, 3629.3m), (position.ContractId, position.SignedQuantity, position.Leverage!.Value, position.LiquidationPrice!.Value));
         Assert.True(result.PositionsComplete);
+        Assert.False(result.FillHistoryTruncated);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1700000000000), result.OldestRawFillAtUtc);
         Assert.Equal(100m, result.Snapshot.AccountValueUsd);
         var fill = Assert.Single(result.Fills); // flx:GOLD is another collateral: out of scope, and not an omission.
         Assert.Equal("xyz:GOLD", fill.ContractId);

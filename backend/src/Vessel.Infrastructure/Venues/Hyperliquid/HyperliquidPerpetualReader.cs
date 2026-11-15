@@ -96,7 +96,8 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
     /// <param name="ActiveDexes">Builder DEXes with a selectable market: their positions, books and contexts need one read each.</param>
     /// <param name="BuildersUnavailable">Builder metadata failed, so this catalogue is primary only and coverage is partial.</param>
     internal sealed record Catalogue(IReadOnlyList<VenueInstrument> All, IReadOnlyList<VenueInstrument> Selectable,
-        IReadOnlyList<string>? ActiveDexes = null, bool BuildersUnavailable = false)
+        IReadOnlyList<string>? ActiveDexes = null, bool BuildersUnavailable = false,
+        IReadOnlySet<string>? ExcludedBuilderContracts = null)
     {
         public IReadOnlyList<string> Dexes => ActiveDexes ?? [];
     }
@@ -115,7 +116,8 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
         {
             // Builder metadata changes slowly and costs three reads, so a refresh does not force it.
             var builders = await catalogues.GetBuildersAsync(token => ReadBoundedAsync(ReadBuildersAsync, token), ct);
-            return new([.. primary.All, .. builders.All], [.. primary.Selectable, .. builders.Selectable], builders.ActiveDexes);
+            return new([.. primary.All, .. builders.All], [.. primary.Selectable, .. builders.Selectable], builders.ActiveDexes,
+                ExcludedBuilderContracts: builders.ExcludedBuilderContracts);
         }
         catch (Exception error) when (WalletFailure(error) && !ct.IsCancellationRequested)
         {
@@ -155,7 +157,8 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
             using var fills = await ReadJsonAsync(
                 new { type = "userFills", user = publicAddress, aggregateByTime = false }, token);
             var omissions = new List<VenueOmission>();
-            var executions = ReadFills(fills.RootElement, contracts, latestTimestamp, out var omitted, omissions);
+            var executions = ReadFills(fills.RootElement, contracts, latestTimestamp, out var omitted, omissions,
+                catalogue.ExcludedBuilderContracts, rejectUnknownBuilders: builderMarkets && !catalogue.BuildersUnavailable);
             var fillCoverage = new RawFillReadCoverage();
             fillCoverage.Observe(fills.RootElement, row => Timestamp(Property(row, "time"), latestTimestamp));
 
@@ -179,10 +182,13 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
                 wallet = null;
                 notice += " " + WalletUnavailableNotice;
             }
+            // Defer all fills during the fallback: retaining a newer primary fill would become the next import's
+            // continuity boundary, hiding an older builder fill that falls outside a later capped response.
             return new PerpetualVenueReadResult(snapshot with { StablecoinWallet = wallet, AccountMode = accountMode }, instruments,
-                executions, notice,
-                PositionsComplete: positionsComplete, FillHistoryTruncated: fillCoverage.Count == MaxFills,
-                OldestRawFillAtUtc: fillCoverage.OldestAtUtc, OmittedExecutions: omitted)
+                catalogue.BuildersUnavailable ? [] : executions, notice,
+                PositionsComplete: positionsComplete,
+                FillHistoryTruncated: catalogue.BuildersUnavailable ? null : fillCoverage.Count == MaxFills,
+                OldestRawFillAtUtc: catalogue.BuildersUnavailable ? null : fillCoverage.OldestAtUtc, OmittedExecutions: omitted)
             { Omissions = omissions.DistinctBy(o => o.SourceId).ToList() };
         }, cancellationToken);
     }
@@ -275,12 +281,14 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
     }
 
     /// <param name="omitted">
-    /// Primary-perpetual fills on a contract the catalogue does not list. Spot (<c>@…</c>, <c>A/B</c>) and HIP-3
-    /// (<c>dex:…</c>) fills are proven out of scope; an unrecognized primary contract is an in-scope fact Vessel left out.
+    /// Primary-perpetual fills on a contract the catalogue does not list. Spot (<c>@…</c>, <c>A/B</c>) and builder
+    /// contracts proven to use other collateral are excluded. A primary-only fallback cannot prove builder fill coverage;
+    /// an unrecognized primary contract is an in-scope fact Vessel left out.
     /// </param>
     /// <param name="omissions">Phase 2, item 7: receives each omitted row's marker, keyed by its trade ID, which it must have.</param>
     internal static List<VenueFill> ReadFills(JsonElement root, HashSet<string> contracts, long latestTimestamp, out int omitted,
-        List<VenueOmission>? omissions = null)
+        List<VenueOmission>? omissions = null, IReadOnlySet<string>? excludedBuilderContracts = null,
+        bool rejectUnknownBuilders = false)
     {
         omitted = 0;
         var array = Array(root);
@@ -292,6 +300,8 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
             var name = Text(Property(fill, "coin"));
             if (!contracts.Contains(name))
             {
+                if (rejectUnknownBuilders && name.Contains(':') && excludedBuilderContracts?.Contains(name) != true)
+                    throw new VenueReadException("Hyperliquid builder fill scope is unknown. Retry after the catalogue refreshes.");
                 if (IsPrimaryContract(name))
                 {
                     omitted++;

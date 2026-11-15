@@ -781,6 +781,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     /// <summary>Moves the continuity watermark to the newest fill the import read; it never moves back.</summary>
     private static void AdvanceWatermark(MonitorAccount row, PerpetualVenueReadResult read, DateTimeOffset? boundary)
     {
+        if (read.FillHistoryTruncated is null && !read.FillHistoryComplete) return;
         var newest = read.Fills.Count == 0 ? boundary : read.Fills.Max(f => f.OccurredAtUtc);
         if (newest > row.NewestFillAtUtc || row.NewestFillAtUtc is null) row.NewestFillAtUtc = newest;
     }

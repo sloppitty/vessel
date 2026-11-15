@@ -31,12 +31,16 @@ public sealed partial class HyperliquidPerpetualReader : IVenueFillHistoryReader
         var end = toUtc.ToUnixTimeMilliseconds();
         return ReadBoundedAsync(async token =>
         {
-            var contracts = (await CatalogueAsync(token, refresh: true)).All
+            var catalogue = await CatalogueAsync(token, refresh: true);
+            if (catalogue.BuildersUnavailable)
+                throw new VenueReadException("Hyperliquid builder metadata is unavailable. Retry fill history later.");
+            var contracts = catalogue.All
                 .Select(i => i.VenueContractId ?? i.ContractId).ToHashSet(StringComparer.Ordinal);
             using var document = await ReadJsonAsync(
                 new { type = "userFillsByTime", user = source, startTime = start, endTime = end, aggregateByTime = false }, token);
             var omissions = new List<VenueOmission>();
-            var fills = ReadFills(document.RootElement, contracts, end, out var omitted, omissions);
+            var fills = ReadFills(document.RootElement, contracts, end, out var omitted, omissions,
+                catalogue.ExcludedBuilderContracts, rejectUnknownBuilders: builderMarkets);
             var raw = new List<VenueRawRow>();
             foreach (var row in Array(document.RootElement).EnumerateArray())
             {
