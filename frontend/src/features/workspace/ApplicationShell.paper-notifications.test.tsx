@@ -180,4 +180,43 @@ describe('real journal notifications in Paper mode', () => {
     expect(api.real.play).not.toHaveBeenCalled()
     expect(next.real.play).not.toHaveBeenCalled()
   })
+
+  it('discards a Paper claim that completes after its shell has switched back to Journal', async () => {
+    let finish!: (claim: { popups: ReturnType<typeof notificationWith>[]; more: number }) => void
+    const api = clients()
+    render(tree(api.real))
+    await waitFor(() => expect(api.real.claimNotifications).toHaveBeenCalledTimes(1))
+    vi.mocked(api.real.claimNotifications).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    await enterPaper(api)
+    await userEvent.click(mode())
+    await waitFor(() => expect(api.real.monitorStream).toHaveBeenCalledTimes(3))
+    const notification = notificationWith(51, { severity: 'critical', content: {
+      ...notificationWith(51).content, summary: 'Late real missing stop', links: [playLink],
+    } })
+    await act(async () => finish({ popups: [notification], more: 0 }))
+    expect(screen.queryByText('Late real missing stop')).not.toBeInTheDocument()
+    expect(api.real.readNotification).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Journal, switch to Paper playground' })).toBeInTheDocument()
+  })
+
+  it('discards an old shell claim after the API connection is replaced', async () => {
+    let finish!: (claim: { popups: ReturnType<typeof notificationWith>[]; more: number }) => void
+    const api = clients()
+    const view = render(tree(api.real))
+    await waitFor(() => expect(api.real.claimNotifications).toHaveBeenCalledTimes(1))
+    vi.mocked(api.real.claimNotifications).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    await enterPaper(api)
+    await userEvent.click(mode())
+    await waitFor(() => expect(api.real.monitorStream).toHaveBeenCalledTimes(3))
+    const next = clients()
+    view.rerender(tree(next.real))
+    await waitFor(() => expect(next.real.overview).toHaveBeenCalled())
+    const notification = notificationWith(52, { severity: 'critical', content: {
+      ...notificationWith(52).content, summary: 'Old connection private position warning', links: [playLink],
+    } })
+    await act(async () => finish({ popups: [notification], more: 0 }))
+    expect(screen.queryByText('Old connection private position warning')).not.toBeInTheDocument()
+    expect(api.real.readNotification).not.toHaveBeenCalled()
+    expect(next.real.readNotification).not.toHaveBeenCalled()
+  })
 })

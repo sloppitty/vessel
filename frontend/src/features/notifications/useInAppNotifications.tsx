@@ -78,7 +78,13 @@ export function useInAppNotifications({ api, active, onLink, onOpenPage, realJou
     session.current = newSession(api)
   }, [api])
   useEffect(() => { if (!active) closeAll(session.current, live.current.dismiss) }, [active])
-  useEffect(() => () => closeAll(session.current, live.current.dismiss), [])
+  useEffect(() => () => {
+    // Mode switches unmount this shell while the provider survives. Invalidate claims before their replies
+    // can create popups whose actions belong to the discarded shell or connection.
+    session.current.generation++
+    live.current.active = false
+    closeAll(session.current, live.current.dismiss)
+  }, [])
   const listeners = useRef(new Set<(change: InAppChange) => void>())
   const documentActive = useDocumentActive()
 
