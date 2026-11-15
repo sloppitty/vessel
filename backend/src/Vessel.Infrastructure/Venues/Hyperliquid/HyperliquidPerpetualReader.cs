@@ -179,10 +179,12 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
                 wallet = null;
                 notice += " " + WalletUnavailableNotice;
             }
+            // A primary-only fallback cannot prove continuity across builder-market fills.
             return new PerpetualVenueReadResult(snapshot with { StablecoinWallet = wallet, AccountMode = accountMode }, instruments,
                 executions, notice,
-                PositionsComplete: positionsComplete, FillHistoryTruncated: fillCoverage.Count == MaxFills,
-                OldestRawFillAtUtc: fillCoverage.OldestAtUtc, OmittedExecutions: omitted)
+                PositionsComplete: positionsComplete,
+                FillHistoryTruncated: catalogue.BuildersUnavailable ? null : fillCoverage.Count == MaxFills,
+                OldestRawFillAtUtc: catalogue.BuildersUnavailable ? null : fillCoverage.OldestAtUtc, OmittedExecutions: omitted)
             { Omissions = omissions.DistinctBy(o => o.SourceId).ToList() };
         }, cancellationToken);
     }
@@ -275,8 +277,9 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
     }
 
     /// <param name="omitted">
-    /// Primary-perpetual fills on a contract the catalogue does not list. Spot (<c>@…</c>, <c>A/B</c>) and HIP-3
-    /// (<c>dex:…</c>) fills are proven out of scope; an unrecognized primary contract is an in-scope fact Vessel left out.
+    /// Primary-perpetual fills on a contract the catalogue does not list. Spot (<c>@…</c>, <c>A/B</c>) and builder
+    /// contracts absent from the catalogue are excluded. A primary-only fallback cannot prove builder fill coverage;
+    /// an unrecognized primary contract is an in-scope fact Vessel left out.
     /// </param>
     /// <param name="omissions">Phase 2, item 7: receives each omitted row's marker, keyed by its trade ID, which it must have.</param>
     internal static List<VenueFill> ReadFills(JsonElement root, HashSet<string> contracts, long latestTimestamp, out int omitted,

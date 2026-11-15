@@ -46,6 +46,9 @@ read this setting, so a Play on a disabled market keeps linking fills and being 
 - **Catalogue.** `allPerpMetas`, `perpDexs` and `perpConciseAnnotations`, cached 5 minutes and not forced by imports, on top
   of the unchanged primary `meta`. A malformed third-party market is skipped. Missing annotations leave markets labelled
   Other. If builder metadata fails, primary reads continue and positions and open orders report incomplete coverage.
+  Refresh fill coverage is unknown, so the import proves no continuity and does not advance its continuity watermark.
+  Fill-history pages fail with `VenueReadException` until builder metadata can be read, so backfill retries without storing
+  a partial page or closing its gap. With metadata available, non-USDC builder fills remain out of scope, not omissions.
 - **Reads.** One `clearinghouseState`, `frontendOpenOrders` and `metaAndAssetCtxs` per DEX with a selectable market. Fills,
   order history, funding, candles and streams needed only the contract check relaxed. Builder funding rows carry an
   all-zero hash, which the reader used to reject, failing the whole funding read of any such account.
@@ -69,3 +72,5 @@ end-to-end tests run on `xyz:GOLD`. The address used for live checks is not reco
 `HyperliquidBuilderMarketTests`, `MarketSourceServiceTests`, `MarketSourceIsolationTests`, the cascade cases in
 `InstrumentPicker.test.tsx` and `MarketSourceSettings.test.tsx`. `HyperliquidBuilderLiveTests` reads the real API when
 `Vessel_TEST_HYPERLIQUID_ADDRESS` holds a public address with builder history.
+`HyperliquidBuilderContinuityIntegrationTests` uses builder-enabled readers and an isolated PostgreSQL schema to check
+builder fill imports, unknown refresh continuity, degraded checks and backfill retry without partial history writes.
