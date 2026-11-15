@@ -33,11 +33,11 @@ describe('stop evidence for the chart (Phase 0, 0.4c)', () => {
     expect(of([coverageAs('unsupported', 'current-book-not-read')])).toEqual({ text: 'not read', confirmed: false })
   })
   it('says where a stop rests when it is not at the planned price, or when the draft moved the line', () => {
-    expect(of([level('resting-elsewhere', {}, { price: '59000' })])).toEqual({ text: 'resting at 59000 as of T(2026-10-14T10:00:00Z)', confirmed: false })
+    expect(of([level('resting-elsewhere', {}, { price: '59000' })])).toEqual({ text: 'resting at $59,000.00 as of T(2026-10-14T10:00:00Z)', confirmed: false })
     // The unsaved draft dragged the stop to 58000: the order still rests at its saved level, not on the moved line.
-    expect(of([level('resting')], 58000)).toEqual({ text: 'resting at 60000 as of T(2026-10-14T10:00:00Z)', confirmed: false })
+    expect(of([level('resting')], 58000)).toEqual({ text: 'resting at $60,000.00 as of T(2026-10-14T10:00:00Z)', confirmed: false })
     // A level without a saved price cannot be confirmed either.
-    expect(of([level('resting', {}, { plannedPrice: null })])).toEqual({ text: 'resting at 60000 as of T(2026-10-14T10:00:00Z)', confirmed: false })
+    expect(of([level('resting', {}, { plannedPrice: null })])).toEqual({ text: 'resting at $60,000.00 as of T(2026-10-14T10:00:00Z)', confirmed: false })
   })
   it('never confirms a stop it has no evidence for', () => {
     // A level the check did not record (e.g. added by a later revision), no recorded check yet, or an older API.

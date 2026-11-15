@@ -41,6 +41,16 @@ const deferred = <T,>() => {
 }
 
 describe('operation table', () => {
+  it('keeps low entry, exit and execution prices distinct without changing result or fee precision', () => {
+    render(<OperationsTable api={client()} operations={[{ ...closed, averageEntryPrice: '0.0123', averageExitPrice: '0.0127' }]} accounts={[accountFixture]} />)
+    expect(screen.getByTitle('0.0123')).toHaveTextContent('$0.0123')
+    expect(screen.getByTitle('0.0127')).toHaveTextContent('$0.0127')
+    expect(screen.getByText('$2.00')).toBeInTheDocument()
+    render(<ActivityTable fills={[{ ...activityFillFixture, price: '0.1634', closedPnlUsd: '0.123456' }]} accounts={[accountFixture]} />)
+    expect(screen.getByText('$0.1634')).toBeInTheDocument()
+    expect(screen.getByText('$0.12')).toBeInTheDocument()
+  })
+
   it('toggles from any summary cell, retains keyboard control and leaves expanded actions independent', async () => {
     const preview = vi.fn()
     render(<OperationsTable api={client()} operations={[closed]} accounts={[accountFixture]} onPreview={preview} />)
@@ -105,7 +115,7 @@ describe('operation table', () => {
     expect(screen.getByRole('columnheader', { name: 'Unrealized P&L' })).toBeInTheDocument()
     const value = screen.getByText('-$12.50')
     expect(value).toHaveClass('negative')
-    expect(value.getAttribute('title')).toMatch(/^-12\.5 · Mark 93\.75 at .+\. Before fees and funding\.$/)
+    expect(value.getAttribute('title')).toMatch(/^-12\.5 · Mark \$93\.75 at .+\. Before fees and funding\.$/)
     expect(screen.getByTitle('No open position')).toHaveTextContent('—')
     view.rerender(<OperationsTable api={client()} operations={[{ ...marked, unrealizedPnlUsd: '4', unrealizedPnlSource: 'snapshot',
       unrealizedPnlMarkPrice: null }]} accounts={[accountFixture]} />)

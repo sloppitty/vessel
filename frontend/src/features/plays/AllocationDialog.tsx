@@ -1,3 +1,4 @@
+import { price } from '@/lib/format'
 import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { errorMessage } from '@/api/errors'
 import { allocationReasonLabels, allocationReasons, statusLabels, type AllocateFill, type AllocationPlay, type AllocationReason, type SharedFill } from '@/api/plays'
@@ -20,12 +21,13 @@ const newRequestId = () => globalThis.crypto?.randomUUID?.() ?? `00000000-0000-4
  * fill closes; a flip takes this Play's exit and another Play's entry. The remainder of the fill and the fee split are shown
  * as the owner types; the server decides and refuses what does not add up.
  */
-export function AllocationDialog({ shared, plays, playId, busy, onSubmit, onClose }: {
+export function AllocationDialog({ shared, plays, playId, busy, onSubmit, onClose, tick }: {
   shared: SharedFill
   plays: readonly AllocationPlay[]
   /** The Play whose panel opened the dialog. */
   playId: string
   busy: boolean
+  tick?: number | null
   onSubmit: (request: AllocateFill) => Promise<void>
   onClose: () => void
 }) {
@@ -107,7 +109,7 @@ export function AllocationDialog({ shared, plays, playId, busy, onSubmit, onClos
   return <Dialog open onOpenChange={next => { if (!next && !busy) onClose() }}>
     <DialogContent className="workspace-dialog allocation-dialog">
       <DialogHeader><DialogTitle>{flip ? 'Split this flip' : opening ? 'Allocate this entry' : 'Allocate this fill'}</DialogTitle><DialogDescription>
-        {fill.direction} {fill.quantity} at {fill.price} · order {shared.orderId}. The lines must add up to the fill. These plays get
+        {fill.direction} {fill.quantity} at {price(fill.price, tick)} · order {shared.orderId}. The lines must add up to the fill. These plays get
         no venue result; each keeps its own fills' result.
       </DialogDescription></DialogHeader>
       <form className="workspace-form" onSubmit={submit} aria-busy={busy}>

@@ -1,3 +1,4 @@
+import { price } from '@/lib/format'
 import { ApiError, errorMessage } from '@/api/errors'
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { WorkspaceApi } from '@/api/workspace'
@@ -15,7 +16,7 @@ import { EntryReceipts, ManualFees, ReceiptTotals } from './Receipt'
 import { Time } from '@/components/ui/time'
 import { formatTime } from '@/lib/time'
 
-export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form, onChange, onStored, onBegin, working = false, observedVersion, zone = 'local' }: {
+export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form, onChange, onStored, onBegin, working = false, observedVersion, zone = 'local', tick = null }: {
   api: WorkspaceApi
   saved: SavedState | null
   entries: DraftEntry[]
@@ -31,6 +32,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
   observedVersion?: number
   /** The display time zone times are typed and shown in (phase 1, 1.6b and 1.6e). */
   zone?: EntryZone
+  tick?: number | null
 }) {
   const id = useId()
   const playId = saved?.summary.id
@@ -190,11 +192,11 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
         {ledger.fees && <div><dt>Fees</dt><dd><ManualFees ledger={ledger} /></dd></div>}
         {ledger.receipt && <ReceiptTotals receipt={ledger.receipt} status={ledger.play.summary.status} />}
       </dl>
-      <EntryReceipts progress={ledger.entries ?? []} entries={entries} />
+      <EntryReceipts progress={ledger.entries ?? []} entries={entries} tick={tick} />
       {(!ledger.totals.feesComplete || ledger.notice) && <p className="muted">{ledger.totals.feesComplete ? '' : 'Unknown fees are not zero. '}{ledger.notice}</p>}
       <ol className="manual-records" aria-label="Manual executions">
         {ledger.records.map(record => <li key={record.id}>
-          <strong>{record.role === 'entry' ? 'Entry' : 'Exit'} · {record.side} {record.quantity} at {record.price}</strong>
+          <strong>{record.role === 'entry' ? 'Entry' : 'Exit'} · {record.side} {record.quantity} at {price(record.price, tick)}</strong>
           <Time at={record.occurredAtUtc} style="datetime-exact" />
           <span>Source: {record.source} · Fee: {record.fee === null ? 'Unknown' : `${record.fee} ${record.feeCurrency}`}</span>
           <Button type="button" size="sm" variant="outline" disabled={!enabled || dirty || pending || !canCorrect || hasManualDraft(form)}
@@ -206,8 +208,8 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
           <strong>{change.before ? change.batchId ? 'Correction batch' : 'Correction' : 'Recorded'} · {change.reason ?? 'Initial record'}</strong>
           {change.batchId && <small>Batch {change.batchId.slice(0, 8)}: {ledger.history.filter(item => item.batchId === change.batchId).length} executions corrected together</small>}
           <Time at={change.occurredAtUtc} style="datetime-seconds" />
-          {change.before && <p>Before: {change.before.role} · {change.before.side} {change.before.quantity} at {change.before.price} · <Time at={change.before.occurredAtUtc} style="datetime-exact" /> · {change.before.source} · fee {change.before.fee === null ? 'unknown' : `${change.before.fee} ${change.before.feeCurrency}`}</p>}
-          <p>After: {change.after.role} · {change.after.side} {change.after.quantity} at {change.after.price} · <Time at={change.after.occurredAtUtc} style="datetime-exact" /> · {change.after.source} · fee {change.after.fee === null ? 'unknown' : `${change.after.fee} ${change.after.feeCurrency}`}</p>
+          {change.before && <p>Before: {change.before.role} · {change.before.side} {change.before.quantity} at {price(change.before.price, tick)} · <Time at={change.before.occurredAtUtc} style="datetime-exact" /> · {change.before.source} · fee {change.before.fee === null ? 'unknown' : `${change.before.fee} ${change.before.feeCurrency}`}</p>}
+          <p>After: {change.after.role} · {change.after.side} {change.after.quantity} at {price(change.after.price, tick)} · <Time at={change.after.occurredAtUtc} style="datetime-exact" /> · {change.after.source} · fee {change.after.fee === null ? 'unknown' : `${change.after.fee} ${change.after.feeCurrency}`}</p>
         </li>)}</ol>
       </details>
     </>}
@@ -259,7 +261,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
               if (record) change({ together: [...together, manualCorrectionDraft(record, zone)] })
             }}>
             <option value="">Another execution, with the same reason…</option>
-            {addable.map(record => <option key={record.id} value={record.id}>{record.role === 'entry' ? 'Entry' : 'Exit'} · {record.side} {record.quantity} at {record.price} · {formatTime(record.occurredAtUtc, zone, 'datetime-exact')}</option>)}
+            {addable.map(record => <option key={record.id} value={record.id}>{record.role === 'entry' ? 'Entry' : 'Exit'} · {record.side} {record.quantity} at {price(record.price, tick)} · {formatTime(record.occurredAtUtc, zone, 'datetime-exact')}</option>)}
           </NativeSelect></label>}
           {together.length > 0 && <p className="muted">These corrections are saved together with one reason, or not at all. Only the final ledger has to be valid.</p>}
         </div>}

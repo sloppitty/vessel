@@ -1,4 +1,4 @@
-import type { PriceStep } from '@/lib/price-step'
+import { tickOf, type PriceStep } from '@/lib/price-step'
 import { PlayBundleButton } from './PlayBundleButton'
 import type { PaperPlayState, PaperSettings as PaperSettingsDocument } from '@/api/paper'
 import { PaperExecutionPanel } from './PaperExecutionPanel'
@@ -760,7 +760,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       : undefined
   const movedStops = stopChanges && stopsMoved(stopChanges) ? <StopChanges history={stopChanges} entries={draft.entries} /> : undefined
   const reviewReceipt = outcomeReceipt || movedStops ? <>{outcomeReceipt}{movedStops}</> : undefined
-  const retrospectiveReceipt = retrospective && shownExecution ? staleOutcome ?? <RetrospectiveReceipt execution={shownExecution} direction={draft.direction} /> : undefined
+  const retrospectiveReceipt = retrospective && shownExecution ? staleOutcome ?? <RetrospectiveReceipt execution={shownExecution} direction={draft.direction} tick={tickOf(priceStep)} /> : undefined
 
   // The status badge, a revision pill and the buttons say what the owner can do; no banner restates them.
   const revision = saved && locked && !retrospective && saved.summary.planRevision > 1 ? saved.summary.planRevision : null
@@ -790,7 +790,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
       reviewCompletion={saved ? <ReviewCompletionBar summary={saved.summary} dirty={dirty} busy={pending}
         filled={(playReceipt?.fillCount ?? 0) > 0} onAction={action => { void reviewAction(action) }} /> : undefined}
       plannedAfterExecution={playReceipt?.plannedAfterExecution === true}
-      execution={paper ? saved ? <PaperExecutionPanel key={saved.summary.id} api={api} playId={saved.summary.id} reloadGeneration={reloadGeneration + saved.summary.version} onState={onPaperState} /> : <p className="workspace-scope-note">Save this Paper play to see simulated execution progress. Planning arms evaluation; a draft never monitors.</p> : manual ? <ManualExecutionPanel key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries} zone={zone}
+      execution={paper ? saved ? <PaperExecutionPanel tick={tickOf(priceStep)} key={saved.summary.id} api={api} playId={saved.summary.id} reloadGeneration={reloadGeneration + saved.summary.version} onState={onPaperState} /> : <p className="workspace-scope-note">Save this Paper play to see simulated execution progress. Planning arms evaluation; a draft never monitors.</p> : manual ? <ManualExecutionPanel tick={tickOf(priceStep)} key={saved?.summary.id ?? 'unsaved'} api={api} saved={saved} entries={draft.entries} zone={zone}
         enabled={account?.isEnabled !== false} dirty={dirty} form={session.manual ?? emptyManualDraft()}
         working={busy !== null}
         observedVersion={observedPlayVersion(session, api)}

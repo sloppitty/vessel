@@ -4,7 +4,7 @@ import type { WorkspaceApi } from '@/api/workspace'
 import { ApiError, errorMessage } from '@/api/errors'
 import { newDiaryRequestId } from '@/api/diary'
 import { Button } from '@/components/ui/button'
-import { amount, money } from '@/lib/format'
+import { amount, money, price } from '@/lib/format'
 import { useDisplayZone, type DisplayZone } from '@/lib/display-zone'
 import { defaultPlayTitle, maxPlayTitleLength } from '@/features/plays/default-title'
 import { OperationDirection } from './OperationDirection'
@@ -87,8 +87,8 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
     <div className="retrospective-summary" title={`Operation ${op.id} · Account ${op.accountId}`}><strong>{op.contractId}</strong><OperationDirection direction={op.direction} /><span className="workspace-badge">{op.status} · {op.playAssociation}</span></div>
     <dl className="retrospective-times" aria-label="Trade summary">
       <div><dt>Quantity</dt><dd title={op.totalEnteredQuantity ?? 'Unknown'}>{op.totalEnteredQuantity === null ? 'Unknown' : amount(op.totalEnteredQuantity)}</dd></div>
-      <div><dt>Average entry</dt><dd title={op.averageEntryPrice ?? 'Unknown'}>{money(op.averageEntryPrice)}</dd></div>
-      <div><dt>Average exit</dt><dd title={op.averageExitPrice ?? 'Unknown'}>{money(op.averageExitPrice)}</dd></div>
+      <div><dt>Average entry</dt><dd title={op.averageEntryPrice ?? 'Unknown'}>{price(op.averageEntryPrice)}</dd></div>
+      <div><dt>Average exit</dt><dd title={op.averageExitPrice ?? 'Unknown'}>{price(op.averageExitPrice)}</dd></div>
       <div><dt>Net execution result</dt><dd title={op.netResultUsd ?? 'Unknown'}>{money(op.netResultUsd)}</dd></div>
       <div><dt>Dates</dt><dd>{operationDates(op, zone)}{op.openedAtUtc !== null && op.closedAtUtc !== null && <small> · {duration(op.openedAtUtc, op.closedAtUtc)}</small>}</dd></div>
     </dl>
@@ -101,7 +101,7 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
       const fill = part.fill
       return <tr key={`${fill.id}-${index}`}><td><strong>{fill.id}</strong><small><Time at={fill.occurredAtUtc} style="datetime-seconds" /></small><small>Source fill {fill.sourceFillId}</small><small>Transaction {fill.transactionHash || 'Not reported'}</small></td>
         <td>{fill.side}<small>Effect {fill.positionEffect}</small><small>Operation role {part.role}</small></td>
-        <td>{fill.quantity}<small>Price {fill.price}</small><small>Allocated quantity {part.quantity}</small></td>
+        <td>{fill.quantity}<small title={fill.price}>Price {price(fill.price)}</small><small>Allocated quantity {part.quantity}</small></td>
         <td>{fill.fee} {fill.feeToken}<small>{fill.feeBasis}</small><small>Closed P&amp;L {fill.closedPnlUsd}</small><small>{fill.pnlBasis}</small><small>Allocated fee {part.fee} · P&amp;L {part.closedPnlUsd}</small></td>
         <td>{fill.orderId}<small>{fill.playId ? `Play ${fill.playId}` : 'Unassigned'}</small></td></tr>
     })}</tbody></table></div></details>

@@ -178,7 +178,7 @@ describe('shared fills in the execution panel', () => {
     const onAllocate = vi.fn().mockRejectedValue(new ApiError('http', 'A flip\u2019s exit closes First exactly.', 409))
     const view = render(<ExecutionPanel {...props} execution={base} onAllocate={onAllocate} />)
     const section = screen.getByRole('region', { name: 'Shared fills' })
-    expect(within(section).getByText('Close Long 3 at 105')).toBeInTheDocument()
+    expect(within(section).getByText('Close Long 3 at $105.00')).toBeInTheDocument()
     await userEvent.click(within(section).getByRole('button', { name: 'Allocate' }))
     await userEvent.type(screen.getByLabelText('Quantity for First'), '1')
     await userEvent.type(screen.getByLabelText('Quantity for Second'), '2')

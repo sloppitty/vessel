@@ -1,3 +1,4 @@
+import { price as formatPrice } from '@/lib/format'
 import type { MonitorCoverage } from '@/api/monitor'
 import type { PlayExecution } from '@/api/plays'
 import type { LevelEvidence, StopEvidenceOf } from '@/features/plays/levels'
@@ -121,7 +122,7 @@ export function stopEvidenceFor(execution: PlayExecution | null | undefined, tim
         const asOf = ` as of ${time(stop.observedAtUtc)}`
         // Stale evidence keeps its date but no longer confirms anything.
         if (stop.evidence === 'resting' && atSavedPrice(price, stop.plannedPrice)) return { text: `resting${asOf}`, confirmed: !stale }
-        return { text: stop.price ? `resting at ${stop.price}${asOf}` : `resting elsewhere${asOf}`, confirmed: false }
+        return { text: stop.price ? `resting at ${formatPrice(stop.price)}${asOf}` : `resting elsewhere${asOf}`, confirmed: false }
       }
       case 'not-seen': return stale ? unknown : { text: 'not seen at the venue', confirmed: false }
       case 'not-read': return notRead

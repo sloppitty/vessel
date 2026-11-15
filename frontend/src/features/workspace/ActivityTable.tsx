@@ -2,7 +2,7 @@ import { OperationDirection } from './OperationDirection'
 import { sideDirection, resultSign } from './activity-format'
 import type { ImportedFill } from '@/api/fills'
 import type { BrokerAccount } from '@/api/workspace'
-import { amount, money } from '@/lib/format'
+import { amount, money, price } from '@/lib/format'
 import { Inbox } from 'lucide-react'
 import { Time } from '@/components/ui/time'
 
@@ -14,7 +14,7 @@ export function ActivityTable({ fills, accounts, compact = false }: { fills: Imp
     <tbody>{visible.map(fill => <tr key={fill.id}>
       <td><OperationDirection direction={sideDirection(fill)} /></td>
       <td><Time at={fill.occurredAtUtc} /></td>
-      <td className="numeric">{amount(fill.quantity)}</td><td className="numeric">{money(fill.price)}</td>
+      <td className="numeric">{amount(fill.quantity)}</td><td className="numeric">{price(fill.price)}</td>
       {!compact && <><td className="numeric"><span className={`operation-result ${resultSign(fill.closedPnlUsd)}`}>{money(fill.closedPnlUsd)}</span><small>Fee {amount(fill.fee)} {fill.feeToken}{fill.pnlBasis === 'net-of-fee' ? ' · P&L after fees' : ''}{fill.feeBasis === 'standard-account-free' ? ' · fee-free account' : ''}</small></td><td><span className="workspace-badge" title={fill.playId ?? undefined}>{fill.playId ? `Play ${fill.playId.slice(0, 8)}` : 'Unassigned'}</span></td></>}
     </tr>)}</tbody></table></div>
 }

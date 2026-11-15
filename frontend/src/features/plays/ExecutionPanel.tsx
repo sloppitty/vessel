@@ -1,4 +1,5 @@
-import type { PriceStep } from '@/lib/price-step'
+import { tickOf, type PriceStep } from '@/lib/price-step'
+import { price } from '@/lib/format'
 import { allocationReasonLabels, type AllocateFill, type AllocationPlay, type ExecutionOrder, type LinkOrder, type PlayExecution, type PlaySummary, type RebindLevel, type SharedFill, type SharedFillsPage, type VenueRisk } from '@/api/plays'
 import { errorMessage } from '@/api/errors'
 import { useState } from 'react'
@@ -23,7 +24,7 @@ import { useDisplayZone } from '@/lib/display-zone'
 import { formatTime } from '@/lib/time'
 
 /** A venue risk figure: its liquidation price or "not reported", and its margin mode. */
-const venueRisk = (risk: VenueRisk) => `${risk.liquidationPrice ?? 'not reported'}${risk.marginMode ? ` (${risk.marginMode})` : ''}`
+const venueRisk = (risk: VenueRisk, tick: number | null) => `${risk.liquidationPrice === null ? 'not reported' : price(risk.liquidationPrice, tick)}${risk.marginMode ? ` (${risk.marginMode})` : ''}`
 
 // One shared empty object, so an untouched panel does not look like new state on every render.
 const noChoices: Record<string, string> = {}
@@ -81,6 +82,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
   onLoadSharedFills?: ((offset: number) => Promise<SharedFillsPage>) | undefined
 }) {
   const zone = useDisplayZone()
+  const tick = tickOf(priceStep)
   const [allocating, setAllocating] = useState<string | null>(null)
   // Older pages of allocated fills, kept for the execution they were read with (its Play and allocation count).
   const [older, setOlder] = useState<{ key: string; items: SharedFill[]; plays: AllocationPlay[]; next: number | null } | null>(null)
@@ -125,7 +127,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
     const chosen = choices[order.orderId] ?? ''
     const option = allowed.find(item => item.value === chosen)
     return <li key={order.orderId}>
-      <span><strong>{describeOrder(order)}</strong><small>{order.status} · placed <Time at={order.placedAtUtc} /></small></span>
+      <span><strong>{describeOrder(order, tick)}</strong><small>{order.status} · placed <Time at={order.placedAtUtc} /></small></span>
       <span className="execution-actions">
         <NativeSelect density="compact" aria-label={`Level for order ${order.orderId}`} value={chosen} disabled={busy}
           onChange={event => setChoices(current => ({ ...current, [order.orderId]: event.target.value }))}>
@@ -155,7 +157,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
           context={{ direction, leverage, tick: priceStep }} origin={origin} playId={execution.playId} version={version} blocked={busy ? 'Wait for the current change to finish.' : rebindBlocked}
           onRebind={onRebind} />}
         {!stale && <LinkStopAction discrepancy={item} orders={[...execution.unlinkedOrders, ...(execution.earlierOrders ?? [])]} entries={entries}
-          direction={direction} busy={busy} blocked={rebindBlocked} onLink={onLink} />}</> : undefined} />}
+          direction={direction} busy={busy} blocked={rebindBlocked} onLink={onLink} tick={tick} />}</> : undefined} />}
     <MonitorWatches watches={execution.watches} levelName={watchLevel} />
     {/* Kept from the last read until a fresh one arrives (usePlayExecution); new links wait for it too. */}
     {stale && <p className="muted" role="status">These figures are from the last read and may be out of date until the execution is read again.</p>}
@@ -175,10 +177,10 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
       {execution.funding && <PlayFundingRow funding={execution.funding} />}
       {execution.receipt && <ReceiptTotals receipt={execution.receipt} status={execution.status} />}
       {(execution.venuePosition || execution.riskAtFirstFill) && <div><dt>Venue liquidation<InfoTip label="About the venue liquidation price">The venue's own liquidation price and margin mode for this Play's position, each as read at the time shown. It is not the plan's isolated estimate; under cross margin it moves with the whole account. The earliest one is the first read after the first entry fill, not a value at the fill itself.</InfoTip></dt>
-        <dd>{execution.venuePosition ? <>{venueRisk(execution.venuePosition)} <small>read <Time at={execution.venuePosition.observedAtUtc} /></small></> : <>Flat now</>}
-          {execution.riskAtFirstFill && <small> · first read after entry {venueRisk(execution.riskAtFirstFill)}, <Time at={execution.riskAtFirstFill.observedAtUtc} /></small>}</dd></div>}
+        <dd>{execution.venuePosition ? <>{venueRisk(execution.venuePosition, tick)} <small>read <Time at={execution.venuePosition.observedAtUtc} /></small></> : <>Flat now</>}
+          {execution.riskAtFirstFill && <small> · first read after entry {venueRisk(execution.riskAtFirstFill, tick)}, <Time at={execution.riskAtFirstFill.observedAtUtc} /></small>}</dd></div>}
     </dl>
-    <EntryReceipts progress={execution.entries} entries={entries} stale={stale} />
+    <EntryReceipts progress={execution.entries} entries={entries} stale={stale} tick={tick} />
 
     {execution.issues.length > 0 && <section aria-label="Not reconciled" className="execution-section execution-issues">
       <h3>Not reconciled<InfoTip label="About unreconciled executions">Vessel neither closes nor scores a play while these remain. Fills that contradict their link are left out of the totals.</InfoTip></h3>
@@ -188,7 +190,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
     {(shared.length > 0 || nextOffset !== null) && <section aria-label="Shared fills" className="execution-section execution-shared">
       <h3>Shared fills<InfoTip label="About shared fills">One fill can close several plays, or close one and open another. Split it by quantity; the fee follows the quantities. A play with a split fill has no venue result and is not scored.</InfoTip></h3>
       <ul className="execution-list">{shared.map(item => <li key={item.fillId}>
-        <span><strong>{item.fill.direction} {item.fill.quantity} at {item.fill.price}</strong>
+        <span><strong>{item.fill.direction} {item.fill.quantity} at {price(item.fill.price, tick)}</strong>
           <small>order {item.orderId} · <Time at={item.fill.occurredAtUtc} />{item.lines.length > 0 ? ` · ${allocationSummary(item)}` : ''}</small></span>
         {onAllocate && allocatable && <span className="execution-actions">
           {/* An allocation writes new versions of its Plays, so it waits for unsaved plan edits and other Play work, as a rebind does. */}
@@ -202,7 +204,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
           {olderWork.busy ? 'Reading…' : 'Show older allocations'}</Button>}</p>}
       {olderWork.error && <p className="error" role="alert">{olderWork.error}</p>}
     </section>}
-    {allocatingFill && onAllocate && <AllocationDialog shared={allocatingFill} plays={allocationPlays} playId={execution.playId} busy={busy}
+    {allocatingFill && onAllocate && <AllocationDialog tick={tick} shared={allocatingFill} plays={allocationPlays} playId={execution.playId} busy={busy}
       // A saved change gives new revisions, so older pages are read again rather than edited from their old state.
       onSubmit={async request => { await onAllocate(request); setOlder(null) }} onClose={() => setAllocating(null)} />}
 
@@ -213,7 +215,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
         const levels = group.links.length > 1
         const order = group.links[0]!.order
         return <li key={group.key}>
-          <span><strong>{order ? describeOrder(order) : 'Order details unavailable'}</strong>
+          <span><strong>{order ? describeOrder(order, tick) : 'Order details unavailable'}</strong>
             <small>{order ? `${order.status} · ` : ''}{group.otherPlay ? levels ? 'Matches several levels of this play and another play' : 'Also matches another play'
               : levels ? 'Matches several levels of this play' : 'Not assigned automatically'}</small></span>
           <span className="execution-actions">
@@ -232,10 +234,10 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
       <h3>Linked orders</h3>
       {execution.links.length ? <ul className="execution-list">{execution.links.map(link => <li key={link.id}>
         <span><strong>{levelName(entries, link, origin)}</strong>
-          <small>{link.order ? `${describeOrder(link.order)} · ${link.order.status}` : 'Order details unavailable'} · filled {link.filledQuantity}
+          <small>{link.order ? `${describeOrder(link.order, tick)} · ${link.order.status}` : 'Order details unavailable'} · filled {link.filledQuantity}
             {retrospective ? ' · owner-confirmed retrospective link' : link.source === 'automatic' ? ' · linked automatically' : ' · linked by you'}</small>
           {link.fills.length > 0 && <small className="execution-fills" title={link.fills.map(fill =>
-            `${fill.direction} ${fill.quantity} at ${fill.price} · ${formatTime(fill.occurredAtUtc, zone, 'datetime-seconds')}`).join('\n')}>{fillSummary(link.fills)}</small>}</span>
+            `${fill.direction} ${fill.quantity} at ${price(fill.price, tick)} · ${formatTime(fill.occurredAtUtc, zone, 'datetime-seconds')}`).join('\n')}>{fillSummary(link.fills, tick)}</small>}</span>
         {editable && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onUnlink(link.id)} aria-label={`Unlink ${levelName(entries, link, origin)} order`}
           title="Unlink. Vessel will not link this order to this level again."><Link2Off size={13} />Unlink</Button>}
       </li>)}</ul> : <p className="muted">{retrospective ? 'No execution links are available.' : 'No orders linked yet.'}</p>}

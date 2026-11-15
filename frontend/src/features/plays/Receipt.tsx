@@ -2,7 +2,7 @@ import type { ManualExecutions } from '@/api/diary'
 import type { EntryProgress, PlayExecution, PlayReceipt, PlayStatus } from '@/api/plays'
 import { InfoTip } from '@/components/ui/info-tip'
 import { decimalDifference } from '@/lib/decimal'
-import { amount } from '@/lib/format'
+import { amount, price } from '@/lib/format'
 import { duration } from '@/features/workspace/activity-format'
 import { multiple, timeHeld } from './receipt-format'
 import type { DraftEntry } from './draft'
@@ -24,7 +24,7 @@ const signed = (value: string) => value.startsWith('-') ? value : `+${value}`
  * Each planned entry beside its plan: average fill against the planned price, filled against the planned quantity. While the
  * execution is stale (just after a plan revision is saved, say) its figures may compare with an earlier plan, so they wait.
  */
-export function EntryReceipts({ progress, entries, stale = false }: { progress: readonly EntryProgress[]; entries: readonly DraftEntry[]; stale?: boolean }) {
+export function EntryReceipts({ progress, entries, stale = false, tick }: { progress: readonly EntryProgress[]; entries: readonly DraftEntry[]; stale?: boolean; tick?: number | null }) {
   // An older server sends no planned values; nothing is guessed from the current plan in their place.
   const shown = progress.filter(entry => entry.plannedPrice !== undefined)
   if (!shown.length) return null
@@ -37,7 +37,7 @@ export function EntryReceipts({ progress, entries, stale = false }: { progress: 
         <span><strong>{entries[index]?.name || `Entry ${index + 1 || ''}`.trim()}</strong>
           {entry.planRevision != null && <small>Plan revision {entry.planRevision}</small>}</span>
         <span className="receipt-figures">
-          <span>Average fill {entry.averageFillPrice ?? 'none yet'} vs plan {entry.plannedPrice ?? 'unknown'}{difference !== null && ` (${signed(difference)})`}</span>
+          <span>Average fill {entry.averageFillPrice === null ? 'none yet' : price(entry.averageFillPrice, tick)} vs plan {entry.plannedPrice == null ? 'unknown' : price(entry.plannedPrice, tick)}{difference !== null && ` (${signed(difference)})`}</span>
           <span title={entry.plannedQuantity ?? undefined}>Filled {entry.filledQuantity} of {entry.plannedQuantity == null ? 'unknown' : amount(entry.plannedQuantity)}</span>
         </span>
       </li>
@@ -96,15 +96,15 @@ export function ManualFees({ ledger }: { ledger: Pick<ManualExecutions, 'fees' |
 }
 
 /** The facts of a retrospective Play, which has no plan to compare with: what was traded, at what prices and result. */
-export function RetrospectiveReceipt({ execution, direction }: { execution: PlayExecution; direction: 'long' | 'short' }) {
+export function RetrospectiveReceipt({ execution, direction, tick }: { execution: PlayExecution; direction: 'long' | 'short'; tick?: number | null }) {
   const { totals, receipt } = execution
   return <dl className="retrospective-receipt" aria-label="Trade facts">
     <div><dt>Direction</dt><dd>{direction === 'long' ? 'Long' : 'Short'}</dd></div>
     <div><dt>Entered</dt><dd>{totals.enteredQuantity}</dd></div>
     <div><dt>Exited</dt><dd>{totals.exitedQuantity}</dd></div>
     {receipt && <>
-      <div><dt>Average entry</dt><dd>{receipt.averageEntryPrice ?? 'Unknown'}</dd></div>
-      <div><dt>Average exit</dt><dd>{receipt.averageExitPrice ?? 'Unknown'}</dd></div>
+      <div><dt>Average entry</dt><dd>{receipt.averageEntryPrice === null ? 'Unknown' : price(receipt.averageEntryPrice, tick)}</dd></div>
+      <div><dt>Average exit</dt><dd>{receipt.averageExitPrice === null ? 'Unknown' : price(receipt.averageExitPrice, tick)}</dd></div>
     </>}
     <div><dt>Venue net</dt><dd>{totals.venueNetUsd == null ? 'Unknown' : `${totals.venueNetUsd} USD`}</dd></div>
     {totals.local && <div><dt>Play-local result</dt><dd><LocalResultValue local={totals.local} format={value => `${value} USD`} />

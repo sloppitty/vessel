@@ -1,3 +1,4 @@
+import { price } from '@/lib/format'
 import type { MonitorDiscrepancy } from '@/api/monitor'
 import { decimalDifference, decimalSign } from '@/lib/decimal'
 
@@ -46,6 +47,10 @@ export interface DiscrepancyFact { label: string; value: string }
 
 const text = (value: unknown) => typeof value === 'string' && value.length > 0 ? value : null
 const unknown = 'Unknown'
+const shownPrice = (value: unknown, fallback = unknown) => {
+  const decimal = text(value)
+  return decimal === null || !/^-?\d+(?:\.\d+)?$/.test(decimal) ? fallback : price(decimal)
+}
 const sizedKinds = new Set(['protection.missing', 'protection.cancelled', 'protection.short', 'protection.excess'])
 const positionKinds = new Set(['position.missing', 'position.opposite', 'position.short', 'position.excess'])
 
@@ -75,10 +80,10 @@ export function discrepancyFacts(record: MonitorDiscrepancy, time: (value: strin
     facts.push({ label: 'Venue position', value: text(details.venueQuantity) ?? unknown })
   } else if (record.kind === 'protection.beyond-liquidation') {
     // The venue's own figures (phase 2, 8b); under cross margin the price moves with the account.
-    facts.push({ label: 'Venue liquidation', value: text(details.liquidationPrice) ?? unknown })
+    facts.push({ label: 'Venue liquidation', value: shownPrice(details.liquidationPrice) })
     facts.push({ label: 'Margin mode', value: text(details.marginMode) ?? unknown })
     const beyond = (Array.isArray(details.stops) ? details.stops : []).filter(isObject).filter(stop => stop.beyond === true)
-    facts.push({ label: 'Stops beyond it', value: beyond.length ? beyond.map(stop => text(stop.price) ?? unknown).join(', ') : unknown })
+    facts.push({ label: 'Stops beyond it', value: beyond.length ? beyond.map(stop => shownPrice(stop.price)).join(', ') : unknown })
   } else if (record.kind === 'fill.unlinked') {
     facts.push({ label: 'Unlinked fills', value: typeof details.count === 'number' ? String(details.count) : unknown })
     facts.push({ label: 'Total quantity', value: text(details.totalQuantity) ?? unknown })
@@ -109,7 +114,7 @@ export function discrepancyOrders(record: MonitorDiscrepancy, name?: (key: unkno
   const details = record.details
   if (record.kind === 'level.drift') {
     return (Array.isArray(details.levels) ? details.levels : []).filter(isObject).map(level =>
-      `Order ${text(level.orderId) ?? unknown} · at ${text(level.actualPrice) ?? unknown}, plan ${text(level.plannedPrice) ?? 'not priced'}`)
+      `Order ${text(level.orderId) ?? unknown} · at ${shownPrice(level.actualPrice)}, plan ${shownPrice(level.plannedPrice, 'not priced')}`)
   }
   const orders = Array.isArray(details.orders) ? details.orders.filter(isObject) : []
   return orders.map(order => {

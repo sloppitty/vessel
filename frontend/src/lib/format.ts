@@ -25,6 +25,19 @@ export function money(value: string | null): string {
   if (value === null) return '—'
   return numberFormat({ style: 'currency', currency: 'USD', maximumFractionDigits: fractionDigits(value, 2) }).format(decimalString(value))
 }
+/** Prices keep the tick's decimals, or five significant digits with at least two decimals. Never coerce the value to Number. */
+export function price(value: string | null, tick?: string | number | null): string {
+  if (value === null) return '—'
+  const tickParts = tick == null ? null : /^(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i.exec(String(tick))
+  const tickCoefficient = tickParts ? tickParts[1]! + (tickParts[2] ?? '') : ''
+  const tickDigits = /[1-9]/.test(tickCoefficient)
+    ? Math.max(0, (tickParts![2]?.length ?? 0) - (tickCoefficient.match(/0+$/)?.[0].length ?? 0) - Number(tickParts![3] ?? 0)) : null
+  const [, whole = '', fraction = '', exponent = '0'] = /^[+-]?(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i.exec(value) ?? []
+  const first = (whole + fraction).search(/[1-9]/)
+  const digits = Math.min(100, tickDigits ?? Math.max(2, first < 0 ? 2 : 5 - (whole.length - first + Number(exponent))))
+  return numberFormat({ style: 'currency', currency: 'USD', minimumFractionDigits: tickDigits === null ? 2 : digits,
+    maximumFractionDigits: digits }).format(decimalString(value))
+}
 export function amount(value: string): string {
   return numberFormat({ maximumFractionDigits: fractionDigits(value, 8) }).format(decimalString(value))
 }

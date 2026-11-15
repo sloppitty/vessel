@@ -1,4 +1,5 @@
-import type { PriceStep } from '@/lib/price-step'
+import { tickOf, type PriceStep } from '@/lib/price-step'
+import { price } from '@/lib/format'
 import { assetName } from './instruments-cascade'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import { ArrowRightToLine, Camera, ChartNoAxesCombined, ChartSpline, Layers, Maximize2, OctagonX, RefreshCw, Star, Target } from 'lucide-react'
@@ -29,7 +30,7 @@ import { describeMarket, useMarketContext } from '@/features/market/useMarketCon
 import { addEntry, createNextEntry, removeEntry, type DraftEntry, type PlayDraft } from './draft'
 import { LevelEditor } from './LevelEditor'
 import { originalStopOverlays, type EntryStopHistory } from './stop-history'
-import { applyEntryEdit, applyLevelDrag, averageEntryPrice, formatDraggedPrice, levelTag, parseOverlayId, placeLevel, planOverlays, type ChartView, type ExitKind, type StopEvidenceOf } from './levels'
+import { applyEntryEdit, applyLevelDrag, averageEntryPrice, levelTag, parseOverlayId, placeLevel, planOverlays, type ChartView, type ExitKind, type StopEvidenceOf } from './levels'
 import { positivePlanNumber } from './numbers'
 import { useDisplayZone } from '@/lib/display-zone'
 import { formatTime } from '@/lib/time'
@@ -196,7 +197,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
   // A preferred interval the venue does not serve falls back to the hour, or the venue's first interval.
   const interval = intervals.includes(preferences.interval) ? preferences.interval
     : intervals.includes('1h') ? '1h' : intervals[0] ?? preferences.interval
-  const markers = useMemo(() => fillMarkers(fills, interval, zone), [fills, interval, zone])
+  const markers = useMemo(() => fillMarkers(fills, interval, zone, tickOf(priceStep)), [fills, interval, zone, priceStep])
   const [expanded, setExpanded] = useState(false)
   const expandButton = useRef<HTMLButtonElement>(null)
   const live = source !== null && instrument !== ''
@@ -312,7 +313,7 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
         onChange={next => setPreferences({ interval: next })} onFavoritesChange={favorites => setPreferences({ favorites })} />}
       // A trade-dated chart shows the trade's candles; a live tail would join today onto them.
       liveUpdates={preferences.live && streamable && !tradeDates} streamable={streamable && !tradeDates} marketContext={marketContext} onLiveUpdatesChange={on => setPreferences({ live: on })}
-      markers={markers} tradeDates={tradeDates}
+      markers={markers} tradeDates={tradeDates} tick={tickOf(priceStep)}
       viewMenu={<>{favoriteTools}<ChartToolbarDivider />{indicatorMenu}</>} rail={rail} drawingBar={<>{drawingBar}{levelEditor}</>} drawingProps={drawingProps} overlays={overlays} createAdapter={createAdapter} expanded={expanded} expandButton={expandButton}
       onExpandedChange={setExpanded} onDialogClosed={() => expandButton.current?.focus({ preventScroll: true })} />
       : <>
@@ -338,12 +339,12 @@ export function ChartPanel({ entries, selectedId, onSelect, instrument, instrume
         <i aria-hidden="true" /><span>{entry.name}</span>
         <small>{entry.share ? `${entry.share}%` : 'Share not set'}</small>
       </button>)}
-      {average !== null && <span className="chart-legend-average"><i aria-hidden="true" />Average entry <strong>{formatDraggedPrice(average)}</strong></span>}
+      {average !== null && <span className="chart-legend-average"><i aria-hidden="true" />Average entry <strong>{price(String(average), tickOf(priceStep))}</strong></span>}
     </div>}
   </section>
 }
 
-function LiveChart({ source, instrument, instrumentName, interval, caption, venue, onCapture, onShowEvidence, liveUpdates, streamable, onLiveUpdatesChange, marketContext, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed, markers, tradeDates }: {
+function LiveChart({ source, instrument, instrumentName, interval, caption, venue, onCapture, onShowEvidence, liveUpdates, streamable, onLiveUpdatesChange, marketContext, timeframes, viewMenu, rail, drawingBar, drawingProps, overlays, createAdapter, expanded, expandButton, onExpandedChange, onDialogClosed, markers, tradeDates, tick }: {
   source: ChartSource
   instrument: string
   instrumentName: string
@@ -369,6 +370,7 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
   onDialogClosed: () => void
   markers: readonly ChartMarker[]
   tradeDates: boolean
+  tick: number | null
 }) {
   const zone = useDisplayZone()
   // An ended trade opens on its dates: candles end shortly after its last fill, and the view frames it.
@@ -425,8 +427,8 @@ function LiveChart({ source, instrument, instrumentName, interval, caption, venu
     .reduce<string | null>((latest, value) => latest === null || Date.parse(value) > Date.parse(latest) ? value : latest, null)
   const described = market.context ? describeMarket(market.context) : null
   const stats: ChartStat[] = [
-    { label: 'Mark', value: market.context?.markPrice ?? '—' },
-    { label: 'Oracle', value: market.context?.oraclePrice ?? '—' },
+    { label: 'Mark', value: price(market.context?.markPrice ?? null, tick) },
+    { label: 'Oracle', value: price(market.context?.oraclePrice ?? null, tick) },
     { label: '24h change', value: described?.change ?? '—', ...(described && described.direction !== 'flat' ? { tone: described.direction } : {}) },
     { label: '24h volume', hint: 'notional', value: described?.volume ?? '—' },
     { label: 'Open interest', value: described ? `${described.openInterest} ${assetName(instrument)}` : '—' },

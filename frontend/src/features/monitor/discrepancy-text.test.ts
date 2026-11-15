@@ -10,8 +10,8 @@ describe('beyond-liquidation wording (phase 2, 8b)', () => {
     expect(discrepancyAction('protection.beyond-liquidation')).toContain('Under cross margin the price moves with the account')
     const facts = discrepancyFacts(record({ liquidationPrice: '95.5', marginMode: 'cross',
       stops: [{ orderId: '1', price: '90', beyond: true }, { orderId: '2', price: '97', beyond: false }] }), value => value)
-    expect(facts.slice(0, 3)).toEqual([{ label: 'Venue liquidation', value: '95.5' }, { label: 'Margin mode', value: 'cross' },
-      { label: 'Stops beyond it', value: '90' }])
+    expect(facts.slice(0, 3)).toEqual([{ label: 'Venue liquidation', value: '$95.50' }, { label: 'Margin mode', value: 'cross' },
+      { label: 'Stops beyond it', value: '$90.00' }])
   })
 
   it('says unknown rather than inventing a figure', () => {

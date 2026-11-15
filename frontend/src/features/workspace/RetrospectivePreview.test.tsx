@@ -9,7 +9,7 @@ import { activityPage } from '@/test/activity-fixture'
 import { retrospectiveFixture, retrospectiveSavedFixture as savedPlayFixture } from '@/test/retrospective.fixtures'
 import { ActivityOperations } from './ActivityOperations'
 import { duration, operationDates } from './activity-format'
-import { amount, money } from '@/lib/format'
+import { amount, money, price } from '@/lib/format'
 
 function setup(preview: RetrospectivePreview = retrospectiveFixture, overrides: Partial<WorkspaceApi> = {}) {
   const api = {
@@ -34,7 +34,7 @@ describe('Activity retrospective inspection', () => {
     const dialog = await inspect()
     await within(dialog).findByText('Original imported fills and associations (2)', { selector: 'summary' })
     expect(api.retrospectivePreview).toHaveBeenCalledWith(accountFixture.id, retrospectiveFixture.operation.id, expect.any(AbortSignal))
-    expect(within(dialog).getByText('100.123456789123456789', { exact: false })).toBeInTheDocument()
+    expect(within(dialog).getByText('Price $100.12')).toHaveAttribute('title', '100.123456789123456789')
     expect(within(dialog).getByText(retrospectiveFixture.operation.fills[0]!.fill.id)).toBeInTheDocument()
     expect(within(dialog).getByText('Source fill 1')).toBeInTheDocument()
     expect(within(dialog).getAllByText('Unassigned')).toHaveLength(2)
@@ -57,8 +57,8 @@ describe('Activity retrospective inspection', () => {
     const dialog = await inspect()
     const facts = await within(dialog).findByLabelText('Trade summary')
     const op = retrospectiveFixture.operation
-    for (const [label, value] of [['Quantity', amount(op.totalEnteredQuantity!)], ['Average entry', money(op.averageEntryPrice)],
-      ['Average exit', money(op.averageExitPrice)], ['Net execution result', money(op.netResultUsd)]] as const)
+    for (const [label, value] of [['Quantity', amount(op.totalEnteredQuantity!)], ['Average entry', price(op.averageEntryPrice)],
+      ['Average exit', price(op.averageExitPrice)], ['Net execution result', money(op.netResultUsd)]] as const)
       expect(within(facts).getByText(label).nextElementSibling).toHaveTextContent(value)
     expect(within(facts).getByText('Dates', { exact: false }).nextElementSibling)
       .toHaveTextContent(`${operationDates(op, 'local')} · ${duration(op.openedAtUtc!, op.closedAtUtc!)}`)

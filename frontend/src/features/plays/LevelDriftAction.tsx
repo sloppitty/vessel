@@ -1,3 +1,5 @@
+import { price } from '@/lib/format'
+import { tickOf } from '@/lib/price-step'
 import { useState } from 'react'
 import { errorMessage } from '@/api/errors'
 import type { MonitorDiscrepancy } from '@/api/monitor'
@@ -54,12 +56,13 @@ export function LevelDriftAction({ discrepancy, links, entries, context, origin,
       const orderId = link.order!.orderId
       const reason = reasons[link.id] ?? ''
       // A percentage level becomes a fixed price; the owner is told before choosing it.
-      const label = percent === null ? `Use ${observed}` : `Use ${observed} (changes ${percent} % to a price)`
+      const shown = price(observed, tickOf(context.tick))
+      const label = percent === null ? `Use ${shown}` : `Use ${shown} (changes ${percent} % to a price)`
       return <div key={link.id} className="level-drift-row">
-        <p>{name}: order {orderId} rests at {observed}; the plan said {planned}.</p>
+        <p>{name}: order {orderId} rests at {shown}; the plan said {price(planned, tickOf(context.tick))}.</p>
         {applied ? <p className="muted">The plan matches this order now. The monitor clears this on its next check.</p>
           : <div className="monitor-dismiss">
-            <label><span className="sr-only">Reason to move {name} to {observed}</span>
+            <label><span className="sr-only">Reason to move {name} to {shown}</span>
               <input maxLength={2000} placeholder="Why the level moves (kept with the revision)" value={reason} disabled={pending !== null}
                 onChange={event => { const value = event.target.value; setReasons(current => ({ ...current, [link.id]: value })) }} /></label>
             <Button size="sm" variant="outline" disabled={!!blocked || pending !== null || !reason.trim()}
