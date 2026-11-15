@@ -33,8 +33,8 @@ public sealed class HyperliquidBuilderContinuityIntegrationTests : HyperliquidAd
 
         db.ChangeTracker.Clear();
         var fills = await db.Fills.ToListAsync();
-        Assert.Contains(fills, f => f.ContractId == "BTC");
-        Assert.Equal(metadataAvailable ? 2 : 1, fills.Count);
+        Assert.Equal(metadataAvailable, fills.Any(f => f.ContractId == "BTC"));
+        Assert.Equal(metadataAvailable ? 2 : 0, fills.Count);
         Assert.Equal(metadataAvailable, fills.Any(f => f.ContractId == "xyz:GOLD"));
         var coverage = await db.FillCoverage.SingleAsync();
         Assert.Equal(FillCoverageRecord.Refresh, coverage.Source);
@@ -106,7 +106,8 @@ public sealed class HyperliquidBuilderContinuityIntegrationTests : HyperliquidAd
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
-        var (account, _) = await SeedAsync(db, owner);
+        var (account, seededMonitor) = await SeedAsync(db, owner);
+        var watermark = seededMonitor.NewestFillAtUtc;
         using var handler = new BuilderHistoryHandler(metadataAvailable: false);
         using var client = Client(handler);
         var clock = new TestClock();
@@ -122,11 +123,41 @@ public sealed class HyperliquidBuilderContinuityIntegrationTests : HyperliquidAd
         var monitor = await db.Set<MonitorAccount>().SingleAsync();
         Assert.Equal("degraded", monitor.State);
         Assert.False(monitor.HasHistoryGap);
+        Assert.Equal(watermark, monitor.NewestFillAtUtc);
+        Assert.Empty(await db.Fills.ToListAsync());
         var coverage = await db.FillCoverage.SingleAsync();
         Assert.Equal(FillCoverageRecord.Check, coverage.Source);
         Assert.Null(coverage.Truncated);
         Assert.Null(coverage.CoveredFromUtc);
         Assert.Null(coverage.CoveredToUtc);
+    }
+
+    [PostgresFact]
+    public async Task Unknown_refresh_cannot_hide_a_builder_gap_from_the_next_capped_refresh()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        await using var db = database.Context(owner);
+        var (account, monitor) = await SeedAsync(db, owner);
+        var watermark = monitor.NewestFillAtUtc;
+        using var handler = new BuilderHistoryHandler(metadataAvailable: false);
+        using var client = Client(handler);
+        var clock = new TestClock();
+        var reader = new HyperliquidPerpetualReader(client, clock, builderMarkets: true);
+        var venues = TestVenues.With(reader);
+        await MonitorTestPaths.RefreshAsync(db, owner, venues, account.Id, time: clock);
+        Assert.Empty(await db.Fills.ToListAsync());
+
+        handler.MetadataAvailable = true;
+        handler.Capped = true;
+        clock.Advance(TimeSpan.FromMinutes(1));
+        await MonitorTestPaths.RefreshAsync(db, owner, venues, account.Id, time: clock);
+
+        db.ChangeTracker.Clear();
+        Assert.True((await db.Set<MonitorAccount>().SingleAsync()).HasHistoryGap);
+        var coverage = await db.FillCoverage.SingleAsync(c => c.Truncated == true);
+        Assert.Equal(watermark, coverage.GapFromUtc);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(StateTime - 61_999), coverage.GapToUtc);
     }
 
     private static async Task<(Account, MonitorAccount)> SeedAsync(VesselDbContext db, Guid owner)
@@ -154,11 +185,14 @@ public sealed class HyperliquidBuilderContinuityIntegrationTests : HyperliquidAd
 
     private sealed class BuilderHistoryHandler(bool metadataAvailable) : HttpMessageHandler
     {
+        public bool MetadataAvailable { get; set; } = metadataAvailable;
+        public bool Capped { get; set; }
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
             var type = body.RootElement.GetProperty("type").GetString();
-            if (!metadataAvailable && type == "allPerpMetas")
+            if (!MetadataAvailable && type == "allPerpMetas")
                 return new(System.Net.HttpStatusCode.ServiceUnavailable);
             return Json(type switch
             {
@@ -167,6 +201,8 @@ public sealed class HyperliquidBuilderContinuityIntegrationTests : HyperliquidAd
                 "perpDexs" => """[null,{"name":"xyz","fullName":"XYZ"}]""",
                 "perpConciseAnnotations" => "[]",
                 "clearinghouseState" => Mutate(State, n => n["assetPositions"] = new JsonArray()),
+                "userFills" when Capped => "[" + string.Join(",", Enumerable.Range(0, 2000).Select(i =>
+                    Mutate(Fill, n => { n["tid"] = 2000 + i; n["time"] = StateTime - 60_000 - i; }))) + "]",
                 "userFills" or "userFillsByTime" =>
                     $"[{Fill},{Mutate(Fill, n => { n["coin"] = "xyz:GOLD"; n["tid"] = 42; n["oid"] = 43; })}]",
                 "userAbstraction" => "\"default\"",

@@ -46,9 +46,13 @@ read this setting, so a Play on a disabled market keeps linking fills and being 
 - **Catalogue.** `allPerpMetas`, `perpDexs` and `perpConciseAnnotations`, cached 5 minutes and not forced by imports, on top
   of the unchanged primary `meta`. A malformed third-party market is skipped. Missing annotations leave markets labelled
   Other. If builder metadata fails, primary reads continue and positions and open orders report incomplete coverage.
-  Refresh fill coverage is unknown, so the import proves no continuity and does not advance its continuity watermark.
+  Refresh and Check fill coverage is unknown, so neither proves continuity nor advances its continuity watermark.
+  Fill imports, including primary fills, wait until the builder scope is known. Otherwise a newer retained primary fill
+  could conceal a missing builder fill in the next capped response. Primary snapshot reads continue.
   Fill-history pages fail with `VenueReadException` until builder metadata can be read, so backfill retries without storing
-  a partial page or closing its gap. With metadata available, non-USDC builder fills remain out of scope, not omissions.
+  a partial page or closing its gap. Missing or invalid collateral metadata also means unknown scope. A fill on a builder
+  contract missing from a warm catalogue fails the read until the catalogue refreshes; it is never silently excluded.
+  Only builder contracts positively identified as non-USDC remain out of scope, not omissions.
 - **Reads.** One `clearinghouseState`, `frontendOpenOrders` and `metaAndAssetCtxs` per DEX with a selectable market. Fills,
   order history, funding, candles and streams needed only the contract check relaxed. Builder funding rows carry an
   all-zero hash, which the reader used to reject, failing the whole funding read of any such account.

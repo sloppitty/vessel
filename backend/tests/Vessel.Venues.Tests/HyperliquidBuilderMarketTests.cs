@@ -144,6 +144,46 @@ public sealed class HyperliquidBuilderMarketTests
         Assert.Empty(page.Omissions);
     }
 
+    [Theory]
+    [InlineData("\"collateralToken\":null")]
+    [InlineData("\"collateralToken\":\"0\"")]
+    [InlineData("\"collateralToken\":-1")]
+    [InlineData("")]
+    public async Task Unknown_collateral_is_not_proven_out_of_scope(string collateral)
+    {
+        var metadata = collateral.Length == 0 ? AllMetas.Replace(",\"collateralToken\":0", "")
+            : AllMetas.Replace("\"collateralToken\":0", collateral);
+        using var handler = new Routes((type, dex) => type == "allPerpMetas" ? metadata : Default(type, dex));
+        var reader = Reader(handler);
+        var read = await reader.ReadAsync(Address, default);
+        Assert.Null(read.FillHistoryTruncated);
+        Assert.Empty(read.Fills);
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "History");
+        account.Configure(null, Address, null);
+        var to = DateTimeOffset.FromUnixTimeMilliseconds(1700000000000);
+        await Assert.ThrowsAsync<VenueReadException>(() =>
+            reader.ReadFillPageAsync(account, to.AddMinutes(-1), to, default));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_warm_catalogue_cannot_silently_exclude_a_new_builder_market(bool history)
+    {
+        using var handler = new Routes((type, dex) => type is "userFills" or "userFillsByTime"
+            ? GoldFill.Replace("xyz:GOLD", "xyz:NEW") : Default(type, dex));
+        var reader = Reader(handler);
+        await reader.ReadInstrumentsAsync(default);
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "History");
+        account.Configure(null, Address, null);
+        var to = DateTimeOffset.FromUnixTimeMilliseconds(1700000000000);
+        if (history)
+            await Assert.ThrowsAsync<VenueReadException>(() =>
+                reader.ReadFillPageAsync(account, to.AddMinutes(-1), to, default));
+        else
+            await Assert.ThrowsAsync<VenueReadException>(() => reader.ReadAsync(Address, default));
+    }
+
     [Fact]
     public async Task Full_read_adds_builder_positions_and_fills_but_leaves_primary_equity_alone()
     {

@@ -62,11 +62,19 @@ public sealed partial class HyperliquidPerpetualReader
 
         List<VenueInstrument> all = [], selectable = [];
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var excluded = new HashSet<string>(StringComparer.Ordinal);
         var active = new List<string>();
         foreach (var meta in Array(metas).EnumerateArray())
         {
             if (!meta.TryGetProperty("collateralToken", out var collateral) || collateral.ValueKind != JsonValueKind.Number ||
-                !collateral.TryGetInt32(out var token) || token != UsdcTokenIndex) continue;
+                !collateral.TryGetInt32(out var token) || token < 0)
+                throw new VenueReadException(InvalidResponse);
+            if (token != UsdcTokenIndex)
+            {
+                foreach (var item in Array(Property(meta, "universe")).EnumerateArray())
+                    excluded.Add(Text(Property(item, "name")));
+                continue;
+            }
             string? listed = null;
             foreach (var item in Array(Property(meta, "universe")).EnumerateArray())
             {
@@ -78,7 +86,7 @@ public sealed partial class HyperliquidPerpetualReader
             }
             if (listed is not null) active.Add(listed);
         }
-        return new(all, selectable, active);
+        return new(all, selectable, active, ExcludedBuilderContracts: excluded);
     }
 
     private static (VenueInstrument Instrument, bool Delisted)? ReadBuilderMarket(JsonElement item,

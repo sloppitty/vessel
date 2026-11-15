@@ -39,7 +39,8 @@ public sealed partial class HyperliquidPerpetualReader : IVenueFillHistoryReader
             using var document = await ReadJsonAsync(
                 new { type = "userFillsByTime", user = source, startTime = start, endTime = end, aggregateByTime = false }, token);
             var omissions = new List<VenueOmission>();
-            var fills = ReadFills(document.RootElement, contracts, end, out var omitted, omissions);
+            var fills = ReadFills(document.RootElement, contracts, end, out var omitted, omissions,
+                catalogue.ExcludedBuilderContracts, rejectUnknownBuilders: builderMarkets);
             var raw = new List<VenueRawRow>();
             foreach (var row in Array(document.RootElement).EnumerateArray())
             {
