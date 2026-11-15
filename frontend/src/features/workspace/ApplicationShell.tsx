@@ -103,11 +103,15 @@ export function ApplicationShell(props: ShellProps) {
   return <Tooltip.Provider delayDuration={250} skipDelayDuration={400}><NotificationProvider><TradingWorkspace {...props} /></NotificationProvider></Tooltip.Provider>
 }
 
+type NotificationDestination = NotificationLink | 'notifications'
+type NotificationArrival = TradingModeArrival & { api: WorkspaceApi; notificationDestination?: NotificationDestination | undefined }
 type ModeProps = {
-  tradingMode: TradingMode; paperAvailable: boolean; onTradingModeChange: (mode: TradingMode) => void; onPaperSettingsChange: () => void
+  /** Only the real journal client supplies owner warnings, never Paper page data. */
+  realApi: WorkspaceApi
+  tradingMode: TradingMode; paperAvailable: boolean; onTradingModeChange: (mode: TradingMode, destination?: NotificationDestination) => void; onPaperSettingsChange: () => void
   /** Kept above the per-mode shell so a switch keeps the rail and its control. */
   navigationCollapsed: boolean; onNavigationCollapsedChange: (collapsed: boolean) => void
-  modeArrival: TradingModeArrival | null; onModeArrivalSeen: () => void
+  modeArrival: NotificationArrival | null; onModeArrivalSeen: () => void
 }
 
 /** Desktop widths, where the collapsed rail applies; narrower screens use the off-canvas sheet. */
@@ -141,26 +145,26 @@ function TradingWorkspace(props: ShellProps) {
   const api = tradingMode === 'paper' ? paperClient! : props.api
   const [navigationCollapsed, setNavigationCollapsed] = useState(false)
   // The shell is keyed by mode, so a switch remounts it: what it needs afterwards lives here.
-  const [modeArrival, setModeArrival] = useState<TradingModeArrival | null>(null)
+  const [modeArrival, setModeArrival] = useState<NotificationArrival | null>(null)
   const [modeAnnouncement, setModeAnnouncement] = useState('')
-  const changeTradingMode = useCallback((next: TradingMode) => {
-    setModeArrival({ from: tradingMode, to: next, focusControl: true })
+  const changeTradingMode = useCallback((next: TradingMode, notificationDestination?: NotificationDestination) => {
+    setModeArrival({ from: tradingMode, to: next, api: props.api, focusControl: !notificationDestination, notificationDestination })
     setModeAnnouncement(tradingModeNames[next])
     setMode(next)
-  }, [tradingMode])
+  }, [tradingMode, props.api])
   const modeArrivalSeen = useCallback(() => setModeArrival(null), [])
   // A paper account shares public chart/catalogue support only, never real account actions or streaming.
   const venues = useMemo(() => tradingMode === 'real' ? props.system.venues : props.system.venues.map(venue => ({ ...venue,
     tradeUrlTemplate: null, capabilities: { ...venue.capabilities, sync: false, orders: false, stablecoinWallet: false,
       accountDiscovery: false, readOnlyCredential: false, manualExecutions: false, marketContext: false, stream: false } })), [props.system.venues, tradingMode])
-  return <VenuesProvider venues={venues}><Shell key={tradingMode} {...props} api={api} tradingMode={tradingMode} paperAvailable={paperAvailable}
+  return <VenuesProvider venues={venues}><Shell key={tradingMode} {...props} api={api} realApi={props.api} tradingMode={tradingMode} paperAvailable={paperAvailable}
     onTradingModeChange={changeTradingMode} onPaperSettingsChange={() => setSettingsGeneration(value => value + 1)}
     navigationCollapsed={navigationCollapsed} onNavigationCollapsedChange={setNavigationCollapsed} modeArrival={modeArrival} onModeArrivalSeen={modeArrivalSeen} />
     {/* Outlives the remount, so the new mode is announced. */}
     {paperAvailable && <span className="sr-only" role="status" aria-live="polite">{modeAnnouncement}</span>}</VenuesProvider>
 }
 
-function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable, onTradingModeChange, onPaperSettingsChange,
+function Shell({ system, disconnect, api, realApi, identity, tradingMode, paperAvailable, onTradingModeChange, onPaperSettingsChange,
   navigationCollapsed, onNavigationCollapsedChange, modeArrival, onModeArrivalSeen }: ShellProps & ModeProps) {
   const { notify } = useNotifications()
   const venues = useVenues()
@@ -171,7 +175,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
   const modeControl = useRef<HTMLButtonElement>(null)
   // Set only when the dialog closes without a switch; a switch moves focus to the remounted shell itself.
   const switchFocus = useRef<{ control: HTMLElement | null } | null>(null)
-  const [pendingSwitch, setPendingSwitch] = useState<{ target: TradingMode; api: WorkspaceApi; work: RefObject<symbol | null>; control: HTMLButtonElement } | null>(null)
+  const [pendingSwitch, setPendingSwitch] = useState<{ target: TradingMode; api: WorkspaceApi; work: RefObject<symbol | null>; control: HTMLElement | null; destination?: NotificationDestination | undefined } | null>(null)
   // Read once: this shell was mounted by a switch made in this browser session, not by a load or reload.
   const [arrival] = useState(() => modeArrival?.to === tradingMode ? modeArrival : null)
   const arrivedFrom = arrival?.from ?? null
@@ -304,9 +308,9 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
   }, [startupNotice, noticePresented, notify])
   // Links from notifications go through the shell's own navigation; a missing account gets a short notice.
   const notificationLink = useRef<(link: NotificationLink) => void>(() => {})
-  const inApp = useInAppNotifications({ api, active: disconnectedApi !== api && tradingMode === 'real', onLink: link => notificationLink.current(link),
-    onOpenPage: () => navigate('notifications', true) })
-  const monitor = useMonitorEvents(api, disconnectedApi !== api && tradingMode === 'real', reload, reloadKey, inApp.handlers)
+  const inApp = useInAppNotifications({ api: realApi, active: disconnectedApi !== api, realJournalNotice: tradingMode === 'paper',
+    onLink: link => notificationLink.current(link), onOpenPage: openNotifications })
+  const monitor = useMonitorEvents(realApi, disconnectedApi !== api, reload, reloadKey, inApp.handlers, tradingMode === 'real')
   // The persistent incident count: stored monitor records only, never notifications. Shared by the Plays entry and Overview.
   const incidents = useMemo(() => monitorIncidents(monitor.summary?.accounts ?? []), [monitor.summary])
   const incidentCounts = countIncidents(incidents, incidentsBeyondCap(monitor.summary?.accounts ?? []))
@@ -425,14 +429,30 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
       ...(location.kind === 'page' && location.page === 'settings' ? [settingsLocation('appearance')] : [])))
   }
   const portfolios = data?.portfolios ?? [], accounts = data?.accounts ?? []
+  const arrivalHandled = useRef(false)
   useEffect(() => {
     notificationLink.current = link => {
+      if (exitState.current?.api !== api) return
+      if (tradingMode === 'paper') { requestTradingMode('real', document.activeElement as HTMLElement | null, link); return }
       if (link.kind === 'play' || link.kind === 'play-execution') {
         // The Plays page opens it (protecting unsaved work) and reports a Play that no longer exists.
         if (link.playId) void viewPlay(link.playId, new AbortController().signal)
       } else if (link.accountId && accounts.some(account => account.id === link.accountId)) viewAccount(link.accountId)
       else notify({ tone: 'info', message: 'This account is no longer available.' })
     }
+  })
+  useEffect(() => {
+    const destination = arrival?.notificationDestination
+    if (!destination || arrival?.api !== api || arrivalHandled.current || exitState.current?.api !== api) return
+    // Account navigation checks the real account list; Play navigation loads through its own guarded request.
+    if (destination !== 'notifications' && destination.accountId && loading) return
+    // Follow after the new shell commits, not in the discarded Paper editor.
+    queueMicrotask(() => {
+      if (arrivalHandled.current || exitState.current?.api !== api) return
+      arrivalHandled.current = true
+      if (destination === 'notifications') navigate('notifications', true)
+      else notificationLink.current(destination)
+    })
   })
   const enabledAccounts = accounts.filter(account => account.isEnabled !== false)
   const activePortfolioFilter = portfolioFilter === 'unassigned' || portfolios.some(p => p.id === portfolioFilter) ? portfolioFilter : ''
@@ -499,22 +519,29 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
   </Button>
 
   function switchTradingMode(control: HTMLButtonElement) {
+    requestTradingMode(otherTradingMode(tradingMode), control)
+  }
+  function openNotifications() {
+    if (tradingMode === 'paper') requestTradingMode('real', document.activeElement as HTMLElement | null, 'notifications')
+    else navigate('notifications', true)
+  }
+  function requestTradingMode(next: TradingMode, control: HTMLElement | null, destination?: NotificationDestination) {
     if (pendingSwitch) return
-    const next = otherTradingMode(tradingMode)
     const current = exitState.current
-    if (current?.work.current || current && hasUnsavedPlayWork(current.session)) {
-      setPendingSwitch({ target: next, api, work: current.work, control })
+    if (current?.api !== api) return
+    if (current.work.current || hasUnsavedPlayWork(current.session)) {
+      setPendingSwitch({ target: next, api, work: current.work, control, destination })
       return
     }
-    commitTradingMode(next)
+    commitTradingMode(next, destination)
   }
   // Only a mode the shell can enter remounts it; clearing the guards without that remount would leave live work unprotected.
   const canEnter = (next: TradingMode) => next !== tradingMode && (next === 'real' || paperAvailable)
-  function commitTradingMode(next: TradingMode) {
+  function commitTradingMode(next: TradingMode, destination?: NotificationDestination) {
     if (!canEnter(next)) return
     cancelRefresh()
     exitState.current = null
-    onTradingModeChange(next)
+    onTradingModeChange(next, destination)
   }
   function keepTradingMode() {
     switchFocus.current = { control: pendingSwitch?.control ?? null }
@@ -528,7 +555,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
     if (current?.api !== pendingSwitch.api || current.work !== pendingSwitch.work || !canEnter(pendingSwitch.target)) { keepTradingMode(); return }
     switchFocus.current = null
     setPendingSwitch(null)
-    commitTradingMode(pendingSwitch.target)
+    commitTradingMode(pendingSwitch.target, pendingSwitch.destination)
   }
   // Cancelling returns focus to the control that asked, or to the current one if a resize swapped the rail and subtitle forms,
   // or to the content when Paper became unavailable and no mode control is left.
@@ -566,7 +593,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
       <div className="nav-section-label later-section">Later</div>
       <div className="shell-nav-later" role="link" aria-label="Strategies" aria-disabled="true" title="Strategies are not available yet"><Compass size={18} aria-hidden="true" /><span className="sidebar-copy">Strategies</span><small className="sidebar-copy" aria-hidden="true">Soon</small></div>
       <div className="shell-sidebar-bottom">
-        {tradingMode === 'real' && <a href="#notifications" className={`shell-nav-item ${page === 'notifications' ? 'active' : ''}`} aria-label={notificationsName} title={notificationsName} aria-current={page === 'notifications' ? 'page' : undefined} onClick={event => { event.preventDefault(); navigate('notifications') }}><Bell size={18} aria-hidden="true" /><span className="sidebar-copy">Notifications</span><NotificationBadge count={unread} /></a>}
+        <a href="#notifications" className={`shell-nav-item ${page === 'notifications' ? 'active' : ''}`} aria-label={notificationsName} title={notificationsName} aria-current={page === 'notifications' ? 'page' : undefined} onClick={event => { event.preventDefault(); openNotifications() }}><Bell size={18} aria-hidden="true" /><span className="sidebar-copy">Notifications</span><NotificationBadge count={unread} /></a>
         <a href="#settings" className={`shell-nav-item ${page === 'settings' ? 'active' : ''}`} aria-label="Settings" title="Settings" aria-current={page === 'settings' ? 'page' : undefined} onClick={event => { event.preventDefault(); navigate('settings') }}><Settings2 size={18} aria-hidden="true" /><span className="sidebar-copy">Settings</span></a>
         <AccountMenu identity={identity} onSignOut={disconnectSession}
           onProfile={() => { navigate('settings'); changeSettingsTab('profile', true) }}
@@ -578,7 +605,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
         {tradingMode === 'paper' && <TradingModeHeaderMark />}
         <ShellBreadcrumb key={locationKey(trail.at(-1)!)} trail={trail.map(location => location.kind === 'account'
           ? { ...location, label: accounts.find(account => account.id === location.id)?.name || location.label } : location)} onVisit={visitCrumb} />
-        {tradingMode === 'real' && <a href="#notifications" className="icon-button header-notifications" aria-label={notificationsName} title={notificationsName} onClick={event => { event.preventDefault(); navigate('notifications') }}><Bell size={18} aria-hidden="true" /><NotificationBadge count={unread} /></a>}</div>
+        <a href="#notifications" className="icon-button header-notifications" aria-label={notificationsName} title={notificationsName} onClick={event => { event.preventDefault(); openNotifications() }}><Bell size={18} aria-hidden="true" /><NotificationBadge count={unread} /></a></div>
         <ShellNotices notices={tradingMode === 'paper' ? [paperNotice] : []} />
       </header>
       <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
@@ -633,7 +660,7 @@ function Shell({ system, disconnect, api, identity, tradingMode, paperAvailable,
 
         {page === 'activity' && data && <section className="shell-panel"><header className="shell-panel-heading"><h2>Position operations</h2></header><ActivityOperations api={api} accounts={accounts} portfolios={portfolios} filters state={activityState} onStateChange={setActivityState} reloadGeneration={reloadKey} onOpenPlay={viewPlay} onCreated={reload} /></section>}
 
-        {page === 'notifications' && tradingMode === 'paper' && <p className="workspace-scope-note">Real-account notifications are unavailable in Paper mode.</p>}
+        {page === 'notifications' && tradingMode === 'paper' && <p className="workspace-scope-note">Real-journal notifications remain active. Switch to Journal to view the notification list.</p>}
         {page === 'notifications' && tradingMode === 'real' && cursorReady && <Suspense fallback={<PageLoading />}><NotificationsPage api={api} inApp={inApp} accounts={accounts}
           state={notificationList} onStateChange={setNotificationList} eyebrow={logLine(page, system.owner.displayName)} onPreferences={() => navigate('settings', true)} /></Suspense>}
 

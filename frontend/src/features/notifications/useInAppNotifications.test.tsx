@@ -93,25 +93,26 @@ describe('in-app notification popups', () => {
     })
     vi.stubGlobal('fetch', fetcher)
     const clientFor = (userId: string) => createWorkspaceApi({ kind: 'session', userId, sessionId: sessionFixture.session.id })
-    function Harness({ api }: { api: WorkspaceApi }) {
-      const hub = useInAppNotifications({ api, active: true, onLink: vi.fn(), onOpenPage: vi.fn() })
+    function Harness({ api, paper }: { api: WorkspaceApi; paper: boolean }) {
+      const hub = useInAppNotifications({ api, active: true, realJournalNotice: paper, onLink: vi.fn(), onOpenPage: vi.fn() })
       useEffect(() => { hub.handlers.onHead({ ...notificationHeadFixture, unreadCount: 1 }) }, [hub.handlers])
       return <span>{hub.status.unreadCount} unread</span>
     }
-    const tree = (userId: string) => <NotificationProvider><Harness api={clientFor(userId)} /></NotificationProvider>
-    const first = render(tree(sessionFixture.user.id))
-    const otherTab = render(tree(sessionFixture.user.id))
+    const tree = (userId: string, paper: boolean) => <NotificationProvider><Harness api={clientFor(userId)} paper={paper} /></NotificationProvider>
+    const first = render(tree(sessionFixture.user.id, true))
+    const otherTab = render(tree(sessionFixture.user.id, false))
     await flush()
     expect(screen.getAllByText('Notification 1')).toHaveLength(1)
+    expect(screen.getByText('Real journal.')).toBeInTheDocument()
     await act(async () => { await vi.advanceTimersByTimeAsync(6000) })
     expect(screen.queryByText('Notification 1')).toBeNull()
     expect(screen.getAllByText('1 unread')).toHaveLength(2)
     first.unmount(); otherTab.unmount()
-    const reloaded = render(tree(sessionFixture.user.id))
+    const reloaded = render(tree(sessionFixture.user.id, true))
     await flush()
     expect(screen.queryByText('Notification 1')).toBeNull()
     reloaded.unmount()
-    render(tree('7d2e4f61-3a7b-4c85-b0e1-6f8a2d5c7b34'))
+    render(tree('7d2e4f61-3a7b-4c85-b0e1-6f8a2d5c7b34', true))
     await flush()
     expect(screen.getByText('Notification 1')).toBeInTheDocument()
     expect(fetcher).toHaveBeenCalledTimes(4)
