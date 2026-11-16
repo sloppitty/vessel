@@ -309,7 +309,7 @@ function Shell({ system, disconnect, api, realApi, identity, tradingMode, paperA
   // Links from notifications go through the shell's own navigation; a missing account gets a short notice.
   const notificationLink = useRef<(link: NotificationLink, followed?: () => void) => void>(() => {})
   const inApp = useInAppNotifications({ api: realApi, active: disconnectedApi !== api, realJournalNotice: tradingMode === 'paper',
-    onLink: (link, followed) => notificationLink.current(link, followed), onOpenPage: openNotifications })
+    onLink: (link, followed) => notificationLink.current(link, followed), onOpenPage: () => openNotifications(true) })
   const monitor = useMonitorEvents(realApi, disconnectedApi !== api, reload, reloadKey, inApp.handlers, tradingMode === 'real')
   // The persistent incident count: stored monitor records only, never notifications. Shared by the Plays entry and Overview.
   const incidents = useMemo(() => monitorIncidents(monitor.summary?.accounts ?? []), [monitor.summary])
@@ -451,7 +451,8 @@ function Shell({ system, disconnect, api, realApi, identity, tradingMode, paperA
     queueMicrotask(() => {
       if (arrivalHandled.current || exitState.current?.api !== api) return
       arrivalHandled.current = true
-      if (destination === 'notifications') navigate('notifications', true)
+      // A mode switch remounts the shell, so the Notifications page starts a fresh trail.
+      if (destination === 'notifications') navigate('notifications')
       else notificationLink.current(destination)
     })
   })
@@ -522,9 +523,10 @@ function Shell({ system, disconnect, api, realApi, identity, tradingMode, paperA
   function switchTradingMode(control: HTMLButtonElement) {
     requestTradingMode(otherTradingMode(tradingMode), control)
   }
-  function openNotifications() {
+  // The sidebar and header links are top-level navigation; only the popup backlog link drills down.
+  function openNotifications(drillDown = false) {
     if (tradingMode === 'paper') requestTradingMode('real', document.activeElement as HTMLElement | null, 'notifications')
-    else navigate('notifications', true)
+    else navigate('notifications', drillDown)
   }
   // `followed` runs only when the switch commits, so a kept Paper session leaves the notification unread.
   function requestTradingMode(next: TradingMode, control: HTMLElement | null, destination?: NotificationDestination, followed?: () => void) {
