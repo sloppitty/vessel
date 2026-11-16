@@ -109,11 +109,12 @@ export function MonitorPanel({ monitor, discrepancies, coverage = monitor.covera
 
 /** `levelName` names a plan level from its monitor key ("Entry 1 stop") where the Play is known. */
 /** `truncated`: the server's cap left older records out (incidents are listed first). */
-export function MonitorDiscrepancies({ discrepancies, busy, onDismiss, action, levelName, truncated = false }: {
+export function MonitorDiscrepancies({ discrepancies, busy, onDismiss, action, levelName, tick, truncated = false }: {
   discrepancies: MonitorDiscrepancy[]; busy: boolean; onDismiss: (id: string, note?: string) => Promise<void>
   /** What the owner can do about one record besides dismissing it, such as rebinding a drifted level. */
   action?: ((item: MonitorDiscrepancy) => ReactNode) | undefined
   levelName?: ((key: unknown) => string | null) | undefined
+  tick?: string | number | null
   truncated?: boolean
 }) {
   const zone = useDisplayZone()
@@ -137,14 +138,14 @@ export function MonitorDiscrepancies({ discrepancies, busy, onDismiss, action, l
       // Open, or unverifiable and not dismissed since: the records that still await the owner and can be dismissed.
       const incident = isIncident(item)
       const unverifiable = item.outcome === 'unverifiable' && incident
-      const orders = discrepancyOrders(item, levelName)
+      const orders = discrepancyOrders(item, levelName, tick)
       return <li key={item.id} data-incident={incident ? incidentTone(item) : undefined}>
         <div><strong>{title}<span className="monitor-contract"> · {item.contractId}</span></strong>
           <span className="monitor-badge" data-severity={item.severity} data-outcome={unverifiable ? 'unverifiable' : undefined}>
             {item.severity} · {unverifiable ? 'unverifiable' : item.state}</span></div>
         <small>Opened <Time at={item.openedAtUtc} fallback="not recorded" />{item.confirmedAtUtc && <> · confirmed <Time at={item.confirmedAtUtc} /></>}</small>
         <dl className="monitor-facts">
-          {discrepancyFacts(item, time).map(fact => <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}
+          {discrepancyFacts(item, time, tick).map(fact => <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}
           {orders.length > 0 && <div className="monitor-orders"><dt>Orders</dt><dd>{orders.map((order, index) => <span key={index}>{order}</span>)}</dd></div>}
         </dl>
         {incident && <p className="monitor-next">Next: {unverifiable && item.state !== 'open' ? unverifiableAction : discrepancyAction(item.kind)}</p>}

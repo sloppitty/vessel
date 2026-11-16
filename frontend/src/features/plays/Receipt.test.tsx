@@ -16,13 +16,18 @@ const totals: PlayExecution['totals'] = { enteredQuantity: '0.5', exitedQuantity
   fees: [{ token: 'USDC', amount: '0.03' }], venueNetUsd: '4.97', local: { netUsd: '-0.2', basis: 'executions', reason: null, signDiffers: true } }
 
 describe('actual versus plan (phase 1, 1.1a)', () => {
+  it('shows small planned and filled prices at the known tick precision', () => {
+    render(<EntryReceipts progress={[{ ...progress, averageFillPrice: '0.0123', plannedPrice: '0.0127' }]} entries={entries} tick={0.00001} />)
+    expect(screen.getByText('Average fill $0.01230 vs plan $0.01270 (-0.0004)')).toBeInTheDocument()
+  })
+
   it('sets each entry beside the plan at its first fill: average fill against price, filled against quantity', () => {
     render(<EntryReceipts progress={[progress, { ...progress, entryId: 'e2', filledQuantity: '0', averageFillPrice: null,
       plannedPrice: null, plannedQuantity: '7.1428571428571428571428571429', planRevision: null }]} entries={entries} />)
     const [first, second] = within(screen.getByRole('region', { name: 'Entries against the plan' })).getAllByRole('listitem')
     expect(first).toHaveTextContent('Breakout')
     expect(first).toHaveTextContent('Plan revision 1')
-    expect(first).toHaveTextContent('Average fill 100.4 vs plan 100 (+0.4)')
+    expect(first).toHaveTextContent('Average fill $100.40 vs plan $100.00 (+0.4)')
     expect(first).toHaveTextContent('Filled 0.5 of 1')
     // Unknown stays unknown, and a long planned quantity is shortened for display with the exact value as its title.
     expect(second).toHaveTextContent('Average fill none yet vs plan unknown')
@@ -43,7 +48,7 @@ describe('actual versus plan (phase 1, 1.1a)', () => {
     const { container, rerender } = render(<EntryReceipts progress={[{ entryId: 'e1', filledQuantity: '0.5', averageFillPrice: '100', restingOrders: 0 }]} entries={entries} />)
     expect(container).toBeEmptyDOMElement()
     rerender(<EntryReceipts progress={[{ ...progress, averageFillPrice: '99.75' }]} entries={entries} />)
-    expect(screen.getByText('Average fill 99.75 vs plan 100 (-0.25)')).toBeInTheDocument()
+    expect(screen.getByText('Average fill $99.75 vs plan $100.00 (-0.25)')).toBeInTheDocument()
   })
 
   it('never shows a small non-zero R as zero', () => {

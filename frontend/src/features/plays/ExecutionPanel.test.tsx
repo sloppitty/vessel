@@ -8,7 +8,7 @@ import type { PlayFunding } from '@/api/play-funding'
 import { ExecutionPanel } from './ExecutionPanel'
 import { createDraft } from './draft'
 import { PlayJournal } from './WorkspacePanels'
-import { fillSummary, suggestionGroups } from './execution'
+import { describeOrder, fillSummary, suggestionGroups } from './execution'
 import { restoreZone } from '@/test/zone'
 
 const entry = { ...createDraft().entries[0]!, id: 'e1', name: 'Entry 1', price: '100' }
@@ -33,6 +33,32 @@ const execution: PlayExecution = {
 }
 
 describe('execution panel', () => {
+  it('keeps liquidation and stop prices distinguishable at the known tick', () => {
+    const discrepancy = { ...missingStopFixture, kind: 'protection.beyond-liquidation', details: {
+      liquidationPrice: '0.163441', marginMode: 'cross', stops: [{ price: '0.163439', beyond: true }],
+    } }
+    render(<ExecutionPanel execution={{ ...execution, discrepancies: [discrepancy] }} error={null} busy={false}
+      entries={entries} direction="long" priceStep={0.000001} onCheck={vi.fn()} onLink={vi.fn()}
+      onUnlink={vi.fn()} onDismiss={vi.fn()} />)
+    expect(screen.getByText('$0.163441')).toBeInTheDocument()
+    expect(screen.getByText('$0.163439')).toBeInTheDocument()
+  })
+
+  it('uses the instrument tick for order and fill prices without rounding through a float', () => {
+    const link = execution.links[0]!
+    const precise = { ...execution, links: [{ ...link, order: order('11', { limitPrice: '0.1634' }),
+      fills: [{ ...link.fills[0]!, price: '0.1634' }] }] }
+    render(<ExecutionPanel execution={precise} error={null} busy={false} entries={entries} direction="long" priceStep={0.00001}
+      onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
+    const linked = within(screen.getByRole('region', { name: 'Linked orders' }))
+    expect(linked.getByText(/Buy limit at \$0\.16340/)).toBeInTheDocument()
+    expect(linked.getByText('Open Long 0.5 at $0.16340')).toBeInTheDocument()
+    expect(describeOrder(order('tiny', { triggerPrice: '0.000012345' }), 1e-9)).toContain('trigger $0.000012345')
+    expect(fillSummary([{ ...link.fills[0]!, quantity: '0.5', price: '9007199254740990.01' },
+      { ...link.fills[0]!, quantity: '0.5', price: '9007199254740990.03' }]))
+      .toBe('Open Long · 2 fills, average $9,007,199,254,740,990.02')
+  })
+
   it('marks figures kept from the last read and holds confirmations until a fresh one (phase 1, 1.1a)', () => {
     const props = { execution, error: null, busy: false, entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn() }
     const view = render(<ExecutionPanel {...props} stale />)
@@ -179,10 +205,10 @@ describe('execution panel', () => {
     expect(screen.getByText('0.02 USDC')).toBeInTheDocument()
     const linked = screen.getByRole('region', { name: 'Linked orders' })
     expect(within(linked).getByText('Entry 1')).toBeInTheDocument()
-    expect(within(linked).getByText(/Buy limit at 100 · 0.5 · filled · filled 0.5 · linked automatically/)).toBeInTheDocument()
-    expect(within(linked).getByText('Open Long 0.5 at 100')).toBeInTheDocument()
+    expect(within(linked).getByText(/Buy limit at \$100\.00 · 0.5 · filled · filled 0.5 · linked automatically/)).toBeInTheDocument()
+    expect(within(linked).getByText('Open Long 0.5 at $100.00')).toBeInTheDocument()
     expect(fillSummary([{ ...execution.links[0]!.fills[0]!, quantity: '1', price: '100' }, { ...execution.links[0]!.fills[0]!, quantity: '3', price: '104' }]))
-      .toBe('Open Long · 2 fills, average 103')
+      .toBe('Open Long · 2 fills, average $103.00')
 
     const confirm = screen.getByRole('region', { name: 'Orders to confirm' })
     // An older server says nothing about other Plays, so neither does the row.
@@ -239,7 +265,7 @@ describe('execution panel', () => {
       riskAtFirstFill: { signedQuantity: '0.5', entryPrice: '100', liquidationPrice: null, marginMode: 'isolated', observedAtUtc: '2026-10-03T10:01:30Z' } }}
       error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
     const row = screen.getByText(/^Venue liquidation/).closest('div')!
-    expect(row).toHaveTextContent(/82\.5 \(cross\) read .+ · first read after entry not reported \(isolated\), .+/)
+    expect(row).toHaveTextContent(/\$82\.50 \(cross\) read .+ · first read after entry not reported \(isolated\), .+/)
     // Sol round 1 on #41: each value says when it was read.
     expect(row.querySelectorAll('time')).toHaveLength(2)
   })
@@ -248,7 +274,7 @@ describe('execution panel', () => {
     const view = render(<ExecutionPanel execution={{ ...execution, venuePosition: null,
       riskAtFirstFill: { signedQuantity: '0.5', entryPrice: '100', liquidationPrice: '70', marginMode: 'isolated', observedAtUtc: '2026-10-03T10:01:30Z' } }}
       error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
-    expect(screen.getByText(/^Venue liquidation/).closest('div')!).toHaveTextContent(/Flat now · first read after entry 70 \(isolated\)/)
+    expect(screen.getByText(/^Venue liquidation/).closest('div')!).toHaveTextContent(/Flat now · first read after entry \$70\.00 \(isolated\)/)
     view.rerender(<ExecutionPanel execution={{ ...execution, venuePosition: null, riskAtFirstFill: null }} error={null} busy={false} entries={entries}
       direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
     expect(screen.queryByText(/^Venue liquidation/)).not.toBeInTheDocument()
@@ -382,8 +408,8 @@ describe('fill times in the display zone (phase 1, 1.6e)', () => {
     process.env.TZ = 'Europe/Madrid'
     try {
       render(<ExecutionPanel execution={execution} error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
-      expect(within(screen.getByRole('region', { name: 'Linked orders' })).getByText('Open Long 0.5 at 100'))
-        .toHaveAttribute('title', 'Open Long 0.5 at 100 · 3 Oct 2026, 12:01:00 CEST')
+      expect(within(screen.getByRole('region', { name: 'Linked orders' })).getByText('Open Long 0.5 at $100.00'))
+        .toHaveAttribute('title', 'Open Long 0.5 at $100.00 · 3 Oct 2026, 12:01:00 CEST')
     } finally { restoreZone(zone) }
   })
 })

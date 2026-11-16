@@ -25,6 +25,11 @@ const of = (coverage: MonitorCoverage[] | undefined, price = saved, overrides: P
 const originalZone = process.env.TZ
 afterEach(() => { restoreZone(originalZone) })
 
+it('keeps the known tick in a resting-elsewhere chart label', () => {
+  const evidence = stopEvidenceFor(execution([level('resting-elsewhere', {}, { price: '0.163439' })]), stamp, '0.000001')
+  expect(evidence!('entry-1', 'stop-1', saved)?.text).toContain('resting at $0.163439')
+})
+
 describe('stop evidence for the chart (Phase 0, 0.4c)', () => {
   it('confirms only a stop the last check saw resting at its saved level, dated, and words everything else as the evidence does', () => {
     expect(of([level('resting')])).toEqual({ text: 'resting as of T(2026-10-14T10:00:00Z)', confirmed: true })
@@ -33,11 +38,11 @@ describe('stop evidence for the chart (Phase 0, 0.4c)', () => {
     expect(of([coverageAs('unsupported', 'current-book-not-read')])).toEqual({ text: 'not read', confirmed: false })
   })
   it('says where a stop rests when it is not at the planned price, or when the draft moved the line', () => {
-    expect(of([level('resting-elsewhere', {}, { price: '59000' })])).toEqual({ text: 'resting at 59000 as of T(2026-10-14T10:00:00Z)', confirmed: false })
+    expect(of([level('resting-elsewhere', {}, { price: '59000' })])).toEqual({ text: 'resting at $59,000.00 as of T(2026-10-14T10:00:00Z)', confirmed: false })
     // The unsaved draft dragged the stop to 58000: the order still rests at its saved level, not on the moved line.
-    expect(of([level('resting')], 58000)).toEqual({ text: 'resting at 60000 as of T(2026-10-14T10:00:00Z)', confirmed: false })
+    expect(of([level('resting')], 58000)).toEqual({ text: 'resting at $60,000.00 as of T(2026-10-14T10:00:00Z)', confirmed: false })
     // A level without a saved price cannot be confirmed either.
-    expect(of([level('resting', {}, { plannedPrice: null })])).toEqual({ text: 'resting at 60000 as of T(2026-10-14T10:00:00Z)', confirmed: false })
+    expect(of([level('resting', {}, { plannedPrice: null })])).toEqual({ text: 'resting at $60,000.00 as of T(2026-10-14T10:00:00Z)', confirmed: false })
   })
   it('never confirms a stop it has no evidence for', () => {
     // A level the check did not record (e.g. added by a later revision), no recorded check yet, or an older API.

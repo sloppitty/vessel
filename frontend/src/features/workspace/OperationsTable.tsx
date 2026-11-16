@@ -8,7 +8,7 @@ import { OperationLeverage } from './OperationLeverage'
 import { OperationFills } from './OperationFills'
 import { NominalUsdTag } from './CoverageBadge'
 import { duration, operationDates, operationPriceReturn, operationStatus, resultSign } from './activity-format'
-import { amount, money } from '@/lib/format'
+import { amount, money, price } from '@/lib/format'
 import './activity-operations.css'
 import { useDisplayZone, type DisplayZone } from '@/lib/display-zone'
 import { formatTime, otherZoneTime } from '@/lib/time'
@@ -26,7 +26,7 @@ function Unrealized({ operation: op, zone }: { operation: ActivityOperation; zon
   const value = op.unrealizedPnlUsd ?? null
   if (value === null) return op.status === 'open' ? <><span title="No current mark or matching refreshed position">—</span><small>Unavailable</small></> : <span title="No open position">—</span>
   const at = op.unrealizedPnlAsOfUtc ? formatTime(op.unrealizedPnlAsOfUtc, zone, 'datetime-seconds') : 'unknown time'
-  const source = op.unrealizedPnlSource === 'mark' ? `Mark ${op.unrealizedPnlMarkPrice} at ${at}` : `Venue-reported at the refresh of ${at}`
+  const source = op.unrealizedPnlSource === 'mark' ? `Mark ${price(op.unrealizedPnlMarkPrice ?? null)} at ${at}` : `Venue-reported at the refresh of ${at}`
   return <span className={`operation-result ${resultSign(value)}`} title={`${value} · ${source}. Before fees and funding.`}>{money(value)}</span>
 }
 
@@ -120,7 +120,7 @@ export function OperationsTable({ operations, accounts, compact = false, onPrevi
       <td><div className="operation-heading"><button type="button" className="operation-toggle" aria-label={`${open ? 'Collapse' : 'Expand'} ${op.contractId} operation`} aria-expanded={open} aria-controls={open ? `operation-${op.id}` : undefined} onClick={() => toggle(op.id)}>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button><div><strong className="operation-asset">{op.contractId}</strong><div className="operation-tags"><OperationDirection direction={op.direction} />{op.tradingMode !== 'paper' && <OperationLeverage operation={op} />}<span className={`operation-status ${status.tone}`}>{status.label}</span></div></div></div></td>
       <td><strong>{accounts.find(a => a.id === op.accountId)?.name ?? 'Account'}</strong><small className="operation-dates" title={`Opened: ${op.openedAtUtc ? otherZoneTime(op.openedAtUtc, zone) : 'unknown'}; ${op.closedAtUtc ? `Closed: ${otherZoneTime(op.closedAtUtc, zone)}` : `Last execution: ${otherZoneTime(op.lastOccurredAtUtc, zone)}`}`}>{operationDates(op, zone)}</small>{op.openedAtUtc !== null && op.closedAtUtc !== null && <small>{duration(op.openedAtUtc, op.closedAtUtc)}</small>}</td>
       <td className="numeric"><strong title={op.quantity === null ? 'Peak quantity unknown' : `Peak quantity: ${op.quantity}`}>{op.quantity === null ? '—' : amount(op.quantity)}</strong>{resultSign(op.openQuantity) === 'positive' && <small>Remaining {amount(op.openQuantity!)}</small>}</td>
-      {!compact && <><td className="numeric operation-entry"><span title={op.averageEntryPrice ?? 'Unknown'}>{money(op.averageEntryPrice)}</span></td><td className={`numeric operation-result ${priceTone}`}><span title={op.averageExitPrice ?? 'Unknown'}>{money(op.averageExitPrice)}</span></td><td className="numeric"><div className="operation-pnl"><Result value={op.grossClosedPnlUsd} />{priceReturn !== null && <span className={`operation-return operation-result ${priceTone}`} title="Average entry-to-exit price return, direction-adjusted, before fees and leverage. Not an account or margin return.">{priceReturn}</span>}</div></td>
+      {!compact && <><td className="numeric operation-entry"><span title={op.averageEntryPrice ?? 'Unknown'}>{price(op.averageEntryPrice)}</span></td><td className={`numeric operation-result ${priceTone}`}><span title={op.averageExitPrice ?? 'Unknown'}>{price(op.averageExitPrice)}</span></td><td className="numeric"><div className="operation-pnl"><Result value={op.grossClosedPnlUsd} />{priceReturn !== null && <span className={`operation-return operation-result ${priceTone}`} title="Average entry-to-exit price return, direction-adjusted, before fees and leverage. Not an account or margin return.">{priceReturn}</span>}</div></td>
       <td className="numeric operation-fees"><span title={op.stablecoinFeesNominalUsd}>{money(op.stablecoinFeesNominalUsd)}</span>{op.otherFees.map(f => <small key={f.token}>{amount(f.amount)} {f.token}</small>)}</td>
       <td className="numeric"><Result value={op.fundingNetUsd} />{op.fundingStatus !== 'complete' && <small>{op.fundingStatus === 'not-applicable' ? 'Not simulated' : op.fundingStatus === 'partial' ? 'Partial' : 'Unavailable'}</small>}</td></>}
       <td className="numeric operation-net"><Result value={op.netResultUsd} /></td>

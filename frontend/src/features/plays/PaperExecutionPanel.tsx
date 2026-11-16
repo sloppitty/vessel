@@ -1,3 +1,4 @@
+import { price } from '@/lib/format'
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { errorMessage } from '@/api/errors'
 import { isPaperPlayState, type PaperPlayState } from '@/api/paper'
@@ -27,6 +28,7 @@ export interface PaperExecutionPanelProps {
   playId: string
   onState?: (state: PaperPlayState | null) => void
   reloadGeneration?: number
+  tick?: number | null
 }
 const statusLabels: Record<PaperPlayState['status'], string> = {
   'not-armed': 'Not armed', waiting: 'Waiting', ready: 'Ready',
@@ -38,7 +40,7 @@ const roleLabels: Record<PaperPlayState['executions'][number]['role'], string> =
 }
 
 /** Reads local paper facts only; timed observation never calls a venue, refreshes candles or starts a check. */
-export function PaperExecutionPanel({ api, playId, onState, reloadGeneration = 0 }: PaperExecutionPanelProps) {
+export function PaperExecutionPanel({ api, playId, onState, reloadGeneration = 0, tick }: PaperExecutionPanelProps) {
   const id = useId()
   const [attempt, setAttempt] = useState(0)
   const request = useMemo(() => ({ api, playId, attempt, reloadGeneration }), [api, playId, attempt, reloadGeneration])
@@ -146,7 +148,7 @@ export function PaperExecutionPanel({ api, playId, onState, reloadGeneration = 0
         <h3>Simulated executions</h3>
         {state.executions.length > 0 ? <ul className="execution-list">{state.executions.map(execution => <li key={execution.id}>
           <span><strong>{roleLabels[execution.role]}</strong>
-            <small>Quantity {execution.quantity} at {execution.price} · simulated P&amp;L {execution.pnlUsd} USD</small>
+            <small>Quantity {execution.quantity} at <span title={execution.price}>{price(execution.price, tick)}</span> · simulated P&amp;L {execution.pnlUsd} USD</small>
             <small>Simulated at <Time at={execution.occurredAtUtc} /></small>
             <small>Candle <Time at={execution.candleOpenAtUtc} /> – <Time at={execution.candleCloseAtUtc} /></small>
             <small>Entry ID {execution.entryId}{execution.levelId !== null && ` · Level ID ${execution.levelId}`}</small>

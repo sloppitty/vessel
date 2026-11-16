@@ -1,15 +1,16 @@
 import type { PriceStep } from '@/lib/price-step'
 import type { ExecutionFill, ExecutionOrder, LinkOrder, LinkRole, OrderLink, PlaySummary } from '@/api/plays'
 import type { MonitorDiscrepancy } from '@/api/monitor'
-import { exactDecimal } from '@/lib/decimal'
+import { exactAdd, exactDecimal, exactDiv, exactFixed, exactMul, exactZero } from '@/lib/decimal'
+import { price } from '@/lib/format'
 import type { DraftEntry } from './draft'
 import { exactLevelPrice, pricesMatch } from './levels'
 
-export function describeOrder(order: ExecutionOrder) {
+export function describeOrder(order: ExecutionOrder, tick?: number | null) {
   const side = order.side === 'buy' ? 'Buy' : 'Sell'
-  const price = order.triggerPrice ? `trigger ${order.triggerPrice}` : `at ${order.limitPrice}`
+  const at = order.triggerPrice ? `trigger ${price(order.triggerPrice, tick)}` : `at ${price(order.limitPrice, tick)}`
   const size = order.isPositionTpsl ? 'whole position' : order.originalSize
-  return `${side} ${order.orderType.toLowerCase()} ${price} · ${size}`
+  return `${side} ${order.orderType.toLowerCase()} ${at} · ${size}`
 }
 
 /**
@@ -70,13 +71,14 @@ export function levelOptions(entries: readonly DraftEntry[], open: boolean) {
   return options
 }
 
-/** "Open Long · 3 fills, average 84541". The average is weighted by quantity and only for display. */
-export function fillSummary(fills: readonly ExecutionFill[]) {
-  if (fills.length === 1) return `${fills[0]!.direction} ${fills[0]!.quantity} at ${fills[0]!.price}`
-  const quantity = fills.reduce((sum, fill) => sum + Number(fill.quantity), 0)
-  const average = fills.reduce((sum, fill) => sum + Number(fill.price) * Number(fill.quantity), 0) / quantity
+/** "Open Long · 3 fills, average $84,541.00". The average is weighted by quantity and only for display. */
+export function fillSummary(fills: readonly ExecutionFill[], tick?: number | null) {
+  if (fills.length === 1) return `${fills[0]!.direction} ${fills[0]!.quantity} at ${price(fills[0]!.price, tick)}`
+  const quantity = fills.reduce((sum, fill) => exactAdd(sum, exactDecimal(fill.quantity)!), exactZero)
+  const notional = fills.reduce((sum, fill) => exactAdd(sum, exactMul(exactDecimal(fill.price)!, exactDecimal(fill.quantity)!)), exactZero)
+  const average = exactDiv(notional, quantity)
   const directions = [...new Set(fills.map(fill => fill.direction))].join(', ')
-  return `${directions} · ${fills.length} fills, average ${Number(average.toPrecision(8))}`
+  return `${directions} · ${fills.length} fills, average ${price(average === null ? null : exactFixed(average, 100), tick)}`
 }
 
 /** A linked stop or target a `level.drift` record names, and the price its order rests at. */

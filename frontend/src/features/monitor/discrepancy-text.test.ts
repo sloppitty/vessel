@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { MonitorDiscrepancy } from '@/api/monitor'
-import { discrepancyAction, discrepancyFacts, discrepancyTitle } from './discrepancy-text'
+import { discrepancyAction, discrepancyFacts, discrepancyOrders, discrepancyTitle } from './discrepancy-text'
 
 const record = (details: Record<string, unknown>) => ({ kind: 'protection.beyond-liquidation', details, lastObservedAtUtc: null }) as unknown as MonitorDiscrepancy
+
+it('keeps drifted and planned prices distinguishable at the known tick', () => {
+  const drift = { ...record({ levels: [{ orderId: '1', actualPrice: '0.163441', plannedPrice: '0.163439' }] }), kind: 'level.drift' }
+  expect(discrepancyOrders(drift, undefined, '0.000001')).toEqual(['Order 1 · at $0.163441, plan $0.163439'])
+})
 
 describe('beyond-liquidation wording (phase 2, 8b)', () => {
   it('names the venue liquidation price, mode and the stops beyond it', () => {
@@ -10,8 +15,8 @@ describe('beyond-liquidation wording (phase 2, 8b)', () => {
     expect(discrepancyAction('protection.beyond-liquidation')).toContain('Under cross margin the price moves with the account')
     const facts = discrepancyFacts(record({ liquidationPrice: '95.5', marginMode: 'cross',
       stops: [{ orderId: '1', price: '90', beyond: true }, { orderId: '2', price: '97', beyond: false }] }), value => value)
-    expect(facts.slice(0, 3)).toEqual([{ label: 'Venue liquidation', value: '95.5' }, { label: 'Margin mode', value: 'cross' },
-      { label: 'Stops beyond it', value: '90' }])
+    expect(facts.slice(0, 3)).toEqual([{ label: 'Venue liquidation', value: '$95.50' }, { label: 'Margin mode', value: 'cross' },
+      { label: 'Stops beyond it', value: '$90.00' }])
   })
 
   it('says unknown rather than inventing a figure', () => {

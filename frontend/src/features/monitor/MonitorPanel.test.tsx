@@ -422,7 +422,7 @@ describe('incident visibility (Phase 0, 0.4a)', () => {
     expect(fact(second!, 'Unlinked fills')).toBe('2')
     expect(fact(second!, 'Total quantity')).toBe('0.3')
     expect(within(third!).getByText('A linked order no longer matches its plan level')).toBeInTheDocument()
-    expect(within(third!).getByText('Order 900000030 · at 61000, plan 60000')).toBeInTheDocument()
+    expect(within(third!).getByText('Order 900000030 · at $61,000.00, plan $60,000.00')).toBeInTheDocument()
     expect(within(fourth!).getByText('Order 900000029 · Entry 1 stop · resting')).toBeInTheDocument()
   })
 })

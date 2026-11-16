@@ -76,7 +76,7 @@ describe('level drift', () => {
     render(<LevelDriftAction discrepancy={drift([{ orderId: 's-order', actualPrice: '95', plannedPrice: '98.333333333333333333333333333', remainingQuantity: '1' }])}
       links={[away]} entries={percentStop} context={context} origin="planned" playId="p1" version={2} onRebind={onRebind} />)
     await user.type(screen.getByRole('textbox', { name: /Reason to move/ }), 'Moved at the venue')
-    await user.click(screen.getByRole('button', { name: 'Use 95 (changes 5 % to a price) for Entry 1 stop' }))
+    await user.click(screen.getByRole('button', { name: 'Use $95.00 (changes 5 % to a price) for Entry 1 stop' }))
     expect(onRebind).toHaveBeenCalledWith(stopLink.id, { expectedVersion: 2, orderId: 's-order', observedPrice: '95', reason: 'Moved at the venue' })
   })
 
@@ -84,13 +84,13 @@ describe('level drift', () => {
     const onRebind = vi.fn(() => Promise.resolve())
     const user = userEvent.setup()
     render(<LevelDriftAction discrepancy={drifted} links={[stopLink, targetLink]} entries={entries} context={context} origin="planned" playId="p1" version={7} onRebind={onRebind} />)
-    expect(screen.getByText('Entry 1 stop: order s-order rests at 101; the plan said 95.')).toBeInTheDocument()
-    const use = screen.getByRole('button', { name: 'Use 101 for Entry 1 stop' })
+    expect(screen.getByText('Entry 1 stop: order s-order rests at $101.00; the plan said $95.00.')).toBeInTheDocument()
+    const use = screen.getByRole('button', { name: 'Use $101.00 for Entry 1 stop' })
     expect(use).toBeDisabled()
-    await user.type(screen.getByRole('textbox', { name: 'Reason to move Entry 1 stop to 101' }), 'Trailed at the venue')
+    await user.type(screen.getByRole('textbox', { name: 'Reason to move Entry 1 stop to $101.00' }), 'Trailed at the venue')
     await user.click(use)
     expect(onRebind).toHaveBeenCalledWith(stopLink.id, { expectedVersion: 7, orderId: 's-order', observedPrice: '101', reason: 'Trailed at the venue' })
-    expect(screen.getByRole('textbox', { name: 'Reason to move Entry 1 stop to 101' })).toHaveValue('')
+    expect(screen.getByRole('textbox', { name: 'Reason to move Entry 1 stop to $101.00' })).toHaveValue('')
   })
 
   it('shows the refusal and stays blocked while plan edits are unsaved', async () => {
@@ -99,15 +99,15 @@ describe('level drift', () => {
     const view = render(<LevelDriftAction discrepancy={drifted} links={[stopLink]} entries={entries} context={context} origin="planned" playId="p1" version={7}
       blocked="Save or discard your plan changes first." onRebind={onRebind} />)
     await user.type(screen.getByRole('textbox', { name: /Reason to move/ }), 'Trailed')
-    expect(screen.getByRole('button', { name: 'Use 101 for Entry 1 stop' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Use 101 for Entry 1 stop' })).toHaveAttribute('title', 'Save or discard your plan changes first.')
+    expect(screen.getByRole('button', { name: 'Use $101.00 for Entry 1 stop' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Use $101.00 for Entry 1 stop' })).toHaveAttribute('title', 'Save or discard your plan changes first.')
     view.rerender(<LevelDriftAction discrepancy={drifted} links={[stopLink]} entries={entries} context={context} origin="planned" playId="p1" version={7} onRebind={onRebind} />)
-    await user.click(screen.getByRole('button', { name: 'Use 101 for Entry 1 stop' }))
+    await user.click(screen.getByRole('button', { name: 'Use $101.00 for Entry 1 stop' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('The order\'s price changed since it was observed.')
     // A resolved record offers nothing.
     view.rerender(<LevelDriftAction discrepancy={{ ...drifted, state: 'resolved' }} links={[stopLink]} entries={entries} context={context} origin="planned" playId="p1"
       version={7} onRebind={onRebind} />)
-    expect(screen.queryByRole('button', { name: /Use 101/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Use \$101\.00/ })).not.toBeInTheDocument()
   })
 
   it('sits in the drift record of the Execution tab, only for editable plays', () => {
@@ -121,9 +121,9 @@ describe('level drift', () => {
       onDismiss: vi.fn(() => Promise.resolve()), onRebind: vi.fn(() => Promise.resolve()), version: 3 }
     const view = render(<ExecutionPanel {...props} />)
     const record = within(screen.getByRole('region', { name: 'Monitor discrepancies' }))
-    expect(record.getByRole('button', { name: 'Use 101 for Entry 1 stop' })).toBeInTheDocument()
+    expect(record.getByRole('button', { name: 'Use $101.00 for Entry 1 stop' })).toBeInTheDocument()
     expect(record.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument()
     view.rerender(<ExecutionPanel {...props} execution={{ ...execution, status: 'closed' }} />)
-    expect(screen.queryByRole('button', { name: /Use 101/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Use \$101\.00/ })).not.toBeInTheDocument()
   })
 })

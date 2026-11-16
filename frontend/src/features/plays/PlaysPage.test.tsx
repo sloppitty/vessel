@@ -960,13 +960,13 @@ describe('managed stops on the page', () => {
     render(<Page api={venueApi(server, { playExecution, rebindLevel })} accounts={[venue]} initial={{ view: 'editor', draft, saved: savedState(open, draft) }} />)
     await user.click(await screen.findByRole('tab', { name: 'Execution' }))
     const record = within(await screen.findByRole('region', { name: 'Monitor discrepancies' }))
-    const use = record.getByRole('button', { name: 'Use 101 for Entry 1 stop' })
+    const use = record.getByRole('button', { name: 'Use $101.00 for Entry 1 stop' })
 
     // Unsaved plan edits come first: the rebind writes a revision of the saved plan.
     const target = screen.getByRole('spinbutton', { name: 'Entry 1 planned target 1 price (quote units)' })
     await user.clear(target)
     await user.type(target, '111')
-    await user.type(record.getByRole('textbox', { name: 'Reason to move Entry 1 stop to 101' }), 'Trailed at the venue')
+    await user.type(record.getByRole('textbox', { name: 'Reason to move Entry 1 stop to $101.00' }), 'Trailed at the venue')
     expect(use).toBeDisabled()
     expect(use).toHaveAttribute('title', 'Save or discard your plan changes first.')
     await user.clear(target)

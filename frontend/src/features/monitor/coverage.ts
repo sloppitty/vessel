@@ -1,3 +1,4 @@
+import { price as formatPrice } from '@/lib/format'
 import type { MonitorCoverage } from '@/api/monitor'
 import type { PlayExecution } from '@/api/plays'
 import type { LevelEvidence, StopEvidenceOf } from '@/features/plays/levels'
@@ -105,7 +106,7 @@ const atSavedPrice = (drawn: number, saved: string | null) => {
  * Undefined where the plan makes no venue claim (drafts, plans before an entry fills, untracked Plays).
  */
 /** `time` writes a time for the chart's tags, in the display zone and naming it (1.6e). */
-export function stopEvidenceFor(execution: PlayExecution | null | undefined, time: (value: string) => string): StopEvidenceOf | undefined {
+export function stopEvidenceFor(execution: PlayExecution | null | undefined, time: (value: string) => string, tick?: string | number | null): StopEvidenceOf | undefined {
   if (!execution || execution.status !== 'open' || !execution.tracked) return undefined
   if (!execution.monitor) return () => notRead
   const coverage = execution.monitor.coverage?.find(row => row.playId === execution.playId)
@@ -121,7 +122,7 @@ export function stopEvidenceFor(execution: PlayExecution | null | undefined, tim
         const asOf = ` as of ${time(stop.observedAtUtc)}`
         // Stale evidence keeps its date but no longer confirms anything.
         if (stop.evidence === 'resting' && atSavedPrice(price, stop.plannedPrice)) return { text: `resting${asOf}`, confirmed: !stale }
-        return { text: stop.price ? `resting at ${stop.price}${asOf}` : `resting elsewhere${asOf}`, confirmed: false }
+        return { text: stop.price ? `resting at ${formatPrice(stop.price, tick)}${asOf}` : `resting elsewhere${asOf}`, confirmed: false }
       }
       case 'not-seen': return stale ? unknown : { text: 'not seen at the venue', confirmed: false }
       case 'not-read': return notRead
