@@ -66,6 +66,7 @@ public sealed class MonitorAccount : IOwned
     public void Admit(Guid requestId, string trigger, DateTimeOffset now, bool scheduled = false)
     {
         ReleaseAbandonedRefresh(now);
+        ReleaseExpiredLease(now);
         if (requestId == Guid.Empty || ManualState != "idle" || !scheduled && RetryAfter(now) != 0)
             throw new InvalidOperationException("Monitor admission is busy or cooling down.");
         RequestId = requestId;
@@ -99,6 +100,14 @@ public sealed class MonitorAccount : IOwned
     {
         // An abandoned backfill or funding run (Phase 2, items 6b and 9c) is released the same way; its work stays due.
         if (!Background(Trigger) || ManualState == "idle" || ManualState == "running" && LeaseUntilUtc > now) return false;
+        Release();
+        return true;
+    }
+
+    /// <summary>An expired running lease stops gating admission; its check work stays due.</summary>
+    public bool ReleaseExpiredLease(DateTimeOffset now)
+    {
+        if (ManualState != "running" || LeaseUntilUtc > now) return false;
         Release();
         return true;
     }
