@@ -95,8 +95,11 @@ describe('notification stream frames', () => {
 })
 
 describe('notification client', () => {
-  const client = () => createWorkspaceApi(credentialsFixture)
-  it('uses this transport for every notification endpoint', async () => {
+  const client = (fromPaper = false) => {
+    const api = createWorkspaceApi(credentialsFixture)
+    return fromPaper ? api.forTradingMode!('paper').forTradingMode!('real') : api
+  }
+  it.each([false, true])('uses real journal endpoints and transport for notifications, from Paper: %s', async fromPaper => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json(notificationHeadFixture))
       .mockResolvedValueOnce(json({ items: [], page: 1, pageSize: 25, total: 0, unreadTotal: 0, allTotal: 0 }))
@@ -107,7 +110,7 @@ describe('notification client', () => {
       .mockResolvedValueOnce(json(notificationPreferencesFixture))
       .mockResolvedValueOnce(new Response(null, { status: 202 }))
     vi.stubGlobal('fetch', fetcher)
-    const api = client()
+    const api = client(fromPaper)
     await api.notificationHead()
     await api.notifications(query)
     await api.claimNotifications()
@@ -117,6 +120,11 @@ describe('notification client', () => {
     await api.saveNotificationPreferences({ ...notificationPreferencesFixture, expectedRevision: 3 })
     await api.requestTestNotification()
     expect(fetcher).toHaveBeenCalledTimes(8)
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+      '/api/notifications/head', '/api/notifications?tab=unread&page=1&pageSize=25', '/api/notifications/claim',
+      `/api/notifications/${notificationFixture.id}/read`, '/api/notifications/read',
+      '/api/notifications/preferences', '/api/notifications/preferences', '/api/notifications/test',
+    ])
     for (const [, init] of fetcher.mock.calls) {
       expect(init.credentials).toBe('same-origin')
       expect(init.headers).toMatchObject({ 'X-Vessel-User': sessionFixture.user.id })
@@ -125,10 +133,10 @@ describe('notification client', () => {
     }
   })
 
-  it('sends both cursors on the stream only when a notification cursor is known', async () => {
+  it.each([false, true])('sends both cursors on the real stream only when a notification cursor is known, from Paper: %s', async fromPaper => {
     const fetcher = vi.fn().mockImplementation(() => Promise.resolve(new Response('', { headers: { 'Content-Type': 'text/event-stream' } })))
     vi.stubGlobal('fetch', fetcher)
-    const api = client()
+    const api = client(fromPaper)
     const signal = new AbortController().signal
     await api.monitorStream(eventCursor('5'), signal, () => undefined)
     await api.monitorStream(eventCursor('5'), signal, () => undefined, notificationCursor(7, 1))

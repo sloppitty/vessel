@@ -53,19 +53,22 @@ export interface InAppNotifications {
  * once. A popup closing on its timer leaves its notification unread; its close button or a link marks it read.
  * The durable shown marker is the server's owner-scoped delivery claim, never browser storage.
  */
-export function useInAppNotifications({ api, active, onLink, onOpenPage }: {
+export function useInAppNotifications({ api, active, onLink, onOpenPage, realJournalNotice = false }: {
   api: WorkspaceApi
   /** False once the session is disconnected. */
   active: boolean
   /** Shell navigation for a link; it reports a missing target itself. */
-  onLink: (link: NotificationLink) => void
+  /** Calls `followed` once the link is actually followed, which marks the notification read; a cancelled switch never calls it. */
+  onLink: (link: NotificationLink, followed: () => void) => void
   onOpenPage: () => void
+  /** Paper pages still receive real warnings; make their journal explicit. */
+  realJournalNotice?: boolean
 }): InAppNotifications {
   const { notify, dismiss } = useNotifications()
   const [state, setState] = useState<{ api: WorkspaceApi; status: InAppStatus }>({ api, status: unknownStatus })
   const status = state.api === api && active ? state.status : unknownStatus
-  const live = useRef({ api, active, onLink, onOpenPage, notify, dismiss })
-  useEffect(() => { live.current = { api, active, onLink, onOpenPage, notify, dismiss } })
+  const live = useRef({ api, active, onLink, onOpenPage, notify, dismiss, realJournalNotice })
+  useEffect(() => { live.current = { api, active, onLink, onOpenPage, notify, dismiss, realJournalNotice } })
   // Per-API memory: never storage. Seen IDs decide when a frame warrants a claim; popups are those shown here.
   const session = useRef(newSession(api))
   // Runs before the stream's effects (this hook is called first), so a new API never sees the old session. The old
@@ -76,7 +79,13 @@ export function useInAppNotifications({ api, active, onLink, onOpenPage }: {
     session.current = newSession(api)
   }, [api])
   useEffect(() => { if (!active) closeAll(session.current, live.current.dismiss) }, [active])
-  useEffect(() => () => closeAll(session.current, live.current.dismiss), [])
+  useEffect(() => () => {
+    // Mode switches unmount this shell while the provider survives. Invalidate claims before their replies
+    // can create popups whose actions belong to the discarded shell or connection.
+    session.current.generation++
+    live.current.active = false
+    closeAll(session.current, live.current.dismiss)
+  }, [])
   const listeners = useRef(new Set<(change: InAppChange) => void>())
   const documentActive = useDocumentActive()
 
@@ -109,8 +118,7 @@ export function useInAppNotifications({ api, active, onLink, onOpenPage }: {
     markRead(id).catch(cause => live.current.notify({ tone: 'error', message: errorMessage(cause, 'The notification could not be marked as read.') }))
   }, [markRead])
   const openLink = useCallback((link: NotificationLink, notificationId: string) => {
-    live.current.onLink(link)
-    markReadQuietly(notificationId)
+    live.current.onLink(link, () => markReadQuietly(notificationId))
   }, [markReadQuietly])
 
   const show = useCallback((current: Session, generation: number, claim: NotificationClaim) => {
@@ -127,7 +135,7 @@ export function useInAppNotifications({ api, active, onLink, onOpenPage }: {
       current.popups.set(notification.id, notification)
       popup({
         key: popupKey(notification.id), tone, duration, timer: 'visible-focused', title: content.title, closeLabel: 'Mark as read and close',
-        message: <>{content.summary}{content.late && <span className="notification-late">Late</span>}</>,
+        message: <>{live.current.realJournalNotice && <span>Real journal. </span>}{content.summary}{content.late && <span className="notification-late">Late</span>}</>,
         actions: content.links.map(link => ({ label: link.label, onClick: () => { if (session.current === current) openLink(link, notification.id) } })),
         onClose: reason => {
           if (current.popups.get(notification.id) === notification) current.popups.delete(notification.id)
@@ -138,7 +146,7 @@ export function useInAppNotifications({ api, active, onLink, onOpenPage }: {
     }
     if (claim.more > 0) popup({
       key: backlogKey, tone: 'info', duration: popupTiming.info.duration, timer: 'visible-focused',
-      message: `${claim.more} more unread notification${claim.more === 1 ? '' : 's'}`,
+      message: `${live.current.realJournalNotice ? 'Real journal. ' : ''}${claim.more} more unread notification${claim.more === 1 ? '' : 's'}`,
       action: { label: 'Open notifications', onClick: () => live.current.onOpenPage() },
     })
   }, [markReadQuietly, openLink])

@@ -38,9 +38,10 @@ export interface NotificationStreamHandlers {
  * With `notifications`, the notification head is read after the event head and the stream also carries the
  * notification feed from it. Its cursor and resets are independent of the event cursor. A failed notification head
  * never holds stored reads: the stream opens without notifications and the head is retried on the fallback timer.
+ * With `refreshWorkspace` false, only the real notification feed runs: no monitor summary reads or page reloads.
  */
 export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: () => void, generation: number,
-  notifications?: NotificationStreamHandlers) {
+  notifications?: NotificationStreamHandlers, refreshWorkspace = true) {
   const [head, setHead] = useState<{ api: WorkspaceApi; cursor: EventCursor | null } | null>(null)
   const [result, setResult] = useState<{ api: WorkspaceApi; summary: MonitorSummary } | null>(null)
   const [error, setError] = useState<{ api: WorkspaceApi; message: string } | null>(null)
@@ -82,7 +83,7 @@ export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: ()
   }, [api, enabled, headKnown, withNotifications])
 
   useEffect(() => {
-    if (!enabled || !headKnown) return
+    if (!enabled || !headKnown || !refreshWorkspace) return
     const controller = new AbortController()
     Promise.resolve().then(() => api.monitor(controller.signal)).then(summary => {
       if (!controller.signal.aborted) { setResult({ api, summary }); setError(null) }
@@ -90,7 +91,7 @@ export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: ()
       if (!controller.signal.aborted) setError({ api, message: cause instanceof ApiError ? cause.message : 'Monitor status is unavailable.' })
     })
     return () => controller.abort()
-  }, [api, enabled, headKnown, generation, healthGeneration])
+  }, [api, enabled, headKnown, generation, healthGeneration, refreshWorkspace])
 
   useEffect(() => {
     if (!enabled || start === null || !notificationsSettled) return
@@ -109,7 +110,7 @@ export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: ()
     let stable: ReturnType<typeof setTimeout> | undefined
     let debounce: ReturnType<typeof setTimeout> | undefined
     const refresh = () => {
-      if (controller.signal.aborted || debounce !== undefined) return
+      if (!refreshWorkspace || controller.signal.aborted || debounce !== undefined) return
       debounce = setTimeout(() => {
         debounce = undefined
         if (!controller.signal.aborted) latestReload.current()
@@ -196,7 +197,7 @@ export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: ()
     }
     void connect()
     const fallback = setInterval(() => {
-      if (ready) setHealthGeneration(value => value + 1)
+      if (ready) { if (refreshWorkspace) setHealthGeneration(value => value + 1) }
       else { reloadOnReady = true; refresh() }
       // Keeps the notifications worker status current, and retries a head that could not be read.
       readNotificationHead()
@@ -208,12 +209,12 @@ export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: ()
       clearTimeout(debounce)
       clearInterval(fallback)
     }
-  }, [api, enabled, start, notificationsSettled, notificationStart])
+  }, [api, enabled, start, notificationsSettled, notificationStart, refreshWorkspace])
   return {
     /** False until the head cursor is known (or could not be read); hold stored reads until then. */
     cursorReady: !enabled || headKnown,
-    summary: enabled && result?.api === api ? result.summary : null,
-    error: enabled && error?.api === api ? error.message : null,
+    summary: enabled && refreshWorkspace && result?.api === api ? result.summary : null,
+    error: enabled && refreshWorkspace && error?.api === api ? error.message : null,
     notice: enabled && notice?.api === api ? notice.message : null,
   }
 }

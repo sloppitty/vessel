@@ -309,6 +309,31 @@ describe('the notification feed on the shared stream', () => {
   const status = (state: 'ready' | 'reset', sequence: number, reset = 0) =>
     ({ type: 'notifications', status: { state, nextCursor: notificationCursor(sequence, reset), unreadCount: 2, enabled: true } }) as const
 
+  it('keeps real notifications live without monitor reads or page reloads in Paper, including fallback and reconnect', async () => {
+    const { api, connections } = client()
+    const feed = handlers(), reload = vi.fn()
+    const view = renderHook(() => useMonitorEvents(api, true, reload, 0, feed, false))
+    await advance(0)
+    expect(connections[0]!.notificationsAfter).toBe(notificationHeadFixture.nextCursor)
+    act(() => {
+      connections[0]!.emit(ready())
+      connections[0]!.emit(item(11))
+      connections[0]!.emit(eventFrame())
+      connections[0]!.emit({ type: 'status', status: { state: 'reset', nextCursor: eventCursor('5') } })
+    })
+    await advance(60_000)
+    expect(feed.onFrame).toHaveBeenCalledOnce()
+    expect(api.notificationHead).toHaveBeenCalledTimes(2)
+    act(() => connections[0]!.finish())
+    await advance(60_000)
+    expect(connections.length).toBeGreaterThan(1)
+    expect(connections.at(-1)!.notificationsAfter).toBe(notificationCursor(11))
+    expect(api.monitor).not.toHaveBeenCalled()
+    expect(api.sync).not.toHaveBeenCalled()
+    expect(reload).not.toHaveBeenCalled()
+    expect(view.result.current.summary).toBeNull()
+  })
+
   it('resumes both cursors in Wallet mode after the server closes a stream at its maximum lifetime', async () => {
     const streams: { path: string; body: ReadableStreamDefaultController<Uint8Array> }[] = []
     const encoder = new TextEncoder()

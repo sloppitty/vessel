@@ -21,6 +21,34 @@ part of this stack. Independent Sol reviews and isolated checks are required
 before handoff. Test failures and skipped dependencies are reported, not counted
 as passes.
 
+## Delivery status, November 15, 2026
+
+#85 and #86 are merged through PRs #130 and #131. The remaining stack is:
+
+1. PR #132 for #87, based on `main`.
+2. PR #133 for #96, based on `fix/health-87-prices`.
+3. PR #134 for #97, based on `fix/health-96-monitor-admission`.
+
+After each squash merge, rebase the next branch onto updated main and retarget
+its PR. Only each PR's own issue has an automatic closing reference.
+
+Each layer received an independent adversarial Sol review. #87's missing tick
+propagation and #97's pending-claim unmount race are corrected with regressions;
+#96's review found no blockers.
+
+The rebased combined `scripts/check.sh` passed with SDK 10.0.302, full-ICU Node,
+disposable PostgreSQL 18 and RabbitMQ, with build/test concurrency capped at two.
+It passed 133 operator tests, 76 prototype tests, 4,459 backend tests and 4,457
+frontend tests, plus typecheck, lint and production build. The seven explicit
+skips are five opt-in live-venue cases and two opt-in S3 cases, not database or
+broker tests. The corrected script reported seven skips after backend execution
+and on its final line.
+
+The separate end-to-end `--no-db` rerun remains outstanding; the earlier stopped
+run is not a pass. The post-correction #86 independent re-check failed with a
+provider rate limit, not an approval. Neither is represented as completed by
+these three PRs. No release, deployment or owner's database change occurred.
+
 ## Next work
 
 1. **#88, golden journal.** Establish hand-checked cross-reader identities before

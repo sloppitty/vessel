@@ -52,6 +52,11 @@ describe('shell route history', () => {
     expect(labels()).toEqual(['Settings', 'Appearance'])
     await user.click(screen.getByRole('link', { name: 'Vessel overview' }))
     expect(labels()).toEqual(['Overview'])
+    for (const link of screen.getAllByRole('link', { name: /^Notifications/ })) {
+      await user.click(screen.getByRole('link', { name: 'Vessel overview' }))
+      await user.click(link)
+      expect(labels()).toEqual(['Notifications'])
+    }
   })
 
   it('keeps account filters when Overview → account detail returns through the Accounts crumb', async () => {
