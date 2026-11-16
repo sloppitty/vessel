@@ -175,7 +175,7 @@ function Shell({ system, disconnect, api, realApi, identity, tradingMode, paperA
   const modeControl = useRef<HTMLButtonElement>(null)
   // Set only when the dialog closes without a switch; a switch moves focus to the remounted shell itself.
   const switchFocus = useRef<{ control: HTMLElement | null } | null>(null)
-  const [pendingSwitch, setPendingSwitch] = useState<{ target: TradingMode; api: WorkspaceApi; work: RefObject<symbol | null>; control: HTMLElement | null; destination?: NotificationDestination | undefined } | null>(null)
+  const [pendingSwitch, setPendingSwitch] = useState<{ target: TradingMode; api: WorkspaceApi; work: RefObject<symbol | null>; control: HTMLElement | null; destination?: NotificationDestination | undefined; followed?: (() => void) | undefined } | null>(null)
   // Read once: this shell was mounted by a switch made in this browser session, not by a load or reload.
   const [arrival] = useState(() => modeArrival?.to === tradingMode ? modeArrival : null)
   const arrivedFrom = arrival?.from ?? null
@@ -307,9 +307,9 @@ function Shell({ system, disconnect, api, realApi, identity, tradingMode, paperA
     noticePresented?.()
   }, [startupNotice, noticePresented, notify])
   // Links from notifications go through the shell's own navigation; a missing account gets a short notice.
-  const notificationLink = useRef<(link: NotificationLink) => void>(() => {})
+  const notificationLink = useRef<(link: NotificationLink, followed?: () => void) => void>(() => {})
   const inApp = useInAppNotifications({ api: realApi, active: disconnectedApi !== api, realJournalNotice: tradingMode === 'paper',
-    onLink: link => notificationLink.current(link), onOpenPage: openNotifications })
+    onLink: (link, followed) => notificationLink.current(link, followed), onOpenPage: openNotifications })
   const monitor = useMonitorEvents(realApi, disconnectedApi !== api, reload, reloadKey, inApp.handlers, tradingMode === 'real')
   // The persistent incident count: stored monitor records only, never notifications. Shared by the Plays entry and Overview.
   const incidents = useMemo(() => monitorIncidents(monitor.summary?.accounts ?? []), [monitor.summary])
@@ -431,9 +431,10 @@ function Shell({ system, disconnect, api, realApi, identity, tradingMode, paperA
   const portfolios = data?.portfolios ?? [], accounts = data?.accounts ?? []
   const arrivalHandled = useRef(false)
   useEffect(() => {
-    notificationLink.current = link => {
+    notificationLink.current = (link, followed) => {
       if (exitState.current?.api !== api) return
-      if (tradingMode === 'paper') { requestTradingMode('real', document.activeElement as HTMLElement | null, link); return }
+      if (tradingMode === 'paper') { requestTradingMode('real', document.activeElement as HTMLElement | null, link, followed); return }
+      followed?.()
       if (link.kind === 'play' || link.kind === 'play-execution') {
         // The Plays page opens it (protecting unsaved work) and reports a Play that no longer exists.
         if (link.playId) void viewPlay(link.playId, new AbortController().signal)
@@ -525,23 +526,25 @@ function Shell({ system, disconnect, api, realApi, identity, tradingMode, paperA
     if (tradingMode === 'paper') requestTradingMode('real', document.activeElement as HTMLElement | null, 'notifications')
     else navigate('notifications', true)
   }
-  function requestTradingMode(next: TradingMode, control: HTMLElement | null, destination?: NotificationDestination) {
+  // `followed` runs only when the switch commits, so a kept Paper session leaves the notification unread.
+  function requestTradingMode(next: TradingMode, control: HTMLElement | null, destination?: NotificationDestination, followed?: () => void) {
     if (pendingSwitch) return
     const current = exitState.current
     if (current?.api !== api) return
     if (current.work.current || hasUnsavedPlayWork(current.session)) {
-      setPendingSwitch({ target: next, api, work: current.work, control, destination })
+      setPendingSwitch({ target: next, api, work: current.work, control, destination, followed })
       return
     }
-    commitTradingMode(next, destination)
+    if (commitTradingMode(next, destination)) followed?.()
   }
   // Only a mode the shell can enter remounts it; clearing the guards without that remount would leave live work unprotected.
   const canEnter = (next: TradingMode) => next !== tradingMode && (next === 'real' || paperAvailable)
   function commitTradingMode(next: TradingMode, destination?: NotificationDestination) {
-    if (!canEnter(next)) return
+    if (!canEnter(next)) return false
     cancelRefresh()
     exitState.current = null
     onTradingModeChange(next, destination)
+    return true
   }
   function keepTradingMode() {
     switchFocus.current = { control: pendingSwitch?.control ?? null }
@@ -555,7 +558,7 @@ function Shell({ system, disconnect, api, realApi, identity, tradingMode, paperA
     if (current?.api !== pendingSwitch.api || current.work !== pendingSwitch.work || !canEnter(pendingSwitch.target)) { keepTradingMode(); return }
     switchFocus.current = null
     setPendingSwitch(null)
-    commitTradingMode(pendingSwitch.target, pendingSwitch.destination)
+    if (commitTradingMode(pendingSwitch.target, pendingSwitch.destination)) pendingSwitch.followed?.()
   }
   // Cancelling returns focus to the control that asked, or to the current one if a resize swapped the rail and subtitle forms,
   // or to the content when Paper became unavailable and no mode control is left.

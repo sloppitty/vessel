@@ -37,7 +37,7 @@ function client(claims: { popups: InAppNotification[]; more: number }[] = []) {
 }
 
 function setup(api: WorkspaceApi) {
-  const onLink = vi.fn<(link: NotificationLink) => void>(), onOpenPage = vi.fn()
+  const onLink = vi.fn((_link: NotificationLink, followed: () => void) => followed()), onOpenPage = vi.fn()
   const result: { current: InAppNotifications | null } = { current: null }
   function Harness() {
     result.current = useInAppNotifications({ api, active: true, onLink, onOpenPage })
@@ -190,7 +190,7 @@ describe('in-app notification popups', () => {
     expect(api.readNotification).toHaveBeenCalledWith(notificationWith(1).id)
     act(() => screen.getByRole('button', { name: 'Open account' }).click())
     await flush()
-    expect(onLink).toHaveBeenCalledWith(link)
+    expect(onLink).toHaveBeenCalledWith(link, expect.any(Function))
     expect(api.readNotification).toHaveBeenLastCalledWith(notificationWith(2).id)
     expect(screen.queryByRole('status')).toBeNull()
   })

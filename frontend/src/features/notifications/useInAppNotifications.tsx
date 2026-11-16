@@ -58,7 +58,8 @@ export function useInAppNotifications({ api, active, onLink, onOpenPage, realJou
   /** False once the session is disconnected. */
   active: boolean
   /** Shell navigation for a link; it reports a missing target itself. */
-  onLink: (link: NotificationLink) => void
+  /** Calls `followed` once the link is actually followed, which marks the notification read; a cancelled switch never calls it. */
+  onLink: (link: NotificationLink, followed: () => void) => void
   onOpenPage: () => void
   /** Paper pages still receive real warnings; make their journal explicit. */
   realJournalNotice?: boolean
@@ -117,8 +118,7 @@ export function useInAppNotifications({ api, active, onLink, onOpenPage, realJou
     markRead(id).catch(cause => live.current.notify({ tone: 'error', message: errorMessage(cause, 'The notification could not be marked as read.') }))
   }, [markRead])
   const openLink = useCallback((link: NotificationLink, notificationId: string) => {
-    live.current.onLink(link)
-    markReadQuietly(notificationId)
+    live.current.onLink(link, () => markReadQuietly(notificationId))
   }, [markReadQuietly])
 
   const show = useCallback((current: Session, generation: number, claim: NotificationClaim) => {
