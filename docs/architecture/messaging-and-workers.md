@@ -596,7 +596,7 @@ stateDiagram-v2
 | any | fresh present or absent | Clears `UnverifiableAtUtc`; sets `LastObservedAtUtc` | — |
 | `open` | fresh present | Details and fingerprint follow the evidence | nothing |
 | `dismissed`, same fingerprint | fresh present | Stays dismissed | `dismissed` only if the last announcement was `unverifiable` |
-| `candidate`, `resolved`, or `dismissed` with changed evidence | fresh present | Starts or continues confirmation (on its condition for `protection.short`, `protection.missing`, `protection.excess`, `position.short`, `position.excess` and `position.unprotected`, below); once observed at least 60 s after the uninterrupted sequence began: `open`, `OpenedAtUtc` = sequence start, new revision | `opened` |
+| `candidate`, `resolved`, or `dismissed` with changed evidence | fresh present | Starts or continues confirmation (on its condition for `protection.short`, `protection.missing`, `protection.cancelled` with no linked stop resting, `protection.excess`, `position.short`, `position.excess` and `position.unprotected`, below); once observed at least 60 s after the uninterrupted sequence began: `open`, `OpenedAtUtc` = sequence start, new revision | `opened` |
 | `resolved` | fresh absent | Unchanged | `resolved` only if an `unverifiable` announcement is open |
 | other | fresh absent | `resolved` | `resolved` if publicly open (last announcement `opened` or `unverifiable`), else silent |
 | any | incomplete | Confirmation sequence restarts; work kept | nothing |
@@ -607,9 +607,10 @@ stateDiagram-v2
 
 Every announcement increments `Revision` and keys the event `discrepancy:{id}:{revision}:{transition}`. Anything ever announced stays visible (`Visible`), and every `opened` or `unverifiable` announcement gets exactly one matching close (`resolved` or `dismissed`). A repeated delivery of the same source snapshot is not independent confirmation.
 
-**Confirmation on the condition (October 22, 2026, Phase 2, D-19; extended October 23).** Six kinds confirm on their condition (`DiscrepancyInput.ConfirmsOnCondition`): their kind and subject, with the condition still present. A changing size is normal while a trade is built, so a position, stop or target whose quantity keeps changing still confirms after 60 s:
+**Confirmation on the condition (October 22, 2026, Phase 2, D-19; extended October 23 and November 17).** Six kinds, and `protection.cancelled` while no linked stop rests, confirm on their condition (`DiscrepancyInput.ConfirmsOnCondition`): their kind and subject, with the condition still present. A changing size is normal while a trade is built, so a position, stop or target whose quantity keeps changing still confirms after 60 s:
 - `protection.short`: the Play's linked stop covers less than its open quantity (D-19);
 - `protection.missing`: an open quantity past the grace with no resting stop covering it, so an entry that keeps filling after the grace still confirms (owner, October 23);
+- `protection.cancelled`, only while no linked stop rests: a linked stop cancelled without filling and none resting, so an entry that keeps filling cannot keep restarting the critical that supersedes `protection.missing` (#94 under a gap, #140 without). While a linked stop rests the record is about that stop's size and confirms on its evidence;
 - `protection.excess`: a resting linked stop or target above the Play's open quantity (October 23);
 - `position.short` and `position.excess`: the venue position smaller (same sign) or larger than the Open Plays expect, per account and instrument (October 23). They are two kinds from one comparison, so a switch from one to the other is another record and starts its own sequence;
 - `position.unprotected`: item 6c's open position with no Open Play and no resting stop (below).
