@@ -44,6 +44,7 @@ public sealed class RiskStore(VesselDbContext db, UnitOfWork unitOfWork) : IOpen
             var executions = new List<RiskExecution>();
             string? problem = null;
             var pairs = new List<(PlayOrderLink, ImportedFill)>();
+            var stopOrders = new List<RiskOrder>();
             foreach (var link in linked[play.Id])
             {
                 // A linked order that is not stored leaves its executions, and what its level still rests for, unknown.
@@ -52,6 +53,10 @@ public sealed class RiskStore(VesselDbContext db, UnitOfWork unitOfWork) : IOpen
                 // A filled order whose retained executions fall short leaves its prices and quantity unknown.
                 if (ExecutionIntegrity.MissingExecutions(order, own)) problem = OpenRiskCalculator.MissingExecutions;
                 pairs.AddRange(own.Select(fill => (link, fill)));
+                // What an executed stop still rests for comes from its orders as the venue reported them (#117).
+                if (link is { Role: OrderLinkRole.Stop, EntryId: { } entryId, LevelId: { } levelId })
+                    stopOrders.Add(new(entryId, levelId, order.Status, order.OriginalSize, order.RemainingSize, order.IsPositionTpsl,
+                        own.Sum(f => f.Quantity)));
             }
             if (FillAllocations.Incomplete(play.Id, allocations).Any()) problem = OpenRiskCalculator.MissingExecutions;
             if (FillAllocations.Unallocated(play.Id, allocations).Any()) problem = OpenRiskCalculator.UnallocatedExecution;
@@ -59,7 +64,7 @@ public sealed class RiskStore(VesselDbContext db, UnitOfWork unitOfWork) : IOpen
             foreach (var fill in FillAllocations.For(play.Id, pairs, allocations))
                 executions.Add(new(fill.Role, fill.Role == OrderLinkRole.Exit ? null : fill.EntryId, fill.LevelId, fill.Fill.Quantity, fill.Fill.Price)
                     { Fill = fill.Fill });
-            return new OpenRiskFacts(play, executions, coverage.GetValueOrDefault(play.Id), false, problem);
+            return new OpenRiskFacts(play, executions, coverage.GetValueOrDefault(play.Id), false, problem, stopOrders);
         }).ToList();
     }
 

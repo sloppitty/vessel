@@ -17,6 +17,15 @@ public sealed record RiskExecution(OrderLinkRole Role, string? EntryId, string? 
 }
 
 /// <summary>
+/// A venue order linked to one of a Play's stops, as the venue last reported it: its normalized status (open, triggered,
+/// filled, canceled, rejected or other), original and remaining size, whether it is a whole-position TP/SL, and the
+/// quantity of its own retained executions. Open risk reads it only for a stop that has executed, to know what that stop
+/// still rests for; it never derives a resting quantity from the plan.
+/// </summary>
+public sealed record RiskOrder(string EntryId, string LevelId, string Status, decimal OriginalSize, decimal RemainingSize,
+    bool IsPositionTpsl, decimal Executed);
+
+/// <summary>
 /// A Play's risk at its plan's stops, or null with the reason it is unknown. Whether its stops rest at the venue is not
 /// decided here: that is the monitor's recorded coverage.
 /// </summary>
@@ -29,9 +38,12 @@ public sealed record PlayRisk(Ratio? Risk, string? Reason);
 /// <item><b>Planned part.</b> Each entry's planned quantity that has not filled, at its planned price.</item>
 /// <item><b>Per stop.</b> A stop's part of what remains of its entry, times the distance from the reference price to the
 /// stop on the loss side. A stop at or beyond the reference adds zero: risk is never negative and never offsets another
-/// stop. What remains is shared in proportion to what each stop still rests for: its share of the entry's filled
-/// quantity less its own executions, never below zero. The part a stop has filled has left the position, so a fully
-/// filled stop adds nothing and a part-filled one counts for the rest.</item>
+/// stop. What remains is shared in proportion to what each stop rests for. A stop that has not executed counts for its
+/// share of the entry's filled quantity. A stop that has executed counts for what its linked orders still rest for, as the
+/// venue reports them: the remaining size of each open or triggered order. A filled, cancelled or rejected order rests
+/// for nothing, so a fully filled stop adds nothing, a part-filled one counts for its remaining size, a part-filled one
+/// that was cancelled counts for nothing and one whose order was replaced counts for the new order. Order facts that do
+/// not reconcile make the Play unknown.</item>
 /// </list>
 /// Anything that cannot be measured makes the whole Play unknown, never partly summed. No fees, slippage or funding.
 /// </summary>
@@ -48,11 +60,14 @@ public static class OpenRiskCalculator
     public const string Units = "The quote asset is not a listed USD stablecoin.";
     public const string MissingExecutions = "A linked order is missing executions, so its fills are not all known.";
     public const string UnallocatedExecution = "A split order has an execution that is not allocated yet.";
+    public const string UnreconciledStop = "A stop has executed, but its orders do not say what it still rests for.";
 
     private static readonly Ratio Hundred = Ratio.Of(100);
 
-    public static PlayRisk Calculate(PlayPlanDocument plan, IReadOnlyList<RiskExecution> executions, bool usdQuoted)
+    public static PlayRisk Calculate(PlayPlanDocument plan, IReadOnlyList<RiskExecution> executions, bool usdQuoted,
+        IReadOnlyList<RiskOrder>? orders = null)
     {
+        orders ??= [];
         if (!usdQuoted) return new(null, Units);
         if (executions.Any(e => e.Contradicts)) return new(null, Contradicting);
         var sign = plan.Direction == "short" ? -1 : 1;
@@ -131,18 +146,23 @@ public static class OpenRiskCalculator
             if (priced.Any(s => s.Price is null)) return new(null, UnpricedStop);
             if (priced.Aggregate(Ratio.Zero, (sum, s) => sum + s.Share!.Value) != Hundred) return new(null, StopShares);
 
-            // Open part: what remains, from the average fill, shared in proportion to what each stop still rests for: its
-            // share of the filled quantity less what it has executed. Each stop's executions already left the position.
+            // Open part: what remains, from the average fill, shared in proportion to what each stop rests for. A stop that
+            // has executed rests for what its linked orders still rest for at the venue, never for a quantity from the plan.
             if (remaining.Sign > 0)
             {
                 var average = Ratio.Divide(notional, quantity)!.Value;
-                var resting = priced.Select(s => (Stop: s, Rests: Ratio.Max(Ratio.Zero,
-                    quantity * Ratio.Divide(s.Share!.Value, Hundred)!.Value - executedLevels.GetValueOrDefault(Key(entry.Id, s.Id), Ratio.Zero))))
-                    .Where(s => s.Rests.Sign > 0).ToList();
+                var resting = new List<(Ratio? Price, Ratio Rests)>();
+                foreach (var stop in priced)
+                {
+                    if (executedLevels.GetValueOrDefault(Key(entry.Id, stop.Id), Ratio.Zero).Sign == 0)
+                        resting.Add((stop.Price, quantity * Ratio.Divide(stop.Share!.Value, Hundred)!.Value));
+                    else if (StillRests(orders, entry.Id, stop.Id) is { } rests) resting.Add((stop.Price, rests));
+                    else return new(null, UnreconciledStop);
+                }
                 var total = resting.Aggregate(Ratio.Zero, (sum, s) => sum + s.Rests);
                 if (total.Sign == 0) return new(null, NoStop);
-                foreach (var (stop, rests) in resting)
-                    risk += remaining * Ratio.Divide(rests, total)!.Value * Loss(average, stop.Price!.Value, sign);
+                foreach (var (stopPrice, rests) in resting.Where(s => s.Rests.Sign > 0))
+                    risk += remaining * Ratio.Divide(rests, total)!.Value * Loss(average, stopPrice!.Value, sign);
             }
 
             // Planned part: the planned quantity not yet filled, at the planned price, against every stop.
@@ -157,6 +177,41 @@ public static class OpenRiskCalculator
     }
 
     private static string Key(string entryId, string levelId) => entryId + "\u001f" + levelId;
+
+    /// <summary>
+    /// What an executed stop still rests for: the remaining size of each linked order that is open or triggered. A filled,
+    /// cancelled or rejected order rests for nothing; a replacement order counts for its own remaining size. Null when the
+    /// orders do not say: none is known, a status is unrecognized, a size is out of range, a live order rests for nothing,
+    /// is a whole-position TP/SL without a fixed size, or has executed other than what its retained executions show, or a
+    /// filled order still reports a remaining size.
+    /// </summary>
+    private static Ratio? StillRests(IReadOnlyList<RiskOrder> orders, string entryId, string levelId)
+    {
+        var own = orders.Where(o => o.EntryId == entryId && o.LevelId == levelId).ToList();
+        if (own.Count == 0) return null;
+        var rests = Ratio.Zero;
+        foreach (var order in own)
+        {
+            var original = Ratio.From(order.OriginalSize);
+            var left = Ratio.From(order.RemainingSize);
+            if (left.Sign < 0 || left > original) return null;
+            switch (order.Status)
+            {
+                case "open" or "triggered":
+                    if (order.IsPositionTpsl || left.Sign == 0 || original - left != Ratio.From(order.Executed)) return null;
+                    rests += left;
+                    break;
+                case "filled":
+                    if (left.Sign != 0) return null;
+                    break;
+                case "canceled" or "rejected":
+                    break;
+                default:
+                    return null;
+            }
+        }
+        return rests;
+    }
 
     /// <summary>The loss per unit from the reference to the stop on the loss side; zero at or beyond the reference.</summary>
     private static Ratio Loss(Ratio reference, Ratio stop, int sign) => Ratio.Max(Ratio.Zero, sign > 0 ? reference - stop : stop - reference);
