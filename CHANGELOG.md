@@ -32,6 +32,9 @@
   check. A gap now affects only Plays that started before it ended, and an omission only its
   own contract; quantity comparisons stay unknown where the gap applies. Accounts that
   already hold a gap can raise a missing-stop critical after the upgrade.
+- A tab left open across an upgrade now shows a "New version" notice with a Reload button,
+  and a read that fails because the versions differ says to reload where it used to report
+  incompatible data. Reload asks first while Play work is unsaved.
 
 ### Changed
 
@@ -44,6 +47,9 @@
 - Tests: a hand-checked golden journal (`docs/architecture/golden-journal.md`) is asserted
   through Activity, Overview, Review, Sizing, Open risk and the Plays list, with identities
   that tie the screens to each other.
+- The web app no longer accepts monitor, account, portfolio, history-coverage and review
+  responses with fields missing. Those fallbacks existed for older API versions, which the
+  version notice now covers.
 
 No migrations and no configuration changes.
 
