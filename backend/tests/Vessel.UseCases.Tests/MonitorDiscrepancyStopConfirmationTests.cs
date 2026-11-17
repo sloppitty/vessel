@@ -149,7 +149,119 @@ public sealed class MonitorDiscrepancyStopConfirmationTests
         Assert.Equal(["discrepancy.opened", "discrepancy.resolved", "discrepancy.opened"], f.Events.Items.Select(x => x.Type).ToArray());
     }
 
+    // #140: an entry that keeps filling after its only stop was cancelled changes the fingerprint's quantity on every check.
+    // With no linked stop resting, protection.cancelled confirms on its condition, so the critical it opens instead of
+    // protection.missing is not delayed. Its fingerprint and details keep the quantity, and an open record follows it silently.
+    [Fact]
+    public async Task A_cancelled_stop_with_none_resting_confirms_while_the_entry_keeps_filling()
+    {
+        var f = new DiscrepancyFixture();
+        f.Stop(o => o with { Status = VenueOrderStatus.Canceled, VenueStatus = "canceled" });
+        PartlyFilledEntry(f);
+        var start = f.Clock.Now;
+        await f.Evaluate();
+        var row = f.Store.Rows.Single(x => x.Kind == "protection.cancelled");
+        var quantities = new List<string?> { Quantity(row) };
+        for (var i = 1; i <= 2; i++)
+        {
+            f.Advance(30); Grow(f, i);
+            var result = await f.Evaluate();
+            Assert.False(result.Incomplete);
+            quantities.Add(Quantity(row));
+            // Half a minute is not a confirmation.
+            if (i == 1) Assert.Equal(("candidate", (DateTimeOffset?)start), (row.State, row.PendingSinceUtc));
+        }
+        Assert.Equal(["1", "1.5", "2"], quantities);
+        Assert.Equal(("open", "critical", start), (row.State, row.Severity, row.OpenedAtUtc));
+        // One cause, one record: the cancelled stop supersedes protection.missing.
+        Assert.DoesNotContain(f.Store.Rows, x => x.Kind == "protection.missing" && x.HasWork);
+        var opened = Assert.Single(f.Events.Items);
+        Assert.Equal(("discrepancy.opened", "critical", row.Id), (opened.Type, opened.Severity, opened.Subject.DiscrepancyId));
+        // The open critical shows the latest quantity without announcing it again.
+        f.Advance(30); Grow(f, 3);
+        await f.Evaluate();
+        Assert.Equal(("open", "2.5"), (row.State, Quantity(row)));
+        Assert.Single(f.Events.Items);
+    }
+
+    [Theory]
+    [InlineData("whole")]
+    [InlineData("partial")]
+    public async Task A_resting_replacement_stop_between_the_observations_breaks_the_confirmation(string replacement)
+    {
+        var f = new DiscrepancyFixture();
+        f.Stop(o => o with { Status = VenueOrderStatus.Canceled, VenueStatus = "canceled" });
+        PartlyFilledEntry(f);
+        await f.Evaluate();
+        var row = f.Store.Rows.Single(x => x.Kind == "protection.cancelled");
+        // A linked replacement stop rests at the second check.
+        f.Advance(30); Grow(f, 1);
+        f.AddOrder("replacement-stop", OrderLinkRole.Stop, replacement == "whole" ? 1.5m : .5m, 90);
+        await f.Evaluate();
+        var restart = f.Clock.Now;
+        // Covering the position ends the candidate; a smaller one is about its size and confirms on its own evidence.
+        if (replacement == "whole") Assert.Equal(("resolved", (DateTimeOffset?)null), (row.State, row.PendingSinceUtc));
+        else Assert.Equal(("candidate", (DateTimeOffset?)restart), (row.State, row.PendingSinceUtc));
+        // It is cancelled in turn: the first observation does not confirm the third.
+        f.Advance(30); Grow(f, 2);
+        var index = f.VenueOrders.FindIndex(x => x.OrderId == "replacement-stop");
+        f.VenueOrders[index] = f.VenueOrders[index] with { Status = VenueOrderStatus.Canceled, VenueStatus = "canceled" };
+        await f.Evaluate();
+        Assert.NotEqual("open", row.State);
+        Assert.Empty(f.Events.Items);
+    }
+
+    [Theory]
+    [InlineData("incomplete-book")]
+    [InlineData("stale")]
+    public async Task An_unknown_observation_neither_confirms_nor_resolves_a_cancelled_stop(string reason)
+    {
+        var f = new DiscrepancyFixture();
+        f.Stop(o => o with { Status = VenueOrderStatus.Canceled, VenueStatus = "canceled" });
+        PartlyFilledEntry(f);
+        await f.Evaluate();
+        var row = f.Store.Rows.Single(x => x.Kind == "protection.cancelled");
+        f.Advance(30); Grow(f, 1);
+        if (reason == "incomplete-book") f.OrdersComplete = false; else f.ObservationOffset = TimeSpan.FromMinutes(-6);
+        Assert.True((await f.Evaluate()).Incomplete);
+        Assert.Equal(("candidate", (DateTimeOffset?)null), (row.State, row.PendingSinceUtc));
+        (f.OrdersComplete, f.ObservationOffset) = (true, TimeSpan.Zero);
+        f.Advance(30); Grow(f, 2);
+        var restart = f.Clock.Now;
+        await f.Evaluate();
+        Assert.Equal(("candidate", (DateTimeOffset?)restart), (row.State, row.PendingSinceUtc));
+        Assert.Empty(f.Events.Items);
+        // An open critical stays open on an unknown read.
+        f.Advance(30); Grow(f, 3); await f.Evaluate();
+        f.Advance(30); Grow(f, 4); await f.Evaluate();
+        Assert.Equal(("open", restart), (row.State, row.OpenedAtUtc));
+        if (reason == "incomplete-book") f.OrdersComplete = false; else f.ObservationOffset = TimeSpan.FromMinutes(-6);
+        f.VenueOrders.Clear();
+        f.Advance(60); await f.Evaluate();
+        Assert.Equal("open", row.State);
+        Assert.Equal(["discrepancy.opened"], f.Events.Items.Select(x => x.Type).ToArray());
+    }
+
+    // The entry order is partly filled, so its later fills are not missing executions.
+    private static void PartlyFilledEntry(DiscrepancyFixture f)
+    {
+        var entry = f.Store.Orders.Single(x => x.ExternalOrderId == "entry");
+        (entry.OriginalSize, entry.Status, entry.VenueStatus) = (5, "open", "open");
+    }
+
+    // One more entry fill, with the venue position following it.
+    private static void Grow(DiscrepancyFixture f, int i)
+    {
+        f.Fill($"entry-fill-{i}", "entry", .5m, f.Clock.Now);
+        f.Position += .5m;
+    }
+
+    private static string? Quantity(PlayDiscrepancy row) =>
+        System.Text.Json.JsonDocument.Parse(row.Details).RootElement.GetProperty("quantity").GetString();
+
     [Theory] // D-19 and its follow-up change the size kinds only: every other kind still confirms on its unchanged evidence.
+    // #140: protection.cancelled confirms on its condition only while no linked stop rests (see above); here a resting
+    // replacement stop is too small, so the warning is about its size and its evidence must persist.
     [InlineData("protection.cancelled")]
     [InlineData("protection.orphaned")]
     [InlineData("protection.beyond-liquidation")]
@@ -180,7 +292,8 @@ public sealed class MonitorDiscrepancyStopConfirmationTests
         switch (kind)
         {
             case "protection.cancelled":
-                if (version == 0) f.Stop(o => o with { Status = VenueOrderStatus.Canceled }); else Grow();
+                if (version == 0) { f.Stop(o => o with { Status = VenueOrderStatus.Canceled }); f.AddOrder("replacement-stop", OrderLinkRole.Stop, .5m, 90); }
+                else Grow();
                 break;
             case "protection.orphaned":
                 if (version == 0) f.Play.MarkClosed("fixture", f.Clock.Now.AddMinutes(-1)); else f.Stop(o => o with { RemainingSize = 1 - .2m * version });
