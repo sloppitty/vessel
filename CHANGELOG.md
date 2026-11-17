@@ -82,6 +82,9 @@
   version notice now covers.
 - Eighteen page reads share one hook (`useApiRead`) for cancelling, discarding stale answers
   and error text.
+- Tests and documentation record how the API and the monitor worker behave when RabbitMQ is
+  unreachable at start, returns, or goes away while they run. Neither host starts without
+  the broker; `docs/architecture/messaging-and-workers.md` has the table.
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and
