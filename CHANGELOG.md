@@ -58,6 +58,11 @@
 - The Plays list kept a Play's result and R after a later refresh found that one of its
   orders had left an execution out, although Review had already withdrawn it. The list now
   follows Review.
+- Overview leaves out operations with known missing executions from its realized total and
+  count, as Review and Sizing do, and says how many it left out.
+- "Limited history" no longer appears on Overview just because an account has funding
+  coverage.
+- Overview's unrealized P&L is labelled "at last refresh" with its time.
 
 ### Changed
 
