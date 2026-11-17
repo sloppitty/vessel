@@ -175,6 +175,53 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
         Assert.Contains(realized.Coverage.Reasons, r => r.Reason.Contains("net result") && r.Count == 1);
     }
 
+    /// <summary>#93: Review and Sizing leave out an operation whose filled order misses an execution; Overview does too.</summary>
+    [Fact]
+    public async Task An_operation_with_a_known_missing_execution_is_left_out_and_said_so()
+    {
+        var a = Account(balance: 10);
+        Operation(a, Now.AddHours(-1), 10); Operation(a, Now.AddHours(-2), 3);
+        var entry = store.Fills.Single(f => f.ContractId == "contract-2" && f.PositionEffect == "open");
+        orders.Orders.Add(new ImportedOrder
+        {
+            Id = Guid.NewGuid(), OwnerId = owner, AccountId = a.Id, ContractId = entry.ContractId, ExternalOrderId = entry.ExternalOrderId,
+            Side = "buy", OrderType = "Limit", OriginalSize = 2, Status = "filled", VenueStatus = "filled", PlacedAtUtc = entry.OccurredAtUtc,
+            StatusAtUtc = entry.OccurredAtUtc, ObservedAtUtc = entry.OccurredAtUtc, LimitPrice = 100,
+        });
+        var realized = (await service.GetAsync("account", "30", "all", default)).Totals.RealizedResult;
+        Assert.Equal(("10", 1, 1), (realized.AmountUsd, realized.Coverage.ContributingOperationCount, realized.Coverage.ExcludedOperationCount));
+        Assert.Contains(new SummaryReason(OverviewSummaryService.MissingExecutionsReason, 1), realized.Coverage.Reasons);
+    }
+
+    /// <summary>#93: the funding-state row every funding-capable account has says nothing about its fill history.</summary>
+    [Fact]
+    public async Task A_funding_state_row_is_not_a_history_limitation()
+    {
+        var a = Account(venue: "hyperliquid"); Snapshot(a, 100);
+        Operation(a, Now.AddHours(-1), 10);
+        fundingStates.Add(new() { OwnerId = owner, AccountId = a.Id, LastReadComplete = true, Notice = "Funding settlements covered for the last 30 days." });
+        var realized = (await service.GetAsync("account", "30", "all", default)).Totals.RealizedResult;
+        Assert.Equal("10", realized.AmountUsd);
+        Assert.Empty(realized.Coverage.Reasons);
+        // A real history notice still counts.
+        a.RecordSync(Now, "Retained history begins after the venue's first fill.");
+        Assert.Contains((await service.GetAsync("account", "30", "all", default)).Totals.RealizedResult.Coverage.Reasons,
+            r => r.Reason.Contains("retained-history") && r.Count == 1);
+    }
+
+    /// <summary>#93: unrealized P&amp;L is the venues' figure at the last refresh; its time is the oldest one included.</summary>
+    [Fact]
+    public async Task Unrealized_carries_the_oldest_included_refresh_time()
+    {
+        var a = Account(venue: "hyperliquid"); Snapshot(a, 100, pnl: 1, quantity: 1);
+        var b = Account(venue: "hyperliquid"); Snapshot(b, 100, pnl: 2, quantity: 1);
+        store.Snapshots.Single(s => s.AccountId == b.Id).ObservedAtUtc = Now.AddHours(-3);
+        Account(balance: 10);
+        var result = await service.GetAsync("account", "30", "all", default);
+        Assert.Equal(("3", Now.AddHours(-3)), (result.Totals.UnrealizedPnl.AmountUsd, result.Totals.UnrealizedPnlAsOfUtc));
+        Assert.Equal([Now, Now.AddHours(-3), null], result.Rows.Select(r => r.Totals.UnrealizedPnlAsOfUtc).OrderByDescending(t => t).ToArray());
+    }
+
     [Fact]
     public async Task Listed_stablecoin_fees_pool_nominally_across_venues_with_the_caveat_visible()
     {

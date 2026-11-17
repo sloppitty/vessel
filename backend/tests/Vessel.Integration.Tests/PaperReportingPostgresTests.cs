@@ -184,7 +184,7 @@ public sealed class PaperReportingPostgresTests
         var sizingStore = new SizingStore(db, unit);
         var sizing = new SizingService(sizingStore, new CoreOwner(owner), clock, unit, activity);
         var review = new ReviewService(new ReviewStore(db, sizingStore), clock);
-        var overview = new OverviewSummaryService(workspaceStore, workspace, activity, clock);
+        var overview = new OverviewSummaryService(workspaceStore, workspace, activity, sizingStore, clock);
 
         var realActivity = await activity.PageAsync(new(), default);
         Assert.Equal(1, realActivity.TotalCount);

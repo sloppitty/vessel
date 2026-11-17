@@ -27,7 +27,7 @@ internal sealed record GoldenJournalScreens(ActivityService Activity, OverviewSu
         var owner = new CoreOwner(GoldenJournal.Owner);
         var activity = new ActivityService(activityStore, workspaceStore, clock, venues, marks: new MarketContextCache(clock));
         var workspace = new WorkspaceService(workspaceStore, owner, venues, unitOfWork);
-        return new(activity, new OverviewSummaryService(workspaceStore, workspace, activity, clock),
+        return new(activity, new OverviewSummaryService(workspaceStore, workspace, activity, sizingStore, clock),
             new ReviewService(reviewStore, clock, venues, new ActivityReviewPositions(activity, sizingStore)),
             new SizingService(sizingStore, owner, clock, unitOfWork, activity, venues),
             new OpenRiskService(riskStore, workspaceStore, workspace, venues, owner, clock, unitOfWork));

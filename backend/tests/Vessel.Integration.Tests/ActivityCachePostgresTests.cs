@@ -198,8 +198,8 @@ public sealed class ActivityCachePostgresTests
             foreach (var period in new[] { "7", "30", "90", "all" })
             foreach (var group in new[] { "account", "portfolio" })
             {
-                var expected = await new OverviewSummaryService(store, workspace, cold, new Clock()).GetAsync(group, period, selected, default);
-                Assert.Equal(Json(expected), Json(await new OverviewSummaryService(store, workspace, cached, new Clock()).GetAsync(group, period, selected, default)));
+                var expected = await new OverviewSummaryService(store, workspace, cold, new SizingStore(dbRead, TestUnitOfWork.For(dbRead)), new Clock()).GetAsync(group, period, selected, default);
+                Assert.Equal(Json(expected), Json(await new OverviewSummaryService(store, workspace, cached, new SizingStore(dbRead, TestUnitOfWork.For(dbRead)), new Clock()).GetAsync(group, period, selected, default)));
             }
         }
         Assert.Equal(3, reads.Count); // all, unassigned, first account; portfolio and account share their exact set.

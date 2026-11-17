@@ -9,6 +9,7 @@ using Vessel.Domain.Numerics;
 using Vessel.Domain.Sizing;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Common;
+using Vessel.Domain.Workspace;
 
 namespace Vessel.Application.Sizing;
 
@@ -115,21 +116,31 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
         // still reports it, but it is never scored as a position here, nor listed as one that could not be.
         var allocated = await store.AllocatedFillIdsAsync(ct);
         bool Allocated(ActivityOperationDto o) => allocated.Count > 0 && o.SourceFills.Any(f => allocated.Contains(f.Id));
-        var candidates = summaries.Operations.Where(o => Candidate(o) && !Allocated(o))
-            .Select(o => (Operation: o, Orders: o.SourceFills.Where(f => !string.IsNullOrWhiteSpace(f.ExternalOrderId))
-                .Select(OrderKey.Of).ToHashSet())).ToList();
-        var keys = candidates.SelectMany(c => c.Orders).ToHashSet();
-        HashSet<OrderKey> incomplete = [];
-        if (keys.Count > 0)
-        {
-            var retained = summaries.Facts.Fills.ToLookup(OrderKey.Of);
-            incomplete = (await store.OrdersAsync(keys, ct)).Where(o => keys.Contains(OrderKey.Of(o)) &&
-                ExecutionIntegrity.MissingExecutions(o, retained[OrderKey.Of(o)])).Select(OrderKey.Of).ToHashSet();
-        }
-        var complete = candidates.Where(c => !c.Orders.Overlaps(incomplete)).Select(c => c.Operation).ToList();
+        var candidates = summaries.Operations.Where(o => Candidate(o) && !Allocated(o)).ToList();
+        var missing = await MissingExecutionsAsync(candidates, summaries.Facts.Fills, store, ct);
+        var complete = candidates.Where(o => !missing.Contains(o)).ToList();
         var kept = new HashSet<ActivityOperationDto>(complete, ReferenceEqualityComparer.Instance);
         return (complete, summaries.Operations.Where(o => o.ClosedAtUtc is not null && o.Status is "closed" or "incomplete" && !kept.Contains(o) &&
             !Allocated(o)).ToList());
+    }
+
+    /// <summary>
+    /// Of these operations, the ones holding an execution of a filled fixed-size order whose retained executions (in or
+    /// outside the operation) fall short of its size, by the shared <see cref="OrderKey"/> and
+    /// <see cref="ExecutionIntegrity.MissingExecutions(ImportedOrder, IEnumerable{ImportedFill})"/> rules. Sizing, Review and
+    /// Overview leave them out alike. Fills without a retained order record cannot prove a missing execution.
+    /// </summary>
+    internal static async Task<IReadOnlySet<ActivityOperationDto>> MissingExecutionsAsync(IReadOnlyCollection<ActivityOperationDto> operations,
+        IEnumerable<ImportedFill> retainedFills, ISizingStore store, CancellationToken ct)
+    {
+        var orders = operations.Select(o => (Operation: o, Orders: o.SourceFills.Where(f => !string.IsNullOrWhiteSpace(f.ExternalOrderId))
+            .Select(OrderKey.Of).ToHashSet())).ToList();
+        var keys = orders.SelectMany(c => c.Orders).ToHashSet();
+        if (keys.Count == 0) return new HashSet<ActivityOperationDto>(ReferenceEqualityComparer.Instance);
+        var retained = retainedFills.ToLookup(OrderKey.Of);
+        var incomplete = (await store.OrdersAsync(keys, ct)).Where(o => keys.Contains(OrderKey.Of(o)) &&
+            ExecutionIntegrity.MissingExecutions(o, retained[OrderKey.Of(o)])).Select(OrderKey.Of).ToHashSet();
+        return orders.Where(c => c.Orders.Overlaps(incomplete)).Select(c => c.Operation).ToHashSet<ActivityOperationDto>(ReferenceEqualityComparer.Instance);
     }
 
     private static bool Candidate(ActivityOperationDto operation) =>

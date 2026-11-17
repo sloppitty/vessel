@@ -44,28 +44,9 @@ public sealed class GoldenJournalTests
     }
 
     /// <summary>Section 7.2: Overview leaves out P6, whose entry order misses an execution, as Review and Sizing do.</summary>
-    [Fact(Skip = "#93: Overview counts P6 (+3), an operation with a known missing execution, so it shows 10.81 and Swing 14.1.")]
-    public async Task Overview_realized_equals_activity_closed_nets_minus_known_missing_executions()
-    {
-        var s = Screens;
-        var activity = (await s.Activity.PageAsync(new(PageSize: "100"), default)).Operations.Where(o => o.Status == "closed").ToList();
-        var missing = activity.Where(o => o.PlayId == j.Play["P6"].Id).ToList();
-        var overview = await s.Overview.GetAsync("portfolio", "all", "all", default);
-        var realized = overview.Totals.RealizedResult;
-        Assert.Equal(("7.81", 8, 2), (realized.AmountUsd, realized.Coverage.ContributingOperationCount, realized.Coverage.ExcludedOperationCount));
-        Assert.Equal([("Swing", "11.1"), ("Unassigned", "-3.29")], overview.Rows.Select(r => (r.Name, r.Totals.RealizedResult.AmountUsd)));
-        Assert.Equal(GoldenJournalChecks.ExactSum(activity.Select(o => o.NetResultUsd)) - GoldenJournalChecks.ExactSum(missing.Select(o => o.NetResultUsd)),
-            GoldenJournalChecks.ExactSum([realized.AmountUsd]));
-        // With the same rule, Review with positions equals Overview realized: both leave out P6 and X1, and nothing else.
-        var review = await s.Review.GetAsync(new(Period: "all", Positions: "include"), default);
-        Assert.Equal(realized.AmountUsd, review.Metrics.Net);
-        foreach (var scope in new[] { $"portfolio:{j.Swing.Id}", $"account:{j.Gross.Id}" })
-        {
-            var scoped = await s.Overview.GetAsync("portfolio", "all", scope, default);
-            Assert.Equal(GoldenJournalChecks.ExactSum(activity.Where(o => o.AccountId == j.Gross.Id && o.PlayId != j.Play["P6"].Id)
-                .Select(o => o.NetResultUsd)), GoldenJournalChecks.ExactSum([scoped.Totals.RealizedResult.AmountUsd]));
-        }
-    }
+    [Fact]
+    public Task Overview_realized_equals_activity_closed_nets_minus_known_missing_executions() =>
+        GoldenJournalChecks.OverviewRealizedAsync(j, Screens);
 
     /// <summary>Section 7.4: SOL-S closes exactly on D(7); the rolling-period rule decides whether it is in, but once for all.</summary>
     [Fact(Skip = "#125: Activity and Overview count SOL-S, which closed exactly on the 7-day boundary; Review's week leaves it out.")]
