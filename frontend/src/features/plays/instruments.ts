@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
 import type { BrokerAccount, InstrumentCatalog, VenueInstrument, WorkspaceApi } from '@/api/workspace'
-import { errorMessage } from '@/api/errors'
+import { ApiError } from '@/api/errors'
+import { useApiRead } from '@/lib/use-api-read'
 import { useVenues } from '@/api/venues'
 
 /** Trading pair label, e.g. BTC/USDC, or GOLD/USDC for a contract the venue labels. */
@@ -30,36 +30,15 @@ export interface InstrumentCatalogState {
 /** Venue catalogue of the account's perpetuals, read once per account and on retry. */
 export function useInstrumentCatalog(api: WorkspaceApi, account: BrokerAccount | undefined): InstrumentCatalogState {
   const venues = useVenues()
-  const [generation, setGeneration] = useState(0)
-  const [result, setResult] = useState<{
-    api: WorkspaceApi; accountId: string; generation: number
-    catalog: InstrumentCatalog | null; error: string | null
-  } | null>(null)
   const venueId = account?.venueId ?? ''
   const hasCatalogue = venues.can(venueId, 'instruments')
   const accountId = account?.isEnabled !== false && hasCatalogue ? account!.id : null
-  const current = result?.api === api && result.accountId === accountId && result.generation === generation ? result : null
+  const read = useApiRead(api, JSON.stringify([accountId, venueId]), (client, signal) => client.instruments(accountId!, signal).then(catalog => {
+    if (catalog.venueId !== venueId || catalog.scope !== 'venue-perpetuals') throw new ApiError('invalid-response', 'The catalogue does not match the selected venue.')
+    return catalog
+  }), { fallback: 'The venue catalogue could not be loaded.', enabled: accountId !== null })
 
-  useEffect(() => {
-    if (accountId === null) return
-    const controller = new AbortController()
-    let active = true
-    api.instruments(accountId, controller.signal).then(catalog => {
-      if (!active) return
-      const matches = catalog.venueId === venueId && catalog.scope === 'venue-perpetuals'
-      setResult({ api, accountId, generation, catalog: matches ? catalog : null,
-        error: matches ? null : 'The catalogue does not match the selected venue.' })
-    }).catch(cause => {
-      if (active) setResult({ api, accountId, generation, catalog: null,
-        error: errorMessage(cause, 'The venue catalogue could not be loaded.') })
-    })
-    return () => { active = false; controller.abort() }
-  }, [api, accountId, generation, venueId])
-
-  return {
-    accountId, catalog: current?.catalog ?? null, error: current?.error ?? null,
-    loading: accountId !== null && current === null, retry: () => setGeneration(value => value + 1),
-  }
+  return { accountId, catalog: read.data, error: read.error, loading: read.loading, retry: read.reload }
 }
 
 /** Enough for any one category or source; the columns narrow the rest. */

@@ -2,6 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { PreflightCheck } from '@/api/plays'
 import type { LossLimits, LossWindow } from '@/api/risk'
 import type { WorkspaceApi } from '@/api/workspace'
+import { useApiRead } from '@/lib/use-api-read'
 import { exactDecimal, exactFixed } from '@/lib/decimal'
 
 /*
@@ -36,15 +37,8 @@ export function useLossLimits(api: WorkspaceApi, enabled: boolean, reloadKey: un
   const changed = useSyncExternalStore(subscribe, currentGeneration, currentGeneration)
   const [expired, setExpired] = useState(0)
   const key = JSON.stringify([reloadKey, changed, expired])
-  const [state, setState] = useState<{ api: WorkspaceApi; key: string; load: LossLimitsLoad } | null>(null)
-  useEffect(() => {
-    if (!enabled) return
-    const controller = new AbortController()
-    api.lossLimits(controller.signal).then(value => { if (!controller.signal.aborted) setState({ api, key, load: { value } }) })
-      .catch(() => { if (!controller.signal.aborted) setState({ api, key, load: { failed: true } }) })
-    return () => controller.abort()
-  }, [api, enabled, key])
-  const load = enabled && state?.api === api && state.key === key ? state.load : null
+  const read = useApiRead(api, key, (client, signal) => client.lossLimits(signal), { fallback: 'The loss limits could not be read.', enabled })
+  const load: LossLimitsLoad | null = read.data ? { value: read.data } : read.error !== null ? { failed: true } : null
   // Today's loss ends at the reporting midnight and the week's at its end: read again then. A sleeping tab's timer fires
   // late, so returning to the tab after the end reads again too (Sol round 1 on 10b).
   const ends = load && 'value' in load ? Math.min(Date.parse(load.value.day.toUtc), Date.parse(load.value.week.toUtc)) : null

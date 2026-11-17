@@ -13,6 +13,7 @@ import { isPageSize } from '@/components/ui/paging'
 import { Skeleton, SkeletonStatus } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDelayedFlag } from '@/lib/use-delayed-flag'
+import { useApiRead } from '@/lib/use-api-read'
 import { useNotifications } from '@/components/notifications/notifications'
 import { preloadLightweightRenderer } from '@/components/chart/lazy'
 import { useVenues } from '@/api/venues'
@@ -916,22 +917,17 @@ function PlayList({ api, accounts, busy, reloadGeneration, unsaved, list, onList
     adopted.current = rows.key
     onList({ ...list, page: rows.page.page })
   }, [api, list, onList, rows, rowsKey])
-  const countsKey = JSON.stringify([list.q, generation, reloadGeneration])
-  const [counts, setCounts] = useState<{ api: WorkspaceApi; key: string; counts: PlayCounts | null } | null>(null)
-  useEffect(() => {
-    const controller = new AbortController()
-    const q = (JSON.parse(countsKey) as [string, number, number])[0]
-    api.playCounts(q ? { q } : {}, controller.signal).then(next => { if (!controller.signal.aborted) setCounts({ api, key: countsKey, counts: next }) })
-      .catch(() => { if (!controller.signal.aborted) setCounts({ api, key: countsKey, counts: null }) })
-    return () => controller.abort()
-  }, [api, countsKey])
+  // Tab counts follow the search text and every finished owner action or accepted reload; a failed read shows none.
+  const q = list.q
+  const counts = useApiRead(api, q, (client, signal) => client.playCounts(q ? { q } : {}, signal),
+    { fallback: '', reloadKey: JSON.stringify([generation, reloadGeneration]) })
 
   const pending = rows === null || rows.api !== api || rows.key !== rowsKey && rows.requested !== rowsKey
   const previous = rows?.api === api ? rows.page ?? null : null
   const shown = pending ? previous : rows.page ?? null
   const error = pending ? null : rows.error ?? null
   const skeleton = useDelayedFlag(pending && previous === null)
-  const tabCounts = counts?.api === api && counts.key === countsKey ? counts.counts : null
+  const tabCounts: PlayCounts | null = counts.data
   const top = useRef<HTMLDivElement | null>(null)
   const accountName = (id: string) => accounts.find(account => account.id === id)?.name ?? 'Unknown account'
 
