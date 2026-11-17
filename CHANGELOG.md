@@ -35,6 +35,10 @@
 - A tab left open across an upgrade now shows a "New version" notice with a Reload button,
   and a read that fails because the versions differ says to reload where it used to report
   incompatible data. Reload asks first while Play work is unsaved.
+- A refresh with an incomplete position read (for example an unreadable Hyperliquid builder
+  DEX) no longer shows 0 positions and $0 unrealized P&L. They read as unknown with a reason
+  until the next complete read, and Activity draws no snapshot conclusions from an
+  incomplete read.
 
 ### Changed
 
@@ -51,7 +55,14 @@
   responses with fields missing. Those fallbacks existed for older API versions, which the
   version notice now covers.
 
-No migrations and no configuration changes.
+Migrations: stop the API and every worker, back up, then apply the journal migrations with
+the explicit migration service before starting the updated images. The updated API and
+workers need these columns, so they must not start against an unmigrated database.
+
+- `20261117090000_SnapshotPositionsComplete` adds `PositionsComplete` to account snapshots.
+  It is additive and existing snapshots stay complete.
+
+No configuration changes.
 
 ## 0.4.2 - November 7, 2026
 
