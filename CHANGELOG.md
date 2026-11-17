@@ -28,6 +28,10 @@
   exact value with exact zero neutral.
 - With imported positions counted, Review labels the weighted figures as weighted and counts
   "results" where positions are included.
+- Monitor: a history gap or an omitted execution no longer switches off the "no stop at all"
+  check. A gap now affects only Plays that started before it ended, and an omission only its
+  own contract; quantity comparisons stay unknown where the gap applies. Accounts that
+  already hold a gap can raise a missing-stop critical after the upgrade.
 
 ### Changed
 

@@ -67,13 +67,14 @@ public sealed partial class MonitorPostgresTests
 
     /// <summary>
     /// Negative control for the probe: after a long pause, a capped Refresh whose oldest raw fill is newer than everything
-    /// retained records a real gap. The next checks surface it and suppress missing and short protection; later
-    /// uncapped reads and Refreshes never clear it. The uncapped variant shows the same Play would be flagged.
+    /// retained records a real gap. The next checks surface it and keep the quantity checks (short protection) unknown;
+    /// later uncapped reads and Refreshes never clear it. Since #94 the gap no longer hides the Play's missing stop: the
+    /// book and the venue position decide it, as in the uncapped variant.
     /// </summary>
     [PostgresTheory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task Phase0_a_capped_refresh_after_a_pause_records_a_sticky_gap_that_suppresses_protection(bool capped)
+    public async Task Phase0_a_capped_refresh_after_a_pause_records_a_sticky_gap_that_keeps_quantities_unknown(bool capped)
     {
         await using var database = await DiscrepancyDatabase.Create();
         var f = new DiscrepancyFixture();
@@ -141,7 +142,7 @@ public sealed partial class MonitorPostgresTests
             return;
         }
         Assert.Equal(("degraded", true, GapError), (row.State, row.HasHistoryGap, row.Error));
-        Assert.Empty(await Protection());
+        Assert.Equal([("protection.missing", "open")], (await Protection()).Select(x => (x.Kind, x.State)).ToArray());
 
         // An uncapped Refresh and another check do not clear it either.
         f.Advance((int)options.ManualCooldown.TotalSeconds + 1);
@@ -150,7 +151,7 @@ public sealed partial class MonitorPostgresTests
         await CheckWhenDue();
         row = await Row();
         Assert.Equal(("degraded", true, GapError), (row.State, row.HasHistoryGap, row.Error));
-        Assert.Empty(await Protection());
+        Assert.Equal([("protection.missing", "open")], (await Protection()).Select(x => (x.Kind, x.State)).ToArray());
     }
 
     /// <summary>With nothing retained and no watermark, a capped first import has no earlier fill to be discontinuous with.</summary>

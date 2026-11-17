@@ -55,11 +55,12 @@ public sealed partial class MonitorDiscrepancyService
     /// <summary>
     /// A Play's facts. <paramref name="Fills"/> to <paramref name="Valid"/> come from its linked orders alone: the position
     /// comparison keeps reading them (Phase 2, item 11, accepted). <paramref name="Protection"/> applies the allocation read
-    /// rule for the protection checks.
+    /// rule for the protection checks. <paramref name="Started"/> is the earliest time any of its executions can have (#94):
+    /// the earliest placement of its linked orders or of its fills; null when a linked order is not retained or it has none.
     /// </summary>
     private sealed record PlayFacts(Play Play, PlayPlanDocument Plan, VenueInstrument Instrument,
         PlayOrderLink[] Links, LinkedFill[] Fills, ExactAmount Quantity, DateTimeOffset? FirstEntry,
-        DateTimeOffset? LastFill, bool Valid, ProtectionFacts Protection);
+        DateTimeOffset? LastFill, bool Valid, ProtectionFacts Protection, DateTimeOffset? Started);
     /// <summary>
     /// The quantity the protection checks compare stops with (Sol round 1 on item 11): the Play's fills by the allocation read
     /// rule (<see cref="FillAllocations"/>), so a flip's entry line opens a Play and a shared exit's line closes only its part.
@@ -75,10 +76,20 @@ public sealed partial class MonitorDiscrepancyService
 
     private Scan Observe(MonitorEvaluation observation, MonitorDiscrepancyFacts facts, DateTimeOffset now)
     {
-        // Executions the adapter knowingly omitted may belong to any Play or be unlinked: fill-derived quantities and
-        // the unlinked-fill check are unknown, exactly as with a fill-window gap.
+        // Executions the adapter knowingly omitted may belong to any Play on their contract or be unlinked: there,
+        // fill-derived quantities and the unlinked-fill check are unknown, exactly as with a fill-window gap. Either still
+        // leaves the run incomplete.
         var gap = observation.HistoryGap || observation.Read.Sync.OmittedExecutions > 0;
         var scan = new Scan { Incomplete = gap || !facts.Complete };
+        // #94: an omission reaches only its own contract, unless one counted omission does not name its contract.
+        var omissions = observation.Read.Sync.Omissions;
+        var omittedContracts = omissions.Count >= observation.Read.Sync.OmittedExecutions && omissions.All(x => x.ContractId is not null)
+            ? omissions.Select(x => x.ContractId!).ToHashSet(StringComparer.Ordinal) : null;
+        bool Omitted(string contract) => observation.Read.Sync.OmittedExecutions > 0 && (omittedContracts is null || omittedContracts.Contains(contract));
+        // #94: a history gap reaches only the Plays that started no later than its end; with an unknown end, every Play.
+        bool HistoryGapped(PlayFacts p) => observation.HistoryGap &&
+            (observation.HistoryGapEndUtc is not { } end || p.Started is not { } started || started <= end);
+        bool Gapped(PlayFacts p) => HistoryGapped(p) || Omitted(p.Instrument.ContractId);
         if (!facts.Complete) return scan;
         scan.Coverage = [];
         // Without a current book (the venue capability), no order is ever seen resting and absence proves nothing: the
@@ -159,10 +170,13 @@ public sealed partial class MonitorDiscrepancyService
             var entered = counted.Where(x => x.Role == OrderLinkRole.Entry).ToArray();
             var quantity = ExecutionIntegrity.Quantity(entered.Select(x => x.Fill)) - ExecutionIntegrity.Quantity(counted.Where(x => x.Role != OrderLinkRole.Entry).Select(x => x.Fill));
             if (play.Status == PlayStatus.Open && (entered.Length == 0 || quantity.Units.Sign <= 0)) valid = false;
+            var protection = Protect(play, plan, instrument, links, linkMap, missing.ToArray());
+            var placed = links.Select(l => Retained(l)?.PlacedAtUtc).ToArray();
+            var times = placed.OfType<DateTimeOffset>().Concat(fills.Concat(protection.Fills).Select(x => x.Fill.OccurredAtUtc)).ToArray();
             plays.Add(new(play, plan, instrument, links, fills, quantity,
                 entered.Length == 0 ? null : entered.Min(x => x.Fill.OccurredAtUtc),
-                fills.Length == 0 ? null : fills.Max(x => x.Fill.OccurredAtUtc), valid,
-                Protect(play, plan, instrument, links, linkMap, missing.ToArray())));
+                fills.Length == 0 ? null : fills.Max(x => x.Fill.OccurredAtUtc), valid, protection,
+                placed.Any(x => x is null) || times.Length == 0 ? null : times.Min()));
         }
 
         // Sol round 1 on item 11: the protection checks read a Play's fills by the allocation read rule. Without allocations
@@ -204,8 +218,11 @@ public sealed partial class MonitorDiscrepancyService
             var involved = onInstrument.Where(x => x.Play.Status == PlayStatus.Open).OrderBy(x => x.Play.Id).ToArray();
             var ids = involved.Select(x => x.Play.Id).ToArray();
             var positions = positionsByContract[instrument.ContractId].ToArray();
+            // #94: a gap leaves the expected position and the unlinked fills unknown only where it reaches: an omission on this
+            // contract, or a history gap reaching an Open Play here. Fills it may hide predate every unaffected Play's start.
+            var instrumentGap = Omitted(instrument.ContractId) || involved.Any(HistoryGapped);
             // A Play that closed after the snapshot (now terminal, so not expected) can still be in the venue position.
-            var valid = positionsFresh && !gap && instrument.QuantityDecimals is >= 0 and <= 28 &&
+            var valid = positionsFresh && !instrumentGap && instrument.QuantityDecimals is >= 0 and <= 28 &&
                 involved.All(x => x.Valid && x.LastFill <= snapshotAt) && onInstrument.All(x => !(x.LastFill > snapshotAt)) &&
                 positions.Length <= 1 && positions.All(x => Same(instrument, x.ContractId, x.VenueContractId));
             var expected = involved.Aggregate(default(ExactAmount), (sum, p) => sum + (p.Plan.Direction == "long" ? p.Quantity : -p.Quantity));
@@ -244,7 +261,7 @@ public sealed partial class MonitorDiscrepancyService
             // A retained positive fact remains unlinked even after leaving the bounded recent venue window.
             // Linking/suggestion is local evidence of resolution; absence from recent fills never is.
             var ambiguousFills = after.Length != unlinked.Length;
-            var fillKnown = assignmentsComplete && Fresh(snapshotAt) && !gap && !ambiguousFills && involved.All(x => x.Valid) &&
+            var fillKnown = assignmentsComplete && Fresh(snapshotAt) && !instrumentGap && !ambiguousFills && involved.All(x => x.Valid) &&
                 !truncatedFills.Contains(instrument.ContractId) && unlinked.All(x => x.OccurredAtUtc <= snapshotAt);
             // Details stay bounded for any number of fills; the fingerprint still covers every fill ID.
             // A fill gap leaves fill-derived checks unknown, not the current position: kept accounts often have gaps.
@@ -304,7 +321,8 @@ public sealed partial class MonitorDiscrepancyService
             var completeOrders = knownOrders && orders!.OpenOrdersComplete;
             // Sol round 1 on item 11: protection compares stops with the Play's own part, allocations included.
             var guarded = p.Protection;
-            var freshQuantity = guarded.Valid && !gap && guarded.LastFill <= at;
+            var playGap = Gapped(p);
+            var freshQuantity = guarded.Valid && !playGap && guarded.LastFill <= at;
             var resting = scoped.Where(x => Resting(x.Order)).ToArray();
             // A stop on the entry side closes nothing of this exposure: a sell stop covers a long, a buy stop a short.
             var exitSide = ExecutionMatcher.ExitSide(p.Plan);
@@ -367,24 +385,47 @@ public sealed partial class MonitorDiscrepancyService
             // Without a current book a missing stop is never decided, so the grace deadline needs no confirmation run.
             if (bookRead && open && graceAt > at) scan.Next = Earlier(scan.Next, graceAt.Value);
 
+            // Phase 2, item 8b and #94: only the position in the Play's direction describes its exposure. An opposite one
+            // leaves the checks that read it undecided; a fresh read with neither proves the Play's position is gone.
+            var onInstrument = positionsFresh ? sync.Snapshot.Positions.Where(x => x.SignedQuantity != 0 &&
+                Same(p.Instrument, x.ContractId, x.VenueContractId)).ToArray() : [];
+            var playLong = exitSide == ExecutionFacts.Sell;
+            var venuePosition = onInstrument.FirstOrDefault(x => playLong ? x.SignedQuantity > 0 : x.SignedQuantity < 0);
+            var opposite = venuePosition is null && onInstrument.Length > 0;
+
             var cancelled = scoped.Where(x => x.Link.Role == OrderLinkRole.Stop && x.Order?.Status == VenueOrderStatus.Canceled).ToArray();
             var filled = p.Fills.Select(x => OrderKey.Of(x.Fill)).ToHashSet();
             bool Filled(PlayOrderLink link) => Retained(link) is { } order && filled.Contains(OrderKey.Of(order));
             var cancelKnown = cancelled.All(x => Filled(x.Link) ||
                 x.Order!.OriginalSize > 0 && x.Order.RemainingSize == x.Order.OriginalSize);
-            bool? cancelledPresent = !open ? completeOrders ? false : null : !stopPresenceKnown ? null :
-                cancelled.All(x => Filled(x.Link)) ? false : !cancelKnown || !stopCoverageKnown ? null :
-                Compare(stopQuantity, guarded.Quantity, p.Instrument) < 0;
+            // #94: a gap leaves only this Play's quantity unknown. Whether any linked stop rests at all is the complete,
+            // fresh book's answer, and whether the Play is exposed is the fresh venue position's in its direction, so with no
+            // resting stop at all neither check needs the fills. Anything less than that evidence stays unknown.
+            var bare = open && playGap && completeOrders && mechanicsKnown && stops.Length == 0 && !siblingWholeStop && venuePosition is not null;
+            bool? cancelledPresent = !open ? completeOrders ? false : null :
+                stopPresenceKnown ? cancelled.All(x => Filled(x.Link)) ? false : !cancelKnown || !stopCoverageKnown ? null :
+                    Compare(stopQuantity, guarded.Quantity, p.Instrument) < 0 :
+                !bare ? null : cancelled.All(x => Filled(x.Link)) ? false : cancelKnown ? true : null;
             // A cancelled stop explains the same gap; it supersedes missing and short protection.
             var superseded = cancelledPresent == true;
-            Add("protection.cancelled", cancelledPresent, stopPresenceKnown && cancelKnown && mechanicsKnown && structural);
-            bool? missing = !open ? completeOrders ? false : null : !stopPresenceKnown ? null : superseded || stops.Length > 0 ? false :
-                !mechanicsKnown ? null : siblingWholeStop ? shared ? false : null : graceAt <= at;
+            // Under a gap the venue position makes the bare case present, so it also rests on the snapshot.
+            var bareEarliest = bare && snapshotAt < at ? snapshotAt : (DateTimeOffset?)null;
+            // The bare case confirms on its condition (a cancelled, unfilled stop and none resting), like protection.missing:
+            // an entry that keeps filling changes the fingerprint's quantity, and restarting would let superseded hide the
+            // no-stop critical indefinitely. Without a gap it confirms on its evidence as before.
+            Add("protection.cancelled", cancelledPresent, stopPresenceKnown && cancelKnown && mechanicsKnown && structural,
+                onCondition: bare, earliest: bareEarliest);
+            bool? missing = !open ? completeOrders ? false : null :
+                stopPresenceKnown ? superseded || stops.Length > 0 ? false : !mechanicsKnown ? null : siblingWholeStop ? shared ? false : null :
+                    graceAt <= at :
+                // #94: under a gap a resting linked stop still proves one rests; its size is protection.short's question.
+                // The known first entry is no earlier than the real one, so its grace having passed is enough.
+                !playGap || !completeOrders ? null : superseded || stops.Length > 0 ? false : bare && graceAt <= at ? true : null;
             // Phase 2, D-19 follow-up (owner, October 23): a missing stop confirms on its condition (an open quantity past the
             // grace with no resting stop covering it), so an entry that keeps filling after the grace still confirms; the
-            // fingerprint keeps the quantities. Only the linked fills and the book make it present: the one snapshot-dependent
-            // case, a sibling's whole-position stop, never does, so it needs no earliest source time.
-            Add("protection.missing", missing, stopPresenceKnown && mechanicsKnown && structural, onCondition: true);
+            // fingerprint keeps the quantities. Without a gap only the linked fills and the book make it present: the one
+            // snapshot-dependent case, a sibling's whole-position stop, never does. Under a gap (#94) the snapshot does.
+            Add("protection.missing", missing, stopPresenceKnown && mechanicsKnown && structural, onCondition: true, earliest: bareEarliest);
             // Phase 2, D-19: a persistent undersized stop confirms on its condition (this Play's linked stop covers less than its
             // open quantity), so a position or stop that keeps changing still confirms. Its fingerprint and details keep the
             // quantities, so an open record shows the latest and a dismissed one reopens only on changed evidence.
@@ -394,13 +435,8 @@ public sealed partial class MonitorDiscrepancyService
             // Phase 2, item 8b: a resting linked stop at or beyond the venue's own liquidation price on the loss side cannot act
             // before liquidation. Only the venue's reported price counts, from this read's fresh snapshot; when the venue
             // reports none the check is undecidable by design. Under cross margin the price moves with the whole account.
-            // Sol round 1 on #42: only the position in the Play's direction describes its exposure. An opposite one leaves this
-            // check undecided (position.opposite reports it); a fresh read with neither proves the Play's position is gone.
-            var onInstrument = positionsFresh ? sync.Snapshot.Positions.Where(x => x.SignedQuantity != 0 &&
-                Same(p.Instrument, x.ContractId, x.VenueContractId)).ToArray() : [];
-            var playLong = exitSide == ExecutionFacts.Sell;
-            var venuePosition = onInstrument.FirstOrDefault(x => playLong ? x.SignedQuantity > 0 : x.SignedQuantity < 0);
-            var opposite = venuePosition is null && onInstrument.Length > 0;
+            // Sol round 1 on #42: only the position in the Play's direction describes its exposure (see venuePosition above). An
+            // opposite one leaves this check undecided (position.opposite reports it).
             var liquidation = venuePosition?.LiquidationPrice;
             var beyond = liquidation is { } limit ? stops.Where(x => playLong
                 ? x.Order!.ActingPrice <= limit : x.Order!.ActingPrice >= limit).ToArray() : [];
@@ -461,8 +497,8 @@ public sealed partial class MonitorDiscrepancyService
             // allocate), which is unknown, never missing; a whole-position stop covering several same-direction Plays is shared.
             var (state, covered, reason) =
                 !bookRead ? (MonitorCoverageStates.Unsupported, (bool?)null, "current-book-not-read") :
-                observation.HistoryGap ? (MonitorCoverageStates.Unknown, null, "history-gap") :
-                sync.OmittedExecutions > 0 ? (MonitorCoverageStates.Unknown, null, "omitted-executions") :
+                HistoryGapped(p) ? (MonitorCoverageStates.Unknown, null, "history-gap") :
+                Omitted(p.Instrument.ContractId) ? (MonitorCoverageStates.Unknown, null, "omitted-executions") :
                 !guarded.Valid ? (MonitorCoverageStates.Unknown, null, "quantity-unknown") :
                 orders is null ? (MonitorCoverageStates.Unknown, null, "orders-unavailable") :
                 !ordersFresh ? (MonitorCoverageStates.Unknown, null, "stale-order-read") :

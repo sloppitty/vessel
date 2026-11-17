@@ -24,6 +24,10 @@ internal sealed class DiscrepancyFixture
     public bool PositionsComplete = true, OrdersComplete = true, HistoryGap, StampOpenOrders = true, Retired, CurrentOrderBook = true;
     public bool? Truncated;
     public int Omitted;
+    /// <summary>The omissions the read lists (#94); empty leaves <see cref="Omitted"/> unattributed, so account-wide.</summary>
+    public readonly List<VenueOmission> Omissions = [];
+    /// <summary>With <see cref="HistoryGap"/>, the latest end of the open gaps (#94); null reaches every Play.</summary>
+    public DateTimeOffset? HistoryGapEnd;
     public TimeSpan ObservationOffset;
     public DiscrepancyFixture()
     {
@@ -89,8 +93,8 @@ internal sealed class DiscrepancyFixture
         var at = Clock.Now + ObservationOffset;
         return new(Guid.NewGuid(), Account, new(new(new(at, "primary-perpetuals", 100, 100, 0,
             Position == 0 || Retired ? [] : [new("BTC", Position, 100, 0, 0, 1, LiquidationPrice: Liquidation, MarginMode: MarginMode)]), Retired ? [] : [new("BTC", 4, 10, "USDC", PriceStep)], [], "bounded",
-            PositionsComplete, false, Truncated, OmittedExecutions: Omitted), new(VenueOrders.Select(x => StampOpenOrders && x.Status == VenueOrderStatus.Open ? x with { StatusAtUtc = at } : x).ToArray(), at, "bounded", OrdersComplete)),
-            null, null, HistoryGap, "scheduled", CurrentOrderBook);
+            PositionsComplete, false, Truncated, OmittedExecutions: Omitted) { Omissions = Omissions.ToArray() }, new(VenueOrders.Select(x => StampOpenOrders && x.Status == VenueOrderStatus.Open ? x with { StatusAtUtc = at } : x).ToArray(), at, "bounded", OrdersComplete)),
+            null, null, HistoryGap, "scheduled", CurrentOrderBook, HistoryGapEndUtc: HistoryGapEnd);
     }
     public Task<MonitorEvaluationResult> Evaluate() => Service.EvaluateAsync(Observation(), default);
     public async Task Confirm() { await Evaluate(); Advance(60); await Evaluate(); }

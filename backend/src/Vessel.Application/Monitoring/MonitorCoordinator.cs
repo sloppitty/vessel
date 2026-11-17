@@ -426,7 +426,8 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             // other comparisons would flag every untracked position.
             var compare = protection || await store.ProtectionEligibleAsync(account.Id, now, ct);
             var evaluation = evaluator is null ? new MonitorEvaluationResult(null) : await evaluator.EvaluateAsync(
-                new(lease.RequestId, account, read, previousSuccess, previousFill, gap, lease.Trigger, currentBook, compare), ct);
+                new(lease.RequestId, account, read, previousSuccess, previousFill, gap, lease.Trigger, currentBook, compare,
+                    gap ? await GapEndAsync(account.Id, ct) : null), ct);
             if (evaluation.Coverage is { } coverage)
                 await store.SaveCoverageAsync(account.Id, coverage.Select(x => new MonitorCoverage
                 {
@@ -760,6 +761,21 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     /// Phase 2, item 6: one import's coverage by the 0.4b rule, in the unit that retains its fills. An import of unknown
     /// truncation records its request only.
     /// </summary>
+    /// <summary>
+    /// #94: the latest end of the account's open gaps (an unknown end is bounded by the latest import that found it), or
+    /// null when the gap flag has no open gap to bound it, so the gap reaches every Play.
+    /// </summary>
+    private async Task<DateTimeOffset?> GapEndAsync(Guid accountId, CancellationToken ct)
+    {
+        DateTimeOffset? latest = null;
+        foreach (var gap in await store.OpenGapsAsync(accountId, ct))
+        {
+            var end = gap.ToUtc ?? await store.GapEndBoundAsync(gap, ct);
+            if (latest is null || end > latest) latest = end;
+        }
+        return latest;
+    }
+
     private Task RecordCoverageAsync(Account account, string source, PerpetualVenueReadResult read, DateTimeOffset? boundary,
         CancellationToken ct) => store.RecordCoverageAsync(FillCoverageRecord.For(owner.OwnerId, account.Id, source,
             read.Snapshot.ObservedAtUtc, read.FillHistoryTruncated, read.FillHistoryComplete, read.OldestRawFillAtUtc, boundary), ct);
