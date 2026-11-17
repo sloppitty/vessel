@@ -14,6 +14,7 @@ import { isAccountMonitor, isMonitorEventPage, isMonitorRunAccepted, isMonitorSu
 import { candleIntervals, type CandleInterval } from './candles'
 import { ApiError } from './errors'
 import { createApiCall, type AuthFailure, type SessionCredentials } from './request'
+import { hasVersion } from './version'
 import { authErrorMessage } from './auth'
 import { emitApiEvent } from './events'
 import { isImportedFill, type ImportedFill } from './fills'
@@ -363,6 +364,8 @@ export interface CreateAccount {
 export interface WorkspaceApi {
   readonly tradingMode?: TradingMode
   forTradingMode?(mode: TradingMode): WorkspaceApi
+  /** The API's version from `/api/system`, for the version handshake on stream reconnects. */
+  apiVersion?(signal?: AbortSignal): Promise<string>
   paperSettings(signal?: AbortSignal): Promise<PaperSettings>
   savePaperSettings(settings: PaperSettings): Promise<PaperSettings>
   paperState(id: string, signal?: AbortSignal): Promise<PaperPlayState>
@@ -779,6 +782,7 @@ export function createWorkspaceApi(credentials: SessionCredentials, onAuthFailur
   const api: WorkspaceApi = {
     tradingMode: tradingMode ?? 'real',
     forTradingMode: mode => createWorkspaceApi(credentials, onAuthFailure, mode),
+    apiVersion: async signal => (await rawCall('/api/system', { ...workspaceRequest, timeout: 8_000, validate: hasVersion, versionCheck: true, ...withSignal(signal) })).version,
     paperSettings: signal => call('/api/paper/settings', { ...workspaceRequest, validate: isPaperSettings, ...withSignal(signal) }),
     savePaperSettings: settings => {
       if (!isPaperSettings(settings)) return Promise.reject(new ApiError('invalid-response', 'Use a whole paper check interval from 1 to 1440 minutes.'))

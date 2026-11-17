@@ -183,7 +183,7 @@ The development launch profile binds `http://127.0.0.1:5080`.
 
 - `GET /health/live` is anonymous liveness and does not prove database readiness.
 - `GET /api/auth/config` reports the registration policy; sign-in uses `/api/auth/challenge` and `/api/auth/verify` and sets an `HttpOnly` session cookie.
-- `GET /api/system` needs a session and reports foundation metadata, including perps scope and planned/manual venue statuses.
+- `GET /api/system` needs a session and reports foundation metadata, including the API version (compared with the web build's), perps scope and planned/manual venue statuses.
 - Requests without a session fail closed; a bearer header authenticates nobody. New unannotated endpoints have an authenticated fallback policy.
 - Development OpenAPI is also protected.
 

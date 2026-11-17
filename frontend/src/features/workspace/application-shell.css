@@ -96,6 +96,7 @@
 .shell-notice > svg { flex-shrink: 0; align-self: center; color: var(--warning); }
 .shell-notice strong { margin-right: 6px; color: var(--warning); font-weight: 600; }
 .shell-notice + .shell-notice { margin-top: 6px; }
+.shell-notice-action { flex-shrink: 0; align-self: center; margin-left: auto; }
 .shell-content { max-width: 1480px; min-height: 100dvh; margin: auto; padding: 38px 40px 28px; }
 
 /* ── Page heading ────────────────────────────────────────────────────────── */

@@ -1,5 +1,6 @@
 import { ApiError } from './errors'
 import { isGuid, isRecord, isText } from './guards'
+import { apiVersionMismatch, hasVersion, isPlaceholderVersion, reportApiVersion, versionMismatchMessage, webVersion } from './version'
 
 /**
  * How a call proves who it is. `session` rides the same-origin session cookie and binds the tab to its user with
@@ -58,6 +59,8 @@ interface RequestOptions {
   noContent?: string
   invalidJson?: string
   invalidData?: string
+  /** The version check's own read: a body it cannot use never starts another check. */
+  versionCheck?: boolean
   httpError?: (response: Response) => ApiError
   /** Copy for a ProblemDetails `code`; `undefined` keeps the status default. */
   codeMessage?: (code: string, status: number) => string | undefined
@@ -187,7 +190,7 @@ export function createApiCall(credentials: ApiCredentials, onUnauthorized?: (fai
         try { body = await response.json() } catch {
           throw new ApiError('invalid-response', options.safeError ?? options.invalidJson ?? 'The API returned invalid data.')
         }
-        if (!options.validate(body)) throw new ApiError('invalid-response', options.safeError ?? options.invalidData ?? 'The API returned incompatible workspace data.')
+        if (!options.validate(body)) throw await incompatible(options)
       }
       return { ok: true, value: body }
     } catch (error) {
@@ -195,6 +198,20 @@ export function createApiCall(credentials: ApiCredentials, onUnauthorized?: (fai
     } finally {
       clearTimeout(timer)
     }
+  }
+
+  /**
+   * A body this page cannot read may come from a server of another version, such as a tab left open across an
+   * upgrade. Then the answer says to reload, never that the data is incompatible.
+   */
+  async function incompatible(options: RequestOptions): Promise<ApiError> {
+    if (!options.versionCheck && apiVersionMismatch() === null && credentials.kind === 'session' && !isPlaceholderVersion(webVersion())) {
+      const outcome = await send('/api/system', { timeout: 8_000, validate: hasVersion, versionCheck: true, ...options.signal ? { signal: options.signal } : {} })
+      if (outcome.ok) reportApiVersion(outcome.value.version)
+    }
+    return apiVersionMismatch() !== null
+      ? new ApiError('invalid-response', versionMismatchMessage, undefined, undefined, 'version-mismatch')
+      : new ApiError('invalid-response', options.safeError ?? options.invalidData ?? 'The API returned incompatible workspace data.')
   }
 
   return async function call<T>(path: string, options: Options<T>): Promise<T> {

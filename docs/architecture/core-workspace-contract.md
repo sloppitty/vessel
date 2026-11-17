@@ -276,6 +276,18 @@ server by `GET`/`PUT /api/risk/settings`, blank by default. Settings has a
   neutral account statuses; paper rows do not claim a refresh timestamp or
   leverage observation. Simulation result/basis, execution-source, immutable
   capital, sizing-source and capability explanations remain.
+- November 17, 2026 (issue #112): the version handshake also uses this slot.
+  `/api/system` reports the API's `version` behind the session; the web build
+  states its `package.json` version (the Vite dev server and tests report a
+  placeholder). The shell compares them on load and whenever the event stream
+  reconnects, and a request whose body fails its guard reads the version once
+  before answering. Two differing release versions show a **New version**
+  strip (`role="status"`, before the Paper strip) naming both versions, with a
+  Reload button; the failing request says to reload instead of "incompatible
+  data". A placeholder (`development`, `unknown`, `0.0.0` or any non-release
+  string) on either side never shows it. Nothing reloads by itself; Reload asks
+  first while Play work is unsaved or in flight, as signing out does, and the
+  mismatch is kept until the page reloads.
 
 ### Trading mode lockup
 

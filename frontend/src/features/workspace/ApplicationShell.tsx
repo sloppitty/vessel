@@ -1,10 +1,12 @@
 import type { TradingMode } from '@/api/paper'
-import { createRef, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { createRef, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
 import { Tooltip } from 'radix-ui'
 import type { BrokerAccount, Overview, WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
 import { onApiEvent } from '@/api/events'
 import type { SystemInfo } from '@/api/system'
+import { apiVersionMismatch, onVersionMismatch, reportApiVersion, webVersion } from '@/api/version'
+import { reloadPage } from './reload-page'
 import { Button } from '@/components/ui/button'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { useNotifications } from '@/components/notifications/notifications'
@@ -310,7 +312,12 @@ function Shell({ system, disconnect, api, realApi, identity, tradingMode, paperA
   const notificationLink = useRef<(link: NotificationLink, followed?: () => void) => void>(() => {})
   const inApp = useInAppNotifications({ api: realApi, active: disconnectedApi !== api, realJournalNotice: tradingMode === 'paper',
     onLink: (link, followed) => notificationLink.current(link, followed), onOpenPage: () => openNotifications(true) })
-  const monitor = useMonitorEvents(realApi, disconnectedApi !== api, reload, reloadKey, inApp.handlers, tradingMode === 'real')
+  // The version handshake: the version read at sign-in, then again whenever the event stream reconnects, which an API
+  // restart forces. A differing release version shows the reload notice; nothing reloads by itself.
+  const updatedVersion = useSyncExternalStore(onVersionMismatch, apiVersionMismatch)
+  useEffect(() => { reportApiVersion(system.version) }, [system.version])
+  const checkVersion = useCallback(() => { realApi.apiVersion?.().then(reportApiVersion, () => undefined) }, [realApi])
+  const monitor = useMonitorEvents(realApi, disconnectedApi !== api, reload, reloadKey, inApp.handlers, tradingMode === 'real', checkVersion)
   // The persistent incident count: stored monitor records only, never notifications. Shared by the Plays entry and Overview.
   const incidents = useMemo(() => monitorIncidents(monitor.summary?.accounts ?? []), [monitor.summary])
   const incidentCounts = countIncidents(incidents, incidentsBeyondCap(monitor.summary?.accounts ?? []))
@@ -514,6 +521,23 @@ function Shell({ system, disconnect, api, realApi, identity, tradingMode, paperA
     exitState.current = null
     cancelRefresh(); setDisconnectedApi(api); setRequestedPlay(null); setPlaysSession(createPlaysSession()); disconnect()
   }
+  // Reloading discards the in-memory Play draft, so it asks first, as signing out does.
+  const reloadForUpdate = () => {
+    const current = exitState.current
+    if (current?.api === api && current.work === playsLifetime.work && (current.work.current || hasUnsavedPlayWork(current.session))) {
+      const message = current.work.current
+        ? 'A Play request is still in progress. Reload and discard unsaved work? Already-sent changes may still complete.'
+        : 'Reload and discard unsaved Play work?'
+      if (!window.confirm(message)) return
+      // Confirmed here: the page must not ask again as it unloads.
+      if (exitState.current === current) exitState.current = null
+    }
+    reloadPage()
+  }
+  const versionNotice: ShellNotice | null = updatedVersion === null ? null : {
+    id: 'version', title: 'New version.', announce: true, action: { label: 'Reload', onClick: reloadForUpdate },
+    message: `Vessel ${updatedVersion} is running on the server; this page is ${webVersion()}. Reload to use it. Unsaved Play work is kept until you do.`,
+  }
   const refreshAllAction = tradingMode === 'paper' ? null : <Button variant="outline" size="sm" onClick={() => { void refreshAll() }}
     disabled={refreshing !== null || loading || !refreshable.length} aria-busy={refreshProgress !== null}>
     <RefreshCw size={14} className={refreshProgress ? 'is-spinning' : ''} />
@@ -611,7 +635,7 @@ function Shell({ system, disconnect, api, realApi, identity, tradingMode, paperA
         <ShellBreadcrumb key={locationKey(trail.at(-1)!)} trail={trail.map(location => location.kind === 'account'
           ? { ...location, label: accounts.find(account => account.id === location.id)?.name || location.label } : location)} onVisit={visitCrumb} />
         <a href="#notifications" className="icon-button header-notifications" aria-label={notificationsName} title={notificationsName} onClick={event => { event.preventDefault(); openNotifications() }}><Bell size={18} aria-hidden="true" /><NotificationBadge count={unread} /></a></div>
-        <ShellNotices notices={tradingMode === 'paper' ? [paperNotice] : []} />
+        <ShellNotices notices={[...versionNotice ? [versionNotice] : [], ...tradingMode === 'paper' ? [paperNotice] : []]} />
       </header>
       <span className="sr-only" role="status" aria-live="polite">{announcement}</span>
       <main id="workspace-content" className="shell-content" tabIndex={-1}>

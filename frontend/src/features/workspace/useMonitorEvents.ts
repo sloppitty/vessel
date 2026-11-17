@@ -39,9 +39,10 @@ export interface NotificationStreamHandlers {
  * notification feed from it. Its cursor and resets are independent of the event cursor. A failed notification head
  * never holds stored reads: the stream opens without notifications and the head is retried on the fallback timer.
  * With `refreshWorkspace` false, only the real notification feed runs: no monitor summary reads or page reloads.
+ * `onReconnect` hears every stream that opens after an earlier one of this hook ended, such as after an API restart.
  */
 export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: () => void, generation: number,
-  notifications?: NotificationStreamHandlers, refreshWorkspace = true) {
+  notifications?: NotificationStreamHandlers, refreshWorkspace = true, onReconnect?: () => void) {
   const [head, setHead] = useState<{ api: WorkspaceApi; cursor: EventCursor | null } | null>(null)
   const [result, setResult] = useState<{ api: WorkspaceApi; summary: MonitorSummary } | null>(null)
   const [error, setError] = useState<{ api: WorkspaceApi; message: string } | null>(null)
@@ -50,7 +51,8 @@ export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: ()
   // A new reload callback must not reopen the stream (and reset its cursor or backoff).
   const latestReload = useRef(reload)
   const handlers = useRef(notifications)
-  useEffect(() => { latestReload.current = reload; handlers.current = notifications })
+  const latestReconnect = useRef(onReconnect)
+  useEffect(() => { latestReload.current = reload; handlers.current = notifications; latestReconnect.current = onReconnect })
   const withNotifications = notifications !== undefined
   // The first notification head for this API, or null when it could not be read.
   const [notificationHead, setNotificationHead] = useState<{ api: WorkspaceApi; cursor: NotificationCursor | null } | null>(null)
@@ -101,6 +103,7 @@ export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: ()
     let notificationCursor = notificationStart
     let connection: AbortController | null = null
     let headRequests = 0
+    let connections = 0
     let ready = false
     // A fallback reload ran while the stream was down; it may have failed, so the next clean connection reloads once.
     let reloadOnReady = false
@@ -147,6 +150,7 @@ export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: ()
           if (controller.signal.aborted) return
           if (!opened) {
             opened = true
+            if (connections++ > 0) latestReconnect.current?.()
             if (refusals) { refusals = 0; setNotice(null) }
             stable = setTimeout(() => { failures = 0 }, stableStream)
           }
