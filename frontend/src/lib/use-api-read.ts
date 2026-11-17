@@ -33,6 +33,8 @@ export interface ApiRead<T> {
 interface Settled<T> {
   api: unknown; key: unknown; reloadKey: unknown; count: number
   data: T | null; error: string | null; cause: unknown; latest: T | null
+  /** Set when the request that produced this ended its turn: a later request with the same parameters is not this one. */
+  superseded?: boolean
 }
 
 /**
@@ -57,12 +59,16 @@ export function useApiRead<A, T>(api: A, key: unknown, read: (api: A, signal: Ab
     pending.then(data => {
       if (!controller.signal.aborted) done(data, null, undefined)
     }, (cause: unknown) => { if (!controller.signal.aborted) done(null, failed(cause), cause) })
-    return () => controller.abort()
+    return () => {
+      controller.abort()
+      // Matching parameters do not identify a request: returning to an earlier key, or enabling again, starts a new one.
+      setSettled(previous => previous && !previous.superseded ? { ...previous, superseded: true } : previous)
+    }
   }, [api, key, reloadKey, count, enabled])
   const reload = useCallback(() => setCount(value => value + 1), [])
   if (!enabled) return { data: null, error: null, cause: undefined, loading: false, latest: null, reload }
   const own = settled?.api === api ? settled : null
-  const current = own && Object.is(own.key, key) && Object.is(own.reloadKey, reloadKey) && own.count === count ? own : null
+  const current = own && !own.superseded && Object.is(own.key, key) && Object.is(own.reloadKey, reloadKey) && own.count === count ? own : null
   const kept = !current && own && own.error === null && (keepPrevious === 'always' || keepPrevious === 'reload' && Object.is(own.key, key))
     ? own.data : null
   return {

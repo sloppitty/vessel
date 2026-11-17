@@ -146,6 +146,48 @@ describe('useApiRead', () => {
     expect(result.current).toMatchObject({ data: 'A', loading: true })
   })
 
+  it('loads again when the key returns to an earlier one before the other settles', async () => {
+    const { api, calls } = deferredApi()
+    const { result, rerender } = setup({ api, keyValue: 'a' })
+    await flush()
+    await act(async () => calls[0]!.resolve('A'))
+    rerender({ api, keyValue: 'b' })
+    await flush()
+    rerender({ api, keyValue: 'a' })
+    await flush()
+    expect(calls).toHaveLength(3)
+    // A fresh read of "a" is in flight: the earlier answer is not this request's.
+    expect(result.current).toMatchObject({ data: null, error: null, loading: true })
+    await act(async () => calls[2]!.resolve('A2'))
+    expect(result.current).toMatchObject({ data: 'A2', loading: false })
+  })
+
+  it('keeps the earlier answer for a returning key only when asked to', async () => {
+    const { api, calls } = deferredApi()
+    const { result, rerender } = setup({ api, keyValue: 'a', options: { keepPrevious: 'reload' } })
+    await flush()
+    await act(async () => calls[0]!.resolve('A'))
+    rerender({ api, keyValue: 'b', options: { keepPrevious: 'reload' } })
+    await flush()
+    rerender({ api, keyValue: 'a', options: { keepPrevious: 'reload' } })
+    await flush()
+    expect(result.current).toMatchObject({ data: 'A', loading: true })
+  })
+
+  it('loads again after being disabled and enabled, without showing the old answer or failure', async () => {
+    const { api, calls } = deferredApi()
+    const { result, rerender } = setup({ api, keyValue: 'a' })
+    await flush()
+    await act(async () => calls[0]!.reject(new Error('boom')))
+    expect(result.current).toMatchObject({ error: 'Could not load.', loading: false })
+    rerender({ api, keyValue: 'a', options: { enabled: false } })
+    await flush()
+    rerender({ api, keyValue: 'a', options: { enabled: true } })
+    await flush()
+    expect(calls).toHaveLength(2)
+    expect(result.current).toMatchObject({ data: null, error: null, loading: true })
+  })
+
   it('reads nothing while disabled', async () => {
     const { api } = deferredApi()
     const { result } = setup({ api, keyValue: 'a', options: { enabled: false } })
