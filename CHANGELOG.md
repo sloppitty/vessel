@@ -55,6 +55,9 @@
   linked order as the venue reported it (45 where it reported 9 in a two-stop example). A
   fully filled stop still adds nothing, and stop order facts that do not add up make the
   Play's open risk unknown.
+- The Plays list kept a Play's result and R after a later refresh found that one of its
+  orders had left an execution out, although Review had already withdrawn it. The list now
+  follows Review.
 
 ### Changed
 
@@ -79,6 +82,12 @@ workers need these columns, so they must not start against an unmigrated databas
   It is additive and existing snapshots stay complete.
 - `20261117102251_UnrecognizedRowOmissions` adds the `unrecognized-row` omission kind and
   widens `accounts.HistoryNotice` to 1,200 characters. Roll it back only from a backup.
+
+After upgrading: once every updated host is running, rebuild the Plays list projection in
+full, once. Rows that went stale before this release are not repaired by a plain rebuild,
+which skips rows that already hold the current projection version.
+
+    docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll play-search-rebuild --apply --all
 
 No configuration changes.
 
