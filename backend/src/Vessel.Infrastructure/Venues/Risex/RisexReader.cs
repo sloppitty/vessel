@@ -526,7 +526,7 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             Json.ParseDecimal(funding);
             // RISEx reports a 24-hour change, not the previous price, and no mid or premium; those stay unknown.
             contexts.Add(new(market.Key, Unsigned("mark_price"), Unsigned("index_price"), null, null,
-                Unsigned("quote_volume_24h"), Unsigned("open_interest"), funding, null));
+                Unsigned("quote_volume_24h"), Unsigned("open_interest"), funding, null, market.MarketId));
         }
         return contexts;
     }

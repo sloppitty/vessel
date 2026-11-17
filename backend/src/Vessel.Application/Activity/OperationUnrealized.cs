@@ -8,14 +8,14 @@ namespace Vessel.Application.Activity;
 
 /// <summary>
 /// Unrealized P&amp;L of the open operations on one Activity page, read after the cached aggregate so it never enters the
-/// page version. A venue with market context marks the remaining quantity at its current mark price; otherwise the
+/// page version. A venue with market context marks the remaining quantity at its own native market's current mark price,
+/// against the remaining average-cost basis (issue #90); otherwise the
 /// latest snapshot's venue-reported figure counts only when that snapshot position is the operation's remaining
 /// position, from a complete position read. Closed, incomplete or unmatched operations stay null, never zero.
 /// </summary>
 internal static class OperationUnrealized
 {
     public const string Mark = "mark", Snapshot = "snapshot";
-    private static readonly ExactAmount One = ExactAmount.Parse("1");
 
     public static async Task<List<ActivityOperationSummaryDto>> ApplyAsync(IReadOnlyList<ActivityOperationDto> rows, ActivityFacts facts,
         IVenueRegistry? venues, MarketContextCache? marks, CancellationToken ct)
@@ -59,15 +59,18 @@ internal static class OperationUnrealized
     private static ActivityOperationSummaryDto FromMark(ActivityOperationDto o, ActivityOperationSummaryDto row,
         MarketContextCache.Snapshot? context)
     {
-        if (context is null || o.AverageEntryPrice is null) return row;
-        var matches = context.Value.Where(c => c.ContractId == o.ContractId).Take(2).ToList();
+        if (context is null || o.RemainingBasis is not { } basis) return row;
+        // Issue #90: only the operation's own native market. A retired market never takes its successor's mark, and an
+        // ID-less partition takes only a mark the venue also reports without a native ID. Paper has no native partition and
+        // is simulated on the canonical key's current market.
+        var native = o.ContractKey.IsNative ? o.ContractKey.Identity : null;
+        var matches = context.Value.Where(c => c.ContractId == o.ContractId && (o.TradingMode == "paper" || c.VenueContractId == native))
+            .Take(2).ToList();
         if (matches.Count != 1 || !decimal.TryParse(matches[0].MarkPrice, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var mark) ||
             mark <= 0) return row;
-        var move = ExactAmount.From(mark) - ExactAmount.Parse(o.AverageEntryPrice);
-        var pnl = ExactAmount.Average(ExactAmount.Parse(o.OpenQuantity!).Units * move.Units, One)!;
         return row with
         {
-            UnrealizedPnlUsd = o.Direction == "short" ? (-ExactAmount.Parse(pnl)).ToString() : pnl,
+            UnrealizedPnlUsd = basis.Unrealized(ExactAmount.Parse(o.OpenQuantity!), ExactAmount.From(mark), o.Direction == "short"),
             UnrealizedPnlSource = Mark, UnrealizedPnlMarkPrice = ExactDecimal.Format(mark), UnrealizedPnlAsOfUtc = context.Observed
         };
     }

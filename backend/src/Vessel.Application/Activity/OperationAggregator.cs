@@ -300,6 +300,11 @@ public static class OperationAggregator
         private bool unassigned, unsupportedGrossFee, unsupportedNetFee;
         private ExactAmount entered, exited, pnl, grossFees, netFees;
         private BigInteger entryNotional, exitNotional;
+        // Issue #90: the remaining quantity's average cost. An entry and an exit at one timestamp have no known order,
+        // and the order changes the basis, so it becomes unknown.
+        private CostBasis? basis;
+        private bool basisUnknown;
+        private (DateTimeOffset At, string Role)? previous;
         public void Add(ImportedFill fill, string role, ExactAmount quantity, bool monetary, IReadOnlyDictionary<Guid, Guid>? links,
             bool split = false)
         {
@@ -321,6 +326,12 @@ public static class OperationAggregator
             {
                 if (NominalStablecoins.Contains(fill.FeeToken)) netFees += fee;
                 else if (!fee.Units.IsZero) unsupportedNetFee = true;
+            }
+            if (role is "entry" or "exit")
+            {
+                if (previous is { } last && last.At == fill.OccurredAtUtc && last.Role != role) basisUnknown = true;
+                previous = (fill.OccurredAtUtc, role);
+                if (role == "entry") basis = CostBasis.Add(basis, entered - exited, quantity, fill.Price);
             }
             if (role == "entry") { entered += quantity; entryNotional += quantity.Units * ExactAmount.From(fill.Price).Units; if (!string.IsNullOrWhiteSpace(fill.ExternalOrderId)) entries.Add(fill.ExternalOrderId); }
             if (role == "exit") { exited += quantity; exitNotional += quantity.Units * ExactAmount.From(fill.Price).Units; if (!string.IsNullOrWhiteSpace(fill.ExternalOrderId)) exits.Add(fill.ExternalOrderId); }
@@ -348,6 +359,7 @@ public static class OperationAggregator
                 FillLeverages = leverages,
                 // The unrounded 56-place product; the API's weighted averages above keep their documented rounding.
                 ExactEntryNotional = UnknownBoundaries || MissingEntries || entered.Units.IsZero ? null : entryNotional,
+                RemainingBasis = UnknownBoundaries || MissingEntries || basisUnknown || position.Abs() != entered - exited ? null : basis,
                 SourceFills = parts.Select(p => p.Fill)
             };
         }

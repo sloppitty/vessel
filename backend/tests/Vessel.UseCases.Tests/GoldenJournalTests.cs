@@ -32,7 +32,7 @@ public sealed class GoldenJournalTests
     public Task Identities_hold_across_the_screens() => GoldenJournalChecks.IdentitiesAsync(j, Screens);
 
     /// <summary>Section 2.3: the average-cost basis of what is still open, 110, gives 10 × (130 − 110).</summary>
-    [Fact(Skip = "#90: Activity marks AVAX from the average of every entry (1600/15), giving 233.33…, not the venue's 200.")]
+    [Fact]
     public async Task Avax_unrealized_uses_the_cost_of_what_is_still_open()
     {
         var page = await Screens.Activity.PageAsync(new(PageSize: "100"), default);

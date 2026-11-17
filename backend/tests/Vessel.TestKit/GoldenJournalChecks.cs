@@ -46,7 +46,8 @@ internal static class GoldenJournalChecks
             rows[j.Operation("b4", "short")].OpenedAtUtc, rows[j.Operation("b4", "short")].ClosedAtUtc));
 
         // Unrealized P&L (section 2.3). P8 is marked at 52: −(2 × (52 − 51)). XRP has no mark, so the snapshot's own figure
-        // counts. AVAX's mark-path figure is in a test skipped for #90.
+        // counts. AVAX is marked at 130 against the remaining cost 110 (#90): 10 × (130 − 110).
+        Assert.Equal(("200", "mark"), (rows[j.Operation("a15", "long")].UnrealizedPnlUsd, rows[j.Operation("a15", "long")].UnrealizedPnlSource));
         var eth = rows[j.Operation("a18", "short")];
         Assert.Equal(("-2", "mark", GoldenJournal.EthMark), (eth.UnrealizedPnlUsd, eth.UnrealizedPnlSource, eth.UnrealizedPnlMarkPrice));
         var xrp = rows[j.Operation("b6", "short")];
@@ -213,10 +214,13 @@ internal static class GoldenJournalChecks
             (record.Wins, record.Losses, record.Scratches, record.ClosedPlays));
         Assert.Equal(ExactSum([plays.Metrics.Batting]), ExactSum([record.BattingAverage]));
 
-        // 7.6: where an open position has had no exit, the mark path and the venue's own snapshot figure agree (P8, ETH −2).
-        var marked = activity.Single(o => o.Id == j.Operation("a18", "short"));
-        var reported = j.Snapshots.Single(x => x.AccountId == j.Gross.Id).Positions.Single(p => p.ContractId == "ETH").UnrealizedPnlUsd;
-        Assert.Equal(ExactSum([marked.UnrealizedPnlUsd]), Vessel.Domain.Numerics.ExactAmount.From(reported));
+        // 7.6: the mark path and the venue's own snapshot figure agree (P8, ETH −2; AVAX, after an exit and an add, 200).
+        foreach (var (operation, contract) in new[] { (j.Operation("a18", "short"), "ETH"), (j.Operation("a15", "long"), "AVAX") })
+        {
+            var marked = activity.Single(o => o.Id == operation);
+            var reported = j.Snapshots.Single(x => x.AccountId == j.Gross.Id).Positions.Single(p => p.ContractId == contract).UnrealizedPnlUsd;
+            Assert.Equal(ExactSum([marked.UnrealizedPnlUsd]), Vessel.Domain.Numerics.ExactAmount.From(reported));
+        }
     }
 
     public static string Name(GoldenJournal j, Guid? playId) => j.Play.SingleOrDefault(p => p.Value.Id == playId).Key ?? "?";

@@ -421,6 +421,9 @@ public sealed partial class RisexAdapterTests
             (btc.MarkPrice, btc.OraclePrice, btc.DayNotionalVolume, btc.OpenInterest, btc.FundingRate));
         Assert.Null(btc.PreviousDayPrice);
         Assert.Null(btc.MidPrice);
+        // Issue #90: each mark names its native market, and the retired DOGE market 13 has none.
+        Assert.Equal("1", btc.VenueContractId);
+        Assert.Equal("14", contexts.Single(c => c.ContractId == "DOGE").VenueContractId);
         Assert.DoesNotContain(contexts, c => c.ContractId == "weird name");
         Assert.Equal(3, contexts.Count);
     }
