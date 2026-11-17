@@ -31,6 +31,9 @@
   the image build context.
 - Claude Code can see the repository skills through `.claude/skills`.
 - Added the November 2026 codebase health review under `docs/architecture`.
+- Tests: a hand-checked golden journal (`docs/architecture/golden-journal.md`) is asserted
+  through Activity, Overview, Review, Sizing, Open risk and the Plays list, with identities
+  that tie the screens to each other.
 
 No migrations and no configuration changes.
 
