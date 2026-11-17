@@ -416,6 +416,34 @@ flowchart TB
 - The API reports `workerOnline` when a monitor deployment heartbeat is at most `Vessel:Monitor:HeartbeatTimeout` old. It filters deployments using its own module map, so a non-monitor worker cannot make monitor health green. API, worker and provisioning hosts must have identical `Vessel:Messaging:Deployments`.
 - Logs carry IDs and exception type names, never payloads, venue messages or secrets.
 
+### Without the broker (measured November 17, 2026)
+
+Issue #98 measured what the API and the monitor worker do when RabbitMQ is unreachable. Nothing was changed; whether a host should start without the broker is issue #99. The tests are opt-in like the other broker tests (`Vessel_TEST_EVENT_RABBIT`) and live in `MonitorBrokerOutageTests.cs` (class `MonitorEndToEndTests`):
+
+- **A**: `Worker_and_api_retry_an_unreachable_broker_for_about_95_seconds_then_fail_to_start`;
+- **B**: `Hosts_finish_starting_when_the_broker_returns_within_the_retry_window`;
+- **C**: `Checks_continue_while_the_broker_is_away_and_its_events_are_delivered_once_when_it_returns`.
+
+The worker and the API reach the broker through `BrokerProxy`, a loopback relay the test closes (connections refused, open connections reset) and reopens. With `Vessel_TEST_BROKER_SWITCH` set, the relay stays open and the test asks the machine running the broker to `docker stop` and `docker start` it instead (**C-stop**). Pinned WolverineFx 6.50.0, RabbitMQ 4.3.6.
+
+| Question | Measured answer | How |
+|---|---|---|
+| Broker unreachable at start: does the API start? | No. Wolverine makes 20 connection attempts, then the host fails with `BrokerInitializationException`. `Vessel.Api/Program.cs` does not catch it, so the process ends (read from the code, not run as a process). Same for a refused port and a host name that does not resolve. | A (API on an unresolvable name) |
+| Does the monitor worker start? | No, the same way. From `Vessel.Worker/Program.cs`, the entrypoint then prints `Vessel worker could not start (BrokerInitializationException)` and exits with code 1. | A (worker on a refused port) |
+| How long does a start attempt block? | About 95 s (95.1 s and 95.4 s measured); the retry delay grows with each attempt. | A |
+| What does readiness report? | Nothing: the host never finishes starting, so `/health/ready` is never served. Once a host runs, readiness ignores the broker: it stays `200 ready` during an outage. | A, C |
+| Do scheduled checks run? | Not usefully. The scheduler starts before Wolverine, and its first pass claims the account, but the run fails with `InvalidOperationException` ("The Rabbit MQ sending connection has not been created") because it cannot stage its events. The claim keeps its 5-minute lease, so the account is not checked again until the lease expires, even if the broker returns. | A, B |
+| Are events appended to PostgreSQL? | No. The failed run rolls back with its events: `events` stays empty. | A, B |
+| Broker returns during the start attempt: does the host start? | Yes. Both hosts finished starting 5 s after the broker returned (the next retry). The account claimed by the failed run waited for its lease to expire; then the run succeeded and its events reached the subscriber once. | B |
+| Broker returns after the attempt failed | Not measured: the process has exited. With `restart: unless-stopped` Docker starts it again, and each attempt lasts up to 95 s. | Packaged stack only (gap) |
+| Broker goes away while the hosts run: do checks continue? | Yes. Scheduled runs succeed, state stays `live`, the heartbeat stays fresh. Their events commit in PostgreSQL and wait in the worker's `wolverine_outgoing_envelopes`. | C, C-stop |
+| What happens to a manual Check? | `202 Accepted` with `manualState: pending`. The command waits in the API's outbox; the worker does not hear of it, and its next scheduler tick (30 s in production) runs the pending request. | C, C-stop |
+| What do the hosts log? | Only Wolverine logs. With connections reset (C), at Error: `Unexpected Rabbit MQ connection shutdown` and `Unexpected channel shutdown … Wolverine will attempt to restart`; with a real broker stop (C-stop), only the channel shutdowns, at Warning. Then, in both, about one `Error trying to start a new Rabbit MQ channel` per sender per second, `Failed to send outgoing envelopes batch`, then `Sending agent for … is latched`. Vessel's code logs nothing about it. No log line contains the broker password. On return: `RabbitMQ connection is recovered successfully`. | C, C-stop |
+| When the broker returns, does delivery resume? | Yes, without a restart. Both outboxes drained and every event appended meanwhile settled `delivered` with one attempt, 1.5 s (C) and 3.2 s (C-stop) after the broker's port answered again. No event was delivered twice. | C, C-stop |
+| Does the worker's command listener resume? | Yes. After the return, a Check woke the scheduler without a tick, as it does normally. | C, C-stop |
+
+Gaps: whether the API's HTTP port accepts connections during the 95 s attempt, and Docker's restart loop, need the packaged stack. The in-process tests use `WebApplicationFactory`, which opens no socket. `scripts/verify-release.py` already stops RabbitMQ under running hosts and checks the outbox and the Notification Hub catch-up, but it never starts a host without the broker.
+
 ## Monitor
 
 ### Run lifecycle
@@ -978,7 +1006,7 @@ web host, real venue adapter, Application service with fakes, then pure rules.
 | Wire contract | `VesselEventGoldenTests` (real producers, explicit nulls, causal order) |
 | Subscriptions | `EventSubscriptionTests` (registration, dispatcher, retries, races, savepoint, admin retry, low-water mark, retention, maintenance, epoch rotation, account deletion, settings binding) |
 | Browser stream and API | `VesselEventStreamTests`, `VesselEventApiTests` |
-| Broker | `VesselEventTransportTests` (outbox, settlement table through inline listeners, unroutable publish and lost queue recovery, provisioning-only storage), `MonitorEndToEndTests` (scheduler without a browser, HTTP Check through the real broker) |
+| Broker | `VesselEventTransportTests` (outbox, settlement table through inline listeners, unroutable publish and lost queue recovery, provisioning-only storage), `MonitorEndToEndTests` (scheduler without a browser, HTTP Check through the real broker; in `MonitorBrokerOutageTests.cs`, hosts with the broker unreachable at start, returning, and going away while they run, see [Without the broker](#without-the-broker-measured-november-17-2026)) |
 | Worker host / multi-owner | `WorkerHostTests`, `MultiOwnerWorkerTests`, `MultiOwnerEventTests`, `MultiOwnerMessagingTests`, `MultiOwnerMonitorLimitsTests`, `OwnerScopeArchitectureTests`, `Isolation/BackgroundIsolationTests` (directory status, assigned scopes, cross-owner events/claims, shared budgets and deployment heartbeat) |
 | Monitor | `MonitorAccountTests`, `MonitorPostgresTests`, `MonitorCredentialRaceTests` |
 | Discrepancies | `DiscrepancyLifecycleTests` (table-driven state machine), `MonitorDiscrepancyTests`, `MonitorDiscrepancyReviewTests`, `MonitorDiscrepancyRound2Tests`–`Round7Tests`, `MonitorDiscrepancyStopConfirmationTests` (D-19), `MonitorDiscrepancyConditionKindsTests` (its October 23 extension), `MonitorDiscrepancyPostgresTests`, `MonitorDiscrepancyApiTests` |
