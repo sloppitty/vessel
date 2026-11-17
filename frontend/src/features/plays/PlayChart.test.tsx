@@ -895,6 +895,8 @@ describe('Chart panel live updates', () => {
     last().fail()
     await flush()
     expect(toggle()).toHaveAttribute('data-state', 'reconnecting')
+    // The visible label leaves "Live" while the stream is down.
+    expect(toggle().querySelector('span[aria-hidden="true"]')).toHaveTextContent(/^Reconnecting$/)
     await advance(999)
     expect(marketStream).toHaveBeenCalledOnce()
     await advance(1)

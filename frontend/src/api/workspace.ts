@@ -1,7 +1,7 @@
 import { isPaperSettings, isPaperPlayState, type PaperSettings, type PaperPlayState, type TradingMode } from './paper'
 import { overviewSummaryPath, isOverviewSummary, type OverviewQuery, type OverviewSummaryDocument } from './overview-summary'
 import { activityFillsPath, activityPath, isActivityFills, isActivityPage, type ActivityFills, type ActivityPage, type ActivityQuery } from './activity'
-import { readSseStream, SseOverflowError, SseParser } from './sse'
+import { readSseStream, SseOverflowError } from './sse'
 import { isAfter, isNotificationAfter, isNotificationCursor, isRequestCursor, isUnknownCursor } from './event-cursor'
 import {
   isInAppNotification, isNotificationClaim, isNotificationHead, isNotificationPage, isNotificationPreferenceFields,
@@ -745,41 +745,19 @@ export function createWorkspaceApi(credentials: SessionCredentials, onAuthFailur
       throw new ApiError('invalid-response', 'The API returned an invalid live market stream.')
     }
     const isContext = marketContext(query.instrument)
-    const parser = new SseParser(({ event, data }) => {
-      if (signal.aborted || data.length > streamLimit) return
-      let body: unknown
-      try { body = JSON.parse(data) } catch { return }
-      if (event === 'candle' && candle(body)) onEvent({ type: 'candle', candle: body })
-      else if (event === 'context' && isContext(body)) onEvent({ type: 'context', context: body })
-      else if (event === 'status' && streamStatus(body)) onEvent({ type: 'status', status: body })
-    }, streamLimit)
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    const stop = () => { void reader.cancel().catch(() => undefined) }
-    signal.addEventListener('abort', stop, { once: true })
     try {
-      for (;;) {
-        let chunk: ReadableStreamReadResult<Uint8Array>
-        try { chunk = await reader.read() } catch {
-          if (signal.aborted) return
-          throw interrupted()
-        }
-        if (signal.aborted) return
-        if (chunk.done) {
-          parser.push(decoder.decode())
-          parser.end()
-          return
-        }
-        try { parser.push(decoder.decode(chunk.value, { stream: true })) } catch (error) {
-          if (error instanceof SseOverflowError) {
-            stop()
-            throw new ApiError('invalid-response', 'The live market stream sent an oversized message.')
-          }
-          throw error
-        }
-      }
-    } finally {
-      signal.removeEventListener('abort', stop)
+      await readSseStream(response.body, signal, ({ event, data }) => {
+        if (data.length > streamLimit) return
+        let body: unknown
+        try { body = JSON.parse(data) } catch { return }
+        if (event === 'candle' && candle(body)) onEvent({ type: 'candle', candle: body })
+        else if (event === 'context' && isContext(body)) onEvent({ type: 'context', context: body })
+        else if (event === 'status' && streamStatus(body)) onEvent({ type: 'status', status: body })
+      }, { maxBuffer: streamLimit })
+    } catch (error) {
+      if (signal.aborted) return
+      if (error instanceof SseOverflowError) throw new ApiError('invalid-response', 'The live market stream sent an oversized message.')
+      throw interrupted()
     }
   }
   const playPath = (id: string) => {

@@ -373,6 +373,74 @@ describe('the notification feed on the shared stream', () => {
     view.unmount(); tab.dispose()
   })
 
+  it('reconnects a half-open stream from both cursors within a minute without reloading or repeating notifications', async () => {
+    const streams: { path: string; body: ReadableStreamDefaultController<Uint8Array>; cancelled: ReturnType<typeof vi.fn> }[] = []
+    const encoder = new TextEncoder()
+    vi.stubGlobal('fetch', vi.fn((path: string) => {
+      if (path.startsWith('/api/events/stream?')) {
+        const cancelled = vi.fn()
+        const body = new ReadableStream<Uint8Array>({ start(body) { streams.push({ path, body, cancelled }) }, cancel: cancelled })
+        return Promise.resolve(new Response(body, { headers: { 'Content-Type': 'text/event-stream' } }))
+      }
+      return Promise.resolve(new Response(JSON.stringify(path.startsWith('/api/events?')
+        ? { events: [], nextCursor: headSequence, resetRequired: false }
+        : path === '/api/notifications/head' ? notificationHeadFixture : monitorSummaryFixture)))
+    }))
+    const tab = new SessionController({ session: sessionFixture, channels: channelBus().factory, navigate: vi.fn() })
+    const api = createWorkspaceApi(tab.credentials(), tab.handleFailure), feed = handlers(), reload = vi.fn()
+    const view = renderHook(() => useMonitorEvents(api, true, reload, 0, feed))
+    await advance(0)
+    const send = (stream: number, event: string, data: unknown, id = '') => streams[stream]!.body.enqueue(encoder.encode(
+      `${id ? `id: ${id}\n` : ''}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
+    ))
+    send(0, 'status', { state: 'ready', nextCursor: headSequence })
+    send(0, 'notifications', { state: 'ready', nextCursor: notificationHeadFixture.nextCursor, unreadCount: 0, enabled: true })
+    send(0, 'event', monitorEventFixture, eventCursor(monitorEventFixture.sequence))
+    send(0, 'notification', item(11).frame)
+    await advance(1_000)
+    expect(reload).toHaveBeenCalledOnce()
+    // A network change leaves the connection open but silent: no keepalive arrives any more. The watchdog gives
+    // up after 45 seconds and the normal backoff reopens the stream before the 60-second fallback reload.
+    await advance(47_000)
+    expect(streams[0]!.cancelled).toHaveBeenCalled()
+    expect(streams).toHaveLength(2)
+    const resumed = new URL(streams[1]!.path, 'https://vessel.test').searchParams
+    expect(resumed.get('after')).toBe(eventCursor(monitorEventFixture.sequence))
+    expect(resumed.get('notificationsAfter')).toBe(notificationCursor(11))
+    // The resumed stream confirms the cursors; a replayed notification is not shown again.
+    send(1, 'status', { state: 'ready', nextCursor: eventCursor(monitorEventFixture.sequence) })
+    send(1, 'notifications', { state: 'ready', nextCursor: notificationCursor(11), unreadCount: 1, enabled: true })
+    send(1, 'notification', item(11).frame)
+    await advance(1_000)
+    expect(feed.onFrame).toHaveBeenCalledOnce()
+    expect(reload).toHaveBeenCalledOnce()
+    view.unmount(); tab.dispose()
+  })
+
+  it('keeps a stream that only sends keepalives open', async () => {
+    const streams: ReadableStreamDefaultController<Uint8Array>[] = []
+    vi.stubGlobal('fetch', vi.fn((path: string) => {
+      if (path.startsWith('/api/events/stream?')) {
+        const body = new ReadableStream<Uint8Array>({ start(body) { streams.push(body) } })
+        return Promise.resolve(new Response(body, { headers: { 'Content-Type': 'text/event-stream' } }))
+      }
+      return Promise.resolve(new Response(JSON.stringify(path.startsWith('/api/events?')
+        ? { events: [], nextCursor: headSequence, resetRequired: false } : monitorSummaryFixture)))
+    }))
+    const tab = new SessionController({ session: sessionFixture, channels: channelBus().factory, navigate: vi.fn() })
+    const api = createWorkspaceApi(tab.credentials(), tab.handleFailure)
+    const view = renderHook(() => useMonitorEvents(api, true, vi.fn(), 0))
+    await advance(0)
+    const keepalive = new TextEncoder().encode(': keepalive\n\n')
+    streams[0]!.enqueue(new TextEncoder().encode(`event: status\ndata: ${JSON.stringify({ state: 'ready', nextCursor: headSequence })}\n\n`))
+    for (let tick = 0; tick < 20; tick++) {
+      await advance(15_000)
+      streams[0]!.enqueue(keepalive)
+    }
+    expect(streams).toHaveLength(1)
+    view.unmount(); tab.dispose()
+  })
+
   it('reads the notification head after the event head and streams both cursors', async () => {
     const { api, connections } = client()
     const feed = handlers()

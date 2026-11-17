@@ -3,7 +3,7 @@ import { useId } from 'react'
 export type LiveIndicatorState = 'off' | 'connecting' | 'live' | 'reconnecting' | 'polling' | 'stale'
 
 const labels: Record<LiveIndicatorState, string> = {
-  off: 'Off', connecting: 'Live', live: 'Live', reconnecting: 'Live', polling: 'Polling', stale: 'Stale',
+  off: 'Off', connecting: 'Live', live: 'Live', reconnecting: 'Reconnecting', polling: 'Polling', stale: 'Stale',
 }
 const descriptions: Record<LiveIndicatorState, string> = {
   off: 'Live updates are off. Refresh updates the chart manually.',
