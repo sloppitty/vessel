@@ -65,6 +65,11 @@
 - Overview's unrealized P&L is labelled "at last refresh" with its time.
 - Review and the Overview summary keep the last loaded figures on screen while a background
   reload runs, where they went back to "Loading…".
+- Balances no longer combine the perpetuals of one refresh with the wallet or positions of
+  another: a snapshot and its rows are read in one statement.
+- A separate-ledger Hyperliquid account whose stablecoin wallet was never read shows an
+  unknown balance with a reason, where it showed the perpetuals alone. An observed empty
+  wallet stays a known zero.
 
 ### Changed
 
