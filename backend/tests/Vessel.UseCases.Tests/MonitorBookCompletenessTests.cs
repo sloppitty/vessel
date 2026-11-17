@@ -6,7 +6,7 @@ namespace Vessel.Tests;
 
 /// <summary>
 /// #95: an open order the adapter attributes to its market but cannot read (a Hyperliquid order with attached TP/SL
-/// children, a Lighter TWAP or flagged order) leaves only that market's book incomplete. Plays on other markets keep every
+/// children, a Lighter TWAP or unsized order) leaves only that market's book incomplete. Plays on other markets keep every
 /// stop check; Plays on that market stay unknown with the order kind as the reason and never resolve. An order that cannot
 /// be attributed leaves the whole book incomplete, as before.
 /// </summary>

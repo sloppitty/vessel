@@ -62,13 +62,14 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
                             orders[(order.ContractId, order.OrderId)] = order;
                         }
                         else if (IsPerpetualContract(Text(Property(item, "coin")))) openOrdersComplete = false;
-                        // Nested children are not projected by ReadOrder. Never claim their absence. #95: they are the
-                        // parent's own take-profit/stop-loss on its market, so a read parent leaves only its contract
-                        // unknown; an unread parent or a malformed list still leaves the whole book unknown.
+                        // Nested children are not projected by ReadOrder. Never claim their absence. #95: a read parent
+                        // whose every child is a well-formed order on the parent's own market leaves only its contract
+                        // unknown; an unread parent, a malformed list or any child that fails that leaves the whole book.
                         if (item.TryGetProperty("children", out var children) &&
                             (children.ValueKind != JsonValueKind.Array || children.GetArrayLength() > 0))
                         {
-                            if (order is not null && children.ValueKind == JsonValueKind.Array)
+                            if (order is not null && children.ValueKind == JsonValueKind.Array && children.EnumerateArray()
+                                    .All(child => AttachedOn(child, order.VenueContractId ?? order.ContractId, contracts, latestTimestamp, observed)))
                                 incomplete.Add(new(order.ContractId, order.VenueContractId, VenueIncompleteBook.AttachedTpsl));
                             else openOrdersComplete = false;
                         }
@@ -102,6 +103,21 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
             Nonnegative(Property(order, "origSz")), Nonnegative(Property(order, "sz")),
             Timestamp(Property(order, "timestamp"), latestTimestamp), status, venueStatus, statusAt,
             VenueContractId: HyperliquidInstruments.Canonical(coin) == coin ? null : coin);
+    }
+
+    /// <summary>
+    /// #95: whether an attached child is an order Vessel could read, without children of its own, on the parent's native
+    /// market. Only then may the child narrow the book's gap to the parent's contract.
+    /// </summary>
+    private static bool AttachedOn(JsonElement child, string coin, HashSet<string> contracts, long latestTimestamp,
+        DateTimeOffset observed)
+    {
+        if (child.ValueKind != JsonValueKind.Object || !child.TryGetProperty("coin", out var childCoin) ||
+            childCoin.ValueKind != JsonValueKind.String || childCoin.GetString() != coin) return false;
+        if (child.TryGetProperty("children", out var nested) &&
+            (nested.ValueKind != JsonValueKind.Array || nested.GetArrayLength() > 0)) return false;
+        try { return ReadOrder(child, contracts, latestTimestamp, "open", VenueOrderStatus.Open, observed) is not null; }
+        catch (VenueReadException) { return false; }
     }
 
     private static bool Flag(JsonElement order, string name) =>

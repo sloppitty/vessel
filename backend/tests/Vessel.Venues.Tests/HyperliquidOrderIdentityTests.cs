@@ -53,11 +53,20 @@ public sealed partial class HyperliquidOrderTests
         Assert.Single(result.Orders, o => o.ContractId == "BTC");
     }
 
-    private static string WithChildren(string order, string children = "[]")
+    // By default one stop child on the parent's own market, as Hyperliquid attaches it.
+    private static string WithChildren(string order, string? children = null)
     {
         var parent = JsonNode.Parse(order)!;
-        parent["children"] = JsonNode.Parse(children == "[]" ? $"[{Order(99, "A", trigger: true, type: "Stop Market")}]" : children);
+        var coin = (string)parent["coin"]!;
+        parent["children"] = JsonNode.Parse(children ?? $"[{Order(99, "A", trigger: true, type: "Stop Market", coin: coin)}]");
         return parent.ToJsonString();
+    }
+
+    private static string Without(string order, string property)
+    {
+        var node = JsonNode.Parse(order)!;
+        node.AsObject().Remove(property);
+        return node.ToJsonString();
     }
 
     [Fact] // #95: attached TP/SL children are the parent's own market; only that contract's book is incomplete.
@@ -76,18 +85,36 @@ public sealed partial class HyperliquidOrderTests
     [InlineData("spot-parent")]
     [InlineData("malformed-children")]
     [InlineData("duplicate")]
+    // Review S1: each child must be a readable order on the parent's own native market.
+    [InlineData("null-child")]
+    [InlineData("number-child")]
+    [InlineData("child-without-coin")]
+    [InlineData("child-on-another-market")]
+    [InlineData("child-with-malformed-oid")]
+    [InlineData("child-with-children")]
     public async Task Coverage_children_that_cannot_be_attributed_leave_the_whole_book_incomplete(string scope)
     {
+        var stop = Order(99, "A", trigger: true, type: "Stop Market", coin: "kPEPE");
+        var parent = Order(7, coin: "kPEPE", px: "0.012345");
+        var badOid = stop.Replace("\"oid\":99", "\"oid\":-1", StringComparison.Ordinal);
+        Assert.NotEqual(stop, badOid);
         var book = scope switch
         {
             "spot-parent" => $"[{WithChildren(Order(7, coin: "@123"))},{Order(8)}]",
-            "malformed-children" => $"[{WithChildren(Order(7, coin: "kPEPE"), "{}")},{Order(8)}]",
-            _ => $"[{WithChildren(Order(7, coin: "kPEPE"))},{Order(8)},{Order(8)}]",
+            "malformed-children" => $"[{WithChildren(parent, "{}")},{Order(8)}]",
+            "null-child" => $"[{WithChildren(parent, "[null]")},{Order(8)}]",
+            "number-child" => $"[{WithChildren(parent, "[1]")},{Order(8)}]",
+            "child-without-coin" => $"[{WithChildren(parent, $"[{Without(stop, "coin")}]")},{Order(8)}]",
+            "child-on-another-market" => $"[{WithChildren(parent, $"[{Order(99, "A", trigger: true, type: "Stop Market")}]")},{Order(8)}]",
+            "child-with-malformed-oid" => $"[{WithChildren(parent, $"[{badOid}]")},{Order(8)}]",
+            "child-with-children" => $"[{WithChildren(parent, $"[{WithChildren(stop)}]")},{Order(8)}]",
+            _ => $"[{WithChildren(parent)},{Order(8)},{Order(8)}]",
         };
         var result = await ReadTwoMarketOrders("[]", book);
         Assert.False(result.OpenOrdersComplete);
         Assert.Null(result.IncompleteContracts);
         Assert.False(result.OpenOrdersCompleteFor("BTC", null));
+        Assert.False(result.OpenOrdersCompleteFor("1000PEPE", "kPEPE"));
     }
 
     [Fact]

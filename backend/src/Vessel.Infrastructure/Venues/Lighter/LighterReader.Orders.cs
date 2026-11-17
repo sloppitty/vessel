@@ -38,20 +38,27 @@ public sealed partial class LighterReader
             IReadOnlyList<VenueIncompleteBook>? incompleteContracts;
             using (var active = await GetAsync("accountActiveOrders?account_index=" + source + "&market_type=perp", ct, credential))
             {
-                var skipped = new List<VenueIncompleteBook>();
+                var skipped = new List<UnreadOrder>();
                 var current = ReadOrders(active.RootElement, catalogue, source, observed, 1000, skipped);
                 var rows = Rows(json, active.RootElement, "orders", 1000);
-                // Active orders cover all perp markets without a market_id filter. A cursor, cap,
-                // omitted unsupported order or unknown active status prevents negative evidence.
-                // #95: an unsupported order on a known perp market prevents it only for that market.
-                var noNextPage = !active.RootElement.TryGetProperty("next_cursor", out var next) ||
-                    next.ValueKind == JsonValueKind.String && next.GetString() == "";
-                var whole = rows.GetArrayLength() < 1000 && noNextPage &&
-                    current.Count + skipped.Count == rows.GetArrayLength() && current.All(o => o.Status == VenueOrderStatus.Open);
-                openOrdersComplete = whole && skipped.Count == 0;
-                incompleteContracts = whole ? skipped.Distinct().ToArray() : null;
                 foreach (var order in current)
                     if (!orders.TryAdd((order.ContractId, order.OrderId), order)) throw json.Invalid();
+                // #95: an unsupported order narrows to its market only when it passed every check a read order passes
+                // (exact ID, an active status, no repeat among all active rows). Any doubt leaves the whole book unknown.
+                var seen = orders.Keys.ToHashSet();
+                var attributed = true;
+                foreach (var unread in skipped)
+                    attributed &= unread is { Book: not null, Order: { Status: VenueOrderStatus.Open } order } &&
+                        seen.Add((order.ContractId, order.OrderId));
+                // Active orders cover all perp markets without a market_id filter. A cursor, cap,
+                // omitted unsupported order or unknown active status prevents negative evidence.
+                // #95: an attributed unsupported order on a known perp market prevents it only for that market.
+                var noNextPage = !active.RootElement.TryGetProperty("next_cursor", out var next) ||
+                    next.ValueKind == JsonValueKind.String && next.GetString() == "";
+                var whole = rows.GetArrayLength() < 1000 && noNextPage && attributed &&
+                    current.Count + skipped.Count == rows.GetArrayLength() && current.All(o => o.Status == VenueOrderStatus.Open);
+                openOrdersComplete = whole && skipped.Count == 0;
+                incompleteContracts = whole ? skipped.Select(x => x.Book!).Distinct().ToArray() : null;
             }
             string? cursor = null;
             var cursors = new HashSet<string>(StringComparer.Ordinal);
@@ -91,7 +98,7 @@ public sealed partial class LighterReader
     // Authenticated happy-path payloads remain fixture-tested until the owner supplies a read-only token.
     /// <param name="skipped">#95: collects each perp order left out because it cannot be modelled, with its market.</param>
     internal static IReadOnlyList<VenueOrder> ReadOrders(JsonElement root, Catalogue catalogue, string source,
-        DateTimeOffset observed, int limit, List<VenueIncompleteBook>? skipped = null)
+        DateTimeOffset observed, int limit, List<UnreadOrder>? skipped = null)
     {
         var json = catalogue.Exchange.Json;
         var orders = new List<VenueOrder>();
@@ -107,37 +114,58 @@ public sealed partial class LighterReader
             var initial = Nonnegative(json, row, "initial_base_amount");
             var remaining = Nonnegative(json, row, "remaining_base_amount");
             if (remaining > initial) throw json.Invalid();
-            var unread = type is "twap" or "twap-sub" ? VenueIncompleteBook.Twap : initial == 0 ? VenueIncompleteBook.Unsized :
-                row.TryGetProperty("order_flags", out var flags) && json.Integer(flags) != 0 ? VenueIncompleteBook.Flagged : null;
-            if (unread is not null)
+            var unread = type is "twap" or "twap-sub" ? VenueIncompleteBook.Twap : initial == 0 ? VenueIncompleteBook.Unsized : null;
+            bool flagged;
+            // Flags are checked on every row, whatever its type or size; malformed flags still fail a modelled row.
+            try { flagged = row.TryGetProperty("order_flags", out var flags) && json.Integer(flags) != 0; }
+            catch (VenueReadException) when (unread is not null) { flagged = true; }
+            if (unread is null && !flagged)
             {
-                skipped?.Add(new(market.Key, marketId, unread));
+                orders.Add(ReadOrder(json, row, market.Key, marketId, type, initial, remaining, observed));
                 continue;
             }
-            var id = ExactId(json, row, "order_index", "order_id");
-            var isAsk = json.Boolean(json.Property(row, "is_ask"));
-            var reduceOnly = json.Boolean(json.Property(row, "reduce_only"));
-            var trigger = type.StartsWith("stop-loss", StringComparison.Ordinal) || type.StartsWith("take-profit", StringComparison.Ordinal);
-            var price = Nonnegative(json, row, "price");
-            var triggerPrice = Nonnegative(json, row, "trigger_price");
-            if (trigger && triggerPrice == 0 || !trigger && triggerPrice != 0) throw json.Invalid();
-            var status = Text(json, row, "status");
-            if (status.Any(c => c is not (>= 'a' and <= 'z') && c != '-')) throw json.Invalid();
-            var normalized = status switch
-            {
-                "open" or "in-progress" or "pending" => VenueOrderStatus.Open,
-                "filled" => VenueOrderStatus.Filled,
-                "canceled" => VenueOrderStatus.Canceled,
-                _ when status.StartsWith("canceled-", StringComparison.Ordinal) => VenueOrderStatus.Canceled,
-                _ => VenueOrderStatus.Other
-            };
-            var at = Seconds(json, row, "timestamp", observed.AddMinutes(5));
-            // created_at/updated_at units have no official description. Do not guess based on magnitude.
-            // timestamp is the venue order time; the local observation is a known upper bound for status time.
-            orders.Add(new(id, market.Key, isAsk ? ExecutionFacts.Sell : ExecutionFacts.Buy, type,
-                price, trigger ? triggerPrice : null, reduceOnly, false, initial, remaining, at,
-                normalized, status, observed, marketId));
+            if (skipped is null) continue;
+            // #95: validated like a read order before it may narrow the book to its market. A row that fails, or any
+            // flags (whose scope is not documented), leaves the whole book unknown.
+            VenueOrder? read;
+            try { read = ReadOrder(json, row, market.Key, marketId, type, initial, remaining, observed); }
+            catch (VenueReadException) { read = null; }
+            skipped.Add(new(read, flagged ? null : new(market.Key, marketId, unread!)));
         }
         return orders;
     }
+
+    private static VenueOrder ReadOrder(StrictJson json, JsonElement row, string contractId, string marketId, string type,
+        decimal initial, decimal remaining, DateTimeOffset observed)
+    {
+        var id = ExactId(json, row, "order_index", "order_id");
+        var isAsk = json.Boolean(json.Property(row, "is_ask"));
+        var reduceOnly = json.Boolean(json.Property(row, "reduce_only"));
+        var trigger = type.StartsWith("stop-loss", StringComparison.Ordinal) || type.StartsWith("take-profit", StringComparison.Ordinal);
+        var price = Nonnegative(json, row, "price");
+        var triggerPrice = Nonnegative(json, row, "trigger_price");
+        if (trigger && triggerPrice == 0 || !trigger && triggerPrice != 0) throw json.Invalid();
+        var status = Text(json, row, "status");
+        if (status.Any(c => c is not (>= 'a' and <= 'z') && c != '-')) throw json.Invalid();
+        var normalized = status switch
+        {
+            "open" or "in-progress" or "pending" => VenueOrderStatus.Open,
+            "filled" => VenueOrderStatus.Filled,
+            "canceled" => VenueOrderStatus.Canceled,
+            _ when status.StartsWith("canceled-", StringComparison.Ordinal) => VenueOrderStatus.Canceled,
+            _ => VenueOrderStatus.Other
+        };
+        var at = Seconds(json, row, "timestamp", observed.AddMinutes(5));
+        // created_at/updated_at units have no official description. Do not guess based on magnitude.
+        // timestamp is the venue order time; the local observation is a known upper bound for status time.
+        return new(id, contractId, isAsk ? ExecutionFacts.Sell : ExecutionFacts.Buy, type,
+            price, trigger ? triggerPrice : null, reduceOnly, false, initial, remaining, at,
+            normalized, status, observed, marketId);
+    }
+
+    /// <summary>
+    /// #95: an active perp order left out because it cannot be modelled. <paramref name="Order"/> is null when the row
+    /// failed a check a read order must pass; <paramref name="Book"/> is null when the reason is not market-local.
+    /// </summary>
+    internal sealed record UnreadOrder(VenueOrder? Order, VenueIncompleteBook? Book);
 }

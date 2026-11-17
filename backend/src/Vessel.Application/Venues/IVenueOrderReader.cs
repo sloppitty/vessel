@@ -79,8 +79,6 @@ public sealed record VenueIncompleteBook(string ContractId, string? VenueContrac
     public const string AttachedTpsl = "attached-tpsl";
     /// <summary>A Lighter TWAP order or one of its slices.</summary>
     public const string Twap = "twap";
-    /// <summary>A Lighter order with flags the adapter does not model.</summary>
-    public const string Flagged = "flagged";
     /// <summary>A Lighter order with no size, such as one sized by the position when it acts.</summary>
     public const string Unsized = "unsized";
 

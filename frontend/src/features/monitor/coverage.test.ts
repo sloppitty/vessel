@@ -110,7 +110,7 @@ describe('stop coverage heading (Phase 0, 0.4c)', () => {
   it('names the order kind that left a market\'s book incomplete (#95)', () => {
     expect(coverageLines([coverageAs('unknown', 'incomplete-book-attached-tpsl')], String))
       .toEqual(['Stop coverage is unknown. An open order on this market has attached take-profit/stop-loss orders, which Vessel does not read.'])
-    for (const kind of ['twap', 'flagged', 'unsized'])
+    for (const kind of ['twap', 'unsized'])
       expect(coverageLines([coverageAs('unknown', `incomplete-book-${kind}`)], String)[0]).not.toContain('no further detail')
   })
 })

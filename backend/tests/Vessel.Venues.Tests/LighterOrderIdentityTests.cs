@@ -52,17 +52,16 @@ public sealed partial class LighterAdapterTests
         Assert.All(result.Orders, o => Assert.Equal("9007199254740995", o.OrderId));
     }
 
+    // A TWAP is not a trigger order, so like any read order it carries no trigger price.
     private static string Unread(int market, string kind) => kind switch
     {
-        "twap" or "twap-sub" => Change(OrderOn(market), "type", JsonValue.Create(kind)),
-        "flagged" => Change(OrderOn(market), "order_flags", JsonValue.Create(1)),
+        "twap" or "twap-sub" => Change(Change(OrderOn(market), "type", JsonValue.Create(kind)), "trigger_price", JsonValue.Create("0")),
         _ => Change(Change(OrderOn(market), "initial_base_amount", JsonValue.Create("0")), "remaining_base_amount", JsonValue.Create("0")),
     };
 
     [Theory] // #95: an order Vessel cannot model leaves only its own market's book incomplete.
     [InlineData("twap", VenueIncompleteBook.Twap)]
     [InlineData("twap-sub", VenueIncompleteBook.Twap)]
-    [InlineData("flagged", VenueIncompleteBook.Flagged)]
     [InlineData("unsized", VenueIncompleteBook.Unsized)]
     public async Task Coverage_an_unread_order_leaves_only_its_market_incomplete(string row, string kind)
     {
@@ -78,9 +77,33 @@ public sealed partial class LighterAdapterTests
     [Theory] // #95: with a whole-read condition beside it, no market is complete.
     [InlineData("cursor")]
     [InlineData("unknown-status")]
+    // Flags have no documented market scope, whatever the order's type or size (review S2).
+    [InlineData("flagged")]
+    [InlineData("flagged-twap")]
+    [InlineData("flagged-unsized")]
+    // A skipped order is checked like a read one before it may narrow the book (review S3).
+    [InlineData("skipped-unknown-status")]
+    [InlineData("skipped-repeated")]
+    [InlineData("skipped-malformed-id")]
+    [InlineData("skipped-repeats-a-read-order")]
+    [InlineData("skipped-trigger-price")]
     public async Task Coverage_an_unread_order_beside_a_whole_read_condition_leaves_every_market_incomplete(string condition)
     {
-        var body = Orders(Unread(4, "twap") + "," + (condition == "unknown-status" ? OrderOn(1, "unknown") : OrderOn(1)));
+        var twap = Unread(4, "twap");
+        string[] rows = condition switch
+        {
+            "unknown-status" => [twap, OrderOn(1, "unknown")],
+            "flagged" => [Change(OrderOn(4), "order_flags", JsonValue.Create(1)), OrderOn(1)],
+            "flagged-twap" => [Change(twap, "order_flags", JsonValue.Create(1)), OrderOn(1)],
+            "flagged-unsized" => [Change(Unread(4, "unsized"), "order_flags", JsonValue.Create(1)), OrderOn(1)],
+            "skipped-unknown-status" => [Change(twap, "status", JsonValue.Create("unknown")), OrderOn(1)],
+            "skipped-repeated" => [twap, twap, OrderOn(1)],
+            "skipped-malformed-id" => [Change(twap, "order_id", JsonValue.Create("1")), OrderOn(1)],
+            "skipped-repeats-a-read-order" => [Unread(1, "unsized"), OrderOn(1), OrderOn(4)],
+            "skipped-trigger-price" => [Change(twap, "trigger_price", JsonValue.Create("1")), OrderOn(1)],
+            _ => [twap, OrderOn(1)],
+        };
+        var body = Orders(string.Join(",", rows));
         if (condition == "cursor")
         {
             var root = JsonNode.Parse(body)!;
@@ -92,6 +115,7 @@ public sealed partial class LighterAdapterTests
         Assert.False(result.OpenOrdersComplete);
         Assert.Null(result.IncompleteContracts);
         Assert.False(result.OpenOrdersCompleteFor("BTC", "1"));
+        Assert.False(result.OpenOrdersCompleteFor("1000PEPE", "4"));
     }
 
     [Fact]
