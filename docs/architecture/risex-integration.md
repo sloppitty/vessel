@@ -204,6 +204,15 @@ See `phase2-risk-coverage-contract.md`, item 14a.
 - **Counted omissions.** Trades on unrecognized markets were already counted
   in `OmittedExecutions`; the history notice now ends with one sentence for
   them, for example "Omitted executions: 1 on an unrecognized market."
+- **November 17 (issue #118): row-level values.** A trade whose `side` or
+  `position_side` is not `BUY` or `SELL`, or whose `fee` is negative (a maker
+  rebate, whose meaning is not established; see the field audit), is set aside
+  once its other fields validate, like D-22: a marker keeps its order (kind
+  `unrecognized-row` or `fee`), the sentence counts it ("1 with an
+  unrecognized side", "1 with a negative fee") and the rest of the read
+  applies. A side of the wrong JSON type, an unusable time or any other
+  malformed field still fails the read. Orders keep the strict side rule. See
+  the row-level section of `execution-facts.md`.
 - **A fixed end cut (F-13, probe V9).** Every `/v1/trade-history` page carries
   the same `end_time`: the snapshot's observation time in nanoseconds,
   truncated to whole milliseconds. A trade arriving between page requests

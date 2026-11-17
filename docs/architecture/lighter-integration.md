@@ -173,3 +173,15 @@ Each task is one reviewable change with its own tests. Every task keeps `scripts
 - The maximum `count_back` for candles.
 - How position-tied TP/SL orders and OCO pairs appear in inactive orders.
 - That `trades` keeps answering account queries with the token, and whether Lighter starts requiring auth for it.
+
+## November 17, 2026: unrecognized trade types (issue #118)
+
+A well-formed trade whose `type` is not `trade`, `liquidation`, `deleverage` or
+`market-settlement` no longer fails the account's import. Its trade ID, market,
+account role, size and fee rates still validate, and its time must be valid.
+It is left out with an `unrecognized-row` marker on its market and order, and
+the one counted omission sentence adds "N of an unrecognized type", for example
+"Omitted executions: 1 of an unrecognized type." A `type` that is not a string,
+or a row without a usable identity or time, still fails the read. To fit the
+extra count, `accounts.HistoryNotice` is now 1,200 characters (migration
+`UnrecognizedRowOmissions`). See the row-level section of `execution-facts.md`.
