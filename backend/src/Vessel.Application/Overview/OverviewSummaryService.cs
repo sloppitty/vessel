@@ -1,6 +1,7 @@
 using System.Globalization;
 using Vessel.Application.Activity;
 using Vessel.Application.Common;
+using Vessel.Application.Sizing;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Workspace;
@@ -8,17 +9,19 @@ using Vessel.Domain.Common;
 
 namespace Vessel.Application.Overview;
 
-public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceService workspace, ActivityService activity, TimeProvider time)
+public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceService workspace, ActivityService activity, ISizingStore orders,
+    TimeProvider time)
 {
     public const int MaxGroups = 200;
     public const string ScopeNote = "Enabled owner accounts only, including Unassigned. Nominal USD, no FX/depeg valuation. " +
         NominalStablecoins.Caveat + " Venues with different quote stablecoins are pooled nominally. " +
-        "Balance and availability use the workspace's reported ledgers, never inferred funds. Positions and unrealized P&L use latest retained snapshots, not live prices; an incomplete position read leaves them unknown. " +
-        "Realized result uses closed retained position operations and actual exit times, not Plays; incomplete boundaries and unknown net results are excluded. " +
+        "Balance and availability use the workspace's reported ledgers, never inferred funds. Positions and unrealized P&L use latest retained snapshots, not live prices, as of the oldest included refresh; an incomplete position read leaves them unknown. " +
+        "Realized result uses closed retained position operations and actual exit times, not Plays; incomplete boundaries, unknown net results and operations with known missing executions are excluded. " +
         "No closed result is unknown, not zero. Retained imports do not prove complete history. Listed stablecoin gross fees are deducted once; separate funding is not added and reported funding inclusion is unverified. " +
         "Shares are exact ratios of known balance subtotals, not claims of complete valuation. At most 200 groups; totals include omitted groups.";
 
     public const string IncompletePositionsReason = "Latest position read was incomplete; positions and unrealized P&L unknown.";
+    public const string MissingExecutionsReason = "Operations left out: executions missing. A filled order's retained executions fall short of its size.";
 
     public async Task<OverviewSummaryDto> GetAsync(string? groupBy, string? period, string? scope, CancellationToken ct,
         string? tradingMode = "real")
@@ -38,7 +41,16 @@ public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceServi
         var snapshots = summaries.Facts.Snapshots.ToDictionary(s => s.AccountId);
         var operations = summaries.Operations.GroupBy(o => o.AccountId).ToDictionary(g => g.Key, g => g.ToList());
         var fills = summaries.Facts.Fills.GroupBy(f => f.AccountId).ToDictionary(g => g.Key, g => g.Count());
-        var history = summaries.Coverage.GroupBy(c => c.AccountId).ToDictionary(g => g.Key, g => g.Count());
+        // #93: every funding-capable account has a funding-state row; it says nothing about retained fill history.
+        var fundingStates = summaries.Facts.FundingStates.Select(f => (f.AccountId, f.Notice)).ToHashSet();
+        var history = summaries.Coverage.Where(c => c.ContractId is not null || !fundingStates.Contains((c.AccountId, c.Notice)))
+            .Select(c => c.AccountId).ToHashSet();
+        bool InPeriod(ActivityOperationDto o) => (o.ClosedAtUtc ?? o.LastOccurredAtUtc) <= asOf && (from is null || (o.ClosedAtUtc ?? o.LastOccurredAtUtc) >= from);
+        bool KnownClosed(ActivityOperationDto o) => o.Status == "closed" && o.ClosedAtUtc is not null && o.NetResultUsd is not null;
+        // #93: the shared rule Review and Sizing apply; simulated executions have no venue orders to check.
+        var missing = mode == TradingMode.Real
+            ? await SizingService.MissingExecutionsAsync(summaries.Operations.Where(o => KnownClosed(o) && InPeriod(o)).ToList(), summaries.Facts.Fills, orders, ct)
+            : new HashSet<ActivityOperationDto>();
 
         OverviewSummaryTotals Totals(IReadOnlyList<AccountDto> selected)
         {
@@ -52,9 +64,8 @@ public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceServi
             // #89: a partial read's rows are not the account's whole picture, so its count and sum stay unknown.
             bool Partial(AccountDto a) => mode == TradingMode.Real && snapshots.TryGetValue(a.Id, out var s) && !s.PositionsComplete;
             var candidates = selected.SelectMany(a => operations.GetValueOrDefault(a.Id) ?? [])
-                .Where(o => (o.Status == "closed" || o.Status == "incomplete") &&
-                    (o.ClosedAtUtc ?? o.LastOccurredAtUtc) <= asOf && (from is null || (o.ClosedAtUtc ?? o.LastOccurredAtUtc) >= from)).ToList();
-            var known = candidates.Where(o => o.Status == "closed" && o.ClosedAtUtc is not null && o.NetResultUsd is not null).ToList();
+                .Where(o => (o.Status == "closed" || o.Status == "incomplete") && InPeriod(o)).ToList();
+            var known = candidates.Where(o => KnownClosed(o) && !missing.Contains(o)).ToList();
             var contributing = known.Select(o => o.AccountId).Distinct().Count();
             var reasons = new List<SummaryReason>();
             var incomplete = candidates.Count(o => o.Status == "incomplete");
@@ -62,8 +73,10 @@ public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceServi
             if (incomplete > 0) reasons.Add(new(mode == TradingMode.Paper ? "Unresolved or incomplete simulated outcomes; excluded, never guessed." :
                 "Incomplete operation boundaries; excluded using latest execution time when exit is unknown.", incomplete));
             if (unknown > 0) reasons.Add(new("Closed operation net result or exit time unavailable.", unknown));
+            var withMissing = candidates.Count(missing.Contains);
+            if (withMissing > 0) reasons.Add(new(MissingExecutionsReason, withMissing));
             if (contributing < selected.Count) reasons.Add(new("Accounts without a known closed result in this period.", selected.Count - contributing));
-            var limitedHistory = selected.Count(a => a.HistoryNotice is not null || history.ContainsKey(a.Id));
+            var limitedHistory = selected.Count(a => a.HistoryNotice is not null || history.Contains(a.Id));
             if (limitedHistory > 0) reasons.Add(new(mode == TradingMode.Paper ? "Accounts with unresolved simulation coverage." :
                 "Accounts with retained-history or snapshot comparison limitations.", limitedHistory));
             var realized = new SummaryAmount(known.Count == 0 ? null : known.Aggregate(default(ExactAmount),
@@ -83,7 +96,9 @@ public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceServi
                     mode == TradingMode.Paper ? "Current marks unavailable; simulated unrealized P&L unknown." :
                     "Latest perpetual snapshot unavailable; unrealized P&L unknown.", a => Partial(a) ? IncompletePositionsReason : null), realized,
                 selected.Sum(a => fills.GetValueOrDefault(a.Id)),
-                selected.Sum(a => (operations.GetValueOrDefault(a.Id) ?? []).Sum(o => o.PaperExecutionCount)));
+                selected.Sum(a => (operations.GetValueOrDefault(a.Id) ?? []).Sum(o => o.PaperExecutionCount)),
+                mode == TradingMode.Real ? selected.Select(a => snapshots.GetValueOrDefault(a.Id)).Where(s => s is { PositionsComplete: true })
+                    .Select(s => (DateTimeOffset?)s!.ObservedAtUtc).Min() : null);
         }
         var totals = Totals(members);
         var byPortfolio = portfolios.ToDictionary(p => p.Id);

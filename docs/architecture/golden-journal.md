@@ -171,15 +171,19 @@ All periods, scope All, grouped by portfolio. Only the two enabled accounts coun
 
 - Balance: 1000 + 500 = 1500. Available: 600 + 400 = 1000.
 - Open positions in the snapshots: AVAX, ETH and XRP, so 3.
-- Unrealized from the snapshots: 200 - 2 - 0.2 = 197.8. Swing 198, Unassigned -0.2.
+- Unrealized from the snapshots: 200 - 2 - 0.2 = 197.8. Swing 198, Unassigned -0.2. Both snapshots were taken at `Now`, so
+  the tile's "at last refresh" time is `Now`.
 - Imported fills: 24.
 - Rows, by balance: Swing (Gross) 1000, share 1000 / 1500. Unassigned (Net) 500.
 - Realized, Unassigned row: -3.29 from 3 operations, nothing excluded.
 - X1 has no known net. Overview excludes it and says "Closed operation net result or exit time unavailable." with a count of 1.
 
-The right realized total is 7.81, with Swing at 11.1: 10.81 minus P6's +3, because P6's entry order misses an execution
-and Review and Sizing leave it out by the shared rule. That gives 8 contributing operations and 2 excluded (X1 and P6).
-Section 9 says what the code shows.
+- P6's entry order filled 2 with one execution of 1 retained. Overview leaves it out by the shared `MissingExecutions` rule,
+  as Review and Sizing do, and says "Operations left out: executions missing. A filled order's retained executions fall
+  short of its size." with a count of 1.
+
+Realized, All: Activity's closed known nets minus P6, 10.81 - 3 = 7.81. Swing (Gross): 14.1 - 3 = 11.1. Unassigned: -3.29,
+and 11.1 - 3.29 = 7.81. Of the 10 closed operations, 8 contribute (10 minus X1 and P6) and 2 are excluded (X1 and P6).
 
 ## 4. Review
 
@@ -308,8 +312,11 @@ database run.
 7.1. Review with positions = Activity's closed known nets minus the operations Review leaves out that have a known net:
 10.81 - 3 (P6) = 7.81. Also, Review's 8 scored items + 1 excluded Play + 1 omitted position = Activity's 10 closed operations.
 
-7.2. Overview realized = Activity's closed known nets minus the operations with a known missing execution. In the scopes
-without one (Unassigned, the Net account) both are -3.29. In the scopes holding P6 (All, Swing, Gross), see section 9.
+7.2. Overview realized = Activity's closed known nets minus the operations with a known missing execution. The only such
+operation is P6 (+3); X1 has no known net, so it is in neither sum. All: 10.81 - 3 = 7.81. Swing and the Gross account:
+14.1 - 3 = 11.1. Unassigned and the Net account hold none, so both are -3.29. With the same rule, Review with positions
+equals Overview realized, 7.81, since both leave out P6 and X1 and nothing else. Over 7 days nothing changes: P6 closed at
+D(8), outside the window.
 
 7.3. Group totals sum to their total. Overview by portfolio and by account: realized, unrealized and balance. Review, with
 and without positions: portfolios, accounts, assets, directions and origins.
@@ -355,9 +362,9 @@ once the issue is fixed. Nothing else in the golden journal is skipped.
 
 | Figure | Right | Code | Why the document is right | Test |
 | --- | --- | --- | --- | --- |
-| Overview realized, All (3, 7.2) | 7.81, 8 contributing, 2 excluded; Swing 11.1 | 10.81, 9 contributing, 1 excluded; Swing 14.1 | P6's order filled 2 with one execution of 1 retained. Review and Sizing leave it out by the shared `MissingExecutions` rule; Overview counts its +3. | `Overview_realized_equals_activity_closed_nets_minus_known_missing_executions`, #93 |
 | 7-day selection (7.4) | one count on every screen | Activity 3, Overview 3, Review 2 | SOL-S closes exactly at Now - 7 days. Activity uses [from, ...), Overview [from, now], Review (from, now]. Which rule is right is #125's decision; the test only requires all screens to agree. | `The_seven_day_period_selects_the_same_operations_on_every_screen`, #125 |
 
-When #93 is fixed, section 3's realized total and identity 7.2 for All also make Review with positions equal Overview
-realized (7.81 both), since both leave out P6 and X1. When #125 is fixed, update section 4.2's week and section 7.4 to the
+#93 (Overview counted P6's +3, showing 10.81 and Swing 14.1) is fixed: its test,
+`Overview_realized_equals_activity_closed_nets_minus_known_missing_executions`, runs in both the in-memory and the database
+run. When #125 is fixed, update section 4.2's week and section 7.4 to the
 chosen rule.

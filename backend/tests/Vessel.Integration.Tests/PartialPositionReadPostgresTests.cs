@@ -43,7 +43,7 @@ public sealed class PartialPositionReadPostgresTests
         var workspace = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(), TestUnitOfWork.For(db));
         // No venue registry: open operations take the snapshot path of unrealized P&L.
         var activity = new ActivityService(new ActivityStore(db), store, TimeProvider.System);
-        return new(await new OverviewSummaryService(store, workspace, activity, TimeProvider.System).GetAsync("account", "all", "all", default),
+        return new(await new OverviewSummaryService(store, workspace, activity, new SizingStore(db, TestUnitOfWork.For(db)), TimeProvider.System).GetAsync("account", "all", "all", default),
             await workspace.AccountAsync(accountId, default), await workspace.OverviewAsync(default),
             (await workspace.SnapshotAsync(accountId, default))!, await activity.PageAsync(new ActivityQuery(), default));
     }

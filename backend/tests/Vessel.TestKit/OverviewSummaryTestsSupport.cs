@@ -10,14 +10,17 @@ public partial class OverviewSummaryTestsSupport
     internal readonly MemoryWorkspaceStore store;
     internal readonly OverviewSummaryService service;
     internal readonly SummaryActivityStore activityStore;
+    internal readonly MemorySizingStore orders = new();
+    internal readonly List<Vessel.Domain.Workspace.AccountFundingState> fundingStates = [];
     public OverviewSummaryTestsSupport()
     {
         store = new(owner);
-        activityStore = new(store, owner);
-        service = new(store, new(store, new CoreOwner(owner), TestVenues.With(), TestUnitOfWork.None), new(activityStore, store, new Clock()), new Clock());
+        activityStore = new(store, owner, fundingStates);
+        service = new(store, new(store, new CoreOwner(owner), TestVenues.With(), TestUnitOfWork.None), new(activityStore, store, new Clock()), orders, new Clock());
     }
     internal sealed class Clock : TimeProvider { public override DateTimeOffset GetUtcNow() => Now; }
-    internal sealed class SummaryActivityStore(MemoryWorkspaceStore store, Guid owner) : IActivityStore
+    internal sealed class SummaryActivityStore(MemoryWorkspaceStore store, Guid owner, List<Vessel.Domain.Workspace.AccountFundingState>? funding = null)
+        : IActivityStore
     {
         public List<IReadOnlySet<Guid>?> Reads { get; } = [];
         public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
@@ -27,7 +30,10 @@ public partial class OverviewSummaryTestsSupport
                 (accountIds is null || accountIds.Contains(a.Id))).ToList();
             var ids = accounts.Select(a => a.Id).ToHashSet();
             return Task.FromResult(new ActivityFacts(accounts, store.Fills.Where(f => f.OwnerId == owner && ids.Contains(f.AccountId)).ToList(),
-                store.Snapshots.Where(s => s.OwnerId == owner && ids.Contains(s.AccountId)).ToList(), new Dictionary<Guid, Guid>()));
+                store.Snapshots.Where(s => s.OwnerId == owner && ids.Contains(s.AccountId)).ToList(), new Dictionary<Guid, Guid>())
+            {
+                FundingStates = (funding ?? []).Where(f => ids.Contains(f.AccountId)).ToList()
+            });
         }
         public Task<IReadOnlyDictionary<Guid, string>> PlayTitlesAsync(IReadOnlyCollection<Guid> playIds, CancellationToken ct) =>
             Task.FromResult<IReadOnlyDictionary<Guid, string>>(new Dictionary<Guid, string>());

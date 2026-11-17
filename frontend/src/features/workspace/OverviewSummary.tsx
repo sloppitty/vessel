@@ -13,6 +13,7 @@ import './overview-summary.css'
 import { NativeSelect } from '@/components/ui/native-select'
 import { CoverageBadge, NominalUsdTag, SummaryCoverageBadge } from './CoverageBadge'
 import { Time } from '@/components/ui/time'
+import { InfoTip } from '@/components/ui/info-tip'
 
 
 
@@ -56,6 +57,8 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
       <div className="shell-panel metric"><span className="metric-label">Enabled accounts</span><strong>{totals?.accountCount ?? accountCount}</strong></div>
       <div className="shell-panel metric"><span className="metric-label">Perpetual positions</span><strong>{totals?.openPositionCount ?? (loadingAll ? fallback.totals.openPositionCount ?? '—' : '—')}</strong>
         <small className={signClass(totals?.unrealizedPnl.amountUsd ?? null)}>{money(totals?.unrealizedPnl.amountUsd ?? null)} unrealized</small>
+        {totals?.unrealizedPnlAsOfUtc && <small>at last refresh <Time at={totals.unrealizedPnlAsOfUtc} /><InfoTip label="About unrealized at last refresh">
+          Venue-reported figures from each account's latest refresh, not live prices; the time is the oldest refresh included. Activity marks open positions at current prices.</InfoTip></small>}
         {totals && <SummaryCoverageBadge value={totals.unrealizedPnl} label="Unrealized" />}</div>
       <div className="shell-panel metric"><span className="metric-label">{api.tradingMode === 'paper' ? 'Simulated executions' : 'Imported executions'}</span><strong>{api.tradingMode === 'paper' ? totals?.paperExecutionCount ?? '—' : totals?.importedFillCount ?? (loadingAll ? fallback.totals.importedFillCount : '—')}</strong></div>
       {extraMetric}

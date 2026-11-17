@@ -60,6 +60,7 @@ public sealed class GoldenJournalPostgresTests
         var screens = Screens(db);
         await GoldenJournalChecks.ActivityAsync(j, screens);
         await GoldenJournalChecks.OverviewAsync(j, screens);
+        await GoldenJournalChecks.OverviewRealizedAsync(j, screens);
         await GoldenJournalChecks.ReviewPlaysAsync(j, screens);
         await GoldenJournalChecks.ReviewPositionsAsync(j, screens);
         await GoldenJournalChecks.SizingAsync(j, screens);

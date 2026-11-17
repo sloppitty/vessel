@@ -33,6 +33,15 @@ describe('Overview summary API', () => {
     const q = { groupBy: kind, period: '30', scope: `${kind}:bbbbbbbb-cccc-dddd-eeee-ffffffffffff` } as OverviewQuery
     expect(isOverviewSummary(overviewSummaryFixture(q), q)).toBe(false)
   })
+  it('requires the unrealized as-of time as a timestamp or null (#93)', () => {
+    const document = overviewSummaryFixture()
+    document.totals.unrealizedPnlAsOfUtc = '2026-10-13T11:00:00Z'
+    expect(isOverviewSummary(document, query)).toBe(true)
+    document.totals.unrealizedPnlAsOfUtc = 'yesterday'
+    expect(isOverviewSummary(document, query)).toBe(false)
+    delete (document.totals as Partial<typeof document.totals>).unrealizedPnlAsOfUtc
+    expect(isOverviewSummary(document, query)).toBe(false)
+  })
   it('accepts an unknown position count, never requiring a number (#89)', () => {
     const document = overviewSummaryFixture()
     document.totals.openPositionCount = null; document.rows[0]!.totals = document.totals

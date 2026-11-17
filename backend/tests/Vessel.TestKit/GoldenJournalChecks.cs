@@ -55,7 +55,7 @@ internal static class GoldenJournalChecks
         Assert.All(page.Operations.Where(o => o.Status == "closed"), o => Assert.Null(o.UnrealizedPnlUsd));
     }
 
-    /// <summary>Document section 3, without the realized figures that #93 makes wrong.</summary>
+    /// <summary>Document section 3; its realized total is in <see cref="OverviewRealizedAsync"/>.</summary>
     public static async Task OverviewAsync(GoldenJournal j, GoldenJournalScreens s)
     {
         var all = await s.Overview.GetAsync("portfolio", "all", "all", default);
@@ -65,6 +65,8 @@ internal static class GoldenJournalChecks
         Assert.Equal([$"portfolio:{j.Swing.Id}", "unassigned"], all.Rows.Select(r => r.Id));
         Assert.Equal([("1000", "198"), ("500", "-0.2")], all.Rows.Select(r => (r.Totals.Balance.AmountUsd, r.Totals.UnrealizedPnl.AmountUsd)));
         Assert.Equal(new Vessel.Application.Overview.BalanceShare("1000", "1500"), all.Rows[0].ShareOfBalance);
+        // Unrealized is the venue's figure at the last refresh, never a live mark: both snapshots were taken at Now.
+        Assert.Equal(GoldenJournal.Now, t.UnrealizedPnlAsOfUtc);
         // X1's net is unknown, so it is excluded and said so. The unknown is never zero.
         Assert.Contains(new Vessel.Application.Overview.SummaryReason("Closed operation net result or exit time unavailable.", 1),
             t.RealizedResult.Coverage.Reasons);
@@ -73,6 +75,33 @@ internal static class GoldenJournalChecks
         Assert.Equal(("-3.29", 1, 1, 3, 0), (net.AmountUsd, net.Coverage.ContributingAccountCount, net.Coverage.TotalAccountCount,
             net.Coverage.ContributingOperationCount, net.Coverage.ExcludedOperationCount));
         Assert.Empty(net.Coverage.Reasons);
+    }
+
+    /// <summary>
+    /// Document section 3's realized figures and identity 7.2 (#93): Overview leaves out P6, whose entry order misses an
+    /// execution, by the rule Review and Sizing apply, and says so.
+    /// </summary>
+    public static async Task OverviewRealizedAsync(GoldenJournal j, GoldenJournalScreens s)
+    {
+        var activity = (await s.Activity.PageAsync(new(PageSize: "100"), default)).Operations.Where(o => o.Status == "closed").ToList();
+        var missing = activity.Where(o => o.PlayId == j.Play["P6"].Id).ToList();
+        var overview = await s.Overview.GetAsync("portfolio", "all", "all", default);
+        var realized = overview.Totals.RealizedResult;
+        Assert.Contains(new Vessel.Application.Overview.SummaryReason(Vessel.Application.Overview.OverviewSummaryService.MissingExecutionsReason, 1),
+            realized.Coverage.Reasons);
+        Assert.Equal(("7.81", 8, 2), (realized.AmountUsd, realized.Coverage.ContributingOperationCount, realized.Coverage.ExcludedOperationCount));
+        Assert.Equal([("Swing", "11.1"), ("Unassigned", "-3.29")], overview.Rows.Select(r => (r.Name, r.Totals.RealizedResult.AmountUsd)));
+        Assert.Equal(ExactSum(activity.Select(o => o.NetResultUsd)) - ExactSum(missing.Select(o => o.NetResultUsd)),
+            ExactSum([realized.AmountUsd]));
+        // With the same rule, Review with positions equals Overview realized: both leave out P6 and X1, and nothing else.
+        var review = await s.Review.GetAsync(new(Period: "all", Positions: "include"), default);
+        Assert.Equal(realized.AmountUsd, review.Metrics.Net);
+        foreach (var scope in new[] { $"portfolio:{j.Swing.Id}", $"account:{j.Gross.Id}" })
+        {
+            var scoped = await s.Overview.GetAsync("portfolio", "all", scope, default);
+            Assert.Equal(ExactSum(activity.Where(o => o.AccountId == j.Gross.Id && o.PlayId != j.Play["P6"].Id)
+                .Select(o => o.NetResultUsd)), ExactSum([scoped.Totals.RealizedResult.AmountUsd]));
+        }
     }
 
     /// <summary>Document section 4.1: Plays only.</summary>
