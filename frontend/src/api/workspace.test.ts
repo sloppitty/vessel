@@ -407,6 +407,22 @@ describe('Market stream', () => {
     await expect(createWorkspaceApi(credentialsFixture).marketStream(accountFixture.id, query, aborted.signal, vi.fn())).resolves.toBeUndefined()
   })
 
+  it('interrupts a market stream that goes silent, so the chart reconnects instead of showing frozen prices', async () => {
+    vi.useFakeTimers()
+    try {
+      stream([': keepalive\n\n', frame('candle', first)], { close: false })
+      const events: unknown[] = []
+      const outcome = vi.fn()
+      void createWorkspaceApi(credentialsFixture).marketStream(accountFixture.id, query, new AbortController().signal, e => events.push(e))
+        .then(() => outcome('ended'), (error: unknown) => outcome(error))
+      await vi.advanceTimersByTimeAsync(44_000)
+      expect(events).toEqual([{ type: 'candle', candle: first }])
+      expect(outcome).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(outcome).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'unavailable', message: 'The live market stream was interrupted.' }))
+    } finally { vi.useRealTimers() }
+  })
+
   it('rejects network failures and oversized messages', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('network')))
     await expect(createWorkspaceApi(credentialsFixture).marketStream(accountFixture.id, query, new AbortController().signal, vi.fn())).rejects.toMatchObject({ kind: 'unavailable' })

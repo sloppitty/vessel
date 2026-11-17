@@ -12,6 +12,9 @@
   Compose now allows 40 seconds, so a stopping worker no longer leaves a check "running".
 - Identity records that carry a session token or pairing secret no longer print it when
   turned into text.
+- A live stream that stopped sending data, for example after a Wi-Fi or network change, kept
+  showing "Live" with frozen prices. Both streams now reconnect within a minute and resume
+  where they left off, and the chart shows "Reconnecting" while it is down.
 
 ### Changed
 

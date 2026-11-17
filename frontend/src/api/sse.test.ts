@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { SseOverflowError, SseParser, type SseEvent } from './sse'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readSseStream, SseIdleError, sseIdleTimeout, SseOverflowError, SseParser, type SseEvent } from './sse'
 
 function parse(chunks: string[], maxBuffer?: number) {
   const events: SseEvent[] = []
@@ -53,5 +53,44 @@ describe('Server-sent event parser', () => {
     lines.push('data: 01234\n')
     expect(() => lines.push('data: 56789\ndata: abcde\n')).toThrow(SseOverflowError)
     expect(parse(['data: 0123456789\n\n'.repeat(4)], 16)).toHaveLength(4)
+  })
+})
+
+describe('Shared stream reader idle watchdog', () => {
+  afterEach(() => vi.useRealTimers())
+  const encoder = new TextEncoder()
+  function open() {
+    let body!: ReadableStreamDefaultController<Uint8Array>
+    const cancelled = vi.fn()
+    const stream = new ReadableStream<Uint8Array>({ start(controller) { body = controller }, cancel: cancelled })
+    const events: SseEvent[] = []
+    const outcome = vi.fn()
+    const reading = readSseStream(stream, new AbortController().signal, event => events.push(event))
+      .then(() => outcome('ended'), (error: unknown) => outcome(error))
+    return { send: (text: string) => body.enqueue(encoder.encode(text)), cancelled, events, outcome, reading }
+  }
+
+  it('gives up on a half-open stream that stops sending bytes, well within a minute', async () => {
+    vi.useFakeTimers()
+    const { send, cancelled, events, outcome } = open()
+    send('event: status\ndata: {}\n\n')
+    await vi.advanceTimersByTimeAsync(sseIdleTimeout - 1)
+    expect(outcome).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(outcome).toHaveBeenCalledExactlyOnceWith(expect.any(SseIdleError))
+    expect(cancelled).toHaveBeenCalled()
+    expect(events).toHaveLength(1)
+    expect(sseIdleTimeout).toBeLessThan(60_000)
+  })
+
+  it('leaves a healthy stream that only sends keepalives alone', async () => {
+    vi.useFakeTimers()
+    const { send, cancelled, outcome } = open()
+    for (let tick = 0; tick < 40; tick++) {
+      await vi.advanceTimersByTimeAsync(15_000)
+      send(': keepalive\n\n')
+    }
+    expect(outcome).not.toHaveBeenCalled()
+    expect(cancelled).not.toHaveBeenCalled()
   })
 })

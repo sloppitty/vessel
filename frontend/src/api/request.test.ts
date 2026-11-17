@@ -159,8 +159,10 @@ describe('shared API request pipeline', () => {
       : api.monitorStream('0', controller.signal, vi.fn())
     await vi.advanceTimersByTimeAsync(25_001)
     expect((fetch.mock.calls[0]![1].signal as AbortSignal).aborted).toBe(false)
-    expect(vi.getTimerCount()).toBe(0)
+    // Only the reader's idle watchdog remains, and it ends with the stream.
+    expect(vi.getTimerCount()).toBe(1)
     controller.abort()
     await expect(request).resolves.toBeUndefined()
+    expect(vi.getTimerCount()).toBe(0)
   })
 })
