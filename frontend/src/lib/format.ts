@@ -44,25 +44,23 @@ export function amount(value: string): string {
 export const shortAddress = (value: string | null) => value === null ? 'Manual record' : `${value.slice(0, 6)}…${value.slice(-4)}`
 
 // Review keeps its compact money precision, N/A label and UTC date profile.
-export function reviewMoney(value: string | null, signed = false): string {
-  if (value === null) return 'N/A'
-  const digits = Number(value) !== 0 && Math.abs(Number(value)) < 1 ? 4 : 2
-  return numberFormat({ style: 'currency', currency: 'USD', maximumFractionDigits: digits,
-    minimumFractionDigits: 0, signDisplay: signed ? 'exceptZero' : 'auto' }).format(decimalString(value))
-}
 /**
- * One Play's signed result (venue net or Play-local) in Review: compact like `reviewMoney`, but a non-zero value that would
- * round to "$0" keeps its sign and leading digits, so it never reads as an exact scratch. Only exact zero is "$0".
+ * Review money: compact (two decimals, four below $1), but a non-zero value that would round to "$0" keeps its leading
+ * digits, so its colour, which follows the exact value, never sits on a "$0" and a tiny loss never reads "-$0". Only exact
+ * zero is "$0".
  */
-export function reviewResult(value: string | null): string {
+export function reviewMoney(value: string | null, signed = false): string {
   if (value === null) return 'N/A'
   const standard = Number(value) !== 0 && Math.abs(Number(value)) < 1 ? 4 : 2
   return numberFormat({ style: 'currency', currency: 'USD', maximumFractionDigits: fractionDigits(value, standard),
-    minimumFractionDigits: 0, signDisplay: 'exceptZero' }).format(decimalString(value))
+    minimumFractionDigits: 0, signDisplay: signed ? 'exceptZero' : 'auto' }).format(decimalString(value))
 }
+/** One Play's signed result (venue net or Play-local) in Review. */
+export const reviewResult = (value: string | null) => reviewMoney(value, true)
+/** Review percent to one decimal. A value that rounds to zero reads "0.0%", never a signed zero. */
 export function reviewPercent(value: string | null, fraction = false): string {
   if (value === null) return 'N/A'
-  const formatted = numberFormat({ maximumFractionDigits: 1, minimumFractionDigits: 1,
+  const formatted = numberFormat({ maximumFractionDigits: 1, minimumFractionDigits: 1, signDisplay: 'negative',
     ...(fraction ? { style: 'percent' as const } : {}) }).format(decimalString(value))
   return fraction ? formatted : `${formatted}%`
 }

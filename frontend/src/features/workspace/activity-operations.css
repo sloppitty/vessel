@@ -29,6 +29,7 @@
 .operation-pnl { display: flex; align-items: center; gap: 8px; }
 .operation-return { font-size: var(--text-2xs); white-space: nowrap; padding: 3px 5px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
 .operation-net { font-weight: 650; }
+td.operation-net > span.coverage-badge { display: flex; margin: 4px 0 0 auto; }
 .operation-unrealized { font-weight: 650; }
 /* The expanded row's Play line; a long title shortens with an ellipsis and keeps the full title as its tooltip. */
 .workspace-table .operation-play { display: flex; align-items: baseline; gap: 10px; max-width: 32rem; margin: 0 0 10px; white-space: normal; }

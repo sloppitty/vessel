@@ -6,7 +6,7 @@ import { Skeleton, SkeletonStatus } from '@/components/ui/skeleton'
 import { OperationDirection } from './OperationDirection'
 import { OperationLeverage } from './OperationLeverage'
 import { OperationFills } from './OperationFills'
-import { NominalUsdTag } from './CoverageBadge'
+import { CoverageBadge, NominalUsdTag } from './CoverageBadge'
 import { duration, operationDates, operationPriceReturn, operationStatus, resultSign } from './activity-format'
 import { amount, money, price } from '@/lib/format'
 import './activity-operations.css'
@@ -123,7 +123,8 @@ export function OperationsTable({ operations, accounts, compact = false, onPrevi
       {!compact && <><td className="numeric operation-entry"><span title={op.averageEntryPrice ?? 'Unknown'}>{price(op.averageEntryPrice)}</span></td><td className={`numeric operation-result ${priceTone}`}><span title={op.averageExitPrice ?? 'Unknown'}>{price(op.averageExitPrice)}</span></td><td className="numeric"><div className="operation-pnl"><Result value={op.grossClosedPnlUsd} />{priceReturn !== null && <span className={`operation-return operation-result ${priceTone}`} title="Average entry-to-exit price return, direction-adjusted, before fees and leverage. Not an account or margin return.">{priceReturn}</span>}</div></td>
       <td className="numeric operation-fees"><span title={op.stablecoinFeesNominalUsd}>{money(op.stablecoinFeesNominalUsd)}</span>{op.otherFees.map(f => <small key={f.token}>{amount(f.amount)} {f.token}</small>)}</td>
       <td className="numeric"><Result value={op.fundingNetUsd} />{op.fundingStatus !== 'complete' && <small>{op.fundingStatus === 'not-applicable' ? 'Not simulated' : op.fundingStatus === 'partial' ? 'Partial' : 'Unavailable'}</small>}</td></>}
-      <td className="numeric operation-net"><Result value={op.netResultUsd} /></td>
+      <td className="numeric operation-net"><Result value={op.netResultUsd} />{(op.netResultUsd === null || op.coverage.length > 0) &&
+        <CoverageBadge label="Net result" status={op.netResultUsd === null ? 'unavailable' : 'partial'} reasons={op.coverage} />}</td>
       {!compact && <td className="numeric operation-unrealized"><Unrealized operation={op} zone={zone} /></td>}
     </tr>{open && <tr id={`operation-${op.id}`}><td colSpan={compact ? 4 : 10} className="operation-expanded">
       {!compact && <p className="operation-play"><span>Play</span><PlayCell operation={op} onOpenPlay={onOpenPlay} opening={opening} onJournal={onPreview} /></p>}
