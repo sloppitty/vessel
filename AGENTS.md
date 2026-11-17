@@ -105,6 +105,14 @@ release tag; branch dispatches skip before allocating a runner. Run local checks
 before merging. Existing branches must incorporate the updated workflow files
 to stop their older branch-triggered runs.
 
+November 17, 2026: a repository pre-push hook (`scripts/hooks/pre-push`,
+issue #104) runs the quick checks the pushed files need and refuses a `v*` tag
+that fails `scripts/release.py check --tag`. Install it once per clone with
+`git config core.hooksPath scripts/hooks`; see `docs/development.md`. Missing
+tools are skipped with a reason; `git push --no-verify` is the only bypass. It
+does not replace the local checks before merging, and CI still runs only on
+release tags.
+
 October 16, 2026: the owner requested funding retrieval per venue, storage,
 display and operation aggregation. Follow `docs/architecture/venue-funding.md`
 and the four venue funding research notes. Funding is a signed actual settlement,

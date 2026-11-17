@@ -330,6 +330,51 @@ pnpm --filter vessel-frontend build
 dotnet test backend/Vessel.slnx --configuration Release
 ```
 
+### Pre-push hook
+
+The repository ships a pre-push hook. Install it once per clone:
+
+```sh
+git config core.hooksPath scripts/hooks
+```
+
+This replaces any hooks in `.git/hooks` for the clone. Remove it with
+`git config --unset core.hooksPath`.
+
+For each pushed branch the hook lists the files changed against the remote
+branch, or against `origin/main` for a new branch, and runs only what they need:
+
+| Changed files | Check |
+| --- | --- |
+| `scripts/`, `deploy/` | `python3 -m unittest discover -s scripts -p 'test_*.py'` |
+| `frontend/`, root `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` | `pnpm --filter vessel-frontend typecheck` and `lint` |
+| `backend/`, root `global.json` | `dotnet build backend/Vessel.slnx --configuration Release` (locked restore) |
+
+The checks run on the working tree, not on an export of the pushed commits. So
+when a pushed branch needs checks, the hook refuses the push if that branch is
+not the checked-out commit, or if any tracked file has uncommitted changes
+(staged or not), because the checks read more than the paths that select them.
+Commit or clean those changes and push from the checked-out branch, or use
+`git push --no-verify`. Untracked files do not refuse. The hook also clears the
+repository variables git exports to hooks (`GIT_DIR`, `GIT_INDEX_FILE` and the
+rest of `git rev-parse --local-env-vars`), so checks that create their own
+temporary repositories cannot change yours.
+
+Other files (documentation, for example) run nothing. No test suites or
+database run, so a one-file change takes well under two minutes (a cold backend
+build is the slowest step, about 1.5 minutes). A pushed `v*` tag runs
+`python3 scripts/release.py check --tag <tag>` against the tagged commit's files.
+
+A check that runs and fails refuses the push. A check whose tool is missing is
+skipped, and the hook says which and why: no `node` or `pnpm`, frontend
+dependencies not installed, or no `dotnet` with the SDK pinned in `global.json`.
+Frontend tests are not run, so the hook does not need a full-ICU Node. A
+skipped check is not a pass; run it another way (for example in a container)
+before merging.
+
+To push without the hook on purpose, use `git push --no-verify`. The selection
+logic is `scripts/pre_push.py`, covered by `scripts/test_pre_push.py`.
+
 CI is defined in `.github/workflows/checks.yml`. Local execution does not establish that a remote GitHub run succeeded; no push is implied.
 
 Hyperliquid account detail now has supported stablecoin total/held/available wallet rows, separate from its primary perpetual snapshot. Use Refresh account to populate old snapshots. See [stablecoin wallet limits](architecture/stablecoin-wallet.md).
