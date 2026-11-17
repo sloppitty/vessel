@@ -27,9 +27,11 @@ public sealed record PlayRisk(Ratio? Risk, string? Reason);
 /// <list type="bullet">
 /// <item><b>Open part.</b> Each entry with fills: the quantity still open, from the entry's exact average fill.</item>
 /// <item><b>Planned part.</b> Each entry's planned quantity that has not filled, at its planned price.</item>
-/// <item><b>Per stop.</b> A stop's share of what remains of its entry, times the distance from the reference price to the
+/// <item><b>Per stop.</b> A stop's part of what remains of its entry, times the distance from the reference price to the
 /// stop on the loss side. A stop at or beyond the reference adds zero: risk is never negative and never offsets another
-/// stop. Stops whose linked orders have already filled have done their part; the others share what remains.</item>
+/// stop. What remains is shared in proportion to what each stop still rests for: its share of the entry's filled
+/// quantity less its own executions, never below zero. The part a stop has filled has left the position, so a fully
+/// filled stop adds nothing and a part-filled one counts for the rest.</item>
 /// </list>
 /// Anything that cannot be measured makes the whole Play unknown, never partly summed. No fees, slippage or funding.
 /// </summary>
@@ -70,7 +72,7 @@ public static class OpenRiskCalculator
 
         var filled = new Dictionary<string, (Ratio Quantity, Ratio Notional)>(StringComparer.Ordinal);
         var exited = new Dictionary<string, Ratio>(StringComparer.Ordinal);
-        var executedLevels = new HashSet<string>(StringComparer.Ordinal);
+        var executedLevels = new Dictionary<string, Ratio>(StringComparer.Ordinal);
         var unattributed = Ratio.Zero;
         foreach (var execution in executions)
         {
@@ -84,7 +86,8 @@ public static class OpenRiskCalculator
             else if (execution.EntryId is { } entryId)
             {
                 exited[entryId] = exited.GetValueOrDefault(entryId, Ratio.Zero) + quantity;
-                if (execution.Role == OrderLinkRole.Stop && execution.LevelId is { } level) executedLevels.Add(Key(entryId, level));
+                if (execution.Role == OrderLinkRole.Stop && execution.LevelId is { } level)
+                    executedLevels[Key(entryId, level)] = executedLevels.GetValueOrDefault(Key(entryId, level), Ratio.Zero) + quantity;
             }
             else unattributed += quantity;
         }
@@ -128,15 +131,18 @@ public static class OpenRiskCalculator
             if (priced.Any(s => s.Price is null)) return new(null, UnpricedStop);
             if (priced.Aggregate(Ratio.Zero, (sum, s) => sum + s.Share!.Value) != Hundred) return new(null, StopShares);
 
-            // Open part: what remains, shared by the stops that have not executed, from the average fill.
+            // Open part: what remains, from the average fill, shared in proportion to what each stop still rests for: its
+            // share of the filled quantity less what it has executed. Each stop's executions already left the position.
             if (remaining.Sign > 0)
             {
                 var average = Ratio.Divide(notional, quantity)!.Value;
-                var left = priced.Where(s => !executedLevels.Contains(Key(entry.Id, s.Id))).ToList();
-                if (left.Count == 0) return new(null, NoStop);
-                var total = left.Aggregate(Ratio.Zero, (sum, s) => sum + s.Share!.Value);
-                foreach (var stop in left)
-                    risk += remaining * Ratio.Divide(stop.Share!.Value, total)!.Value * Loss(average, stop.Price!.Value, sign);
+                var resting = priced.Select(s => (Stop: s, Rests: Ratio.Max(Ratio.Zero,
+                    quantity * Ratio.Divide(s.Share!.Value, Hundred)!.Value - executedLevels.GetValueOrDefault(Key(entry.Id, s.Id), Ratio.Zero))))
+                    .Where(s => s.Rests.Sign > 0).ToList();
+                var total = resting.Aggregate(Ratio.Zero, (sum, s) => sum + s.Rests);
+                if (total.Sign == 0) return new(null, NoStop);
+                foreach (var (stop, rests) in resting)
+                    risk += remaining * Ratio.Divide(rests, total)!.Value * Loss(average, stop.Price!.Value, sign);
             }
 
             // Planned part: the planned quantity not yet filled, at the planned price, against every stop.

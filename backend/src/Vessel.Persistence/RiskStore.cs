@@ -46,7 +46,8 @@ public sealed class RiskStore(VesselDbContext db, UnitOfWork unitOfWork) : IOpen
             var pairs = new List<(PlayOrderLink, ImportedFill)>();
             foreach (var link in linked[play.Id])
             {
-                if (!orders.TryGetValue(link.ImportedOrderId, out var order)) continue;
+                // A linked order that is not stored leaves its executions, and what its level still rests for, unknown.
+                if (!orders.TryGetValue(link.ImportedOrderId, out var order)) { problem = OpenRiskCalculator.MissingExecutions; continue; }
                 var own = fills[OrderKey.Of(order)].ToList();
                 // A filled order whose retained executions fall short leaves its prices and quantity unknown.
                 if (ExecutionIntegrity.MissingExecutions(order, own)) problem = OpenRiskCalculator.MissingExecutions;

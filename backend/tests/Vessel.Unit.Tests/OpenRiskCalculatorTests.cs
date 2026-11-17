@@ -95,6 +95,37 @@ public sealed class OpenRiskCalculatorTests
         Assert.Equal("0", Risk(Plan(), Fill(OrderLinkRole.Entry, 1, 100), Fill(OrderLinkRole.Target, 1, 110, level: "t1")));
     }
 
+    [Theory]
+    [InlineData("long", "90", "99", 90)]
+    [InlineData("short", "110", "101", 110)]
+    public void A_part_filled_stop_counts_for_what_it_still_rests_for(string direction, string far, string near, int fill)
+    {
+        // #117: 10 at 100, stops for 5 at the far price and 5 at the near one. The far stop filled 1 and still rests for 4:
+        // the 9 left open face 4 × 10 + 5 × 1 = 45, not 9 × 1 = 9 at the near stop alone.
+        var plan = Plan(direction, size: "10", entries: Entry("e1", "100", "100", Stop(far, "50", id: "a"), Stop(near, "50", id: "b")));
+        Assert.Equal("45", Risk(plan, Fill(OrderLinkRole.Entry, 10, 100), Fill(OrderLinkRole.Stop, 1, fill, level: "a")));
+        // A target that took 2 more shrinks what each stop covers in proportion to what it rests for, 4 : 5:
+        // 7 × 4/9 × 10 + 7 × 5/9 × 1 = 280/9 + 35/9 = 35.
+        var target = direction == "long" ? 110m : 90m;
+        Assert.Equal("35", Risk(plan, Fill(OrderLinkRole.Entry, 10, 100), Fill(OrderLinkRole.Stop, 1, fill, level: "a"),
+            Fill(OrderLinkRole.Target, 2, target, level: "t1")));
+    }
+
+    [Theory]
+    [InlineData("long", "90", "99", 90)]
+    [InlineData("short", "110", "101", 110)]
+    public void A_fully_filled_stop_still_adds_nothing(string direction, string far, string near, int fill)
+    {
+        // The far stop filled all 5 it was for: the 5 left open face the near stop alone, 5 × 1.
+        var plan = Plan(direction, size: "10", entries: Entry("e1", "100", "100", Stop(far, "50", id: "a"), Stop(near, "50", id: "b")));
+        Assert.Equal("5", Risk(plan, Fill(OrderLinkRole.Entry, 10, 100), Fill(OrderLinkRole.Stop, 5, fill, level: "a")));
+        // Split over two fills, the same.
+        Assert.Equal("5", Risk(plan, Fill(OrderLinkRole.Entry, 10, 100), Fill(OrderLinkRole.Stop, 2, fill, level: "a"),
+            Fill(OrderLinkRole.Stop, 3, fill, level: "a")));
+        // A stop that took more than its share rests for nothing; the rest faces the other stop: 4 × 1.
+        Assert.Equal("4", Risk(plan, Fill(OrderLinkRole.Entry, 10, 100), Fill(OrderLinkRole.Stop, 6, fill, level: "a")));
+    }
+
     [Fact]
     public void An_unfilled_remainder_of_the_plan_counts_at_its_planned_price()
     {
