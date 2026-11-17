@@ -47,6 +47,10 @@
 - Monitor: a stop cancelled without filling now raises its critical after two checks a
   minute apart even while the entry keeps filling. Each new fill used to restart the
   confirmation, so the no-stop warning stayed hidden while the position grew.
+- One unrecognized venue row (a new Lighter trade type, an unknown Hyperliquid or RISEx
+  side, a RISEx negative fee) no longer stops an account's whole import. It leaves an
+  omission marker and its operation counts as incomplete everywhere. A malformed row or
+  response still fails the read.
 
 ### Changed
 
@@ -69,6 +73,8 @@ workers need these columns, so they must not start against an unmigrated databas
 
 - `20261117090000_SnapshotPositionsComplete` adds `PositionsComplete` to account snapshots.
   It is additive and existing snapshots stay complete.
+- `20261117102251_UnrecognizedRowOmissions` adds the `unrecognized-row` omission kind and
+  widens `accounts.HistoryNotice` to 1,200 characters. Roll it back only from a backup.
 
 No configuration changes.
 
