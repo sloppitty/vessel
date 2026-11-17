@@ -181,8 +181,8 @@ revisions, status changes, log entries, image notes, manual executions, order
 links, paper executions and simulations) or through its linked orders (an
 imported fill by the shared order-key rule, or an order one of whose
 `MissingExecutions` inputs changed: status, size, position TP/SL flag or
-omitted executions, listed in `ExecutionIntegrity.MissingExecutionsOrderInputs`
-and checked against the rule by a unit test, #92). So Play saves and reviews,
+omitted executions: the members of `IMissingExecutionsInputs`, the only type
+the rule reads an order through, #92). So Play saves and reviews,
 log appends, image note edits and deletions, venue lifecycle, manual
 corrections, retrospective Plays and paper evaluation all commit or roll back
 with their projection.
