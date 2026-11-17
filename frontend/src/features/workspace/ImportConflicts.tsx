@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useApiRead } from '@/lib/use-api-read'
 import type { FillConflictField, FillConflicts, WorkspaceApi } from '@/api/workspace'
 import { InfoTip } from '@/components/ui/info-tip'
 import { Time } from '@/components/ui/time'
@@ -13,18 +13,10 @@ const fieldLabels: Record<FillConflictField, string> = {
  * this lists which fields differed and when, never either value. Nothing shows while there are none or the read fails.
  */
 export function ImportConflicts({ api, accountId, reloadKey }: { api: Pick<WorkspaceApi, 'importConflicts'>; accountId: string; reloadKey: string }) {
-  const request = useMemo(() => ({ api, accountId, reloadKey }), [api, accountId, reloadKey])
-  const [loaded, setLoaded] = useState<{ request: typeof request; conflicts: FillConflicts } | null>(null)
-  useEffect(() => {
-    // Clients without the read (older test doubles) show nothing.
-    if (typeof request.api.importConflicts !== 'function') return
-    const controller = new AbortController()
-    request.api.importConflicts(request.accountId, controller.signal)
-      .then(conflicts => { if (!controller.signal.aborted) setLoaded({ request, conflicts }) })
-      .catch(() => { /* An optional notice: a failed read leaves it out rather than blocking the account. */ })
-    return () => controller.abort()
-  }, [request])
-  const conflicts = loaded?.request === request ? loaded.conflicts : null
+  // An optional notice: a failed read leaves it out rather than blocking the account. Clients without the read (older test
+  // doubles) show nothing.
+  const conflicts: FillConflicts | null = useApiRead(api, accountId, (client, signal) => client.importConflicts(accountId, signal),
+    { fallback: '', reloadKey, enabled: typeof api.importConflicts === 'function' }).data
   if (!conflicts || conflicts.total === 0) return null
   return <section className="shell-panel" aria-labelledby={`import-conflicts-${accountId}`}>
     <header className="shell-panel-heading"><div className="heading-with-tip">

@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
 import type { ActivityFills, ActivityOperation } from '@/api/activity'
-import { ApiError, errorMessage } from '@/api/errors'
+import { ApiError } from '@/api/errors'
 import type { BrokerAccount, WorkspaceApi } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { Skeleton, SkeletonStatus } from '@/components/ui/skeleton'
 import { useDelayedFlag } from '@/lib/use-delayed-flag'
+import { useApiRead } from '@/lib/use-api-read'
 import { ActivityTable } from './ActivityTable'
 import { amount, money, price } from '@/lib/format'
 import { Time } from '@/components/ui/time'
@@ -16,31 +16,21 @@ export function OperationFills({ api, operation, accounts, onReload, refreshGene
   /** Changes with every accepted Activity response; per-execution Play associations can change without the row's facts. */
   refreshGeneration?: number
 }) {
-  const [retry, setRetry] = useState(0)
   const { accountId, id } = operation
   // Re-read on every accepted Activity response and when the row's facts change, not on every render.
   const key = JSON.stringify([accountId, id, operation.fillCount, operation.lastOccurredAtUtc, operation.playId, operation.playAssociation,
-    operation.fundingPaymentCount, operation.fundingAsOfUtc, refreshGeneration, retry])
-  const [result, setResult] = useState<{ api: WorkspaceApi; key: string; fills?: ActivityFills; error?: string; changed?: boolean } | null>(null)
-  useEffect(() => {
-    const controller = new AbortController()
-    api.activityFills(accountId, id, controller.signal)
-      .then(fills => { if (!controller.signal.aborted) setResult({ api, key, fills }) })
-      .catch(cause => {
-        if (controller.signal.aborted) return
-        setResult({ api, key, error: errorMessage(cause, 'Executions could not be loaded.'), changed: cause instanceof ApiError && cause.status === 404 })
-      })
-    return () => controller.abort()
-  }, [api, accountId, id, key])
-  const pending = result === null || result.api !== api || result.key !== key
+    operation.fundingPaymentCount, operation.fundingAsOfUtc, refreshGeneration])
+  const read = useApiRead(api, key, (client, signal) => client.activityFills(accountId, id, signal), { fallback: 'Executions could not be loaded.' })
+  const pending = read.loading
   const skeleton = useDelayedFlag(pending)
   if (pending) return skeleton ? <SkeletonStatus label="Loading executions…" className="operation-fills-skeleton">
     {[0, 1].map(row => <span key={row} className="operation-fills-skeleton-row"><Skeleton /><Skeleton /><Skeleton /><Skeleton /></span>)}
   </SkeletonStatus> : <div className="operation-fills-pending" aria-busy="true" />
-  if (result.changed) return <div className="workspace-alert" role="alert"><span>This operation changed since the page loaded.</span>
+  if (read.cause instanceof ApiError && read.cause.status === 404) return <div className="workspace-alert" role="alert"><span>This operation changed since the page loaded.</span>
     {onReload && <Button variant="ghost" size="sm" onClick={onReload}>Reload activity</Button>}</div>
-  if (result.error || !result.fills) return <div className="workspace-alert" role="alert"><span>{result.error}</span>
-    <Button variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>Retry executions</Button></div>
+  if (read.error || !read.data) return <div className="workspace-alert" role="alert"><span>{read.error}</span>
+    <Button variant="ghost" size="sm" onClick={read.reload}>Retry executions</Button></div>
+  const result: { fills: ActivityFills } = { fills: read.data }
   if (result.fills.tradingMode === 'paper') return <>
     <p className="workspace-scope-note">Simulated executions at defined levels. Zero fees and slippage. Candle windows do not prove intrabar ordering.</p>
     <div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Role</th><th>Price</th><th>Quantity</th><th>Simulated P&amp;L</th><th>Time</th><th>Candle window</th></tr></thead>
