@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from './workspace'
-import { isAccountMonitor, isMonitorCoverage, isMonitorDiscrepancy, isMonitorEvent, isMonitorSummary, isMonitorWatch, monitorFrame, type MonitorDiscrepancy } from './monitor'
+import { isAccountMonitor, isMonitorCoverage, isMonitorDiscrepancy, isMonitorEvent, isMonitorSummary, isMonitorWatch, monitorFrame } from './monitor'
 import { isPlayExecution, type PlayExecution } from './plays'
 import { discrepancyFacts } from '@/features/monitor/discrepancy-text'
 import { coverageAs, coverageFixture, discrepancyFixture, eventCursor, monitorEventFixture, monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
@@ -30,7 +30,12 @@ describe('monitor contract', () => {
     expect(isAccountMonitor({ ...monitorFixture, nextManualAllowedAtUtc: '2026-10-14T10:00:00.1234567+00:00' })).toBe(true)
     expect(isAccountMonitor({ ...monitorFixture, manualState: 'unknown' })).toBe(false)
     expect(isMonitorSummary({ ...monitorSummaryFixture, accounts: [monitorFixture, monitorFixture] })).toBe(false)
-    // Truncation is an optional flag: an older server omits it.
+    // The API always states truncation, coverage, unchecked Plays and the interval.
+    for (const field of ['discrepanciesTruncated', 'coverage', 'uncheckedPlays', 'intervalMinutes']) {
+      const omitted: Record<string, unknown> = { ...monitorFixture }
+      delete omitted[field]
+      expect(isAccountMonitor(omitted)).toBe(false)
+    }
     expect(isAccountMonitor({ ...monitorFixture, discrepanciesTruncated: true })).toBe(true)
     expect(isAccountMonitor({ ...monitorFixture, discrepanciesTruncated: false })).toBe(true)
     expect(isAccountMonitor({ ...monitorFixture, discrepanciesTruncated: 'yes' })).toBe(false)
@@ -58,28 +63,24 @@ describe('monitor contract', () => {
     delete older.outcome
     expect(isMonitorDiscrepancy(older)).toBe(false)
   })
-  it('reads the last observation time as a UTC timestamp, an explicit null or, from an older server, omitted as unknown', () => {
+  it('reads the last observation time as a UTC timestamp or an explicit null, never omitted', () => {
     expect(isMonitorDiscrepancy({ ...discrepancyFixture, lastObservedAtUtc: null })).toBe(true)
     expect(isMonitorDiscrepancy({ ...discrepancyFixture, lastObservedAtUtc: '2026-10-14T10:00:00.1234567+00:00' })).toBe(true)
     expect(isMonitorDiscrepancy({ ...discrepancyFixture, lastObservedAtUtc: '2026-10-14 10:00' })).toBe(false)
-    const older: Record<string, unknown> = { ...discrepancyFixture }
-    delete older.lastObservedAtUtc
-    // An API from before the field existed: the record, its account monitor, the summary and the execution all stay readable.
-    expect(isMonitorDiscrepancy(older)).toBe(true)
-    expect(isAccountMonitor({ ...monitorFixture, discrepancies: [older] })).toBe(true)
-    expect(isMonitorSummary({ ...monitorSummaryFixture, accounts: [{ ...monitorFixture, discrepancies: [older] }] })).toBe(true)
-    expect(isPlayExecution({ ...executionFixture, monitor: { ...monitorFixture, discrepancies: [older] }, discrepancies: [older] })).toBe(true)
-    // It reads as unknown, never as a time.
-    expect(discrepancyFacts(older as unknown as MonitorDiscrepancy, String).find(fact => fact.label === 'Last observed')?.value).toBe('Unknown')
+    const omitted: Record<string, unknown> = { ...discrepancyFixture }
+    delete omitted.lastObservedAtUtc
+    expect(isMonitorDiscrepancy(omitted)).toBe(false)
+    expect(isPlayExecution({ ...executionFixture, discrepancies: [{ ...discrepancyFixture, lastObservedAtUtc: null }] })).toBe(true)
+    // Null reads as unknown, never as a time.
+    expect(discrepancyFacts({ ...discrepancyFixture, lastObservedAtUtc: null }, String).find(fact => fact.label === 'Last observed')?.value).toBe('Unknown')
   })
   it('accepts recorded stop coverage, projected stale, and rejects coverage that contradicts itself (Phase 0, 0.4c)', () => {
     expect(isAccountMonitor({ ...monitorFixture, coverage: [coverageFixture] })).toBe(true)
-    // An older API without coverage, and a monitor with no Open Plays.
-    expect(isAccountMonitor(monitorFixture)).toBe(true)
+    // A monitor with no Open Plays.
     expect(isAccountMonitor({ ...monitorFixture, coverage: [] })).toBe(true)
     expect(isAccountMonitor({ ...monitorFixture, coverage: null })).toBe(false)
     expect(isAccountMonitor({ ...monitorFixture, coverage: [coverageFixture, coverageFixture] })).toBe(false)
-    // The count of Open Plays without coverage: a whole number, optional for an older API.
+    // The count of Open Plays without coverage: a whole number.
     expect(isAccountMonitor({ ...monitorFixture, uncheckedPlays: 2 })).toBe(true)
     expect(isAccountMonitor({ ...monitorFixture, uncheckedPlays: -1 })).toBe(false)
     expect(isAccountMonitor({ ...monitorFixture, uncheckedPlays: 1.5 })).toBe(false)

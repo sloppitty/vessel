@@ -50,7 +50,7 @@ describe('financial report mode boundaries', () => {
   it('rejects unlabelled actual imported positions and aggregates even when Paper requests exclusion', async () => {
     const actual: ReviewDocument = JSON.parse(JSON.stringify(reviewFixture))
     Object.assign(actual.plays[0]!, { id: null, origin: 'position', executionSource: 'imported',
-      operationId: `${accountFixture.id}:long`, rMultiple: null, reviewed: false, local: null })
+      operationId: `${accountFixture.id}:long`, rMultiple: null, reviewed: false, local: null, reviewCompletion: null })
     actual.metrics.positions = 1
     actual.periods[0]!.positions = 1
     actual.groups.accounts[0]!.metrics.positions = 1

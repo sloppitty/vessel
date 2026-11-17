@@ -26,7 +26,7 @@ const targetLink: OrderLink = { ...stopLink, id: '00000000-0000-4000-8000-000000
 const drift = (levels: unknown[], overrides: Partial<MonitorDiscrepancy> = {}): MonitorDiscrepancy => ({
   id: '00000000-0000-4000-8000-0000000000c1', accountId: '00000000-0000-4000-8000-0000000000c2', playId: '00000000-0000-4000-8000-000000000001',
   contractId: 'BTC', kind: 'level.drift', severity: 'info', state: 'open', openedAtUtc: '2026-10-19T10:10:00Z', confirmedAtUtc: '2026-10-19T10:11:00Z',
-  resolvedAtUtc: null, dismissedAtUtc: null, note: null, details: { coverage: {}, levels }, outcome: null, unverifiableAtUtc: null, ...overrides,
+  resolvedAtUtc: null, dismissedAtUtc: null, note: null, details: { coverage: {}, levels }, outcome: null, unverifiableAtUtc: null, lastObservedAtUtc: null, ...overrides,
 })
 const context = { direction: 'long' as const, leverage: 3, tick: null }
 const drifted = drift([

@@ -38,7 +38,7 @@ describe('Review API', () => {
     metrics: { ...reviewFixture.metrics, positions: 1 },
     positions: { mode: 'auto', included: true, minPlays: 5, plays: 2, positions: 1, omitted: 0, playWeight: '2' },
     plays: [...reviewFixture.plays, { ...reviewFixture.plays[0], id: null, operationId: 'abc:long', title: 'BTC Long', origin: 'position',
-      executionSource: 'imported', rMultiple: null, reviewed: false, local: null }],
+      executionSource: 'imported', rMultiple: null, reviewed: false, local: null, reviewCompletion: null }],
   }
   it('accepts imported positions only without a Play ID, R or Play-local result', () => {
     expect(isReviewDocument(positionReport)).toBe(true)

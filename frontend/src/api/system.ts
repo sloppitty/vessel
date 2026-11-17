@@ -47,6 +47,8 @@ export interface SystemInfo {
   marketScope: 'perpetuals'
   allowsConcurrentPlays: true
   venues: VenueInfo[]
+  /** The API's release version, or a placeholder in development. The shell compares it with this page's build. */
+  version: string
 }
 
 const capabilityNames = ['sync', 'instruments', 'orders', 'candles', 'marketContext', 'stream', 'stablecoinWallet']
@@ -88,7 +90,7 @@ function isSystemInfo(value: unknown): value is SystemInfo {
   const ids = venues.map(venue => isRecord(venue) ? venue.id : null)
   return value.application === 'Vessel' && ['foundation', 'core'].includes(String(value.stage)) &&
     value.marketScope === 'perpetuals' && value.allowsConcurrentPlays === true &&
-    isGuid(value.owner.id) &&
+    isGuid(value.owner.id) && typeof value.version === 'string' && value.version.length <= 64 &&
     typeof value.owner.displayName === 'string' && value.owner.displayName.trim().length > 0 &&
     venues.every(isVenue) && new Set(ids).size === ids.length && ids.includes(manualVenueId)
 }

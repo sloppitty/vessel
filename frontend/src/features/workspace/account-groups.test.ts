@@ -84,16 +84,11 @@ describe('groupBalance', () => {
   })
   it('is partial, never a sum, when an enabled account has no balance', () => {
     expect(groupBalance([hl('a', { balanceUsd: '10' }), hl('b', { balanceUsd: null }), hl('c', { balanceUsd: null })])).toEqual({ kind: 'partial', reported: 1, enabled: 3, accounts: 3 })
-    const withoutBalance = hl('d')
-    delete withoutBalance.balanceUsd
-    expect(groupBalance([withoutBalance])).toEqual({ kind: 'partial', reported: 0, enabled: 1, accounts: 1 })
   })
   it('is none when every account is disabled', () => {
     expect(groupBalance([hl('a', { isEnabled: false })])).toEqual({ kind: 'none', accounts: 1 })
   })
-  it('treats a missing enabled flag as enabled and keeps exact zero', () => {
-    const legacy = hl('a', { balanceUsd: '0' })
-    delete legacy.isEnabled
-    expect(groupBalance([legacy])).toMatchObject({ kind: 'exact', value: '0', enabled: 1 })
+  it('keeps exact zero', () => {
+    expect(groupBalance([hl('a', { balanceUsd: '0' })])).toMatchObject({ kind: 'exact', value: '0', enabled: 1 })
   })
 })

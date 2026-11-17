@@ -949,7 +949,7 @@ describe('managed stops on the page', () => {
     server.plays.set(open.summary.id, open)
     const discrepancy = { id: '00000000-0000-4000-8000-0000000000d2', accountId: venue.id, playId: open.summary.id, contractId: 'BTC',
       kind: 'level.drift', severity: 'info' as const, state: 'open' as const, openedAtUtc: '2026-10-03T10:10:00Z', confirmedAtUtc: '2026-10-03T10:11:00Z',
-      resolvedAtUtc: null, dismissedAtUtc: null, note: null, outcome: null, unverifiableAtUtc: null,
+      resolvedAtUtc: null, dismissedAtUtc: null, note: null, outcome: null, unverifiableAtUtc: null, lastObservedAtUtc: null,
       details: { coverage: {}, levels: [{ orderId: 's-order', actualPrice: '101', plannedPrice: '95', remainingQuantity: '1' }] } }
     const playExecution = filledExecution(server, { links: [stopLink], discrepancies: [discrepancy] })
     const rebound: SavedPlay = { ...open, summary: { ...open.summary, version: 5, planRevision: 2 },

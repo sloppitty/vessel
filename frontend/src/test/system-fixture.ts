@@ -6,7 +6,7 @@ const none: VenueCapabilities = { sync: false, instruments: false, orders: false
 export const systemFixture: SystemInfo = {
   application: 'Vessel', stage: 'foundation',
   owner: { id: '11111111-1111-1111-1111-111111111111', displayName: 'Owner' },
-  marketScope: 'perpetuals', allowsConcurrentPlays: true,
+  marketScope: 'perpetuals', allowsConcurrentPlays: true, version: '1.2.3',
   venues: [
     { id: 'hyperliquid', name: 'Hyperliquid', status: 'read-only', source: 'evm-address', quoteAsset: 'USDC', logo: 'hyperliquid',
       tradeUrlTemplate: 'https://app.hyperliquid.xyz/trade/{instrument}', priceRule: 'significant-figures',

@@ -45,7 +45,7 @@ describe('stop evidence for the chart (Phase 0, 0.4c)', () => {
     expect(of([level('resting', {}, { plannedPrice: null })])).toEqual({ text: 'resting at $60,000.00 as of T(2026-10-14T10:00:00Z)', confirmed: false })
   })
   it('never confirms a stop it has no evidence for', () => {
-    // A level the check did not record (e.g. added by a later revision), no recorded check yet, or an older API.
+    // A level the check did not record (e.g. added by a later revision), or no recorded check yet.
     expect(stopEvidenceFor(execution([level('resting')]), stamp)!('entry-1', 'stop-2', saved)).toEqual({ text: 'unknown', confirmed: false })
     expect(of([])).toEqual({ text: 'unknown', confirmed: false })
     expect(of(undefined)).toEqual({ text: 'unknown', confirmed: false })

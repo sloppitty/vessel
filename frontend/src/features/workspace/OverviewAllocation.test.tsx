@@ -3,13 +3,14 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { BrokerAccount, Portfolio } from '@/api/workspace'
+import { accountFixture } from '@/test/workspace-fixture'
 import { render } from '@/test/render'
 import { OverviewAllocation } from './OverviewAllocation'
 
-const portfolio = (id: string, name: string): Portfolio => ({ id, name, accountCount: 0, totalValueUsd: null, valueCoverage: 'unavailable', icon: 'folder' })
+const portfolio = (id: string, name: string): Portfolio => ({ id, name, accountCount: 0, totalValueUsd: null, valueCoverage: 'unavailable', icon: 'folder',
+  balanceUsd: null, balanceCoverage: 'unavailable', availableBalanceUsd: null, availableBalanceAccountCount: 0, availableBalanceCoverage: 'unavailable', enabledAccountCount: 0 })
 const account = (id: string, portfolioId: string | null, balanceUsd: string | null, isEnabled = true): BrokerAccount => ({
-  id, portfolioId, name: id, venueId: 'manual', address: null, accountValueUsd: balanceUsd, lastSyncedAtUtc: null,
-  syncStatus: 'manual', lastSyncError: null, positionCount: 0, historyNotice: null, isEnabled, balanceUsd,
+  ...accountFixture, id, portfolioId, name: id, accountValueUsd: balanceUsd, isEnabled, balanceUsd,
 })
 const portfolios = [portfolio('p1', 'Swing'), portfolio('p2', 'Core'), portfolio('p3', 'Empty')]
 const accounts = [account('Alpha', 'p1', '300'), account('Beta', 'p1', '100'), account('Gamma', 'p2', '600'),

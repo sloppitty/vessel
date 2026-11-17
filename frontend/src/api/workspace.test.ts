@@ -106,6 +106,20 @@ describe('Core workspace API', () => {
     response([{ ...portfolioFixture, icon: 'x'.repeat(41) }])
     await expect(createWorkspaceApi(credentialsFixture).portfolios()).rejects.toThrow('incompatible workspace data')
   })
+  it.each(['icon', 'balanceUsd', 'balanceCoverage', 'availableBalanceUsd', 'availableBalanceAccountCount', 'availableBalanceCoverage', 'enabledAccountCount'])(
+    'rejects a portfolio without %s, which the API always sends', async field => {
+      const omitted: Record<string, unknown> = { ...portfolioFixture }
+      delete omitted[field]
+      response([omitted])
+      await expect(createWorkspaceApi(credentialsFixture).portfolios()).rejects.toThrow('incompatible workspace data')
+    })
+  it.each(['sourceId', 'isEnabled', 'balanceUsd', 'availableBalanceUsd', 'availableBalanceSource', 'settingsRevision', 'keepExecutionHistory'])(
+    'rejects an account without %s, which the API always sends', async field => {
+      const omitted: Record<string, unknown> = { ...accountFixture }
+      delete omitted[field]
+      response([omitted])
+      await expect(createWorkspaceApi(credentialsFixture).accounts()).rejects.toThrow('incompatible workspace data')
+    })
   it('accepts an unavailable snapshot as null, not a zero balance', async () => {
     response(null)
     await expect(createWorkspaceApi(credentialsFixture).snapshot(accountFixture.id)).resolves.toBeNull()

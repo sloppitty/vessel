@@ -31,6 +31,10 @@ describe('GET /api/system', () => {
     mockResponse(body)
     await expect(getSystem(credentialsFixture)).resolves.toEqual(body)
   })
+  it.each([undefined, null, 7, 'x'.repeat(65)])('rejects a missing or malformed API version %j', async version => {
+    mockResponse({ ...systemFixture, version })
+    await expect(getSystem(credentialsFixture)).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
   it('accepts the native trade placeholder and HTTPS read-only credential setup link', async () => {
     const body = { ...systemFixture, venues: [
       { ...indexVenue, tradeUrlTemplate: 'https://trade.example/{venueContractId}' },

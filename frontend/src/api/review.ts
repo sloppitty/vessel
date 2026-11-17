@@ -1,7 +1,7 @@
 import { isTradingMode, type TradingMode } from './paper'
 import { isCount, isFilledText, isGuid, isListOf, isNonBlankText, isNullOr, isRecord, isReviewDecimal, isText, isTimestamp } from './guards'
 import { isWeekStart, type WeekStart } from './reporting'
-import { isOptionalPlayLocalResult, type PlayLocalResult } from './local-result'
+import { isPlayLocalResult, type PlayLocalResult } from './local-result'
 import { isUnresolvedEvidence, preflightCodes, unresolvedReasons, type PreflightCode, type UnresolvedEvidence, type UnresolvedReason } from './plays'
 
 export const reviewPeriods = [
@@ -41,34 +41,34 @@ export interface ReviewMetrics {
   /** Estimated R (planned-stop model), over the `riskCount` Plays with a complete initial stop. */
   averageR: string | null; riskCount: number; reviewed: number
   drawdown: string | null; maxWins: number; maxLosses: number
-  /** Plays whose Play-local and venue results differ in sign. These four are absent from servers before October 19, 2026. */
-  signDiffers?: number
+  /** Plays whose Play-local and venue results differ in sign. */
+  signDiffers: number
   /** Plays with no Play-local result. */
-  localUnknown?: number
+  localUnknown: number
   /** Losses whose venue result before fees is zero or better. Win, loss and scratch are unchanged. */
-  feeOnlyLosses?: number
+  feeOnlyLosses: number
   /** Losses whose venue result before fees is unknown; not counted as fee-only. */
-  unknownGrossLosses?: number
-  /** Imported positions among `count`; absent from servers before October 20, 2026. */
-  positions?: number
+  unknownGrossLosses: number
+  /** Imported positions among `count`. */
+  positions: number
 }
 export interface ReviewGroup { id: string; name: string; detail: string; metrics: ReviewMetrics }
 export interface ReviewPoint { atUtc: string; net: string; cumulative: string; drawdown: string; count: number }
 /** A scored Play, or an imported position (origin `position`: no ID, R, review or Play-local result). */
 export interface ReviewPlay {
-  id: string | null; operationId?: string | null; title: string; accountId: string; accountName: string; venueId: string; instrument: string
+  id: string | null; operationId: string | null; title: string; accountId: string; accountName: string; venueId: string; instrument: string
   closedAtUtc: string; net: string; returnPercent: string; rMultiple: string | null; reviewed: boolean
-  origin?: 'planned' | 'retrospective' | 'position'
-  executionSource?: 'imported' | 'manual' | 'paper'
-  /** The Play-local result beside the scored `net`; absent from servers before October 19, 2026. */
-  local?: PlayLocalResult | null
-  /** The plan was written after the Play's first execution (D-17); scored like any other. Absent from older servers. */
-  plannedAfterExecution?: boolean
-  /** The stored answers and completion (phase 1, 1.4b); absent from older servers. */
-  adherence?: 'followed' | 'deviated' | 'not-applicable' | null
-  mistakeTag?: string | null
-  direction?: string
-  reviewCompletion?: 'completed' | 'not-needed' | 'legacy' | null
+  origin: 'planned' | 'retrospective' | 'position'
+  executionSource: 'imported' | 'manual' | 'paper'
+  /** The Play-local result beside the scored `net`. */
+  local: PlayLocalResult | null
+  /** The plan was written after the Play's first execution (D-17); scored like any other. */
+  plannedAfterExecution: boolean
+  /** The stored answers and completion (phase 1, 1.4b). */
+  adherence: 'followed' | 'deviated' | 'not-applicable' | null
+  mistakeTag: string | null
+  direction: string
+  reviewCompletion: 'completed' | 'not-needed' | 'legacy' | null
 }
 /** Process and outcome as cases (phase 1, 1.4b): counts only; a rate is shown only where its own n is at least 10. */
 export interface ReviewProcess {
@@ -129,33 +129,32 @@ export interface ReviewDocument {
   tradingMode?: TradingMode
   asOfUtc: string; fromUtc: string | null; period: ReviewPeriod; currency: 'USD'
   options: { portfolios: Array<{ id: string; name: string }>; accounts: ReviewAccount[]; instruments: string[] }
-  periods: Array<{ id: ReviewPeriod; count: number; net: string | null; positions?: number }>
+  periods: Array<{ id: ReviewPeriod; count: number; net: string | null; positions: number }>
   metrics: ReviewMetrics; series: ReviewPoint[]; bucketDays: number
-  /** Origins and directions are in a fixed order and absent from servers before phase 1.4b. */
-  groups: Record<'portfolios' | 'accounts' | 'assets', ReviewGroup[]> & Partial<Record<'origins' | 'directions', ReviewGroup[]>>
+  /** Origins and directions are in a fixed order. */
+  groups: Record<'portfolios' | 'accounts' | 'assets' | 'origins' | 'directions', ReviewGroup[]>
   coverage: {
     closedCandidates: number; incompleteFees: number; incompleteExecutions: number; openPlays: number
     unassignedFills: number; firstFillAtUtc: string | null; notice: string
-    /** Unresolved Plays declared in the period, excluded with no result (phase 1, 1.3a); absent from older servers. */
-    unresolved?: number
-    /** Plays cancelled in the period, listed with the exclusions (phase 1, 1.4b); absent from an older server. */
-    cancelled?: number
-    /** Closed Plays with a fill allocated between Plays: venue result not allocated (Phase 2, item 11); absent from older servers. */
-    notAllocated?: number
+    /** Unresolved Plays declared in the period, excluded with no result (phase 1, 1.3a). */
+    unresolved: number
+    /** Plays cancelled in the period, listed with the exclusions (phase 1, 1.4b). */
+    cancelled: number
+    /** Closed Plays with a fill allocated between Plays: venue result not allocated (Phase 2, item 11). */
+    notAllocated: number
   }
   plays: ReviewPlay[]; offset: number; nextOffset: number | null
   /**
    * The pre-flight recorded at Plan it over the period's closed planned Plays, scored or excluded: how many have one, how
-   * many were planned before it existed, and per check how many went ahead without it. Absent from older servers.
+   * many were planned before it existed, and per check how many went ahead without it.
    */
-  preflight?: { recorded: number; notRecorded: number; skipped: Array<{ code: PreflightCode; count: number }> }
-  /** Absent from servers before phase 1.4b. */
-  process?: ReviewProcess
-  /** Whether imported positions are in this report; absent from servers before October 20, 2026. */
-  positions?: ReviewPositions
-  /** The if-then rule's answers over the same Plays (Phase 2, item 3); absent from older servers. */
-  rule?: ReviewRule
-  /** The reporting week, present only when the query names one (Phase 2, item 2). */
+  preflight: { recorded: number; notRecorded: number; skipped: Array<{ code: PreflightCode; count: number }> }
+  process: ReviewProcess
+  /** Whether imported positions are in this report. */
+  positions: ReviewPositions
+  /** The if-then rule's answers over the same Plays (Phase 2, item 3). */
+  rule: ReviewRule
+  /** The reporting week, present only when the query names one (Phase 2, item 2); the API omits it otherwise. */
   week?: ReviewWeek
 }
 export interface ReviewPositions {
@@ -175,36 +174,34 @@ export const isReviewMetrics = (v: unknown): v is ReviewMetrics => isRecord(v) &
   ['net', 'batting', 'averageGain', 'averageLoss', 'payoff', 'profitFactor', 'averageWin', 'averageLossUsd', 'expectancy', 'averageR', 'drawdown']
     .every(key => isNullOr(v[key], isReviewDecimal)) &&
   (v.wins as number) + (v.losses as number) + (v.scratches as number) === v.count &&
-  (v.positions === undefined || isCount(v.positions) && v.positions <= (v.count as number)) &&
+  isCount(v.positions) && v.positions <= (v.count as number) &&
   // Stops, reviews and Play-local results belong to Plays, never to imported positions.
-  ['riskCount', 'reviewed', 'signDiffers', 'localUnknown'].every(key => v[key] === undefined ||
-    (v[key] as number) <= (v.count as number) - ((v.positions as number | undefined) ?? 0)) &&
+  ['riskCount', 'reviewed', 'signDiffers', 'localUnknown'].every(key => isCount(v[key]) &&
+    (v[key] as number) <= (v.count as number) - (v.positions as number)) &&
   (v.batting === null || Number(v.batting) >= 0 && Number(v.batting) <= 1) &&
   (v.count === 0 ? v.net === null : isReviewDecimal(v.net)) &&
-  ['signDiffers', 'localUnknown'].every(key => v[key] === undefined || isCount(v[key])) &&
-  ['feeOnlyLosses', 'unknownGrossLosses'].every(key => v[key] === undefined || isCount(v[key]) && (v[key] as number) <= (v.losses as number))
+  ['feeOnlyLosses', 'unknownGrossLosses'].every(key => isCount(v[key]) && (v[key] as number) <= (v.losses as number))
 const group = (v: unknown) => isRecord(v) && isText(v.id, 128) && isText(v.name, 200) && isText(v.detail, 2000) && isReviewMetrics(v.metrics)
 const play = (v: unknown) => isRecord(v) &&
-  (v.origin === 'position' ? v.id === null && isNonBlankText(v.operationId, 200) && (v.local === undefined || v.local === null) &&
-    v.reviewed === false && (v.executionSource === undefined || v.executionSource === 'imported') : isGuid(v.id)) && isText(v.title, 200) && isGuid(v.accountId) && isText(v.accountName, 200) &&
+  (v.origin === 'position' ? v.id === null && isNonBlankText(v.operationId, 200) && v.local === null &&
+    v.reviewed === false && v.executionSource === 'imported' : isGuid(v.id)) && isText(v.title, 200) && isGuid(v.accountId) && isText(v.accountName, 200) &&
   isText(v.venueId, 64) && isText(v.instrument, 128) && isTimestamp(v.closedAtUtc, 64) && isReviewDecimal(v.net) &&
   isReviewDecimal(v.returnPercent) && isNullOr(v.rMultiple, isReviewDecimal) && typeof v.reviewed === 'boolean' &&
-  (v.origin === undefined || v.origin === 'planned' || v.origin === 'retrospective' || v.origin === 'position') &&
-  (v.executionSource === undefined || v.executionSource === 'imported' || v.executionSource === 'manual' || v.executionSource === 'paper') &&
+  (v.origin === 'planned' || v.origin === 'retrospective' || v.origin === 'position') &&
+  (v.executionSource === 'imported' || v.executionSource === 'manual' || v.executionSource === 'paper') &&
   (v.origin !== 'retrospective' && v.origin !== 'position' || v.rMultiple === null) &&
-  (v.origin === 'position' || isOptionalPlayLocalResult(v.local, isReviewDecimal)) &&
+  (v.origin === 'position' || isPlayLocalResult(v.local, isReviewDecimal)) &&
   (!isRecord(v.local) || v.local.basis === 'manual-ledger' === (v.executionSource === 'manual') &&
     (v.local.basis === 'paper-simulation') === (v.executionSource === 'paper')) &&
-  (v.plannedAfterExecution === undefined || typeof v.plannedAfterExecution === 'boolean' &&
-    (!v.plannedAfterExecution || v.origin !== 'retrospective' && v.origin !== 'position')) &&
-  answers(v) && (v.direction === undefined || directions.includes(v.direction as string)) &&
-  (v.reviewCompletion === undefined || isNullOr(v.reviewCompletion, x => ['completed', 'not-needed', 'legacy'].includes(x as string))) &&
+  typeof v.plannedAfterExecution === 'boolean' && (!v.plannedAfterExecution || v.origin !== 'retrospective' && v.origin !== 'position') &&
+  answers(v) && directions.includes(v.direction as string) &&
+  isNullOr(v.reviewCompletion, x => ['completed', 'not-needed', 'legacy'].includes(x as string)) &&
   (v.origin !== 'position' || !v.adherence && !v.mistakeTag && !v.reviewCompletion)
 /** A Play's plan direction, or none; an imported position's direction, or none when its side is unknown. */
 const directions = ['', 'long', 'short']
 const answers = (v: Record<string, unknown>) =>
-  (v.adherence === undefined || isNullOr(v.adherence, x => ['followed', 'deviated', 'not-applicable'].includes(x as string))) &&
-  (v.mistakeTag === undefined || isNullOr(v.mistakeTag, x => isText(x, 100)))
+  isNullOr(v.adherence, x => ['followed', 'deviated', 'not-applicable'].includes(x as string)) &&
+  isNullOr(v.mistakeTag, x => isText(x, 100))
 const processRow = (v: unknown) => isRecord(v) && ['wins', 'losses', 'scratches'].every(k => isCount(v[k]))
 const isReviewProcess = (v: unknown): v is ReviewProcess => isRecord(v) && processRow(v.followed) && processRow(v.deviated) &&
   ['retrospective', 'unscored', 'unanswered', 'notApplicable', 'mistakeTagCount'].every(k => isCount(v[k])) &&
@@ -219,28 +216,26 @@ export const isReviewDocument = (v: unknown): v is ReviewDocument => isRecord(v)
   isRecord(v.options) && isListOf(v.options.portfolios, p => isRecord(p) && isGuid(p.id) && isText(p.name, 200), listLimit) &&
   isListOf(v.options.accounts, account, listLimit) && isListOf(v.options.instruments, i => isText(i, 128), listLimit) &&
   isListOf(v.periods, p => isRecord(p) && period(p.id) && isCount(p.count) && isNullOr(p.net, isReviewDecimal) &&
-    (p.positions === undefined || isCount(p.positions) && p.positions <= p.count), 5) &&
+    isCount(p.positions) && p.positions <= p.count, 5) &&
   (v.periods as Array<{ id: string }>).length === 5 && new Set((v.periods as Array<{ id: string }>).map(p => p.id)).size === 5 &&
   isReviewMetrics(v.metrics) &&
   isListOf(v.series, p => isRecord(p) && isTimestamp(p.atUtc, 64) && isReviewDecimal(p.net) && isReviewDecimal(p.cumulative) && isReviewDecimal(p.drawdown) && isCount(p.count), 366) &&
   isCount(v.bucketDays) && v.bucketDays > 0 &&
   isRecord(v.groups) && isListOf(v.groups.portfolios, group, listLimit) && isListOf(v.groups.accounts, group, listLimit) && isListOf(v.groups.assets, group, listLimit) &&
-  (v.groups.origins === undefined || isListOf(v.groups.origins, group, 3)) && (v.groups.directions === undefined || isListOf(v.groups.directions, group, 2)) &&
-  (v.process === undefined || isReviewProcess(v.process)) && (v.rule === undefined || isReviewRule(v.rule)) &&
+  isListOf(v.groups.origins, group, 3) && isListOf(v.groups.directions, group, 2) &&
+  isReviewProcess(v.process) && isReviewRule(v.rule) &&
   isRecord(v.coverage) && ['closedCandidates', 'incompleteFees', 'incompleteExecutions', 'openPlays', 'unassignedFills'].every(key => isCount((v.coverage as Record<string, unknown>)[key])) &&
   isNullOr(v.coverage.firstFillAtUtc, x => isTimestamp(x, 64)) && isText(v.coverage.notice, 4000) &&
-  (v.coverage.unresolved === undefined || isCount(v.coverage.unresolved)) &&
-  (v.coverage.cancelled === undefined || isCount(v.coverage.cancelled)) &&
-  (v.coverage.notAllocated === undefined || isCount(v.coverage.notAllocated)) && isListOf(v.plays, play, 50) &&
+  isCount(v.coverage.unresolved) && isCount(v.coverage.cancelled) && isCount(v.coverage.notAllocated) && isListOf(v.plays, play, 50) &&
   (v.plays as ReviewPlay[]).every(p => (p.executionSource === 'paper') === (v.tradingMode === 'paper')) &&
   isCount(v.offset) && (v.nextOffset === null || isCount(v.nextOffset) && v.nextOffset > v.offset) &&
-  (v.preflight === undefined || isRecord(v.preflight) && isCount(v.preflight.recorded) && isCount(v.preflight.notRecorded) &&
+  isRecord(v.preflight) && isCount(v.preflight.recorded) && isCount(v.preflight.notRecorded) &&
     isListOf(v.preflight.skipped, s => isRecord(s) && preflightCodes.includes(s.code as PreflightCode) && isCount(s.count) &&
-      s.count <= ((v.preflight as Record<string, unknown>).recorded as number), preflightCodes.length)) &&
-  (v.positions === undefined || isReviewPositions(v.positions)) &&
+      s.count <= ((v.preflight as Record<string, unknown>).recorded as number), preflightCodes.length) &&
+  isReviewPositions(v.positions) &&
   (v.week === undefined || isReviewWeek(v.week)) &&
   (v.tradingMode !== 'paper' ||
-    (v.positions === undefined || v.positions.mode === 'exclude' && !v.positions.included) &&
+    v.positions.mode === 'exclude' && !v.positions.included &&
     !(v.metrics as ReviewMetrics).positions &&
     (v.periods as ReviewDocument['periods']).every(p => !p.positions) &&
     Object.values(v.groups as ReviewDocument['groups']).every(rows => rows.every(row => !row.metrics.positions)))
