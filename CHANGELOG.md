@@ -44,6 +44,9 @@
   a mark of 130 now reads +200, matching the venue, where it read +233.33.
 - Unrealized P&L uses only the mark of the operation's own market. A retired RISEx market
   shows unknown where it could take its successor's mark.
+- Monitor: a stop cancelled without filling now raises its critical after two checks a
+  minute apart even while the entry keeps filling. Each new fill used to restart the
+  confirmation, so the no-stop warning stayed hidden while the position grew.
 
 ### Changed
 
