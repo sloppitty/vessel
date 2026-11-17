@@ -179,10 +179,13 @@ participant (`PlaySearchProjector`) reprojects those Plays from the database
 state of that transaction. A Play is reached directly (Plays, plan and review
 revisions, status changes, log entries, image notes, manual executions, order
 links, paper executions and simulations) or through its linked orders (an
-imported fill by the shared order-key rule, or an order whose status, size or
-position TP/SL flag changed). So Play saves and reviews, log appends, image
-note edits and deletions, venue lifecycle, manual corrections, retrospective
-Plays and paper evaluation all commit or roll back with their projection.
+imported fill by the shared order-key rule, or an order one of whose
+`MissingExecutions` inputs changed: status, size, position TP/SL flag or
+omitted executions, listed in `ExecutionIntegrity.MissingExecutionsOrderInputs`
+and checked against the rule by a unit test, #92). So Play saves and reviews,
+log appends, image note edits and deletions, venue lifecycle, manual
+corrections, retrospective Plays and paper evaluation all commit or roll back
+with their projection.
 - Each projected Play is locked first (an advisory lock per owner and Play,
   in ID order, the last lock of the unit), so concurrent units take turns and
   the later one reads what the earlier committed. A Play the unit deleted is
