@@ -115,9 +115,11 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             portfolios.OrderBy(p => p.Name).Select(p => new ReviewPortfolioDto(p.Id.ToString(), p.Name)).ToList(),
             accounts.Values.OrderBy(a => a.Name).Select(a => new ReviewAccountDto(a.Id, a.Name, a.PortfolioId, a.VenueId,
                 a.LastSyncedAtUtc, a.SyncStatus, a.HistoryNotice)).ToList(),
-            facts.ClosedPlays.Select(f => f.Play).Concat(facts.UnresolvedPlays.Select(u => u.Play)).Concat(facts.CancelledPlays.Select(c => c.Play))
+            // A scoped read lists the closed Plays' instruments apart; otherwise its closed Plays are all of them.
+            (facts.ClosedInstruments is null ? facts.ClosedPlays.Select(f => f.Play) : [])
+                .Concat(facts.UnresolvedPlays.Select(u => u.Play)).Concat(facts.CancelledPlays.Select(c => c.Play))
                 .Where(p => p.TradingMode == query.TradingMode && accounts.ContainsKey(p.AccountId))
-                .Select(p => p.ContractId).Concat(read.Where(p => p.Outcome is not null).Select(p => p.ContractId))
+                .Select(p => p.ContractId).Concat(facts.ClosedInstruments ?? []).Concat(read.Where(p => p.Outcome is not null).Select(p => p.ContractId))
                 .OfType<string>().Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList());
         var series = Series(current, window, now);
         List<ReviewGroupDto> Groups(Func<Evaluated, string> key, Func<string, string> name, Func<string, List<Evaluated>, string> detail) =>

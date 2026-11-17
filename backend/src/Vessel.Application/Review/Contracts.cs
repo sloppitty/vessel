@@ -57,6 +57,11 @@ public sealed record ReviewFacts(IReadOnlyList<Portfolio> Portfolios, IReadOnlyL
     /// whether a week has data at all.
     /// </summary>
     public DateTimeOffset? FirstPlayAtUtc { get; init; }
+    /// <summary>
+    /// The instruments of every closed Play on the enabled accounts, for the instrument filter, when <see cref="ClosedPlays"/>
+    /// holds only the Plays in scope (issue #109). Null when <see cref="ClosedPlays"/> holds them all.
+    /// </summary>
+    public IReadOnlyList<string>? ClosedInstruments { get; init; }
 }
 
 /// <summary>A Cancelled Play in Review's process view: never scored, placed by its cancellation time.</summary>

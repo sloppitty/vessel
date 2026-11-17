@@ -136,6 +136,14 @@ public interface ISizingStore
     Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct);
     async Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, CancellationToken ct) =>
         (await ClosedPlaysAsync(ct)).Where(f => f.Play.TradingMode == tradingMode).ToList();
+    /// <summary>
+    /// The closed Plays of <paramref name="tradingMode"/> on these accounts and, when given, this instrument (ordinal equality):
+    /// the subset of <see cref="ClosedPlaysAsync(string, CancellationToken)"/> Review filters to. Persistence reads only these.
+    /// </summary>
+    async Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, IReadOnlyCollection<Guid> accountIds, string? instrument,
+        CancellationToken ct) =>
+        (await ClosedPlaysAsync(tradingMode, ct)).Where(f => accountIds.Contains(f.Play.AccountId) &&
+            (instrument is null || string.Equals(f.Play.ContractId, instrument, StringComparison.Ordinal))).ToList();
     /// <summary>How many real Unresolved Plays the owner has on enabled accounts; they are never counted in the record.</summary>
     Task<int> UnresolvedPlaysAsync(CancellationToken ct);
     /// <summary>

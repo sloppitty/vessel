@@ -18,22 +18,42 @@ public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISi
 
     public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct) => ClosedPlaysAsync(TradingMode.Real, ct);
 
-    public async Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, CancellationToken ct)
+    public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, CancellationToken ct) => ReadClosedAsync(tradingMode, null, null, ct);
+
+    public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, IReadOnlyCollection<Guid> accountIds, string? instrument,
+        CancellationToken ct) => ReadClosedAsync(tradingMode, accountIds, instrument, ct);
+
+    private async Task<List<ClosedPlayFacts>> ReadClosedAsync(string tradingMode, IReadOnlyCollection<Guid>? accountIds, string? instrument,
+        CancellationToken ct)
     {
         tradingMode = TradingMode.Validate(tradingMode);
         await using var transaction = tradingMode == TradingMode.Paper && db.Database.CurrentTransaction is null
             ? await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct) : null;
-        var plays = await db.Plays.Where(p => p.TradingMode == tradingMode &&
-            (p.Status == PlayStatus.Closed || tradingMode == TradingMode.Paper &&
-                db.PaperSimulations.Any(s => s.PlayId == p.Id && (s.State == "ambiguous" || s.State == "gap" ||
-                    s.SuspensionsJson != "[]" && p.Status == PlayStatus.Cancelled))) &&
-            db.Accounts.Any(a => a.Id == p.AccountId && a.IsEnabled && a.TradingMode == tradingMode))
-            .AsNoTracking().ToListAsync(ct);
+        var query = Closed(db, tradingMode);
+        // The scope as Review filters it in memory: the account IDs exactly, and the instrument by exact (ordinal) equality.
+        if (accountIds is not null)
+        {
+            var ids = accountIds.Distinct().ToList();
+            query = query.Where(p => ids.Contains(p.AccountId));
+        }
+        if (instrument is not null) query = query.Where(p => p.ContractId == instrument);
+        var plays = await query.AsNoTracking().ToListAsync(ct);
         if (plays.Count == 0) return [];
         var facts = await FactsAsync(db, plays, ct);
         if (transaction is not null) await transaction.CommitAsync(ct);
         return facts;
     }
+
+    /// <summary>
+    /// The Plays Review and sizing score in a mode: Closed ones (and, in paper, those whose simulation is held as ambiguous,
+    /// gapped or suspended) on the owner's enabled accounts of that mode.
+    /// </summary>
+    internal static IQueryable<Play> Closed(VesselDbContext db, string tradingMode) =>
+        db.Plays.Where(p => p.TradingMode == tradingMode &&
+            (p.Status == PlayStatus.Closed || tradingMode == TradingMode.Paper &&
+                db.PaperSimulations.Any(s => s.PlayId == p.Id && (s.State == "ambiguous" || s.State == "gap" ||
+                    s.SuspensionsJson != "[]" && p.Status == PlayStatus.Cancelled))) &&
+            db.Accounts.Any(a => a.Id == p.AccountId && a.IsEnabled && a.TradingMode == tradingMode));
 
     /// <summary>
     /// The facts Review and sizing score, for any of the owner's Plays, in their order: a paper Play's simulation, or a real
