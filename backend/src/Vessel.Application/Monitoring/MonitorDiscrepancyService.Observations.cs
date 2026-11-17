@@ -410,11 +410,12 @@ public sealed partial class MonitorDiscrepancyService
             var superseded = cancelledPresent == true;
             // Under a gap the venue position makes the bare case present, so it also rests on the snapshot.
             var bareEarliest = bare && snapshotAt < at ? snapshotAt : (DateTimeOffset?)null;
-            // The bare case confirms on its condition (a cancelled, unfilled stop and none resting), like protection.missing:
-            // an entry that keeps filling changes the fingerprint's quantity, and restarting would let superseded hide the
-            // no-stop critical indefinitely. Without a gap it confirms on its evidence as before.
+            // With no linked stop resting at all (the bare case under a gap included), it confirms on its condition (a cancelled,
+            // unfilled stop and none resting), like protection.missing: an entry that keeps filling changes the fingerprint's
+            // quantity, and restarting would let superseded hide the no-stop critical indefinitely (#94, #140). While a linked
+            // stop rests the warning is about its size, so it confirms on its evidence: a replacement stop restarts it.
             Add("protection.cancelled", cancelledPresent, stopPresenceKnown && cancelKnown && mechanicsKnown && structural,
-                onCondition: bare, earliest: bareEarliest);
+                onCondition: stops.Length == 0, earliest: bareEarliest);
             bool? missing = !open ? completeOrders ? false : null :
                 stopPresenceKnown ? superseded || stops.Length > 0 ? false : !mechanicsKnown ? null : siblingWholeStop ? shared ? false : null :
                     graceAt <= at :
