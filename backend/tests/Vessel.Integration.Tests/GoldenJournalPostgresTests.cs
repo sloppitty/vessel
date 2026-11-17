@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Plays;
+using Vessel.Application.Venues;
+using Vessel.Domain.Workspace;
 using Vessel.Persistence;
 using Vessel.Persistence.Search;
 
@@ -80,7 +82,7 @@ public sealed class GoldenJournalPostgresTests
     /// Section 8.1: a later refresh learns that P1's exit order left an execution out, and nothing else about the order
     /// changes. Review and Sizing drop P1 at once; the list must withhold its result too.
     /// </summary>
-    [PostgresFact(Skip = "#92: the Plays list projection is not refreshed when only an order's omitted-executions flag changes; it keeps 9.8 and 1.96R.")]
+    [PostgresFact]
     public async Task A_later_omission_on_a_scored_plays_order_withdraws_its_list_result()
     {
         await using var database = await CoreDatabase.CreateAsync();
@@ -98,6 +100,59 @@ public sealed class GoldenJournalPostgresTests
         var review = await Screens(read).Review.GetAsync(new(Period: "all", Positions: "exclude"), default);
         Assert.DoesNotContain(j.Play["P1"].Id, review.Plays.Select(p => p.Id));
         Assert.Equal(2, review.Coverage.IncompleteExecutions);
+        var p1 = (await ListAsync(read, j))["P1"];
+        Assert.Equal(("executions", (string?)null, (string?)null), (p1.State, p1.ResultUsd, p1.EstimatedR));
+    }
+
+    /// <summary>
+    /// #92 through the import path: a refresh whose only news about P1's exit order is an omission marker naming it. The
+    /// refresh flags the order and changes nothing else about it, and the list withholds P1's result like Review.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_refresh_that_only_reports_an_omission_on_a_scored_plays_order_withdraws_its_list_result()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var j = await SeedAsync(database);
+        await using var db = database.Context(GoldenJournal.Owner);
+        var exit = j.Orders.Single(o => o.ExternalOrderId == j.Fill["a4"].ExternalOrderId);
+        var account = await db.Accounts.SingleAsync(a => a.Id == exit.AccountId);
+        var unit = Projected(db);
+        var omission = new VenueOmission("golden-a4-omitted", ExecutionOmission.Fee, "fee-bearing or unverified fee", exit.ContractId, null,
+            exit.ExternalOrderId, GoldenJournal.D(12));
+        var refresh = new PerpetualVenueReadResult(new(GoldenJournal.Now, "synthetic", 100, 100, 0, []), [], [], "Synthetic",
+            PositionsComplete: true, FillHistoryTruncated: false) { Omissions = [omission] };
+        await unit.ExecuteAsync(async () =>
+        {
+            await new WorkspaceStore(db, unit, new GoldenClock()).SaveRefreshAsync(account, refresh, default);
+            return true;
+        }, default);
+
+        await using var read = database.Context(GoldenJournal.Owner);
+        Assert.True((await read.Orders.AsNoTracking().SingleAsync(o => o.Id == exit.Id)).ExecutionsOmitted);
+        var review = await Screens(read).Review.GetAsync(new(Period: "all", Positions: "exclude"), default);
+        Assert.DoesNotContain(j.Play["P1"].Id, review.Plays.Select(p => p.Id));
+        var p1 = (await ListAsync(read, j))["P1"];
+        Assert.Equal(("executions", (string?)null, (string?)null), (p1.State, p1.ResultUsd, p1.EstimatedR));
+    }
+
+    /// <summary>
+    /// #92 repair: a row left stale before the fix holds the current projection version and no recheck time, so only
+    /// <c>play-search-rebuild --apply --all</c> rewrites it. The stale row is made here by a write the capture never sees.
+    /// </summary>
+    [PostgresFact]
+    public async Task Rebuilding_all_projections_repairs_a_list_row_left_stale_by_an_earlier_omission()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var j = await SeedAsync(database);
+        await using var db = database.Context(GoldenJournal.Owner);
+        var exit = j.Orders.Single(o => o.ExternalOrderId == j.Fill["a4"].ExternalOrderId).Id;
+        await db.Orders.Where(o => o.Id == exit).ExecuteUpdateAsync(s => s.SetProperty(o => o.ExecutionsOmitted, true));
+        Assert.Equal("scored", (await ListAsync(db, j))["P1"].State);
+
+        Assert.Equal(0, (await new PlaySearchRebuild(db, Projected(db), new GoldenClock()).RunAsync(true, false, 100, default)).Projected);
+        Assert.Equal("scored", (await ListAsync(db, j))["P1"].State);
+        Assert.Equal(j.Plays.Count, (await new PlaySearchRebuild(db, Projected(db), new GoldenClock()).RunAsync(true, true, 100, default)).Projected);
+        await using var read = database.Context(GoldenJournal.Owner);
         var p1 = (await ListAsync(read, j))["P1"];
         Assert.Equal(("executions", (string?)null, (string?)null), (p1.State, p1.ResultUsd, p1.EstimatedR));
     }

@@ -198,8 +198,21 @@ public static class FillConflictFields
         [Side, Direction, Price, Quantity, Fee, FeeToken, ClosedPnl, Time, OrderId, TransactionHash, VenueContract, Leverage];
 }
 
+/// <summary>
+/// The only order properties the shared missing-executions rule may read (its other input is the order's retained fills).
+/// The rule takes this type, so reading anything else does not compile; the journal search projection watches exactly these
+/// members, so a change to one re-projects the order's Plays (#92).
+/// </summary>
+public interface IMissingExecutionsInputs
+{
+    bool ExecutionsOmitted { get; }
+    string Status { get; }
+    decimal OriginalSize { get; }
+    bool IsPositionTpsl { get; }
+}
+
 // The latest known state of a venue order that could belong to a Play. A fact, not trading intent.
-public sealed class ImportedOrder : IOwned
+public sealed class ImportedOrder : IOwned, IMissingExecutionsInputs
 {
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }

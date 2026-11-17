@@ -54,8 +54,16 @@ public static class ExecutionIntegrity
     /// A filled order whose retained executions fall short of its size, or any order an import left an execution of out
     /// (Phase 2, item 7), whatever its status.
     /// </summary>
-    private static bool MissingExecutions(ImportedOrder order, ExactAmount retained) => order.ExecutionsOmitted ||
+    private static bool MissingExecutions<TOrder>(TOrder order, ExactAmount retained) where TOrder : IMissingExecutionsInputs =>
+        order.ExecutionsOmitted ||
         order.Status == "filled" && !order.IsPositionTpsl && ExactAmount.From(order.OriginalSize).CompareTo(retained) > 0;
+
+    /// <summary>
+    /// The order properties the rule reads, by name: the members of <see cref="IMissingExecutionsInputs"/>, the only type it
+    /// reads an order through. The journal search projection re-projects an order's Plays when one changes (#92).
+    /// </summary>
+    public static readonly IReadOnlyList<string> MissingExecutionsOrderInputs =
+        [.. typeof(IMissingExecutionsInputs).GetProperties().Select(p => p.Name)];
 
     internal static ExactAmount Quantity(IEnumerable<ImportedFill> fills) =>
         fills.Aggregate(default(ExactAmount), (sum, fill) => sum + ExactAmount.From(fill.Quantity));

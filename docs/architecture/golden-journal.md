@@ -345,6 +345,8 @@ and `RiskStore`. The Plays list must then show Review's own outcome for each Pla
 
 A later refresh learns that P1's exit order left an execution out (`ExecutionsOmitted`) and changes nothing else about the
 order. Review drops P1 at once (`IncompleteExecutions` becomes 2). The list must show P1 as `executions` with no result or R.
+The projection re-projects an order's Plays when any order input of the shared `MissingExecutions` rule changes
+(#92), so the list agrees.
 
 ## 9. Where the code disagrees
 
@@ -355,7 +357,6 @@ once the issue is fixed. Nothing else in the golden journal is skipped.
 | --- | --- | --- | --- | --- |
 | Overview realized, All (3, 7.2) | 7.81, 8 contributing, 2 excluded; Swing 11.1 | 10.81, 9 contributing, 1 excluded; Swing 14.1 | P6's order filled 2 with one execution of 1 retained. Review and Sizing leave it out by the shared `MissingExecutions` rule; Overview counts its +3. | `Overview_realized_equals_activity_closed_nets_minus_known_missing_executions`, #93 |
 | 7-day selection (7.4) | one count on every screen | Activity 3, Overview 3, Review 2 | SOL-S closes exactly at Now - 7 days. Activity uses [from, ...), Overview [from, now], Review (from, now]. Which rule is right is #125's decision; the test only requires all screens to agree. | `The_seven_day_period_selects_the_same_operations_on_every_screen`, #125 |
-| P1 list row after a later omission (8.1) | executions, no result, no R | scored, 9.8, 1.96 | The projection reacts to an order's status, size and TP/SL flag, not to `ExecutionsOmitted`, so the row keeps a result Review has withdrawn. | `A_later_omission_on_a_scored_plays_order_withdraws_its_list_result`, #92 |
 
 When #93 is fixed, section 3's realized total and identity 7.2 for All also make Review with positions equal Overview
 realized (7.81 both), since both leave out P6 and X1. When #125 is fixed, update section 4.2's week and section 7.4 to the
