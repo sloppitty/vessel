@@ -76,7 +76,7 @@ A close establishes the reduced position's direction but not its size. A subsequ
 
 An open or flip can also establish direction while its initial size remains unknown. A flip does not establish its remaining quantity or start a complete operation; a later opposite-position open is still needed. Unknown effects and ambiguous timestamp order erase that direction proof; later reductions can establish a new one. A contradictory label in the known walk is not itself a direction proof. Unanchored unknown-boundary operations have null position-derived fields, but keep reported money and original fills. Completed operations before the uncertainty remain intact.
 
-Missing entries do not make an anchored final position unknown. The service still reports genuine snapshot disagreements, including snapshot-only positions absent from retained fills. Missing snapshot rows mean zero only for resolved identities, not unresolved canonical-only facts or native candidates affected by an ambiguous legacy row. An older snapshot is explicitly not comparable with newer fills; an absent snapshot is reported. An unknown-boundary operation cannot be compared. Neither snapshots nor retained facts are mutated or corrected. Provider history notices remain visible.
+Missing entries do not make an anchored final position unknown. The service still reports genuine snapshot disagreements, including snapshot-only positions absent from retained fills. Missing snapshot rows mean zero only for resolved identities, not unresolved canonical-only facts or native candidates affected by an ambiguous legacy row. An older snapshot is explicitly not comparable with newer fills; an absent snapshot is reported, and so is a snapshot from an incomplete position read, which anchors and compares nothing (November 17, 2026). An unknown-boundary operation cannot be compared. Neither snapshots nor retained facts are mutated or corrected. Provider history notices remain visible.
 
 Confirmed order links supply fill Play IDs. Only an operation whose **every** fill links to the same Play gets that Play ID. All-unlinked is Unassigned; multiple Plays or linked/unlinked mixtures are Mixed with a null operation Play ID. Suggested/dismissed links are not assignments. Multiple simultaneous Plays on a contract still form the one venue position operation, and their separate intent remains untouched.
 
@@ -228,7 +228,8 @@ asked for unrealized P&L in its place, in both real and Paper modes.
   once per venue per page. Paper mode reads this server-side; the browser's
   Paper market-stream deny-list is unchanged. A venue without market context
   (Lighter) uses the latest snapshot's venue-reported figure. That snapshot
-  must be no older than the operation's latest execution, and must hold
+  must come from a complete position read, be no older than the operation's
+  latest execution, and must hold
   exactly the remaining signed quantity on the same native contract. A failed
   or timed-out venue read, an unknown or ambiguous market, or a mismatch leaves
   the fields null without failing the page.
@@ -241,3 +242,18 @@ asked for unrealized P&L in its place, in both real and Paper modes.
   unassigned operation, or "Unassigned"/"Mixed". "Journal this trade" replaces
   that row's "Inspect retrospective eligibility", which opens the same preview,
   so the two never appear side by side. Other operations keep the inspection.
+
+## November 17, 2026: incomplete position reads (#89)
+
+A snapshot stored from an incomplete position read (`PositionsComplete` false; see the November 17 section of
+`core-workspace-contract.md`) is not a current picture of the account's positions:
+
+- It never anchors the walk. Operations of that account use the unanchored forward walk, as without a snapshot.
+- It is never compared. The account gets the coverage notice "The latest position read was incomplete; positions are
+  unknown and snapshot comparison is unavailable." and no disagreement is reported from it. Ambiguous-identity notices
+  still apply.
+- The snapshot path of unrealized P&L leaves open operations null, even when the read returned their position.
+- A Play's funding proof does not use it to show a flat start.
+
+Native identities its positions carry, their reported leverage and its observation time (the open end of a funding
+window) are still used: those are facts about what the read returned, not claims about what it did not.

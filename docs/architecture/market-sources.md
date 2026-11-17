@@ -46,6 +46,8 @@ read this setting, so a Play on a disabled market keeps linking fills and being 
 - **Catalogue.** `allPerpMetas`, `perpDexs` and `perpConciseAnnotations`, cached 5 minutes and not forced by imports, on top
   of the unchanged primary `meta`. A malformed third-party market is skipped. Missing annotations leave markets labelled
   Other. If builder metadata fails, primary reads continue and positions and open orders report incomplete coverage.
+  The snapshot stores that incompleteness, so position counts and unrealized P&L read as unknown until a complete read
+  (#89, see `core-workspace-contract.md`).
   Refresh and Check fill coverage is unknown, so neither proves continuity nor advances its continuity watermark.
   Fill imports, including primary fills, wait until the builder scope is known. Otherwise a newer retained primary fill
   could conceal a missing builder fill in the next capped response. Primary snapshot reads continue.

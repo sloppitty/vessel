@@ -60,9 +60,11 @@ availableBalanceUsd: string|null, availableBalanceSource: "wallet"|"margin"|"wit
 lastSyncedAtUtc: string|null,
 syncStatus: "manual"|"not-synced"|"synced"|"error",
 lastSyncError: string|null,
-positionCount,
+positionCount: number|null,
 historyNotice: string|null
 ```
+
+`positionCount` is null when the latest position read was incomplete (November 17, 2026; see below).
 
 ### Snapshots, fills and manual refresh
 
@@ -81,7 +83,8 @@ accountValueUsd, withdrawableUsd, availableMarginUsd, marginUsedUsd,
 positions: [{
   contractId, signedQuantity, entryPrice,
   unrealizedPnlUsd, marginUsedUsd, leverage: number|null
-}]
+}],
+positionsComplete: boolean
 ```
 
 `FillDto`:
@@ -104,7 +107,7 @@ accounts: AccountDto[],
 totals: {
   portfolioCount, accountCount,
   totalAccountValueUsd: string|null,
-  valuedAccountCount, openPositionCount, importedFillCount,
+  valuedAccountCount, openPositionCount: number|null, importedFillCount,
   totalBalanceUsd: string|null,
   balanceAccountCount, balanceCoverage: "complete"|"partial"|"unavailable",
   availableBalanceUsd: string|null,
@@ -167,7 +170,7 @@ The summary passes its resolved enabled-account set into Activity's store and ag
 Scope and row totals contain:
 
 ```text
-accountCount, openPositionCount, importedFillCount,
+accountCount, openPositionCount: number|null, importedFillCount,
 balance, available, unrealizedPnl, realizedResult: {
   amountUsd: string|null,
   coverage: {
@@ -179,7 +182,7 @@ balance, available, unrealizedPnl, realizedResult: {
 shareOfBalance: { numerator: string, denominator: string }|null
 ```
 
-Balance/availability reuse `WorkspaceService` account DTO calculations without changing their ledger definitions. Exact strings reach `Activity/ExactAmount` for cross-account addition, including results exceeding .NET decimal's range. Position count includes nonzero signed perpetual positions only. Unrealized P&L sums their reported values from latest retained snapshots, with snapshot-account coverage. An observed empty snapshot contributes known zero; a missing snapshot contributes nothing. Counts describe retained snapshots, not a live completeness claim.
+Balance/availability reuse `WorkspaceService` account DTO calculations without changing their ledger definitions. Exact strings reach `Activity/ExactAmount` for cross-account addition, including results exceeding .NET decimal's range. Position count includes nonzero signed perpetual positions only. Unrealized P&L sums their reported values from latest retained snapshots, with snapshot-account coverage. An observed empty snapshot contributes known zero; a missing snapshot contributes nothing. A snapshot from an incomplete position read makes the group's position count null and leaves its account out of unrealized P&L with the reason "Latest position read was incomplete; positions and unrealized P&L unknown." Counts describe retained snapshots, not a live completeness claim.
 
 Realized result reuses Activity's complete internal operation summaries before any Activity filter or page. Only known-net closed operations with actual `closedAtUtc` in the inclusive UTC window contribute; `all` still excludes future exits. Gross USDC fees are deducted once by the existing aggregator, and net-of-fee P&L is not charged again. Unknown net results and incomplete operations are excluded and counted. For incomplete operations without an exit time, their latest execution determines only whether to include an exclusion notice in this period, never a fabricated closing date or result. Coverage states contributing accounts, known closed operations, excluded operations, accounts without a known closed result, and retained-history/snapshot limitations. No known closed result is null, not a fabricated zero. No retrospective Play, initial risk, complete-history or funding-free P&L is inferred.
 
@@ -340,3 +343,24 @@ select; switching still remounts the shell in the other mode.
   the new control (the rail button when collapsed), or to the menu button on
   narrow screens because the sheet closes. A polite live region outside the
   per-mode shell announces "Paper playground" or "Journal".
+
+## November 17, 2026: incomplete position reads (#89)
+
+A venue read reports `PositionsComplete = false` when it could not establish every current position in its scope, for
+example when Hyperliquid builder metadata fails (see `market-sources.md`). Migration `20261117090000_SnapshotPositionsComplete`
+adds non-null `account_snapshots.PositionsComplete`, default true: snapshots stored before it were treated as the whole
+picture and stay complete. Apply it explicitly like every journal migration; tests apply it only to disposable databases.
+
+- **Storage.** A newer refresh still replaces the perpetual ledger and its position rows, partial or not, and records the
+  read's completeness. The rows of a partial read are real observations at that time; they are not the account's whole
+  picture, and an absent position is unknown, not flat. Keeping the previous rows instead would mix two observation times.
+  The next complete read clears the flag.
+- **Workspace.** `AccountDto.positionCount` and `/api/overview` `totals.openPositionCount` are null while an account's
+  latest read is incomplete. `SnapshotDto.positionsComplete` is false, and account detail says positions not listed are
+  unknown, not closed.
+- **Overview summary.** Position count is null and unrealized P&L leaves the account out, with its coverage reason, as
+  described above. A partial list is never summed as the whole.
+- **Activity.** See the incomplete position read section of `activity-operations.md`.
+- **Unchanged.** Leverage and risk observations still record positions a partial read returned, since each is a real
+  observation. The monitor uses the in-run flag, as before. A Play's venue liquidation line still reads a returned
+  position; an absent one reads as no position, as for an unknown market.
