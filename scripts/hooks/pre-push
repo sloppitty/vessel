@@ -1,0 +1,4 @@
+#!/bin/sh
+# Vessel pre-push checks. Install: git config core.hooksPath scripts/hooks
+# Bypass on purpose: git push --no-verify
+exec python3 "$(git rev-parse --show-toplevel)/scripts/pre_push.py" "$@"
