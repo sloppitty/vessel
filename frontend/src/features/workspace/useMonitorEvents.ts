@@ -103,7 +103,7 @@ export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: ()
     let notificationCursor = notificationStart
     let connection: AbortController | null = null
     let headRequests = 0
-    let connections = 0
+    let attempts = 0
     let ready = false
     // A fallback reload ran while the stream was down; it may have failed, so the next clean connection reloads once.
     let reloadOnReady = false
@@ -143,6 +143,8 @@ export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: ()
       let opened = false
       let refused = false
       let retryAt = 0
+      // Counted per attempt: a first attempt that ends before any frame still makes the next one a reconnect.
+      const reconnected = attempts++ > 0
       const current = new AbortController()
       connection = current
       try {
@@ -150,7 +152,7 @@ export function useMonitorEvents(api: WorkspaceApi, enabled: boolean, reload: ()
           if (controller.signal.aborted) return
           if (!opened) {
             opened = true
-            if (connections++ > 0) latestReconnect.current?.()
+            if (reconnected) latestReconnect.current?.()
             if (refusals) { refusals = 0; setNotice(null) }
             stable = setTimeout(() => { failures = 0 }, stableStream)
           }

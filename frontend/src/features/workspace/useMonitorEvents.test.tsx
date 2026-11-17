@@ -177,6 +177,19 @@ describe('one shell monitor subscription', () => {
     act(() => connections[1]!.emit(eventFrame()))
     expect(reconnected).toHaveBeenCalledOnce()
   })
+  it('reports the stream that opens after a first attempt ended before any frame', async () => {
+    const { api, connections } = client()
+    const reconnected = vi.fn()
+    renderHook(() => useMonitorEvents(api, true, vi.fn(), 0, undefined, true, reconnected))
+    await advance(0)
+    // The API was upgraded while this first attempt was in flight: it ends without delivering a frame.
+    act(() => connections[0]!.finish())
+    await advance(2000)
+    expect(connections).toHaveLength(2)
+    expect(reconnected).not.toHaveBeenCalled()
+    act(() => connections[1]!.emit(ready()))
+    expect(reconnected).toHaveBeenCalledOnce()
+  })
   it('does not acknowledge undispatched catch-up events from a ready frame', async () => {
     const { api, connections } = client()
     const reload = vi.fn()
