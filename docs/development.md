@@ -342,14 +342,23 @@ This replaces any hooks in `.git/hooks` for the clone. Remove it with
 `git config --unset core.hooksPath`.
 
 For each pushed branch the hook lists the files changed against the remote
-branch, or against `origin/main` for a new branch, and runs only what they need,
-on the working tree:
+branch, or against `origin/main` for a new branch, and runs only what they need:
 
 | Changed files | Check |
 | --- | --- |
 | `scripts/`, `deploy/` | `python3 -m unittest discover -s scripts -p 'test_*.py'` |
-| `frontend/` | `pnpm --filter vessel-frontend typecheck` and `lint` |
-| `backend/` | `dotnet build backend/Vessel.slnx --configuration Release` (locked restore) |
+| `frontend/`, root `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` | `pnpm --filter vessel-frontend typecheck` and `lint` |
+| `backend/`, root `global.json` | `dotnet build backend/Vessel.slnx --configuration Release` (locked restore) |
+
+The checks run on the working tree, not on an export of the pushed commits. So
+when a pushed branch needs checks, the hook refuses the push if that branch is
+not the checked-out commit, or if tracked files under the paths those checks
+read have uncommitted changes (staged or not). Commit or clean those changes and
+push from the checked-out branch, or use `git push --no-verify`. Untracked files
+and changes outside the checked paths do not refuse. The hook also clears the
+repository variables git exports to hooks (`GIT_DIR`, `GIT_INDEX_FILE` and the
+rest of `git rev-parse --local-env-vars`), so checks that create their own
+temporary repositories cannot change yours.
 
 Other files (documentation, for example) run nothing. No test suites or
 database run, so a one-file change takes well under two minutes (a cold backend

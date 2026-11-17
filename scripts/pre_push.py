@@ -6,9 +6,11 @@ Git passes the remote name and URL as arguments and one line per pushed ref on
 stdin: `<local ref> <local sha> <remote ref> <remote sha>`.
 
 For branches it runs only the quick checks the changed files need (script
-tests, frontend typecheck and lint, backend build) against the working tree. A
-check whose tool is missing is skipped with the reason; a check that runs and
-fails refuses the push. A pushed `v*` tag must pass
+tests, frontend typecheck and lint, backend build) against the working tree, so
+it refuses a branch that needs checks unless it is the checked-out commit with
+no uncommitted changes to tracked files under the checked paths. A check whose
+tool is missing is skipped with the reason; a check that runs and fails refuses
+the push. A pushed `v*` tag must pass
 `scripts/release.py check --tag <tag>` on the tagged commit. `git push
 --no-verify` is the only bypass.
 """
@@ -36,12 +38,34 @@ CHECKS = {
     ]),
 }
 PREFIXES = {'scripts/': 'scripts', 'deploy/': 'scripts', 'frontend/': 'frontend', 'backend/': 'backend'}
+# Root build and dependency inputs.
+FILES = {'package.json': 'frontend', 'pnpm-lock.yaml': 'frontend', 'pnpm-workspace.yaml': 'frontend',
+         'global.json': 'backend'}
 
 
 def select_checks(paths):
     """The checks the changed paths need, in running order."""
-    wanted = {check for path in paths for prefix, check in PREFIXES.items() if path.startswith(prefix)}
+    wanted = {FILES[path] for path in paths if path in FILES}
+    wanted |= {check for path in paths for prefix, check in PREFIXES.items() if path.startswith(prefix)}
     return [check for check in CHECKS if check in wanted]
+
+
+def covered_paths(checks):
+    """The pathspecs the given checks read."""
+    return [path for path, check in (*PREFIXES.items(), *FILES.items()) if check in checks]
+
+
+def clear_git_environment():
+    """Drop the repository variables git exports to hooks.
+
+    Otherwise every git command a check runs, even one with its own cwd (the
+    script tests' temporary repositories), acts on the pushing repository.
+    """
+    names = subprocess.run(['git', 'rev-parse', '--local-env-vars'], capture_output=True, text=True,
+                           cwd='/').stdout.split()
+    for name in names or ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR',
+                          'GIT_OBJECT_DIRECTORY', 'GIT_CONFIG', 'GIT_PREFIX'):
+        os.environ.pop(name, None)
 
 
 def is_zero(sha):
@@ -67,8 +91,8 @@ def changed_paths(local_sha, remote_sha, remote, root=ROOT):
 
 
 def plan(lines, remote, root=ROOT):
-    """Read git's pre-push lines into (checks, tags, notes)."""
-    checks, tags, notes = set(), [], []
+    """Read git's pre-push lines into (checks, tags, notes, refusals)."""
+    checks, tags, notes, refusals = set(), [], [], []
     for line in lines:
         fields = line.split()
         if len(fields) != 4:
@@ -84,13 +108,23 @@ def plan(lines, remote, root=ROOT):
             paths = changed_paths(local_sha, remote_sha, remote, root)
             if paths is None:
                 notes.append(f'No base found for {remote_ref}; running every check.')
-                checks.update(CHECKS)
+                selected = list(CHECKS)
             else:
-                checks.update(select_checks(paths))
+                selected = select_checks(paths)
+            if not selected:
+                continue
+            checks.update(selected)
+            # Checks run against the working tree, so it must be the pushed commit.
             head = git('rev-parse', 'HEAD', root=root)
-            if head is not None and head.strip() != local_sha:
-                notes.append(f'{local_ref} is not the checked-out commit; checks run against the working tree.')
-    return [check for check in CHECKS if check in checks], tags, notes
+            if head is None or head.strip() != local_sha:
+                refusals.append(f'{local_ref} ({local_sha[:12]}) is not the checked-out commit.')
+                continue
+            dirty = git('status', '--porcelain', '--untracked-files=no', '--', *covered_paths(selected),
+                        root=root)
+            if dirty is None or dirty.strip():
+                files = ', '.join(line[3:] for line in (dirty or '').splitlines()) or 'unknown'
+                refusals.append(f'{local_ref} has uncommitted changes the checks would read: {files}.')
+    return [check for check in CHECKS if check in checks], tags, notes, refusals
 
 
 def missing_tool(check, root=ROOT):
@@ -136,10 +170,18 @@ def check_tag(tag, sha, root=ROOT):
 
 
 def main(argv, stdin, root=ROOT):
+    clear_git_environment()
     remote = argv[0] if argv else 'origin'
-    checks, tags, notes = plan(stdin.read().splitlines(), remote, root)
+    checks, tags, notes, refusals = plan(stdin.read().splitlines(), remote, root)
     for note in notes:
         print(f'pre-push: {note}')
+    if refusals:
+        for refusal in refusals:
+            print(f'pre-push: {refusal}', file=sys.stderr)
+        print('pre-push: Push refused: the checks read the working tree, not the pushed commits. Commit or '
+              'clean those changes and push from the checked-out branch, or use git push --no-verify.',
+              file=sys.stderr)
+        return 1
     failed, skipped = [], []
     for tag, sha in tags:
         if not check_tag(tag, sha, root):
