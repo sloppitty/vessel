@@ -83,9 +83,15 @@ fills, in the instrument's quote asset. It has two separate parts.
   - an exit linked to one of the entry's stops or targets is the entry's;
   - a position-level exit (an unplanned venue exit, or any manual exit)
     belongs to the entry only when it is the Play's only filled entry;
-  - the remaining quantity is shared by the entry's stops whose linked
-    orders have not executed, in proportion to their shares. A stop that has
-    already filled has done its part and is not counted again.
+  - the remaining quantity is shared by the entry's stops in proportion to
+    what each still rests for: its share of the entry's filled quantity less
+    its own linked executions, never below zero. The part a stop has filled
+    has left the position and is not counted again, so a fully filled stop
+    adds nothing and a part-filled stop counts for its remaining resting
+    quantity (issue #117). Example: long 10 at 100 with stops for 5 at 90 and
+    5 at 99; the 90 stop fills 1. The 9 left open face 4 at 90 and 5 at 99:
+    4 x 10 + 5 x 1 = 45. A target or position-level exit shrinks every
+    stop's part in the same proportion.
 - **Planned part.** For each entry, its planned quantity not yet filled, at
   its planned price, against every stop of the entry. That is the whole entry
   before its first fill, and the remainder after a partial fill. The planned
@@ -100,6 +106,9 @@ fills, in the instrument's quote asset. It has two separate parts.
   - an exit that cannot be attributed to one entry;
   - exits that exceed their entry;
   - a linked fill that contradicts its role;
+  - a linked order that is not stored, or whose executions are known to be
+    missing by the shared `MissingExecutions` rule, so a stop's filled and
+    resting quantities cannot be established;
   - a quote asset that is not a listed nominal USD stablecoin;
   - a manual execution that cannot be read.
 

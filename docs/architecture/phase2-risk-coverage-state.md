@@ -78,7 +78,9 @@ October 21, 2026. Implemented on `t3/phase2-open-risk`.
     fill;
   - exits linked to the entry's levels, and a position-level exit when there
     is only one filled entry, reduce it;
-  - the stops whose linked orders have not executed share it;
+  - the stops share it in proportion to what each still rests for, its share
+    of the filled quantity less its own executions (November 17, issue
+    #117; it was the stops whose linked orders had not executed at all);
   - the unfilled remainder of each entry counts at its planned price against
     every stop;
   - each stop's loss is clamped at zero.
