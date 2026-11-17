@@ -25,7 +25,7 @@ The clock is fixed at `Now` = 2026-11-10 12:00 UTC. `D(n)` is `Now` minus n whol
 
 | Account | Venue | P&L basis | Portfolio | State | Snapshot at Now |
 | --- | --- | --- | --- | --- | --- |
-| Gross | hyperliquid | gross: closed P&L before fees, fees in USDC | Swing | enabled | value 1000, available margin 600; AVAX +10 (venue unrealized 200), ETH -2 (venue unrealized -2) |
+| Gross | hyperliquid | gross: closed P&L before fees, fees in USDC | Swing | enabled | value 1000, available margin 600, account mode `default` with an observed empty stablecoin wallet; AVAX +10 (venue unrealized 200), ETH -2 (venue unrealized -2) |
 | Net | risex | net of fee: each fill's closed P&L already has its own fee taken off | Unassigned | enabled | value 500, available margin 400; XRP -4 (venue unrealized -0.2) |
 | Disabled | hyperliquid | gross | Swing | disabled | none |
 
