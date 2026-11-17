@@ -103,6 +103,41 @@ public sealed class MonitorDiscrepancyGapScopeTests
         Assert.Equal(["discrepancy.opened"], f.Events.Items.Select(x => x.Type).ToArray());
     }
 
+    // An entry that keeps filling changes the Play's quantity, so the fingerprint, on every observation. Under a gap the
+    // no-stop checks confirm on their condition: the critical still opens after two observations a minute apart.
+    [Theory]
+    [InlineData("protection.cancelled")]
+    [InlineData("protection.missing")]
+    public async Task Under_a_gap_an_entry_that_keeps_filling_still_confirms_the_no_stop_critical(string kind)
+    {
+        var f = new DiscrepancyFixture { HistoryGap = true };
+        if (kind == "protection.cancelled") f.Stop(o => o with { Status = VenueOrderStatus.Canceled, VenueStatus = "canceled" });
+        else f.VenueOrders.Clear();
+        // The entry order is partly filled, so its later fills are not missing executions.
+        var entry = f.Store.Orders.Single(x => x.ExternalOrderId == "entry");
+        (entry.OriginalSize, entry.Status, entry.VenueStatus) = (5, "open", "open");
+        var start = f.Clock.Now;
+        await f.Evaluate();
+        var row = f.Store.Rows.Single(x => x.Kind == kind);
+        var quantities = new List<string?> { Quantity(row) };
+        for (var i = 1; i <= 2; i++)
+        {
+            f.Advance(30);
+            f.Fill($"entry-fill-{i}", "entry", .5m, f.Clock.Now);
+            await f.Evaluate();
+            quantities.Add(Quantity(row));
+            // Half a minute is not a confirmation.
+            if (i == 1) Assert.Equal(("candidate", (DateTimeOffset?)start), (row.State, row.PendingSinceUtc));
+        }
+        Assert.Equal(["1", "1.5", "2"], quantities);
+        Assert.Equal(("open", "critical", start), (row.State, row.Severity, row.OpenedAtUtc));
+        Assert.Equal(["discrepancy.opened"], f.Events.Items.Select(x => x.Type).ToArray());
+        Assert.DoesNotContain(f.Store.Rows, x => x.Kind is "protection.missing" or "protection.cancelled" && x.Kind != kind && x.HasWork);
+
+        static string? Quantity(Vessel.Domain.Monitoring.PlayDiscrepancy row) =>
+            System.Text.Json.JsonDocument.Parse(row.Details).RootElement.GetProperty("quantity").GetString();
+    }
+
     [Fact]
     public async Task Under_a_gap_the_quantity_comparisons_stay_unknown()
     {
