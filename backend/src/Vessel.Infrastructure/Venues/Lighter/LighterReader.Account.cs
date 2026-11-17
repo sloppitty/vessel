@@ -104,7 +104,6 @@ public sealed partial class LighterReader
             var fees = 0;
             var selfTrades = 0;
             var (liquidations, deleverages, settlements) = (0, 0, 0);
-            var unrecognized = 0;
             // Phase 2, item 7: the rows left out, once each across pages, for durable markers and forced-event facts.
             var omissions = new Dictionary<(string, string), VenueOmission>();
             var forced = new Dictionary<string, VenueForcedEvent>(StringComparer.Ordinal);
@@ -151,7 +150,6 @@ public sealed partial class LighterReader
                         liquidations += result.Liquidations;
                         deleverages += result.Deleverages;
                         settlements += result.Settlements;
-                        unrecognized += result.Unrecognized;
                         foreach (var omission in result.Omissions) omissions.TryAdd((omission.Kind, omission.SourceId), omission);
                         foreach (var forcedEvent in result.ForcedEvents) forced.TryAdd(forcedEvent.SourceId, forcedEvent);
                         cursor = Cursor(json, trades.RootElement);
@@ -160,6 +158,8 @@ public sealed partial class LighterReader
                     if (!cursors.Add(cursor)) throw json.Invalid();
                 }
             if (cursor is not null) notices.Add(venue.PageLimitNotice);
+            // Issue #118: counted from the deduplicated markers, so a trade on two overlapping pages counts once.
+            var unrecognized = omissions.Values.Count(o => o.Kind == ExecutionOmission.UnrecognizedRow);
             if (OmissionNotice(missingPnl, fees, liquidations, deleverages, settlements, selfTrades, unrecognized) is { } omitted) notices.Add(omitted);
             return (new PerpetualVenueReadResult(snapshot,
                 catalogue.Markets.Where(m => m.Active).Select(m => m.Instrument!).ToArray(), fills, string.Join(" ", notices),
@@ -235,7 +235,7 @@ public sealed partial class LighterReader
     }
 
     internal sealed record FillPage(IReadOnlyList<VenueFill> Fills, int MissingPnl, int Fees, int SelfTrades = 0,
-        int Liquidations = 0, int Deleverages = 0, int Settlements = 0, int Unrecognized = 0)
+        int Liquidations = 0, int Deleverages = 0, int Settlements = 0)
     {
         /// <summary>Phase 2, item 7: every in-scope row left out, and the venue-forced ones as facts.</summary>
         public IReadOnlyList<VenueOmission> Omissions { get; init; } = [];
@@ -259,7 +259,6 @@ public sealed partial class LighterReader
         var fees = 0;
         var selfTrades = 0;
         var (liquidations, deleverages, settlements) = (0, 0, 0);
-        var unrecognized = 0;
         var omissions = new List<VenueOmission>();
         var forced = new List<VenueForcedEvent>();
         foreach (var row in Rows(json, root, "trades", PageSize).EnumerateArray())
@@ -298,14 +297,22 @@ public sealed partial class LighterReader
             string? OmittedOrder() { try { return ExactId(json, row, ask ? "ask_id" : "bid_id", ask ? "ask_id_str" : "bid_id_str"); } catch (VenueReadException) { return null; } }
             DateTimeOffset? OmittedTime() => Lenient(() => json.Timestamp(json.Property(row, "timestamp"), latest.ToUnixTimeMilliseconds()));
             void Omit(string kind, string reason) => omissions.Add(new(id, kind, reason, market.Key, marketId, OmittedOrder(), OmittedTime()));
+            // The strict reads of an imported trade's order, time, price and hash.
+            (string OrderId, DateTimeOffset At, decimal Price, string Hash) Strict()
+            {
+                var hash = Text(json, row, "tx_hash", 256);
+                if (!hash.All(char.IsAsciiHexDigit)) throw json.Invalid();
+                return (ExactId(json, row, ask ? "ask_id" : "bid_id", ask ? "ask_id_str" : "bid_id_str"),
+                    json.Timestamp(json.Property(row, "timestamp"), latest.ToUnixTimeMilliseconds()), json.Positive(json.Property(row, "price")), hash);
+            }
             // Issue #118: a well-formed row of a type Vessel does not recognize is row-level. It is left out with a marker
-            // on its market, so its operation counts as incomplete, and the rest of the read applies. Its time must be
-            // valid, like its trade ID; a row without either still fails the read.
+            // on its market, so its operation counts as incomplete, and the rest of the read applies. Every field an
+            // imported trade needs is validated first, unlike the older omissions, so a malformed row still fails the read.
             if (type is not ("trade" or "liquidation" or "deleverage" or "market-settlement"))
             {
-                json.Timestamp(json.Property(row, "timestamp"), latest.ToUnixTimeMilliseconds());
-                unrecognized++;
-                Omit(ExecutionOmission.UnrecognizedRow, "unrecognized trade type");
+                json.OptionalAmount(row, pnlName);
+                var known = Strict();
+                omissions.Add(new(id, ExecutionOmission.UnrecognizedRow, "unrecognized trade type", market.Key, marketId, known.OrderId, known.At));
                 continue;
             }
             // Venue-forced executions are omitted whatever their (still validated) fee, and counted by kind, not as fee-bearing.
@@ -335,11 +342,7 @@ public sealed partial class LighterReader
             var reportedPnl = json.OptionalAmount(row, pnlName);
             if (reportedPnl is null && effect != ExecutionFacts.Open) { missingPnl++; Omit(ExecutionOmission.MissingPnl, "no reported realized P&L"); continue; }
             var pnl = reportedPnl ?? 0m;
-            var orderId = ExactId(json, row, ask ? "ask_id" : "bid_id", ask ? "ask_id_str" : "bid_id_str");
-            var at = json.Timestamp(json.Property(row, "timestamp"), latest.ToUnixTimeMilliseconds());
-            var price = json.Positive(json.Property(row, "price"));
-            var hash = Text(json, row, "tx_hash", 256);
-            if (!hash.All(char.IsAsciiHexDigit)) throw json.Invalid();
+            var (orderId, at, price, hash) = Strict();
             var direction = effect switch
             {
                 ExecutionFacts.Open => ask ? "Open Short" : "Open Long",
@@ -361,6 +364,6 @@ public sealed partial class LighterReader
                 effect, standardTier ? ExecutionFacts.FeeStandardAccountFree : ExecutionFacts.FeeReported,
                 ExecutionFacts.PnlGross, marketId));
         }
-        return new(fills, missingPnl, fees, selfTrades, liquidations, deleverages, settlements, unrecognized) { Omissions = omissions, ForcedEvents = forced };
+        return new(fills, missingPnl, fees, selfTrades, liquidations, deleverages, settlements) { Omissions = omissions, ForcedEvents = forced };
     }
 }

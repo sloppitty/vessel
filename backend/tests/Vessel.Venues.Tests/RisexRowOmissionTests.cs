@@ -39,12 +39,27 @@ public sealed partial class RisexAdapterTests
     [InlineData("time", "\"soon\"")]
     [InlineData("price", "\"not a price\"")]
     [InlineData("realized_pnl", "\"1e3\"")]
-    public async Task A_trade_with_an_unrecognized_value_and_a_malformed_field_still_fails_the_read(string field, string json)
+    public async Task A_trade_with_an_unrecognized_value_and_a_malformed_field_still_fails_the_read(string field, string json) =>
+        await AssertMalformed("fee", "-0.01", field, json);
+
+    [Theory]
+    [InlineData("id", "null")]
+    [InlineData("size", "\"0\"")]
+    [InlineData("order_id", "null")]
+    [InlineData("is_liquidation", "\"no\"")]
+    [InlineData("blockchain_data", "{\"tx_hash\":5}")]
+    [InlineData("leverage", "\"high\"")]
+    [InlineData("realized_pnl", "5")]
+    [InlineData("position_side", "1")]
+    public async Task A_trade_with_an_unrecognized_side_and_a_malformed_field_still_fails_the_read(string field, string json) =>
+        await AssertMalformed("side", "BOTH", field, json);
+
+    private static async Task AssertMalformed(string trigger, string value, string field, string json)
     {
         // Response-level: a wrong type, an unusable time or a value a strict reader rejects fails the read, as before.
         var history = JsonNode.Parse(Trades)!;
         var trade = history["data"]!["trades"]![0]!.AsObject();
-        trade["fee"] = "-0.01";
+        trade[trigger] = value;
         trade[field] = JsonNode.Parse(json);
         var error = await Assert.ThrowsAsync<VenueReadException>(() =>
             Reader(new() { ["/v1/trade-history"] = history.ToJsonString() }).Reader.ReadAsync(Address, default));

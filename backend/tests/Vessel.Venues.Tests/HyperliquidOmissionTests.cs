@@ -48,6 +48,11 @@ public sealed partial class HyperliquidAdapterTests
     [InlineData("px", "\"1e3\"")]
     [InlineData("fee", "\"0.00000000000000000000000000001\"")]
     [InlineData("dir", "1")]
+    [InlineData("sz", "\"0\"")]
+    [InlineData("closedPnl", "1")]
+    [InlineData("feeToken", "null")]
+    [InlineData("oid", "\"x\"")]
+    [InlineData("hash", "null")]
     public async Task A_fill_with_an_unknown_side_and_a_malformed_field_still_fails_the_read(string field, string json)
     {
         // Response-level: a row without a usable identity or time, or with a field a strict reader rejects, is not omitted.
