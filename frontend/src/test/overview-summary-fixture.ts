@@ -8,6 +8,7 @@ export const summaryAmount = (amountUsd: string | null, total = 1): SummaryAmoun
 export const summaryTotals = (balance = '1250.123456', accounts = 1): SummaryTotals => ({ accountCount: accounts,
   balance: summaryAmount(balance, accounts), available: summaryAmount(null, accounts), openPositionCount: 0,
   unrealizedPnl: summaryAmount(null, accounts), realizedResult: summaryAmount(null, accounts), importedFillCount: 0,
+  unrealizedPnlAsOfUtc: null,
 })
 export function overviewSummaryFixture(query: OverviewQuery = { groupBy: 'portfolio', period: '30', scope: 'all' }): OverviewSummaryDocument {
   const asOfUtc = '2026-10-13T12:00:00.000Z'

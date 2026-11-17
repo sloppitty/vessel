@@ -15,6 +15,8 @@ export interface SummaryTotals {
   /** Null when an account's latest position read was incomplete; the unrealized coverage states why. */
   accountCount: number; balance: SummaryAmount; available: SummaryAmount; openPositionCount: number | null
   unrealizedPnl: SummaryAmount; realizedResult: SummaryAmount; importedFillCount: number; paperExecutionCount?: number
+  /** The oldest latest-refresh time behind the unrealized sum (#93); null when no account contributes and in paper mode. */
+  unrealizedPnlAsOfUtc: string | null
 }
 export interface SummaryRow {
   id: string; name: string; icon: string | null; venueId: string | null; totals: SummaryTotals
@@ -41,6 +43,7 @@ function summaryAmount(v: unknown, accounts: number): v is SummaryAmount {
 }
 function totals(v: unknown): v is SummaryTotals {
   if (!(isRecord(v) && isCount(v.accountCount) && (v.openPositionCount === null || isCount(v.openPositionCount)) && (v.paperExecutionCount === undefined || isCount(v.paperExecutionCount)) && isCount(v.importedFillCount) &&
+    (v.unrealizedPnlAsOfUtc === null || isIsoTimestamp(v.unrealizedPnlAsOfUtc)) &&
     ['balance', 'available', 'unrealizedPnl', 'realizedResult'].every(k => summaryAmount(v[k], v.accountCount as number)))) return false
   const checked = v as unknown as SummaryTotals
   return ['balance', 'available', 'unrealizedPnl'].every(k => {

@@ -59,6 +59,15 @@ describe('Overview summary', () => {
     expect(cell.querySelector('span')).toHaveTextContent(/^—$/)
     expect(within(table).queryByText('0')).not.toBeInTheDocument()
   })
+  it('labels the unrealized tile with the time of the last refresh it includes (#93)', async () => {
+    const document = overviewSummaryFixture()
+    document.totals = { ...document.totals, unrealizedPnl: summaryAmount('2'), unrealizedPnlAsOfUtc: '2026-10-13T09:30:00Z' }
+    render(<OverviewSummary api={api(document)} query={query} onQuery={vi.fn()} reloadGeneration={0} fallback={overviewFixture} accountCount={1} />)
+    await screen.findByRole('table')
+    const metric = screen.getByText('Perpetual positions').closest('.metric') as HTMLElement
+    expect(within(metric).getByText(/^at last refresh/)).toHaveTextContent('at last refresh 13 Oct 2026, 09:30 UTC')
+    expect(within(metric).getByRole('button', { name: 'About unrealized at last refresh' })).toHaveAccessibleDescription(/not live prices/)
+  })
   it('changes grouping and period through labelled controls', async () => {
     const onQuery = vi.fn()
     render(<OverviewSummary api={api()} query={query} onQuery={onQuery} reloadGeneration={0} fallback={overviewFixture} accountCount={1} />)
