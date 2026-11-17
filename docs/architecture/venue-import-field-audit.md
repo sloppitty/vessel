@@ -59,6 +59,14 @@ Resolving that gap requires verified financial semantics or a separately designe
 unknown-money representation, not an invented zero or an inferred closing PnL.
 Missing fees remain errors. No Hyperliquid parser change was justified.
 
+November 17, 2026 (issue #118): a RISEx negative `fee` is no longer a
+response-level failure. The rebate's meaning is still not established, so the
+trade is not imported; it is set aside with a `fee` marker ("negative fee")
+keeping its order, and the rest of the read applies. An unknown Hyperliquid
+`side` or RISEx `side`/`position_side` is likewise a marked row-level omission
+rather than a failed read. Missing, null or malformed values remain errors. See
+the row-level section of `execution-facts.md`.
+
 Regressions cover missing/null/empty fee and PnL, Hyperliquid's fee currency,
 explicit zero opening PnL, signed Hyperliquid fees, and both RISEx import paths
 with warm catalogues. Full backend verification passes 1,784 tests with 137

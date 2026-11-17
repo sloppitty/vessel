@@ -92,7 +92,7 @@ October 14, 2026. All five delivery contract items are implemented: the backend 
 | Credential purpose | `lighter-read-token` | `lighter-rh-read-token` |
 | Setup URL | `https://app.lighter.xyz/read-only-tokens` | `https://robinhoodchain.lighter.xyz/read-only-tokens` |
 | Trade URL | none (unchanged) | `https://robinhoodchain.lighter.xyz/trade/{instrument}` |
-| Stored-notice name | Lighter | Lighter (stored history notices keep mainnet's length so combined public and order coverage fits the 1,000-character `HistoryNotice` column; interactive messages say Lighter · Robinhood) |
+| Stored-notice name | Lighter | Lighter (stored history notices keep mainnet's length so combined public and order coverage fits the 1,200-character `HistoryNotice` column; interactive messages say Lighter · Robinhood) |
 | History budget | 5 pages, 500 executions | 2 pages, 200 executions (`trades` weight 600 vs 200) |
 | Snapshot scope | `lighter-perps-account` | `lighter-rh-perps-account` |
 | Logo | `lighter` | `lighter-rh` |

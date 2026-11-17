@@ -160,10 +160,12 @@ Phase 2, item 7a of the [risk and coverage contract](phase2-risk-coverage-contra
   `execution_omissions` (migration `ExecutionOmissions`): its native trade ID,
   kind, plain reason, canonical and native market, native order ID and time. It
   carries no money.
-  - The kinds are `forced`, `fee` (Lighter fee-bearing or unverified fee),
-    `missing-pnl` (a Lighter close or flip, or any RISEx trade, without
-    reported realized P&L) and `unrecognized-market` (a Hyperliquid or RISEx
-    market the catalogue does not list, so its canonical contract is null).
+  - The kinds are `forced`, `fee` (Lighter fee-bearing or unverified fee, or
+    a RISEx negative fee), `missing-pnl` (a Lighter close or flip, or any RISEx
+    trade, without reported realized P&L), `unrecognized-market` (a
+    Hyperliquid or RISEx market the catalogue does not list, so its canonical
+    contract is null) and `unrecognized-row` (a well-formed row with a value
+    Vessel does not recognize; see below).
   - Markers are deduplicated by kind and trade ID. A row seen again only moves
     its last-seen time; a later read that no longer returns it erases nothing.
   - Without a reported time, the marker records the read's window instead:
@@ -199,3 +201,39 @@ Phase 2, item 7a of the [risk and coverage contract](phase2-risk-coverage-contra
   applies; before, the whole read failed. It is never zero.
 - Deleting an account deletes its markers and forced events. Activity becoming
   gap-aware with them is item 7b.
+
+## Row-level and response-level failures (November 17, 2026)
+
+Issue #118. One unrecognized row used to fail an account's whole import, and
+kept failing it while the row stayed in the venue's newest window. Adapters now
+separate two cases:
+- **Response-level: the read fails, as before.** Wrong JSON shape or types,
+  duplicate keys, a row without a usable native identity or time, a number a
+  decimal cannot hold exactly, and anything else the strict helpers in
+  `Venues/Common` reject. A row is validated in full before it can count as
+  row-level, so a malformed field still fails the read.
+- **Row-level: the row is left out with a marker.** A well-formed row with its
+  native identity, time and contract whose enum-like value Vessel does not
+  recognize, or whose fee has a sign Vessel does not support:
+  - a Lighter trade `type` other than `trade`, `liquidation`, `deleverage`
+    and `market-settlement` (`unrecognized-row`, "unrecognized trade type");
+  - a Hyperliquid fill `side` other than `A` or `B` (`unrecognized-row`,
+    "unrecognized side"); an unknown `dir` already imports with an unknown
+    position effect, as before;
+  - a RISEx `side` or `position_side` other than `BUY` or `SELL`
+    (`unrecognized-row`), or a negative `fee` such as a maker rebate (`fee`,
+    "negative fee").
+- **What the marker does.** It carries the native trade ID, kind, canonical and
+  native market, order and time, and counts in `OmittedExecutions`. It goes
+  through the same store, deduplication and order rule as every other marker,
+  so the order it names has known missing executions and the operation it lies
+  in is incomplete for Activity, Review, Sizing, Overview and the monitor. No
+  side, fee or P&L is guessed, and the row is never imported as a fill.
+- **Notices.** Lighter's one counted sentence adds "N of an unrecognized
+  type"; RISEx's adds "N with a negative fee" and "N with an unrecognized
+  side". Hyperliquid has no omission sentence and counts them only.
+- **Migration `UnrecognizedRowOmissions`.** It adds the kind to the check
+  constraint and widens `accounts.HistoryNotice` from 1,000 to 1,200
+  characters. Lighter's worst-case combined notice was already 997 characters,
+  so the extra count would not fit. Its down migration refuses to run once
+  such markers or a longer notice exist.

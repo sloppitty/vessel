@@ -165,10 +165,12 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
                 catalogue.Markets.Where(m => m.Active).Select(m => m.Instrument).ToList(),
                 // Identical copies across pages collapse; a changed copy is kept for the store to record as a conflict (14c).
                 fills.GroupBy(f => (f.ContractId, f.SourceFillId)).SelectMany(g => g.Distinct()).OrderByDescending(f => f.OccurredAtUtc).ToList(),
-                OmissionNotice(omitted.Count, MissingPnl(omissions.Values)) is { } omission ? HistoryNotice + " " + omission : HistoryNotice,
+                OmissionNotice(omitted.Count, Count(omissions.Values, ExecutionOmission.MissingPnl), Count(omissions.Values, ExecutionOmission.Fee),
+                    Count(omissions.Values, ExecutionOmission.UnrecognizedRow)) is { } omission ? HistoryNotice + " " + omission : HistoryNotice,
                 PositionsComplete: positionsComplete,
                 FillHistoryTruncated: hasNextPage || fillCoverage.Count == MaxFillPages * PageSize,
-                OldestRawFillAtUtc: fillCoverage.OldestAtUtc, OmittedExecutions: omitted.Count + MissingPnl(omissions.Values))
+                OldestRawFillAtUtc: fillCoverage.OldestAtUtc,
+                OmittedExecutions: omitted.Count + omissions.Values.Count(o => o.Kind != ExecutionOmission.UnrecognizedMarket))
             { Omissions = omissions.Values.ToList() };
         }, cancellationToken);
     }
@@ -228,11 +230,14 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             ? ns : throw Json.Invalid();
     }
 
-    private static string Side(JsonElement element) => Json.Text(element, 8) switch
+    private static string Side(JsonElement element) => KnownSide(element) ?? throw Json.Invalid();
+
+    /// <summary>The side, or null for a well-formed value Vessel does not recognize (row-level for a trade, issue #118).</summary>
+    private static string? KnownSide(JsonElement element) => Json.Text(element, 8) switch
     {
         "BUY" => ExecutionFacts.Buy,
         "SELL" => ExecutionFacts.Sell,
-        _ => throw Json.Invalid()
+        _ => null
     };
 
     /// <summary>
@@ -257,18 +262,20 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
     internal static List<VenueFill> ReadFills(JsonElement data, RisexCatalogue catalogue, DateTimeOffset latest) =>
         ReadFills(data, catalogue, latest, new HashSet<(string, string)>());
 
-    private static int MissingPnl(IEnumerable<VenueOmission> omissions) => omissions.Count(o => o.Kind == ExecutionOmission.MissingPnl);
+    private static int Count(IEnumerable<VenueOmission> omissions, string kind) => omissions.Count(o => o.Kind == kind);
 
     /// <summary>
     /// One sentence counting the in-scope executions left out, for example "Omitted executions: 2 on unrecognized
     /// markets, 1 without reported P&amp;L." Null when nothing was left out.
     /// </summary>
-    internal static string? OmissionNotice(int unrecognized, int missingPnl = 0)
+    internal static string? OmissionNotice(int unrecognized, int missingPnl = 0, int negativeFees = 0, int unrecognizedRows = 0)
     {
         var parts = new[]
         {
             unrecognized switch { 0 => null, 1 => "1 on an unrecognized market", _ => $"{unrecognized} on unrecognized markets" },
-            missingPnl switch { 0 => null, _ => $"{missingPnl} without reported P&L" }
+            missingPnl switch { 0 => null, _ => $"{missingPnl} without reported P&L" },
+            negativeFees switch { 0 => null, _ => $"{negativeFees} with a negative fee" },
+            unrecognizedRows switch { 0 => null, _ => $"{unrecognizedRows} with an unrecognized side" }
         }.OfType<string>().ToArray();
         return parts.Length == 0 ? null : $"Omitted executions: {string.Join(", ", parts)}.";
     }
@@ -300,9 +307,9 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
                 continue;
             }
             if (cut is { } end && RawNanoseconds(Json.Property(trade, "time")) > end) continue;
-            var side = Side(Json.Property(trade, "side"));
-            var positionSide = Side(Json.Property(trade, "position_side"));
-            var fee = Json.Nonnegative(Json.Property(trade, "fee"));
+            var side = KnownSide(Json.Property(trade, "side"));
+            var positionSide = KnownSide(Json.Property(trade, "position_side"));
+            var fee = Json.Number(Json.Property(trade, "fee"));
             // Every other field is validated first, so a malformed row still fails the read (Sol round 1 on 14a).
             var id = Json.Text(Json.Property(trade, "id"));
             var price = Json.Positive(Json.Property(trade, "price"));
@@ -313,6 +320,17 @@ public sealed partial class RisexReader(HttpClient httpClient, TimeProvider time
             var chain = Json.Property(trade, "blockchain_data");
             var hash = Json.TextOrEmpty(Json.Property(chain, "tx_hash"), 256);
             var leverage = FillLeverage(trade);
+            // Issue #118: a well-formed row with a side Vessel does not recognize, or a negative fee (a maker rebate the
+            // fee basis cannot hold), is row-level: set aside with a marker keeping its order, never guessed, and the rest
+            // of the read applies. Its realized P&L must still be a valid amount when present.
+            if (side is null || positionSide is null || fee < 0)
+            {
+                Json.OptionalAmount(trade, "realized_pnl");
+                omissions?.Add(side is null || positionSide is null
+                    ? new(id, ExecutionOmission.UnrecognizedRow, "unrecognized side", market.Key, marketId, orderId, at)
+                    : new(id, ExecutionOmission.Fee, "negative fee", market.Key, marketId, orderId, at));
+                continue;
+            }
             // Phase 2, item 7 (D-22): unlike Lighter's non-reducing fills, an empty RISEx PnL has no verified net-of-fee
             // zero meaning. The trade is set aside with a counted reason and a durable marker that keeps its order, so that
             // order's executions are known to be missing; the rest of the read still applies. It is never zero.

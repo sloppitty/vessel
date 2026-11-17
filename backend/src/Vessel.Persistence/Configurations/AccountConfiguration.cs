@@ -42,6 +42,6 @@ internal sealed class AccountConfiguration : IEntityTypeConfiguration<Account>
         builder.Property(x => x.SourceId).HasMaxLength(128);
         builder.Property(x => x.SyncStatus).HasMaxLength(32);
         builder.Property(x => x.LastSyncError).HasMaxLength(200);
-        builder.Property(x => x.HistoryNotice).HasMaxLength(1000);
+        builder.Property(x => x.HistoryNotice).HasMaxLength(1200);
     }
 }

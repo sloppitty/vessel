@@ -12,7 +12,7 @@ internal sealed class ExecutionOmissionConfiguration : IEntityTypeConfiguration<
     {
         builder.ToTable("execution_omissions", table =>
         {
-            table.HasCheckConstraint("CK_execution_omissions_kind", "\"Kind\" IN ('forced', 'fee', 'missing-pnl', 'unrecognized-market')");
+            table.HasCheckConstraint("CK_execution_omissions_kind", "\"Kind\" IN ('forced', 'fee', 'missing-pnl', 'unrecognized-market', 'unrecognized-row')");
             table.HasCheckConstraint("CK_execution_omissions_time",
                 """
                 "FirstSeenAtUtc" <= "LastSeenAtUtc" AND ("OccurredAtUtc" IS NULL OR "UncertainFromUtc" IS NULL AND "UncertainToUtc" IS NULL) AND

@@ -17,7 +17,7 @@ internal static class AccountHistoryNoticeBudget
     public static string Public(LighterExchange exchange, string credentialNotice, string terminalNotice,
         int missingPnl = 500, int fees = 500, int selfTrades = 500, int forced = 500) =>
         string.Join(" ", new[] { exchange.HistoryNotice, credentialNotice, terminalNotice,
-            LighterReader.OmissionNotice(missingPnl, fees, forced, forced, forced, selfTrades) }
+            LighterReader.OmissionNotice(missingPnl, fees, forced, forced, forced, selfTrades, forced) }
             .Where(text => !string.IsNullOrEmpty(text)));
 
     public static IEnumerable<(string Venue, string Public, string Orders)> CombinedCases()

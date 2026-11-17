@@ -314,18 +314,28 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
                 continue;
             }
             var side = Text(Property(fill, "side"));
-            if (side is not ("A" or "B"))
-                throw new VenueReadException(InvalidResponse);
             var direction = Text(Property(fill, "dir"));
+            var (id, price, quantity) = (Identity(Property(fill, "tid")), Positive(Property(fill, "px")), Positive(Property(fill, "sz")));
+            var (fee, feeToken) = (Number(Property(fill, "fee")), Text(Property(fill, "feeToken"), FeeTokenLength));
+            var (closedPnl, at) = (Number(Property(fill, "closedPnl")), Timestamp(Property(fill, "time"), latestTimestamp));
+            var (orderId, hash) = (Identity(Property(fill, "oid")), Text(Property(fill, "hash")));
+            var venueContract = HyperliquidInstruments.Canonical(name) == name ? null : name;
+            if (side is not ("A" or "B"))
+            {
+                // Issue #118: a well-formed row whose side Vessel does not recognize is row-level. Every other field is
+                // validated above, so a malformed row still fails the read; this one is left out with a marker on its
+                // market and order, never imported with a guessed side, and the rest of the read applies.
+                omitted++;
+                omissions?.Add(new(id, ExecutionOmission.UnrecognizedRow, "unrecognized side", HyperliquidInstruments.Canonical(name),
+                    venueContract, orderId, at));
+                continue;
+            }
             fills.Add(new(
-                Identity(Property(fill, "tid")), HyperliquidInstruments.Canonical(name), SideOf(side),
-                direction, Positive(Property(fill, "px")), Positive(Property(fill, "sz")),
-                Number(Property(fill, "fee")), Text(Property(fill, "feeToken"), FeeTokenLength),
-                Number(Property(fill, "closedPnl")), Timestamp(Property(fill, "time"), latestTimestamp),
-                Identity(Property(fill, "oid")), Text(Property(fill, "hash")), fill.GetRawText(),
+                id, HyperliquidInstruments.Canonical(name), SideOf(side), direction, price, quantity, fee, feeToken, closedPnl, at,
+                orderId, hash, fill.GetRawText(),
                 // closedPnl excludes the fee, which is reported separately.
                 EffectOf(direction), ExecutionFacts.FeeReported, ExecutionFacts.PnlGross,
-                VenueContractId: HyperliquidInstruments.Canonical(name) == name ? null : name));
+                VenueContractId: venueContract));
         }
         // Preserve venue side/direction as facts; they do not identify a journal play.
         return fills.OrderByDescending(fill => fill.OccurredAtUtc).ToList();

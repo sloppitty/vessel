@@ -97,7 +97,7 @@ public sealed class LighterRobinhoodTests
         int Longest(string venue) => AccountHistoryNoticeBudget.CombinedCases().Where(c => c.Venue == venue)
             .Max(c => (c.Public + "\nOrder history: " + c.Orders).Length);
         Assert.True(Longest("lighter-rh") <= Longest("lighter"), $"{Longest("lighter-rh")} > {Longest("lighter")}");
-        Assert.True(Longest("lighter-rh") <= 1000);
+        Assert.True(Longest("lighter-rh") <= 1200);
     }
 
     [Fact]
