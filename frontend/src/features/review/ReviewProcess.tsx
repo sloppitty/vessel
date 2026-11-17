@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReviewProcess, ReviewProcessPage, ReviewProcessSelection, ReviewQuery, ReviewRule } from '@/api/review'
 import type { WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
+import { useApiRead } from '@/lib/use-api-read'
 import { InfoTip } from '@/components/ui/info-tip'
 import { PlayIdentity } from '@/features/plays/PlayIdentity'
 import { PostHocBadge } from '@/features/plays/PostHocBadge'
@@ -107,21 +108,13 @@ export function ReviewProcessList({ api, query, selection, onOpenPlay }: {
   api: WorkspaceApi; query: ReviewQuery; selection: ReviewProcessSelection; onOpenPlay: (id: string, signal: AbortSignal) => Promise<void>
 }) {
   const [offset, setOffset] = useState(0)
-  const [retry, setRetry] = useState(0)
-  const [state, setState] = useState<{ offset: number; retry: number; value: ReviewProcessPage | null; error: string | null } | null>(null)
+  const read = useMemo(() => ({ query: { ...query, offset }, selection }), [query, selection, offset])
+  const plays = useApiRead(api, read, (client, signal) => client.reviewProcess(read.query, read.selection, signal),
+    { fallback: 'These Plays could not be loaded.' })
   const [opening, setOpening] = useState<string | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
   const request = useRef<AbortController | null>(null)
   useEffect(() => () => request.current?.abort(), [api])
-  useEffect(() => {
-    const controller = new AbortController()
-    api.reviewProcess({ ...query, offset }, selection, controller.signal).then(value => {
-      if (!controller.signal.aborted) setState({ offset, retry, value, error: null })
-    }).catch(cause => {
-      if (!controller.signal.aborted) setState({ offset, retry, value: null, error: errorMessage(cause, 'These Plays could not be loaded.') })
-    })
-    return () => controller.abort()
-  }, [api, query, selection, offset, retry])
   async function open(id: string) {
     request.current?.abort()
     const controller = new AbortController()
@@ -131,9 +124,9 @@ export function ReviewProcessList({ api, query, selection, onOpenPlay }: {
     catch (cause) { if (!controller.signal.aborted) setOpenError(errorMessage(cause, 'The Play could not be opened.')) }
     finally { if (!controller.signal.aborted) setOpening(null) }
   }
-  if (state === null || state.offset !== offset || state.retry !== retry) return <p role="status">Loading Plays…</p>
-  if (state.error) return <div role="alert"><p>{state.error}</p><button className="pr-outline-button" onClick={() => setRetry(n => n + 1)}>Retry</button></div>
-  const page = state.value!
+  if (plays.loading) return <p role="status">Loading Plays…</p>
+  if (plays.error) return <div role="alert"><p>{plays.error}</p><button className="pr-outline-button" onClick={plays.reload}>Retry</button></div>
+  const page: ReviewProcessPage = plays.data!
   return <>
     {openError && <p role="alert">{openError}</p>}
     <ul className="pr-exclusion-list">{page.items.map(item => <li key={item.id}>

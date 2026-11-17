@@ -63,6 +63,8 @@
 - "Limited history" no longer appears on Overview just because an account has funding
   coverage.
 - Overview's unrealized P&L is labelled "at last refresh" with its time.
+- Review and the Overview summary keep the last loaded figures on screen while a background
+  reload runs, where they went back to "Loading…".
 
 ### Changed
 
@@ -78,6 +80,8 @@
 - The web app no longer accepts monitor, account, portfolio, history-coverage and review
   responses with fields missing. Those fallbacks existed for older API versions, which the
   version notice now covers.
+- Eighteen page reads share one hook (`useApiRead`) for cancelling, discarding stale answers
+  and error text.
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and

@@ -1,5 +1,4 @@
-import { errorMessage } from '@/api/errors'
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import type { WorkspaceApi } from '@/api/workspace'
 import { cancelReasonLabels, cancelReasons, statusLabels, unresolvedReasonLabels, unresolvedReasons, type CancelReason, type PlayHistory, type PreflightCheck, type UnresolvedReason, maxPreflightNote, type PlanRuleAnswer, type PlanRuleSnapshot, type PlayRule } from '@/api/plays'
 import { Button } from '@/components/ui/button'
@@ -8,6 +7,7 @@ import { describePlanChanges } from './saved'
 import { preflightLabels } from './preflight'
 import { evidenceLines } from './unresolved'
 import { NativeSelect } from '@/components/ui/native-select'
+import { useApiRead } from '@/lib/use-api-read'
 import { Time } from '@/components/ui/time'
 
 /** Asks why a planned Play's plan changed; the reason is kept with the revision. */
@@ -223,15 +223,8 @@ type HistoryItem = { at: string; key: string; title: string; detail: string[] }
 
 /** Plan revisions with what changed, and status changes, newest first. */
 export function HistoryDialog({ api, playId, onClose }: { api: WorkspaceApi; playId: string; onClose: () => void }) {
-  const key = useMemo(() => ({ api, playId }), [api, playId])
-  const [loaded, setLoaded] = useState<{ key: typeof key; result: { history: PlayHistory } | { error: string } } | null>(null)
-  const result = loaded?.key === key ? loaded.result : null
-  useEffect(() => {
-    const controller = new AbortController()
-    api.playHistory(playId, controller.signal).then(history => { if (!controller.signal.aborted) setLoaded({ key, result: { history } }) })
-      .catch(cause => { if (!controller.signal.aborted) setLoaded({ key, result: { error: errorMessage(cause, 'The change could not be completed. Try again.') } }) })
-    return () => controller.abort()
-  }, [api, playId, key])
+  const read = useApiRead(api, playId, (client, signal) => client.playHistory(playId, signal), { fallback: 'The change could not be completed. Try again.' })
+  const result: { history: PlayHistory } | { error: string } | null = read.data ? { history: read.data } : read.error !== null ? { error: read.error } : null
   const items: HistoryItem[] = result && 'history' in result ? [
     ...result.history.revisions.map((revision, index, all): HistoryItem => ({
       at: revision.createdAtUtc, key: `r${revision.number}`, title: `Plan revision ${revision.number} · ${revision.reason}`,

@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useId, useState } from 'react'
 import { Download, FileDown } from 'lucide-react'
 import type { BrokerAccount, WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
@@ -6,6 +6,7 @@ import { AccountSelect } from '@/components/accounts/AccountSelect'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { saveFile } from '@/lib/download'
+import { useApiRead } from '@/lib/use-api-read'
 import './data-export-settings.css'
 
 type ExportApi = Pick<WorkspaceApi, 'accounts' | 'accountFacts'>
@@ -18,22 +19,16 @@ type Kind = 'executions' | 'funding'
  */
 export function DataExportSettings({ api }: { api: ExportApi }) {
   const id = useId()
-  const [accounts, setAccounts] = useState<{ api: ExportApi; list: BrokerAccount[] } | null>(null)
   const [accountId, setAccountId] = useState('')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [busy, setBusy] = useState<Kind | null>(null)
   const [error, setError] = useState<string | null>(null)
-  useEffect(() => {
-    const controller = new AbortController()
-    // Partial clients (older shells, test doubles) may not list accounts; the panel then has none to offer.
-    if (typeof api.accounts !== 'function') return () => controller.abort()
-    api.accounts(controller.signal).then(list => {
-      if (!controller.signal.aborted) setAccounts({ api, list: list.filter(a => a.isEnabled !== false && (a.tradingMode ?? 'real') === 'real') })
-    }).catch(() => { if (!controller.signal.aborted) setAccounts({ api, list: [] }) })
-    return () => controller.abort()
-  }, [api])
-  const list = accounts?.api === api ? accounts.list : []
+  // Partial clients (older shells, test doubles) may not list accounts; the panel then has none to offer, as after a failed read.
+  const listing = typeof api.accounts === 'function'
+  const accounts = useApiRead(api, null, (client, signal) => client.accounts(signal)
+    .then(all => all.filter(a => a.isEnabled !== false && (a.tradingMode ?? 'real') === 'real')), { fallback: '', enabled: listing })
+  const list: BrokerAccount[] = accounts.data ?? []
   const chosen = list.some(a => a.id === accountId) ? accountId : ''
   const range = from !== '' && to !== '' && from > to ? 'The start date is after the end date.' : null
 
@@ -52,7 +47,7 @@ export function DataExportSettings({ api }: { api: ExportApi }) {
     <div className="data-export-fields">
       <div className="data-export-field"><span id={`${id}-account`}>Account</span>
         <AccountSelect labelledBy={`${id}-account`} value={chosen} accounts={list} onChange={setAccountId}
-          placeholder={accounts && !list.length ? 'No enabled accounts' : 'Choose an account'} /></div>
+          placeholder={listing && !accounts.loading && !list.length ? 'No enabled accounts' : 'Choose an account'} /></div>
       <label className="data-export-field">From (UTC day)<Input type="date" value={from} onChange={event => setFrom(event.target.value)} /></label>
       <label className="data-export-field">To (UTC day)<Input type="date" value={to} aria-invalid={range !== null} onChange={event => setTo(event.target.value)} /></label>
     </div>

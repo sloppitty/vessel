@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
-import { errorMessage } from '@/api/errors'
+import { useRef } from 'react'
 import { isEndedStatus, journalFieldLabels, journalSearchPageSize, statusLabels, type JournalSearchHit, type JournalSearchPage, type PlaySummary } from '@/api/plays'
 import type { BrokerAccount, WorkspaceApi } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { Time } from '@/components/ui/time'
 import { reviewResult } from '@/lib/format'
 import { useDelayedFlag } from '@/lib/use-delayed-flag'
+import { useApiRead } from '@/lib/use-api-read'
 import { PlayIdentity } from './PlayIdentity'
 import { multiple } from './receipt-format'
 
@@ -60,21 +60,12 @@ export function JournalSearchResults({ api, accounts, query, offset, refresh, di
   onOpen: (id: string) => void
   onClear: () => void
 }) {
-  // Try again and a reload read the same page anew: both are part of the request a response answers.
-  const [attempt, setAttempt] = useState(0)
-  const key = JSON.stringify([query, offset, attempt, refresh])
-  const [result, setResult] = useState<{ api: WorkspaceApi; key: string; page?: JournalSearchPage; error?: string } | null>(null)
-  useEffect(() => {
-    const controller = new AbortController()
-    const [q, from] = JSON.parse(key) as [string, number, number, string]
-    api.searchJournal({ q, ...(from ? { offset: from } : {}) }, controller.signal)
-      .then(page => { if (!controller.signal.aborted) setResult({ api, key, page }) })
-      .catch(cause => { if (!controller.signal.aborted) setResult({ api, key, error: errorMessage(cause, 'The journal could not be searched. Try again.') }) })
-    return () => controller.abort()
-  }, [api, key])
-  const pending = result === null || result.api !== api || result.key !== key
-  const shown = result?.api === api ? result.page ?? null : null
-  const error = pending ? null : result.error ?? null
+  // Try again and a reload read the same page anew; earlier results stay, marked as refetching, while the next read runs.
+  const read = useApiRead(api, JSON.stringify([query, offset]), (client, signal) => client.searchJournal({ q: query, ...(offset ? { offset } : {}) }, signal),
+    { fallback: 'The journal could not be searched. Try again.', reloadKey: refresh, keepPrevious: 'always' })
+  const pending = read.loading
+  const shown: JournalSearchPage | null = read.data
+  const error = read.error
   const skeleton = useDelayedFlag(pending && shown === null)
   const top = useRef<HTMLElement | null>(null)
   const accountName = (id: string) => accounts.find(account => account.id === id)?.name ?? 'Unknown account'
@@ -88,7 +79,7 @@ export function JournalSearchResults({ api, accounts, query, offset, refresh, di
       <Button variant="ghost" size="sm" onClick={onClear}>Clear search</Button>
     </div>
     {error && <div className="workspace-alert" role="alert"><span>{error}</span>
-      <Button variant="ghost" size="sm" onClick={() => { setResult(null); setAttempt(current => current + 1) }}>Try again</Button></div>}
+      <Button variant="ghost" size="sm" onClick={read.reload}>Try again</Button></div>}
     {shown && shown.notIndexed > 0 && <p className="workspace-scope-note journal-not-indexed" role="note">
       {count.format(shown.notIndexed)} {shown.notIndexed === 1 ? 'play is' : 'plays are'} not indexed yet, so search cannot find {shown.notIndexed === 1 ? 'it' : 'them'}.
       The journal index is filled once after an upgrade with the play-search-rebuild command.</p>}

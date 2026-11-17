@@ -10,6 +10,7 @@ import { defaultPlayTitle, maxPlayTitleLength } from '@/features/plays/default-t
 import { OperationDirection } from './OperationDirection'
 import { duration, operationDates } from './activity-format'
 import { Time } from '@/components/ui/time'
+import { useApiRead } from '@/lib/use-api-read'
 
 export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, onCreated }: {
   api: WorkspaceApi; accountId: string; operationId: string
@@ -17,8 +18,8 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
   onCreated?: () => void
 }) {
   const zone = useDisplayZone()
-  const [generation, setGeneration] = useState(0)
-  const [state, setState] = useState<{ generation: number; value: Preview | null; error: string | null } | null>(null)
+  const read = useApiRead(api, `${accountId}/${operationId}`, (client, signal) => client.retrospectivePreview(accountId, operationId, signal),
+    { fallback: 'The operation preview could not be loaded.' })
   // Null until the owner edits it: the field then shows the default title, which is also what a blank title saves.
   const [title, setTitle] = useState<string | null>(null)
   const [review, setReview] = useState('')
@@ -29,21 +30,11 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
   const [createdId, setCreatedId] = useState<string | null>(null)
   const mutation = useRef<AbortController | null>(null)
   useEffect(() => () => mutation.current?.abort(), [api])
-  useEffect(() => {
-    const controller = new AbortController()
-    api.retrospectivePreview(accountId, operationId, controller.signal).then(value => {
-      if (!controller.signal.aborted) setState({ generation, value, error: null })
-    }).catch(cause => {
-      if (!controller.signal.aborted) setState({ generation, value: null,
-        error: errorMessage(cause, 'The operation preview could not be loaded.') })
-    })
-    return () => controller.abort()
-  }, [api, accountId, operationId, generation])
 
   function refresh() {
     mutation.current?.abort()
     setAttempt(null); setSaveError(null); setConflict(false)
-    setGeneration(n => n + 1)
+    read.reload()
   }
   async function openCreated(id: string, controller: AbortController) {
     if (!onOpenPlay) return
@@ -52,7 +43,7 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
     catch (cause) { if (!controller.signal.aborted) setSaveError(errorMessage(cause, 'The Play could not be opened. Retry the Play action below; no new creation is needed.')) }
   }
   async function create() {
-    const preview = state?.value
+    const preview: Preview | null = read.data
     if (!preview?.eligible || conflict || saving || createdId) return
     // Keep the complete payload and key after an uncertain response. A retry must not create a second Play.
     const body = attempt ?? {
@@ -77,9 +68,9 @@ export function RetrospectivePreview({ api, accountId, operationId, onOpenPlay, 
       }
     } finally { if (!controller.signal.aborted) setSaving(false) }
   }
-  if (state === null || state.generation !== generation) return <p role="status">Loading original operation facts…</p>
-  if (state.error) return <div role="alert"><p>{state.error}</p><Button variant="outline" onClick={refresh}>Retry preview</Button></div>
-  const preview = state.value!
+  if (read.loading) return <p role="status">Loading original operation facts…</p>
+  if (read.error) return <div role="alert"><p>{read.error}</p><Button variant="outline" onClick={refresh}>Retry preview</Button></div>
+  const preview = read.data!
   const op = preview.operation
   const fallbackTitle = defaultTitle(op, zone)
   // The trade in plain terms first; the original records and their identifiers follow, collapsed.

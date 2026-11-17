@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { OpenRisk, OpenRiskPreview, OpenRiskPreviewRequest, RiskPlan } from '@/api/risk'
 import type { WorkspaceApi } from '@/api/workspace'
+import { useApiRead } from '@/lib/use-api-read'
 import { exactAdd, exactDecimal, exactDiv, exactFixed, exactInteger, exactMul, exactSignOf, exactSub, exactZero, type Exact } from '@/lib/decimal'
 import type { PlayDraft } from './draft'
 
@@ -26,15 +27,8 @@ export const openRiskReadable = (api: WorkspaceApi) => typeof api.openRisk === '
 /** The scope's open risk, read again whenever `reloadKey` changes. */
 export function useOpenRisk(api: WorkspaceApi, scope: string | null, reloadKey: unknown) {
   const key = JSON.stringify([scope, reloadKey])
-  const [state, setState] = useState<Load<OpenRisk> & { api: WorkspaceApi } | null>(null)
-  useEffect(() => {
-    if (scope === null) return
-    const controller = new AbortController()
-    api.openRisk(scope, controller.signal).then(value => { if (!controller.signal.aborted) setState({ api, key, value }) })
-      .catch(() => { if (!controller.signal.aborted) setState({ api, key, failed: true }) })
-    return () => controller.abort()
-  }, [api, key, scope])
-  return state?.api === api && state.key === key ? state : null
+  const read = useApiRead(api, key, (client, signal) => client.openRisk(scope!, signal), { fallback: 'Open risk could not be read.', enabled: scope !== null })
+  return read.data ? { key, value: read.data } satisfies Load<OpenRisk> : read.error !== null ? { key, failed: true } satisfies Load<OpenRisk> : null
 }
 
 /**

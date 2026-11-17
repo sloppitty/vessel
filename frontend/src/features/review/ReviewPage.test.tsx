@@ -79,6 +79,20 @@ describe('Production portfolio review', () => {
     await act(async () => { oldResolve(reviewFixture) })
     expect(screen.queryByText('BTC')).not.toBeInTheDocument()
   })
+  it('keeps the last good report on screen while a background reload runs (#115)', async () => {
+    const api = { ...createWorkspaceApi(credentialsFixture), review: vi.fn().mockResolvedValue(reviewFixture) }
+    const view = render(<ReviewPage api={api} reloadGeneration={0} onOpenPlay={vi.fn()} />)
+    expect(await screen.findByRole('region', { name: 'Performance scorecard' })).toBeVisible()
+    let resolve!: (report: ReviewDocument) => void
+    api.review.mockImplementationOnce(() => new Promise<ReviewDocument>(done => { resolve = done }))
+    view.rerender(<ReviewPage api={api} reloadGeneration={1} onOpenPlay={vi.fn()} />)
+    await waitFor(() => expect(api.review).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('region', { name: 'Performance scorecard' })).toBeVisible()
+    expect(screen.queryByText('Loading review…')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reload review' })).toBeDisabled()
+    await act(async () => { resolve(emptyReview) })
+    expect(await screen.findByText('No scored closed Plays')).toBeVisible()
+  })
   it('retains the displayed asset scope when its option disappears on reload', async () => {
     const { user, review } = setup()
     await screen.findByRole('button', { name: 'Last 30 days' })
