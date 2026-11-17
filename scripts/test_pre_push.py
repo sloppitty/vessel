@@ -123,14 +123,14 @@ class GitRepoTests(unittest.TestCase):
         self.assertIn('Commit or clean those changes and push from the checked-out branch', stderr)
         self.assertIn('git push --no-verify', stderr)
 
-    def test_uncommitted_change_under_checked_paths_is_refused(self):
+    def test_uncommitted_change_is_refused(self):
         head = self.commit('frontend/a.ts')
         (self.root / 'frontend' / 'a.ts').write_text('fix\n')
         _, _, _, refusals = self.plan(f'refs/heads/x {head} refs/heads/x {self.base}')
         self.assertIn('uncommitted changes', refusals[0])
         self.assertIn('frontend/a.ts', refusals[0])
 
-    def test_staged_change_under_checked_paths_is_refused(self):
+    def test_staged_change_is_refused(self):
         head = self.commit('frontend/a.ts')
         (self.root / 'frontend' / 'new.ts').write_text('x\n')
         self.git('add', 'frontend/new.ts')
@@ -144,13 +144,17 @@ class GitRepoTests(unittest.TestCase):
         _, _, _, refusals = self.plan(f'refs/heads/x {head} refs/heads/x {self.base}')
         self.assertIn('package.json', refusals[0])
 
-    def test_untracked_files_and_changes_elsewhere_are_allowed(self):
+    def test_uncommitted_change_outside_the_selecting_paths_is_refused(self):
+        # Script tests read release metadata such as CHANGELOG.md: an uncommitted fix there would mask the pushed content.
+        self.commit('CHANGELOG.md')
+        head = self.commit('scripts/a.py')
+        (self.root / 'CHANGELOG.md').write_text('fixed locally\n')
+        _, _, _, refusals = self.plan(f'refs/heads/x {head} refs/heads/x {self.base}')
+        self.assertIn('CHANGELOG.md', refusals[0])
+
+    def test_untracked_files_are_allowed(self):
         head = self.commit('frontend/a.ts')
         (self.root / 'frontend' / 'untracked.ts').write_text('x\n')
-        (self.root / 'docs' / 'readme.md').write_text('edited\n')
-        (self.root / 'backend').mkdir()
-        (self.root / 'backend' / 'tracked.cs').write_text('x\n')
-        self.git('add', 'backend/tracked.cs')
         self.assertEqual(self.plan(f'refs/heads/x {head} refs/heads/x {self.base}'), (['frontend'], [], [], []))
 
     def test_branch_needing_no_checks_may_be_any_commit(self):

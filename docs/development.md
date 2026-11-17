@@ -352,10 +352,10 @@ branch, or against `origin/main` for a new branch, and runs only what they need:
 
 The checks run on the working tree, not on an export of the pushed commits. So
 when a pushed branch needs checks, the hook refuses the push if that branch is
-not the checked-out commit, or if tracked files under the paths those checks
-read have uncommitted changes (staged or not). Commit or clean those changes and
-push from the checked-out branch, or use `git push --no-verify`. Untracked files
-and changes outside the checked paths do not refuse. The hook also clears the
+not the checked-out commit, or if any tracked file has uncommitted changes
+(staged or not), because the checks read more than the paths that select them.
+Commit or clean those changes and push from the checked-out branch, or use
+`git push --no-verify`. Untracked files do not refuse. The hook also clears the
 repository variables git exports to hooks (`GIT_DIR`, `GIT_INDEX_FILE` and the
 rest of `git rev-parse --local-env-vars`), so checks that create their own
 temporary repositories cannot change yours.

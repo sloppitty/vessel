@@ -8,7 +8,7 @@ stdin: `<local ref> <local sha> <remote ref> <remote sha>`.
 For branches it runs only the quick checks the changed files need (script
 tests, frontend typecheck and lint, backend build) against the working tree, so
 it refuses a branch that needs checks unless it is the checked-out commit with
-no uncommitted changes to tracked files under the checked paths. A check whose
+no uncommitted changes to tracked files. A check whose
 tool is missing is skipped with the reason; a check that runs and fails refuses
 the push. A pushed `v*` tag must pass
 `scripts/release.py check --tag <tag>` on the tagged commit. `git push
@@ -48,11 +48,6 @@ def select_checks(paths):
     wanted = {FILES[path] for path in paths if path in FILES}
     wanted |= {check for path in paths for prefix, check in PREFIXES.items() if path.startswith(prefix)}
     return [check for check in CHECKS if check in wanted]
-
-
-def covered_paths(checks):
-    """The pathspecs the given checks read."""
-    return [path for path, check in (*PREFIXES.items(), *FILES.items()) if check in checks]
 
 
 def clear_git_environment():
@@ -119,11 +114,11 @@ def plan(lines, remote, root=ROOT):
             if head is None or head.strip() != local_sha:
                 refusals.append(f'{local_ref} ({local_sha[:12]}) is not the checked-out commit.')
                 continue
-            dirty = git('status', '--porcelain', '--untracked-files=no', '--', *covered_paths(selected),
-                        root=root)
+            # Any tracked file: checks read more than the paths that select them (release metadata, lockfiles).
+            dirty = git('status', '--porcelain', '--untracked-files=no', root=root)
             if dirty is None or dirty.strip():
                 files = ', '.join(line[3:] for line in (dirty or '').splitlines()) or 'unknown'
-                refusals.append(f'{local_ref} has uncommitted changes the checks would read: {files}.')
+                refusals.append(f'{local_ref} has uncommitted changes to tracked files: {files}.')
     return [check for check in CHECKS if check in checks], tags, notes, refusals
 
 
