@@ -100,6 +100,22 @@ describe('Overview summary', () => {
     view.rerender(<OverviewSummary api={client} query={query} onQuery={vi.fn()} reloadGeneration={1} fallback={overviewFixture} accountCount={1} />)
     await waitFor(() => expect(client.overviewSummary).toHaveBeenCalledTimes(3))
   })
+  it('keeps the last good summary on screen while a reload of the same scope runs (#115)', async () => {
+    const client = api()
+    const view = render(<OverviewSummary api={client} query={query} onQuery={vi.fn()} reloadGeneration={0} fallback={overviewFixture} accountCount={1} />)
+    const table = await screen.findByRole('table')
+    let finish!: (d: OverviewSummaryDocument) => void
+    client.overviewSummary.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    view.rerender(<OverviewSummary api={client} query={query} onQuery={vi.fn()} reloadGeneration={1} fallback={overviewFixture} accountCount={1} />)
+    await waitFor(() => expect(client.overviewSummary).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('table')).toBe(table)
+    expect(screen.queryByText('Loading summary…')).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Scoped overview totals' })).toHaveAttribute('aria-busy', 'true')
+    const next = overviewSummaryFixture(); next.rows = []
+    finish(next)
+    expect(await screen.findByText('No enabled accounts in this scope.')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Scoped overview totals' })).toHaveAttribute('aria-busy', 'false')
+  })
   it('shows empty scopes and bounded group omissions', async () => {
     const document = overviewSummaryFixture(); document.rows = []; document.omittedGroupCount = 1
     render(<OverviewSummary api={api(document)} query={query} onQuery={vi.fn()} reloadGeneration={0} fallback={overviewFixture} accountCount={1} />)

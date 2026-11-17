@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PlayIdentity } from '@/features/plays/PlayIdentity'
 import { errorMessage } from '@/api/errors'
 import { useDelayedFlag } from '@/lib/use-delayed-flag'
+import { useApiRead } from '@/lib/use-api-read'
 import { Time } from '@/components/ui/time'
 
 const filters = [
@@ -32,9 +33,6 @@ export function OverviewPlays({ api, accounts, reloadGeneration, onBrowse, onOpe
   onOpen: (id: string, signal: AbortSignal) => Promise<void>
 }) {
   const [filter, setFilter] = useState<Filter>('progress')
-  const [retry, setRetry] = useState(0)
-  const [result, setResult] = useState<{ api: WorkspaceApi; key: string; plays?: PlaySummary[]; error?: string } | null>(null)
-  const [counts, setCounts] = useState<{ api: WorkspaceApi; key: string; counts: PlayCounts | null } | null>(null)
   const [opening, setOpening] = useState<string | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
   const openRequest = useRef<AbortController | null>(null)
@@ -43,28 +41,17 @@ export function OverviewPlays({ api, accounts, reloadGeneration, onBrowse, onOpe
     openRequest.current = controller
     return () => controller.abort()
   }, [])
-  const key = JSON.stringify([filter, scope, reloadGeneration, retry])
-  useEffect(() => {
-    const request = new AbortController()
-    api.plays({ view: filter, scope, pageSize: recentRows }, request.signal)
-      // Drafts and In progress may come back in full; Overview shows the latest few.
-      .then(list => { if (!request.signal.aborted) setResult({ api, key, plays: list.plays.slice(0, recentRows) }) })
-      .catch(cause => { if (!request.signal.aborted) setResult({ api, key, error: errorMessage(cause, 'The change could not be completed. Try again.') }) })
-    return () => request.abort()
-  }, [api, filter, scope, key])
-  const countsKey = JSON.stringify([scope, reloadGeneration, retry])
-  useEffect(() => {
-    const request = new AbortController()
-    api.playCounts({ scope }, request.signal)
-      .then(next => { if (!request.signal.aborted) setCounts({ api, key: countsKey, counts: next }) })
-      .catch(() => { if (!request.signal.aborted) setCounts({ api, key: countsKey, counts: null }) })
-    return () => request.abort()
-  }, [api, scope, countsKey])
-  const loaded = result?.api === api && result.key === key
-  const previous = result?.api === api ? result.plays ?? null : null
+  // Rows of any earlier tab or scope stay, marked as refetching, while the next read runs.
+  const rows = useApiRead(api, JSON.stringify([filter, scope]), (client, signal) => client.plays({ view: filter, scope, pageSize: recentRows }, signal)
+    // Drafts and In progress may come back in full; Overview shows the latest few.
+    .then((list): PlaySummary[] => list.plays.slice(0, recentRows)),
+  { fallback: 'The change could not be completed. Try again.', reloadKey: reloadGeneration, keepPrevious: 'always' })
+  const counts = useApiRead(api, scope, (client, signal) => client.playCounts({ scope }, signal), { fallback: '', reloadKey: reloadGeneration })
+  const loaded = !rows.loading
+  const previous = rows.loading ? rows.data : null
   const skeleton = useDelayedFlag(!loaded && previous === null)
-  const plays = loaded ? result.plays ?? [] : previous ?? []
-  const tabCounts = counts?.api === api && counts.key === countsKey ? counts.counts : null
+  const plays = rows.data ?? []
+  const tabCounts: PlayCounts | null = counts.data
 
   async function open(id: string) {
     const signal = openRequest.current!.signal
@@ -84,8 +71,8 @@ export function OverviewPlays({ api, accounts, reloadGeneration, onBrowse, onOpe
           {item.label}{' '}<span className="overview-play-count">{tabCounts ? tabCounts[item.id] : '—'}</span>
         </TabsTrigger>)}
       </TabsList>
-      {loaded && result.error && <div className="workspace-alert" role="alert"><span>{result.error}</span>
-        <Button variant="ghost" size="sm" onClick={() => setRetry(current => current + 1)}>Try again</Button></div>}
+      {rows.error && <div className="workspace-alert" role="alert"><span>{rows.error}</span>
+        <Button variant="ghost" size="sm" onClick={() => { rows.reload(); counts.reload() }}>Try again</Button></div>}
       {openError && <div className="workspace-alert" role="alert">{openError}</div>}
       {filters.filter(item => item.id === filter).map(item => <TabsContent key={item.id} value={item.id}>
         {!loaded && previous === null && (skeleton ? <SkeletonStatus label="Loading plays…"><ul className="overview-play-list">
@@ -94,7 +81,7 @@ export function OverviewPlays({ api, accounts, reloadGeneration, onBrowse, onOpe
             <span className="overview-play-state"><Skeleton className="skeleton-badge" /><Skeleton className="skeleton-time" /></span>
           </span></li>)}
         </ul></SkeletonStatus> : <div className="overview-play-pending" aria-busy="true" />)}
-        {(loaded ? !result.error : previous !== null) && (plays.length ? <ul className={loaded ? 'overview-play-list' : 'overview-play-list list-refetching'} aria-busy={!loaded || undefined}>
+        {(loaded ? !rows.error : previous !== null) && (plays.length ? <ul className={loaded ? 'overview-play-list' : 'overview-play-list list-refetching'} aria-busy={!loaded || undefined}>
           {plays.map(play => <li key={play.id}>
             <button className="overview-play-row" disabled={opening !== null} aria-busy={opening === play.id}
               aria-label={`Open ${play.title || 'Untitled play'}`} aria-describedby={`overview-play-identity-${play.id}`} onClick={() => { void open(play.id) }}>

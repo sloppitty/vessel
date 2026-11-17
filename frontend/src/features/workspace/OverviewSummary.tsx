@@ -1,9 +1,9 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import type { Overview, WorkspaceApi } from '@/api/workspace'
 import type { OverviewQuery, OverviewSummaryDocument } from '@/api/overview-summary'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
-import { errorMessage } from '@/api/errors'
+import { useApiRead } from '@/lib/use-api-read'
 import { decimalSign } from '@/lib/decimal'
 import { PortfolioIcon } from './PortfolioIcon'
 import { VenueLogo } from '@/components/venues/VenueBadge'
@@ -30,24 +30,18 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
   extraMetric?: ReactNode
 }) {
   const venues = useVenues()
-  const [retry, setRetry] = useState(0)
-  const [state, setState] = useState<{ api: WorkspaceApi; key: string; document?: OverviewSummaryDocument; error?: string } | null>(null)
-  const key = JSON.stringify([query.groupBy, query.period, query.scope, reloadGeneration, retry])
-  useEffect(() => {
-    const controller = new AbortController()
-    api.overviewSummary(query, controller.signal).then(document => {
-      if (!controller.signal.aborted) setState({ api, key, document })
-    }).catch(cause => { if (!controller.signal.aborted) setState({ api, key, error: errorMessage(cause, 'The change could not be completed. Try again.') }) })
-    return () => controller.abort()
-  }, [api, key, query])
-  const current = state?.api === api && state.key === key ? state : null
-  const totals = current?.document?.totals
+  // A reload of the same grouping, period and scope keeps the last good summary on screen until the new one arrives.
+  const summary = useApiRead(api, JSON.stringify([query.groupBy, query.period, query.scope]), (client, signal) => client.overviewSummary(query, signal),
+    { fallback: 'The change could not be completed. Try again.', reloadKey: reloadGeneration, keepPrevious: 'reload' })
+  const document: OverviewSummaryDocument | null = summary.data
+  const current = document ? { document } : summary.error ? { error: summary.error } : null
+  const totals = document?.totals
   // The existing owner-wide endpoint is a fallback only while the All read loads. Never show All amounts under a narrower scope.
   const loadingAll = !current && query.scope === 'all'
   const balance = totals?.balance.amountUsd ?? (loadingAll ? fallback.totals.totalBalanceUsd ?? null : null)
   const available = totals?.available.amountUsd ?? (loadingAll ? fallback.totals.availableBalanceUsd ?? null : null)
   return <>
-    <section className="workspace-stat-grid overview-metrics" aria-label="Scoped overview totals" aria-busy={!current}>
+    <section className="workspace-stat-grid overview-metrics" aria-label="Scoped overview totals" aria-busy={summary.loading}>
       <div className="shell-panel metric"><span className="metric-label">Total balance<NominalUsdTag /></span><strong>{money(balance)}</strong>
         {totals ? <SummaryCoverageBadge value={totals.balance} label="Balance" /> : loadingAll && <CoverageBadge label="Balance" noun="enabled account"
           covered={fallback.totals.balanceAccountCount ?? 0} total={accountCount} status={fallback.totals.balanceCoverage ?? 'unavailable'} />}</div>
@@ -70,7 +64,7 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
         <label>Result period<NativeSelect value={query.period} autoComplete="off" onChange={e => onQuery({ ...query, period: e.target.value as OverviewQuery['period'] })}><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="all">All retained history</option></NativeSelect></label>
       </div></header>
       {!current && <div className="workspace-loading" role="status">Loading summary…</div>}
-      {current?.error && <div className="workspace-alert" role="alert">{current.error}<Button variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>Retry summary</Button></div>}
+      {current?.error && <div className="workspace-alert" role="alert">{current.error}<Button variant="ghost" size="sm" onClick={summary.reload}>Retry summary</Button></div>}
       {current?.document && <>
         {!current.document.rows.length ? <p className="workspace-empty small-empty">No enabled accounts in this scope.</p> : <div className="overview-summary-scroll"><table className="overview-summary-table"><caption className="sr-only">Overview summary by {query.groupBy}</caption><thead><tr><th scope="col">Name</th><th scope="col">Balance</th><th scope="col">Available</th><th scope="col">Share of total</th><th scope="col">Open positions</th><th scope="col">Realized result</th></tr></thead><tbody>
           {current.document.rows.map(row => {
