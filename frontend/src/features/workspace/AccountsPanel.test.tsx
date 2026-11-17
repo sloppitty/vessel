@@ -287,3 +287,15 @@ describe('Account grouping', () => {
     })
   })
 })
+
+describe('Account position counts (#89)', () => {
+  it('says the count is unknown after an incomplete position read, never zero', () => {
+    const list = [{ ...accountFixture, name: 'Complete read' }, { ...accountFixture, id: 'partial', name: 'Partial read', venueId: 'hyperliquid', syncStatus: 'synced' as const, positionCount: null }]
+    render(<AccountsPanel api={createWorkspaceApi(credentialsFixture)} onChanged={vi.fn()} onReload={vi.fn()} accounts={list} portfolios={[portfolioFixture]} portfolioFilter="" onPortfolioFilter={vi.fn()}
+      filters={emptyAccountFilters} onFiltersChange={vi.fn()} refreshing={null} refreshAction={null} onDetail={vi.fn()} onSync={vi.fn()} onManage={vi.fn()} onAdd={vi.fn()} />)
+    const row = (name: string) => screen.getByRole('button', { name: `View ${name}` }).closest('tr')!
+    expect(within(row('Partial read')).getByText('Positions unknown: incomplete read')).toBeInTheDocument()
+    expect(within(row('Partial read')).queryByText(/reported positions/)).not.toBeInTheDocument()
+    expect(within(row('Complete read')).getByText('0 reported positions')).toBeInTheDocument()
+  })
+})

@@ -70,6 +70,19 @@ describe('Core workspace API', () => {
     response({ ...emptyOverview, totals: { ...emptyOverview.totals, ...bad } })
     await expect(createWorkspaceApi(credentialsFixture).overview()).rejects.toMatchObject({ kind: 'invalid-response' })
   })
+  it('keeps unknown position counts and an incomplete position read as they are (#89)', async () => {
+    const fixture = { ...emptyOverview, totals: { ...emptyOverview.totals, openPositionCount: null } }
+    response(fixture)
+    expect(await createWorkspaceApi(credentialsFixture).overview()).toEqual(fixture)
+    response([{ ...accountFixture, positionCount: null }])
+    expect((await createWorkspaceApi(credentialsFixture).accounts())[0]!.positionCount).toBeNull()
+    const snapshot = { observedAtUtc: '2026-10-12T10:00:00Z', valueScope: 'fixture', accountValueUsd: '1000', withdrawableUsd: null,
+      marginUsedUsd: '20', positions: [], positionsComplete: false }
+    response(snapshot)
+    expect((await createWorkspaceApi(credentialsFixture).snapshot(accountFixture.id))?.positionsComplete).toBe(false)
+    response({ ...snapshot, positionsComplete: 'no' })
+    await expect(createWorkspaceApi(credentialsFixture).snapshot(accountFixture.id)).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
   it('binds the session in a header, not storage, URL or owner body fields', async () => {
     const fetch = response(emptyOverview)
     await expect(createWorkspaceApi(credentialsFixture).overview()).resolves.toEqual(emptyOverview)

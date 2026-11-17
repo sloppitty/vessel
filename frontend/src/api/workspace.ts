@@ -275,7 +275,8 @@ export interface BrokerAccount {
   lastSyncedAtUtc: string | null
   syncStatus: 'manual' | 'not-synced' | 'synced' | 'error' | 'paper'
   lastSyncError: string | null
-  positionCount: number
+  /** Null when the latest position read was incomplete: the count is unknown, not zero. */
+  positionCount: number | null
   historyNotice: string | null
   isEnabled: boolean
   availableStablecoinNominalUsd: string | null
@@ -317,6 +318,8 @@ export interface AccountSnapshot {
     marginMode?: 'cross' | 'isolated' | null
   }>
   stablecoinWallet?: StablecoinWallet | null
+  /** False when the read did not establish every position: absent ones are unknown, not flat. Missing on older servers. */
+  positionsComplete?: boolean
 }
 export interface StablecoinWallet {
   observedAtUtc: string
@@ -335,7 +338,8 @@ export interface Overview {
     accountCount: number
     totalAccountValueUsd: string | null
     valuedAccountCount: number
-    openPositionCount: number
+    /** Null when an account's latest position read was incomplete. */
+    openPositionCount: number | null
     importedFillCount: number
     availableStablecoinNominalUsd?: string | null
     stablecoinAccountCount?: number
@@ -574,7 +578,7 @@ const account = (v: unknown): v is BrokerAccount => isRecord(v) && optionalTradi
   isNullOr(v.sourceId, isText) &&
   isNullOr(v.lastSyncedAtUtc, isTimestamp) &&
   (v.tradingMode === 'paper' ? v.syncStatus === 'paper' : ['manual', 'not-synced', 'synced', 'error'].includes(String(v.syncStatus))) &&
-  isNullOr(v.lastSyncError, isText) && isCount(v.positionCount) && isNullOr(v.historyNotice, isText) &&
+  isNullOr(v.lastSyncError, isText) && isNullOr(v.positionCount, isCount) && isNullOr(v.historyNotice, isText) &&
   typeof v.isEnabled === 'boolean' &&
   isNullOr(v.availableStablecoinNominalUsd, isPlainDecimal) && isNullOr(v.stablecoinScope, isText) && isNullOr(v.accountMode, isText) &&
   isNullOr(v.totalStablecoinNominalUsd, isPlainDecimal) && isNullOr(v.balanceUsd, isPlainDecimal) &&
@@ -612,10 +616,12 @@ const snapshot = (v: unknown): v is AccountSnapshot | null => v === null || isRe
     (p.leverage === null || typeof p.leverage === 'number' && Number.isInteger(p.leverage) && p.leverage > 0) &&
     (p.liquidationPrice === undefined || isNullOr(p.liquidationPrice, isPlainDecimal)) &&
     (p.marginMode === undefined || p.marginMode === null || p.marginMode === 'cross' || p.marginMode === 'isolated')) &&
-  (v.stablecoinWallet === undefined || wallet(v.stablecoinWallet))
+  (v.stablecoinWallet === undefined || wallet(v.stablecoinWallet)) &&
+  (v.positionsComplete === undefined || typeof v.positionsComplete === 'boolean')
 const overview = (v: unknown): v is Overview => isRecord(v) && Array.isArray(v.portfolios) && v.portfolios.every(portfolio) &&
   Array.isArray(v.accounts) && v.accounts.every(account) && isRecord(v.totals) &&
-  ['portfolioCount', 'accountCount', 'valuedAccountCount', 'openPositionCount', 'importedFillCount'].every(k => isRecord(v.totals) && isCount(v.totals[k])) &&
+  ['portfolioCount', 'accountCount', 'valuedAccountCount', 'importedFillCount'].every(k => isRecord(v.totals) && isCount(v.totals[k])) &&
+  isNullOr(v.totals.openPositionCount, isCount) &&
   isNullOr(v.totals.totalAccountValueUsd, isPlainDecimal) &&
   (v.totals.availableStablecoinNominalUsd === undefined || isNullOr(v.totals.availableStablecoinNominalUsd, isPlainDecimal)) &&
   (v.totals.stablecoinAccountCount === undefined || isCount(v.totals.stablecoinAccountCount)) &&

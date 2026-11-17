@@ -54,7 +54,7 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
         {totals ? <SummaryCoverageBadge value={totals.available} label="Availability" /> : loadingAll && <CoverageBadge label="Availability" noun="enabled account"
           covered={fallback.totals.availableBalanceAccountCount ?? 0} total={accountCount} status={fallback.totals.availableBalanceCoverage ?? 'unavailable'} />}</div>
       <div className="shell-panel metric"><span className="metric-label">Enabled accounts</span><strong>{totals?.accountCount ?? accountCount}</strong></div>
-      <div className="shell-panel metric"><span className="metric-label">Perpetual positions</span><strong>{totals?.openPositionCount ?? (loadingAll ? fallback.totals.openPositionCount : '—')}</strong>
+      <div className="shell-panel metric"><span className="metric-label">Perpetual positions</span><strong>{totals?.openPositionCount ?? (loadingAll ? fallback.totals.openPositionCount ?? '—' : '—')}</strong>
         <small className={signClass(totals?.unrealizedPnl.amountUsd ?? null)}>{money(totals?.unrealizedPnl.amountUsd ?? null)} unrealized</small>
         {totals && <SummaryCoverageBadge value={totals.unrealizedPnl} label="Unrealized" />}</div>
       <div className="shell-panel metric"><span className="metric-label">{api.tradingMode === 'paper' ? 'Simulated executions' : 'Imported executions'}</span><strong>{api.tradingMode === 'paper' ? totals?.paperExecutionCount ?? '—' : totals?.importedFillCount ?? (loadingAll ? fallback.totals.importedFillCount : '—')}</strong></div>
@@ -79,7 +79,7 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
               <td><span>{money(row.totals.balance.amountUsd)}</span><SummaryCoverageBadge value={row.totals.balance} label={`${row.name} balance`} /></td>
               <td><span>{money(row.totals.available.amountUsd)}</span><SummaryCoverageBadge value={row.totals.available} label={`${row.name} availability`} /></td>
               <td><span title={row.shareOfBalance ? `${row.shareOfBalance.numerator} / ${row.shareOfBalance.denominator} · rounded for display` : 'Share unavailable'}>{share.label}</span><span className="overview-share-track" aria-hidden="true"><span style={{ width: share.width }} /></span></td>
-              <td><span>{row.totals.openPositionCount}</span><span className={signClass(row.totals.unrealizedPnl.amountUsd)}>{money(row.totals.unrealizedPnl.amountUsd)} unrealized</span><SummaryCoverageBadge value={row.totals.unrealizedPnl} label={`${row.name} unrealized`} /></td>
+              <td><span>{row.totals.openPositionCount ?? '—'}</span><span className={signClass(row.totals.unrealizedPnl.amountUsd)}>{money(row.totals.unrealizedPnl.amountUsd)} unrealized</span><SummaryCoverageBadge value={row.totals.unrealizedPnl} label={`${row.name} unrealized`} /></td>
               <td><span className={signClass(row.totals.realizedResult.amountUsd)}>{money(row.totals.realizedResult.amountUsd)}</span><SummaryCoverageBadge value={row.totals.realizedResult} operations label={`${row.name} realized`} /></td>
             </tr>
           })}

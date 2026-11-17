@@ -161,7 +161,7 @@ internal static class PlayFunding
         }
         // The latest snapshot, walked back as Activity anchors it (observed at or after every fill of the partition) over a
         // covered span with nothing omitted, missing or open.
-        if (snapshot is not null && positions.Quantity(key) is { } observed && partition.Last <= snapshot.ObservedAtUtc && partition.AllPositive &&
+        if (snapshot is { PositionsComplete: true } && positions.Quantity(key) is { } observed && partition.Last <= snapshot.ObservedAtUtc && partition.AllPositive &&
             Covered(start, snapshot.ObservedAtUtc) && !Omitted(from, snapshot.ObservedAtUtc) && !Missing(from, snapshot.ObservedAtUtc) &&
             !Gap(from, snapshot.ObservedAtUtc))
         {

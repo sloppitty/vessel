@@ -2098,6 +2098,9 @@ namespace Vessel.Persistence.Migrations
                     b.Property<DateTimeOffset>("ObservedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("PositionsComplete")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("StablecoinScope")
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");

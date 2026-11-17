@@ -34,7 +34,7 @@ public sealed record PortfolioDto(Guid Id, string Name, int AccountCount, string
     string AvailableBalanceCoverage = "unavailable", int EnabledAccountCount = 0, string TradingMode = "real");
 public sealed record AccountDto(Guid Id, Guid? PortfolioId, string Name, string VenueId, string? Address,
     string? AccountValueUsd, DateTimeOffset? LastSyncedAtUtc, string SyncStatus, string? LastSyncError,
-    int PositionCount, string? HistoryNotice, bool IsEnabled, long SettingsRevision,
+    int? PositionCount, string? HistoryNotice, bool IsEnabled, long SettingsRevision,
     string? AvailableStablecoinNominalUsd = null, string? StablecoinScope = null, string? AccountMode = null,
     string? TotalStablecoinNominalUsd = null, string? BalanceUsd = null, string? SourceId = null,
     string? AvailableBalanceUsd = null, string? AvailableBalanceSource = null, string TradingMode = "real",
@@ -60,7 +60,7 @@ public sealed record PositionDto(string ContractId, string SignedQuantity, strin
     string UnrealizedPnlUsd, string MarginUsedUsd, int? Leverage, string? LiquidationPrice = null, string? MarginMode = null);
 public sealed record SnapshotDto(DateTimeOffset ObservedAtUtc, string ValueScope, string? AccountValueUsd,
     string? WithdrawableUsd, string? MarginUsedUsd, IReadOnlyList<PositionDto> Positions,
-    StablecoinWalletDto? StablecoinWallet = null, string? AvailableMarginUsd = null);
+    StablecoinWalletDto? StablecoinWallet = null, string? AvailableMarginUsd = null, bool PositionsComplete = true);
 public sealed record StablecoinBalanceDto(string Symbol, int TokenIndex, string TokenId,
     string Total, string Held, string Available);
 public sealed record StablecoinWalletDto(DateTimeOffset ObservedAtUtc, string AccountMode, string Scope,
@@ -113,7 +113,7 @@ public sealed record HistoryCoverageFacts(int OpenGapCount, IReadOnlyList<Vessel
     public IReadOnlyList<Vessel.Domain.Monitoring.HistoryBackfill> Backfills { get; init; } = [];
 }
 public sealed record OverviewTotals(int PortfolioCount, int AccountCount, string? TotalAccountValueUsd,
-    int ValuedAccountCount, int OpenPositionCount, int ImportedFillCount,
+    int ValuedAccountCount, int? OpenPositionCount, int ImportedFillCount,
     string? AvailableStablecoinNominalUsd = null, int StablecoinAccountCount = 0,
     string? TotalBalanceUsd = null, int BalanceAccountCount = 0, string BalanceCoverage = "unavailable",
     string? AvailableBalanceUsd = null, int AvailableBalanceAccountCount = 0, string AvailableBalanceCoverage = "unavailable",

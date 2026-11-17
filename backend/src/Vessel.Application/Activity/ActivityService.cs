@@ -125,6 +125,8 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
         return Convert.ToHexStringLower(hash.GetHashAndReset(), 0, 16);
     }
 
+    public const string IncompleteSnapshotNotice = "The latest position read was incomplete; positions are unknown and snapshot comparison is unavailable.";
+
     /// <summary>Phase 2, item 7b: forced events shown as rows; the rest of each account's are counted.</summary>
     public const int MaxForcedEventRows = 50;
 
@@ -193,13 +195,15 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
             if (account.HistoryNotice is { Length: > 0 } notice) coverage.Add(new(account.Id, null, notice));
             var snapshot = positions.Snapshots.GetValueOrDefault(account.Id);
             if (snapshot is null) coverage.Add(new(account.Id, null, "No latest position snapshot is available for comparison."));
+            else if (!snapshot.PositionsComplete) coverage.Add(new(account.Id, null, IncompleteSnapshotNotice));
             foreach (var (key, contract) in contractsByAccount.GetValueOrDefault(account.Id) ?? [])
             {
                 // Same-time close/open operations use remaining position, not UUID display ordering.
                 var hasLast = lastByContract.TryGetValue(key, out var index);
                 var last = hasLast ? operations[index] : null;
                 var observed = positions.Quantity(key);
-                if (snapshot is null && observed is not null) continue;
+                // #89: a partial read compares nothing; its absent positions are unknown, not flat.
+                if ((snapshot is null || !snapshot.PositionsComplete) && observed is not null) continue;
                 string? reason = observed is null ? ActivityPositions.AmbiguousIdentityNotice :
                     last?.LastOccurredAtUtc > snapshot!.ObservedAtUtc ? "Latest snapshot predates retained fills; position comparison is unavailable." :
                     last is not null && last.OpenQuantity is null ? "Computed position is unknown because retained history is incomplete; snapshot comparison is unavailable." : null;

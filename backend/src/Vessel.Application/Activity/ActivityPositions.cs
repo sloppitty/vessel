@@ -144,6 +144,7 @@ internal sealed class ActivityPositions
     public IEnumerable<string> NativeIds(Guid accountId, string contractId) =>
         nativeCandidates.GetValueOrDefault((accountId, contractId))?.Select(k => k.Identity) ?? [];
 
-    // Only a resolved contract absent from a coherent snapshot is flat; ambiguous identities stay unknown.
+    // Only a resolved contract absent from a coherent snapshot is flat; ambiguous identities stay unknown. Null means an
+    // ambiguous identity; callers that read an absent position as flat must also check the snapshot's PositionsComplete (#89).
     public ExactAmount? Quantity(ActivityContractKey key) => quantities.TryGetValue(key, out var quantity) ? quantity : default(ExactAmount);
 }

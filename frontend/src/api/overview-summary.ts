@@ -12,7 +12,8 @@ export interface SummaryCoverage {
 }
 export interface SummaryAmount { amountUsd: string | null; coverage: SummaryCoverage }
 export interface SummaryTotals {
-  accountCount: number; balance: SummaryAmount; available: SummaryAmount; openPositionCount: number
+  /** Null when an account's latest position read was incomplete; the unrealized coverage states why. */
+  accountCount: number; balance: SummaryAmount; available: SummaryAmount; openPositionCount: number | null
   unrealizedPnl: SummaryAmount; realizedResult: SummaryAmount; importedFillCount: number; paperExecutionCount?: number
 }
 export interface SummaryRow {
@@ -39,7 +40,7 @@ function summaryAmount(v: unknown, accounts: number): v is SummaryAmount {
     Array.isArray(c.reasons) && (c.contributingAccountCount === accounts && c.excludedOperationCount === 0 || c.reasons.length > 0) && c.reasons.length <= 10 && c.reasons.every(r => isRecord(r) && isFilledText(r.reason, 2000) && isCount(r.count) && r.count > 0)
 }
 function totals(v: unknown): v is SummaryTotals {
-  if (!(isRecord(v) && isCount(v.accountCount) && isCount(v.openPositionCount) && (v.paperExecutionCount === undefined || isCount(v.paperExecutionCount)) && isCount(v.importedFillCount) &&
+  if (!(isRecord(v) && isCount(v.accountCount) && (v.openPositionCount === null || isCount(v.openPositionCount)) && (v.paperExecutionCount === undefined || isCount(v.paperExecutionCount)) && isCount(v.importedFillCount) &&
     ['balance', 'available', 'unrealizedPnl', 'realizedResult'].every(k => summaryAmount(v[k], v.accountCount as number)))) return false
   const checked = v as unknown as SummaryTotals
   return ['balance', 'available', 'unrealizedPnl'].every(k => {

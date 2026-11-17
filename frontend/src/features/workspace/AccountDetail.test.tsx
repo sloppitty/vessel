@@ -72,3 +72,33 @@ describe('Account detail stablecoin wallet (Phase 2, item 14b)', () => {
     expect(screen.queryByText(/^Wallet last read/)).toBeNull()
   })
 })
+
+describe('Account detail incomplete position read (#89)', () => {
+  const snapshot = (positionsComplete: boolean, quantity?: string): AccountSnapshot => ({
+    observedAtUtc: '2026-10-22T11:00:00Z', valueScope: 'primary-perpetual-dex', accountValueUsd: '1000', withdrawableUsd: '900',
+    marginUsedUsd: '0', positionsComplete,
+    positions: quantity ? [{ contractId: 'BTC', signedQuantity: quantity, entryPrice: '100', unrealizedPnlUsd: '5', marginUsedUsd: '10', leverage: 5 }] : [],
+  })
+  const show = (value: AccountSnapshot) => render(<AccountDetail account={{ ...accountFixture, venueId: 'hyperliquid', syncStatus: 'synced', sourceId: '7', positionCount: null }}
+    api={{ snapshot: vi.fn(() => Promise.resolve(value)) } as unknown as WorkspaceApi} refreshing={false} onSync={vi.fn()} onBack={vi.fn()} onManage={vi.fn()} />)
+  const note = /did not cover every position, so this list may be incomplete\. Positions not listed are unknown, not closed\./
+
+  it('never says there are no positions when the read was incomplete', async () => {
+    show(snapshot(false))
+    expect(await screen.findByText('No positions returned by an incomplete read')).toBeInTheDocument()
+    expect(screen.queryByText('No positions in the latest snapshot')).toBeNull()
+    expect(screen.getByRole('note')).toHaveTextContent(note)
+  })
+
+  it('marks the listed positions as possibly incomplete', async () => {
+    show(snapshot(false, '1'))
+    expect(await screen.findByText('BTC')).toBeInTheDocument()
+    expect(screen.getByRole('note')).toHaveTextContent(note)
+  })
+
+  it('adds nothing after a complete read', async () => {
+    show(snapshot(true))
+    expect(await screen.findByText('No positions in the latest snapshot')).toBeInTheDocument()
+    expect(screen.queryByRole('note')).toBeNull()
+  })
+})

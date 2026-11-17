@@ -40,6 +40,12 @@ public sealed class AccountSnapshot : IOwned
     // Venue-reported available balance/free collateral, not a withdrawal guarantee.
     public decimal? AvailableMarginUsd { get; set; }
     public decimal? MarginUsedUsd { get; set; }
+    /// <summary>
+    /// Whether the read that produced <see cref="Positions"/> established every current position in its scope. When false the
+    /// rows are the positions that read did return: each is a real observation, but an absent position is not flat and the
+    /// list is not the account's whole picture, so counts and sums over it are unknown.
+    /// </summary>
+    public bool PositionsComplete { get; set; } = true;
     public List<AccountPosition> Positions { get; set; } = [];
     public DateTimeOffset? StablecoinsObservedAtUtc { get; set; }
     public string? AccountMode { get; set; }
