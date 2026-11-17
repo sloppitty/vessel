@@ -36,7 +36,8 @@ public static class OperationAggregator
             var times = group.GroupBy(f => f.OccurredAtUtc).OrderBy(g => g.Key).ToList();
             var snapshot = positions.Snapshots.GetValueOrDefault(group.Key.AccountId);
             var observed = positions.Quantity(group.Key);
-            var anchorable = snapshot is not null && observed is not null && snapshot.ObservedAtUtc >= times[^1].Key && group.All(f => f.Quantity > 0);
+            // #89: only a complete position read anchors; in a partial one an absent position is unknown, not flat.
+            var anchorable = snapshot is { PositionsComplete: true } && observed is not null && snapshot.ObservedAtUtc >= times[^1].Key && group.All(f => f.Quantity > 0);
             // Phase 2, item 7b: executions an import left out, from the first retained fill on, break the walk. The
             // snapshot cannot anchor fills before the last of them, and the position after each one is unknown.
             var breaks = positions.Breaks(group.Key).Where(b => b.AnchorAfter >= times[0].Key).ToList();

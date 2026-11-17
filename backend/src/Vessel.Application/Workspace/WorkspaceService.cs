@@ -318,7 +318,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         var balances = enabled.Where(a => a.BalanceUsd is not null).ToList();
         var available = enabled.Where(a => a.AvailableBalanceUsd is not null).ToList();
         return new(portfolios, dtos, new(portfolios.Count, dtos.Count, Sum(known.Select(a => a.AccountValueUsd)),
-            known.Count, dtos.Sum(a => a.PositionCount), mode == TradingMode.Real ? await store.FillCountAsync(ct) : 0,
+            known.Count, dtos.Any(a => a.PositionCount is null) ? null : dtos.Sum(a => a.PositionCount), mode == TradingMode.Real ? await store.FillCountAsync(ct) : 0,
             Sum(wallets.Select(a => a.AvailableStablecoinNominalUsd)), wallets.Count,
             Sum(balances.Select(a => a.BalanceUsd)), balances.Count, Coverage(balances.Count, enabled.Count),
             Sum(available.Select(a => a.AvailableBalanceUsd)), available.Count, Coverage(available.Count, enabled.Count), enabled.Count),
@@ -338,7 +338,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             s.Positions.OrderBy(p => p.ContractId).Select(p => new PositionDto(p.ContractId, ExactDecimal.Format(p.SignedQuantity),
                 ExactDecimal.Format(p.EntryPrice), ExactDecimal.Format(p.UnrealizedPnlUsd), ExactDecimal.Format(p.MarginUsedUsd), p.Leverage,
                 ExactDecimal.Format(p.LiquidationPrice), p.MarginMode)).ToList(),
-            WalletDto(s), ExactDecimal.Format(s.AvailableMarginUsd));
+            WalletDto(s), ExactDecimal.Format(s.AvailableMarginUsd), s.PositionsComplete);
     }
 
     public async Task<PortfolioDto> PortfolioAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real) =>
@@ -458,7 +458,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
                 AvailableBalanceSource: "paper", TradingMode: a.TradingMode, StartingCapitalUsd: ExactDecimal.Format(a.StartingCapitalUsd));
         return new(a.Id, a.PortfolioId, a.Name, a.VenueId, a.Address,
         ExactDecimal.Format(a.VenueId == VenueDescriptor.ManualId ? a.ManualAccountValueUsd : s?.AccountValueUsd), a.LastSyncedAtUtc,
-        a.SyncStatus, a.LastSyncError, a.IsEnabled ? s?.Positions.Count ?? 0 : 0, a.HistoryNotice, a.IsEnabled, a.SettingsRevision,
+        a.SyncStatus, a.LastSyncError, !a.IsEnabled ? 0 : s is { PositionsComplete: false } ? null : s?.Positions.Count ?? 0, a.HistoryNotice, a.IsEnabled, a.SettingsRevision,
         s?.StablecoinsObservedAtUtc is null ? null : ExactDecimal.Sum(s.Stablecoins.Select(balance => balance.Available)),
         s?.StablecoinScope, s?.AccountMode,
         s?.StablecoinsObservedAtUtc is null ? null : ExactDecimal.Sum(s.Stablecoins.Select(balance => balance.Total)),

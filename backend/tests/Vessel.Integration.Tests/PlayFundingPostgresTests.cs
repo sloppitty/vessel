@@ -211,6 +211,10 @@ public sealed class PlayFundingPostgresTests
                 else MissingOrder(db, account, "old", "sell", 1, T.AddHours(-1));
                 db.Snapshots.Remove(await db.Snapshots.SingleAsync(s => s.AccountId == account.Id));
                 break;
+            case "incomplete-snapshot":
+                // #89: a partial position read cannot show the market flat, so it anchors nothing.
+                (await db.Snapshots.SingleAsync(s => s.AccountId == account.Id)).PositionsComplete = false;
+                break;
             case "unanchored-start":
             case "complete-history":
                 db.Snapshots.Remove(await db.Snapshots.SingleAsync(s => s.AccountId == account.Id));
@@ -341,6 +345,7 @@ public sealed class PlayFundingPostgresTests
     [InlineData("marker-window", "incomplete", "omitted-executions")]
     [InlineData("forced-event", "incomplete", "omitted-executions")]
     [InlineData("unanchored-start", "incomplete", "flat-start-unproven")]
+    [InlineData("incomplete-snapshot", "incomplete", "flat-start-unproven")]
     [InlineData("no-flat-after-exit", "incomplete", "flat-end-unproven")]
     [InlineData("partial-funding", "incomplete", "funding-coverage")]
     [InlineData("ambiguous-entry", "incomplete", "funding-ambiguous")]

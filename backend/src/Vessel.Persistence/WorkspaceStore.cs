@@ -232,6 +232,9 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
             snapshot.WithdrawableUsd = observation.WithdrawableUsd;
             snapshot.AvailableMarginUsd = observation.AvailableMarginUsd;
             snapshot.MarginUsedUsd = observation.MarginUsedUsd;
+            // A partial read still replaces the rows (each is a real observation at this time), but is marked so no reader
+            // treats an absent position as flat or the list as the whole picture (#89).
+            snapshot.PositionsComplete = result.PositionsComplete;
             // The mode read with these perps decides how the ledgers combine, even when this read's wallet failed.
             if (observation.AccountMode is { } mode) snapshot.AccountMode = mode;
             snapshot.Positions = observation.Positions.Select(p => new AccountPosition

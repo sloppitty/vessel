@@ -13,10 +13,12 @@ public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceServi
     public const int MaxGroups = 200;
     public const string ScopeNote = "Enabled owner accounts only, including Unassigned. Nominal USD, no FX/depeg valuation. " +
         NominalStablecoins.Caveat + " Venues with different quote stablecoins are pooled nominally. " +
-        "Balance and availability use the workspace's reported ledgers, never inferred funds. Positions and unrealized P&L use latest retained snapshots, not live prices. " +
+        "Balance and availability use the workspace's reported ledgers, never inferred funds. Positions and unrealized P&L use latest retained snapshots, not live prices; an incomplete position read leaves them unknown. " +
         "Realized result uses closed retained position operations and actual exit times, not Plays; incomplete boundaries and unknown net results are excluded. " +
         "No closed result is unknown, not zero. Retained imports do not prove complete history. Listed stablecoin gross fees are deducted once; separate funding is not added and reported funding inclusion is unverified. " +
         "Shares are exact ratios of known balance subtotals, not claims of complete valuation. At most 200 groups; totals include omitted groups.";
+
+    public const string IncompletePositionsReason = "Latest position read was incomplete; positions and unrealized P&L unknown.";
 
     public async Task<OverviewSummaryDto> GetAsync(string? groupBy, string? period, string? scope, CancellationToken ct,
         string? tradingMode = "real")
@@ -40,12 +42,15 @@ public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceServi
 
         OverviewSummaryTotals Totals(IReadOnlyList<AccountDto> selected)
         {
-            SummaryAmount Sum(Func<AccountDto, string?> value, string reason)
+            SummaryAmount Sum(Func<AccountDto, string?> value, string reason, Func<AccountDto, string?>? reasonFor = null)
             {
                 var known = selected.Select(value).OfType<string>().ToList();
                 return new(known.Count == 0 ? null : known.Aggregate(default(ExactAmount), (sum, v) => sum + ExactAmount.Parse(v)).ToString(),
-                    new(known.Count, selected.Count, 0, 0, known.Count == selected.Count ? [] : [new(reason, selected.Count - known.Count)]));
+                    new(known.Count, selected.Count, 0, 0, selected.Where(a => value(a) is null).GroupBy(a => reasonFor?.Invoke(a) ?? reason)
+                        .Select(g => new SummaryReason(g.Key, g.Count())).ToList()));
             }
+            // #89: a partial read's rows are not the account's whole picture, so its count and sum stay unknown.
+            bool Partial(AccountDto a) => mode == TradingMode.Real && snapshots.TryGetValue(a.Id, out var s) && !s.PositionsComplete;
             var candidates = selected.SelectMany(a => operations.GetValueOrDefault(a.Id) ?? [])
                 .Where(o => (o.Status == "closed" || o.Status == "incomplete") &&
                     (o.ClosedAtUtc ?? o.LastOccurredAtUtc) <= asOf && (from is null || (o.ClosedAtUtc ?? o.LastOccurredAtUtc) >= from)).ToList();
@@ -67,16 +72,16 @@ public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceServi
             return new(selected.Count, Sum(a => a.BalanceUsd, mode == TradingMode.Paper ? "Virtual cash unavailable." : "Recorded balance unavailable."),
                 Sum(a => a.AvailableBalanceUsd, mode == TradingMode.Paper ? "Virtual availability is unknown while capital remains unresolved." :
                     "Reported availability unavailable; manual values are not available funds."),
-                selected.Sum(a => mode == TradingMode.Paper
+                selected.Any(Partial) ? null : selected.Sum(a => mode == TradingMode.Paper
                     ? a.PositionCount
                     : snapshots.GetValueOrDefault(a.Id)?.Positions.Count(p => p.SignedQuantity != 0) ?? 0),
                 Sum(a => mode == TradingMode.Paper
                     ? a.AccountValueUsd is { } equity && a.BalanceUsd is { } cash
                         ? (ExactAmount.Parse(equity) - ExactAmount.Parse(cash)).ToString() : null
-                    : snapshots.TryGetValue(a.Id, out var snapshot)
+                    : snapshots.TryGetValue(a.Id, out var snapshot) && snapshot.PositionsComplete
                     ? ExactDecimal.Sum(snapshot.Positions.Where(p => p.SignedQuantity != 0).Select(p => p.UnrealizedPnlUsd)) : null,
                     mode == TradingMode.Paper ? "Current marks unavailable; simulated unrealized P&L unknown." :
-                    "Latest perpetual snapshot unavailable; unrealized P&L unknown."), realized,
+                    "Latest perpetual snapshot unavailable; unrealized P&L unknown.", a => Partial(a) ? IncompletePositionsReason : null), realized,
                 selected.Sum(a => fills.GetValueOrDefault(a.Id)),
                 selected.Sum(a => (operations.GetValueOrDefault(a.Id) ?? []).Sum(o => o.PaperExecutionCount)));
         }

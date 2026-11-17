@@ -10,7 +10,7 @@ namespace Vessel.Application.Activity;
 /// Unrealized P&amp;L of the open operations on one Activity page, read after the cached aggregate so it never enters the
 /// page version. A venue with market context marks the remaining quantity at its current mark price; otherwise the
 /// latest snapshot's venue-reported figure counts only when that snapshot position is the operation's remaining
-/// position. Closed, incomplete or unmatched operations stay null, never zero.
+/// position, from a complete position read. Closed, incomplete or unmatched operations stay null, never zero.
 /// </summary>
 internal static class OperationUnrealized
 {
@@ -75,7 +75,8 @@ internal static class OperationUnrealized
     private static ActivityOperationSummaryDto FromSnapshot(ActivityOperationDto o, ActivityOperationSummaryDto row,
         AccountSnapshot? snapshot)
     {
-        if (snapshot is null || snapshot.ObservedAtUtc < o.LastOccurredAtUtc) return row;
+        // #89: a partial position read is not the account's current picture.
+        if (snapshot is not { PositionsComplete: true } || snapshot.ObservedAtUtc < o.LastOccurredAtUtc) return row;
         var signed = ExactAmount.Parse(o.OpenQuantity!);
         if (o.Direction == "short") signed = -signed;
         var matches = snapshot.Positions.Where(p => p.ContractId == o.ContractId &&
