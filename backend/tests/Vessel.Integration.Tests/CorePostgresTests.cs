@@ -257,7 +257,7 @@ public sealed class CorePostgresTests
         }
         // Fault injection after the old positions are deleted in the transaction.
         // Actual adapter outputs satisfy schema bounds; persistence must still remain atomic.
-        reader.Result = reader.Result with { Snapshot = reader.Result.Snapshot with { ObservedAtUtc = reader.Result.Snapshot.ObservedAtUtc.AddHours(1), AccountValueUsd = 999, Positions = [] }, HistoryNotice = new string('x', 1001) };
+        reader.Result = reader.Result with { Snapshot = reader.Result.Snapshot with { ObservedAtUtc = reader.Result.Snapshot.ObservedAtUtc.AddHours(1), AccountValueUsd = 999, Positions = [] }, HistoryNotice = new string('x', 1201) };
         // The refresh reports a safe failure; the persistence error never reaches the owner.
         await using (var db = database.Context(owner))
             Assert.Equal(502, (await Assert.ThrowsAsync<ProblemException>(() => Refresh(db, owner, reader, id))).StatusCode);
