@@ -30,13 +30,13 @@ it('preserves distinct workspace and Review money outputs', () => {
   expect(money('0.123456')).toBe('$0.12')
   expect(reviewMoney('0.123456')).toBe('$0.1235')
   expect(money('0.000000045')).toBe('$0.000000045')
-  expect(reviewMoney('0.000000045')).toBe('$0')
+  expect(reviewMoney('0.000000045')).toBe('$0.000000045')
   expect(reviewMoney('9007199254740993.25', true)).toBe('+$9,007,199,254,740,993.25')
   expect(reviewMoney('-0.0001', true)).toBe('-$0.0001')
 })
 it('keeps a tiny per-Play result signed and visible, and only an exact zero as $0', () => {
   // Buy 0.001 at 100, sell at 99.99: the Play-local result before fees is -0.00001, not a scratch.
-  expect(reviewMoney('-0.00001', true)).toBe('$0')
+  expect(reviewMoney('-0.00001', true)).toBe('-$0.00001')
   expect(reviewResult('-0.00001')).toBe('-$0.00001')
   expect(reviewResult('0.00001')).toBe('+$0.00001')
   expect(reviewResult('-0.0000000000000000000000000001')).toBe('-$0.0000000000000000000000000001')
@@ -45,6 +45,16 @@ it('keeps a tiny per-Play result signed and visible, and only an exact zero as $
   expect(reviewResult('-0.0001')).toBe('-$0.0001')
   expect(reviewResult('200.123456789')).toBe('+$200.12')
   expect(reviewResult(null)).toBe('N/A')
+})
+it('never prints a signed zero in Review (#119)', () => {
+  // A period net of 0.00004 is coloured positive, so it must not read "$0"; a tiny loss never reads "-$0".
+  expect(reviewMoney('0.00004', true)).toBe('+$0.00004')
+  expect(reviewMoney('-0.00004')).toBe('-$0.00004')
+  expect(reviewMoney('-0', true)).toBe('$0')
+  expect(reviewPercent('-0.04')).toBe('0.0%')
+  expect(reviewPercent('-0.0004', true)).toBe('0.0%')
+  expect(reviewPercent('-10')).toBe('-10.0%')
+  expect(reviewPercent('-0.06')).toBe('-0.1%')
 })
 it('keeps Review percent, ratio and UTC dates separate from local refresh dates', () => {
   expect(reviewPercent('0.5', true)).toBe('50.0%')

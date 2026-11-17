@@ -116,7 +116,7 @@ export function ReviewWeek({ api, filters, onOpenPlay }: {
       {shown.data === 'some' && <section className="pr-scorecard" aria-label="Week scorecard">
         <article><span>Net P&L</span><strong className={tone(stats.net)}>{reviewMoney(stats.net, true)}</strong>
           <small className="pr-sample">{results(stats.count, stats.positions)} · {stats.wins} W · {stats.losses} L · {stats.scratches} S</small></article>
-        <article><span>Batting average</span><strong>{decided >= minimumRateN ? reviewPercent(stats.batting, true) : '—'}</strong>
+        <article><span>{stats.positions ? 'Weighted batting average' : 'Batting average'}</span><strong>{decided >= minimumRateN ? reviewPercent(stats.batting, true) : '—'}</strong>
           <small className="pr-sample">n = {decided} decided{decided < minimumRateN ? ` · no rate below ${minimumRateN}` : ''}</small></article>
         <article><span>Expectancy per Play</span><strong className={tone(stats.expectancy)}>{reviewMoney(stats.expectancy, true)}</strong>
           <small className="pr-sample">n = {stats.count}</small></article>

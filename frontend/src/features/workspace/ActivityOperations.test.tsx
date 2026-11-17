@@ -183,7 +183,7 @@ describe('operation table', () => {
     expect(screen.getByText('$2.00')).toHaveClass('positive')
     expect(screen.getByText('2h')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Expand BTC operation' }))
-    expect(screen.getByText('Snapshot disagrees.')).toBeInTheDocument()
+    expect(screen.getByText('Snapshot disagrees.', { selector: 'li' })).toBeInTheDocument()
     expect(await screen.findByText('Showing the first 1 executions; operation totals include all 11.')).toBeInTheDocument()
   })
   it('shows direction and known exits when snapshot anchoring finds missing entries', async () => {
@@ -197,7 +197,7 @@ describe('operation table', () => {
     expect(screen.getByText('Incomplete')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Expand BTC operation' }))
     expect(screen.getByText(/Exited 2/)).toBeInTheDocument()
-    expect(screen.getByText('Opening entries are missing.')).toBeInTheDocument()
+    expect(screen.getByText('Opening entries are missing.', { selector: 'li' })).toBeInTheDocument()
   })
   it('hides disabled account operations even if an earlier response includes them', () => {
     render(<OperationsTable api={client()} operations={[operationFixture]} accounts={[{ ...accountFixture, isEnabled: false }]} />)

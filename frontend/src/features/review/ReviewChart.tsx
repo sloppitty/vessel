@@ -23,6 +23,8 @@ export function ReviewChart({ report }: { report: ReviewDocument }) {
   const chartValue = mode === 'drawdown' ? series.reduce<string | null>((lowest, point) =>
     lowest === null || decimalLess(point.drawdown, lowest) ? point.drawdown : lowest, null) : report.metrics.net
   const labels = [...new Set([0, Math.floor((series.length - 1) / 3), Math.floor((series.length - 1) * 2 / 3), series.length - 1])]
+  // Imported positions are counted with Plays, so the unit is results.
+  const counted = (n: number) => `${n} ${report.metrics.positions ? n === 1 ? 'result' : 'results' : n === 1 ? 'Play' : 'Plays'}`
   const bucketLabel = report.bucketDays === 1 ? 'Daily' : `${report.bucketDays}-day`
   return <section className="pr-panel pr-chart">
     <header className="pr-panel-heading">
@@ -32,7 +34,7 @@ export function ReviewChart({ report }: { report: ReviewDocument }) {
       </div>
     </header>
     <div className="pr-chart-caption" aria-live="polite">
-      {selected ? <><strong className={tone(selectedValue)}>{reviewMoney(selectedValue, true)}</strong><span>{reviewDate(selected.atUtc)} · {selected.count} Plays</span></>
+      {selected ? <><strong className={tone(selectedValue)}>{reviewMoney(selectedValue, true)}</strong><span>{reviewDate(selected.atUtc)} · {counted(selected.count)}</span></>
         : <strong className={tone(chartValue)}>{reviewMoney(chartValue, true)}</strong>}
     </div>
     {!series.length ? <div className="pr-chart-empty">No scored Plays in this selection.</div> : <svg className="pr-chart-svg" viewBox="0 0 810 252" role="img" aria-label={`${mode} closed-play P&L chart. ${reviewMoney(chartValue)}.`}>
@@ -44,9 +46,9 @@ export function ReviewChart({ report }: { report: ReviewDocument }) {
         <path d={line} fill="none" stroke={mode === 'drawdown' || Number(chartValue) < 0 ? 'var(--pr-red)' : 'var(--pr-green)'} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
       </>}
       {labels.map(i => <text key={i} x={x(i)} y="242" textAnchor={i === series.length - 1 ? 'end' : 'start'}>{reviewDate(series[i]!.atUtc)}</text>)}
-      {series.map((point, i) => <rect key={point.atUtc} x={x(i) - 358 / series.length} width={716 / series.length} y="0" height="217" fill="transparent" onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}><title>{reviewDate(point.atUtc)}: {reviewMoney(point.net, true)}, {point.count} Plays</title></rect>)}
+      {series.map((point, i) => <rect key={point.atUtc} x={x(i) - 358 / series.length} width={716 / series.length} y="0" height="217" fill="transparent" onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}><title>{reviewDate(point.atUtc)}: {reviewMoney(point.net, true)}, {counted(point.count)}</title></rect>)}
       {selected && <line x1={x(hovered!)} x2={x(hovered!)} y1="10" y2="216" stroke="var(--pr-muted)" strokeDasharray="3 3" pointerEvents="none" />}
     </svg>}
-    <details className="pr-chart-data"><summary>Chart data{report.bucketDays > 1 ? ` · ${report.bucketDays}-day buckets` : ''}</summary><div className="pr-table-scroll"><table><caption className="sr-only">Chart values in nominal USD, by bucket ending date UTC</caption><thead><tr><th>Ending UTC</th><th>Plays</th><th>Net P&L</th><th>Cumulative</th><th>Drawdown</th></tr></thead><tbody>{series.map(point => <tr key={point.atUtc}><th scope="row">{reviewDate(point.atUtc, true)}</th><td>{point.count}</td><td>{reviewMoney(point.net, true)}</td><td>{reviewMoney(point.cumulative, true)}</td><td>{reviewMoney(point.drawdown)}</td></tr>)}</tbody></table></div></details>
+    <details className="pr-chart-data"><summary>Chart data{report.bucketDays > 1 ? ` · ${report.bucketDays}-day buckets` : ''}</summary><div className="pr-table-scroll"><table><caption className="sr-only">Chart values in nominal USD, by bucket ending date UTC</caption><thead><tr><th>Ending UTC</th><th>{report.metrics.positions ? 'Results' : 'Plays'}</th><th>Net P&L</th><th>Cumulative</th><th>Drawdown</th></tr></thead><tbody>{series.map(point => <tr key={point.atUtc}><th scope="row">{reviewDate(point.atUtc, true)}</th><td>{point.count}</td><td>{reviewMoney(point.net, true)}</td><td>{reviewMoney(point.cumulative, true)}</td><td>{reviewMoney(point.drawdown)}</td></tr>)}</tbody></table></div></details>
   </section>
 }
