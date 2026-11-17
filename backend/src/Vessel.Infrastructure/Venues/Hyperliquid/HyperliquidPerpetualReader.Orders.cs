@@ -42,7 +42,9 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
             {
                 foreach (var dex in catalogue.Dexes)
                     books.Add(await ReadJsonAsync(new { type = "frontendOpenOrders", user = publicAddress, dex }, token));
+                // Whole-read conditions. #95: an order with attached children names its own contract instead.
                 var openOrdersComplete = !catalogue.BuildersUnavailable;
+                var incomplete = new List<VenueIncompleteBook>();
                 var openIds = new HashSet<(string ContractId, string OrderId)>();
                 var observed = timeProvider.GetUtcNow();
                 foreach (var document in books)
@@ -60,14 +62,23 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
                             orders[(order.ContractId, order.OrderId)] = order;
                         }
                         else if (IsPerpetualContract(Text(Property(item, "coin")))) openOrdersComplete = false;
-                        // Nested children are not projected by ReadOrder. Never claim their absence.
+                        // Nested children are not projected by ReadOrder. Never claim their absence. #95: they are the
+                        // parent's own take-profit/stop-loss on its market, so a read parent leaves only its contract
+                        // unknown; an unread parent or a malformed list still leaves the whole book unknown.
                         if (item.TryGetProperty("children", out var children) &&
                             (children.ValueKind != JsonValueKind.Array || children.GetArrayLength() > 0))
-                            openOrdersComplete = false;
+                        {
+                            if (order is not null && children.ValueKind == JsonValueKind.Array)
+                                incomplete.Add(new(order.ContractId, order.VenueContractId, VenueIncompleteBook.AttachedTpsl));
+                            else openOrdersComplete = false;
+                        }
                     }
                 }
                 return new VenueOrderReadResult(orders.Values.OrderByDescending(o => o.PlacedAtUtc).ToList(), observed,
-                    catalogue.Dexes.Count > 0 ? BuilderOrdersNotice : OrdersNotice, OpenOrdersComplete: openOrdersComplete);
+                    catalogue.Dexes.Count > 0 ? BuilderOrdersNotice : OrdersNotice, OpenOrdersComplete: openOrdersComplete && incomplete.Count == 0)
+                {
+                    IncompleteContracts = openOrdersComplete ? incomplete.Distinct().ToArray() : null
+                };
             }
             finally
             {

@@ -137,6 +137,8 @@ public sealed partial class MonitorDiscrepancyService
             currentOrders.GetValueOrDefault((retained.ContractId, retained.ExternalOrderId)) ?? RetainedOrder(retained);
         bool Resting(VenueOrder? order) => order is { Status: VenueOrderStatus.Open } &&
             currentOrders.ContainsKey((order.ContractId, order.OrderId)) && order.StatusAtUtc == at;
+        // #95: an order the adapter attributed to its market but could not read leaves only that market's book incomplete.
+        bool BookComplete(VenueInstrument i) => orders?.OpenOrdersCompleteFor(i.ContractId, i.VenueContractId) == true;
 
         var plays = new List<PlayFacts>();
         foreach (var play in facts.Plays.Where(x => x.OwnerId == owner.OwnerId && x.AccountId == observation.Account.Id &&
@@ -294,7 +296,7 @@ public sealed partial class MonitorDiscrepancyService
             var triggers = currentOrders.Values.Where(order => Resting(order) && Same(instrument, order.ContractId, order.VenueContractId) &&
                 order.Side == closing).Select(OrderMechanics.Classify).ToArray();
             bool? present = !kept ? false : !positionKnown ? null : sign == 0 || involved.Length > 0 ? false :
-                !bookRead ? null : !ordersFresh || orders?.OpenOrdersComplete != true || duplicateOrders ? null :
+                !bookRead ? null : !ordersFresh || !BookComplete(instrument) || duplicateOrders ? null :
                 triggers.Contains(OrderMechanism.Stop) ? false : triggers.Contains(OrderMechanism.UnknownTrigger) ? null : true;
             var book = orders?.ObservedAtUtc ?? snapshotAt;
             scan.Add(new(UnprotectedKind, Subject(instrument), null, instrument.ContractId, Native(instrument), Severity(UnprotectedKind), present,
@@ -318,7 +320,7 @@ public sealed partial class MonitorDiscrepancyService
             var identityKnown = scoped.All(x => x.Order is null || Same(p.Instrument, x.Order.ContractId, x.Order.VenueContractId));
             var knownOrders = ordersFresh && !duplicateOrders && identityKnown &&
                 scoped.All(x => x.Order is null || x.Order.StatusAtUtc <= at);
-            var completeOrders = knownOrders && orders!.OpenOrdersComplete;
+            var completeOrders = knownOrders && BookComplete(p.Instrument);
             // Sol round 1 on item 11: protection compares stops with the Play's own part, allocations included.
             var guarded = p.Protection;
             var playGap = Gapped(p);
@@ -505,7 +507,10 @@ public sealed partial class MonitorDiscrepancyService
                 !ordersFresh ? (MonitorCoverageStates.Unknown, null, "stale-order-read") :
                 // Duplicate rows, an order on another native market or a status newer than the read.
                 !knownOrders ? (MonitorCoverageStates.Unknown, null, "order-read-unreliable") :
-                !orders.OpenOrdersComplete ? (MonitorCoverageStates.Unknown, null, "incomplete-book") :
+                // #95: the order kind that left this contract's book incomplete, when the adapter named one.
+                !BookComplete(p.Instrument) ? (MonitorCoverageStates.Unknown, null,
+                    orders.IncompleteBookFor(p.Instrument.ContractId, p.Instrument.VenueContractId) is { } unread
+                        ? "incomplete-book-" + unread.Kind : "incomplete-book") :
                 !freshQuantity ? (MonitorCoverageStates.Unknown, null, "fills-after-read") :
                 !mechanicsKnown ? (MonitorCoverageStates.Unknown, null, "mechanics") :
                 cancelledPresent == true ? (MonitorCoverageStates.Known, false, "cancelled") :

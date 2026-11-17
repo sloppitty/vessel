@@ -407,7 +407,7 @@ dotnet test backend/Vessel.slnx
 ### Add a venue
 
 1. Write the adapter in `Infrastructure/Venues/<Venue>/`, implementing only the ports the venue supports, using `BoundedJsonHttp` and `StrictJson`, mapping into `ExecutionFacts` and canonical instrument keys.
-2. Declare a `VenueDescriptor` with its capabilities, source kind (`evm-address` or `account-index`), candle intervals and price rule. Set `CurrentOrderBook` only if the order reader returns the current open book (rows observed with the read and a meaningful `OpenOrdersComplete`); it defaults to false, which labels stop coverage "current book not read".
+2. Declare a `VenueDescriptor` with its capabilities, source kind (`evm-address` or `account-index`), candle intervals and price rule. Set `CurrentOrderBook` only if the order reader returns the current open book (rows observed with the read and a meaningful `OpenOrdersComplete`); it defaults to false, which labels stop coverage "current book not read". An open order the reader can attribute to its market but not model leaves `OpenOrdersComplete` false and names that contract in `IncompleteContracts` (#95), so only that contract's coverage stays unknown; anything it cannot attribute leaves `IncompleteContracts` null.
 3. Call `AddVenueModule<TAdapter>()` in `Infrastructure/DependencyInjection.cs` with the descriptor and client configuration. The helper registers a logger-free named `HttpClient` and the adapter's supported ports. Register a stream separately if it needs a shared lifetime.
 4. Add adapter tests over recorded responses, and a live test behind an environment variable.
 5. Document coverage limits in the venue's notices and in a `docs/architecture/<venue>-…` document.

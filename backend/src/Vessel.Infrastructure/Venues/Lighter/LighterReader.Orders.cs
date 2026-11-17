@@ -35,16 +35,21 @@ public sealed partial class LighterReader
             // Keyed by (canonical contract, order index): the same venue ID on another market is another order.
             var orders = new Dictionary<(string ContractId, string OrderId), VenueOrder>();
             bool openOrdersComplete;
+            IReadOnlyList<VenueIncompleteBook>? incompleteContracts;
             using (var active = await GetAsync("accountActiveOrders?account_index=" + source + "&market_type=perp", ct, credential))
             {
-                var current = ReadOrders(active.RootElement, catalogue, source, observed, 1000);
+                var skipped = new List<VenueIncompleteBook>();
+                var current = ReadOrders(active.RootElement, catalogue, source, observed, 1000, skipped);
                 var rows = Rows(json, active.RootElement, "orders", 1000);
                 // Active orders cover all perp markets without a market_id filter. A cursor, cap,
                 // omitted unsupported order or unknown active status prevents negative evidence.
+                // #95: an unsupported order on a known perp market prevents it only for that market.
                 var noNextPage = !active.RootElement.TryGetProperty("next_cursor", out var next) ||
                     next.ValueKind == JsonValueKind.String && next.GetString() == "";
-                openOrdersComplete = rows.GetArrayLength() < 1000 && noNextPage &&
-                    current.Count == rows.GetArrayLength() && current.All(o => o.Status == VenueOrderStatus.Open);
+                var whole = rows.GetArrayLength() < 1000 && noNextPage &&
+                    current.Count + skipped.Count == rows.GetArrayLength() && current.All(o => o.Status == VenueOrderStatus.Open);
+                openOrdersComplete = whole && skipped.Count == 0;
+                incompleteContracts = whole ? skipped.Distinct().ToArray() : null;
                 foreach (var order in current)
                     if (!orders.TryAdd((order.ContractId, order.OrderId), order)) throw json.Invalid();
             }
@@ -63,7 +68,8 @@ public sealed partial class LighterReader
                 if (!cursors.Add(cursor)) throw json.Invalid();
             }
             return new VenueOrderReadResult(orders.Values.ToArray(), observed, venue.OrdersNotice +
-                (cursor is null ? "" : OrdersPageLimitNotice), OpenOrdersComplete: openOrdersComplete);
+                (cursor is null ? "" : OrdersPageLimitNotice), OpenOrdersComplete: openOrdersComplete)
+                { IncompleteContracts = incompleteContracts };
             }, cancellationToken);
         }
         catch (VenueCredentialRejectedException)
@@ -83,8 +89,9 @@ public sealed partial class LighterReader
 
     // https://apidocs.lighter.xyz/reference/accountactiveorders.md and /reference/accountinactiveorders.md.
     // Authenticated happy-path payloads remain fixture-tested until the owner supplies a read-only token.
+    /// <param name="skipped">#95: collects each perp order left out because it cannot be modelled, with its market.</param>
     internal static IReadOnlyList<VenueOrder> ReadOrders(JsonElement root, Catalogue catalogue, string source,
-        DateTimeOffset observed, int limit)
+        DateTimeOffset observed, int limit, List<VenueIncompleteBook>? skipped = null)
     {
         var json = catalogue.Exchange.Json;
         var orders = new List<VenueOrder>();
@@ -100,8 +107,13 @@ public sealed partial class LighterReader
             var initial = Nonnegative(json, row, "initial_base_amount");
             var remaining = Nonnegative(json, row, "remaining_base_amount");
             if (remaining > initial) throw json.Invalid();
-            if (initial == 0 || type is "twap" or "twap-sub" ||
-                (row.TryGetProperty("order_flags", out var flags) && json.Integer(flags) != 0)) continue;
+            var unread = type is "twap" or "twap-sub" ? VenueIncompleteBook.Twap : initial == 0 ? VenueIncompleteBook.Unsized :
+                row.TryGetProperty("order_flags", out var flags) && json.Integer(flags) != 0 ? VenueIncompleteBook.Flagged : null;
+            if (unread is not null)
+            {
+                skipped?.Add(new(market.Key, marketId, unread));
+                continue;
+            }
             var id = ExactId(json, row, "order_index", "order_id");
             var isAsk = json.Boolean(json.Property(row, "is_ask"));
             var reduceOnly = json.Boolean(json.Property(row, "reduce_only"));
