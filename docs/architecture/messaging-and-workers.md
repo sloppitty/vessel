@@ -424,23 +424,39 @@ Issue #98 measured what the API and the monitor worker do when RabbitMQ is unrea
 - **B**: `Hosts_finish_starting_when_the_broker_returns_within_the_retry_window`;
 - **C**: `Checks_continue_while_the_broker_is_away_and_its_events_are_delivered_once_when_it_returns`.
 
-The worker and the API reach the broker through `BrokerProxy`, a loopback relay the test closes (connections refused, open connections reset) and reopens. With `Vessel_TEST_BROKER_SWITCH` set, the relay stays open and the test asks the machine running the broker to `docker stop` and `docker start` it instead (**C-stop**). Pinned WolverineFx 6.50.0, RabbitMQ 4.3.6.
+The worker and the API reach the broker through `BrokerProxy`, a loopback relay the test closes (connections refused, open connections reset) and reopens. Pinned WolverineFx 6.50.0, RabbitMQ 4.3.6.
 
-| Question | Measured answer | How |
+The Basis column says where each statement comes from: **asserted** (the named test fails if it is false), **observed** (printed in that test's output, not asserted), **read from code** (the named file), **manual** (the real broker stop below, run once, not repeatable from the repository) or **not measured**.
+
+**Real broker stop (manual, November 17, 2026).** To compare with the relay, test C was run once with a temporary, uncommitted variant of `BrokerProxy` that left the relay open and, at the outage and at the return, waited for a shell loop on the host to run `docker stop vessel-verify-rabbit-98` and then `docker start vessel-verify-rabbit-98` (a throwaway `rabbitmq:4.3.6-management` container with a test-only user on the test network, removed afterwards). Each switch waited until the broker's port refused or accepted connections. The test passed; the differences it printed are marked **manual** below. That variant is not in the repository.
+
+| Question | Answer | Basis |
 |---|---|---|
-| Broker unreachable at start: does the API start? | No. Wolverine makes 20 connection attempts, then the host fails with `BrokerInitializationException`. `Vessel.Api/Program.cs` does not catch it, so the process ends (read from the code, not run as a process). Same for a refused port and a host name that does not resolve. | A (API on an unresolvable name) |
-| Does the monitor worker start? | No, the same way. From `Vessel.Worker/Program.cs`, the entrypoint then prints `Vessel worker could not start (BrokerInitializationException)` and exits with code 1. | A (worker on a refused port) |
-| How long does a start attempt block? | About 95 s (95.1 s and 95.4 s measured); the retry delay grows with each attempt. | A |
-| What does readiness report? | Nothing: the host never finishes starting, so `/health/ready` is never served. Once a host runs, readiness ignores the broker: it stays `200 ready` during an outage. | A, C |
-| Do scheduled checks run? | Not usefully. The scheduler starts before Wolverine, and its first pass claims the account, but the run fails with `InvalidOperationException` ("The Rabbit MQ sending connection has not been created") because it cannot stage its events. The claim keeps its 5-minute lease, so the account is not checked again until the lease expires, even if the broker returns. | A, B |
-| Are events appended to PostgreSQL? | No. The failed run rolls back with its events: `events` stays empty. | A, B |
-| Broker returns during the start attempt: does the host start? | Yes. Both hosts finished starting 5 s after the broker returned (the next retry). The account claimed by the failed run waited for its lease to expire; then the run succeeded and its events reached the subscriber once. | B |
-| Broker returns after the attempt failed | Not measured: the process has exited. With `restart: unless-stopped` Docker starts it again, and each attempt lasts up to 95 s. | Packaged stack only (gap) |
-| Broker goes away while the hosts run: do checks continue? | Yes. Scheduled runs succeed, state stays `live`, the heartbeat stays fresh. Their events commit in PostgreSQL and wait in the worker's `wolverine_outgoing_envelopes`. | C, C-stop |
-| What happens to a manual Check? | `202 Accepted` with `manualState: pending`. The command waits in the API's outbox; the worker does not hear of it, and its next scheduler tick (30 s in production) runs the pending request. | C, C-stop |
-| What do the hosts log? | Only Wolverine logs. With connections reset (C), at Error: `Unexpected Rabbit MQ connection shutdown` and `Unexpected channel shutdown … Wolverine will attempt to restart`; with a real broker stop (C-stop), only the channel shutdowns, at Warning. Then, in both, about one `Error trying to start a new Rabbit MQ channel` per sender per second, `Failed to send outgoing envelopes batch`, then `Sending agent for … is latched`. Vessel's code logs nothing about it. No log line contains the broker password. On return: `RabbitMQ connection is recovered successfully`. | C, C-stop |
-| When the broker returns, does delivery resume? | Yes, without a restart. Both outboxes drained and every event appended meanwhile settled `delivered` with one attempt, 1.5 s (C) and 3.2 s (C-stop) after the broker's port answered again. No event was delivered twice. | C, C-stop |
-| Does the worker's command listener resume? | Yes. After the return, a Check woke the scheduler without a tick, as it does normally. | C, C-stop |
+| Broker unreachable at start: does the API start? | No. Wolverine makes 20 connection attempts, then the host fails with `BrokerInitializationException`, for a host name that does not resolve. | Asserted (A, API) |
+| Does the API process end? | Yes: `Vessel.Api/Program.cs` does not catch the exception. Not run as a process. | Read from code (`Vessel.Api/Program.cs`) |
+| Does the monitor worker start? | No, the same way, for a port that refuses connections. | Asserted (A, worker) |
+| Does the worker process end? | Yes: its entrypoint prints `Vessel worker could not start (BrokerInitializationException)` and exits with code 1. Not run as a process. | Read from code (`Vessel.Worker/Program.cs`) |
+| How long does a start attempt block? | Between 60 s and 180 s. | Asserted (A) |
+| | About 95 s: 95.1 s to 95.4 s for each host over two runs. | Observed (A) |
+| Readiness while a host is starting | Unknown: `WebApplicationFactory` returns no client until the host has started, so no test requests `/health/ready` during the attempt. | Not measured |
+| Readiness once a host runs | `200` during an outage: readiness covers PostgreSQL, migrations and identity, not the broker. | Asserted (C) |
+| Do scheduled checks run during the start attempt? | Not usefully. The scheduler starts before Wolverine; its first pass claims the account, and the run fails with `InvalidOperationException` ("The Rabbit MQ sending connection has not been created") because it cannot stage its events. | Asserted (A, B) |
+| | The claim keeps its lease: after the broker returns, a scheduler tick does not run the account again; once the lease has expired, the next tick does. | Asserted (B) |
+| | The lease lasts 5 minutes. | Read from code (`MonitorOptions.Lease`) |
+| Are events appended to PostgreSQL? | No. The failed run rolls back with its events: `events` stays empty. | Asserted (A, B) |
+| Broker returns during the start attempt: does the host start? | Yes. Both hosts finish starting within 30 s of the return; after the lease expires the run succeeds and every event reaches the subscriber once. | Asserted (B) |
+| | About 5 s after the return (the next retry), in two runs. | Observed (B) |
+| Broker returns after the attempt failed | The process has exited. Compose restarts it (`restart: unless-stopped`), and each attempt blocks as above. | Not measured; restart policy read from code (`deploy/compose.yaml`) |
+| Broker goes away while the hosts run: do checks continue? | Yes. Scheduled runs succeed and the state stays `live`; their events commit in PostgreSQL and wait in the worker's `wolverine_outgoing_envelopes`. The API reports `workerOnline: true`. | Asserted (C) |
+| What happens to a manual Check? | `202 Accepted` with `manualState: pending`. The command waits in the API's outbox, the worker does not run it within 3 s, and the next scheduler tick runs the pending request. | Asserted (C) |
+| | The scheduler ticks every 30 s in production. | Read from code (`MonitorOptions.SchedulerTick`) |
+| What do the hosts log? | Wolverine logs at Error; nothing in a `Vessel` category logs at Warning or above. No message text or logged exception contains the broker password. | Asserted (C) |
+| | With connections reset: `Unexpected Rabbit MQ connection shutdown` and `Unexpected channel shutdown … Wolverine will attempt to restart`, then about one `Error trying to start a new Rabbit MQ channel` per sender per second, `Failed to send outgoing envelopes batch`, then `Sending agent for … is latched`. On return: `RabbitMQ connection is recovered successfully`. | Observed (C) |
+| | With a real broker stop: only the two channel shutdowns, at Warning, then the same Error lines and recovery. | Manual |
+| When the broker returns, does delivery resume? | Yes, without a restart. Both outboxes drain and every event appended meanwhile settles `delivered` with one attempt. | Asserted (C) |
+| | About 1.5 s after the relay reopened, in two runs. | Observed (C) |
+| | 3.2 s after the broker's port answered again. | Manual |
+| Does the worker's command listener resume? | Yes. After the return, a Check wakes the scheduler without a tick. | Asserted (C) |
 
 Gaps: whether the API's HTTP port accepts connections during the 95 s attempt, and Docker's restart loop, need the packaged stack. The in-process tests use `WebApplicationFactory`, which opens no socket. `scripts/verify-release.py` already stops RabbitMQ under running hosts and checks the outbox and the Notification Hub catch-up, but it never starts a host without the broker.
 

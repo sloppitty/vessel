@@ -8,17 +8,11 @@ namespace Vessel.Tests;
 /// without touching the broker itself. <see cref="Down"/> stops accepting (new connections are refused) and resets
 /// every relayed connection; <see cref="Up"/> accepts again on the same port.
 /// </summary>
-/// <remarks>
-/// With <c>Vessel_TEST_BROKER_SWITCH</c> set to a directory shared with the machine running the broker, the relay stays
-/// transparent and each switch asks that machine to stop or start the real broker instead: it writes <c>down</c> or
-/// <c>up</c> to <c>want</c> in that directory and waits until the broker's port answers accordingly.
-/// </remarks>
 internal sealed class BrokerProxy : IAsyncDisposable
 {
     private readonly string targetHost;
     private readonly int targetPort;
     private readonly int port;
-    private readonly string? external = Environment.GetEnvironmentVariable("Vessel_TEST_BROKER_SWITCH");
     private readonly List<TcpClient> connections = [];
     private TcpListener? listener;
     private CancellationTokenSource? accepting;
@@ -41,9 +35,8 @@ internal sealed class BrokerProxy : IAsyncDisposable
     /// <summary>A relay that is down until <see cref="Up"/>: connecting to it is refused.</summary>
     public static BrokerProxy Create() => new(new(Environment.GetEnvironmentVariable("Vessel_TEST_EVENT_RABBIT")!));
 
-    public async Task UpAsync()
+    public void Up()
     {
-        if (external is not null) await SwitchExternalAsync("up", reachable: true);
         lock (connections)
         {
             if (!down) return;
@@ -56,18 +49,7 @@ internal sealed class BrokerProxy : IAsyncDisposable
         _ = AcceptAsync(listener, accepting.Token);
     }
 
-    public async Task DownAsync()
-    {
-        if (external is not null)
-        {
-            // The real broker closes its own connections; the relay keeps passing whatever it says.
-            await SwitchExternalAsync("down", reachable: false);
-            return;
-        }
-        Close();
-    }
-
-    private void Close()
+    public void Down()
     {
         TcpClient[] open;
         lock (connections)
@@ -140,30 +122,10 @@ internal sealed class BrokerProxy : IAsyncDisposable
         connection.Dispose();
     }
 
-    private async Task SwitchExternalAsync(string want, bool reachable)
+    public ValueTask DisposeAsync()
     {
-        await File.WriteAllTextAsync(Path.Combine(external!, "want"), want);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-        while (await ReachableAsync() != reachable)
-            await Task.Delay(250, timeout.Token);
-    }
-
-    private async Task<bool> ReachableAsync()
-    {
-        try
-        {
-            using var probe = new TcpClient();
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            await probe.ConnectAsync(targetHost, targetPort, timeout.Token);
-            return true;
-        }
-        catch { return false; }
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (external is not null) await SwitchExternalAsync("up", reachable: true);
-        Close();
+        Down();
         accepting?.Dispose();
+        return ValueTask.CompletedTask;
     }
 }

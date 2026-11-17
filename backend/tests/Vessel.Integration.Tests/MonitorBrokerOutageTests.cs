@@ -40,8 +40,7 @@ public sealed partial class MonitorEndToEndTests(ITestOutputHelper output)
         var (apiError, apiAfter) = await api;
         output.WriteLine($"worker gave up after {workerAfter}; api gave up after {apiAfter}");
 
-        // Neither host starts. Each makes 20 connection attempts (about 95 s in all) and then fails; the real
-        // entrypoints exit (the worker with code 1), so no readiness endpoint ever answers.
+        // Neither host starts. Each makes 20 connection attempts (about 95 s in all) and then fails.
         foreach (var (error, after) in new[] { (workerError, workerAfter), (apiError, apiAfter) })
         {
             Assert.IsType<BrokerInitializationException>(error);
@@ -66,53 +65,57 @@ public sealed partial class MonitorEndToEndTests(ITestOutputHelper output)
     {
         await using var proxy = BrokerProxy.Create();
         await using var fixture = await MonitorFixture.PrepareAsync(proxy.Uri);
-        var logs = new BackgroundWorkLogs();
-        HttpClient? client = null;
-        var worker = fixture.StartWorkerAsync(logs);
-        var api = Task.Run(() => client = fixture.StartApi(logs));
-        await Eventually(() => Task.FromResult(logs.Messages.Any(m => m.Category == "Vessel.Worker.MonitorScheduler" &&
-            m.Text.Contains("failed with InvalidOperationException", StringComparison.Ordinal))), "The first scheduled run did not fail.");
-        // That is the failure: Wolverine refuses to stage an outgoing event before its transport has started.
-        var staged = await Assert.ThrowsAsync<InvalidOperationException>(fixture.AppendThroughWorkerAsync);
-        Assert.Contains("sending connection has not been created", staged.Message, StringComparison.Ordinal);
+        // Restore the relay before the fixture is disposed, even when an assertion fails before the broker returns.
+        try
+        {
+            var logs = new BackgroundWorkLogs();
+            HttpClient? client = null;
+            var worker = fixture.StartWorkerAsync(logs);
+            var api = Task.Run(() => client = fixture.StartApi(logs));
+            await Eventually(() => Task.FromResult(logs.Messages.Any(m => m.Category == "Vessel.Worker.MonitorScheduler" &&
+                m.Text.Contains("failed with InvalidOperationException", StringComparison.Ordinal))), "The first scheduled run did not fail.");
+            // That is the failure: Wolverine refuses to stage an outgoing event before its transport has started.
+            var staged = await Assert.ThrowsAsync<InvalidOperationException>(fixture.AppendThroughWorkerAsync);
+            Assert.Contains("sending connection has not been created", staged.Message, StringComparison.Ordinal);
 
-        await Task.Delay(TimeSpan.FromSeconds(10));
-        Assert.False(worker.IsCompleted);
-        Assert.False(api.IsCompleted);
-        await proxy.UpAsync();
-        var clock = Stopwatch.StartNew();
-        await worker.WaitAsync(TimeSpan.FromSeconds(30));
-        await api.WaitAsync(TimeSpan.FromSeconds(30));
-        output.WriteLine($"both hosts started {clock.Elapsed} after the broker returned");
-        using var _ = client;
+            await Task.Delay(TimeSpan.FromSeconds(10));
+            Assert.False(worker.IsCompleted);
+            Assert.False(api.IsCompleted);
+            proxy.Up();
+            var clock = Stopwatch.StartNew();
+            await worker.WaitAsync(TimeSpan.FromSeconds(30));
+            await api.WaitAsync(TimeSpan.FromSeconds(30));
+            output.WriteLine($"both hosts started {clock.Elapsed} after the broker returned");
+            using var _ = client;
 
-        // The account claimed by the failed run stays leased: the next tick does not run it.
-        var row = (await fixture.MonitorRowAsync())!;
-        Assert.Equal(1, row.Generation);
-        Assert.Equal("running", row.ManualState);
-        fixture.Clock.TickScheduler();
-        await Task.Delay(TimeSpan.FromSeconds(2));
-        Assert.Equal(1, (await fixture.MonitorRowAsync())!.Generation);
-        Assert.Equal(0, await fixture.ScalarAsync("SELECT count(*) FROM events"));
-        // Lease recovery retries it once the five-minute lease has expired.
-        fixture.Clock.Set(row.LeaseUntilUtc!.Value.AddMilliseconds(1));
-        fixture.Clock.TickScheduler();
-        await fixture.WaitForRunAsync(2);
-        Assert.Equal("live", (await fixture.MonitorAsync()).State);
-        var events = await fixture.ScalarAsync("SELECT count(*) FROM events");
-        Assert.True(events > 0);
-        await fixture.WaitForReceiptsAsync((int)events);
+            // The account claimed by the failed run stays leased: the next tick does not run it.
+            var row = (await fixture.MonitorRowAsync())!;
+            Assert.Equal(1, row.Generation);
+            Assert.Equal("running", row.ManualState);
+            fixture.Clock.TickScheduler();
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            Assert.Equal(1, (await fixture.MonitorRowAsync())!.Generation);
+            Assert.Equal(0, await fixture.ScalarAsync("SELECT count(*) FROM events"));
+            // Lease recovery retries it once the five-minute lease has expired.
+            fixture.Clock.Set(row.LeaseUntilUtc!.Value.AddMilliseconds(1));
+            fixture.Clock.TickScheduler();
+            await fixture.WaitForRunAsync(2);
+            Assert.Equal("live", (await fixture.MonitorAsync()).State);
+            var events = await fixture.ScalarAsync("SELECT count(*) FROM events");
+            Assert.True(events > 0);
+            await fixture.WaitForReceiptsAsync((int)events);
+        }
+        finally
+        {
+            proxy.Up();
+        }
     }
 
-    /// <summary>
-    /// With <c>Vessel_TEST_BROKER_SWITCH</c> set, the outage is a real broker stop and start instead of the relay
-    /// dropping its connections (see <see cref="BrokerProxy"/>); the assertions are the same.
-    /// </summary>
     [VesselEventRabbitFact]
     public async Task Checks_continue_while_the_broker_is_away_and_its_events_are_delivered_once_when_it_returns()
     {
         await using var proxy = BrokerProxy.Create();
-        await proxy.UpAsync();
+        proxy.Up();
         await using var identity = await IdentityDatabase.CreateAsync();
         await using var fixture = await MonitorFixture.PrepareAsync(proxy.Uri);
         await identity.SeedAsync(EthECKey.GenerateKey(), fixture.Owner);
@@ -126,63 +129,75 @@ public sealed partial class MonitorEndToEndTests(ITestOutputHelper output)
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/ready")).StatusCode);
         var quiet = logs.Messages.Count;
 
-        await proxy.DownAsync();
-        var clock = Stopwatch.StartNew();
-        // Readiness covers PostgreSQL, migrations and identity only.
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/ready")).StatusCode);
-        // Scheduled checks keep running; their events commit in PostgreSQL and wait in the worker's outbox.
-        await fixture.ScheduledReadAsync(1);
-        Assert.True(await fixture.ScalarAsync("SELECT count(*) FROM events") > delivered);
-        Assert.True(await fixture.OutboxAsync("monitor") > 0);
-
-        // A manual Check is accepted; its command waits in the API's outbox, and the next scheduler tick runs it.
-        var before = await fixture.MonitorAsync();
-        fixture.Clock.Set(before.NextManualAllowedAtUtc!.Value);
-        using (var check = await client.PostAsync($"/api/accounts/{fixture.AccountId}/monitor/run", null))
+        // Restore the relay before the fixture is disposed, even when an assertion fails during the outage.
+        try
         {
-            Assert.Equal(HttpStatusCode.Accepted, check.StatusCode);
-            Assert.Equal("pending", (await check.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("monitor")
-                .GetProperty("manualState").GetString());
+            proxy.Down();
+            var clock = Stopwatch.StartNew();
+            // Readiness covers PostgreSQL, migrations and identity only.
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/ready")).StatusCode);
+            // Scheduled checks keep running; their events commit in PostgreSQL and wait in the worker's outbox.
+            await fixture.ScheduledReadAsync(1);
+            Assert.True(await fixture.ScalarAsync("SELECT count(*) FROM events") > delivered);
+            Assert.True(await fixture.OutboxAsync("monitor") > 0);
+
+            // A manual Check is accepted; its command waits in the API's outbox, and the next scheduler tick runs it.
+            var before = await fixture.MonitorAsync();
+            fixture.Clock.Set(before.NextManualAllowedAtUtc!.Value);
+            using (var check = await client.PostAsync($"/api/accounts/{fixture.AccountId}/monitor/run", null))
+            {
+                Assert.Equal(HttpStatusCode.Accepted, check.StatusCode);
+                var monitor = (await check.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("monitor");
+                Assert.Equal("pending", monitor.GetProperty("manualState").GetString());
+                // The worker's heartbeat stays fresh: the API still reports it online.
+                Assert.True(monitor.GetProperty("workerOnline").GetBoolean());
+            }
+            await Task.Delay(TimeSpan.FromSeconds(3));
+            Assert.Equal(before.Generation, (await fixture.MonitorAsync()).Generation);
+            Assert.Equal(1, await fixture.OutboxAsync("api"));
+            fixture.Clock.TickScheduler();
+            await fixture.WaitForRunAsync(before.Generation + 1);
+            Assert.Equal("live", (await fixture.MonitorAsync()).State);
+            await fixture.ScheduledReadAsync(2);
+            var appended = await fixture.ScalarAsync("SELECT count(*) FROM events");
+            Assert.Equal(delivered, await fixture.ScalarAsync("SELECT count(*) FROM event_receipts"));
+            output.WriteLine($"outage lasted {clock.Elapsed}; {appended - delivered} events appended meanwhile");
+
+            // Only Wolverine logs the outage, at Error, without the broker credentials. Vessel's own code logs nothing.
+            var outage = logs.Messages.Skip(quiet).Where(m => m.Level is >= LogLevel.Warning and < LogLevel.None).ToArray();
+            foreach (var group in outage.GroupBy(m => (m.Level, m.Category, Text: m.Text.Split('\n')[0])))
+                output.WriteLine($"x{group.Count()} {group.Key.Level} {group.Key.Category}: {group.Key.Text}");
+            Assert.Contains(outage, m => m.Level == LogLevel.Error && m.Category.StartsWith("Wolverine.RabbitMQ", StringComparison.Ordinal));
+            Assert.DoesNotContain(outage, m => m.Category.StartsWith("Vessel", StringComparison.Ordinal));
+            // Console providers print the exception too, so a password there would leak as well.
+            Assert.Contains(outage, m => m.Exception is not null);
+            var password = new Uri(proxy.Uri).UserInfo.Split(':')[1];
+            Assert.DoesNotContain(logs.Messages, m => m.Text.Contains(password, StringComparison.Ordinal) ||
+                m.Exception?.Contains(password, StringComparison.Ordinal) == true);
+
+            proxy.Up();
+            clock.Restart();
+            // Both outboxes drain and every event appended meanwhile reaches the subscriber exactly once.
+            await Eventually(async () => await fixture.OutboxAsync("monitor") == 0 && await fixture.OutboxAsync("api") == 0,
+                "The outboxes did not drain after the broker returned.");
+            await fixture.WaitForReceiptsAsync((int)appended);
+            Assert.Equal(appended, await fixture.ScalarAsync("SELECT count(*) FROM event_receipts"));
+            output.WriteLine($"outboxes drained and receipts settled {clock.Elapsed} after the broker returned");
+            foreach (var group in logs.Messages.Skip(quiet).Where(m => m.Level == LogLevel.Information && m.Category.StartsWith("Wolverine.RabbitMQ",
+                         StringComparison.Ordinal)).GroupBy(m => (m.Category, Text: m.Text.Split('\n')[0])))
+                output.WriteLine($"x{group.Count()} {group.Key.Category}: {group.Key.Text}");
+
+            // The worker's command listener consumes again: a Check wakes the scheduler without a tick.
+            before = await fixture.MonitorAsync();
+            fixture.Clock.Set(before.NextManualAllowedAtUtc!.Value);
+            using (var check = await client.PostAsync($"/api/accounts/{fixture.AccountId}/monitor/run", null))
+                Assert.Equal(HttpStatusCode.Accepted, check.StatusCode);
+            await fixture.WaitForRunAsync(before.Generation + 1);
         }
-        await Task.Delay(TimeSpan.FromSeconds(3));
-        Assert.Equal(before.Generation, (await fixture.MonitorAsync()).Generation);
-        Assert.Equal(1, await fixture.OutboxAsync("api"));
-        fixture.Clock.TickScheduler();
-        await fixture.WaitForRunAsync(before.Generation + 1);
-        Assert.Equal("live", (await fixture.MonitorAsync()).State);
-        await fixture.ScheduledReadAsync(2);
-        var appended = await fixture.ScalarAsync("SELECT count(*) FROM events");
-        Assert.Equal(delivered, await fixture.ScalarAsync("SELECT count(*) FROM event_receipts"));
-        output.WriteLine($"outage lasted {clock.Elapsed}; {appended - delivered} events appended meanwhile");
-
-        // Only Wolverine logs the outage (at Error; a graceful broker stop logs its channel shutdowns at Warning), without the
-        // broker credentials. Vessel's own code logs nothing.
-        var outage = logs.Messages.Skip(quiet).Where(m => m.Level is >= LogLevel.Warning and < LogLevel.None).ToArray();
-        foreach (var group in outage.GroupBy(m => (m.Level, m.Category, Text: m.Text.Split('\n')[0])))
-            output.WriteLine($"x{group.Count()} {group.Key.Level} {group.Key.Category}: {group.Key.Text}");
-        Assert.Contains(outage, m => m.Level == LogLevel.Error && m.Category.StartsWith("Wolverine.RabbitMQ", StringComparison.Ordinal));
-        Assert.DoesNotContain(outage, m => m.Category.StartsWith("Vessel", StringComparison.Ordinal));
-        var password = new Uri(proxy.Uri).UserInfo.Split(':')[1];
-        Assert.DoesNotContain(logs.Messages, m => m.Text.Contains(password, StringComparison.Ordinal));
-
-        await proxy.UpAsync();
-        clock.Restart();
-        // Both outboxes drain and every event appended meanwhile reaches the subscriber exactly once.
-        await Eventually(async () => await fixture.OutboxAsync("monitor") == 0 && await fixture.OutboxAsync("api") == 0,
-            "The outboxes did not drain after the broker returned.");
-        await fixture.WaitForReceiptsAsync((int)appended);
-        Assert.Equal(appended, await fixture.ScalarAsync("SELECT count(*) FROM event_receipts"));
-        output.WriteLine($"outboxes drained and receipts settled {clock.Elapsed} after the broker returned");
-        foreach (var group in logs.Messages.Skip(quiet).Where(m => m.Level == LogLevel.Information && m.Category.StartsWith("Wolverine.RabbitMQ",
-                     StringComparison.Ordinal)).GroupBy(m => (m.Category, Text: m.Text.Split('\n')[0])))
-            output.WriteLine($"x{group.Count()} {group.Key.Category}: {group.Key.Text}");
-
-        // The worker's command listener consumes again: a Check wakes the scheduler without a tick.
-        before = await fixture.MonitorAsync();
-        fixture.Clock.Set(before.NextManualAllowedAtUtc!.Value);
-        using (var check = await client.PostAsync($"/api/accounts/{fixture.AccountId}/monitor/run", null))
-            Assert.Equal(HttpStatusCode.Accepted, check.StatusCode);
-        await fixture.WaitForRunAsync(before.Generation + 1);
+        finally
+        {
+            proxy.Up();
+        }
     }
 
     private static async Task<(Exception? Error, TimeSpan After)> Timed(Task start, Stopwatch clock)
