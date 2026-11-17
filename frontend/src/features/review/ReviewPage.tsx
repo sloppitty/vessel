@@ -6,6 +6,7 @@ import type { BrokerAccount, WorkspaceApi } from '@/api/workspace'
 import { AccountPicker } from '@/components/accounts/AccountPicker'
 import { allAccountsChoice } from '@/features/workspace/account-picker-options'
 import { errorMessage } from '@/api/errors'
+import { useApiRead } from '@/lib/use-api-read'
 import { defaultReviewQuery, reviewPeriods, type ReviewDocument, type ReviewGroup, type ReviewGroupBy, type ReviewProcessSelection, type ReviewQuery } from '@/api/review'
 import { useReviewPreferences } from './reviewPreferences'
 import { useVenues } from '@/api/venues'
@@ -95,23 +96,13 @@ function resultCount(count: number, positions = 0) {
 const estimatedRNote = 'Estimated R (planned-stop model): net P&L ÷ (executed entry notional × share-weighted stop distance), from the plan revision at or before the first entry fill. Only Plays with a complete initial stop have one. An estimate, not actual risk.'
 
 function useReport(api: WorkspaceApi, query: ReviewQuery, generation: number) {
-  const [loaded, setLoaded] = useState<{ api: WorkspaceApi; query: ReviewQuery; generation: number; value: ReviewDocument | null; error: string | null } | null>(null)
-  useEffect(() => {
-    const controller = new AbortController()
-    let active = true
-    api.review(query, controller.signal).then(value => {
-      if (active) setLoaded({ api, query, generation, value, error: null })
-    }).catch(error => {
-      if (active) setLoaded(previous => ({ api, query, generation, value: previous?.api === api ? previous.value : null,
-        error: errorMessage(error, 'The review could not be loaded.') }))
-    })
-    return () => { active = false; controller.abort() }
-  }, [api, query, generation])
-  const loading = loaded === null || loaded.api !== api || loaded.query !== query || loaded.generation !== generation
+  // A reload of the same query keeps the last good report on screen; another query's report is never shown as current.
+  const read = useApiRead(api, query, (client, signal) => client.review(query, signal),
+    { fallback: 'The review could not be loaded.', reloadKey: generation, keepPrevious: 'reload' })
   return {
-    loading, error: loading ? null : loaded.error, report: loading || loaded.error ? null : loaded.value,
-    // Previous options keep the controls usable while a new request runs; old results are never shown as current.
-    options: loaded?.api === api ? loaded.value?.options : undefined,
+    loading: read.loading, error: read.error, report: read.data,
+    // Previous options keep the controls usable while a new request runs.
+    options: read.latest?.options,
   }
 }
 
@@ -222,7 +213,7 @@ export function ReviewPage({ api, reloadGeneration, onOpenPlay, workspaceAccount
         <small>{query.positions === 'auto' || query.positions === undefined ? 'Automatic' : 'Manual'}</small>
         <InfoTip label="About imported positions">Closed Activity positions on no Play, with no plan, R or review. Automatic includes them while this selection has fewer than {minPlays} scored {minPlays === 1 ? 'Play' : 'Plays'} (change it in Settings). A Play weighs twice a position in batting average, average gain and loss, payoff and expectancy; dollar totals are never weighted.</InfoTip>
         {query.positions !== 'auto' && query.positions !== undefined && <button className="pr-count-link" onClick={() => setQuery(previous => ({ ...previous, positions: 'auto' }))}>Use automatic</button>}</span>}</div>
-    {loading && <div className="pr-loading" role="status">Loading review…</div>}
+    {loading && !report && <div className="pr-loading" role="status">Loading review…</div>}
     {error && <div className="pr-empty" role="alert"><p>{error}</p><button className="pr-outline-button" onClick={() => setReload(n => n + 1)}>Retry review</button></div>}
     {report && stats && <>
       <section className="pr-periods" role="group" aria-label="Performance period">{reviewPeriods.map(item => {

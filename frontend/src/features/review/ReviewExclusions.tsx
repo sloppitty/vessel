@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReviewExclusions as Exclusions, ReviewQuery } from '@/api/review'
 import type { WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
+import { useApiRead } from '@/lib/use-api-read'
 import { PlayIdentity } from '@/features/plays/PlayIdentity'
 import { evidenceLines } from '@/features/plays/unresolved'
 import { unresolvedReasonLabels } from '@/api/plays'
@@ -11,23 +12,12 @@ export function ReviewExclusions({ api, initialQuery, onOpenPlay }: {
   api: WorkspaceApi; initialQuery: ReviewQuery; onOpenPlay: (id: string, signal: AbortSignal) => Promise<void>
 }) {
   const [offset, setOffset] = useState(0)
-  const [retry, setRetry] = useState(0)
-  const [state, setState] = useState<{ api: WorkspaceApi; offset: number; retry: number; value: Exclusions | null; error: string | null } | null>(null)
+  const query = useMemo<ReviewQuery>(() => ({ ...initialQuery, offset }), [initialQuery, offset])
+  const exclusions = useApiRead(api, query, (client, signal) => client.reviewExclusions(query, signal), { fallback: 'Excluded Plays could not be loaded.' })
   const [opening, setOpening] = useState<string | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
   const request = useRef<AbortController | null>(null)
   useEffect(() => () => request.current?.abort(), [api])
-  useEffect(() => {
-    const controller = new AbortController()
-    const query = { ...initialQuery, offset }
-    api.reviewExclusions(query, controller.signal).then(value => {
-      if (!controller.signal.aborted) setState({ api, offset, retry, value, error: null })
-    }).catch(cause => {
-      if (!controller.signal.aborted) setState({ api, offset, retry, value: null,
-        error: errorMessage(cause, 'Excluded Plays could not be loaded.') })
-    })
-    return () => controller.abort()
-  }, [api, initialQuery, offset, retry])
   async function open(id: string) {
     request.current?.abort()
     const controller = new AbortController()
@@ -37,10 +27,9 @@ export function ReviewExclusions({ api, initialQuery, onOpenPlay }: {
     catch (cause) { if (!controller.signal.aborted) setOpenError(errorMessage(cause, 'The Play could not be opened.')) }
     finally { if (!controller.signal.aborted) setOpening(null) }
   }
-  const pending = state === null || state.api !== api || state.offset !== offset || state.retry !== retry
-  if (pending) return <p role="status">Loading excluded Plays…</p>
-  if (state.error) return <div role="alert"><p>{state.error}</p><button className="pr-outline-button" onClick={() => setRetry(n => n + 1)}>Retry exclusions</button></div>
-  const page = state.value!
+  if (exclusions.loading) return <p role="status">Loading excluded Plays…</p>
+  if (exclusions.error) return <div role="alert"><p>{exclusions.error}</p><button className="pr-outline-button" onClick={exclusions.reload}>Retry exclusions</button></div>
+  const page: Exclusions = exclusions.data!
   return <>
     {openError && <p role="alert">{openError}</p>}
     <p className="pr-exclusion-notice">{page.notice}</p>

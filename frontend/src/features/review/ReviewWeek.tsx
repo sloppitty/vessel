@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ArrowLeft, ChevronLeft, ChevronRight, ClipboardList, ShieldCheck, Tags } from 'lucide-react'
-import { errorMessage } from '@/api/errors'
+import { useApiRead } from '@/lib/use-api-read'
 import type { NextAction } from '@/api/plays'
 import type { ReviewDocument, ReviewProcessSelection, ReviewQuery } from '@/api/review'
 import type { WorkspaceApi } from '@/api/workspace'
@@ -48,35 +48,19 @@ export function ReviewWeek({ api, filters, onOpenPlay }: {
   onOpenPlay: (id: string, signal: AbortSignal) => Promise<void>
 }) {
   const [week, setWeek] = useState('current')
-  const [attempt, setAttempt] = useState(0)
   const [drill, setDrill] = useState<Drill | null>(null)
   const query = useMemo<ReviewQuery>(() => ({ ...filters, week, offset: 0 }), [filters, week])
-  const [loaded, setLoaded] = useState<{ query: ReviewQuery; attempt: number; report: ReviewDocument | null; error: string | null } | null>(null)
-  useEffect(() => {
-    const controller = new AbortController()
-    api.review(query, controller.signal)
-      .then(report => { if (!controller.signal.aborted) setLoaded({ query, attempt, report, error: null }) })
-      .catch(cause => { if (!controller.signal.aborted) setLoaded({ query, attempt, report: null, error: errorMessage(cause, 'The week could not be loaded.') }) })
-    return () => controller.abort()
-  }, [api, query, attempt])
-  const current = loaded?.query === query && loaded.attempt === attempt ? loaded : null
-  const report = current?.report ?? null
+  const loaded = useApiRead(api, query, (client, signal) => client.review(query, signal), { fallback: 'The week could not be loaded.' })
+  const report: ReviewDocument | null = loaded.data
   const shown = report?.week
   // Drill-downs read the same week by its first day, so a new week boundary never changes what a count holds.
   const weekQuery = useMemo<ReviewQuery>(() => ({ ...filters, week: shown?.start ?? week, offset: 0 }), [filters, shown?.start, week])
 
-  const [extras, setExtras] = useState<{ api: WorkspaceApi; scope: string; actions: NextAction[] | null; review: number | null } | null>(null)
   const scope = playScope(filters)
-  useEffect(() => {
-    const controller = new AbortController()
-    // Current state, not the week's: the newest next actions written, and the Plays waiting for a review now.
-    Promise.allSettled([api.nextActions(controller.signal), api.playCounts({ scope }, controller.signal)]).then(([actions, counts]) => {
-      if (!controller.signal.aborted) setExtras({ api, scope, actions: actions.status === 'fulfilled' ? actions.value : null,
-        review: counts.status === 'fulfilled' ? counts.value.review : null })
-    })
-    return () => controller.abort()
-  }, [api, scope])
-  const known = extras?.api === api && extras.scope === scope ? extras : null
+  // Current state, not the week's: the newest next actions written, and the Plays waiting for a review now.
+  const known = useApiRead(api, scope, (client, signal) => Promise.allSettled([client.nextActions(signal), client.playCounts({ scope }, signal)])
+    .then(([actions, counts]): { actions: NextAction[] | null; review: number | null } => ({ actions: actions.status === 'fulfilled' ? actions.value : null,
+      review: counts.status === 'fulfilled' ? counts.value.review : null })), { fallback: '' }).data
 
   if (drill) return <section className="pr-week" aria-label="Week drill-down">
     <button className="pr-outline-button" onClick={() => setDrill(null)}><ArrowLeft size={15} />Back to the week</button>
@@ -104,9 +88,9 @@ export function ReviewWeek({ api, filters, onOpenPlay }: {
       <button className="pr-outline-button" disabled={!shown || latest} onClick={() => shown && setWeek(shift(shown.start, 7))}>Next week<ChevronRight size={15} /></button>
       <button className="pr-outline-button" disabled={latest} onClick={() => setWeek('current')}>This week</button>
     </div>
-    {!current && <p role="status">Loading the week…</p>}
-    {current?.error && <div className="pr-empty" role="alert"><p>{current.error}</p>
-      <button className="pr-outline-button" onClick={() => setAttempt(n => n + 1)}>Retry the week</button></div>}
+    {loaded.loading && <p role="status">Loading the week…</p>}
+    {loaded.error && <div className="pr-empty" role="alert"><p>{loaded.error}</p>
+      <button className="pr-outline-button" onClick={loaded.reload}>Retry the week</button></div>}
     {report && shown && stats && <>
       <p className="pr-week-range">{day(shown.start)} to {day(shift(shown.start, 6))} · {shown.timeZone} · weeks start on {weekday(shown.start)}
         <InfoTip label="About the reporting week">The reporting week from Settings: from midnight on its first day in this zone, up to the next
