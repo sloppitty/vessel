@@ -94,7 +94,7 @@ public sealed class SnapshotReadConsistencyPostgresTests
             Assert.Equal((0, "unavailable"), ((await service.OverviewAsync(default)).Totals.BalanceAccountCount,
                 (await service.OverviewAsync(default)).Totals.BalanceCoverage));
             var summary = await new Vessel.Application.Overview.OverviewSummaryService(new WorkspaceStore(db, TestUnitOfWork.For(db)), service,
-                ActivityTestSupport.Activity(db), TimeProvider.System).GetAsync("account", "all", "all", default);
+                ActivityTestSupport.Activity(db), new SizingStore(db, TestUnitOfWork.For(db)), TimeProvider.System).GetAsync("account", "all", "all", default);
             Assert.Null(summary.Totals.Balance.AmountUsd);
             Assert.Contains(summary.Totals.Balance.Coverage.Reasons, r => r is { Reason: WorkspaceService.WalletNotReadReason, Count: 1 });
         }
