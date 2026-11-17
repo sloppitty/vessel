@@ -170,9 +170,9 @@ October 2, 2026. The owner asked for automatic chart updates, as close to real-t
 
 ### Frontend
 
-- `WorkspaceApi.marketStream(accountId, query, signal, onEvent)` reads the stream with `fetch` (bearer header; no `EventSource`, no token in URLs), parses SSE incrementally and validates every event with the existing candle/context validators. Invalid events are ignored.
+- `WorkspaceApi.marketStream(accountId, query, signal, onEvent)` reads the stream with `fetch` (bearer header; no `EventSource`, no token in URLs), parses SSE incrementally and validates every event with the existing candle/context validators. Invalid events are ignored. It uses the shared reader in `frontend/src/api/sse.ts`, whose idle watchdog ends a stream that sends no bytes (keepalives included) for 45 s, so a half-open connection after a network change reconnects like any other interruption (November 2026, issue #116).
 - `useLiveMarket` starts after the first candle load. It upserts candles into the loaded series and replaces the header statistics. On stream end or error it reconnects with backoff (1, 2, 5, 10, 30 s) and refreshes candles over REST after a reconnect to fill gaps. After three consecutive stream failures it falls back to polling the REST endpoints every 15 s and keeps retrying the stream every 60 s. It pauses while the tab is hidden and refreshes when the tab becomes visible again.
-- A `Live` toggle in the chart toolbar (persisted with the chart preferences, default on) shows the state: live (green dot), connecting/reconnecting (amber), polling fallback, stale, or off. Manual Refresh remains. The expanded dialog shares the same live state.
+- A `Live` toggle in the chart toolbar (persisted with the chart preferences, default on) shows the state: live (green dot), connecting/reconnecting (amber; reconnecting is labelled "Reconnecting", not "Live"), polling fallback, stale, or off. Manual Refresh remains. The expanded dialog shares the same live state.
 
 ### Live updates state
 
