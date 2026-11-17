@@ -15,6 +15,13 @@
 - A live stream that stopped sending data, for example after a Wi-Fi or network change, kept
   showing "Live" with frozen prices. Both streams now reconnect within a minute and resume
   where they left off, and the chart shows "Reconnecting" while it is down.
+- Activity marks an operation whose net result is unknown, or whose coverage is incomplete,
+  with a coverage badge on the row.
+- Review no longer prints a signed zero or a coloured "$0" for a tiny amount, prints R as
+  "R" like the Play receipt, gives average loss its sign, and colours every figure by its
+  exact value with exact zero neutral.
+- With imported positions counted, Review labels the weighted figures as weighted and counts
+  "results" where positions are included.
 
 ### Changed
 
