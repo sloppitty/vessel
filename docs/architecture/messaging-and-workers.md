@@ -444,7 +444,7 @@ The Basis column says where each statement comes from: **asserted** (the named t
 | | The claim keeps its lease: after the broker returns, a scheduler tick does not run the account again; once the lease has expired, the next tick does. | Asserted (B) |
 | | The lease lasts 5 minutes. | Read from code (`MonitorOptions.Lease`) |
 | Are events appended to PostgreSQL? | No. The failed run rolls back with its events: `events` stays empty. | Asserted (A, B) |
-| Broker returns during the start attempt: does the host start? | Yes. Both hosts finish starting within 30 s of the return; after the lease expires the run succeeds and every event reaches the subscriber once. | Asserted (B) |
+| Broker returns during the start attempt: does the host start? | Yes. Both hosts finish starting: the worker within 30 s of the return and the API within a further 30 s (the test waits for them one after the other, so 60 s is the asserted bound for both); after the lease expires the run succeeds and every event reaches the subscriber once. | Asserted (B) |
 | | About 5 s after the return (the next retry), in two runs. | Observed (B) |
 | Broker returns after the attempt failed | The process has exited. Compose restarts it (`restart: unless-stopped`), and each attempt blocks as above. | Not measured; restart policy read from code (`deploy/compose.yaml`) |
 | Broker goes away while the hosts run: do checks continue? | Yes. Scheduled runs succeed and the state stays `live`; their events commit in PostgreSQL and wait in the worker's `wolverine_outgoing_envelopes`. The API reports `workerOnline: true`. | Asserted (C) |
