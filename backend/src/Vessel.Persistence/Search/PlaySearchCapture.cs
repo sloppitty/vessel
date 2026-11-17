@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Vessel.Application.Common;
+using Vessel.Application.Plays.Execution;
 using Vessel.Domain.Evidence;
 using Vessel.Domain.Paper;
 using Vessel.Domain.Plays;
@@ -48,9 +49,10 @@ internal sealed class PlaySearchCapture
                     plays.Add(simulation.PlayId); break;
                 // A fill reaches a Play only through a linked order with its account, contract and external ID.
                 case ImportedFill fill: fillOrders.Add(OrderKey.Of(fill)); break;
-                // A refresh observes every retained order; only what decides missing executions changes an outcome.
-                case ImportedOrder order when entry.State == EntityState.Modified &&
-                    Changed(entry, nameof(ImportedOrder.Status), nameof(ImportedOrder.OriginalSize), nameof(ImportedOrder.IsPositionTpsl)):
+                // A refresh observes every retained order; only what decides missing executions changes an outcome (#92: the
+                // omitted-executions flag included). A new order has no link or allocation yet, and those writes are captured;
+                // orders are deleted only with an account that holds no Play.
+                case ImportedOrder order when entry.State == EntityState.Modified && Changed(entry, ExecutionIntegrity.MissingExecutionsOrderInputs):
                     orders.Add(order.Id); break;
             }
         }
@@ -64,7 +66,7 @@ internal sealed class PlaySearchCapture
         return taken;
     }
 
-    private static bool Changed(EntityEntry entry, params string[] properties) => properties.Any(p => entry.Property(p).IsModified);
+    private static bool Changed(EntityEntry entry, params IEnumerable<string> properties) => properties.Any(p => entry.Property(p).IsModified);
 
     internal sealed record Touched(IReadOnlySet<Guid> Plays, IReadOnlySet<OrderKey> FillOrders, IReadOnlySet<Guid> Orders);
 }
