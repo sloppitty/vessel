@@ -85,7 +85,8 @@ public static class OperationAggregator
                     (known, anchored, omitted) = (true, true, false);
                 }
                 var uncertain = uncertainUntil is { } until && time.Key <= until;
-                var (ordered, ambiguous, peakAmbiguous) = OrderTimestamp(time, known ? position : null, current?.Peak ?? position.Abs());
+                var (ordered, ambiguous, peakAmbiguous, basisAmbiguous) = OrderTimestamp(time, known ? position : null, current?.Peak ?? position.Abs(),
+                    current?.Basis);
                 foreach (var fill in ordered)
                 {
                     var quantity = ExactAmount.From(fill.Quantity);
@@ -166,6 +167,8 @@ public static class OperationAggregator
                     }
                     position = after;
                 }
+                // Issue #90: effect-consistent orders of this timestamp that leave different remaining costs.
+                if (basisAmbiguous && current is not null) current.BasisUnknown = true;
             }
             // An omitted execution after the last retained fill leaves its open operation unknown too.
             if (pending.Count > 0) Break(null);
@@ -201,17 +204,22 @@ public static class OperationAggregator
         };
     }
 
-    private static (IReadOnlyList<ImportedFill> Fills, bool Ambiguous, bool PeakAmbiguous) OrderTimestamp(
-        IEnumerable<ImportedFill> time, ExactAmount? position, ExactAmount priorPeak)
+    /// <remarks>
+    /// Issue #90: <c>BasisAmbiguous</c> is set when the effect-consistent orders share their operation boundaries but leave
+    /// different remaining average costs (an add and a reduction whose order matters). The early returns are orders in
+    /// which adds commute and reductions keep the average, so they never disagree.
+    /// </remarks>
+    private static (IReadOnlyList<ImportedFill> Fills, bool Ambiguous, bool PeakAmbiguous, bool BasisAmbiguous) OrderTimestamp(
+        IEnumerable<ImportedFill> time, ExactAmount? position, ExactAmount priorPeak, CostBasis? priorBasis)
     {
         var rows = time.OrderBy(f => f.PositionEffect == ExecutionFacts.Close ? 0 : f.PositionEffect == ExecutionFacts.Flip ? 1 : 2)
             .ThenBy(f => f.Id).ToArray();
-        if (rows.Length == 1) return (rows, false, false);
+        if (rows.Length == 1) return (rows, false, false, false);
         if (position is null)
         {
             // With unknown size, same-side closes before opens can prove a direction change.
             // Opposing-side ties cannot prove the size or which position their opens increased.
-            return (rows, rows.Select(f => f.Side).Distinct().Count() > 1 || rows.Any(f => f.PositionEffect is ExecutionFacts.Flip or ExecutionFacts.Unknown), false);
+            return (rows, rows.Select(f => f.Side).Distinct().Count() > 1 || rows.Any(f => f.PositionEffect is ExecutionFacts.Flip or ExecutionFacts.Unknown), false, false);
         }
         if (rows.Select(f => f.Side).Distinct().Count() == 1 && rows.All(f => f.Quantity > 0))
         {
@@ -219,37 +227,43 @@ public static class OperationAggregator
             var total = rows.Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Quantity));
             if (sameSide && rows.All(f => f.PositionEffect is ExecutionFacts.Open or ExecutionFacts.Unknown) ||
                 !sameSide && total.CompareTo(position.Value.Abs()) <= 0 && rows.All(f => f.PositionEffect is ExecutionFacts.Close or ExecutionFacts.Unknown))
-                return (rows, false, false); // No internal boundary, regardless of order or burst size.
+                return (rows, false, false, false); // No internal boundary, regardless of order or burst size.
             var closed = rows.Where(f => f.PositionEffect == ExecutionFacts.Close)
                 .Aggregate(default(ExactAmount), (sum, f) => sum + ExactAmount.From(f.Quantity));
             if (!sameSide && closed == position.Value.Abs() && rows.All(f => f.PositionEffect is ExecutionFacts.Close or ExecutionFacts.Open))
-                return (rows, false, false); // All closes must finish before this opposite-position open.
+                return (rows, false, false, false); // All closes must finish before this opposite-position open.
         }
 
         // ponytail: cap unusual timestamp bursts, conservatively flag their operations instead of
         // factorial work. Ordinary bursts without internal boundaries take the linear path.
-        if (rows.Length > 12) return (rows, true, false);
+        if (rows.Length > 12) return (rows, true, false, false);
         var used = new bool[rows.Length];
         var path = new List<ImportedFill>();
         ImportedFill[]? chosen = null;
         string? signature = null;
         string? peakSignature = null;
+        CostBasis? basisSignature = null;
         var ambiguous = false;
         var peakAmbiguous = false;
+        var basisAmbiguous = false;
         var visited = 0;
         var states = new HashSet<string>(StringComparer.Ordinal);
-        void Search(ExactAmount before, int operation, List<string> allocations, List<ExactAmount> peaks)
+        void Search(ExactAmount before, int operation, List<string> allocations, List<ExactAmount> peaks, CostBasis? basis)
         {
             if (ambiguous) return;
             var peakState = string.Join("|", peaks);
-            if (!states.Add($"{string.Join("", used.Select(u => u ? '1' : '0'))}:{before}:{operation}:{peakState}:{string.Join("|", allocations.Order(StringComparer.Ordinal))}")) return;
+            if (!states.Add($"{string.Join("", used.Select(u => u ? '1' : '0'))}:{before}:{operation}:{peakState}:{basis}:{string.Join("|", allocations.Order(StringComparer.Ordinal))}")) return;
             if (++visited > 4096) { ambiguous = true; return; }
             if (path.Count == rows.Length)
             {
                 var candidate = string.Join("|", allocations.Order(StringComparer.Ordinal));
-                if (chosen is null) { chosen = path.ToArray(); signature = candidate; peakSignature = peakState; }
+                if (chosen is null) { chosen = path.ToArray(); signature = candidate; peakSignature = peakState; basisSignature = basis; }
                 else if (signature != candidate) ambiguous = true;
-                else if (peakSignature != peakState) peakAmbiguous = true;
+                else
+                {
+                    if (peakSignature != peakState) peakAmbiguous = true;
+                    if (basisSignature != basis) basisAmbiguous = true;
+                }
                 return;
             }
             for (var i = 0; i < rows.Length; i++)
@@ -262,26 +276,30 @@ public static class OperationAggregator
                 var next = operation;
                 var added = new List<string>(allocations);
                 var nextPeaks = new List<ExactAmount>(peaks);
+                // The walk's basis rule: an add re-averages, a reduction keeps the average, flat or a flip starts over.
+                var nextBasis = basis;
                 if (crosses)
                 {
                     added.Add($"{fill.Id}:{operation}:exit:{before.Abs()}");
                     added.Add($"{fill.Id}:{++next}:entry:{after.Abs()}");
                     nextPeaks.Add(after.Abs());
+                    nextBasis = CostBasis.Add(null, default, after.Abs(), fill.Price);
                 }
                 else
                 {
                     added.Add($"{fill.Id}:{operation}:{(reducing ? "exit" : "entry")}:{ExactAmount.From(fill.Quantity)}");
                     if (after.Abs().CompareTo(nextPeaks[operation]) > 0) nextPeaks[operation] = after.Abs();
-                    if (after.Units.IsZero) { next++; nextPeaks.Add(default); }
+                    if (after.Units.IsZero) { next++; nextPeaks.Add(default); nextBasis = null; }
+                    else if (!reducing) nextBasis = CostBasis.Add(basis, before.Abs(), ExactAmount.From(fill.Quantity), fill.Price);
                 }
                 used[i] = true; path.Add(fill);
-                Search(after, next, added, nextPeaks);
+                Search(after, next, added, nextPeaks, nextBasis);
                 path.RemoveAt(path.Count - 1); used[i] = false;
                 if (ambiguous) break;
             }
         }
-        Search(position.Value, 0, [], [priorPeak]);
-        return (chosen ?? rows, ambiguous || chosen is null, peakAmbiguous);
+        Search(position.Value, 0, [], [priorPeak], position.Value.Units.IsZero ? null : priorBasis);
+        return (chosen ?? rows, ambiguous || chosen is null, peakAmbiguous, basisAmbiguous);
     }
 
     private sealed class Builder(ImportedFill first, int sign)
@@ -300,6 +318,11 @@ public static class OperationAggregator
         private bool unassigned, unsupportedGrossFee, unsupportedNetFee;
         private ExactAmount entered, exited, pnl, grossFees, netFees;
         private BigInteger entryNotional, exitNotional;
+        // Issue #90: the remaining quantity's average cost. It becomes unknown when the effect-consistent orders of a shared
+        // timestamp leave different costs (set by the walk from OrderTimestamp).
+        private CostBasis? basis;
+        public bool BasisUnknown;
+        public CostBasis? Basis => basis;
         public void Add(ImportedFill fill, string role, ExactAmount quantity, bool monetary, IReadOnlyDictionary<Guid, Guid>? links,
             bool split = false)
         {
@@ -322,6 +345,7 @@ public static class OperationAggregator
                 if (NominalStablecoins.Contains(fill.FeeToken)) netFees += fee;
                 else if (!fee.Units.IsZero) unsupportedNetFee = true;
             }
+            if (role == "entry") basis = CostBasis.Add(basis, entered - exited, quantity, fill.Price);
             if (role == "entry") { entered += quantity; entryNotional += quantity.Units * ExactAmount.From(fill.Price).Units; if (!string.IsNullOrWhiteSpace(fill.ExternalOrderId)) entries.Add(fill.ExternalOrderId); }
             if (role == "exit") { exited += quantity; exitNotional += quantity.Units * ExactAmount.From(fill.Price).Units; if (!string.IsNullOrWhiteSpace(fill.ExternalOrderId)) exits.Add(fill.ExternalOrderId); }
             parts.Add(new(fill, role, quantity, fee, closedPnl, play));
@@ -348,6 +372,7 @@ public static class OperationAggregator
                 FillLeverages = leverages,
                 // The unrounded 56-place product; the API's weighted averages above keep their documented rounding.
                 ExactEntryNotional = UnknownBoundaries || MissingEntries || entered.Units.IsZero ? null : entryNotional,
+                RemainingBasis = UnknownBoundaries || MissingEntries || BasisUnknown || position.Abs() != entered - exited ? null : basis,
                 SourceFills = parts.Select(p => p.Fill)
             };
         }

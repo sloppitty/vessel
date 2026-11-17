@@ -61,7 +61,8 @@ public sealed partial class HyperliquidPerpetualReader : IMarketContextReader
             mid.ValueKind == JsonValueKind.Null ? null : Price(mid, numbers).Text,
             Price(Property(ctx, "prevDayPx"), numbers).Text, Price(Property(ctx, "dayNtlVlm"), numbers).Text,
             Price(Property(ctx, "openInterest"), numbers).Text, funding,
-            premium.ValueKind == JsonValueKind.Null ? null : Signed(premium, numbers));
+            premium.ValueKind == JsonValueKind.Null ? null : Signed(premium, numbers),
+            HyperliquidInstruments.Canonical(name) == name ? null : name);
     }
 
     // Keeps the exact text after proving it is a finite decimal that may be negative.

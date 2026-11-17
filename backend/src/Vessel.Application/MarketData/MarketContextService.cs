@@ -11,9 +11,11 @@ public interface IMarketContextReader
     Task<IReadOnlyList<VenueMarketContext>> ReadMarketContextsAsync(CancellationToken cancellationToken);
 }
 
+/// <param name="VenueContractId">The venue's own market identifier when fills and positions carry one, by the same rule as
+/// <c>ImportedFill.VenueContractId</c>; Activity values an operation only at its own native market's mark (issue #90).</param>
 public sealed record VenueMarketContext(
     string ContractId, string MarkPrice, string OraclePrice, string? MidPrice, string? PreviousDayPrice,
-    string DayNotionalVolume, string OpenInterest, string FundingRate, string? Premium);
+    string DayNotionalVolume, string OpenInterest, string FundingRate, string? Premium, string? VenueContractId = null);
 
 public sealed record MarketContextDto(string VenueId, string Instrument, string MarkPrice, string OraclePrice,
     string? MidPrice, string? PreviousDayPrice, string DayNotionalVolume, string OpenInterest, string FundingRate,

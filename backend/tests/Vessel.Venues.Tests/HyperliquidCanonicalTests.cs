@@ -149,6 +149,8 @@ public sealed partial class HyperliquidAdapterTests : HyperliquidAdapterTestsSup
         {
             var result = await reader.ReadMarketContextsAsync(default);
             Assert.Equal(["1000PEPE", "BTC"], result.Select(c => c.ContractId));
+            // Issue #90: the native ID follows the fills' rule, set only when it differs from the canonical key.
+            Assert.Equal(["kPEPE", null], result.Select(c => c.VenueContractId));
             Assert.All(result, c => Assert.Equal("0.0012300", c.MarkPrice));
         }
     }

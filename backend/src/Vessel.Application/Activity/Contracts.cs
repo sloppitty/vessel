@@ -120,6 +120,8 @@ public sealed record ActivityOperationDto(string Id, Guid AccountId, string Cont
     internal IEnumerable<ImportedFill> SourceFills { get; init; } = [];
     // Internal partition identity, never the canonical display key or a serialized API field.
     internal ActivityContractKey ContractKey { get; init; }
+    // Issue #90: the remaining quantity's average-cost basis for unrealized P&L; null when unknown. Never serialized.
+    internal CostBasis? RemainingBasis { get; init; }
 }
 public sealed record ActivityCoverageDto(Guid AccountId, string? ContractId, string Notice);
 public sealed record PaperExecutionDto(Guid Id, string EntryId, string? LevelId, string Role, string Price, string Quantity,

@@ -147,9 +147,9 @@ Activity values an open operation at the venue's mark when the venue has one, an
 
 - P8: the mark is 52, the entry 51, and it is short: -(2 x (52 - 51)) = -2. The venue's snapshot figure is also -2.
 - XRP: RISEx has no mark here, so the snapshot's -0.2 counts. The snapshot is newer than b6 and holds exactly -4 on XRP.
-- AVAX: the right figure is 200. After a16 sells 5 at the average cost of 100, 5 remain at 100. a17 adds 5 at 120, so the
-  remaining cost is (5 x 100 + 5 x 120) / 10 = 110, and 10 x (130 - 110) = 200. The venue's snapshot says 200 too. See
-  section 9 for what the code shows.
+- AVAX: 200. After a16 sells 5 at the average cost of 100, 5 remain at 100. a17 adds 5 at 120, so the remaining cost is
+  (5 x 100 + 5 x 120) / 10 = 110, and 10 x (130 - 110) = 200. The venue's snapshot says 200 too. The displayed entry stays
+  1600 / 15; only unrealized uses the remaining cost (#90). `Avax_unrealized_uses_the_cost_of_what_is_still_open` pins it.
 - Closed operations show no unrealized figure.
 
 The snapshot path has guards. With a single current snapshot and one market per contract, Activity anchors its walk to the
@@ -322,7 +322,7 @@ exactly on D(7); see section 9.
 7.5. Sizing's record and Review's Plays count the same wins, losses, scratches and closed Plays, with the same batting
 average, 0.4.
 
-7.6. For a position that has had no exit, the mark path and the venue's snapshot agree: P8 is -2 both ways.
+7.6. The mark path and the venue's snapshot agree: P8 is -2 both ways, and AVAX, after an exit and an add, 200 both ways.
 
 ## 8. Database run and the Plays list
 
@@ -353,7 +353,6 @@ once the issue is fixed. Nothing else in the golden journal is skipped.
 
 | Figure | Right | Code | Why the document is right | Test |
 | --- | --- | --- | --- | --- |
-| AVAX unrealized (2.3) | 200 | 233.333333333333333333333333333 | The code values the remaining 10 at the average of all 15 entered, 1600 / 15, including the 5 already sold at a cost of 100. 10 x (130 - 106.666…) = 233.33…. The venue's average-cost figure and Overview's snapshot both say 200. | `Avax_unrealized_uses_the_cost_of_what_is_still_open`, #90 |
 | Overview realized, All (3, 7.2) | 7.81, 8 contributing, 2 excluded; Swing 11.1 | 10.81, 9 contributing, 1 excluded; Swing 14.1 | P6's order filled 2 with one execution of 1 retained. Review and Sizing leave it out by the shared `MissingExecutions` rule; Overview counts its +3. | `Overview_realized_equals_activity_closed_nets_minus_known_missing_executions`, #93 |
 | 7-day selection (7.4) | one count on every screen | Activity 3, Overview 3, Review 2 | SOL-S closes exactly at Now - 7 days. Activity uses [from, ...), Overview [from, now], Review (from, now]. Which rule is right is #125's decision; the test only requires all screens to agree. | `The_seven_day_period_selects_the_same_operations_on_every_screen`, #125 |
 | P1 list row after a later omission (8.1) | executions, no result, no R | scored, 9.8, 1.96 | The projection reacts to an order's status, size and TP/SL flag, not to `ExecutionsOmitted`, so the row keeps a result Review has withdrawn. | `A_later_omission_on_a_scored_plays_order_withdraws_its_list_result`, #92 |

@@ -37,11 +37,21 @@ internal static class PaperActivity
         var current = default(ExactAmount);
         var peak = default(ExactAmount);
         var unknownPeak = false;
+        // Issue #90: the remaining average cost, unknown once a bucket both adds and removes (their order is not known).
+        CostBasis? basis = null;
+        var basisUnknown = false;
         foreach (var group in executions.GroupBy(e => e.OccurredAtUtc).OrderBy(g => g.Key))
         {
             var added = Quantity(group.Where(e => e.Role == "entry"));
             var removed = Quantity(group.Where(e => e.Role != "entry"));
             if (added.Units.Sign > 0 && removed.Units.Sign > 0 && current + added > peak) unknownPeak = true;
+            if (added.Units.Sign > 0 && removed.Units.Sign > 0) basisUnknown = true;
+            var held = current;
+            foreach (var entry in group.Where(e => e.Role == "entry"))
+            {
+                basis = CostBasis.Add(basis, held, ExactAmount.From(entry.Quantity), entry.Price);
+                held += ExactAmount.From(entry.Quantity);
+            }
             current += added - removed;
             if (current > peak) peak = current;
             if (current.Units.Sign < 0) incomplete = true;
@@ -58,7 +68,7 @@ internal static class PaperActivity
         {
             TradingMode = "paper", ExecutionSource = "paper", PaperExecutions = executions.Select(ToDto).ToList(),
             PaperExecutionCount = executions.Count, GrossClosedPnlUsd = incomplete ? null : net.ToString(),
-            FundingStatus = "not-applicable"
+            FundingStatus = "not-applicable", RemainingBasis = incomplete || basisUnknown ? null : basis
         };
     }
 

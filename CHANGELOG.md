@@ -39,6 +39,11 @@
   DEX) no longer shows 0 positions and $0 unrealized P&L. They read as unknown with a reason
   until the next complete read, and Activity draws no snapshot conclusions from an
   incomplete read.
+- Activity's unrealized P&L uses the average cost of the quantity still open, where it used
+  the average of every entry. After buying 10 at 100, selling 5 at 110 and buying 5 at 120,
+  a mark of 130 now reads +200, matching the venue, where it read +233.33.
+- Unrealized P&L uses only the mark of the operation's own market. A retired RISEx market
+  shows unknown where it could take its successor's mark.
 
 ### Changed
 

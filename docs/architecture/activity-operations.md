@@ -220,10 +220,10 @@ asked for unrealized P&L in its place, in both real and Paper modes.
 - **Mark source.** Page rows carry `unrealizedPnlUsd`, `unrealizedPnlSource`
   (`mark` or `snapshot`), `unrealizedPnlMarkPrice` and
   `unrealizedPnlAsOfUtc`. They are set only for `open` operations with a
-  direction, positive remaining quantity and known average entry. Venues
+  direction, positive remaining quantity and known remaining cost. Venues
   with market context (Hyperliquid, RISEx, and Paper through its Hyperliquid
   account) mark the remainder at the venue's current `markPx`:
-  direction × remaining × (mark − average entry), exact and rounded once to 28
+  direction × remaining × (mark − remaining cost), exact and rounded once to 28
   places. The read goes through the shared 10-second `MarketContextCache`,
   once per venue per page. Paper mode reads this server-side; the browser's
   Paper market-stream deny-list is unchanged. A venue without market context
@@ -233,6 +233,37 @@ asked for unrealized P&L in its place, in both real and Paper modes.
   exactly the remaining signed quantity on the same native contract. A failed
   or timed-out venue read, an unknown or ambiguous market, or a mismatch leaves
   the fields null without failing the page.
+- **Remaining cost (November 17, 2026, #90).** The displayed average entry
+  stays the quantity-weighted average of every entry. Unrealized P&L uses the
+  remaining quantity's average cost instead, as Hyperliquid does: an exit
+  removes quantity at the current average and leaves it unchanged, an entry
+  re-averages, and a flip starts a new operation with a new cost. The average
+  is carried as an exact fraction and only the final figure rounds. Example:
+  buy 10 at 100, sell 5 at 110, buy 5 at 120. The displayed entry is
+  1600 / 15 = 106.67, the remaining cost (5 × 100 + 5 × 120) / 10 = 110, so a
+  mark of 130 gives 10 × (130 − 110) = +200, the venue's figure (not +233.33).
+  The short mirror (sell 10 at 100, buy 5 at 90, sell 5 at 80, mark 70) gives
+  −10 × (70 − 90) = +200. Fills sharing a timestamp are ordered by their
+  position effects, as for operation boundaries. The cost stays known when
+  those effects fix the order (from flat, buy 10 at 100 opening and sell 5 at
+  110 closing leave 5 at 100) or when every effect-consistent order leaves the
+  same cost; it is unknown, with the mark-path figure, only when they disagree
+  (an add and a reduction of one operation at one timestamp, at different
+  prices). A Paper minute bucket that both adds and removes stays unknown.
+  Incomplete operations and missing opening entries have no remaining cost.
+- **Native market (November 17, 2026, #90).** A mark counts only for the
+  operation's own native market, as the snapshot path already requires. Mark
+  contexts carry the venue's native ID by the fills' rule (RISEx `market_id`,
+  Hyperliquid only for keys whose native name differs, such as `kPEPE`). A
+  native partition takes only the mark with its own native ID, so a retired
+  RISEx market shows unknown, never its successor's mark. A mark without a
+  native ID names the market whose native ID is the canonical key, so when
+  funding names a non-aliased Hyperliquid market natively (`BTC`, `xyz:GOLD`)
+  and the fills resolve to that native partition, its mark still counts. A partition without
+  a native ID (legacy fills, with no single native market named by the fills,
+  snapshot or funding) takes only a mark that the venue also reports without
+  a native ID; otherwise it is unknown. Paper operations have no native
+  partition and use the canonical key's mark, the market they are simulated on.
 - **Not part of history.** Marks are read after the cached aggregate, for the
   shown rows only. `version` does not hash them, so a moving price never flags
   Activity as changed. They are observations, not fills, and do not enter
