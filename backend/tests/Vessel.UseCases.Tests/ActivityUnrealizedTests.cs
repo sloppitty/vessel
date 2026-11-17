@@ -30,11 +30,21 @@ public sealed class ActivityUnrealizedTests
             UnrealizedPnlUsd = unrealized }]
     };
 
+    private static FundingPayment Funding(string contract, string? native) => new()
+    {
+        Id = Guid.NewGuid(), OwnerId = Owner, AccountId = AccountId, SourceId = Guid.NewGuid().ToString(), ContractId = contract,
+        VenueContractId = native, Amount = -1m, Asset = "USDC", OccurredAtUtc = Start.AddMinutes(30)
+    };
+
+    private static Task<IReadOnlyList<ActivityOperationSummaryDto>> Page(string venueId, IReadOnlyList<ImportedFill> fills,
+        IMarketContextReader? reader = null, params AccountSnapshot[] snapshots) =>
+        Page(venueId, fills, Array.Empty<FundingPayment>(), reader, snapshots);
+
     private static async Task<IReadOnlyList<ActivityOperationSummaryDto>> Page(string venueId, IReadOnlyList<ImportedFill> fills,
-        IMarketContextReader? reader = null, params AccountSnapshot[] snapshots)
+        IReadOnlyList<FundingPayment> funding, IMarketContextReader? reader, AccountSnapshot[] snapshots)
     {
         var account = new Account(AccountId, Owner, venueId, "Fixture");
-        var facts = new ActivityFacts([account], fills, snapshots, new Dictionary<Guid, Guid>());
+        var facts = new ActivityFacts([account], fills, snapshots, new Dictionary<Guid, Guid>()) { FundingPayments = funding };
         var workspace = new MemoryWorkspaceStore(Owner);
         workspace.Accounts.Add(account);
         var clock = new Clock(Now);
@@ -133,6 +143,36 @@ public sealed class ActivityUnrealizedTests
     }
 
     [Fact]
+    public async Task Effects_that_fix_the_order_at_one_timestamp_keep_the_basis()
+    {
+        // From a snapshot-anchored flat start, the close can only follow the open: the remaining 5 cost 100, so 5 × (130 − 100).
+        var op = Assert.Single(await Page("hyperliquid", [Fill(1, "buy", "open", 10m, 100m), Fill(1, "sell", "close", 5m, 110m)],
+            new Reader("hyperliquid", Mark("BTC", "130")), Snapshot(10, 5m, 0m)));
+        Assert.Equal(("open", "5", "150"), (op.Status, op.OpenQuantity, op.UnrealizedPnlUsd));
+        // Both orders of an add at the average and a reduction leave the remainder at 100: 10 × (130 − 100).
+        var same = Assert.Single(await Page("hyperliquid", [Fill(0, "buy", "open", 10m, 100m), Fill(1, "sell", "close", 5m, 110m),
+            Fill(1, "buy", "open", 5m, 100m)], new Reader("hyperliquid", Mark("BTC", "130"))));
+        Assert.Equal(("open", "10", "300"), (same.Status, same.OpenQuantity, same.UnrealizedPnlUsd));
+    }
+
+    /// <summary>
+    /// Issue #90: Hyperliquid funding names non-aliased markets natively (`BTC`, `xyz:GOLD`), which resolves ID-less fills to
+    /// that native partition; the mark, reported without a native ID by the same rule as fills, still belongs to it.
+    /// </summary>
+    [Theory]
+    [InlineData("BTC", null, null)]
+    [InlineData("xyz:GOLD", null, null)]
+    [InlineData("1000PEPE", "kPEPE", "kPEPE")]
+    public async Task Hyperliquid_marks_survive_funding_naming_the_native_market(string contract, string? fillNative, string? markNative)
+    {
+        var fills = new[] { Fill(0, "buy", "open", 2m, 100m, contract, fillNative) };
+        var reader = new Reader("hyperliquid", Mark(contract, "200", markNative));
+        Assert.Equal("200", Assert.Single(await Page("hyperliquid", fills, reader)).UnrealizedPnlUsd);
+        var funded = Assert.Single(await Page("hyperliquid", fills, [Funding(contract, fillNative ?? contract)], reader, []));
+        Assert.Equal(("200", "mark"), (funded.UnrealizedPnlUsd, funded.UnrealizedPnlSource));
+    }
+
+    [Fact]
     public async Task A_retired_market_never_takes_its_successors_mark_and_an_id_less_partition_takes_no_native_mark()
     {
         // RISEx retired DOGE market 13 and lists market 14 under the same canonical key; only 14 has a mark.
@@ -141,6 +181,14 @@ public sealed class ActivityUnrealizedTests
         Assert.Equal(2, ops.Count);
         Assert.Null(ops.Single(o => o.AverageEntryPrice == "0.1").UnrealizedPnlUsd);
         Assert.Equal("5", ops.Single(o => o.AverageEntryPrice == "0.15").UnrealizedPnlUsd);
+        // Funding on both markets changes nothing: the mark names market 14, never the canonical key.
+        var funded = await Page("risex", [Fill(0, "buy", "open", 100m, 0.1m, "DOGE", "13"), Fill(1, "buy", "open", 100m, 0.15m, "DOGE", "14")],
+            [Funding("DOGE", "13"), Funding("DOGE", "14")], reader, []);
+        Assert.Null(funded.Single(o => o.AverageEntryPrice == "0.1").UnrealizedPnlUsd);
+        Assert.Equal("5", funded.Single(o => o.AverageEntryPrice == "0.15").UnrealizedPnlUsd);
+        // A mark without a market ID never reaches a numeric native market.
+        Assert.Null(Assert.Single(await Page("risex", [Fill(0, "buy", "open", 100m, 0.1m, "DOGE", "13")],
+            new Reader("risex", Mark("DOGE", "0.2")))).UnrealizedPnlUsd);
         // A legacy fill without a market ID, and nothing naming its market: it cannot prove it is market 14.
         Assert.Null(Assert.Single(await Page("risex", [Fill(0, "buy", "open", 100m, 0.1m, "DOGE")], reader)).UnrealizedPnlUsd);
         // A venue that names no native market for the key still marks an ID-less partition.

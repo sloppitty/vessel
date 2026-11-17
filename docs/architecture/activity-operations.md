@@ -243,16 +243,23 @@ asked for unrealized P&L in its place, in both real and Paper modes.
   1600 / 15 = 106.67, the remaining cost (5 × 100 + 5 × 120) / 10 = 110, so a
   mark of 130 gives 10 × (130 − 110) = +200, the venue's figure (not +233.33).
   The short mirror (sell 10 at 100, buy 5 at 90, sell 5 at 80, mark 70) gives
-  −10 × (70 − 90) = +200. An entry and an exit of one operation at the same
-  timestamp (or Paper minute bucket) have no known order, so the cost and the
-  mark-path figure are unknown. Incomplete operations and missing opening
-  entries have no remaining cost.
+  −10 × (70 − 90) = +200. Fills sharing a timestamp are ordered by their
+  position effects, as for operation boundaries. The cost stays known when
+  those effects fix the order (from flat, buy 10 at 100 opening and sell 5 at
+  110 closing leave 5 at 100) or when every effect-consistent order leaves the
+  same cost; it is unknown, with the mark-path figure, only when they disagree
+  (an add and a reduction of one operation at one timestamp, at different
+  prices). A Paper minute bucket that both adds and removes stays unknown.
+  Incomplete operations and missing opening entries have no remaining cost.
 - **Native market (November 17, 2026, #90).** A mark counts only for the
   operation's own native market, as the snapshot path already requires. Mark
   contexts carry the venue's native ID by the fills' rule (RISEx `market_id`,
   Hyperliquid only for keys whose native name differs, such as `kPEPE`). A
   native partition takes only the mark with its own native ID, so a retired
-  RISEx market shows unknown, never its successor's mark. A partition without
+  RISEx market shows unknown, never its successor's mark. A mark without a
+  native ID names the market whose native ID is the canonical key, so when
+  funding names a non-aliased Hyperliquid market natively (`BTC`, `xyz:GOLD`)
+  and the fills resolve to that native partition, its mark still counts. A partition without
   a native ID (legacy fills, with no single native market named by the fills,
   snapshot or funding) takes only a mark that the venue also reports without
   a native ID; otherwise it is unknown. Paper operations have no native
