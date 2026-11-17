@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+
+- An opt-in pre-push hook (`git config core.hooksPath scripts/hooks`) runs the quick checks
+  the pushed files need and refuses a `v*` tag that fails `scripts/release.py check --tag`.
+  See `docs/development.md`.
+
 ### Fixed
 
 - After an API outage, open pages kept their load error until the next event. The shell now
