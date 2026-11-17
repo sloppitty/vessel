@@ -74,10 +74,32 @@ is not the perps balance. A failed, dropped, malformed or invalid `spotMeta` or
   comes from the perps (reported margin or withdrawal), so it stays current.
 - Account detail shows the wallet's own read time and says it is older than the
   latest perpetuals read.
-- The history notice adds "The stablecoin wallet could not be refreshed; its
+- The history notice adds "The stablecoin wallet could not be refreshed; any
   last observed balances and their time are kept, and the account balance is
   unknown until it is read again."
 
 Unified and portfolio-margin accounts hold every balance in the wallet, so a
 wallet failure still fails their read. A rate limit, a missing account mode or
 the shared read deadline still stops the whole read on every mode.
+
+## Consistent reads and a wallet never read (November 17, 2026)
+
+Issue #91 (review N-20, N-22, Q-18).
+
+- A snapshot is read with its positions and wallet rows in one statement
+  (`WorkspaceStore.SnapshotAsync`, `SnapshotsAsync` and the refresh's own read),
+  so a reader never pairs the perps of one refresh with the wallet or positions
+  of another. Before, a split query could add the old perps equity to a wallet
+  refreshed in between. The join multiplies an account's positions by its few
+  supported stablecoins at most and takes no lock a refresh waits for.
+- A wallet that was never read is not an empty wallet. On a wallet-capable
+  venue (Hyperliquid) a separate-ledger balance stays unknown until a wallet has
+  been observed, as it already did while the observed wallet is older than the
+  perps. `StablecoinsObservedAtUtc` is the stored fact: it is set by every valid
+  balance-array read, an empty one included, so an observed empty wallet is a
+  known zero. No migration is needed. A snapshot with no account mode yet is
+  unknown too.
+- The Overview summary's balance coverage gives the reason "Stablecoin wallet
+  not read with the latest perpetuals; balance unknown." for these accounts.
+- Unified and portfolio-margin accounts, wallet-less venues (Lighter, RISEx),
+  manual records and paper accounts are unchanged.

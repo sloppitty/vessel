@@ -360,7 +360,7 @@ public sealed partial class HyperliquidPerpetualReader(HttpClient httpClient, Ti
     };
 
     internal const string WalletUnavailableNotice =
-        "The stablecoin wallet could not be refreshed; its last observed balances and their time are kept, and the " +
+        "The stablecoin wallet could not be refreshed; any last observed balances and their time are kept, and the " +
         "account balance is unknown until it is read again.";
 
     /// <summary>

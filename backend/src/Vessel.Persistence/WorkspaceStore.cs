@@ -23,10 +23,13 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         .Where(x => x.Id == id).Select(x => new MarketDataAccount(x.IsEnabled, x.VenueId, x.TradingMode)).SingleOrDefaultAsync(ct);
     public Task<bool> SourceExistsAsync(string venueId, string sourceId, CancellationToken ct) =>
         db.Accounts.AnyAsync(a => a.TradingMode == TradingMode.Real && a.VenueId == venueId && a.SourceId == sourceId, ct);
+    // One statement, so a snapshot row and its positions and wallet rows always come from the same refresh (#91). Separate
+    // statements outside a shared snapshot could pair the old perps with a newer wallet. The join multiplies an account's
+    // positions by its few supported stablecoins at most, and takes no locks a refresh would wait for.
     public Task<AccountSnapshot?> SnapshotAsync(Guid id, CancellationToken ct) => db.Snapshots
         .Where(s => s.AccountId == id && db.Accounts.Any(a => a.Id == s.AccountId && a.IsEnabled && a.TradingMode == TradingMode.Real))
-        .Include(s => s.Positions).Include(s => s.Stablecoins).AsSplitQuery().AsNoTracking().SingleOrDefaultAsync(ct);
-    public Task<List<AccountSnapshot>> SnapshotsAsync(CancellationToken ct) => db.Snapshots.Where(s => db.Accounts.Any(a => a.Id == s.AccountId && a.IsEnabled && a.TradingMode == TradingMode.Real)).Include(x => x.Positions).Include(x => x.Stablecoins).AsSplitQuery().AsNoTracking().ToListAsync(ct);
+        .Include(s => s.Positions).Include(s => s.Stablecoins).AsSingleQuery().AsNoTracking().SingleOrDefaultAsync(ct);
+    public Task<List<AccountSnapshot>> SnapshotsAsync(CancellationToken ct) => db.Snapshots.Where(s => db.Accounts.Any(a => a.Id == s.AccountId && a.IsEnabled && a.TradingMode == TradingMode.Real)).Include(x => x.Positions).Include(x => x.Stablecoins).AsSingleQuery().AsNoTracking().ToListAsync(ct);
     public Task<List<ImportedFill>> FillsAsync(Guid? accountId, int limit, CancellationToken ct) => db.Fills
         .Where(x => (accountId == null || x.AccountId == accountId) && db.Accounts.Any(a => a.Id == x.AccountId && a.IsEnabled && a.TradingMode == TradingMode.Real)).OrderByDescending(x => x.OccurredAtUtc).ThenBy(x => x.Id)
         .Take(limit).AsNoTracking().ToListAsync(ct);
@@ -188,7 +191,7 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
         // Validate immutable settlement identities before any refresh facts are written.
         if (result.Funding is { } funding) await ApplyFundingAsync(account, funding, ct);
         var observation = result.Snapshot;
-        var snapshot = await db.Snapshots.Include(x => x.Positions).Include(x => x.Stablecoins).AsSplitQuery().SingleOrDefaultAsync(x => x.AccountId == account.Id, ct);
+        var snapshot = await db.Snapshots.Include(x => x.Positions).Include(x => x.Stablecoins).AsSingleQuery().SingleOrDefaultAsync(x => x.AccountId == account.Id, ct);
         var replacePerps = snapshot is null || observation.ObservedAtUtc > snapshot.ObservedAtUtc;
         var wallet = observation.StablecoinWallet;
         var replaceWallet = wallet is not null &&
