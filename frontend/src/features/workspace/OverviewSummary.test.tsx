@@ -43,6 +43,22 @@ describe('Overview summary', () => {
     fireEvent.click(within(table).getByText('100.00%'))
     expect(onQuery).toHaveBeenCalledTimes(2)
   })
+  it('shows positions and unrealized P&L as unknown after an incomplete position read, with the reason (#89)', async () => {
+    const document = overviewSummaryFixture()
+    const reason = 'Latest position read was incomplete; positions and unrealized P&L unknown.'
+    document.totals = { ...document.totals, openPositionCount: null, unrealizedPnl: { amountUsd: null, coverage: { contributingAccountCount: 0,
+      totalAccountCount: 1, contributingOperationCount: 0, excludedOperationCount: 0, reasons: [{ reason, count: 1 }] } } }
+    document.rows[0]!.totals = document.totals
+    // The owner-wide fallback still counts zero positions; the loaded summary must not fall back to it.
+    render(<OverviewSummary api={api(document)} query={query} onQuery={vi.fn()} reloadGeneration={0} fallback={overviewFixture} accountCount={1} />)
+    const table = await screen.findByRole('table')
+    const metric = screen.getByText('Perpetual positions').closest('.metric') as HTMLElement
+    expect(metric.querySelector('strong')).toHaveTextContent(/^—$/)
+    expect(screen.getByRole('button', { name: '0/1 Unrealized coverage' })).toHaveAccessibleDescription(new RegExp(`1: ${reason.replace(/[.&]/g, '\\$&')}`))
+    const cell = within(table).getByRole('button', { name: '0/1 Swing trading unrealized coverage' }).closest('td') as HTMLElement
+    expect(cell.querySelector('span')).toHaveTextContent(/^—$/)
+    expect(within(table).queryByText('0')).not.toBeInTheDocument()
+  })
   it('changes grouping and period through labelled controls', async () => {
     const onQuery = vi.fn()
     render(<OverviewSummary api={api()} query={query} onQuery={onQuery} reloadGeneration={0} fallback={overviewFixture} accountCount={1} />)

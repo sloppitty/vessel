@@ -33,6 +33,13 @@ describe('Overview summary API', () => {
     const q = { groupBy: kind, period: '30', scope: `${kind}:bbbbbbbb-cccc-dddd-eeee-ffffffffffff` } as OverviewQuery
     expect(isOverviewSummary(overviewSummaryFixture(q), q)).toBe(false)
   })
+  it('accepts an unknown position count, never requiring a number (#89)', () => {
+    const document = overviewSummaryFixture()
+    document.totals.openPositionCount = null; document.rows[0]!.totals = document.totals
+    expect(isOverviewSummary(document, query)).toBe(true)
+    document.totals.openPositionCount = '0' as unknown as number
+    expect(isOverviewSummary(document, query)).toBe(false)
+  })
   it('encodes resource scope without inserting another query parameter', () => {
     expect(overviewSummaryPath({ ...query, scope: 'account:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' })).toContain('scope=account%3Aaaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
   })
