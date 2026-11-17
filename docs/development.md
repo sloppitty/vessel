@@ -330,6 +330,42 @@ pnpm --filter vessel-frontend build
 dotnet test backend/Vessel.slnx --configuration Release
 ```
 
+### Pre-push hook
+
+The repository ships a pre-push hook. Install it once per clone:
+
+```sh
+git config core.hooksPath scripts/hooks
+```
+
+This replaces any hooks in `.git/hooks` for the clone. Remove it with
+`git config --unset core.hooksPath`.
+
+For each pushed branch the hook lists the files changed against the remote
+branch, or against `origin/main` for a new branch, and runs only what they need,
+on the working tree:
+
+| Changed files | Check |
+| --- | --- |
+| `scripts/`, `deploy/` | `python3 -m unittest discover -s scripts -p 'test_*.py'` |
+| `frontend/` | `pnpm --filter vessel-frontend typecheck` and `lint` |
+| `backend/` | `dotnet build backend/Vessel.slnx --configuration Release` (locked restore) |
+
+Other files (documentation, for example) run nothing. No test suites or
+database run, so a one-file change takes well under two minutes (a cold backend
+build is the slowest step, about 1.5 minutes). A pushed `v*` tag runs
+`python3 scripts/release.py check --tag <tag>` against the tagged commit's files.
+
+A check that runs and fails refuses the push. A check whose tool is missing is
+skipped, and the hook says which and why: no `node` or `pnpm`, frontend
+dependencies not installed, or no `dotnet` with the SDK pinned in `global.json`.
+Frontend tests are not run, so the hook does not need a full-ICU Node. A
+skipped check is not a pass; run it another way (for example in a container)
+before merging.
+
+To push without the hook on purpose, use `git push --no-verify`. The selection
+logic is `scripts/pre_push.py`, covered by `scripts/test_pre_push.py`.
+
 CI is defined in `.github/workflows/checks.yml`. Local execution does not establish that a remote GitHub run succeeded; no push is implied.
 
 Hyperliquid account detail now has supported stablecoin total/held/available wallet rows, separate from its primary perpetual snapshot. Use Refresh account to populate old snapshots. See [stablecoin wallet limits](architecture/stablecoin-wallet.md).
