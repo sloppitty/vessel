@@ -50,4 +50,37 @@ public sealed partial class LighterAdapterTests
         Assert.Empty(page.ForcedEvents);
         Assert.Equal(1, page.Deleverages);
     }
+
+    [Fact]
+    public async Task An_unknown_trade_type_leaves_a_marker_and_lets_the_other_rows_import()
+    {
+        // Issue #118: a new Lighter trade type no longer stops the account's whole import.
+        var unknown = WithId(Change(Trade, "type", JsonValue.Create("rfq-trade")), 5);
+        using var handler = CoverageHandler();
+        var snapshotReply = handler.Reply!;
+        handler.Reply = request => request.RequestUri!.AbsolutePath.EndsWith("/trades", StringComparison.Ordinal)
+            ? Response(Trades(string.Join(",", Trade, unknown))) : snapshotReply(request);
+        var result = await Reader(handler).ReadAsync(Source, default);
+        Assert.Equal("9223372036854775806", Assert.Single(result.Fills).SourceFillId);
+        var marker = Assert.Single(result.Omissions);
+        Assert.Equal(("5", ExecutionOmission.UnrecognizedRow, "unrecognized trade type", "BTC", "1", "9007199254740995", Now.AddMinutes(-1)),
+            (marker.SourceId, marker.Kind, marker.Reason, marker.ContractId, marker.VenueContractId, marker.OrderId, marker.OccurredAtUtc!.Value));
+        Assert.Empty(result.ForcedEvents);
+        Assert.Equal(1, result.OmittedExecutions);
+        Assert.Contains("Omitted executions: 1 of an unrecognized type.", result.HistoryNotice);
+    }
+
+    [Theory]
+    [InlineData("type", "7")]
+    [InlineData("timestamp", "\"soon\"")]
+    [InlineData("trade_id_str", "\"x\"")]
+    [InlineData("size", "\"-1\"")]
+    [InlineData("maker_fee", "\"1\"")]
+    public void An_unknown_trade_type_with_a_malformed_field_still_fails_the_read(string field, string json)
+    {
+        // Response-level: a type of the wrong JSON type, or a row without a usable identity or time, is not omitted.
+        var row = Change(Change(Trade, "type", JsonValue.Create("rfq-trade")), field, JsonNode.Parse(json));
+        Assert.Throws<Vessel.Application.Venues.VenueReadException>(() => Page(Trade, row));
+    }
 }
+

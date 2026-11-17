@@ -233,14 +233,15 @@ public sealed class ImportedOrder : IOwned
 }
 
 /// <summary>
-/// Phase 2, item 7: an in-scope execution an import read but left out (forced, fee-bearing, missing reported P&amp;L, or on
-/// a market Vessel does not recognize). A durable marker, deduplicated by its native trade ID and kind: a later read that
+/// Phase 2, item 7: an in-scope execution an import read but left out (forced, fee-bearing, missing reported P&amp;L, on
+/// a market Vessel does not recognize, or a well-formed row with a value Vessel does not recognize). A durable marker, deduplicated by its native trade ID and kind: a later read that
 /// no longer returns the row cannot erase it. It carries no money. Without a reported time, the read's window bounds it.
 /// </summary>
 public sealed class ExecutionOmission : IOwned
 {
-    public const string Forced = "forced", Fee = "fee", MissingPnl = "missing-pnl", UnrecognizedMarket = "unrecognized-market";
-    public static readonly IReadOnlyList<string> Kinds = [Forced, Fee, MissingPnl, UnrecognizedMarket];
+    public const string Forced = "forced", Fee = "fee", MissingPnl = "missing-pnl", UnrecognizedMarket = "unrecognized-market",
+        UnrecognizedRow = "unrecognized-row";
+    public static readonly IReadOnlyList<string> Kinds = [Forced, Fee, MissingPnl, UnrecognizedMarket, UnrecognizedRow];
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }
     public Guid AccountId { get; set; }

@@ -48,7 +48,7 @@ public sealed class LighterExchange
     public int TradePages { get; }
     public string SnapshotScope { get; }
     /// <summary>
-    /// Short name for the notices stored in the 1,000-character HistoryNotice column, where public and order coverage
+    /// Short name for the notices stored in the 1,200-character HistoryNotice column, where public and order coverage
     /// are combined. Interactive messages use <see cref="Name"/>.
     /// </summary>
     public string NoticeName { get; }
@@ -83,7 +83,7 @@ public sealed class LighterExchange
 
     private string PageCount => Counts[TradePages];
 
-    // Stored in the account's 1,000-character HistoryNotice column; the coverage table in
+    // Stored in the account's 1,200-character HistoryNotice column; the coverage table in
     // docs/architecture/lighter-state.md carries the detail. A test keeps every sentence combined below that limit.
     internal string HistoryNotice =>
         $"Incomplete {NoticeName} history: at most the latest {MaxTrades} perpetual executions, no backfill. " +

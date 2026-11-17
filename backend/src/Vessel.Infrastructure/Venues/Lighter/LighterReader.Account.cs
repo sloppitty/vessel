@@ -19,11 +19,13 @@ public sealed partial class LighterReader
     /// <summary>
     /// One sentence counting every in-scope execution left out, by reason: no reported realized PnL, a fee that is
     /// nonzero or cannot be verified as zero, venue-forced liquidations, deleverages and market settlements (left out
-    /// whatever their fee, and never called fee-bearing), and out-of-scope self-trades. For example "Omitted executions:
+    /// whatever their fee, and never called fee-bearing), out-of-scope self-trades and well-formed trades of a type Vessel
+    /// does not recognize (row-level, so the rest of the read applies). For example "Omitted executions:
     /// 1 fee-bearing or unverified-fee, 1 liquidation, 2 deleverages." Null when nothing was left out. One sentence
-    /// keeps the account's 1,000-character HistoryNotice column within budget with every reason at its largest count.
+    /// keeps the account's 1,200-character HistoryNotice column within budget with every reason at its largest count.
     /// </summary>
-    internal static string? OmissionNotice(int missingPnl, int fees, int liquidations, int deleverages, int settlements, int selfTrades)
+    internal static string? OmissionNotice(int missingPnl, int fees, int liquidations, int deleverages, int settlements, int selfTrades,
+        int unrecognized = 0)
     {
         static string? Count(int count, string singular, string plural) => count > 0 ? $"{count} {(count == 1 ? singular : plural)}" : null;
         var parts = new[]
@@ -34,6 +36,7 @@ public sealed partial class LighterReader
             Count(deleverages, "deleverage", "deleverages"),
             Count(settlements, "market settlement", "market settlements"),
             Count(selfTrades, "self-trade", "self-trades"),
+            Count(unrecognized, "of an unrecognized type", "of an unrecognized type"),
         }.OfType<string>().ToArray();
         return parts.Length == 0 ? null : $"Omitted executions: {string.Join(", ", parts)}.";
     }
@@ -101,6 +104,7 @@ public sealed partial class LighterReader
             var fees = 0;
             var selfTrades = 0;
             var (liquidations, deleverages, settlements) = (0, 0, 0);
+            var unrecognized = 0;
             // Phase 2, item 7: the rows left out, once each across pages, for durable markers and forced-event facts.
             var omissions = new Dictionary<(string, string), VenueOmission>();
             var forced = new Dictionary<string, VenueForcedEvent>(StringComparer.Ordinal);
@@ -147,6 +151,7 @@ public sealed partial class LighterReader
                         liquidations += result.Liquidations;
                         deleverages += result.Deleverages;
                         settlements += result.Settlements;
+                        unrecognized += result.Unrecognized;
                         foreach (var omission in result.Omissions) omissions.TryAdd((omission.Kind, omission.SourceId), omission);
                         foreach (var forcedEvent in result.ForcedEvents) forced.TryAdd(forcedEvent.SourceId, forcedEvent);
                         cursor = Cursor(json, trades.RootElement);
@@ -155,14 +160,14 @@ public sealed partial class LighterReader
                     if (!cursors.Add(cursor)) throw json.Invalid();
                 }
             if (cursor is not null) notices.Add(venue.PageLimitNotice);
-            if (OmissionNotice(missingPnl, fees, liquidations, deleverages, settlements, selfTrades) is { } omitted) notices.Add(omitted);
+            if (OmissionNotice(missingPnl, fees, liquidations, deleverages, settlements, selfTrades, unrecognized) is { } omitted) notices.Add(omitted);
             return (new PerpetualVenueReadResult(snapshot,
                 catalogue.Markets.Where(m => m.Active).Select(m => m.Instrument!).ToArray(), fills, string.Join(" ", notices),
                 PositionsComplete: positionsComplete,
                 FillHistoryTruncated: historyAvailable ? cursor is not null || fillCoverage.Count == venue.TradePages * PageSize : null,
                 OldestRawFillAtUtc: historyAvailable ? fillCoverage.OldestAtUtc : null,
                 // Self-trades are out of scope (they leave the position unchanged); these are in-scope facts left out.
-                OmittedExecutions: missingPnl + fees + liquidations + deleverages + settlements)
+                OmittedExecutions: missingPnl + fees + liquidations + deleverages + settlements + unrecognized)
             { Omissions = omissions.Values.ToList(), ForcedEvents = forced.Values.ToList() }, refused);
         }, cancellationToken);
 
@@ -230,7 +235,7 @@ public sealed partial class LighterReader
     }
 
     internal sealed record FillPage(IReadOnlyList<VenueFill> Fills, int MissingPnl, int Fees, int SelfTrades = 0,
-        int Liquidations = 0, int Deleverages = 0, int Settlements = 0)
+        int Liquidations = 0, int Deleverages = 0, int Settlements = 0, int Unrecognized = 0)
     {
         /// <summary>Phase 2, item 7: every in-scope row left out, and the venue-forced ones as facts.</summary>
         public IReadOnlyList<VenueOmission> Omissions { get; init; } = [];
@@ -254,6 +259,7 @@ public sealed partial class LighterReader
         var fees = 0;
         var selfTrades = 0;
         var (liquidations, deleverages, settlements) = (0, 0, 0);
+        var unrecognized = 0;
         var omissions = new List<VenueOmission>();
         var forced = new List<VenueForcedEvent>();
         foreach (var row in Rows(json, root, "trades", PageSize).EnumerateArray())
@@ -275,7 +281,6 @@ public sealed partial class LighterReader
             var effect = Effect(side, before, quantity);
             if (row.TryGetProperty(role + "_position_sign_changed", out var changed)) json.Boolean(changed);
             var type = Text(json, row, "type");
-            if (type is not ("trade" or "liquidation" or "deleverage" or "market-settlement")) throw json.Invalid();
 
             // Trade fee fields are rates, not fee amounts. Never apply the other counterparty's tier to this account.
             // Both official web clients normalize absent/null protocol and integrator fee ticks to zero.
@@ -293,6 +298,16 @@ public sealed partial class LighterReader
             string? OmittedOrder() { try { return ExactId(json, row, ask ? "ask_id" : "bid_id", ask ? "ask_id_str" : "bid_id_str"); } catch (VenueReadException) { return null; } }
             DateTimeOffset? OmittedTime() => Lenient(() => json.Timestamp(json.Property(row, "timestamp"), latest.ToUnixTimeMilliseconds()));
             void Omit(string kind, string reason) => omissions.Add(new(id, kind, reason, market.Key, marketId, OmittedOrder(), OmittedTime()));
+            // Issue #118: a well-formed row of a type Vessel does not recognize is row-level. It is left out with a marker
+            // on its market, so its operation counts as incomplete, and the rest of the read applies. Its time must be
+            // valid, like its trade ID; a row without either still fails the read.
+            if (type is not ("trade" or "liquidation" or "deleverage" or "market-settlement"))
+            {
+                json.Timestamp(json.Property(row, "timestamp"), latest.ToUnixTimeMilliseconds());
+                unrecognized++;
+                Omit(ExecutionOmission.UnrecognizedRow, "unrecognized trade type");
+                continue;
+            }
             // Venue-forced executions are omitted whatever their (still validated) fee, and counted by kind, not as fee-bearing.
             // Each is also kept as a forced-event fact. Lighter reports fee rates, not amounts, so the fee stays unknown.
             if (type is "liquidation" or "deleverage" or "market-settlement")
@@ -346,6 +361,6 @@ public sealed partial class LighterReader
                 effect, standardTier ? ExecutionFacts.FeeStandardAccountFree : ExecutionFacts.FeeReported,
                 ExecutionFacts.PnlGross, marketId));
         }
-        return new(fills, missingPnl, fees, selfTrades, liquidations, deleverages, settlements) { Omissions = omissions, ForcedEvents = forced };
+        return new(fills, missingPnl, fees, selfTrades, liquidations, deleverages, settlements, unrecognized) { Omissions = omissions, ForcedEvents = forced };
     }
 }

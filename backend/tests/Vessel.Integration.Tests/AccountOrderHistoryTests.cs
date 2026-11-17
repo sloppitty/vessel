@@ -235,8 +235,8 @@ public sealed class AccountOrderHistoryTests
     [InlineData("hyperliquid", 488)]
     [InlineData("risex", 312)]
     // Lighter's single omission sentence names liquidations, deleverages and market settlements as well (Phase 0, D-25).
-    [InlineData("lighter", 877)]
-    [InlineData("lighter-rh", 877)]
+    [InlineData("lighter", 906)]
+    [InlineData("lighter-rh", 906)]
     public async Task Optional_failure_notice_fits_with_each_venues_maximum_public_coverage(string venue, int combinedLength)
     {
         var coverage = AccountHistoryNoticeBudget.CombinedCases().Where(c => c.Venue == venue).MaxBy(c => c.Public.Length);
@@ -253,7 +253,7 @@ public sealed class AccountOrderHistoryTests
         Assert.Equal(combinedLength, refreshed.HistoryNotice!.Length);
         // Every order notice the monitor can record also fits the stored column with that public coverage.
         foreach (var notice in new[] { OrderRetryNotice, CredentialNotice, InterruptedNotice, DeferredNotice })
-            Assert.True((coverage.Public + "\nOrder history: " + notice).Length <= 1000);
+            Assert.True((coverage.Public + "\nOrder history: " + notice).Length <= 1200);
     }
 }
 

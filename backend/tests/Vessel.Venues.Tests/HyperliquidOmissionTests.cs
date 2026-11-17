@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Tests;
@@ -24,5 +25,33 @@ public sealed partial class HyperliquidAdapterTests
         // Sol round 1: counting it without a durable marker would lose the evidence once the row leaves recent history.
         var anonymous = Mutate(Fill, node => { node["coin"] = "SOL"; node["tid"] = null; });
         await Assert.ThrowsAsync<Vessel.Application.Venues.VenueReadException>(() => Read(fills: $"[{Fill},{anonymous}]"));
+    }
+
+    [Fact]
+    public async Task A_fill_with_an_unknown_side_leaves_a_marker_and_the_other_fills_import()
+    {
+        // Issue #118: one unrecognized row no longer stops the account's import, and is never imported with a guessed side.
+        var unknown = Mutate(Fill, node => { node["side"] = "X"; node["tid"] = "42"; node["oid"] = 77; });
+        var result = await Read(fills: $"[{Fill},{unknown}]");
+        var fill = Assert.Single(result.Fills);
+        Assert.Equal("18446744073709551615", fill.SourceFillId);
+        var marker = Assert.Single(result.Omissions);
+        Assert.Equal(("42", ExecutionOmission.UnrecognizedRow, (string?)"BTC", (string?)null, (string?)"77"),
+            (marker.SourceId, marker.Kind, marker.ContractId, marker.VenueContractId, marker.OrderId));
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1790812799000), marker.OccurredAtUtc);
+        Assert.Equal(1, result.OmittedExecutions);
+    }
+
+    [Theory]
+    [InlineData("tid", "null")]
+    [InlineData("time", "null")]
+    [InlineData("px", "\"1e3\"")]
+    [InlineData("fee", "\"0.00000000000000000000000000001\"")]
+    [InlineData("dir", "1")]
+    public async Task A_fill_with_an_unknown_side_and_a_malformed_field_still_fails_the_read(string field, string json)
+    {
+        // Response-level: a row without a usable identity or time, or with a field a strict reader rejects, is not omitted.
+        var unknown = Mutate(Fill, node => { node["side"] = "X"; node[field] = JsonNode.Parse(json); });
+        await Assert.ThrowsAsync<Vessel.Application.Venues.VenueReadException>(() => Read(fills: $"[{Fill},{unknown}]"));
     }
 }

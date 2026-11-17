@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Vessel.Application.Activity;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
@@ -136,4 +137,48 @@ public sealed class OmissionMarkerPostgresTests
         var marker = Assert.Single(facts.Omissions);
         Assert.Equal(("BTC", (string?)null, (DateTimeOffset?)At.AddMinutes(-5)), (marker.ContractId, marker.VenueContractId, marker.OccurredAtUtc));
     }
+
+    /// <summary>
+    /// Issue #118: a well-formed row with a value Vessel does not recognize leaves a durable marker of its own kind, which
+    /// flags the order it names and interrupts the operation it lies in, by the same shared rules as every other marker.
+    /// </summary>
+    [PostgresFact]
+    public async Task An_unrecognized_row_marker_is_stored_and_makes_its_order_and_operation_incomplete()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        await using var db = database.Context(owner);
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        account.Configure(null, "0x" + new string('e', 40), null);
+        db.Accounts.Add(account);
+        ImportedFill Fill(int minutes, string side, string effect, string order) => new()
+        {
+            Id = Guid.NewGuid(), OwnerId = owner, AccountId = account.Id, ContractId = "BTC", Side = side, Direction = "display",
+            PositionEffect = effect, Quantity = 1, Price = 100m, ClosedPnlUsd = 0, Fee = 0, FeeToken = "USDC", PnlBasis = "gross",
+            FeeBasis = "reported", OccurredAtUtc = At.AddMinutes(minutes), ExternalOrderId = order, SourceFillId = order, TransactionHash = ""
+        };
+        db.Fills.AddRange(Fill(-30, "buy", "open", "o1"), Fill(-10, "sell", "close", "o2"));
+        await db.SaveChangesAsync();
+        var work = TestUnitOfWork.For(db);
+        var workspace = new WorkspaceStore(db, work, new ManualTime(At));
+        var executions = new ExecutionStore(db, work);
+        async Task Unit(Func<Task> step) => await work.ExecuteAsync(async () => { await step(); return true; }, default);
+        var baseline = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(null, default)).Operations;
+        Assert.Equal(("long", "closed"), (Assert.Single(baseline).Direction, baseline[0].Status));
+
+        await Unit(() => executions.UpsertOrdersAsync(account, [VenueOrder("o2")], At, default));
+        await Unit(() => workspace.SaveRefreshAsync(account, Read(At, new VenueOmission("t7", ExecutionOmission.UnrecognizedRow,
+            "unrecognized side", "BTC", null, "o2", At.AddMinutes(-20))), default));
+        db.ChangeTracker.Clear();
+        var marker = await db.ExecutionOmissions.AsNoTracking().SingleAsync();
+        Assert.Equal(("t7", ExecutionOmission.UnrecognizedRow, "BTC", (DateTimeOffset?)At.AddMinutes(-20)),
+            (marker.SourceId, marker.Kind, marker.ContractId, marker.OccurredAtUtc));
+        var order = await db.Orders.AsNoTracking().SingleAsync(o => o.ExternalOrderId == "o2");
+        Assert.True(order.ExecutionsOmitted);
+        Assert.True(ExecutionIntegrity.MissingExecutions(order, await db.Fills.AsNoTracking().Where(f => f.ExternalOrderId == "o2").ToListAsync()));
+        var operations = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(null, default)).Operations;
+        Assert.Contains(operations, o => o.Status == "incomplete" && o.Coverage.Contains(OperationAggregator.OmittedNotice));
+        Assert.DoesNotContain(operations, o => o.Direction == "long" && o.Status == "closed");
+    }
 }
+

@@ -33,8 +33,8 @@ namespace Vessel.Persistence.Migrations
                         .HasColumnType("character varying(42)");
 
                     b.Property<string>("HistoryNotice")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
+                        .HasMaxLength(1200)
+                        .HasColumnType("character varying(1200)");
 
                     b.Property<bool>("IsEnabled")
                         .ValueGeneratedOnAdd()
@@ -2218,7 +2218,7 @@ namespace Vessel.Persistence.Migrations
 
                     b.ToTable("execution_omissions", null, t =>
                         {
-                            t.HasCheckConstraint("CK_execution_omissions_kind", "\"Kind\" IN ('forced', 'fee', 'missing-pnl', 'unrecognized-market')");
+                            t.HasCheckConstraint("CK_execution_omissions_kind", "\"Kind\" IN ('forced', 'fee', 'missing-pnl', 'unrecognized-market', 'unrecognized-row')");
 
                             t.HasCheckConstraint("CK_execution_omissions_time", "\"FirstSeenAtUtc\" <= \"LastSeenAtUtc\" AND (\"OccurredAtUtc\" IS NULL OR \"UncertainFromUtc\" IS NULL AND \"UncertainToUtc\" IS NULL) AND\n(\"UncertainFromUtc\" IS NULL OR \"UncertainToUtc\" IS NULL OR \"UncertainFromUtc\" <= \"UncertainToUtc\")");
                         });

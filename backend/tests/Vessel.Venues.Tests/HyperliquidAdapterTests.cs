@@ -230,7 +230,9 @@ public sealed partial class HyperliquidAdapterTests : HyperliquidAdapterTestsSup
     [InlineData("px", "\"1.\"")]
     [InlineData("px", "\".1\"")]
     [InlineData("px", "12.3")]
-    [InlineData("side", "\"buy\"")]
+    // Issue #118: an unknown side value is row-level (HyperliquidOmissionTests); a side of the wrong type still fails.
+    [InlineData("side", "1")]
+    [InlineData("side", "null")]
     [InlineData("time", "-1")]
     [InlineData("time", "253402300800000")]
     [InlineData("time", "9223372036854775808")]
