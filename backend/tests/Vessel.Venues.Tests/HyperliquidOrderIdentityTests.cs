@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Vessel.Application.Venues;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 
@@ -50,6 +51,43 @@ public sealed partial class HyperliquidOrderTests
         Assert.Equal(2, result.Orders.Count);
         Assert.Single(result.Orders, o => o.ContractId == "1000PEPE");
         Assert.Single(result.Orders, o => o.ContractId == "BTC");
+    }
+
+    private static string WithChildren(string order, string children = "[]")
+    {
+        var parent = JsonNode.Parse(order)!;
+        parent["children"] = JsonNode.Parse(children == "[]" ? $"[{Order(99, "A", trigger: true, type: "Stop Market")}]" : children);
+        return parent.ToJsonString();
+    }
+
+    [Fact] // #95: attached TP/SL children are the parent's own market; only that contract's book is incomplete.
+    public async Task Coverage_attached_children_leave_only_their_parents_contract_incomplete()
+    {
+        var result = await ReadTwoMarketOrders("[]", $"[{WithChildren(Order(7, coin: "kPEPE", px: "0.012345"))},{Order(8)}]");
+        Assert.False(result.OpenOrdersComplete);
+        Assert.Equal([new VenueIncompleteBook("1000PEPE", "kPEPE", VenueIncompleteBook.AttachedTpsl)], result.IncompleteContracts);
+        Assert.False(result.OpenOrdersCompleteFor("1000PEPE", "kPEPE"));
+        Assert.True(result.OpenOrdersCompleteFor("BTC", null));
+        // The parent itself is still read; its children are not.
+        Assert.Equal(["7", "8"], result.Orders.Select(o => o.OrderId).Order(StringComparer.Ordinal));
+    }
+
+    [Theory] // #95: an unread parent, a malformed child list or a whole-read condition still leaves every contract unknown.
+    [InlineData("spot-parent")]
+    [InlineData("malformed-children")]
+    [InlineData("duplicate")]
+    public async Task Coverage_children_that_cannot_be_attributed_leave_the_whole_book_incomplete(string scope)
+    {
+        var book = scope switch
+        {
+            "spot-parent" => $"[{WithChildren(Order(7, coin: "@123"))},{Order(8)}]",
+            "malformed-children" => $"[{WithChildren(Order(7, coin: "kPEPE"), "{}")},{Order(8)}]",
+            _ => $"[{WithChildren(Order(7, coin: "kPEPE"))},{Order(8)},{Order(8)}]",
+        };
+        var result = await ReadTwoMarketOrders("[]", book);
+        Assert.False(result.OpenOrdersComplete);
+        Assert.Null(result.IncompleteContracts);
+        Assert.False(result.OpenOrdersCompleteFor("BTC", null));
     }
 
     [Fact]

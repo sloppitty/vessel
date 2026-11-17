@@ -52,6 +52,48 @@ public sealed partial class LighterAdapterTests
         Assert.All(result.Orders, o => Assert.Equal("9007199254740995", o.OrderId));
     }
 
+    private static string Unread(int market, string kind) => kind switch
+    {
+        "twap" or "twap-sub" => Change(OrderOn(market), "type", JsonValue.Create(kind)),
+        "flagged" => Change(OrderOn(market), "order_flags", JsonValue.Create(1)),
+        _ => Change(Change(OrderOn(market), "initial_base_amount", JsonValue.Create("0")), "remaining_base_amount", JsonValue.Create("0")),
+    };
+
+    [Theory] // #95: an order Vessel cannot model leaves only its own market's book incomplete.
+    [InlineData("twap", VenueIncompleteBook.Twap)]
+    [InlineData("twap-sub", VenueIncompleteBook.Twap)]
+    [InlineData("flagged", VenueIncompleteBook.Flagged)]
+    [InlineData("unsized", VenueIncompleteBook.Unsized)]
+    public async Task Coverage_an_unread_order_leaves_only_its_market_incomplete(string row, string kind)
+    {
+        using var handler = OrderHandler(Orders(Unread(4, row) + "," + OrderOn(1)));
+        var result = await Reader(handler, new(Token)).ReadOrdersAsync(Account(), default);
+        Assert.False(result.OpenOrdersComplete);
+        Assert.Equal([new VenueIncompleteBook("1000PEPE", "4", kind)], result.IncompleteContracts);
+        Assert.False(result.OpenOrdersCompleteFor("1000PEPE", "4"));
+        Assert.True(result.OpenOrdersCompleteFor("BTC", "1"));
+        Assert.Equal("BTC", Assert.Single(result.Orders).ContractId);
+    }
+
+    [Theory] // #95: with a whole-read condition beside it, no market is complete.
+    [InlineData("cursor")]
+    [InlineData("unknown-status")]
+    public async Task Coverage_an_unread_order_beside_a_whole_read_condition_leaves_every_market_incomplete(string condition)
+    {
+        var body = Orders(Unread(4, "twap") + "," + (condition == "unknown-status" ? OrderOn(1, "unknown") : OrderOn(1)));
+        if (condition == "cursor")
+        {
+            var root = JsonNode.Parse(body)!;
+            root["next_cursor"] = "more";
+            body = root.ToJsonString();
+        }
+        using var handler = OrderHandler(body);
+        var result = await Reader(handler, new(Token)).ReadOrdersAsync(Account(), default);
+        Assert.False(result.OpenOrdersComplete);
+        Assert.Null(result.IncompleteContracts);
+        Assert.False(result.OpenOrdersCompleteFor("BTC", "1"));
+    }
+
     [Fact]
     public async Task Identity_inactive_history_on_another_market_adds_an_order()
     {
