@@ -29,7 +29,7 @@ export function ManagePortfolioDialog({ portfolio, accounts = noAccounts, portfo
   const currentAccounts = reloaded?.source === accounts ? reloaded.accounts : accounts
   const currentPortfolios = reloaded?.portfolioSource === portfolios ? reloaded.portfolios : portfolios
   const [membershipSource, setMembershipSource] = useState(currentAccounts)
-  const [membershipRevisions, setMembershipRevisions] = useState(() => Object.fromEntries(accounts.map(a => [a.id, a.settingsRevision])))
+  const [membershipRevisions, setMembershipRevisions] = useState<Record<string, number | undefined>>(() => Object.fromEntries(accounts.map(a => [a.id, a.settingsRevision])))
   if (membershipSource !== currentAccounts) {
     const added = selected.filter(id => !baseline.includes(id) && currentAccounts.some(a => a.id === id))
     const removed = baseline.filter(id => !selected.includes(id))

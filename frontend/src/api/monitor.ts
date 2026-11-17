@@ -20,11 +20,8 @@ export interface MonitorDiscrepancy {
   /** `unverifiable`: the subject stayed unobservable beyond the monitor lifetime. Neither resolved nor still checked. */
   outcome: 'unverifiable' | null
   unverifiableAtUtc: string | null
-  /**
-   * Source time of the last fresh decisive observation; incomplete reads do not move it. Null when none is recorded.
-   * Absent from an older API, which is accepted and shown as unknown, like null.
-   */
-  lastObservedAtUtc?: string | null
+  /** Source time of the last fresh decisive observation; incomplete reads do not move it. Null when none is recorded. */
+  lastObservedAtUtc: string | null
 }
 
 /** A terminal Play's linked exit or entry order, watched until the venue shows it is no longer resting. */
@@ -89,18 +86,18 @@ export interface AccountMonitor {
   discrepancies: MonitorDiscrepancy[]
   /**
    * More records exist than `discrepancies` lists. Incidents are listed first, so only older records are left out, unless
-   * the incidents alone exceed the cap. Optional: an older API omits it, read as not truncated.
+   * the incidents alone exceed the cap.
    */
-  discrepanciesTruncated?: boolean
-  /** Stored stop coverage of the account's Open Plays. Optional: an older API omits it. */
-  coverage?: MonitorCoverage[]
+  discrepanciesTruncated: boolean
+  /** Stored stop coverage of the account's Open Plays. */
+  coverage: MonitorCoverage[]
   /**
    * Open, tracked Plays on the account with no recorded coverage yet (after the migration, or once reconciliation opens
-   * one, until the next check). Optional, like `coverage`; absent reads as none.
+   * one, until the next check).
    */
-  uncheckedPlays?: number
+  uncheckedPlays: number
   /** The configured check cadence in whole minutes (I-08), stated beside "not stop protection". */
-  intervalMinutes?: number
+  intervalMinutes: number
 }
 
 export interface MonitorSummary {
@@ -153,8 +150,7 @@ export const isMonitorDiscrepancy = (v: unknown): v is MonitorDiscrepancy => obj
   severity(v.severity) && ['candidate', 'open', 'resolved', 'dismissed'].includes(v.state as string) &&
   date(v.openedAtUtc) && nullableDate(v.confirmedAtUtc) && nullableDate(v.resolvedAtUtc) && nullableDate(v.dismissedAtUtc) &&
   (v.note === null || text(v.note, 2000)) && object(v.details) &&
-  // An older server omits it: unknown, never a reason to reject the record, its summary or the Play's execution.
-  (v.lastObservedAtUtc === undefined || nullableDate(v.lastObservedAtUtc)) &&
+  nullableDate(v.lastObservedAtUtc) &&
   // The outcome and its time come together; only an unverifiable record is visible as a candidate.
   (v.outcome === null ? v.unverifiableAtUtc === null && v.state !== 'candidate' : v.outcome === 'unverifiable' && date(v.unverifiableAtUtc))
 
@@ -183,11 +179,10 @@ export const isAccountMonitor = (v: unknown): v is AccountMonitor => object(v) &
   nullableDate(v.nextManualAllowedAtUtc) &&
   (v.error === null || text(v.error, 2000)) && typeof v.workerOnline === 'boolean' &&
   Array.isArray(v.discrepancies) && v.discrepancies.every(d => isMonitorDiscrepancy(d) && d.accountId === v.accountId) &&
-  (v.discrepanciesTruncated === undefined || typeof v.discrepanciesTruncated === 'boolean') &&
-  (v.coverage === undefined || Array.isArray(v.coverage) && v.coverage.length <= 500 && v.coverage.every(isMonitorCoverage) &&
-    new Set(v.coverage.map(c => c.playId)).size === v.coverage.length) &&
-  (v.uncheckedPlays === undefined || isCount(v.uncheckedPlays)) &&
-  (v.intervalMinutes === undefined || isCount(v.intervalMinutes) && v.intervalMinutes <= 1440)
+  typeof v.discrepanciesTruncated === 'boolean' &&
+  Array.isArray(v.coverage) && v.coverage.length <= 500 && v.coverage.every(isMonitorCoverage) &&
+    new Set(v.coverage.map(c => c.playId)).size === v.coverage.length &&
+  isCount(v.uncheckedPlays) && isCount(v.intervalMinutes) && v.intervalMinutes <= 1440
 
 export const isMonitorSummary = (v: unknown): v is MonitorSummary => object(v) && typeof v.workerOnline === 'boolean' &&
   nullableDate(v.heartbeatAtUtc) && Array.isArray(v.accounts) && v.accounts.length <= 200 && v.accounts.every(isAccountMonitor) &&

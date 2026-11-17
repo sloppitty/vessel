@@ -81,13 +81,15 @@ describe('Account discovery contract', () => {
     await expect(api().discoverAccounts(venue, address)).rejects.toMatchObject({ kind: 'invalid-response' })
     expect(fetch).not.toHaveBeenCalled()
   })
-  it('rejects numeric account identities, but accepts older DTOs without sourceId', async () => {
+  it('rejects numeric account identities and an omitted sourceId, which the API always sends', async () => {
     respond({ ...indexAccount, sourceId: 9007199254740992 })
     await expect(api().account(indexAccount.id)).rejects.toMatchObject({ kind: 'invalid-response' })
-    const legacy: Partial<typeof indexAccount> = { ...indexAccount }
-    delete legacy.sourceId
-    respond(legacy)
-    await expect(api().account(indexAccount.id)).resolves.toEqual(legacy)
+    const omitted: Partial<typeof indexAccount> = { ...indexAccount }
+    delete omitted.sourceId
+    respond(omitted)
+    await expect(api().account(indexAccount.id)).rejects.toMatchObject({ kind: 'invalid-response' })
+    respond({ ...indexAccount, sourceId: null })
+    await expect(api().account(indexAccount.id)).resolves.toEqual({ ...indexAccount, sourceId: null })
   })
   it('validates the complete account index without numeric coercion', () => {
     expect(accountIndex('0')).toBe(true)

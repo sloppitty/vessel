@@ -21,7 +21,7 @@ const position = {
   ...firstPlay, id: null, operationId: 'operation-1:long', title: 'BTC Long',
   origin: 'position' as const, executionSource: 'imported' as const,
   closedAtUtc: '2026-10-08T12:00:00Z',
-  net: '-50', returnPercent: '-1', rMultiple: null, reviewed: false, local: null,
+  net: '-50', returnPercent: '-1', rMultiple: null, reviewed: false, local: null, reviewCompletion: null,
 }
 const mixedReport: ReviewDocument = {
   ...reviewFixture,
@@ -31,6 +31,7 @@ const mixedReport: ReviewDocument = {
     portfolios: reviewFixture.groups.portfolios.map(group => ({ ...group, metrics: mixedMetrics })),
     accounts: reviewFixture.groups.accounts.map(group => ({ ...group, metrics: mixedMetrics })),
     assets: reviewFixture.groups.assets.map(group => ({ ...group, metrics: mixedMetrics })),
+    origins: [], directions: [],
   },
   plays: [
     { ...firstPlay, operationId: null, executionSource: 'imported',
@@ -113,16 +114,18 @@ describe('Review positions regressions (Sol review)', () => {
     expect(screen.getByRole('spinbutton', { name: /fewer Plays than/ })).toHaveValue(12)
   })
 
-  it('accepts the current wire nulls and the older response without position fields', () => {
+  it('accepts the current wire nulls and requires the position fields the API always sends', () => {
     // Current C# DTOs emit operationId:null on Plays and id/local:null on positions.
     expect(isReviewDocument(mixedReport)).toBe(true)
-    // Pre-October-20 fields are absent, not null.
-    expect(isReviewDocument(reviewFixture)).toBe(true)
     expect(isReviewDocument({
       ...emptyReview,
       positions: { mode: 'exclude', included: false, minPlays: 5, plays: 0,
         positions: null, omitted: null, playWeight: '2' },
     })).toBe(true)
+    const withoutPositions: Record<string, unknown> = { ...emptyReview }
+    delete withoutPositions.positions
+    expect(isReviewDocument(withoutPositions)).toBe(false)
+    expect(isReviewDocument({ ...emptyReview, metrics: { ...emptyReview.metrics, positions: undefined } })).toBe(false)
   })
 })
 

@@ -110,7 +110,8 @@ describe('Production portfolio review', () => {
     await user.click(screen.getByRole('button', { name: 'Inspect Swing trading' }))
     const dialog = screen.getByRole('dialog')
     await within(dialog).findByRole('button', { name: 'Open Play BTC breakout' })
-    expect(review).toHaveBeenLastCalledWith({ ...defaultReviewQuery, positions: 'auto', minPlays: 5, portfolio: reviewFixture.options.portfolios[0]!.id, offset: 0 }, expect.any(AbortSignal))
+    // Drill-downs keep the report's decision: this one left positions out.
+    expect(review).toHaveBeenLastCalledWith({ ...defaultReviewQuery, positions: 'exclude', minPlays: 5, portfolio: reviewFixture.options.portfolios[0]!.id, offset: 0 }, expect.any(AbortSignal))
     await user.click(within(dialog).getByRole('button', { name: 'Next' }))
     await waitFor(() => expect(review).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 50 }), expect.any(AbortSignal)))
     await user.click(await within(dialog).findByRole('button', { name: 'Open Play BTC breakout' }))
@@ -191,7 +192,7 @@ describe('Review result bases', () => {
       skipped: [{ code: 'priced-stops', count: 2 }, { code: 'allocations', count: 0 }, { code: 'thesis', count: 1 },
         { code: 'risk', count: 0 }, { code: 'liquidation', count: 0 }] } }))
     await user.click(await screen.findByText('3 scored · 2 excluded · 1 review complete'))
-    expect(screen.getByText(/^Pre-flight at Plan it: 3 recorded · 2 not recorded\./)).toHaveTextContent(
+    expect(screen.getByText((_, element) => element?.tagName === 'P' && /^Pre-flight at Plan it: 3 recorded · 2 not recorded\./.test(element.textContent ?? ''))).toHaveTextContent(
       'Planned without: a priced stop for every priced entry (2) · thesis and invalidation are written (1).')
   })
   it('names the R estimate with its denominator and counts sign differences and fee-only losses', async () => {
@@ -259,14 +260,6 @@ describe('Review result bases', () => {
     expect(second![2]).toHaveTextContent(/^\$0$/)
   })
 
-  it('omits the result-basis figures for reports from servers before them', async () => {
-    const { user } = setup()
-    await user.click(await screen.findByRole('button', { name: `${reviewFixture.metrics.count} Plays` }))
-    expect(screen.queryByText('Sign differs by basis')).not.toBeInTheDocument()
-    expect(screen.queryByText('Fee-only losses')).not.toBeInTheDocument()
-    const table = await within(await screen.findByRole('dialog')).findByRole('table', { name: 'Contributing closed Plays' })
-    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('Not reported')
-  })
 })
 
 describe('Review venue names', () => {

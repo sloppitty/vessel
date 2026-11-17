@@ -12,6 +12,7 @@ const gap = { id: '00000000-0000-4000-8000-000000000001', fromUtc: '2026-10-20T1
   openedAtUtc: '2026-10-21T10:00:00Z', closedAtUtc: null }
 const coverage: Coverage = {
   keepExecutionHistory: true, available: true, openGapCount: 2, recordCount: 3, notice: 'Each import records what it asked for.',
+  backfillAvailable: false, backfills: [],
   openGaps: [gap, { ...gap, id: '00000000-0000-4000-8000-000000000002', fromUtc: null, toUtc: null }], closedGaps: [],
   recent: [
     { source: 'check', firstObservedAtUtc: '2026-10-21T10:00:00Z', lastObservedAtUtc: '2026-10-21T12:00:00Z', importCount: 13,
@@ -41,6 +42,11 @@ describe('history coverage (Phase 2, item 6)', () => {
 
   it('reads only ledgers whose ranges hold together', () => {
     expect(isHistoryCoverage(coverage)).toBe(true)
+    for (const field of ['backfillAvailable', 'backfills']) {
+      const omitted: Record<string, unknown> = { ...coverage }
+      delete omitted[field]
+      expect(isHistoryCoverage(omitted)).toBe(false)
+    }
     const [first, second] = coverage.recent as [Coverage['recent'][number], Coverage['recent'][number]]
     // Unknown truncation proves nothing; a gap has both ends; an open list holds open gaps only.
     expect(isHistoryCoverage({ ...coverage, recent: [{ ...second, coveredToUtc: second.lastObservedAtUtc }] })).toBe(false)

@@ -53,14 +53,14 @@ export interface Portfolio {
   totalValueUsd: string | null
   valueCoverage: 'complete' | 'partial' | 'unavailable'
   /** Sum of account balances (perps plus stablecoin wallet, or the wallet alone in unified modes). */
-  balanceUsd?: string | null
-  balanceCoverage?: 'complete' | 'partial' | 'unavailable'
-  availableBalanceUsd?: string | null
-  availableBalanceAccountCount?: number
-  availableBalanceCoverage?: 'complete' | 'partial' | 'unavailable'
-  enabledAccountCount?: number
-  /** Icon key chosen by the owner; absent from servers that predate portfolio icons. */
-  icon?: string
+  balanceUsd: string | null
+  balanceCoverage: 'complete' | 'partial' | 'unavailable'
+  availableBalanceUsd: string | null
+  availableBalanceAccountCount: number
+  availableBalanceCoverage: 'complete' | 'partial' | 'unavailable'
+  enabledAccountCount: number
+  /** Icon key chosen by the owner. */
+  icon: string
 }
 export interface VenueInstrument {
   contractId: string
@@ -152,10 +152,10 @@ export interface HistoryCoverage {
   recordCount: number
   recent: FillCoverage[]
   notice: string
-  /** Whether this account's venue can backfill a gap; missing on older servers. */
-  backfillAvailable?: boolean
+  /** Whether this account's venue can backfill a gap. */
+  backfillAvailable: boolean
   /** The latest backfills, newest first; at most one is queued. */
-  backfills?: HistoryBackfill[]
+  backfills: HistoryBackfill[]
 }
 const before = (a: string | null, b: string | null) => a === null || b === null || Date.parse(a) <= Date.parse(b)
 const isHistoryGap = (v: unknown): v is HistoryGap => isRecord(v) && isGuid(v.id) && isNullOr(v.fromUtc, isTimestamp) &&
@@ -187,9 +187,9 @@ export const isHistoryCoverage = (v: unknown): v is HistoryCoverage => isRecord(
   Array.isArray(v.closedGaps) && v.closedGaps.length <= 50 && v.closedGaps.every(g => isHistoryGap(g) && g.closedAtUtc !== null) &&
   isCount(v.recordCount) && Array.isArray(v.recent) && v.recent.length <= 50 && v.recent.length <= v.recordCount &&
   v.recent.every(isFillCoverage) && isText(v.notice, 1000) &&
-  (v.backfillAvailable === undefined || typeof v.backfillAvailable === 'boolean') &&
-  (v.backfills === undefined || Array.isArray(v.backfills) && v.backfills.length <= 10 && v.backfills.every(isHistoryBackfill) &&
-    v.backfills.filter(b => isRecord(b) && b.state === 'queued').length <= 1)
+  typeof v.backfillAvailable === 'boolean' &&
+  Array.isArray(v.backfills) && v.backfills.length <= 10 && v.backfills.every(isHistoryBackfill) &&
+    v.backfills.filter(b => isRecord(b) && b.state === 'queued').length <= 1
 
 export interface InstrumentCatalog {
   venueId: string
@@ -269,29 +269,28 @@ export interface BrokerAccount {
   name: string
   venueId: string
   address: string | null
-  /** Missing on older servers. Display sourceId ?? address for EVM compatibility. */
-  sourceId?: string | null
+  /** Display sourceId ?? address for EVM compatibility. */
+  sourceId: string | null
   accountValueUsd: string | null
   lastSyncedAtUtc: string | null
   syncStatus: 'manual' | 'not-synced' | 'synced' | 'error' | 'paper'
   lastSyncError: string | null
   positionCount: number
   historyNotice: string | null
-  /** Missing only during rollout from the previous API; treated as enabled. */
-  isEnabled?: boolean
-  availableStablecoinNominalUsd?: string | null
-  stablecoinScope?: string | null
-  accountMode?: string | null
+  isEnabled: boolean
+  availableStablecoinNominalUsd: string | null
+  stablecoinScope: string | null
+  accountMode: string | null
   /** Supported stablecoins in the wallet, held amounts included. */
-  totalStablecoinNominalUsd?: string | null
+  totalStablecoinNominalUsd: string | null
   /** Nominal balance: perps plus wallet, or the wallet alone in unified and portfolio-margin modes. */
-  balanceUsd?: string | null
+  balanceUsd: string | null
   /** Exactly one availability source selected by the server, never summed with another ledger. */
-  availableBalanceUsd?: string | null
-  availableBalanceSource?: 'wallet' | 'margin' | 'withdrawable' | 'paper' | null
-  settingsRevision?: number
-  /** "Keep execution history" (Phase 2, item 6); missing on older servers, which read as off. */
-  keepExecutionHistory?: boolean
+  availableBalanceUsd: string | null
+  availableBalanceSource: 'wallet' | 'margin' | 'withdrawable' | 'paper' | null
+  settingsRevision: number
+  /** "Keep execution history" (Phase 2, item 6). */
+  keepExecutionHistory: boolean
 }
 export interface AccountSettingsExpectation {
   accountId: string
@@ -564,32 +563,25 @@ const instrumentPattern = /^(?=.{1,32}$)[A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?$/
 const portfolio = (v: unknown): v is Portfolio => isRecord(v) && optionalTradingMode(v) && isGuid(v.id) && isText(v.name) &&
   isCount(v.accountCount) && isNullOr(v.totalValueUsd, isPlainDecimal) &&
   coverages.includes(String(v.valueCoverage)) &&
-  (v.balanceUsd === undefined || isNullOr(v.balanceUsd, isPlainDecimal)) &&
-  (v.balanceCoverage === undefined || coverages.includes(String(v.balanceCoverage))) &&
-  (v.availableBalanceUsd === undefined || isNullOr(v.availableBalanceUsd, isPlainDecimal)) &&
-  (v.availableBalanceAccountCount === undefined || isCount(v.availableBalanceAccountCount)) &&
-  (v.enabledAccountCount === undefined || isCount(v.enabledAccountCount)) &&
-  (v.availableBalanceCoverage === undefined || isText(v.availableBalanceCoverage) && coverages.includes(v.availableBalanceCoverage)) &&
-  (v.icon === undefined || isText(v.icon, 40))
+  isNullOr(v.balanceUsd, isPlainDecimal) && coverages.includes(String(v.balanceCoverage)) &&
+  isNullOr(v.availableBalanceUsd, isPlainDecimal) && isCount(v.availableBalanceAccountCount) && isCount(v.enabledAccountCount) &&
+  isText(v.availableBalanceCoverage) && coverages.includes(v.availableBalanceCoverage) && isText(v.icon, 40)
 const account = (v: unknown): v is BrokerAccount => isRecord(v) && optionalTradingMode(v) &&
+  // Real: the API omits a null starting capital (`WhenWritingNull`), so absence is the normal real answer.
   (v.startingCapitalUsd === undefined || isNullOr(v.startingCapitalUsd, isNonNegativeDecimal)) && isGuid(v.id) &&
   isNullOr(v.portfolioId, isGuid) && isText(v.name) && isText(v.venueId) &&
   isNullOr(v.address, isText) && isNullOr(v.accountValueUsd, isPlainDecimal) &&
-  (v.sourceId === undefined || isNullOr(v.sourceId, isText)) &&
+  isNullOr(v.sourceId, isText) &&
   isNullOr(v.lastSyncedAtUtc, isTimestamp) &&
   (v.tradingMode === 'paper' ? v.syncStatus === 'paper' : ['manual', 'not-synced', 'synced', 'error'].includes(String(v.syncStatus))) &&
   isNullOr(v.lastSyncError, isText) && isCount(v.positionCount) && isNullOr(v.historyNotice, isText) &&
-  (v.isEnabled === undefined || typeof v.isEnabled === 'boolean') &&
-  (v.availableStablecoinNominalUsd === undefined || isNullOr(v.availableStablecoinNominalUsd, isPlainDecimal)) &&
-  (v.stablecoinScope === undefined || isNullOr(v.stablecoinScope, isText)) &&
-  (v.accountMode === undefined || isNullOr(v.accountMode, isText)) &&
-  (v.totalStablecoinNominalUsd === undefined || isNullOr(v.totalStablecoinNominalUsd, isPlainDecimal)) &&
-  (v.balanceUsd === undefined || isNullOr(v.balanceUsd, isPlainDecimal)) &&
-  (v.availableBalanceUsd === undefined || isNullOr(v.availableBalanceUsd, isPlainDecimal)) &&
-  (v.availableBalanceSource === undefined || v.availableBalanceSource === null ||
-    isText(v.availableBalanceSource) && ['wallet', 'margin', 'withdrawable', 'paper'].includes(v.availableBalanceSource)) &&
-  (v.settingsRevision === undefined || isPositiveCount(v.settingsRevision)) &&
-  (v.keepExecutionHistory === undefined || typeof v.keepExecutionHistory === 'boolean' && (!v.keepExecutionHistory || v.tradingMode !== 'paper'))
+  typeof v.isEnabled === 'boolean' &&
+  isNullOr(v.availableStablecoinNominalUsd, isPlainDecimal) && isNullOr(v.stablecoinScope, isText) && isNullOr(v.accountMode, isText) &&
+  isNullOr(v.totalStablecoinNominalUsd, isPlainDecimal) && isNullOr(v.balanceUsd, isPlainDecimal) &&
+  isNullOr(v.availableBalanceUsd, isPlainDecimal) &&
+  (v.availableBalanceSource === null || isText(v.availableBalanceSource) && ['wallet', 'margin', 'withdrawable', 'paper'].includes(v.availableBalanceSource)) &&
+  isPositiveCount(v.settingsRevision) &&
+  typeof v.keepExecutionHistory === 'boolean' && (!v.keepExecutionHistory || v.tradingMode !== 'paper')
 const discovery = (venueId: string, address: string) => (v: unknown): v is AccountDiscovery => isRecord(v) &&
   v.venueId === venueId && isText(v.address) && v.address.toLowerCase() === address.toLowerCase() &&
   isText(v.notice, 2000) && Array.isArray(v.accounts) && v.accounts.length <= 1000 &&

@@ -15,9 +15,8 @@ describe('monitor incidents beyond the record cap (review round 2)', () => {
     // The server lists incidents first: a historical record in the list means every incident made it.
     expect(incidentsBeyondCap([account([missingStopFixture, { ...shortStopFixture, state: 'resolved' }], true)])).toBe(false)
     expect(incidentsBeyondCap([account([missingStopFixture, unverifiable()], true)])).toBe(true)
-    // Not truncated, or an older server that does not say.
+    // Not truncated.
     expect(incidentsBeyondCap([account([missingStopFixture, unverifiable()], false)])).toBe(false)
-    expect(incidentsBeyondCap([account([missingStopFixture, unverifiable()])])).toBe(false)
     expect(incidentsBeyondCap([account([], true)])).toBe(false)
   })
   it('shows a lower bound, "2+ incidents", whose severities are not all known', () => {

@@ -112,7 +112,7 @@ describe('Capital context', () => {
   })
 
   it('keeps a reported zero distinct from missing values and does not create a default portfolio', () => {
-    const account = { ...accountFixture, portfolioId: null, accountValueUsd: '0' }
+    const account = { ...accountFixture, portfolioId: null, accountValueUsd: '0', balanceUsd: '0' }
     render(<BudgetHarness initial={{ ...createDraft(), accountId: account.id }} accounts={[account]} portfolios={[portfolioFixture]} />)
     expect(metric('Account balance')).toHaveTextContent('$0.00')
     expect(screen.queryByText(/Swing trading/)).not.toBeInTheDocument()

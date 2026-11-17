@@ -470,7 +470,8 @@ describe('check cadence (I-08, Sol round 1 on #43)', () => {
   it('states the configured cadence and "not stop protection", even before any check', () => {
     const view = render(<MonitorPanel monitor={{ ...monitorFixture, intervalMinutes: 10 }} busy={false} error={null} onCheck={vi.fn()} />)
     expect(screen.getByText(/Checked about every 10 minutes; not stop protection/)).toBeVisible()
-    view.rerender(<MonitorPanel monitor={{ ...monitorFixture, lastSuccessAtUtc: null, nextRunAtUtc: null }} busy={false} error={null} onCheck={vi.fn()} />)
+    // A sub-minute interval rounds to zero whole minutes.
+    view.rerender(<MonitorPanel monitor={{ ...monitorFixture, intervalMinutes: 0, lastSuccessAtUtc: null, nextRunAtUtc: null }} busy={false} error={null} onCheck={vi.fn()} />)
     expect(screen.getByText(/Checked periodically; not stop protection/)).toBeVisible()
     expect(screen.getByRole('button', { name: 'About check timing' })).toBeVisible()
   })
