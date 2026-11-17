@@ -78,7 +78,14 @@ October 21, 2026. Implemented on `t3/phase2-open-risk`.
     fill;
   - exits linked to the entry's levels, and a position-level exit when there
     is only one filled entry, reduce it;
-  - the stops whose linked orders have not executed share it;
+  - the stops share it in proportion to what each rests for: a stop with no
+    executions its share of the filled quantity, an executed stop the
+    remaining size of its open or triggered linked orders as the venue
+    reported them, so a filled, cancelled or rejected order adds nothing and
+    a replacement order counts for itself (November 17, issue #117; it was
+    the stops whose linked orders had not executed at all). `RiskStore`
+    passes each linked stop order's status, sizes and retained executions as
+    `RiskOrder`;
   - the unfilled remainder of each entry counts at its planned price against
     every stop;
   - each stop's loss is clamped at zero.
@@ -90,6 +97,7 @@ October 21, 2026. Implemented on `t3/phase2-open-risk`.
   - an exit cannot be attributed to one entry;
   - exits exceed their entry;
   - a linked fill contradicts its role;
+  - an executed stop's linked orders do not reconcile (issue #117);
   - the quote asset is not a listed stablecoin;
   - a manual execution cannot be read.
 - **The API.**

@@ -94,10 +94,11 @@ public sealed record OpenRiskPreviewDto(Guid? PlayId, string Direction, string? 
 
 /// <summary>
 /// One active real Play with what open risk reads: its executions as linked fills or the manual ledger, the monitor's last
-/// recorded stop coverage, and a problem that makes its executions unreadable or incomplete.
+/// recorded stop coverage, a problem that makes its executions unreadable or incomplete, and the venue orders linked to its
+/// stops (none for a manual ledger).
 /// </summary>
 public sealed record OpenRiskFacts(Play Play, IReadOnlyList<RiskExecution> Executions, MonitorCoverage? Coverage,
-    bool ManualLedger, string? Problem = null);
+    bool ManualLedger, string? Problem = null, IReadOnlyList<RiskOrder>? StopOrders = null);
 
 // Application owns this bounded port; EF details stay in Persistence. Reads are owner-filtered.
 public interface IOpenRiskStore

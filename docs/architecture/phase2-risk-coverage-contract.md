@@ -83,9 +83,30 @@ fills, in the instrument's quote asset. It has two separate parts.
   - an exit linked to one of the entry's stops or targets is the entry's;
   - a position-level exit (an unplanned venue exit, or any manual exit)
     belongs to the entry only when it is the Play's only filled entry;
-  - the remaining quantity is shared by the entry's stops whose linked
-    orders have not executed, in proportion to their shares. A stop that has
-    already filled has done its part and is not counted again.
+  - the remaining quantity is shared by the entry's stops in proportion to
+    what each rests for (issue #117):
+    - a stop with no linked executions counts for its share of the entry's
+      filled quantity;
+    - a stop that has executed counts for what its linked orders still rest
+      for, as the venue last reported them: the remaining size of each linked
+      order that is open or triggered. The quantity is never inferred from the
+      plan. The part a stop has filled has left the position;
+    - a filled order rests for nothing, so a fully filled stop adds nothing,
+      even when its order was smaller than the stop's planned share;
+    - a cancelled or rejected order (an expired one is reported as
+      cancelled) rests for nothing, even after a partial fill, so the
+      remaining quantity faces the entry's other stops. Whether a stop rests
+      at all stays the monitor's coverage, not this figure;
+    - when a stop's order was replaced, the new linked order counts for its
+      own remaining size and the old cancelled one for nothing;
+    - when no stop rests for anything and some quantity remains, the Play
+      is unknown.
+
+    Example: long 10 at 100 with stops for 5 at 90 and 5 at 99; the 90 stop's
+    order for 5 fills 1 and rests for 4. The 9 left open face 4 at 90 and 5 at
+    99: 4 x 10 + 5 x 1 = 45. Had the same one-unit execution come from an
+    order for 1, now filled, the 9 would face 99 alone: 9 x 1 = 9. A target
+    or position-level exit shrinks every stop's part in the same proportion.
 - **Planned part.** For each entry, its planned quantity not yet filled, at
   its planned price, against every stop of the entry. That is the whole entry
   before its first fill, and the remainder after a partial fill. The planned
@@ -100,6 +121,15 @@ fills, in the instrument's quote asset. It has two separate parts.
   - an exit that cannot be attributed to one entry;
   - exits that exceed their entry;
   - a linked fill that contradicts its role;
+  - a linked order that is not stored, or whose executions are known to be
+    missing by the shared `MissingExecutions` rule, so a stop's filled and
+    resting quantities cannot be established;
+  - a stop that has executed whose linked orders do not reconcile: none is
+    known, a status other than open, triggered, filled, cancelled or
+    rejected, a remaining size above the order's size, a live order that
+    rests for nothing, is a whole-position TP/SL or has executed (size less
+    remaining) other than its retained executions, or a filled order that
+    still reports a remaining size;
   - a quote asset that is not a listed nominal USD stablecoin;
   - a manual execution that cannot be read.
 

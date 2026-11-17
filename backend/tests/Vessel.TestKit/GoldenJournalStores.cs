@@ -124,7 +124,13 @@ internal sealed class GoldenJournalStores(GoldenJournal journal)
                         new RiskExecution(l.Role, l.Role == OrderLinkRole.Exit ? null : l.EntryId, l.LevelId, f.Quantity, f.Price) { Fill = f }))
                         .ToList();
                     var incomplete = links.Any(l => ExecutionIntegrity.MissingExecutions(OrderOf(journal, l), journal.FillsOf(OrderOf(journal, l))));
-                    return new OpenRiskFacts(p, executions, null, false, incomplete ? OpenRiskCalculator.MissingExecutions : null);
+                    var stopOrders = links.Where(l => l is { Role: OrderLinkRole.Stop, EntryId: not null, LevelId: not null }).Select(l =>
+                    {
+                        var order = OrderOf(journal, l);
+                        return new RiskOrder(l.EntryId!, l.LevelId!, order.Status, order.OriginalSize, order.RemainingSize, order.IsPositionTpsl,
+                            journal.FillsOf(order).Sum(f => f.Quantity));
+                    }).ToList();
+                    return new OpenRiskFacts(p, executions, null, false, incomplete ? OpenRiskCalculator.MissingExecutions : null, stopOrders);
                 }).ToList());
 
         public Task<Play?> PlayAsync(Guid id, CancellationToken ct) => Task.FromResult(journal.Plays.SingleOrDefault(p => p.Id == id));

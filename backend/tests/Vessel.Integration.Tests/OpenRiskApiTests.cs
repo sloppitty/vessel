@@ -216,6 +216,55 @@ public sealed class OpenRiskApiTests
         Assert.Equal(OpenRiskCalculator.MissingExecutions, (await Preview(client, new(open, account.Id, edited, "venue"))).Reason);
     }
 
+    [PostgresFact]
+    public async Task A_stop_order_says_what_an_executed_stop_still_rests_for()
+    {
+        // #117, review S1: long 10 at 100 with stops for 5 at 90 and 5 at 99; the 90 stop's order executed one unit.
+        var (database, owner, account, _, _) = await Seed();
+        await using var _ = database;
+        var plan = new PlayPlanDocument("long", "quantity", "10", "1", null, [new PlanEntry("e1", "Entry", "#b9c9e4", "100", "100",
+            [new PlanExit("a", "price", "90", "50"), new PlanExit("b", "price", "99", "50")], [])], new PlanNotes("", "", "", ""));
+        Guid playId;
+        await using (var db = database.Context(owner))
+        {
+            var play = Add(db, account, "LINK", plan, PlayStatus.Open, 20);
+            playId = play.Id;
+            ImportedOrder Order(string id, string side, decimal size, decimal remaining, string status) => new()
+            {
+                Id = Guid.NewGuid(), OwnerId = owner, AccountId = account.Id, ExternalOrderId = id, ContractId = "LINK", Side = side,
+                OrderType = "Limit", LimitPrice = 100, OriginalSize = size, RemainingSize = remaining, PlacedAtUtc = T0.AddMinutes(20),
+                Status = status, VenueStatus = status, StatusAtUtc = T0.AddMinutes(21), ObservedAtUtc = T0.AddMinutes(21),
+            };
+            ImportedFill Fill(string id, string side, string effect, decimal price, decimal quantity) => new()
+            {
+                Id = Guid.NewGuid(), OwnerId = owner, AccountId = account.Id, ContractId = "LINK", SourceFillId = id + "-fill", ExternalOrderId = id,
+                Side = side, Direction = "", PositionEffect = effect, Price = price, Quantity = quantity, Fee = 0, FeeToken = "USDC", ClosedPnlUsd = 0,
+                OccurredAtUtc = T0.AddMinutes(21), TransactionHash = "",
+            };
+            var entry = Order("link-entry", "buy", 10, 0, "filled");
+            var stop = Order("link-stop", "sell", 5, 4, "open");
+            db.Orders.AddRange(entry, stop);
+            db.Fills.AddRange(Fill("link-entry", "buy", "open", 100, 10), Fill("link-stop", "sell", "close", 90, 1));
+            db.OrderLinks.Add(new PlayOrderLink(play, entry, OrderLinkRole.Entry, "e1", null, OrderLinkState.Linked, OrderLinkSource.Automatic, T0.AddMinutes(21)));
+            db.OrderLinks.Add(new PlayOrderLink(play, stop, OrderLinkRole.Stop, "e1", "a", OrderLinkState.Linked, OrderLinkSource.Automatic, T0.AddMinutes(21)));
+            await db.SaveChangesAsync();
+        }
+        await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
+        using var client = factory.AuthorizedClient();
+        async Task<string?> Risk() => (await client.GetFromJsonAsync<OpenRiskDto>("/api/risk/open"))!.Plays.Single(p => p.PlayId == playId).RiskUsd;
+
+        // The order for 5 still rests for 4: 4 × 10 + 5 × 1 = 45.
+        Assert.Equal("45", await Risk());
+        // The same one-unit execution from an order for 1 that is filled rests for nothing: 9 × 1 = 9.
+        await using (var db = database.Context(owner))
+        {
+            var stop = await db.Orders.SingleAsync(o => o.ExternalOrderId == "link-stop");
+            (stop.OriginalSize, stop.RemainingSize, stop.Status) = (1, 0, "filled");
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal("9", await Risk());
+    }
+
     private static async Task<OpenRiskPreviewDto> Preview(HttpClient client, OpenRiskPreviewRequest request)
     {
         var response = await client.PostAsJsonAsync("/api/risk/open/preview", request);

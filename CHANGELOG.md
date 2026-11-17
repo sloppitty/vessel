@@ -51,6 +51,10 @@
   side, a RISEx negative fee) no longer stops an account's whole import. It leaves an
   omission marker and its operation counts as incomplete everywhere. A malformed row or
   response still fails the read.
+- Open risk counts a part-filled stop for the quantity it still rests for, read from the
+  linked order as the venue reported it (45 where it reported 9 in a two-stop example). A
+  fully filled stop still adds nothing, and stop order facts that do not add up make the
+  Play's open risk unknown.
 
 ### Changed
 

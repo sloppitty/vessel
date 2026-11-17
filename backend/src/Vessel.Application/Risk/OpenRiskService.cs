@@ -136,7 +136,7 @@ public sealed class OpenRiskService(IOpenRiskStore store, IWorkspaceStore worksp
         var entrySide = ExecutionIntegrity.EntrySide(plan);
         var executions = fact.Executions.Select(e => e.Fill is { } fill ? e with { Contradicts = ExecutionIntegrity.Contradicts(e.Role, entrySide, fill) } : e)
             .ToList();
-        return OpenRiskCalculator.Calculate(plan, executions, usd);
+        return OpenRiskCalculator.Calculate(plan, executions, usd, fact.StopOrders);
     }
 
     public const string NotCovered = "not-covered", Covered = "covered", NotChecked = "not-checked";
