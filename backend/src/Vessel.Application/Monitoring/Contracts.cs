@@ -81,8 +81,13 @@ public sealed record MonitorRead(PerpetualVenueReadResult Sync, VenueOrderReadRe
 /// Whether the run has protection work. Without it (an account read only because it keeps its history, Phase 2, item 6c)
 /// only the kept-history check runs: an open position with no resting stop and no Play. Every other kind is left as it is.
 /// </param>
+/// <param name="HistoryGapEndUtc">
+/// With <paramref name="HistoryGap"/>, the latest end of the account's open gaps: no execution after it can be missing, so a
+/// Play that started later is not affected (#94). Null when an end is unknown, so the gap reaches every Play.
+/// </param>
 public sealed record MonitorEvaluation(Guid RunId, Account Account, MonitorRead Read, DateTimeOffset? PreviousSuccessAtUtc,
-    DateTimeOffset? NewestFillBeforeReadUtc, bool HistoryGap, string Trigger, bool CurrentOrderBook, bool Protection = true);
+    DateTimeOffset? NewestFillBeforeReadUtc, bool HistoryGap, string Trigger, bool CurrentOrderBook, bool Protection = true,
+    DateTimeOffset? HistoryGapEndUtc = null);
 /// <param name="Coverage">Stop coverage of each evaluated Open Play; null when the facts were too incomplete to name them,
 /// which leaves the stored outcomes to go stale.</param>
 public sealed record MonitorEvaluationResult(DateTimeOffset? NextConfirmationAtUtc, bool Incomplete = false, string? SafeNotice = null,

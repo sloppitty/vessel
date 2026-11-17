@@ -68,7 +68,6 @@ public sealed class MonitorDiscrepancyConditionKindsTests
 
     [Theory]
     [InlineData("protection.missing", "incomplete-read")]
-    [InlineData("protection.missing", "history-gap")]
     [InlineData("protection.missing", "interrupted-check")]
     [InlineData("protection.missing", "absent")]
     [InlineData("protection.excess", "incomplete-read")]

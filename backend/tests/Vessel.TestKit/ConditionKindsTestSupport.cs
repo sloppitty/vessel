@@ -81,8 +81,9 @@ internal static class ConditionKindsTestSupport
     internal static bool Scaled(Vessel.Domain.Workspace.ImportedFill fill) => fill.SourceFillId.StartsWith("scale-", StringComparison.Ordinal);
 
     /// <summary>
-    /// Evidence the kind cannot decide: a history gap for every kind, or an incomplete read of what it rests on. An
-    /// incomplete book still shows an oversized resting order (positive evidence), so the excess uses incomplete facts.
+    /// Evidence the kind cannot decide: a history gap for every quantity kind, or an incomplete read of what it rests on. A
+    /// gap no longer hides a missing stop (#94), which the book and the position decide. An incomplete book still shows an
+    /// oversized resting order (positive evidence), so the excess uses incomplete facts.
     /// </summary>
     internal static void Unknown(DiscrepancyFixture f, string kind, string interruption, bool on)
     {
