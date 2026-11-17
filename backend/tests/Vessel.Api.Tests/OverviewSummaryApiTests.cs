@@ -12,7 +12,11 @@ public sealed class OverviewSummaryApiTests : OverviewSummaryTestsSupport
     [Fact]
     public async Task Endpoint_requires_authentication_and_validates_parameters_without_caching()
     {
-        await using var factory = new CoreApiFactory(owner, store, configure: services => services.AddSingleton<IActivityStore>(activityStore));
+        await using var factory = new CoreApiFactory(owner, store, configure: services =>
+        {
+            services.AddSingleton<IActivityStore>(activityStore);
+            services.AddSingleton<Vessel.Application.Sizing.ISizingStore>(orders);
+        });
         using var anonymous = factory.CreateClient(); Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/overview/summary")).StatusCode);
         using var client = factory.AuthorizedClient();
         using var response = await client.GetAsync("/api/overview/summary");
