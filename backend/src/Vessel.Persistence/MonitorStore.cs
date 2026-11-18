@@ -395,7 +395,8 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         var ownerKey = "vessel-monitor-budget:" + db.CurrentOwnerId;
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({ownerKey}, 0))", ct);
         var venueKey = "vessel-venue-budget:" + venueId;
-        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({venueKey}, 0))", ct);
+        // The paper scheduler holds this key over one bounded public candle read: waiting for it is by design.
+        await DatabaseLimits.BlockingWaitAsync(db.Database, $"SELECT pg_advisory_xact_lock(hashtextextended({venueKey}, 0))", ct);
         // Count on this transaction's connection, including any lease it has just saved. No owner filter is removed.
         await unitOfWork.SaveChangesAsync(ct);
         if (await OwnerAtCapacityAsync(now, headroom > 0 ? 1 : 0, ct)) return false;

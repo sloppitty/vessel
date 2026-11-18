@@ -22,6 +22,7 @@ public sealed class ExportStore(VesselDbContext db) : IFactsExportStore
         var rows = db.ManualExecutions.Join(db.Plays, m => m.PlayId, p => p.Id, (m, p) => new { Row = m, p.AccountId, p.ContractId })
             .Where(x => x.AccountId == accountId && (from == null || x.Row.OccurredAtUtc >= from) && (to == null || x.Row.OccurredAtUtc < to))
             .OrderBy(x => x.Row.OccurredAtUtc).ThenBy(x => x.Row.Id);
+        await DatabaseLimits.LiftStatementLimitForSessionAsync(db.Database, ct);
         await foreach (var row in rows.AsNoTracking().AsAsyncEnumerable().WithCancellation(ct)) yield return (row.Row, row.ContractId);
     }
 
@@ -30,8 +31,11 @@ public sealed class ExportStore(VesselDbContext db) : IFactsExportStore
         Stream(db.FundingPayments.Where(p => p.AccountId == accountId && (from == null || p.OccurredAtUtc >= from) && (to == null || p.OccurredAtUtc < to))
             .OrderBy(p => p.OccurredAtUtc).ThenBy(p => p.OccurredAtUnixNanoseconds).ThenBy(p => p.ContractId).ThenBy(p => p.SourceId).AsNoTracking(), ct);
 
-    private static async IAsyncEnumerable<T> Stream<T>(IQueryable<T> query, [EnumeratorCancellation] CancellationToken ct)
+    // An export streams to the browser at the browser's pace, so its one statement is long on purpose: the session that
+    // runs it has no statement limit, and the pool's reset restores the limit when the request's context is disposed.
+    private async IAsyncEnumerable<T> Stream<T>(IQueryable<T> query, [EnumeratorCancellation] CancellationToken ct)
     {
+        await DatabaseLimits.LiftStatementLimitForSessionAsync(db.Database, ct);
         await foreach (var item in query.AsAsyncEnumerable().WithCancellation(ct)) yield return item;
     }
 }

@@ -39,6 +39,23 @@ internal static class VesselEventSql
         return value is DBNull ? null : value;
     }
 
+    /// <summary>
+    /// A wait that is designed to block (the retention key, a receipt another dispatcher holds): no lock limit for this
+    /// statement only. The statement limit still bounds it, and the session value returns afterwards.
+    /// </summary>
+    internal static async Task<object?> BlockingScalarAsync(VesselDbContext db, string sql, CancellationToken ct,
+        params (string Name, object? Value)[] parameters)
+    {
+        await ExecuteAsync(db, DatabaseLimits.LiftLockLimit, ct);
+        var value = await ScalarAsync(db, sql, ct, parameters);
+        await ExecuteAsync(db, DatabaseLimits.RestoreLockLimit, ct);
+        return value;
+    }
+
+    /// <summary>Retention sweeps and bulk deletes: no statement limit for the rest of this transaction.</summary>
+    internal static Task LiftStatementLimitAsync(VesselDbContext db, CancellationToken ct) =>
+        ExecuteAsync(db, "SET LOCAL statement_timeout = 0", ct);
+
     internal static void RequireTransaction(VesselDbContext db)
     {
         UnitOfWork.ForCurrentContext(db).RequireActive();

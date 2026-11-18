@@ -232,7 +232,15 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Identity/IdentityDbContext.cs|e1b7a668a5e3ab1cf3318d78321688ad059827b7d660f00bda0ac249e2afee69",
             "Vessel.Persistence/VesselDbContextFactory.cs|e1b7a668a5e3ab1cf3318d78321688ad059827b7d660f00bda0ac249e2afee69",
             // Not SQL: check-config usage text ("--Vessel:Key=value" and the word "do").
-            "Vessel.Api/ConfigurationCheckCommand.cs|ed23367322632085581515ce59e3a4ab16f07ac9f7dc62ae7df4d6fc17700445",
+            "Vessel.Api/ConfigurationCheckCommand.cs|6b2800edbcdbc02cc269ece1fc14dc17eb65509e769b341b8c0807731ff6a605",
+            // Issue #106: session settings only (lock_timeout/statement_timeout lifted for one transaction, statement or session,
+            // and restored); they read and write no rows.
+            "Vessel.Identity/IdentityCleanup.cs|e06f3c7d027e0dbbbf87e8ee03ee9fd9cfa2633dfb6814e24bbe872c783ef37b",
+            "Vessel.Persistence/DatabaseLimits.cs|356dcdca767da41cf842c7c389614cc17ed3d6ab3d743c7e15d7b188a4a2ff0f",
+            "Vessel.Persistence/DatabaseLimits.cs|a90032ef553cc437ed6894ebdfa82d60cb6a08f03c8e96a0eac47f1d05b95d0d",
+            "Vessel.Persistence/DatabaseLimits.cs|b8159ffebcfd73323056211d32d1c29757a6201c0f4db4de61e9d4906f09a0a2",
+            "Vessel.Persistence/DatabaseLimits.cs|e06f3c7d027e0dbbbf87e8ee03ee9fd9cfa2633dfb6814e24bbe872c783ef37b",
+            "Vessel.Persistence/Events/VesselEventSql.cs|e06f3c7d027e0dbbbf87e8ee03ee9fd9cfa2633dfb6814e24bbe872c783ef37b",
             // Not SQL: paper report coverage prose and the account-move instruction.
             "Vessel.Application/Review/ReviewService.cs|e540123a645048886c64b77cd996b33b11ba772faa86cca3911968a0a364ffde",
             "Vessel.Application/Workspace/WorkspaceService.cs|a1c0bc9961d3e38f15fd9b7b59072f141e41a0ba20319ee201057cfa365c4a81",

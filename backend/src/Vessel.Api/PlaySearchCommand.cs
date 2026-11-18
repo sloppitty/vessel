@@ -47,7 +47,7 @@ public static class PlaySearchCommand
             var services = new ServiceCollection();
             services.AddLogging();
             services.AddScoped<IJournalOwnerContext, AssignedOwnerContext>();
-            services.AddVesselPersistence(configuration);
+            services.AddVesselOfflinePersistence(configuration);
             await using var provider = services.BuildServiceProvider();
             var inventory = provider.GetRequiredService<IJournalOwnerInventory>();
             var scopes = provider.GetRequiredService<IOwnerScopeFactory>();

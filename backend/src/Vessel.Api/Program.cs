@@ -88,6 +88,8 @@ app.Use(async (context, next) =>
             DomainRuleException error => (409, error.Message),
             BadHttpRequestException { StatusCode: 413 } => (413, "The request body is too large."),
             BadHttpRequestException => (400, "The request body or parameters are invalid."),
+            // A lock or statement timeout: the database is busy, not down. Before the outage check, which counts 55P03 as transient.
+            _ when DatabaseBusy.Is(ex) => (503, DatabaseBusy.Message),
             _ when SafeExceptionDiagnostics.IsDependencyOutage(ex) => (503, "The service is unavailable. Try again later."),
             _ => (500, "An unexpected error occurred.")
         };
@@ -108,6 +110,7 @@ app.Use(async (context, next) =>
             if (problem.RetryAfterSeconds is { } retryAfter)
                 context.Response.Headers.RetryAfter = retryAfter.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
+        if (DatabaseBusy.Is(ex)) context.Response.Headers.RetryAfter = "1";
         if (context.Request.Path.StartsWithSegments("/api/auth") && !extensions.ContainsKey("code"))
             extensions["code"] = status switch { 413 => "request-too-large", 503 => "identity-unavailable", _ => "request-invalid" };
         await Results.Problem(statusCode: status, detail: detail,
@@ -176,7 +179,7 @@ public partial class Program
     public static async Task<int> VerifyIdentityAsync(Microsoft.Extensions.Configuration.IConfiguration configuration,
         IReadOnlyList<IdentityVerificationUser> users, TextWriter output, CancellationToken ct)
     {
-        await using var services = new ServiceCollection().AddVesselPersistence(configuration).BuildServiceProvider();
+        await using var services = new ServiceCollection().AddVesselOfflinePersistence(configuration).BuildServiceProvider();
         return await VerifyIdentityAsync(users, services.GetRequiredService<Vessel.Application.Ownership.IJournalOwnerInventory>(), output, ct);
     }
 

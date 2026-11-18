@@ -14,7 +14,18 @@ public sealed class MissingDatabaseConfigurationException()
 
 public static class DependencyInjection
 {
-    public static IServiceCollection AddVesselPersistence(this IServiceCollection services, IConfiguration config)
+    /// <summary>Request and worker hosts: every connection carries the <see cref="DatabaseLimits"/> lock and statement timeouts.</summary>
+    public static IServiceCollection AddVesselPersistence(this IServiceCollection services, IConfiguration config) =>
+        services.AddPersistence(config, DatabaseLimits.Read(config));
+
+    /// <summary>
+    /// Offline commands (search projection rebuild, messaging provisioning and receipt retries, identity verification): the
+    /// same stores without the session limits, because their work is long on purpose and runs with the hosts stopped.
+    /// </summary>
+    public static IServiceCollection AddVesselOfflinePersistence(this IServiceCollection services, IConfiguration config) =>
+        services.AddPersistence(config, null);
+
+    private static IServiceCollection AddPersistence(this IServiceCollection services, IConfiguration config, DatabaseLimits? limits)
     {
         services.TryAddScoped<OwnerScopeAssignment>();
         services.TryAddSingleton<IOwnerScopeFactory, OwnerScopeFactory>();
@@ -22,7 +33,7 @@ public static class DependencyInjection
         {
             var connection = config.GetConnectionString("Vessel");
             if (string.IsNullOrWhiteSpace(connection)) throw new MissingDatabaseConfigurationException();
-            return NpgsqlDataSource.Create(connection);
+            return limits is null ? NpgsqlDataSource.Create(connection) : limits.Create(connection);
         });
         services.TryAddSingleton<IJournalOwnerInventory, JournalOwnerInventory>();
         // Every worker registers persistence, including deployments that do not run the monitor module.

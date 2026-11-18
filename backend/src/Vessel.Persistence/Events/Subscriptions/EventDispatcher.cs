@@ -188,8 +188,9 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
 
     // The scalar result of pg_advisory_xact_lock_shared is void; callers only await the lock, so Task is the contract.
 #pragma warning disable CA1859
+    // Waits behind a floor publication, which waits for in-flight dispatches: blocking by design, so no lock limit.
     private Task LockRetentionSharedAsync(CancellationToken ct) =>
-        VesselEventSql.ScalarAsync(db, "SELECT pg_advisory_xact_lock_shared(@key)", ct, ("key", VesselEventSql.RetentionLock(db.CurrentOwnerId)));
+        VesselEventSql.BlockingScalarAsync(db, "SELECT pg_advisory_xact_lock_shared(@key)", ct, ("key", VesselEventSql.RetentionLock(db.CurrentOwnerId)));
 #pragma warning restore CA1859
 
     private async Task<(long Sequence, string Type, DateTimeOffset? ExpiresAt, string Payload, long Floor)?> RetainedAsync(
@@ -228,13 +229,18 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
     private async Task<(string State, int Attempts, int MaxAttempts, DateTimeOffset NextAttemptAt)?> LockReceiptAsync(
         string subscription, Guid eventId, bool skipLocked, CancellationToken ct)
     {
-        await using var command = VesselEventSql.TransactionCommand(db, $"""
+        // Live delivery waits for the dispatcher that holds the receipt, by design: no lock limit for that wait.
+        if (!skipLocked) await VesselEventSql.ExecuteAsync(db, DatabaseLimits.LiftLockLimit, ct);
+        (string, int, int, DateTimeOffset)? receipt = null;
+        await using (var command = VesselEventSql.TransactionCommand(db, $"""
             SELECT state,attempts,max_attempts,next_attempt_at FROM event_receipts
             WHERE owner_id=@owner AND subscription=@name AND event_id=@id FOR UPDATE{(skipLocked ? " SKIP LOCKED" : "")}
-            """, ("owner", db.CurrentOwnerId), ("name", subscription), ("id", eventId));
-        await using var row = await command.ExecuteReaderAsync(ct);
-        if (!await row.ReadAsync(ct)) return null;
-        return (row.GetString(0), row.GetInt32(1), row.GetInt32(2), row.GetFieldValue<DateTimeOffset>(3));
+            """, ("owner", db.CurrentOwnerId), ("name", subscription), ("id", eventId)))
+        await using (var row = await command.ExecuteReaderAsync(ct))
+            if (await row.ReadAsync(ct))
+                receipt = (row.GetString(0), row.GetInt32(1), row.GetInt32(2), row.GetFieldValue<DateTimeOffset>(3));
+        if (!skipLocked) await VesselEventSql.ExecuteAsync(db, DatabaseLimits.RestoreLockLimit, ct);
+        return receipt;
     }
 
     private static string Safe(string message) => message.Length <= 200 ? message : message[..200];

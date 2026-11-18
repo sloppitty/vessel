@@ -113,8 +113,9 @@ public sealed class EventCatchUp(VesselDbContext db, UnitOfWork work, EventDispa
         }, ct);
     }
 
+    // Waits behind a floor publication, which waits for in-flight dispatches: blocking by design, so no lock limit.
     private Task<object?> LockRetentionAsync(CancellationToken ct) =>
-        VesselEventSql.ScalarAsync(db, "SELECT pg_advisory_xact_lock_shared(@key)", ct,
+        VesselEventSql.BlockingScalarAsync(db, "SELECT pg_advisory_xact_lock_shared(@key)", ct,
             ("key", VesselEventSql.RetentionLock(db.CurrentOwnerId)));
 
     private async Task<IReadOnlyList<Guid>> IdsAsync(string sql, EventSubscription subscription, CancellationToken ct,

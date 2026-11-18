@@ -108,7 +108,7 @@ public static class MessagingProvisioning
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddScoped<IJournalOwnerContext, AssignedOwnerContext>();
-        services.AddVesselPersistence(configuration);
+        services.AddVesselOfflinePersistence(configuration);
         services.AddVesselEvents(configuration);
         // Registration and admin paths append no events; nothing is published from here.
         services.AddScoped<IVesselEventOutbox, NoPublication>();

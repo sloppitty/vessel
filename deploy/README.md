@@ -233,6 +233,43 @@ health by its own map. Heartbeats are per deployment, not per user.
 and deregistration of a subscriber are server-wide; handling/progress/receipts
 remain owner-scoped. See the [worker reference](../docs/architecture/messaging-and-workers.md).
 
+### Database timeouts
+
+Each API and worker process opens one PostgreSQL connection pool, and every
+connection in it carries two session limits, sent as startup options:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `Vessel__Database__LockTimeout` | `00:00:10` | `lock_timeout`: the longest a statement waits for a row, table or advisory lock. |
+| `Vessel__Database__StatementTimeout` | `00:00:25` | `statement_timeout`: the longest one statement runs. |
+
+Both accept 1 second to 1 hour. The lock limit may not be longer than the
+statement limit, and the statement limit must stay shorter than the connection
+string's `Command Timeout` (30 seconds unless set), so PostgreSQL reports the
+timeout before the client gives up. `check-config` (and so `migrate`) refuses
+other values by setting name. Connect directly to PostgreSQL or through a pooler
+that passes startup options; PgBouncer drops them unless it is told to keep
+them.
+
+A request that waits too long answers 503 with "The database is busy. Try again
+in a moment." and `Retry-After: 1`; the server log names the request. A worker
+treats the same error as a retryable failure: a monitor run releases its lease
+without recording a venue failure and runs again later, and an event delivery
+counts the attempt and retries with its usual delay.
+
+Work that is long on purpose is exempt. The migration bundles and the offline
+commands (`play-search-rebuild`, `provision-messaging`, `retry-event-receipts`,
+`deregister-event-subscription`, `rotate-event-epoch`, the `identity` commands,
+the evidence copies) connect without these limits. Inside the API and workers,
+exports, history backfill pages, account deletion and the event, notification
+and identity retention sweeps lift the statement limit for their own
+transaction or session; the client's command timeout still bounds each
+statement, as before. Waits that block by design lift only the lock limit, for
+that one statement: the monitor's venue-capacity key (the Paper worker holds it
+over one candle read), the event retention key that floor publication, dispatch,
+catch-up and receipt retries share, and live delivery waiting for a receipt
+another dispatcher holds.
+
 ## Requirements
 
 Install Docker Engine with Docker Compose 2.24.4 or newer on a Linux amd64 host, OpenSSL,

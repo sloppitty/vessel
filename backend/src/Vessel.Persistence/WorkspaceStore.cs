@@ -90,7 +90,9 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
             await db.PaperLedgerEntries.AnyAsync(e => e.AccountId == account.Id, ct))
             throw new ProblemException(409, "Paper capital history is retained. Disable this account instead of deleting it.");
         // Explicit owner-filtered deletes run under the locked account's transaction.
-        // Positions cascade from the snapshot, never from trading intent.
+        // Positions cascade from the snapshot, never from trading intent. Bulk deletes of every retained fact are long
+        // on purpose: no statement limit for the rest of this unit.
+        await DatabaseLimits.LiftStatementLimitAsync(db.Database, ct);
         await db.FillImportConflicts.Where(c => c.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.ExecutionOmissions.Where(m => m.AccountId == account.Id).ExecuteDeleteAsync(ct);
         await db.ForcedEvents.Where(e => e.AccountId == account.Id).ExecuteDeleteAsync(ct);
@@ -291,6 +293,8 @@ public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOf
     {
         if (account.TradingMode != TradingMode.Real)
             throw new ProblemException(409, "Paper accounts cannot import real venue facts.");
+        // A history backfill page is long on purpose: no statement limit for the rest of its unit.
+        await DatabaseLimits.LiftStatementLimitAsync(db.Database, ct);
         var ids = fills.Select(f => f.SourceFillId).Distinct().ToArray();
         var retained = await db.Fills.Where(f => f.AccountId == account.Id && ids.Contains(f.SourceFillId)).AsNoTracking().ToListAsync(ct);
         var existing = retained.Select(f => (f.ContractId, f.SourceFillId)).ToHashSet();

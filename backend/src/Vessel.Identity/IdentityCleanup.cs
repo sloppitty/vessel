@@ -27,6 +27,8 @@ public sealed class IdentityCleanup(IDbContextFactory<IdentityDbContext> factory
     {
         await new IdentityTransaction(factory).RunAsync(async db =>
         {
+            // A retention sweep is long on purpose: no statement limit for the rest of this transaction.
+            await db.Database.ExecuteSqlRawAsync("SET LOCAL statement_timeout = 0", ct);
             var now = clock.GetUtcNow();
             // Preserve the full verification skew; cleanup must not shorten a challenge's accepted lifetime.
             await db.Challenges.Where(x => x.ExpiresAt < now.AddSeconds(-30)).ExecuteDeleteAsync(ct);

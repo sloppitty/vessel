@@ -12,7 +12,7 @@ public static class ConfigurationCheckCommand
 {
     private const string Usage = """
         Usage: dotnet Vessel.Api.dll check-config [--Vessel:Key=value …]
-        Validates the authentication and identity configuration exactly as the API and workers do at startup,
+        Validates the authentication, identity and database session settings exactly as the API and workers do at startup,
         without opening a database or broker connection. Exit codes: 0 valid, 1 invalid, 2 usage.
         """;
 
@@ -40,6 +40,8 @@ public static class ConfigurationCheckCommand
             // Program.cs order: production settings outside Development, then the identity settings every host resolves.
             if (!development) ProductionConfiguration.Validate(configuration);
             var settings = IdentitySettings.Read(configuration, development);
+            // The request and worker session limits (lock and statement timeouts), read as every host reads them.
+            Vessel.Persistence.DatabaseLimits.Read(configuration);
             if (settings.LegacyOwnerOverride && settings.OwnerId == Vessel.Application.Ownership.JournalOwner.Default)
                 output.WriteLine("Warning: Vessel:Identity:AllowLegacyDefaultOwner permits the legacy default owner.");
             // Accepted by the code, but the delivery contract (§13) leaves them undocumented until per-user quotas exist.
@@ -48,7 +50,7 @@ public static class ConfigurationCheckCommand
             output.WriteLine("Configuration is valid for wallet sign-in.");
             return 0;
         }
-        catch (Exception error) when (error is InvalidOperationException && error.Source is "Vessel.Api" or "Vessel.Identity")
+        catch (Exception error) when (error is InvalidOperationException && error.Source is "Vessel.Api" or "Vessel.Identity" or "Vessel.Persistence")
         {
             output.WriteLine(error.Message);
             return 1;
