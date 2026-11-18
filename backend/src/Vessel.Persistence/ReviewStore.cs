@@ -26,7 +26,11 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
         var ids = accounts.Where(a => (query.AccountId is null || a.Id == query.AccountId) &&
             (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||
                 a.PortfolioId?.ToString() == query.Portfolio)).Select(a => a.Id).ToList();
-        var closed = await sizing.ClosedPlaysAsync(mode, ct);
+        // Only the closed Plays in scope are read with their facts (issue #109). A Play's links, allocations and fills are on its
+        // own account and instrument (PlayOrderLink refuses another), so the scope also bounds the Plays that claim fills here.
+        var closed = await sizing.ClosedPlaysAsync(mode, ids, query.Instrument, ct);
+        // The instrument filter lists every closed Play's instrument on the enabled accounts, whatever the scope.
+        var instruments = await SizingStore.Closed(db, mode).Where(p => p.ContractId != null).Select(p => p.ContractId!).Distinct().ToListAsync(ct);
         // Known filled orders with missing executions come with the closed Plays, as sizing reads them.
         var incomplete = closed.Where(p => p.IncompleteOrders is { Count: > 0 }).Select(p => p.Play.Id).ToHashSet();
         var open = await db.Plays.CountAsync(p => p.TradingMode == mode && ids.Contains(p.AccountId) && p.Status == PlayStatus.Open &&
@@ -39,7 +43,7 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
                 .Select(e => (DateTimeOffset?)e.OccurredAtUtc).MinAsync(ct);
             var firstPaperPlay = await FirstPlayAsync(mode, ids, query.Instrument, ct);
             await transaction.CommitAsync(ct);
-            return new(portfolios, accounts, closed, open, 0, firstPaper, incomplete) { FirstPlayAtUtc = firstPaperPlay };
+            return new(portfolios, accounts, closed, open, 0, firstPaper, incomplete) { FirstPlayAtUtc = firstPaperPlay, ClosedInstruments = instruments };
         }
         var fills = db.Fills.Where(f => ids.Contains(f.AccountId) && f.OccurredAtUtc <= asOf &&
             (query.Instrument == null || f.ContractId == query.Instrument));
@@ -53,10 +57,13 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
             var to = window.To;
             windowed = windowed.Where(f => f.OccurredAtUtc < to);
         }
-        var unassigned = await windowed.CountAsync(f => !db.OrderLinks.Any(l => l.AccountId == f.AccountId && l.State == OrderLinkState.Linked &&
-                db.Orders.Any(o => o.OwnerId == l.OwnerId && o.AccountId == l.AccountId && o.Id == l.ImportedOrderId &&
-                    o.ContractId == f.ContractId && o.ExternalOrderId == f.ExternalOrderId) &&
-                db.Plays.Any(p => p.Id == l.PlayId && p.TradingMode == mode && p.ContractId == f.ContractId)) &&
+        // A fill is assigned when its own order (account, contract, external ID: the shared OrderKey rule) has a Linked link to a
+        // Play of this mode on the fill's contract. Starting from the order lets PostgreSQL hash the fills against the few linked
+        // orders by that key, instead of testing every link of the account against every fill (issue #109).
+        var unassigned = await windowed.CountAsync(f => !db.Orders.Any(o => o.AccountId == f.AccountId && o.ContractId == f.ContractId &&
+                o.ExternalOrderId == f.ExternalOrderId && db.OrderLinks.Any(l => l.OwnerId == o.OwnerId && l.AccountId == o.AccountId &&
+                    l.ImportedOrderId == o.Id && l.State == OrderLinkState.Linked &&
+                    db.Plays.Any(p => p.Id == l.PlayId && p.TradingMode == mode && p.ContractId == o.ContractId))) &&
             // A fill allocated between Plays is theirs (Phase 2, item 11), whether or not its order is linked.
             !db.FillAllocations.Any(a => a.FillId == f.Id && a.Lines.Any(l => db.Plays.Any(p => p.Id == l.PlayId && p.TradingMode == mode))), ct);
         // Unresolved Plays are never scored; Review counts and lists them with their latest declaration (1.3a).
@@ -84,6 +91,7 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
         return new(portfolios, accounts, closed, open, unassigned, first, incomplete)
         {
             FirstPlayAtUtc = firstPlay,
+            ClosedInstruments = instruments,
             UnresolvedPlays = unresolvedPlays.Select(p => new UnresolvedPlayFacts(p, PlayUnresolved.Latest(declarations[p.Id], p.EndedAtUtc))
             {
                 Revisions = firstRevisions[p.Id].ToList(), FirstExecutionAtUtc = firstExecution.TryGetValue(p.Id, out var at) ? at : null,

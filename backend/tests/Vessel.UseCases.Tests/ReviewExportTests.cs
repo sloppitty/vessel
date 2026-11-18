@@ -1,7 +1,9 @@
 using static Vessel.Tests.CsvTestRows;
 using Vessel.Application.Common;
 using Vessel.Application.Review;
+using Vessel.Application.Sizing;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Workspace;
 
 namespace Vessel.Tests;
 
@@ -89,5 +91,35 @@ public sealed class ReviewExportTests
         var excluded = named[1];
         Assert.Equal((unscored.Play.Id.ToString(), "", "", "closed"), (excluded["play_id"], excluded["net_usd"], excluded["return_percent"], excluded["status"]));
         Assert.Equal(string.Join("; ", exclusions.Items.Single().Reasons), excluded["exclusion_reasons"]);
+    }
+    [Fact]
+    public async Task Fill_reasons_follow_fill_time_whatever_order_the_store_returns_the_fills_in()
+    {
+        // Issue #109: the scoped read can return a Play's fills in another order. 120 fills without a fee token give one reason
+        // each, more than the 100 a list keeps, so the order decides which reasons stay visible as well as how they read.
+        var account = f.Account();
+        var facts = f.Add(0, ReviewClock.Now.AddDays(-1), account);
+        var start = ReviewClock.Now.AddDays(-3);
+        var fills = Enumerable.Range(0, 120).Select(i => new LinkedFill(i < 60 ? OrderLinkRole.Entry : OrderLinkRole.Exit, new ImportedFill
+        {
+            Id = Guid.NewGuid(), OwnerId = f.Owner, AccountId = account.Id, ContractId = "BTC", SourceFillId = $"f{i:D3}",
+            ExternalOrderId = $"o{i:D3}", TransactionHash = "", Side = i < 60 ? ExecutionFacts.Buy : ExecutionFacts.Sell, Direction = "",
+            PositionEffect = i < 60 ? ExecutionFacts.Open : ExecutionFacts.Close, Quantity = 1, Price = 100, Fee = 0, FeeToken = "",
+            OccurredAtUtc = start.AddMinutes(i),
+        })).ToList();
+        f.Closed.Clear();
+        f.Closed.Add(facts with { Fills = fills });
+        var exclusions = await f.Service.ExclusionsAsync(new(Period: "all"), default);
+        var export = await f.Service.ExportAsync(new(Period: "all"), default);
+        f.Closed[0] = facts with { Fills = fills.AsEnumerable().Reverse().ToList() };
+        var reversed = await f.Service.ExclusionsAsync(new(Period: "all"), default);
+        Assert.Equal(exclusions.Items.Single().Reasons, reversed.Items.Single().Reasons);
+        Assert.Equal(export.Content, (await f.Service.ExportAsync(new(Period: "all"), default)).Content);
+        var reasons = exclusions.Items.Single().Reasons;
+        Assert.Equal(100, reasons.Count);
+        // The earliest 99 fills, in time order, then the count of those left out.
+        Assert.Equal(Enumerable.Range(0, 99).Select(i => $"Fill f{i:D3} of order o{i:D3} has missing or unsupported fee inputs (, reported)."),
+            reasons.Where(r => r.StartsWith("Fill ", StringComparison.Ordinal)));
+        Assert.StartsWith("21 additional reasons omitted", reasons[^1]);
     }
 }

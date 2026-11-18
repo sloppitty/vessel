@@ -115,9 +115,11 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             portfolios.OrderBy(p => p.Name).Select(p => new ReviewPortfolioDto(p.Id.ToString(), p.Name)).ToList(),
             accounts.Values.OrderBy(a => a.Name).Select(a => new ReviewAccountDto(a.Id, a.Name, a.PortfolioId, a.VenueId,
                 a.LastSyncedAtUtc, a.SyncStatus, a.HistoryNotice)).ToList(),
-            facts.ClosedPlays.Select(f => f.Play).Concat(facts.UnresolvedPlays.Select(u => u.Play)).Concat(facts.CancelledPlays.Select(c => c.Play))
+            // A scoped read lists the closed Plays' instruments apart; otherwise its closed Plays are all of them.
+            (facts.ClosedInstruments is null ? facts.ClosedPlays.Select(f => f.Play) : [])
+                .Concat(facts.UnresolvedPlays.Select(u => u.Play)).Concat(facts.CancelledPlays.Select(c => c.Play))
                 .Where(p => p.TradingMode == query.TradingMode && accounts.ContainsKey(p.AccountId))
-                .Select(p => p.ContractId).Concat(read.Where(p => p.Outcome is not null).Select(p => p.ContractId))
+                .Select(p => p.ContractId).Concat(facts.ClosedInstruments ?? []).Concat(read.Where(p => p.Outcome is not null).Select(p => p.ContractId))
                 .OfType<string>().Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList());
         var series = Series(current, window, now);
         List<ReviewGroupDto> Groups(Func<Evaluated, string> key, Func<string, string> name, Func<string, List<Evaluated>, string> detail) =>
@@ -588,15 +590,18 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             return DiaryService.BoundedReasons(paper.Issues.Concat(problem is null ? [] : new[] { problem }));
         }
         if (exclusion == NotAllocated) return [FillAllocations.NotAllocatedReason];
-        var reasons = ExecutionIntegrity.Problems(ExecutionIntegrity.EntrySide(facts.CurrentPlan),
-            facts.Fills.ToList(), facts.IncompleteOrders ?? []);
+        // Fills arrive in whatever order the store's query returns them, which depends on the plan and the scope read. Reasons
+        // follow fill time, then the fill's own identity, so the same facts always give the same list before it is bounded.
+        var fills = facts.Fills.OrderBy(f => f.Fill.OccurredAtUtc).ThenBy(f => f.Fill.SourceFillId, StringComparer.Ordinal)
+            .ThenBy(f => f.Fill.ExternalOrderId, StringComparer.Ordinal).ThenBy(f => f.Fill.Id).ThenBy(f => f.Role).ToList();
+        var reasons = ExecutionIntegrity.Problems(ExecutionIntegrity.EntrySide(facts.CurrentPlan), fills, facts.IncompleteOrders ?? []);
         PlayOutcomeCalculator.Outcome(facts, out var arithmeticProblem);
         if (arithmeticProblem is not null) reasons.Add(arithmeticProblem);
-        if (exclusion == "fees" || facts.Fills.Any(f => !ExecutionFacts.IsFeeBasis(f.Fill.FeeBasis) ||
+        if (exclusion == "fees" || fills.Any(f => !ExecutionFacts.IsFeeBasis(f.Fill.FeeBasis) ||
             string.IsNullOrWhiteSpace(f.Fill.FeeToken) || f.Fill.PnlBasis == ExecutionFacts.PnlGross &&
                 f.Fill.Fee != 0 && !NominalStablecoins.Contains(f.Fill.FeeToken)))
         {
-            reasons.AddRange(facts.Fills.Where(f => !ExecutionFacts.IsFeeBasis(f.Fill.FeeBasis) ||
+            reasons.AddRange(fills.Where(f => !ExecutionFacts.IsFeeBasis(f.Fill.FeeBasis) ||
                 string.IsNullOrWhiteSpace(f.Fill.FeeToken) || f.Fill.PnlBasis == ExecutionFacts.PnlGross &&
                 f.Fill.Fee != 0 && !NominalStablecoins.Contains(f.Fill.FeeToken)).Select(f =>
                     $"Fill {f.Fill.SourceFillId} of order {f.Fill.ExternalOrderId} has missing or unsupported fee inputs ({f.Fill.FeeToken}, {f.Fill.FeeBasis})."));
@@ -604,7 +609,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         }
         if (exclusion == "executions")
         {
-            reasons.AddRange(facts.Fills.Where(f => f.Fill.AccountId != facts.Play.AccountId || f.Fill.ContractId != facts.Play.ContractId ||
+            reasons.AddRange(fills.Where(f => f.Fill.AccountId != facts.Play.AccountId || f.Fill.ContractId != facts.Play.ContractId ||
                 f.Fill.PositionEffect is not (ExecutionFacts.Open or ExecutionFacts.Close) || f.Fill.Price <= 0 || f.Fill.Quantity <= 0 ||
                 f.Fill.OccurredAtUtc > now).Select(f => $"Fill {f.Fill.SourceFillId} of order {f.Fill.ExternalOrderId} has invalid identity, effect, quantity, price or time."));
             if (facts.Fills.Select(f => f.Fill.Id).Distinct().Count() != facts.Fills.Count) reasons.Add("Repeated fill IDs prevent a unique execution result.");
