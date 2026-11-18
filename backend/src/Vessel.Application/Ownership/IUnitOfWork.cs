@@ -18,10 +18,9 @@ public interface IUnitOfWork
 
     /// <summary>
     /// Runs reads against one consistent database snapshot, as the outermost unit (Phase 2, item 5c: a Play bundle whose
-    /// parts must agree). It writes nothing; close it before any object-storage read. Stores without snapshots run it as
-    /// an ordinary unit.
+    /// parts must agree). It writes nothing; close it before any object-storage read.
     /// </summary>
-    Task<T> ReadSnapshotAsync<T>(Func<Task<T>> read, CancellationToken cancellationToken) => ExecuteAsync(read, cancellationToken);
+    Task<T> ReadSnapshotAsync<T>(Func<Task<T>> read, CancellationToken cancellationToken);
 
     /// <summary>Persists intermediate changes inside the active boundary, without committing.</summary>
     Task SaveChangesAsync(CancellationToken cancellationToken);
@@ -31,11 +30,15 @@ public interface IUnitOfWork
     /// outside the database (object storage) refuse to start then: a later rollback could not undo them.
     /// </summary>
     bool IsActive { get; }
+}
 
+/// <summary>Guards shared by every unit of work; not part of the port, so no implementation can change them.</summary>
+public static class UnitOfWorkGuards
+{
     /// <summary>Refuses, before any side effect, to run <paramref name="operation"/> inside an active unit.</summary>
-    void RequireOutermost(string operation)
+    public static void RequireOutermost(this IUnitOfWork unitOfWork, string operation)
     {
-        if (IsActive)
+        if (unitOfWork.IsActive)
             throw new InvalidOperationException(
                 $"{operation} writes object storage outside the database and cannot run inside a unit of work or transaction.");
     }
