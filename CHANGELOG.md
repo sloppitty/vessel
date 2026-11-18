@@ -112,6 +112,11 @@
 - Every Compose service has capped logs, `no-new-privileges`, no capabilities beyond those
   listed and a read-only root, and every long-running service has a health check (new for
   web and the TLS proxy).
+- Releases build both images once and publish exactly the images that were verified;
+  rerunning the same release run reuses the originally built pair, and the GitHub Release
+  lists both image digests.
+- Base images are pinned by digest and workflow actions by commit SHA with token-free
+  checkouts; Dependabot proposes the updates.
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and
