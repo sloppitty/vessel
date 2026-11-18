@@ -48,7 +48,7 @@ export function RiskSettings({ api }: { api: RiskSettingsApi }) {
   const parsed = current ? { open: riskLimitText(current.text.open), daily: riskLimitText(current.text.daily), weekly: riskLimitText(current.text.weekly) } : null
   const valid = !!parsed && parsed.open !== undefined && parsed.daily !== undefined && parsed.weekly !== undefined
   const dirty = !!current?.saved && valid && (parsed.open !== current.saved.openRiskLimitPercent ||
-    parsed.daily !== (current.saved.dailyLossLimitR ?? null) || parsed.weekly !== (current.saved.weeklyLossLimitR ?? null))
+    parsed.daily !== current.saved.dailyLossLimitR || parsed.weekly !== current.saved.weeklyLossLimitR)
 
   async function save() {
     const controller = scope.current

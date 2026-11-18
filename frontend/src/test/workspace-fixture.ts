@@ -145,7 +145,7 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
     openRisk: vi.fn().mockImplementation((scope: string) => Promise.resolve(emptyOpenRisk(scope))),
     openRiskPreview: vi.fn().mockImplementation((request: { playId: string | null; plan: { direction: 'long' | 'short' } }) => Promise.resolve({
       playId: request.playId, direction: request.plan.direction, riskUsd: null, reason: 'An entry has no stop.', rounded: false })),
-    riskSettings: vi.fn().mockResolvedValue({ openRiskLimitPercent: null }), updateRiskSettings: vi.fn(unexpected),
+    riskSettings: vi.fn().mockResolvedValue({ openRiskLimitPercent: null, dailyLossLimitR: null, weeklyLossLimitR: null }), updateRiskSettings: vi.fn(unexpected),
     lossLimits: vi.fn().mockResolvedValue(lossLimitsFixture),
     playRule: vi.fn().mockResolvedValue({ active: null, tradingMode: 'real' }), setPlayRule: vi.fn(unexpected), archivePlayRule: vi.fn(unexpected),
     marketSources: vi.fn().mockResolvedValue([]), setMarketSource: vi.fn(unexpected),
