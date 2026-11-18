@@ -75,6 +75,9 @@
   attached TP/SL on its own market, and a Lighter TWAP or unsized order. The reason names
   the order kind. Anything that cannot be attributed safely, including a Lighter order with
   flags, still leaves the whole book unknown.
+- Review loads much faster (about 1.8 s to 0.2 s on the benchmark journal): unassigned fills
+  are counted by order key, and only the closed Plays in the selected scope are read. An
+  excluded Play now lists its reasons in a stable order, by fill time.
 
 ### Changed
 
