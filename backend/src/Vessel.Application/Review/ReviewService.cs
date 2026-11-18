@@ -590,15 +590,18 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             return DiaryService.BoundedReasons(paper.Issues.Concat(problem is null ? [] : new[] { problem }));
         }
         if (exclusion == NotAllocated) return [FillAllocations.NotAllocatedReason];
-        var reasons = ExecutionIntegrity.Problems(ExecutionIntegrity.EntrySide(facts.CurrentPlan),
-            facts.Fills.ToList(), facts.IncompleteOrders ?? []);
+        // Fills arrive in whatever order the store's query returns them, which depends on the plan and the scope read. Reasons
+        // follow fill time, then the fill's own identity, so the same facts always give the same list before it is bounded.
+        var fills = facts.Fills.OrderBy(f => f.Fill.OccurredAtUtc).ThenBy(f => f.Fill.SourceFillId, StringComparer.Ordinal)
+            .ThenBy(f => f.Fill.ExternalOrderId, StringComparer.Ordinal).ThenBy(f => f.Fill.Id).ThenBy(f => f.Role).ToList();
+        var reasons = ExecutionIntegrity.Problems(ExecutionIntegrity.EntrySide(facts.CurrentPlan), fills, facts.IncompleteOrders ?? []);
         PlayOutcomeCalculator.Outcome(facts, out var arithmeticProblem);
         if (arithmeticProblem is not null) reasons.Add(arithmeticProblem);
-        if (exclusion == "fees" || facts.Fills.Any(f => !ExecutionFacts.IsFeeBasis(f.Fill.FeeBasis) ||
+        if (exclusion == "fees" || fills.Any(f => !ExecutionFacts.IsFeeBasis(f.Fill.FeeBasis) ||
             string.IsNullOrWhiteSpace(f.Fill.FeeToken) || f.Fill.PnlBasis == ExecutionFacts.PnlGross &&
                 f.Fill.Fee != 0 && !NominalStablecoins.Contains(f.Fill.FeeToken)))
         {
-            reasons.AddRange(facts.Fills.Where(f => !ExecutionFacts.IsFeeBasis(f.Fill.FeeBasis) ||
+            reasons.AddRange(fills.Where(f => !ExecutionFacts.IsFeeBasis(f.Fill.FeeBasis) ||
                 string.IsNullOrWhiteSpace(f.Fill.FeeToken) || f.Fill.PnlBasis == ExecutionFacts.PnlGross &&
                 f.Fill.Fee != 0 && !NominalStablecoins.Contains(f.Fill.FeeToken)).Select(f =>
                     $"Fill {f.Fill.SourceFillId} of order {f.Fill.ExternalOrderId} has missing or unsupported fee inputs ({f.Fill.FeeToken}, {f.Fill.FeeBasis})."));
@@ -606,7 +609,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         }
         if (exclusion == "executions")
         {
-            reasons.AddRange(facts.Fills.Where(f => f.Fill.AccountId != facts.Play.AccountId || f.Fill.ContractId != facts.Play.ContractId ||
+            reasons.AddRange(fills.Where(f => f.Fill.AccountId != facts.Play.AccountId || f.Fill.ContractId != facts.Play.ContractId ||
                 f.Fill.PositionEffect is not (ExecutionFacts.Open or ExecutionFacts.Close) || f.Fill.Price <= 0 || f.Fill.Quantity <= 0 ||
                 f.Fill.OccurredAtUtc > now).Select(f => $"Fill {f.Fill.SourceFillId} of order {f.Fill.ExternalOrderId} has invalid identity, effect, quantity, price or time."));
             if (facts.Fills.Select(f => f.Fill.Id).Distinct().Count() != facts.Fills.Count) reasons.Add("Repeated fill IDs prevent a unique execution result.");

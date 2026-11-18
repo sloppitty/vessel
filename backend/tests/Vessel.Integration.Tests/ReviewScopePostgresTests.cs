@@ -132,16 +132,6 @@ public sealed class ReviewScopePostgresTests
 
     private static string Json(object value) => JsonSerializer.Serialize(value, value.GetType());
 
-    // A Play's fills come from SQL without an order, so several fill reasons of one excluded Play are listed in whatever
-    // order the plan returns them, before and after #109 alike. Compare their set; every other value stays exact.
-    private static ReviewExclusionsDto Unordered(ReviewExclusionsDto page) =>
-        page with { Items = page.Items.Select(i => i with { Reasons = i.Reasons.Order(StringComparer.Ordinal).ToList() }).ToList() };
-
-    // Reasons share a quoted CSV cell on separate lines, after the row's other cells, so the export is compared as the
-    // multiset of its cells, lines and reasons, without the quotes around whichever reason comes first and last.
-    private static string Unordered(ReviewExportDto export) => export.FileName + "\n" + string.Join('\n',
-        export.Content.Replace("\"", "").Split(["\r\n", "\n", "; ", ","], StringSplitOptions.None).Order(StringComparer.Ordinal));
-
     [PostgresFact]
     public async Task Review_reads_only_the_closed_plays_in_scope_with_the_same_report_as_the_in_memory_filter()
     {
@@ -171,8 +161,9 @@ public sealed class ReviewScopePostgresTests
                 var report = await service.GetAsync(query, default);
                 // The instrument filter still offers every closed Play's instrument, whatever the scope.
                 Assert.Equal(all.Options.Instruments, report.Options.Instruments);
-                results.Add(Json(report) + Json(Unordered(await service.ExclusionsAsync(query, default))) +
-                    Unordered(await service.ExportAsync(query, default)) + Json(await service.ProcessAsync(new(query, Lane: "unanswered"), default)));
+                var export = await service.ExportAsync(query, default);
+                results.Add(Json(report) + Json(await service.ExclusionsAsync(query, default)) + export.FileName + "\n" + export.Content +
+                    Json(await service.ProcessAsync(new(query, Lane: "unanswered"), default)));
             }
             Assert.All(results, r => Assert.Equal(results[0], r));
         }
