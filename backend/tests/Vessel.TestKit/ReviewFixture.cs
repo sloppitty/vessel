@@ -8,7 +8,7 @@ using Vessel.Domain.Workspace;
 
 namespace Vessel.Tests;
 
-internal sealed class ReviewFixture : IReviewStore
+internal sealed class ReviewFixture : IReviewStoreDefaults
 {
     public Guid Owner { get; } = Guid.NewGuid();
     public List<Account> Accounts { get; } = [];

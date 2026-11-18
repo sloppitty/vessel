@@ -89,7 +89,7 @@ internal sealed class GoldenJournalStores(GoldenJournal journal)
             Task.FromResult<IReadOnlyDictionary<Guid, string>>(journal.Plays.Where(p => playIds.Contains(p.Id)).ToDictionary(p => p.Id, p => p.Title));
     }
 
-    private sealed class ReviewReader(GoldenJournal journal) : IReviewStore
+    private sealed class ReviewReader(GoldenJournal journal) : IReviewStoreDefaults
     {
         public Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct) =>
             Task.FromResult(new ReviewFacts([journal.Swing], journal.Accounts.ToList(), Closed(journal),

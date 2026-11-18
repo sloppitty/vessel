@@ -392,7 +392,7 @@ public sealed class DiaryArithmeticRegressionTests
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
-    private sealed class DiaryArithmeticFixture : IDiaryStore, IPlayExecutionStoreDefaults, IReviewStore
+    private sealed class DiaryArithmeticFixture : IDiaryStoreDefaults, IPlayExecutionStoreDefaults, IReviewStoreDefaults
     {
         public Account Account { get; }
         public MemoryPlayStore Plays { get; }

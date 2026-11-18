@@ -11,7 +11,7 @@ namespace Vessel.Tests;
 public sealed class ReviewPositionRegressionIntegrationTests : ReviewPositionRegressionTestsSupport
 {
 
-    private sealed class AfterReviewRead(IReviewStore inner, Func<Task> commit) : IReviewStore
+    private sealed class AfterReviewRead(IReviewStore inner, Func<Task> commit) : IReviewStoreDefaults
     {
         private bool committed;
         public async Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct)

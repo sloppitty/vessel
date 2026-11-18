@@ -81,9 +81,9 @@ public interface IReviewStore
 {
     Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct);
     /// <summary>The same snapshot, with the unassigned-fills count over <paramref name="window"/> (Phase 2, item 2).</summary>
-    Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, ReviewWindow window, CancellationToken ct) => ReadAsync(query, asOf, ct);
+    Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, ReviewWindow window, CancellationToken ct);
     /// <summary>The owner's reporting setting, or null for the defaults (UTC, Monday).</summary>
-    Task<ReportingSettings?> ReportingAsync(CancellationToken ct) => Task.FromResult<ReportingSettings?>(null);
+    Task<ReportingSettings?> ReportingAsync(CancellationToken ct);
     /// <summary>
     /// The owner's own mistake tags for autocomplete, newest use first: trimmed, grouped case-insensitively in their latest
     /// spelling, at most <paramref name="limit"/> (phase 1, 1.4b).

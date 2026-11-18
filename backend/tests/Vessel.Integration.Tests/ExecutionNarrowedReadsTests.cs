@@ -371,8 +371,8 @@ public sealed class ExecutionNarrowedReadsTests
 
     // Retrospective preview -------------------------------------------------------------------------------------------
 
-    /// <summary>Implements only the whole-account reads, so the targeted preview reads fall back to the port's reference rule.</summary>
-    private sealed class FullReadDiaryStore(DiaryStore inner) : IDiaryStore
+    /// <summary>Implements only the whole-account reads, so the targeted preview reads fall back to the TestKit reference rule.</summary>
+    private sealed class FullReadDiaryStore(DiaryStore inner) : IDiaryStoreDefaults
     {
         public Task<T> WithRequestLockAsync<T>(Guid requestId, Func<Task<T>> action, CancellationToken ct) => inner.WithRequestLockAsync(requestId, action, ct);
         public Task<DiaryRequest?> RequestAsync(Guid requestId, CancellationToken ct) => inner.RequestAsync(requestId, ct);
