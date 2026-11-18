@@ -112,7 +112,11 @@ public sealed class HyperliquidBuilderMarketTests
         Assert.Null(result.FillHistoryTruncated);
         Assert.Null(result.OldestRawFillAtUtc);
         Assert.Empty(result.Fills);
-        Assert.False((await reader.ReadOrdersAsync(Address, CancellationToken.None)).OpenOrdersComplete);
+        var orders = await reader.ReadOrdersAsync(Address, CancellationToken.None);
+        Assert.False(orders.OpenOrdersComplete);
+        // #95: a whole-read condition, never narrowed to a contract.
+        Assert.Null(orders.IncompleteContracts);
+        Assert.False(orders.OpenOrdersCompleteFor("BTC", null));
     }
 
     [Theory]

@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Vessel.Application.Venues;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 
@@ -50,6 +51,84 @@ public sealed partial class HyperliquidOrderTests
         Assert.Equal(2, result.Orders.Count);
         Assert.Single(result.Orders, o => o.ContractId == "1000PEPE");
         Assert.Single(result.Orders, o => o.ContractId == "BTC");
+    }
+
+    // By default one stop child on the parent's own market, as Hyperliquid attaches it.
+    private static string WithChildren(string order, string? children = null)
+    {
+        var parent = JsonNode.Parse(order)!;
+        var coin = (string)parent["coin"]!;
+        parent["children"] = JsonNode.Parse(children ?? $"[{Order(99, "A", trigger: true, type: "Stop Market", coin: coin)}]");
+        return parent.ToJsonString();
+    }
+
+    private static string Without(string order, string property)
+    {
+        var node = JsonNode.Parse(order)!;
+        node.AsObject().Remove(property);
+        return node.ToJsonString();
+    }
+
+    [Fact] // #95: attached TP/SL children are the parent's own market; only that contract's book is incomplete.
+    public async Task Coverage_attached_children_leave_only_their_parents_contract_incomplete()
+    {
+        var result = await ReadTwoMarketOrders("[]", $"[{WithChildren(Order(7, coin: "kPEPE", px: "0.012345"))},{Order(8)}]");
+        Assert.False(result.OpenOrdersComplete);
+        Assert.Equal([new VenueIncompleteBook("1000PEPE", "kPEPE", VenueIncompleteBook.AttachedTpsl)], result.IncompleteContracts);
+        Assert.False(result.OpenOrdersCompleteFor("1000PEPE", "kPEPE"));
+        Assert.True(result.OpenOrdersCompleteFor("BTC", null));
+        // The parent itself is still read; its children are not.
+        Assert.Equal(["7", "8"], result.Orders.Select(o => o.OrderId).Order(StringComparer.Ordinal));
+    }
+
+    [Theory] // #95: an unread parent, a malformed child list or a whole-read condition still leaves every contract unknown.
+    [InlineData("spot-parent")]
+    [InlineData("malformed-children")]
+    [InlineData("duplicate")]
+    // Review S1: each child must be a readable order on the parent's own native market.
+    [InlineData("null-child")]
+    [InlineData("number-child")]
+    [InlineData("child-without-coin")]
+    [InlineData("child-on-another-market")]
+    [InlineData("child-with-malformed-oid")]
+    [InlineData("child-with-children")]
+    // Review S1 (round 2): a child shares the active-order identity space.
+    [InlineData("duplicate-children")]
+    [InlineData("child-repeats-parent")]
+    [InlineData("child-repeats-earlier-top-level")]
+    [InlineData("child-repeats-later-top-level")]
+    [InlineData("children-reach-the-order-cap")]
+    public async Task Coverage_children_that_cannot_be_attributed_leave_the_whole_book_incomplete(string scope)
+    {
+        var stop = Order(99, "A", trigger: true, type: "Stop Market", coin: "kPEPE");
+        var parent = Order(7, coin: "kPEPE", px: "0.012345");
+        var badOid = stop.Replace("\"oid\":99", "\"oid\":-1", StringComparison.Ordinal);
+        Assert.NotEqual(stop, badOid);
+        var parentOid = stop.Replace("\"oid\":99", "\"oid\":7", StringComparison.Ordinal);
+        Assert.NotEqual(stop, parentOid);
+        var book = scope switch
+        {
+            "spot-parent" => $"[{WithChildren(Order(7, coin: "@123"))},{Order(8)}]",
+            "malformed-children" => $"[{WithChildren(parent, "{}")},{Order(8)}]",
+            "null-child" => $"[{WithChildren(parent, "[null]")},{Order(8)}]",
+            "number-child" => $"[{WithChildren(parent, "[1]")},{Order(8)}]",
+            "child-without-coin" => $"[{WithChildren(parent, $"[{Without(stop, "coin")}]")},{Order(8)}]",
+            "child-on-another-market" => $"[{WithChildren(parent, $"[{Order(99, "A", trigger: true, type: "Stop Market")}]")},{Order(8)}]",
+            "child-with-malformed-oid" => $"[{WithChildren(parent, $"[{badOid}]")},{Order(8)}]",
+            "child-with-children" => $"[{WithChildren(parent, $"[{WithChildren(stop)}]")},{Order(8)}]",
+            "duplicate-children" => $"[{WithChildren(parent, $"[{stop},{stop}]")},{Order(8)}]",
+            "child-repeats-parent" => $"[{WithChildren(parent, $"[{parentOid}]")},{Order(8)}]",
+            "child-repeats-earlier-top-level" => $"[{stop},{WithChildren(parent)},{Order(8)}]",
+            "child-repeats-later-top-level" => $"[{WithChildren(parent)},{Order(8)},{stop}]",
+            // 1,999 rows and one child: 2,000 orders reach the cap, so the book may be truncated anywhere.
+            "children-reach-the-order-cap" => $"[{WithChildren(parent)},{string.Join(",", Enumerable.Range(1000, 1998).Select(i => Order(i)))}]",
+            _ => $"[{WithChildren(parent)},{Order(8)},{Order(8)}]",
+        };
+        var result = await ReadTwoMarketOrders("[]", book);
+        Assert.False(result.OpenOrdersComplete);
+        Assert.Null(result.IncompleteContracts);
+        Assert.False(result.OpenOrdersCompleteFor("BTC", null));
+        Assert.False(result.OpenOrdersCompleteFor("1000PEPE", "kPEPE"));
     }
 
     [Fact]

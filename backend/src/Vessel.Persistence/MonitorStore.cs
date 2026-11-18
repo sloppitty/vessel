@@ -492,9 +492,11 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
                     watch.EndedAtUtc = orders.ObservedAtUtc;
                     watch.Outcome = MonitorWatchOutcomes.Terminal;
                 }
-                else if ((current is null || current.Status == VenueOrderStatus.Open) && orders.OpenOrdersComplete)
+                else if ((current is null || current.Status == VenueOrderStatus.Open) &&
+                         orders.OpenOrdersCompleteFor(order.ContractId, order.VenueContractId))
                 {
-                    // Absent from a complete current book; absence proves nothing on an incomplete read.
+                    // Absent from a complete current book; absence proves nothing on an incomplete read. #95: only this
+                    // order's contract needs to be complete.
                     watch.EndedAtUtc = orders.ObservedAtUtc;
                     watch.Outcome = MonitorWatchOutcomes.Absent;
                 }

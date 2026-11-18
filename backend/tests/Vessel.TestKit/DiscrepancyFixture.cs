@@ -29,6 +29,10 @@ internal sealed class DiscrepancyFixture
     /// <summary>With <see cref="HistoryGap"/>, the latest end of the open gaps (#94); null reaches every Play.</summary>
     public DateTimeOffset? HistoryGapEnd;
     public TimeSpan ObservationOffset;
+    /// <summary>Markets beside BTC, with the venue position on each (#95).</summary>
+    public readonly Dictionary<string, decimal> Markets = new(StringComparer.Ordinal);
+    /// <summary>The contracts the read names as incomplete while the rest of the book was read (#95).</summary>
+    public List<VenueIncompleteBook>? IncompleteContracts;
     public DiscrepancyFixture()
     {
         Account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Synthetic"); Store.Account = Account;
@@ -36,17 +40,17 @@ internal sealed class DiscrepancyFixture
         AddOrder("stop", OrderLinkRole.Stop, 1, 90);
         Service = new(Store, TestUnitOfWork.None, new CoreOwner(Account.OwnerId), Events, new(), Clock);
     }
-    public Play AddPlay(string direction, decimal quantity, string? entryOrder = null)
+    public Play AddPlay(string direction, decimal quantity, string? entryOrder = null, string contract = "BTC")
     {
         var plan = new PlayPlanDocument(direction, "quantity", "1", "1", null,
             [new("e", "Entry", "#ffffff", "100", "100", [new("s", "price", direction == "long" ? "90" : "110", "100")],
                 [new("t", "price", direction == "long" ? "120" : "80", "100")])], new("", "", "", ""));
-        var play = new Play(Guid.NewGuid(), Account, new("hyperliquid", "BTC"), InstrumentSource.Venue, PlayDocuments.Serialize(plan), Clock.Now.AddHours(-1));
+        var play = new Play(Guid.NewGuid(), Account, new("hyperliquid", contract), InstrumentSource.Venue, PlayDocuments.Serialize(plan), Clock.Now.AddHours(-1));
         play.MarkPlanned(Clock.Now.AddMinutes(-30)); play.MarkOpen("fixture", Clock.Now.AddMinutes(-20)); Store.Plays.Add(play);
         entryOrder ??= play.Id.ToString();
         var side = direction == "long" ? "buy" : "sell";
-        Fill(entryOrder + "-fill", entryOrder, quantity, Clock.Now.AddMinutes(-20), side);
-        Store.Orders.Add(new() { Id = Guid.NewGuid(), OwnerId = Account.OwnerId, AccountId = Account.Id, ContractId = "BTC", ExternalOrderId = entryOrder,
+        Fill(entryOrder + "-fill", entryOrder, quantity, Clock.Now.AddMinutes(-20), side, contract: contract);
+        Store.Orders.Add(new() { Id = Guid.NewGuid(), OwnerId = Account.OwnerId, AccountId = Account.Id, ContractId = contract, ExternalOrderId = entryOrder,
             Side = side, OrderType = "Limit", OriginalSize = quantity, Status = "filled", VenueStatus = "filled", PlacedAtUtc = Clock.Now.AddMinutes(-25),
             StatusAtUtc = Clock.Now.AddMinutes(-20), ObservedAtUtc = Clock.Now.AddMinutes(-20), LimitPrice = 100 });
         Store.Links.Add(Link(play, entryOrder, OrderLinkRole.Entry, "e", null, OrderLinkState.Linked, OrderLinkSource.Owner, Clock.Now.AddMinutes(-25)));
@@ -81,9 +85,10 @@ internal sealed class DiscrepancyFixture
         VenueOrders.Add(new(id, "BTC", "sell", role == OrderLinkRole.Stop ? "Stop Market" : "Take Profit Market", price, price, true, false,
             quantity, quantity, Clock.Now.AddMinutes(-15), VenueOrderStatus.Open, "open", Clock.Now));
     }
-    public void Fill(string id, string order, decimal quantity, DateTimeOffset at, string side = "buy", string effect = ExecutionFacts.Open) => Store.Fills.Add(new()
+    public void Fill(string id, string order, decimal quantity, DateTimeOffset at, string side = "buy", string effect = ExecutionFacts.Open,
+        string contract = "BTC") => Store.Fills.Add(new()
     {
-        Id = Guid.NewGuid(), OwnerId = Account.OwnerId, AccountId = Account.Id, ContractId = "BTC", SourceFillId = id, ExternalOrderId = order,
+        Id = Guid.NewGuid(), OwnerId = Account.OwnerId, AccountId = Account.Id, ContractId = contract, SourceFillId = id, ExternalOrderId = order,
         Side = side, Direction = side, PositionEffect = effect, Quantity = quantity, Price = 100, OccurredAtUtc = at, FeeToken = "USDC", TransactionHash = "synthetic"
     });
     public void Stop(Func<VenueOrder, VenueOrder> change) { var index = VenueOrders.FindIndex(x => x.OrderId == "stop"); VenueOrders[index] = change(VenueOrders[index]); }
@@ -91,9 +96,14 @@ internal sealed class DiscrepancyFixture
     public MonitorEvaluation Observation()
     {
         var at = Clock.Now + ObservationOffset;
+        VenuePosition[] btc = Position == 0 || Retired ? [] : [new("BTC", Position, 100, 0, 0, 1, LiquidationPrice: Liquidation, MarginMode: MarginMode)];
+        VenueInstrument[] btcInstrument = Retired ? [] : [new("BTC", 4, 10, "USDC", PriceStep)];
+        var others = Markets.Where(x => x.Value != 0).Select(x => new VenuePosition(x.Key, x.Value, 100, 0, 0, 1));
+        var markets = Markets.Keys.Select(x => new VenueInstrument(x, 4, 10, "USDC", PriceStep));
         return new(Guid.NewGuid(), Account, new(new(new(at, "primary-perpetuals", 100, 100, 0,
-            Position == 0 || Retired ? [] : [new("BTC", Position, 100, 0, 0, 1, LiquidationPrice: Liquidation, MarginMode: MarginMode)]), Retired ? [] : [new("BTC", 4, 10, "USDC", PriceStep)], [], "bounded",
-            PositionsComplete, false, Truncated, OmittedExecutions: Omitted) { Omissions = Omissions.ToArray() }, new(VenueOrders.Select(x => StampOpenOrders && x.Status == VenueOrderStatus.Open ? x with { StatusAtUtc = at } : x).ToArray(), at, "bounded", OrdersComplete)),
+            [.. btc, .. others]), [.. btcInstrument, .. markets], [], "bounded",
+            PositionsComplete, false, Truncated, OmittedExecutions: Omitted) { Omissions = Omissions.ToArray() }, new(VenueOrders.Select(x => StampOpenOrders && x.Status == VenueOrderStatus.Open ? x with { StatusAtUtc = at } : x).ToArray(), at, "bounded", OrdersComplete)
+            { IncompleteContracts = IncompleteContracts?.ToArray() }),
             null, null, HistoryGap, "scheduled", CurrentOrderBook, HistoryGapEndUtc: HistoryGapEnd);
     }
     public Task<MonitorEvaluationResult> Evaluate() => Service.EvaluateAsync(Observation(), default);

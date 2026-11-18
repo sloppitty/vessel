@@ -306,9 +306,15 @@ public sealed partial class MonitorPostgresTests
         }, default);
         await Observe(new([], now.AddSeconds(1), "Incomplete", OpenOrdersComplete: false));
         Assert.True(await store.EligibleAsync(id, DateTimeOffset.UtcNow, default));
+        // #95: an unread order on the stop's own contract proves nothing about it either.
+        await Observe(new([], now.AddSeconds(1), "Incomplete here", OpenOrdersComplete: false)
+            { IncompleteContracts = [new("BTC", null, VenueIncompleteBook.AttachedTpsl)] });
+        Assert.True(await store.EligibleAsync(id, DateTimeOffset.UtcNow, default));
         await Observe(new([], now.AddSeconds(-1), "Earlier than cancellation", OpenOrdersComplete: true));
         Assert.True(await store.EligibleAsync(id, DateTimeOffset.UtcNow, default));
-        await Observe(new([], now.AddSeconds(2), "Fresh absence", OpenOrdersComplete: true));
+        // #95: one incomplete on another contract only, this contract's book was read whole.
+        await Observe(new([], now.AddSeconds(2), "Fresh absence", OpenOrdersComplete: false)
+            { IncompleteContracts = [new("ETH", null, VenueIncompleteBook.AttachedTpsl)] });
         Assert.False(await store.EligibleAsync(id, DateTimeOffset.UtcNow, default));
         link.Confirm(now.AddSeconds(3));
         await db.SaveChangesAsync();
