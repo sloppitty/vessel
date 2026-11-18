@@ -182,21 +182,23 @@ def build(root, version, revision, output, image=IMAGE):
 
 def load(source, version, revision, expected, image=IMAGE):
     """Load the saved images after checking they are the expected ones; return the local reference of each."""
-    refs = {}
+    saved = {}
     for kind in DOCKERFILES:
         if not DIGEST.fullmatch(expected.get(kind) or ''):
             raise ReleaseError(f'The expected {kind} config digest must be sha256:<64 hex>, not {expected.get(kind)!r}')
         archive = Path(source) / f'{kind}.tar'
-        saved = archive_identity(archive)
-        ref = f'{image}:{kind}-{version}'
-        if saved['config'] != expected[kind]:
-            raise ReleaseError(f'{archive} holds {saved["config"]}, not the built and verified {expected[kind]}')
-        expect_metadata(ref, saved['image'], version, revision)
+        saved[kind] = archive_identity(archive)
+        if saved[kind]['config'] != expected[kind]:
+            raise ReleaseError(f'{archive} holds {saved[kind]["config"]}, not the built and verified {expected[kind]}')
+        expect_metadata(f'{image}:{kind}-{version}', saved[kind]['image'], version, revision)
+    refs = {}
+    for kind in DOCKERFILES:
+        archive, tags, ref = Path(source) / f'{kind}.tar', saved[kind]['tags'], f'{image}:{kind}-{version}'
+        if not tags:
+            raise ReleaseError(f'{archive} names no image')
         docker('load', '--quiet', '--input', str(archive))
-        if ref not in saved['tags']:
-            if not saved['tags']:
-                raise ReleaseError(f'{archive} names no image')
-            docker('tag', saved['tags'][0], ref)
+        if ref not in tags:
+            docker('tag', tags[0], ref)
         if local_config(ref) != expected[kind]:
             raise ReleaseError(f'{ref} is not the loaded image {expected[kind]}')
         refs[kind] = ref

@@ -221,8 +221,9 @@ class ReleaseImageTests(unittest.TestCase):
         self.assertEqual({'api': 'example/vessel:api-1.2.3', 'web': 'example/vessel:web-1.2.3'}, refs)
         with self.assertRaisesRegex(release.ReleaseError, 'not the built and verified'):
             self.load({**self.expected, 'web': 'sha256:' + 'f' * 64})
+        # Both archives are checked before either is loaded.
         loads = [ref for command, ref in self.calls if command == 'load']
-        self.assertEqual([str(self.directory / 'api.tar'), str(self.directory / 'web.tar'), str(self.directory / 'api.tar')], loads)
+        self.assertEqual([str(self.directory / 'api.tar'), str(self.directory / 'web.tar')], loads)
         with self.assertRaisesRegex(release.ReleaseError, 'must be sha256:<64 hex>'):
             self.load({**self.expected, 'api': 'sha256:short'})
 
