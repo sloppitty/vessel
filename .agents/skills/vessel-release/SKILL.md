@@ -90,14 +90,17 @@ Do not use force or `--tags`. The Release workflow then:
 1. rejects lightweight tags, tags not on `main` and version/notes mismatches;
 2. runs the foundation checks, and builds both images once from the tagged
    commit (`scripts/release.py build`), saving them as the `release-images`
-   workflow artifact with each config digest as a job output;
+   workflow artifact with each config digest as a job output. A later attempt
+   of the same run downloads that artifact and recomputes both digests from it
+   (`release.py identify`) instead of building, and never uploads over it;
 3. loads that artifact (`release.py load`, which refuses an archive whose config
    digest differs) and runs `verify-release.py --api-image … --web-image …` for
    S3 and local storage;
 4. runs `release.py publish` in the `docker-hub` environment: loads the same
    artifact, pushes both versioned tags, fails when a pushed config digest is not
-   the verified one, then tags and pushes both latest tags and verifies they
-   resolve to the same digests. A versioned tag already published from another
+   the verified one, then copies each verified versioned manifest to its latest
+   tag (`docker buildx imagetools create --prefer-index=false`) and verifies both
+   latest tags resolve to the same digests. A versioned tag already published from another
    revision, or from this revision by another build, stops the job; one already
    holding the verified image is reused;
 5. creates or updates the GitHub Release from `docs/releases/vX.Y.Z.md` plus
@@ -117,10 +120,23 @@ environments or Docker credential configuration.
   `gh secret set DOCKERHUB_TOKEN --env docker-hub` or in repository settings.
 - A missing secret fails before any push. After it is set, re-run the failed
   jobs, or dispatch the workflow on the tag ("Use workflow from" the tag).
-- If a versioned push fails, latest tags are untouched. If a latest push fails,
-  report the partial publication; "Re-run failed jobs" reuses the run's image
-  artifact (kept 30 days) and the versioned images. "Re-run all jobs" rebuilds
-  the images, so publish refuses versioned tags the earlier attempt pushed.
+- If a versioned push fails, latest tags are untouched. After any partial
+  publication, report it, then recover in the same run (the `release-images`
+  artifact is kept 30 days):
+  - "Re-run failed jobs" reruns publication (and the GitHub Release) with the
+    run's artifact and the build job's recorded digests; versioned tags already
+    holding the verified images are reused, not pushed again.
+  - "Re-run all jobs" reruns everything, but the build job downloads the run's
+    artifact and recomputes its digests instead of rebuilding, so verification
+    and publication see the same pair. If that download fails it builds, and the
+    upload then fails because the artifact exists; nothing is replaced.
+  - A new dispatch on the tag is a new run without the artifact: it rebuilds,
+    so it only helps when nothing was published yet.
+  - Once the artifact has expired, no run can reproduce the verified pair:
+    publication refuses a rebuilt image under a versioned tag already published.
+    Leave the published versioned tags as they are and report to the owner; the
+    usual way forward is a new patch release. Never delete or move a published
+    tag to work around it.
 - If a correction is needed after a tag was pushed, report it and obtain the
   owner's direction rather than moving the tag.
 

@@ -96,10 +96,11 @@ def digest_of(data):
     return 'sha256:' + hashlib.sha256(data).hexdigest()
 
 
-def write_archive(path, config, tags):
-    """A minimal `docker save` archive: manifest.json naming one config blob and its tags."""
-    entries = {'blobs/sha256/config': config,
-               'manifest.json': json.dumps([{'Config': 'blobs/sha256/config', 'RepoTags': tags, 'Layers': []}]).encode()}
+def write_archive(path, config, tags, name=None):
+    """A minimal `docker save` archive: manifest.json naming one config blob, by its digest, and its tags."""
+    name = name or 'blobs/sha256/' + hashlib.sha256(config).hexdigest()
+    entries = {name: config,
+               'manifest.json': json.dumps([{'Config': name, 'RepoTags': tags, 'Layers': []}]).encode()}
     with tarfile.open(path, 'w') as archive:
         for name, data in entries.items():
             info = tarfile.TarInfo(name)
@@ -118,6 +119,18 @@ class ImageArchiveTests(unittest.TestCase):
         self.assertEqual(digest_of(config_bytes('api')), saved['config'])
         self.assertEqual(['example/vessel:api-1.2.3'], saved['tags'])
         self.assertEqual('linux', saved['image']['os'])
+        # Older daemons name the config <hex>.json.
+        legacy = hashlib.sha256(config_bytes('api')).hexdigest() + '.json'
+        write_archive(self.directory / 'old.tar', config_bytes('api'), [], name=legacy)
+        self.assertEqual(digest_of(config_bytes('api')), release.archive_identity(self.directory / 'old.tar')['config'])
+
+    def test_a_config_that_does_not_hash_to_its_name_is_corrupted(self):
+        named_for_web = 'blobs/sha256/' + hashlib.sha256(config_bytes('web')).hexdigest()
+        for name in (named_for_web, 'blobs/sha256/config'):
+            with self.subTest(name=name):
+                write_archive(self.directory / 'api.tar', config_bytes('api'), [], name=name)
+                with self.assertRaisesRegex(release.ReleaseError, 'the archive is corrupted'):
+                    release.archive_identity(self.directory / 'api.tar')
 
     def test_anything_but_one_saved_image_is_rejected(self):
         (self.directory / 'api.tar').write_text('not a tar')
@@ -176,6 +189,12 @@ class ReleaseImageTests(unittest.TestCase):
             ref = args[-1]
             config = self.pushed_as.get(ref, digest_of(self.local[ref]))
             self.registry[ref] = {'digest': 'sha256:manifest-' + config[-8:], 'config': config, 'image': image()}
+        elif command == 'buildx':
+            # imagetools create --prefer-index=false --tag <target> <source>@<digest>: a registry-side copy.
+            self.assertEqual(('imagetools', 'create', '--prefer-index=false', '--tag'), args[1:5])
+            source, digest = args[-1].split('@')
+            self.assertEqual(digest, self.registry[source]['digest'])
+            self.registry[args[5]] = dict(self.registry[source])
         return None
 
     def run_release(self, function, *args):
@@ -247,9 +266,10 @@ class ReleaseImageTests(unittest.TestCase):
         digests = self.publish()
         self.assertEqual({kind: 'sha256:manifest-' + self.expected[kind][-8:] for kind in ('api', 'web')}, digests)
         self.assertNotIn('build', [call[0] for call in self.calls])
-        pushes = [ref for command, ref in self.calls if command == 'push']
-        self.assertEqual(['example/vessel:api-1.2.3', 'example/vessel:web-1.2.3',
-                          'example/vessel:api-latest', 'example/vessel:web-latest'], pushes)
+        moves = [(command, ref) for command, ref in self.calls if command in ('push', 'buildx')]
+        self.assertEqual([('push', 'example/vessel:api-1.2.3'), ('push', 'example/vessel:web-1.2.3'),
+                          ('buildx', f'example/vessel:api-1.2.3@{digests["api"]}'),
+                          ('buildx', f'example/vessel:web-1.2.3@{digests["web"]}')], moves)
         for kind in ('api', 'web'):
             self.assertEqual(self.expected[kind], self.registry[f'example/vessel:{kind}-latest']['config'])
 
@@ -282,12 +302,55 @@ class ReleaseImageTests(unittest.TestCase):
         self.assertIn('example/vessel:web-1.2.3', pushes)
         self.assertNotIn('pull', [call[0] for call in self.calls])
 
+    def test_latest_copies_an_earlier_attempts_manifest_even_when_another_encoding_has_the_same_config(self):
+        # The registry holds api-1.2.3 as a manifest that a fresh push of the same config would not reproduce.
+        self.registry['example/vessel:api-1.2.3'] = {'digest': 'sha256:alternate', 'config': self.expected['api'],
+                                                     'image': image()}
+        digests = self.publish()
+        self.assertEqual('sha256:alternate', digests['api'])
+        self.assertEqual('sha256:alternate', self.registry['example/vessel:api-latest']['digest'])
+        self.assertEqual(digests['web'], self.registry['example/vessel:web-latest']['digest'])
+        self.assertNotIn(('push', 'example/vessel:api-latest'), self.calls)
+
     def test_a_version_from_the_same_revision_but_another_build_is_never_overwritten(self):
         self.registry['example/vessel:api-1.2.3'] = {'digest': 'sha256:earlier', 'config': 'sha256:' + 'c' * 64,
                                                      'image': image()}
         with self.assertRaisesRegex(release.ReleaseError, 'already published from this revision as sha256:c+'):
             self.publish()
         self.assertEqual([], [call for call in self.calls if call[0] in ('load', 'push')])
+
+    def identify(self, image='example/vessel'):
+        outputs = self.directory / 'github-output'
+        with patch('builtins.print'), patch.dict('os.environ', {'GITHUB_STEP_SUMMARY': '', 'GITHUB_OUTPUT': str(outputs)}):
+            return release.identify(self.directory, '1.2.3', REVISION, image), outputs.read_text()
+
+    def test_identify_recomputes_the_digests_build_recorded_without_building(self):
+        output, recorded = self.directory / 'out', self.directory / 'build-output'
+        with patch.object(release, 'docker', self.fake_docker), patch('builtins.print'), \
+                patch.dict('os.environ', {'GITHUB_STEP_SUMMARY': '', 'GITHUB_OUTPUT': str(recorded)}):
+            built = release.build(Path('/source'), '1.2.3', REVISION, output, 'example/vessel')
+        self.calls.clear()
+        with patch.object(release, 'docker', self.fake_docker):
+            outputs = self.directory / 'identify-output'
+            with patch('builtins.print'), patch.dict('os.environ', {'GITHUB_STEP_SUMMARY': '', 'GITHUB_OUTPUT': str(outputs)}):
+                self.assertEqual(built, release.identify(output, '1.2.3', REVISION, 'example/vessel'))
+        self.assertEqual(recorded.read_text(), outputs.read_text())
+        self.assertEqual([], self.calls)
+
+    def test_identify_refuses_a_corrupted_or_mismatched_pair(self):
+        api = self.directory / 'api.tar'
+        api.write_bytes(api.read_bytes()[:100])
+        with self.assertRaisesRegex(release.ReleaseError, 'not a docker save archive'):
+            self.identify()
+        write_archive(api, config_bytes('api', revision='b' * 40), ['example/vessel:api-1.2.3'])
+        with self.assertRaisesRegex(release.ReleaseError, 'was built from'):
+            self.identify()
+        write_archive(api, config_bytes('web'), ['example/vessel:web-1.2.3'])
+        with self.assertRaisesRegex(release.ReleaseError, 'api.tar holds example/vessel:web-1.2.3, not example/vessel:api-1.2.3'):
+            self.identify()
+        write_archive(api, config_bytes('api'), ['example/vessel:api-1.2.3'])
+        with self.assertRaisesRegex(release.ReleaseError, 'holds example/vessel:api-1.2.3, not other/vessel:api-1.2.3'):
+            self.identify('other/vessel')
 
     def test_metadata_rejects_another_platform_or_version(self):
         with self.assertRaisesRegex(release.ReleaseError, 'linux/arm64, not linux/amd64'):

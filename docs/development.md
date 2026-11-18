@@ -59,9 +59,11 @@ runs (S3 and local storage) and publication load that artifact
 (`release.py load`), refusing an archive whose config digest differs. Publish
 pushes `skorcius/vessel:api-0.4.2` and `web-0.4.2`, fails when a pushed config
 digest is not the verified one, moves `api-latest` and `web-latest` only after
-both are verified, and creates the GitHub Release from the notes plus both
+both are verified (a registry-side copy of each verified versioned manifest), and creates the GitHub Release from the notes plus both
 published digests (`release.py notes`). Nothing run-scoped is pushed to Docker
-Hub. It never overwrites a version published from another commit or another
+Hub. A later attempt of the same run reuses the artifact (`release.py
+identify`) instead of rebuilding; the skill describes recovery after a partial
+publication. It never overwrites a version published from another commit or another
 build. It needs the `DOCKERHUB_TOKEN` secret on the `docker-hub` environment;
 see the [`vessel-release` skill](../.agents/skills/vessel-release/SKILL.md).
 

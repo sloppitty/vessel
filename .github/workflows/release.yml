@@ -59,24 +59,42 @@ jobs:
     needs: source
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 60
+    # A later attempt of this run reuses the pair an earlier attempt built (see the first two steps).
     outputs:
-      api-config-digest: ${{ steps.build.outputs.api-config-digest }}
-      web-config-digest: ${{ steps.build.outputs.web-config-digest }}
+      api-config-digest: ${{ steps.build.outputs.api-config-digest || steps.reuse.outputs.api-config-digest }}
+      web-config-digest: ${{ steps.build.outputs.web-config-digest || steps.reuse.outputs.web-config-digest }}
     steps:
       - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
         with:
           persist-credentials: false
+      # "Re-run all jobs" after a partial publication must publish the pair the first attempt verified, not a rebuild:
+      # artifacts belong to the run, so a later attempt finds the earlier upload under the same name.
+      - name: Images an earlier attempt of this run built
+        id: earlier
+        if: github.run_attempt != '1'
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-images
+          path: ${{ runner.temp }}/images
+      - name: Reuse them without building
+        id: reuse
+        if: steps.earlier.outcome == 'success'
+        run: python3 scripts/release.py identify --revision "$GITHUB_SHA" --input "$RUNNER_TEMP/images"
       - name: Build and save both images
         id: build
+        if: steps.earlier.outcome != 'success'
         run: python3 scripts/release.py build --revision "$GITHUB_SHA" --output "$RUNNER_TEMP/images"
       # Verification and publication load these bytes; nothing run-scoped is pushed to the public registry.
-      # A re-run of failed jobs reuses this artifact; re-running all jobs rebuilds and replaces it.
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      # Without overwrite the upload fails when the run already has the artifact, so a failed download above can
+      # never replace the pair an earlier attempt verified or published.
+      - if: steps.build.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-images
           path: ${{ runner.temp }}/images/
           if-no-files-found: error
-          overwrite: true
+          overwrite: false
           retention-days: 30
 
   verify:

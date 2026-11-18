@@ -18,6 +18,16 @@ Each release run builds both images once, verifies those exact images and
 pushes them. The GitHub Release lists both image digests; to deploy exactly the
 verified bytes, pin them, for example `skorcius/vessel@sha256:<digest>`.
 
+If publication stops part-way (for example one latest tag moved and the other
+did not), recover in the same workflow run while its `release-images` artifact
+exists (30 days). "Re-run failed jobs" publishes again from that artifact and
+reuses the versioned tags already pushed. "Re-run all jobs" also reuses the
+artifact: its build job recomputes the digests from the saved images instead of
+rebuilding. A new run, or any run after the artifact expired, rebuilds, and
+publication then refuses to replace a versioned tag that is already published;
+release a new patch version instead. See the
+[`vessel-release` skill](../.agents/skills/vessel-release/SKILL.md).
+
 ## Sign-in
 
 **Vessel uses Ethereum wallets for sign-in.** A signed-in computer can also
