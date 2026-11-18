@@ -107,7 +107,7 @@ export function OperationsTable({ operations, accounts, compact = false, onPrevi
     const next = new Set(previous); if (next.has(id)) next.delete(id); else next.add(id); return next
   })
   // Defense in depth: a management reload may disable an account while an earlier activity read is still visible.
-  const visible = operations.filter(op => accounts.some(a => a.id === op.accountId && a.isEnabled !== false))
+  const visible = operations.filter(op => accounts.some(a => a.id === op.accountId && a.isEnabled))
   if (!visible.length) return <div className="workspace-empty small-empty"><Inbox size={27} /><strong>No operations in this view</strong><p>{api.tradingMode === 'paper' ? 'Plan a paper Play to begin simulation, or reset the filters.' : 'Refresh an enabled exchange account to retrieve fills, or reset the filters.'}</p></div>
   return <div className="workspace-table-wrap"><table className="workspace-table operations-table"><OperationsHead compact={compact} /><tbody>{visible.map(op => {
     const open = expanded.has(op.id)

@@ -109,7 +109,10 @@ export type AvailableSource = NonNullable<BrokerAccount['availableBalanceSource'
 /** The account's normalized available balance (`availableBalanceUsd`), an exact decimal string, with its source. */
 export interface AvailableBalance {
   value: string
-  /** Null only from an older server that did not name it. */
+  /**
+   * The account's `availableBalanceSource`. The API names one whenever it reports the balance (WorkspaceService.AvailableSource
+   * selects the balance), but the account type keeps the two fields apart, so the label falls back to "available".
+   */
   source: AvailableSource | null
   /** When the snapshot it comes from was read: the account's last successful refresh. */
   asOfUtc?: string | null
@@ -124,8 +127,8 @@ export interface AvailableBalance {
  * No age limit is assumed; the figure carries its snapshot time and whether the last refresh failed.
  */
 export function availableOf(account: BrokerAccount | null | undefined): AvailableBalance | null {
-  if (!account || account.isEnabled === false || account.availableBalanceUsd == null) return null
-  return { value: account.availableBalanceUsd, source: account.availableBalanceSource ?? null,
+  if (!account || !account.isEnabled || account.availableBalanceUsd == null) return null
+  return { value: account.availableBalanceUsd, source: account.availableBalanceSource,
     asOfUtc: account.lastSyncedAtUtc, refreshFailed: account.syncStatus === 'error' }
 }
 

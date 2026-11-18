@@ -27,7 +27,7 @@ export function DataExportSettings({ api }: { api: ExportApi }) {
   // Partial clients (older shells, test doubles) may not list accounts; the panel then has none to offer, as after a failed read.
   const listing = typeof api.accounts === 'function'
   const accounts = useApiRead(api, null, (client, signal) => client.accounts(signal)
-    .then(all => all.filter(a => a.isEnabled !== false && (a.tradingMode ?? 'real') === 'real')), { fallback: '', enabled: listing })
+    .then(all => all.filter(a => a.isEnabled && (a.tradingMode ?? 'real') === 'real')), { fallback: '', enabled: listing })
   const list: BrokerAccount[] = accounts.data ?? []
   const chosen = list.some(a => a.id === accountId) ? accountId : ''
   const range = from !== '' && to !== '' && from > to ? 'The start date is after the end date.' : null

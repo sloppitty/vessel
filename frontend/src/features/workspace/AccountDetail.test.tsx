@@ -25,7 +25,7 @@ describe('Account detail monitor heading (Phase 0, 0.4c)', () => {
     expect(within(panel()).getByText('Stop coverage not checked yet')).toBeInTheDocument()
     expect(within(panel()).getByText('2 Open Plays\' stop coverage has not been checked yet.')).toBeInTheDocument()
     view.unmount()
-    // Once a check recorded it, or from an older API that does not say, the run state heads the panel.
+    // Once a check recorded it, or with no Open Play left unchecked, the run state heads the panel.
     show({ ...monitorFixture, coverage: [coverageFixture], uncheckedPlays: 0 }).unmount()
     show(monitorFixture)
     expect(within(panel()).getByText('Monitored')).toBeInTheDocument()

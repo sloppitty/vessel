@@ -463,7 +463,7 @@ function Shell({ system, disconnect, api, realApi, identity, tradingMode, paperA
       else notificationLink.current(destination)
     })
   })
-  const enabledAccounts = accounts.filter(account => account.isEnabled !== false)
+  const enabledAccounts = accounts.filter(account => account.isEnabled)
   const activePortfolioFilter = portfolioFilter === 'unassigned' || portfolios.some(p => p.id === portfolioFilter) ? portfolioFilter : ''
   const managedPortfolio = portfolios.find(p => p.id === managedPortfolioId) ?? null
   const managedAccount = accounts.find(a => a.id === managedAccountId) ?? null
@@ -506,7 +506,7 @@ function Shell({ system, disconnect, api, realApi, identity, tradingMode, paperA
   const accountCreated = (account?: BrokerAccount) => {
     if (exitState.current?.api !== api) return
     reload()
-    if (account && account.tradingMode !== 'paper' && account.isEnabled !== false && venues.can(account.venueId, 'sync')) enqueue(account)
+    if (account && account.tradingMode !== 'paper' && account.isEnabled && venues.can(account.venueId, 'sync')) enqueue(account)
   }
   const disconnectSession = () => {
     const current = exitState.current

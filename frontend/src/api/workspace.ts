@@ -1059,7 +1059,7 @@ export function createWorkspaceApi(credentials: SessionCredentials, onAuthFailur
     deletePortfolio: id => call(`/api/portfolios/${resourceId(id)}`, { ...workspaceRequest, validate: (v): v is undefined => v === undefined, method: 'DELETE' }),
     updateAccount: async (id, settings) => {
       const updated = await call(accountPath(id), { ...workspaceRequest, validate: account, method: 'PUT', body: JSON.stringify(settings) })
-      if (updated.isEnabled === false) emitApiEvent(api, { type: 'account-removed', accountId: id })
+      if (!updated.isEnabled) emitApiEvent(api, { type: 'account-removed', accountId: id })
       return updated
     },
     deleteAccount: async id => {

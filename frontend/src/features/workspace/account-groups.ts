@@ -36,7 +36,7 @@ export function addressKey(address: string | null | undefined): string | null {
 }
 
 export function groupBalance(accounts: BrokerAccount[]): GroupBalance {
-  const enabled = accounts.filter(a => a.isEnabled !== false)
+  const enabled = accounts.filter(a => a.isEnabled)
   if (!enabled.length) return { kind: 'none', accounts: accounts.length }
   const values = enabled.flatMap(a => a.balanceUsd == null ? [] : [a.balanceUsd])
   return values.length === enabled.length

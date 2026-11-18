@@ -11,7 +11,7 @@ const accountsText = (n: number) => `${n} ${n === 1 ? 'account' : 'accounts'}`
 export function OverviewScope({ scope, onScope, accounts, portfolios }: {
   scope: string; onScope: (scope: string) => void; accounts: BrokerAccount[]; portfolios: Portfolio[]
 }) {
-  const enabled = accounts.filter(a => a.isEnabled !== false)
+  const enabled = accounts.filter(a => a.isEnabled)
   const id = useId()
   const unassigned = enabled.filter(a => a.portfolioId === null).length
   const choices: PickerChoice[] = [

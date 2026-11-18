@@ -30,7 +30,7 @@ export function OverviewPage({ data, api, monitors = [], incidents = [], overvie
   browsePlays: (view: PlayView) => void; viewPlay: (id: string, signal: AbortSignal) => Promise<void>; reload: () => void
 }) {
   const { accounts, portfolios } = data
-  const enabledAccounts = accounts.filter(account => account.isEnabled !== false)
+  const enabledAccounts = accounts.filter(account => account.isEnabled)
   const scopedAccounts = overviewAccounts(overviewQuery.scope, accounts)
   const portfolioNames = Object.fromEntries(portfolios.map(p => [p.id, p.name]))
   return <>

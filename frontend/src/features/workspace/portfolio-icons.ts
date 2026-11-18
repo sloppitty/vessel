@@ -36,5 +36,5 @@ export const portfolioIcons = {
   crown: { label: 'Crown', icon: Crown },
 } as const satisfies Record<PortfolioIconKey, { label: string; icon: LucideIcon }>
 
-/** A stored key this browser does not know (or an older server without icons) shows the default folder. */
+/** A stored key this browser does not know shows the default folder. */
 export const portfolioIconKey = (key: string | undefined): PortfolioIconKey => isPortfolioIconKey(key) ? key : defaultPortfolioIcon
