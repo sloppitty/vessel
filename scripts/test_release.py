@@ -1,9 +1,13 @@
+import hashlib
+import io
 import json
 import os
 import importlib.util
 from pathlib import Path
+import re
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -84,52 +88,279 @@ class ReleaseCheckTests(unittest.TestCase):
             self.check(version='1.2')
 
 
-class ReleasePublishTests(unittest.TestCase):
+def config_bytes(kind, version='1.2.3', revision=REVISION):
+    return json.dumps({**image(version, revision), 'kind': kind}).encode()
+
+
+def digest_of(data):
+    return 'sha256:' + hashlib.sha256(data).hexdigest()
+
+
+def write_archive(path, config, tags):
+    """A minimal `docker save` archive: manifest.json naming one config blob and its tags."""
+    entries = {'blobs/sha256/config': config,
+               'manifest.json': json.dumps([{'Config': 'blobs/sha256/config', 'RepoTags': tags, 'Layers': []}]).encode()}
+    with tarfile.open(path, 'w') as archive:
+        for name, data in entries.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+
+
+class ImageArchiveTests(unittest.TestCase):
     def setUp(self):
+        self.directory = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.directory)
+
+    def test_the_identity_is_the_digest_of_the_saved_config(self):
+        write_archive(self.directory / 'api.tar', config_bytes('api'), ['example/vessel:api-1.2.3'])
+        saved = release.archive_identity(self.directory / 'api.tar')
+        self.assertEqual(digest_of(config_bytes('api')), saved['config'])
+        self.assertEqual(['example/vessel:api-1.2.3'], saved['tags'])
+        self.assertEqual('linux', saved['image']['os'])
+
+    def test_anything_but_one_saved_image_is_rejected(self):
+        (self.directory / 'api.tar').write_text('not a tar')
+        with self.assertRaisesRegex(release.ReleaseError, 'not a docker save archive'):
+            release.archive_identity(self.directory / 'api.tar')
+        with self.assertRaisesRegex(release.ReleaseError, 'not a docker save archive'):
+            release.archive_identity(self.directory / 'missing.tar')
+        with tarfile.open(self.directory / 'two.tar', 'w') as archive:
+            data = json.dumps([{'Config': 'a'}, {'Config': 'b'}]).encode()
+            info = tarfile.TarInfo('manifest.json')
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+        with self.assertRaisesRegex(release.ReleaseError, 'holds 2 images, not one'):
+            release.archive_identity(self.directory / 'two.tar')
+
+    def test_the_local_config_digest_follows_the_image_store(self):
+        classic = json.dumps([{'Id': 'sha256:config'}])
+        containerd = json.dumps([{'Id': 'sha256:manifest', 'Descriptor': {'annotations': {'config.digest': 'sha256:config'}}}])
+        for inspected in (classic, containerd):
+            with patch.object(release, 'docker', return_value=inspected):
+                self.assertEqual('sha256:config', release.local_config('ref'))
+
+
+class ReleaseImageTests(unittest.TestCase):
+    """build, load and publish against a fake Docker daemon and registry that track images by config digest."""
+
+    def setUp(self):
+        self.directory = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.directory)
         self.calls = []
+        self.local = {}
         self.registry = {}
+        self.pushed_as = {}
+        self.expected = {}
+        for kind in ('api', 'web'):
+            write_archive(self.directory / f'{kind}.tar', config_bytes(kind), [f'example/vessel:{kind}-1.2.3'])
+            self.expected[kind] = digest_of(config_bytes(kind))
 
     def fake_docker(self, *args, capture=False):
-        self.calls.append((args[0], args[args.index('-t') + 1] if args[0] == 'build' else args[-1]))
-        if args[0] == 'image':
-            return json.dumps([{'Os': 'linux', 'Architecture': 'amd64', 'Config': image()['config']}])
-        if args[0] == 'push':
+        command = args[0]
+        self.calls.append((command, args[args.index('-t') + 1] if command == 'build' else args[-1]))
+        if command == 'build':
+            ref = args[args.index('-t') + 1]
+            self.local[ref] = config_bytes(ref.rsplit(':', 1)[1].split('-')[0])
+        elif command == 'save':
+            write_archive(args[args.index('--output') + 1], self.local[args[-1]], [args[-1]])
+        elif command == 'load':
+            saved = release.archive_identity(args[-1])
+            for tag in saved['tags']:
+                self.local[tag] = config_bytes(saved['image']['kind'])
+        elif command == 'tag':
+            self.local[args[2]] = self.local[args[1]]
+        elif command == 'image':
+            return json.dumps([{'Id': digest_of(self.local[args[-1]])}])
+        elif command == 'push':
             ref = args[-1]
-            versioned = ref.replace('-latest', '-1.2.3')
-            self.registry[ref] = {'digest': 'sha256:' + versioned.rsplit(':', 1)[1], 'image': image()}
+            config = self.pushed_as.get(ref, digest_of(self.local[ref]))
+            self.registry[ref] = {'digest': 'sha256:manifest-' + config[-8:], 'config': config, 'image': image()}
         return None
 
-    def publish(self):
+    def run_release(self, function, *args):
         with patch.object(release, 'docker', self.fake_docker), \
                 patch.object(release, 'remote', lambda ref: self.registry.get(ref)), \
-                patch.dict('os.environ', {'GITHUB_STEP_SUMMARY': ''}), patch('builtins.print'):
-            return release.publish(Path('/source'), '1.2.3', REVISION, 'example/vessel')
+                patch.dict('os.environ', {'GITHUB_STEP_SUMMARY': '', 'GITHUB_OUTPUT': ''}), patch('builtins.print'):
+            return function(*args)
 
-    def test_latest_moves_only_after_both_versioned_tags_are_pushed(self):
+    def publish(self):
+        return self.run_release(release.publish, self.directory, '1.2.3', REVISION, self.expected, 'example/vessel')
+
+    def load(self, expected=None, image='example/vessel'):
+        return self.run_release(release.load, self.directory, '1.2.3', REVISION, expected or self.expected, image)
+
+    def test_build_saves_each_image_once_and_reports_its_config_digest(self):
+        output = self.directory / 'out'
+        outputs = self.directory / 'github-output'
+        with patch.object(release, 'docker', self.fake_docker), patch('builtins.print'), \
+                patch.dict('os.environ', {'GITHUB_STEP_SUMMARY': '', 'GITHUB_OUTPUT': str(outputs)}):
+            configs = release.build(Path('/source'), '1.2.3', REVISION, output, 'example/vessel')
+        self.assertEqual(self.expected, configs)
+        self.assertEqual([('build', 'example/vessel:api-1.2.3'), ('build', 'example/vessel:web-1.2.3')],
+                         [call for call in self.calls if call[0] == 'build'])
+        self.assertEqual(2, sum(call[0] == 'save' for call in self.calls))
+        self.assertNotIn('push', [call[0] for call in self.calls])
+        for kind in ('api', 'web'):
+            self.assertEqual(self.expected[kind], release.archive_identity(output / f'{kind}.tar')['config'])
+        self.assertEqual(f'api-config-digest={self.expected["api"]}\nweb-config-digest={self.expected["web"]}\n',
+                         outputs.read_text())
+
+    def test_build_refuses_a_saved_archive_that_is_not_the_built_image(self):
+        def save_another(*args, capture=False):
+            if args[0] == 'save':
+                write_archive(args[args.index('--output') + 1], config_bytes('other'), [args[-1]])
+                return None
+            return self.fake_docker(*args, capture=capture)
+        with patch.object(release, 'docker', save_another), patch('builtins.print'):
+            with self.assertRaisesRegex(release.ReleaseError, 'is not the image that was built'):
+                release.build(Path('/source'), '1.2.3', REVISION, self.directory / 'out', 'example/vessel')
+
+    def test_load_checks_the_archive_before_loading_it(self):
+        refs = self.load()
+        self.assertEqual({'api': 'example/vessel:api-1.2.3', 'web': 'example/vessel:web-1.2.3'}, refs)
+        with self.assertRaisesRegex(release.ReleaseError, 'not the built and verified'):
+            self.load({**self.expected, 'web': 'sha256:' + 'f' * 64})
+        loads = [ref for command, ref in self.calls if command == 'load']
+        self.assertEqual([str(self.directory / 'api.tar'), str(self.directory / 'web.tar'), str(self.directory / 'api.tar')], loads)
+        with self.assertRaisesRegex(release.ReleaseError, 'must be sha256:<64 hex>'):
+            self.load({**self.expected, 'api': 'sha256:short'})
+
+    def test_load_tags_the_image_for_another_repository(self):
+        refs = self.load(image='127.0.0.1:5000/vessel')
+        self.assertEqual('127.0.0.1:5000/vessel:api-1.2.3', refs['api'])
+        self.assertIn(('tag', '127.0.0.1:5000/vessel:web-1.2.3'), self.calls)
+        self.assertEqual(config_bytes('web'), self.local['127.0.0.1:5000/vessel:web-1.2.3'])
+
+    def test_load_refuses_when_the_daemon_holds_another_image_under_the_tag(self):
+        def load_another(*args, capture=False):
+            result = self.fake_docker(*args, capture=capture)
+            if args[0] == 'load':
+                self.local['example/vessel:api-1.2.3'] = config_bytes('other')
+            return result
+        with patch.object(release, 'docker', load_another), patch('builtins.print'):
+            with self.assertRaisesRegex(release.ReleaseError, 'is not the loaded image'):
+                release.load(self.directory, '1.2.3', REVISION, self.expected, 'example/vessel')
+
+    def test_publish_pushes_the_verified_images_and_moves_latest_only_after_both(self):
         digests = self.publish()
-        self.assertEqual({'api': 'sha256:api-1.2.3', 'web': 'sha256:web-1.2.3'}, digests)
+        self.assertEqual({kind: 'sha256:manifest-' + self.expected[kind][-8:] for kind in ('api', 'web')}, digests)
+        self.assertNotIn('build', [call[0] for call in self.calls])
         pushes = [ref for command, ref in self.calls if command == 'push']
         self.assertEqual(['example/vessel:api-1.2.3', 'example/vessel:web-1.2.3',
                           'example/vessel:api-latest', 'example/vessel:web-latest'], pushes)
+        for kind in ('api', 'web'):
+            self.assertEqual(self.expected[kind], self.registry[f'example/vessel:{kind}-latest']['config'])
+
+    def test_publish_fails_when_a_pushed_image_is_not_the_verified_one(self):
+        self.pushed_as['example/vessel:web-1.2.3'] = 'sha256:' + 'e' * 64
+        with self.assertRaisesRegex(release.ReleaseError, 'web-1.2.3 was pushed as sha256:e+, not the verified'):
+            self.publish()
+        self.assertNotIn('example/vessel:api-latest', self.registry)
+        self.assertNotIn('example/vessel:web-latest', self.registry)
+
+    def test_publish_refuses_an_archive_that_is_not_the_verified_one_before_any_push(self):
+        self.expected['api'] = 'sha256:' + 'd' * 64
+        with self.assertRaisesRegex(release.ReleaseError, 'not the built and verified'):
+            self.publish()
+        self.assertEqual([], [call for call in self.calls if call[0] == 'push'])
 
     def test_a_version_published_from_another_revision_is_never_overwritten(self):
-        self.registry['example/vessel:web-1.2.3'] = {'digest': 'sha256:old', 'image': image(revision='b' * 40)}
+        self.registry['example/vessel:web-1.2.3'] = {'digest': 'sha256:old', 'config': self.expected['web'],
+                                                     'image': image(revision='b' * 40)}
         with self.assertRaisesRegex(release.ReleaseError, 'never overwritten'):
             self.publish()
-        self.assertEqual([], [call for call in self.calls if call[0] in ('build', 'push')])
+        self.assertEqual([], [call for call in self.calls if call[0] in ('load', 'push')])
 
-    def test_a_version_from_the_same_revision_is_reused_not_rebuilt(self):
-        self.registry['example/vessel:api-1.2.3'] = {'digest': 'sha256:api-1.2.3', 'image': image()}
+    def test_a_version_from_the_same_revision_and_verified_image_is_reused_not_pushed_again(self):
+        self.registry['example/vessel:api-1.2.3'] = {'digest': 'sha256:manifest-' + self.expected['api'][-8:],
+                                                     'config': self.expected['api'], 'image': image()}
         self.publish()
-        self.assertIn(('pull', 'example/vessel:api-1.2.3'), self.calls)
-        self.assertNotIn(('build', 'example/vessel:api-1.2.3'), self.calls)
-        self.assertIn(('build', 'example/vessel:web-1.2.3'), self.calls)
+        pushes = [ref for command, ref in self.calls if command == 'push']
+        self.assertNotIn('example/vessel:api-1.2.3', pushes)
+        self.assertIn('example/vessel:web-1.2.3', pushes)
+        self.assertNotIn('pull', [call[0] for call in self.calls])
+
+    def test_a_version_from_the_same_revision_but_another_build_is_never_overwritten(self):
+        self.registry['example/vessel:api-1.2.3'] = {'digest': 'sha256:earlier', 'config': 'sha256:' + 'c' * 64,
+                                                     'image': image()}
+        with self.assertRaisesRegex(release.ReleaseError, 'already published from this revision as sha256:c+'):
+            self.publish()
+        self.assertEqual([], [call for call in self.calls if call[0] in ('load', 'push')])
 
     def test_metadata_rejects_another_platform_or_version(self):
         with self.assertRaisesRegex(release.ReleaseError, 'linux/arm64, not linux/amd64'):
             release.expect_metadata('ref', image(platform=('linux', 'arm64')), '1.2.3')
         with self.assertRaisesRegex(release.ReleaseError, "labelled version '1.2.2'"):
             release.expect_metadata('ref', image(version='1.2.2'), '1.2.3')
+
+    def test_remote_reads_the_config_digest_of_the_amd64_image(self):
+        index = {'manifests': [{'digest': 'sha256:arm', 'platform': {'os': 'linux', 'architecture': 'arm64'}},
+                               {'digest': 'sha256:amd', 'platform': {'os': 'linux', 'architecture': 'amd64'}}]}
+        answers = {('r:1', '--format'): {'manifest': {'digest': 'sha256:index'}, 'image': {'linux/amd64': image()}},
+                   ('r:1', '--raw'): index, ('r@sha256:amd', '--raw'): {'config': {'digest': 'sha256:config'}}}
+        with patch.object(release, 'imagetools', lambda ref, *args: answers[(ref, args[0])]):
+            found = release.remote('r:1')
+        self.assertEqual(('sha256:index', 'sha256:config', 'amd64'),
+                         (found['digest'], found['config'], found['image']['architecture']))
+
+
+class ReleaseNotesTests(unittest.TestCase):
+    def test_the_release_body_is_the_notes_and_both_published_digests(self):
+        digests = {'api': 'sha256:' + 'a' * 64, 'web': 'sha256:' + 'b' * 64}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_release(root, **{'docs/releases/v1.2.3.md': '# Vessel 1.2.3\n\nNotes.\n'})
+            body = release.notes(root, '1.2.3', digests, 'example/vessel')
+            self.assertTrue(body.startswith('# Vessel 1.2.3\n\nNotes.\n\n## Image digests\n'))
+            self.assertIn(f'| `example/vessel:api-1.2.3` | `{digests["api"]}` |', body)
+            self.assertIn(f'| `example/vessel:web-1.2.3` | `{digests["web"]}` |', body)
+            with self.assertRaisesRegex(release.ReleaseError, 'web digest must be'):
+                release.notes(root, '1.2.3', {**digests, 'web': ''}, 'example/vessel')
+
+    def test_load_and_publish_require_both_verified_config_digests(self):
+        for command in ('load', 'publish'):
+            with self.subTest(command), patch('sys.stderr'), self.assertRaises(SystemExit) as error:
+                release.main([command, '--revision', REVISION, '--input', '/tmp', '--api-config-digest', 'sha256:x'])
+            self.assertEqual(2, error.exception.code)
+
+
+class SupplyChainPinningTests(unittest.TestCase):
+    WORKFLOWS = sorted((release.ROOT / '.github' / 'workflows').glob('*.yml'))
+
+    def test_every_action_is_pinned_to_a_commit_and_every_checkout_keeps_no_token(self):
+        self.assertTrue(self.WORKFLOWS)
+        for workflow in self.WORKFLOWS:
+            text = workflow.read_text()
+            for line in re.findall(r'^\s*(?:-\s*)?uses:\s*(.+)$', text, re.MULTILINE):
+                with self.subTest(workflow=workflow.name, uses=line):
+                    self.assertRegex(line, r'^(\./\S+|[\w.-]+/[\w.-]+@[0-9a-f]{40} # v\d+(\.\d+){2})$')
+            checkouts = re.findall(r'uses: \S+/checkout@\S+.*\n\s+with:\n(?:\s+[\w-]+: .*\n)*', text)
+            self.assertEqual(text.count('/checkout@'), len(checkouts), workflow.name)
+            for step in checkouts:
+                self.assertIn('persist-credentials: false', step, workflow.name)
+
+    def test_no_branch_or_pull_request_event_starts_a_workflow(self):
+        # Dependabot pull requests must not consume runner time either.
+        for workflow in self.WORKFLOWS:
+            text = workflow.read_text()
+            self.assertNotIn('pull_request', text, workflow.name)
+            self.assertNotRegex(text, r'^\s+branches', workflow.name)
+
+    def test_every_base_image_is_pinned_by_digest(self):
+        for file in release.DOCKERFILES.values():
+            stages = set()
+            for base, stage in re.findall(r'^FROM\s+(\S+)(?:\s+AS\s+(\S+))?', (release.ROOT / file).read_text(), re.MULTILINE):
+                with self.subTest(file=file, base=base):
+                    self.assertTrue(base in stages or re.fullmatch(r'\S+:\S+@sha256:[0-9a-f]{64}', base), base)
+                stages.add(stage)
+
+    def test_dependabot_watches_the_pins(self):
+        text = (release.ROOT / '.github' / 'dependabot.yml').read_text()
+        self.assertIn('package-ecosystem: github-actions', text)
+        self.assertIn('package-ecosystem: docker', text)
+        for directory in ('/backend', '/frontend'):
+            self.assertIn(f'- {directory}\n', text)
 
 
 class WalletReleaseTests(unittest.TestCase):
@@ -437,6 +668,48 @@ assert.equal(unexpectedConsoleError(message('Informational message', 'log'), tru
             self.assertTrue(check.start_browser_server().endswith('/test-path'))
         self.assertEqual(2, connection.request.call_count)
         sleep.assert_called_once_with(1)
+
+
+class PrebuiltImageVerificationTests(unittest.TestCase):
+    def check(self, *args):
+        check = verify_release.Check(verify_release.parse_args(list(args)))
+        self.addCleanup(lambda: shutil.rmtree(check.temp, ignore_errors=True))
+        return check
+
+    def test_both_loaded_images_are_required_together(self):
+        for args in (['--api-image', 'a'], ['--web-image', 'w']):
+            with self.subTest(args=args), patch('sys.stderr'), self.assertRaises(SystemExit) as error:
+                verify_release.parse_args(args)
+            self.assertEqual(2, error.exception.code)
+
+    def test_loaded_images_are_checked_as_they_are_not_rebuilt(self):
+        check = self.check('--api-image', 'example/vessel:api-1.2.3', '--web-image', 'example/vessel:web-1.2.3')
+        self.assertEqual({'api': 'example/vessel:api-1.2.3', 'web': 'example/vessel:web-1.2.3'}, check.images)
+        check.wallet_signature = Mock()
+        check.prepare = Mock()
+        check.wallet_bootstrap = Mock(side_effect=RuntimeError('stop after the image checks'))
+        check.expect = Mock()
+        check.cleanup = Mock()
+        with patch.object(verify_release, 'run', return_value=Mock(stderr='--with-http_realip_module')) as run, \
+                patch.object(verify_release.subprocess, 'run', return_value=Mock(returncode=1)):
+            with self.assertRaisesRegex(RuntimeError, 'stop after the image checks'):
+                check.main()
+        commands = [call.args[:2] for call in run.call_args_list]
+        self.assertEqual(('docker', 'image'), commands[0])
+        self.assertEqual(('example/vessel:api-1.2.3', 'example/vessel:web-1.2.3'), run.call_args_list[0].args[3:])
+        self.assertNotIn(('docker', 'build'), commands)
+        self.assertIn('example/vessel:web-1.2.3', run.call_args_list[1].args)
+
+    def test_cleanup_leaves_loaded_images_for_publication(self):
+        check = self.check('--api-image', 'example/vessel:api-1.2.3', '--web-image', 'example/vessel:web-1.2.3')
+        with patch.object(verify_release, 'run') as run:
+            check.cleanup()
+        self.assertNotIn(('docker', 'image', 'rm'), [call.args[:3] for call in run.call_args_list])
+        built = self.check()
+        with patch.object(verify_release, 'run') as run:
+            built.cleanup()
+        self.assertEqual([('docker', 'image', 'rm', image) for image in built.images.values()],
+                         [call.args for call in run.call_args_list])
 
 
 class MigrationPreflightTests(unittest.TestCase):

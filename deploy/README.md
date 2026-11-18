@@ -14,6 +14,10 @@ Releases are published by the repository's Release workflow when an annotated
 [`vessel-release` skill](../.agents/skills/vessel-release/SKILL.md) and the
 [release notes](../docs/releases/). Publishing never upgrades an installation.
 
+Each release run builds both images once, verifies those exact images and
+pushes them. The GitHub Release lists both image digests; to deploy exactly the
+verified bytes, pin them, for example `skorcius/vessel@sha256:<digest>`.
+
 ## Sign-in
 
 **Vessel uses Ethereum wallets for sign-in.** A signed-in computer can also

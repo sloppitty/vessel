@@ -1,9 +1,12 @@
 name: Release
 
-# Pushing an annotated vX.Y.Z tag that is on main runs the foundation checks and
-# release verification, publishes skorcius/vessel:api-X.Y.Z and web-X.Y.Z, moves
-# both latest tags and creates the GitHub Release from docs/releases/vX.Y.Z.md.
-# Branch pushes and pull requests consume no CI runner time.
+# Pushing an annotated vX.Y.Z tag that is on main runs the foundation checks,
+# builds both images once and hands them to both release verifications and to
+# publication as a workflow artifact, publishes skorcius/vessel:api-X.Y.Z and
+# web-X.Y.Z only when the pushed images are the verified ones, moves both latest
+# tags and creates the GitHub Release from docs/releases/vX.Y.Z.md plus both
+# image digests. Branch pushes and pull requests (Dependabot's included) consume
+# no CI runner time. Actions are pinned to commit SHAs and checkouts keep no token.
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+']
@@ -24,9 +27,10 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: useblacksmith/checkout@v1
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Require an annotated tag on main
         run: |
           if [ "$GITHUB_REF_TYPE" != tag ]; then
@@ -50,17 +54,44 @@ jobs:
     needs: source
     uses: ./.github/workflows/checks.yml
 
+  images:
+    name: Build images once
+    needs: source
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 60
+    outputs:
+      api-config-digest: ${{ steps.build.outputs.api-config-digest }}
+      web-config-digest: ${{ steps.build.outputs.web-config-digest }}
+    steps:
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
+      - name: Build and save both images
+        id: build
+        run: python3 scripts/release.py build --revision "$GITHUB_SHA" --output "$RUNNER_TEMP/images"
+      # Verification and publication load these bytes; nothing run-scoped is pushed to the public registry.
+      # A re-run of failed jobs reuses this artifact; re-running all jobs rebuilds and replaces it.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-images
+          path: ${{ runner.temp }}/images/
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
   verify:
     name: Release verification (${{ matrix.storage }})
-    needs: source
+    needs: [source, images]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 60
     strategy:
       matrix:
         storage: [s3, local]
     steps:
-      - uses: useblacksmith/checkout@v1
-      - uses: actions/setup-node@v6
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: .nvmrc
       - name: Enable pinned pnpm
@@ -68,18 +99,35 @@ jobs:
           corepack enable
           corepack install
       # Sign-in is wallet-only: the check binds and signs in with a synthetic, publicly known EOA. Its signer
-      # libraries stay outside the checkout and the application's dependencies.
+      # libraries install from their committed lockfile outside the checkout and the application's dependencies.
       - name: Synthetic wallet signer
         run: |
           mkdir -p "$RUNNER_TEMP/wallet-signer"
-          pnpm --dir "$RUNNER_TEMP/wallet-signer" add @noble/curves@2.4.0 @noble/hashes@2.4.0
+          cp scripts/wallet-signer/package.json scripts/wallet-signer/pnpm-lock.yaml "$RUNNER_TEMP/wallet-signer/"
+          pnpm --dir "$RUNNER_TEMP/wallet-signer" install --frozen-lockfile
           echo "NOBLE_MODULE_DIR=$RUNNER_TEMP/wallet-signer/node_modules" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-images
+          path: ${{ runner.temp }}/images
+      - name: Load the images built once
+        id: load
+        env:
+          API_CONFIG_DIGEST: ${{ needs.images.outputs.api-config-digest }}
+          WEB_CONFIG_DIGEST: ${{ needs.images.outputs.web-config-digest }}
+        run: >-
+          python3 scripts/release.py load --revision "$GITHUB_SHA" --input "$RUNNER_TEMP/images"
+          --api-config-digest "$API_CONFIG_DIGEST" --web-config-digest "$WEB_CONFIG_DIGEST"
       - name: Isolated images, transport, sign-in, restore
-        run: python3 scripts/verify-release.py --storage "${{ matrix.storage }}"
+        env:
+          API_IMAGE: ${{ steps.load.outputs.api-image }}
+          WEB_IMAGE: ${{ steps.load.outputs.web-image }}
+          STORAGE: ${{ matrix.storage }}
+        run: python3 scripts/verify-release.py --storage "$STORAGE" --api-image "$API_IMAGE" --web-image "$WEB_IMAGE"
 
   publish:
     name: Publish images
-    needs: [source, checks, verify]
+    needs: [source, checks, images, verify]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment:
       name: docker-hub
@@ -87,8 +135,17 @@ jobs:
     concurrency:
       group: docker-hub-publish
       cancel-in-progress: false
+    outputs:
+      api-digest: ${{ steps.publish.outputs.api-digest }}
+      web-digest: ${{ steps.publish.outputs.web-digest }}
     steps:
-      - uses: useblacksmith/checkout@v1
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-images
+          path: ${{ runner.temp }}/images
       - name: Log in to Docker Hub
         env:
           DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME || 'skorcius' }}
@@ -99,8 +156,15 @@ jobs:
             exit 1
           fi
           printf '%s' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
-      - name: Build, push and verify both images, then move latest
-        run: python3 scripts/release.py publish --revision "$GITHUB_SHA"
+      # Pushes the verified images and fails when a pushed config digest differs from the verified one.
+      - name: Push the verified images, compare digests, then move latest
+        id: publish
+        env:
+          API_CONFIG_DIGEST: ${{ needs.images.outputs.api-config-digest }}
+          WEB_CONFIG_DIGEST: ${{ needs.images.outputs.web-config-digest }}
+        run: >-
+          python3 scripts/release.py publish --revision "$GITHUB_SHA" --input "$RUNNER_TEMP/images"
+          --api-config-digest "$API_CONFIG_DIGEST" --web-config-digest "$WEB_CONFIG_DIGEST"
       - name: Log out
         if: always()
         run: docker logout
@@ -112,13 +176,22 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: useblacksmith/checkout@v1
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
+      - name: Release body with both image digests
+        env:
+          API_DIGEST: ${{ needs.publish.outputs.api-digest }}
+          WEB_DIGEST: ${{ needs.publish.outputs.web-digest }}
+        run: >-
+          python3 scripts/release.py notes --tag "$GITHUB_REF_NAME" --api-digest "$API_DIGEST"
+          --web-digest "$WEB_DIGEST" --output "$RUNNER_TEMP/release-notes.md"
       - name: Create or update the release from its notes
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          notes="docs/releases/$GITHUB_REF_NAME.md"
+          notes="$RUNNER_TEMP/release-notes.md"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release edit "$GITHUB_REF_NAME" --title "Vessel $GITHUB_REF_NAME" --notes-file "$notes"
           else

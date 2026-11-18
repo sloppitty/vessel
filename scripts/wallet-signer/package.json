@@ -1,0 +1,9 @@
+{
+  "name": "vessel-wallet-signer",
+  "private": true,
+  "description": "Signer libraries for scripts/wallet-test-signer.cjs in release checks. Copied outside the checkout and installed with --frozen-lockfile; never an application dependency.",
+  "dependencies": {
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "2.4.0"
+  }
+}

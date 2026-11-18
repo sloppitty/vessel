@@ -2,24 +2,37 @@
 """Release metadata checks and image publication for Vessel.
 
 `check` confirms that every packaged version agrees and that the version has a
-changelog entry and release notes. `publish` builds the Linux amd64 API and web
-images from one commit, pushes both versioned tags, then moves both latest tags
-and verifies all four remotely. It never overwrites a versioned tag published
-from another revision. Registry authentication is the caller's Docker login;
-this script never reads, prints or stores credentials.
+changelog entry and release notes. `build` builds the Linux amd64 API and web
+images once from one commit and saves them (`docker save`) with their config
+digests. `load` loads that saved pair after checking it is the pair that was
+built. `publish` loads the same pair, pushes both versioned tags, fails when a
+pushed image is not the verified one, then moves both latest tags and verifies
+all four remotely. It never overwrites a versioned tag published from another
+revision. `notes` writes the GitHub Release body: the release notes plus both
+published digests. Registry authentication is the caller's Docker login; this
+script never reads, prints or stores credentials.
+
+The verified identity of an image is its config digest: the SHA-256 of the image
+configuration, which names every layer by the digest of its uncompressed
+content. `docker save`, `docker load` and `docker push` keep it, whichever image
+store the daemon uses, whereas the manifest digest is known only once a registry
+holds the compressed layers.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import tarfile
 
 ROOT = Path(__file__).resolve().parent.parent
 IMAGE = 'skorcius/vessel'
 DOCKERFILES = {'api': 'backend/Dockerfile', 'web': 'frontend/Dockerfile'}
 SEMVER = re.compile(r'\d+\.\d+\.\d+')
+DIGEST = re.compile(r'sha256:[0-9a-f]{64}')
 
 
 class ReleaseError(Exception):
@@ -70,19 +83,33 @@ def docker(*args, capture=False):
     return result.stdout if capture else None
 
 
-def remote(ref):
-    """The manifest digest and linux/amd64 image config of a remote tag, or None when the tag does not exist."""
-    result = subprocess.run(['docker', 'buildx', 'imagetools', 'inspect', ref, '--format', '{{json .}}'],
-                            text=True, capture_output=True)
+def imagetools(ref, *args):
+    result = subprocess.run(['docker', 'buildx', 'imagetools', 'inspect', ref, *args], text=True, capture_output=True)
     if result.returncode != 0:
         if 'not found' in result.stderr:
             return None
         raise ReleaseError(f'Could not inspect {ref}: ' + (result.stderr.strip().splitlines() or ['unknown error'])[-1])
-    info = json.loads(result.stdout)
+    return json.loads(result.stdout)
+
+
+def remote(ref):
+    """The manifest digest, config digest and linux/amd64 image config of a remote tag, or None when it does not exist."""
+    info = imagetools(ref, '--format', '{{json .}}')
+    if info is None:
+        return None
     image = info.get('image') or {}
     if 'architecture' not in image:
         image = image.get('linux/amd64') or {}
-    return {'digest': info['manifest']['digest'], 'image': image}
+    raw = imagetools(ref, '--raw')
+    if raw is not None and 'manifests' in raw:
+        child = next((entry['digest'] for entry in raw['manifests']
+                      if (entry.get('platform') or {}).get('os') == 'linux'
+                      and (entry.get('platform') or {}).get('architecture') == 'amd64'), None)
+        raw = imagetools(f'{ref.rsplit(":", 1)[0]}@{child}', '--raw') if child else None
+    config = ((raw or {}).get('config') or {}).get('digest')
+    if config is None:
+        raise ReleaseError(f'{ref} has no linux/amd64 image config')
+    return {'digest': info['manifest']['digest'], 'config': config, 'image': image}
 
 
 def expect_metadata(ref, image, version, revision=None):
@@ -97,7 +124,87 @@ def expect_metadata(ref, image, version, revision=None):
     return labels.get('org.opencontainers.image.revision')
 
 
-def publish(root, version, revision, image=IMAGE):
+def archive_identity(path):
+    """The config digest, image config and tags of the single image in a `docker save` archive."""
+    try:
+        with tarfile.open(path) as archive:
+            entries = json.load(archive.extractfile('manifest.json'))
+            if len(entries) != 1:
+                raise ReleaseError(f'{path} holds {len(entries)} images, not one')
+            config = archive.extractfile(entries[0]['Config']).read()
+    except (OSError, KeyError, tarfile.TarError, json.JSONDecodeError, AttributeError) as error:
+        raise ReleaseError(f'{path} is not a docker save archive: {error}') from error
+    return {'config': 'sha256:' + hashlib.sha256(config).hexdigest(), 'image': json.loads(config),
+            'tags': entries[0].get('RepoTags') or []}
+
+
+def local_config(ref):
+    """The config digest of a local image: the image ID with the classic store, an annotation with containerd's."""
+    local = json.loads(docker('image', 'inspect', ref, capture=True))[0]
+    return ((local.get('Descriptor') or {}).get('annotations') or {}).get('config.digest') or local['Id']
+
+
+def github_output(**values):
+    if os.environ.get('GITHUB_OUTPUT'):
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as handle:
+            handle.writelines(f'{key.replace("_", "-")}={value}\n' for key, value in values.items())
+
+
+def summarize(text):
+    print(text, flush=True)
+    if os.environ.get('GITHUB_STEP_SUMMARY'):
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as handle:
+            handle.write(text)
+
+
+def build(root, version, revision, output, image=IMAGE):
+    """Build both images once, save each to <output>/<kind>.tar and return their config digests."""
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=True)
+    configs = {}
+    for kind, file in DOCKERFILES.items():
+        ref = f'{image}:{kind}-{version}'
+        # Attestations would wrap the image in an index; keep the single amd64 manifest of earlier releases.
+        docker('build', '--platform', 'linux/amd64', '--provenance=false', '--sbom=false', '-f', str(root / file),
+               '--build-arg', f'VERSION={version}', '--build-arg', f'REVISION={revision}', '-t', ref, str(root))
+        docker('save', '--output', str(output / f'{kind}.tar'), ref)
+        saved = archive_identity(output / f'{kind}.tar')
+        expect_metadata(ref, saved['image'], version, revision)
+        if saved['config'] != local_config(ref):
+            raise ReleaseError(f'The saved {ref} is not the image that was built')
+        configs[kind] = saved['config']
+    github_output(**{f'{kind}_config_digest': digest for kind, digest in configs.items()})
+    summarize('\n'.join([f'### Built {image} {version}', '', '| Image | Config digest |', '| --- | --- |',
+                          *[f'| `{image}:{kind}-{version}` | `{configs[kind]}` |' for kind in DOCKERFILES],
+                          '', f'Revision `{revision}`, linux/amd64, saved once for verification and publication.', '']))
+    return configs
+
+
+def load(source, version, revision, expected, image=IMAGE):
+    """Load the saved images after checking they are the expected ones; return the local reference of each."""
+    refs = {}
+    for kind in DOCKERFILES:
+        if not DIGEST.fullmatch(expected.get(kind) or ''):
+            raise ReleaseError(f'The expected {kind} config digest must be sha256:<64 hex>, not {expected.get(kind)!r}')
+        archive = Path(source) / f'{kind}.tar'
+        saved = archive_identity(archive)
+        ref = f'{image}:{kind}-{version}'
+        if saved['config'] != expected[kind]:
+            raise ReleaseError(f'{archive} holds {saved["config"]}, not the built and verified {expected[kind]}')
+        expect_metadata(ref, saved['image'], version, revision)
+        docker('load', '--quiet', '--input', str(archive))
+        if ref not in saved['tags']:
+            if not saved['tags']:
+                raise ReleaseError(f'{archive} names no image')
+            docker('tag', saved['tags'][0], ref)
+        if local_config(ref) != expected[kind]:
+            raise ReleaseError(f'{ref} is not the loaded image {expected[kind]}')
+        refs[kind] = ref
+    github_output(**{f'{kind}_image': ref for kind, ref in refs.items()})
+    return refs
+
+
+def publish(source, version, revision, expected, image=IMAGE):
     versioned = {kind: f'{image}:{kind}-{version}' for kind in DOCKERFILES}
     latest = {kind: f'{image}:{kind}-latest' for kind in DOCKERFILES}
     reused = []
@@ -108,20 +215,14 @@ def publish(root, version, revision, image=IMAGE):
         published = expect_metadata(ref, existing['image'], version)
         if published != revision:
             raise ReleaseError(f'{ref} already exists from revision {published}; a published version is never overwritten')
-        print(f'{ref} is already published from this revision; reusing it.', flush=True)
+        if existing['config'] != expected.get(kind):
+            raise ReleaseError(f'{ref} was already published from this revision as {existing["config"]}, not as the '
+                               f'verified {expected.get(kind)}; a published version is never overwritten. Re-run the '
+                               'failed jobs of the release run that published it.')
+        print(f'{ref} is already published from this revision and verified image; reusing it.', flush=True)
         reused.append(kind)
 
-    for kind, file in DOCKERFILES.items():
-        if kind in reused:
-            docker('pull', '--quiet', '--platform', 'linux/amd64', versioned[kind])
-            continue
-        # Attestations would wrap the image in an index; keep the single amd64 manifest of earlier releases.
-        docker('build', '--platform', 'linux/amd64', '--provenance=false', '--sbom=false', '-f', str(root / file),
-               '--build-arg', f'VERSION={version}', '--build-arg', f'REVISION={revision}', '-t', versioned[kind], str(root))
-        local = json.loads(docker('image', 'inspect', versioned[kind], capture=True))[0]
-        expect_metadata(versioned[kind], {'os': local['Os'], 'architecture': local['Architecture'], 'config': local['Config']},
-                        version, revision)
-
+    load(source, version, revision, expected, image)
     for kind in DOCKERFILES:
         if kind not in reused:
             docker('push', '--quiet', versioned[kind])
@@ -131,6 +232,8 @@ def publish(root, version, revision, image=IMAGE):
         if published is None:
             raise ReleaseError(f'{ref} is missing after its push')
         expect_metadata(ref, published['image'], version, revision)
+        if published['config'] != expected[kind]:
+            raise ReleaseError(f'{ref} was pushed as {published["config"]}, not the verified {expected[kind]}')
         digests[kind] = published['digest']
 
     # Latest moves only after both versioned tags are verified remotely. Tag and push, rather than a registry-side
@@ -140,17 +243,26 @@ def publish(root, version, revision, image=IMAGE):
         docker('push', '--quiet', latest[kind])
     for kind, ref in latest.items():
         moved = remote(ref)
-        if moved is None or moved['digest'] != digests[kind]:
+        if moved is None or moved['digest'] != digests[kind] or moved['config'] != expected[kind]:
             raise ReleaseError(f'{ref} does not resolve to {versioned[kind]} ({digests[kind]})')
 
-    lines = [f'| `{versioned[kind]}` and `{latest[kind]}` | `{digests[kind]}` |' for kind in DOCKERFILES]
-    summary = '\n'.join([f'### Published {image} {version}', '', '| Tags | Digest |', '| --- | --- |', *lines,
-                         '', f'Revision `{revision}`, linux/amd64.', ''])
-    print(summary, flush=True)
-    if os.environ.get('GITHUB_STEP_SUMMARY'):
-        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as handle:
-            handle.write(summary)
+    lines = [f'| `{versioned[kind]}` and `{latest[kind]}` | `{digests[kind]}` | `{expected[kind]}` |' for kind in DOCKERFILES]
+    summarize('\n'.join([f'### Published {image} {version}', '', '| Tags | Digest | Verified config digest |',
+                          '| --- | --- | --- |', *lines, '', f'Revision `{revision}`, linux/amd64.', '']))
+    github_output(**{f'{kind}_digest': digest for kind, digest in digests.items()})
     return digests
+
+
+def notes(root, version, digests, image=IMAGE):
+    """The GitHub Release body: the committed release notes followed by both published image digests."""
+    for kind in DOCKERFILES:
+        if not DIGEST.fullmatch(digests.get(kind) or ''):
+            raise ReleaseError(f'The {kind} digest must be sha256:<64 hex>, not {digests.get(kind)!r}')
+    text = (root / 'docs' / 'releases' / f'v{version}.md').read_text().rstrip('\n')
+    rows = [f'| `{image}:{kind}-{version}` | `{digests[kind]}` |' for kind in DOCKERFILES]
+    return '\n'.join([text, '', '## Image digests', '', 'Both images were built once, verified, then pushed; '
+                       f'pull `{image}@<digest>` to get exactly these bytes.', '', '| Image | Digest |',
+                       '| --- | --- |', *rows, ''])
 
 
 def main(argv=None):
@@ -158,21 +270,41 @@ def main(argv=None):
     commands = parser.add_subparsers(dest='command', required=True)
     checking = commands.add_parser('check', help='Check packaged versions, changelog and release notes.')
     checking.add_argument('--tag', help='Also require this Git tag to be v<version>.')
-    publishing = commands.add_parser('publish', help='Build, push and verify both images, then move both latest tags.')
-    publishing.add_argument('--revision', required=True, help='Full commit SHA the images are built from.')
-    publishing.add_argument('--image', default=IMAGE, help=f'Repository to publish to (default {IMAGE}).')
+    building = commands.add_parser('build', help='Build both images once and save them with their config digests.')
+    loading = commands.add_parser('load', help='Load the saved images after checking their config digests.')
+    publishing = commands.add_parser('publish', help='Push the saved, verified images, then move both latest tags.')
+    noting = commands.add_parser('notes', help='Write the GitHub Release body: release notes plus image digests.')
+    noting.add_argument('--tag', help='Also require this Git tag to be v<version>.')
+    for command in (building, loading, publishing):
+        command.add_argument('--revision', required=True, help='Full commit SHA the images are built from.')
+        command.add_argument('--image', default=IMAGE, help=f'Repository the images are tagged for (default {IMAGE}).')
+    building.add_argument('--output', required=True, help='Directory for api.tar and web.tar.')
+    for command in (loading, publishing):
+        command.add_argument('--input', required=True, help='Directory holding the api.tar and web.tar that build saved.')
+        for kind in DOCKERFILES:
+            command.add_argument(f'--{kind}-config-digest', required=True, help=f'The {kind} config digest build reported.')
+    for kind in DOCKERFILES:
+        noting.add_argument(f'--{kind}-digest', required=True, help=f'The published {kind} manifest digest.')
+    noting.add_argument('--output', required=True, help='File to write the release body to.')
     args = parser.parse_args(argv)
     try:
         version = check(ROOT, getattr(args, 'tag', None))
         if args.command == 'check':
             print(version)
-            if os.environ.get('GITHUB_OUTPUT'):
-                with open(os.environ['GITHUB_OUTPUT'], 'a') as handle:
-                    handle.write(f'version={version}\n')
+            github_output(version=version)
+        elif args.command == 'notes':
+            Path(args.output).write_text(notes(ROOT, version, {kind: getattr(args, f'{kind}_digest') for kind in DOCKERFILES}))
         else:
             if not re.fullmatch(r'[0-9a-f]{40}', args.revision):
                 raise ReleaseError('--revision must be a full commit SHA')
-            publish(ROOT, version, args.revision, args.image)
+            if args.command == 'build':
+                build(ROOT, version, args.revision, args.output, args.image)
+                return 0
+            expected = {kind: getattr(args, f'{kind}_config_digest') for kind in DOCKERFILES}
+            if args.command == 'load':
+                print('\n'.join(load(args.input, version, args.revision, expected, args.image).values()))
+            else:
+                publish(args.input, version, args.revision, expected, args.image)
     except ReleaseError as error:
         print(f'::error::{error}' if os.environ.get('GITHUB_ACTIONS') else f'error: {error}', file=sys.stderr)
         return 1
