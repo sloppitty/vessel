@@ -182,12 +182,14 @@ export const emptyOpenRisk = (scope: string): OpenRisk => ({
 
 /** A sizing document with no closed plays, full exposure and the default limits. */
 export const sizingFixture: SizingDocument = {
+  tradingMode: 'real',
   settings: { riskPercent: '1.25' },
-  exposure: { level: 'full', multiplier: '1', reason: 'No losing streak.', lossStreak: 0, winsSinceStepDown: 0 },
+  exposure: { level: 'full', multiplier: '1', reason: 'No losing streak.', lossStreak: 0, winsSinceStepDown: 0, tiedOutcomes: 0 },
   record: {
     source: 'none', closedPlays: 0, decidedPlays: 0, window: 20, wins: 0, losses: 0, scratches: 0,
     battingAverage: null, averageGainPercent: null, averageLossPercent: null, winLossRatio: null, breakEvenRewardRisk: null,
     averageWinR: null, averageLossR: null, recent: [],
+    localSignChanges: 0, localUnknown: 0, feeOnlyLosses: 0, unknownGrossLosses: 0, unresolved: 0, notAllocated: 0,
   },
   limits: { effectiveRiskPercent: '1.25', maxStopPercent: '10', minRewardRisk: '2', maxStopSource: 'default', minRewardRiskSource: 'default' },
   notice: 'Mechanical estimates from your settings and record, not investment advice.',

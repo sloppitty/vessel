@@ -24,7 +24,7 @@ function plan(changes: Partial<PlayDraft> = {}, stop = exit('95'), target = exit
 
 const reduced: SizingDocument = {
   ...sizingFixture,
-  exposure: { level: 'half', multiplier: '0.5', reason: 'Half size after 3 losses in a row.', lossStreak: 0, winsSinceStepDown: 0 },
+  exposure: { level: 'half', multiplier: '0.5', reason: 'Half size after 3 losses in a row.', lossStreak: 0, winsSinceStepDown: 0, tiedOutcomes: 0 },
   limits: { ...sizingFixture.limits, effectiveRiskPercent: '0.625' },
 }
 
@@ -261,7 +261,7 @@ describe('record and risk', () => {
       wins: 2, losses: 1, battingAverage: '0.6667', winLossRatio: '2', averageGainPercent: '4', averageLossPercent: '2', breakEvenRewardRisk: '0.5',
       recent: [{ playId: null, operationId: '12345678-1234-1234-1234-123456789abc:long', accountId: accountFixture.id, title: 'BTC Long',
         instrument: 'BTC', closedAtUtc: '2026-10-12T10:00:00Z', netResultUsd: '4', returnPercent: '4', riskUsd: null, rMultiple: null,
-        outcome: 'win', feesComplete: true }] } }
+        outcome: 'win', feesComplete: true, detectedAtUtc: null }], localSignChanges: null, localUnknown: null } }
     render(<Workspace initial={plan()} sizing={sizing} />)
     await openPanel(user)
     const source = screen.getByTestId('record-source')

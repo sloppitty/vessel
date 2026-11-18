@@ -185,12 +185,12 @@ function emptyReason(plan: PlanSuggestions) {
 
 /**
  * What the result bases say about the window's decided results: sign changes under the Play-local basis and results
- * without one (Play records only; positions are not Plays), and losses made by fees alone. Zero and absent counts say nothing.
+ * without one (Play records only; positions are not Plays), and losses made by fees alone. Zero and null counts say nothing.
  */
 function recordBasisNotes(record: SizingRecord, decided: number) {
   const notes: string[] = []
   const changes = record.localSignChanges ?? 0, unknown = record.localUnknown ?? 0
-  const feeOnly = record.feeOnlyLosses ?? 0, unknownGross = record.unknownGrossLosses ?? 0
+  const feeOnly = record.feeOnlyLosses, unknownGross = record.unknownGrossLosses
   if (record.source === 'plays' && changes > 0) notes.push(`${changes} of the last ${decided} ${changes === 1 ? 'changes' : 'change'} sign under the Play-local basis.`)
   if (record.source === 'plays' && unknown > 0) notes.push(`${unknown} ${unknown === 1 ? 'has' : 'have'} no Play-local figure.`)
   if (feeOnly > 0) notes.push(`${feeOnly} ${feeOnly === 1 ? 'loss came' : 'losses came'} from fees alone.`)
