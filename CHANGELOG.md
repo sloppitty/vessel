@@ -70,6 +70,11 @@
 - A separate-ledger Hyperliquid account whose stablecoin wallet was never read shows an
   unknown balance with a reason, where it showed the perpetuals alone. An observed empty
   wallet stays a known zero.
+- Monitor: an open order Vessel cannot read now leaves only its own market's stop coverage
+  unknown, where it left every Play on the account unknown: a Hyperliquid order with
+  attached TP/SL on its own market, and a Lighter TWAP or unsized order. The reason names
+  the order kind. Anything that cannot be attributed safely, including a Lighter order with
+  flags, still leaves the whole book unknown.
 
 ### Changed
 
