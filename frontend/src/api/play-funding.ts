@@ -36,5 +36,5 @@ export const isPlayFunding = (v: unknown): v is PlayFunding => {
     v.amountUsd === null && v.asset === null && v.paymentCount === null && v.fromUtc === null && v.toUtc === null
 }
 
-/** Absent for a manual instrument, before the first entry fill, and from servers before Phase 2, item 9b. */
+/** The API omits it (WhenWritingNull on PlayExecutionDto.Funding) for a manual instrument and before the first entry fill. */
 export const isOptionalPlayFunding = (v: unknown) => v === undefined || isPlayFunding(v)

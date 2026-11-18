@@ -20,6 +20,3 @@ export const isPlayLocalResult = (v: unknown, decimal: (x: unknown) => boolean =
   isNullOr(v.netUsd, decimal) && (v.basis === 'executions' || v.basis === 'manual-ledger' || v.basis === 'paper-simulation') &&
   isNullOr(v.reason, x => isNonBlankText(x, 500)) && typeof v.signDiffers === 'boolean' &&
   (v.netUsd === null) === (v.reason !== null) && (v.netUsd !== null || !v.signDiffers)
-
-/** Absent from servers before October 19, 2026. */
-export const isOptionalPlayLocalResult = (v: unknown, decimal?: (x: unknown) => boolean) => v === undefined || isPlayLocalResult(v, decimal)

@@ -23,6 +23,7 @@ import * as overviewActions from '@/features/workspace/OverviewActions'
 import * as savedChecks from './saved'
 import * as preflightChecks from './preflight'
 import { credentialsFixture, shellIdentityFixture } from '@/test/identity-fixture'
+import { executionDefaults, totalsDefaults } from '@/test/execution-fixture'
 
 const at = '2026-10-13T10:00:00Z'
 const otherId = '00000000-0000-4000-8000-000000000002'
@@ -34,8 +35,9 @@ const sessionFor = (play: SavedPlay): PlaysSession => {
 }
 const execution = (play: SavedPlay): PlayExecution => ({
   playId: play.summary.id, status: play.summary.status, tracked: false, reason: 'No imported tracking.', checkedAtUtc: null,
-  totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
+  totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [], ...totalsDefaults },
   entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Facts only.', issues: [], monitor: null, discrepancies: [], watches: [],
+  ...executionDefaults,
 })
 
 const manualLedger = (play: SavedPlay): ManualExecutions => ({
@@ -389,7 +391,7 @@ describe('diary workspace integration', () => {
     const fill = { sourceFillId: 'f1', direction: 'Open Long', price: '100', quantity: '1', fee: '0', feeToken: 'USDC', closedPnlUsd: '0',
       side: 'buy' as const, positionEffect: 'open' as const, pnlBasis: 'gross' as const, occurredAtUtc: at }
     const filled = (play: SavedPlay): PlayExecution => ({ ...execution(play), tracked: true, reason: null,
-      links: [{ id: ids(161), role: 'entry', entryId: 'entry-1', levelId: null, state: 'linked', source: 'automatic', order: null, filledQuantity: '1', fills: [fill] }] })
+      links: [{ id: ids(161), role: 'entry', entryId: 'entry-1', levelId: null, state: 'linked', source: 'automatic', order: null, filledQuantity: '1', fills: [fill], otherPlay: null }] })
     let current = open
     const { api, methods } = client(open)
     methods.play.mockImplementation(() => Promise.resolve(current))
@@ -664,10 +666,10 @@ describe('diary workspace integration', () => {
     methods.playExecution.mockResolvedValue({ ...execution(retrospective), tracked: true, links: [
       { id: 'entry-link', role: 'entry', entryId: null, levelId: null, state: 'linked', source: 'owner', order: null,
         filledQuantity: '1', fills: [{ sourceFillId: 'entry-fill', direction: 'Open Long', price: '100', quantity: '1',
-          fee: '0', feeToken: 'USDC', closedPnlUsd: '0', side: 'buy', positionEffect: 'open', pnlBasis: 'gross', occurredAtUtc: at }] },
+          fee: '0', feeToken: 'USDC', closedPnlUsd: '0', side: 'buy', positionEffect: 'open', pnlBasis: 'gross', occurredAtUtc: at }], otherPlay: null },
       { id: 'exit-link', role: 'exit', entryId: null, levelId: null, state: 'linked', source: 'owner', order: null,
         filledQuantity: '1', fills: [{ sourceFillId: 'exit-fill', direction: 'Close Long', price: '108', quantity: '1',
-          fee: '0', feeToken: 'USDC', closedPnlUsd: '8', side: 'sell', positionEffect: 'close', pnlBasis: 'gross', occurredAtUtc: at }] },
+          fee: '0', feeToken: 'USDC', closedPnlUsd: '8', side: 'sell', positionEffect: 'close', pnlBasis: 'gross', occurredAtUtc: at }], otherPlay: null },
     ] })
     render(<Harness api={api} initial={sessionFor(retrospective)} />)
     await userEvent.click(screen.getByRole('tab', { name: 'Execution' }))
@@ -725,7 +727,7 @@ describe('diary workspace integration', () => {
       totals: { ...execution(closed).totals, enteredQuantity: '0.5', exitedQuantity: '0.5', closedPnlUsd: '5', venueNetUsd: '4.97',
         fees: [{ token: 'USDC', amount: '0.03' }] },
       receipt: { firstEntryAtUtc: '2026-10-13T08:00:00Z', lastExitAtUtc: '2026-10-13T09:30:00Z', averageEntryPrice: '100.4', averageExitPrice: '110',
-        fillCount: 3, estimatedR: '1.98', initialRisk: '2.51', estimatedRReason: null } }))
+        fillCount: 3, estimatedR: '1.98', initialRisk: '2.51', estimatedRReason: null, plannedAfterExecution: false } }))
     const user = userEvent.setup()
     render(<Harness api={api} initial={sessionFor(closed)} />)
     await user.click(screen.getByRole('tab', { name: 'Review' }))
@@ -747,7 +749,7 @@ describe('diary workspace integration', () => {
     methods.playExecution.mockImplementation(() => Promise.resolve({ ...execution(closed), tracked: true, reason: null,
       totals: { ...execution(closed).totals, venueNetUsd: '4.97' },
       receipt: { firstEntryAtUtc: '2026-10-13T08:00:00Z', lastExitAtUtc: '2026-10-13T09:30:00Z', averageEntryPrice: '100.4', averageExitPrice: '110',
-        fillCount: 3, estimatedR: '1.98', initialRisk: '2.51', estimatedRReason: null } }))
+        fillCount: 3, estimatedR: '1.98', initialRisk: '2.51', estimatedRReason: null, plannedAfterExecution: false } }))
     const user = userEvent.setup()
     const view = render(<Harness api={api} initial={sessionFor(closed)} />)
     await user.click(screen.getByRole('tab', { name: 'Review' }))
@@ -820,7 +822,7 @@ describe('diary workspace integration', () => {
     const { api, methods } = client(closed)
     const receipt = { firstEntryAtUtc: '2026-10-10T08:00:00Z', lastExitAtUtc: '2026-10-10T09:00:00Z', averageEntryPrice: '100',
       averageExitPrice: '110', fillCount: 2, estimatedR: null, initialRisk: null,
-      estimatedRReason: 'No plan revision was in force at the first entry fill: the plan was written after it.' }
+      estimatedRReason: 'No plan revision was in force at the first entry fill: the plan was written after it.', plannedAfterExecution: false }
     methods.playExecution.mockImplementation(() => Promise.resolve({ ...execution(closed), receipt: { ...receipt, plannedAfterExecution: true } }))
     const user = userEvent.setup()
     const view = render(<Harness api={api} initial={sessionFor(closed)} />)

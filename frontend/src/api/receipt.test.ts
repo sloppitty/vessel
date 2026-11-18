@@ -6,11 +6,11 @@ import recorded from '@/test/contracts/monitor-api.json?raw'
 
 const execution = (JSON.parse(recorded) as { playExecution: Record<string, unknown> & { entries: Record<string, unknown>[] } }).playExecution
 const known: PlayReceipt = { firstEntryAtUtc: '2026-10-03T10:00:00Z', lastExitAtUtc: '2026-10-03T12:00:00Z', averageEntryPrice: '100.4',
-  averageExitPrice: '110', fillCount: 3, estimatedR: '-1.25', initialRisk: '2.51', estimatedRReason: null }
+  averageExitPrice: '110', fillCount: 3, estimatedR: '-1.25', initialRisk: '2.51', estimatedRReason: null, plannedAfterExecution: false }
 const unknown: PlayReceipt = { ...known, estimatedR: null, initialRisk: null, estimatedRReason: 'Known once the Play is closed and its fills settle it.' }
 
 describe('Play receipt (phase 1, 1.1a)', () => {
-  it('accepts the recorded server execution with planned entries and its receipt, and an older one without them', () => {
+  it('accepts the recorded server execution with planned entries and its receipt, and rejects one without them', () => {
     expect(isPlayExecution(execution)).toBe(true)
     expect(execution.entries[0]).toMatchObject({ plannedPrice: '100', plannedQuantity: '7.5', planRevision: 1 })
     const older: Record<string, unknown> = { ...execution, entries: execution.entries.map(entry => {
@@ -18,8 +18,13 @@ describe('Play receipt (phase 1, 1.1a)', () => {
       delete copy.plannedPrice; delete copy.plannedQuantity; delete copy.planRevision
       return copy
     }) }
-    delete older.receipt
-    expect(isPlayExecution(older)).toBe(true)
+    expect(isPlayExecution(older)).toBe(false)
+    const noReceipt: Record<string, unknown> = { ...execution }
+    delete noReceipt.receipt
+    expect(isPlayExecution(noReceipt)).toBe(false)
+    const olderReceipt: Record<string, unknown> = { ...known }
+    delete olderReceipt.plannedAfterExecution
+    expect(isPlayReceipt(olderReceipt)).toBe(false)
     expect(isPlayExecution({ ...execution, receipt: known })).toBe(true)
     expect(isPlayExecution({ ...execution, entries: [{ ...execution.entries[0], plannedQuantity: '1e2' }] })).toBe(false)
     expect(isPlayExecution({ ...execution, entries: [{ ...execution.entries[0], planRevision: -1 }] })).toBe(false)

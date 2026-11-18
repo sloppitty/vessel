@@ -6,11 +6,12 @@ import { savedPlayFixture } from '@/test/workspace-fixture'
 import { formatTime } from '@/lib/time'
 import { coverageHeading, coverageLines, stopEvidenceFor } from './coverage'
 import { restoreZone } from '@/test/zone'
+import { executionDefaults, totalsDefaults } from '@/test/execution-fixture'
 
 const execution = (coverage: MonitorCoverage[] | undefined, overrides: Partial<PlayExecution> = {}): PlayExecution => ({
   playId: savedPlayFixture.summary.id, status: 'open', tracked: true, reason: null, checkedAtUtc: null,
-  totals: { enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
-  entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: '', issues: [],
+  totals: { enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [], ...totalsDefaults },
+  entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: '', issues: [], ...executionDefaults,
   monitor: coverage === undefined ? { ...monitorFixture } : { ...monitorFixture, coverage }, discrepancies: [], watches: [], ...overrides,
 })
 const stamp = (iso: string) => `T(${iso})`

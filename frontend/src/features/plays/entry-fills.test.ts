@@ -15,7 +15,7 @@ const fill = (quantity: string, price: string, side: 'buy' | 'sell' = 'buy', pos
   ({ sourceFillId: `${quantity}@${price}`, direction: 'Open Long', price, quantity, fee: '0', feeToken: 'USDC', closedPnlUsd: '0',
     occurredAtUtc: at, side, positionEffect, pnlBasis: 'gross' })
 const entryLink = (entryId: string, fills: ExecutionFill[]): OrderLink => ({ id: `00000000-0000-4000-8000-0000000000${entryId === 'e1' ? 'a1' : 'a2'}`,
-  role: 'entry', entryId, levelId: null, state: 'linked', source: 'automatic', order: null, filledQuantity: '0', fills })
+  role: 'entry', entryId, levelId: null, state: 'linked', source: 'automatic', order: null, filledQuantity: '0', fills, otherPlay: null })
 
 describe('entry fills', () => {
   it('averages a venue entry exactly from its linked fills, leaving out contradicting ones', () => {

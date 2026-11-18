@@ -4,7 +4,7 @@ import { isCount, isGuid, isNullOr, isPlainDecimal, isRecord, isText, isTimestam
 import { isImageMarkup, type ImageMarkup } from './markup'
 import { validOverviewScope } from './overview-summary'
 import { isAccountMonitor, isMonitorDiscrepancy, isMonitorWatch, type AccountMonitor, type MonitorDiscrepancy, type MonitorWatch } from './monitor'
-import { isOptionalPlayLocalResult, type PlayLocalResult } from './local-result'
+import { isPlayLocalResult, type PlayLocalResult } from './local-result'
 import { isOptionalPlayFunding, type PlayFunding } from './play-funding'
 
 export const playStatuses = ['draft', 'planned', 'paused', 'open', 'closed', 'cancelled', 'unresolved'] as const
@@ -459,8 +459,8 @@ export interface OrderLink {
   order: ExecutionOrder | null
   filledQuantity: string
   fills: ExecutionFill[]
-  /** On a suggestion: its order is also offered to another active Play (phase 1, 1.6d); absent from an older server. */
-  otherPlay?: boolean | null
+  /** On a suggestion: its order is also offered to another active Play (phase 1, 1.6d); null on linked orders. */
+  otherPlay: boolean | null
 }
 /** A position's venue-reported risk context: the venue's figures, never the plan's estimate; null is not reported. */
 export interface VenueRisk {
@@ -486,16 +486,15 @@ export interface PlayExecution {
     /**
      * Venue closed PnL less listed stablecoin fees on before-fee fills, over the counted fills, so far while open. Review and
      * sizing score this basis only once the play is closed and settled. Null when a fee is unverified or in another token.
-     * With `local`, absent from servers before October 19, 2026.
      */
-    venueNetUsd?: string | null
+    venueNetUsd: string | null
     /** The Play-local result beside it, known once the play is closed and its fills settle it. */
-    local?: PlayLocalResult
+    local: PlayLocalResult
     /**
      * A fill of this Play is allocated between Plays (Phase 2, item 11): the venue's average-cost P&L cannot be split, so the
-     * venue result is not allocated and neither venue figure is this Play's. Absent from older servers.
+     * venue result is not allocated and neither venue figure is this Play's.
      */
-    venueNotAllocated?: boolean
+    venueNotAllocated: boolean
   }
   entries: EntryProgress[]
   links: OrderLink[]
@@ -503,16 +502,16 @@ export interface PlayExecution {
   unlinkedOrders: ExecutionOrder[]
   /**
    * Compatible orders placed in the lookback before the Play was created and not linked to any Play (Phase 2, item 4), for
-   * the owner to link by hand; the automatic matcher never reaches back. Absent from older servers.
+   * the owner to link by hand; the automatic matcher never reaches back.
    */
-  earlierOrders?: ExecutionOrder[]
+  earlierOrders: ExecutionOrder[]
   /** The account's current venue position on the Play's contract with its reported risk context (Phase 2, item 8a). */
-  venuePosition?: VenueRisk | null
+  venuePosition: VenueRisk | null
   /** The first risk context the venue reported at or after the Play's first entry fill. */
-  riskAtFirstFill?: VenueRisk | null
+  riskAtFirstFill: VenueRisk | null
   /**
-   * Settled funding beside the Play, only with proven sole exposure (Phase 2, item 9b); never added to a result. Absent for a
-   * manual instrument, before the first entry fill and from older servers.
+   * Settled funding beside the Play, only with proven sole exposure (Phase 2, item 9b); never added to a result. The API
+   * omits it (WhenWritingNull) for a manual instrument and before the first entry fill.
    */
   funding?: PlayFunding
   notice: string
@@ -522,19 +521,19 @@ export interface PlayExecution {
   discrepancies: MonitorDiscrepancy[]
   /** Linked orders still watched after the Play ended; empty while it is active. */
   watches: MonitorWatch[]
-  /** Times, averages and estimated R by Review's rules; absent from servers before Phase 1. */
-  receipt?: PlayReceipt | null
+  /** Times, averages and estimated R by Review's rules. */
+  receipt: PlayReceipt | null
   /**
    * Fills the owner may split between Plays from this Play (Phase 2, item 11): its allocated fills, the exit fills of its
-   * linked orders while they exceed its entries, and unallocated flips that close its direction. Absent from older servers.
+   * linked orders while they exceed its entries, and unallocated flips that close its direction.
    */
-  sharedFills?: SharedFill[]
+  sharedFills: SharedFill[]
   /** The Plays a line of those fills may name, with the versions a request expects. */
-  allocationPlays?: AllocationPlay[]
-  /** How many allocated fills this Play has; `sharedFills` holds the newest page of them. Absent from older servers. */
-  sharedFillCount?: number
+  allocationPlays: AllocationPlay[]
+  /** How many allocated fills this Play has; `sharedFills` holds the newest page of them. */
+  sharedFillCount: number
   /** Where the next page of allocated fills starts (`sharedFillsPage`); null when none is left. */
-  sharedFillsNextOffset?: number | null
+  sharedFillsNextOffset: number | null
 }
 /** A further page of a Play's allocated fills, newest first, with the Plays their lines name and may name. */
 export interface SharedFillsPage { items: SharedFill[]; plays: AllocationPlay[]; total: number; offset: number; nextOffset: number | null }
@@ -597,11 +596,11 @@ export interface EntryProgress {
   restingOrders: number
   /**
    * The entry as planned, from the plan revision in force at its first fill (`planRevision`, null for a Draft or a
-   * retrospective Play); before any fill, the current plan. Null when the plan cannot give it; absent from older servers.
+   * retrospective Play); before any fill, the current plan. Null when the plan cannot give it.
    */
-  plannedPrice?: string | null
-  plannedQuantity?: string | null
-  planRevision?: number | null
+  plannedPrice: string | null
+  plannedQuantity: string | null
+  planRevision: number | null
 }
 /**
  * What happened, beside the plan, by Review's own rules: the first entry and last exit fills (time held runs between
@@ -617,8 +616,8 @@ export interface PlayReceipt {
   estimatedR: string | null
   initialRisk: string | null
   estimatedRReason: string | null
-  /** The plan was written after the Play's first execution (D-17); absent from servers before Phase 1.4a. */
-  plannedAfterExecution?: boolean
+  /** The plan was written after the Play's first execution (D-17). */
+  plannedAfterExecution: boolean
 }
 export interface LinkOrder { orderId: string; role: LinkRole; entryId?: string; levelId?: string }
 /**
@@ -656,15 +655,15 @@ export const isSharedFillsPage = (v: unknown): v is SharedFillsPage => isRecord(
 const orderLink = (v: unknown): v is OrderLink => isRecord(v) && isGuid(v.id) && ['entry', 'stop', 'target', 'exit'].includes(v.role as string) &&
   isNullOr(v.entryId, x => isText(x, 64)) && isNullOr(v.levelId, x => isText(x, 64)) && (v.state === 'linked' || v.state === 'suggested') &&
   (v.source === 'automatic' || v.source === 'owner') && (v.order === null || executionOrder(v.order)) && isPlainDecimal(v.filledQuantity) &&
-  Array.isArray(v.fills) && v.fills.every(executionFill) && (v.otherPlay === undefined || v.otherPlay === null || typeof v.otherPlay === 'boolean')
+  Array.isArray(v.fills) && v.fills.every(executionFill) && (v.otherPlay === null || typeof v.otherPlay === 'boolean')
 export const isEntryProgress = (e: unknown): e is EntryProgress => isRecord(e) && isText(e.entryId, 64) && isPlainDecimal(e.filledQuantity) &&
-  isNullOr(e.averageFillPrice, isPlainDecimal) && isCount(e.restingOrders) && (e.plannedPrice === undefined || isNullOr(e.plannedPrice, isPlainDecimal)) &&
-  (e.plannedQuantity === undefined || isNullOr(e.plannedQuantity, isPlainDecimal)) && (e.planRevision === undefined || isNullOr(e.planRevision, isCount))
+  isNullOr(e.averageFillPrice, isPlainDecimal) && isCount(e.restingOrders) && isNullOr(e.plannedPrice, isPlainDecimal) &&
+  isNullOr(e.plannedQuantity, isPlainDecimal) && isNullOr(e.planRevision, isCount)
 export const isPlayReceipt = (r: unknown): r is PlayReceipt => isRecord(r) &&
   isNullOr(r.firstEntryAtUtc, x => isTimestamp(x, timeLength)) && isNullOr(r.lastExitAtUtc, x => isTimestamp(x, timeLength)) &&
   isNullOr(r.averageEntryPrice, isPlainDecimal) && isNullOr(r.averageExitPrice, isPlainDecimal) && isCount(r.fillCount) &&
   isNullOr(r.estimatedR, isPlainDecimal) && isNullOr(r.initialRisk, isPlainDecimal) && isNullOr(r.estimatedRReason, x => isText(x, 500)) &&
-  (r.plannedAfterExecution === undefined || typeof r.plannedAfterExecution === 'boolean') &&
+  typeof r.plannedAfterExecution === 'boolean' &&
   // R and its denominator come together, or neither comes and a reason says why.
   (r.estimatedR === null) === (r.initialRisk === null) && (r.estimatedR === null) === (r.estimatedRReason !== null)
 export const isPlayExecution = (v: unknown): v is PlayExecution => isRecord(v) && isGuid(v.playId) && playStatuses.includes(v.status as PlayStatus) &&
@@ -672,17 +671,15 @@ export const isPlayExecution = (v: unknown): v is PlayExecution => isRecord(v) &
   isRecord(v.totals) && ['enteredQuantity', 'exitedQuantity', 'openQuantity', 'closedPnlUsd'].every(k => isPlainDecimal((v.totals as Record<string, unknown>)[k])) &&
   ['gross', 'net-of-fee', 'mixed'].includes(v.totals.closedPnlBasis as string) &&
   Array.isArray(v.totals.fees) && v.totals.fees.every(f => isRecord(f) && isText(f.token, 64) && isPlainDecimal(f.amount)) &&
-  (v.totals.venueNetUsd === undefined || isNullOr(v.totals.venueNetUsd, isPlainDecimal)) && isOptionalPlayLocalResult(v.totals.local) &&
-  (v.totals.venueNotAllocated === undefined || typeof v.totals.venueNotAllocated === 'boolean') &&
-  (v.sharedFills === undefined || Array.isArray(v.sharedFills) && v.sharedFills.length <= allocationBounds.sharedFills && v.sharedFills.every(sharedFill)) &&
-  (v.allocationPlays === undefined || Array.isArray(v.allocationPlays) && v.allocationPlays.length <= allocationBounds.plays && v.allocationPlays.every(allocationPlay)) &&
-  (v.sharedFillCount === undefined || isCount(v.sharedFillCount)) &&
-  (v.sharedFillsNextOffset === undefined || isNullOr(v.sharedFillsNextOffset, isCount)) &&
-  Array.isArray(v.entries) && v.entries.every(isEntryProgress) && (v.receipt === undefined || isNullOr(v.receipt, isPlayReceipt)) &&
+  isNullOr(v.totals.venueNetUsd, isPlainDecimal) && isPlayLocalResult(v.totals.local) && typeof v.totals.venueNotAllocated === 'boolean' &&
+  Array.isArray(v.sharedFills) && v.sharedFills.length <= allocationBounds.sharedFills && v.sharedFills.every(sharedFill) &&
+  Array.isArray(v.allocationPlays) && v.allocationPlays.length <= allocationBounds.plays && v.allocationPlays.every(allocationPlay) &&
+  isCount(v.sharedFillCount) && isNullOr(v.sharedFillsNextOffset, isCount) &&
+  Array.isArray(v.entries) && v.entries.every(isEntryProgress) && isNullOr(v.receipt, isPlayReceipt) &&
   Array.isArray(v.links) && v.links.every(orderLink) && Array.isArray(v.suggestions) && v.suggestions.every(orderLink) &&
   Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(executionOrder) &&
-  (v.earlierOrders === undefined || Array.isArray(v.earlierOrders) && v.earlierOrders.length <= 20 && v.earlierOrders.every(executionOrder)) &&
-  (v.venuePosition === undefined || isNullOr(v.venuePosition, isVenueRisk)) && (v.riskAtFirstFill === undefined || isNullOr(v.riskAtFirstFill, isVenueRisk)) &&
+  Array.isArray(v.earlierOrders) && v.earlierOrders.length <= 20 && v.earlierOrders.every(executionOrder) &&
+  isNullOr(v.venuePosition, isVenueRisk) && isNullOr(v.riskAtFirstFill, isVenueRisk) &&
   isOptionalPlayFunding(v.funding) && isText(v.notice, 1000) &&
   Array.isArray(v.issues) && v.issues.every(issue => isText(issue, 1000)) &&
   (v.monitor === null || isAccountMonitor(v.monitor)) && Array.isArray(v.discrepancies) && v.discrepancies.every(isMonitorDiscrepancy) &&

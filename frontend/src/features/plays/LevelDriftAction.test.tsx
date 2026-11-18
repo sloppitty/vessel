@@ -10,6 +10,7 @@ import { createDraft } from './draft'
 import { ExecutionPanel } from './ExecutionPanel'
 import { levelDrifts } from './execution'
 import { LevelDriftAction } from './LevelDriftAction'
+import { executionDefaults, plannedUnknown, totalsDefaults } from '@/test/execution-fixture'
 
 const base = createDraft().entries[0]!
 const entries = [{ ...base, id: 'e1', name: 'Entry 1', price: '100', stops: [{ id: 's1', unit: 'price' as const, value: '95', share: '100' }],
@@ -20,7 +21,7 @@ const order = (orderId: string, overrides: Partial<ExecutionOrder> = {}): Execut
   statusAtUtc: '2026-10-19T10:00:00Z', ...overrides,
 })
 const stopLink: OrderLink = { id: '00000000-0000-4000-8000-0000000000b1', role: 'stop', entryId: 'e1', levelId: 's1', state: 'linked',
-  source: 'automatic', order: order('s-order'), filledQuantity: '0', fills: [] }
+  source: 'automatic', order: order('s-order'), filledQuantity: '0', fills: [], otherPlay: null }
 const targetLink: OrderLink = { ...stopLink, id: '00000000-0000-4000-8000-0000000000b2', role: 'target', levelId: 't1',
   order: order('t-order', { orderType: 'Limit', limitPrice: '110', triggerPrice: null }) }
 const drift = (levels: unknown[], overrides: Partial<MonitorDiscrepancy> = {}): MonitorDiscrepancy => ({
@@ -113,9 +114,9 @@ describe('level drift', () => {
   it('sits in the drift record of the Execution tab, only for editable plays', () => {
     const execution: PlayExecution = {
       playId: '00000000-0000-4000-8000-000000000001', status: 'open', tracked: true, reason: null, checkedAtUtc: '2026-10-19T10:11:00Z',
-      totals: { enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
-      entries: [{ entryId: 'e1', filledQuantity: '1', averageFillPrice: '100', restingOrders: 0 }], links: [stopLink], suggestions: [],
-      unlinkedOrders: [], notice: 'Venue facts.', issues: [], monitor: monitorFixture, discrepancies: [drifted], watches: [],
+      totals: { enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [], ...totalsDefaults },
+      entries: [{ entryId: 'e1', filledQuantity: '1', averageFillPrice: '100', restingOrders: 0, ...plannedUnknown }], links: [stopLink], suggestions: [],
+      unlinkedOrders: [], notice: 'Venue facts.', issues: [], monitor: monitorFixture, discrepancies: [drifted], watches: [], ...executionDefaults,
     }
     const props = { execution, error: null, busy: false, entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn(),
       onDismiss: vi.fn(() => Promise.resolve()), onRebind: vi.fn(() => Promise.resolve()), version: 3 }

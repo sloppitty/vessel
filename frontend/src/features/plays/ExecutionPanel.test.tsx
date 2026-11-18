@@ -10,6 +10,7 @@ import { createDraft } from './draft'
 import { PlayJournal } from './WorkspacePanels'
 import { describeOrder, fillSummary, suggestionGroups } from './execution'
 import { restoreZone } from '@/test/zone'
+import { executionDefaults, plannedUnknown, totalsDefaults } from '@/test/execution-fixture'
 
 const entry = { ...createDraft().entries[0]!, id: 'e1', name: 'Entry 1', price: '100' }
 const entries = [{ ...entry, stops: [{ ...entry.stops[0]!, id: 's1', value: '95' }], targets: [{ ...entry.targets[0]!, id: 't1', value: '110' }] }]
@@ -20,16 +21,16 @@ const order = (orderId: string, overrides: Partial<ExecutionOrder> = {}): Execut
 })
 const execution: PlayExecution = {
   playId: '00000000-0000-4000-8000-000000000001', status: 'open', tracked: true, reason: null, checkedAtUtc: '2026-10-03T10:05:00Z',
-  totals: { enteredQuantity: '0.5', exitedQuantity: '0', openQuantity: '0.5', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [{ token: 'USDC', amount: '0.02' }] },
-  entries: [{ entryId: 'e1', filledQuantity: '0.5', averageFillPrice: '100', restingOrders: 0 }],
+  totals: { enteredQuantity: '0.5', exitedQuantity: '0', openQuantity: '0.5', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [{ token: 'USDC', amount: '0.02' }], ...totalsDefaults },
+  entries: [{ entryId: 'e1', filledQuantity: '0.5', averageFillPrice: '100', restingOrders: 0, ...plannedUnknown }],
   links: [{ id: '00000000-0000-4000-8000-0000000000a1', role: 'entry', entryId: 'e1', levelId: null, state: 'linked', source: 'automatic',
-    order: order('11', { status: 'filled' }), filledQuantity: '0.5',
+    order: order('11', { status: 'filled' }), filledQuantity: '0.5', otherPlay: null,
     fills: [{ sourceFillId: 'f1', direction: 'Open Long', price: '100', quantity: '0.5', fee: '0.02', feeToken: 'USDC', closedPnlUsd: '0', side: 'buy', positionEffect: 'open', pnlBasis: 'gross', occurredAtUtc: '2026-10-03T10:01:00Z' }] }],
   suggestions: [{ id: '00000000-0000-4000-8000-0000000000a2', role: 'stop', entryId: 'e1', levelId: 's1', state: 'suggested', source: 'automatic',
-    order: order('12', { side: 'sell', orderType: 'Stop Market', triggerPrice: '95', reduceOnly: true }), filledQuantity: '0', fills: [] }],
+    order: order('12', { side: 'sell', orderType: 'Stop Market', triggerPrice: '95', reduceOnly: true }), filledQuantity: '0', fills: [], otherPlay: false }],
   unlinkedOrders: [order('13', { side: 'sell', limitPrice: '110', reduceOnly: true })],
   notice: 'Orders and fills come from the venue.',
-  issues: [], monitor: monitorFixture, discrepancies: [], watches: [],
+  issues: [], monitor: monitorFixture, discrepancies: [], watches: [], ...executionDefaults,
 }
 
 describe('execution panel', () => {
@@ -146,11 +147,6 @@ describe('execution panel', () => {
       local: { netUsd: '0.00001', basis: 'executions', reason: null, signDiffers: true } } }} {...props} />)
     expect(value('Venue net')).toHaveTextContent(/^-0\.00001 USD$/)
     expect(value('Play-local result')).toHaveTextContent(/^0\.00001 USD/)
-
-    // Servers before October 19, 2026 send neither figure.
-    view.rerender(<ExecutionPanel execution={execution} {...props} />)
-    expect(screen.queryByText('Venue net')).not.toBeInTheDocument()
-    expect(screen.queryByText('Play-local result')).not.toBeInTheDocument()
   })
 
   it('shows settled funding beside the results in each state and changes neither result (phase 2, 9b)', () => {

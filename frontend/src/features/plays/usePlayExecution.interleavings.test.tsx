@@ -6,6 +6,7 @@ import { ApiError } from '@/api/errors'
 import { monitorFixture } from '@/test/monitor-fixture'
 import { savedPlayFixture } from '@/test/workspace-fixture'
 import { usePlayExecution } from './usePlayExecution'
+import { executionDefaults, totalsDefaults } from '@/test/execution-fixture'
 
 /*
  * Every ordering of starts and completions of execution reads and one mutation, through the real hook (fourth and
@@ -30,8 +31,9 @@ interface Outcome { r1: boolean; r2: boolean; mutation: boolean; returns: boolea
 
 const base: PlayExecution = {
   playId: savedPlayFixture.summary.id, status: 'open', tracked: true, checkedAtUtc: null, reason: null,
-  totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
+  totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [], ...totalsDefaults },
   entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'v0', issues: [], monitor: monitorFixture, discrepancies: [], watches: [],
+  ...executionDefaults,
 }
 const at = (version: number): PlayExecution => ({ ...base, notice: `v${version}` })
 const versionOf = (execution: PlayExecution) => Number(execution.notice.slice(1))

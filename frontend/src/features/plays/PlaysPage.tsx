@@ -269,7 +269,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   // The server keeps the direction once an entry has filled: it decides which side closes the position.
   const filled = paperFills ? paperFills.filled.size > 0 : venueStatus !== undefined && (!!tracking.execution?.links.some(link => link.role === 'entry' && link.fills.length > 0) ||
     // A flip's entry line fills this Play's entry as a linked entry fill does (Phase 2, item 11).
-    !!tracking.execution?.sharedFills?.some(item => item.lines.some(line => line.role === 'entry' && line.playId === tracking.execution?.playId)))
+    !!tracking.execution?.sharedFills.some(item => item.lines.some(line => line.role === 'entry' && line.playId === tracking.execution?.playId)))
   const status = saved?.summary.status ?? 'draft'
   // Which entries have filled, per entry, as the server decides it: the execution's linked entry fills for a venue Play,
   // the manual ledger for a manual one. Whatever facts are loaded count, whatever the saved status says (a reread of the

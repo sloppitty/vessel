@@ -8,6 +8,7 @@ import { allocationRemainder, feeShares } from './allocation'
 import { AllocationDialog } from './AllocationDialog'
 import { ExecutionPanel } from './ExecutionPanel'
 import { createDraft } from './draft'
+import { executionDefaults, totalsDefaults } from '@/test/execution-fixture'
 
 // Fixed IDs so the lowest Play ID as text is known: a < b.
 const a = '10000000-0000-4000-8000-000000000000'
@@ -49,9 +50,9 @@ describe('allocation preview', () => {
   it('accepts the execution fields of an allocation and refuses malformed ones', () => {
     const execution = {
       playId: a, status: 'open', tracked: true, reason: null, checkedAtUtc: null,
-      totals: { enteredQuantity: '1', exitedQuantity: '3', openQuantity: '0', closedPnlUsd: '15', closedPnlBasis: 'gross', fees: [], venueNotAllocated: false },
+      totals: { enteredQuantity: '1', exitedQuantity: '3', openQuantity: '0', closedPnlUsd: '15', closedPnlBasis: 'gross', fees: [], ...totalsDefaults },
       entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Facts.', issues: [], monitor: null, discrepancies: [], watches: [],
-      sharedFills: [shared()], allocationPlays: plays,
+      ...executionDefaults, sharedFills: [shared()], allocationPlays: plays,
     }
     expect(isPlayExecution(execution)).toBe(true)
     // A line's reason and lines come together, and an entry line names its entry.
@@ -64,8 +65,9 @@ describe('allocation preview', () => {
   it('accepts exactly what the server can send (Sol round 1): pages of allocated fills, offered fills and the Plays they list', () => {
     const execution = {
       playId: a, status: 'open', tracked: true, reason: null, checkedAtUtc: null,
-      totals: { enteredQuantity: '1', exitedQuantity: '3', openQuantity: '0', closedPnlUsd: '15', closedPnlBasis: 'gross', fees: [] },
+      totals: { enteredQuantity: '1', exitedQuantity: '3', openQuantity: '0', closedPnlUsd: '15', closedPnlBasis: 'gross', fees: [], ...totalsDefaults },
       entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Facts.', issues: [], monitor: null, discrepancies: [], watches: [],
+      ...executionDefaults,
     }
     const allocated = (i: number) => shared({ fillId: `40000000-0000-4000-8000-${String(i).padStart(12, '0')}`, revision: 1, reason: 'shared-close',
       note: 'Shared.', lines: [{ playId: a, title: 'First', role: 'exit', entryId: null, quantity: '0.5', fee: null, feeRemainder: null }] })
@@ -168,9 +170,9 @@ describe('allocation dialog', () => {
 describe('shared fills in the execution panel', () => {
   const base = {
     playId: a, status: 'open' as const, tracked: true, reason: null, checkedAtUtc: null,
-    totals: { enteredQuantity: '1', exitedQuantity: '3', openQuantity: '0', closedPnlUsd: '15', closedPnlBasis: 'gross' as const, fees: [] },
+    totals: { enteredQuantity: '1', exitedQuantity: '3', openQuantity: '0', closedPnlUsd: '15', closedPnlBasis: 'gross' as const, fees: [], ...totalsDefaults },
     entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Facts.', issues: ['Linked exits exceed the entered quantity.'],
-    monitor: null, discrepancies: [], watches: [], sharedFills: [shared()], allocationPlays: plays,
+    monitor: null, discrepancies: [], watches: [], ...executionDefaults, sharedFills: [shared()], allocationPlays: plays,
   }
   const props = { error: null, busy: false, entries: createDraft().entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn() }
 

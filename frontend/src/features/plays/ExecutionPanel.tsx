@@ -94,13 +94,13 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
   const editable = !retrospective && ['planned', 'paused', 'open'].includes(execution.status)
   // An Unresolved Play may still receive its part of a shared fill (Phase 2, item 11); the server checks every Play on the lines.
   const allocatable = !retrospective && ['planned', 'paused', 'open', 'unresolved'].includes(execution.status)
-  const pageKey = `${execution.playId}:${execution.sharedFillCount ?? 0}`
+  const pageKey = `${execution.playId}:${execution.sharedFillCount}`
   const loaded = older?.key === pageKey ? older : null
-  const shared = [...(execution.sharedFills ?? []),
-    ...(loaded?.items ?? []).filter(item => !execution.sharedFills?.some(fill => fill.fillId === item.fillId))]
-  const nextOffset = loaded ? loaded.next : execution.sharedFillsNextOffset ?? null
+  const shared = [...execution.sharedFills,
+    ...(loaded?.items ?? []).filter(item => !execution.sharedFills.some(fill => fill.fillId === item.fillId))]
+  const nextOffset = loaded ? loaded.next : execution.sharedFillsNextOffset
   // Every page lists the Plays its lines name, with their versions; a later read of the same Play wins.
-  const allocationPlays = [...new Map([...(execution.allocationPlays ?? []), ...(loaded?.plays ?? [])].map(play => [play.playId, play])).values()]
+  const allocationPlays = [...new Map([...execution.allocationPlays, ...(loaded?.plays ?? [])].map(play => [play.playId, play])).values()]
   const allocated = shared.filter(item => item.lines.length > 0).length
   const allocatingFill = shared.find(item => item.fillId === allocating)
   const loadOlder = async () => {
@@ -156,7 +156,7 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
         {onRebind && version !== undefined && <LevelDriftAction discrepancy={item} links={execution.links} entries={entries}
           context={{ direction, leverage, tick: priceStep }} origin={origin} playId={execution.playId} version={version} blocked={busy ? 'Wait for the current change to finish.' : rebindBlocked}
           onRebind={onRebind} />}
-        {!stale && <LinkStopAction discrepancy={item} orders={[...execution.unlinkedOrders, ...(execution.earlierOrders ?? [])]} entries={entries}
+        {!stale && <LinkStopAction discrepancy={item} orders={[...execution.unlinkedOrders, ...execution.earlierOrders]} entries={entries}
           direction={direction} busy={busy} blocked={rebindBlocked} onLink={onLink} tick={tick} />}</> : undefined} />}
     <MonitorWatches watches={execution.watches} levelName={watchLevel} />
     {/* Kept from the last read until a fresh one arrives (usePlayExecution); new links wait for it too. */}
@@ -168,11 +168,11 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
       <div title={pnlBasisNote[totals.closedPnlBasis]}><dt>Venue closed PnL{totals.closedPnlBasis === 'net-of-fee' ? ' · after fees' : ''}</dt><dd>{totals.venueNotAllocated
         ? <InfoTip className="value-tag" trigger="Not allocated" label="venue closed PnL">{notAllocatedNote}</InfoTip> : `${totals.closedPnlUsd} USD`}</dd></div>
       <div><dt>Fees</dt><dd>{totals.fees.length ? totals.fees.map(fee => `${fee.amount} ${fee.token}`).join(' · ') : '0'}</dd></div>
-      {totals.venueNetUsd !== undefined && <div><dt>Venue net<InfoTip label="About venue net">Venue closed PnL less fees in listed stablecoins on before-fee fills, over the fills counted here, so far while the play is open. Review and sizing score the venue result of a closed play whose fills settle it, each with its own eligibility rules; retrospective plays are not in sizing.</InfoTip></dt>
+      <div><dt>Venue net<InfoTip label="About venue net">Venue closed PnL less fees in listed stablecoins on before-fee fills, over the fills counted here, so far while the play is open. Review and sizing score the venue result of a closed play whose fills settle it, each with its own eligibility rules; retrospective plays are not in sizing.</InfoTip></dt>
         <dd>{totals.venueNotAllocated ? <InfoTip className="value-tag" trigger="Not allocated" label="venue net">{notAllocatedNote}</InfoTip>
-          : totals.venueNetUsd === null ? <InfoTip className="value-tag" trigger="Unknown" label="venue net">A fee is unverified or in a token outside the listed stablecoins.</InfoTip> : `${totals.venueNetUsd} USD`}</dd></div>}
-      {totals.local && <div><dt>Play-local result<InfoTip label="About the Play-local result">{localResultNote}</InfoTip></dt>
-        <dd><LocalResultValue local={totals.local} format={value => `${value} USD`} />{totals.local.signDiffers && <SignDiffersFlag />}</dd></div>}
+          : totals.venueNetUsd === null ? <InfoTip className="value-tag" trigger="Unknown" label="venue net">A fee is unverified or in a token outside the listed stablecoins.</InfoTip> : `${totals.venueNetUsd} USD`}</dd></div>
+      <div><dt>Play-local result<InfoTip label="About the Play-local result">{localResultNote}</InfoTip></dt>
+        <dd><LocalResultValue local={totals.local} format={value => `${value} USD`} />{totals.local.signDiffers && <SignDiffersFlag />}</dd></div>
       {/* Phase 2, item 9b: beside the results, never added to either. */}
       {execution.funding && <PlayFundingRow funding={execution.funding} />}
       {execution.receipt && <ReceiptTotals receipt={execution.receipt} status={execution.status} />}
@@ -194,12 +194,12 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
           <small>order {item.orderId} · <Time at={item.fill.occurredAtUtc} />{item.lines.length > 0 ? ` · ${allocationSummary(item)}` : ''}</small></span>
         {onAllocate && allocatable && <span className="execution-actions">
           {/* An allocation writes new versions of its Plays, so it waits for unsaved plan edits and other Play work, as a rebind does. */}
-          <Button size="sm" variant="outline" disabled={busy || stale || !execution.allocationPlays || !!rebindBlocked} title={rebindBlocked}
+          <Button size="sm" variant="outline" disabled={busy || stale || !!rebindBlocked} title={rebindBlocked}
             onClick={() => setAllocating(item.fillId)}>
             {item.lines.length > 0 ? 'Edit' : item.kind === 'flip' ? 'Split flip' : 'Allocate'}</Button></span>}
       </li>)}</ul>
       {nextOffset !== null && <p className="execution-more">
-        <small>{allocated} of {execution.sharedFillCount ?? allocated} allocated fills shown</small>
+        <small>{allocated} of {execution.sharedFillCount} allocated fills shown</small>
         {onLoadSharedFills && <Button size="sm" variant="ghost" disabled={olderWork.busy} onClick={() => { void loadOlder() }}>
           {olderWork.busy ? 'Reading…' : 'Show older allocations'}</Button>}</p>}
       {olderWork.error && <p className="error" role="alert">{olderWork.error}</p>}
@@ -247,9 +247,9 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
       <h3>Other orders on this instrument<InfoTip label="About other orders">Placed since this play was created and not linked to any play. Link one by hand if it belongs here.</InfoTip></h3>
       {orderList(execution.unlinkedOrders)}
     </section>}
-    {editable && (execution.earlierOrders?.length ?? 0) > 0 && <section aria-label="Placed before this Play was saved" className="execution-section">
+    {editable && execution.earlierOrders.length > 0 && <section aria-label="Placed before this Play was saved" className="execution-section">
       <h3>Placed before this Play was saved<InfoTip label="About orders placed before this Play">Placed shortly before this play was created (within 24 hours unless the server is set otherwise), fitting one of its levels by side and kind, and not linked to any play. Vessel never links them by itself. Link one by hand if it belongs here: an entry that filled before the plan was written marks the plan as written after the first execution.</InfoTip></h3>
-      {orderList(execution.earlierOrders ?? [])}
+      {orderList(execution.earlierOrders)}
     </section>}
     {execution.notice && <details className="execution-notice"><summary>About these numbers</summary><p className="muted">{execution.notice}</p></details>}
   </div>
