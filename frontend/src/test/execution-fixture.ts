@@ -1,3 +1,4 @@
+import type { ManualExecutions } from '@/api/diary'
 import type { EntryProgress, PlayExecution } from '@/api/plays'
 
 /**
@@ -17,3 +18,6 @@ export const totalsDefaults = {
 
 /** An entry whose plan the server could not give. */
 export const plannedUnknown = { plannedPrice: null, plannedQuantity: null, planRevision: null } satisfies Partial<EntryProgress>
+
+/** The manual ledger fields the API always sends (`DiaryService.ManualResult`), for a ledger with nothing recorded. */
+export const manualLedgerDefaults = { fees: [], unknownFees: 0, entries: [], receipt: null } satisfies Partial<ManualExecutions>

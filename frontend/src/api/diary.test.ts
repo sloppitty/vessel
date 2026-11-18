@@ -6,6 +6,7 @@ import { createDraft } from '@/features/plays/draft'
 import { planFromDraft } from '@/features/plays/saved'
 import { credentialsFixture } from '@/test/identity-fixture'
 import { summaryDefaults } from '@/test/workspace-fixture'
+import { manualLedgerDefaults } from '@/test/execution-fixture'
 
 const id = '00000000-0000-4000-8000-000000000001'
 const at = '2026-10-13T10:00:00Z'
@@ -21,8 +22,9 @@ function saved(): SavedPlay {
 }
 const record = { ...input, id, createdAtUtc: at, updatedAtUtc: at }
 const ledger = () => ({ play: saved(), records: [record],
-  history: [{ id, executionId: id, before: null, after: record, reason: null, occurredAtUtc: at }],
-  totals: { enteredQuantity: input.quantity, exitedQuantity: '0', openQuantity: input.quantity, grossResultUsd: '0', netResultUsd: null, feesComplete: false }, notice: 'Manual scope.' })
+  history: [{ id, executionId: id, before: null, after: record, reason: null, occurredAtUtc: at, batchId: null }],
+  totals: { enteredQuantity: input.quantity, exitedQuantity: '0', openQuantity: input.quantity, grossResultUsd: '0', netResultUsd: null, feesComplete: false }, notice: 'Manual scope.',
+  ...manualLedgerDefaults })
 
 describe('diary boundary', () => {
   it('keeps exact strings, accepts unknown fees and nullable creation reasons, and separates known zero', () => {
@@ -35,6 +37,8 @@ describe('diary boundary', () => {
     expect(isManualExecutionInput({ ...input, fee: '0' })).toBe(false)
     expect(isManualExecutionInput({ ...input, feeCurrency: 'USDC' })).toBe(false)
     expect(isManualExecutions({ ...ledger(), totals: { ...ledger().totals, netResultUsd: 0 } })).toBe(false)
+    // ManualHistoryDto always writes its batch ID, null for a single-row write.
+    expect(isManualExecutions({ ...ledger(), history: [{ id, executionId: id, before: null, after: record, reason: null, occurredAtUtc: at }] })).toBe(false)
   })
   it.each([
     { role: 'entry', entryId: null }, { role: 'exit', entryId: 'entry-1' }, { occurredAtUtc: '2026-02-31T10:00:00Z' },

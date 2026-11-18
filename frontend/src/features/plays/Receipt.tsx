@@ -88,9 +88,9 @@ export function ReviewReceipt({ receipt, result, status }: { receipt: PlayReceip
 
 /** A manual ledger's known fees by currency, and how many executions have unknown costs, which are never zero. */
 export function ManualFees({ ledger }: { ledger: Pick<ManualExecutions, 'fees' | 'unknownFees'> }) {
-  const known = ledger.fees?.length ? ledger.fees.map(fee => `${fee.amount} ${fee.token}`).join(' · ') : ledger.fees ? '0' : null
+  const known = ledger.fees.length ? ledger.fees.map(fee => `${fee.amount} ${fee.token}`).join(' · ') : '0'
   const unknown = ledger.unknownFees ? `${ledger.unknownFees} unknown` : null
-  return <>{[known, unknown].filter(Boolean).join(' · ') || 'Not reported'}</>
+  return <>{[known, unknown].filter(Boolean).join(' · ')}</>
 }
 
 /** The facts of a retrospective Play, which has no plan to compare with: what was traded, at what prices and result. */

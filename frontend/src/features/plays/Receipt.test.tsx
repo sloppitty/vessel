@@ -79,7 +79,7 @@ describe('actual versus plan (phase 1, 1.1a)', () => {
     expect(outcome).toHaveTextContent('2h 5m')
     // Unknown R names Review's reason instead of a number.
     view.rerender(<ReviewReceipt receipt={{ ...closed, estimatedR: null, initialRisk: null, estimatedRReason: 'The plan was written after the first fill.' }}
-      result={{ kind: 'manual', totals: { enteredQuantity: '1', exitedQuantity: '1', openQuantity: '0', grossResultUsd: '2', netResultUsd: null, feesComplete: false }, fees: {} }} status="closed" />)
+      result={{ kind: 'manual', totals: { enteredQuantity: '1', exitedQuantity: '1', openQuantity: '0', grossResultUsd: '2', netResultUsd: null, feesComplete: false }, fees: { fees: [], unknownFees: 0 } }} status="closed" />)
     const manual = screen.getByLabelText('Outcome')
     expect(manual).toHaveTextContent('Manual ledger net')
     expect(manual).not.toHaveTextContent('Venue net')

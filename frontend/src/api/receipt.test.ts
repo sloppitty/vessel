@@ -3,6 +3,7 @@ import { isManualExecutions, type ManualExecutions } from './diary'
 import { isPlayExecution, isPlayReceipt, type PlayReceipt } from './plays'
 import { savedPlayFixture } from '@/test/workspace-fixture'
 import recorded from '@/test/contracts/monitor-api.json?raw'
+import { manualLedgerDefaults } from '@/test/execution-fixture'
 
 const execution = (JSON.parse(recorded) as { playExecution: Record<string, unknown> & { entries: Record<string, unknown>[] } }).playExecution
 const known: PlayReceipt = { firstEntryAtUtc: '2026-10-03T10:00:00Z', lastExitAtUtc: '2026-10-03T12:00:00Z', averageEntryPrice: '100.4',
@@ -42,10 +43,16 @@ describe('Play receipt (phase 1, 1.1a)', () => {
     expect(isPlayReceipt(value)).toBe(false)
   })
 
-  it('accepts a manual ledger with entries and a receipt, and one from an older server', () => {
+  it('accepts a manual ledger with entries and a receipt, and rejects one without them', () => {
     const ledger: ManualExecutions = { play: savedPlayFixture, records: [], history: [], notice: 'Manual facts only.',
-      totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', grossResultUsd: '0', netResultUsd: null, feesComplete: false } }
+      totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', grossResultUsd: '0', netResultUsd: null, feesComplete: false },
+      ...manualLedgerDefaults }
     expect(isManualExecutions(ledger)).toBe(true)
+    for (const key of ['fees', 'unknownFees', 'entries', 'receipt']) {
+      const older: Record<string, unknown> = { ...ledger }
+      delete older[key]
+      expect(isManualExecutions(older)).toBe(false)
+    }
     expect(isManualExecutions({ ...ledger, entries: [{ entryId: 'entry-1', filledQuantity: '0', averageFillPrice: null, restingOrders: 0,
       plannedPrice: '100', plannedQuantity: '7.5', planRevision: 1 }], receipt: unknown })).toBe(true)
     expect(isManualExecutions({ ...ledger, receipt: { ...unknown, estimatedRReason: null } })).toBe(false)

@@ -15,6 +15,7 @@ import { ManualExecutionPanel } from './ManualExecutionPanel'
 import { emptyManualDraft, type ManualExecutionDraft } from './manual'
 import { draftFromSaved, savedState } from './saved'
 import { restoreZone } from '@/test/zone'
+import { manualLedgerDefaults } from '@/test/execution-fixture'
 
 const at = '2026-10-13T10:00:00Z'
 const id = '00000000-0000-4000-8000-000000000001'
@@ -23,9 +24,9 @@ const record: ManualExecutionRecord = { id, role: 'entry', entryId: 'entry-1', o
   quantity: '1.000000000000000001', price: '100.00', fee: null, feeCurrency: null, source: 'Statement', createdAtUtc: at, updatedAtUtc: at }
 const ledger = (status: 'planned' | 'open' | 'closed' = 'planned', records: ManualExecutionRecord[] = []): ManualExecutions => ({
   play: { ...play, summary: { ...play.summary, status, version: status === 'planned' ? 2 : 3 } }, records,
-  history: records.map(after => ({ id, executionId: after.id, before: null, after, reason: null, occurredAtUtc: at })),
+  history: records.map(after => ({ id, executionId: after.id, before: null, after, reason: null, occurredAtUtc: at, batchId: null })),
   totals: { enteredQuantity: records.length ? record.quantity : '0', exitedQuantity: '0', openQuantity: records.length ? record.quantity : '0',
-    grossResultUsd: '0', netResultUsd: null, feesComplete: false }, notice: 'Bounded owner facts.',
+    grossResultUsd: '0', netResultUsd: null, feesComplete: false }, notice: 'Bounded owner facts.', ...manualLedgerDefaults,
 })
 function Harness({ api, initial = ledger().play, enabled = true, dirty = false, onStored = vi.fn(), onForm = vi.fn(), zone = 'local' }: {
   api: WorkspaceApi; initial?: SavedPlay; enabled?: boolean; dirty?: boolean; onStored?: (play: SavedPlay) => void; onForm?: (form: ManualExecutionDraft) => void
@@ -111,7 +112,7 @@ describe('manual entry (phase 1, 1.6b)', () => {
     const before = { ...record, occurredAtUtc: '2026-10-13T10:00:00.100000Z' }
     const after = { ...record, occurredAtUtc: '2026-10-13T10:00:00.900000Z' }
     const corrected: ManualExecutions = { ...ledger('open', [after]),
-      history: [{ id, executionId: id, before, after, reason: 'Statement time', occurredAtUtc: at }] }
+      history: [{ id, executionId: id, before, after, reason: 'Statement time', occurredAtUtc: at, batchId: null }] }
     const { api } = client(corrected)
     render(<Harness api={api} initial={corrected.play} zone="utc" />)
     expect(await screen.findByText('Before:', { exact: false })).toHaveTextContent('13 Oct 2026, 10:00:00.100000 UTC')

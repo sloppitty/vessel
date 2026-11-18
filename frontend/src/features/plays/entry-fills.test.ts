@@ -6,6 +6,7 @@ import type { WorkspaceApi } from '@/api/workspace'
 import { exactDecimal, exactFixed } from '@/lib/decimal'
 import { savedPlayFixture } from '@/test/workspace-fixture'
 import { executionFills, ledgerFills, useLedgerFills } from './entry-fills'
+import { manualLedgerDefaults } from '@/test/execution-fixture'
 
 const at = '2026-10-19T10:00:00Z'
 const record = (entryId: string | null, quantity: string, price: string, role: 'entry' | 'exit' = 'entry'): ManualExecutionRecord => ({
@@ -48,7 +49,7 @@ describe('entry fills', () => {
   it('counts a ledger answer only for the version it was read at, and never keeps it through a failed reread', async () => {
     const ledger = (version: number, price: string): ManualExecutions => ({ play: { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, version } },
       records: [record('entry-1', '1', price)], history: [], totals: { enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1',
-        grossResultUsd: null, netResultUsd: null, feesComplete: true }, notice: 'Manual facts only.' })
+        grossResultUsd: null, netResultUsd: null, feesComplete: true }, notice: 'Manual facts only.', ...manualLedgerDefaults })
     const manualExecutions = vi.fn<WorkspaceApi['manualExecutions']>().mockResolvedValueOnce(ledger(3, '100'))
       .mockRejectedValueOnce(new Error('Ledger unavailable'))
     const api = { manualExecutions } as unknown as WorkspaceApi
@@ -65,7 +66,7 @@ describe('entry fills', () => {
   it('drops the previous answer at every read attempt, including a reread at the same version (second Sol review)', async () => {
     const ledger: ManualExecutions = { play: { ...savedPlayFixture, summary: { ...savedPlayFixture.summary, version: 3 } },
       records: [record('entry-1', '1', '100')], history: [], totals: { enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1',
-        grossResultUsd: null, netResultUsd: null, feesComplete: true }, notice: 'Manual facts only.' }
+        grossResultUsd: null, netResultUsd: null, feesComplete: true }, notice: 'Manual facts only.', ...manualLedgerDefaults }
     let failRead!: (cause: unknown) => void
     const manualExecutions = vi.fn<WorkspaceApi['manualExecutions']>().mockResolvedValueOnce(ledger)
       .mockImplementationOnce(() => new Promise((_resolve, reject) => { failRead = reject }))

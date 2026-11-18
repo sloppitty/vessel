@@ -23,7 +23,7 @@ import * as overviewActions from '@/features/workspace/OverviewActions'
 import * as savedChecks from './saved'
 import * as preflightChecks from './preflight'
 import { credentialsFixture, shellIdentityFixture } from '@/test/identity-fixture'
-import { executionDefaults, totalsDefaults } from '@/test/execution-fixture'
+import { executionDefaults, totalsDefaults, manualLedgerDefaults } from '@/test/execution-fixture'
 
 const at = '2026-10-13T10:00:00Z'
 const otherId = '00000000-0000-4000-8000-000000000002'
@@ -42,7 +42,7 @@ const execution = (play: SavedPlay): PlayExecution => ({
 
 const manualLedger = (play: SavedPlay): ManualExecutions => ({
   play, records: [], history: [], totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0',
-    grossResultUsd: '0', netResultUsd: null, feesComplete: false }, notice: 'Manual facts only.',
+    grossResultUsd: '0', netResultUsd: null, feesComplete: false }, notice: 'Manual facts only.', ...manualLedgerDefaults,
 })
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -132,12 +132,12 @@ describe('diary workspace integration', () => {
         entryId: null, side: 'sell' as const, occurredAtUtc: '2026-10-13T10:01:00Z' }
       const history: ManualExecutions['history'] = [record, exit].map((after, index) => ({
         id: `00000000-0000-4000-8000-00000000000${index + 4}`, executionId: after.id, reason: null,
-        occurredAtUtc: '2026-10-13T10:02:00Z', before: null, after,
+        occurredAtUtc: '2026-10-13T10:02:00Z', before: null, after, batchId: null,
       }))
       if (version >= 4) history.push({ id: '00000000-0000-4000-8000-000000000006', executionId: record.id,
-        reason: 'Statement amended', occurredAtUtc: '2026-10-13T10:03:00Z', before: record, after: { ...record, price: '94' } })
+        reason: 'Statement amended', occurredAtUtc: '2026-10-13T10:03:00Z', before: record, after: { ...record, price: '94' }, batchId: null })
       if (version >= 5) history.push({ id: '00000000-0000-4000-8000-000000000007', executionId: record.id,
-        reason: 'Second amendment', occurredAtUtc: '2026-10-13T10:04:00Z', before: { ...record, price: '94' }, after: entered })
+        reason: 'Second amendment', occurredAtUtc: '2026-10-13T10:04:00Z', before: { ...record, price: '94' }, after: entered, batchId: null })
       return { ...manualLedger({ ...closed, review, summary: { ...closed.summary, version } }), records: [entered, exit], history,
         totals: { enteredQuantity: '1', exitedQuantity: '1', openQuantity: '0', grossResultUsd: result, netResultUsd: result, feesComplete: true } }
     }
@@ -1309,7 +1309,7 @@ const openedLedger = (): ManualExecutions => {
     occurredAtUtc: at, side: 'buy', quantity: '1', price: '100', fee: null, feeCurrency: null,
     source: 'Statement', createdAtUtc: at, updatedAtUtc: at }
   return { ...manualLedger({ ...shellPlay, summary: { ...shellPlay.summary, status: 'open', version: 3 } }),
-    records: [after], history: [{ id: otherId, executionId: after.id, before: null, after, reason: null, occurredAtUtc: at }],
+    records: [after], history: [{ id: otherId, executionId: after.id, before: null, after, reason: null, occurredAtUtc: at, batchId: null }],
     totals: { enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1', grossResultUsd: '0', netResultUsd: null, feesComplete: false } }
 }
 

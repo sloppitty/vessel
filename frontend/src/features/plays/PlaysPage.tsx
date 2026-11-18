@@ -747,7 +747,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   // The outcome beside the review: a venue Play's two bases or a manual Play's ledger, with R and time held from the server.
   const shownExecution = tracking.execution?.playId === saved?.summary.id ? tracking.execution : null
   // Like the outcome, the header's post-hoc badge waits for a fresh read rather than keeping an earlier one's flag.
-  const playReceipt = manual ? manualLedger && manualLedger !== 'unknown' ? manualLedger.receipt ?? null : null
+  const playReceipt = manual ? manualLedger && manualLedger !== 'unknown' ? manualLedger.receipt : null
     : tracking.stale ? null : shownExecution?.receipt ?? null
   // Figures kept from an earlier read are not shown as current: after a failed or pending reread the receipt waits for it.
   const staleOutcome = tracking.stale ? tracking.error
