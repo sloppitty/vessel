@@ -99,7 +99,7 @@ internal sealed class GoldenJournalStores(GoldenJournal journal)
         public Task<IReadOnlyList<string>> MistakeTagsAsync(int limit, CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([]);
     }
 
-    private sealed class SizingReader(GoldenJournal journal) : ISizingStore
+    private sealed class SizingReader(GoldenJournal journal) : ISizingStoreDefaults
     {
         private SizingSettings? settings;
         public Task<SizingSettings?> SettingsAsync(CancellationToken ct) => Task.FromResult(settings);

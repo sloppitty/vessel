@@ -6,7 +6,7 @@ using Vessel.Domain.Workspace;
 
 namespace Vessel.Tests;
 
-internal sealed class MemorySizingStore : ISizingStore
+internal sealed class MemorySizingStore : ISizingStoreDefaults
 {
     public SizingSettings? Settings { get; set; }
     public List<ClosedPlayFacts> Closed { get; } = [];
