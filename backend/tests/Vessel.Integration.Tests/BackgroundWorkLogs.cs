@@ -4,8 +4,9 @@ namespace Vessel.Tests;
 
 internal sealed class BackgroundWorkLogs : ILoggerProvider
 {
-    private readonly List<(string Category, LogLevel Level, string Text)> messages = [];
-    public IReadOnlyList<(string Category, LogLevel Level, string Text)> Messages { get { lock (messages) return messages.ToArray(); } }
+    private readonly List<(string Category, LogLevel Level, string Text, string? Exception)> messages = [];
+    /// <summary>Each entry's formatted text and, as a console provider would print it, its exception.</summary>
+    public IReadOnlyList<(string Category, LogLevel Level, string Text, string? Exception)> Messages { get { lock (messages) return messages.ToArray(); } }
     public ILogger CreateLogger(string categoryName) => new Logger(this, categoryName);
     public void Dispose() { }
 
@@ -16,7 +17,7 @@ internal sealed class BackgroundWorkLogs : ILoggerProvider
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter)
         {
-            lock (logs.messages) logs.messages.Add((category, logLevel, formatter(state, exception)));
+            lock (logs.messages) logs.messages.Add((category, logLevel, formatter(state, exception), exception?.ToString()));
         }
     }
 }

@@ -37,7 +37,7 @@ namespace Vessel.Tests;
 public sealed class MonitorTransportCollection;
 
 [Collection("Monitor transport")]
-public sealed class MonitorEndToEndTests
+public sealed partial class MonitorEndToEndTests
 {
     [VesselEventRabbitFact]
     public async Task Hosted_scheduler_imports_partial_full_and_stop_fills_without_a_browser_and_restarts_without_duplicates()
@@ -352,7 +352,7 @@ public sealed class MonitorEndToEndTests
         await cancellation.CancelAsync();
     }
 
-    private sealed class MonitorFixture(CoreDatabase database) : IAsyncDisposable
+    private sealed partial class MonitorFixture(CoreDatabase database) : IAsyncDisposable
     {
         public CoreDatabase Database { get; } = database;
         public Guid Owner { get; } = Guid.NewGuid();
@@ -367,11 +367,36 @@ public sealed class MonitorEndToEndTests
             [MessagingHosting.ApiDeployment, MonitorModule.ModuleName, VerificationModule.ModuleName];
         private readonly string heartbeat = Path.Combine(Path.GetTempPath(), "vessel-e2e-" + Guid.NewGuid().ToString("N"));
         private Dictionary<string, string?> config = null!;
+        /// <summary>The configuration of the worker and the API: <see cref="config"/>, possibly with another broker URI.</summary>
+        private Dictionary<string, string?> HostConfig { get; set; } = null!;
         private IHost? worker;
         private IHost? verification;
         private MonitorApiFactory? api;
 
         public static async Task<MonitorFixture> StartAsync()
+        {
+            var fixture = await PrepareAsync();
+            try
+            {
+                fixture.worker = fixture.BuildWorker();
+                fixture.api = new(fixture.HostConfig, fixture.Clock, fixture.Venue, fixture.Owner);
+                await fixture.worker.StartAsync();
+                await fixture.WaitForRunAsync(1);
+                Assert.Equal("live", (await fixture.MonitorAsync()).State);
+                return fixture;
+            }
+            catch
+            {
+                await fixture.DisposeAsync();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Seeds, provisions and starts the verification subscriber against the real broker, but neither the worker nor
+        /// the API. <paramref name="hostBroker"/> replaces the broker URI that only the worker and API use.
+        /// </summary>
+        public static async Task<MonitorFixture> PrepareAsync(string? hostBroker = null)
         {
             var fixture = new MonitorFixture(await CoreDatabase.CreateAsync());
             try
@@ -394,11 +419,8 @@ public sealed class MonitorEndToEndTests
                 // A verification subscription proves every committed event is delivered once to a subscriber.
                 fixture.verification = fixture.BuildVerification();
                 await fixture.verification.StartAsync();
-                fixture.worker = fixture.BuildWorker();
-                fixture.api = new(fixture.config, fixture.Clock, fixture.Venue, fixture.Owner);
-                await fixture.worker.StartAsync();
-                await fixture.WaitForRunAsync(1);
-                Assert.Equal("live", (await fixture.MonitorAsync()).State);
+                fixture.HostConfig = new(fixture.config);
+                if (hostBroker is not null) fixture.HostConfig["Vessel:Messaging:RabbitMqUri"] = hostBroker;
                 return fixture;
             }
             catch
@@ -408,13 +430,14 @@ public sealed class MonitorEndToEndTests
             }
         }
 
-        private IHost BuildWorker()
+        private IHost BuildWorker(ILoggerProvider? logs = null)
         {
             var builder = Host.CreateApplicationBuilder([]);
             builder.Configuration.Sources.Clear();
-            builder.Configuration.AddInMemoryCollection(config);
+            builder.Configuration.AddInMemoryCollection(HostConfig);
             builder.Logging.ClearProviders();
             builder.Logging.AddConsole().SetMinimumLevel(LogLevel.Warning);
+            if (logs is not null) builder.Logging.AddProvider(logs);
             WorkerHost.Configure(builder);
             ReplaceInputs(builder.Services, Clock, Venue, Owner);
             return builder.Build();
@@ -598,8 +621,8 @@ public sealed class MonitorEndToEndTests
         }
     }
 
-    private sealed class MonitorApiFactory(Dictionary<string, string?> config, TestClock clock, SyntheticVenue venue, Guid owner)
-        : WebApplicationFactory<Program>
+    private sealed class MonitorApiFactory(Dictionary<string, string?> config, TestClock clock, SyntheticVenue venue, Guid owner,
+        ILoggerProvider? logs = null) : WebApplicationFactory<Program>
     {
         protected override IHost CreateHost(IHostBuilder builder)
         {
@@ -610,7 +633,11 @@ public sealed class MonitorEndToEndTests
         {
             builder.UseEnvironment("Production");
             builder.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(config));
-            builder.ConfigureLogging(logging => logging.ClearProviders());
+            builder.ConfigureLogging(logging =>
+            {
+                logging.ClearProviders();
+                if (logs is not null) logging.AddProvider(logs);
+            });
             builder.ConfigureServices(services =>
             {
                 ReplaceInputs(services, clock, venue, owner);
