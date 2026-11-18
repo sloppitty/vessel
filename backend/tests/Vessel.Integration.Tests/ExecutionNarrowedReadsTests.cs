@@ -27,8 +27,8 @@ public sealed class ExecutionNarrowedReadsTests
     private static readonly Guid Eth = Guid.Parse("00000000-0000-0000-0000-0000000000e4");
     private static readonly Guid Cancelled = Guid.Parse("00000000-0000-0000-0000-0000000000d5");
 
-    /// <summary>Implements only the whole-account reads, so every targeted read falls back to the port's reference rule.</summary>
-    private sealed class FullReadStore(ExecutionStore inner) : IPlayExecutionStore
+    /// <summary>Implements only the whole-account reads, so every targeted read falls back to the TestKit reference rule.</summary>
+    private sealed class FullReadStore(ExecutionStore inner) : IPlayExecutionStoreDefaults
     {
         public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => inner.AccountAsync(id, ct);
         public Task<List<Play>> ActivePlaysAsync(Guid accountId, CancellationToken ct, bool settling = false) => inner.ActivePlaysAsync(accountId, ct, settling);
@@ -49,7 +49,7 @@ public sealed class ExecutionNarrowedReadsTests
     }
 
     /// <summary>The narrowed store, counting the orders, links and fill order IDs it hands out.</summary>
-    private sealed class CountingStore(ExecutionStore inner) : IPlayExecutionStore
+    private sealed class CountingStore(ExecutionStore inner) : IPlayExecutionStoreDefaults
     {
         public int Orders { get; private set; }
         public int Links { get; private set; }

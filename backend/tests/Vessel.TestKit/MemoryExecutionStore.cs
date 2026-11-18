@@ -8,7 +8,7 @@ using Vessel.Domain.Workspace;
 namespace Vessel.Tests;
 
 /// <summary>Execution facts of one account, kept in memory for owner linking and lifecycle checks.</summary>
-internal sealed class MemoryExecutionStore(MemoryPlayStore plays) : IPlayExecutionStore
+internal sealed class MemoryExecutionStore(MemoryPlayStore plays) : IPlayExecutionStoreDefaults
 {
     public List<ImportedOrder> Orders { get; } = [];
     public List<ImportedFill> Fills { get; } = [];
