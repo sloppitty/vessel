@@ -239,6 +239,44 @@ troubleshooting. PostgreSQL, API, worker, AMQP and RustFS have no host ports; th
 RustFS console is disabled. **Existing folder installations must select the local
 overlay or complete the storage cutover below before switching to the new default.**
 
+### Container hardening, logs and restarts
+
+Every service in `compose.yaml` and its overlays (TLS, paper, storage, credentials)
+runs with:
+
+- **Capped logs**: the `json-file` driver with `max-size` `VESSEL_LOG_MAX_SIZE`
+  (default `10m`) and `max-file` `VESSEL_LOG_MAX_FILE` (default `5`), so each
+  container keeps at most about 50 MB of logs. This overrides the daemon's default
+  log driver for these services. RustFS writes its log to standard output, so the
+  same cap applies; it no longer writes a log file inside its container.
+- **No privilege gain and no capabilities**: `no-new-privileges` and `cap_drop: ALL`.
+  Only PostgreSQL and RabbitMQ add back `CHOWN`, `DAC_OVERRIDE`, `SETUID` and
+  `SETGID`: their entrypoints start as root, fix the ownership of their data volume
+  and switch to their own user, and RabbitMQ's health check runs its CLI as root,
+  which must read the server's Erlang cookie. Caddy, nginx, RustFS, the AWS CLI and the API image
+  need none.
+- **A read-only root file system**: writes go only to the named volumes, to small
+  in-memory `/tmp` mounts (also `/var/run/postgresql` for PostgreSQL and
+  `/etc/nginx/conf.d`, owned by nginx's UID 101, for web), and for the API to the
+  `api-tmp` volume at `/tmp`, on disk because Play exports and uploads are staged
+  there. `api-tmp` holds only temporary files and needs no backup. With
+  `VESSEL_TLS_DIRECTIVE=tls internal`, Caddy logs `failed to install root
+  certificate`: it cannot add its local CA to the read-only container's own trust
+  store, which nothing in that container uses.
+- **Health checks** on every long-running service. New: web fetches its own
+  `index.html`, and the TLS proxy asks Caddy's local admin endpoint.
+
+Compose's `restart: unless-stopped` restarts a container whose process **exits**; it
+never restarts one that is only unhealthy. So the workers exit by themselves when
+their loop stalls (see [Start and connect](#start-and-connect)), and the API and
+workers exit at start when they cannot start. An unhealthy web, API or proxy is
+reported by `docker compose ps` but not restarted; check its logs.
+
+One-off maintenance commands inherit these settings. A command that runs as root
+(`--user 0`) to restore an archive into a volume another user owns must add back
+`--cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER`, as the restore examples
+below do. Commands that run as the image's own user need nothing extra.
+
 ## Configure an installation
 
 From the operator directory:
@@ -1435,14 +1473,16 @@ docker compose -p vessel-restore-check exec -T postgres \
 
 # Extract only your trusted RustFS archive before RustFS/API start.
 docker compose -p vessel-restore-check run --rm --no-deps -T \
-  --user 0 --entrypoint sh rustfs -c \
+  --user 0 --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER \
+  --entrypoint sh rustfs -c \
   'tar -xzf - -C /data && chown -R 10001:10001 /data' \
   < /private/backups/objects.tar.gz
 ```
 
 For a local-folder backup, include `compose.storage-local.yaml`, restore
 `evidence.tar.gz` using service `api`, path `/var/lib/vessel/evidence` and UID/GID
-`1654:1654` instead. Never extract a RustFS archive into the API's evidence root.
+`1654:1654` instead, with the same `--user 0` and `--cap-add` options. Never extract a
+RustFS archive into the API's evidence root.
 
 Place the original credential ring in a separate mode-700 secret directory,
 not the operator directory, database or evidence archive. Preserve every original
@@ -1676,6 +1716,13 @@ docker compose ps -a
 docker compose logs --tail=100 migrate api web
 curl --fail http://127.0.0.1:8080/health/ready
 ```
+
+- A worker that `docker compose ps` shows restarting, with exit code 3 and the log
+  line `The monitor loop made no progress for …` (or `notifications`/`paper`), was
+  stopped by its own watchdog and restarted. Look at the lines before it, and at
+  database reachability. Exit code 1 with `Vessel worker refused to start.` is the
+  schema check below; exit code 1 with `could not start (…)` is configuration,
+  migrations or the broker.
 
 Do not publish operator `.env`, `docker inspect`, `docker compose config`, request
 bodies or full environment dumps; they can contain secrets. The API logs safe

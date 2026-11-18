@@ -7,6 +7,20 @@ services:
     profiles: ["paper"]
     image: skorcius/vessel:api-${VESSEL_VERSION:?Set VESSEL_VERSION to a paper-capable image}
     entrypoint: ["/app/worker"]
+    # The same hardening as compose.yaml's x-hardening (anchors do not cross files).
+    logging:
+      driver: json-file
+      options:
+        max-size: ${VESSEL_LOG_MAX_SIZE:-10m}
+        max-file: ${VESSEL_LOG_MAX_FILE:-5}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      # The heartbeat file lives here.
+      - /tmp:size=16m
     environment:
       - DOTNET_ENVIRONMENT=Production
       - Vessel__Worker__Modules__0=paper

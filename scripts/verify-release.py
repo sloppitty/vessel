@@ -47,6 +47,10 @@ http.createServer((req, res) => {
 """
 
 
+# What a root restore command adds back to extract an archive into a volume another user owns (deploy/README.md).
+RESTORE_CAPABILITIES = ('--cap-add', 'CHOWN', '--cap-add', 'DAC_OVERRIDE', '--cap-add', 'FOWNER')
+
+
 def run(*args, **kwargs):
     return subprocess.run(args, check=kwargs.pop('check', True), **kwargs)
 
@@ -127,6 +131,14 @@ class Check:
     depends_on:
       migrate:
         condition: service_completed_successfully
+    # The same hardening as every compose.yaml service (issue #105).
+    logging:
+      driver: json-file
+      options: {{max-size: 10m, max-file: "5"}}
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: ["/tmp:size=16m"]
     # The heartbeat file belongs to the monitor module, so this host reports only that its process is alive.
     # `compose up --wait` rejects a service without a healthcheck, so it cannot simply be disabled.
     healthcheck:
@@ -731,7 +743,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             self.compose('run', '--rm', '--no-deps', '-T', '--entrypoint', 'tar', service, '-C', directory, '-czf', '-', '.', stdout=out)
         # Copy the same ring bytes to a separate restoration location and mount it.
         with (self.temp / 'ring.backup').open('wb') as out:
-            self.compose('run', '--rm', '--no-deps', '-T', '--user', '0', '--entrypoint', 'sh', 'api', '-c', 'cat /run/secrets/vessel-credential-keys.json', stdout=out)
+            # As the API's own user: without capabilities, root cannot read the mode-600 ring that UID 1654 owns.
+            self.compose('run', '--rm', '--no-deps', '-T', '--entrypoint', 'sh', 'api', '-c', 'cat /run/secrets/vessel-credential-keys.json', stdout=out)
         # Original network must be removed before restore, not merely stopped.
         self.compose('down', '-v', '--remove-orphans', stdout=subprocess.DEVNULL)
         project = self.projects[1]
@@ -743,7 +756,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         with (self.temp / 'vessel.dump').open('rb') as source:
             self.compose('exec', '-T', 'postgres', 'pg_restore', '-U', 'vessel', '-d', 'vessel', '--no-owner', '--no-privileges', '--exit-on-error', project=project, stdin=source)
         with (self.temp / 'evidence.tar.gz').open('rb') as source:
-            self.compose('run', '--rm', '--no-deps', '-T', '--user', '0', '--entrypoint', 'sh', service, '-c',
+            # Every service drops all capabilities; extracting and re-owning the archive needs these back (README).
+            self.compose('run', '--rm', '--no-deps', '-T', '--user', '0', *RESTORE_CAPABILITIES, '--entrypoint', 'sh', service, '-c',
                          f'tar -xzf - -C {directory} && chown -R {uid}:{uid} {directory}', project=project, stdin=source, stdout=subprocess.DEVNULL)
         # Reset restored identities before any host starts, then rotate the event epoch.
         self.expect(self.sql(f"SELECT count(*) FROM identity.sessions WHERE id = '{self.session['session']['id']}' AND revoked_at IS NULL", project) == '1',

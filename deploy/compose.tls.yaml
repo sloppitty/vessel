@@ -7,6 +7,19 @@ services:
 
   tls:
     image: caddy:2-alpine
+    # The same hardening as compose.yaml's x-hardening (anchors do not cross files). Caddy needs no capability.
+    logging:
+      driver: json-file
+      options:
+        max-size: ${VESSEL_LOG_MAX_SIZE:-10m}
+        max-file: ${VESSEL_LOG_MAX_FILE:-5}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
     environment:
       VESSEL_TLS_HOST: ${VESSEL_TLS_HOST:?Set the TLS hostname}
       VESSEL_TLS_DIRECTIVE: ${VESSEL_TLS_DIRECTIVE:-}
@@ -23,6 +36,13 @@ services:
     depends_on:
       web:
         condition: service_started
+    healthcheck:
+      # Caddy's local admin endpoint answers once its configuration has loaded.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 6
     restart: unless-stopped
 
 volumes:
