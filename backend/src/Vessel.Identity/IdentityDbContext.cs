@@ -196,8 +196,14 @@ public sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> option
     }
 
     public static void Configure(DbContextOptionsBuilder options, string connection, IdentitySchema schema) =>
-        options.UseNpgsql(connection, postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", schema.Name))
-            .ReplaceService<IModelCacheKeyFactory, IdentityModelCacheKeyFactory>()
+        Services(options.UseNpgsql(connection, postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", schema.Name)));
+
+    /// <summary>Hosts pass their one registered data source, so identity reads share the journal's connection pool.</summary>
+    public static void Configure(DbContextOptionsBuilder options, System.Data.Common.DbDataSource dataSource, IdentitySchema schema) =>
+        Services(options.UseNpgsql(dataSource, postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", schema.Name)));
+
+    private static void Services(DbContextOptionsBuilder options) =>
+        options.ReplaceService<IModelCacheKeyFactory, IdentityModelCacheKeyFactory>()
             .ReplaceService<IMigrationsAssembly, IdentityMigrationsAssembly>();
 }
 

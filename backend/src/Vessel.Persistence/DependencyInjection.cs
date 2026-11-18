@@ -32,12 +32,11 @@ public static class DependencyInjection
         services.TryAddSingleton<Vessel.Application.Monitoring.IServerStateStore, ServerStateStore>();
         services.TryAddSingleton<Vessel.Application.Monitoring.ISystemMonitorStore, SystemMonitorStore>();
         // Resolve only when persistence is consumed. Metadata and liveness do not open a database.
-        services.AddDbContext<VesselDbContext>(options =>
+        // One pool per process: the context borrows the registered data source instead of building its own from the
+        // connection string, so EF, the raw-SQL stores and the identity contexts share one set of connections.
+        services.AddDbContext<VesselDbContext>((provider, options) =>
         {
-            var connection = config.GetConnectionString("Vessel");
-            if (string.IsNullOrWhiteSpace(connection))
-                throw new MissingDatabaseConfigurationException();
-            options.UseNpgsql(connection).ConfigureWarnings(warnings => warnings.Log(
+            options.UseNpgsql(provider.GetRequiredService<NpgsqlDataSource>()).ConfigureWarnings(warnings => warnings.Log(
                 // These Error events embed exception text, the database name and host:port.
                 // The API records request failures with a safe event, so keep them at Debug.
                 (RelationalEventId.ConnectionError, LogLevel.Debug),
