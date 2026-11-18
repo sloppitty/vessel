@@ -20,6 +20,7 @@ namespace Vessel.Persistence.Migrations
                 .HasAnnotation("ProductVersion", "10.0.10")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
+            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "public", "pg_trgm");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("Vessel.Domain.Accounts.Account", b =>
@@ -1841,6 +1842,11 @@ namespace Vessel.Persistence.Migrations
 
                     b.HasKey("OwnerId", "PlayId", "Position");
 
+                    b.HasIndex("Folded");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Folded"), "gin");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Folded"), new[] { "public.gin_trgm_ops" });
+
                     b.ToTable("play_search_texts", null, t =>
                         {
                             t.HasCheckConstraint("CK_play_search_texts_text", "\"Text\" <> '' AND length(\"Folded\") = length(\"Text\") AND \"Position\" >= 0");
@@ -2501,6 +2507,8 @@ namespace Vessel.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("OwnerId", "OccurredAtUtc");
+
+                    b.HasIndex("OwnerId", "AccountId", "OccurredAtUtc");
 
                     b.HasIndex("OwnerId", "AccountId", "ContractId", "ExternalOrderId");
 

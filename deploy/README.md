@@ -990,6 +990,22 @@ docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dl
 - Use the same overlay set as `migrate`. Backups need nothing new: the
   projection is derived data and can always be rebuilt from the journal.
 
+The search reads a trigram index (`IX_play_search_texts_Folded`), which needs
+PostgreSQL's `pg_trgm` extension in the `public` schema. The journal migration
+`DatabaseHygieneIndexes` runs `CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA
+public`. `pg_trgm` is a trusted extension, so the database owner (the Compose
+example's `POSTGRES_USER`) or any role with `CREATE` on the database may create
+it. If `migrate` connects as a role without that right, ask a superuser to run
+this once in the Vessel database before `migrate`:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public;
+```
+
+An existing `pg_trgm` installed in another schema makes the migration fail; move
+it with `ALTER EXTENSION pg_trgm SET SCHEMA public` first. Rolling the
+migration back drops both new indexes and leaves the extension in place.
+
 ## Upgrade
 
 ### From v0.4.1 to v0.4.2

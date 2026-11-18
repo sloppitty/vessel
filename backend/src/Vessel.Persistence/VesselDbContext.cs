@@ -71,6 +71,9 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // The trigram operator class of the journal search index (issue #106), always in public so the index can name it
+        // whatever the connection's search path.
+        modelBuilder.HasPostgresExtension("public", "pg_trgm");
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(VesselDbContext).Assembly);
         MonitorModel.Configure(modelBuilder);
         MonitorDiscrepancyModel.Configure(modelBuilder);
