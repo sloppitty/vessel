@@ -1583,7 +1583,13 @@ cookies, guarded writes and that no bearer value authenticates. It checks the
 internal-CA TLS mode and the default plain-HTTP web (behind an operator's own
 HTTPS proxy, with the same public origin and session), spoofed scheme/address handling,
 compression, headers, unbuffered SSE via a local fixture, upload limits, unpublished
-web in TLS mode and a fresh-volume restore. For delivery it sets
+web in TLS mode and a fresh-volume restore. It checks that every running service has
+capped logs, `no-new-privileges`, no capabilities beyond those listed above and a
+read-only root, and that web and the TLS proxy are healthy; that a journal schema
+with a migration the image does not know makes the API unready (with the reason in
+its log only) and a worker refuse to start; and that a worker whose heartbeat cannot
+advance exits with code 3 after its two-minute test limit (about three minutes of
+the run). For delivery it sets
 `Vessel__Messaging__Verification=true` on `migrate` and runs the `verification`
 subscription in a separate `verifier` worker (deployment `verification`), leaving
 the monitor worker's configuration as shipped: receipts prove live delivery, an
