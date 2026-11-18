@@ -12,7 +12,7 @@ public partial class PaperReportingTestsSupport : PaperReportingTestsValues
         new(papers.Select(p => p.Account).ToList(), [], [], new Dictionary<Guid, Guid>())
         { PaperPlays = papers.Select(p => p.Facts.Paper!).ToList() };
 
-    internal sealed class ActivityRows(ActivityFacts facts) : IActivityStore
+    internal sealed class ActivityRows(ActivityFacts facts) : IActivityStoreDefaults
     {
         public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) => Task.FromResult(facts);
         public Task<IReadOnlyDictionary<Guid, string>> PlayTitlesAsync(IReadOnlyCollection<Guid> playIds, CancellationToken ct) =>

@@ -71,7 +71,7 @@ internal sealed class GoldenJournalStores(GoldenJournal journal)
                     .Select(o => o.ExternalOrderId).Distinct(StringComparer.Ordinal).ToList());
         }).ToList();
 
-    private sealed class ActivityReader(GoldenJournal journal) : IActivityStore
+    private sealed class ActivityReader(GoldenJournal journal) : IActivityStoreDefaults
     {
         public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
         {

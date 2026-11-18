@@ -8,7 +8,7 @@ namespace Vessel.Tests;
 /// <summary>Uncommitted independent reviewer-A reproductions and controls for 6f261c2.</summary>
 public sealed class ReviewPositionRegressionTests : ReviewPositionRegressionTestsSupport
 {
-    private sealed class ActivityFactsStore(ActivityFacts facts) : IActivityStore
+    private sealed class ActivityFactsStore(ActivityFacts facts) : IActivityStoreDefaults
     {
         public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) =>
             Task.FromResult(facts);
