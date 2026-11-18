@@ -47,7 +47,8 @@ public sealed class OpenRiskApiTests
         disabled.UpdateSettings("Disabled", null, false);
         await using var db = database.Context(owner);
         db.Accounts.AddRange(account, other, disabled);
-        db.Snapshots.Add(new AccountSnapshot { OwnerId = owner, AccountId = account.Id, ObservedAtUtc = T0, ValueScope = "fixture", AccountValueUsd = 1000 });
+        db.Snapshots.Add(new AccountSnapshot { OwnerId = owner, AccountId = account.Id, ObservedAtUtc = T0, ValueScope = "fixture", AccountValueUsd = 1000,
+            AccountMode = "default", StablecoinScope = "hypercore-spot-stablecoins", StablecoinsObservedAtUtc = T0 }); // An observed empty wallet (#91).
         await db.SaveChangesAsync();
 
         // G-06: three 1.25% longs on BTC, ETH and SOL are one stressed book.

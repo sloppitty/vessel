@@ -196,6 +196,10 @@ internal sealed class GoldenJournal
     {
         OwnerId = Owner, AccountId = account.Id, ObservedAtUtc = Now, ValueScope = "golden-journal", AccountValueUsd = value,
         AvailableMarginUsd = available, Positions = positions.ToList(),
+        // A Hyperliquid read also records its account mode and wallet: separate ledgers with an observed empty wallet (#91).
+        AccountMode = account.VenueId == "hyperliquid" ? "default" : null,
+        StablecoinScope = account.VenueId == "hyperliquid" ? "hypercore-spot-stablecoins" : null,
+        StablecoinsObservedAtUtc = account.VenueId == "hyperliquid" ? Now : null,
     };
 
     private static AccountPosition Position(Account account, string contract, decimal signed, decimal entry, decimal unrealized) => new()

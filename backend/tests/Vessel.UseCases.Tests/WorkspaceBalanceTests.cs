@@ -128,6 +128,26 @@ public sealed class WorkspaceBalanceTests : WorkspaceBalanceTestsSupport
     }
 
     [Fact]
+    public async Task A_separate_ledger_wallet_never_read_leaves_the_balance_unknown_while_other_accounts_keep_theirs()
+    {
+        // #91: a wallet that was never read is not an empty one; an observed empty wallet is a known zero.
+        var unread = Add(null, "hyperliquid", 40m, 35m, "default");
+        var empty = Add(null, "hyperliquid", 40m, 35m, "dexAbstraction", 0m);
+        store.Snapshots.Single(s => s.AccountId == empty.Id).Stablecoins.Clear();
+        var legacy = Add(null, "hyperliquid", 40m, 35m); // No mode read yet: the ledgers' arrangement is unknown too.
+        var unified = Add(null, "hyperliquid", 999m, 888m, "unifiedAccount");
+        var walletless = Add(null, "public-perps", 30m, 20m);
+        Assert.Null((await service.AccountAsync(unread.Id, default)).BalanceUsd);
+        Assert.Equal("35", (await service.AccountAsync(unread.Id, default)).AvailableBalanceUsd); // Availability comes from the perps.
+        Assert.Equal("40", (await service.AccountAsync(empty.Id, default)).BalanceUsd);
+        Assert.Null((await service.AccountAsync(legacy.Id, default)).BalanceUsd);
+        Assert.Null((await service.AccountAsync(unified.Id, default)).BalanceUsd); // As before: the wallet is its only ledger.
+        Assert.Equal("30", (await service.AccountAsync(walletless.Id, default)).BalanceUsd);
+        var totals = (await service.OverviewAsync(default)).Totals;
+        Assert.Equal(("70", 2, 5, "partial"), (totals.TotalBalanceUsd, totals.BalanceAccountCount, totals.EnabledAccountCount, totals.BalanceCoverage));
+    }
+
+    [Fact]
     public async Task Unknown_and_empty_observed_wallets_are_distinct_and_manual_value_is_not_available_funds()
     {
         Assert.Null((await service.OverviewAsync(default)).Totals.AvailableBalanceUsd);

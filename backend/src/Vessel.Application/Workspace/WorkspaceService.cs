@@ -473,17 +473,28 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     /// spot ledgers, so perps equity and the wallet total add up. Supported stablecoins only; other assets are excluded.
     /// </summary>
     // Keep individual ledger amounts until the exact display sum; decimal addition can round within one account.
-    private static List<decimal>? Balance(Account a, AccountSnapshot? s)
+    private List<decimal>? Balance(Account a, AccountSnapshot? s)
     {
         if (a.VenueId == VenueDescriptor.ManualId) return a.ManualAccountValueUsd is { } manual ? [manual] : null;
         if (s is null) return null;
         List<decimal>? wallet = s.StablecoinsObservedAtUtc is null ? null : s.Stablecoins.Select(balance => balance.Total).ToList();
         if (s.AccountMode is "unifiedAccount" or "portfolioMargin") return wallet;
-        // Separate ledgers add up only when the wallet was read with the perps or after them. A wallet left from an earlier
-        // read could still hold funds since moved into perps, so the balance is unknown (Phase 2, item 14b, Sol round 1).
-        if (wallet is not null && s.StablecoinsObservedAtUtc < s.ObservedAtUtc) return null;
+        if (BalanceAwaitsWallet(a.VenueId, s)) return null;
         return s.AccountValueUsd is { } perps ? [perps, ..wallet ?? []] : wallet;
     }
+
+    public const string WalletNotReadReason = "Stablecoin wallet not read with the latest perpetuals; balance unknown.";
+
+    /// <summary>
+    /// Whether a separate-ledger balance is unknown because its wallet was not read with the latest perps. Separate ledgers
+    /// add up only when the wallet was read with the perps or after them: a wallet left from an earlier read could still hold
+    /// funds since moved into perps (Phase 2, item 14b, Sol round 1). A wallet never read is not an empty one either (#91):
+    /// on a venue that has a wallet, the balance stays unknown until one is observed, and an observed empty wallet is zero.
+    /// </summary>
+    public bool BalanceAwaitsWallet(string venueId, AccountSnapshot s) =>
+        s.AccountMode is not ("unifiedAccount" or "portfolioMargin") && (s.StablecoinsObservedAtUtc is { } walletAt
+            ? walletAt < s.ObservedAtUtc
+            : venues.Descriptor(venueId)?.Capabilities.StablecoinWallet == true);
 
     /// <summary>One reported availability source per enabled account. Never infer it from equity or margin used.</summary>
     private string? AvailableSource(Account a, AccountSnapshot? s)

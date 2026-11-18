@@ -82,7 +82,9 @@ public sealed class OverviewSummaryService(IWorkspaceStore store, WorkspaceServi
             var realized = new SummaryAmount(known.Count == 0 ? null : known.Aggregate(default(ExactAmount),
                 (sum, o) => sum + ExactAmount.Parse(o.NetResultUsd!)).ToString(), new(contributing, selected.Count, known.Count,
                     candidates.Count - known.Count, reasons));
-            return new(selected.Count, Sum(a => a.BalanceUsd, mode == TradingMode.Paper ? "Virtual cash unavailable." : "Recorded balance unavailable."),
+            return new(selected.Count, Sum(a => a.BalanceUsd, mode == TradingMode.Paper ? "Virtual cash unavailable." : "Recorded balance unavailable.",
+                    a => mode == TradingMode.Real && snapshots.TryGetValue(a.Id, out var s) && workspace.BalanceAwaitsWallet(a.VenueId, s)
+                        ? WorkspaceService.WalletNotReadReason : null),
                 Sum(a => a.AvailableBalanceUsd, mode == TradingMode.Paper ? "Virtual availability is unknown while capital remains unresolved." :
                     "Reported availability unavailable; manual values are not available funds."),
                 selected.Any(Partial) ? null : selected.Sum(a => mode == TradingMode.Paper
