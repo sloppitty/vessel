@@ -361,7 +361,9 @@ Example: the `notifications` module (`NotificationsModule`), which follows these
 2. Resolves the modules from the registry; an unknown name stops startup.
 3. Registers Infrastructure, Identity directory, Persistence and each module's worker services, then `AddVesselMessaging(deployment, modules)` and `AddSubscriptionMaintenance()`. Directory selection is order-independent. Background work uses `IOwnerScopeFactory`; the worker no longer registers a fixed `WorkerOwnerContext`.
 4. At start, `MessagingDeploymentGuard` checks `messaging_deployments` before Wolverine starts: the deployment's schema (`wolverine_{deployment}` with `-` as `_`, or `Vessel:Messaging:StorageSchemas:{deployment}`) must be provisioned for exactly this deployment and sorted module set. Wolverine's service name is `vessel-{deployment}`; `AutoBuildMessageStorageOnStartup` is `None`.
-5. A startup failure prints only the exception type name.
+5. Before the host starts, the entrypoint runs the schema check that API readiness uses (`SchemaCompatibility`): it refuses to start, prints `Vessel worker refused to start.` with the reason and exits with code 1 when the journal or identity schema has migrations the image does not know or lacks some of the image's migrations.
+6. A startup failure prints only the exception type name.
+7. `WorkerWatchdog`, registered last, stops the worker with exit code 3 when a module's loop makes no progress ([stale worker exit](#stale-worker-exit-issue-105)).
 
 Replicas of one deployment share its schema. Deployments with different module sets need different schemas.
 
@@ -415,6 +417,15 @@ flowchart TB
 - `/app/worker-health` passes when the file is readable, has two numeric fields and its age is between 0 and the timeout it records.
 - The API reports `workerOnline` when a monitor deployment heartbeat is at most `Vessel:Monitor:HeartbeatTimeout` old. It filters deployments using its own module map, so a non-monitor worker cannot make monitor health green. API, worker and provisioning hosts must have identical `Vessel:Messaging:Deployments`.
 - Logs carry IDs and exception type names, never payloads, venue messages or secrets.
+
+### Stale worker exit (issue #105)
+
+The health check only marks a container unhealthy, and Compose never restarts an unhealthy container. So each worker also runs `WorkerWatchdog`: when one of its modules has made no progress for its limit, it logs `The {module} loop made no progress for … Stopping the worker with exit code 3 …` at Critical, stops the host and the process exits with code 3, so `restart: unless-stopped` starts a new one. A shutdown that does not finish within the host's shutdown timeout (30 s) plus 10 s ends the process with a fail-fast exit, also non-zero.
+
+- **Progress** is the moment a module writes its heartbeat (`WorkerProgress`): the monitor scheduler after a productive pass, the notifications maintenance after a productive catch-up pass, the paper scheduler after a tick. The paper scheduler also counts each finished candle read inside a tick, failed or not, because one tick reads one window after another. Before the first heartbeat, time counts from the watchdog's start, which comes after every other hosted service (the broker connection included) has started. Modules without a heartbeat (`verification`) are not watched.
+- **Limit**: `Vessel:Worker:StaleExitAfter` (default `00:10:00`, 2 minutes to 2 hours), never less than the module's own heartbeat timeout, so the container is reported unhealthy first. The watchdog checks every 30 seconds, so the exit comes between the limit and the limit plus 30 seconds.
+- **Why 10 minutes.** A module's normal gap is 30 seconds: the monitor scheduler tick (`MonitorOptions.SchedulerTick`), the catch-up interval (`EventSubscriptionLimits.CatchUpInterval`) and the paper tick (`Vessel:Paper:SchedulerTickSeconds`). The longest legitimate wait inside one step is 20 seconds: a venue read at its whole-read deadline (`BoundedJsonHttp.Deadline`, the same as the venue `HttpClient` timeout), or a monitor claim waiting for the `vessel-venue-budget:{venue}` advisory lock, which the paper worker holds over at most one such read. The other waits do not block a loop: a venue at its machine-wide capacity or behind a venue deadline (at most 1 hour) is skipped for the tick, not waited for; monitor runs, backfill pages (five reads of 20 seconds) and funding reads run on leases outside the scheduler tick, which never awaits them; venue reads never run inside a transaction or lock (Refresh and Check read under a lease, credential verification outside the lock), so a database lock is held only by a short unit; the paper worker's per-Play cadence (60 minutes by default) only decides which Plays are due, and its tick still writes a heartbeat every 30 seconds. 10 minutes is 20 normal gaps and 30 back-to-back 20-second waits. The longest configurable heartbeat timeout is 10 minutes for monitor and notifications and 15 minutes for paper; the limit follows it when it is longer.
+- **Outages.** A module's heartbeat also stops when every owner's work fails, for example while PostgreSQL is unreachable. The worker then exits after the limit and restarts; at start it reads the schema, fails while the database is away, exits with code 1 and is restarted by Compose with its growing delay until the database returns. A broker outage after start does not stop the heartbeat (see [Without the broker](#without-the-broker-measured-november-17-2026)); a start without the broker blocks for about 95 seconds and exits with code 1, as before.
 
 ### Without the broker (measured November 17, 2026)
 
@@ -814,6 +825,7 @@ The owner Refresh reads settled funding in resumable windows (Phase 2, item 9a),
 |---|---|---|---|
 | `Modules:{i}` | `["monitor"]` | Compiled-in module names | Modules this worker runs; an unknown name stops startup |
 | `Deployment` | First module | Valid name, not `api` | Logical deployment: envelope schema and Wolverine service name |
+| `StaleExitAfter` | `00:10:00` | 2 minutes–2 hours | A module without progress for this long (never less than its heartbeat timeout) stops the worker with exit code 3 ([stale worker exit](#stale-worker-exit-issue-105)) |
 
 ### `Vessel:Notifications` (`NotificationOptions`)
 
@@ -992,6 +1004,8 @@ Recreate every other service that uses the same user too, for example additional
 | `credential-error` | Read-only token missing, refused or expired; scheduling stops | Save a valid token; discovery reschedules the account |
 | Worker offline (`workerOnline: false`) | Heartbeat older than `HeartbeatTimeout` | `docker compose ps worker`, `docker compose logs --tail=100 worker`; check database and broker reachability and provisioning |
 | Container unhealthy | Heartbeat file missing, malformed or too old | Same as offline |
+| Worker restarts with exit code 3 | A module made no progress for `Vessel:Worker:StaleExitAfter` ([stale worker exit](#stale-worker-exit-issue-105)) | Read the log lines before `made no progress`; check database reachability. Repeated exits mean the loop keeps stalling |
+| Worker exits at start with `refused to start` | The journal or identity schema is behind the image, or has migrations the image does not know (an older image on a newer schema) | Run `migrate`, or start the image that applied the newer migrations, or restore the pre-upgrade backup |
 | Worker exits at start | Unknown module, unprovisioned deployment or schema provisioned for another module set | Run `migrate`; fix `Vessel__Worker__Modules`/`Deployment`; use a new deployment name for a new module set |
 | Discrepancy `unverifiable` | No decisive observation within the lifetime | Inspect the venue; dismiss with a note, or wait for a fresh decision |
 | Watch `unverifiable` | Leftover order not proven gone within `WatchLifetime` | Check the order at the venue; cancel it there if it still rests |

@@ -87,7 +87,7 @@ internal static class MonitorSchedulerLoop
 /// </summary>
 public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDirectory owners, TimeProvider time, MonitorOptions options,
     MonitorWakeup wakeup, ILogger<MonitorScheduler> logger, ISystemMonitorStore candidates, IServerStateStore server,
-    WorkerSettings worker) : BackgroundService
+    WorkerSettings worker, WorkerProgress? progress = null) : BackgroundService
 {
     private readonly string workerId = Guid.NewGuid().ToString("N");
     private readonly List<Task> running = [];
@@ -252,6 +252,7 @@ public sealed class MonitorScheduler(IOwnerScopeFactory scopes, IJournalOwnerDir
                 $"{now.ToUnixTimeSeconds()} {(long)options.HeartbeatTimeout.TotalSeconds}"), ct);
             File.Move(temporary, file, overwrite: true);
             await server.RecordHeartbeatAsync(worker.Deployment!, now, ct);
+            progress?.Advance(Vessel.Messaging.Modules.Monitor.MonitorModule.ModuleName);
         }
         catch
         {

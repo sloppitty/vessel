@@ -15,7 +15,7 @@ namespace Vessel.Worker;
 /// touches the monitor's, so a healthy notifications worker cannot make a stopped monitor look online.
 /// </summary>
 public sealed class NotificationHeartbeat(NotificationWorkerState state, WorkerSettings worker,
-    NotificationOptions options, TimeProvider time) : IMaintenanceHeartbeat
+    NotificationOptions options, TimeProvider time, WorkerProgress? progress = null) : IMaintenanceHeartbeat
 {
     private readonly string workerId = Guid.NewGuid().ToString("N");
 
@@ -30,6 +30,7 @@ public sealed class NotificationHeartbeat(NotificationWorkerState state, WorkerS
                 $"{now.ToUnixTimeSeconds()} {(long)options.HeartbeatTimeout.TotalSeconds}"), cancellationToken);
             File.Move(temporary, file, overwrite: true);
             await state.RecordAsync(worker.Deployment!, now, cancellationToken);
+            progress?.Advance(Vessel.Messaging.Modules.Notifications.NotificationsModule.ModuleName);
         }
         catch
         {

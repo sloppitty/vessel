@@ -634,6 +634,21 @@ configured timeout; `/app/worker-health` rejects a missing, malformed or older
 file. If the file cannot be written, the database heartbeat is not recorded
 either, so API monitor responses report the worker offline.
 
+Compose never restarts a container only because it is unhealthy. Each worker
+(`worker`, `worker-notifications`, `worker-paper`) therefore watches its own
+heartbeat: when its module has made no progress for
+`Vessel__Worker__StaleExitAfter` (default `00:10:00`, at least the module's
+heartbeat timeout), it logs `The monitor loop made no progress for … Stopping the
+worker with exit code 3 so that its restart policy starts a new one.` (or
+`notifications`/`paper`) and exits with code 3, and `restart: unless-stopped`
+starts it again. This also happens while the database is unreachable; the new
+process then exits at start (code 1) until the database answers, and Compose keeps
+restarting it with a growing delay. Ten minutes is far above any legitimate pause:
+the loops beat every 30 seconds, a venue read ends within 20 seconds, and monitor
+runs, history backfills and funding reads run outside the scheduler's loop. See
+[stale worker exit](../docs/architecture/messaging-and-workers.md#stale-worker-exit-issue-105)
+for the arithmetic.
+
 The Notification Hub runs as `worker-notifications`: the same image and entrypoint
 with `Vessel__Worker__Modules__0: notifications` in its own deployment
 (`wolverine_notifications`). It hosts the `notifications` subscription to every

@@ -101,6 +101,40 @@ public sealed class PaperWorkerPostgresTests
     }
 
     [PostgresFact]
+    public async Task A_tick_of_slow_reads_longer_than_the_stale_limit_never_trips_the_watchdog()
+    {
+        // Issue #105: each read finishing is progress, so only one read (at most the 20-second venue deadline) counts
+        // against the limit. Here each read takes 6 minutes of a 10-minute limit and the tick takes 12.
+        await using var f = await Fixture.CreateAsync(separateOwnerSymbols: true);
+        var progress = f.Progress;
+        var exit = new WorkerExit();
+        var lifetime = new StoppingLifetime();
+        var watchdog = new WorkerWatchdog(progress, [new("paper", TimeSpan.FromMinutes(10))], f.Clock, lifetime, exit,
+            NullLogger<WorkerWatchdog>.Instance);
+        var checks = new List<bool>();
+        f.Reader.BeforeReturn = () =>
+        {
+            f.Clock.Now = f.Clock.Now.AddMinutes(6);
+            checks.Add(watchdog.Check());
+        };
+        await f.Scheduler.TickAsync(default);
+        Assert.Equal(2, f.Reader.Reads);
+        Assert.Equal([false, false], checks);
+        Assert.False(lifetime.Stopped);
+        Assert.Equal(f.Clock.Now, progress.Last("paper"));
+        Assert.Equal(0, exit.Code);
+    }
+
+    private sealed class StoppingLifetime : Microsoft.Extensions.Hosting.IHostApplicationLifetime
+    {
+        public bool Stopped;
+        public CancellationToken ApplicationStarted => CancellationToken.None;
+        public CancellationToken ApplicationStopping => CancellationToken.None;
+        public CancellationToken ApplicationStopped => CancellationToken.None;
+        public void StopApplication() => Stopped = true;
+    }
+
+    [PostgresFact]
     public async Task An_actual_venue_rate_limit_still_shares_its_deadline_and_stops_further_public_reads()
     {
         await using var f = await Fixture.CreateAsync(separateOwnerSymbols: true);
@@ -324,7 +358,7 @@ public sealed class PaperWorkerPostgresTests
         }
     }
     private sealed class Fixture(CoreDatabase database, ServiceProvider services, Guid[] owners, Reader reader,
-        Directory directory, Clock clock, string heartbeat, PaperScheduler scheduler) : IAsyncDisposable
+        Directory directory, Clock clock, string heartbeat, PaperScheduler scheduler, WorkerProgress progress) : IAsyncDisposable
     {
         public CoreDatabase Database { get; } = database;
         public ServiceProvider Services { get; } = services;
@@ -334,6 +368,7 @@ public sealed class PaperWorkerPostgresTests
         public Clock Clock { get; } = clock;
         public string Heartbeat { get; } = heartbeat;
         public PaperScheduler Scheduler { get; } = scheduler;
+        public WorkerProgress Progress { get; } = progress;
 
         public static async Task<Fixture> CreateAsync(int maxPlaysPerTick = 200, bool crossInstrumentLoss = false,
             bool failFirstOwnerCapital = false, bool separateOwnerSymbols = false)
@@ -393,10 +428,12 @@ public sealed class PaperWorkerPostgresTests
                 });
             var provider = services.BuildServiceProvider();
             var heartbeat = Path.Combine(Path.GetTempPath(), "vessel-paper-test-" + Guid.NewGuid().ToString("N"));
+            var progress = new WorkerProgress(clock);
             var scheduler = new PaperScheduler(provider.GetRequiredService<IOwnerScopeFactory>(), directory,
                 provider.GetRequiredService<NpgsqlDataSource>(), provider.GetRequiredService<IServerStateStore>(),
-                new() { HeartbeatFile = heartbeat, MaxPlaysPerTick = maxPlaysPerTick }, clock, NullLogger<PaperScheduler>.Instance);
-            return new(database, provider, owners, reader, directory, clock, heartbeat, scheduler);
+                new() { HeartbeatFile = heartbeat, MaxPlaysPerTick = maxPlaysPerTick }, clock, NullLogger<PaperScheduler>.Instance,
+                progress);
+            return new(database, provider, owners, reader, directory, clock, heartbeat, scheduler, progress);
         }
         public async ValueTask DisposeAsync()
         {
