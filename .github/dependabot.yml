@@ -1,5 +1,6 @@
-# Proposes updates to the commit SHAs that pin every action and to the digests
-# that pin both Dockerfiles' base images. Its pull requests start no CI: the
+# Proposes updates to the commit SHAs that pin every action, to the digests
+# that pin both Dockerfiles' base images and to the release check's pinned
+# wallet signer libraries. Its pull requests start no CI: the
 # workflows run only for release tags (no push-to-branch or pull_request
 # trigger), so run the local checks before merging one.
 version: 2
@@ -28,3 +29,12 @@ updates:
       # A new major (Node, .NET) is a deliberate change with .nvmrc, global.json and the projects.
       - dependency-name: '*'
         update-types: ['version-update:semver-major']
+
+  # The release check's synthetic wallet signer (@noble), installed from its own pnpm lockfile.
+  - package-ecosystem: npm
+    directory: /scripts/wallet-signer
+    schedule:
+      interval: weekly
+    groups:
+      wallet-signer:
+        patterns: ['*']

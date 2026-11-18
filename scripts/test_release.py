@@ -425,6 +425,7 @@ class SupplyChainPinningTests(unittest.TestCase):
         self.assertIn('package-ecosystem: docker', text)
         for directory in ('/backend', '/frontend'):
             self.assertIn(f'- {directory}\n', text)
+        self.assertIn('package-ecosystem: npm\n    directory: /scripts/wallet-signer\n', text)
 
 
 class WalletReleaseTests(unittest.TestCase):
