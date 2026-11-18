@@ -1345,7 +1345,10 @@ Do not use `docker compose restart` to upgrade or apply migrations. Failed
 migrations block API startup; inspect the migration logs before proceeding.
 Use both `-f` options above when credential storage is configured.
 An application downgrade does not roll back the database. Restore backups if a
-new schema is incompatible with the old image.
+new schema is incompatible with the old image. An older API or worker image refuses
+a schema that has migrations it does not know: the API stays unready and each worker
+exits at start, both logging the unknown migration IDs (see
+[Logs and troubleshooting](#logs-and-troubleshooting)).
 
 ## Backups
 
@@ -1664,8 +1667,17 @@ bodies or full environment dumps; they can contain secrets. The API logs safe
 failure categories, not raw dependency details.
 
 - `/health/live` only proves the API process responds.
-- `/health/ready` returns 200 when PostgreSQL is reachable and there are no pending
-  migrations. A 503 reveals no database details. It does not verify venue or object-store access.
+- `/health/ready` returns 200 when PostgreSQL is reachable and the journal and
+  identity schemas hold exactly the migrations of this image: none pending and none
+  unknown to it. A 503 reveals no database details; the API log says why, once per
+  change: `Not ready: The journal schema is behind this image: … Run the explicit
+  migrate step.` (warning) or `Not ready: The journal schema is newer than this
+  image: it has applied migration(s) this image does not know (…)` (error). The
+  second means an older image was started on a database that a newer image
+  migrated, such as an image rollback without a restore: start the newer image
+  again or restore the pre-upgrade backup. Every worker runs the same check once
+  at start and refuses to start with `Vessel worker refused to start. …` and the
+  same reason, exit code 1. It does not verify venue or object-store access.
   Right after start it answers 503 `warming-up` while a read-only warm-up prepares the
   sign-in and first-page reads, for at most `Vessel__Startup__Warmup__Timeout`
   (default `00:00:30`, at most `00:01:00` so it ends inside the healthcheck

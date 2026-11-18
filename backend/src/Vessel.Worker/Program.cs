@@ -1,4 +1,5 @@
 using Vessel.Application.Monitoring;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -22,7 +23,16 @@ internal static class WorkerProgram
             var normalized = args.Select(x => x == "--modules" ? "--Vessel:Worker:Modules:0" : x).ToArray();
             var builder = Host.CreateApplicationBuilder(normalized);
             WorkerHost.Configure(builder);
-            await builder.Build().RunAsync();
+            var host = builder.Build();
+            // Before any module runs: never work on a schema this image does not know, or one not yet migrated.
+            var schema = await WorkerHost.SchemaCheckAsync(host.Services, CancellationToken.None);
+            if (schema.Reason is { } reason)
+            {
+                host.Dispose();
+                Console.Error.WriteLine($"Vessel worker refused to start. {reason}");
+                return 1;
+            }
+            await host.RunAsync();
             return 0;
         }
         catch (Exception error)
@@ -60,6 +70,18 @@ public sealed class WorkerSettings
 
 public static class WorkerHost
 {
+    /// <summary>The API readiness schema check, run once at worker start (<see cref="SchemaCompatibility"/>).</summary>
+    public static async Task<SchemaCheck> SchemaCheckAsync(IServiceProvider services, CancellationToken ct)
+    {
+        // No owner scope exists yet, so neither context comes from one.
+        var connection = services.GetRequiredService<IConfiguration>().GetConnectionString("Vessel");
+        if (string.IsNullOrWhiteSpace(connection)) throw new MissingDatabaseConfigurationException();
+        await using var journal = SchemaCompatibility.JournalContext(connection);
+        await using var identity = await services.GetRequiredService<IDbContextFactory<Vessel.Identity.IdentityDbContext>>()
+            .CreateDbContextAsync(ct);
+        return await SchemaCompatibility.CheckAsync([("journal", journal), ("identity", identity)], ct);
+    }
+
     public static void Configure(HostApplicationBuilder builder)
     {
         var worker = WorkerSettings.From(builder.Configuration);

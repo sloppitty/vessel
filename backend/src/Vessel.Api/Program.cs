@@ -123,7 +123,10 @@ app.UseEndpointTransport();
 app.UseTradingModeBoundary();
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "healthy" })).AllowAnonymous();
-// Readiness for a proxy or orchestrator: the database answers and every migration is applied. No details.
+// The last schema mismatch written to the log, so a probe every few seconds logs it once, not on every request.
+string? loggedSchemaReason = null;
+// Readiness for a proxy or orchestrator: the database answers and both schemas have exactly this image's migrations.
+// No details in the response; a schema mismatch is logged with its migration IDs.
 app.MapGet("/health/ready", async (IServiceProvider services, CancellationToken ct) =>
 {
     if (!services.GetRequiredService<StartupWarmup>().Completed)
@@ -131,9 +134,11 @@ app.MapGet("/health/ready", async (IServiceProvider services, CancellationToken 
     try
     {
         var db = services.GetRequiredService<VesselDbContext>();
-        var ready = await db.Database.CanConnectAsync(ct) && !(await db.Database.GetPendingMigrationsAsync(ct)).Any();
         var identity = services.GetRequiredService<IdentityDbContext>();
-        ready = ready && await identity.Database.CanConnectAsync(ct) && !(await identity.Database.GetPendingMigrationsAsync(ct)).Any();
+        var schema = await SchemaCompatibility.CheckAsync([("journal", db), ("identity", identity)], ct);
+        if (Interlocked.Exchange(ref loggedSchemaReason, schema.Reason) != schema.Reason && schema.Reason is { } reason)
+            app.Logger.Log(schema.State == SchemaState.Ahead ? LogLevel.Error : LogLevel.Warning, "Not ready: {Reason}", reason);
+        var ready = schema.State == SchemaState.Current;
         // Nobody can sign in until an active operator has a wallet (identity bind-wallet), so the API is not ready.
         if (ready && !await (from user in identity.Users
                     join wallet in identity.Wallets on user.Id equals wallet.UserId
