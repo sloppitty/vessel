@@ -38,16 +38,16 @@ export function OverviewSummary({ api, query, onQuery, reloadGeneration, fallbac
   const totals = document?.totals
   // The existing owner-wide endpoint is a fallback only while the All read loads. Never show All amounts under a narrower scope.
   const loadingAll = !current && query.scope === 'all'
-  const balance = totals?.balance.amountUsd ?? (loadingAll ? fallback.totals.totalBalanceUsd ?? null : null)
-  const available = totals?.available.amountUsd ?? (loadingAll ? fallback.totals.availableBalanceUsd ?? null : null)
+  const balance = totals?.balance.amountUsd ?? (loadingAll ? fallback.totals.totalBalanceUsd : null)
+  const available = totals?.available.amountUsd ?? (loadingAll ? fallback.totals.availableBalanceUsd : null)
   return <>
     <section className="workspace-stat-grid overview-metrics" aria-label="Scoped overview totals" aria-busy={summary.loading}>
       <div className="shell-panel metric"><span className="metric-label">Total balance<NominalUsdTag /></span><strong>{money(balance)}</strong>
         {totals ? <SummaryCoverageBadge value={totals.balance} label="Balance" /> : loadingAll && <CoverageBadge label="Balance" noun="enabled account"
-          covered={fallback.totals.balanceAccountCount ?? 0} total={accountCount} status={fallback.totals.balanceCoverage ?? 'unavailable'} />}</div>
+          covered={fallback.totals.balanceAccountCount} total={accountCount} status={fallback.totals.balanceCoverage} />}</div>
       <div className="shell-panel metric"><span className="metric-label">Available balance</span><strong>{money(available)}</strong>
         {totals ? <SummaryCoverageBadge value={totals.available} label="Availability" /> : loadingAll && <CoverageBadge label="Availability" noun="enabled account"
-          covered={fallback.totals.availableBalanceAccountCount ?? 0} total={accountCount} status={fallback.totals.availableBalanceCoverage ?? 'unavailable'} />}</div>
+          covered={fallback.totals.availableBalanceAccountCount} total={accountCount} status={fallback.totals.availableBalanceCoverage} />}</div>
       <div className="shell-panel metric"><span className="metric-label">Enabled accounts</span><strong>{totals?.accountCount ?? accountCount}</strong></div>
       <div className="shell-panel metric"><span className="metric-label">Perpetual positions</span><strong>{totals?.openPositionCount ?? (loadingAll ? fallback.totals.openPositionCount ?? '—' : '—')}</strong>
         <small className={signClass(totals?.unrealizedPnl.amountUsd ?? null)}>{money(totals?.unrealizedPnl.amountUsd ?? null)} unrealized</small>

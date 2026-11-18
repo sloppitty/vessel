@@ -9,7 +9,7 @@ import { HistoryCoverage, backfillPollMs } from './HistoryCoverage'
 import { ManageAccountDialog } from './ManageDialogs'
 
 const gap = { id: '00000000-0000-4000-8000-000000000001', fromUtc: '2026-10-20T10:00:00Z', toUtc: '2026-10-21T09:00:00Z',
-  openedAtUtc: '2026-10-21T10:00:00Z', closedAtUtc: null }
+  openedAtUtc: '2026-10-21T10:00:00Z', closedAtUtc: null, beyondVenueReach: false }
 const coverage: Coverage = {
   keepExecutionHistory: true, available: true, openGapCount: 2, recordCount: 3, notice: 'Each import records what it asked for.',
   backfillAvailable: false, backfills: [],

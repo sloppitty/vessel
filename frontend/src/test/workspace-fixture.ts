@@ -22,7 +22,7 @@ export const accountFixture: BrokerAccount = {
 export const emptyOverview: Overview = {
   portfolios: [], accounts: [],
   totals: { portfolioCount: 0, accountCount: 0, totalAccountValueUsd: null, valuedAccountCount: 0, openPositionCount: 0, importedFillCount: 0,
-    totalBalanceUsd: null, balanceAccountCount: 0, balanceCoverage: 'unavailable',
+    availableStablecoinNominalUsd: null, stablecoinAccountCount: 0, totalBalanceUsd: null, balanceAccountCount: 0, balanceCoverage: 'unavailable',
     availableBalanceUsd: null, availableBalanceAccountCount: 0, availableBalanceCoverage: 'unavailable', enabledAccountCount: 0 },
   recentActivity: [], scopeNote: 'Values are only known account records. Provider history can be incomplete.',
 }
