@@ -103,7 +103,7 @@ describe('Review API', () => {
     expect(isReviewDocument({ ...reviewFixture, plays: [{ ...play, rMultiple: '2' }] })).toBe(false)
     expect(isReviewDocument({ ...reviewFixture, plays: [{ ...play, executionSource: 'guessed' }] })).toBe(false)
   })
-  it('accepts the Play-local result and basis counts, and reports from servers before them', () => {
+  it('accepts the Play-local result and basis counts', () => {
     const play = reviewFixture.plays[0]!
     const local = { netUsd: '-2', basis: 'executions', reason: null, signDiffers: true }
     const metrics = { ...reviewFixture.metrics, signDiffers: 1, localUnknown: 1, feeOnlyLosses: 1, unknownGrossLosses: 0 }
