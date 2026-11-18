@@ -46,12 +46,14 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
                 var openOrdersComplete = !catalogue.BuildersUnavailable;
                 var incomplete = new List<VenueIncompleteBook>();
                 var openIds = new HashSet<(string ContractId, string OrderId)>();
+                var childIds = new List<(string ContractId, string OrderId)>();
                 var observed = timeProvider.GetUtcNow();
                 foreach (var document in books)
                 {
                     var book = Array(document.RootElement);
                     if (book.GetArrayLength() > MaxOrders) throw new VenueReadException(InvalidResponse);
-                    openOrdersComplete &= book.GetArrayLength() < MaxOrders;
+                    // #95: attached children count toward the cap; whether the venue counts them is not documented.
+                    var rows = book.GetArrayLength();
                     foreach (var item in book.EnumerateArray())
                     {
                         // The open book is the current truth and overrides an older history entry.
@@ -68,13 +70,26 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
                         if (item.TryGetProperty("children", out var children) &&
                             (children.ValueKind != JsonValueKind.Array || children.GetArrayLength() > 0))
                         {
-                            if (order is not null && children.ValueKind == JsonValueKind.Array && children.EnumerateArray()
-                                    .All(child => AttachedOn(child, order.VenueContractId ?? order.ContractId, contracts, latestTimestamp, observed)))
-                                incomplete.Add(new(order.ContractId, order.VenueContractId, VenueIncompleteBook.AttachedTpsl));
+                            var attached = order is not null && children.ValueKind == JsonValueKind.Array
+                                ? children.EnumerateArray()
+                                    .Select(child => AttachedOn(child, order.VenueContractId ?? order.ContractId, contracts, latestTimestamp, observed))
+                                    .ToList()
+                                : null;
+                            if (attached is not null && attached.All(child => child is not null))
+                            {
+                                childIds.AddRange(attached.Select(child => (child!.ContractId, child.OrderId)));
+                                rows += attached.Count;
+                                incomplete.Add(new(order!.ContractId, order.VenueContractId, VenueIncompleteBook.AttachedTpsl));
+                            }
                             else openOrdersComplete = false;
                         }
                     }
+                    openOrdersComplete &= rows < MaxOrders;
                 }
+                // #95: a child shares the active-order identity space. Repeating another child, its parent or any
+                // top-level order, wherever it appears in the response, is a whole-book condition.
+                foreach (var id in childIds)
+                    if (!openIds.Add(id)) openOrdersComplete = false;
                 return new VenueOrderReadResult(orders.Values.OrderByDescending(o => o.PlacedAtUtc).ToList(), observed,
                     catalogue.Dexes.Count > 0 ? BuilderOrdersNotice : OrdersNotice, OpenOrdersComplete: openOrdersComplete && incomplete.Count == 0)
                 {
@@ -106,18 +121,19 @@ public sealed partial class HyperliquidPerpetualReader : IVenueOrderReader
     }
 
     /// <summary>
-    /// #95: whether an attached child is an order Vessel could read, without children of its own, on the parent's native
-    /// market. Only then may the child narrow the book's gap to the parent's contract.
+    /// #95: the attached child read as an order, when it is one Vessel could read, without children of its own, on the
+    /// parent's native market; otherwise null. Only then (and with a unique identity) may it narrow the book's gap to the
+    /// parent's contract.
     /// </summary>
-    private static bool AttachedOn(JsonElement child, string coin, HashSet<string> contracts, long latestTimestamp,
+    private static VenueOrder? AttachedOn(JsonElement child, string coin, HashSet<string> contracts, long latestTimestamp,
         DateTimeOffset observed)
     {
         if (child.ValueKind != JsonValueKind.Object || !child.TryGetProperty("coin", out var childCoin) ||
-            childCoin.ValueKind != JsonValueKind.String || childCoin.GetString() != coin) return false;
+            childCoin.ValueKind != JsonValueKind.String || childCoin.GetString() != coin) return null;
         if (child.TryGetProperty("children", out var nested) &&
-            (nested.ValueKind != JsonValueKind.Array || nested.GetArrayLength() > 0)) return false;
-        try { return ReadOrder(child, contracts, latestTimestamp, "open", VenueOrderStatus.Open, observed) is not null; }
-        catch (VenueReadException) { return false; }
+            (nested.ValueKind != JsonValueKind.Array || nested.GetArrayLength() > 0)) return null;
+        try { return ReadOrder(child, contracts, latestTimestamp, "open", VenueOrderStatus.Open, observed); }
+        catch (VenueReadException) { return null; }
     }
 
     private static bool Flag(JsonElement order, string name) =>

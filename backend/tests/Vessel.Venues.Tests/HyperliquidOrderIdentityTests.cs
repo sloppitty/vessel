@@ -92,12 +92,20 @@ public sealed partial class HyperliquidOrderTests
     [InlineData("child-on-another-market")]
     [InlineData("child-with-malformed-oid")]
     [InlineData("child-with-children")]
+    // Review S1 (round 2): a child shares the active-order identity space.
+    [InlineData("duplicate-children")]
+    [InlineData("child-repeats-parent")]
+    [InlineData("child-repeats-earlier-top-level")]
+    [InlineData("child-repeats-later-top-level")]
+    [InlineData("children-reach-the-order-cap")]
     public async Task Coverage_children_that_cannot_be_attributed_leave_the_whole_book_incomplete(string scope)
     {
         var stop = Order(99, "A", trigger: true, type: "Stop Market", coin: "kPEPE");
         var parent = Order(7, coin: "kPEPE", px: "0.012345");
         var badOid = stop.Replace("\"oid\":99", "\"oid\":-1", StringComparison.Ordinal);
         Assert.NotEqual(stop, badOid);
+        var parentOid = stop.Replace("\"oid\":99", "\"oid\":7", StringComparison.Ordinal);
+        Assert.NotEqual(stop, parentOid);
         var book = scope switch
         {
             "spot-parent" => $"[{WithChildren(Order(7, coin: "@123"))},{Order(8)}]",
@@ -108,6 +116,12 @@ public sealed partial class HyperliquidOrderTests
             "child-on-another-market" => $"[{WithChildren(parent, $"[{Order(99, "A", trigger: true, type: "Stop Market")}]")},{Order(8)}]",
             "child-with-malformed-oid" => $"[{WithChildren(parent, $"[{badOid}]")},{Order(8)}]",
             "child-with-children" => $"[{WithChildren(parent, $"[{WithChildren(stop)}]")},{Order(8)}]",
+            "duplicate-children" => $"[{WithChildren(parent, $"[{stop},{stop}]")},{Order(8)}]",
+            "child-repeats-parent" => $"[{WithChildren(parent, $"[{parentOid}]")},{Order(8)}]",
+            "child-repeats-earlier-top-level" => $"[{stop},{WithChildren(parent)},{Order(8)}]",
+            "child-repeats-later-top-level" => $"[{WithChildren(parent)},{Order(8)},{stop}]",
+            // 1,999 rows and one child: 2,000 orders reach the cap, so the book may be truncated anywhere.
+            "children-reach-the-order-cap" => $"[{WithChildren(parent)},{string.Join(",", Enumerable.Range(1000, 1998).Select(i => Order(i)))}]",
             _ => $"[{WithChildren(parent)},{Order(8)},{Order(8)}]",
         };
         var result = await ReadTwoMarketOrders("[]", book);
