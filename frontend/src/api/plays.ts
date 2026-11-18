@@ -34,7 +34,10 @@ export interface StructuredReview {
   mistakeTag: string | null
   lesson: string
   nextAction: string
-  /** "Followed the rule?" for a Play planned under an if-then rule (Phase 2, item 3); absent from older servers. */
+  /**
+   * "Followed the rule?" for a Play planned under an if-then rule (Phase 2, item 3). The API always sends it, null when
+   * unanswered; it is optional only because the browser builds answers without it.
+   */
   rule?: 'followed' | 'deviated' | 'not-applicable' | null
 }
 export const emptyStructuredReview = (): StructuredReview => ({ adherence: null, mistakeTag: null, lesson: '', nextAction: '' })
@@ -81,7 +84,7 @@ export interface PlayPlan {
   notes: { thesis: string; invalidation: string; strategy: string; evidence: string }
 }
 export interface PlaySummary {
-  tradingMode?: TradingMode
+  tradingMode: TradingMode
   id: string
   title: string
   status: PlayStatus
@@ -99,18 +102,17 @@ export interface PlaySummary {
   endedAtUtc: string | null
   /** Whether a nonblank review note has been saved, independently of lifecycle status. */
   hasReview: boolean
-  /** Absent on older servers: those records were planned, never retrospective. */
-  origin?: 'planned' | 'retrospective'
-  reviewedAtUtc?: string | null
+  origin: 'planned' | 'retrospective'
+  reviewedAtUtc: string | null
   /**
    * How the review was completed, explicitly (phase 1, 1.2): Complete review or changed answers, No review needed, or kept
-   * from before completion existed. Null while it needs review; absent from older servers.
+   * from before completion existed. Null while it needs review.
    */
-  reviewCompletion?: ReviewCompletion | null
-  reviewCompletedAtUtc?: string | null
+  reviewCompletion: ReviewCompletion | null
+  reviewCompletedAtUtc: string | null
   /**
    * List and search rows only (Phase 2, item 13, F-07): the Play's outcome from its search projection, never the plan.
-   * Absent from the Play's own read and from older servers.
+   * The Play's own read omits it (WhenWritingNull on PlaySummaryDto.Outcome).
    */
   outcome?: PlayOutcome
 }
@@ -154,8 +156,8 @@ export interface SavedPlay {
   /** Chart drawings per venue instrument key; validated by the chart when loaded. */
   drawings: Record<string, unknown[]>
   review: string
-  structuredReview?: StructuredReview | null
-  /** The if-then rule the Play was planned under (Phase 2, item 3); absent without one. */
+  structuredReview: StructuredReview | null
+  /** The if-then rule the Play was planned under (Phase 2, item 3); the API omits it (WhenWritingNull) without one. */
   rule?: PlayRuleSeen | null
 }
 export interface PlayFields {
@@ -170,9 +172,9 @@ export interface PlayFields {
 }
 export interface PlanRevision {
   number: number; status: PlayStatus; reason: string; createdAtUtc: string; plan: PlayPlan
-  /** The pre-flight seen at Plan it, on revision 1 only; null or absent for older plans and later revisions. */
-  preflight?: PreflightCheck[] | null
-  /** The if-then rule seen at Plan it and the owner's answer, on revision 1 only (Phase 2, item 3). */
+  /** The pre-flight seen at Plan it, on revision 1 only; null for plans from before it existed and later revisions. */
+  preflight: PreflightCheck[] | null
+  /** The if-then rule seen at Plan it and the owner's answer, on revision 1 only (Phase 2, item 3); omitted (WhenWritingNull) otherwise. */
   rule?: PlanRuleSnapshot | null
 }
 /** The non-blocking checks shown at Plan it, in display order (phase 1, 1.5). */
@@ -184,18 +186,18 @@ export const maxPreflightNote = 500
 /** One of the owner's recent next actions and the Play it was written for. */
 export interface NextAction { playId: string; title: string; nextAction: string; reviewedAtUtc: string | null }
 export interface StatusChange {
-  from: PlayStatus; to: PlayStatus; reason: CancelReason | null; note: string | null; occurredAtUtc: string; source?: 'owner' | 'venue' | 'manual' | 'paper'
+  from: PlayStatus; to: PlayStatus; reason: CancelReason | null; note: string | null; occurredAtUtc: string; source: 'owner' | 'venue' | 'manual' | 'paper'
   /** On a change to Unresolved: the owner's reason and the execution facts kept with it. */
-  unresolvedReason?: UnresolvedReason | null
-  evidence?: UnresolvedEvidence | null
+  unresolvedReason: UnresolvedReason | null
+  evidence: UnresolvedEvidence | null
 }
 export const reviewActions = ['edited', 'completed', 'reopened', 'not-needed', 'cleared'] as const
 export interface ReviewRevision {
   number: number; occurredAtUtc: string; review: string; structuredReview: StructuredReview
-  /** What happened: edited, completed, reopened, not-needed, or cleared when the Play left a final state; absent from older servers. */
-  action?: typeof reviewActions[number]
+  /** What happened: edited, completed, reopened, not-needed, or cleared when the Play left a final state. */
+  action: typeof reviewActions[number]
 }
-export interface PlayHistory { revisions: PlanRevision[]; statusChanges: StatusChange[]; reviews?: ReviewRevision[] | null }
+export interface PlayHistory { revisions: PlanRevision[]; statusChanges: StatusChange[]; reviews: ReviewRevision[] }
 export type StatusRequest =
   | { status: 'planned'; preflight?: PreflightCheck[]; rule?: PlanRuleAnswer }
   | { status: 'paused' }
@@ -225,22 +227,22 @@ export const isPlayPlan = (v: unknown): v is PlayPlan => isRecord(v) && (v.direc
   isNullOr(v.budgetOverride, x => isText(x, 64)) && Array.isArray(v.entries) && v.entries.length > 0 && v.entries.every(entry) &&
   isRecord(v.notes) && ['thesis', 'invalidation', 'strategy', 'evidence'].every(k => isText((v.notes as Record<string, unknown>)[k], noteLength))
 export const isPlaySummary = (v: unknown): v is PlaySummary => isRecord(v) &&
-  (v.tradingMode === undefined || v.tradingMode === 'real' || v.tradingMode === 'paper') && isGuid(v.id) && isText(v.title, 200) &&
+  (v.tradingMode === 'real' || v.tradingMode === 'paper') && isGuid(v.id) && isText(v.title, 200) &&
   playStatuses.includes(v.status as PlayStatus) && isGuid(v.accountId) && isText(v.venueId, 64) && isNullOr(v.instrument, x => isText(x, 128)) &&
   (v.instrumentSource === 'venue' || v.instrumentSource === 'manual') && (v.direction === 'long' || v.direction === 'short') &&
   isCount(v.planRevision) && isCount(v.version) && isNullOr(v.cancelReason, x => cancelReasons.includes(x as CancelReason)) &&
   isTimestamp(v.createdAtUtc, timeLength) && isTimestamp(v.updatedAtUtc, timeLength) &&
   isNullOr(v.plannedAtUtc, x => isTimestamp(x, timeLength)) && isNullOr(v.endedAtUtc, x => isTimestamp(x, timeLength)) &&
-  typeof v.hasReview === 'boolean' && (v.origin === undefined || v.origin === 'planned' || v.origin === 'retrospective') &&
-  (v.reviewedAtUtc === undefined || isNullOr(v.reviewedAtUtc, x => isTimestamp(x, timeLength))) &&
-  (v.reviewCompletion === undefined || isNullOr(v.reviewCompletion, x => ['completed', 'not-needed', 'legacy'].includes(x as string))) &&
-  (v.reviewCompletedAtUtc === undefined || isNullOr(v.reviewCompletedAtUtc, x => isTimestamp(x, timeLength))) &&
-  (v.reviewCompletion == null) === (v.reviewCompletedAtUtc == null) &&
+  typeof v.hasReview === 'boolean' && (v.origin === 'planned' || v.origin === 'retrospective') &&
+  isNullOr(v.reviewedAtUtc, x => isTimestamp(x, timeLength)) &&
+  isNullOr(v.reviewCompletion, x => ['completed', 'not-needed', 'legacy'].includes(x as string)) &&
+  isNullOr(v.reviewCompletedAtUtc, x => isTimestamp(x, timeLength)) &&
+  (v.reviewCompletion === null) === (v.reviewCompletedAtUtc === null) &&
   (v.outcome === undefined || isPlayOutcome(v.outcome, v.status as PlayStatus))
 export const isStructuredReview = (v: unknown): v is StructuredReview => isRecord(v) &&
   (v.adherence === null || ['followed', 'deviated', 'not-applicable'].includes(v.adherence as string)) &&
   isNullOr(v.mistakeTag, x => isText(x, 100)) && isText(v.lesson, 4000) && isText(v.nextAction, 4000) &&
-  (v.rule == null || ruleAnswers.includes(v.rule as typeof ruleAnswers[number]))
+  (v.rule === null || ruleAnswers.includes(v.rule as typeof ruleAnswers[number]))
 // Retrospective documents have a deliberately empty compatibility plan, not an original plan.
 const isRetrospectivePlan = (v: unknown) => isRecord(v) && Array.isArray(v.entries) && v.entries.length === 0 &&
   v.leverage === '0' && isRecord(v.notes) && ['thesis', 'invalidation', 'strategy', 'evidence'].every(k => v.notes && (v.notes as Record<string, unknown>)[k] === '') &&
@@ -248,7 +250,7 @@ const isRetrospectivePlan = (v: unknown) => isRecord(v) && Array.isArray(v.entri
 export const isSavedPlay = (v: unknown): v is SavedPlay => isRecord(v) && isPlaySummary(v.summary) &&
   (v.summary.origin === 'retrospective' ? isRetrospectivePlan(v.plan) : isPlayPlan(v.plan)) &&
   isRecord(v.drawings) && Object.values(v.drawings).every(Array.isArray) && isText(v.review, noteLength) &&
-  (v.structuredReview == null || isStructuredReview(v.structuredReview)) && (v.rule == null || isPlayRuleSeen(v.rule))
+  isNullOr(v.structuredReview, isStructuredReview) && (v.rule === undefined || isNullOr(v.rule, isPlayRuleSeen))
 export const isPreflightCheck = (v: unknown): v is PreflightCheck => isRecord(v) && preflightCodes.includes(v.code as PreflightCode) &&
   ['passed', 'skipped', 'unknown'].includes(v.outcome as string) &&
   (v.note === undefined || v.code === 'loss-limit' && v.outcome === 'skipped' && isText(v.note, maxPreflightNote) && v.note.trim() !== '')
@@ -263,18 +265,18 @@ export const isUnresolvedEvidence = (v: unknown): v is UnresolvedEvidence => isR
 export const isPlayHistory = (v: unknown): v is PlayHistory => isRecord(v) && Array.isArray(v.revisions) && Array.isArray(v.statusChanges) &&
   v.revisions.every(r => isRecord(r) && isCount(r.number) && playStatuses.includes(r.status as PlayStatus) && isText(r.reason, 2000) &&
     isTimestamp(r.createdAtUtc, timeLength) && isPlayPlan(r.plan) &&
-    (r.preflight == null || Array.isArray(r.preflight) && r.preflight.length <= preflightCodes.length && r.preflight.every(isPreflightCheck)) &&
-    (r.rule == null || r.number === 1 && isPlanRuleSnapshot(r.rule))) &&
+    (r.preflight === null || Array.isArray(r.preflight) && r.preflight.length <= preflightCodes.length && r.preflight.every(isPreflightCheck)) &&
+    (r.rule === undefined || r.rule === null || r.number === 1 && isPlanRuleSnapshot(r.rule))) &&
   v.statusChanges.every(c => isRecord(c) && playStatuses.includes(c.from as PlayStatus) && playStatuses.includes(c.to as PlayStatus) &&
     isNullOr(c.reason, x => cancelReasons.includes(x as CancelReason)) && isNullOr(c.note, x => isText(x, 2000)) && isTimestamp(c.occurredAtUtc, timeLength) &&
-    (c.source === undefined || c.source === 'owner' || c.source === 'venue' || c.source === 'manual' || c.source === 'paper') &&
+    (c.source === 'owner' || c.source === 'venue' || c.source === 'manual' || c.source === 'paper') &&
     // A declaration names its reason; a return to Open names the reason of the declaration it undoes (1.3a).
-    (c.unresolvedReason == null || (c.to === 'unresolved' || c.from === 'unresolved' && c.to === 'open') &&
+    (c.unresolvedReason === null || (c.to === 'unresolved' || c.from === 'unresolved' && c.to === 'open') &&
       unresolvedReasons.includes(c.unresolvedReason as UnresolvedReason)) &&
-    (c.evidence == null || c.to === 'unresolved' && isUnresolvedEvidence(c.evidence))) &&
-  (v.reviews == null || Array.isArray(v.reviews) && v.reviews.every(r => isRecord(r) && isCount(r.number) &&
+    (c.evidence === null || c.to === 'unresolved' && isUnresolvedEvidence(c.evidence))) &&
+  Array.isArray(v.reviews) && v.reviews.every(r => isRecord(r) && isCount(r.number) &&
     isTimestamp(r.occurredAtUtc, timeLength) && isText(r.review, noteLength) && isStructuredReview(r.structuredReview) &&
-    (r.action === undefined || reviewActions.includes(r.action as typeof reviewActions[number]))))
+    reviewActions.includes(r.action as typeof reviewActions[number]))
 export const isPlayNote = (v: unknown): v is PlayNote => isRecord(v) && isGuid(v.id) && isText(v.text, 2000) && v.text.trim() !== '' &&
   (v.state === null || playNoteStates.includes(v.state as PlayNoteState)) && isTimestamp(v.createdAtUtc, timeLength)
 export const isSavedEvidence = (v: unknown): v is SavedEvidence => isRecord(v) && isGuid(v.id) && isGuid(v.playId) &&
@@ -297,16 +299,11 @@ export interface PlayListQuery {
   pageSize?: number
 }
 export interface PlayList { plays: PlaySummary[]; view: PlayView; page: number; pageSize: number; totalCount: number }
-/** Counts per view; `unresolved` has no tab of its own and is absent from servers before phase 1.3a. */
-export type PlayCounts = Record<'drafts' | 'progress' | 'review' | 'reviewed' | 'closed' | 'cancelled' | 'all', number> & { unresolved?: number }
+/** Counts per view; `unresolved` has no tab of its own. */
+export type PlayCounts = Record<'drafts' | 'progress' | 'review' | 'reviewed' | 'closed' | 'cancelled' | 'all' | 'unresolved', number>
 
-/** Whether a closed or cancelled Play counts as reviewed, as the list views define it. */
-/**
- * Whether a Play's review is complete. Completion is explicit (decision 3); a server from before it existed still listed a
- * Play with review text, answers or a review time as reviewed.
- */
-export const isReviewed = (play: PlaySummary) => play.reviewCompletion !== undefined ? play.reviewCompletion !== null
-  : play.hasReview || !!play.reviewedAtUtc
+/** Whether a Play's review is complete, as the list views define it. Completion is explicit (decision 3). */
+export const isReviewed = (play: PlaySummary) => play.reviewCompletion !== null
 /** Whether a Play belongs to a list view, as the server selects it. */
 export const playInView = (play: PlaySummary, view: PlayView) => {
   switch (view) {
@@ -358,11 +355,9 @@ export function isPlayList(v: unknown, query: PlayListQuery): v is PlayList {
     plays.every(play => playInView(play, query.view) && (account === null || play.accountId.toLowerCase() === account))
 }
 export function isPlayCounts(v: unknown): v is PlayCounts {
-  if (!isRecord(v) || !['drafts', 'progress', 'review', 'reviewed', 'closed', 'cancelled', 'all'].every(k => isCount(v[k]))) return false
-  if (v.unresolved !== undefined && !isCount(v.unresolved)) return false
+  if (!isRecord(v) || !['drafts', 'progress', 'review', 'reviewed', 'closed', 'cancelled', 'all', 'unresolved'].every(k => isCount(v[k]))) return false
   const c = v as PlayCounts
-  const unresolved = c.unresolved ?? 0
-  return c.drafts + c.progress + c.closed + c.cancelled + unresolved === c.all && c.review + c.reviewed === c.closed + c.cancelled + unresolved
+  return c.drafts + c.progress + c.closed + c.cancelled + c.unresolved === c.all && c.review + c.reviewed === c.closed + c.cancelled + c.unresolved
 }
 
 /** Journal-wide search (Phase 2, item 13): the fields it reads, in the order a Play's first match is chosen. */

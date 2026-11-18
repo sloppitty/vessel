@@ -55,10 +55,12 @@ describe('review completion (phase 1, 1.2)', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 
-  it('reads reviewed from the explicit completion, and from the old rule only for a server without it', () => {
+  it('reads reviewed from the explicit completion only', () => {
     expect(isReviewed(summary({ status: 'closed', hasReview: true, reviewedAtUtc: '2026-10-20T10:00:00Z', reviewCompletion: null }))).toBe(false)
     expect(isReviewed(summary({ status: 'closed', hasReview: false, reviewCompletion: 'not-needed', reviewCompletedAtUtc: '2026-10-20T10:00:00Z' }))).toBe(true)
-    expect(isReviewed(summary({ status: 'closed', hasReview: true }))).toBe(true)
+    const { reviewCompletion: _, reviewCompletedAtUtc: __, ...older } = summary({ status: 'closed', hasReview: true })
+    void _; void __
+    expect(isPlaySummary(older)).toBe(false)
     expect(isPlaySummary(summary({ reviewCompletion: 'completed', reviewCompletedAtUtc: null }))).toBe(false)
     expect(isPlaySummary(summary({ reviewCompletion: 'reviewed' as never, reviewCompletedAtUtc: '2026-10-20T10:00:00Z' }))).toBe(false)
     expect(isPlayNote(note)).toBe(true)
@@ -219,7 +221,7 @@ describe('a delayed answer of the mounted Log (phase 1, 1.2)', () => {
   })
 })
 
-describe('log reads and older servers (phase 1, 1.2)', () => {
+describe('log reads (phase 1, 1.2)', () => {
   it('never lets an earlier read hide an entry a write already showed', async () => {
     let finishRead!: (notes: PlayNote[]) => void
     const api = { playNotes: vi.fn(() => new Promise<PlayNote[]>(resolve => { finishRead = resolve })),
@@ -231,13 +233,6 @@ describe('log reads and older servers (phase 1, 1.2)', () => {
     expect(await screen.findByText(note.text)).toBeInTheDocument()
     await act(async () => finishRead([]))
     expect(screen.getByText(note.text)).toBeInTheDocument()
-  })
-  it('offers no completion action when the server reports no completion field', () => {
-    const { reviewCompletion: _, reviewCompletedAtUtc: __, ...older } = summary({ status: 'closed' })
-    void _; void __
-    render(<ReviewCompletionBar summary={older} dirty={false} busy={false} onAction={vi.fn()} />)
-    expect(screen.queryByRole('button', { name: 'Complete review' })).not.toBeInTheDocument()
-    expect(screen.queryByText('This review is not complete yet.')).not.toBeInTheDocument()
   })
 })
 

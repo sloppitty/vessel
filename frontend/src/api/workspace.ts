@@ -886,7 +886,7 @@ export function createWorkspaceApi(credentials: SessionCredentials, onAuthFailur
       call(`${playPath(id)}/status`, { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify({ expectedVersion, ...request }) }),
     playHistory: (id, signal) => call(`${playPath(id)}/history`, { ...playRequest,
       validate: (v): v is PlayHistory => isPlayHistory(v) && v.statusChanges.every(change => tradingMode === 'paper'
-        ? change.source === undefined || change.source === 'owner' || change.source === 'paper' : change.source !== 'paper'),
+        ? change.source === 'owner' || change.source === 'paper' : change.source !== 'paper'),
       ...withSignal(signal) }),
     completeReview: (id, expectedVersion) => call(`${playPath(id)}/review/complete`,
       { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify({ expectedVersion }) }),

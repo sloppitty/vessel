@@ -79,7 +79,7 @@ describe('financial report mode boundaries', () => {
 
   it('does not require a discriminator on mode-neutral counts, exclusions or settings', async () => {
     const paper = createWorkspaceApi(credentialsFixture, undefined, 'paper')
-    const counts = { drafts: 0, progress: 0, review: 0, reviewed: 0, closed: 0, cancelled: 0, all: 0 }
+    const counts = { drafts: 0, progress: 0, review: 0, reviewed: 0, closed: 0, cancelled: 0, all: 0, unresolved: 0 }
     response(counts)
     await expect(paper.playCounts({})).resolves.toEqual(counts)
     const exclusions = { items: [], total: 0, offset: 0, nextOffset: null, notice: 'No excluded paper outcomes.' }
@@ -111,7 +111,7 @@ describe('mode-bound workspace requests', () => {
       [{ ...emptyReview, tradingMode: 'paper' }, () => client.review({ period: 'month', portfolio: 'all' })],
       [{ ...overviewSummaryFixture(), tradingMode: 'paper' }, () => client.overviewSummary({ groupBy: 'portfolio', period: '30', scope: 'all' })],
       [{ ...activityPage([]), tradingMode: 'paper', paperExecutionCount: 0 }, () => client.activity({ page: 1, pageSize: 25 })],
-      [{ drafts: 0, progress: 0, review: 0, reviewed: 0, closed: 0, cancelled: 0, all: 0 }, () => client.playCounts({})],
+      [{ drafts: 0, progress: 0, review: 0, reviewed: 0, closed: 0, cancelled: 0, all: 0, unresolved: 0 }, () => client.playCounts({})],
     ]
     for (const [body, read] of reads) {
       const fetch = response(body)
@@ -235,18 +235,17 @@ describe('isolated typed paper report codecs', () => {
 })
 
 describe('explicit simulated lifecycle history', () => {
-  const change = (source?: StatusChange['source']): StatusChange => ({
-    from: 'planned', to: 'open', reason: null, note: null, occurredAtUtc: '2026-10-20T12:01:00Z',
-    ...(source === undefined ? {} : { source }),
+  const change = (source: StatusChange['source']): StatusChange => ({
+    from: 'planned', to: 'open', reason: null, note: null, occurredAtUtc: '2026-10-20T12:01:00Z', source, unresolvedReason: null, evidence: null,
   })
-  const history = (source?: StatusChange['source']): PlayHistory => ({ revisions: [], statusChanges: [change(source)] })
+  const history = (source: StatusChange['source']): PlayHistory => ({ revisions: [], statusChanges: [change(source)], reviews: [] })
 
   it('preserves owner planning and explicit paper entry/exit lifecycle facts', async () => {
     const body: PlayHistory = { revisions: [], statusChanges: [
       { ...change('owner'), from: 'draft', to: 'planned' },
       change('paper'),
       { ...change('paper'), from: 'open', to: 'closed', occurredAtUtc: '2026-10-20T12:02:00Z' },
-    ] }
+    ], reviews: [] }
     expect(isPlayHistory(body)).toBe(true)
     const fetch = response(body)
     expect(await createWorkspaceApi(credentialsFixture, undefined, 'paper').playHistory(savedPlayFixture.summary.id)).toEqual(body)
@@ -265,13 +264,16 @@ describe('explicit simulated lifecycle history', () => {
       .rejects.toMatchObject({ kind: 'invalid-response' })
   })
 
-  it.each([undefined, 'owner', 'venue', 'manual'] as const)('preserves existing real history source %s', async source => {
+  it.each(['owner', 'venue', 'manual'] as const)('preserves existing real history source %s', async source => {
     const body = history(source)
     response(body)
     await expect(createWorkspaceApi(credentialsFixture).playHistory(savedPlayFixture.summary.id)).resolves.toEqual(body)
   })
 
-  it('still rejects an unknown history discriminator', () => {
-    expect(isPlayHistory({ revisions: [], statusChanges: [{ ...change(), source: 'simulated' }] })).toBe(false)
+  it('still rejects an unknown history discriminator, and a change without a source', () => {
+    expect(isPlayHistory({ revisions: [], statusChanges: [{ ...change('owner'), source: 'simulated' }], reviews: [] })).toBe(false)
+    const { source: _, ...unsourced } = change('owner')
+    void _
+    expect(isPlayHistory({ revisions: [], statusChanges: [unsourced], reviews: [] })).toBe(false)
   })
 })

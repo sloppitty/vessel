@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import type { ManualExecutions } from '@/api/diary'
-import { emptyStructuredReview, preflightCodes, type PlayRuleState, type PlayExecution, type PlayFields, type PlayList, type PlayNote, type PlaySummary, type PlayView, type SavedPlay } from '@/api/plays'
+import { emptyStructuredReview, hasStructuredReview, isEndedStatus, preflightCodes, type PlayRuleState, type PlayExecution, type PlayFields, type PlayList, type PlayNote, type PlaySummary, type PlayView, type SavedPlay } from '@/api/plays'
 import { VenuesProvider } from '@/api/venues'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { accountFixture, idleMarketStream, instrumentCatalogFixture, overviewFixture, playApiStubs, playCountsFrom, playListPage, playsFrom, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
@@ -76,7 +76,10 @@ function client(play = terminal, more: SavedPlay[] = []) {
     }),
     updatePlay: vi.fn((_id: string, fields: PlayFields & { expectedVersion: number }) => {
       current = { ...current, review: fields.review, structuredReview: fields.structuredReview ?? emptyStructuredReview(),
-        summary: { ...current.summary, version: current.summary.version + 1, hasReview: true, reviewedAtUtc: at } }
+        // Saving changed answers on an ended Play completes its review, as the server does (decision 3); text alone never does.
+        summary: { ...current.summary, version: current.summary.version + 1, hasReview: true, reviewedAtUtc: at,
+          ...(hasStructuredReview(fields.structuredReview) && isEndedStatus(current.summary.status) && current.summary.reviewCompletion === null
+            ? { reviewCompletion: 'completed' as const, reviewCompletedAtUtc: at } : {}) } }
       return Promise.resolve(current)
     }),
   }
@@ -990,7 +993,7 @@ describe('diary workspace integration', () => {
     const sent = methods.updatePlay.mock.calls[0]![1]
     expect(sent.review).toBe('Existing free text')
     await act(async () => complete({ ...terminal, structuredReview: sent.structuredReview,
-      summary: { ...terminal.summary, hasReview: true, reviewedAtUtc: at, version: 3 } } as SavedPlay))
+      summary: { ...terminal.summary, hasReview: true, reviewedAtUtc: at, reviewCompletion: 'completed' as const, reviewCompletedAtUtc: at, version: 3 } } as SavedPlay))
     expect(screen.getByLabelText('Lesson')).toHaveValue('First lesson extended')
     expect(screen.getByRole('button', { name: /^Save$/ })).toBeEnabled()
     await user.click(screen.getByRole('button', { name: /^Save$/ }))
@@ -1014,10 +1017,10 @@ describe('diary workspace integration', () => {
     await waitFor(() => expect(methods.updatePlay).toHaveBeenCalledOnce())
     expect(methods.updatePlay.mock.calls[0]![1].plan.entries).toEqual([])
   })
-  it('filters terminal Cancelled and retrospective Plays by saved review state, including reviewedAtUtc', async () => {
+  it('filters terminal Cancelled and retrospective Plays by review completion, including one kept from before completion', async () => {
     const pending = { ...terminal, review: '' }
     const reviewed: SavedPlay = { ...terminal, summary: { ...terminal.summary, id: otherId, title: 'Imported review', origin: 'retrospective',
-      status: 'closed', hasReview: false, reviewedAtUtc: at } }
+      status: 'closed', hasReview: false, reviewedAtUtc: at, reviewCompletion: 'legacy', reviewCompletedAtUtc: at } }
     const { api } = client(pending, [reviewed])
     render(<Harness api={api} />)
     const user = userEvent.setup()
@@ -1047,7 +1050,7 @@ describe('diary workspace integration', () => {
     expect(screen.getByRole('button', { name: 'New play' })).toBeDisabled()
     expect(reads(methods, 'review')).toBe(1)
     const reviewed = { ...pending, structuredReview: sent.structuredReview ?? emptyStructuredReview(),
-      summary: { ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at } }
+      summary: { ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at, reviewCompletion: 'completed' as const, reviewCompletedAtUtc: at } }
     serve(methods, [reviewed.summary])
     await act(async () => saving.resolve(reviewed))
     await waitFor(() => expect(reads(methods, 'review')).toBe(2))
@@ -1085,7 +1088,7 @@ describe('diary workspace integration', () => {
     await waitFor(() => expect(reads(methods)).toBe(1))
     const signal = methods.plays.mock.calls[0]![1]!
     const reviewed = { ...pending, structuredReview: sent.structuredReview ?? emptyStructuredReview(),
-      summary: { ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at } }
+      summary: { ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at, reviewCompletion: 'completed' as const, reviewCompletedAtUtc: at } }
     serve(methods, [reviewed.summary])
     await act(async () => saving.resolve(reviewed))
     await user.click(screen.getByRole('tab', { name: /^Reviewed/ }))
@@ -1136,7 +1139,7 @@ describe('diary workspace integration', () => {
     await user.click(screen.getByRole('tab', { name: /^Needs review/ }))
     expect(await screen.findByRole('button', { name: `Open ${closed.summary.title}` })).toBeDisabled()
     // A concurrent review completes after the queue read; the retry still returns its cached v4 document.
-    const reviewed = { ...closed.summary, version: 6, hasReview: true, reviewedAtUtc: at }
+    const reviewed = { ...closed.summary, version: 6, hasReview: true, reviewedAtUtc: at, reviewCompletion: 'completed' as const, reviewCompletedAtUtc: at }
     serve(methods, [reviewed])
     await act(async () => replay.resolve(ledger(4)))
     expect(current.saved?.summary.version).toBe(5)
@@ -1162,7 +1165,7 @@ describe('diary workspace integration', () => {
     await user.click(screen.getByRole('tab', { name: /^Needs review/ }))
     await screen.findByRole('button', { name: `Open ${pending.summary.title}` })
     // The server committed, but no saved document reaches the editor.
-    serve(methods, [{ ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at }])
+    serve(methods, [{ ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at, reviewCompletion: 'completed' as const, reviewCompletedAtUtc: at }])
     await act(async () => saving.reject(new ApiError('unavailable', 'Review response lost.')))
     await waitFor(() => expect(reads(methods, 'review')).toBe(2))
     expect(current.saved?.summary.version).toBe(2)
@@ -1241,7 +1244,7 @@ describe('diary workspace integration', () => {
     const { api } = client()
     api.playHistory = vi.fn(async () => ({
       revisions: [], statusChanges: [], reviews: [{ number: 1, occurredAtUtc: at, review: 'Old free text',
-        structuredReview: { adherence: 'not-applicable' as const, mistakeTag: null, lesson: 'Kept evidence', nextAction: 'Wait' } }],
+        structuredReview: { adherence: 'not-applicable' as const, mistakeTag: null, lesson: 'Kept evidence', nextAction: 'Wait' }, action: 'edited' as const }],
     }))
     render(<Harness api={api} initial={sessionFor(terminal)} />)
     await userEvent.click(screen.getByRole('button', { name: 'History' }))
@@ -1541,7 +1544,7 @@ describe('diary mutation ownership in the actual shell', () => {
 describe('Plays review wave request regressions', () => {
   it('memoizes draft checks across unrelated renders and recomputes them for real edits', async () => {
     const { api } = client(planned)
-    api.playHistory = vi.fn().mockResolvedValue({ revisions: [], statusChanges: [] })
+    api.playHistory = vi.fn().mockResolvedValue({ revisions: [], statusChanges: [], reviews: [] })
     const dirty = vi.spyOn(savedChecks, 'isDirty')
     const changed = vi.spyOn(savedChecks, 'planChanged')
     try {
@@ -1632,7 +1635,7 @@ describe('Plays review wave request regressions', () => {
     const pending = deferred<SavedPlay>()
     methods.updatePlay.mockReturnValueOnce(pending.promise)
     api.changePlayStatus = vi.fn().mockReturnValue(pending.promise)
-    api.playHistory = vi.fn().mockResolvedValue({ revisions: [], statusChanges: [] })
+    api.playHistory = vi.fn().mockResolvedValue({ revisions: [], statusChanges: [], reviews: [] })
     render(<Harness api={api} initial={sessionFor(planned)} />)
     const user = userEvent.setup()
     const historyButton = screen.getByRole('button', { name: 'History' })

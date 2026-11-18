@@ -9,7 +9,7 @@ import { pickInstrument } from '@/test/instrument'
 import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api/workspace'
 import type { PlayExecution, PlayFields, PlayHistory, PlayListQuery, PlayStatus, PlaySummary, SavedEvidence, SavedPlay, StatusRequest } from '@/api/plays'
 import { ApiError } from '@/api/errors'
-import { accountFixture, idleMarketStream, instrumentCatalogFixture, playCountsFrom, playsFrom, portfolioFixture, savedPlayFixture, sizingFixture } from '@/test/workspace-fixture'
+import { accountFixture, idleMarketStream, instrumentCatalogFixture, playCountsFrom, playsFrom, portfolioFixture, savedPlayFixture, sizingFixture, summaryDefaults } from '@/test/workspace-fixture'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { PlaysPage } from './PlaysPage'
 import { createDraft } from './draft'
@@ -54,11 +54,11 @@ function fakeServer() {
       const play: SavedPlay = {
         summary: { id, title: fields.title.trim(), status: 'draft', accountId: fields.accountId, venueId: 'manual', instrument: fields.instrument,
           instrumentSource: fields.instrumentSource, direction: fields.plan.direction, planRevision: 0, version: 1, cancelReason: null,
-          createdAtUtc: now(), updatedAtUtc: now(), plannedAtUtc: null, endedAtUtc: null, hasReview: !!fields.review.trim() },
-        plan: fields.plan, drawings: fields.drawings, review: fields.review,
+          createdAtUtc: now(), updatedAtUtc: now(), plannedAtUtc: null, endedAtUtc: null, hasReview: !!fields.review.trim(), ...summaryDefaults },
+        plan: fields.plan, drawings: fields.drawings, review: fields.review, structuredReview: fields.structuredReview ?? null,
       }
       plays.set(id, play)
-      history.set(id, { revisions: [], statusChanges: [] })
+      history.set(id, { revisions: [], statusChanges: [], reviews: [] })
       return Promise.resolve(play)
     }),
     updatePlay: vi.fn((id: string, fields: PlayFields & { expectedVersion: number; revisionReason?: string }) => {
@@ -69,7 +69,7 @@ function fakeServer() {
       if (planChanged && play.summary.status !== 'draft') {
         if (!fields.revisionReason) return Promise.reject(new ApiError('http', 'Say why the plan changed.', 409))
         revision += 1
-        history.get(id)!.revisions.push({ number: revision, status: play.summary.status, reason: fields.revisionReason, createdAtUtc: now(), plan: fields.plan })
+        history.get(id)!.revisions.push({ number: revision, status: play.summary.status, reason: fields.revisionReason, createdAtUtc: now(), plan: fields.plan, preflight: null })
       }
       const updated = { ...bump(play, { title: fields.title.trim(), instrument: fields.instrument, planRevision: revision, hasReview: !!fields.review.trim() }),
         plan: fields.plan, drawings: fields.drawings, review: fields.review }
@@ -82,9 +82,9 @@ function fakeServer() {
       const to: PlayStatus = request.status
       const record = history.get(id)!
       record.statusChanges.push({ from: play.summary.status, to, reason: request.status === 'cancelled' ? request.reason : null,
-        note: request.status === 'cancelled' ? request.note ?? null : null, occurredAtUtc: now() })
+        note: request.status === 'cancelled' ? request.note ?? null : null, occurredAtUtc: now(), source: 'owner', unresolvedReason: null, evidence: null })
       const planned = play.summary.status === 'draft' && to === 'planned'
-      if (planned) record.revisions.push({ number: 1, status: 'planned', reason: 'Planned', createdAtUtc: now(), plan: play.plan })
+      if (planned) record.revisions.push({ number: 1, status: 'planned', reason: 'Planned', createdAtUtc: now(), plan: play.plan, preflight: null })
       const updated = bump(play, { status: to, ...(planned ? { planRevision: 1, plannedAtUtc: now() } : {}),
         ...(request.status === 'cancelled' ? { cancelReason: request.reason, endedAtUtc: now() } : {}) })
       plays.set(id, updated)
@@ -908,7 +908,7 @@ describe('managed stops on the page', () => {
   it('saves a stop at 105 on an Open long filled at 100 with a reason and shows +5 locked in (acceptance)', async () => {
     const server = fakeServer()
     server.plays.set(open.summary.id, open)
-    server.history.set(open.summary.id, { revisions: [], statusChanges: [] })
+    server.history.set(open.summary.id, { revisions: [], statusChanges: [], reviews: [] })
     const playExecution = filledExecution(server)
     const draft = draftFromSaved(open, [])
     const user = userEvent.setup()
@@ -1003,7 +1003,7 @@ describe('filled entries on the page', () => {
   it('keeps a stop saved beyond an entry whose fill was unlinked saveable, as a warning, and checks a new one', async () => {
     const server = fakeServer()
     server.plays.set(open.summary.id, open)
-    server.history.set(open.summary.id, { revisions: [], statusChanges: [] })
+    server.history.set(open.summary.id, { revisions: [], statusChanges: [], reviews: [] })
     // The entry's link still shows a fill that contradicts it; the execution counts no filled quantity for the entry.
     const contradicting = { id: '00000000-0000-4000-8000-0000000000e1', role: 'entry' as const, entryId: 'entry-1', levelId: null, state: 'linked' as const,
       source: 'owner' as const, filledQuantity: '1', order: null, otherPlay: null, fills: [{ sourceFillId: 'x', direction: 'Close Short', price: '100', quantity: '1', fee: '0',
@@ -1090,7 +1090,7 @@ describe('Duplicate to Draft (phase 1, 1.6c)', () => {
   it('opens the current plan as a Draft whose managed stop beyond the entry is flagged until it is moved', async () => {
     const server = fakeServer()
     server.plays.set(open.summary.id, open)
-    server.history.set(open.summary.id, { revisions: [], statusChanges: [] })
+    server.history.set(open.summary.id, { revisions: [], statusChanges: [], reviews: [] })
     const user = userEvent.setup()
     render(<Page api={venueApi(server)} accounts={[venue]} initial={openSession(open)} />)
     await user.click(await screen.findByRole('button', { name: 'Duplicate' }))

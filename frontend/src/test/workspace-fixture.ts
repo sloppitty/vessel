@@ -32,8 +32,14 @@ export const overviewFixture: Overview = {
     totalBalanceUsd: '1250.123456', balanceAccountCount: 1, balanceCoverage: 'complete', enabledAccountCount: 1 },
 }
 
+/** The Play summary fields the API always sends (`PlayService.Summary`), for a planned real Play whose review is not complete. */
+export const summaryDefaults = {
+  tradingMode: 'real', origin: 'planned', reviewedAtUtc: null, reviewCompletion: null, reviewCompletedAtUtc: null,
+} satisfies Partial<PlaySummary>
+
 export const savedPlayFixture: SavedPlay = {
   summary: {
+    ...summaryDefaults,
     id: '22222222-3333-4444-5555-666666666666', title: 'Saved idea', status: 'draft',
     accountId: accountFixture.id, venueId: 'manual', instrument: 'BTC', instrumentSource: 'manual', direction: 'long',
     planRevision: 0, version: 1, cancelReason: null, hasReview: false,
@@ -44,7 +50,7 @@ export const savedPlayFixture: SavedPlay = {
     entries: [{ id: 'entry-1', name: 'Entry 1', color: '#b9c9e4', share: '100', price: '', stops: [], targets: [] }],
     notes: { thesis: '', invalidation: '', strategy: '', evidence: '' },
   },
-  drawings: {}, review: '',
+  drawings: {}, review: '', structuredReview: null,
 }
 
 export const instrumentCatalogFixture: InstrumentCatalog = {
@@ -98,8 +104,10 @@ export function playListPage(plays: PlaySummary[], query: PlayListQuery): PlayLi
 /** A fake `plays` endpoint over these plays. */
 export const playsFrom = (plays: PlaySummary[]): WorkspaceApi['plays'] => query => Promise.resolve(playListPage(plays, query))
 /** A fake `playCounts` endpoint over these plays. */
-export const playCountsFrom = (plays: PlaySummary[]): WorkspaceApi['playCounts'] => query => Promise.resolve(
-  Object.fromEntries(playViews.map(view => [view, playListPage(plays, { ...query, view }).totalCount])) as PlayCounts)
+export const playCountsFrom = (plays: PlaySummary[]): WorkspaceApi['playCounts'] => query => Promise.resolve({
+  ...Object.fromEntries(playViews.map(view => [view, playListPage(plays, { ...query, view }).totalCount])),
+  unresolved: playListPage(plays.filter(play => play.status === 'unresolved'), { ...query, view: 'all' }).totalCount,
+} as PlayCounts)
 
 /** Saved-play API stubs: no saved plays, and every write rejects unless a test overrides it. */
 /** No loss limit set and nothing closed (Phase 2, item 10b): no line, no flag and no pre-flight check. */
@@ -119,7 +127,7 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
     // Tests outside Overview keep this unrelated read pending unless they supply a summary fixture.
     overviewSummary: vi.fn().mockImplementation(() => new Promise(() => {})),
     plays: vi.fn(playsFrom([])), playCounts: vi.fn(playCountsFrom([])), searchJournal: vi.fn(unexpected), play: vi.fn(unexpected), createPlay: vi.fn(unexpected), updatePlay: vi.fn(unexpected),
-    changePlayStatus: vi.fn(unexpected), playHistory: vi.fn().mockResolvedValue({ revisions: [], statusChanges: [] }),
+    changePlayStatus: vi.fn(unexpected), playHistory: vi.fn().mockResolvedValue({ revisions: [], statusChanges: [], reviews: [] }),
     nextActions: vi.fn().mockResolvedValue([]),
     completeReview: vi.fn(unexpected), reopenReview: vi.fn(unexpected), noReviewNeeded: vi.fn(unexpected),
     declareUnresolved: vi.fn(unexpected), returnToOpen: vi.fn(unexpected),

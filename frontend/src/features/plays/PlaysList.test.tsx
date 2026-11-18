@@ -21,7 +21,7 @@ const ended = (n: number, status: 'closed' | 'cancelled', fields: Partial<PlaySu
   play(n, { status, endedAtUtc: new Date(Date.parse('2026-10-09T00:00:00Z') - n * 60_000).toISOString(), ...fields })
 const library = [
   play(1, { title: 'Draft breakout' }), play(2, { title: 'Planned BTC', status: 'planned' }), play(3, { title: 'Open ETH', status: 'open', instrument: 'ETH' }),
-  ended(4, 'closed', { title: 'Closed loser' }), ended(5, 'closed', { title: 'Closed reviewed', hasReview: true }), ended(6, 'cancelled', { title: 'Cancelled idea' }),
+  ended(4, 'closed', { title: 'Closed loser' }), ended(5, 'closed', { title: 'Closed reviewed', hasReview: true, reviewCompletion: 'completed', reviewCompletedAtUtc: '2026-10-09T00:00:00Z' }), ended(6, 'cancelled', { title: 'Cancelled idea' }),
 ]
 function client(plays: PlaySummary[] = library, overrides: Partial<WorkspaceApi> = {}) {
   return { ...createWorkspaceApi(credentialsFixture), ...playApiStubs(), marketStream: idleMarketStream,

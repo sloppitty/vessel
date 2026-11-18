@@ -66,7 +66,7 @@ describe('soft loss limits (Phase 2, item 10b)', () => {
   it('lists the cooldown note in the plan history', async () => {
     const history: PlayHistory = { statusChanges: [], revisions: [{ number: 1, status: 'planned', reason: '', createdAtUtc: '2026-10-09T12:00:00Z',
       plan: { direction: 'long', sizingMode: 'margin', size: '100', leverage: '1', budgetOverride: null, entries: [], notes: { thesis: '', invalidation: '', management: '', review: '' } },
-      preflight: [{ code: 'loss-limit', outcome: 'skipped', note: 'Walk away until Monday.' }] }] } as unknown as PlayHistory
+      preflight: [{ code: 'loss-limit', outcome: 'skipped', note: 'Walk away until Monday.' }] }], reviews: [] } as unknown as PlayHistory
     render(<HistoryDialog api={{ playHistory: vi.fn().mockResolvedValue(history) } as unknown as WorkspaceApi} playId="one" onClose={vi.fn()} />)
     expect(await screen.findByText("Pre-flight: today's and this week's losses within your loss limits · not met.")).toBeInTheDocument()
     expect(screen.getByText('Cooldown note: Walk away until Monday.')).toBeInTheDocument()

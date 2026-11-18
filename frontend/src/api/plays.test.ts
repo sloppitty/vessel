@@ -10,7 +10,7 @@ const base = savedPlayFixture.summary
 const play = (n: number, fields: Partial<PlaySummary> = {}): PlaySummary =>
   ({ ...base, id: `${String(n).padStart(8, '0')}-3333-4444-5555-666666666666`, ...fields })
 const closed = (n: number, fields: Partial<PlaySummary> = {}) => play(n, { status: 'closed', endedAtUtc: '2026-10-06T12:00:00Z', ...fields })
-const counts: PlayCounts = { drafts: 2, progress: 3, review: 4, reviewed: 1, closed: 3, cancelled: 2, all: 10 }
+const counts: PlayCounts = { drafts: 2, progress: 3, review: 4, reviewed: 1, closed: 3, cancelled: 2, all: 10, unresolved: 0 }
 const other = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 
 describe('Plays list API', () => {
@@ -37,7 +37,7 @@ describe('Plays list API', () => {
   })
   it.each([
     ['another view', { view: 'reviewed' }],
-    ['a reviewed play under Needs review', { plays: [closed(1, { hasReview: true }), closed(2)] }],
+    ['a reviewed play under Needs review', { plays: [closed(1, { hasReview: true, reviewCompletion: 'completed', reviewCompletedAtUtc: '2026-10-06T12:00:00Z' }), closed(2)] }],
     ['an open play under Needs review', { plays: [play(1, { status: 'open' }), closed(2)] }],
     ['a short page', { plays: [closed(1)] }],
     ['a page past the end', { page: 3 }],
@@ -92,9 +92,12 @@ describe('level rebind API (0.5b)', () => {
 })
 
 describe('Unresolved Plays in the API guards (phase 1, 1.3a)', () => {
-  const counts: PlayCounts = { drafts: 1, progress: 1, review: 1, reviewed: 1, closed: 1, cancelled: 1, all: 4 }
-  it('adds unresolved Plays to the ended totals, and still reads counts from older servers', () => {
+  const counts: PlayCounts = { drafts: 1, progress: 1, review: 1, reviewed: 1, closed: 1, cancelled: 1, all: 4, unresolved: 0 }
+  it('adds unresolved Plays to the ended totals, and requires their count', () => {
     expect(isPlayCounts(counts)).toBe(true)
+    const { unresolved: _, ...older } = counts
+    void _
+    expect(isPlayCounts(older)).toBe(false)
     expect(isPlayCounts({ ...counts, unresolved: 1, all: 5, review: 2 })).toBe(true)
     // An unresolved Play missing from either total is an invalid reply.
     expect(isPlayCounts({ ...counts, unresolved: 1 })).toBe(false)
@@ -116,7 +119,7 @@ describe('Unresolved Plays in the API guards (phase 1, 1.3a)', () => {
     expect(isPlayHistory(history({ ...declared, evidence: { ...evidence, entered: '1e3' } }))).toBe(false)
     expect(isPlayHistory(history({ ...declared, evidence: { ...evidence, open: '-1' } }))).toBe(true)
     expect(isPlayHistory({ ...history(declared), reviews: [{ number: 1, occurredAtUtc: '2026-10-20T11:00:00Z', review: '',
-      structuredReview: { adherence: null, mistakeTag: null, lesson: '', nextAction: '' }, action: 'cleared' }] })).toBe(true)
+      structuredReview: { adherence: null, mistakeTag: null, lesson: '', nextAction: '', rule: null }, action: 'cleared' }] })).toBe(true)
     // A return to Open names the declaration it undoes, with no facts of its own; a whole declare, return, settle history reads.
     const returned = { from: 'unresolved', to: 'open', reason: null, note: 'Relinked.', occurredAtUtc: '2026-10-20T12:00:00Z', source: 'owner',
       unresolvedReason: 'shared-close', evidence: null }

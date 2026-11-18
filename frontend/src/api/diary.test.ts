@@ -5,6 +5,7 @@ import { isSavedPlay, isPlayPlan, emptyStructuredReview, type SavedPlay } from '
 import { createDraft } from '@/features/plays/draft'
 import { planFromDraft } from '@/features/plays/saved'
 import { credentialsFixture } from '@/test/identity-fixture'
+import { summaryDefaults } from '@/test/workspace-fixture'
 
 const id = '00000000-0000-4000-8000-000000000001'
 const at = '2026-10-13T10:00:00Z'
@@ -15,8 +16,8 @@ const input: ManualExecutionInput = {
 function saved(): SavedPlay {
   return { summary: { id, title: 'Manual', status: 'planned', accountId: id, venueId: 'manual', instrument: 'BTC',
     instrumentSource: 'manual', direction: 'long', planRevision: 1, version: 2, cancelReason: null,
-    createdAtUtc: at, updatedAtUtc: at, plannedAtUtc: at, endedAtUtc: null, hasReview: false },
-    plan: planFromDraft(createDraft()), drawings: {}, review: '' }
+    createdAtUtc: at, updatedAtUtc: at, plannedAtUtc: at, endedAtUtc: null, hasReview: false, ...summaryDefaults },
+    plan: planFromDraft(createDraft()), drawings: {}, review: '', structuredReview: null }
 }
 const record = { ...input, id, createdAtUtc: at, updatedAtUtc: at }
 const ledger = () => ({ play: saved(), records: [record],
@@ -49,7 +50,9 @@ describe('diary boundary', () => {
     const play = saved()
     expect(isSavedPlay(play)).toBe(true)
     expect(isSavedPlay({ ...play, structuredReview: null })).toBe(true)
-    expect(isSavedPlay({ ...play, structuredReview: emptyStructuredReview() })).toBe(true)
+    expect(isSavedPlay({ ...play, structuredReview: { ...emptyStructuredReview(), rule: null } })).toBe(true)
+    // ReviewAnswers always writes its rule answer, null when unanswered.
+    expect(isSavedPlay({ ...play, structuredReview: emptyStructuredReview() })).toBe(false)
     const plan = { ...play.plan, entries: [], leverage: '0' }
     expect(isPlayPlan(plan)).toBe(false)
     expect(isSavedPlay({ ...play, plan })).toBe(false)
