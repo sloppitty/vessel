@@ -259,7 +259,7 @@ public sealed class ServerDiagnosticTests
         }
     }
 
-    private sealed class ThrowingStore(Exception error) : IWorkspaceStore
+    private sealed class ThrowingStore(Exception error) : IWorkspaceStoreDefaults
     {
         private readonly MemoryWorkspaceStore other = new(Guid.NewGuid());
         public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => throw error;

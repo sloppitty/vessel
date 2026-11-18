@@ -6,7 +6,7 @@ using Vessel.Domain.Workspace;
 
 namespace Vessel.Tests;
 
-internal sealed class MemoryWorkspaceStore(Guid ownerId) : IWorkspaceStore
+internal sealed class MemoryWorkspaceStore(Guid ownerId) : IWorkspaceStoreDefaults
 {
     public bool RejectOwnerWideReads { get; set; }
     public bool RejectActivityReads { get; set; }
