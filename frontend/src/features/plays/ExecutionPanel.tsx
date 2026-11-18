@@ -1,6 +1,6 @@
 import { tickOf, type PriceStep } from '@/lib/price-step'
 import { price } from '@/lib/format'
-import { allocationReasonLabels, type AllocateFill, type AllocationPlay, type ExecutionOrder, type LinkOrder, type PlayExecution, type PlaySummary, type RebindLevel, type SharedFill, type SharedFillsPage, type VenueRisk } from '@/api/plays'
+import { allocationReasonLabels, type AllocateFill, type AllocationPlay, type LinkOrder, type OfferedOrder, type PlayExecution, type PlaySummary, type RebindLevel, type SharedFill, type SharedFillsPage, type VenueRisk } from '@/api/plays'
 import { errorMessage } from '@/api/errors'
 import { useState } from 'react'
 import { AllocationDialog } from './AllocationDialog'
@@ -120,10 +120,9 @@ export function ExecutionPanel({ execution, error, busy, stale = false, entries,
   // Monitor records and watches name this Play's levels ("Entry 1 stop") rather than only the order's role.
   const recordLevel = (key: unknown) => { const level = levelKey(key); return level ? levelName(entries, level, origin) : null }
   const watchLevel = (watch: { linkId: string }) => { const link = execution.links.find(item => item.id === watch.linkId); return link ? levelName(entries, link, origin) : null }
-  const orderList = (orders: readonly ExecutionOrder[]) => <ul className="execution-list">{orders.map(order => {
+  const orderList = (orders: readonly OfferedOrder[]) => <ul className="execution-list">{orders.map(order => {
     // Only roles the order's side and flags allow; a contradicting fill is refused by the server.
-    const allowed = options.filter(item => orderFitsRole(order, item.request.role, direction) &&
-      (order.roles?.includes(item.request.role) ?? true))
+    const allowed = options.filter(item => orderFitsRole(order, item.request.role, direction) && order.roles.includes(item.request.role))
     const chosen = choices[order.orderId] ?? ''
     const option = allowed.find(item => item.value === chosen)
     return <li key={order.orderId}>

@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from './workspace'
-import { isPlayCounts, isPlayHistory, playCountsPath, playInView as isPlayInView, playListPath, type PlayCounts, type PlayListQuery, type PlaySummary } from './plays'
+import { isPlayCounts, isPlayExecution, isPlayHistory, playCountsPath, playInView as isPlayInView, playListPath, type PlayCounts, type PlayExecution, type PlayListQuery, type PlaySummary } from './plays'
 import { accountFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { credentialsFixture } from '@/test/identity-fixture'
+import recorded from '@/test/contracts/monitor-api.json?raw'
 
 function response(value: unknown) { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(value), { status: 200 }))) }
 afterEach(() => vi.unstubAllGlobals())
@@ -128,5 +129,19 @@ describe('Unresolved Plays in the API guards (phase 1, 1.3a)', () => {
       .toBe(true)
     expect(isPlayHistory(history({ ...returned, evidence }))).toBe(false)
     expect(isPlayHistory(history({ ...returned, from: 'open', to: 'closed' }))).toBe(false)
+  })
+})
+
+describe('orders offered to link (#112)', () => {
+  const execution = (JSON.parse(recorded) as { playExecution: PlayExecution }).playExecution
+  const linked = execution.links[0]!.order!
+  it('requires the roles the server states on unlinked and earlier orders, never on linked ones', () => {
+    // The recorded linked orders carry no roles (WhenWritingNull).
+    expect(linked.roles).toBeUndefined()
+    expect(isPlayExecution(execution)).toBe(true)
+    const offered = { ...linked, roles: ['entry'] }
+    expect(isPlayExecution({ ...execution, unlinkedOrders: [offered], earlierOrders: [offered] })).toBe(true)
+    expect(isPlayExecution({ ...execution, unlinkedOrders: [linked] })).toBe(false)
+    expect(isPlayExecution({ ...execution, earlierOrders: [linked] })).toBe(false)
   })
 })

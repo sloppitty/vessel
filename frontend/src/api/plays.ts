@@ -422,9 +422,14 @@ export interface ExecutionOrder {
   status: 'open' | 'filled' | 'triggered' | 'canceled' | 'rejected' | 'other'
   venueStatus: string
   statusAtUtc: string
-  /** For an order offered to link: the roles the server would accept on this Play, by its side, mechanics and fills. */
+  /**
+   * For an order offered to link: the roles the server would accept on this Play, by its side, mechanics and fills. The API
+   * omits it (WhenWritingNull) on linked orders.
+   */
   roles?: LinkRole[]
 }
+/** An order offered to link (unlinked or placed earlier): the server always states its roles; only linked orders omit them. */
+export type OfferedOrder = ExecutionOrder & { roles: LinkRole[] }
 export interface ExecutionFill {
   sourceFillId: string
   direction: string
@@ -494,12 +499,12 @@ export interface PlayExecution {
   entries: EntryProgress[]
   links: OrderLink[]
   suggestions: OrderLink[]
-  unlinkedOrders: ExecutionOrder[]
+  unlinkedOrders: OfferedOrder[]
   /**
    * Compatible orders placed in the lookback before the Play was created and not linked to any Play (Phase 2, item 4), for
    * the owner to link by hand; the automatic matcher never reaches back.
    */
-  earlierOrders: ExecutionOrder[]
+  earlierOrders: OfferedOrder[]
   /** The account's current venue position on the Play's contract with its reported risk context (Phase 2, item 8a). */
   venuePosition: VenueRisk | null
   /** The first risk context the venue reported at or after the Play's first entry fill. */
@@ -627,6 +632,7 @@ const executionOrder = (v: unknown): v is ExecutionOrder => isRecord(v) && isTex
   isTimestamp(v.placedAtUtc, timeLength) && ['open', 'filled', 'triggered', 'canceled', 'rejected', 'other'].includes(v.status as string) &&
   isText(v.venueStatus, 64) && isTimestamp(v.statusAtUtc, timeLength) &&
   (v.roles === undefined || Array.isArray(v.roles) && v.roles.length <= 4 && v.roles.every(r => ['entry', 'stop', 'target', 'exit'].includes(r as string)))
+const offeredOrder = (v: unknown): v is OfferedOrder => executionOrder(v) && v.roles !== undefined
 const executionFill = (v: unknown): v is ExecutionFill => isRecord(v) && isText(v.sourceFillId, 128) && isText(v.direction, 128) &&
   isPlainDecimal(v.price) && isPlainDecimal(v.quantity) && isPlainDecimal(v.fee) && isText(v.feeToken, 64) && isPlainDecimal(v.closedPnlUsd) && isTimestamp(v.occurredAtUtc, timeLength) &&
   (v.side === 'buy' || v.side === 'sell') && ['open', 'close', 'flip', 'unknown'].includes(v.positionEffect as string) &&
@@ -672,8 +678,8 @@ export const isPlayExecution = (v: unknown): v is PlayExecution => isRecord(v) &
   isCount(v.sharedFillCount) && isNullOr(v.sharedFillsNextOffset, isCount) &&
   Array.isArray(v.entries) && v.entries.every(isEntryProgress) && isNullOr(v.receipt, isPlayReceipt) &&
   Array.isArray(v.links) && v.links.every(orderLink) && Array.isArray(v.suggestions) && v.suggestions.every(orderLink) &&
-  Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(executionOrder) &&
-  Array.isArray(v.earlierOrders) && v.earlierOrders.length <= 20 && v.earlierOrders.every(executionOrder) &&
+  Array.isArray(v.unlinkedOrders) && v.unlinkedOrders.every(offeredOrder) &&
+  Array.isArray(v.earlierOrders) && v.earlierOrders.length <= 20 && v.earlierOrders.every(offeredOrder) &&
   isNullOr(v.venuePosition, isVenueRisk) && isNullOr(v.riskAtFirstFill, isVenueRisk) &&
   isOptionalPlayFunding(v.funding) && isText(v.notice, 1000) &&
   Array.isArray(v.issues) && v.issues.every(issue => isText(issue, 1000)) &&

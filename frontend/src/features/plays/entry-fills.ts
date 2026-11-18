@@ -15,8 +15,10 @@ import type { EntryFills } from './position-risk-summary'
  * A venue Play: the fills of its linked entry orders that do not contradict the entry side, as the server counts them (an
  * entry buys for a long and opens; a close or flip contradicts it). Each entry's average fill is their exact quantity ×
  * price over their quantity, not the server's average rounded to 28 places, so a stop at that rounded figure keeps its
- * true sign. Only when the listed fills do not add up to the entry's reported filled quantity (an older server) is the
- * rounded average used, and the entry is marked so the Summary does not claim a sign within that rounding.
+ * true sign. Only when the listed fills do not add up to the entry's reported filled quantity is the rounded average used,
+ * and the entry is marked so the Summary does not claim a sign within that rounding. That is real: the server counts only
+ * this Play's line of a fill allocated between Plays (Phase 2, item 11), which a linked order lists whole or, for a flip's
+ * entry line, not at all.
  */
 export function executionFills(execution: PlayExecution, direction: 'long' | 'short'): EntryFills {
   const entrySide = direction === 'long' ? 'buy' : 'sell'

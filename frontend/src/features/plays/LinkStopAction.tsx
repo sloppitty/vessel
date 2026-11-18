@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link2 } from 'lucide-react'
 import type { MonitorDiscrepancy } from '@/api/monitor'
-import type { ExecutionOrder, LinkOrder } from '@/api/plays'
+import type { LinkOrder, OfferedOrder } from '@/api/plays'
 import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
 import type { DraftEntry } from './draft'
@@ -13,7 +13,7 @@ import { describeOrder, isStopMechanism, levelOptions } from './execution'
  * the server checks the link like any other, and a price away from the level is then a drift to rebind.
  */
 export function LinkStopAction({ discrepancy, orders, entries, direction, busy, blocked, onLink, tick }: {
-  discrepancy: MonitorDiscrepancy; orders: readonly ExecutionOrder[]; entries: readonly DraftEntry[]; direction: 'long' | 'short'
+  discrepancy: MonitorDiscrepancy; orders: readonly OfferedOrder[]; entries: readonly DraftEntry[]; direction: 'long' | 'short'
   busy: boolean; onLink: (request: LinkOrder) => void | Promise<void>
   /** Why linking waits, for example unsaved plan edits whose levels the server does not know yet. */
   blocked?: string | undefined
@@ -23,9 +23,9 @@ export function LinkStopAction({ discrepancy, orders, entries, direction, busy, 
   // Only an open incident asks for a stop; a resolved or dismissed record is history (Sol round 1 on #43).
   if (discrepancy.state !== 'open' || discrepancy.kind !== 'protection.missing' && discrepancy.kind !== 'protection.short') return null
   const exitSide = direction === 'long' ? 'sell' : 'buy'
-  // The server states which roles each offered order can take, its retained fills included; older servers do not.
+  // The server states which roles each offered order can take, its retained fills included.
   const stops = orders.filter(order => order.status === 'open' && order.side === exitSide && isStopMechanism(order) &&
-    (order.roles?.includes('stop') ?? true))
+    order.roles.includes('stop'))
   const options = levelOptions(entries, false).filter(option => option.request.role === 'stop')
   if (!stops.length || !options.length) return null
   return <div className="link-stop">{stops.map(order => {
