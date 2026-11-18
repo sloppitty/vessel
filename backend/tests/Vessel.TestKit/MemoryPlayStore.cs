@@ -5,7 +5,7 @@ using Vessel.Domain.Plays;
 
 namespace Vessel.Tests;
 
-internal sealed class MemoryPlayStore(Guid owner) : IPlayStore
+internal sealed class MemoryPlayStore(Guid owner) : IPlayStoreDefaults
 {
     public List<Account> Accounts { get; } = [];
     public List<Play> Plays { get; } = [];
