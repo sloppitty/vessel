@@ -1088,9 +1088,10 @@ class Upgrade(Check):
         self.upgrade = None
 
     def compose(self, *args, project=None, **kwargs):
-        # The operator directory's .env selects the files, profile and version, as for an operator's bare commands.
+        # The operator directory's .env selects the files, profile and version, as for an operator's bare commands
+        # run there: Compose resolves COMPOSE_FILE's relative paths against the working directory.
         return run('docker', 'compose', '--project-directory', str(self.temp), '-p', self.name, *args,
-                   env=verification_environment(), **kwargs)
+                   cwd=self.temp, env=verification_environment(), **kwargs)
 
     def prepare(self):
         files = ['compose.yaml', 'compose.tls.yaml', 'compose.paper.yaml']
