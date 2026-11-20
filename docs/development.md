@@ -231,7 +231,7 @@ Outside `Development`, the API refuses to start unless `ConnectionStrings__Vesse
 
 October 1, 2026: the owner requested the actual frontend/backend preview on the LAN and explicitly requested a development-only authentication token.
 
-October 25, 2026: Token sign-in was removed. The token override below is historical: the preview now needs a wallet bound to its owner (`pnpm dev:identity bind-wallet …` with the preview's environment), and `pnpm dev:lan` allows sign-in from `http://10.1.0.219:5180`. Remove `Vessel__Auth__Token` from `.env.lan-preview`; the API refuses to start while it is set.
+October 25, 2026: Token sign-in was removed. The preview now needs a wallet bound to its owner (`pnpm dev:identity bind-wallet …` with the preview's environment), and `pnpm dev:lan` allows sign-in from `http://10.1.0.219:5180`. `.env.lan-preview` must not set `Vessel__Auth__Token`; the API refuses to start while it is set.
 
 - Application URL: **http://10.1.0.219:5180/**
 - Frontend listener: `10.1.0.219:5180`, not all interfaces.
@@ -240,9 +240,9 @@ October 25, 2026: Token sign-in was removed. The token override below is histori
 - User service: `vessel-lan-preview.service`.
 - A subnet-specific NixOS firewall rule allows TCP 5180 on `ens18` from `10.1.0.0/24` to `10.1.0.219`.
 
-The separate preview token override lives in ignored `.env.lan-preview`, mode 600. It is used only by the API process, not compiled into the frontend or copied into documentation. The original `.env` token and database password are unchanged and were not disclosed. The owner received the preview token explicitly for development access; future secret disclosure is not authorized by that exception.
+The preview's private settings live in ignored `.env.lan-preview`, mode 600. They are used only by the server processes, not compiled into the frontend or copied into documentation. The development token the owner received on October 1 no longer signs anyone in, and that exception never authorized further secret disclosure.
 
-The preview is HTTP development access, not a production deployment. Anyone given the token can use this single-owner development workspace. Do not reuse the preview token for production or expose this service to the internet.
+The preview is HTTP development access, not a production deployment. Whoever controls the bound wallet can use this development workspace. Do not reuse the preview's settings for production or expose this service to the internet.
 
 ```sh
 systemctl --user status vessel-lan-preview.service
@@ -252,7 +252,7 @@ systemctl --user stop vessel-lan-preview.service
 
 The service is transient and is not configured to return after a host reboot. The firewall rule also disappears after a firewall reload/reboot. Stopping the service does not delete the database volume.
 
-To recreate the service on this machine after it is unloaded, retain the private preview environment file containing the token override, `Vessel_DEV_HOST=10.1.0.219`, and a `PATH` containing the user-installed pnpm shim:
+To recreate the service on this machine after it is unloaded, retain the private preview environment file containing `Vessel_DEV_HOST=10.1.0.219`, and a `PATH` containing the user-installed pnpm shim:
 
 ```sh
 systemd-run --user --unit=vessel-lan-preview \
@@ -285,7 +285,7 @@ Verification included actual LAN page/liveness HTTP 200, missing/wrong bearer AP
 
 The original `10.1.0.219:5180` frontend still served an October 4 revision when checked on October 5. The current agent host (`10.1.0.230`) has no authorized SSH access to update that service.
 
-An additional transient user service, `vessel-sl-tp-preview.service`, serves the latest-main frontend plus the SL/TP display correction at **`http://10.1.0.230:5180/`** from the `t3code-dcce987b` worktree. Its server-only `VESSEL_API_TARGET=http://10.1.0.219:5180` forwards protected API requests through the existing preview. Connect with the existing API token; no token, database configuration or private environment was copied. Stop it with `systemctl --user stop vessel-sl-tp-preview.service`.
+An additional transient user service, `vessel-sl-tp-preview.service`, serves the latest-main frontend plus the SL/TP display correction at **`http://10.1.0.230:5180/`** from the `t3code-dcce987b` worktree. Its server-only `VESSEL_API_TARGET=http://10.1.0.219:5180` forwards protected API requests through the existing preview. It was used with the API token, which no longer exists, and has not been checked with wallet sign-in; no token, database configuration or private environment was copied. Stop it with `systemctl --user stop vessel-sl-tp-preview.service`.
 
 This is a frontend comparison preview, **not an upgrade of the original backend**. Newer API capabilities such as sizing suggestions still require updating and migrating the original backend with authorized access. The database, original service and firewall were left unchanged. SL/TP controls were browser-verified separately with a disposable, clearly labeled fixture that made no account/API requests.
 

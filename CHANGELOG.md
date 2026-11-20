@@ -159,6 +159,9 @@
   API endpoint must be classified as real-only or mode-aware.
 - `deploy/README.md` keeps only what the operator command does not cover; the manual upgrade
   and backup command blocks point to `./vessel`.
+- `AGENTS.md` now holds only current rules. Dated history moved verbatim to
+  `docs/decisions.md`, area rules to `backend/`, `frontend/` and `deploy/AGENTS.md`, checked
+  by `scripts/check_decision_log.py`.
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and

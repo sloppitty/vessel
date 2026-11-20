@@ -6,17 +6,15 @@ advice. A chart reaching a price never proves that an order filled.
 
 ## Which version this describes
 
-This is the October 18, 2026 multi-user stack, rebased onto integrated D1 `a336bb3`
-(A1 identity core, B1 scopes/events, A2 identity accounts, B2 monitor/limits,
-C1 isolation and D1 frontend) on main `43ebaa0`, including Notification Hub N1–N4,
-order identity and the October 17 backend pass, plus P4 operator/developer documentation and
-isolated release/browser verification. See the
+This describes `main` as of release 0.4.2 (see the [changelog](../CHANGELOG.md)
+and [release notes](releases/v0.4.2.md)): multi-user wallet sign-in with device
+pairing, the background Play monitor, the in-app Notification Hub, the paper
+playground and the trust, learning-loop and risk work of Phases 0 to 2. It is
+not a claim that an installation has been deployed or migrated. The multi-user
+D1–D12 defaults are adopted recommendations and remain owner-overridable; see the
 [delivery state and exact evidence](architecture/multi-user-state.md).
-These are checkout/verification states, not a claim that a branch has merged,
-a release has been published or an installation has been deployed/migrated.
-The D1–D12 defaults are adopted recommendations and remain owner-overridable.
-October 25, 2026: the owner removed Token sign-in; wallet sign-in is the only
-way in, so installations must bind the owner's wallet before upgrading.
+Wallet sign-in is the only way in, so installations that used the API token must
+bind the owner's wallet before upgrading.
 §10 is still **not signed off**: the real-wallet EOA/non-mainnet compatibility
 check remains owner-pending;
 Firefox **146.0.1 Wallet writes PASS** through the official Playwright 1.58.2
@@ -150,9 +148,11 @@ venue capabilities rather than assuming every venue provides the same data.
 | Manual | Owner-entered account and instrument | Optional account value and explicit Play executions; no venue imports | Placeholder; uploaded evidence remains usable |
 
 Lighter history excludes fee-bearing or unverified-fee fills and fills without
-reported PnL, with a coverage notice. Importing an account does not refresh its
-history automatically. A missing order token does not erase successful public
-balance/fill reads, but order completeness and linking remain limited.
+reported PnL; each omission leaves a durable marker and a coverage notice.
+Liquidations, deleverages and settlements are kept as unscored forced events.
+Adding or importing an account queues one initial bounded refresh. A missing
+order token does not erase successful public balance/fill reads, but order
+completeness and linking remain limited.
 
 Canonical instrument keys preserve multipliers, such as `1000PEPE`, while native
 venue contract IDs remain available for matching and trade links.
@@ -188,17 +188,18 @@ The [runtime diagram](diagrams/app-status.md#runtime-and-trust-boundaries),
 
 | Trigger | Current behaviour |
 | --- | --- |
-| Add/import account | Creates account records. Discovery is read-only; there is no automatic history refresh. |
+| Add/import account | Creates account records, then the browser queues one bounded refresh of each new account. Discovery is read-only. |
 | Refresh account / Refresh all | Reads bounded venue state and fills, then retains available orders. Refresh all runs sequentially with progress and one result summary. This path does not assign orders to Plays. |
-| Open a tracked Play / Check execution | Checks venue orders and fills, reconciles links and derives status. While that Play editor is active, the browser repeats checks every 60 seconds when the tab is visible. |
+| Monitor worker / Check | The monitor worker checks active Plays and resting linked exits against venue orders and fills every 10 minutes by default, reconciles links and derives status. Check asks it for a run now, with a 60-second cooldown after each run. The browser reads committed events and stored state; it does not poll venues. |
 | Open/switch/refresh chart | Loads or revalidates bounded candle windows. Manual Refresh bypasses reusable cached data. |
 | Live chart enabled | Hyperliquid data flows through one shared backend WebSocket and authenticated server-sent events. Reconnects can fall back to 15-second market-data polling. Hidden tabs pause the stream. |
 | Save, record/correct execution, confirm retrospective, review | Explicit owner writes. Version checks or preview fingerprints reject stale changes rather than silently overwriting them. |
 | Open Overview, Activity or Review | Reads retained facts and derives reports. Reporting does not sync a venue, assign executions or change a Play's status. |
 
-The market stream and execution polling are separate. Neither is an
-always-running background Play monitor. Closing the browser stops its polling.
-See [execution polling](../frontend/src/features/plays/usePlayExecution.ts),
+The market stream and the monitor are separate: chart observations never drive
+Play status. The monitor keeps running when the browser is closed.
+See [the monitor plan](architecture/play-monitor-plan.md),
+[execution reads](../frontend/src/features/plays/usePlayExecution.ts),
 [live market handling](../frontend/src/features/market/useLiveMarket.ts) and
 [cache rules](architecture/performance-plan.md).
 
