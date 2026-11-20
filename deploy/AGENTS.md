@@ -21,6 +21,11 @@ The top-level [`AGENTS.md`](../AGENTS.md) applies first. The operator guide is
 - Never bake secrets into images or expose plain HTTP to the internet.
 - The API never migrates at startup. An upgrade the owner authorizes runs
   `migrate` as an explicit one-shot step.
+- Upgrades, backups, restores and rollbacks of an installation run through the
+  `deploy/vessel` operator command (the
+  [`vessel-upgrade` skill](../.agents/skills/vessel-upgrade/SKILL.md)), and only
+  when the owner asks for that deployment. Each release with migrations or
+  post-steps ships `docs/releases/vX.Y.Z.upgrade.json`.
 - Upgrades stop every API and worker host and replica (including
   `worker-notifications`) and back up both schemas first. There is no rolling
   upgrade; rollback restores the pre-upgrade backup. A restore resets identity,

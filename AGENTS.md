@@ -46,7 +46,7 @@ Never:
 | `docs/architecture/` | Feature contracts (`*-contract.md`, plans) and verified progress (`*-state.md`) |
 | `docs/decisions.md` | Owner decisions, newest first, with what superseded what |
 | `docs/design/`, `prototype/` | Design records and the disposable prototype; prototype interactions are not production features |
-| `.agents/skills/` | The `vessel-release` skill |
+| `.agents/skills/` | The `vessel-release` and `vessel-upgrade` skills |
 
 ## Build, run and test
 
