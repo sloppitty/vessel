@@ -3,6 +3,7 @@ using Vessel.Application.MarketData;
 using Vessel.Application.Venues;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Application.Activity;
 
@@ -65,7 +66,7 @@ internal static class OperationUnrealized
         // the market whose native ID is the canonical key (as fills, positions and the catalogue do), so a partition that
         // funding resolved to that native name (Hyperliquid `BTC`, `xyz:GOLD`) keeps it. Paper has no native partition and
         // is simulated on the canonical key's current market.
-        var matches = context.Value.Where(c => c.ContractId == o.ContractId && (o.TradingMode == "paper" ||
+        var matches = context.Value.Where(c => c.ContractId == o.ContractId && (o.TradingMode == TradingMode.Paper ||
                 (o.ContractKey.IsNative ? (c.VenueContractId ?? c.ContractId) == o.ContractKey.Identity : c.VenueContractId is null)))
             .Take(2).ToList();
         if (matches.Count != 1 || !decimal.TryParse(matches[0].MarkPrice, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var mark) ||

@@ -21,6 +21,7 @@ using Vessel.Persistence;
 using Vessel.Persistence.Events;
 using Vessel.Persistence.Events.Subscriptions;
 using Wolverine;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -168,7 +169,7 @@ public sealed class VesselEventTransportTests
     {
         await using var broker = await BrokerScope.CreateAsync();
         await broker.ProvisionAsync();
-        var account = new Account(Guid.NewGuid(), broker.Owner, "hyperliquid", "Synthetic");
+        var account = new Account(Guid.NewGuid(), broker.Owner, "hyperliquid", "Synthetic", TradingMode.Real);
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
         await using (var seed = broker.Database.Context(broker.Owner))
         {

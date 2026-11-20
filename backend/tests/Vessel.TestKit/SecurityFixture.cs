@@ -4,6 +4,7 @@ using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Credentials;
 using Vessel.Infrastructure.Venues.Hyperliquid;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -22,7 +23,7 @@ internal static class SecurityFixture
     public static AesGcmCredentialVault Vault() => new(new() { ActiveKeyId = "v1", Keys = new() { ["v1"] = Key } });
     public static Account Account(Guid owner, string source = "123")
     {
-        var account = new Account(Guid.NewGuid(), owner, Venue.Id, "Index account"); account.Configure(null, null, null, source); return account;
+        var account = new Account(Guid.NewGuid(), owner, Venue.Id, "Index account", TradingMode.Real); account.Configure(null, null, null, source); return account;
     }
     public static AccountCredentialService Service(Guid owner, IWorkspaceStore accounts, IAccountCredentialStore credentials, ICredentialVault vault, SecurityVerifier? verifier = null, Vessel.Application.Ownership.IUnitOfWork? unitOfWork = null) =>
         new(accounts, credentials, new CoreOwner(owner), Registry(verifier ?? new()), vault, Clock, unitOfWork ?? TestUnitOfWork.None, MonitorServerState.Reads(time: Clock));

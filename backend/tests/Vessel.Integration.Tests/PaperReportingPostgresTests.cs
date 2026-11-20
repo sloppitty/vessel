@@ -12,6 +12,7 @@ using Vessel.Domain.Paper;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Markets;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -78,7 +79,7 @@ public sealed class PaperReportingPostgresTests
             var report = (await client.GetFromJsonAsync<ReviewDto>(
                 $"/api/review?period=all&tradingMode=paper&positions={positions}&minPlays=1000"))!;
             Assert.Equal(0, positionReads);
-            Assert.Equal(("paper", "30", 1, 0), (report.TradingMode, report.Metrics.Net, report.Metrics.Count, report.Metrics.Positions));
+            Assert.Equal((TradingMode.Paper, "30", 1, 0), (report.TradingMode, report.Metrics.Net, report.Metrics.Count, report.Metrics.Positions));
             Assert.Equal(("exclude", false), (report.Positions!.Mode, report.Positions.Included));
             Assert.Null(report.Positions.Positions); Assert.Null(report.Positions.Omitted);
             var row = Assert.Single(report.Plays);
@@ -94,7 +95,7 @@ public sealed class PaperReportingPostgresTests
         Assert.Empty(empty.Plays); Assert.Null(empty.Metrics.Net);
         var realReport = (await client.GetFromJsonAsync<ReviewDto>(path))!;
         Assert.Equal(1, positionReads);
-        Assert.Equal(("real", "30", 2, 1), (realReport.TradingMode, realReport.Metrics.Net, realReport.Metrics.Count, realReport.Metrics.Positions));
+        Assert.Equal((TradingMode.Real, "30", 2, 1), (realReport.TradingMode, realReport.Metrics.Net, realReport.Metrics.Count, realReport.Metrics.Positions));
         Assert.True(realReport.Positions!.Included);
         Assert.All(realReport.Plays, p => Assert.Equal("imported", p.ExecutionSource));
         Assert.Contains(realReport.Plays, p => p.Id == actual.Play.Id);
@@ -137,7 +138,7 @@ public sealed class PaperReportingPostgresTests
         Assert.Empty((await review.GetAsync(new(Period: "all", TradingMode: "paper"), default)).Plays);
         Assert.Contains(Assert.Single((await review.ExclusionsAsync(new(Period: "all", TradingMode: "paper"), default)).Items)
             .Reasons, r => r.Contains("suspended", StringComparison.OrdinalIgnoreCase));
-        var sized = await sizing.GetAsync(default, "paper");
+        var sized = await sizing.GetAsync(TradingMode.Paper, default);
         Assert.Equal("paper", sized.Record.Source);
         Assert.Equal(0, sized.Record.ClosedPlays);
         Assert.Empty(sized.Record.Recent);
@@ -194,12 +195,12 @@ public sealed class PaperReportingPostgresTests
         var paperActivity = await activity.PageAsync(new(TradingMode: "paper"), default);
         Assert.Equal((1, 0, 2), (paperActivity.TotalCount, paperActivity.RetainedFillCount, paperActivity.PaperExecutionCount));
         Assert.Equal([paper.Account.Id], paperActivity.Facets.AccountIds);
-        var expanded = await activity.FillsAsync(paper.Account.Id, paper.Facts.Play.Id.ToString(), default, "paper");
+        var expanded = await activity.FillsAsync(paper.Account.Id, paper.Facts.Play.Id.ToString(), TradingMode.Paper, default);
         Assert.Empty(expanded.Fills); Assert.Equal(2, expanded.PaperExecutions!.Count);
-        var mismatched = await Assert.ThrowsAsync<ProblemException>(() => activity.FillsAsync(paper.Account.Id, paper.Facts.Play.Id.ToString(), default));
+        var mismatched = await Assert.ThrowsAsync<ProblemException>(() => activity.FillsAsync(paper.Account.Id, paper.Facts.Play.Id.ToString(), TradingMode.Real, default));
         Assert.Equal(404, mismatched.StatusCode);
-        Assert.Equal("activity", (await sizing.GetAsync(default)).Record.Source);
-        var paperSizing = await sizing.GetAsync(default, "paper");
+        Assert.Equal("activity", (await sizing.GetAsync(TradingMode.Real, default)).Record.Source);
+        var paperSizing = await sizing.GetAsync(TradingMode.Paper, default);
         Assert.Equal(("paper", "20"), (paperSizing.Record.Source, paperSizing.Record.Recent.Single().NetResultUsd));
         Assert.Empty((await review.GetAsync(new(Period: "all"), default)).Options.Portfolios);
         var paperReview = await review.GetAsync(new(Period: "all", TradingMode: "paper"), default);
@@ -208,14 +209,14 @@ public sealed class PaperReportingPostgresTests
         var exclusions = await review.ExclusionsAsync(new(Period: "all", TradingMode: "paper"), default);
         Assert.Contains(Assert.Single(exclusions.Items).Reasons, r => r.Contains("frozen unresolved"));
         Assert.Equal([paper.Portfolio.Id.ToString()], paperReview.Options.Portfolios.Select(p => p.Id));
-        var realOverview = await overview.GetAsync(null, "all", null, default);
-        var paperOverview = await overview.GetAsync(null, "all", null, default, "paper");
+        var realOverview = await overview.GetAsync(null, "all", null, TradingMode.Real, default);
+        var paperOverview = await overview.GetAsync(null, "all", null, TradingMode.Paper, default);
         Assert.Equal(1, realOverview.Totals.AccountCount);
         Assert.Equal((1, "4020", "20", 0, 2), (paperOverview.Totals.AccountCount, paperOverview.Totals.Balance.AmountUsd,
             paperOverview.Totals.RealizedResult.AmountUsd, paperOverview.Totals.ImportedFillCount, paperOverview.Totals.PaperExecutionCount));
 
         var before = JsonSerializer.Serialize(realActivity);
-        var oldSizing = JsonSerializer.Serialize(await sizing.GetAsync(default));
+        var oldSizing = JsonSerializer.Serialize(await sizing.GetAsync(TradingMode.Real, default));
         var oldOverview = JsonSerializer.Serialize(realOverview);
         await unit.ExecuteAsync(async () =>
         {
@@ -226,8 +227,8 @@ public sealed class PaperReportingPostgresTests
             return true;
         }, default);
         Assert.Equal(before, JsonSerializer.Serialize(await activity.PageAsync(new(), default)));
-        Assert.Equal(oldSizing, JsonSerializer.Serialize(await sizing.GetAsync(default)));
-        Assert.Equal(oldOverview, JsonSerializer.Serialize(await overview.GetAsync(null, "all", null, default)));
+        Assert.Equal(oldSizing, JsonSerializer.Serialize(await sizing.GetAsync(TradingMode.Real, default)));
+        Assert.Equal(oldOverview, JsonSerializer.Serialize(await overview.GetAsync(null, "all", null, TradingMode.Real, default)));
         Assert.Empty((await activity.PageAsync(new(TradingMode: "paper"), default)).Operations);
     }
 
@@ -245,10 +246,10 @@ public sealed class PaperReportingPostgresTests
             await foreign.SaveChangesAsync();
         }
         await using var db = database.Context(owner);
-        var facts = await new ActivityStore(db).ReadAsync(null, "paper", default);
+        var facts = await new ActivityStore(db).ReadAsync(null, TradingMode.Paper, default);
         Assert.Empty(facts.Accounts); Assert.Empty(facts.PaperPlays);
-        Assert.Empty(await new SizingStore(db, TestUnitOfWork.For(db)).ClosedPlaysAsync("paper", default));
-        var problem = await Assert.ThrowsAsync<ProblemException>(() => new ActivityStore(db).ReadAsync(paper.Account.Id, "paper", default));
+        Assert.Empty(await new SizingStore(db, TestUnitOfWork.For(db)).ClosedPlaysAsync(TradingMode.Paper, default));
+        var problem = await Assert.ThrowsAsync<ProblemException>(() => new ActivityStore(db).ReadAsync(paper.Account.Id, TradingMode.Paper, default));
         Assert.Equal(404, problem.StatusCode);
     }
 }

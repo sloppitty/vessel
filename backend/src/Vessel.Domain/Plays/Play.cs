@@ -49,7 +49,7 @@ public sealed class Play : IOwned
     public Guid Id { get; private set; }
     public Guid OwnerId { get; private set; }
     public Guid AccountId { get; private set; }
-    public string TradingMode { get; private set; } = Common.TradingMode.Real;
+    public TradingMode TradingMode { get; private set; }
     public string VenueId { get; private set; } = null!;
     /// <summary>Venue contract ID or manual label; null while a Draft has no instrument.</summary>
     public string? ContractId { get; private set; }
@@ -112,6 +112,12 @@ public sealed class Play : IOwned
         Version = 1;
         CreatedAtUtc = now;
         UpdatedAtUtc = now;
+    }
+
+    /// <summary>Refuses a paper Play with a 409 that names what it cannot do.</summary>
+    public void RequireReal(string refusal)
+    {
+        if (TradingMode != TradingMode.Real) throw new DomainRuleException(refusal);
     }
 
     public bool IsEditable => Status is PlayStatus.Draft or PlayStatus.Planned or PlayStatus.Paused or PlayStatus.Open;
@@ -242,8 +248,7 @@ public sealed class Play : IOwned
     public static Play Retrospective(Guid id, Account account, PerpetualInstrument instrument, string emptyPlan,
         DateTimeOffset closedAt, DateTimeOffset now, string title)
     {
-        if (account.TradingMode != Common.TradingMode.Real)
-            throw new DomainRuleException("Simulated executions cannot become retrospective actual executions.");
+        account.RequireReal("Simulated executions cannot become retrospective actual executions.");
         var play = new Play(id, account, instrument, InstrumentSource.Venue, emptyPlan, now);
         play.Origin = PlayOrigin.Retrospective;
         play.Status = PlayStatus.Closed;
@@ -255,13 +260,13 @@ public sealed class Play : IOwned
         return play;
     }
 
-    public PlayStatusChange RecordManualOpen(DateTimeOffset now) => TradingMode == Common.TradingMode.Real && Status == PlayStatus.Planned
+    public PlayStatusChange RecordManualOpen(DateTimeOffset now) => TradingMode == TradingMode.Real && Status == PlayStatus.Planned
         ? Transition(PlayStatus.Open, null, "Owner-recorded manual entry, not a venue observation.", now)
         : throw new DomainRuleException("Only a planned Play can open from manual facts.");
 
     public PlayStatusChange RecordManualClose(DateTimeOffset closedAt, DateTimeOffset now)
     {
-        if (TradingMode != Common.TradingMode.Real) throw new DomainRuleException("Paper Plays cannot contain actual manual executions.");
+        RequireReal("Paper Plays cannot contain actual manual executions.");
         if (Status != PlayStatus.Open) throw new DomainRuleException("Only an open Play can close from manual facts.");
         var change = Transition(PlayStatus.Closed, null, "Owner-recorded manual ledger is flat.", now);
         EndedAtUtc = closedAt;
@@ -270,7 +275,7 @@ public sealed class Play : IOwned
 
     public void RecordManualCorrection(DateTimeOffset? closedAt, DateTimeOffset now)
     {
-        if (TradingMode != Common.TradingMode.Real) throw new DomainRuleException("Paper Plays cannot contain actual manual executions.");
+        RequireReal("Paper Plays cannot contain actual manual executions.");
         if (Status == PlayStatus.Closed) EndedAtUtc = closedAt ?? throw new DomainRuleException("A closed manual ledger must stay closed.");
         Touch(now);
     }
@@ -281,7 +286,7 @@ public sealed class Play : IOwned
     /// </summary>
     public void RecordFillAllocation(DateTimeOffset now)
     {
-        if (TradingMode != Common.TradingMode.Real) throw new DomainRuleException("Paper Plays use simulated executions, not actual fills.");
+        RequireReal("Paper Plays use simulated executions, not actual fills.");
         if (Status is not (PlayStatus.Planned or PlayStatus.Paused or PlayStatus.Open or PlayStatus.Unresolved))
             throw new DomainRuleException("Only a planned, paused, open or unresolved Play takes a new part of a fill.");
         Touch(now);
@@ -351,7 +356,7 @@ public sealed class Play : IOwned
     public PlayStatusChange DeclareUnresolved(UnresolvedReason reason, string note, string evidence, DateTimeOffset now)
     {
         if (Status != PlayStatus.Open) throw new DomainRuleException("Only an open Play can be declared unresolved.");
-        if (TradingMode == Common.TradingMode.Paper)
+        if (TradingMode == TradingMode.Paper)
             throw new DomainRuleException("A paper Play's simulation holds what it cannot settle; it is never declared unresolved.");
         if (!Enum.IsDefined(reason)) throw new DomainValidationException("Unknown unresolved reason.");
         if (string.IsNullOrWhiteSpace(note)) throw new DomainValidationException("Say what happened. The note is kept with the declaration.");
@@ -392,7 +397,7 @@ public sealed class Play : IOwned
     /// <summary>Only explicit paper facts can advance a simulated Play; no venue or manual provenance is assigned.</summary>
     public PlayStatusChange? ApplyPaperExecutionState(bool hasEntry, bool fullyClosed, DateTimeOffset now)
     {
-        if (TradingMode != Common.TradingMode.Paper)
+        if (TradingMode != TradingMode.Paper)
             throw new DomainRuleException("Paper execution state is only valid for paper Plays.");
         if (fullyClosed && hasEntry && Status == PlayStatus.Open)
         {
@@ -419,8 +424,8 @@ public sealed class Play : IOwned
     private PlayStatusChange Transition(PlayStatus to, CancelReason? reason, string? note, DateTimeOffset now,
         StatusChangeSource source = StatusChangeSource.Owner)
     {
-        if (source == StatusChangeSource.Paper && TradingMode != Common.TradingMode.Paper ||
-            source == StatusChangeSource.Venue && TradingMode != Common.TradingMode.Real)
+        if (source == StatusChangeSource.Paper && TradingMode != TradingMode.Paper ||
+            source == StatusChangeSource.Venue && TradingMode != TradingMode.Real)
             throw new DomainRuleException("Execution provenance must match the Play's trading mode.");
         var change = new PlayStatusChange(this, Status, to, reason, note, now, source);
         Status = to;

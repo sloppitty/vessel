@@ -16,7 +16,7 @@ public sealed class PaperLedgerEntry : IOwned
 {
     public Guid Id { get; private set; }
     public Guid OwnerId { get; private set; }
-    public string TradingMode { get; private set; } = "paper";
+    public TradingMode TradingMode { get; private set; } = TradingMode.Paper;
     public Guid AccountId { get; private set; }
     public Guid? PlayId { get; private set; }
     public Guid? ExecutionId { get; private set; }
@@ -47,7 +47,7 @@ public sealed class PaperExecution : IOwned
     public int ModelVersion { get; private set; } = 1;
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }
-    public string TradingMode { get; private set; } = "paper";
+    public TradingMode TradingMode { get; private set; } = TradingMode.Paper;
     public Guid AccountId { get; set; }
     public Guid PlayId { get; set; }
     public string EntryId { get; set; } = null!;
@@ -69,7 +69,7 @@ public sealed class PaperSimulation : IOwned
 {
     public Guid PlayId { get; set; }
     public Guid OwnerId { get; set; }
-    public string TradingMode { get; private set; } = "paper";
+    public TradingMode TradingMode { get; private set; } = TradingMode.Paper;
     public Guid AccountId { get; set; }
     public string State { get; set; } = "waiting";
     public DateTimeOffset? CheckedAtUtc { get; set; }
@@ -119,7 +119,7 @@ public sealed class PaperPlanActivation : IOwned
 {
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }
-    public string TradingMode { get; private set; } = "paper";
+    public TradingMode TradingMode { get; private set; } = TradingMode.Paper;
     public Guid AccountId { get; set; }
     public Guid PlayId { get; set; }
     public int PlanVersion { get; set; }
@@ -132,7 +132,7 @@ public sealed class PaperReservation : IOwned
 {
     public Guid PlayId { get; set; }
     public Guid OwnerId { get; set; }
-    public string TradingMode { get; private set; } = "paper";
+    public TradingMode TradingMode { get; private set; } = TradingMode.Paper;
     public Guid AccountId { get; set; }
     public decimal AmountUsd { get; set; }
 }

@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Vessel.Application.Venues;
 using Vessel.Infrastructure.Venues.Hyperliquid;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -13,7 +14,7 @@ public sealed partial class HyperliquidAdapterIntegrationTests : HyperliquidAdap
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
-        var account = new Vessel.Domain.Accounts.Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var account = new Vessel.Domain.Accounts.Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
         account.Configure(null, Address, null);
         var play = new Vessel.Domain.Plays.Play(Guid.NewGuid(), account, new Vessel.Domain.Markets.PerpetualInstrument("hyperliquid", "BTC"),
             Vessel.Domain.Plays.InstrumentSource.Venue, Vessel.Application.Plays.PlayDocuments.Serialize(TestPlays.Plan()), DateTimeOffset.UtcNow.AddMinutes(-2));

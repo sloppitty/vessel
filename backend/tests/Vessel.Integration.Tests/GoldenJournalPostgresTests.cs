@@ -4,6 +4,7 @@ using Vessel.Application.Venues;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
 using Vessel.Persistence.Search;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -47,7 +48,7 @@ public sealed class GoldenJournalPostgresTests
     {
         var unit = TestUnitOfWork.For(db);
         var list = await new PlayService(new PlayStore(db, unit, new GoldenClock()), new MemoryObjectStore(), new GoldenClock(), unit)
-            .ListAsync("all", null, null, null, "100", default);
+            .ListAsync("all", null, null, null, "100", TradingMode.Real, default);
         return list.Plays.ToDictionary(p => GoldenJournalChecks.Name(j, p.Id), p => p.Outcome!);
     }
 

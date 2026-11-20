@@ -11,6 +11,7 @@ using Vessel.Domain.Workspace;
 using Vessel.Infrastructure.Venues;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 using Vessel.Infrastructure.Venues.Lighter;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -252,7 +253,7 @@ public sealed class LighterRobinhoodTests
         Assert.StartsWith(Rh.HistoryNotice, result.HistoryNotice);
         Assert.All(handler.Requests, r => Assert.StartsWith("https://api.rh.lighter.xyz/api/v1/", r));
 
-        var mainnetAccount = new Account(Guid.NewGuid(), Guid.NewGuid(), "lighter", "Mainnet");
+        var mainnetAccount = new Account(Guid.NewGuid(), Guid.NewGuid(), "lighter", "Mainnet", TradingMode.Real);
         mainnetAccount.Configure(null, null, null, Source);
         var refused = await Assert.ThrowsAsync<VenueReadException>(() => reader.ReadAsync(mainnetAccount, default));
         Assert.Equal("An enabled Lighter · Robinhood account is required.", refused.Message);

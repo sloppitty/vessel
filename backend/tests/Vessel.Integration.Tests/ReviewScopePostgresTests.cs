@@ -8,6 +8,7 @@ using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -22,7 +23,7 @@ public sealed class ReviewScopePostgresTests
     {
         public Task<SizingSettings?> SettingsAsync(CancellationToken ct) => inner.SettingsAsync(ct);
         public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct) => inner.ClosedPlaysAsync(ct);
-        public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, CancellationToken ct) => inner.ClosedPlaysAsync(tradingMode, ct);
+        public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(TradingMode tradingMode, CancellationToken ct) => inner.ClosedPlaysAsync(tradingMode, ct);
         public Task<int> UnresolvedPlaysAsync(CancellationToken ct) => inner.UnresolvedPlaysAsync(ct);
         public Task<List<ImportedOrder>> OrdersAsync(IReadOnlyCollection<OrderKey> orders, CancellationToken ct) => inner.OrdersAsync(orders, ct);
         public void Add(SizingSettings settings) => inner.Add(settings);
@@ -34,8 +35,8 @@ public sealed class ReviewScopePostgresTests
     {
         public Task<SizingSettings?> SettingsAsync(CancellationToken ct) => inner.SettingsAsync(ct);
         public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct) => inner.ClosedPlaysAsync(ct);
-        public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, CancellationToken ct) => inner.ClosedPlaysAsync(tradingMode, ct);
-        public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, IReadOnlyCollection<Guid> accountIds, string? instrument,
+        public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(TradingMode tradingMode, CancellationToken ct) => inner.ClosedPlaysAsync(tradingMode, ct);
+        public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(TradingMode tradingMode, IReadOnlyCollection<Guid> accountIds, string? instrument,
             CancellationToken ct) => inner.ClosedPlaysAsync(tradingMode, ct);
         public Task<int> UnresolvedPlaysAsync(CancellationToken ct) => inner.UnresolvedPlaysAsync(ct);
         public Task<List<ImportedOrder>> OrdersAsync(IReadOnlyCollection<OrderKey> orders, CancellationToken ct) => inner.OrdersAsync(orders, ct);
@@ -55,7 +56,7 @@ public sealed class ReviewScopePostgresTests
     private static async Task<Seeded> SeedAsync(CoreDatabase database)
     {
         var f = new ReviewFixture();
-        var swing = new Portfolio(Guid.NewGuid(), f.Owner, "Swing");
+        var swing = new Portfolio(Guid.NewGuid(), f.Owner, "Swing", TradingMode.Real);
         f.Portfolios.Add(swing);
         var main = f.Account("Main", swing.Id);
         var second = f.Account("Second", swing.Id);
@@ -126,8 +127,8 @@ public sealed class ReviewScopePostgresTests
         return fills.CountAsync(f => !db.OrderLinks.Any(l => l.AccountId == f.AccountId && l.State == OrderLinkState.Linked &&
                 db.Orders.Any(o => o.OwnerId == l.OwnerId && o.AccountId == l.AccountId && o.Id == l.ImportedOrderId &&
                     o.ContractId == f.ContractId && o.ExternalOrderId == f.ExternalOrderId) &&
-                db.Plays.Any(p => p.Id == l.PlayId && p.TradingMode == "real" && p.ContractId == f.ContractId)) &&
-            !db.FillAllocations.Any(a => a.FillId == f.Id && a.Lines.Any(l => db.Plays.Any(p => p.Id == l.PlayId && p.TradingMode == "real"))));
+                db.Plays.Any(p => p.Id == l.PlayId && p.TradingMode == TradingMode.Real && p.ContractId == f.ContractId)) &&
+            !db.FillAllocations.Any(a => a.FillId == f.Id && a.Lines.Any(l => db.Plays.Any(p => p.Id == l.PlayId && p.TradingMode == TradingMode.Real))));
     }
 
     private static string Json(object value) => JsonSerializer.Serialize(value, value.GetType());

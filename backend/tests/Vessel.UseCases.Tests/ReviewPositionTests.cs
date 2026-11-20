@@ -4,6 +4,7 @@ using Vessel.Application.Review;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Sizing;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -172,7 +173,7 @@ public sealed class ReviewPositionTests
     public async Task Activity_source_skips_positions_whose_fills_belong_to_a_play()
     {
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "risex", "Venue");
+        var account = new Account(Guid.NewGuid(), owner, "risex", "Venue", TradingMode.Real);
         var start = ReviewClock.Now.AddDays(-1);
         var fills = new List<ImportedFill>();
         ImportedFill Fill(int minute, string side, string effect, decimal price, decimal pnl) => new()

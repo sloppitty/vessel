@@ -15,6 +15,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Monitoring;
 using Vessel.Domain.Plays;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -57,10 +58,10 @@ public sealed partial class ExecutionPostgresTests
         Assert.Equal(PlayReceipts.UnresolvedNote, (await h.Execution.GetAsync(id, default)).Receipt!.EstimatedRReason);
 
         // Needs review and All list it; Closed does not. Counts add up.
-        async Task<IReadOnlyList<Guid>> Ids(string view) => (await h.Plays.ListAsync(view, null, null, null, null, default)).Plays.Select(p => p.Id).ToList();
+        async Task<IReadOnlyList<Guid>> Ids(string view) => (await h.Plays.ListAsync(view, null, null, null, null, TradingMode.Real, default)).Plays.Select(p => p.Id).ToList();
         Assert.Equal((id, id), (Assert.Single(await Ids("review")), Assert.Single(await Ids("all"))));
         Assert.Empty(await Ids("closed"));
-        var counts = await h.Plays.CountsAsync(null, null, default);
+        var counts = await h.Plays.CountsAsync(null, null, TradingMode.Real, default);
         Assert.Equal((1, 1, 0, 1), (counts.Unresolved, counts.Review, counts.Closed, counts.All));
 
         // No result: Review excludes it with its declaration, and sizing counts it beside the ladder only.
@@ -71,7 +72,7 @@ public sealed partial class ExecutionPostgresTests
         Assert.Equal((id, "shared-close", "Closed with another play's position.", "1"),
             (exclusion.PlayId, exclusion.Unresolved!.Reason, exclusion.Unresolved.Note, exclusion.Unresolved.Evidence!.Entered));
         Assert.Contains("a shared close", Assert.Single(exclusion.Reasons));
-        var sizing = await h.Sizing.GetAsync(default);
+        var sizing = await h.Sizing.GetAsync(TradingMode.Real, default);
         Assert.Equal((1, 0), (sizing.Record.Unresolved, sizing.Record.ClosedPlays));
 
         // It takes no new links until it returns to Open.
@@ -89,7 +90,7 @@ public sealed partial class ExecutionPostgresTests
         Assert.Equal(("unresolved", "open", "The shared close was another play's.", "shared-close"), (history.StatusChanges.Last().From,
             history.StatusChanges.Last().To, history.StatusChanges.Last().Note, history.StatusChanges.Last().UnresolvedReason));
         Assert.Equal(ReviewActions.Cleared, history.Reviews!.Last().Action);
-        Assert.Equal(0, (await h.Plays.CountsAsync(null, null, default)).Unresolved);
+        Assert.Equal(0, (await h.Plays.CountsAsync(null, null, TradingMode.Real, default)).Unresolved);
 
     }
 
@@ -209,7 +210,7 @@ public sealed class UnresolvedEventTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
         var now = DateTimeOffset.UtcNow;
         var (entryOrder, exitOrder) = (Order(owner, account.Id, "entry", "buy", now), Order(owner, account.Id, "exit", "sell", now));

@@ -4,6 +4,7 @@ using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -76,7 +77,7 @@ public sealed class ReviewPositionRegressionIntegrationTests : ReviewPositionReg
         await using var database = await CoreDatabase.CreateAsync();
         var f = new ReviewFixture();
         var foreign = new ReviewFixture();
-        var portfolio = new Portfolio(Guid.NewGuid(), f.Owner, "Selected");
+        var portfolio = new Portfolio(Guid.NewGuid(), f.Owner, "Selected", TradingMode.Real);
         var selected = f.Account("Selected", portfolio.Id);
         var other = f.Account("Unassigned");
         var disabled = f.Account("Disabled");

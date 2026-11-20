@@ -9,7 +9,7 @@ public sealed class AccountManagementTests
     [Fact]
     public void Domain_settings_preserve_source_and_sync_metadata()
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Before");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Before", TradingMode.Real);
         account.Configure(Guid.NewGuid(), "0x1111111111111111111111111111111111111111", null);
         var observed = DateTimeOffset.Parse("2026-10-01T10:00:00Z");
         account.RecordSync(observed, "Bounded history");
@@ -27,8 +27,8 @@ public sealed class AccountManagementTests
     [InlineData(null)]
     public void Domain_rejects_empty_names(string? name)
     {
-        var owner = Guid.NewGuid(); var account = new Account(Guid.NewGuid(), owner, "manual", "Account");
-        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Portfolio");
+        var owner = Guid.NewGuid(); var account = new Account(Guid.NewGuid(), owner, "manual", "Account", TradingMode.Real);
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Portfolio", TradingMode.Real);
         Assert.ThrowsAny<ArgumentException>(() => account.UpdateSettings(name!, null, false));
         Assert.ThrowsAny<ArgumentException>(() => portfolio.Rename(name!));
         Assert.True(account.IsEnabled); Assert.Equal("Account", account.Name); Assert.Equal("Portfolio", portfolio.Name);
@@ -37,11 +37,11 @@ public sealed class AccountManagementTests
     [Fact]
     public void Domain_rejects_long_names_and_empty_portfolio_ID_without_changes()
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Account");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Account", TradingMode.Real);
         Assert.Throws<DomainValidationException>(() => account.UpdateSettings(new string('x', 201), null, false));
         Assert.Throws<DomainValidationException>(() => account.UpdateSettings("Name", Guid.Empty, false));
         Assert.True(account.IsEnabled); Assert.Null(account.PortfolioId);
-        var portfolio = new Portfolio(Guid.NewGuid(), account.OwnerId, "Portfolio");
+        var portfolio = new Portfolio(Guid.NewGuid(), account.OwnerId, "Portfolio", TradingMode.Real);
         Assert.Throws<DomainValidationException>(() => portfolio.Rename(new string('x', 201)));
         portfolio.Rename(" Trimmed "); Assert.Equal("Trimmed", portfolio.Name);
     }

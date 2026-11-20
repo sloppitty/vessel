@@ -7,6 +7,7 @@ using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Credentials;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -42,7 +43,7 @@ public sealed class AccountSecurityPostgresTests
         Assert.Equal(409, duplicate.StatusCode);
         var created = await service.CreateAccountAsync(new(null, "Index", SecurityFixture.Venue.Id, SourceId: "9223372036854775807"), default);
         Assert.Equal("9223372036854775807", created.SourceId);
-        var disabled = await service.UpdateAccountAsync(created.Id, new("Index", null, false, 1), default);
+        var disabled = await service.UpdateAccountAsync(created.Id, new("Index", null, false, 1), TradingMode.Real, default);
         Assert.False(disabled.IsEnabled);
         Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => service.CreateAccountAsync(new(null, "Again", SecurityFixture.Venue.Id, SourceId: created.SourceId), default))).StatusCode);
         await using var other = database.Context(Guid.NewGuid());
@@ -98,7 +99,7 @@ public sealed class AccountSecurityPostgresTests
         };
         foreign.AccountCredentials.Add(stolen);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => foreign.SaveChangesAsync());
-        await new WorkspaceService(store, new CoreOwner(owner), SecurityFixture.Registry(), TestUnitOfWork.For(db)).DeleteAccountAsync(account.Id, default);
+        await new WorkspaceService(store, new CoreOwner(owner), SecurityFixture.Registry(), TestUnitOfWork.For(db)).DeleteAccountAsync(account.Id, TradingMode.Real, default);
         Assert.Empty(await db.AccountCredentials.AsNoTracking().ToListAsync()); Assert.Empty(await db.Accounts.ToListAsync());
     }
 
@@ -114,7 +115,7 @@ public sealed class AccountSecurityPostgresTests
         await verifier.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var management = new WorkspaceService(new WorkspaceStore(managementDb, TestUnitOfWork.For(managementDb)), new CoreOwner(owner), SecurityFixture.Registry(), TestUnitOfWork.For(managementDb));
         // Verification holds no transaction or account lock, so disabling does not wait for the venue.
-        Assert.False((await management.UpdateAccountAsync(account.Id, new("Disabled", null, false, 1), default).WaitAsync(TimeSpan.FromSeconds(5))).IsEnabled);
+        Assert.False((await management.UpdateAccountAsync(account.Id, new("Disabled", null, false, 1), TradingMode.Real, default).WaitAsync(TimeSpan.FromSeconds(5))).IsEnabled);
         verifier.Release.SetResult();
         var refused = await Assert.ThrowsAsync<ProblemException>(() => saving.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.Equal(409, refused.StatusCode); Assert.Equal(AccountCredentialService.ChangedWhileVerifying, refused.Message);
@@ -122,7 +123,7 @@ public sealed class AccountSecurityPostgresTests
         Assert.False((await check.Accounts.SingleAsync()).IsEnabled); Assert.Empty(await check.AccountCredentials.ToListAsync());
         var reader = new AccountCredentialReader(new WorkspaceStore(check, TestUnitOfWork.For(check)), new AccountCredentialStore(check, TestUnitOfWork.For(check)), new CoreOwner(owner), vault, SecurityFixture.Clock, TestUnitOfWork.For(check));
         Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => reader.ReadAsync(account.Id, default))).StatusCode);
-        await management.DeleteAccountAsync(account.Id, default); Assert.Empty(await check.AccountCredentials.AsNoTracking().ToListAsync());
+        await management.DeleteAccountAsync(account.Id, TradingMode.Real, default); Assert.Empty(await check.AccountCredentials.AsNoTracking().ToListAsync());
     }
 
     [PostgresFact]

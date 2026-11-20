@@ -8,6 +8,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -41,9 +42,9 @@ public sealed class OpenRiskApiTests
     {
         var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Trading");
-        var other = new Account(Guid.NewGuid(), owner, "hyperliquid", "Other");
-        var disabled = new Account(Guid.NewGuid(), owner, "hyperliquid", "Disabled");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Trading", TradingMode.Real);
+        var other = new Account(Guid.NewGuid(), owner, "hyperliquid", "Other", TradingMode.Real);
+        var disabled = new Account(Guid.NewGuid(), owner, "hyperliquid", "Disabled", TradingMode.Real);
         disabled.UpdateSettings("Disabled", null, false);
         await using var db = database.Context(owner);
         db.Accounts.AddRange(account, other, disabled);

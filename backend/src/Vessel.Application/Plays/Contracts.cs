@@ -4,6 +4,7 @@ using Vessel.Application.Common;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Application.Plays;
 
@@ -41,7 +42,7 @@ public sealed record ChangePlayStatusRequest(
 public sealed record PlaySummaryDto(Guid Id, string Title, string Status, Guid AccountId, string VenueId, string? Instrument,
     string InstrumentSource, string Direction, int PlanRevision, long Version, string? CancelReason,
     DateTimeOffset CreatedAtUtc, DateTimeOffset UpdatedAtUtc, DateTimeOffset? PlannedAtUtc, DateTimeOffset? EndedAtUtc,
-    bool HasReview, string Origin = "planned", DateTimeOffset? ReviewedAtUtc = null, string TradingMode = "real")
+    bool HasReview, string Origin, DateTimeOffset? ReviewedAtUtc, TradingMode TradingMode)
 {
     /// <summary>completed, not-needed or legacy once the review is complete; null while it still needs review (phase 1, 1.2).</summary>
     public string? ReviewCompletion { get; init; }
@@ -106,7 +107,7 @@ public sealed record PlayListPage(int TotalCount, int Page, List<PlayListRow> Ro
 /// Search is a trimmed, case-insensitive substring of title or instrument. A scope keeps its enabled accounts only;
 /// a null scope is the Plays page: every owner Play, including those on disabled accounts.
 /// </summary>
-public sealed record PlayListFilter(string? Search, ListScope? Scope, string TradingMode = "real");
+public sealed record PlayListFilter(string? Search, ListScope? Scope, TradingMode TradingMode);
 
 /// <summary>Summary columns only. Plan, drawings and review text are never read for a list.</summary>
 public sealed record PlayListRow
@@ -115,7 +116,7 @@ public sealed record PlayListRow
     public string Title { get; init; } = "";
     public PlayStatus Status { get; init; }
     public Guid AccountId { get; init; }
-    public string TradingMode { get; init; } = "real";
+    public TradingMode TradingMode { get; init; }
     public string VenueId { get; init; } = "";
     public string? ContractId { get; init; }
     public InstrumentSource InstrumentSource { get; init; }
@@ -178,7 +179,7 @@ public interface IPlayStore
 {
     /// <summary>Whether the scope's portfolio or account exists for this owner; <c>all</c> and <c>unassigned</c> always do.</summary>
     Task<bool> ScopeExistsAsync(ListScope scope, CancellationToken ct);
-    Task<bool> ScopeExistsAsync(ListScope scope, string tradingMode, CancellationToken ct);
+    Task<bool> ScopeExistsAsync(ListScope scope, TradingMode tradingMode, CancellationToken ct);
     /// <summary>
     /// One consistent page of a view: the exact total, the requested page clamped to it and its ordered summary rows
     /// (updated desc for Drafts, In progress and All; ended desc, updated desc otherwise; then ID), read from one snapshot.
@@ -190,7 +191,7 @@ public interface IPlayStore
     /// every Play of theirs as the unscoped list keeps them: the exact total, the count not indexed yet and one page, newest
     /// updated first, each with its first matching text. One snapshot.
     /// </summary>
-    Task<PlaySearchResult> SearchAsync(string pattern, string tradingMode, int offset, int limit, CancellationToken ct);
+    Task<PlaySearchResult> SearchAsync(string pattern, TradingMode tradingMode, int offset, int limit, CancellationToken ct);
     Task<Play?> FindAsync(Guid id, CancellationToken ct);
     /// <summary>
     /// The Play's drawings row, tracked so a change saves with the Play; null when it has none, which means no drawings
@@ -205,7 +206,7 @@ public interface IPlayStore
     /// The newest non-blank next actions of the owner's Closed or Cancelled Plays, by review time, at most
     /// <paramref name="limit"/>; only the ID, title, next action and review time are read.
     /// </summary>
-    Task<List<NextActionDto>> NextActionsAsync(int limit, string tradingMode, CancellationToken ct);
+    Task<List<NextActionDto>> NextActionsAsync(int limit, TradingMode tradingMode, CancellationToken ct);
     /// <summary>A Play's log, oldest first.</summary>
     Task<List<PlayNote>> NotesAsync(Guid playId, CancellationToken ct);
     /// <summary>The owner's log entry written for <paramref name="requestId"/>, if any.</summary>
@@ -228,14 +229,14 @@ public interface IPlayStore
     void Add(PlayStatusChange change);
     void Add(PlayReviewRevision revision);
     /// <summary>The owner's active if-then rule in the mode (Phase 2, item 3), tracked for archiving; null without one.</summary>
-    Task<PlayRule?> ActiveRuleAsync(string tradingMode, CancellationToken ct);
+    Task<PlayRule?> ActiveRuleAsync(TradingMode tradingMode, CancellationToken ct);
     /// <summary>
     /// Adds the owner's next rule version in the mode. Archive and save the active one first: one rule is active per mode, and
     /// a concurrent change of the same rule is a 409.
     /// </summary>
-    Task<PlayRule> AddRuleAsync(string tradingMode, string @if, string then, Guid? sourcePlayId, DateTimeOffset now, CancellationToken ct);
+    Task<PlayRule> AddRuleAsync(TradingMode tradingMode, string @if, string then, Guid? sourcePlayId, DateTimeOffset now, CancellationToken ct);
     /// <summary>The title of the owner's Play in the mode, or null when there is none.</summary>
-    Task<string?> TitleAsync(Guid playId, string tradingMode, CancellationToken ct);
+    Task<string?> TitleAsync(Guid playId, TradingMode tradingMode, CancellationToken ct);
     /// <summary>Flushes a rule change; a version another change archived first is a 409 about the rule.</summary>
     Task SaveRuleAsync(CancellationToken ct);
     /// <summary>Persists pending changes through the active unit of work without committing; a concurrent Play write is a 409.</summary>

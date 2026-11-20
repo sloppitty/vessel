@@ -5,6 +5,7 @@ using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Reporting;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Application.Review;
 
@@ -14,10 +15,13 @@ namespace Vessel.Application.Review;
 /// (yyyy-MM-dd) or <c>current</c>, replaces the rolling period with the reporting week holding it (Phase 2, item 2).
 /// </summary>
 public sealed record ReviewQuery(string Period = "month", string Portfolio = "all", Guid? AccountId = null,
-    string? Instrument = null, int Offset = 0, string Positions = "exclude", int MinPlays = ReviewQuery.DefaultMinPlays, string? TradingMode = "real",
+    string? Instrument = null, int Offset = 0, string Positions = "exclude", int MinPlays = ReviewQuery.DefaultMinPlays, string? TradingMode = null,
     string? Week = null)
 {
     public const int DefaultMinPlays = 5, MaxMinPlays = 1000;
+
+    /// <summary>The query's mode, as the request sent it; an absent parameter is the real journal.</summary>
+    public Vessel.Domain.Common.TradingMode Mode => TradingModes.FromRequest(TradingMode);
 }
 
 /// <summary>
@@ -219,7 +223,7 @@ public sealed record ReviewPositionsDto(string Mode, bool Included, int MinPlays
 public sealed record ReviewDto(DateTimeOffset AsOfUtc, DateTimeOffset? FromUtc, string Period, string Currency,
     ReviewOptionsDto Options, IReadOnlyList<ReviewPeriodDto> Periods, ReviewMetricsDto Metrics,
     IReadOnlyList<ReviewPointDto> Series, int BucketDays, ReviewGroupsDto Groups, ReviewCoverageDto Coverage,
-    IReadOnlyList<ReviewPlayDto> Plays, int Offset, int? NextOffset, string TradingMode = "real")
+    IReadOnlyList<ReviewPlayDto> Plays, int Offset, int? NextOffset, Vessel.Domain.Common.TradingMode TradingMode)
 {
     public ReviewPositionsDto? Positions { get; init; }
     /// <summary>

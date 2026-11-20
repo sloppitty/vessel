@@ -5,6 +5,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -20,7 +21,7 @@ public sealed class SizingAggregateOverflowUseCasesTests : SizingAggregateOverfl
         // A win of 7e26 on a notional of 1 returns 7e28 percent; a loss of 1e-22 returns 1e-20 percent.
         store.Closed.Add(Closed(owner, pnl: 7 * E28 / 100, day: 2));
         store.Closed.Add(Closed(owner, pnl: -decimal.Parse("1e-22", NumberStyles.Float, CultureInfo.InvariantCulture), day: 3));
-        var result = await new SizingService(store, new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.None).GetAsync(default);
+        var result = await new SizingService(store, new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.None).GetAsync(TradingMode.Real, default);
         Assert.Equal((2, (string?)null, "default", "default"),
             (result.Record.DecidedPlays, result.Record.WinLossRatio, result.Limits.MaxStopSource, result.Limits.MinRewardRiskSource));
         Assert.Equal("70000000000000000000000000000", result.Record.AverageGainPercent);
@@ -28,7 +29,7 @@ public sealed class SizingAggregateOverflowUseCasesTests : SizingAggregateOverfl
 
         store.Closed.Clear();
         store.Closed.Add(Closed(owner, pnl: 1, day: 2));
-        var ordinary = await new SizingService(store, new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.None).GetAsync(default);
+        var ordinary = await new SizingService(store, new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.None).GetAsync(TradingMode.Real, default);
         Assert.DoesNotContain("win/loss ratio", ordinary.Notice);
     }
 
@@ -38,14 +39,14 @@ public sealed class SizingAggregateOverflowUseCasesTests : SizingAggregateOverfl
         var owner = Guid.NewGuid();
         var store = new MemorySizingStore();
         for (var day = 2; day < 12; day++) store.Closed.Add(Closed(owner, pnl: E28 / 100, day: day));
-        var result = await new SizingService(store, new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.None).GetAsync(default);
+        var result = await new SizingService(store, new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.None).GetAsync(TradingMode.Real, default);
         Assert.Equal((10, "10000000000000000000000000000"), (result.Record.Wins, result.Record.AverageGainPercent));
     }
 
     private static ClosedPlayFacts Closed(Guid owner, decimal pnl, int day)
     {
         var planned = DateTimeOffset.Parse("2026-10-01T10:00:00Z", CultureInfo.InvariantCulture);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue", TradingMode.Real);
         var plan = new PlayPlanDocument("long", "margin", "250", "1", null,
             [new PlanEntry("entry-1", "entry-1", "#b9c9e4", "100", "1", [new PlanExit("stop-1", "price", "0.5", "100")],
                 [new PlanExit("t", "price", "2", "100")])], new PlanNotes("", "", "", ""));

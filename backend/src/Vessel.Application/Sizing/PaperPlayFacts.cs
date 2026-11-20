@@ -4,6 +4,7 @@ using Vessel.Domain.Numerics;
 using Vessel.Domain.Paper;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
+using Vessel.Domain.Common;
 
 namespace Vessel.Application.Sizing;
 
@@ -34,9 +35,9 @@ public sealed record PaperPlayFacts(Play Play, IReadOnlyList<PlayPlanRevision> R
         { problem = "The retained simulation state is unavailable."; return null; }
         var entries = Executions.Where(e => e.Role == "entry").ToList();
         var exits = Executions.Where(e => e.Role != "entry").ToList();
-        if (Play.TradingMode != "paper" || Play.Status != PlayStatus.Closed || entries.Count == 0 || exits.Count == 0 ||
+        if (Play.TradingMode != TradingMode.Paper || Play.Status != PlayStatus.Closed || entries.Count == 0 || exits.Count == 0 ||
             Executions.Select(e => e.Id).Distinct().Count() != Executions.Count ||
-            Executions.Any(e => e.TradingMode != "paper" || e.OwnerId != Play.OwnerId || e.AccountId != Play.AccountId ||
+            Executions.Any(e => e.TradingMode != TradingMode.Paper || e.OwnerId != Play.OwnerId || e.AccountId != Play.AccountId ||
                 e.PlayId != Play.Id || e.Quantity <= 0 || e.Price <= 0 || e.OccurredAtUtc > asOf ||
                 e.Role is not ("entry" or "stop" or "target" or "exit") ||
                 e.CandleOpenAtUtc >= e.CandleCloseAtUtc || e.OccurredAtUtc < e.CandleOpenAtUtc ||

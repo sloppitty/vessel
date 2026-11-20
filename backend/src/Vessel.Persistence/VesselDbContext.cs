@@ -67,8 +67,15 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     internal Search.PlaySearchCapture SearchCapture { get; } = new();
 
     // Unconstrained PostgreSQL numeric preserves every .NET decimal digit and scale. This also covers decimal?.
-    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder) =>
+    // A trading mode is stored as its exact wire string, real or paper (issue #113).
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
         configurationBuilder.Properties<decimal>().HaveColumnType("numeric");
+        configurationBuilder.Properties<Vessel.Domain.Common.TradingMode>().HaveConversion<TradingModeConverter>();
+    }
+
+    private sealed class TradingModeConverter() : Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<Vessel.Domain.Common.TradingMode, string>(
+        mode => Vessel.Domain.Common.TradingModes.ToValue(mode), value => Vessel.Domain.Common.TradingModes.Parse(value));
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -5,6 +5,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -33,7 +34,7 @@ internal sealed class ReviewFixture : IReviewStoreDefaults
     }
     public Account Account(string name = "Main", Guid? portfolio = null)
     {
-        var account = new Account(Guid.NewGuid(), Owner, "hyperliquid", name);
+        var account = new Account(Guid.NewGuid(), Owner, "hyperliquid", name, TradingMode.Real);
         account.Configure(portfolio, null, null);
         Accounts.Add(account);
         return account;

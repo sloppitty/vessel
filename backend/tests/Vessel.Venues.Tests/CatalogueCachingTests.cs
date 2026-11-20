@@ -9,6 +9,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 using Vessel.Infrastructure.Venues.Lighter;
 using Vessel.Infrastructure.Venues.Risex;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -171,7 +172,7 @@ public sealed class CatalogueCachingTests
         var descriptor = venue == "lighter" ? LighterReader.Descriptor : RisexReader.Descriptor;
         var registry = new VenueRegistry([descriptor], [reader], [], [(ICandleReader)reader], [], [], [], []);
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var account = new Account(Guid.NewGuid(), owner, venue, "Test");
+        var account = new Account(Guid.NewGuid(), owner, venue, "Test", TradingMode.Real);
         store.Accounts.Add(account);
         var cache = new CandleCache(clock);
         var service = new CandleService(store, registry, cache, clock);
@@ -199,7 +200,7 @@ public sealed class CatalogueCachingTests
         using var client = new HttpClient(handler) { BaseAddress = new Uri("https://venue.test/") };
         var reader = Reader("hyperliquid", client, clock);
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Test"); store.Accounts.Add(account);
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Test", TradingMode.Real); store.Accounts.Add(account);
         var cache = new CandleCache(clock);
         var service = new CandleService(store, TestVenues.With(reader), cache, clock);
         var end = clock.Now.AddDays(-1).ToUnixTimeMilliseconds();

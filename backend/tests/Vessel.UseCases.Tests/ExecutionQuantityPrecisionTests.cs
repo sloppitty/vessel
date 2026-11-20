@@ -3,6 +3,7 @@ using Vessel.Application.Plays.Execution;
 using Vessel.Application.Sizing;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -174,7 +175,7 @@ public sealed class ExecutionQuantityPrecisionTests : ExecutionQuantityPrecision
         sizing.Closed.Add(f.Facts);
 
         var report = await review.Service.GetAsync(new("all"), default);
-        var record = await new SizingService(sizing, new CoreOwner(f.Account.OwnerId), new ReviewClock(), TestUnitOfWork.None).GetAsync(default);
+        var record = await new SizingService(sizing, new CoreOwner(f.Account.OwnerId), new ReviewClock(), TestUnitOfWork.None).GetAsync(TradingMode.Real, default);
 
         Assert.Equal(0, report.Metrics.Count);
         Assert.Equal(1, report.Coverage.IncompleteExecutions);

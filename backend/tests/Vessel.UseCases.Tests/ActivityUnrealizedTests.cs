@@ -4,6 +4,7 @@ using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Paper;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -43,7 +44,7 @@ public sealed class ActivityUnrealizedTests
     private static async Task<IReadOnlyList<ActivityOperationSummaryDto>> Page(string venueId, IReadOnlyList<ImportedFill> fills,
         IReadOnlyList<FundingPayment> funding, IMarketContextReader? reader, AccountSnapshot[] snapshots)
     {
-        var account = new Account(AccountId, Owner, venueId, "Fixture");
+        var account = new Account(AccountId, Owner, venueId, "Fixture", TradingMode.Real);
         var facts = new ActivityFacts([account], fills, snapshots, new Dictionary<Guid, Guid>()) { FundingPayments = funding };
         var workspace = new MemoryWorkspaceStore(Owner);
         workspace.Accounts.Add(account);

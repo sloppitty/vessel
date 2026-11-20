@@ -2,6 +2,7 @@ using Vessel.Application.Common;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -20,9 +21,9 @@ public sealed class WorkspaceTests
         await service.CreateAccountAsync(new(complete.Id, "Known zero", "manual", ManualAccountValueUsd: "0"), default);
         await service.CreateAccountAsync(new(partial.Id, "Known", "manual", ManualAccountValueUsd: "12.00000000000000000000000001"), default);
         var unknown = await service.CreateAccountAsync(new(partial.Id, "Unknown", "manual"), default);
-        store.Accounts.Add(new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Foreign"));
-        store.Portfolios.Add(new Portfolio(Guid.NewGuid(), Guid.NewGuid(), "Foreign"));
-        var overview = await service.OverviewAsync(default);
+        store.Accounts.Add(new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Foreign", TradingMode.Real));
+        store.Portfolios.Add(new Portfolio(Guid.NewGuid(), Guid.NewGuid(), "Foreign", TradingMode.Real));
+        var overview = await service.OverviewAsync(TradingMode.Real, default);
         Assert.Equal(3, overview.Totals.AccountCount);
         Assert.Equal(2, overview.Totals.ValuedAccountCount);
         Assert.Equal("12.00000000000000000000000001", overview.Totals.TotalAccountValueUsd);
@@ -31,7 +32,7 @@ public sealed class WorkspaceTests
         Assert.Equal("partial", overview.Portfolios.Single(p => p.Id == partial.Id).ValueCoverage);
         Assert.Equal("unavailable", overview.Portfolios.Single(p => p.Id == empty.Id).ValueCoverage);
         Assert.Null(unknown.AccountValueUsd);
-        Assert.Null(await service.SnapshotAsync(unknown.Id, default));
+        Assert.Null(await service.SnapshotAsync(unknown.Id, TradingMode.Real, default));
     }
 
     [Fact]
@@ -39,10 +40,10 @@ public sealed class WorkspaceTests
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
         var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(new FixtureReader()), TestUnitOfWork.None);
-        Assert.Null((await service.OverviewAsync(default)).Totals.TotalAccountValueUsd);
+        Assert.Null((await service.OverviewAsync(TradingMode.Real, default)).Totals.TotalAccountValueUsd);
         var portfolio = await service.CreatePortfolioAsync(new("Unknown"), default);
         await service.CreateAccountAsync(new(portfolio.Id, "Manual", "manual"), default);
-        var overview = await service.OverviewAsync(default);
+        var overview = await service.OverviewAsync(TradingMode.Real, default);
         Assert.Null(overview.Totals.TotalAccountValueUsd);
         Assert.Null(overview.Portfolios.Single().TotalValueUsd);
         Assert.Equal("unavailable", overview.Portfolios.Single().ValueCoverage);
@@ -53,9 +54,9 @@ public sealed class WorkspaceTests
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
         var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(new FixtureReader()), TestUnitOfWork.None);
-        var foreign = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Foreign"); store.Accounts.Add(foreign);
-        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.SnapshotAsync(foreign.Id, default))).StatusCode);
-        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.FillsAsync(foreign.Id, default))).StatusCode);
+        var foreign = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Foreign", TradingMode.Real); store.Accounts.Add(foreign);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.SnapshotAsync(foreign.Id, TradingMode.Real, default))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.FillsAsync(foreign.Id, TradingMode.Real, default))).StatusCode);
         Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.CreateAccountAsync(new(Guid.NewGuid(), "Foreign", "manual"), default))).StatusCode);
     }
 }

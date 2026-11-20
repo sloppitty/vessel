@@ -18,6 +18,7 @@ using Vessel.Domain.Monitoring;
 using Vessel.Domain.Plays;
 using Vessel.Persistence;
 using Vessel.Worker;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -85,7 +86,7 @@ public sealed class MultiOwnerWorkerTests
         await using (var second = fixture.Database.Context(fixture.Second))
         {
             // The smallest ID, so it sorts before the protection account at the same due time.
-            var account = new Account(Guid.Parse("00000000-0000-4000-8000-000000000001"), fixture.Second, "hyperliquid", "Kept history");
+            var account = new Account(Guid.Parse("00000000-0000-4000-8000-000000000001"), fixture.Second, "hyperliquid", "Kept history", TradingMode.Real);
             account.Configure(null, "0x" + new string('f', 40), null);
             account.UpdateSettings(account.Name, null, true, keepExecutionHistory: true);
             second.Accounts.Add(account);
@@ -406,7 +407,7 @@ public sealed class MultiOwnerWorkerTests
         {
             var owner = Guid.NewGuid(); fixture.Directory.Set(owner, JournalOwnerStatus.Suspended);
             await using var db = fixture.Database.Context(owner);
-            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Suspended synthetic");
+            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Suspended synthetic", TradingMode.Real);
             account.Configure(null, "0x" + new string('a', 40), null);
             var row = new MonitorAccount { OwnerId = owner, AccountId = account.Id };
             row.Admit(Guid.NewGuid(), "manual", now.AddMinutes(-1));
@@ -703,7 +704,7 @@ public sealed class MultiOwnerWorkerTests
                 for (var index = 0; index < count; index++)
                 {
                     await using var db = fixture.Database.Context(owner);
-                    var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic owner account");
+                    var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic owner account", TradingMode.Real);
                     account.Configure(null, "0x" + new string((char)('a' + index), 40), null);
                     var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"),
                         InstrumentSource.Venue, "{}", fixture.Clock.GetUtcNow().AddMinutes(-2));

@@ -31,7 +31,7 @@ public sealed class PaperPlayTests : PaperPlayTestsValues
     [Fact]
     public void Real_lifecycle_does_not_accept_paper_proof()
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Real");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Real", TradingMode.Real);
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
         play.MarkPlanned(DateTimeOffset.UnixEpoch);
         Assert.Throws<DomainRuleException>(() => play.ApplyPaperExecutionState(true, false, DateTimeOffset.UnixEpoch));

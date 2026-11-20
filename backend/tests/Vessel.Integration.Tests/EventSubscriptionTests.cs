@@ -12,6 +12,7 @@ using Vessel.Messaging;
 using Vessel.Persistence;
 using Vessel.Persistence.Events;
 using Vessel.Persistence.Events.Subscriptions;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -261,7 +262,7 @@ public sealed partial class EventSubscriptionTests
     public async Task A_handler_effect_failing_at_save_is_a_counted_attempt_and_catch_up_continues()
     {
         await using var runtime = await Runtime.CreateAsync();
-        var existing = new Account(Guid.NewGuid(), runtime.Owner, "manual", "Existing");
+        var existing = new Account(Guid.NewGuid(), runtime.Owner, "manual", "Existing", TradingMode.Real);
         await using (var seed = runtime.Database.Context(runtime.Owner))
         {
             seed.Accounts.Add(existing);
@@ -525,8 +526,8 @@ public sealed partial class EventSubscriptionTests
     {
         await using var runtime = await Runtime.CreateAsync();
         var all = await runtime.RegisterNewAsync("all");
-        var account = new Account(Guid.NewGuid(), runtime.Owner, "hyperliquid", "Deleted");
-        var kept = new Account(Guid.NewGuid(), runtime.Owner, "hyperliquid", "Kept");
+        var account = new Account(Guid.NewGuid(), runtime.Owner, "hyperliquid", "Deleted", TradingMode.Real);
+        var kept = new Account(Guid.NewGuid(), runtime.Owner, "hyperliquid", "Kept", TradingMode.Real);
         await using (var seed = runtime.Database.Context(runtime.Owner))
         {
             seed.Accounts.AddRange(account, kept);
@@ -585,7 +586,7 @@ public sealed partial class EventSubscriptionTests
             var db = scope.ServiceProvider.GetRequiredService<VesselDbContext>();
             await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().ExecuteAsync(async () =>
             {
-                var account = new Account(Guid.NewGuid(), runtime.Owner, "manual", "Synthetic");
+                var account = new Account(Guid.NewGuid(), runtime.Owner, "manual", "Synthetic", TradingMode.Real);
                 var play = TestPlays.Create(account, new("manual", "BTC"));
                 db.Accounts.Add(account); db.Plays.Add(play);
                 var planned = play.MarkPlanned(DateTimeOffset.UtcNow);
@@ -677,7 +678,7 @@ public sealed partial class EventSubscriptionTests
         {
             await events.AppendAsync(Draft("handler-" + message.DedupKey), cancellationToken);
             db.Accounts.Add(new Account(message.DedupKey.StartsWith("bad", StringComparison.Ordinal) ? conflict() : Guid.NewGuid(),
-                owner, "manual", "Handler effect"));
+                owner, "manual", "Handler effect", TradingMode.Real));
             return EventHandling.Delivered;
         }
     }

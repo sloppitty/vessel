@@ -1,5 +1,6 @@
 using Vessel.Application.Activity;
 using Vessel.Application.Review;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -58,7 +59,7 @@ internal static class GoldenJournalChecks
     /// <summary>Document section 3; its realized total is in <see cref="OverviewRealizedAsync"/>.</summary>
     public static async Task OverviewAsync(GoldenJournal j, GoldenJournalScreens s)
     {
-        var all = await s.Overview.GetAsync("portfolio", "all", "all", default);
+        var all = await s.Overview.GetAsync("portfolio", "all", "all", TradingMode.Real, default);
         var t = all.Totals;
         Assert.Equal((2, "1500", "1000", 3, "197.8", 24),
             (t.AccountCount, t.Balance.AmountUsd, t.Available.AmountUsd, t.OpenPositionCount, t.UnrealizedPnl.AmountUsd, t.ImportedFillCount));
@@ -85,7 +86,7 @@ internal static class GoldenJournalChecks
     {
         var activity = (await s.Activity.PageAsync(new(PageSize: "100"), default)).Operations.Where(o => o.Status == "closed").ToList();
         var missing = activity.Where(o => o.PlayId == j.Play["P6"].Id).ToList();
-        var overview = await s.Overview.GetAsync("portfolio", "all", "all", default);
+        var overview = await s.Overview.GetAsync("portfolio", "all", "all", TradingMode.Real, default);
         var realized = overview.Totals.RealizedResult;
         Assert.Contains(new Vessel.Application.Overview.SummaryReason(Vessel.Application.Overview.OverviewSummaryService.MissingExecutionsReason, 1),
             realized.Coverage.Reasons);
@@ -98,7 +99,7 @@ internal static class GoldenJournalChecks
         Assert.Equal(realized.AmountUsd, review.Metrics.Net);
         foreach (var scope in new[] { $"portfolio:{j.Swing.Id}", $"account:{j.Gross.Id}" })
         {
-            var scoped = await s.Overview.GetAsync("portfolio", "all", scope, default);
+            var scoped = await s.Overview.GetAsync("portfolio", "all", scope, TradingMode.Real, default);
             Assert.Equal(ExactSum(activity.Where(o => o.AccountId == j.Gross.Id && o.PlayId != j.Play["P6"].Id)
                 .Select(o => o.NetResultUsd)), ExactSum([scoped.Totals.RealizedResult.AmountUsd]));
         }
@@ -157,7 +158,7 @@ internal static class GoldenJournalChecks
     /// <summary>Document section 5: the record comes from the Plays; P6 is not settled and P3 is a scratch.</summary>
     public static async Task SizingAsync(GoldenJournal j, GoldenJournalScreens s)
     {
-        var sizing = await s.Sizing.GetAsync(default);
+        var sizing = await s.Sizing.GetAsync(TradingMode.Real, default);
         var r = sizing.Record;
         Assert.Equal(("plays", 6, 5, 20, 2, 3, 1), (r.Source, r.ClosedPlays, r.DecidedPlays, r.Window, r.Wins, r.Losses, r.Scratches));
         Assert.Equal(("0.4", "6.3", "3.13333333", "2.0106383", "1.5", "1.26", "-0.62666667"), (r.BattingAverage, r.AverageGainPercent,
@@ -204,7 +205,7 @@ internal static class GoldenJournalChecks
         // 7.2: in a scope with no known missing execution, Overview realized = Activity's closed known nets.
         foreach (var (scope, account) in new[] { ("unassigned", j.Net.Id), ($"account:{j.Net.Id}", j.Net.Id) })
         {
-            var overview = await s.Overview.GetAsync("portfolio", "all", scope, default);
+            var overview = await s.Overview.GetAsync("portfolio", "all", scope, TradingMode.Real, default);
             Assert.Equal(ExactSum(closed.Where(o => o.AccountId == account).Select(o => o.NetResultUsd)),
                 ExactSum([overview.Totals.RealizedResult.AmountUsd]));
         }
@@ -212,7 +213,7 @@ internal static class GoldenJournalChecks
         // 7.3: group nets and amounts sum to their totals, on every grouping.
         foreach (var groupBy in new[] { "portfolio", "account" })
         {
-            var overview = await s.Overview.GetAsync(groupBy, "all", "all", default);
+            var overview = await s.Overview.GetAsync(groupBy, "all", "all", TradingMode.Real, default);
             Assert.Equal(ExactSum([overview.Totals.RealizedResult.AmountUsd]), ExactSum(overview.Rows.Select(r => r.Totals.RealizedResult.AmountUsd)));
             Assert.Equal(ExactSum([overview.Totals.UnrealizedPnl.AmountUsd]), ExactSum(overview.Rows.Select(r => r.Totals.UnrealizedPnl.AmountUsd)));
             Assert.Equal(ExactSum([overview.Totals.Balance.AmountUsd]), ExactSum(overview.Rows.Select(r => r.Totals.Balance.AmountUsd)));
@@ -224,7 +225,7 @@ internal static class GoldenJournalChecks
 
         // 7.4: 30 days have no close on their boundary, so every screen selects the same ten closed operations.
         var activity30 = await s.Activity.PageAsync(new(Period: "30", Status: "closed", PageSize: "100"), default);
-        var overview30 = (await s.Overview.GetAsync("portfolio", "30", "all", default)).Totals.RealizedResult.Coverage;
+        var overview30 = (await s.Overview.GetAsync("portfolio", "30", "all", TradingMode.Real, default)).Totals.RealizedResult.Coverage;
         var review30 = await s.Review.GetAsync(new(Period: "month", Positions: "include"), default);
         Assert.Equal([10, 10, 10], new[] { activity30.TotalCount, overview30.ContributingOperationCount + overview30.ExcludedOperationCount,
             review30.Metrics.Count + review30.Coverage.IncompleteExecutions + review30.Positions!.Omitted!.Value });
@@ -238,7 +239,7 @@ internal static class GoldenJournalChecks
         Assert.Equal(["P5", "P7"], review7.Plays.Where(p => p.Id is not null).Select(p => Name(j, p.Id)).Order().ToArray());
 
         // 7.5: Sizing's record and Review's Plays count the same outcomes and the same batting average.
-        var record = (await s.Sizing.GetAsync(default)).Record;
+        var record = (await s.Sizing.GetAsync(TradingMode.Real, default)).Record;
         Assert.Equal((plays.Metrics.Wins, plays.Metrics.Losses, plays.Metrics.Scratches, plays.Metrics.Count),
             (record.Wins, record.Losses, record.Scratches, record.ClosedPlays));
         Assert.Equal(ExactSum([plays.Metrics.Batting]), ExactSum([record.BattingAverage]));

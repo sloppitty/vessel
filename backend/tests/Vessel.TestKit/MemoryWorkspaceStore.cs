@@ -3,6 +3,7 @@ using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -19,7 +20,7 @@ internal sealed class MemoryWorkspaceStore(Guid ownerId) : IWorkspaceStoreDefaul
     public Task<List<Account>> AccountsAsync(CancellationToken ct) => Task.FromResult(Accounts.Where(a => a.OwnerId == ownerId).ToList());
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => Task.FromResult(Accounts.SingleOrDefault(a => a.Id == id && a.OwnerId == ownerId));
     public Task<MarketDataAccount?> MarketDataAccountAsync(Guid id, CancellationToken ct) => Task.FromResult(
-        Accounts.Where(a => a.Id == id && a.OwnerId == ownerId).Select(a => new MarketDataAccount(a.IsEnabled, a.VenueId)).SingleOrDefault());
+        Accounts.Where(a => a.Id == id && a.OwnerId == ownerId).Select(a => new MarketDataAccount(a.IsEnabled, a.VenueId, a.TradingMode)).SingleOrDefault());
     public Task<bool> SourceExistsAsync(string venueId, string address, CancellationToken ct) =>
         Task.FromResult(Accounts.Any(a => a.OwnerId == ownerId && a.VenueId == venueId && a.Address == address));
     public Task<AccountSnapshot?> SnapshotAsync(Guid id, CancellationToken ct) => Task.FromResult(Snapshots.SingleOrDefault(s =>

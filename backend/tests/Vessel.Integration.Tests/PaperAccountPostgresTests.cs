@@ -9,6 +9,7 @@ using Vessel.Application.Workspace;
 using Vessel.Domain.Paper;
 using Vessel.Domain.Plays;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -39,10 +40,10 @@ public sealed class PaperAccountPostgresTests
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"INSERT INTO plays (\"Id\",\"OwnerId\",\"AccountId\",\"VenueId\",\"ContractId\",\"Status\",\"Direction\") VALUES ({play},{owner},{account},'manual','BTC','Draft','long')");
         await db.GetService<IMigrator>().MigrateAsync();
-        Assert.Equal("real", (await db.Accounts.SingleAsync()).TradingMode);
+        Assert.Equal(TradingMode.Real, (await db.Accounts.SingleAsync()).TradingMode);
         Assert.Null((await db.Accounts.SingleAsync()).StartingCapitalUsd);
-        Assert.Equal("real", (await db.Portfolios.SingleAsync()).TradingMode);
-        Assert.Equal("real", (await db.Plays.SingleAsync()).TradingMode);
+        Assert.Equal(TradingMode.Real, (await db.Portfolios.SingleAsync()).TradingMode);
+        Assert.Equal(TradingMode.Real, (await db.Plays.SingleAsync()).TradingMode);
         Assert.Empty(await db.PaperLedgerEntries.ToListAsync());
     }
 
@@ -63,13 +64,13 @@ public sealed class PaperAccountPostgresTests
         Assert.Null(paper.TotalStablecoinNominalUsd);
         var seed = Assert.Single(await db.PaperLedgerEntries.ToListAsync());
         Assert.Equal(paper.Id, seed.AccountId); Assert.Equal(4000m, seed.AmountUsd); Assert.Equal("seed", seed.Kind);
-        Assert.Equal(real.Id, Assert.Single(await service.AccountsAsync(default)).Id);
-        Assert.Equal(paper.Id, Assert.Single(await service.AccountsAsync(default, "paper")).Id);
-        Assert.Null(await service.SnapshotAsync(paper.Id, default, "paper"));
-        Assert.Equal(0, (await service.OverviewAsync(default, "paper")).Totals.ImportedFillCount);
-        Assert.Equal("123.456", (await service.OverviewAsync(default)).Totals.TotalBalanceUsd);
-        Assert.Equal("4000", (await service.OverviewAsync(default, "paper")).Totals.TotalBalanceUsd);
-        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => service.DeleteAccountAsync(paper.Id, default, "paper"))).StatusCode);
+        Assert.Equal(real.Id, Assert.Single(await service.AccountsAsync(TradingMode.Real, default)).Id);
+        Assert.Equal(paper.Id, Assert.Single(await service.AccountsAsync(TradingMode.Paper, default)).Id);
+        Assert.Null(await service.SnapshotAsync(paper.Id, TradingMode.Paper, default));
+        Assert.Equal(0, (await service.OverviewAsync(TradingMode.Paper, default)).Totals.ImportedFillCount);
+        Assert.Equal("123.456", (await service.OverviewAsync(TradingMode.Real, default)).Totals.TotalBalanceUsd);
+        Assert.Equal("4000", (await service.OverviewAsync(TradingMode.Paper, default)).Totals.TotalBalanceUsd);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => service.DeleteAccountAsync(paper.Id, TradingMode.Paper, default))).StatusCode);
     }
 
     [PostgresFact]
@@ -81,7 +82,7 @@ public sealed class PaperAccountPostgresTests
         Assert.Equal("0", account.StartingCapitalUsd);
         Assert.Equal("0", account.AvailableBalanceUsd);
         Assert.Equal("0", account.AccountValueUsd);
-        Assert.Equal("complete", Assert.Single(await Service(db, owner).PortfoliosAsync(default, "paper")).BalanceCoverage);
+        Assert.Equal("complete", Assert.Single(await Service(db, owner).PortfoliosAsync(TradingMode.Paper, default)).BalanceCoverage);
     }
 
     [PostgresFact]
@@ -185,11 +186,11 @@ public sealed class PaperAccountPostgresTests
         await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE plays SET \"Status\"='Planned' WHERE \"Id\"={play.Id}");
         await db.SaveChangesAsync();
         var service = Service(db, owner);
-        var before = await service.AccountAsync(dto.Id, default, "paper");
+        var before = await service.AccountAsync(dto.Id, TradingMode.Paper, default);
         Assert.Equal("4000", before.BalanceUsd); Assert.Null(before.AccountValueUsd); Assert.Equal("3700", before.AvailableBalanceUsd);
-        await service.UpdateAccountAsync(dto.Id, new("Disabled", dto.PortfolioId, false, 1), default, "paper");
-        await service.UpdateAccountAsync(dto.Id, new("Enabled", dto.PortfolioId, true, 2), default, "paper");
-        var after = await service.AccountAsync(dto.Id, default, "paper");
+        await service.UpdateAccountAsync(dto.Id, new("Disabled", dto.PortfolioId, false, 1), TradingMode.Paper, default);
+        await service.UpdateAccountAsync(dto.Id, new("Enabled", dto.PortfolioId, true, 2), TradingMode.Paper, default);
+        var after = await service.AccountAsync(dto.Id, TradingMode.Paper, default);
         Assert.Null(after.AvailableBalanceUsd);
         var state = await db.PaperSimulations.SingleAsync();
         Assert.Equal("suspended", state.State); Assert.Null(state.NextCheckAtUtc);
@@ -215,7 +216,7 @@ public sealed class PaperAccountPostgresTests
         {
             simulation.State = state; simulation.IssuesJson = issues;
             await db.SaveChangesAsync();
-            var held = await service.AccountAsync(dto.Id, default, "paper");
+            var held = await service.AccountAsync(dto.Id, TradingMode.Paper, default);
             Assert.Equal("4000", held.BalanceUsd);
             Assert.Null(held.AvailableBalanceUsd);
             Assert.Null(held.AccountValueUsd);
@@ -223,7 +224,7 @@ public sealed class PaperAccountPostgresTests
         }
         simulation.State = "waiting"; simulation.IssuesJson = "[]";
         await db.SaveChangesAsync();
-        var resolved = await service.AccountAsync(dto.Id, default, "paper");
+        var resolved = await service.AccountAsync(dto.Id, TradingMode.Paper, default);
         Assert.Equal("4000", resolved.AccountValueUsd);
         Assert.Equal("4000", resolved.AvailableBalanceUsd);
     }

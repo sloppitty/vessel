@@ -6,6 +6,7 @@ using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
 using Vessel.Infrastructure.Venues.Hyperliquid;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -27,7 +28,7 @@ public sealed class HyperliquidFundingTests
     private static string Page(IEnumerable<string> rows) => "[" + string.Join(',', rows) + "]";
     private static Account Account(string venue = "hyperliquid", string? source = Address, bool enabled = true)
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), venue, "Synthetic funding");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), venue, "Synthetic funding", TradingMode.Real);
         account.Configure(null, null, null, source);
         if (!enabled) account.UpdateSettings(account.Name, null, false);
         return account;

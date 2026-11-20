@@ -14,9 +14,9 @@ public sealed class PaperPlayUseCasesTests : PaperPlayTestsValues
         var owner = Guid.NewGuid();
         var paper = PaperAccount(owner, Guid.NewGuid());
         var play = TestPlays.Create(paper, new("hyperliquid", "BTC"));
-        Assert.Equal("paper", play.TradingMode);
-        Assert.Equal("paper", PlayService.Summary(play).TradingMode);
-        var real = new Account(Guid.NewGuid(), owner, "hyperliquid", "Real");
+        Assert.Equal(TradingMode.Paper, play.TradingMode);
+        Assert.Equal(TradingMode.Paper, PlayService.Summary(play).TradingMode);
+        var real = new Account(Guid.NewGuid(), owner, "hyperliquid", "Real", TradingMode.Real);
         Assert.Throws<DomainRuleException>(() => play.MoveTo(real, new("hyperliquid", "BTC"), InstrumentSource.Venue, DateTimeOffset.UtcNow));
         Assert.Equal(paper.Id, play.AccountId);
     }

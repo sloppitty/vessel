@@ -2,12 +2,29 @@ using Vessel.Application.Common;
 using Vessel.Application.Evidence;
 using Vessel.Application.Plays;
 using Vessel.Application.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Api;
+
+/// <summary>
+/// Marks an endpoint that reads or changes actual venue facts (discovery, monitoring, risk, retained facts, retrospective
+/// Plays, fill allocations). A paper request to it is refused before anything runs.
+/// </summary>
+public sealed class RealOnlyMetadata
+{
+    public static readonly RealOnlyMetadata Instance = new();
+    private RealOnlyMetadata() { }
+}
 
 /// <summary>Mode checks run after bounded model binding, before any handler reads or writes owner resources.</summary>
 public static class TradingModeBoundary
 {
+    public const string RealOnlyRefusal = "Paper accounts do not use actual-account discovery or monitoring.";
+
+    /// <summary>The endpoint is real-only: <c>?tradingMode=paper</c> answers 409 before services, resources or bodies are read.</summary>
+    public static TBuilder RealOnly<TBuilder>(this TBuilder builder) where TBuilder : IEndpointConventionBuilder =>
+        builder.WithMetadata(RealOnlyMetadata.Instance);
+
     /// <summary>Selection-only checks precede handler service resolution, without reading resources or request bodies.</summary>
     public static void UseTradingModeBoundary(this WebApplication app) => app.Use(async (context, next) =>
     {
@@ -15,8 +32,8 @@ public static class TradingModeBoundary
         if (parts is { Length: >= 2 } && parts[0] == "api")
         {
             var mode = Mode(context);
-            if (mode == "paper" && ActualOnly(parts))
-                throw new ProblemException(409, "Paper accounts do not use actual-account discovery or monitoring.");
+            if (mode == TradingMode.Paper && context.GetEndpoint()?.Metadata.GetMetadata<RealOnlyMetadata>() is not null)
+                throw new ProblemException(409, RealOnlyRefusal);
         }
         await next(context);
     });
@@ -31,9 +48,8 @@ public static class TradingModeBoundary
         {
             return await next(invocation);
         }
+        // UseTradingModeBoundary has already refused a paper request to a real-only endpoint.
         var mode = Mode(context);
-        if (mode == "paper" && ActualOnly(parts))
-            throw new ProblemException(409, "Paper accounts do not use actual-account discovery or monitoring.");
         // Ordinary account/portfolio ID handlers already enforce the mode inside WorkspaceService. Avoid a
         // duplicate pre-read there, preserving their existing diagnostics and failure behavior.
         if (parts.Length >= 3 && !(parts.Length == 3 && parts[1] is "accounts" or "portfolios") &&
@@ -49,7 +65,7 @@ public static class TradingModeBoundary
                     (await services.GetRequiredService<IEvidenceMetadataStore>().PlayAsync(id, ct))?.TradingMode,
                 "plays" => (await services.GetRequiredService<IPlayStore>().FindAsync(id, ct))?.TradingMode,
                 "accounts" => (await services.GetRequiredService<IWorkspaceStore>().AccountAsync(id, ct))?.TradingMode,
-                "portfolios" => (await services.GetRequiredService<IWorkspaceStore>().PortfoliosAsync(ct, mode)).SingleOrDefault(p => p.Id == id)?.TradingMode,
+                "portfolios" => (await services.GetRequiredService<IWorkspaceStore>().PortfoliosAsync(mode, ct)).SingleOrDefault(p => p.Id == id)?.TradingMode,
                 _ => await EvidenceMode(services.GetRequiredService<IEvidenceMetadataStore>(), id, ct)
             };
             if (actual != mode) throw new ProblemException(404, parts[1] switch
@@ -63,24 +79,13 @@ public static class TradingModeBoundary
 
     private static string[]? Parts(HttpContext context) => context.Request.Path.Value?
         .Split('/', StringSplitOptions.RemoveEmptyEntries).Select(segment => segment.ToLowerInvariant()).ToArray();
-    private static bool ActualOnly(string[] parts) => parts[1] is "monitor" or "risk" ||
-        parts is [_, "venues", _, "accounts", ..] ||
-        // Phase 2, item 5b: an account's raw retained venue facts (Sol round 1 on #39: refused before any read).
-        parts is [_, "accounts", _, "facts"] ||
-        // Phase 2, item 14c: retained fills reported again with different venue facts.
-        parts is [_, "accounts", _, "import-conflicts"] ||
-        parts is [_, "accounts", _, "history-coverage"] ||
-        parts is [_, "accounts", _, "history-gaps", _, "backfill"] ||
-        parts is [_, "activity" or "plays", "retrospective"] ||
-        // Phase 2, item 11: an allocation splits an actual imported fill.
-        parts is [_, "plays", _, "execution", "allocations", ..];
-    private static string Mode(HttpContext context)
+    private static TradingMode Mode(HttpContext context)
     {
         var values = context.Request.Query["tradingMode"];
-        return values.Count == 0 ? "real" : values.Count == 1 && values[0] is "real" or "paper"
-            ? values[0]! : throw new ProblemException(400, "Trading mode must be real or paper.");
+        return values.Count == 0 ? TradingMode.Real : values.Count == 1 && TradingModes.TryParse(values[0], out var mode)
+            ? mode : throw new ProblemException(400, TradingModes.Invalid);
     }
 
-    private static async Task<string?> EvidenceMode(IEvidenceMetadataStore store, Guid id, CancellationToken ct) =>
+    private static async Task<TradingMode?> EvidenceMode(IEvidenceMetadataStore store, Guid id, CancellationToken ct) =>
         await store.FindAsync(id, ct) is { } evidence ? (await store.PlayAsync(evidence.PlayId, ct))?.TradingMode : null;
 }

@@ -13,7 +13,7 @@ internal sealed class PortfolioConfiguration : IEntityTypeConfiguration<Portfoli
         builder.HasKey(x => x.Id);
         builder.HasAlternateKey(x => new { x.OwnerId, x.Id });
         builder.HasAlternateKey(x => new { x.OwnerId, x.Id, x.TradingMode });
-        builder.Property(x => x.TradingMode).HasMaxLength(8).HasDefaultValue("real");
+        builder.Property(x => x.TradingMode).HasMaxLength(8).HasDefaultValue(Vessel.Domain.Common.TradingMode.Real);
         builder.Property(x => x.Name).HasMaxLength(200);
         builder.Property(x => x.Icon).HasMaxLength(PortfolioIcons.MaxLength).HasDefaultValue(PortfolioIcons.Default);
     }

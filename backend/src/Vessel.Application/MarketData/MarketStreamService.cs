@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using Vessel.Application.Common;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Application.MarketData;
 
@@ -61,7 +62,7 @@ public sealed class MarketStreamService(IWorkspaceStore store, IVenueRegistry ve
     public async Task<MarketStreamSession> OpenAsync(Guid accountId, string? instrument, string? interval, CancellationToken ct)
     {
         var account = await MarketDataGuard.AccountAsync(store, accountId, ct);
-        if (account.TradingMode == "paper")
+        if (account.TradingMode == TradingMode.Paper)
             throw new ProblemException(409, "Paper accounts use scheduled closed-candle checks, not a continuous price stream.");
         instrument = MarketDataGuard.Instrument(instrument);
         var venue = venues.Descriptor(account.VenueId);

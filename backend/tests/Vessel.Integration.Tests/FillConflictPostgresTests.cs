@@ -5,6 +5,7 @@ using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -41,7 +42,7 @@ public sealed class FillConflictPostgresTests
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account", TradingMode.Real);
         account.Configure(null, "0x" + new string('a', 40), null);
         db.Accounts.Add(account);
         await db.SaveChangesAsync();
@@ -61,7 +62,7 @@ public sealed class FillConflictPostgresTests
         Assert.Equal((100m, 0.05m, Start.AddMinutes(1)), (kept.Price, kept.Fee, kept.OccurredAtUtc));
 
         var service = new WorkspaceService(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(), TestUnitOfWork.For(db));
-        var read = await service.FillConflictsAsync(account.Id, default);
+        var read = await service.FillConflictsAsync(account.Id, TradingMode.Real, default);
         Assert.Equal(1, read.Total);
         var listed = Assert.Single(read.Recent);
         Assert.Equal(("f1", 2), (listed.SourceFillId, listed.Reports));
@@ -85,7 +86,7 @@ public sealed class FillConflictPostgresTests
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account", TradingMode.Real);
         account.Configure(null, "0x" + new string('b', 40), null);
         db.Accounts.Add(account);
         await db.SaveChangesAsync();
@@ -101,10 +102,10 @@ public sealed class FillConflictPostgresTests
         Assert.Equal(("direction,price", 2), (second.Fields, second.Reports));
 
         var service = new WorkspaceService(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(), TestUnitOfWork.For(db));
-        Assert.Equal(1, (await service.FillConflictsAsync(account.Id, default)).Total);
+        Assert.Equal(1, (await service.FillConflictsAsync(account.Id, TradingMode.Real, default)).Total);
         account.UpdateSettings(account.Name, null, false);
         await db.SaveChangesAsync();
-        var hidden = await service.FillConflictsAsync(account.Id, default);
+        var hidden = await service.FillConflictsAsync(account.Id, TradingMode.Real, default);
         Assert.Equal((0, 0), (hidden.Total, hidden.Recent.Count));
     }
 
@@ -114,14 +115,14 @@ public sealed class FillConflictPostgresTests
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
-        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
-        var paper = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper", "paper", 4000);
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: TradingMode.Paper);
+        var paper = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper", TradingMode.Paper, 4000);
         paper.Configure(portfolio.Id, null, null);
         db.AddRange(portfolio, paper);
         await db.SaveChangesAsync();
         var service = new WorkspaceService(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(), TestUnitOfWork.For(db));
-        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => service.FillConflictsAsync(paper.Id, default, "paper"))).StatusCode);
-        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.FillConflictsAsync(Guid.NewGuid(), default))).StatusCode);
+        await Assert.ThrowsAsync<DomainRuleException>(() => service.FillConflictsAsync(paper.Id, TradingMode.Paper, default));
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.FillConflictsAsync(Guid.NewGuid(), TradingMode.Real, default))).StatusCode);
     }
 
     [PostgresFact]

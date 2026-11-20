@@ -8,6 +8,7 @@ using Vessel.Application.Sizing;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Persistence.Events;
 
@@ -56,7 +57,7 @@ public sealed partial class VesselEventStore
         {
             var play = await lookups.PlayAsync(change.PlayId, ct);
             // Paper lifecycle/status history is retained, but actual-account events and notifications are not its transport.
-            if (play is null || play.TradingMode != "real") continue;
+            if (play is null || play.TradingMode != TradingMode.Real) continue;
             // An Unresolved Play that its fills settle closes with the same closed-result event as an Open one (1.3a).
             var type = change.To == PlayStatus.Open && change.From is PlayStatus.Planned or PlayStatus.Paused
                 ? "play.opened" : change.From is PlayStatus.Open or PlayStatus.Unresolved && change.To == PlayStatus.Closed

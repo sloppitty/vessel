@@ -11,6 +11,7 @@ using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 using Vessel.Tests.Identity;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -25,7 +26,7 @@ public sealed class UserVenueReadLimitIntegrationTests : UserVenueReadLimitTests
         var key = EthECKey.GenerateKey();
         var owner = (await identity.SeedAsync(key)).User.Id;
         var store = new MemoryWorkspaceStore(owner);
-        var marketAccount = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic market account");
+        var marketAccount = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic market account", TradingMode.Real);
         var credentialAccount = SecurityFixture.Account(owner);
         store.Accounts.AddRange([marketAccount, credentialAccount]);
         using var vault = SecurityFixture.Vault();

@@ -9,15 +9,15 @@ public sealed class IfThenRuleRulesTests
 {
     private static readonly DateTimeOffset At = DateTimeOffset.Parse("2026-10-22T10:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
 
-    private static PlayRule Rule(int version = 1) => new(Guid.NewGuid(), "real", version, "price tags the stop", "I wait for the close", null, At);
+    private static PlayRule Rule(int version = 1) => new(Guid.NewGuid(), TradingMode.Real, version, "price tags the stop", "I wait for the close", null, At);
 
     [Fact]
     public void A_rule_is_two_trimmed_plain_text_parts_of_at_most_500_characters()
     {
-        var rule = new PlayRule(Guid.NewGuid(), "real", 1, "  the setup fails  ", " I step aside\nfor a day ", null, At);
+        var rule = new PlayRule(Guid.NewGuid(), TradingMode.Real, 1, "  the setup fails  ", " I step aside\nfor a day ", null, At);
         Assert.Equal(("the setup fails", "I step aside\nfor a day"), (rule.If, rule.Then));
         foreach (var (@if, then) in new[] { ("", "x"), ("x", " "), (new string('x', 501), "x"), ("x", "bell\a") })
-            Assert.Throws<DomainValidationException>(() => new PlayRule(Guid.NewGuid(), "real", 1, @if, then, null, At));
+            Assert.Throws<DomainValidationException>(() => new PlayRule(Guid.NewGuid(), TradingMode.Real, 1, @if, then, null, At));
         rule.Archive(At.AddHours(1));
         rule.Archive(At.AddHours(2));
         Assert.Equal(At.AddHours(1), rule.ArchivedAtUtc);

@@ -2,6 +2,7 @@ using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 
 namespace Vessel.Application.Credentials;
 
@@ -15,7 +16,7 @@ public sealed class AccountCredentialReader(IWorkspaceStore accounts, IAccountCr
     public Task<CredentialAttempt?> ReadAttemptAsync(Guid accountId, CancellationToken cancellationToken) =>
         unitOfWork.ExecuteAsync(() => accounts.WithAccountLockAsync<CredentialAttempt?>(accountId, async account =>
         {
-            if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts cannot use venue credentials.");
+            account.RequireReal("Paper accounts cannot use venue credentials.");
             if (account.OwnerId != owner.OwnerId) throw new ProblemException(404, "Account not found.");
             if (!account.IsEnabled) throw new ProblemException(409, "Enable the account before reading its credential.");
             var purpose = VenueCredentialPurpose.ReadToken(account.VenueId);
@@ -31,7 +32,7 @@ public sealed class AccountCredentialReader(IWorkspaceStore accounts, IAccountCr
     public Task MarkRefusedAsync(Guid accountId, string attemptedRevision, CancellationToken cancellationToken) =>
         unitOfWork.ExecuteAsync(() => accounts.WithAccountLockAsync(accountId, async account =>
         {
-            if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts cannot use venue credentials.");
+            account.RequireReal("Paper accounts cannot use venue credentials.");
             if (account.OwnerId != owner.OwnerId) throw new ProblemException(404, "Account not found.");
             var credential = await credentials.FindAsync(accountId, VenueCredentialPurpose.ReadToken(account.VenueId), cancellationToken);
             if (credential is null || credential.LastError is not null || string.IsNullOrEmpty(attemptedRevision) ||
@@ -46,7 +47,7 @@ public sealed class AccountCredentialReader(IWorkspaceStore accounts, IAccountCr
     // every poll behind a running refresh, and decrypting would expose the token for no reason.
     public async Task<bool> IsUsableAsync(Account account, CancellationToken cancellationToken)
     {
-        if (account.TradingMode != "real" || account.OwnerId != owner.OwnerId || !account.IsEnabled) return false;
+        if (account.TradingMode != TradingMode.Real || account.OwnerId != owner.OwnerId || !account.IsEnabled) return false;
         var credential = await credentials.FindAsync(account.Id, VenueCredentialPurpose.ReadToken(account.VenueId), cancellationToken);
         return credential is not null && credential.ExpiresAt > time.GetUtcNow() && credential.LastError is null &&
             vault.HasKey(credential.KeyId);

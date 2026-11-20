@@ -6,6 +6,7 @@ using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -23,7 +24,7 @@ public sealed class PriceRulePostgresTests
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Trading");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Trading", TradingMode.Real);
         db.Accounts.Add(account);
         var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
             PlayDocuments.Serialize(TestPlays.Plan(price: "0.051234", stop: "0.04")), Created);

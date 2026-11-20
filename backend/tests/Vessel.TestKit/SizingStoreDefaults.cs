@@ -1,5 +1,6 @@
 using Vessel.Application.Sizing;
 using Vessel.Domain.Sizing;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -9,10 +10,10 @@ namespace Vessel.Tests;
 /// </summary>
 public interface ISizingStoreDefaults : ISizingStore
 {
-    async Task<List<ClosedPlayFacts>> ISizingStore.ClosedPlaysAsync(string tradingMode, CancellationToken ct) =>
+    async Task<List<ClosedPlayFacts>> ISizingStore.ClosedPlaysAsync(TradingMode tradingMode, CancellationToken ct) =>
         (await ClosedPlaysAsync(ct)).Where(f => f.Play.TradingMode == tradingMode).ToList();
 
-    async Task<List<ClosedPlayFacts>> ISizingStore.ClosedPlaysAsync(string tradingMode, IReadOnlyCollection<Guid> accountIds, string? instrument,
+    async Task<List<ClosedPlayFacts>> ISizingStore.ClosedPlaysAsync(TradingMode tradingMode, IReadOnlyCollection<Guid> accountIds, string? instrument,
         CancellationToken ct) =>
         (await ClosedPlaysAsync(tradingMode, ct)).Where(f => accountIds.Contains(f.Play.AccountId) &&
             (instrument is null || string.Equals(f.Play.ContractId, instrument, StringComparison.Ordinal))).ToList();

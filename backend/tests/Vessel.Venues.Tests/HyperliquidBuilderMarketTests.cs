@@ -4,6 +4,7 @@ using System.Text.Json;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Hyperliquid;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -126,7 +127,7 @@ public sealed class HyperliquidBuilderMarketTests
     {
         using var handler = new Routes((type, dex) => type == failedRead ? null :
             type == "userFillsByTime" ? GoldFill : Default(type, dex));
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "History");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "History", TradingMode.Real);
         account.Configure(null, Address, null);
         var to = DateTimeOffset.FromUnixTimeMilliseconds(1700000000000);
         await Assert.ThrowsAsync<VenueReadException>(() =>
@@ -138,7 +139,7 @@ public sealed class HyperliquidBuilderMarketTests
     public async Task Fill_history_imports_usdc_builder_fills_and_keeps_other_collateral_out_of_scope()
     {
         using var handler = new Routes((type, dex) => type == "userFillsByTime" ? GoldFill : Default(type, dex));
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "History");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "History", TradingMode.Real);
         account.Configure(null, Address, null);
         var to = DateTimeOffset.FromUnixTimeMilliseconds(1700000000000);
         var page = await Reader(handler).ReadFillPageAsync(account, to.AddMinutes(-1), to, default);
@@ -162,7 +163,7 @@ public sealed class HyperliquidBuilderMarketTests
         var read = await reader.ReadAsync(Address, default);
         Assert.Null(read.FillHistoryTruncated);
         Assert.Empty(read.Fills);
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "History");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "History", TradingMode.Real);
         account.Configure(null, Address, null);
         var to = DateTimeOffset.FromUnixTimeMilliseconds(1700000000000);
         await Assert.ThrowsAsync<VenueReadException>(() =>
@@ -178,7 +179,7 @@ public sealed class HyperliquidBuilderMarketTests
             ? GoldFill.Replace("xyz:GOLD", "xyz:NEW") : Default(type, dex));
         var reader = Reader(handler);
         await reader.ReadInstrumentsAsync(default);
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "History");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "History", TradingMode.Real);
         account.Configure(null, Address, null);
         var to = DateTimeOffset.FromUnixTimeMilliseconds(1700000000000);
         if (history)

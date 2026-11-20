@@ -6,6 +6,7 @@ using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -41,7 +42,7 @@ public sealed class EarlierOrderCandidateTests
     {
         var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Trading");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Trading", TradingMode.Real);
         await using var db = database.Context(owner);
         db.Accounts.Add(account);
         var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Vessel.Application.Activity;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Persistence;
 
@@ -10,7 +11,7 @@ namespace Vessel.Persistence;
 /// One cached aggregate. <paramref name="Revision"/> is the owner's execution revision (issue #107): equal values hold equal
 /// retained history, so an entry is rebased onto newer observations rather than read again.
 /// </summary>
-public readonly record struct ActivitySummaryKey(Guid OwnerId, long Revision, Guid? AccountId, string Accounts, string TradingMode = "real");
+public readonly record struct ActivitySummaryKey(Guid OwnerId, long Revision, Guid? AccountId, string Accounts, TradingMode TradingMode);
 
 /// <summary>Process-local, size-bounded LRU. Failed and abandoned computations never enter the cache.</summary>
 public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int entryLimit = 64, ILogger<ActivitySummaryCache>? logger = null)
@@ -93,7 +94,7 @@ public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int 
     /// Issue #107: a cached aggregate over several accounts, at this execution revision, that holds
     /// <paramref name="accountId"/>; an account's read narrows it instead of reading the account's history again.
     /// </summary>
-    public ActivitySummaries? FindContaining(Guid ownerId, long revision, string tradingMode, Guid accountId)
+    public ActivitySummaries? FindContaining(Guid ownerId, long revision, TradingMode tradingMode, Guid accountId)
     {
         lock (gate)
         {

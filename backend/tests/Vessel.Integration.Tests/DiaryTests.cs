@@ -16,6 +16,7 @@ using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -45,7 +46,7 @@ public sealed partial class DiaryPostgresTests
     }
     private static async Task<Account> Account(CoreDatabase database, Guid owner, string venue = "manual")
     {
-        var account = new Account(Guid.NewGuid(), owner, venue, venue);
+        var account = new Account(Guid.NewGuid(), owner, venue, venue, TradingMode.Real);
         await using var db = database.Context(owner);
         db.Accounts.Add(account); await db.SaveChangesAsync();
         return account;

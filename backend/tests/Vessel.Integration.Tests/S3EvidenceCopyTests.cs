@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Evidence;
 using Vessel.Domain.Markets;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -55,7 +56,7 @@ public sealed class S3EvidenceCopyTests
         await s3.PutBucketAsync(new PutBucketRequest { BucketName = bucket }, ct);
         try
         {
-            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic copy account");
+            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic copy account", TradingMode.Real);
             var play = TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC"));
             // These exact valid pictures were also decoded/downloaded in the recorded browser round-trip.
             byte[] Fixture(string extension) => File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "Evidence", "original." + extension));

@@ -18,15 +18,15 @@ public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISi
 
     public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct) => ClosedPlaysAsync(TradingMode.Real, ct);
 
-    public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, CancellationToken ct) => ReadClosedAsync(tradingMode, null, null, ct);
+    public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(TradingMode tradingMode, CancellationToken ct) => ReadClosedAsync(tradingMode, null, null, ct);
 
-    public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, IReadOnlyCollection<Guid> accountIds, string? instrument,
+    public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(TradingMode tradingMode, IReadOnlyCollection<Guid> accountIds, string? instrument,
         CancellationToken ct) => ReadClosedAsync(tradingMode, accountIds, instrument, ct);
 
-    private async Task<List<ClosedPlayFacts>> ReadClosedAsync(string tradingMode, IReadOnlyCollection<Guid>? accountIds, string? instrument,
+    private async Task<List<ClosedPlayFacts>> ReadClosedAsync(TradingMode tradingMode, IReadOnlyCollection<Guid>? accountIds, string? instrument,
         CancellationToken ct)
     {
-        tradingMode = TradingMode.Validate(tradingMode);
+        tradingMode = TradingModes.Validate(tradingMode);
         await using var transaction = tradingMode == TradingMode.Paper && db.Database.CurrentTransaction is null
             ? await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct) : null;
         var query = Closed(db, tradingMode);
@@ -48,7 +48,7 @@ public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISi
     /// The Plays Review and sizing score in a mode: Closed ones (and, in paper, those whose simulation is held as ambiguous,
     /// gapped or suspended) on the owner's enabled accounts of that mode.
     /// </summary>
-    internal static IQueryable<Play> Closed(VesselDbContext db, string tradingMode) =>
+    internal static IQueryable<Play> Closed(VesselDbContext db, TradingMode tradingMode) =>
         db.Plays.Where(p => p.TradingMode == tradingMode &&
             (p.Status == PlayStatus.Closed || tradingMode == TradingMode.Paper &&
                 db.PaperSimulations.Any(s => s.PlayId == p.Id && (s.State == "ambiguous" || s.State == "gap" ||

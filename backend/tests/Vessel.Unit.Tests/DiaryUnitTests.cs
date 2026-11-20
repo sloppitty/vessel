@@ -5,6 +5,7 @@ using Vessel.Application.Sizing;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -13,7 +14,7 @@ public sealed class ManualLedgerTests
     private static readonly DateTimeOffset At = DateTimeOffset.UnixEpoch.AddDays(1);
     private static Play Play(string direction = "long")
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Manual");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Manual", TradingMode.Real);
         return new(Guid.NewGuid(), account, new PerpetualInstrument("manual", "BTC"), InstrumentSource.Manual,
             PlayDocuments.Serialize(TestPlays.Plan() with { Direction = direction }), At);
     }

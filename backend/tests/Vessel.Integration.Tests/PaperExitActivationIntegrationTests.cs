@@ -10,6 +10,7 @@ using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
 using Xunit.Abstractions;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -104,15 +105,15 @@ public sealed class PaperExitActivationIntegrationTests(ITestOutputHelper output
         {
             var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
             await using var db = database.Context(owner);
-            var portfolio = new Portfolio(Guid.NewGuid(), owner, "A2", tradingMode: "paper");
-            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "A2", "paper", 4000); account.Configure(portfolio.Id, null, null);
+            var portfolio = new Portfolio(Guid.NewGuid(), owner, "A2", tradingMode: TradingMode.Paper);
+            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "A2", TradingMode.Paper, 4000); account.Configure(portfolio.Id, null, null);
             db.AddRange(portfolio, account, PaperLedgerEntry.Seed(owner, account.Id, 4000, Saved), new PaperSettings { OwnerId = owner, Enabled = true, CheckIntervalMinutes = 1 });
             await db.SaveChangesAsync(); return new(database, owner, account.Id);
         }
         public async Task<Guid> ArmAsync(PlayPlanDocument plan)
         {
             await using var db = Db.Context(OwnerId); var service = Plays(db);
-            var saved = await service.CreateAsync(new(Account, "BTC", "venue", "A2 activation", plan), default, "paper");
+            var saved = await service.CreateAsync(new(Account, "BTC", "venue", "A2 activation", plan), TradingMode.Paper, default);
             return (await service.ChangeStatusAsync(saved.Summary.Id, new(saved.Summary.Version, "planned"), default)).Summary.Id;
         }
         public async Task ReviseAsync(Guid id, PlayPlanDocument plan)
@@ -133,7 +134,7 @@ public sealed class PaperExitActivationIntegrationTests(ITestOutputHelper output
         public async Task<AccountDto> AccountAsync()
         {
             await using var db = Db.Context(OwnerId); var work = TestUnitOfWork.For(db);
-            return await new WorkspaceService(new WorkspaceStore(db, work, Clock), new CoreOwner(OwnerId), TestVenues.With(), work).AccountAsync(Account, default, "paper");
+            return await new WorkspaceService(new WorkspaceStore(db, work, Clock), new CoreOwner(OwnerId), TestVenues.With(), work).AccountAsync(Account, TradingMode.Paper, default);
         }
         public ValueTask DisposeAsync() => Db.DisposeAsync();
     }

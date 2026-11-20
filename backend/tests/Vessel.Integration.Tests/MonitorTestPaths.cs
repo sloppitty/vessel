@@ -6,6 +6,7 @@ using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -45,7 +46,7 @@ internal static class MonitorTestPaths
         if (!await coordinator.RunAsync(await coordinator.AdmitRefreshAsync(accountId, "test-" + Guid.NewGuid().ToString("N"), ct), ct))
             throw new ProblemException(502, RefreshFailed);
         return await new WorkspaceService(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), venues,
-            TestUnitOfWork.For(db)).AccountAsync(accountId, ct);
+            TestUnitOfWork.For(db)).AccountAsync(accountId, TradingMode.Real, ct);
     }
 
     /// <summary>

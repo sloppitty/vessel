@@ -9,6 +9,7 @@ using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -67,10 +68,10 @@ public sealed class PlayListPostgresTests
     private static async Task<Seeded> SeedAsync(CoreDatabase database)
     {
         var owner = Guid.NewGuid(); var otherOwner = Guid.NewGuid();
-        var swing = new Portfolio(Guid.NewGuid(), owner, "Swing", "wallet");
-        var first = new Account(Guid.NewGuid(), owner, "hyperliquid", "First"); first.Configure(swing.Id, null, null);
-        var second = new Account(Guid.NewGuid(), owner, "manual", "Second");
-        var disabled = new Account(Guid.NewGuid(), owner, "hyperliquid", "Disabled"); disabled.UpdateSettings("Disabled", swing.Id, false);
+        var swing = new Portfolio(Guid.NewGuid(), owner, "Swing", TradingMode.Real, "wallet");
+        var first = new Account(Guid.NewGuid(), owner, "hyperliquid", "First", TradingMode.Real); first.Configure(swing.Id, null, null);
+        var second = new Account(Guid.NewGuid(), owner, "manual", "Second", TradingMode.Real);
+        var disabled = new Account(Guid.NewGuid(), owner, "hyperliquid", "Disabled", TradingMode.Real); disabled.UpdateSettings("Disabled", swing.Id, false);
         var plays = new Dictionary<string, Play>
         {
             ["d1"] = New(first, "BTC", 10, title: @"Breakout 50%_\ test"),
@@ -94,7 +95,7 @@ public sealed class PlayListPostgresTests
             // A review time alone no longer completes a review (decision 3): only an explicit completion does.
             await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE plays SET \"ReviewedAtUtc\" = {T0} WHERE \"Id\" = {plays["x2"].Id}");
         }
-        var foreign = new Account(Guid.NewGuid(), otherOwner, "hyperliquid", "Foreign");
+        var foreign = new Account(Guid.NewGuid(), otherOwner, "hyperliquid", "Foreign", TradingMode.Real);
         await using (var db = database.Context(otherOwner))
         {
             db.Accounts.Add(foreign); db.Plays.Add(New(foreign, "BTC", 300, title: "Breakout foreign"));
@@ -117,7 +118,7 @@ public sealed class PlayListPostgresTests
         await using var db = database.Context(seeded.Owner);
         var service = Service(db);
         async Task<string[]> View(string? view, string? q = null, string? scope = "all", string? page = null, string? size = null) =>
-            (await service.ListAsync(view, q, scope, page, size, default)).Plays.Select(p => names[p.Id]).ToArray();
+            (await service.ListAsync(view, q, scope, page, size, TradingMode.Real, default)).Plays.Select(p => names[p.Id]).ToArray();
 
         Assert.Equal(["d2", "d1"], await View("drafts"));
         Assert.Equal(["o1", "p2", "p1"], await View("progress"));
@@ -129,7 +130,7 @@ public sealed class PlayListPostgresTests
         Assert.Equal(["r1", "x2", "x1", "c3", "c2", "c1", "o1", "p2", "p1", "d2", "d1"], await View("all"));
         Assert.Equal(await View("all"), await View(null));
 
-        var list = await service.ListAsync("review", null, null, null, null, default);
+        var list = await service.ListAsync("review", null, null, null, null, TradingMode.Real, default);
         Assert.Equal(("review", 1, 25, 4), (list.View, list.Page, list.PageSize, list.TotalCount));
         var c2 = list.Plays.Single(p => names[p.Id] == "c2");
         Assert.False(c2.HasReview); Assert.Null(c2.ReviewedAtUtc);
@@ -142,12 +143,12 @@ public sealed class PlayListPostgresTests
         Assert.Equal(T0.AddMinutes(5), retro.EndedAtUtc);
         foreach (var (key, id) in seeded.Plays.Where(p => p.Key != "hidden"))
             Assert.Equal((await service.GetAsync(id, default)).Summary,
-                (await service.ListAsync("all", null, null, null, "100", default)).Plays.Single(p => p.Id == id) with { Outcome = null });
+                (await service.ListAsync("all", null, null, null, "100", TradingMode.Real, default)).Plays.Single(p => p.Id == id) with { Outcome = null });
 
-        Assert.Equal(new PlayCountsDto(2, 3, 4, 2, 4, 2, 11), await service.CountsAsync(null, "all", default));
+        Assert.Equal(new PlayCountsDto(2, 3, 4, 2, 4, 2, 11), await service.CountsAsync(null, "all", TradingMode.Real, default));
         // The unscoped Plays page also lists Plays on disabled accounts; Overview scopes never do.
         Assert.Equal(["hidden", "d2", "d1"], await View("drafts", scope: null));
-        Assert.Equal(new PlayCountsDto(3, 3, 4, 2, 4, 2, 12), await service.CountsAsync(null, null, default));
+        Assert.Equal(new PlayCountsDto(3, 3, 4, 2, 4, 2, 12), await service.CountsAsync(null, null, TradingMode.Real, default));
     }
 
     [PostgresFact]
@@ -161,8 +162,8 @@ public sealed class PlayListPostgresTests
             new CoreOwner(seeded.Owner));
         var service = Service(db);
         foreach (var view in new[] { "drafts", "progress", "review", "reviewed", "closed", "cancelled", "all" })
-            await service.ListAsync(view, "a", $"portfolio:{seeded.Swing.Id}", null, null, default);
-        await service.CountsAsync("a", "unassigned", default);
+            await service.ListAsync(view, "a", $"portfolio:{seeded.Swing.Id}", null, null, TradingMode.Real, default);
+        await service.CountsAsync("a", "unassigned", TradingMode.Real, default);
         var selects = sql.Where(s => s.Contains("FROM plays", StringComparison.Ordinal)).ToList();
         Assert.NotEmpty(selects);
         Assert.All(selects, s =>
@@ -182,27 +183,27 @@ public sealed class PlayListPostgresTests
         var names = seeded.Plays.ToDictionary(p => p.Value, p => p.Key);
         await using var db = database.Context(seeded.Owner);
         var service = Service(db);
-        async Task<string[]> All(string scope) => (await service.ListAsync("all", null, scope, null, "100", default)).Plays.Select(p => names[p.Id]).ToArray();
+        async Task<string[]> All(string scope) => (await service.ListAsync("all", null, scope, null, "100", TradingMode.Real, default)).Plays.Select(p => names[p.Id]).ToArray();
 
         Assert.Equal(["x2", "c3", "p2", "d2"], await All("unassigned"));
         Assert.Equal(["r1", "x1", "c2", "c1", "o1", "p1", "d1"], await All($"portfolio:{seeded.Swing.Id}"));
         Assert.Equal(await All($"portfolio:{seeded.Swing.Id}"), await All($"account:{seeded.First.Id}"));
         Assert.Empty(await All($"account:{seeded.Disabled.Id}"));
         // Unassigned holds x2 (a review time, not completed) and c3 (completed).
-        Assert.Equal(new PlayCountsDto(1, 1, 1, 1, 1, 1, 4), await service.CountsAsync(null, "unassigned", default));
-        Assert.Equal(new PlayCountsDto(0, 0, 0, 0, 0, 0, 0), await service.CountsAsync(null, $"account:{seeded.Disabled.Id}", default));
+        Assert.Equal(new PlayCountsDto(1, 1, 1, 1, 1, 1, 4), await service.CountsAsync(null, "unassigned", TradingMode.Real, default));
+        Assert.Equal(new PlayCountsDto(0, 0, 0, 0, 0, 0, 0), await service.CountsAsync(null, $"account:{seeded.Disabled.Id}", TradingMode.Real, default));
         foreach (var scope in new[] { $"portfolio:{Guid.NewGuid()}", $"account:{Guid.NewGuid()}" })
         {
-            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.ListAsync("all", null, scope, null, null, default))).StatusCode);
-            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.CountsAsync(null, scope, default))).StatusCode);
+            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.ListAsync("all", null, scope, null, null, TradingMode.Real, default))).StatusCode);
+            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.CountsAsync(null, scope, TradingMode.Real, default))).StatusCode);
         }
 
         // Another owner's accounts are unknown to this owner, and its own Play stays invisible here.
         await using var foreignDb = database.Context(seeded.OtherOwner);
         var foreign = Service(foreignDb);
-        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => foreign.ListAsync("all", null, $"account:{seeded.First.Id}", null, null, default))).StatusCode);
-        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => foreign.CountsAsync(null, $"portfolio:{seeded.Swing.Id}", default))).StatusCode);
-        Assert.Equal(1, (await foreign.CountsAsync(null, null, default)).All);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => foreign.ListAsync("all", null, $"account:{seeded.First.Id}", null, null, TradingMode.Real, default))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => foreign.CountsAsync(null, $"portfolio:{seeded.Swing.Id}", TradingMode.Real, default))).StatusCode);
+        Assert.Equal(1, (await foreign.CountsAsync(null, null, TradingMode.Real, default)).All);
     }
 
     [PostgresFact]
@@ -214,7 +215,7 @@ public sealed class PlayListPostgresTests
         await using var db = database.Context(seeded.Owner);
         var service = Service(db);
         async Task<string[]> Find(string? q) =>
-            (await service.ListAsync("all", q, "all", null, "100", default)).Plays.Select(p => names[p.Id]).Order().ToArray();
+            (await service.ListAsync("all", q, "all", null, "100", TradingMode.Real, default)).Plays.Select(p => names[p.Id]).Order().ToArray();
 
         Assert.Equal(["d1"], await Find("%"));
         Assert.Equal(["d1"], await Find("_"));
@@ -226,8 +227,8 @@ public sealed class PlayListPostgresTests
         Assert.Empty(await Find("b_c"));
         Assert.Equal(11, (await Find("   ")).Length);
         Assert.Equal(11, (await Find(null)).Length);
-        Assert.Equal(new PlayCountsDto(1, 1, 0, 0, 0, 0, 2), await service.CountsAsync("breakout", "all", default));
-        Assert.Equal(new PlayCountsDto(2, 1, 0, 0, 0, 0, 3), await service.CountsAsync("breakout", null, default));
+        Assert.Equal(new PlayCountsDto(1, 1, 0, 0, 0, 0, 2), await service.CountsAsync("breakout", "all", TradingMode.Real, default));
+        Assert.Equal(new PlayCountsDto(2, 1, 0, 0, 0, 0, 3), await service.CountsAsync("breakout", null, TradingMode.Real, default));
         Assert.Empty(await Find(" " + new string('x', 100) + " "));
         Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Find(new string('x', 101)))).StatusCode);
     }
@@ -245,26 +246,26 @@ public sealed class PlayListPostgresTests
         }
         await using var reading = database.Context(seeded.Owner);
         var service = Service(reading);
-        var drafts = await service.ListAsync("drafts", null, "all", null, null, default);
+        var drafts = await service.ListAsync("drafts", null, "all", null, null, TradingMode.Real, default);
         Assert.Equal(("drafts", 1, 200, 202, 200), (drafts.View, drafts.Page, drafts.PageSize, drafts.TotalCount, drafts.Plays.Count));
-        var recent = await service.ListAsync("drafts", null, "all", "3", "5", default);
+        var recent = await service.ListAsync("drafts", null, "all", "3", "5", TradingMode.Real, default);
         Assert.Equal((1, 5, 202, 5, "Bulk 199"), (recent.Page, recent.PageSize, recent.TotalCount, recent.Plays.Count, recent.Plays[0].Title));
         Assert.Equal("Bulk 199", drafts.Plays[0].Title);
-        var progress = await service.ListAsync("progress", null, "all", null, null, default);
+        var progress = await service.ListAsync("progress", null, "all", null, null, TradingMode.Real, default);
         Assert.Equal((1, 200, 3, 3), (progress.Page, progress.PageSize, progress.TotalCount, progress.Plays.Count));
 
-        var page = await service.ListAsync("closed", null, null, "2", "3", default);
+        var page = await service.ListAsync("closed", null, null, "2", "3", TradingMode.Real, default);
         Assert.Equal((2, 3, 4, 1), (page.Page, page.PageSize, page.TotalCount, page.Plays.Count));
-        var clamped = await service.ListAsync("closed", null, null, "99", "3", default);
+        var clamped = await service.ListAsync("closed", null, null, "99", "3", TradingMode.Real, default);
         Assert.Equal((2, page.Plays[0].Id), (clamped.Page, clamped.Plays[0].Id));
-        var empty = await service.ListAsync("cancelled", "nothing matches", null, "7", null, default);
+        var empty = await service.ListAsync("cancelled", "nothing matches", null, "7", null, TradingMode.Real, default);
         Assert.Equal((1, 25, 0), (empty.Page, empty.PageSize, empty.TotalCount));
         Assert.Empty(empty.Plays);
-        var all = await service.ListAsync("all", null, "all", "3", "100", default);
+        var all = await service.ListAsync("all", null, "all", "3", "100", TradingMode.Real, default);
         Assert.Equal((3, 11), (all.Page, all.Plays.Count));
         Assert.Equal(211, all.TotalCount);
-        Assert.Equal(new PlayCountsDto(202, 3, 4, 2, 4, 2, 211), await service.CountsAsync(null, "all", default));
-        Assert.Equal(new PlayCountsDto(203, 3, 4, 2, 4, 2, 212), await service.CountsAsync(null, null, default));
+        Assert.Equal(new PlayCountsDto(202, 3, 4, 2, 4, 2, 211), await service.CountsAsync(null, "all", TradingMode.Real, default));
+        Assert.Equal(new PlayCountsDto(203, 3, 4, 2, 4, 2, 212), await service.CountsAsync(null, null, TradingMode.Real, default));
     }
 
     [PostgresFact]
@@ -272,7 +273,7 @@ public sealed class PlayListPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account", TradingMode.Real);
         await using (var db = database.Context(owner)) { db.Accounts.Add(account); await db.SaveChangesAsync(); }
         await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
         using var client = factory.AuthorizedClient();

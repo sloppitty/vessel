@@ -1,6 +1,7 @@
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -11,5 +12,5 @@ internal static class EvidenceFixtures
     public static readonly byte[] WebP = [.. "RIFF"u8, 9, 0, 0, 0, .. "WEBP"u8, 7];
 
     public static Play PlayFor(Guid owner) =>
-        TestPlays.Create(new Account(Guid.NewGuid(), owner, "hyperliquid", "Account"), new PerpetualInstrument("hyperliquid", "BTC"));
+        TestPlays.Create(new Account(Guid.NewGuid(), owner, "hyperliquid", "Account", TradingMode.Real), new PerpetualInstrument("hyperliquid", "BTC"));
 }

@@ -6,6 +6,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -43,11 +44,11 @@ internal sealed class GoldenJournal
 
     public GoldenJournal()
     {
-        Swing = new Portfolio(Id(0x10), Owner, "Swing", "folder");
-        Gross = new Account(Id(0x20), Owner, "hyperliquid", "Gross");
+        Swing = new Portfolio(Id(0x10), Owner, "Swing", TradingMode.Real, "folder");
+        Gross = new Account(Id(0x20), Owner, "hyperliquid", "Gross", TradingMode.Real);
         Gross.Configure(Swing.Id, null, null);
-        Net = new Account(Id(0x21), Owner, "risex", "Net");
-        Disabled = new Account(Id(0x22), Owner, "hyperliquid", "Disabled");
+        Net = new Account(Id(0x21), Owner, "risex", "Net", TradingMode.Real);
+        Disabled = new Account(Id(0x22), Owner, "hyperliquid", "Disabled", TradingMode.Real);
         Disabled.Configure(Swing.Id, null, null);
         Disabled.UpdateSettings(Disabled.Name, Swing.Id, false);
         Accounts.AddRange([Gross, Net, Disabled]);

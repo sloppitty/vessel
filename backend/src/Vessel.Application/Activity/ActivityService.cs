@@ -38,19 +38,19 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
     /// </summary>
     public async Task<ActivityPageDto> PageAsync(ActivityQuery query, CancellationToken ct)
     {
-        var mode = TradingMode.Validate(query.TradingMode ?? TradingMode.Real);
+        var mode = TradingModes.FromRequest(query.TradingMode);
         var (page, pageSize) = ListPaging.Parse(query.Page, query.PageSize);
         var scope = ListScope.Parse(query.Scope);
         if (query.AccountId == Guid.Empty) throw new ProblemException(400, "Choose a valid account.");
         var asOf = time.GetUtcNow();
         var filter = ActivityFilter.Parse(query, asOf);
-        var accounts = await workspace.AccountsAsync(ct, mode);
-        var portfolios = scope.Kind == "portfolio" ? await workspace.PortfoliosAsync(ct, mode) : [];
+        var accounts = await workspace.AccountsAsync(mode, ct);
+        var portfolios = scope.Kind == "portfolio" ? await workspace.PortfoliosAsync(mode, ct) : [];
         scope.RequireKnown(id => portfolios.Any(p => p.Id == id), id => accounts.Any(a => a.Id == id));
         if (query.AccountId is { } detail && !accounts.Any(a => a.Id == detail)) throw new ProblemException(404, "Account not found.");
         var members = accounts.Where(a => scope.Includes(a.Id, a.PortfolioId, a.IsEnabled) && (query.AccountId is null || a.Id == query.AccountId))
             .Select(a => a.Id).ToHashSet();
-        var summary = await ReadSummariesAsync(null, ct, members, mode);
+        var summary = await ReadSummariesAsync(null, mode, ct, members);
         var portfolioOf = summary.Facts.Accounts.ToDictionary(a => a.Id, a => a.PortfolioId);
         // #107: the cached aggregate keeps its operations in page order and its facets, so a hit sorts nothing.
         var scoped = summary.Ordered;
@@ -78,13 +78,13 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
     }
 
     /// <summary>One operation's constituent rows, from that account only. Changed history is 404.</summary>
-    public async Task<OperationFillsDto> FillsAsync(Guid? accountId, string? operationId, CancellationToken ct, string? tradingMode = "real")
+    public async Task<OperationFillsDto> FillsAsync(Guid? accountId, string? operationId, TradingMode tradingMode, CancellationToken ct)
     {
-        var mode = TradingMode.Validate(tradingMode ?? TradingMode.Real);
+        var mode = TradingModes.Validate(tradingMode);
         if (accountId is null || accountId == Guid.Empty || string.IsNullOrWhiteSpace(operationId) || operationId.Length > MaxOperationIdLength)
             throw new ProblemException(400, "Choose a valid account and retained operation.");
         // Missing and foreign accounts are 404 in the store; a disabled account has no visible operations.
-        var summary = await ReadSummariesAsync(accountId, ct, tradingMode: mode);
+        var summary = await ReadSummariesAsync(accountId, mode, ct);
         var operation = summary.Operations.SingleOrDefault(o => o.Id == operationId)
             ?? throw new ProblemException(404, "Retained operation not found. Reload Activity.");
         var shown = operation.Fills.Take(MaxExpandedFills).ToList();
@@ -144,20 +144,20 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
 
     // Overview, Activity pages and the fills endpoint share these unbounded aggregate results; constituent DTOs
     // are only built for the rows a caller returns.
-    internal async Task<ActivitySummaries> ReadSummariesAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null,
-        string tradingMode = "real")
+    internal async Task<ActivitySummaries> ReadSummariesAsync(Guid? accountId, TradingMode tradingMode, CancellationToken ct,
+        IReadOnlySet<Guid>? accountIds = null)
     {
-        tradingMode = TradingMode.Validate(tradingMode);
+        tradingMode = TradingModes.Validate(tradingMode);
         if (accountId == Guid.Empty) throw new ProblemException(400, "Choose a valid account.");
         if (accountIds is { Count: 0 }) return new([], [], new([], [], [], new Dictionary<Guid, Guid>()));
         if (summaries is not null) return await summaries.ReadAsync(accountId, tradingMode, ct, accountIds);
-        return Aggregate(await store.ReadAsync(accountId, tradingMode, ct, accountIds), accountId, accountIds, venues, tradingMode);
+        return Aggregate(await store.ReadAsync(accountId, tradingMode, ct, accountIds), tradingMode, accountId, accountIds, venues);
     }
 
-    public static ActivitySummaries Aggregate(ActivityFacts facts, Guid? accountId = null,
-        IReadOnlySet<Guid>? accountIds = null, IVenueRegistry? venues = null, string tradingMode = "real")
+    public static ActivitySummaries Aggregate(ActivityFacts facts, TradingMode tradingMode, Guid? accountId = null,
+        IReadOnlySet<Guid>? accountIds = null, IVenueRegistry? venues = null)
     {
-        tradingMode = TradingMode.Validate(tradingMode);
+        tradingMode = TradingModes.Validate(tradingMode);
         var accounts = facts.Accounts.Where(a => a.TradingMode == tradingMode && a.IsEnabled && (accountId == null || a.Id == accountId) &&
             (accountIds == null || accountIds.Contains(a.Id))).ToDictionary(a => a.Id);
         if (tradingMode == TradingMode.Paper)

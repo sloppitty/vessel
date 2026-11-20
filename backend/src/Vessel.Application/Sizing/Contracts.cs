@@ -4,6 +4,7 @@ using Vessel.Application.Plays;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Application.Sizing;
 
@@ -77,7 +78,7 @@ public sealed record SizingLimitsDto(string EffectiveRiskPercent, string MaxStop
     string MinRewardRiskSource);
 
 public sealed record SizingDto(SizingSettingsDto Settings, ExposureDto Exposure, TrackRecordDto Record, SizingLimitsDto Limits, string Notice,
-    string TradingMode = "real");
+    TradingMode TradingMode);
 
 /// <summary>
 /// A closed Play with its plan revisions, the fills of its linked orders and the linked orders known to be filled
@@ -134,12 +135,12 @@ public interface ISizingStore
     Task<SizingSettings?> SettingsAsync(CancellationToken ct);
     /// <summary>Closed Plays on enabled accounts with their revisions, linked fills and incompletely retained orders.</summary>
     Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct);
-    Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, CancellationToken ct);
+    Task<List<ClosedPlayFacts>> ClosedPlaysAsync(TradingMode tradingMode, CancellationToken ct);
     /// <summary>
     /// The closed Plays of <paramref name="tradingMode"/> on these accounts and, when given, this instrument (ordinal equality):
-    /// the subset of <see cref="ClosedPlaysAsync(string, CancellationToken)"/> Review filters to. Persistence reads only these.
+    /// the subset of <see cref="ClosedPlaysAsync(TradingMode, CancellationToken)"/> Review filters to. Persistence reads only these.
     /// </summary>
-    Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, IReadOnlyCollection<Guid> accountIds, string? instrument,
+    Task<List<ClosedPlayFacts>> ClosedPlaysAsync(TradingMode tradingMode, IReadOnlyCollection<Guid> accountIds, string? instrument,
         CancellationToken ct);
     /// <summary>How many real Unresolved Plays the owner has on enabled accounts; they are never counted in the record.</summary>
     Task<int> UnresolvedPlaysAsync(CancellationToken ct);

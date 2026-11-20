@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Vessel.Application.Ownership;
 using Vessel.Domain.Accounts;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -19,7 +20,7 @@ public sealed class VesselEventUnitOfWorkTests
         var work = new UnitOfWork(db, [probe], logs);
         probe.Before = async () =>
         {
-            db.Accounts.Add(new Account(Guid.NewGuid(), owner, "manual", "Before commit"));
+            db.Accounts.Add(new Account(Guid.NewGuid(), owner, "manual", "Before commit", TradingMode.Real));
             await work.SaveChangesAsync(default);
             await using var outside = database.Context(owner);
             Assert.Empty(await outside.Accounts.ToListAsync());
@@ -53,7 +54,7 @@ public sealed class VesselEventUnitOfWorkTests
         };
         await Assert.ThrowsAsync<InvalidOperationException>(() => work.ExecuteAsync(() =>
         {
-            db.Accounts.Add(new Account(Guid.NewGuid(), owner, "manual", "Rolled back"));
+            db.Accounts.Add(new Account(Guid.NewGuid(), owner, "manual", "Rolled back", TradingMode.Real));
             return Task.FromResult(true);
         }, default));
         Assert.Equal((1, 0, 1), (probe.BeforeCalls, probe.AfterCalls, probe.RollbackCalls));

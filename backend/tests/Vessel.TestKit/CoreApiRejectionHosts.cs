@@ -1,3 +1,4 @@
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -17,7 +18,7 @@ public sealed class CoreApiRejectionHosts : IAsyncDisposable
     {
         var owner = Guid.NewGuid();
         Store = new MemoryWorkspaceStore(owner);
-        Portfolio = new Vessel.Domain.Workspace.Portfolio(Guid.NewGuid(), owner, "Trading");
+        Portfolio = new Vessel.Domain.Workspace.Portfolio(Guid.NewGuid(), owner, "Trading", TradingMode.Real);
         Store.Portfolios.Add(Portfolio);
         Rejecting = new CoreApiFactory(owner, Store);
     }

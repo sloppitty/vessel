@@ -1,6 +1,7 @@
 using Vessel.Application.Activity;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -44,7 +45,7 @@ public sealed class ActivityLeverageTests
     private static Task<ActivityPageDto> Page(IReadOnlyList<ImportedFill> fills, IReadOnlyList<LeverageObservation>? observed = null,
         params AccountSnapshot[] snapshots)
     {
-        var account = new Account(AccountId, Owner, "manual", "Fixture");
+        var account = new Account(AccountId, Owner, "manual", "Fixture", TradingMode.Real);
         var facts = new ActivityFacts([account], fills, snapshots, new Dictionary<Guid, Guid>()) { LeverageObservations = observed ?? [] };
         var workspace = new MemoryWorkspaceStore(Owner);
         workspace.Accounts.Add(account);
@@ -216,7 +217,7 @@ public sealed class ActivityLeverageTests
             observed.Add(Observed(i * 10 + 2, 1, i % 50 + 1));
             observed.Add(Observed(i * 10 + 7, 1, 99)); // between operations
         }
-        var account = new Account(AccountId, Owner, "manual", "Fixture");
+        var account = new Account(AccountId, Owner, "manual", "Fixture", TradingMode.Real);
         var workspace = new MemoryWorkspaceStore(Owner);
         workspace.Accounts.Add(account);
         var service = new ActivityService(new Store(new ActivityFacts([account], fills, [], new Dictionary<Guid, Guid>()) { LeverageObservations = observed }),

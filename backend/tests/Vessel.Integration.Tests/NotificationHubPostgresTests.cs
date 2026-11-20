@@ -16,6 +16,7 @@ using Vessel.Messaging.Modules.Notifications;
 using Vessel.Persistence;
 using Vessel.Persistence.Events;
 using Vessel.Persistence.Events.Subscriptions;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -420,7 +421,7 @@ public sealed class NotificationHubPostgresTests
 
         public async Task<Guid> SeedAccountAsync(string name, string venue = "hyperliquid")
         {
-            var account = new Account(Guid.NewGuid(), Owner, venue, name);
+            var account = new Account(Guid.NewGuid(), Owner, venue, name, TradingMode.Real);
             await using var db = Database.Context(Owner);
             db.Accounts.Add(account);
             await db.SaveChangesAsync();
@@ -429,7 +430,7 @@ public sealed class NotificationHubPostgresTests
 
         public async Task<(Guid Account, Guid Play)> SeedPlayAsync(string title, string venue = "hyperliquid")
         {
-            var account = new Account(Guid.NewGuid(), Owner, venue, "Main");
+            var account = new Account(Guid.NewGuid(), Owner, venue, "Main", TradingMode.Real);
             var play = TestPlays.Create(account, new(venue, "BTC"));
             await using var db = Database.Context(Owner);
             db.Accounts.Add(account); db.Plays.Add(play);

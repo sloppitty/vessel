@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Sizing;
 using Vessel.Domain.Sizing;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -18,7 +19,7 @@ public sealed class SizingSettingsFirstWriteRaceTests
         var owner = Guid.NewGuid();
         var foreign = Guid.NewGuid();
         await using (var other = database.Context(foreign))
-            Assert.Equal("3", (await Service(other, foreign).UpdateSettingsAsync(new("3"), default)).Settings.RiskPercent);
+            Assert.Equal("3", (await Service(other, foreign).UpdateSettingsAsync(new("3"), TradingMode.Real, default)).Settings.RiskPercent);
 
         await using var first = database.Context(owner);
         await using var second = database.Context(owner);
@@ -36,7 +37,7 @@ public sealed class SizingSettingsFirstWriteRaceTests
         }, default);
         await inserted.Task;
         // The first write's row is inserted but uncommitted: the second sees no row yet and must wait on the conflict.
-        var secondWrite = Service(second, owner).UpdateSettingsAsync(new("2.5"), default);
+        var secondWrite = Service(second, owner).UpdateSettingsAsync(new("2.5"), TradingMode.Real, default);
         await Task.Delay(300);
         Assert.False(secondWrite.IsCompleted);
         release.SetResult();
@@ -60,8 +61,8 @@ public sealed class SizingSettingsFirstWriteRaceTests
             var owner = Guid.NewGuid();
             await using var a = database.Context(owner);
             await using var b = database.Context(owner);
-            var results = await Task.WhenAll(Service(a, owner).UpdateSettingsAsync(new("1.5"), default),
-                Service(b, owner).UpdateSettingsAsync(new("2"), default));
+            var results = await Task.WhenAll(Service(a, owner).UpdateSettingsAsync(new("1.5"), TradingMode.Real, default),
+                Service(b, owner).UpdateSettingsAsync(new("2"), TradingMode.Real, default));
             Assert.Equal(["1.5", "2"], results.Select(r => r.Settings.RiskPercent));
             await using var verify = database.Context(owner);
             var row = Assert.Single(await verify.SizingSettings.ToListAsync());
@@ -75,13 +76,13 @@ public sealed class SizingSettingsFirstWriteRaceTests
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
-        await Assert.ThrowsAsync<Vessel.Domain.Common.DomainValidationException>(() => Service(db, owner).UpdateSettingsAsync(new("9"), default));
+        await Assert.ThrowsAsync<Vessel.Domain.Common.DomainValidationException>(() => Service(db, owner).UpdateSettingsAsync(new("9"), TradingMode.Real, default));
         await using (var check = database.Context(owner))
             Assert.Empty(await check.SizingSettings.ToListAsync());
         await using (var one = database.Context(owner))
-            await Service(one, owner).UpdateSettingsAsync(new("1.5"), default);
+            await Service(one, owner).UpdateSettingsAsync(new("1.5"), TradingMode.Real, default);
         await using (var two = database.Context(owner))
-            await Service(two, owner).UpdateSettingsAsync(new("2.25"), default);
+            await Service(two, owner).UpdateSettingsAsync(new("2.25"), TradingMode.Real, default);
         await using var verify = database.Context(owner);
         Assert.Equal(2.25m, Assert.Single(await verify.SizingSettings.ToListAsync()).RiskPercent);
     }

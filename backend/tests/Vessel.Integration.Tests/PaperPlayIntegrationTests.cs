@@ -8,6 +8,7 @@ using Vessel.Domain.Paper;
 using Vessel.Domain.Evidence;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -19,7 +20,7 @@ public sealed class PaperPlayIntegrationTests : PaperPlayTestsValues
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: TradingMode.Paper);
         var account = PaperAccount(owner, portfolio.Id);
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
         var minute = DateTimeOffset.Parse("2026-10-20T10:00:00Z");
@@ -54,9 +55,9 @@ public sealed class PaperPlayIntegrationTests : PaperPlayTestsValues
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: TradingMode.Paper);
         var account = PaperAccount(owner, portfolio.Id);
-        var real = new Account(Guid.NewGuid(), owner, "hyperliquid", "Real");
+        var real = new Account(Guid.NewGuid(), owner, "hyperliquid", "Real", TradingMode.Real);
         var realPlay = TestPlays.Create(real, new("hyperliquid", "BTC"));
         await using (var db = database.Context(owner))
         {
@@ -82,7 +83,7 @@ public sealed class PaperPlayIntegrationTests : PaperPlayTestsValues
         var created = await client.PostAsJsonAsync("/api/plays?tradingMode=paper", request);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var play = (await created.Content.ReadFromJsonAsync<PlayDto>())!;
-        Assert.Equal("paper", play.Summary.TradingMode);
+        Assert.Equal(TradingMode.Paper, play.Summary.TradingMode);
         Assert.Single((await client.GetFromJsonAsync<PlayListDto>("/api/plays"))!.Plays);
         Assert.Single((await client.GetFromJsonAsync<PlayListDto>("/api/plays?tradingMode=paper"))!.Plays);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/plays/{play.Summary.Id}")).StatusCode);
@@ -128,7 +129,7 @@ public sealed class PaperPlayIntegrationTests : PaperPlayTestsValues
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: TradingMode.Paper);
         var first = PaperAccount(owner, portfolio.Id);
         var second = PaperAccount(owner, portfolio.Id);
         await using (var seed = database.Context(owner))

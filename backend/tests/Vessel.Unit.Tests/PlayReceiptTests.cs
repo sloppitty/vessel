@@ -6,6 +6,7 @@ using Vessel.Domain.Markets;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -30,7 +31,7 @@ public sealed class PlayReceiptTests
     /// <summary>Planned at 10:00 with the entry at 100; revision 2 at 12:00 moves it to 105.</summary>
     private static (Play Play, List<PlayPlanRevision> Revisions) Revised()
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Venue");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Venue", TradingMode.Real);
         var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
             PlayDocuments.Serialize(Plan()), Planned);
         List<PlayPlanRevision> revisions = [play.MarkPlanned(Planned).Revision];
@@ -55,7 +56,7 @@ public sealed class PlayReceiptTests
     public void Planned_values_read_plan_text_as_the_editor_does()
     {
         // Older stored text the editor reads as unknown stays unknown here, and nothing but plain decimals reaches the browser.
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Venue");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Venue", TradingMode.Real);
         PlannedEntry Read(string price, string leverage)
         {
             var plan = Plan(price) with { Leverage = leverage };
@@ -82,7 +83,7 @@ public sealed class PlayReceiptTests
     [InlineData("margin", "", "5", null)]             // no size: unknown, not zero
     public void Planned_quantity_follows_the_editor_sizing(string sizing, string size, string leverage, string? expected)
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Venue");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Venue", TradingMode.Real);
         var second = new PlanEntry("entry-2", "Entry 2", "#b9c9e4", "40", "90", [new PlanExit("stop-2", "price", "85", "100")], []);
         var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
             PlayDocuments.Serialize(Plan(sizing: sizing, size: size, leverage: leverage, more: second)), Planned);
@@ -145,7 +146,7 @@ public sealed class PlayReceiptTests
     public void A_plan_without_a_complete_stop_has_no_R()
     {
         var (play, _) = Revised();
-        var account = new Account(play.AccountId, play.OwnerId, "hyperliquid", "Venue");
+        var account = new Account(play.AccountId, play.OwnerId, "hyperliquid", "Venue", TradingMode.Real);
         var stopless = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
             PlayDocuments.Serialize(Plan() with { Entries = [Plan().Entries[0] with { Stops = [] }] }), Planned);
         var revision = stopless.MarkPlanned(Planned).Revision;

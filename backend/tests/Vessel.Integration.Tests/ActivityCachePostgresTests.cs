@@ -14,6 +14,7 @@ using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -90,7 +91,7 @@ public sealed class ActivityCachePostgresTests
     public async Task Producer_releases_snapshot_and_connection_before_aggregation_and_still_hits_the_cache()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture", TradingMode.Real);
         await using (var db = database.Context(owner))
         { db.Accounts.Add(account); db.Fills.Add(Fill(account, 0)); await db.SaveChangesAsync(); }
         var reads = new Reads(); await using var provider = Provider(database, reads, verifyReleased: true);
@@ -109,7 +110,7 @@ public sealed class ActivityCachePostgresTests
     public async Task Version_tracks_corrected_metrics_coverage_and_funding_details_without_new_executions(string change)
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture", TradingMode.Real);
         await using (var db = database.Context(owner))
         {
             db.Accounts.Add(account); db.Fills.AddRange(Fill(account, 0), Fill(account, 1));
@@ -156,7 +157,7 @@ public sealed class ActivityCachePostgresTests
                 break;
         }
         await using var fresh = database.Context(owner);
-        Assert.Equal(Json(ActivityService.Aggregate(await new ActivityStore(fresh).ReadAsync(null, default))), Json(after));
+        Assert.Equal(Json(ActivityService.Aggregate(await new ActivityStore(fresh).ReadAsync(null, default), TradingMode.Real)), Json(after));
         Assert.Same(after, await Read(provider, owner));
         // #107: snapshot and sync-state writes are observations; the cached history is rebased onto them, not read again.
         Assert.Equal(change is "snapshot-coverage" or "history-coverage" ? 1 : 2, reads.Count);
@@ -166,9 +167,9 @@ public sealed class ActivityCachePostgresTests
     public async Task Cached_and_uncached_activity_and_overview_are_byte_identical_across_scopes_filters_pages()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
-        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Fixture");
-        var first = new Account(Guid.NewGuid(), owner, "manual", "First"); first.Configure(portfolio.Id, null, 100);
-        var second = new Account(Guid.NewGuid(), owner, "manual", "Second"); second.Configure(null, null, 200);
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Fixture", TradingMode.Real);
+        var first = new Account(Guid.NewGuid(), owner, "manual", "First", TradingMode.Real); first.Configure(portfolio.Id, null, 100);
+        var second = new Account(Guid.NewGuid(), owner, "manual", "Second", TradingMode.Real); second.Configure(null, null, 200);
         await using (var db = database.Context(owner))
         {
             db.Portfolios.Add(portfolio); db.Accounts.AddRange(first, second);
@@ -199,8 +200,8 @@ public sealed class ActivityCachePostgresTests
             foreach (var period in new[] { "7", "30", "90", "all" })
             foreach (var group in new[] { "account", "portfolio" })
             {
-                var expected = await new OverviewSummaryService(store, workspace, cold, new SizingStore(dbRead, TestUnitOfWork.For(dbRead)), new Clock()).GetAsync(group, period, selected, default);
-                Assert.Equal(Json(expected), Json(await new OverviewSummaryService(store, workspace, cached, new SizingStore(dbRead, TestUnitOfWork.For(dbRead)), new Clock()).GetAsync(group, period, selected, default)));
+                var expected = await new OverviewSummaryService(store, workspace, cold, new SizingStore(dbRead, TestUnitOfWork.For(dbRead)), new Clock()).GetAsync(group, period, selected, TradingMode.Real, default);
+                Assert.Equal(Json(expected), Json(await new OverviewSummaryService(store, workspace, cached, new SizingStore(dbRead, TestUnitOfWork.For(dbRead)), new Clock()).GetAsync(group, period, selected, TradingMode.Real, default)));
             }
         }
         Assert.Equal(3, reads.Count); // all, unassigned, first account; portfolio and account share their exact set.
@@ -210,8 +211,8 @@ public sealed class ActivityCachePostgresTests
     public async Task Every_fact_table_write_from_a_separate_connection_invalidates_and_matches_uncached_results()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture");
-        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Moved");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture", TradingMode.Real);
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Moved", TradingMode.Real);
         var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("manual", "BTC"), InstrumentSource.Manual, "{}", At);
         var order = TestOrders.For(play, "0");
         var link = new PlayOrderLink(play, order, OrderLinkRole.Entry, "entry", null, OrderLinkState.Linked, OrderLinkSource.Owner, At);
@@ -235,7 +236,7 @@ public sealed class ActivityCachePostgresTests
             var next = await Read(provider, owner);
             Assert.NotSame(previous, next);
             await using var fresh = database.Context(owner);
-            Assert.Equal(Json(ActivityService.Aggregate(await new ActivityStore(fresh).ReadAsync(null, default))), Json(next));
+            Assert.Equal(Json(ActivityService.Aggregate(await new ActivityStore(fresh).ReadAsync(null, default), TradingMode.Real)), Json(next));
             Assert.Same(next, await Read(provider, owner)); previous = next;
         }
         await Change(db => { db.Fills.Add(Fill(account, 2)); return Task.CompletedTask; });
@@ -364,7 +365,7 @@ public sealed class ActivityCachePostgresTests
     public async Task Revision_and_facts_share_snapshot_and_owners_never_share_results()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid(); var other = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture", TradingMode.Real);
         await using (var db = database.Context(owner)) { db.Accounts.Add(account); db.Fills.Add(Fill(account, 0)); await db.SaveChangesAsync(); }
         var reads = new Reads(); await using var provider = Provider(database, reads);
         var started = new TaskCompletionSource(); var resume = new TaskCompletionSource();
@@ -386,8 +387,8 @@ public sealed class ActivityCachePostgresTests
     public async Task Revision_is_commit_ordered_once_per_transaction_and_takes_no_lock_before_commit()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
-        var first = new Account(Guid.NewGuid(), owner, "manual", "First");
-        var second = new Account(Guid.NewGuid(), owner, "manual", "Second");
+        var first = new Account(Guid.NewGuid(), owner, "manual", "First", TradingMode.Real);
+        var second = new Account(Guid.NewGuid(), owner, "manual", "Second", TradingMode.Real);
         var play = new Play(Guid.NewGuid(), second, new PerpetualInstrument("manual", "BTC"), InstrumentSource.Manual, "{}", At);
         var order = TestOrders.For(play, "0");
         await using (var db = database.Context(owner))
@@ -419,7 +420,7 @@ public sealed class ActivityCachePostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var first = Guid.NewGuid(); var second = Guid.NewGuid(); var rolledBack = Guid.NewGuid();
-        var accounts = new[] { first, second, rolledBack }.Select(o => new Account(Guid.NewGuid(), o, "manual", "Fixture")).ToArray();
+        var accounts = new[] { first, second, rolledBack }.Select(o => new Account(Guid.NewGuid(), o, "manual", "Fixture", TradingMode.Real)).ToArray();
         foreach (var account in accounts)
         {
             await using var db = database.Context(account.OwnerId);
@@ -452,7 +453,7 @@ public sealed class ActivityCachePostgresTests
     public async Task Trigger_functions_keep_the_migration_schema_when_the_writer_changes_search_path()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture", TradingMode.Real);
         await using var writer = database.Context(owner);
         writer.Accounts.Add(account); await writer.SaveChangesAsync();
         var schema = new Npgsql.NpgsqlConnectionStringBuilder(database.ConnectionString).SearchPath;
@@ -481,7 +482,7 @@ public sealed class ActivityCachePostgresTests
         await new UnitOfWork(writer).ExecuteAsync(() =>
         {
             Assert.Equal(System.Data.IsolationLevel.ReadCommitted, writer.Database.CurrentTransaction!.GetDbTransaction().IsolationLevel);
-            writer.Accounts.Add(new(Guid.NewGuid(), owner, "manual", "Fixture"));
+            writer.Accounts.Add(new(Guid.NewGuid(), owner, "manual", "Fixture", TradingMode.Real));
             return Task.FromResult(true);
         }, default);
         await using var observer = database.Context(owner);
@@ -492,7 +493,7 @@ public sealed class ActivityCachePostgresTests
     public async Task Real_refresh_unit_invalidates_imports_funding_and_snapshot_from_another_context()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Fixture");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Fixture", TradingMode.Real);
         account.Configure(null, "0x" + new string('1', 40), null);
         await using (var db = database.Context(owner)) { db.Accounts.Add(account); await db.SaveChangesAsync(); }
         var reads = new Reads(); await using var provider = Provider(database, reads);
@@ -517,7 +518,7 @@ public sealed class ActivityCachePostgresTests
     public async Task Migration_backfills_existing_owners_and_initializes_new_owners_and_rollback_does_not_invalidate()
     {
         await using var database = await CoreDatabase.CreateAsync("20261018120000_ServerNotificationState");
-        var owner = Guid.NewGuid(); var account = new Account(Guid.NewGuid(), owner, "manual", "Existing");
+        var owner = Guid.NewGuid(); var account = new Account(Guid.NewGuid(), owner, "manual", "Existing", TradingMode.Real);
         await using (var db = database.Context(owner))
         {
             // This is deliberately the pre-ActivityFactsRevision schema, not the current Account EF model.
@@ -535,7 +536,7 @@ public sealed class ActivityCachePostgresTests
         }
         Assert.Equal(1, await Revision(observer, owner));
         var empty = Guid.NewGuid(); Assert.Equal(0, await Revision(observer, empty));
-        await using (var db = database.Context(empty)) { db.Accounts.Add(new(Guid.NewGuid(), empty, "manual", "New")); await db.SaveChangesAsync(); }
+        await using (var db = database.Context(empty)) { db.Accounts.Add(new(Guid.NewGuid(), empty, "manual", "New", TradingMode.Real)); await db.SaveChangesAsync(); }
         Assert.Equal(1, await Revision(observer, empty));
     }
 }

@@ -5,13 +5,14 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
 public sealed class ExecutionMatcherTests
 {
     private static readonly DateTimeOffset Created = DateTimeOffset.Parse("2026-10-03T10:00:00Z");
-    private readonly Account account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Trading");
+    private readonly Account account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Trading", TradingMode.Real);
 
     private Play Planned(PlayPlanDocument? plan = null, string contract = "BTC")
     {

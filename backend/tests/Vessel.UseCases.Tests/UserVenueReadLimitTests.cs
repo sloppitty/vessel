@@ -1,5 +1,6 @@
 using Vessel.Application.MarketData;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -33,7 +34,7 @@ public sealed class UserVenueReadLimitTests : UserVenueReadLimitTestsSupport
         CandleService Service(Guid owner, out Guid id)
         {
             var store = new MemoryWorkspaceStore(owner);
-            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic market");
+            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic market", TradingMode.Real);
             store.Accounts.Add(account); id = account.Id;
             return new(store, registry, cache, clock, new CoreOwner(owner));
         }

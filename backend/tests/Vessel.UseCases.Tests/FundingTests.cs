@@ -1,6 +1,7 @@
 using Vessel.Application.Activity;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -22,7 +23,7 @@ public sealed class FundingTests : FundingTestsValues
     private static ActivityFacts Facts(IReadOnlyList<FundingPayment> payments, string basis = FundingFacts.Excluded,
         bool complete = true, IReadOnlyList<ImportedFill>? fills = null)
     {
-        var account = new Account(AccountId, Owner, "hyperliquid", "Synthetic");
+        var account = new Account(AccountId, Owner, "hyperliquid", "Synthetic", TradingMode.Real);
         return new([account], fills ?? [Fill(0, "buy", "open"), Fill(10, "sell", "close", pnl: 10)],
             [new() { OwnerId = Owner, AccountId = AccountId, ObservedAtUtc = At.AddMinutes(20), ValueScope = "fixture" }],
             new Dictionary<Guid, Guid>())
@@ -64,7 +65,7 @@ public sealed class FundingTests : FundingTestsValues
         Assert.Equal("1.1234567890123456789012345678", operation.FundingNetUsd);
         Assert.Equal(status, operation.FundingStatus);
         Assert.Equal(total, operation.TotalResultUsd);
-        var detail = await Service(facts).FillsAsync(AccountId, operation.Id, default);
+        var detail = await Service(facts).FillsAsync(AccountId, operation.Id, TradingMode.Real, default);
         Assert.Equal("1.1234567890123456789012345678", Assert.Single(detail.FundingPayments).Amount);
     }
 
@@ -143,7 +144,7 @@ public sealed class FundingTests : FundingTestsValues
         Assert.Equal("complete", final.FundingStatus);
         Assert.Equal("5", final.FundingNetUsd);
         Assert.Empty(page.UnassignedFundingPayments);
-        Assert.Equal("5", Assert.Single((await service.FillsAsync(AccountId, final.Id, default)).FundingPayments).Amount);
+        Assert.Equal("5", Assert.Single((await service.FillsAsync(AccountId, final.Id, TradingMode.Real, default)).FundingPayments).Amount);
     }
 
     [Fact]
@@ -185,7 +186,7 @@ public sealed class FundingTests : FundingTestsValues
         {
             Assert.Equal(payment.SourceId, Assert.Single(page.UnassignedFundingPayments).SourceId);
             foreach (var operation in page.Operations)
-                Assert.Empty((await service.FillsAsync(AccountId, operation.Id, default)).FundingPayments);
+                Assert.Empty((await service.FillsAsync(AccountId, operation.Id, TradingMode.Real, default)).FundingPayments);
         }
         else
         {
@@ -243,7 +244,7 @@ public sealed class FundingTests : FundingTestsValues
         var facts = Facts([Payment(-1, asset: "BTC")]);
         var operation = await Operation(facts);
         Assert.Null(operation.FundingNetUsd); Assert.Null(operation.TotalResultUsd);
-        var detail = await Service(facts).FillsAsync(AccountId, operation.Id, default);
+        var detail = await Service(facts).FillsAsync(AccountId, operation.Id, TradingMode.Real, default);
         Assert.Equal("BTC", Assert.Single(detail.FundingPayments).Asset);
     }
 

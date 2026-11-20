@@ -5,6 +5,7 @@ using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Credentials;
+using Vessel.Domain.Common;
 
 namespace Vessel.Application.Credentials;
 
@@ -110,7 +111,7 @@ public sealed class AccountCredentialService(
 
     private void Guard(Account account, bool requireEnabled)
     {
-        if (account.TradingMode != "real") throw new ProblemException(400, "Paper accounts do not accept venue credentials.");
+        if (account.TradingMode != TradingMode.Real) throw new ProblemException(400, "Paper accounts do not accept venue credentials.");
         if (account.OwnerId != owner.OwnerId) throw new ProblemException(404, "Account not found.");
         if (requireEnabled && !account.IsEnabled) throw new ProblemException(409, "Enable the account before reading or changing its credential.");
         if (venues.Descriptor(account.VenueId)?.Capabilities.ReadOnlyCredential != true || account.SourceId is null)

@@ -4,6 +4,7 @@ using Vessel.Application.Sizing;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -56,7 +57,7 @@ public sealed class ClosedPlayPlanParsingTests : ClosedPlayPlanParsingTestsValue
         Assert.Equal(twin, facts);
         Assert.Equal(twin.GetHashCode(), facts.GetHashCode());
 
-        var other = new Play(Guid.NewGuid(), new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Venue"),
+        var other = new Play(Guid.NewGuid(), new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Venue", TradingMode.Real),
             new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue, PlayDocuments.Serialize(Plan("105", "short")), Planned);
         var copy = facts with { Play = other };
         Assert.Equal(("short", "105"), (copy.CurrentPlan.Direction, copy.CurrentPlan.Entries[0].Stops[0].Value));

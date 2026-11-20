@@ -4,6 +4,7 @@ using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Hyperliquid;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -37,7 +38,7 @@ public sealed class VenueMarketDataTests
     private static (MemoryWorkspaceStore Store, Account Account) Setup()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var account = new Account(Guid.NewGuid(), owner, "tick", "Tick account");
+        var account = new Account(Guid.NewGuid(), owner, "tick", "Tick account", TradingMode.Real);
         store.Accounts.Add(account);
         return (store, account);
     }
@@ -67,7 +68,7 @@ public sealed class VenueMarketDataTests
     public async Task Hyperliquid_keeps_its_full_interval_list_and_notice()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "HL");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "HL", TradingMode.Real);
         store.Accounts.Add(account);
         var service = new CandleService(store, TestVenues.With(), new CandleCache(TimeProvider.System), TimeProvider.System);
         var refused = await Assert.ThrowsAsync<ProblemException>(() => service.CandlesAsync(account.Id, "BTC", "2M", null, default));

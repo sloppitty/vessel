@@ -3,6 +3,7 @@ using Npgsql;
 using Vessel.Application.Common;
 using Vessel.Application.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -22,10 +23,10 @@ public sealed class PortfolioMembershipPostgresTests
         // Keep a stale tracked entity too; the locked check must use the reloaded row.
         var displayed = await tabA.Accounts.SingleAsync();
         await using (var tabB = database.Context(owner))
-            await Service(tabB, owner).MoveAccountsAsync(new([account], target), default);
+            await Service(tabB, owner).MoveAccountsAsync(new([account], target), TradingMode.Real, default);
         Assert.Equal(old, displayed.PortfolioId); Assert.Equal(1, displayed.SettingsRevision);
         Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
-            Service(tabA, owner).MoveAccountsAsync(new([account], null, [new(account, 1)]), default))).StatusCode);
+            Service(tabA, owner).MoveAccountsAsync(new([account], null, [new(account, 1)]), TradingMode.Real, default))).StatusCode);
         await using var verify = database.Context(owner); var retained = await verify.Accounts.SingleAsync();
         Assert.Equal(target, retained.PortfolioId); Assert.Equal(2, retained.SettingsRevision);
     }
@@ -41,7 +42,7 @@ public sealed class PortfolioMembershipPostgresTests
             var ids = new[] { (await service.CreateAccountAsync(new(old, "First", "manual"), default)).Id,
                 (await service.CreateAccountAsync(new(old, "Second", "manual"), default)).Id }.Order().ToArray();
             first = ids[0]; stale = ids[1];
-            await service.MoveAccountsAsync(new([stale], target), default);
+            await service.MoveAccountsAsync(new([stale], target), TradingMode.Real, default);
         }
         foreach (var action in new[] { "unlink", "move", "create" })
         {
@@ -51,7 +52,7 @@ public sealed class PortfolioMembershipPostgresTests
                 Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(async () =>
                 {
                     if (action == "create") await service.CreatePortfolioAsync(new("Rejected", AccountIds: [first, stale], Expected: expected), default);
-                    else await service.MoveAccountsAsync(new([first, stale], action == "unlink" ? null : target, expected), default);
+                    else await service.MoveAccountsAsync(new([first, stale], action == "unlink" ? null : target, expected), TradingMode.Real, default);
                 })).StatusCode);
             }
             await using var verify = database.Context(owner);
@@ -75,17 +76,17 @@ public sealed class PortfolioMembershipPostgresTests
             var service = Service(db, owner); target = (await service.CreatePortfolioAsync(new("Target"), default)).Id;
             first = (await service.CreateAccountAsync(new(null, "Venue", "hyperliquid", "0x1111111111111111111111111111111111111111"), default)).Id;
             second = (await service.CreateAccountAsync(new(null, "Disabled", "manual", ManualAccountValueUsd: "1.25"), default)).Id;
-            await MonitorTestPaths.RefreshAsync(db, owner, TestVenues.With(new FixtureReader()), first); await service.UpdateAccountAsync(second, new("Disabled", null, false, 1), default);
-            var moved = await service.MoveAccountsAsync(new([first, second], target), default);
+            await MonitorTestPaths.RefreshAsync(db, owner, TestVenues.With(new FixtureReader()), first); await service.UpdateAccountAsync(second, new("Disabled", null, false, 1), TradingMode.Real, default);
+            var moved = await service.MoveAccountsAsync(new([first, second], target), TradingMode.Real, default);
             Assert.Equal(2, moved.Count); Assert.All(moved, a => Assert.Equal(target, a.PortfolioId));
             Assert.Equal(2, moved.Single(a => a.Id == first).SettingsRevision); Assert.Equal(3, moved.Single(a => a.Id == second).SettingsRevision);
-            await service.MoveAccountsAsync(new([first, second], target), default);
-            Assert.Equal(2, (await service.AccountAsync(first, default)).SettingsRevision);
-            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => service.UpdateAccountAsync(first, new("Stale", null, true, 1), default))).StatusCode);
+            await service.MoveAccountsAsync(new([first, second], target), TradingMode.Real, default);
+            Assert.Equal(2, (await service.AccountAsync(first, TradingMode.Real, default)).SettingsRevision);
+            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => service.UpdateAccountAsync(first, new("Stale", null, true, 1), TradingMode.Real, default))).StatusCode);
         }
         await using (var db = database.Context(owner))
         {
-            await Service(db, owner).MoveAccountsAsync(new([first, second], null), default);
+            await Service(db, owner).MoveAccountsAsync(new([first, second], null), TradingMode.Real, default);
             Assert.All(await db.Accounts.ToListAsync(), a => Assert.Null(a.PortfolioId));
             Assert.False((await db.Accounts.SingleAsync(a => a.Id == second)).IsEnabled);
             Assert.Single(await db.Fills.ToListAsync()); Assert.Single(await db.Snapshots.ToListAsync()); Assert.Single(await db.Positions.ToListAsync());
@@ -128,7 +129,7 @@ public sealed class PortfolioMembershipPostgresTests
                 Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(async () =>
                 {
                     if (create) await service.CreatePortfolioAsync(new("Rejected", AccountIds: [valid, invalid]), default);
-                    else await service.MoveAccountsAsync(new([valid, invalid], target), default);
+                    else await service.MoveAccountsAsync(new([valid, invalid], target), TradingMode.Real, default);
                 })).StatusCode);
             }
             await using var verify = database.Context(owner);
@@ -163,7 +164,7 @@ public sealed class PortfolioMembershipPostgresTests
         await using (var db = database.Context(owner))
         {
             var service = Service(db, owner); id = (await service.CreateAccountAsync(new(null, "Valid", "manual"), default)).Id;
-            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.MoveAccountsAsync(new([id], target), default))).StatusCode);
+            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.MoveAccountsAsync(new([id], target), TradingMode.Real, default))).StatusCode);
         }
         await using var verify = database.Context(owner); Assert.Null((await verify.Accounts.SingleAsync()).PortfolioId);
     }
@@ -181,7 +182,7 @@ public sealed class PortfolioMembershipPostgresTests
         var locked = await syncing.Accounts.FromSqlInterpolated($"SELECT * FROM accounts WHERE \"Id\" = {id} FOR UPDATE").SingleAsync();
         await using var moving = database.Context(owner); await moving.Database.OpenConnectionAsync();
         var pid = ((NpgsqlConnection)moving.Database.GetDbConnection()).ProcessID;
-        var move = Service(moving, owner).MoveAccountsAsync(new([id], target), default);
+        var move = Service(moving, owner).MoveAccountsAsync(new([id], target), TradingMode.Real, default);
         await using var inspect = new NpgsqlConnection(database.ConnectionString); await inspect.OpenAsync();
         var blocked = false;
         for (var attempt = 0; attempt < 200 && !blocked; attempt++)

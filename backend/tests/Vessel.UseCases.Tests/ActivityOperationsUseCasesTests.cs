@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Vessel.Application.Activity;
 using Vessel.Application.Common;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -217,7 +218,7 @@ public sealed class ActivityOperationsUseCasesTests : ActivityOperationsTestsSup
         var op = Assert.Single(result.Operations);
         Assert.Equal(15000, op.FillCount); Assert.Equal("15000", op.ReportedClosedPnlUsd); Assert.Equal("13500", op.NetResultUsd);
         Assert.True(pageBytes < fullBytes * 0.7, $"Page allocation {pageBytes} should be below 70% of full materialization {fullBytes}.");
-        var expanded = await service.FillsAsync(AccountId, op.Id, default);
+        var expanded = await service.FillsAsync(AccountId, op.Id, TradingMode.Real, default);
         Assert.Equal(op.Id, expanded.OperationId); Assert.Equal(1000, expanded.Fills.Count); Assert.Equal(14000, expanded.OmittedFillCount);
         Assert.Equal(fills.Take(1000).Select(f => f.Id), expanded.Fills.Select(f => f.Fill.Id));
     }
@@ -304,7 +305,7 @@ public sealed class ActivityOperationsUseCasesTests : ActivityOperationsTestsSup
             page = await service.PageAsync(new(Page: number.ToString(), PageSize: "100"), default);
             foreach (var o in page.Operations)
             {
-                var rows = await service.FillsAsync(o.AccountId, o.Id, default);
+                var rows = await service.FillsAsync(o.AccountId, o.Id, TradingMode.Real, default);
                 operations.Add(new(o.Id, o.AccountId, o.ContractId, o.Direction, o.Status, o.OpenedAtUtc, o.ClosedAtUtc, o.LastOccurredAtUtc,
                     o.Quantity, o.TotalEnteredQuantity, o.TotalExitedQuantity, o.OpenQuantity, o.AverageEntryPrice, o.AverageExitPrice,
                     o.EntryOrderCount, o.ExitOrderCount, o.FillCount, o.ReportedClosedPnlUsd, o.StablecoinFeesNominalUsd, o.OtherFees,
@@ -390,7 +391,7 @@ public sealed class ActivityOperationsUseCasesTests : ActivityOperationsTestsSup
     private sealed record Fixture(ActivityService Service, Guid Second, Guid Disabled, Portfolio Swing, List<ImportedFill> Fills);
     private static Fixture Filters(Action<List<ImportedFill>>? change = null, Dictionary<Guid, Guid>? links = null)
     {
-        var swing = new Portfolio(Guid.NewGuid(), Owner, "Swing", "wallet");
+        var swing = new Portfolio(Guid.NewGuid(), Owner, "Swing", TradingMode.Real, "wallet");
         Guid second = Guid.Parse("00000000-0000-0000-0000-000000000002"), disabled = Guid.NewGuid();
         ImportedFill On(ImportedFill fill, Guid account, string contract) { fill.AccountId = account; fill.ContractId = contract; return fill; }
         var old = On(Fill(0), second, "ETH"); old.OccurredAtUtc = FixtureNow.AddDays(-40);
@@ -573,13 +574,13 @@ public sealed class ActivityOperationsUseCasesTests : ActivityOperationsTestsSup
         var (service, second, disabled, _, _) = Filters();
         var page = await service.PageAsync(new(Contract: "SOL"), default);
         var op = Assert.Single(page.Operations);
-        var rows = await service.FillsAsync(AccountId, op.Id, default);
+        var rows = await service.FillsAsync(AccountId, op.Id, TradingMode.Real, default);
         Assert.Equal((op.Id, 0), (rows.OperationId, rows.OmittedFillCount));
         Assert.Equal(["entry", "exit"], rows.Fills.Select(f => f.Role));
         Assert.True(rows.Fills[0].Fill.OccurredAtUtc < rows.Fills[1].Fill.OccurredAtUtc);
         foreach (var (account, id) in new[] { (second, op.Id), (AccountId, "missing:long"), (disabled, op.Id) })
-            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.FillsAsync(account, id, default))).StatusCode);
+            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.FillsAsync(account, id, TradingMode.Real, default))).StatusCode);
         foreach (var (account, id) in new (Guid?, string?)[] { (null, op.Id), (Guid.Empty, op.Id), (AccountId, null), (AccountId, " "), (AccountId, new string('x', 201)) })
-            Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.FillsAsync(account, id, default))).StatusCode);
+            Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.FillsAsync(account, id, TradingMode.Real, default))).StatusCode);
     }
 }

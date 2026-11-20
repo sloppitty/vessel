@@ -1,6 +1,7 @@
 using Vessel.Application.Activity;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -39,9 +40,9 @@ public sealed class ActivityOmissionTests
     /// <summary>A flat snapshot after every fill by default; <paramref name="snapshot"/> null reads without one.</summary>
     private static ActivitySummaries Aggregate(ImportedFill[] fills, ExecutionOmission[] omissions, ForcedEvent[]? forced = null, decimal? snapshot = 0)
     {
-        var account = new Account(AccountId, Owner, "manual", "Fixture");
+        var account = new Account(AccountId, Owner, "manual", "Fixture", TradingMode.Real);
         return ActivityService.Aggregate(new([account], fills, snapshot is { } quantity ? [Snapshot(quantity)] : [], new Dictionary<Guid, Guid>())
-        { Omissions = omissions.Select(ActivityOmission.From).ToList(), ForcedEvents = forced ?? [] });
+        { Omissions = omissions.Select(ActivityOmission.From).ToList(), ForcedEvents = forced ?? [] }, TradingMode.Real);
     }
 
     private static List<ActivityOperationDto> Operations(ImportedFill[] fills, ExecutionOmission[] omissions, decimal? snapshot = 0) =>

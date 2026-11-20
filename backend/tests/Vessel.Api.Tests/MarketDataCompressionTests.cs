@@ -3,6 +3,7 @@ using System.Net;
 using System.Text.Json;
 using Vessel.Application.MarketData;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -21,7 +22,7 @@ public sealed class MarketDataCompressionTests
     private static (Guid Owner, MemoryWorkspaceStore Store, Account Account) Setup()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Test");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Test", TradingMode.Real);
         store.Accounts.Add(account);
         return (owner, store, account);
     }

@@ -10,6 +10,7 @@ using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -153,8 +154,8 @@ public sealed class ExecutionNarrowedReadsTests
     {
         var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Trading");
-        var other = new Account(Guid.NewGuid(), owner, "hyperliquid", "Other");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Trading", TradingMode.Real);
+        var other = new Account(Guid.NewGuid(), owner, "hyperliquid", "Other", TradingMode.Real);
         await using var db = database.Context(owner);
         db.Accounts.AddRange(account, other);
         await db.SaveChangesAsync();

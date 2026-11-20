@@ -4,6 +4,7 @@ using System.Text.Json;
 using Vessel.Application.Events;
 using Vessel.Application.Plays;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -15,7 +16,7 @@ public sealed class VesselEventApiIntegrationTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic manual account");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic manual account", TradingMode.Real);
         await using (var db = database.Context(owner))
         {
             db.Accounts.Add(account);

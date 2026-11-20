@@ -13,6 +13,7 @@ using Vessel.Application.MarketData;
 using Vessel.Domain.Accounts;
 using Vessel.Identity;
 using Vessel.Persistence.Events;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests.Identity;
 
@@ -168,7 +169,7 @@ public sealed class StreamRevalidationTests : StreamRevalidationTestsSupport
     {
         var owner = Guid.NewGuid();
         var store = new MemoryWorkspaceStore(owner);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
         store.Accounts.Add(account);
         var source = new FakeMarketStream();
         var limiter = new MarketStreamLimiter();

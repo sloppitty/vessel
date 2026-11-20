@@ -12,6 +12,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
 using Vessel.Infrastructure;
 using Vessel.Infrastructure.Venues.Lighter;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -100,7 +101,7 @@ public sealed class LighterFundingTests
 
     private static Account Account(string venue = "lighter", string? source = Source, bool enabled = true)
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), venue, "Synthetic funding account");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), venue, "Synthetic funding account", TradingMode.Real);
         account.Configure(null, null, null, source);
         account.UpdateSettings(account.Name, null, enabled);
         return account;

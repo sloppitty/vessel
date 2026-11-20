@@ -36,7 +36,7 @@ public partial class ExactNumberCharacterizationTestsSupport : ExactNumberCharac
     internal static async Task<string> RiskPercent(string? text)
     {
         var store = new MemorySizingStore();
-        try { await new SizingService(store, new CoreOwner(Guid.NewGuid()), TimeProvider.System, TestUnitOfWork.None).UpdateSettingsAsync(new(text!), default); }
+        try { await new SizingService(store, new CoreOwner(Guid.NewGuid()), TimeProvider.System, TestUnitOfWork.None).UpdateSettingsAsync(new(text!), TradingMode.Real, default); }
         catch (ProblemException e) when (e.Message == "Risk per trade must be a decimal percentage.") { return "x"; }
         catch (DomainValidationException) { return "rule"; }
         return Describe(store.Settings!.RiskPercent);

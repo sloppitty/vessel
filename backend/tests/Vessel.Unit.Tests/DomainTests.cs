@@ -1,6 +1,7 @@
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -9,7 +10,7 @@ public sealed class DomainTests
     [Fact]
     public void Distinct_active_plays_can_share_an_account_and_perpetual_contract()
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Trading");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Trading", TradingMode.Real);
         var instrument = new PerpetualInstrument("hyperliquid", "BTC-PERP");
         var first = TestPlays.Create(account, instrument);
         var second = TestPlays.Create(account, instrument);
@@ -32,7 +33,7 @@ public sealed class DomainTests
     [Fact]
     public void Play_rejects_a_contract_from_another_venue()
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Trading");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Trading", TradingMode.Real);
         Assert.Throws<ArgumentException>(() => TestPlays.Create(account,
             new PerpetualInstrument("hyperliquid", "BTC")));
     }
@@ -48,13 +49,13 @@ public sealed class DomainTests
     [Fact]
     public void Account_requires_owner_identity()
     {
-        Assert.Throws<ArgumentException>(() => new Account(Guid.NewGuid(), Guid.Empty, "manual", "Trading"));
+        Assert.Throws<ArgumentException>(() => new Account(Guid.NewGuid(), Guid.Empty, "manual", "Trading", TradingMode.Real));
     }
 
     [Fact]
     public void Play_requires_distinct_identity()
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Trading");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Trading", TradingMode.Real);
         Assert.Throws<ArgumentException>(() => new Play(Guid.Empty, account, new PerpetualInstrument("manual", "BTC"), InstrumentSource.Manual, "{}", DateTimeOffset.UnixEpoch));
     }
 }

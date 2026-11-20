@@ -11,6 +11,7 @@ using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
 using Vessel.Persistence.Events;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -24,8 +25,8 @@ public sealed class VesselEventTests : VesselEventTestsValues
         await using var scope = new EventScope(database, owner);
         await scope.ExecuteAsync(async () =>
         {
-            var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
-            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Virtual", "paper");
+            var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: TradingMode.Paper);
+            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Virtual", TradingMode.Paper);
             account.Configure(portfolio.Id, null, null);
             scope.Db.Portfolios.Add(portfolio);
             scope.Db.Accounts.Add(account);
@@ -141,7 +142,7 @@ public sealed class VesselEventTests : VesselEventTestsValues
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic", TradingMode.Real);
         await using var scope = new EventScope(database, owner);
         await scope.ExecuteAsync(async () =>
         {
@@ -179,7 +180,7 @@ public sealed class VesselEventTests : VesselEventTestsValues
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
         await using (var seed = database.Context(owner))
         {
@@ -233,7 +234,7 @@ public sealed class VesselEventTests : VesselEventTestsValues
         await using var scope = new EventScope(database, owner);
         await scope.ExecuteAsync(() =>
         {
-            var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic");
+            var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic", TradingMode.Real);
             var play = TestPlays.Create(account, new("manual", "BTC"));
             scope.Db.Accounts.Add(account); scope.Db.Plays.Add(play);
             scope.Db.ManualExecutions.Add(new()
@@ -259,7 +260,7 @@ public sealed class VesselEventTests : VesselEventTestsValues
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var foreign = Guid.NewGuid();
-        var foreignAccount = new Account(Guid.NewGuid(), foreign, "manual", "Foreign");
+        var foreignAccount = new Account(Guid.NewGuid(), foreign, "manual", "Foreign", TradingMode.Real);
         await using (var seed = database.Context(foreign))
         {
             seed.Accounts.Add(foreignAccount);
@@ -298,7 +299,7 @@ public sealed class VesselEventTests : VesselEventTestsValues
         await using var scope = new EventScope(database, owner);
         await scope.ExecuteAsync(async () =>
         {
-            var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic");
+            var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic", TradingMode.Real);
             var play = TestPlays.Create(account, new("manual", "BTC"));
             scope.Db.Accounts.Add(account); scope.Db.Plays.Add(play);
             var planned = play.MarkPlanned(DateTimeOffset.UtcNow.AddHours(-2));
@@ -334,7 +335,7 @@ public sealed class VesselEventTests : VesselEventTestsValues
             await scope.ExecuteAsync(async () =>
             {
                 await scope.Store.SetRunAsync(run, "monitor", default);
-                var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+                var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
                 var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
                 scope.Db.Accounts.Add(account); scope.Db.Plays.Add(play);
                 var planned = play.MarkPlanned(first.AddHours(-1));
@@ -383,7 +384,7 @@ public sealed class VesselEventTests : VesselEventTestsValues
             await scope.ExecuteAsync(async () =>
             {
                 await scope.Store.SetRunAsync(Guid.CreateVersion7(), "monitor", default);
-                var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+                var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
                 var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
                 scope.Db.Accounts.Add(account); scope.Db.Plays.Add(play);
                 var planned = play.MarkPlanned(first.AddHours(-1));
@@ -421,7 +422,7 @@ public sealed class VesselEventTests : VesselEventTestsValues
         await using (var scope = new EventScope(database, owner))
             await scope.ExecuteAsync(async () =>
             {
-                var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+                var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
                 scope.Db.Accounts.Add(account);
                 var plays = new List<Play>();
                 for (var i = 0; i < exits.Length; i++)
@@ -447,7 +448,7 @@ public sealed class VesselEventTests : VesselEventTestsValues
             .ToDictionary(e => e.Subject.PlayId!.Value, e => e.OccurredAt);
         Assert.Equal([exits[0], exits[1], now], closed.Values.Order());
         var sizing = await new SizingService(new SizingStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TimeProvider.System,
-            TestUnitOfWork.For(db)).GetAsync(default);
+            TestUnitOfWork.For(db)).GetAsync(TradingMode.Real, default);
         Assert.Equal(3, sizing.Record.Recent.Count);
         Assert.All(sizing.Record.Recent, row =>
         {
@@ -468,7 +469,7 @@ public sealed class VesselEventTests : VesselEventTestsValues
         await using var scope = new EventScope(database, owner);
         await scope.ExecuteAsync(() =>
         {
-            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
             var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
             scope.Db.Accounts.Add(account); scope.Db.Plays.Add(play);
             var planned = play.MarkPlanned(first.AddHours(-1));
@@ -504,7 +505,7 @@ public sealed class VesselEventTests : VesselEventTestsValues
         await using var scope = new EventScope(database, owner);
         await scope.ExecuteAsync(() =>
         {
-            var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic");
+            var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic", TradingMode.Real);
             var play = TestPlays.Create(account, new("manual", "BTC"));
             scope.Db.Accounts.Add(account); scope.Db.Plays.Add(play);
             var planned = play.MarkPlanned(now.AddHours(-3));

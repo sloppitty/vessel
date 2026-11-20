@@ -12,7 +12,7 @@ namespace Vessel.Tests;
 public sealed class PlayDomainTests
 {
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-10-03T10:00:00Z");
-    private readonly Account account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Trading");
+    private readonly Account account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Trading", TradingMode.Real);
 
     [Fact]
     public void Draft_edits_create_no_revisions_and_planning_records_the_first()

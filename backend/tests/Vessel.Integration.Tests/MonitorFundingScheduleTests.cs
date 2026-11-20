@@ -8,6 +8,7 @@ using Vessel.Domain.Monitoring;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -253,8 +254,8 @@ public sealed partial class MonitorPostgresTests
             InstrumentSource.Venue, "{}", clock.Now.AddHours(-3));
         waiting.MarkPlanned(clock.Now.AddHours(-2));
         // A paper account whose Play is open in the simulation.
-        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
-        var paper = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper", "paper", 4000);
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: TradingMode.Paper);
+        var paper = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper", TradingMode.Paper, 4000);
         paper.Configure(portfolio.Id, null, null);
         var simulated = new Play(Guid.NewGuid(), paper, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue, "{}",
             clock.Now.AddHours(-3));

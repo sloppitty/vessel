@@ -9,6 +9,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Evidence;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -25,7 +26,7 @@ public sealed class PlayPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account", TradingMode.Real);
         await using (var db = database.Context(owner)) { db.Accounts.Add(account); await db.SaveChangesAsync(); }
         await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString);
         using var client = factory.AuthorizedClient();
@@ -73,7 +74,7 @@ public sealed class PlayPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account", TradingMode.Real);
         var stored = PlayDocuments.Serialize(TestPlays.LegacyPlan());
         var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue, stored, DateTimeOffset.UnixEpoch);
         await using (var db = database.Context(owner)) { db.Accounts.Add(account); db.Plays.Add(play); await db.SaveChangesAsync(); }
@@ -103,7 +104,7 @@ public sealed class PlayPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account", TradingMode.Real);
         var play = TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC"));
         await using (var db = database.Context(owner))
         {

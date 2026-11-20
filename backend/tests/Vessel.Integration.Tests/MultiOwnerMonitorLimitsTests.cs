@@ -12,6 +12,7 @@ using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Monitoring;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -289,7 +290,7 @@ public sealed class MultiOwnerMonitorLimitsTests
         var ids = new List<Guid>();
         for (var index = 0; index < count; index++)
         {
-            var account = new Account(Guid.NewGuid(), owner, venue, "Synthetic monitor");
+            var account = new Account(Guid.NewGuid(), owner, venue, "Synthetic monitor", TradingMode.Real);
             account.Configure(null, "0x" + index.ToString("x40", System.Globalization.CultureInfo.InvariantCulture), null);
             var row = new MonitorAccount { OwnerId = owner, AccountId = account.Id };
             row.Admit(Guid.NewGuid(), "manual", due);

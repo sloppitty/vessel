@@ -7,6 +7,7 @@ using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -19,7 +20,7 @@ namespace Vessel.Tests;
 public sealed class PlayLocalResultTests
 {
     private static readonly DateTimeOffset T0 = DateTimeOffset.Parse("2026-10-10T10:00:00Z");
-    private readonly Account account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Venue");
+    private readonly Account account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Venue", TradingMode.Real);
 
     private static DateTimeOffset T(int minute) => T0.AddMinutes(minute);
 
@@ -224,7 +225,7 @@ public sealed class PlayLocalResultTests
     [Fact]
     public void A_manual_ledger_result_is_the_play_local_result()
     {
-        var manual = new Account(Guid.NewGuid(), account.OwnerId, "manual", "Paper");
+        var manual = new Account(Guid.NewGuid(), account.OwnerId, "manual", "Paper", TradingMode.Real);
         var play = new Play(Guid.NewGuid(), manual, new PerpetualInstrument("manual", "BTC"), InstrumentSource.Manual,
             PlayDocuments.Serialize(TestPlays.Plan()), T(-10));
         play.MarkPlanned(T(-10));

@@ -18,6 +18,7 @@ using Vessel.Persistence.Events.Subscriptions;
 using Vessel.Persistence.Notifications;
 using Vessel.Worker;
 using Wolverine;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -159,7 +160,7 @@ public sealed class NotificationOwnerTests
         var journalOnly = Guid.NewGuid();
         await using (var db = runtime.Database.Context(journalOnly))
         {
-            db.Accounts.Add(new Account(Guid.NewGuid(), journalOnly, "manual", "Journal only"));
+            db.Accounts.Add(new Account(Guid.NewGuid(), journalOnly, "manual", "Journal only", TradingMode.Real));
             await db.SaveChangesAsync();
         }
         var inventory = runtime.Services.GetRequiredService<SystemNotificationStore>();

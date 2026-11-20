@@ -6,6 +6,7 @@ using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -28,8 +29,8 @@ public sealed class VenueRateLimitIntegrationTests : VenueRateLimitTestsSupport
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var first = new Account(Guid.NewGuid(), owner, "hyperliquid", "Limited account");
-        var second = new Account(Guid.NewGuid(), owner, "hyperliquid", "Other account on the same venue");
+        var first = new Account(Guid.NewGuid(), owner, "hyperliquid", "Limited account", TradingMode.Real);
+        var second = new Account(Guid.NewGuid(), owner, "hyperliquid", "Other account on the same venue", TradingMode.Real);
         first.Configure(null, "0x" + new string('a', 40), null);
         second.Configure(null, "0x" + new string('b', 40), null);
         var play = new Play(Guid.NewGuid(), second, new PerpetualInstrument("hyperliquid", "BTC"),

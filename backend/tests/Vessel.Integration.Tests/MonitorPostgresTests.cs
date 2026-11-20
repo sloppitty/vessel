@@ -12,6 +12,7 @@ using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Infrastructure.Monitoring;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -1165,7 +1166,7 @@ public sealed partial class MonitorPostgresTests
         await using var db = database.Context(owner);
         var accounts = Enumerable.Range(0, count).Select(i =>
         {
-            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Monitor " + i);
+            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Monitor " + i, TradingMode.Real);
             account.Configure(null, "0x" + Guid.NewGuid().ToString("N") + "00000000", null);
             return account;
         }).ToArray();

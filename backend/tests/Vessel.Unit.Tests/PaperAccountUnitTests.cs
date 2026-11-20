@@ -10,19 +10,19 @@ public sealed class PaperAccountUnitTests : PaperAccountTestsValues
     [Fact]
     public void Existing_constructors_default_to_real_and_paper_capital_defaults_without_losing_zero()
     {
-        Assert.Equal("real", new Account(Guid.NewGuid(), Owner, "manual", "Real").TradingMode);
-        Assert.Equal("real", new Portfolio(Guid.NewGuid(), Owner, "Real").TradingMode);
-        var paper = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Paper", "paper");
+        Assert.Equal(TradingMode.Real, new Account(Guid.NewGuid(), Owner, "manual", "Real", TradingMode.Real).TradingMode);
+        Assert.Equal(TradingMode.Real, new Portfolio(Guid.NewGuid(), Owner, "Real", TradingMode.Real).TradingMode);
+        var paper = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Paper", TradingMode.Paper);
         Assert.Equal(4000m, paper.StartingCapitalUsd);
-        Assert.Equal(0m, new Account(Guid.NewGuid(), Owner, "hyperliquid", "Zero", "paper", 0m).StartingCapitalUsd);
-        Assert.Throws<DomainValidationException>(() => new Account(Guid.NewGuid(), Owner, "manual", "Real", startingCapitalUsd: 1m));
-        Assert.Throws<DomainValidationException>(() => new Portfolio(Guid.NewGuid(), Owner, "Unknown", tradingMode: "unknown"));
+        Assert.Equal(0m, new Account(Guid.NewGuid(), Owner, "hyperliquid", "Zero", TradingMode.Paper, 0m).StartingCapitalUsd);
+        Assert.Throws<DomainValidationException>(() => new Account(Guid.NewGuid(), Owner, "manual", "Real", TradingMode.Real, startingCapitalUsd: 1m));
+        Assert.Throws<DomainValidationException>(() => new Portfolio(Guid.NewGuid(), Owner, "Unknown", tradingMode: (TradingMode)99));
     }
 
     [Fact]
     public void Paper_cannot_become_unassigned_accept_real_facts_or_sync()
     {
-        var paper = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Paper", "paper");
+        var paper = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Paper", TradingMode.Paper);
         var portfolio = Guid.NewGuid();
         paper.Configure(portfolio, null, null);
         Assert.Throws<DomainValidationException>(() => paper.Configure(null, null, null));

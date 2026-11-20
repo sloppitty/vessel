@@ -2,6 +2,7 @@ using Vessel.Application.Monitoring;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -12,7 +13,7 @@ namespace Vessel.Tests;
 public sealed class FundingWindowsTests
 {
     private static readonly DateTimeOffset To = new(2026, 10, 21, 12, 0, 0, TimeSpan.Zero);
-    private static readonly Account Lighter = new(Guid.NewGuid(), Guid.NewGuid(), "lighter", "Lighter");
+    private static readonly Account Lighter = new(Guid.NewGuid(), Guid.NewGuid(), "lighter", "Lighter", TradingMode.Real);
     private static readonly Func<CancellationToken, Task> Allowed = _ => Task.CompletedTask;
 
     /// <summary>Hourly settlements per market; a read holding more rows than its budget is truncated, oldest rows kept.</summary>

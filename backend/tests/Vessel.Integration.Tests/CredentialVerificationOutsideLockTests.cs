@@ -5,6 +5,7 @@ using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -26,7 +27,7 @@ public sealed class CredentialVerificationOutsideLockTests
         await verifier.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.False(verifier.SawOpenUnit);
         // The account row is not locked while the venue is being asked.
-        var renamed = await Management(managementDb, owner).UpdateAccountAsync(account.Id, new("Renamed", null, true, 1), default)
+        var renamed = await Management(managementDb, owner).UpdateAccountAsync(account.Id, new("Renamed", null, true, 1), TradingMode.Real, default)
             .WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal("Renamed", renamed.Name);
         verifier.Release.SetResult();
@@ -112,7 +113,7 @@ public sealed class CredentialVerificationOutsideLockTests
         var verifier = new GatedVerifier();
         var saving = Service(writerDb, owner, vault, verifier).PutAsync(account.Id, new() { Token = SecurityFixture.Token }, default);
         await verifier.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await Management(managementDb, owner).DeleteAccountAsync(account.Id, default).WaitAsync(TimeSpan.FromSeconds(5));
+        await Management(managementDb, owner).DeleteAccountAsync(account.Id, TradingMode.Real, default).WaitAsync(TimeSpan.FromSeconds(5));
         verifier.Release.SetResult();
         Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => saving.WaitAsync(TimeSpan.FromSeconds(5)))).StatusCode);
         await using var check = database.Context(owner);

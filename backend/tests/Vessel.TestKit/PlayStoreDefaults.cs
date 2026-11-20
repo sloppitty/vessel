@@ -1,6 +1,7 @@
 using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -10,17 +11,17 @@ namespace Vessel.Tests;
 /// </summary>
 public interface IPlayStoreDefaults : IPlayStore
 {
-    Task<bool> IPlayStore.ScopeExistsAsync(ListScope scope, string tradingMode, CancellationToken ct) => ScopeExistsAsync(scope, ct);
+    Task<bool> IPlayStore.ScopeExistsAsync(ListScope scope, TradingMode tradingMode, CancellationToken ct) => ScopeExistsAsync(scope, ct);
 
-    Task<PlaySearchResult> IPlayStore.SearchAsync(string pattern, string tradingMode, int offset, int limit, CancellationToken ct) =>
+    Task<PlaySearchResult> IPlayStore.SearchAsync(string pattern, TradingMode tradingMode, int offset, int limit, CancellationToken ct) =>
         throw new NotSupportedException();
 
-    Task<PlayRule?> IPlayStore.ActiveRuleAsync(string tradingMode, CancellationToken ct) => Task.FromResult<PlayRule?>(null);
+    Task<PlayRule?> IPlayStore.ActiveRuleAsync(TradingMode tradingMode, CancellationToken ct) => Task.FromResult<PlayRule?>(null);
 
-    Task<PlayRule> IPlayStore.AddRuleAsync(string tradingMode, string @if, string then, Guid? sourcePlayId, DateTimeOffset now,
+    Task<PlayRule> IPlayStore.AddRuleAsync(TradingMode tradingMode, string @if, string then, Guid? sourcePlayId, DateTimeOffset now,
         CancellationToken ct) => throw new NotSupportedException();
 
-    Task<string?> IPlayStore.TitleAsync(Guid playId, string tradingMode, CancellationToken ct) => Task.FromResult<string?>(null);
+    Task<string?> IPlayStore.TitleAsync(Guid playId, TradingMode tradingMode, CancellationToken ct) => Task.FromResult<string?>(null);
 
     Task IPlayStore.SaveRuleAsync(CancellationToken ct) => SaveAsync(ct);
 }

@@ -10,6 +10,7 @@ using Vessel.Domain.Evidence;
 using Vessel.Domain.Markets;
 using Vessel.Infrastructure;
 using Vessel.Infrastructure.Evidence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -84,7 +85,7 @@ public sealed class EvidencePostgresTests
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var other = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account", TradingMode.Real);
         var play = TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC"));
         var evidence = new PlayEvidence(Guid.NewGuid(), play, $"{owner:N}/{play.Id:N}/a.png", "image/png", 12,
             new string('a', 64), EvidenceSource.Capture, "Note", DateTimeOffset.Parse("2026-10-02T10:00:00Z"));
@@ -136,7 +137,7 @@ public sealed class EvidenceLimitPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account", TradingMode.Real);
         var play = TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC"));
         await using (var db = database.Context(owner))
         {

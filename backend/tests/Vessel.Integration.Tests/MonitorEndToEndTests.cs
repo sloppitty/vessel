@@ -29,6 +29,7 @@ using Vessel.Messaging.Modules;
 using Vessel.Messaging.Modules.Monitor;
 using Vessel.Messaging.Modules.Verification;
 using Vessel.Worker;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -492,7 +493,7 @@ public sealed partial class MonitorEndToEndTests
 
         private static Account Account(Guid owner)
         {
-            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic monitor account");
+            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic monitor account", TradingMode.Real);
             account.Configure(null, "0x" + Guid.NewGuid().ToString("N") + "00000000", null);
             return account;
         }

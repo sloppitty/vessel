@@ -8,6 +8,7 @@ using Vessel.Application.Overview;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -18,13 +19,13 @@ public sealed class OverviewSummaryPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid(); var foreignOwner = Guid.NewGuid();
-        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Selected");
-        var otherPortfolio = new Portfolio(Guid.NewGuid(), owner, "Other");
-        var selected = new Account(Guid.NewGuid(), owner, "manual", "Selected"); selected.Configure(portfolio.Id, null, null);
-        var disabled = new Account(Guid.NewGuid(), owner, "manual", "Disabled"); disabled.UpdateSettings(disabled.Name, portfolio.Id, false);
-        var other = new Account(Guid.NewGuid(), owner, "manual", "Other"); other.Configure(otherPortfolio.Id, null, null);
-        var unassigned = new Account(Guid.NewGuid(), owner, "manual", "Unassigned");
-        var foreign = new Account(Guid.NewGuid(), foreignOwner, "manual", "Foreign");
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Selected", TradingMode.Real);
+        var otherPortfolio = new Portfolio(Guid.NewGuid(), owner, "Other", TradingMode.Real);
+        var selected = new Account(Guid.NewGuid(), owner, "manual", "Selected", TradingMode.Real); selected.Configure(portfolio.Id, null, null);
+        var disabled = new Account(Guid.NewGuid(), owner, "manual", "Disabled", TradingMode.Real); disabled.UpdateSettings(disabled.Name, portfolio.Id, false);
+        var other = new Account(Guid.NewGuid(), owner, "manual", "Other", TradingMode.Real); other.Configure(otherPortfolio.Id, null, null);
+        var unassigned = new Account(Guid.NewGuid(), owner, "manual", "Unassigned", TradingMode.Real);
+        var foreign = new Account(Guid.NewGuid(), foreignOwner, "manual", "Foreign", TradingMode.Real);
         var now = DateTimeOffset.UtcNow;
         async Task Seed(Guid actor, Account[] accounts, params Portfolio[] portfolios)
         {
@@ -86,12 +87,12 @@ public sealed class OverviewSummaryPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid(); var foreignOwner = Guid.NewGuid();
-        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Swing", "wallet");
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Owned"); account.Configure(portfolio.Id, null, 10.000000000000000000000000001m);
-        var unassigned = new Account(Guid.NewGuid(), owner, "manual", "Unassigned"); unassigned.Configure(null, null, 20);
-        var disabled = new Account(Guid.NewGuid(), owner, "manual", "Disabled"); disabled.Configure(null, null, 999); disabled.UpdateSettings(disabled.Name, null, false);
-        var foreign = new Account(Guid.NewGuid(), foreignOwner, "manual", "Foreign"); foreign.Configure(null, null, 1000);
-        var foreignPortfolio = new Portfolio(Guid.NewGuid(), foreignOwner, "Foreign");
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Swing", TradingMode.Real, "wallet");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Owned", TradingMode.Real); account.Configure(portfolio.Id, null, 10.000000000000000000000000001m);
+        var unassigned = new Account(Guid.NewGuid(), owner, "manual", "Unassigned", TradingMode.Real); unassigned.Configure(null, null, 20);
+        var disabled = new Account(Guid.NewGuid(), owner, "manual", "Disabled", TradingMode.Real); disabled.Configure(null, null, 999); disabled.UpdateSettings(disabled.Name, null, false);
+        var foreign = new Account(Guid.NewGuid(), foreignOwner, "manual", "Foreign", TradingMode.Real); foreign.Configure(null, null, 1000);
+        var foreignPortfolio = new Portfolio(Guid.NewGuid(), foreignOwner, "Foreign", TradingMode.Real);
         var now = DateTimeOffset.UtcNow.AddHours(-1);
         await using (var db = database.Context(owner))
         {

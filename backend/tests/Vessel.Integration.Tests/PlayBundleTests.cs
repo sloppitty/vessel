@@ -8,6 +8,7 @@ using Vessel.Application.Plays;
 using Vessel.Application.Workspace;
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Export;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -198,7 +199,7 @@ public sealed class PlayBundleTests : IDisposable
         Guid playId;
         await using (var db = database.Context(owner))
         {
-            var account = new Vessel.Domain.Accounts.Account(Guid.NewGuid(), owner, "hyperliquid", "Venue");
+            var account = new Vessel.Domain.Accounts.Account(Guid.NewGuid(), owner, "hyperliquid", "Venue", TradingMode.Real);
             account.Configure(null, "0x" + new string('b', 40), null);
             var play = new Vessel.Domain.Plays.Play(Guid.NewGuid(), account, new Vessel.Domain.Markets.PerpetualInstrument("hyperliquid", "BTC"),
                 Vessel.Domain.Plays.InstrumentSource.Venue, PlayDocuments.Serialize(TestPlays.Plan()), at);
@@ -233,8 +234,8 @@ public sealed class PlayBundleTests : IDisposable
         Guid playId;
         await using (var db = database.Context(owner))
         {
-            var portfolio = new Vessel.Domain.Workspace.Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
-            var account = new Vessel.Domain.Accounts.Account(Guid.NewGuid(), owner, "hyperliquid", "Paper", "paper", 4000);
+            var portfolio = new Vessel.Domain.Workspace.Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: TradingMode.Paper);
+            var account = new Vessel.Domain.Accounts.Account(Guid.NewGuid(), owner, "hyperliquid", "Paper", TradingMode.Paper, 4000);
             account.Configure(portfolio.Id, null, null);
             var play = new Vessel.Domain.Plays.Play(Guid.NewGuid(), account, new Vessel.Domain.Markets.PerpetualInstrument("hyperliquid", "BTC"),
                 Vessel.Domain.Plays.InstrumentSource.Venue, PlayDocuments.Serialize(TestPlays.Plan()), at);

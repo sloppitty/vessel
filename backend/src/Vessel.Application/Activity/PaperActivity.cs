@@ -2,6 +2,7 @@ using System.Numerics;
 using Vessel.Application.Sizing;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Paper;
+using Vessel.Domain.Common;
 
 namespace Vessel.Application.Activity;
 
@@ -14,7 +15,7 @@ internal static class PaperActivity
     internal static ActivitySummaries Aggregate(ActivityFacts facts)
     {
         var accounts = facts.Accounts.Select(a => a.Id).ToHashSet();
-        var plays = facts.PaperPlays.Where(p => accounts.Contains(p.Play.AccountId) && p.Play.TradingMode == "paper").ToList();
+        var plays = facts.PaperPlays.Where(p => accounts.Contains(p.Play.AccountId) && p.Play.TradingMode == TradingMode.Paper).ToList();
         var operations = plays.Where(p => p.Executions.Count > 0).Select(Operation).ToList();
         var coverage = plays.Where(p => p.HasIssues).SelectMany(p => p.Issues.Prepend("Simulation " + p.State + ".")
             .Distinct().Select(issue => new ActivityCoverageDto(p.Play.AccountId, p.Play.ContractId, issue))).ToList();
@@ -66,7 +67,7 @@ internal static class PaperActivity
             net.ToString(), "0", [], incomplete ? null : net.ToString(), "paper-simulation", facts.Play.Id, "paper",
             coverage, [])
         {
-            TradingMode = "paper", ExecutionSource = "paper", PaperExecutions = executions.Select(ToDto).ToList(),
+            TradingMode = TradingMode.Paper, ExecutionSource = "paper", PaperExecutions = executions.Select(ToDto).ToList(),
             PaperExecutionCount = executions.Count, GrossClosedPnlUsd = incomplete ? null : net.ToString(),
             FundingStatus = "not-applicable", RemainingBasis = incomplete || basisUnknown ? null : basis
         };

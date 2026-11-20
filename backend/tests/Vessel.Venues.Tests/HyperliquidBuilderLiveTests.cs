@@ -1,6 +1,7 @@
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Hyperliquid;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -46,7 +47,7 @@ public sealed class HyperliquidBuilderLiveTests
         Assert.Contains(result.Snapshot.Positions, p => p.ContractId.Contains(':'));
         Assert.NotEmpty((await reader.ReadOrdersAsync(Address!, default)).Orders);
         var now = DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Live");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Live", TradingMode.Real);
         account.Configure(null, null, null, Address);
         var funding = await reader.ReadFundingAsync(account, now.AddDays(-7), now, default);
         Assert.Contains(funding.Payments, p => p.ContractId.Contains(':'));

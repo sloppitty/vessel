@@ -3,6 +3,7 @@ using Vessel.Application.Activity;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -41,9 +42,9 @@ public sealed class ActivityOmissionPostgresTests
     /// <summary>A flat snapshot after every fill by default; <paramref name="snapshot"/> null reads without one.</summary>
     private static ActivitySummaries Aggregate(ImportedFill[] fills, ExecutionOmission[] omissions, ForcedEvent[]? forced = null, decimal? snapshot = 0)
     {
-        var account = new Account(AccountId, Owner, "manual", "Fixture");
+        var account = new Account(AccountId, Owner, "manual", "Fixture", TradingMode.Real);
         return ActivityService.Aggregate(new([account], fills, snapshot is { } quantity ? [Snapshot(quantity)] : [], new Dictionary<Guid, Guid>())
-        { Omissions = omissions.Select(ActivityOmission.From).ToList(), ForcedEvents = forced ?? [] });
+        { Omissions = omissions.Select(ActivityOmission.From).ToList(), ForcedEvents = forced ?? [] }, TradingMode.Real);
     }
 
     private static List<ActivityOperationDto> Operations(ImportedFill[] fills, ExecutionOmission[] omissions, decimal? snapshot = 0) =>
@@ -57,7 +58,7 @@ public sealed class ActivityOmissionPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
         await using (var seed = database.Context(owner))
         {
             seed.Accounts.Add(account);
@@ -74,13 +75,13 @@ public sealed class ActivityOmissionPostgresTests
         Assert.Equal(ActivityService.MaxForcedEventRows, facts.ForcedEvents.Count);
         Assert.DoesNotContain(facts.ForcedEvents, e => e.SourceId is "f0" or "f1");
         Assert.Equal(ActivityService.MaxForcedEventRows + 2, facts.ForcedEventCounts![account.Id]);
-        var coverage = ActivityService.Aggregate(facts).Coverage;
+        var coverage = ActivityService.Aggregate(facts, TradingMode.Real).Coverage;
         Assert.Equal(ActivityService.MaxForcedEventRows, coverage.Count(c => c.Notice.StartsWith("Liquidation", StringComparison.Ordinal)));
         Assert.Contains(coverage, c => c.AccountId == account.Id && c.Notice == "2 more venue-forced executions are retained and excluded.");
         // At or below the cap, nothing is counted separately.
         await db.ForcedEvents.Where(e => e.SourceId == "f0" || e.SourceId == "f1").ExecuteDeleteAsync();
         var fewer = await new ActivityStore(db).ReadAsync(null, default);
         Assert.Equal((ActivityService.MaxForcedEventRows, (IReadOnlyDictionary<Guid, int>?)null), (fewer.ForcedEvents.Count, fewer.ForcedEventCounts));
-        Assert.DoesNotContain(ActivityService.Aggregate(fewer).Coverage, c => c.Notice.Contains("more venue-forced", StringComparison.Ordinal));
+        Assert.DoesNotContain(ActivityService.Aggregate(fewer, TradingMode.Real).Coverage, c => c.Notice.Contains("more venue-forced", StringComparison.Ordinal));
     }
 }

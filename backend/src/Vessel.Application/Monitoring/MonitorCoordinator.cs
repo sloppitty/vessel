@@ -7,6 +7,7 @@ using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Monitoring;
+using Vessel.Domain.Common;
 
 namespace Vessel.Application.Monitoring;
 
@@ -36,7 +37,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     public async Task<AccountMonitorDto> AccountAsync(Guid id, CancellationToken ct)
     {
         var capture = await store.CaptureAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
-        if (capture.Account.TradingMode != "real") throw new ProblemException(409, "Paper accounts use the paper scheduler, not the actual-account monitor.");
+        capture.Account.RequireReal("Paper accounts use the paper scheduler, not the actual-account monitor.");
         var row = await store.FindAsync(id, ct) ?? new() { AccountId = id, OwnerId = owner.OwnerId };
         return await ToDto(row, await store.VenueRetryAtAsync(capture.Account.VenueId, ct),
             IsOnline((await store.HeartbeatAsync(ct))?.HeartbeatAtUtc), await store.CoverageAsync([id], ct),
@@ -75,7 +76,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             if (await unitOfWork.ExecuteAsync(() => store.LockedAsync(candidate.AccountId, async (account, row) =>
                 {
                     var old = row.State;
-                    var monitorable = account.TradingMode == "real" && account.IsEnabled && account.SourceId is not null && venueIds.Contains(account.VenueId);
+                    var monitorable = account.TradingMode == TradingMode.Real && account.IsEnabled && account.SourceId is not null && venueIds.Contains(account.VenueId);
                     if (row.ManualState != "idle")
                     {
                         // A live run settles itself (it sees the same changes); a monitorable account's pending work
@@ -153,7 +154,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         await unitOfWork.ExecuteAsync(() => store.LockedAsync(accountId, async (account, row) =>
         {
             var now = time.GetUtcNow();
-            if (account.TradingMode != "real" || !account.IsEnabled || account.SourceId is null || !EligibleVenue(account.VenueId) ||
+            if (account.TradingMode != TradingMode.Real || !account.IsEnabled || account.SourceId is null || !EligibleVenue(account.VenueId) ||
                 !await store.EligibleAsync(accountId, now, ct))
                 throw new ProblemException(409, "This account has no eligible venue Plays, pending linked orders, discrepancy work or kept history.");
             row.ReleaseAbandonedRefresh(now);
@@ -176,7 +177,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     public Task<MonitorLease> AdmitRefreshAsync(Guid accountId, string readerId, CancellationToken ct) =>
         unitOfWork.ExecuteAsync(() => store.LockedAsync(accountId, async (account, row) =>
         {
-            if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts cannot import venue history.");
+            account.RequireReal("Paper accounts cannot import venue history.");
             if (!account.IsEnabled) throw new ProblemException(400, "Enable the account before refreshing it.");
             if (account.SourceId is null || venues.Descriptor(account.VenueId)?.Capabilities.Sync != true)
                 throw new ProblemException(400, "This account cannot be refreshed.");
@@ -239,7 +240,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 if (deferred > 0 && refresh) throw new MonitorAdmissionException(deferred);
                 return false;
             }
-            if (capture.Account.TradingMode != "real" || !capture.Account.IsEnabled || capture.Account.SourceId is null) return await SupersedeAsync(lease, ct, attempted: false);
+            if (capture.Account.TradingMode != TradingMode.Real || !capture.Account.IsEnabled || capture.Account.SourceId is null) return await SupersedeAsync(lease, ct, attempted: false);
             if (!refresh && venues.Descriptor(capture.Account.VenueId)?.Capabilities.ReadOnlyCredential == true &&
                 !await credentials.IsUsableAsync(capture.Account, ct))
                 return await FailAsync(lease, capture, true, "A usable read-only credential is required. Update it to resume monitoring.", ct);
@@ -496,7 +497,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     public Task<HistoryBackfillDto> StartBackfillAsync(Guid accountId, Guid gapId, CancellationToken ct) =>
         unitOfWork.ExecuteAsync(() => store.LockedAsync(accountId, async (account, _) =>
         {
-            if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts have no venue history.");
+            account.RequireReal("Paper accounts have no venue history.");
             if (!account.IsEnabled) throw new ProblemException(400, "Enable the account before backfilling it.");
             if (account.SourceId is null || !EligibleVenue(account.VenueId) || venues.FillHistory(account.VenueId) is null)
                 throw new ProblemException(400, "This venue cannot backfill executions.");
@@ -519,7 +520,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     {
         try
         {
-            if (venues.FillHistory(capture.Account.VenueId) is not { } reader || capture.Account.TradingMode != "real" ||
+            if (venues.FillHistory(capture.Account.VenueId) is not { } reader || capture.Account.TradingMode != TradingMode.Real ||
                 !capture.Account.IsEnabled || capture.Account.SourceId is null) return false;
             for (var page = 0; page < BackfillPagesPerRun; page++)
             {
@@ -640,7 +641,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         try
         {
             var account = capture.Account;
-            if (account.TradingMode != "real" || !account.IsEnabled || account.SourceId is null ||
+            if (account.TradingMode != TradingMode.Real || !account.IsEnabled || account.SourceId is null ||
                 venues.Descriptor(account.VenueId)?.Capabilities.Sync != true || venues.Funding(account.VenueId) is not { } reader)
             {
                 next = time.GetUtcNow() + settings.Interval;
@@ -687,7 +688,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     private Task<bool> FundingUnitAsync(MonitorLease lease, MonitorCapture captured, VenueFundingReadResult result, CancellationToken ct) =>
         unitOfWork.ExecuteAsync(() => store.LockedAsync(lease.AccountId, async (account, row) =>
         {
-            if (!row.Owns(lease.Generation, lease.WorkerId, time.GetUtcNow()) || !account.IsEnabled || account.TradingMode != "real" ||
+            if (!row.Owns(lease.Generation, lease.WorkerId, time.GetUtcNow()) || !account.IsEnabled || account.TradingMode != TradingMode.Real ||
                 account.SettingsRevision != captured.Account.SettingsRevision || account.SourceId != captured.Account.SourceId ||
                 account.VenueId != captured.Account.VenueId ||
                 (await store.CaptureAsync(account.Id, ct))?.CredentialRevision != captured.CredentialRevision) return false;
@@ -703,7 +704,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             // The owner started the backfill: like a Refresh, nothing it changes is announced as monitor news.
             await events.SetRunAsync(lease.RequestId, "owner", ct);
             var now = time.GetUtcNow();
-            if (!row.Owns(lease.Generation, lease.WorkerId, now) || !account.IsEnabled || account.TradingMode != "real" ||
+            if (!row.Owns(lease.Generation, lease.WorkerId, now) || !account.IsEnabled || account.TradingMode != TradingMode.Real ||
                 account.SettingsRevision != captured.Account.SettingsRevision || account.SourceId != captured.Account.SourceId) return false;
             if (await store.BackfillAsync(account.Id, backfillId, ct) is not { IsActive: true } backfill) return false;
             var next = await step(account, row, backfill, now);

@@ -37,16 +37,16 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
     private const string ActivityReason = " Counted from closed Activity positions until a play closes with a win or loss.";
     private const string RatioNotice = " The win/loss ratio exceeds the supported decimal range and is unknown.";
 
-    public async Task<SizingDto> GetAsync(CancellationToken ct, string? tradingMode = "real")
+    public async Task<SizingDto> GetAsync(TradingMode tradingMode, CancellationToken ct)
     {
-        tradingMode = TradingMode.Validate(tradingMode ?? TradingMode.Real);
+        tradingMode = TradingModes.Validate(tradingMode);
         var settings = await store.SettingsAsync(ct);
         return await BuildAsync(settings?.RiskPercent ?? SizingSettings.DefaultRiskPercent, tradingMode, ct);
     }
 
-    public async Task<SizingDto> UpdateSettingsAsync(UpdateSizingSettingsRequest request, CancellationToken ct, string? tradingMode = "real")
+    public async Task<SizingDto> UpdateSettingsAsync(UpdateSizingSettingsRequest request, TradingMode tradingMode, CancellationToken ct)
     {
-        tradingMode = TradingMode.Validate(tradingMode ?? TradingMode.Real);
+        tradingMode = TradingModes.Validate(tradingMode);
         if (tradingMode == TradingMode.Paper)
             throw new ProblemException(409, "Paper sizing reads the risk preference; it cannot change real sizing settings.");
         if (!ExactDecimal.TryParseRiskPercent(request.RiskPercent, out var risk))
@@ -63,7 +63,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
         return await BuildAsync(risk, tradingMode, ct);
     }
 
-    private async Task<SizingDto> BuildAsync(decimal risk, string tradingMode, CancellationToken ct)
+    private async Task<SizingDto> BuildAsync(decimal risk, TradingMode tradingMode, CancellationToken ct)
     {
         var dto = await RecordAsync(risk, tradingMode, ct);
         // Unresolved Plays have no result: they stay out of the record and the ladder, and are only counted beside it.
@@ -72,7 +72,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
             : dto with { Record = dto.Record with { Unresolved = await store.UnresolvedPlaysAsync(ct) } };
     }
 
-    private async Task<SizingDto> RecordAsync(decimal risk, string tradingMode, CancellationToken ct)
+    private async Task<SizingDto> RecordAsync(decimal risk, TradingMode tradingMode, CancellationToken ct)
     {
         var closed = (await store.ClosedPlaysAsync(tradingMode, ct)).Where(f => f.Play.TradingMode == tradingMode).ToList();
         if (tradingMode == TradingMode.Paper)
@@ -81,7 +81,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
                 .Where(x => x.Outcome is not null).Select(x => new Scored(x.Outcome!,
                     Row(x.Facts.Play.Id, x.Facts.Play.Title, x.Facts.Play.ContractId, x.Outcome!))
                 { Local = PaperPlayFacts.Local(x.Outcome!) }).ToList();
-            return ToDto(risk, paper, SourcePaper) with { TradingMode = TradingMode.Paper };
+            return ToDto(risk, paper, SourcePaper, TradingMode.Paper);
         }
         var plays = PlayOutcomes(closed, venues);
         // Phase 2, item 11: a settled Play with an allocated fill has no venue result, so it is never in the record or the
@@ -89,10 +89,10 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
         var notAllocated = closed.Count(f => f.Paper is null && f.Play.Origin != PlayOrigin.Retrospective && f.Fills.Any(x => x.Allocated) &&
             ExecutionIntegrity.Settled(f));
         SizingDto Counted(SizingDto dto) => dto with { Record = dto.Record with { NotAllocated = notAllocated } };
-        if (plays.Any(x => x.Outcome.Kind != PlayOutcomeKind.Scratch) || activity is null) return Counted(ToDto(risk, plays, SourcePlays));
+        if (plays.Any(x => x.Outcome.Kind != PlayOutcomeKind.Scratch) || activity is null) return Counted(ToDto(risk, plays, SourcePlays, TradingMode.Real));
         // Only with no decided Play outcome; the two sources are never mixed.
         var operations = await ActivityRecordAsync(activity, ct);
-        return Counted(operations.Any(x => x.Outcome.Kind != PlayOutcomeKind.Scratch) ? ToDto(risk, operations, SourceActivity) : ToDto(risk, plays, SourceNone));
+        return Counted(operations.Any(x => x.Outcome.Kind != PlayOutcomeKind.Scratch) ? ToDto(risk, operations, SourceActivity, TradingMode.Real) : ToDto(risk, plays, SourceNone, TradingMode.Real));
     }
 
     /// <summary>
@@ -111,7 +111,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
     internal static async Task<(List<ActivityOperationDto> Complete, List<ActivityOperationDto> Omitted)> CompleteOperationsAsync(
         ActivityService activity, ISizingStore store, IReadOnlySet<Guid>? accountIds, CancellationToken ct)
     {
-        var summaries = await activity.ReadSummariesAsync(null, ct, accountIds);
+        var summaries = await activity.ReadSummariesAsync(null, TradingMode.Real, ct, accountIds);
         // Phase 2, item 11 (Sol round 1): an operation holding a fill the owner allocated between Plays is their trade; Activity
         // still reports it, but it is never scored as a position here, nor listed as one that could not be.
         var allocated = await store.AllocatedFillIdsAsync(ct);
@@ -208,7 +208,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
             ExactDecimal.FormatEightPlaces(outcome.ReturnPercent), ExactDecimal.FormatEightPlaces(outcome.PlannedRisk),
             ExactDecimal.FormatEightPlaces(outcome.RMultiple), Name(outcome.Kind), outcome.FeesComplete);
 
-    private static SizingDto ToDto(decimal risk, List<Scored> outcomes, string source)
+    private static SizingDto ToDto(decimal risk, List<Scored> outcomes, string source, TradingMode mode)
     {
         var record = TrackRecord.From(outcomes.Select(x => x.Outcome).ToList());
         // The ladder walks every decided outcome of the chosen source, fallback operations included: they are real results.
@@ -242,7 +242,7 @@ public sealed class SizingService(ISizingStore store, IJournalOwnerContext owner
             },
             new SizingLimitsDto(ExactDecimal.FormatEightPlaces(limits.EffectiveRiskPercent), ExactDecimal.FormatEightPlaces(limits.MaxStopPercent),
                 ExactDecimal.FormatEightPlaces(limits.MinRewardRisk), Source(limits.MaxStopSource), Source(limits.MinRewardRiskSource)),
-            record is { AverageGainPercent: not null, AverageLossPercent: > 0, WinLossRatio: null } ? notice + RatioNotice : notice);
+            record is { AverageGainPercent: not null, AverageLossPercent: > 0, WinLossRatio: null } ? notice + RatioNotice : notice, mode);
     }
 
     private static string Name<T>(T value) where T : Enum => value.ToString().ToLowerInvariant();

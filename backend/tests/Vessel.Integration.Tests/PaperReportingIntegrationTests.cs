@@ -1,4 +1,5 @@
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -10,7 +11,7 @@ public sealed class PaperReportingIntegrationTests : PaperReportingTestsSupport
     {
         var paper = Paper(owner, state: "disabled");
         Assert.NotNull(paper.Facts.Paper!.Outcome(At.AddDays(1), out _));
-        var real = new ActivitySummaryKey(owner, 1, null, "*");
-        Assert.NotEqual(real, real with { TradingMode = "paper" });
+        var real = new ActivitySummaryKey(owner, 1, null, "*", TradingMode.Real);
+        Assert.NotEqual(real, real with { TradingMode = TradingMode.Paper });
     }
 }

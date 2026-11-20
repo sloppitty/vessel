@@ -4,6 +4,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -29,7 +30,7 @@ public partial class SizingServiceTestsValues
 
     internal ClosedPlayFacts Closed(PlayPlanDocument plan, IEnumerable<LinkedFill> fills, PlayPlanDocument? revised = null, int closedDay = 2)
     {
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue", TradingMode.Real);
         var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
             PlayDocuments.Serialize(plan), Planned);
         List<PlayPlanRevision> revisions = [play.MarkPlanned(Planned).Revision];

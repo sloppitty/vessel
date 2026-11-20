@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Vessel.Application.Common;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Common;
 
 namespace Vessel.Application.Plays;
 
@@ -21,7 +22,7 @@ public sealed record PlayRuleSeenDto(int Version, string If, string Then);
 public sealed record PlayRuleDto(int Version, string If, string Then, Guid? SourcePlayId, string? SourceTitle, DateTimeOffset CreatedAtUtc);
 
 /// <summary>The active rule in one trading mode, or none.</summary>
-public sealed record PlayRuleStateDto(PlayRuleDto? Active, string TradingMode);
+public sealed record PlayRuleStateDto(PlayRuleDto? Active, TradingMode TradingMode);
 
 /// <summary>
 /// Makes a new rule version the active one. <paramref name="ExpectedVersion"/> is the active version the owner saw, null

@@ -11,7 +11,7 @@ public static class RiskEndpoints
 
     public static void MapRisk(this WebApplication app)
     {
-        var api = app.MapGroup("/api/risk").RequireAuthorization();
+        var api = app.MapGroup("/api/risk").RequireAuthorization().RealOnly();
         api.MapGet("/open", async (string? scope, OpenRiskService service, CancellationToken ct) => Results.Ok(await service.GetAsync(scope, ct)));
         api.MapPost("/open/preview", async (OpenRiskPreviewRequest request, OpenRiskService service, CancellationToken ct) =>
             Results.Ok(await service.PreviewAsync(request, ct))).WithBodyLimit(PreviewBodyBytes, "Open-risk preview is too large.");

@@ -6,6 +6,7 @@ using Vessel.Application.Plays;
 using Vessel.Application.Review;
 using Vessel.Domain.Plays;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -70,7 +71,7 @@ public sealed partial class ExecutionPostgresTests
         await using var _ = database;
         async Task<Guid> Stuck(string price, string order, decimal at, DateTimeOffset? earliest)
         {
-            var play = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", $"Stuck {order}", TestPlays.Plan(price)), default);
+            var play = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", $"Stuck {order}", TestPlays.Plan(price)), TradingMode.Real, default);
             play = await h.Plays.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "planned"), default);
             h.Orders.Orders.Add(Order(order, "buy", at, "filled"));
             AddFills(h, Fill($"{order}-a", order, "Open Long", at, 0.5m, earliest), Fill($"{order}-b", order, "Open Long", at, 0.5m));

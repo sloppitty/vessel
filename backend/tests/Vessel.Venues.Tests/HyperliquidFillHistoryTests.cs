@@ -2,6 +2,7 @@ using System.Text.Json;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Hyperliquid;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -10,7 +11,7 @@ public sealed partial class HyperliquidAdapterTests
 {
     private static Account FillHistoryAccount()
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Backfill");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Backfill", TradingMode.Real);
         account.Configure(null, Address, null);
         return account;
     }

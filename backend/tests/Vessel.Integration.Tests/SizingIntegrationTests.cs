@@ -6,6 +6,7 @@ using Vessel.Domain.Workspace;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 using Vessel.Application.Venues;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -33,29 +34,29 @@ public sealed class SizingPostgresTests
         var sizing = new SizingService(new SizingStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.For(db));
         var account = await workspace.CreateAccountAsync(new(null, "Venue", "hyperliquid", "0x" + Guid.NewGuid().ToString("N") + "00000000"), default);
 
-        var play = await plays.CreateAsync(new CreatePlayRequest(account.Id, "BTC", "venue", "Breakout", TestPlays.Plan()), default);
+        var play = await plays.CreateAsync(new CreatePlayRequest(account.Id, "BTC", "venue", "Breakout", TestPlays.Plan()), TradingMode.Real, default);
         play = await plays.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "planned"), default);
         orders.Orders.AddRange([Order("21", "buy", 100m, "filled"), Order("22", "sell", 110m, "filled", reduceOnly: true)]);
         reader.Result = reader.Result with { Fills = [Fill("g1", "21", "Open Long", 100m, 0), Fill("g2", "22", "Close Long", 110m, 10m)] };
         Assert.Equal("closed", (await MonitorTestPaths.CheckAsync(db, owner, TestVenues.With(reader, orders), play.Summary.Id)).Status);
 
-        var result = await sizing.GetAsync(default);
+        var result = await sizing.GetAsync(TradingMode.Real, default);
         var outcome = Assert.Single(result.Record.Recent);
         Assert.Equal(("win", "9.98", "5", "1.996"), (outcome.Outcome, outcome.NetResultUsd, outcome.RiskUsd, outcome.RMultiple));
         Assert.Equal("1", result.Record.BattingAverage);
 
-        Assert.Equal("2.5", (await sizing.UpdateSettingsAsync(new("2.5"), default)).Settings.RiskPercent);
+        Assert.Equal("2.5", (await sizing.UpdateSettingsAsync(new("2.5"), TradingMode.Real, default)).Settings.RiskPercent);
         await using (var again = database.Context(owner))
-            Assert.Equal("2.5", (await new SizingService(new SizingStore(again, TestUnitOfWork.For(again)), new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.For(again)).GetAsync(default)).Settings.RiskPercent);
+            Assert.Equal("2.5", (await new SizingService(new SizingStore(again, TestUnitOfWork.For(again)), new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.For(again)).GetAsync(TradingMode.Real, default)).Settings.RiskPercent);
 
         await using (var other = database.Context(Guid.NewGuid()))
         {
-            var foreign = await new SizingService(new SizingStore(other, TestUnitOfWork.For(other)), new CoreOwner(Guid.NewGuid()), TimeProvider.System, TestUnitOfWork.For(other)).GetAsync(default);
+            var foreign = await new SizingService(new SizingStore(other, TestUnitOfWork.For(other)), new CoreOwner(Guid.NewGuid()), TimeProvider.System, TestUnitOfWork.For(other)).GetAsync(TradingMode.Real, default);
             Assert.Equal((0, "1.25"), (foreign.Record.ClosedPlays, foreign.Settings.RiskPercent));
         }
 
         var stored = await db.Accounts.SingleAsync(a => a.Id == account.Id);
-        await workspace.UpdateAccountAsync(account.Id, new(stored.Name, stored.PortfolioId, false, stored.SettingsRevision), default);
-        Assert.Equal(0, (await sizing.GetAsync(default)).Record.ClosedPlays);
+        await workspace.UpdateAccountAsync(account.Id, new(stored.Name, stored.PortfolioId, false, stored.SettingsRevision), TradingMode.Real, default);
+        Assert.Equal(0, (await sizing.GetAsync(TradingMode.Real, default)).Record.ClosedPlays);
     }
 }

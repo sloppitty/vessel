@@ -7,6 +7,7 @@ using Vessel.Application.Plays.Execution;
 using Vessel.Application.Venues;
 using Vessel.Application.Paper;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 
@@ -22,12 +23,12 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     public const int MaxUnpagedPlays = 200, MaxSearchLength = 100;
 
     /// <summary>One view of saved Plays. Drafts and In progress return one page of at most 200 rows (or an explicit size); <c>TotalCount</c> stays exact.</summary>
-    public async Task<PlayListDto> ListAsync(string? view, string? search, string? scope, string? page, string? pageSize, CancellationToken ct,
-        string? tradingMode = "real")
+    public async Task<PlayListDto> ListAsync(string? view, string? search, string? scope, string? page, string? pageSize, TradingMode tradingMode,
+        CancellationToken ct)
     {
         var listView = View(view);
         var (requested, size) = ListPaging.Parse(page, pageSize);
-        var filter = await Filter(search, scope, Mode(tradingMode), ct);
+        var filter = await Filter(search, scope, TradingModes.Validate(tradingMode), ct);
         // Unpaged views are one page: the whole view up to 200 rows, or an explicit smaller size such as Overview's 5.
         if (listView is PlayListView.Drafts or PlayListView.Progress) (requested, size) = (1, string.IsNullOrEmpty(pageSize) ? MaxUnpagedPlays : size);
         var result = await store.PageAsync(listView, filter, requested, size, ct);
@@ -39,9 +40,9 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     /// hold the query, 50 per page from <paramref name="offset"/>, each with its first matching field and an excerpt. The
     /// paged list and its title/instrument search are unchanged; Plays not indexed yet are counted, never silently missed.
     /// </summary>
-    public async Task<PlaySearchPageDto> SearchAsync(string? q, int? offset, CancellationToken ct, string? tradingMode = "real")
+    public async Task<PlaySearchPageDto> SearchAsync(string? q, int? offset, TradingMode tradingMode, CancellationToken ct)
     {
-        var mode = Mode(tradingMode);
+        var mode = TradingModes.Validate(tradingMode);
         var (query, folded) = JournalSearch.Query(q);
         var start = offset ?? 0;
         if (start is < 0 or > JournalSearch.MaxOffset)
@@ -55,9 +56,9 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         return new(query, items, result.Total, start, start + items.Count < result.Total ? start + items.Count : null, result.NotIndexed);
     }
 
-    public async Task<PlayCountsDto> CountsAsync(string? search, string? scope, CancellationToken ct, string? tradingMode = "real")
+    public async Task<PlayCountsDto> CountsAsync(string? search, string? scope, TradingMode tradingMode, CancellationToken ct)
     {
-        var rows = await store.CountsAsync(await Filter(search, scope, Mode(tradingMode), ct), ct);
+        var rows = await store.CountsAsync(await Filter(search, scope, TradingModes.Validate(tradingMode), ct), ct);
         int Count(Func<PlayCountRow, bool> where) => rows.Where(where).Sum(r => r.Count);
         static bool Ended(PlayCountRow r) => r.Status is PlayStatus.Closed or PlayStatus.Cancelled or PlayStatus.Unresolved;
         return new(Count(r => r.Status == PlayStatus.Draft), Count(r => r.Status is PlayStatus.Planned or PlayStatus.Paused or PlayStatus.Open),
@@ -65,7 +66,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             Count(r => r.Status == PlayStatus.Cancelled), Count(_ => true)) { Unresolved = Count(r => r.Status == PlayStatus.Unresolved) };
     }
 
-    private async Task<PlayListFilter> Filter(string? search, string? scope, string tradingMode, CancellationToken ct)
+    private async Task<PlayListFilter> Filter(string? search, string? scope, TradingMode tradingMode, CancellationToken ct)
     {
         search = search?.Trim();
         if (search?.Length > MaxSearchLength) throw new ProblemException(400, $"Search is limited to {MaxSearchLength} characters.");
@@ -93,10 +94,10 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
 
     public async Task<PlayDto> GetAsync(Guid id, CancellationToken ct) => await ToDtoAsync(store, await Find(id, ct), ct);
 
-    public Task<PlayDto> CreateAsync(CreatePlayRequest request, CancellationToken ct, string? tradingMode = "real") => unitOfWork.ExecuteAsync(async () =>
+    public Task<PlayDto> CreateAsync(CreatePlayRequest request, TradingMode tradingMode, CancellationToken ct) => unitOfWork.ExecuteAsync(async () =>
     {
         var account = await EnabledAccount(request.AccountId, ct);
-        if (account.TradingMode != Mode(tradingMode)) throw new ProblemException(404, "Account not found.");
+        if (account.TradingMode != TradingModes.Validate(tradingMode)) throw new ProblemException(404, "Account not found.");
         var (instrument, source) = Instrument(account, request.Instrument, request.InstrumentSource);
         var plan = PlayDocuments.Serialize(PlayDocuments.Normalize(request.Plan));
         var now = time.GetUtcNow();
@@ -121,7 +122,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         // at or beyond the entry; the fills are read under the Play lock, so none arrives in between.
         var plan = play.Origin == PlayOrigin.Retrospective ? PlayDocuments.Serialize(request.Plan)
             : PlayDocuments.Serialize(PlayDocuments.Normalize(request.Plan, PlayDocuments.Read(play.Plan),
-                play.TradingMode == "paper" ? (await RequirePaper().GetExecutionProofAsync(play.Id, ct)).ExecutedEntryIds
+                play.TradingMode == TradingMode.Paper ? (await RequirePaper().GetExecutionProofAsync(play.Id, ct)).ExecutedEntryIds
                     : await ExecutedEntriesAsync(store, play, ct)));
         var drawings = PlayDocuments.NormalizeDrawings(request.Drawings);
         var now = time.GetUtcNow();
@@ -141,7 +142,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         if (play.ReplaceDrawings(current, drawings, now) && stored is null) store.Add(current);
         var review = play.Annotate(request.Title ?? "", request.Review ?? "", now, request.StructuredReview);
         if (revision is not null) store.Add(revision);
-        if (revision is not null && play.TradingMode == "paper")
+        if (revision is not null && play.TradingMode == TradingMode.Paper)
             await RequirePaper().ActivateRevisionAsync(play, ct);
         if (review is not null) store.Add(review);
         return ToDto(play, current.Document);
@@ -188,7 +189,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             default:
                 throw new ProblemException(400, "Status must be planned, paused or cancelled.");
         }
-        if (play.TradingMode == "paper")
+        if (play.TradingMode == TradingMode.Paper)
         {
             if (play.Status == PlayStatus.Planned) await RequirePaper().ArmAsync(play, ct);
             else if (play.Status is PlayStatus.Paused or PlayStatus.Cancelled) await RequirePaper().SuspendAsync(play, ct);
@@ -258,8 +259,8 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     /// <summary>At most this many recent next actions are offered at planning (phase 1, 1.5).</summary>
     public const int MaxNextActions = 10;
 
-    public Task<List<NextActionDto>> NextActionsAsync(CancellationToken ct, string? tradingMode = "real") =>
-        store.NextActionsAsync(MaxNextActions, Mode(tradingMode), ct);
+    public Task<List<NextActionDto>> NextActionsAsync(TradingMode tradingMode, CancellationToken ct) =>
+        store.NextActionsAsync(MaxNextActions, TradingModes.Validate(tradingMode), ct);
 
     public async Task<PlayHistoryDto> HistoryAsync(Guid id, CancellationToken ct)
     {
@@ -303,7 +304,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     /// </summary>
     private async Task RequireFilledEntriesKept(Play play, PlayPlanDocument next, CancellationToken ct)
     {
-        var filled = play.TradingMode == "paper" ? (await RequirePaper().GetExecutionProofAsync(play.Id, ct)).ExecutedEntryIds
+        var filled = play.TradingMode == TradingMode.Paper ? (await RequirePaper().GetExecutionProofAsync(play.Id, ct)).ExecutedEntryIds
             : await store.FilledEntryIdsAsync(play.Id, ct);
         var current = PlayDocuments.Read(play.Plan);
         var linked = await store.LinkedPlanReferencesAsync(play.Id, ct);
@@ -363,7 +364,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
 
     private static (PerpetualInstrument?, InstrumentSource) Instrument(Account account, string? instrument, string? source)
     {
-        if (account.TradingMode == "paper" && source != "venue")
+        if (account.TradingMode == TradingMode.Paper && source != "venue")
             throw new ProblemException(400, "Paper Plays use the venue's perpetual catalogue.");
         var kind = source switch
         {
@@ -405,12 +406,6 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     };
 
     private IPaperTradingService RequirePaper() => paper ?? throw new ProblemException(503, "Paper execution is unavailable.");
-    private static string Mode(string? mode) => mode switch
-    {
-        null or "real" => "real", "paper" => "paper",
-        _ => throw new ProblemException(400, "Trading mode must be real or paper.")
-    };
-
     public static string? CompletionName(ReviewCompletionKind? kind) => kind switch
     {
         ReviewCompletionKind.Completed => "completed", ReviewCompletionKind.NotNeeded => "not-needed", ReviewCompletionKind.Legacy => "legacy",
@@ -431,9 +426,9 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     }
 
     /// <summary>The active if-then rule in the mode (Phase 2, item 3), naming the Play it was promoted from.</summary>
-    public async Task<PlayRuleStateDto> RuleAsync(string? tradingMode, CancellationToken ct)
+    public async Task<PlayRuleStateDto> RuleAsync(TradingMode tradingMode, CancellationToken ct)
     {
-        var mode = Mode(tradingMode);
+        var mode = TradingModes.Validate(tradingMode);
         return new(await RuleDto(await store.ActiveRuleAsync(mode, ct), mode, ct), mode);
     }
 
@@ -441,9 +436,9 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     /// Makes a new rule version the active one, archiving the one it replaces; Plays planned under it keep their text. It is
     /// a 409 when the active version is not the one the owner saw. A source Play must be the owner's, in this mode.
     /// </summary>
-    public Task<PlayRuleStateDto> SetRuleAsync(string? tradingMode, SetPlayRuleRequest request, CancellationToken ct) => unitOfWork.ExecuteAsync(async () =>
+    public Task<PlayRuleStateDto> SetRuleAsync(TradingMode tradingMode, SetPlayRuleRequest request, CancellationToken ct) => unitOfWork.ExecuteAsync(async () =>
     {
-        var mode = Mode(tradingMode);
+        var mode = TradingModes.Validate(tradingMode);
         var active = await store.ActiveRuleAsync(mode, ct);
         if (active?.Version != request.ExpectedVersion)
             throw new ProblemException(409, PlayRules.Changed);
@@ -461,9 +456,9 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     }, ct);
 
     /// <summary>Archives the active rule, leaving none; 409 when it is not the version the owner saw.</summary>
-    public Task<PlayRuleStateDto> ArchiveRuleAsync(string? tradingMode, int expectedVersion, CancellationToken ct) => unitOfWork.ExecuteAsync(async () =>
+    public Task<PlayRuleStateDto> ArchiveRuleAsync(TradingMode tradingMode, int expectedVersion, CancellationToken ct) => unitOfWork.ExecuteAsync(async () =>
     {
-        var mode = Mode(tradingMode);
+        var mode = TradingModes.Validate(tradingMode);
         var active = await store.ActiveRuleAsync(mode, ct);
         if (active is null || active.Version != expectedVersion)
             throw new ProblemException(409, PlayRules.Changed);
@@ -472,7 +467,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         return new PlayRuleStateDto(null, mode);
     }, ct);
 
-    private async Task<PlayRuleDto?> RuleDto(PlayRule? rule, string mode, CancellationToken ct) => rule is null ? null
+    private async Task<PlayRuleDto?> RuleDto(PlayRule? rule, TradingMode mode, CancellationToken ct) => rule is null ? null
         : new(rule.Version, rule.If, rule.Then, rule.SourcePlayId,
             rule.SourcePlayId is { } source ? await store.TitleAsync(source, mode, ct) : null, rule.CreatedAtUtc);
 

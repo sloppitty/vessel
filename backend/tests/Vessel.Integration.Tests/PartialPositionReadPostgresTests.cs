@@ -5,6 +5,7 @@ using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -43,9 +44,9 @@ public sealed class PartialPositionReadPostgresTests
         var workspace = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(), TestUnitOfWork.For(db));
         // No venue registry: open operations take the snapshot path of unrealized P&L.
         var activity = new ActivityService(new ActivityStore(db), store, TimeProvider.System);
-        return new(await new OverviewSummaryService(store, workspace, activity, new SizingStore(db, TestUnitOfWork.For(db)), TimeProvider.System).GetAsync("account", "all", "all", default),
-            await workspace.AccountAsync(accountId, default), await workspace.OverviewAsync(default),
-            (await workspace.SnapshotAsync(accountId, default))!, await activity.PageAsync(new ActivityQuery(), default));
+        return new(await new OverviewSummaryService(store, workspace, activity, new SizingStore(db, TestUnitOfWork.For(db)), TimeProvider.System).GetAsync("account", "all", "all", TradingMode.Real, default),
+            await workspace.AccountAsync(accountId, TradingMode.Real, default), await workspace.OverviewAsync(TradingMode.Real, default),
+            (await workspace.SnapshotAsync(accountId, TradingMode.Real, default))!, await activity.PageAsync(new ActivityQuery(), default));
     }
 
     [PostgresFact]
@@ -53,7 +54,7 @@ public sealed class PartialPositionReadPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Builder");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Builder", TradingMode.Real);
         account.Configure(null, "0x" + new string('b', 40), null);
         await using (var db = database.Context(owner))
         {
@@ -102,7 +103,7 @@ public sealed class PartialPositionReadPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Builder");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Builder", TradingMode.Real);
         account.Configure(null, "0x" + new string('c', 40), null);
         await using (var db = database.Context(owner))
         {
@@ -125,7 +126,7 @@ public sealed class PartialPositionReadPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync("20261102123723_MarketSources");
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Existing");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Existing", TradingMode.Real);
         await using var db = database.Context(owner);
         await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO accounts (\"Id\", \"OwnerId\", \"VenueId\", \"Name\", \"SyncStatus\") VALUES ({account.Id}, {owner}, 'hyperliquid', 'Existing', 'synced')");
         await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO account_snapshots (\"OwnerId\", \"AccountId\", \"ObservedAtUtc\", \"ValueScope\") VALUES ({owner}, {account.Id}, now(), 'primary-perpetual-dex')");

@@ -1,4 +1,5 @@
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -12,7 +13,7 @@ public sealed class AccountOrderHistoryUseCasesTests
     [Fact]
     public void Order_notice_replacement_keeps_latest_public_coverage_and_failure_state_without_growth()
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "History");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "History", TradingMode.Real);
         account.RecordSync(AccountHistoryOrders.At, "Previous public coverage.");
         account.RecordOrderHistoryNotice("Previous order coverage.");
         account.RecordSync(AccountHistoryOrders.At.AddMinutes(1), "Latest public coverage.");

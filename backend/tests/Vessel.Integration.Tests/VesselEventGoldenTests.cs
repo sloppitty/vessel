@@ -10,6 +10,7 @@ using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
 using Vessel.Persistence.Events;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -88,7 +89,7 @@ public sealed partial class VesselEventGoldenTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
         var now = DateTimeOffset.UtcNow;
         // The execution.filled dedup key names the internal order ID: a venue ID alone collides across contracts.

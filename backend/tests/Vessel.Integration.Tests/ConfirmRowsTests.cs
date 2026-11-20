@@ -1,5 +1,6 @@
 using Vessel.Application.Common;
 using Vessel.Application.Plays;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -14,7 +15,7 @@ public sealed partial class ExecutionPostgresTests
         await using var _ = database;
         var plan = TestPlays.Plan() with { Entries = [TestPlays.Plan().Entries[0] with {
             Targets = [new PlanExit("target-1", "price", "110", "50"), new PlanExit("target-2", "price", "110", "50")] }] };
-        var created = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Two targets", plan), default);
+        var created = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Two targets", plan), TradingMode.Real, default);
         var play = await h.Plays.ChangeStatusAsync(created.Summary.Id, new(created.Summary.Version, "planned"), default);
         h.Orders.Orders.AddRange([Order("31", "sell", 110m, reduceOnly: true, size: 0.5m), Order("32", "sell", 110m, reduceOnly: true, size: 0.5m)]);
         var execution = await h.CheckAsync(play.Summary.Id);
@@ -45,7 +46,7 @@ public sealed partial class ExecutionPostgresTests
         await using var _ = database;
         var plan = TestPlays.Plan() with { Entries = [TestPlays.Plan().Entries[0] with {
             Targets = [new PlanExit("target-1", "price", "110", "50"), new PlanExit("target-2", "price", "110", "50")] }] };
-        var created = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Two targets", plan), default);
+        var created = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Two targets", plan), TradingMode.Real, default);
         var play = await h.Plays.ChangeStatusAsync(created.Summary.Id, new(created.Summary.Version, "planned"), default);
         var id = play.Summary.Id;
         h.Orders.Orders.Add(Order("11", "buy", 100.01m, "filled"));
@@ -89,8 +90,9 @@ public sealed partial class ExecutionPostgresTests
         await using var _ = database;
         var portfolio = await h.Workspace.CreatePortfolioAsync(new("Paper", TradingMode: "paper"), default);
         var paper = await h.Workspace.CreateAccountAsync(new(portfolio.Id, "Paper", "hyperliquid", TradingMode: "paper"), default);
-        var play = await h.Plays.CreateAsync(new CreatePlayRequest(paper.Id, "BTC", "venue", "Paper idea", TestPlays.Plan()), default, "paper");
-        var refused = await Assert.ThrowsAsync<ProblemException>(() => h.Execution.RejectOrderAsync(play.Summary.Id, new("31"), default));
-        Assert.Equal((409, "Paper Plays use explicit simulated executions, not actual order linking."), (refused.StatusCode, refused.Message));
+        var play = await h.Plays.CreateAsync(new CreatePlayRequest(paper.Id, "BTC", "venue", "Paper idea", TestPlays.Plan()), TradingMode.Paper, default);
+        // #113: Play.RequireReal refuses it, a 409 with this message at the API.
+        var refused = await Assert.ThrowsAsync<DomainRuleException>(() => h.Execution.RejectOrderAsync(play.Summary.Id, new("31"), default));
+        Assert.Equal("Paper Plays use explicit simulated executions, not actual order linking.", refused.Message);
     }
 }

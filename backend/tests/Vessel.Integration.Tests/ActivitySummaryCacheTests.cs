@@ -3,13 +3,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Vessel.Application.Activity;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
 public sealed class ActivitySummaryCacheTests
 {
     private static readonly ActivitySummaries Value = new([], [], new([], [], [], new Dictionary<Guid, Guid>()));
-    private static ActivitySummaryKey Key(Guid? owner = null, long revision = 1, string accounts = "*") => new(owner ?? Guid.NewGuid(), revision, null, accounts);
+    private static ActivitySummaryKey Key(Guid? owner = null, long revision = 1, string accounts = "*") => new(owner ?? Guid.NewGuid(), revision, null, accounts, TradingMode.Real);
     private static ValueTask Unused() => ValueTask.CompletedTask;
 
     [Fact]

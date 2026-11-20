@@ -5,6 +5,7 @@ using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Domain.Accounts;
 using Vessel.Identity;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests.Identity;
 
@@ -214,7 +215,7 @@ public sealed class AdministrationTests
         }
         await using (var setup = journal.Context(orphan))
         {
-            setup.Accounts.Add(new Account(Guid.NewGuid(), orphan, "manual", "Synthetic orphan"));
+            setup.Accounts.Add(new Account(Guid.NewGuid(), orphan, "manual", "Synthetic orphan", TradingMode.Real));
             await setup.SaveChangesAsync();
         }
         var config = new ConfigurationBuilder().AddConfiguration(identity.Configuration(owner.User.Id))

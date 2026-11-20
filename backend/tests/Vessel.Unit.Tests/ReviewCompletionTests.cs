@@ -9,7 +9,7 @@ namespace Vessel.Tests;
 public sealed class ReviewCompletionTests
 {
     private static readonly DateTimeOffset At = DateTimeOffset.Parse("2026-10-20T10:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
-    private static readonly Account Account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Venue");
+    private static readonly Account Account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Venue", TradingMode.Real);
 
     private static Play Open()
     {

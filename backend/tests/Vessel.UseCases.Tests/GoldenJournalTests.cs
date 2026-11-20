@@ -1,3 +1,4 @@
+using Vessel.Domain.Common;
 namespace Vessel.Tests;
 
 /// <summary>
@@ -54,7 +55,7 @@ public sealed class GoldenJournalTests
     {
         var s = Screens;
         var activity = await s.Activity.PageAsync(new(Period: "7", Status: "closed", PageSize: "100"), default);
-        var overview = (await s.Overview.GetAsync("portfolio", "7", "all", default)).Totals.RealizedResult;
+        var overview = (await s.Overview.GetAsync("portfolio", "7", "all", TradingMode.Real, default)).Totals.RealizedResult;
         var review = await s.Review.GetAsync(new(Period: "week", Positions: "include"), default);
         var reviewed = review.Metrics.Count + review.Coverage.IncompleteExecutions + review.Positions!.Omitted!.Value;
         Assert.Equal(activity.TotalCount, overview.Coverage.ContributingOperationCount + overview.Coverage.ExcludedOperationCount);

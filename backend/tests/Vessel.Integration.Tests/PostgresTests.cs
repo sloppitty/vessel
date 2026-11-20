@@ -5,6 +5,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -16,8 +17,8 @@ public sealed class PostgresTests
         await using var database = await TestDatabase.CreateAsync();
         var firstOwner = Guid.NewGuid();
         var secondOwner = Guid.NewGuid();
-        var accountA = new Account(Guid.NewGuid(), firstOwner, "hyperliquid", "First owner");
-        var accountB = new Account(Guid.NewGuid(), secondOwner, "hyperliquid", "Second owner");
+        var accountA = new Account(Guid.NewGuid(), firstOwner, "hyperliquid", "First owner", TradingMode.Real);
+        var accountB = new Account(Guid.NewGuid(), secondOwner, "hyperliquid", "Second owner", TradingMode.Real);
         var instrument = new PerpetualInstrument("hyperliquid", "BTC-PERP");
         await using (var db = database.Context(firstOwner))
         {
@@ -57,7 +58,7 @@ public sealed class PostgresTests
     {
         await using var database = await TestDatabase.CreateAsync();
         await using var db = database.Context(Guid.NewGuid());
-        db.Accounts.Add(new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Foreign"));
+        db.Accounts.Add(new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Foreign", TradingMode.Real));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => db.SaveChangesAsync());
     }
 
@@ -66,7 +67,7 @@ public sealed class PostgresTests
     {
         await using var database = await TestDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Trading");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Trading", TradingMode.Real);
         await using var db = database.Context(owner);
         db.Accounts.Add(account);
         await db.SaveChangesAsync();
@@ -83,7 +84,7 @@ public sealed class PostgresTests
     {
         await using var database = await TestDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Trading");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Trading", TradingMode.Real);
         await using (var db = database.Context(owner))
         {
             db.Accounts.Add(account);

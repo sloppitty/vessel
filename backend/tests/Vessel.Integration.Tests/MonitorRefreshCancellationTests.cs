@@ -9,6 +9,7 @@ using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Monitoring;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -216,7 +217,7 @@ public sealed class MonitorRefreshCancellationTests
             new NoCommands(), new CoreOwner(owner), options, clock);
         if (!await coordinator.RunAsync(await coordinator.AdmitRefreshAsync(id, "test-" + Guid.NewGuid().ToString("N"), ct), ct))
             throw new ProblemException(502, MonitorTestPaths.RefreshFailed);
-        return await new WorkspaceService(new WorkspaceStore(db, work), new CoreOwner(owner), venues, work).AccountAsync(id, ct);
+        return await new WorkspaceService(new WorkspaceStore(db, work), new CoreOwner(owner), venues, work).AccountAsync(id, TradingMode.Real, ct);
     }
 
     private sealed class Clock : TimeProvider

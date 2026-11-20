@@ -6,6 +6,7 @@ using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
 using Vessel.Infrastructure.Venues.Risex;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -41,7 +42,7 @@ public sealed class RisexFundingTests
 
     private static Account Account(string venue = RisexReader.Id, string? address = Address, string? source = null, bool enabled = true)
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), venue, "Synthetic RISEx");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), venue, "Synthetic RISEx", TradingMode.Real);
         account.Configure(null, address, null, source);
         if (!enabled) account.UpdateSettings(account.Name, null, false);
         return account;

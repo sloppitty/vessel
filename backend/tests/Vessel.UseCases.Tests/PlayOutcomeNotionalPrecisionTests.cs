@@ -3,6 +3,7 @@ using Vessel.Application.Sizing;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -102,12 +103,12 @@ public sealed class PlayOutcomeNotionalPrecisionTests
         Closed(Tiny, 1.5m * Tiny, Unit);
         var service = new SizingService(sizing, new CoreOwner(review.Owner), TimeProvider.System, TestUnitOfWork.None);
 
-        var excluded = await service.GetAsync(default);
+        var excluded = await service.GetAsync(TradingMode.Real, default);
         Assert.Equal(0, excluded.Record.ClosedPlays);
         Assert.Empty(excluded.Record.Recent);
 
         Closed(Tiny, 2 * Tiny, Unit);
-        var scored = await service.GetAsync(default);
+        var scored = await service.GetAsync(TradingMode.Real, default);
         Assert.Equal((1, 1), (scored.Record.ClosedPlays, scored.Record.Wins));
         Assert.Equal("50", Assert.Single(scored.Record.Recent).ReturnPercent);
     }

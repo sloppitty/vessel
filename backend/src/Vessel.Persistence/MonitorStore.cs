@@ -9,6 +9,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Monitoring;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Persistence;
 
@@ -38,7 +39,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         var cutoff = now - settings.WatchLifetime;
         var rows = await (from m in Rows.AsNoTracking()
                           join a in db.Accounts on m.AccountId equals a.Id
-                          where a.TradingMode == "real" && a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) &&
+                          where a.TradingMode == TradingMode.Real && a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) &&
                               (a.KeepExecutionHistory || ActivePlays.Any(p => p.AccountId == a.Id) ||
                                Watching.Any(x => x.Link.AccountId == a.Id && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)) ||
                                AwaitingDiscrepancies.Any(d => d.AccountId == a.Id) ||
@@ -61,7 +62,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         server.DeferVenueAsync(venueId, retryAtUtc, now, ct);
     public Task<ServerMonitorHeartbeat?> HeartbeatAsync(CancellationToken ct) => server.HeartbeatAsync(ct);
 
-    private IQueryable<Play> ActivePlays => db.Plays.Where(p => p.TradingMode == "real" && p.InstrumentSource == InstrumentSource.Venue && p.ContractId != null &&
+    private IQueryable<Play> ActivePlays => db.Plays.Where(p => p.TradingMode == TradingMode.Real && p.InstrumentSource == InstrumentSource.Venue && p.ContractId != null &&
         p.Origin == PlayOrigin.Planned && (p.Status == PlayStatus.Planned || p.Status == PlayStatus.Paused || p.Status == PlayStatus.Open));
 
     // Member initialization, not a constructor, so the projection stays translatable when it is composed further.
@@ -99,7 +100,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
 
     /// <summary>An enabled real venue account that keeps its execution history (Phase 2, item 6).</summary>
     private Task<bool> KeepsHistoryAsync(Guid accountId, CancellationToken ct) => db.Accounts.AnyAsync(a => a.Id == accountId &&
-        a.KeepExecutionHistory && a.TradingMode == "real" && a.IsEnabled && a.SourceId != null, ct);
+        a.KeepExecutionHistory && a.TradingMode == TradingMode.Real && a.IsEnabled && a.SourceId != null, ct);
 
     private IQueryable<HistoryBackfill> ActiveBackfills => db.HistoryBackfills.Where(b => b.State == HistoryBackfill.Queued);
 
@@ -115,7 +116,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
             if (account is null) return null;
             return await MonitorLockedAsync<MonitorLease?>(account, async (account, row) =>
             {
-                if (await owners.StatusAsync(db.CurrentOwnerId, ct) != JournalOwnerStatus.Active || account.TradingMode != "real" ||
+                if (await owners.StatusAsync(db.CurrentOwnerId, ct) != JournalOwnerStatus.Active || account.TradingMode != TradingMode.Real ||
                     !account.IsEnabled || account.SourceId is null) return null;
                 row.ReleaseAbandonedRefresh(now);
                 // Never beside another run of this account: a check, Refresh or backfill holds it.
@@ -163,7 +164,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
     }, ct);
 
     /// <summary>Phase 2, item 9c: Open Plays on a venue instrument, of any origin, whose account's funding the schedule reads.</summary>
-    private IQueryable<Play> OpenVenuePlays => db.Plays.Where(p => p.TradingMode == "real" && p.InstrumentSource == InstrumentSource.Venue &&
+    private IQueryable<Play> OpenVenuePlays => db.Plays.Where(p => p.TradingMode == TradingMode.Real && p.InstrumentSource == InstrumentSource.Venue &&
         p.Status == PlayStatus.Open);
 
     public Task<MonitorLease?> ClaimFundingAsync(Guid accountId, string workerId, DateTimeOffset now, CancellationToken ct) =>
@@ -175,7 +176,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
             if (account is null) return null;
             return await MonitorLockedAsync<MonitorLease?>(account, async (account, row) =>
             {
-                if (await owners.StatusAsync(db.CurrentOwnerId, ct) != JournalOwnerStatus.Active || account.TradingMode != "real" ||
+                if (await owners.StatusAsync(db.CurrentOwnerId, ct) != JournalOwnerStatus.Active || account.TradingMode != TradingMode.Real ||
                     !account.IsEnabled || account.SourceId is null) return null;
                 row.ReleaseAbandonedRefresh(now);
                 // Never beside another run of this account, and never ahead of its own due check.
@@ -281,7 +282,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
         var cutoff = now - settings.WatchLifetime;
         // Keyset page: the filter applies before the limit, so every candidate is reached by a later page.
         var rows = await db.Accounts.AsNoTracking()
-            .Where(a => a.TradingMode == "real" && a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) ||
+            .Where(a => a.TradingMode == TradingMode.Real && a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId) ||
                 Rows.Any(m => m.AccountId == a.Id && (m.State != "idle" || m.NextRunAtUtc != null || m.ManualState != "idle")))
             .Where(a => after == null || a.Id.CompareTo(after.Value) > 0)
             .OrderBy(a => a.Id).Take(Math.Clamp(limit, 1, 1000))
@@ -289,7 +290,7 @@ public sealed class MonitorStore(VesselDbContext db, UnitOfWork unitOfWork, ISer
             {
                 a.Id, a.VenueId,
                 Monitorable = a.IsEnabled && a.SourceId != null && venueIds.Contains(a.VenueId),
-                Active = a.KeepExecutionHistory && a.TradingMode == "real" || ActivePlays.Any(p => p.AccountId == a.Id),
+                Active = a.KeepExecutionHistory && a.TradingMode == TradingMode.Real || ActivePlays.Any(p => p.AccountId == a.Id),
                 Watching = Watching.Any(x => x.Link.AccountId == a.Id && (x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)),
                 Expired = Watching.Any(x => x.Link.AccountId == a.Id && !(x.Link.UpdatedAtUtc > cutoff || x.EndedAtUtc > cutoff)),
                 Awaiting = AwaitingDiscrepancies.Any(d => d.AccountId == a.Id),

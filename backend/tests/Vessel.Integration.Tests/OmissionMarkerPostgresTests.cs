@@ -5,6 +5,7 @@ using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -29,7 +30,7 @@ public sealed class OmissionMarkerPostgresTests
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
         account.Configure(null, "0x" + new string('c', 40), null);
         db.Accounts.Add(account);
         await db.SaveChangesAsync();
@@ -72,7 +73,7 @@ public sealed class OmissionMarkerPostgresTests
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
-        var account = new Account(Guid.NewGuid(), owner, "risex", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "risex", "Synthetic", TradingMode.Real);
         account.Configure(null, "0x" + new string('d', 40), null);
         db.Accounts.Add(account);
         await db.SaveChangesAsync();
@@ -116,7 +117,7 @@ public sealed class OmissionMarkerPostgresTests
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
         account.Configure(null, "0x" + new string('d', 40), null);
         db.Accounts.Add(account);
         await db.SaveChangesAsync();
@@ -148,7 +149,7 @@ public sealed class OmissionMarkerPostgresTests
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
         account.Configure(null, "0x" + new string('e', 40), null);
         db.Accounts.Add(account);
         ImportedFill Fill(int minutes, string side, string effect, string order) => new()
@@ -163,7 +164,7 @@ public sealed class OmissionMarkerPostgresTests
         var workspace = new WorkspaceStore(db, work, new ManualTime(At));
         var executions = new ExecutionStore(db, work);
         async Task Unit(Func<Task> step) => await work.ExecuteAsync(async () => { await step(); return true; }, default);
-        var baseline = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(null, default)).Operations;
+        var baseline = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(null, default), TradingMode.Real).Operations;
         Assert.Equal(("long", "closed"), (Assert.Single(baseline).Direction, baseline[0].Status));
 
         await Unit(() => executions.UpsertOrdersAsync(account, [VenueOrder("o2")], At, default));
@@ -176,7 +177,7 @@ public sealed class OmissionMarkerPostgresTests
         var order = await db.Orders.AsNoTracking().SingleAsync(o => o.ExternalOrderId == "o2");
         Assert.True(order.ExecutionsOmitted);
         Assert.True(ExecutionIntegrity.MissingExecutions(order, await db.Fills.AsNoTracking().Where(f => f.ExternalOrderId == "o2").ToListAsync()));
-        var operations = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(null, default)).Operations;
+        var operations = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(null, default), TradingMode.Real).Operations;
         Assert.Contains(operations, o => o.Status == "incomplete" && o.Coverage.Contains(OperationAggregator.OmittedNotice));
         Assert.DoesNotContain(operations, o => o.Direction == "long" && o.Status == "closed");
     }

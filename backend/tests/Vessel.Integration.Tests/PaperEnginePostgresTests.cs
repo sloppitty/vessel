@@ -13,6 +13,7 @@ using Vessel.Domain.Paper;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -40,15 +41,15 @@ public sealed class PaperEnginePostgresTests
         Assert.Equal("ready", (await db.PaperSimulations.FindAsync(sibling))!.State);
         var unit = TestUnitOfWork.For(db);
         var workspace = new WorkspaceService(new WorkspaceStore(db, unit), new CoreOwner(f.Owner), TestVenues.With(), unit);
-        Assert.Equal("4071.942446043164", Assert.Single(await workspace.AccountsAsync(default, "paper")).BalanceUsd);
-        Assert.Equal("4071.942446043164", Assert.Single(await workspace.PortfoliosAsync(default, "paper")).BalanceUsd);
-        Assert.Equal("4071.942446043164", (await workspace.OverviewAsync(default, "paper")).Totals.TotalBalanceUsd);
-        Assert.Empty(await workspace.AccountsAsync(default));
+        Assert.Equal("4071.942446043164", Assert.Single(await workspace.AccountsAsync(TradingMode.Paper, default)).BalanceUsd);
+        Assert.Equal("4071.942446043164", Assert.Single(await workspace.PortfoliosAsync(TradingMode.Paper, default)).BalanceUsd);
+        Assert.Equal("4071.942446043164", (await workspace.OverviewAsync(TradingMode.Paper, default)).Totals.TotalBalanceUsd);
+        Assert.Empty(await workspace.AccountsAsync(TradingMode.Real, default));
         _ = await new PaperStore(db, unit).TimelineCapitalAsync(f.AccountId, [], default);
         _ = await f.ArmAsync("100", instrument: "SOL");
         var account = (await db.Accounts.FindAsync(f.AccountId))!;
         var disabled = await workspace.UpdateAccountAsync(f.AccountId,
-            new(account.Name, account.PortfolioId, false, account.SettingsRevision), default, "paper");
+            new(account.Name, account.PortfolioId, false, account.SettingsRevision), TradingMode.Paper, default);
         Assert.False(disabled.IsEnabled);
     }
 
@@ -167,9 +168,9 @@ public sealed class PaperEnginePostgresTests
         var unit = TestUnitOfWork.For(db);
         Assert.Equal(expected, (await new PaperStore(db, unit).TimelineCapitalAsync(f.AccountId, [], default)).CashUsd.ToString());
         var workspace = new WorkspaceService(new WorkspaceStore(db, unit), new CoreOwner(f.Owner), TestVenues.With(), unit);
-        Assert.Equal(expected, Assert.Single(await workspace.AccountsAsync(default, "paper")).BalanceUsd);
-        Assert.Equal(expected, Assert.Single(await workspace.PortfoliosAsync(default, "paper")).BalanceUsd);
-        Assert.Equal(expected, (await workspace.OverviewAsync(default, "paper")).Totals.TotalBalanceUsd);
+        Assert.Equal(expected, Assert.Single(await workspace.AccountsAsync(TradingMode.Paper, default)).BalanceUsd);
+        Assert.Equal(expected, Assert.Single(await workspace.PortfoliosAsync(TradingMode.Paper, default)).BalanceUsd);
+        Assert.Equal(expected, (await workspace.OverviewAsync(TradingMode.Paper, default)).Totals.TotalBalanceUsd);
         _ = await f.ArmAsync("100", instrument: "SOL");
     }
 
@@ -310,7 +311,7 @@ public sealed class PaperEnginePostgresTests
                 var workspace = new WorkspaceService(new WorkspaceStore(db, unit, f.Clock), new CoreOwner(f.Owner), TestVenues.With(), unit);
                 var account = (await db.Accounts.FindAsync(f.AccountId))!;
                 await workspace.UpdateAccountAsync(account.Id,
-                    new(account.Name, account.PortfolioId, enabled, account.SettingsRevision), default, "paper");
+                    new(account.Name, account.PortfolioId, enabled, account.SettingsRevision), TradingMode.Paper, default);
             }
         }
         await Toggle(false);
@@ -723,8 +724,8 @@ public sealed class PaperEnginePostgresTests
             var db = await CoreDatabase.CreateAsync();
             var owner = Guid.NewGuid();
             await using var context = db.Context(owner);
-            var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
-            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper", "paper", capital);
+            var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: TradingMode.Paper);
+            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper", TradingMode.Paper, capital);
             account.Configure(portfolio.Id, null, null);
             context.AddRange(portfolio, account, PaperLedgerEntry.Seed(owner, account.Id, capital, At),
                 new PaperSettings { OwnerId = owner, Enabled = true, CheckIntervalMinutes = 1 });
