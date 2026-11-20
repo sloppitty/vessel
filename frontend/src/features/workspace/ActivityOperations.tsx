@@ -59,7 +59,7 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
   }
   const trigger = useRef<HTMLElement | null>(null)
   const top = useRef<HTMLDivElement | null>(null)
-  const enabled = accounts.filter(a => a.isEnabled !== false)
+  const enabled = accounts.filter(a => a.isEnabled)
   const fieldId = useId()
   const previous = result?.api === api ? result.page : null
   // Options that disappear fall back to All; instruments come from the scoped set the server reports.

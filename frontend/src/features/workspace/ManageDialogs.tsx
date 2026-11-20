@@ -121,8 +121,8 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
   const [credentialPending, setCredentialPending] = useState(false)
   const [name, setName] = useState(account.name)
   const [portfolioId, setPortfolioId] = useState(account.portfolioId ?? '')
-  const [enabled, setEnabled] = useState(account.isEnabled !== false)
-  const [keep, setKeep] = useState(account.keepExecutionHistory === true)
+  const [enabled, setEnabled] = useState(account.isEnabled)
+  const [keep, setKeep] = useState(account.keepExecutionHistory)
   // Phase 2, item 6: a real account on a venue the monitor checks can keep its execution history.
   const canKeep = account.tradingMode !== 'paper' && !!(account.sourceId ?? account.address) &&
     venues.can(account.venueId, 'sync') && venues.can(account.venueId, 'orders')
@@ -141,7 +141,7 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
       if (current.settingsRevision === undefined) throw new ApiError('invalid-response', 'Current settings version is unavailable. Reload after the API update.')
       setReloadedPortfolios({ source: portfolios, options: currentPortfolios })
       setName(current.name); setPortfolioId(current.portfolioId ?? '')
-      setEnabled(current.isEnabled !== false); setKeep(current.keepExecutionHistory === true); setRevision(current.settingsRevision); setConflict(false)
+      setEnabled(current.isEnabled); setKeep(current.keepExecutionHistory); setRevision(current.settingsRevision); setConflict(false)
     } catch (cause) { setError(errorMessage(cause, 'The change could not be confirmed. Reload current settings before retrying.')) }
     finally { setPending(false) }
   }
@@ -199,7 +199,7 @@ export function ManageAccountDialog({ account, portfolios, api, onClose, onChang
         <div className="management-actions"><Button type="button" variant="ghost" className="danger-action" onClick={() => { setDeleting(true); setError(null) }} disabled={pending || credentialPending}><Trash2 size={14} />Delete</Button><Button type="submit" disabled={pending || credentialPending || conflict}>{pending ? 'Saving…' : 'Save settings'}</Button></div>
       </form>
       {account.tradingMode !== 'paper' && venues.can(account.venueId, 'readOnlyCredential') && <fieldset className="credential-fieldset" disabled={pending}>
-        <AccountCredential accountId={account.id} venueId={account.venueId} enabled={account.isEnabled !== false} api={api} onBusy={setCredentialPending} />
+        <AccountCredential accountId={account.id} venueId={account.venueId} enabled={account.isEnabled} api={api} onBusy={setCredentialPending} />
       </fieldset>}</>}
     </DialogContent>
   </Dialog>

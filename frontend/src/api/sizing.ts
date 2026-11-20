@@ -18,24 +18,24 @@ export interface SizingExposure {
   winsSinceStepDown: number
   /**
    * Decided results sharing an exact exit time with another. They keep a stable, non-economic order and the reason
-   * says so when above zero. Absent from servers before October 19, 2026.
+   * says so when above zero.
    */
-  tiedOutcomes?: number
+  tiedOutcomes: number
 }
 /** Where the record comes from: closed Plays, closed Activity positions while no Play has a win or loss, or neither. */
 export type RecordSource = 'plays' | 'activity' | 'none' | 'paper'
 export interface RecordedPlay {
   /** Null for an Activity position, which is not a Play. */
   playId: string | null
-  /** An Activity fallback outcome's operation and account; absent or null for a Play. */
-  operationId?: string | null
-  accountId?: string | null
+  /** An Activity fallback outcome's operation and account; null for a Play. */
+  operationId: string | null
+  accountId: string | null
   title: string
   instrument: string | null
   /** The latest valid linked exit of a venue-linked Play, the owner-entered exit of a manual ledger, an operation's closing fill. */
   closedAtUtc: string
-  /** Audit only: when a check or refresh detected a venue-linked Play's close; absent or null otherwise. */
-  detectedAtUtc?: string | null
+  /** Audit only: when a check or refresh detected a venue-linked Play's close; null otherwise. */
+  detectedAtUtc: string | null
   netResultUsd: string
   returnPercent: string | null
   riskUsd: string | null
@@ -63,22 +63,21 @@ export interface SizingRecord {
   recent: RecordedPlay[]
   /**
    * Decided results in the window whose Play-local result differs in sign from the scored venue result, and those with no
-   * Play-local result. Null for the Activity fallback (positions are not Plays). These four are absent from servers before
-   * October 19, 2026.
+   * Play-local result. Null for the Activity fallback (positions are not Plays).
    */
-  localSignChanges?: number | null
-  localUnknown?: number | null
+  localSignChanges: number | null
+  localUnknown: number | null
   /** Losses in the window whose scored result before fees is zero or better. Win, loss and scratch are unchanged. */
-  feeOnlyLosses?: number
+  feeOnlyLosses: number
   /** Losses in the window whose scored result before fees is unknown; not counted as fee-only. */
-  unknownGrossLosses?: number
+  unknownGrossLosses: number
   /** Unresolved Plays on enabled accounts: no result, so never in the record or the ladder (phase 1, 1.3a). */
-  unresolved?: number
+  unresolved: number
   /**
    * Closed Plays whose fills settle them but include a fill allocated between Plays (Phase 2, item 11): their venue result is
-   * not allocated, so they are never in the record or the ladder. Absent from older servers.
+   * not allocated, so they are never in the record or the ladder.
    */
-  notAllocated?: number
+  notAllocated: number
 }
 export interface SizingLimits {
   effectiveRiskPercent: string
@@ -89,7 +88,7 @@ export interface SizingLimits {
   minRewardRiskSource: 'default' | 'battingAverage'
 }
 export interface SizingDocument {
-  tradingMode?: TradingMode
+  tradingMode: TradingMode
   settings: SizingSettings
   exposure: SizingExposure
   record: SizingRecord
@@ -101,9 +100,9 @@ export interface SizingDocument {
 export const riskPercentRange = { min: 0.1, max: 5, warnAbove: 2.5 } as const
 
 const recorded = (v: unknown): v is RecordedPlay => isRecord(v) && isNullOr(v.playId, x => isText(x, 64)) && isText(v.title, 200) &&
-  (v.operationId === undefined || isNullOr(v.operationId, x => isText(x, 48))) && (v.accountId === undefined || isNullOr(v.accountId, x => isText(x, 64))) &&
+  isNullOr(v.operationId, x => isText(x, 48)) && isNullOr(v.accountId, x => isText(x, 64)) &&
   isNullOr(v.instrument, x => isText(x, 128)) && isTimestamp(v.closedAtUtc, 64) &&
-  (v.detectedAtUtc === undefined || isNullOr(v.detectedAtUtc, x => isTimestamp(x, 64))) && isPlainDecimal(v.netResultUsd) &&
+  isNullOr(v.detectedAtUtc, x => isTimestamp(x, 64)) && isPlainDecimal(v.netResultUsd) &&
   isNullOr(v.returnPercent, isPlainDecimal) && isNullOr(v.riskUsd, isPlainDecimal) && isNullOr(v.rMultiple, isPlainDecimal) &&
   ['win', 'loss', 'scratch'].includes(v.outcome as string) && typeof v.feesComplete === 'boolean'
 const record = (v: unknown): v is SizingRecord => isRecord(v) && ['plays', 'activity', 'none', 'paper'].includes(v.source as string) &&
@@ -111,16 +110,16 @@ const record = (v: unknown): v is SizingRecord => isRecord(v) && ['plays', 'acti
   ['battingAverage', 'averageGainPercent', 'averageLossPercent', 'winLossRatio', 'breakEvenRewardRisk', 'averageWinR', 'averageLossR']
     .every(k => isNullOr(v[k], isPlainDecimal)) &&
   Array.isArray(v.recent) && v.recent.length <= 100 && v.recent.every(recorded) &&
-  ['localSignChanges', 'localUnknown'].every(k => v[k] === undefined || isNullOr(v[k], x => isCount(x) && x <= (v.decidedPlays as number))) &&
-  ['feeOnlyLosses', 'unknownGrossLosses'].every(k => v[k] === undefined || isCount(v[k]) && (v[k] as number) <= (v.losses as number)) &&
-  (v.unresolved === undefined || isCount(v.unresolved)) && (v.notAllocated === undefined || isCount(v.notAllocated))
+  ['localSignChanges', 'localUnknown'].every(k => isNullOr(v[k], x => isCount(x) && x <= (v.decidedPlays as number))) &&
+  ['feeOnlyLosses', 'unknownGrossLosses'].every(k => isCount(v[k]) && (v[k] as number) <= (v.losses as number)) &&
+  isCount(v.unresolved) && isCount(v.notAllocated)
 
 export const isSizingDocument = (v: unknown): v is SizingDocument => isRecord(v) &&
-  (v.tradingMode === undefined || isTradingMode(v.tradingMode)) &&
+  isTradingMode(v.tradingMode) &&
   isRecord(v.settings) && isPlainDecimal(v.settings.riskPercent) &&
   isRecord(v.exposure) && ['full', 'half', 'quarter'].includes(v.exposure.level as string) && isPlainDecimal(v.exposure.multiplier) &&
   isText(v.exposure.reason, 2000) && isCount(v.exposure.lossStreak) && isCount(v.exposure.winsSinceStepDown) &&
-  (v.exposure.tiedOutcomes === undefined || isCount(v.exposure.tiedOutcomes)) &&
+  isCount(v.exposure.tiedOutcomes) &&
   record(v.record) && (v.record.source === 'paper') === (v.tradingMode === 'paper') &&
   isRecord(v.limits) && ['effectiveRiskPercent', 'maxStopPercent', 'minRewardRisk'].every(k => isPlainDecimal((v.limits as Record<string, unknown>)[k])) &&
   ['default', 'averageGain'].includes(v.limits.maxStopSource as string) &&

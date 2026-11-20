@@ -11,9 +11,9 @@ const entries = [{ ...createDraft().entries[0]!, id: 'e1', name: 'Breakout', pri
 const progress: EntryProgress = { entryId: 'e1', filledQuantity: '0.5', averageFillPrice: '100.4', restingOrders: 0,
   plannedPrice: '100', plannedQuantity: '1', planRevision: 1 }
 const closed: PlayReceipt = { firstEntryAtUtc: '2026-10-03T10:00:00Z', lastExitAtUtc: '2026-10-03T12:05:00Z', averageEntryPrice: '100.4',
-  averageExitPrice: '110', fillCount: 3, estimatedR: '1.9800796812749003984063745020', initialRisk: '2.51', estimatedRReason: null }
+  averageExitPrice: '110', fillCount: 3, estimatedR: '1.9800796812749003984063745020', initialRisk: '2.51', estimatedRReason: null, plannedAfterExecution: false }
 const totals: PlayExecution['totals'] = { enteredQuantity: '0.5', exitedQuantity: '0.5', openQuantity: '0', closedPnlUsd: '5', closedPnlBasis: 'gross',
-  fees: [{ token: 'USDC', amount: '0.03' }], venueNetUsd: '4.97', local: { netUsd: '-0.2', basis: 'executions', reason: null, signDiffers: true } }
+  fees: [{ token: 'USDC', amount: '0.03' }], venueNetUsd: '4.97', local: { netUsd: '-0.2', basis: 'executions', reason: null, signDiffers: true }, venueNotAllocated: false }
 
 describe('actual versus plan (phase 1, 1.1a)', () => {
   it('shows small planned and filled prices at the known tick precision', () => {
@@ -44,10 +44,8 @@ describe('actual versus plan (phase 1, 1.1a)', () => {
     expect(screen.getByRole('region', { name: 'Entries against the plan' })).toHaveTextContent('Filled 0.5 of 1')
   })
 
-  it('shows nothing for an older server that sends no planned values, and signs a fill below plan', () => {
-    const { container, rerender } = render(<EntryReceipts progress={[{ entryId: 'e1', filledQuantity: '0.5', averageFillPrice: '100', restingOrders: 0 }]} entries={entries} />)
-    expect(container).toBeEmptyDOMElement()
-    rerender(<EntryReceipts progress={[{ ...progress, averageFillPrice: '99.75' }]} entries={entries} />)
+  it('signs a fill below plan', () => {
+    render(<EntryReceipts progress={[{ ...progress, averageFillPrice: '99.75' }]} entries={entries} />)
     expect(screen.getByText('Average fill $99.75 vs plan $100.00 (-0.25)')).toBeInTheDocument()
   })
 
@@ -81,7 +79,7 @@ describe('actual versus plan (phase 1, 1.1a)', () => {
     expect(outcome).toHaveTextContent('2h 5m')
     // Unknown R names Review's reason instead of a number.
     view.rerender(<ReviewReceipt receipt={{ ...closed, estimatedR: null, initialRisk: null, estimatedRReason: 'The plan was written after the first fill.' }}
-      result={{ kind: 'manual', totals: { enteredQuantity: '1', exitedQuantity: '1', openQuantity: '0', grossResultUsd: '2', netResultUsd: null, feesComplete: false }, fees: {} }} status="closed" />)
+      result={{ kind: 'manual', totals: { enteredQuantity: '1', exitedQuantity: '1', openQuantity: '0', grossResultUsd: '2', netResultUsd: null, feesComplete: false }, fees: { fees: [], unknownFees: 0 } }} status="closed" />)
     const manual = screen.getByLabelText('Outcome')
     expect(manual).toHaveTextContent('Manual ledger net')
     expect(manual).not.toHaveTextContent('Venue net')

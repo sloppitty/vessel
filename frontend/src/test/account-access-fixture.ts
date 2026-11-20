@@ -14,8 +14,8 @@ export const indexAccount = {
 export const discoveryFixture: AccountDiscovery = {
   venueId: indexVenue.id, address: `0x${'12'.repeat(20)}`, notice: 'Account values are venue-reported USD.',
   accounts: [
-    { sourceId: indexAccount.sourceId, name: 'Main account', accountType: 'main', accountValueUsd: '123.123456789', existingAccountId: null, isEnabled: null },
-    { sourceId: '9223372036854775807', name: 'Subaccount 1', accountType: 'subaccount', accountValueUsd: null, existingAccountId: null, isEnabled: null },
+    { sourceId: indexAccount.sourceId, name: 'Main account', accountType: 'main', accountValueUsd: '123.123456789', collateralUsd: null, availableBalanceUsd: null, existingAccountId: null, isEnabled: null },
+    { sourceId: '9223372036854775807', name: 'Subaccount 1', accountType: 'subaccount', accountValueUsd: null, collateralUsd: null, availableBalanceUsd: null, existingAccountId: null, isEnabled: null },
   ],
 }
 export const credentialFixture: AccountCredential = {

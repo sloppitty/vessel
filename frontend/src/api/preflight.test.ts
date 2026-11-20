@@ -13,10 +13,13 @@ describe('pre-flight and next-action responses (phase 1, 1.5)', () => {
   })
 
   it('accepts history with or without a recorded pre-flight', () => {
-    expect(isPlayHistory({ statusChanges: [], revisions: [revision] })).toBe(true)
-    expect(isPlayHistory({ statusChanges: [], revisions: [{ ...revision, preflight: null }] })).toBe(true)
-    expect(isPlayHistory({ statusChanges: [], revisions: [{ ...revision, preflight: [{ code: 'thesis', outcome: 'skipped' }] }] })).toBe(true)
-    expect(isPlayHistory({ statusChanges: [], revisions: [{ ...revision, preflight: [{ code: 'thesis', outcome: 'maybe' }] }] })).toBe(false)
+    // Revision 1 of a plan from before pre-flight existed is stored without one: the API sends null.
+    expect(isPlayHistory({ statusChanges: [], reviews: [], revisions: [{ ...revision, preflight: null }] })).toBe(true)
+    expect(isPlayHistory({ statusChanges: [], reviews: [], revisions: [{ ...revision, preflight: [{ code: 'thesis', outcome: 'skipped' }] }] })).toBe(true)
+    expect(isPlayHistory({ statusChanges: [], reviews: [], revisions: [{ ...revision, preflight: [{ code: 'thesis', outcome: 'maybe' }] }] })).toBe(false)
+    // The API always writes the field and the review revisions.
+    expect(isPlayHistory({ statusChanges: [], reviews: [], revisions: [revision] })).toBe(false)
+    expect(isPlayHistory({ statusChanges: [], revisions: [{ ...revision, preflight: null }] })).toBe(false)
   })
 
   it('accepts a next action only with its text and source', () => {

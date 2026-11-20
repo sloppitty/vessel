@@ -41,8 +41,8 @@ export interface OpenRisk {
   limitPercent: string | null
   notice: string
 }
-/** The soft limits, each null until set. Loss limits are in R and absent from servers before Phase 2, item 10b. */
-export interface RiskSettings { openRiskLimitPercent: string | null; dailyLossLimitR?: string | null; weeklyLossLimitR?: string | null }
+/** The soft limits, each null until set. Loss limits are in R (Phase 2, item 10b). */
+export interface RiskSettings { openRiskLimitPercent: string | null; dailyLossLimitR: string | null; weeklyLossLimitR: string | null }
 /**
  * One reporting day or week's loss (Phase 2, item 10b): the exact sum of estimated R of real Plays closed in it, how many
  * have R and how many have none (never counted as zero), and whether the known loss reached the limit.
@@ -91,8 +91,7 @@ export const isOpenRisk = (v: unknown, scope: string): v is OpenRisk => isRecord
   isNullOr(v.limitPercent, isSummaryDecimal) && isText(v.notice, 4000)
 
 export const isRiskSettings = (v: unknown): v is RiskSettings => isRecord(v) && isNullOr(v.openRiskLimitPercent, isSummaryDecimal) &&
-  (v.dailyLossLimitR === undefined || isNullOr(v.dailyLossLimitR, isSummaryDecimal)) &&
-  (v.weeklyLossLimitR === undefined || isNullOr(v.weeklyLossLimitR, isSummaryDecimal))
+  isNullOr(v.dailyLossLimitR, isSummaryDecimal) && isNullOr(v.weeklyLossLimitR, isSummaryDecimal)
 const lossWindow = (v: unknown): v is LossWindow => isRecord(v) && typeof v.start === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.start) &&
   isTimestamp(v.fromUtc, 64) && isTimestamp(v.toUtc, 64) && Date.parse(v.fromUtc) < Date.parse(v.toUtc) &&
   isNullOr(v.limitR, isSummaryDecimal) && isSummaryDecimal(v.netR) && isCount(v.withR) && isCount(v.withoutR) &&

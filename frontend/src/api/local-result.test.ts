@@ -27,13 +27,17 @@ describe('Play-local result', () => {
     expect(isPlayLocalResult(value)).toBe(false)
   })
 
-  it('accepts execution totals with both bases, and totals from servers before them', () => {
+  it('accepts execution totals with both bases and rejects totals without them', () => {
     const { totals } = execution
     expect(isPlayExecution(execution)).toBe(true)
     const older = { ...totals }
     delete older.venueNetUsd
     delete older.local
-    expect(isPlayExecution({ ...execution, totals: older })).toBe(true)
+    expect(isPlayExecution({ ...execution, totals: older })).toBe(false)
+    expect(isPlayExecution({ ...execution, totals: { ...totals, local: undefined } })).toBe(false)
+    const unallocated = { ...totals }
+    delete unallocated.venueNotAllocated
+    expect(isPlayExecution({ ...execution, totals: unallocated })).toBe(false)
     expect(isPlayExecution({ ...execution, totals: { ...totals, venueNetUsd: '2.9', local: known } })).toBe(true)
     expect(isPlayExecution({ ...execution, totals: { ...totals, venueNetUsd: null, local: unknown } })).toBe(true)
     expect(isPlayExecution({ ...execution, totals: { ...totals, venueNetUsd: 2.9 } })).toBe(false)

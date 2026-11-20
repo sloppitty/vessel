@@ -235,9 +235,9 @@ export function HistoryDialog({ api, playId, onClose }: { api: WorkspaceApi; pla
       detail: [change.reason ? cancelReasonLabels[change.reason] : '', change.unresolvedReason ? unresolvedReasonLabels[change.unresolvedReason] : '',
         change.note ?? '', ...(change.evidence ? evidenceLines(change.evidence) : [])].filter(Boolean),
     })),
-    ...(result.history.reviews ?? []).map(review => ({
+    ...result.history.reviews.map(review => ({
       at: review.occurredAtUtc, key: `review${review.number}`,
-      title: `Review revision ${review.number}${review.action && review.action !== 'edited' ? ` · ${reviewActionLabels[review.action]}` : ''}`,
+      title: `Review revision ${review.number}${review.action !== 'edited' ? ` · ${reviewActionLabels[review.action]}` : ''}`,
       // Review again, No review needed and a cleared completion change only the completion; the text they keep is already listed.
       detail: review.action === 'reopened' || review.action === 'not-needed' || review.action === 'cleared' ? [] : [review.review, review.structuredReview.adherence ? `Adherence: ${review.structuredReview.adherence}` : '',
         review.structuredReview.rule ? `Followed the rule: ${review.structuredReview.rule}` : '',

@@ -35,7 +35,7 @@ export function PortfolioAccounts({ accounts, portfolios, selected, onChange, di
         disabled={disabled || !allowUnassign && portfolioId !== null && account.portfolioId === portfolioId || !selected.includes(account.id) && selected.length >= maxSelected}
         onChange={event => onChange(event.target.checked ? [...selected, account.id] : selected.filter(id => id !== account.id))} />
       <VenueLogo venueId={account.venueId} size="md" />
-      <span><strong>{account.name}</strong><small>{venues.name(account.venueId)} · {account.portfolioId ? names[account.portfolioId] ?? 'Portfolio' : 'Unassigned'}{account.isEnabled === false ? ' · Disabled' : ''}</small></span>
+      <span><strong>{account.name}</strong><small>{venues.name(account.venueId)} · {account.portfolioId ? names[account.portfolioId] ?? 'Portfolio' : 'Unassigned'}{!account.isEnabled ? ' · Disabled' : ''}</small></span>
       {effect && <small className="portfolio-account-effect">{effect}</small>}
     </label>})}</div>
     {!allowUnassign && portfolioId !== null && accounts.some(account => account.portfolioId === portfolioId) && <p className="field-help">Paper accounts must remain in a paper portfolio. Move existing members to another paper portfolio through Manage account or the Accounts bulk move.</p>}

@@ -20,15 +20,15 @@ describe('Core workspace API', () => {
     controller.abort()
     expect(signal.aborted).toBe(true)
   })
-  it.each([undefined, null, '0', '-0.0000000000000000000000000001', '131.89123456789012345678901234'])('keeps exact nullable snapshot available margin %s', async value => {
+  it.each([null, '0', '-0.0000000000000000000000000001', '131.89123456789012345678901234'])('keeps exact nullable snapshot available margin %s', async value => {
     const snapshot = { observedAtUtc: '2026-10-12T10:00:00Z', valueScope: 'fixture', accountValueUsd: '1000',
-      withdrawableUsd: null, availableMarginUsd: value, marginUsedUsd: '20', positions: [] }
+      withdrawableUsd: null, availableMarginUsd: value, marginUsedUsd: '20', positions: [], stablecoinWallet: null, positionsComplete: true }
     response(snapshot)
     expect((await createWorkspaceApi(credentialsFixture).snapshot(accountFixture.id))?.availableMarginUsd).toBe(value)
   })
-  it.each([0, '', '1e3', ' ', true, {}, ['0']])('rejects malformed snapshot available margin %j', async value => {
+  it.each([undefined, 0, '', '1e3', ' ', true, {}, ['0']])('rejects malformed snapshot available margin %j', async value => {
     response({ observedAtUtc: '2026-10-12T10:00:00Z', valueScope: 'fixture', accountValueUsd: '1000',
-      withdrawableUsd: null, availableMarginUsd: value, marginUsedUsd: '20', positions: [] })
+      withdrawableUsd: null, availableMarginUsd: value, marginUsedUsd: '20', positions: [], stablecoinWallet: null, positionsComplete: true })
     await expect(createWorkspaceApi(credentialsFixture).snapshot(accountFixture.id)).rejects.toMatchObject({ kind: 'invalid-response' })
   })
   it('keeps the account available amount and selected source, and portfolio coverage', async () => {
@@ -77,10 +77,13 @@ describe('Core workspace API', () => {
     response([{ ...accountFixture, positionCount: null }])
     expect((await createWorkspaceApi(credentialsFixture).accounts())[0]!.positionCount).toBeNull()
     const snapshot = { observedAtUtc: '2026-10-12T10:00:00Z', valueScope: 'fixture', accountValueUsd: '1000', withdrawableUsd: null,
-      marginUsedUsd: '20', positions: [], positionsComplete: false }
+      marginUsedUsd: '20', positions: [], positionsComplete: false, availableMarginUsd: null, stablecoinWallet: null }
     response(snapshot)
     expect((await createWorkspaceApi(credentialsFixture).snapshot(accountFixture.id))?.positionsComplete).toBe(false)
     response({ ...snapshot, positionsComplete: 'no' })
+    await expect(createWorkspaceApi(credentialsFixture).snapshot(accountFixture.id)).rejects.toMatchObject({ kind: 'invalid-response' })
+    // SnapshotDto always writes it, true unless the read was incomplete.
+    response({ ...snapshot, positionsComplete: undefined })
     await expect(createWorkspaceApi(credentialsFixture).snapshot(accountFixture.id)).rejects.toMatchObject({ kind: 'invalid-response' })
   })
   it('binds the session in a header, not storage, URL or owner body fields', async () => {
@@ -244,7 +247,7 @@ describe('Core workspace API', () => {
   it('accepts stablecoin wallet observations as decimal strings without merging perp equity', async () => {
     const body = {
       observedAtUtc: '2026-10-01T12:00:00Z', valueScope: 'primary-perpetual-dex',
-      accountValueUsd: '0', withdrawableUsd: '0', marginUsedUsd: '0', positions: [],
+      accountValueUsd: '0', withdrawableUsd: '0', marginUsedUsd: '0', positions: [], availableMarginUsd: null, positionsComplete: true,
       stablecoinWallet: {
         observedAtUtc: '2026-10-01T12:00:02Z', accountMode: 'unifiedAccount', scope: 'hypercore-spot-stablecoins',
         totalNominalUsd: '12.12345678901234567890123456', availableNominalUsd: '10.12345678901234567890123456',
@@ -259,7 +262,7 @@ describe('Core workspace API', () => {
   it('rejects stablecoin balance numbers that would lose exact string semantics', async () => {
     response({
       observedAtUtc: '2026-10-01T12:00:00Z', valueScope: 'primary-perpetual-dex',
-      accountValueUsd: '0', withdrawableUsd: '0', marginUsedUsd: '0', positions: [],
+      accountValueUsd: '0', withdrawableUsd: '0', marginUsedUsd: '0', positions: [], availableMarginUsd: null, positionsComplete: true,
       stablecoinWallet: {
         observedAtUtc: '2026-10-01T12:00:02Z', accountMode: 'unifiedAccount', scope: 'hypercore-spot-stablecoins',
         totalNominalUsd: '12', availableNominalUsd: '10',

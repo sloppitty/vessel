@@ -22,7 +22,7 @@ export const accountFixture: BrokerAccount = {
 export const emptyOverview: Overview = {
   portfolios: [], accounts: [],
   totals: { portfolioCount: 0, accountCount: 0, totalAccountValueUsd: null, valuedAccountCount: 0, openPositionCount: 0, importedFillCount: 0,
-    totalBalanceUsd: null, balanceAccountCount: 0, balanceCoverage: 'unavailable',
+    availableStablecoinNominalUsd: null, stablecoinAccountCount: 0, totalBalanceUsd: null, balanceAccountCount: 0, balanceCoverage: 'unavailable',
     availableBalanceUsd: null, availableBalanceAccountCount: 0, availableBalanceCoverage: 'unavailable', enabledAccountCount: 0 },
   recentActivity: [], scopeNote: 'Values are only known account records. Provider history can be incomplete.',
 }
@@ -32,8 +32,14 @@ export const overviewFixture: Overview = {
     totalBalanceUsd: '1250.123456', balanceAccountCount: 1, balanceCoverage: 'complete', enabledAccountCount: 1 },
 }
 
+/** The Play summary fields the API always sends (`PlayService.Summary`), for a planned real Play whose review is not complete. */
+export const summaryDefaults = {
+  tradingMode: 'real', origin: 'planned', reviewedAtUtc: null, reviewCompletion: null, reviewCompletedAtUtc: null,
+} satisfies Partial<PlaySummary>
+
 export const savedPlayFixture: SavedPlay = {
   summary: {
+    ...summaryDefaults,
     id: '22222222-3333-4444-5555-666666666666', title: 'Saved idea', status: 'draft',
     accountId: accountFixture.id, venueId: 'manual', instrument: 'BTC', instrumentSource: 'manual', direction: 'long',
     planRevision: 0, version: 1, cancelReason: null, hasReview: false,
@@ -44,7 +50,7 @@ export const savedPlayFixture: SavedPlay = {
     entries: [{ id: 'entry-1', name: 'Entry 1', color: '#b9c9e4', share: '100', price: '', stops: [], targets: [] }],
     notes: { thesis: '', invalidation: '', strategy: '', evidence: '' },
   },
-  drawings: {}, review: '',
+  drawings: {}, review: '', structuredReview: null,
 }
 
 export const instrumentCatalogFixture: InstrumentCatalog = {
@@ -98,8 +104,10 @@ export function playListPage(plays: PlaySummary[], query: PlayListQuery): PlayLi
 /** A fake `plays` endpoint over these plays. */
 export const playsFrom = (plays: PlaySummary[]): WorkspaceApi['plays'] => query => Promise.resolve(playListPage(plays, query))
 /** A fake `playCounts` endpoint over these plays. */
-export const playCountsFrom = (plays: PlaySummary[]): WorkspaceApi['playCounts'] => query => Promise.resolve(
-  Object.fromEntries(playViews.map(view => [view, playListPage(plays, { ...query, view }).totalCount])) as PlayCounts)
+export const playCountsFrom = (plays: PlaySummary[]): WorkspaceApi['playCounts'] => query => Promise.resolve({
+  ...Object.fromEntries(playViews.map(view => [view, playListPage(plays, { ...query, view }).totalCount])),
+  unresolved: playListPage(plays.filter(play => play.status === 'unresolved'), { ...query, view: 'all' }).totalCount,
+} as PlayCounts)
 
 /** Saved-play API stubs: no saved plays, and every write rejects unless a test overrides it. */
 /** No loss limit set and nothing closed (Phase 2, item 10b): no line, no flag and no pre-flight check. */
@@ -119,7 +127,7 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
     // Tests outside Overview keep this unrelated read pending unless they supply a summary fixture.
     overviewSummary: vi.fn().mockImplementation(() => new Promise(() => {})),
     plays: vi.fn(playsFrom([])), playCounts: vi.fn(playCountsFrom([])), searchJournal: vi.fn(unexpected), play: vi.fn(unexpected), createPlay: vi.fn(unexpected), updatePlay: vi.fn(unexpected),
-    changePlayStatus: vi.fn(unexpected), playHistory: vi.fn().mockResolvedValue({ revisions: [], statusChanges: [] }),
+    changePlayStatus: vi.fn(unexpected), playHistory: vi.fn().mockResolvedValue({ revisions: [], statusChanges: [], reviews: [] }),
     nextActions: vi.fn().mockResolvedValue([]),
     completeReview: vi.fn(unexpected), reopenReview: vi.fn(unexpected), noReviewNeeded: vi.fn(unexpected),
     declareUnresolved: vi.fn(unexpected), returnToOpen: vi.fn(unexpected),
@@ -137,7 +145,7 @@ export function playApiStubs(): Pick<WorkspaceApi, 'overviewSummary' | 'plays' |
     openRisk: vi.fn().mockImplementation((scope: string) => Promise.resolve(emptyOpenRisk(scope))),
     openRiskPreview: vi.fn().mockImplementation((request: { playId: string | null; plan: { direction: 'long' | 'short' } }) => Promise.resolve({
       playId: request.playId, direction: request.plan.direction, riskUsd: null, reason: 'An entry has no stop.', rounded: false })),
-    riskSettings: vi.fn().mockResolvedValue({ openRiskLimitPercent: null }), updateRiskSettings: vi.fn(unexpected),
+    riskSettings: vi.fn().mockResolvedValue({ openRiskLimitPercent: null, dailyLossLimitR: null, weeklyLossLimitR: null }), updateRiskSettings: vi.fn(unexpected),
     lossLimits: vi.fn().mockResolvedValue(lossLimitsFixture),
     playRule: vi.fn().mockResolvedValue({ active: null, tradingMode: 'real' }), setPlayRule: vi.fn(unexpected), archivePlayRule: vi.fn(unexpected),
     marketSources: vi.fn().mockResolvedValue([]), setMarketSource: vi.fn(unexpected),
@@ -174,12 +182,14 @@ export const emptyOpenRisk = (scope: string): OpenRisk => ({
 
 /** A sizing document with no closed plays, full exposure and the default limits. */
 export const sizingFixture: SizingDocument = {
+  tradingMode: 'real',
   settings: { riskPercent: '1.25' },
-  exposure: { level: 'full', multiplier: '1', reason: 'No losing streak.', lossStreak: 0, winsSinceStepDown: 0 },
+  exposure: { level: 'full', multiplier: '1', reason: 'No losing streak.', lossStreak: 0, winsSinceStepDown: 0, tiedOutcomes: 0 },
   record: {
     source: 'none', closedPlays: 0, decidedPlays: 0, window: 20, wins: 0, losses: 0, scratches: 0,
     battingAverage: null, averageGainPercent: null, averageLossPercent: null, winLossRatio: null, breakEvenRewardRisk: null,
     averageWinR: null, averageLossR: null, recent: [],
+    localSignChanges: 0, localUnknown: 0, feeOnlyLosses: 0, unknownGrossLosses: 0, unresolved: 0, notAllocated: 0,
   },
   limits: { effectiveRiskPercent: '1.25', maxStopPercent: '10', minRewardRisk: '2', maxStopSource: 'default', minRewardRiskSource: 'default' },
   notice: 'Mechanical estimates from your settings and record, not investment advice.',

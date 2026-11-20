@@ -32,8 +32,8 @@ export interface ManualExecutions {
   records: ManualExecutionRecord[]
   history: Array<{
     id: string; executionId: string; reason: string | null; occurredAtUtc: string; before: ManualExecutionRecord | null; after: ManualExecutionRecord
-    /** Shared by the rows one correction batch changed together; absent from servers before phase 1.3b. */
-    batchId?: string | null
+    /** Shared by the rows one correction batch changed together; null for single-row writes. */
+    batchId: string | null
   }>
   totals: {
     enteredQuantity: string
@@ -43,15 +43,15 @@ export interface ManualExecutions {
     netResultUsd: string | null
     feesComplete: boolean
   }
-  /** Known fees by currency as entered, exactly; absent from servers before Phase 1.1a. */
-  fees?: Array<{ token: string; amount: string }>
+  /** Known fees by currency as entered, exactly. */
+  fees: Array<{ token: string; amount: string }>
   /** Executions whose cost is unknown, never counted as zero. */
-  unknownFees?: number
+  unknownFees: number
   notice: string
-  /** Each planned entry's ledger fills beside its plan; absent from servers before Phase 1. */
-  entries?: EntryProgress[]
-  /** Times, averages and estimated R by Review's rules; absent from servers before Phase 1. */
-  receipt?: PlayReceipt | null
+  /** Each planned entry's ledger fills beside its plan. */
+  entries: EntryProgress[]
+  /** Times, averages and estimated R by Review's rules. */
+  receipt: PlayReceipt | null
 }
 
 const facts = (v: Record<string, unknown>) => ['entry', 'exit'].includes(v.role as string) &&
@@ -74,15 +74,14 @@ export const isManualExecutions = (v: unknown): v is ManualExecutions => isRecor
   Array.isArray(v.records) && v.records.length <= 200 && v.records.every(isManualExecutionRecord) && Array.isArray(v.history) && v.history.length <= 1000 &&
   v.history.every(h => isRecord(h) && isGuid(h.id) && isGuid(h.executionId) && (h.reason === null || isText(h.reason, 2000)) && isUtcTimestamp(h.occurredAtUtc) &&
     (h.before === null || isManualExecutionRecord(h.before)) && isManualExecutionRecord(h.after) &&
-    (h.batchId === undefined || h.batchId === null || isGuid(h.batchId))) && isRecord(v.totals) &&
+    (h.batchId === null || isGuid(h.batchId))) && isRecord(v.totals) &&
   ['enteredQuantity', 'exitedQuantity', 'openQuantity'].every(key => isDiaryNonNegativeDecimal((v.totals as Record<string, unknown>)[key])) &&
   (v.totals.grossResultUsd === null || isDiaryDecimal(v.totals.grossResultUsd)) &&
   (v.totals.netResultUsd === null || isDiaryDecimal(v.totals.netResultUsd)) && typeof v.totals.feesComplete === 'boolean' && isText(v.notice, 4000) &&
-  (v.fees === undefined || Array.isArray(v.fees) && v.fees.length <= 200 &&
-    v.fees.every(f => isRecord(f) && isText(f.token, 32) && isDiaryDecimal(f.amount))) &&
-  (v.unknownFees === undefined || isCount(v.unknownFees)) &&
-  (v.entries === undefined || Array.isArray(v.entries) && v.entries.length <= 20 && v.entries.every(isEntryProgress)) &&
-  (v.receipt === undefined || v.receipt === null || isPlayReceipt(v.receipt))
+  // A replayed request returns its stored response read back into ManualExecutionsDto, so its fields are present too.
+  Array.isArray(v.fees) && v.fees.length <= 200 && v.fees.every(f => isRecord(f) && isText(f.token, 32) && isDiaryDecimal(f.amount)) &&
+  isCount(v.unknownFees) && Array.isArray(v.entries) && v.entries.length <= 20 && v.entries.every(isEntryProgress) &&
+  (v.receipt === null || isPlayReceipt(v.receipt))
 
 /** GUID request identities also work on LAN HTTP where randomUUID is unavailable. */
 export function newDiaryRequestId() {

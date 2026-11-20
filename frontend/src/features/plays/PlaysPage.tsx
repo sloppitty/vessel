@@ -269,7 +269,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   // The server keeps the direction once an entry has filled: it decides which side closes the position.
   const filled = paperFills ? paperFills.filled.size > 0 : venueStatus !== undefined && (!!tracking.execution?.links.some(link => link.role === 'entry' && link.fills.length > 0) ||
     // A flip's entry line fills this Play's entry as a linked entry fill does (Phase 2, item 11).
-    !!tracking.execution?.sharedFills?.some(item => item.lines.some(line => line.role === 'entry' && line.playId === tracking.execution?.playId)))
+    !!tracking.execution?.sharedFills.some(item => item.lines.some(line => line.role === 'entry' && line.playId === tracking.execution?.playId)))
   const status = saved?.summary.status ?? 'draft'
   // Which entries have filled, per entry, as the server decides it: the execution's linked entry fills for a venue Play,
   // the manual ledger for a manual one. Whatever facts are loaded count, whatever the saved status says (a reread of the
@@ -747,7 +747,7 @@ export function PlaysPage({ accounts, portfolios, api, session, onSession, onRel
   // The outcome beside the review: a venue Play's two bases or a manual Play's ledger, with R and time held from the server.
   const shownExecution = tracking.execution?.playId === saved?.summary.id ? tracking.execution : null
   // Like the outcome, the header's post-hoc badge waits for a fresh read rather than keeping an earlier one's flag.
-  const playReceipt = manual ? manualLedger && manualLedger !== 'unknown' ? manualLedger.receipt ?? null : null
+  const playReceipt = manual ? manualLedger && manualLedger !== 'unknown' ? manualLedger.receipt : null
     : tracking.stale ? null : shownExecution?.receipt ?? null
   // Figures kept from an earlier read are not shown as current: after a failed or pending reread the receipt waits for it.
   const staleOutcome = tracking.stale ? tracking.error

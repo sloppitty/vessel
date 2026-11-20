@@ -33,9 +33,12 @@ describe('open risk documents', () => {
     const request = { playId: null, accountId: play.accountId, plan: { direction: 'short' as const, sizingMode: 'quantity' as const, size: '1', leverage: '1', entries: [] }, instrumentSource: 'venue' as const }
     expect(isOpenRiskPreview({ playId: null, direction: 'short', riskUsd: '2', reason: null, rounded: false }, request)).toBe(true)
     expect(isOpenRiskPreview({ playId: null, direction: 'long', riskUsd: '2', reason: null, rounded: false }, request)).toBe(false)
-    expect(isRiskSettings({ openRiskLimitPercent: null })).toBe(true)
-    expect(isRiskSettings({ openRiskLimitPercent: '3.5' })).toBe(true)
-    expect(isRiskSettings({ openRiskLimitPercent: 3.5 })).toBe(false)
+    const limits = { openRiskLimitPercent: null, dailyLossLimitR: null, weeklyLossLimitR: null }
+    expect(isRiskSettings(limits)).toBe(true)
+    expect(isRiskSettings({ ...limits, openRiskLimitPercent: '3.5', dailyLossLimitR: '2', weeklyLossLimitR: '5' })).toBe(true)
+    expect(isRiskSettings({ ...limits, openRiskLimitPercent: 3.5 })).toBe(false)
+    // RiskSettingsDto always writes the loss limits, null until set.
+    expect(isRiskSettings({ openRiskLimitPercent: null })).toBe(false)
   })
 
   it('never reads open risk in Paper mode', async () => {

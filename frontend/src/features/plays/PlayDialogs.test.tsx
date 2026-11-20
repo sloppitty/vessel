@@ -13,14 +13,14 @@ function deferred() {
   return { resolve, reject, promise }
 }
 const history = (reason: string): PlayHistory => ({ statusChanges: [], revisions: [{ number: 1, status: 'planned',
-  reason, createdAtUtc: '2026-10-14T12:00:00Z', plan: savedPlayFixture.plan }] })
+  reason, createdAtUtc: '2026-10-14T12:00:00Z', plan: savedPlayFixture.plan, preflight: null }], reviews: [] })
 
 describe('history request lifetime', () => {
   it('labels simulated lifecycle changes explicitly without presenting them as venue fills', async () => {
     const body: PlayHistory = { revisions: [], statusChanges: [
-      { from: 'draft', to: 'planned', reason: null, note: null, occurredAtUtc: '2026-10-20T12:00:00Z', source: 'owner' },
-      { from: 'planned', to: 'open', reason: null, note: null, occurredAtUtc: '2026-10-20T12:01:00Z', source: 'paper' },
-    ] }
+      { from: 'draft', to: 'planned', reason: null, note: null, occurredAtUtc: '2026-10-20T12:00:00Z', source: 'owner', unresolvedReason: null, evidence: null },
+      { from: 'planned', to: 'open', reason: null, note: null, occurredAtUtc: '2026-10-20T12:01:00Z', source: 'paper', unresolvedReason: null, evidence: null },
+    ], reviews: [] }
     const api = { playHistory: vi.fn().mockResolvedValue(body) } as unknown as WorkspaceApi
     render(<HistoryDialog api={api} playId={savedPlayFixture.summary.id} onClose={vi.fn()} />)
     expect(await screen.findByText('Planned → Open · from simulated paper executions')).toBeInTheDocument()
@@ -56,7 +56,7 @@ describe('history request lifetime', () => {
 describe('pre-flight in history (phase 1, 1.5)', () => {
   it('lists the checklist kept with revision 1, and says when a plan from before it has none', async () => {
     const recorded: PlayHistory = { statusChanges: [], revisions: [{ ...history('Planned').revisions[0]!,
-      preflight: [{ code: 'priced-stops', outcome: 'skipped' }, { code: 'thesis', outcome: 'passed' }] }] }
+      preflight: [{ code: 'priced-stops', outcome: 'skipped' }, { code: 'thesis', outcome: 'passed' }] }], reviews: [] }
     const view = render(<HistoryDialog api={{ playHistory: vi.fn().mockResolvedValue(recorded) } as unknown as WorkspaceApi} playId="one" onClose={vi.fn()} />)
     expect(await screen.findByText('Pre-flight: a priced stop for every priced entry · not met; thesis and invalidation are written · met.')).toBeInTheDocument()
     view.unmount()

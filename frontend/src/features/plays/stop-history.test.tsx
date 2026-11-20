@@ -13,7 +13,7 @@ const plan = (stops: PlanExit[], extra: Partial<PlayPlan> = {}, price = '100'): 
   notes: { thesis: '', invalidation: '', strategy: '', evidence: '' },
   entries: [{ ...base.entries[0]!, id: 'e1', name: 'Breakout', price, stops, targets: [] }], ...extra,
 })
-const revision = (number: number, p: PlayPlan): PlanRevision => ({ number, status: 'open', reason: number === 1 ? 'Planned' : 'Moved', createdAtUtc: `2026-10-0${number}T00:00:00Z`, plan: p })
+const revision = (number: number, p: PlayPlan): PlanRevision => ({ number, status: 'open', reason: number === 1 ? 'Planned' : 'Moved', createdAtUtc: `2026-10-0${number}T00:00:00Z`, plan: p, preflight: null })
 const label = (_: string, index: number, count: number) => `SL${count > 1 ? index + 1 : ''}`
 
 describe('stop history of a closed Play', () => {

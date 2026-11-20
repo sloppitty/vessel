@@ -86,7 +86,7 @@ const accountPart = (a: BrokerAccount): Part => ({ id: a.id, name: a.name, balan
 
 /** One pie per portfolio (plus Unassigned) of each enabled account's share of that portfolio's balance. */
 export function portfolioAllocations(accounts: BrokerAccount[], portfolios: Portfolio[]): Allocation[] {
-  const enabled = accounts.filter(a => a.isEnabled !== false)
+  const enabled = accounts.filter(a => a.isEnabled)
   const groups = portfolios.map(p => ({ id: p.id, name: p.name, icon: p.icon ?? 'folder', scope: `portfolio:${p.id}`, members: enabled.filter(a => a.portfolioId === p.id) }))
   const unassigned = enabled.filter(a => a.portfolioId === null)
   if (unassigned.length) groups.push({ id: 'unassigned', name: 'Unassigned', icon: 'folder', scope: 'unassigned', members: unassigned })

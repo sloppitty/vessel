@@ -115,7 +115,7 @@ const isFillConflicts = (v: unknown): v is FillConflicts => isRecord(v) && isCou
  * backfill showed the venue no longer serves it, so it cannot be backfilled again (6b).
  */
 export interface HistoryGap {
-  id: string; fromUtc: string | null; toUtc: string | null; openedAtUtc: string; closedAtUtc: string | null; beyondVenueReach?: boolean
+  id: string; fromUtc: string | null; toUtc: string | null; openedAtUtc: string; closedAtUtc: string | null; beyondVenueReach: boolean
 }
 /** An owner-started backfill of one gap (Phase 2, item 6b): queued while it reads, then completed, narrowed or failed. */
 export interface HistoryBackfill {
@@ -161,7 +161,7 @@ const before = (a: string | null, b: string | null) => a === null || b === null 
 const isHistoryGap = (v: unknown): v is HistoryGap => isRecord(v) && isGuid(v.id) && isNullOr(v.fromUtc, isTimestamp) &&
   isNullOr(v.toUtc, isTimestamp) && isTimestamp(v.openedAtUtc) && isNullOr(v.closedAtUtc, isTimestamp) &&
   before(v.fromUtc as string | null, v.toUtc as string | null) && before(v.openedAtUtc, v.closedAtUtc as string | null) &&
-  (v.beyondVenueReach === undefined || typeof v.beyondVenueReach === 'boolean')
+  typeof v.beyondVenueReach === 'boolean'
 const backfillStates = ['queued', 'completed', 'narrowed', 'failed'] as const
 export const isHistoryBackfill = (v: unknown): v is HistoryBackfill => isRecord(v) && isGuid(v.id) && isGuid(v.gapId) &&
   backfillStates.includes(v.state as typeof backfillStates[number]) && isTimestamp(v.fromUtc) && isTimestamp(v.toUtc) &&
@@ -303,7 +303,7 @@ export interface AccountSnapshot {
   accountValueUsd: string | null
   withdrawableUsd: string | null
   /** Reported available balance/free collateral, not guaranteed withdrawal capacity. */
-  availableMarginUsd?: string | null
+  availableMarginUsd: string | null
   marginUsedUsd: string | null
   positions: Array<{
     contractId: string
@@ -312,14 +312,14 @@ export interface AccountSnapshot {
     unrealizedPnlUsd: string
     marginUsedUsd: string
     leverage: number | null
-    /** The venue's reported liquidation price (Phase 2, item 8a); null or absent when it reports none. */
-    liquidationPrice?: string | null
-    /** `cross` or `isolated` as the venue reports it; null or absent when it does not. */
-    marginMode?: 'cross' | 'isolated' | null
+    /** The venue's reported liquidation price (Phase 2, item 8a); null when it reports none. */
+    liquidationPrice: string | null
+    /** `cross` or `isolated` as the venue reports it; null when it does not. */
+    marginMode: 'cross' | 'isolated' | null
   }>
-  stablecoinWallet?: StablecoinWallet | null
-  /** False when the read did not establish every position: absent ones are unknown, not flat. Missing on older servers. */
-  positionsComplete?: boolean
+  stablecoinWallet: StablecoinWallet | null
+  /** False when the read did not establish every position: absent ones are unknown, not flat. */
+  positionsComplete: boolean
 }
 export interface StablecoinWallet {
   observedAtUtc: string
@@ -341,15 +341,15 @@ export interface Overview {
     /** Null when an account's latest position read was incomplete. */
     openPositionCount: number | null
     importedFillCount: number
-    availableStablecoinNominalUsd?: string | null
-    stablecoinAccountCount?: number
-    totalBalanceUsd?: string | null
-    balanceAccountCount?: number
-    balanceCoverage?: 'complete' | 'partial' | 'unavailable'
-    availableBalanceUsd?: string | null
-    availableBalanceAccountCount?: number
-    availableBalanceCoverage?: 'complete' | 'partial' | 'unavailable'
-    enabledAccountCount?: number
+    availableStablecoinNominalUsd: string | null
+    stablecoinAccountCount: number
+    totalBalanceUsd: string | null
+    balanceAccountCount: number
+    balanceCoverage: 'complete' | 'partial' | 'unavailable'
+    availableBalanceUsd: string | null
+    availableBalanceAccountCount: number
+    availableBalanceCoverage: 'complete' | 'partial' | 'unavailable'
+    enabledAccountCount: number
   }
   recentActivity: ImportedFill[]
   scopeNote: string
@@ -591,8 +591,7 @@ const discovery = (venueId: string, address: string) => (v: unknown): v is Accou
   isText(v.notice, 2000) && Array.isArray(v.accounts) && v.accounts.length <= 1000 &&
   v.accounts.every((a: unknown) => isRecord(a) && accountIndex(a.sourceId) && isText(a.name, 200) &&
     ['main', 'subaccount'].includes(String(a.accountType)) && isNullOr(a.accountValueUsd, isPlainDecimal) &&
-    (a.collateralUsd === undefined || isNullOr(a.collateralUsd, isPlainDecimal)) &&
-    (a.availableBalanceUsd === undefined || isNullOr(a.availableBalanceUsd, isPlainDecimal)) &&
+    isNullOr(a.collateralUsd, isPlainDecimal) && isNullOr(a.availableBalanceUsd, isPlainDecimal) &&
     isNullOr(a.existingAccountId, isGuid) && (a.isEnabled === null || typeof a.isEnabled === 'boolean')) &&
   new Set(v.accounts.map(a => a.sourceId)).size === v.accounts.length
 const credential = (v: unknown): v is AccountCredential => isRecord(v) && typeof v.storageConfigured === 'boolean' &&
@@ -610,27 +609,21 @@ const wallet = (v: unknown): v is StablecoinWallet | null => v === null || isRec
 const snapshot = (v: unknown): v is AccountSnapshot | null => v === null || isRecord(v) &&
   isTimestamp(v.observedAtUtc) && isText(v.valueScope) &&
   ['accountValueUsd', 'withdrawableUsd', 'marginUsedUsd'].every(k => isNullOr(v[k], isPlainDecimal)) &&
-  (v.availableMarginUsd === undefined || isNullOr(v.availableMarginUsd, isPlainDecimal)) &&
+  isNullOr(v.availableMarginUsd, isPlainDecimal) &&
   Array.isArray(v.positions) && v.positions.every(p => isRecord(p) && isText(p.contractId) &&
     ['signedQuantity', 'entryPrice', 'unrealizedPnlUsd', 'marginUsedUsd'].every(k => isPlainDecimal(p[k])) &&
     (p.leverage === null || typeof p.leverage === 'number' && Number.isInteger(p.leverage) && p.leverage > 0) &&
-    (p.liquidationPrice === undefined || isNullOr(p.liquidationPrice, isPlainDecimal)) &&
-    (p.marginMode === undefined || p.marginMode === null || p.marginMode === 'cross' || p.marginMode === 'isolated')) &&
-  (v.stablecoinWallet === undefined || wallet(v.stablecoinWallet)) &&
-  (v.positionsComplete === undefined || typeof v.positionsComplete === 'boolean')
+    isNullOr(p.liquidationPrice, isPlainDecimal) && (p.marginMode === null || p.marginMode === 'cross' || p.marginMode === 'isolated')) &&
+  wallet(v.stablecoinWallet) && typeof v.positionsComplete === 'boolean'
 const overview = (v: unknown): v is Overview => isRecord(v) && Array.isArray(v.portfolios) && v.portfolios.every(portfolio) &&
   Array.isArray(v.accounts) && v.accounts.every(account) && isRecord(v.totals) &&
   ['portfolioCount', 'accountCount', 'valuedAccountCount', 'importedFillCount'].every(k => isRecord(v.totals) && isCount(v.totals[k])) &&
   isNullOr(v.totals.openPositionCount, isCount) &&
   isNullOr(v.totals.totalAccountValueUsd, isPlainDecimal) &&
-  (v.totals.availableStablecoinNominalUsd === undefined || isNullOr(v.totals.availableStablecoinNominalUsd, isPlainDecimal)) &&
-  (v.totals.stablecoinAccountCount === undefined || isCount(v.totals.stablecoinAccountCount)) &&
-  (v.totals.totalBalanceUsd === undefined || isNullOr(v.totals.totalBalanceUsd, isPlainDecimal)) &&
-  (v.totals.availableBalanceUsd === undefined || isNullOr(v.totals.availableBalanceUsd, isPlainDecimal)) &&
-  ['balanceAccountCount', 'availableBalanceAccountCount', 'enabledAccountCount'].every(k => isRecord(v.totals) &&
-    (v.totals[k] === undefined || isCount(v.totals[k]))) &&
-  ['balanceCoverage', 'availableBalanceCoverage'].every(k => isRecord(v.totals) &&
-    (v.totals[k] === undefined || coverages.includes(String(v.totals[k])))) &&
+  isNullOr(v.totals.availableStablecoinNominalUsd, isPlainDecimal) && isCount(v.totals.stablecoinAccountCount) &&
+  isNullOr(v.totals.totalBalanceUsd, isPlainDecimal) && isNullOr(v.totals.availableBalanceUsd, isPlainDecimal) &&
+  ['balanceAccountCount', 'availableBalanceAccountCount', 'enabledAccountCount'].every(k => isRecord(v.totals) && isCount(v.totals[k])) &&
+  ['balanceCoverage', 'availableBalanceCoverage'].every(k => isRecord(v.totals) && coverages.includes(String(v.totals[k]))) &&
   Array.isArray(v.recentActivity) && v.recentActivity.every(isImportedFill) && isText(v.scopeNote)
 
 function assertResponseMode(value: unknown, mode: TradingMode, requireMode = false): void {
@@ -886,7 +879,7 @@ export function createWorkspaceApi(credentials: SessionCredentials, onAuthFailur
       call(`${playPath(id)}/status`, { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify({ expectedVersion, ...request }) }),
     playHistory: (id, signal) => call(`${playPath(id)}/history`, { ...playRequest,
       validate: (v): v is PlayHistory => isPlayHistory(v) && v.statusChanges.every(change => tradingMode === 'paper'
-        ? change.source === undefined || change.source === 'owner' || change.source === 'paper' : change.source !== 'paper'),
+        ? change.source === 'owner' || change.source === 'paper' : change.source !== 'paper'),
       ...withSignal(signal) }),
     completeReview: (id, expectedVersion) => call(`${playPath(id)}/review/complete`,
       { ...playRequest, validate: isSavedPlay, method: 'POST', body: JSON.stringify({ expectedVersion }) }),
@@ -1066,7 +1059,7 @@ export function createWorkspaceApi(credentials: SessionCredentials, onAuthFailur
     deletePortfolio: id => call(`/api/portfolios/${resourceId(id)}`, { ...workspaceRequest, validate: (v): v is undefined => v === undefined, method: 'DELETE' }),
     updateAccount: async (id, settings) => {
       const updated = await call(accountPath(id), { ...workspaceRequest, validate: account, method: 'PUT', body: JSON.stringify(settings) })
-      if (updated.isEnabled === false) emitApiEvent(api, { type: 'account-removed', accountId: id })
+      if (!updated.isEnabled) emitApiEvent(api, { type: 'account-removed', accountId: id })
       return updated
     },
     deleteAccount: async id => {

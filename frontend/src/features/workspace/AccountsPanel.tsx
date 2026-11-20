@@ -45,7 +45,7 @@ export function AccountsPanel({ accounts, portfolios, portfolioFilter, onPortfol
     (!portfolioFilter || (portfolioFilter === 'unassigned' ? account.portfolioId === null : account.portfolioId === portfolioFilter)) &&
     (!query || [account.name, account.sourceId ?? '', account.address ?? ''].some(value => value.toLowerCase().includes(query))) &&
     (!venue || account.venueId === venue) &&
-    (!status || (status === 'enabled' ? account.isEnabled !== false : status === 'disabled' ? account.isEnabled === false : account.syncStatus === status)))
+    (!status || (status === 'enabled' ? account.isEnabled : status === 'disabled' ? !account.isEnabled : account.syncStatus === status)))
   const visible = shown.map(a => a.id).join(',')
   const selectedAccounts = selection.accounts.filter(a => shown.some(current => current.id === a.id))
   const selected = selectedAccounts.map(a => a.id)

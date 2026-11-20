@@ -100,6 +100,9 @@
   the broker; `docs/architecture/messaging-and-workers.md` has the table.
 - Activity's per-account fill reads and the Plays search use new indexes (about 3.9 ms to
   0.06 ms and 5.8 ms to 0.4 ms on the benchmark journal).
+- The web app also requires every field the API always sends in Play execution, Play list
+  and history, sizing, risk settings, manual ledger and account snapshot reads, where it
+  filled in defaults for older API versions.
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and

@@ -138,7 +138,7 @@ export function PlayWorkspace({ accounts, portfolios, api, draft, onChange, onRe
   const [selectionRequest, setSelectionRequest] = useState(0)
   const [portfolioFilter, setPortfolioFilter] = useState('')
   const [evidenceRequest, setEvidenceRequest] = useState(0)
-  const enabledAccounts = accounts.filter(account => account.isEnabled !== false)
+  const enabledAccounts = accounts.filter(account => account.isEnabled)
   const account = enabledAccounts.find(account => account.id === draft.accountId)
   const accountId = account?.id ?? ''
   const matchesFilter = (account: BrokerAccount, filter: string) => !filter ||

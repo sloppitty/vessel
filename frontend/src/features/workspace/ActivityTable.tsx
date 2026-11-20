@@ -8,7 +8,7 @@ import { Time } from '@/components/ui/time'
 
 /** Executions inside one operation: the operation row already names its account and instrument. */
 export function ActivityTable({ fills, accounts, compact = false }: { fills: ImportedFill[]; accounts: BrokerAccount[]; compact?: boolean }) {
-  const visible = fills.filter(fill => accounts.some(a => a.id === fill.accountId && a.isEnabled !== false))
+  const visible = fills.filter(fill => accounts.some(a => a.id === fill.accountId && a.isEnabled))
   if (!visible.length) return <div className="workspace-empty small-empty"><Inbox size={27} /><strong>No imported executions yet</strong><p>Refresh an exchange account to retrieve recent perpetual fills.</p></div>
   return <div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Side</th><th>Time</th><th>Quantity</th><th>Price</th>{!compact && <><th>Reported closed P&amp;L</th><th>Association</th></>}</tr></thead>
     <tbody>{visible.map(fill => <tr key={fill.id}>

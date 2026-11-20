@@ -3,13 +3,14 @@ import { screen, within } from '@testing-library/react'
 import { render } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { ExecutionOrder, PlayExecution } from '@/api/plays'
+import type { ExecutionOrder, OfferedOrder, PlayExecution } from '@/api/plays'
 import type { PlayFunding } from '@/api/play-funding'
 import { ExecutionPanel } from './ExecutionPanel'
 import { createDraft } from './draft'
 import { PlayJournal } from './WorkspacePanels'
 import { describeOrder, fillSummary, suggestionGroups } from './execution'
 import { restoreZone } from '@/test/zone'
+import { executionDefaults, plannedUnknown, totalsDefaults } from '@/test/execution-fixture'
 
 const entry = { ...createDraft().entries[0]!, id: 'e1', name: 'Entry 1', price: '100' }
 const entries = [{ ...entry, stops: [{ ...entry.stops[0]!, id: 's1', value: '95' }], targets: [{ ...entry.targets[0]!, id: 't1', value: '110' }] }]
@@ -18,18 +19,21 @@ const order = (orderId: string, overrides: Partial<ExecutionOrder> = {}): Execut
   originalSize: '0.5', remainingSize: '0.5', placedAtUtc: '2026-10-03T10:00:00Z', status: 'open', venueStatus: 'open',
   statusAtUtc: '2026-10-03T10:00:00Z', ...overrides,
 })
+/** An unlinked or earlier order: the server states the roles it accepts; these tests leave the side filter to the panel. */
+const offered = (orderId: string, overrides: Partial<ExecutionOrder> = {}): OfferedOrder =>
+  ({ ...order(orderId, overrides), roles: ['entry', 'stop', 'target', 'exit'] })
 const execution: PlayExecution = {
   playId: '00000000-0000-4000-8000-000000000001', status: 'open', tracked: true, reason: null, checkedAtUtc: '2026-10-03T10:05:00Z',
-  totals: { enteredQuantity: '0.5', exitedQuantity: '0', openQuantity: '0.5', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [{ token: 'USDC', amount: '0.02' }] },
-  entries: [{ entryId: 'e1', filledQuantity: '0.5', averageFillPrice: '100', restingOrders: 0 }],
+  totals: { enteredQuantity: '0.5', exitedQuantity: '0', openQuantity: '0.5', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [{ token: 'USDC', amount: '0.02' }], ...totalsDefaults },
+  entries: [{ entryId: 'e1', filledQuantity: '0.5', averageFillPrice: '100', restingOrders: 0, ...plannedUnknown }],
   links: [{ id: '00000000-0000-4000-8000-0000000000a1', role: 'entry', entryId: 'e1', levelId: null, state: 'linked', source: 'automatic',
-    order: order('11', { status: 'filled' }), filledQuantity: '0.5',
+    order: order('11', { status: 'filled' }), filledQuantity: '0.5', otherPlay: null,
     fills: [{ sourceFillId: 'f1', direction: 'Open Long', price: '100', quantity: '0.5', fee: '0.02', feeToken: 'USDC', closedPnlUsd: '0', side: 'buy', positionEffect: 'open', pnlBasis: 'gross', occurredAtUtc: '2026-10-03T10:01:00Z' }] }],
   suggestions: [{ id: '00000000-0000-4000-8000-0000000000a2', role: 'stop', entryId: 'e1', levelId: 's1', state: 'suggested', source: 'automatic',
-    order: order('12', { side: 'sell', orderType: 'Stop Market', triggerPrice: '95', reduceOnly: true }), filledQuantity: '0', fills: [] }],
-  unlinkedOrders: [order('13', { side: 'sell', limitPrice: '110', reduceOnly: true })],
+    order: order('12', { side: 'sell', orderType: 'Stop Market', triggerPrice: '95', reduceOnly: true }), filledQuantity: '0', fills: [], otherPlay: false }],
+  unlinkedOrders: [offered('13', { side: 'sell', limitPrice: '110', reduceOnly: true })],
   notice: 'Orders and fills come from the venue.',
-  issues: [], monitor: monitorFixture, discrepancies: [], watches: [],
+  issues: [], monitor: monitorFixture, discrepancies: [], watches: [], ...executionDefaults,
 }
 
 describe('execution panel', () => {
@@ -146,11 +150,6 @@ describe('execution panel', () => {
       local: { netUsd: '0.00001', basis: 'executions', reason: null, signDiffers: true } } }} {...props} />)
     expect(value('Venue net')).toHaveTextContent(/^-0\.00001 USD$/)
     expect(value('Play-local result')).toHaveTextContent(/^0\.00001 USD/)
-
-    // Servers before October 19, 2026 send neither figure.
-    view.rerender(<ExecutionPanel execution={execution} {...props} />)
-    expect(screen.queryByText('Venue net')).not.toBeInTheDocument()
-    expect(screen.queryByText('Play-local result')).not.toBeInTheDocument()
   })
 
   it('shows settled funding beside the results in each state and changes neither result (phase 2, 9b)', () => {
@@ -189,7 +188,7 @@ describe('execution panel', () => {
     expect(screen.getByRole('button', { name: 'Not available settled funding' })).toHaveAccessibleDescription('Settled funding is not read for this venue.')
     results()
 
-    // No holding window (or an older server): no line at all.
+    // No holding window: the API omits funding, and no line shows.
     view.rerender(<ExecutionPanel execution={closed} {...props} />)
     expect(screen.queryByText('Settled funding')).not.toBeInTheDocument()
     results()
@@ -211,7 +210,7 @@ describe('execution panel', () => {
       .toBe('Open Long · 2 fills, average $103.00')
 
     const confirm = screen.getByRole('region', { name: 'Orders to confirm' })
-    // An older server says nothing about other Plays, so neither does the row.
+    // The server says no other Play is offered this order, so neither does the row.
     expect(within(confirm).queryByText(/another play/)).not.toBeInTheDocument()
     await user.click(within(confirm).getByRole('button', { name: 'Link as Entry 1 stop' }))
     expect(onLink).toHaveBeenCalledWith({ orderId: '12', role: 'stop', entryId: 'e1', levelId: 's1' })
@@ -237,7 +236,7 @@ describe('execution panel', () => {
 
   it('offers only the roles an order can take and says why linked fills do not settle the play', () => {
     const issue = 'Order 51 is filled at the venue, but not all of its executions are retained yet.'
-    render(<ExecutionPanel execution={{ ...execution, issues: [issue], unlinkedOrders: [order('21'), order('22', { reduceOnly: true }), order('23', { side: 'sell' })] }}
+    render(<ExecutionPanel execution={{ ...execution, issues: [issue], unlinkedOrders: [offered('21'), offered('22', { reduceOnly: true }), offered('23', { side: 'sell' })] }}
       error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={vi.fn()} onUnlink={vi.fn()} />)
     expect(within(screen.getByRole('region', { name: 'Not reconciled' })).getByText(issue)).toBeInTheDocument()
     const options = (id: string) => within(screen.getByRole('combobox', { name: `Level for order ${id}` })).getAllByRole('option').map(option => option.textContent)
@@ -250,7 +249,7 @@ describe('execution panel', () => {
     const user = userEvent.setup()
     const onLink = vi.fn().mockResolvedValue(undefined)
     render(<ExecutionPanel execution={{ ...execution, status: 'planned', links: [], suggestions: [], unlinkedOrders: [],
-      earlierOrders: [order('31', { status: 'filled', placedAtUtc: '2026-10-03T09:58:00Z' })] }}
+      earlierOrders: [offered('31', { status: 'filled', placedAtUtc: '2026-10-03T09:58:00Z' })] }}
       error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={onLink} onUnlink={vi.fn()} />)
     const earlier = screen.getByRole('region', { name: 'Placed before this Play was saved' })
     expect(screen.queryByRole('region', { name: 'Other orders on this instrument' })).not.toBeInTheDocument()
@@ -283,8 +282,8 @@ describe('execution panel', () => {
   it('offers a resting unlinked stop to answer a missing stop, never linking it by itself (phase 2, 8c)', async () => {
     const user = userEvent.setup()
     const onLink = vi.fn().mockResolvedValue(undefined)
-    const stop = order('41', { side: 'sell', orderType: 'Stop Market', triggerPrice: '95', reduceOnly: true })
-    const takeProfit = order('42', { side: 'sell', orderType: 'Take Profit Market', triggerPrice: '120', reduceOnly: true })
+    const stop = offered('41', { side: 'sell', orderType: 'Stop Market', triggerPrice: '95', reduceOnly: true })
+    const takeProfit = offered('42', { side: 'sell', orderType: 'Take Profit Market', triggerPrice: '120', reduceOnly: true })
     render(<ExecutionPanel execution={{ ...execution, unlinkedOrders: [stop, takeProfit], discrepancies: [missingStopFixture] }}
       error={null} busy={false} entries={entries} direction="long" onCheck={vi.fn()} onLink={onLink} onUnlink={vi.fn()} onDismiss={vi.fn()} />)
     const buttons = screen.getAllByRole('button', { name: /^Link this stop/ })
@@ -297,7 +296,7 @@ describe('execution panel', () => {
   })
 
   it('offers it only for an open incident, for an order the server says can be a stop, and waits for unsaved edits (Sol round 1 on #43)', () => {
-    const stop = order('41', { side: 'sell', orderType: 'Stop Market', triggerPrice: '95', reduceOnly: true })
+    const stop = offered('41', { side: 'sell', orderType: 'Stop Market', triggerPrice: '95', reduceOnly: true })
     const contradicted = { ...order('43', { side: 'sell', orderType: 'Stop Market', triggerPrice: '94', reduceOnly: true }), roles: ['target' as const] }
     const props = { error: null, busy: false, entries, direction: 'long' as const, onCheck: vi.fn(), onLink: vi.fn(), onUnlink: vi.fn(), onDismiss: vi.fn() }
     const view = render(<ExecutionPanel execution={{ ...execution, unlinkedOrders: [stop],

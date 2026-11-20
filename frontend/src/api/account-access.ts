@@ -38,8 +38,8 @@ export interface DiscoveredAccount {
   name: string
   accountType: 'main' | 'subaccount'
   accountValueUsd: string | null
-  collateralUsd?: string | null
-  availableBalanceUsd?: string | null
+  collateralUsd: string | null
+  availableBalanceUsd: string | null
   existingAccountId: string | null
   isEnabled: boolean | null
 }

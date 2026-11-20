@@ -5,6 +5,7 @@ import { sizingFixture } from '@/test/workspace-fixture'
 const play: RecordedPlay = {
   playId: '12345678-1234-1234-1234-123456789abc', title: 'BTC Long', instrument: 'BTC', closedAtUtc: '2026-10-12T10:00:00Z',
   netResultUsd: '4', returnPercent: '4', riskUsd: null, rMultiple: null, outcome: 'win', feesComplete: true,
+  operationId: null, accountId: null, detectedAtUtc: null,
 }
 const document = (exposure: Record<string, unknown>, row: Record<string, unknown>): unknown => ({
   ...sizingFixture,
@@ -13,8 +14,12 @@ const document = (exposure: Record<string, unknown>, row: Record<string, unknown
 })
 
 describe('sizing document', () => {
-  it('accepts the exit-time tie count and the detection time, and documents from earlier servers without them', () => {
+  it('accepts the exit-time tie count and the detection time, and rejects a document without them', () => {
     expect(isSizingDocument(document({}, {}))).toBe(true)
+    expect(isSizingDocument(document({ tiedOutcomes: undefined }, {}))).toBe(false)
+    expect(isSizingDocument(document({}, { detectedAtUtc: undefined }))).toBe(false)
+    expect(isSizingDocument(document({}, { operationId: undefined, accountId: undefined }))).toBe(false)
+    expect(isSizingDocument({ ...(document({}, {}) as SizingDocument), tradingMode: undefined })).toBe(false)
     expect(isSizingDocument(document({ tiedOutcomes: 0 }, { detectedAtUtc: null }))).toBe(true)
     const tied = document({ tiedOutcomes: 2 }, { detectedAtUtc: '2026-10-12T11:00:00Z' })
     expect(isSizingDocument(tied)).toBe(true)
@@ -29,7 +34,7 @@ describe('sizing document', () => {
     expect(isSizingDocument(document({}, { detectedAtUtc }))).toBe(false)
   })
 
-  it('accepts the Play-local and fee-only counts, null counts for the Activity fallback, and earlier documents', () => {
+  it('accepts the Play-local and fee-only counts and null counts for the Activity fallback, and requires every count', () => {
     const counts = (fields: Record<string, unknown>) => {
       const base = document({}, {}) as SizingDocument
       return { ...base, record: { ...base.record, losses: 1, decidedPlays: 2, ...fields } }
@@ -40,5 +45,7 @@ describe('sizing document', () => {
     expect(isSizingDocument(counts({ feeOnlyLosses: 2 }))).toBe(false)
     expect(isSizingDocument(counts({ feeOnlyLosses: null }))).toBe(false)
     expect(isSizingDocument(counts({ localUnknown: -1 }))).toBe(false)
+    for (const key of ['localSignChanges', 'localUnknown', 'feeOnlyLosses', 'unknownGrossLosses', 'unresolved', 'notAllocated'])
+      expect(isSizingDocument(counts({ [key]: undefined }))).toBe(false)
   })
 })

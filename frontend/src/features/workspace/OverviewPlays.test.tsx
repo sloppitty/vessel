@@ -12,6 +12,7 @@ import { credentialsFixture } from '@/test/identity-fixture'
 
 const summary = (status: PlaySummary['status'], hasReview = false): PlaySummary => ({
   ...savedPlayFixture.summary, id: status, title: `${status} idea`, status, hasReview,
+  ...(hasReview ? { reviewCompletion: 'completed' as const, reviewCompletedAtUtc: '2026-10-06T12:00:00Z' } : {}),
 })
 const plays = ['draft', 'planned', 'paused', 'open', 'closed', 'cancelled'].map(status => summary(status as PlaySummary['status']))
 const api = (list: PlaySummary[] = plays, read = vi.fn(playsFrom(list))) =>

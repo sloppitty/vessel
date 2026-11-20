@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi } from './workspace'
-import { isPlayCounts, isPlayHistory, playCountsPath, playInView as isPlayInView, playListPath, type PlayCounts, type PlayListQuery, type PlaySummary } from './plays'
+import { isPlayCounts, isPlayExecution, isPlayHistory, playCountsPath, playInView as isPlayInView, playListPath, type PlayCounts, type PlayExecution, type PlayListQuery, type PlaySummary } from './plays'
 import { accountFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { credentialsFixture } from '@/test/identity-fixture'
+import recorded from '@/test/contracts/monitor-api.json?raw'
 
 function response(value: unknown) { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(value), { status: 200 }))) }
 afterEach(() => vi.unstubAllGlobals())
@@ -10,7 +11,7 @@ const base = savedPlayFixture.summary
 const play = (n: number, fields: Partial<PlaySummary> = {}): PlaySummary =>
   ({ ...base, id: `${String(n).padStart(8, '0')}-3333-4444-5555-666666666666`, ...fields })
 const closed = (n: number, fields: Partial<PlaySummary> = {}) => play(n, { status: 'closed', endedAtUtc: '2026-10-06T12:00:00Z', ...fields })
-const counts: PlayCounts = { drafts: 2, progress: 3, review: 4, reviewed: 1, closed: 3, cancelled: 2, all: 10 }
+const counts: PlayCounts = { drafts: 2, progress: 3, review: 4, reviewed: 1, closed: 3, cancelled: 2, all: 10, unresolved: 0 }
 const other = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 
 describe('Plays list API', () => {
@@ -37,7 +38,7 @@ describe('Plays list API', () => {
   })
   it.each([
     ['another view', { view: 'reviewed' }],
-    ['a reviewed play under Needs review', { plays: [closed(1, { hasReview: true }), closed(2)] }],
+    ['a reviewed play under Needs review', { plays: [closed(1, { hasReview: true, reviewCompletion: 'completed', reviewCompletedAtUtc: '2026-10-06T12:00:00Z' }), closed(2)] }],
     ['an open play under Needs review', { plays: [play(1, { status: 'open' }), closed(2)] }],
     ['a short page', { plays: [closed(1)] }],
     ['a page past the end', { page: 3 }],
@@ -92,9 +93,12 @@ describe('level rebind API (0.5b)', () => {
 })
 
 describe('Unresolved Plays in the API guards (phase 1, 1.3a)', () => {
-  const counts: PlayCounts = { drafts: 1, progress: 1, review: 1, reviewed: 1, closed: 1, cancelled: 1, all: 4 }
-  it('adds unresolved Plays to the ended totals, and still reads counts from older servers', () => {
+  const counts: PlayCounts = { drafts: 1, progress: 1, review: 1, reviewed: 1, closed: 1, cancelled: 1, all: 4, unresolved: 0 }
+  it('adds unresolved Plays to the ended totals, and requires their count', () => {
     expect(isPlayCounts(counts)).toBe(true)
+    const { unresolved: _, ...older } = counts
+    void _
+    expect(isPlayCounts(older)).toBe(false)
     expect(isPlayCounts({ ...counts, unresolved: 1, all: 5, review: 2 })).toBe(true)
     // An unresolved Play missing from either total is an invalid reply.
     expect(isPlayCounts({ ...counts, unresolved: 1 })).toBe(false)
@@ -116,7 +120,7 @@ describe('Unresolved Plays in the API guards (phase 1, 1.3a)', () => {
     expect(isPlayHistory(history({ ...declared, evidence: { ...evidence, entered: '1e3' } }))).toBe(false)
     expect(isPlayHistory(history({ ...declared, evidence: { ...evidence, open: '-1' } }))).toBe(true)
     expect(isPlayHistory({ ...history(declared), reviews: [{ number: 1, occurredAtUtc: '2026-10-20T11:00:00Z', review: '',
-      structuredReview: { adherence: null, mistakeTag: null, lesson: '', nextAction: '' }, action: 'cleared' }] })).toBe(true)
+      structuredReview: { adherence: null, mistakeTag: null, lesson: '', nextAction: '', rule: null }, action: 'cleared' }] })).toBe(true)
     // A return to Open names the declaration it undoes, with no facts of its own; a whole declare, return, settle history reads.
     const returned = { from: 'unresolved', to: 'open', reason: null, note: 'Relinked.', occurredAtUtc: '2026-10-20T12:00:00Z', source: 'owner',
       unresolvedReason: 'shared-close', evidence: null }
@@ -125,5 +129,19 @@ describe('Unresolved Plays in the API guards (phase 1, 1.3a)', () => {
       .toBe(true)
     expect(isPlayHistory(history({ ...returned, evidence }))).toBe(false)
     expect(isPlayHistory(history({ ...returned, from: 'open', to: 'closed' }))).toBe(false)
+  })
+})
+
+describe('orders offered to link (#112)', () => {
+  const execution = (JSON.parse(recorded) as { playExecution: PlayExecution }).playExecution
+  const linked = execution.links[0]!.order!
+  it('requires the roles the server states on unlinked and earlier orders, never on linked ones', () => {
+    // The recorded linked orders carry no roles (WhenWritingNull).
+    expect(linked.roles).toBeUndefined()
+    expect(isPlayExecution(execution)).toBe(true)
+    const offered = { ...linked, roles: ['entry'] }
+    expect(isPlayExecution({ ...execution, unlinkedOrders: [offered], earlierOrders: [offered] })).toBe(true)
+    expect(isPlayExecution({ ...execution, unlinkedOrders: [linked] })).toBe(false)
+    expect(isPlayExecution({ ...execution, earlierOrders: [linked] })).toBe(false)
   })
 })

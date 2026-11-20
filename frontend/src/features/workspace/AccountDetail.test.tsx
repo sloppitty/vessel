@@ -25,7 +25,7 @@ describe('Account detail monitor heading (Phase 0, 0.4c)', () => {
     expect(within(panel()).getByText('Stop coverage not checked yet')).toBeInTheDocument()
     expect(within(panel()).getByText('2 Open Plays\' stop coverage has not been checked yet.')).toBeInTheDocument()
     view.unmount()
-    // Once a check recorded it, or from an older API that does not say, the run state heads the panel.
+    // Once a check recorded it, or with no Open Play left unchecked, the run state heads the panel.
     show({ ...monitorFixture, coverage: [coverageFixture], uncheckedPlays: 0 }).unmount()
     show(monitorFixture)
     expect(within(panel()).getByText('Monitored')).toBeInTheDocument()
@@ -51,7 +51,7 @@ describe('Account detail value unit', () => {
 describe('Account detail stablecoin wallet (Phase 2, item 14b)', () => {
   const snapshot = (walletAt: string): AccountSnapshot => ({
     observedAtUtc: '2026-10-22T11:00:00Z', valueScope: 'primary-perpetual-dex', accountValueUsd: '1000', withdrawableUsd: '900',
-    marginUsedUsd: '0', positions: [],
+    marginUsedUsd: '0', positions: [], availableMarginUsd: null, positionsComplete: true,
     stablecoinWallet: { observedAtUtc: walletAt, accountMode: 'default', scope: 'hypercore-spot-stablecoins', totalNominalUsd: '1000',
       availableNominalUsd: '1000', balances: [{ symbol: 'USDC', tokenIndex: 0, tokenId: 'usdc', total: '1000', held: '0', available: '1000' }],
       notice: 'Venue stablecoin wallet only.' },
@@ -76,8 +76,9 @@ describe('Account detail stablecoin wallet (Phase 2, item 14b)', () => {
 describe('Account detail incomplete position read (#89)', () => {
   const snapshot = (positionsComplete: boolean, quantity?: string): AccountSnapshot => ({
     observedAtUtc: '2026-10-22T11:00:00Z', valueScope: 'primary-perpetual-dex', accountValueUsd: '1000', withdrawableUsd: '900',
-    marginUsedUsd: '0', positionsComplete,
-    positions: quantity ? [{ contractId: 'BTC', signedQuantity: quantity, entryPrice: '100', unrealizedPnlUsd: '5', marginUsedUsd: '10', leverage: 5 }] : [],
+    marginUsedUsd: '0', positionsComplete, availableMarginUsd: null, stablecoinWallet: null,
+    positions: quantity ? [{ contractId: 'BTC', signedQuantity: quantity, entryPrice: '100', unrealizedPnlUsd: '5', marginUsedUsd: '10', leverage: 5,
+      liquidationPrice: null, marginMode: null }] : [],
   })
   const show = (value: AccountSnapshot) => render(<AccountDetail account={{ ...accountFixture, venueId: 'hyperliquid', syncStatus: 'synced', sourceId: '7', positionCount: null }}
     api={{ snapshot: vi.fn(() => Promise.resolve(value)) } as unknown as WorkspaceApi} refreshing={false} onSync={vi.fn()} onBack={vi.fn()} onManage={vi.fn()} />)

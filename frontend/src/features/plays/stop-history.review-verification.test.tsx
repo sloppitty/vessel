@@ -20,10 +20,10 @@ const plan = (values: string[], leverage = '5', direction: PlayPlan['direction']
   entries: [{ ...savedPlayFixture.plan.entries[0]!, price: '100', stops: values.map((value, index) => ({ id: `s${index}`, unit, value, share: '100' })) }],
 })
 const rev = (number: number, value: PlayPlan): PlanRevision => ({
-  number, plan: value, status: 'open', reason: 'Changed', createdAtUtc: '2026-11-04T00:00:00Z',
+  number, plan: value, status: 'open', reason: 'Changed', createdAtUtc: '2026-11-04T00:00:00Z', preflight: null,
 })
 const history = (original = '95', final = '100'): PlayHistory => ({
-  revisions: [rev(2, plan([final])), rev(1, plan([original]))], statusChanges: [],
+  revisions: [rev(2, plan([final])), rev(1, plan([original]))], statusChanges: [], reviews: [],
 })
 const closed = (id = savedPlayFixture.summary.id, version = 3): SavedPlay => ({
   ...savedPlayFixture, plan: plan(['100']),

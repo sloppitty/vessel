@@ -7,13 +7,14 @@ import { ApiError } from '@/api/errors'
 import { discrepancyFixture, monitorFixture } from '@/test/monitor-fixture'
 import { savedPlayFixture } from '@/test/workspace-fixture'
 import { usePlayExecution } from './usePlayExecution'
+import { executionDefaults, plannedUnknown, totalsDefaults } from '@/test/execution-fixture'
 
 afterEach(() => vi.useRealTimers())
 const execution: PlayExecution = {
   playId: savedPlayFixture.summary.id, status: 'open', tracked: true, checkedAtUtc: null, reason: null,
-  totals: { enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
+  totals: { enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [], ...totalsDefaults },
   entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Stored facts only.', issues: ['Missing exit execution.'],
-  monitor: monitorFixture, discrepancies: [discrepancyFixture], watches: [],
+  monitor: monitorFixture, discrepancies: [discrepancyFixture], watches: [], ...executionDefaults,
 }
 const client = () => ({ playExecution: vi.fn().mockResolvedValue(execution), runAccountMonitor: vi.fn(),
   sync: vi.fn(), dismissPlayDiscrepancy: vi.fn().mockResolvedValue(undefined),
@@ -53,7 +54,7 @@ describe('stored Play execution', () => {
     // Retained, but read against revision 1: not current until revision 2's read is shown.
     expect(view.result.current.execution).toBe(execution)
     expect(view.result.current.stale).toBe(true)
-    await act(async () => { second.resolve({ ...execution, entries: [{ entryId: 'entry-1', filledQuantity: '0', averageFillPrice: null, restingOrders: 0, plannedQuantity: '2' }] }) })
+    await act(async () => { second.resolve({ ...execution, entries: [{ entryId: 'entry-1', filledQuantity: '0', averageFillPrice: null, restingOrders: 0, ...plannedUnknown, plannedQuantity: '2' }] }) })
     expect(view.result.current.stale).toBe(false)
     expect(view.result.current.execution?.entries[0]?.plannedQuantity).toBe('2')
     // A revision whose read fails stays stale, with the failure.

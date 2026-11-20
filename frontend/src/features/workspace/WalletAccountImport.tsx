@@ -165,7 +165,7 @@ function WalletImportSession({ venueId, api, portfolios, accounts, onCreated, on
         {discovery.accounts.map(candidate => {
           const record = existing(candidate)
           const alreadyAdded = added(candidate)
-          const disabled = record ? record.isEnabled === false : candidate.isEnabled === false
+          const disabled = record ? !record.isEnabled : candidate.isEnabled === false
           const result = results[candidate.sourceId]
           const checked = !alreadyAdded && selected.includes(candidate.sourceId)
           return <div className={`discovered-account${checked ? ' selected' : ''}`} key={candidate.sourceId}>

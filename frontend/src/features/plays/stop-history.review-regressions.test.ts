@@ -19,7 +19,7 @@ it.each([
   })
   const revision = (number: number, value: string): PlanRevision => ({
     number, plan: plan(value), status: 'open', reason: 'Move stop',
-    createdAtUtc: '2026-11-04T00:00:00Z',
+    createdAtUtc: '2026-11-04T00:00:00Z', preflight: null,
   })
   for (const value of [entryPrice, original, final]) expect(isPlanText(value)).toBe(true)
   const [entry] = stopHistory([revision(1, original), revision(2, final)], plan(final))

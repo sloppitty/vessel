@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createWorkspaceApi, type WorkspaceApi } from '@/api/workspace'
 import { ApiError } from '@/api/errors'
 import type { ManualExecutions } from '@/api/diary'
-import { emptyStructuredReview, preflightCodes, type PlayRuleState, type PlayExecution, type PlayFields, type PlayList, type PlayNote, type PlaySummary, type PlayView, type SavedPlay } from '@/api/plays'
+import { emptyStructuredReview, hasStructuredReview, isEndedStatus, preflightCodes, type PlayRuleState, type PlayExecution, type PlayFields, type PlayList, type PlayNote, type PlaySummary, type PlayView, type SavedPlay } from '@/api/plays'
 import { VenuesProvider } from '@/api/venues'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { accountFixture, idleMarketStream, instrumentCatalogFixture, overviewFixture, playApiStubs, playCountsFrom, playListPage, playsFrom, portfolioFixture, savedPlayFixture } from '@/test/workspace-fixture'
@@ -23,6 +23,7 @@ import * as overviewActions from '@/features/workspace/OverviewActions'
 import * as savedChecks from './saved'
 import * as preflightChecks from './preflight'
 import { credentialsFixture, shellIdentityFixture } from '@/test/identity-fixture'
+import { executionDefaults, totalsDefaults, manualLedgerDefaults } from '@/test/execution-fixture'
 
 const at = '2026-10-13T10:00:00Z'
 const otherId = '00000000-0000-4000-8000-000000000002'
@@ -34,13 +35,14 @@ const sessionFor = (play: SavedPlay): PlaysSession => {
 }
 const execution = (play: SavedPlay): PlayExecution => ({
   playId: play.summary.id, status: play.summary.status, tracked: false, reason: 'No imported tracking.', checkedAtUtc: null,
-  totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
+  totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [], ...totalsDefaults },
   entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Facts only.', issues: [], monitor: null, discrepancies: [], watches: [],
+  ...executionDefaults,
 })
 
 const manualLedger = (play: SavedPlay): ManualExecutions => ({
   play, records: [], history: [], totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0',
-    grossResultUsd: '0', netResultUsd: null, feesComplete: false }, notice: 'Manual facts only.',
+    grossResultUsd: '0', netResultUsd: null, feesComplete: false }, notice: 'Manual facts only.', ...manualLedgerDefaults,
 })
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -74,7 +76,10 @@ function client(play = terminal, more: SavedPlay[] = []) {
     }),
     updatePlay: vi.fn((_id: string, fields: PlayFields & { expectedVersion: number }) => {
       current = { ...current, review: fields.review, structuredReview: fields.structuredReview ?? emptyStructuredReview(),
-        summary: { ...current.summary, version: current.summary.version + 1, hasReview: true, reviewedAtUtc: at } }
+        // Saving changed answers on an ended Play completes its review, as the server does (decision 3); text alone never does.
+        summary: { ...current.summary, version: current.summary.version + 1, hasReview: true, reviewedAtUtc: at,
+          ...(hasStructuredReview(fields.structuredReview) && isEndedStatus(current.summary.status) && current.summary.reviewCompletion === null
+            ? { reviewCompletion: 'completed' as const, reviewCompletedAtUtc: at } : {}) } }
       return Promise.resolve(current)
     }),
   }
@@ -127,12 +132,12 @@ describe('diary workspace integration', () => {
         entryId: null, side: 'sell' as const, occurredAtUtc: '2026-10-13T10:01:00Z' }
       const history: ManualExecutions['history'] = [record, exit].map((after, index) => ({
         id: `00000000-0000-4000-8000-00000000000${index + 4}`, executionId: after.id, reason: null,
-        occurredAtUtc: '2026-10-13T10:02:00Z', before: null, after,
+        occurredAtUtc: '2026-10-13T10:02:00Z', before: null, after, batchId: null,
       }))
       if (version >= 4) history.push({ id: '00000000-0000-4000-8000-000000000006', executionId: record.id,
-        reason: 'Statement amended', occurredAtUtc: '2026-10-13T10:03:00Z', before: record, after: { ...record, price: '94' } })
+        reason: 'Statement amended', occurredAtUtc: '2026-10-13T10:03:00Z', before: record, after: { ...record, price: '94' }, batchId: null })
       if (version >= 5) history.push({ id: '00000000-0000-4000-8000-000000000007', executionId: record.id,
-        reason: 'Second amendment', occurredAtUtc: '2026-10-13T10:04:00Z', before: { ...record, price: '94' }, after: entered })
+        reason: 'Second amendment', occurredAtUtc: '2026-10-13T10:04:00Z', before: { ...record, price: '94' }, after: entered, batchId: null })
       return { ...manualLedger({ ...closed, review, summary: { ...closed.summary, version } }), records: [entered, exit], history,
         totals: { enteredQuantity: '1', exitedQuantity: '1', openQuantity: '0', grossResultUsd: result, netResultUsd: result, feesComplete: true } }
     }
@@ -389,7 +394,7 @@ describe('diary workspace integration', () => {
     const fill = { sourceFillId: 'f1', direction: 'Open Long', price: '100', quantity: '1', fee: '0', feeToken: 'USDC', closedPnlUsd: '0',
       side: 'buy' as const, positionEffect: 'open' as const, pnlBasis: 'gross' as const, occurredAtUtc: at }
     const filled = (play: SavedPlay): PlayExecution => ({ ...execution(play), tracked: true, reason: null,
-      links: [{ id: ids(161), role: 'entry', entryId: 'entry-1', levelId: null, state: 'linked', source: 'automatic', order: null, filledQuantity: '1', fills: [fill] }] })
+      links: [{ id: ids(161), role: 'entry', entryId: 'entry-1', levelId: null, state: 'linked', source: 'automatic', order: null, filledQuantity: '1', fills: [fill], otherPlay: null }] })
     let current = open
     const { api, methods } = client(open)
     methods.play.mockImplementation(() => Promise.resolve(current))
@@ -664,10 +669,10 @@ describe('diary workspace integration', () => {
     methods.playExecution.mockResolvedValue({ ...execution(retrospective), tracked: true, links: [
       { id: 'entry-link', role: 'entry', entryId: null, levelId: null, state: 'linked', source: 'owner', order: null,
         filledQuantity: '1', fills: [{ sourceFillId: 'entry-fill', direction: 'Open Long', price: '100', quantity: '1',
-          fee: '0', feeToken: 'USDC', closedPnlUsd: '0', side: 'buy', positionEffect: 'open', pnlBasis: 'gross', occurredAtUtc: at }] },
+          fee: '0', feeToken: 'USDC', closedPnlUsd: '0', side: 'buy', positionEffect: 'open', pnlBasis: 'gross', occurredAtUtc: at }], otherPlay: null },
       { id: 'exit-link', role: 'exit', entryId: null, levelId: null, state: 'linked', source: 'owner', order: null,
         filledQuantity: '1', fills: [{ sourceFillId: 'exit-fill', direction: 'Close Long', price: '108', quantity: '1',
-          fee: '0', feeToken: 'USDC', closedPnlUsd: '8', side: 'sell', positionEffect: 'close', pnlBasis: 'gross', occurredAtUtc: at }] },
+          fee: '0', feeToken: 'USDC', closedPnlUsd: '8', side: 'sell', positionEffect: 'close', pnlBasis: 'gross', occurredAtUtc: at }], otherPlay: null },
     ] })
     render(<Harness api={api} initial={sessionFor(retrospective)} />)
     await userEvent.click(screen.getByRole('tab', { name: 'Execution' }))
@@ -725,7 +730,7 @@ describe('diary workspace integration', () => {
       totals: { ...execution(closed).totals, enteredQuantity: '0.5', exitedQuantity: '0.5', closedPnlUsd: '5', venueNetUsd: '4.97',
         fees: [{ token: 'USDC', amount: '0.03' }] },
       receipt: { firstEntryAtUtc: '2026-10-13T08:00:00Z', lastExitAtUtc: '2026-10-13T09:30:00Z', averageEntryPrice: '100.4', averageExitPrice: '110',
-        fillCount: 3, estimatedR: '1.98', initialRisk: '2.51', estimatedRReason: null } }))
+        fillCount: 3, estimatedR: '1.98', initialRisk: '2.51', estimatedRReason: null, plannedAfterExecution: false } }))
     const user = userEvent.setup()
     render(<Harness api={api} initial={sessionFor(closed)} />)
     await user.click(screen.getByRole('tab', { name: 'Review' }))
@@ -747,7 +752,7 @@ describe('diary workspace integration', () => {
     methods.playExecution.mockImplementation(() => Promise.resolve({ ...execution(closed), tracked: true, reason: null,
       totals: { ...execution(closed).totals, venueNetUsd: '4.97' },
       receipt: { firstEntryAtUtc: '2026-10-13T08:00:00Z', lastExitAtUtc: '2026-10-13T09:30:00Z', averageEntryPrice: '100.4', averageExitPrice: '110',
-        fillCount: 3, estimatedR: '1.98', initialRisk: '2.51', estimatedRReason: null } }))
+        fillCount: 3, estimatedR: '1.98', initialRisk: '2.51', estimatedRReason: null, plannedAfterExecution: false } }))
     const user = userEvent.setup()
     const view = render(<Harness api={api} initial={sessionFor(closed)} />)
     await user.click(screen.getByRole('tab', { name: 'Review' }))
@@ -820,7 +825,7 @@ describe('diary workspace integration', () => {
     const { api, methods } = client(closed)
     const receipt = { firstEntryAtUtc: '2026-10-10T08:00:00Z', lastExitAtUtc: '2026-10-10T09:00:00Z', averageEntryPrice: '100',
       averageExitPrice: '110', fillCount: 2, estimatedR: null, initialRisk: null,
-      estimatedRReason: 'No plan revision was in force at the first entry fill: the plan was written after it.' }
+      estimatedRReason: 'No plan revision was in force at the first entry fill: the plan was written after it.', plannedAfterExecution: false }
     methods.playExecution.mockImplementation(() => Promise.resolve({ ...execution(closed), receipt: { ...receipt, plannedAfterExecution: true } }))
     const user = userEvent.setup()
     const view = render(<Harness api={api} initial={sessionFor(closed)} />)
@@ -988,7 +993,7 @@ describe('diary workspace integration', () => {
     const sent = methods.updatePlay.mock.calls[0]![1]
     expect(sent.review).toBe('Existing free text')
     await act(async () => complete({ ...terminal, structuredReview: sent.structuredReview,
-      summary: { ...terminal.summary, hasReview: true, reviewedAtUtc: at, version: 3 } } as SavedPlay))
+      summary: { ...terminal.summary, hasReview: true, reviewedAtUtc: at, reviewCompletion: 'completed' as const, reviewCompletedAtUtc: at, version: 3 } } as SavedPlay))
     expect(screen.getByLabelText('Lesson')).toHaveValue('First lesson extended')
     expect(screen.getByRole('button', { name: /^Save$/ })).toBeEnabled()
     await user.click(screen.getByRole('button', { name: /^Save$/ }))
@@ -1012,10 +1017,10 @@ describe('diary workspace integration', () => {
     await waitFor(() => expect(methods.updatePlay).toHaveBeenCalledOnce())
     expect(methods.updatePlay.mock.calls[0]![1].plan.entries).toEqual([])
   })
-  it('filters terminal Cancelled and retrospective Plays by saved review state, including reviewedAtUtc', async () => {
+  it('filters terminal Cancelled and retrospective Plays by review completion, including one kept from before completion', async () => {
     const pending = { ...terminal, review: '' }
     const reviewed: SavedPlay = { ...terminal, summary: { ...terminal.summary, id: otherId, title: 'Imported review', origin: 'retrospective',
-      status: 'closed', hasReview: false, reviewedAtUtc: at } }
+      status: 'closed', hasReview: false, reviewedAtUtc: at, reviewCompletion: 'legacy', reviewCompletedAtUtc: at } }
     const { api } = client(pending, [reviewed])
     render(<Harness api={api} />)
     const user = userEvent.setup()
@@ -1045,7 +1050,7 @@ describe('diary workspace integration', () => {
     expect(screen.getByRole('button', { name: 'New play' })).toBeDisabled()
     expect(reads(methods, 'review')).toBe(1)
     const reviewed = { ...pending, structuredReview: sent.structuredReview ?? emptyStructuredReview(),
-      summary: { ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at } }
+      summary: { ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at, reviewCompletion: 'completed' as const, reviewCompletedAtUtc: at } }
     serve(methods, [reviewed.summary])
     await act(async () => saving.resolve(reviewed))
     await waitFor(() => expect(reads(methods, 'review')).toBe(2))
@@ -1083,7 +1088,7 @@ describe('diary workspace integration', () => {
     await waitFor(() => expect(reads(methods)).toBe(1))
     const signal = methods.plays.mock.calls[0]![1]!
     const reviewed = { ...pending, structuredReview: sent.structuredReview ?? emptyStructuredReview(),
-      summary: { ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at } }
+      summary: { ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at, reviewCompletion: 'completed' as const, reviewCompletedAtUtc: at } }
     serve(methods, [reviewed.summary])
     await act(async () => saving.resolve(reviewed))
     await user.click(screen.getByRole('tab', { name: /^Reviewed/ }))
@@ -1134,7 +1139,7 @@ describe('diary workspace integration', () => {
     await user.click(screen.getByRole('tab', { name: /^Needs review/ }))
     expect(await screen.findByRole('button', { name: `Open ${closed.summary.title}` })).toBeDisabled()
     // A concurrent review completes after the queue read; the retry still returns its cached v4 document.
-    const reviewed = { ...closed.summary, version: 6, hasReview: true, reviewedAtUtc: at }
+    const reviewed = { ...closed.summary, version: 6, hasReview: true, reviewedAtUtc: at, reviewCompletion: 'completed' as const, reviewCompletedAtUtc: at }
     serve(methods, [reviewed])
     await act(async () => replay.resolve(ledger(4)))
     expect(current.saved?.summary.version).toBe(5)
@@ -1160,7 +1165,7 @@ describe('diary workspace integration', () => {
     await user.click(screen.getByRole('tab', { name: /^Needs review/ }))
     await screen.findByRole('button', { name: `Open ${pending.summary.title}` })
     // The server committed, but no saved document reaches the editor.
-    serve(methods, [{ ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at }])
+    serve(methods, [{ ...pending.summary, version: 3, hasReview: true, reviewedAtUtc: at, reviewCompletion: 'completed' as const, reviewCompletedAtUtc: at }])
     await act(async () => saving.reject(new ApiError('unavailable', 'Review response lost.')))
     await waitFor(() => expect(reads(methods, 'review')).toBe(2))
     expect(current.saved?.summary.version).toBe(2)
@@ -1239,7 +1244,7 @@ describe('diary workspace integration', () => {
     const { api } = client()
     api.playHistory = vi.fn(async () => ({
       revisions: [], statusChanges: [], reviews: [{ number: 1, occurredAtUtc: at, review: 'Old free text',
-        structuredReview: { adherence: 'not-applicable' as const, mistakeTag: null, lesson: 'Kept evidence', nextAction: 'Wait' } }],
+        structuredReview: { adherence: 'not-applicable' as const, mistakeTag: null, lesson: 'Kept evidence', nextAction: 'Wait' }, action: 'edited' as const }],
     }))
     render(<Harness api={api} initial={sessionFor(terminal)} />)
     await userEvent.click(screen.getByRole('button', { name: 'History' }))
@@ -1304,7 +1309,7 @@ const openedLedger = (): ManualExecutions => {
     occurredAtUtc: at, side: 'buy', quantity: '1', price: '100', fee: null, feeCurrency: null,
     source: 'Statement', createdAtUtc: at, updatedAtUtc: at }
   return { ...manualLedger({ ...shellPlay, summary: { ...shellPlay.summary, status: 'open', version: 3 } }),
-    records: [after], history: [{ id: otherId, executionId: after.id, before: null, after, reason: null, occurredAtUtc: at }],
+    records: [after], history: [{ id: otherId, executionId: after.id, before: null, after, reason: null, occurredAtUtc: at, batchId: null }],
     totals: { enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1', grossResultUsd: '0', netResultUsd: null, feesComplete: false } }
 }
 
@@ -1539,7 +1544,7 @@ describe('diary mutation ownership in the actual shell', () => {
 describe('Plays review wave request regressions', () => {
   it('memoizes draft checks across unrelated renders and recomputes them for real edits', async () => {
     const { api } = client(planned)
-    api.playHistory = vi.fn().mockResolvedValue({ revisions: [], statusChanges: [] })
+    api.playHistory = vi.fn().mockResolvedValue({ revisions: [], statusChanges: [], reviews: [] })
     const dirty = vi.spyOn(savedChecks, 'isDirty')
     const changed = vi.spyOn(savedChecks, 'planChanged')
     try {
@@ -1630,7 +1635,7 @@ describe('Plays review wave request regressions', () => {
     const pending = deferred<SavedPlay>()
     methods.updatePlay.mockReturnValueOnce(pending.promise)
     api.changePlayStatus = vi.fn().mockReturnValue(pending.promise)
-    api.playHistory = vi.fn().mockResolvedValue({ revisions: [], statusChanges: [] })
+    api.playHistory = vi.fn().mockResolvedValue({ revisions: [], statusChanges: [], reviews: [] })
     render(<Harness api={api} initial={sessionFor(planned)} />)
     const user = userEvent.setup()
     const historyButton = screen.getByRole('button', { name: 'History' })

@@ -9,7 +9,7 @@ import { pickInstrument } from '@/test/instrument'
 import { createWorkspaceApi, type BrokerAccount, type WorkspaceApi } from '@/api/workspace'
 import type { PlayExecution, PlayFields, PlayHistory, PlayListQuery, PlayStatus, PlaySummary, SavedEvidence, SavedPlay, StatusRequest } from '@/api/plays'
 import { ApiError } from '@/api/errors'
-import { accountFixture, idleMarketStream, instrumentCatalogFixture, playCountsFrom, playsFrom, portfolioFixture, savedPlayFixture, sizingFixture } from '@/test/workspace-fixture'
+import { accountFixture, idleMarketStream, instrumentCatalogFixture, playCountsFrom, playsFrom, portfolioFixture, savedPlayFixture, sizingFixture, summaryDefaults } from '@/test/workspace-fixture'
 import { NotificationProvider } from '@/components/notifications/NotificationProvider'
 import { PlaysPage } from './PlaysPage'
 import { createDraft } from './draft'
@@ -20,6 +20,7 @@ import { createPlaysSession, describePlanChanges, draftFromSaved, planFromDraft,
 import { accountPicker, chooseInPicker } from '@/test/account-picker'
 import { retrospectiveSavedFixture } from '@/test/retrospective.fixtures'
 import { credentialsFixture } from '@/test/identity-fixture'
+import { executionDefaults, plannedUnknown, totalsDefaults } from '@/test/execution-fixture'
 
 const ids = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 
@@ -40,8 +41,9 @@ function fakeServer() {
   const execution = (play: SavedPlay): PlayExecution => ({
     playId: play.summary.id, status: play.summary.status, tracked: play.summary.instrumentSource === 'venue', checkedAtUtc: null,
     reason: play.summary.instrumentSource === 'venue' ? null : 'Manual instruments are not tracked at a venue.',
-    totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
+    totals: { enteredQuantity: '0', exitedQuantity: '0', openQuantity: '0', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [], ...totalsDefaults },
     entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: 'Venue facts.', issues: [], monitor: play.summary.instrumentSource === 'venue' ? monitorFixture : null, discrepancies: [], watches: [],
+    ...executionDefaults,
   })
   const api = {
     plays: vi.fn((query: PlayListQuery) => playsFrom([...plays.values()].map(play => play.summary))(query)),
@@ -52,11 +54,11 @@ function fakeServer() {
       const play: SavedPlay = {
         summary: { id, title: fields.title.trim(), status: 'draft', accountId: fields.accountId, venueId: 'manual', instrument: fields.instrument,
           instrumentSource: fields.instrumentSource, direction: fields.plan.direction, planRevision: 0, version: 1, cancelReason: null,
-          createdAtUtc: now(), updatedAtUtc: now(), plannedAtUtc: null, endedAtUtc: null, hasReview: !!fields.review.trim() },
-        plan: fields.plan, drawings: fields.drawings, review: fields.review,
+          createdAtUtc: now(), updatedAtUtc: now(), plannedAtUtc: null, endedAtUtc: null, hasReview: !!fields.review.trim(), ...summaryDefaults },
+        plan: fields.plan, drawings: fields.drawings, review: fields.review, structuredReview: fields.structuredReview ?? null,
       }
       plays.set(id, play)
-      history.set(id, { revisions: [], statusChanges: [] })
+      history.set(id, { revisions: [], statusChanges: [], reviews: [] })
       return Promise.resolve(play)
     }),
     updatePlay: vi.fn((id: string, fields: PlayFields & { expectedVersion: number; revisionReason?: string }) => {
@@ -67,7 +69,7 @@ function fakeServer() {
       if (planChanged && play.summary.status !== 'draft') {
         if (!fields.revisionReason) return Promise.reject(new ApiError('http', 'Say why the plan changed.', 409))
         revision += 1
-        history.get(id)!.revisions.push({ number: revision, status: play.summary.status, reason: fields.revisionReason, createdAtUtc: now(), plan: fields.plan })
+        history.get(id)!.revisions.push({ number: revision, status: play.summary.status, reason: fields.revisionReason, createdAtUtc: now(), plan: fields.plan, preflight: null })
       }
       const updated = { ...bump(play, { title: fields.title.trim(), instrument: fields.instrument, planRevision: revision, hasReview: !!fields.review.trim() }),
         plan: fields.plan, drawings: fields.drawings, review: fields.review }
@@ -80,9 +82,9 @@ function fakeServer() {
       const to: PlayStatus = request.status
       const record = history.get(id)!
       record.statusChanges.push({ from: play.summary.status, to, reason: request.status === 'cancelled' ? request.reason : null,
-        note: request.status === 'cancelled' ? request.note ?? null : null, occurredAtUtc: now() })
+        note: request.status === 'cancelled' ? request.note ?? null : null, occurredAtUtc: now(), source: 'owner', unresolvedReason: null, evidence: null })
       const planned = play.summary.status === 'draft' && to === 'planned'
-      if (planned) record.revisions.push({ number: 1, status: 'planned', reason: 'Planned', createdAtUtc: now(), plan: play.plan })
+      if (planned) record.revisions.push({ number: 1, status: 'planned', reason: 'Planned', createdAtUtc: now(), plan: play.plan, preflight: null })
       const updated = bump(play, { status: to, ...(planned ? { planRevision: 1, plannedAtUtc: now() } : {}),
         ...(request.status === 'cancelled' ? { cancelReason: request.reason, endedAtUtc: now() } : {}) })
       plays.set(id, updated)
@@ -864,8 +866,8 @@ describe('sizing truth on the page', () => {
       ] } }
     server.plays.set(open.summary.id, open)
     const playExecution = vi.fn(() => Promise.resolve({ ...server.execution(open), entries: [
-      { entryId: 'entry-1', filledQuantity: '1', averageFillPrice: '100', restingOrders: 0 },
-      { entryId: 'entry-2', filledQuantity: '0', averageFillPrice: null, restingOrders: 1 },
+      { entryId: 'entry-1', filledQuantity: '1', averageFillPrice: '100', restingOrders: 0, ...plannedUnknown },
+      { entryId: 'entry-2', filledQuantity: '0', averageFillPrice: null, restingOrders: 1, ...plannedUnknown },
     ] }))
     const draft = draftFromSaved(open, [])
     const user = userEvent.setup()
@@ -890,12 +892,12 @@ describe('managed stops on the page', () => {
       { id: 'entry-1', name: 'Entry 1', color: '#b9c9e4', share: '100', price: '100', stops: [level('stop-1', '95')], targets: [level('target-1', '110')] },
     ] } }
   const stopLink = { id: '00000000-0000-4000-8000-0000000000d1', role: 'stop' as const, entryId: 'entry-1', levelId: 'stop-1', state: 'linked' as const,
-    source: 'automatic' as const, filledQuantity: '0', fills: [], order: { orderId: 's-order', side: 'sell' as const, orderType: 'Stop Market',
+    source: 'automatic' as const, filledQuantity: '0', fills: [], otherPlay: null, order: { orderId: 's-order', side: 'sell' as const, orderType: 'Stop Market',
       limitPrice: '100', triggerPrice: '101', reduceOnly: true, isPositionTpsl: false, originalSize: '1', remainingSize: '1',
       placedAtUtc: '2026-10-03T10:00:00Z', status: 'open' as const, venueStatus: 'open', statusAtUtc: '2026-10-03T10:00:00Z' } }
   /** The venue filled the entry at 100: the execution reports its average fill. */
   const filledExecution = (server: ReturnType<typeof fakeServer>, extra: Partial<PlayExecution> = {}) => vi.fn((id: string) =>
-    Promise.resolve({ ...server.execution(server.plays.get(id)!), entries: [{ entryId: 'entry-1', filledQuantity: '1', averageFillPrice: '100', restingOrders: 0 }],
+    Promise.resolve({ ...server.execution(server.plays.get(id)!), entries: [{ entryId: 'entry-1', filledQuantity: '1', averageFillPrice: '100', restingOrders: 0, ...plannedUnknown }],
       ...extra }))
   const venueApi = (server: ReturnType<typeof fakeServer>, overrides: Partial<WorkspaceApi> = {}) => client(server, {
     instruments: () => Promise.resolve(instrumentCatalogFixture), candles: () => new Promise(() => {}), marketContext: () => new Promise(() => {}),
@@ -906,7 +908,7 @@ describe('managed stops on the page', () => {
   it('saves a stop at 105 on an Open long filled at 100 with a reason and shows +5 locked in (acceptance)', async () => {
     const server = fakeServer()
     server.plays.set(open.summary.id, open)
-    server.history.set(open.summary.id, { revisions: [], statusChanges: [] })
+    server.history.set(open.summary.id, { revisions: [], statusChanges: [], reviews: [] })
     const playExecution = filledExecution(server)
     const draft = draftFromSaved(open, [])
     const user = userEvent.setup()
@@ -1001,13 +1003,13 @@ describe('filled entries on the page', () => {
   it('keeps a stop saved beyond an entry whose fill was unlinked saveable, as a warning, and checks a new one', async () => {
     const server = fakeServer()
     server.plays.set(open.summary.id, open)
-    server.history.set(open.summary.id, { revisions: [], statusChanges: [] })
+    server.history.set(open.summary.id, { revisions: [], statusChanges: [], reviews: [] })
     // The entry's link still shows a fill that contradicts it; the execution counts no filled quantity for the entry.
     const contradicting = { id: '00000000-0000-4000-8000-0000000000e1', role: 'entry' as const, entryId: 'entry-1', levelId: null, state: 'linked' as const,
-      source: 'owner' as const, filledQuantity: '1', order: null, fills: [{ sourceFillId: 'x', direction: 'Close Short', price: '100', quantity: '1', fee: '0',
+      source: 'owner' as const, filledQuantity: '1', order: null, otherPlay: null, fills: [{ sourceFillId: 'x', direction: 'Close Short', price: '100', quantity: '1', fee: '0',
         feeToken: 'USDC', closedPnlUsd: '0', side: 'buy' as const, positionEffect: 'close' as const, pnlBasis: 'gross' as const, occurredAtUtc: '2026-10-03T10:01:00Z' }] }
     const playExecution = vi.fn((id: string) => Promise.resolve({ ...server.execution(server.plays.get(id)!), links: [contradicting],
-      entries: [{ entryId: 'entry-1', filledQuantity: '0', averageFillPrice: null, restingOrders: 0 }] }))
+      entries: [{ entryId: 'entry-1', filledQuantity: '0', averageFillPrice: null, restingOrders: 0, ...plannedUnknown }] }))
     const draft = draftFromSaved(open, [])
     const user = userEvent.setup()
     render(<Page api={venueApi(server, { playExecution })} accounts={[venue]} initial={{ view: 'editor', draft, saved: savedState(open, draft) }} />)
@@ -1047,11 +1049,11 @@ describe('fills from the execution, independent of the saved status', () => {
     const server = fakeServer()
     server.plays.set(planned.summary.id, planned)
     const entryLink = { id: '00000000-0000-4000-8000-0000000000f1', role: 'entry' as const, entryId: 'entry-1', levelId: null, state: 'linked' as const,
-      source: 'automatic' as const, filledQuantity: '1', order: null, fills: [{ sourceFillId: 'f1', direction: 'Open Long', price: '100', quantity: '1',
+      source: 'automatic' as const, filledQuantity: '1', order: null, otherPlay: null, fills: [{ sourceFillId: 'f1', direction: 'Open Long', price: '100', quantity: '1',
         fee: '0', feeToken: 'USDC', closedPnlUsd: '0', side: 'buy' as const, positionEffect: 'open' as const, pnlBasis: 'gross' as const, occurredAtUtc: '2026-10-03T10:01:00Z' }] }
     // The venue moved the Play to Open, but rereading the saved Play fails, so it still says Planned.
     const playExecution = vi.fn((id: string) => Promise.resolve({ ...server.execution(server.plays.get(id)!), status: 'open' as const,
-      links: [entryLink], entries: [{ entryId: 'entry-1', filledQuantity: '1', averageFillPrice: '100', restingOrders: 0 }] }))
+      links: [entryLink], entries: [{ entryId: 'entry-1', filledQuantity: '1', averageFillPrice: '100', restingOrders: 0, ...plannedUnknown }] }))
     const play = vi.fn(() => Promise.reject(new ApiError('unavailable', 'The Play could not be read.')))
     const draft = draftFromSaved(planned, [])
     const user = userEvent.setup()
@@ -1088,7 +1090,7 @@ describe('Duplicate to Draft (phase 1, 1.6c)', () => {
   it('opens the current plan as a Draft whose managed stop beyond the entry is flagged until it is moved', async () => {
     const server = fakeServer()
     server.plays.set(open.summary.id, open)
-    server.history.set(open.summary.id, { revisions: [], statusChanges: [] })
+    server.history.set(open.summary.id, { revisions: [], statusChanges: [], reviews: [] })
     const user = userEvent.setup()
     render(<Page api={venueApi(server)} accounts={[venue]} initial={openSession(open)} />)
     await user.click(await screen.findByRole('button', { name: 'Duplicate' }))

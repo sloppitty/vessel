@@ -101,7 +101,7 @@ export function CapitalContext({ accounts, portfolios, draft, retrospective = fa
   openRisk?: (scope: string, reference: string) => ReactNode
 }) {
   const zone = useDisplayZone()
-  const account = accounts.find(item => item.id === draft.accountId && item.isEnabled !== false)
+  const account = accounts.find(item => item.id === draft.accountId && item.isEnabled)
   const portfolio = portfolios.find(item => item.id === account?.portfolioId)
   const venues = useVenues()
   const paper = account?.tradingMode === 'paper'

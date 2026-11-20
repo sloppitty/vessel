@@ -6,12 +6,14 @@ import { discrepancyFacts } from '@/features/monitor/discrepancy-text'
 import { coverageAs, coverageFixture, discrepancyFixture, eventCursor, monitorEventFixture, monitorFixture, monitorSummaryFixture } from '@/test/monitor-fixture'
 import { accountFixture, savedPlayFixture } from '@/test/workspace-fixture'
 import { credentialsFixture } from '@/test/identity-fixture'
+import { executionDefaults, totalsDefaults } from '@/test/execution-fixture'
 
 afterEach(() => vi.unstubAllGlobals())
 const executionFixture: PlayExecution = {
   playId: savedPlayFixture.summary.id, status: 'open', tracked: true, reason: null, checkedAtUtc: null,
-  totals: { enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [] },
+  totals: { enteredQuantity: '1', exitedQuantity: '0', openQuantity: '1', closedPnlUsd: '0', closedPnlBasis: 'gross', fees: [], ...totalsDefaults },
   entries: [], links: [], suggestions: [], unlinkedOrders: [], notice: '', issues: [], monitor: monitorFixture, discrepancies: [], watches: [],
+  ...executionDefaults,
 }
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
 

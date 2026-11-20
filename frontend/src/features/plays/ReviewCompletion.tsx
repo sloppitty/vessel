@@ -37,8 +37,6 @@ export function ReviewCompletionBar({ summary, dirty, busy, filled = false, onAc
       ? <p className="review-completion muted">Notes during the trade belong in the Log. The review is completed after the Play ends.</p>
       : null
   }
-  // An older server sends no completion and has no completion actions; its lists still read review text as before.
-  if (summary.reviewCompletion === undefined) return null
   if (summary.reviewCompletion) {
     return <div className="review-completion" role="group" aria-label="Review completion">
       <span><strong>{completedLabels[summary.reviewCompletion]}</strong>
