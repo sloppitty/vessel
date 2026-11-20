@@ -161,7 +161,10 @@ def check_tag(tag, sha, root=ROOT):
         if not script.is_file():
             print(f'pre-push: {tag} has no scripts/release.py', file=sys.stderr)
             return False
-        return subprocess.run([sys.executable, str(script), 'check', '--tag', tag], cwd=tree).returncode == 0
+        # The changelog freeze check reads the history of this repository, where the tag being pushed exists.
+        gitdir = git('rev-parse', '--absolute-git-dir', root=root)
+        env = {**os.environ, 'GIT_DIR': gitdir.strip()} if gitdir else None
+        return subprocess.run([sys.executable, str(script), 'check', '--tag', tag], cwd=tree, env=env).returncode == 0
 
 
 def main(argv, stdin, root=ROOT):

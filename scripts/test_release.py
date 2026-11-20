@@ -45,6 +45,14 @@ def write_release(root, version='1.2.3', **overrides):
             f'[DbContext(typeof(VesselDbContext))]\n[Migration("{MIGRATION}")]\npartial class Next {{}}\n',
         'backend/src/Vessel.Identity/Migrations/20261017155708_InitialIdentity.Designer.cs':
             '[Migration("20261017155708_InitialIdentity")]\n',
+        'README.md': f'See the guide for the v{version} API and web images.\n'
+                     f'Read the [v{version} release notes](docs/releases/v{version}.md) before upgrading.\n',
+        'deploy/README.md': f'- `skorcius/vessel:api-{version}` and `skorcius/vessel:api-latest`\n'
+                            f'### From v1.0.0 to v{version}\n\n### From v0.9.0 to v1.0.0\n'
+                            f'  --build-arg VERSION={version} \\\n  -t skorcius/vessel:web-{version} .\n',
+        'docs/development.md': f'git tag -a v{version} -m "Vessel v{version}" origin/main\n'
+                               f'git push origin v{version}\n(`python3 scripts/release.py check --tag v{version}`)\n'
+                               f'pushes `skorcius/vessel:api-{version}` and `web-{version}`\n',
     }
     files.update(overrides)
     for path, text in files.items():
@@ -64,6 +72,9 @@ class ReleaseCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             write_release(root, **overrides)
+            # A tag check reads the history; a new repository has no earlier release to compare against.
+            subprocess.run(['git', 'init', '-q', str(root)], check=True,
+                           env={key: value for key, value in os.environ.items() if not key.startswith('GIT_')})
             return release.check(root, tag)
 
     def test_repository_versions_agree_and_have_notes(self):
@@ -135,10 +146,87 @@ class ReleaseCheckTests(unittest.TestCase):
         manifests = release.upgrade_manifests(release.ROOT)
         self.assertIn('0.4.3', manifests)
         self.assertEqual(['play-search-rebuild', '--apply', '--all'], manifests['0.4.3']['postSteps'][0])
+    def test_current_release_examples_in_the_docs_must_match(self):
+        stale = {
+            'README.md': 'Read the [v1.2.2 release notes](docs/releases/v1.2.2.md).\n',
+            'deploy/README.md': '### From v1.2.1 to v1.2.2\n- `skorcius/vessel:api-1.2.3`\n',
+            'docs/development.md': 'git tag -a v1.2.3 -m x origin/main\ngit push origin v1.2.2\n',
+        }
+        for path, text in stale.items():
+            with self.subTest(path=path), self.assertRaisesRegex(release.ReleaseError, f'{path}: [^;]*1.2.2'):
+                self.check(**{path: text})
+        # Older versions in the upgrade history below the newest heading are history, not examples.
+        self.assertEqual('1.2.3', self.check(**{'deploy/README.md': '### From v1.2.2 to v1.2.3\n'
+                                                                   '### From v1.2.1 to v1.2.2\n`api-1.2.3`\n'}))
 
     def test_non_semantic_versions_are_rejected(self):
         with self.assertRaisesRegex(release.ReleaseError, 'is not MAJOR.MINOR.PATCH'):
             self.check(version='1.2')
+
+
+class ChangelogFreezeTests(unittest.TestCase):
+    """`check --tag` refuses a release whose changelog misses a pull request merged since the previous tag."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root)
+        self.git('init', '-q', '-b', 'main')
+        for key, value in (('user.email', 'test@example.invalid'), ('user.name', 'Test'),
+                           ('commit.gpgsign', 'false'), ('tag.gpgsign', 'false')):
+            self.git('config', key, value)
+        write_release(self.root, version='1.2.2')
+        self.commit('chore(release): prepare v1.2.2 (#9)')
+        self.git('tag', '-a', 'v1.2.2', '-m', 'v1.2.2')
+
+    def git(self, *args):
+        env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+        return subprocess.run(['git', *args], cwd=self.root, env=env, check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    def commit(self, subject):
+        self.git('add', '-A')
+        self.git('commit', '-q', '--allow-empty', '-m', subject)
+
+    def release(self, changelog, *subjects, tag=False):
+        for subject in subjects:
+            self.commit(subject)
+        write_release(self.root, **{'CHANGELOG.md': f'# Changelog\n\n## Unreleased\n\n{changelog}'
+                                                    '## 1.2.2 - October 1, 2026\n\n- #9 is older.\n'})
+        self.commit('Merge pull request #13 from owner/release-1.2.3')
+        if tag:
+            self.git('tag', '-a', 'v1.2.3', '-m', 'v1.2.3')
+        return release.check(self.root, 'v1.2.3')
+
+    def test_a_merged_pull_request_missing_from_the_changelog_is_refused(self):
+        # Pull request 11 merged after the release preparation, as #70 did before v0.3.4.
+        with self.assertRaisesRegex(release.ReleaseError, r'merged since v1.2.2: #11, #12\. Name each'):
+            self.release('## 1.2.3 - October 2, 2026\n\n- A fix (#10).\n- #1, #110 and #120 are other numbers.\n',
+                         'fix(a): one (#4) (#10)', 'feat(b): two (#11)', 'Merge pull request #12 from owner/c',
+                         'docs: a direct commit without a pull request')
+
+    def test_every_pull_request_named_passes_and_the_release_pull_request_is_exempt(self):
+        changelog = '## 1.2.3 - October 2, 2026\n\n- A fix (#10).\n\nPull requests: #11, #12.\n'
+        subjects = 'fix(a): one (#10)', 'feat(b): two (#11)', 'Merge pull request #12 from owner/c'
+        self.assertEqual('1.2.3', self.release(changelog, *subjects, tag=True))
+
+    def test_the_tagged_commit_is_compared_not_a_later_head(self):
+        self.release('## 1.2.3 - October 2, 2026\n\nPull requests: #10.\n', 'fix(a): one (#10)', tag=True)
+        self.commit('feat(c): after the tag (#14)')
+        self.assertEqual('1.2.3', release.check(self.root, 'v1.2.3'))
+
+    def test_without_a_tag_or_an_earlier_release_nothing_is_compared(self):
+        self.commit('feat(b): two (#11)')
+        write_release(self.root)
+        self.assertEqual('1.2.3', release.check(self.root))
+        self.git('tag', '-d', 'v1.2.2')
+        self.assertEqual('1.2.3', release.check(self.root, 'v1.2.3'))
+
+    def test_a_tag_check_outside_a_repository_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            write_release(Path(directory))
+            with patch.dict(os.environ, {'GIT_DIR': str(Path(directory) / 'none')}), \
+                    self.assertRaisesRegex(release.ReleaseError, 'Cannot read the Git history'):
+                release.check(Path(directory), 'v1.2.3')
 
 
 def config_bytes(kind, version='1.2.3', revision=REVISION):
