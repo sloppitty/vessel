@@ -75,6 +75,7 @@ export function ManualExecutionPanel({ api, saved, entries, enabled, dirty, form
     if (alive.current) { setLoaded({ api, ledger: result }); setError(null) }
     return true
   }, [api])
+  // Not useApiRead (#115): reads and writes share one ledger and error, and every answer must first pass the session's high-water mark.
   useEffect(() => {
     if (!playId) return
     const controller = new AbortController()

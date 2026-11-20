@@ -84,6 +84,7 @@ export function PlayLog({ api, playId, draft, onDraft }: {
   // The confirmed-write count this Log's own write produced: it already shows that list, so it needs no read for it.
   const ownWrite = useRef(-1)
   const lastRead = useRef<{ api: WorkspaceApi; playId: string; reload: number } | null>(null)
+  // Not useApiRead (#115): reads are ordered against writes and merged into the shown list, and this Log's own write needs no read.
   useEffect(() => {
     const previous = lastRead.current
     lastRead.current = { api, playId, reload }

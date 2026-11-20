@@ -83,6 +83,7 @@ export function usePlayExecution(api: WorkspaceApi, playId: string | null, statu
     return () => work.controller.abort()
   }, [context])
   const reload = useCallback(() => setRevision(value => value + 1), [])
+  // Not useApiRead (#115): reads and mutations are numbered on one counter, which decides whether the shown facts are fresh.
   useEffect(() => {
     if (!playId) return
     // A newer read aborts this one, so at most one read is live.

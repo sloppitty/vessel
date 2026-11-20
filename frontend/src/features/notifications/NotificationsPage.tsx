@@ -59,6 +59,7 @@ export function NotificationsPage({ api, inApp, accounts, state, onStateChange, 
 
   // The request in flight, so a notification reset can drop its answer at once (the replacement fetch is debounced).
   const inflight = useRef<AbortController | null>(null)
+  // Not useApiRead (#115): an answer applies with a focus anchor taken before rows change, and a feed reset drops the read in flight without reading at once.
   useEffect(() => {
     const controller = new AbortController()
     inflight.current = controller
