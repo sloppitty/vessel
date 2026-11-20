@@ -9,7 +9,7 @@ using Vessel.Domain.Common;
 namespace Vessel.Persistence;
 
 public sealed class CachedActivitySummaryReader(IJournalOwnerContext owner, IOwnerScopeFactory scopes,
-    ActivitySummaryCache cache) : IActivitySummaryReader
+    ActivitySummaryCache cache, IVenueRegistry? venues = null) : IActivitySummaryReader
 {
     public Task<ActivitySummaries> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) =>
         ReadAsync(accountId, TradingMode.Real, ct, accountIds);
@@ -33,15 +33,22 @@ public sealed class CachedActivitySummaryReader(IJournalOwnerContext owner, IOwn
                 await db.Database.CurrentTransaction!.CommitAsync(ct);
                 return ActivityService.Aggregate(facts, accountId, ids, tradingMode: tradingMode);
             }
-            var revision = await ActivityStore.RevisionAsync(db, scope.OwnerId, ct);
-            var key = new ActivitySummaryKey(scope.OwnerId, revision, accountId,
+            // Issue #107: the cache is keyed by the execution revision. Observations (snapshots, funding coverage, sync state)
+            // are read here every time, in the same snapshot, and the cached aggregate is rebased onto them.
+            var revisions = await ActivityStore.RevisionsAsync(db, scope.OwnerId, ct);
+            var observed = await ActivityStore.ObservationsAsync(db, accountId, tradingMode, ct, ids);
+            var key = new ActivitySummaryKey(scope.OwnerId, revisions.ExecutionRevision, accountId,
                 ids is null ? "*" : string.Join(',', ids.Order()), tradingMode);
-            return await cache.ReadAsync(key, async token =>
+            var cached = await cache.ReadAsync(key, async token =>
             {
                 transferred = true;
                 await using (scope)
                 {
-                    var facts = await scope.Services.GetRequiredService<IActivityStore>().ReadAsync(accountId, tradingMode, token, ids);
+                    // Issue #107: an account's read narrows a cached aggregate over several accounts that holds its history.
+                    var narrowed = accountId is { } one && ids is null &&
+                        cache.FindContaining(scope.OwnerId, revisions.ExecutionRevision, tradingMode, one) is { } wide
+                        ? ActivityService.Narrow(wide, one, observed, revisions.Revision) : null;
+                    var facts = narrowed ?? await scope.Services.GetRequiredService<IActivityStore>().ReadAsync(accountId, tradingMode, token, ids);
                     var transaction = db.Database.CurrentTransaction!;
                     await transaction.CommitAsync(token);
                     await transaction.DisposeAsync();
@@ -52,6 +59,9 @@ public sealed class CachedActivitySummaryReader(IJournalOwnerContext owner, IOwn
                     return result;
                 }
             }, () => { transferred = true; return scope.DisposeAsync(); }, ct);
+            var rebased = ActivityService.Rebase(cached, observed, revisions.Revision, accountId, ids, venues);
+            if (!ReferenceEquals(rebased, cached)) cache.Replace(key, cached, rebased);
+            return rebased;
         }
         finally { if (!transferred) await scope.DisposeAsync(); }
     }

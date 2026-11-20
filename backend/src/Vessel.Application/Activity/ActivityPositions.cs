@@ -65,6 +65,24 @@ internal sealed class ActivityPositions
         IndexBreaks(fills, omissions ?? []);
     }
 
+    private ActivityPositions(ActivityPositions source, IReadOnlyList<AccountSnapshot> snapshots)
+    {
+        Snapshots = snapshots.ToDictionary(s => s.AccountId);
+        Contracts = source.Contracts;
+        quantities = source.quantities;
+        nativeCandidates = source.nativeCandidates;
+        breaks = source.breaks;
+        byAccount = source.byAccount;
+        byContract = source.byContract;
+        idless = source.idless;
+    }
+
+    /// <summary>
+    /// Issue #107: the same index over newer snapshots. Only valid when their positions match the ones this index was built
+    /// from (<see cref="ActivityService.Rebase"/> checks that); every index here derives from fills, markers and positions.
+    /// </summary>
+    public ActivityPositions WithSnapshots(IReadOnlyList<AccountSnapshot> snapshots) => new(this, snapshots);
+
     /// <summary>
     /// Phase 2, item 7b: the omitted executions that may lie in a partition, ordered by <see cref="ActivityBreak.ResetAt"/>.
     /// See <see cref="IndexBreaks"/>.

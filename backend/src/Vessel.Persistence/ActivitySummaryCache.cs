@@ -1,20 +1,26 @@
 using System.Reflection;
+using Microsoft.Extensions.Logging;
 using Vessel.Application.Activity;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Persistence;
 
+/// <summary>
+/// One cached aggregate. <paramref name="Revision"/> is the owner's execution revision (issue #107): equal values hold equal
+/// retained history, so an entry is rebased onto newer observations rather than read again.
+/// </summary>
 public readonly record struct ActivitySummaryKey(Guid OwnerId, long Revision, Guid? AccountId, string Accounts, string TradingMode = "real");
 
 /// <summary>Process-local, size-bounded LRU. Failed and abandoned computations never enter the cache.</summary>
-public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int entryLimit = 64)
+public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int entryLimit = 64, ILogger<ActivitySummaryCache>? logger = null)
 {
     private readonly object gate = new();
     private readonly Dictionary<ActivitySummaryKey, Flight> flights = [];
     private readonly Dictionary<ActivitySummaryKey, LinkedListNode<Entry>> entries = [];
     private readonly LinkedList<Entry> lru = [];
     private long size;
+    private long warnedAt;
     private static readonly Dictionary<Type, PropertyInfo[]> StringProperties = new[]
     {
         typeof(Account), typeof(ImportedFill), typeof(AccountSnapshot), typeof(AccountPosition), typeof(AccountStablecoin),
@@ -83,6 +89,37 @@ public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int 
         }
     }
 
+    /// <summary>
+    /// Issue #107: a cached aggregate over several accounts, at this execution revision, that holds
+    /// <paramref name="accountId"/>; an account's read narrows it instead of reading the account's history again.
+    /// </summary>
+    public ActivitySummaries? FindContaining(Guid ownerId, long revision, string tradingMode, Guid accountId)
+    {
+        lock (gate)
+        {
+            foreach (var entry in lru)
+                if (entry.Key.OwnerId == ownerId && entry.Key.Revision == revision && entry.Key.TradingMode == tradingMode &&
+                    entry.Key.AccountId is null && entry.Value.Facts.Accounts.Any(a => a.Id == accountId))
+                    return entry.Value;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Issue #107: keeps an entry's aggregate rebased onto newer observations, so later reads compare with the latest. Only
+    /// replaces the value it was rebased from, and never with an older revision. The charge is kept: execution facts, which
+    /// dominate it, are shared, and observations are one row per account.
+    /// </summary>
+    public void Replace(ActivitySummaryKey key, ActivitySummaries from, ActivitySummaries to)
+    {
+        lock (gate)
+        {
+            if (entries.TryGetValue(key, out var node) && ReferenceEquals(node.Value.Value, from) &&
+                (to.Facts.Revision ?? 0) > (from.Facts.Revision ?? 0))
+                node.Value = node.Value with { Value = to };
+        }
+    }
+
     private async Task RunAsync(ActivitySummaryKey key, Flight flight, Func<CancellationToken, Task<ActivitySummaries>> compute)
     {
         try
@@ -109,6 +146,14 @@ public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int 
                 if (flights.GetValueOrDefault(key) == flight) flights.Remove(key);
                 flight.Completion.TrySetResult(value);
             }
+            // Issue #107: an aggregate larger than the whole cache is computed again on every read; say so, at most hourly.
+            if (charge > capacity && Environment.TickCount64 is var now &&
+                (Interlocked.Read(ref warnedAt) is var warned && (warned == 0 || now - warned >= 3_600_000)) &&
+                Interlocked.CompareExchange(ref warnedAt, now, warned) == warned)
+                logger?.LogWarning("An Activity aggregate of {FillCount} fills and {OperationCount} operations (estimated {ChargeBytes} bytes) " +
+                    "exceeds the Activity cache capacity of {CapacityBytes} bytes and is not cached; every read recomputes it. " +
+                    "Raise Vessel:Activity:CacheCapacityBytes if the host has memory to spare.",
+                    value.Facts.Fills.Count, value.Operations.Count, charge, capacity);
         }
         catch (OperationCanceledException)
         {

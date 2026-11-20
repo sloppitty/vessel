@@ -36,6 +36,14 @@ public sealed record ActivityFacts(IReadOnlyList<Account> Accounts, IReadOnlyLis
 }
 
 /// <summary>
+/// Issue #107: the facts the Activity aggregate reads besides retained history: the scoped enabled accounts, their latest
+/// snapshots with positions and their funding coverage. Every monitor check rewrites some of them, so a cached aggregate is
+/// rebased onto the current ones (<see cref="ActivityService.Rebase"/>) instead of being read and walked again.
+/// </summary>
+public sealed record ActivityObservations(IReadOnlyList<Account> Accounts, IReadOnlyList<AccountSnapshot> Snapshots,
+    IReadOnlyList<AccountFundingState> FundingStates);
+
+/// <summary>
 /// Phase 2, item 7b: an omitted execution as Activity reads it (Sol round 1 on 7b): its market, canonical and native, either
 /// possibly null, and its time, or the read window it lies in when the venue gave none. Never money, order or reason.
 /// </summary>
