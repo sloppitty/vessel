@@ -99,6 +99,15 @@ contract that holds the detail.
   rejecting known missing executions and incomplete fees; R and reviews cover
   Plays only, and RISEx P&L is never promised funding-free
   ([portfolio review][review]).
+- A review completes only by an explicit post-close Complete review, Review again
+  or No review needed; structured answers count, append-only in-trade log entries
+  never do. A manual correction batch is atomic, reasoned and version-checked, and
+  validates only the final closed ledger ([Phase 1][p1]).
+- With imported positions included, a Play weighs 2 positions in batting, average
+  gain/loss, payoff and expectancy only; dollar totals, drawdown, streaks and
+  counts are never weighted ([portfolio review][review]).
+- Shared-exit and flip allocations are owner-confirmed and quantity-conserving;
+  the venue result stays unallocated and unscored ([Phase 2][p2]).
 - The Plays list reads the `Direction` column, never plan, drawing or review
   text. The unscoped list still shows Plays on disabled accounts
   ([list paging][paging]).
@@ -134,9 +143,10 @@ contract that holds the detail.
 - Venue credentials are encrypted with the server-only AES-GCM key ring, per
   owner, account and purpose, through a write-only API. Only verified read-only
   tokens are accepted ([venue credentials][creds]).
-- Token entry needs HTTPS outside explicit development. The only exception is
-  the Vite development build with the API in Development, which shows a
-  plaintext-transport warning ([Lighter delivery][lighter]).
+- Non-loopback token entry needs HTTPS outside explicit development. The Vite
+  development build with the API in Development may use HTTP and shows a
+  plaintext-transport warning; production, staging and other API environments
+  keep the HTTPS guard ([Lighter delivery][lighter]).
 - Verification runs outside database transactions and locks; a short locked
   recheck then saves, or returns 409 if the account or its credential changed
   ([backend review][breview]).

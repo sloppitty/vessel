@@ -10,9 +10,9 @@ or scope; `docs/app-status.md` describes what the app does today.
 
 Never:
 
-1. Read, print or expose `.env` files, secrets (tokens, passwords, credential
-   keys) or the owner's database values, and never put secrets or keys in Vite,
-   request URLs, logs, browser storage, images or chat.
+1. Print or expose the values of `.env` files, secrets (tokens, passwords,
+   credential keys) or the owner's database, and never put secrets or keys in
+   Vite, request URLs, logs, browser storage, images or chat.
 2. Apply a migration to the owner's or any live database during tests, or
    without the owner authorizing that upgrade. Tests use only a throwaway
    database; an authorized upgrade runs `migrate` as an explicit one-shot step,
