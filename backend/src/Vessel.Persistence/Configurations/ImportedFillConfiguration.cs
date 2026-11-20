@@ -22,6 +22,8 @@ internal sealed class ImportedFillConfiguration : IEntityTypeConfiguration<Impor
             .HasPrincipalKey(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(x => new { x.OwnerId, x.AccountId, x.ContractId, x.SourceFillId }).IsUnique();
         builder.HasIndex(x => new { x.OwnerId, x.OccurredAtUtc });
+        // Issue #106: per-account time reads (the monitor's newest fill, exports, backfill windows) seek here.
+        builder.HasIndex(x => new { x.OwnerId, x.AccountId, x.OccurredAtUtc });
         // A fill belongs to the order with the same account, contract and external order ID (LinkedFills, OrderKey).
         builder.HasIndex(x => new { x.OwnerId, x.AccountId, x.ContractId, x.ExternalOrderId });
         builder.Property(x => x.ContractId).HasMaxLength(128);

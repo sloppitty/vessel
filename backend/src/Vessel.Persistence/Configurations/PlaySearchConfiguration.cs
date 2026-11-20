@@ -39,5 +39,8 @@ internal sealed class PlaySearchTextConfiguration : IEntityTypeConfiguration<Pla
         builder.HasKey(x => new { x.OwnerId, x.PlayId, x.Position });
         builder.HasOne<PlaySearchEntry>().WithMany().HasForeignKey(x => new { x.OwnerId, x.PlayId }).OnDelete(DeleteBehavior.Cascade);
         builder.Property(x => x.Field).HasMaxLength(16);
+        // Issue #106: journal search matches "Folded LIKE '%term%'". A trigram GIN index serves that substring predicate
+        // (a B-tree cannot); the owner filter is applied to the rows it finds.
+        builder.HasIndex(x => x.Folded).HasMethod("gin").HasOperators("public.gin_trgm_ops");
     }
 }
