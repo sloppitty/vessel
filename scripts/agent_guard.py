@@ -358,6 +358,9 @@ def check_documents(name, args, documents_here, piped_from, cwd, depth, document
                 raise Refused('Commands piped into a shell cannot be checked. Run them directly.')
             return
         text = ' '.join(producer[1:])
+        if producer[0] == 'echo' and producer[1:2] and producer[1].startswith('-'):
+            raise Refused(f'echo with options piped into {name} runs text the guard cannot read as written. '
+                          'Run the commands directly.')
         if '\\' in text or producer[0] == 'printf' and '%' in text:
             raise Refused(f'{producer[0]} with escapes or format directives piped into {name} runs text the guard '
                           'cannot read as written. Run the commands directly.')

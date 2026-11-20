@@ -76,6 +76,8 @@ REFUSED = {
         'sudo -p "$(cat .env)" true',
         # Text echo or printf would render differently from how it is written.
         "printf 'cat .env\\n' | bash",
+        'echo -n "pnpm db:migrate" | bash',
+        'echo -e "git push --force" | bash',
         "printf '%s' 'cat .env' | sh",
         "echo -e 'cat \\x2eenv' | bash",
         "bash <<'EOF'\nprintf 'cat .env\\n' | bash\nEOF",
