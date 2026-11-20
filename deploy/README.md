@@ -1148,89 +1148,75 @@ unchanged, with the Play's owner, in the same transaction:
 
 ## Upgrade
 
+Upgrade with `./vessel upgrade --to X.Y.Z --yes` (see
+[Upgrade procedure](#upgrade-procedure)), after reading the release notes of
+every release you cross. From v0.4.3 on, each release has an upgrade manifest,
+`docs/releases/vX.Y.Z.upgrade.json`, listing its migrations, post-upgrade steps
+and configuration notes. The API image carries every manifest; `upgrade` prints
+those of each release after the running one up to the target and runs their
+post-steps after `migrate`, before any host starts. The sections below keep
+what the script cannot do for earlier releases. Stopping every writer, the
+backup, `VESSEL_VERSION`, `migrate` and the restart are what `upgrade` does.
+Each section's requirements also apply to every later upgrade that crosses it.
+
 ### From v0.4.1 to v0.4.2
 
-Read the [release notes](../docs/releases/v0.4.2.md). Set `VESSEL_VERSION=0.4.2`
-and use matching API/web images with this release's deploy files. There are no
-new identity or journal migrations and no configuration changes; running
-`migrate` finds nothing to apply. Upgrade API and web together. Earlier upgrade
-requirements below still apply.
+Read the [release notes](../docs/releases/v0.4.2.md). No new migrations and no
+configuration changes. Upgrade API and web together.
 
 ### From v0.4.0 to v0.4.1
 
-Read the [release notes](../docs/releases/v0.4.1.md). Set `VESSEL_VERSION=0.4.1`
-and use matching API/web images with this release's deploy files. There are no
-new identity or journal migrations and no configuration changes; running
-`migrate` finds nothing to apply. Upgrade API and web together. Earlier upgrade
-requirements below still apply.
+Read the [release notes](../docs/releases/v0.4.1.md). No new migrations and no
+configuration changes. Upgrade API and web together.
 
 ### From v0.3.5 to v0.4.0
 
-Read the [release notes](../docs/releases/v0.4.0.md). Set `VESSEL_VERSION=0.4.0`
-and use matching API/web images with this release's deploy files. Stop web,
-every API and every worker, including `worker-notifications` and any optional
-Paper worker, and back up both schemas, evidence and the credential key ring.
-Run the explicit `migrate` service before restarting hosts. It applies thirteen
-journal migrations, in order: `20261021144248_RiskSettings`,
-`20261021164349_RiskContext`, `20261021180627_FillImportConflicts`,
-`20261022100811_ReportingSettings`, `20261022104353_LossLimits`,
-`20261022124043_IfThenRule`, `20261022143200_HistoryRetention`,
-`20261022182854_HistoryBackfill`, `20261022185700_ExecutionOmissions`,
-`20261022193325_FundingSchedule`, `20261023075337_JournalSearch`,
-`20261023083202_FillAllocations` and `20261102123723_MarketSources`. There is
-no new identity migration and there are no required configuration settings.
-
-After `migrate`, run `play-search-rebuild --apply` once (see
-[Journal search index](#journal-search-index)) so existing Plays are searchable.
-Every new limit and history-retention setting starts off or blank; the one new
-schedule that runs by default is the monitor's funding read about every 6 hours
+Read the [release notes](../docs/releases/v0.4.0.md). `migrate` applies thirteen
+journal migrations, from `20261021144248_RiskSettings` to
+`20261102123723_MarketSources`; there is no new identity migration and no
+required setting. After `migrate`, run `play-search-rebuild --apply` once (see
+[Journal search index](#journal-search-index)) so existing Plays are
+searchable; an upgrade to v0.4.3 or later rebuilds every Play through its
+manifest. Every new limit and history-retention setting starts off or blank;
+the monitor's funding read runs about every 6 hours by default
 (`Vessel:Funding:Interval`). Roll back only from the pre-upgrade backup with the
 previous images: the down migrations of `FillAllocations` and
 `UnresolvedStatus` refuse to run once allocations or Unresolved history exist.
-Earlier upgrade requirements below still apply.
 
 ### From v0.3.4 to v0.3.5
 
-Read the [release notes](../docs/releases/v0.3.5.md). Set `VESSEL_VERSION=0.3.5`
-and use matching API/web images with this release's deploy files. Stop every
-writer, including `worker-notifications` and any optional Paper worker, and
-back up both schemas, evidence and the credential key ring. Run the explicit
-`migrate` service before restarting hosts. It applies identity migration
-`20261027213124_DevicePairing`; there are no new journal migrations or required
-configuration settings.
-
-Upgrade API and web together for phone pairing and the Activity unrealized
-P&L fields. Pairing needs an HTTPS origin the phone can reach, not a desktop
-loopback address. Remembered sessions now default to 10 days idle instead of
-14; an explicit `Vessel:Identity:Session:RememberIdleDays` keeps its value.
-Earlier upgrade requirements below still apply.
+Read the [release notes](../docs/releases/v0.3.5.md). `migrate` applies identity
+migration `20261027213124_DevicePairing`; there are no new journal migrations or
+required settings. Upgrade API and web together for phone pairing and the
+Activity unrealized P&L fields. Pairing needs an HTTPS origin the phone can
+reach, not a desktop loopback address. Remembered sessions now default to 10
+days idle instead of 14; an explicit `Vessel:Identity:Session:RememberIdleDays`
+keeps its value.
 
 ### From v0.3.3 to v0.3.4
 
 Read the [release notes](../docs/releases/v0.3.4.md). Wallet sign-in is now the
 only sign-in, and it requires HTTPS. Follow the token-to-wallet procedure below
 before starting the new images; it also lists the deploy-file cleanup for
-installations that already use wallets. Set `VESSEL_VERSION=0.4.2`, preserve
-the owner GUID, and use matching API/web images and this release's deploy files.
-There are no new identity or journal migrations from v0.3.3. Keep registration
-`Closed` until the outstanding real-wallet/non-mainnet acceptance is recorded.
-Earlier upgrade requirements below still apply.
+installations that already use wallets. Preserve the owner GUID. There are no
+new identity or journal migrations from v0.3.3. Keep registration `Closed`
+until the outstanding real-wallet/non-mainnet acceptance is recorded.
 
 ### Moving from the API token to wallet sign-in
 
 Starting with v0.3.4 (October 25, 2026), images have no API token: they refuse
 to start while `Vessel__Auth__Token` is set or `Vessel__Auth__Mode` is anything but
 `Wallet`, and readiness waits for an operator wallet. A Token installation
-moves over **before** starting such images. No journal migration is involved:
-the owner GUID maps the existing journal to the operator user, and the
-identity schema has been migrated since v0.3.0.
+moves over **before** starting such images, by hand: the script cannot edit
+these settings. No journal migration is involved: the owner GUID maps the
+existing journal to the operator user, and the identity schema has been
+migrated since v0.3.0.
 
 1. Choose the installation's own public HTTPS hostname and decide between the
    bundled Caddy overlay and your own HTTPS proxy (see
    [HTTPS and proxy trust](#https-and-proxy-trust)). Sign-in cannot work over
    plain HTTP.
-2. Stop web, every API and every worker (including `worker-notifications` and
-   any `worker-paper`), and take the usual verified backups.
+2. Take a backup with `./vessel backup --yes`, which stops every writer first.
 3. Replace the deploy files with this release's versions, and delete any
    `compose.wallet.yaml`: its settings are now part of `compose.yaml`.
 4. In the private `.env`, delete `Vessel__Auth__Token` and `VESSEL_AUTH_MODE`.
@@ -1254,16 +1240,10 @@ means the previous images **and** the previous deploy files and `.env`.
 
 ### From v0.3.2 to v0.3.3
 
-Read the [release notes](../docs/releases/v0.3.3.md). Stop web, every API and
-every worker on all hosts/replicas, including `worker-notifications` and any
-`worker-paper`, before taking coordinated backups of both database schemas,
-evidence, credential keys and private configuration. Preserve the owner GUID,
+Read the [release notes](../docs/releases/v0.3.3.md). Preserve the owner GUID,
 Compose project and every storage, credential, authentication and TLS overlay.
-This is not a rolling upgrade.
-
-Set `VESSEL_VERSION=0.3.3`, pull matching images and run the explicit `migrate`
-service before starting upgraded hosts. There are no new identity migrations;
-the journal migrations after v0.3.2 are:
+This is not a rolling upgrade: stop replicas on other hosts yourself. There
+are no new identity migrations; the journal migrations after v0.3.2 are:
 
 | Journal migration | Effect |
 | --- | --- |
@@ -1276,8 +1256,7 @@ the journal migrations after v0.3.2 are:
 
 Paper remains off by default. Opt in through Settings only after migrating;
 its scheduler additionally requires the optional `compose.paper.yaml` overlay
-and `--profile paper` (see [Optional paper worker](#optional-paper-worker)). Keep that service stopped
-alongside every other writer during upgrades, backups and restores.
+and `--profile paper` (see [Optional paper worker](#optional-paper-worker)).
 
 Sizing now orders results by actual exit time and requires consecutive recovery
 wins, so historical ladder levels can change. Review preserves the scored
@@ -1286,39 +1265,31 @@ stay reviewed; in-trade log notes do not complete a review.
 
 Rollback requires the pre-upgrade backup and matching previous images.
 Down migrations refuse retained Unresolved history or paper data. Earlier
-versions must also follow the requirements below, including the v0.3.0
-order-identity restriction. No application host migrates at startup.
+versions must also follow the v0.3.0 order-identity restriction below.
 
 ### From v0.3.1 to v0.3.2
 
 Read the [release notes](../docs/releases/v0.3.2.md). This patch restores the
 Review account selector styling and adds no database migrations or configuration
-changes. Back up the installation, set `VESSEL_VERSION=0.3.2` and recreate the
-services with matching API and web images, preserving existing overlays.
-Earlier versions must also follow the upgrade steps below.
+changes.
 
 ### From v0.3.0 to v0.3.1
 
-Read the [release notes](../docs/releases/v0.3.1.md). Stop web, API and every
-worker on all hosts, including `worker-notifications`, and back up both database
-schemas, evidence and credential keys. Preserve the owner GUID and all selected
-storage, credential, authentication and TLS overlays.
-
-Set `VESSEL_VERSION=0.3.1` and run the explicit `migrate` service before starting
-the matching API, web and worker images. It applies these journal migrations in
-order; there are no new identity migrations:
+Read the [release notes](../docs/releases/v0.3.1.md). Preserve the owner GUID
+and all selected storage, credential, authentication and TLS overlays. `migrate`
+applies these journal migrations in order; there are no new identity migrations:
 
 | Journal migration | Effect |
 | --- | --- |
-| `20261018180202_LeverageObservations` | Retains observed position leverage and adds nullable leverage to imported fills. Copies current leveraged snapshot positions; historical fills stay unknown. Apply explicitly before starting upgraded hosts. |
-| `20261019100000_ActivityFactsRevision` | Adds per-owner activity revision counters and commit-deferred invalidation triggers for the bounded in-process aggregation cache. Existing owners start at revision 1. Apply with the explicit journal migration bundle before starting the new API/workers. |
+| `20261018180202_LeverageObservations` | Retains observed position leverage and adds nullable leverage to imported fills. Copies current leveraged snapshot positions; historical fills stay unknown. |
+| `20261019100000_ActivityFactsRevision` | Adds per-owner activity revision counters and commit-deferred invalidation triggers for the bounded in-process aggregation cache. Existing owners start at revision 1. |
 
 Current snapshot leverage is backfilled; past leverage is not reconstructed.
-The cache holds Activity aggregates only and never caches authorization. No
-application host migrates at startup. Rollback requires the pre-upgrade backup
-and matching previous images. Recreate disposable databases that used the
-unshipped `20261018130000_ActivityFactsRevision` ID; never rename migration-history
-rows. When upgrading from v0.2.0 or earlier, the v0.3.0 order-identity restriction
+The cache holds Activity aggregates only and never caches authorization.
+Rollback requires the pre-upgrade backup and matching previous images. Recreate
+disposable databases that used the unshipped
+`20261018130000_ActivityFactsRevision` ID; never rename migration-history rows.
+When upgrading from v0.2.0 or earlier, the v0.3.0 order-identity restriction
 below still applies.
 
 ### From v0.2.0 to v0.3.0
@@ -1331,13 +1302,11 @@ do not bypass it or clear individual tables to force an upgrade.
 Keep a verified backup and the old installation before deliberately creating
 a fresh database and evidence store.
 
-Stop every web, API and worker instance, including `worker-notifications`,
-before changing images or running the one-shot `migrate` service. Set
-`VESSEL_VERSION=0.3.0`, preserve the chosen storage/credential/TLS overlays
-and keep Token mode unless explicitly opting into Wallet mode. The full
-migration and provisioning sequence is below; rollback requires the old
-images and pre-upgrade backup, not down migrations. Publishing the release
-does not perform any of these installation steps.
+Preserve the chosen storage/credential/TLS overlays and keep Token mode unless
+explicitly opting into Wallet mode. The full migration and provisioning
+sequence is below; rollback requires the old images and pre-upgrade backup,
+not down migrations. Publishing the release does not perform any of these
+installation steps.
 
 ### After v0.2.0: order identity (breaking, no upgrade path)
 
@@ -1354,12 +1323,10 @@ database and evidence store) before applying it. See
   index on the events' run identity. `migrate` applies it, then provisions the
   `notifications` deployment, queue, dead-letter queue and subscription.
 - Compose gains the `worker-notifications` service. Add it to any Compose override
-  that pins images, and to your own stop lists for upgrades, backups and restores.
+  that pins images.
 - Optional settings: `Vessel__Notifications__RetentionDays` (90), `MaxEventAge`
   (7 days), `PopupWindow` (24 hours), `TestCooldown` (10 seconds),
   `HeartbeatTimeout` and `HeartbeatFile`.
-
-Stop web, API and the workers, back up, then upgrade as usual.
 
 ### Multi-user wallet sign-in (this delivery)
 
@@ -1374,11 +1341,11 @@ origin, and anything else the API rejects at startup ([`check-config`](#configur
 **before either EF bundle**.
 Do not bypass that wrapper when upgrading.
 
-**Stop every API and worker process on every host/replica, including
-`worker-notifications`, and take a private, verified backup first.** This is not a
-rolling upgrade. This rebased delivery also includes the breaking OrderIdentity
-change above: a v0.2.0 database with imported orders/fills/links must be recreated;
-these identity migrations do not supply an order backfill.
+**Stop every API and worker process on every host/replica and take a private,
+verified backup first.** This is not a rolling upgrade. This rebased delivery
+also includes the breaking OrderIdentity change above: a v0.2.0 database with
+imported orders/fills/links must be recreated; these identity migrations do not
+supply an order backfill.
 
 Identity's `20261017155708_InitialIdentity` uses its own schema/history. The
 journal bundle applies `20261016174509_FundingPayments`,
@@ -1424,19 +1391,17 @@ migration run. Before it:
   service, which must be healthy first; then `api` and the new `worker` start.
 - The restore procedure gains the mandatory `rotate-event-epoch` step below.
 
-Stop web, API and the workers, back up, then follow the procedure below. A worker
-stopped during a run loses nothing: runs are idempotent and the next run repeats
-the work.
+A worker stopped during a run loses nothing: runs are idempotent and the next
+run repeats the work.
 
 ### From v0.1.2 to v0.1.3
 
 This upgrade includes migration `20261016104756_PlayDirection`, which adds a
 `Direction` column to saved Plays, fills it from each Play's plan and adds two
-list indexes. Back up the database first and keep web and API stopped while the
-explicit migration service runs, as in the [upgrade procedure](#upgrade-procedure).
-After the migration, older API images can no longer save new Plays, because
-they do not write the new column; roll back by restoring the backup, not by
-starting an older image. Storage, credentials and Compose files are unchanged.
+list indexes. After the migration, older API images can no longer save new
+Plays, because they do not write the new column; roll back by restoring the
+backup, not by starting an older image. Storage, credentials and Compose files
+are unchanged.
 
 ### From v0.1.1 to v0.1.2
 
@@ -1454,9 +1419,7 @@ migration service connect before the database is ready.
 
 This upgrade includes migration `20261013190344_DiaryCompletion`, which adds
 manual-execution records and correction history, retrospective Play provenance,
-and structured review with amendment history. Back up the database, evidence
-and credential key ring before upgrading. Keep web and API stopped while the
-explicit migration service runs. The application never migrates at startup.
+and structured review with amendment history.
 
 Venue and architecture changes introduce no additional migration. The new
 Lighter · Robinhood venue uses its own accounts and read-only tokens; existing
@@ -1469,8 +1432,9 @@ The operator command `deploy/vessel` (copy it into the operator directory with
 the other deploy files; Python 3, standard library only) reads the same Compose
 configuration as bare `docker compose` commands, including `COMPOSE_FILE` and
 `COMPOSE_PROFILES` from `.env`; repeat `-f`/`--profile` options after the
-subcommand only if you pass them to Compose too. Its read-only commands change
-nothing and print no `.env` values:
+subcommand only if you pass them to Compose too. Use this release's deploy
+files, including `vessel`, with the target version. Its read-only commands
+change nothing and print no `.env` values:
 
 ```sh
 ./vessel status                 # versions, every service incl. paper/notifications workers, migrations, disk, last backup
@@ -1481,96 +1445,62 @@ Its changing commands print their plan and change nothing without `--yes`.
 Each first stops every writer, which is every running container of the project
 except PostgreSQL, RabbitMQ and RustFS: API, `worker`, `worker-notifications`,
 `worker-paper`, any other worker service, web and TLS. It cannot see replicas on
-other Docker hosts; stop those yourself.
+other Docker hosts; stop those yourself. This is never a rolling upgrade.
 
 ```sh
-./vessel upgrade --to 0.4.3 --yes   # backup, VESSEL_VERSION in .env, explicit migrate, start what ran
+./vessel upgrade --to 0.4.3 --yes   # backup, VESSEL_VERSION in .env, explicit migrate, post-steps, start what ran
 ./vessel rollback --yes --keep-active <operator-guid>   # pre-upgrade backup and previous version, in place
 ```
 
 `upgrade` always takes a new pre-upgrade backup (see [Backups](#backups)) and
 stops, restarting the old version, if that fails. It changes only the
-`VESSEL_VERSION` line of `.env`, runs the `migrate` service and then starts
-what was running and waits for health. Run the release's post-upgrade steps
-from its section below, or pass its upgrade manifest with `--manifest`. If a
-step fails, the hosts stay stopped and the command prints the `rollback` to
-run. `rollback` first backs up the current state, then restores the
-pre-upgrade backup and the previous `VESSEL_VERSION` as in
+`VESSEL_VERSION` line of `.env`, runs the `migrate` service and the release
+manifests' post-steps, then starts what was running and waits for health.
+`--manifest FILE` uses that manifest instead of the image's; a target image
+without manifests (before v0.4.3) runs none, so run that release's steps from
+its section above. If a step fails, the hosts stay stopped and the command
+prints the `rollback` to run. `rollback` first backs up the current state,
+then restores the pre-upgrade backup and the previous `VESSEL_VERSION` as in
 [Isolated restore](#isolated-restore), including identity reset and
 `rotate-event-epoch`. Images a digest pins, not `VESSEL_VERSION`, are refused.
+The plan a command prints without `--yes` is also its manual procedure.
 
-The manual equivalent follows. Back up first, read the changelog, and set `VESSEL_VERSION` to the chosen release.
-Retain the complete `COMPOSE_FILE` in the private `.env`. This applies to every
-bare command below; explicit `-f` lists must include all those overlays.
-
-```sh
-docker compose pull
-docker compose stop web api worker worker-notifications
-docker compose up -d
-docker compose ps -a
-```
-
-`up` restarts the completed migration service and applies any pending migrations
-before API and both workers start. Re-running it against the same version is idempotent.
-Stop web, every API and both workers on all hosts first when a schema change is expected, so no old process
-uses the schema while it changes. This
-ordering is the explicit deployment migration step, not API startup migration.
-Do not use `docker compose restart` to upgrade or apply migrations. Failed
+Never use `docker compose restart` to upgrade or apply migrations: migrations run
+only through the explicit `migrate` service, never at API startup, and failed
 migrations block API startup; inspect the migration logs before proceeding.
-Use both `-f` options above when credential storage is configured.
-An application downgrade does not roll back the database. Restore backups if a
-new schema is incompatible with the old image. An older API or worker image refuses
-a schema that has migrations it does not know: the API stays unready and each worker
+An application downgrade does not roll back the database: restore the
+pre-upgrade backup (`rollback`). An older API or worker image refuses a schema
+that has migrations it does not know: the API stays unready and each worker
 exits at start, both logging the unknown migration IDs (see
 [Logs and troubleshooting](#logs-and-troubleshooting)).
 
 ## Backups
 
-`./vessel backup --yes` does this: it stops every writer, writes a new
+`./vessel backup --yes` stops every writer, writes a new
 `backups/vessel-<UTC time>/` directory (mode 700, never overwritten) with
 `vessel.dump` (both schemas), the RustFS or local evidence archive, SHA-256
-sums in `manifest.json`, and starts again what was running. It does not include
-an external S3 bucket, the credential ring, `.env` or the RabbitMQ volume.
-The manual commands follow.
+sums in `manifest.json`, and starts again what was running. The RabbitMQ volume
+is excluded: subscribers recover unsettled events from PostgreSQL. Keep backups
+private and test restores in an isolated installation.
 
-Keep backups private and test restores in an isolated installation. Stop web, API
-and both workers to keep database references and evidence consistent, then (the RabbitMQ
-volume is excluded: subscribers recover unsettled events from PostgreSQL):
+What it does not include, back up separately:
 
-Retain the complete `COMPOSE_FILE` in the private `.env` for **all** commands
-below, including the final `up`. Never omit the TLS/storage/credential overlays
-on restart.
+- The credential ring, with restricted permissions and a separate protected
+  destination. Do not put the keys inside the database or evidence archive.
+- The owner GUID, `.env` and operator settings, privately.
+- An external S3 bucket (`compose.storage-external.yaml`): use the provider's
+  backup.
 
-```sh
-umask 077
-mkdir -p backups
-docker compose stop web api worker worker-notifications
-docker compose exec -T postgres pg_dump -U vessel -d vessel -Fc > backups/vessel.dump
-docker compose stop rustfs
-docker compose run --rm --no-deps -T --entrypoint tar rustfs \
-  -C /data -czf - . > backups/objects.tar.gz
-docker compose up -d
-```
-
-Back up the credential ring **separately**, with restricted permissions and a
-separate protected destination. Save the owner GUID and operator settings
-privately too. Do not put the keys inside the database or evidence archive.
 PostgreSQL 18 stores its data below the named volume mounted at
 `/var/lib/postgresql`. Do not copy a live data directory as a substitute for
-`pg_dump`. RustFS uses the named `objects` volume at `/data`, owned by UID 10001.
-Archive the **entire** stopped volume, including RustFS metadata, and initially
-restore with the same RustFS version. This is not a directory of original images;
-use the S3 API for cross-provider copies. Restore it, the database and the same key ring into a
-disposable deployment before relying on the procedure. The local release
-verification exercises the restore below with synthetic records and evidence.
-
-With `compose.storage-local.yaml`, keep web, every API and both workers stopped but replace the RustFS
-stop/archive commands with:
-
-```sh
-docker compose -f compose.yaml -f compose.storage-local.yaml run --rm --no-deps -T \
-  --entrypoint tar api -C /var/lib/vessel/evidence -czf - . > backups/evidence.tar.gz
-```
+`pg_dump`. RustFS uses the named `objects` volume at `/data`, owned by UID
+10001; the backup archives the **entire** stopped volume, including RustFS
+metadata, so initially restore it with the same RustFS version. It is not a
+directory of original images; use the S3 API for cross-provider copies. Restore
+it, the database and the same key ring into a disposable deployment before
+relying on the procedure. The local release verification exercises the restore
+below with synthetic records and evidence, and an upgrade from the previous
+release through `./vessel upgrade`.
 
 ## Isolated restore
 
@@ -1590,7 +1520,7 @@ another image version or another storage mode, then restores the database and
 evidence, runs `identity reset-after-restore` and `rotate-event-epoch`, and
 leaves every host stopped for the reconciliation below. `--start` also runs
 `migrate` and starts the hosts, for when nothing needs reconciling. The manual
-steps follow.
+steps follow, for a backup the script did not make.
 
 The examples use the default mode; add every applicable `-f` overlay to each
 command. `-p vessel-restore-check` must never name the live project.
@@ -1720,7 +1650,12 @@ cookies, guarded writes and that no bearer value authenticates. It checks the
 internal-CA TLS mode and the default plain-HTTP web (behind an operator's own
 HTTPS proxy, with the same public origin and session), spoofed scheme/address handling,
 compression, headers, unbuffered SSE via a local fixture, upload limits, unpublished
-web in TLS mode and a fresh-volume restore. It checks that every running service has
+web in TLS mode and a fresh-volume restore. First, in a separate project with the
+paper worker, it runs the previous published release (pulled from Docker Hub),
+seeds synthetic data and upgrades it with `./vessel upgrade --to` the images
+under check, which must back up first, stop and restart every host, apply
+exactly the migrations the upgrade manifests list, run their post-steps and keep
+the data. It checks that every running service has
 capped logs, `no-new-privileges`, no capabilities beyond those listed above and a
 read-only root, and that web and the TLS proxy are healthy; that a journal schema
 with a migration the image does not know makes the API unready (with the reason in
