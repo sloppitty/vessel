@@ -11,6 +11,15 @@
   `restore --from DIR` and `rollback`. Changing commands print their plan and need `--yes`,
   stop every writer (paper and notification workers included) and restart what was running;
   a backup is timestamped, never overwritten and always taken before a migration.
+- `deploy/vessel upgrade` runs the post-steps in each release's upgrade manifest
+  (`docs/releases/vX.Y.Z.upgrade.json`, carried in the API image) for every release it
+  crosses. From 0.4.3 on, it stops before changing anything when the target's manifest is
+  missing or cannot be read.
+- `scripts/release.py check` requires the upgrade manifest from 0.4.3, and release
+  verification upgrades the previous published release, with data, through `./vessel
+  upgrade`.
+- A `vessel-upgrade` agent skill runs the operator command, and only when the owner asks for
+  a deployment.
 
 ### Fixed
 
@@ -148,6 +157,8 @@
 - Trading mode is a required type in the backend: no call reads the real journal because the
   mode was left out, real-only endpoints are declared with `.RealOnly()` metadata, and every
   API endpoint must be classified as real-only or mode-aware.
+- `deploy/README.md` keeps only what the operator command does not cover; the manual upgrade
+  and backup command blocks point to `./vessel`.
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and
