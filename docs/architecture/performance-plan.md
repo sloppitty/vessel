@@ -588,3 +588,7 @@ that #110 does not touch, such as Activity, were also faster on head, so part of
 and Sizing, which read closed Plays without needing their drawings, gained 25–30% at p50, more than the control;
 the Plays list was already fast at this size and stays within noise. The editor load still returns the whole
 drawings document, as before.
+
+Not measured: one list row with large drawings against an otherwise identical row without. The list rows were
+already projections that never selected drawings, and full Play loads no longer map them, so that comparison is
+guaranteed by the query shape rather than timed here.
