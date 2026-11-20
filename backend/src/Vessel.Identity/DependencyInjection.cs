@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 using Vessel.Application.Ownership;
 
 namespace Vessel.Identity;
@@ -21,7 +22,7 @@ public static class DependencyInjection
         services.TryAddSingleton(TimeProvider.System);
         // Directory/cleanup construction, liveness and requests without cookies do not resolve a database.
         services.AddSingleton<IDbContextFactory<IdentityDbContext>>(sp =>
-            new IdentityContextFactory(configuration, sp.GetRequiredService<IdentitySchema>()));
+            new IdentityContextFactory(configuration, sp.GetRequiredService<IdentitySchema>(), sp));
         services.AddScoped(sp => sp.GetRequiredService<IDbContextFactory<IdentityDbContext>>().CreateDbContext());
         services.AddHostedService<IdentityStartupValidation>();
         services.Replace(ServiceDescriptor.Singleton<IJournalOwnerDirectory, IdentityOwnerDirectory>());
@@ -56,15 +57,16 @@ public static class DependencyInjection
     }
 }
 
-internal sealed class IdentityContextFactory(IConfiguration configuration, IdentitySchema schema) : IDbContextFactory<IdentityDbContext>
+internal sealed class IdentityContextFactory(IConfiguration configuration, IdentitySchema schema, IServiceProvider services)
+    : IDbContextFactory<IdentityDbContext>
 {
     public IdentityDbContext CreateDbContext()
     {
-        var connection = configuration.GetConnectionString("Vessel");
-        if (string.IsNullOrWhiteSpace(connection))
+        if (string.IsNullOrWhiteSpace(configuration.GetConnectionString("Vessel")))
             throw IdentityErrors.Error(503, "identity-unavailable");
         var options = new DbContextOptionsBuilder<IdentityDbContext>();
-        IdentityDbContext.Configure(options, connection, schema);
+        // The host's directory pool (see Vessel.Persistence.DatabasePools), never one built from the connection string.
+        IdentityDbContext.Configure(options, services.GetRequiredService<NpgsqlDataSource>(), schema);
         options.ConfigureWarnings(warnings => warnings.Log(
             (RelationalEventId.ConnectionError, LogLevel.Debug), (RelationalEventId.CommandError, LogLevel.Debug),
             (RelationalEventId.TransactionError, LogLevel.Debug), (CoreEventId.QueryIterationFailed, LogLevel.Debug),

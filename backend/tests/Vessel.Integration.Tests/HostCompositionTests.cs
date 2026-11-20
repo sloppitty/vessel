@@ -1,14 +1,20 @@
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Npgsql;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Infrastructure.Internal;
 using Vessel.Application.Credentials;
 using Vessel.Application.Monitoring;
 using Vessel.Application.Ownership;
 using Vessel.Application.Plays.Execution;
 using Vessel.Application.Workspace;
+using Vessel.Identity;
 using Vessel.Infrastructure.Monitoring;
+using Vessel.Persistence;
 using Vessel.Messaging.Modules.Verification;
 using Vessel.Worker;
 
@@ -56,6 +62,37 @@ public sealed class HostCompositionTests
         Assert.Same(workerScope.ServiceProvider.GetRequiredService<MonitorDiscrepancyService>(),
             workerScope.ServiceProvider.GetRequiredService<IMonitorEvaluator>());
     }
+
+    [Fact]
+    public void Api_and_worker_contexts_borrow_the_registered_journal_and_directory_pools()
+    {
+        var owner = Guid.NewGuid();
+        using var api = new CoreApiFactory(owner, connection: UnusedDatabase);
+        using var worker = Worker(owner, modules: null);
+        foreach (var services in new[] { api.Services, worker.Services })
+        {
+            using var scope = services.CreateScope();
+            var journal = services.GetRequiredKeyedService<NpgsqlDataSource>(DatabasePools.Journal);
+            var directory = services.GetRequiredService<NpgsqlDataSource>();
+            // Separate pools, so a unit holding a journal connection never waits for its own pool to read identity.
+            Assert.NotSame(journal, directory);
+            // A context built from the connection string would carry that string and its own data source (another pool).
+            Assert.Same(journal, DataSourceOf(scope.ServiceProvider.GetRequiredService<VesselDbContext>()));
+            Assert.Same(directory, DataSourceOf(scope.ServiceProvider.GetRequiredService<IdentityDbContext>()));
+            using var created = services.GetRequiredService<IDbContextFactory<IdentityDbContext>>().CreateDbContext();
+            Assert.Same(directory, DataSourceOf(created));
+        }
+    }
+
+#pragma warning disable EF1001 // The provider's options extension is the only place the configured data source is visible.
+    private static System.Data.Common.DbDataSource? DataSourceOf(DbContext context)
+    {
+        var options = context.GetService<IDbContextOptions>().FindExtension<NpgsqlOptionsExtension>();
+        Assert.NotNull(options);
+        Assert.Null(options.ConnectionString);
+        return options.DataSource;
+    }
+#pragma warning restore EF1001
 
     [Fact]
     public void A_worker_without_the_monitor_module_registers_no_monitor_use_cases()

@@ -1,4 +1,6 @@
+using System.Reflection;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Vessel.Application.Common;
 using Vessel.Application.Credentials;
 using Vessel.Application.Events;
@@ -119,6 +121,59 @@ public sealed class MonitorRefreshCancellationTests
             Assert.Equal(502, (await Assert.ThrowsAsync<ProblemException>(() => RefreshAsync(db, owner, reader, id, clock, default))).StatusCode);
         await using (var verify = database.Context(owner))
             Assert.Equal("error", (await verify.Accounts.AsNoTracking().SingleAsync()).SyncStatus);
+    }
+
+    // Issue #106: a lock or statement timeout while the run reads its account, before the run's own error handling, still
+    // releases the lease with the refresh cooldown and records no venue failure.
+    [PostgresFact]
+    public async Task A_busy_database_before_the_run_starts_releases_the_lease_without_a_sync_failure()
+    {
+        await using var database = await CoreDatabase.CreateAsync();
+        var owner = Guid.NewGuid();
+        var clock = new Clock();
+        var reader = new ControlledReader();
+        var id = await SyncedAccountAsync(database, owner, reader, clock);
+        await using (var db = database.Context(owner))
+        {
+            var venues = TestVenues.With(reader);
+            var work = TestUnitOfWork.For(db);
+            var options = new MonitorOptions { ManualCooldown = Cooldown };
+            var store = DispatchProxy.Create<IMonitorStore, BusyCaptureStore>();
+            ((BusyCaptureStore)store).Inner = MonitorTestPaths.Store(db, work, options);
+            var coordinator = new MonitorCoordinator(store, new WorkspaceStore(db, work),
+                MonitorTestPaths.Execution(db, venues, time: clock), venues, new NoCredentials(), work, new NoEvents(),
+                new NoCommands(), new CoreOwner(owner), options, clock);
+            var lease = await coordinator.AdmitRefreshAsync(id, "test-" + Guid.NewGuid().ToString("N"), default);
+            ((BusyCaptureStore)store).Armed = true;
+            var error = await Assert.ThrowsAsync<PostgresException>(() => coordinator.RunAsync(lease, default));
+            Assert.True(DatabaseBusy.Is(error));
+        }
+        await using var verify = database.Context(owner);
+        var account = await verify.Accounts.AsNoTracking().SingleAsync();
+        Assert.Equal(("synced", (string?)null), (account.SyncStatus, account.LastSyncError));
+        await AssertReleasedWithCooldownAsync(verify, clock);
+    }
+
+    public class BusyCaptureStore : DispatchProxy
+    {
+        public IMonitorStore Inner = null!;
+        public bool Armed;
+
+        protected override object? Invoke(MethodInfo? method, object?[]? args)
+        {
+            if (Armed && method!.Name == nameof(IMonitorStore.CaptureAsync))
+            {
+                Armed = false;
+                return Task.FromException<MonitorCapture?>(new PostgresException(
+                    "canceling statement due to lock timeout", "ERROR", "ERROR", PostgresErrorCodes.LockNotAvailable));
+            }
+            try { return method!.Invoke(Inner, args); }
+            catch (TargetInvocationException error) when (error.InnerException is not null)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error.InnerException).Throw();
+                throw;
+            }
+        }
     }
 
     private static async Task<Guid> SyncedAccountAsync(CoreDatabase database, Guid owner, ControlledReader reader, Clock clock)

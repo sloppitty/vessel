@@ -158,6 +158,83 @@ public sealed partial class EventSubscriptionTests
         Assert.Equal(("delivered", 1), await runtime.ReceiptAsync(raced, slow.Id));
     }
 
+    // Issue #106: a second live delivery waits for the first to commit, past the lock timeout, whether it waits at the
+    // owner's first-time initialization or at the receipt the first dispatcher inserted and has not committed.
+    [VesselEventPostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_second_live_delivery_waits_past_the_lock_timeout_for_the_first_to_commit(bool initialized)
+    {
+        await using var runtime = await Runtime.CreateAsync(lockTimeout: TimeSpan.FromSeconds(1));
+        var contended = await runtime.RegisterNewAsync("contended-live");
+        if (initialized)
+        {
+            var earlier = await runtime.AppendAsync(Draft("earlier"));
+            Assert.Equal(DispatchOutcome.Delivered, (await runtime.DispatchAsync(contended, earlier.Id)).Outcome);
+        }
+        var slow = await runtime.AppendAsync(Draft("live-slow"));
+        var first = runtime.DispatchAsync(contended, slow.Id);
+        await runtime.Subscriber.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var second = runtime.DispatchAsync(contended, slow.Id);
+        await Task.Delay(TimeSpan.FromMilliseconds(1800));
+        Assert.False(second.IsCompleted, second.IsFaulted ? second.Exception!.GetBaseException().Message : "The second delivery did not wait.");
+        runtime.Subscriber.Release.TrySetResult();
+        Assert.Equal(DispatchOutcome.Delivered, (await first).Outcome);
+        Assert.Equal(DispatchOutcome.AlreadySettled, (await second).Outcome);
+        Assert.Equal(1, runtime.Subscriber.Calls(slow.Id));
+    }
+
+    // Issue #106: a unit that fails to commit rolls back the owner's first-time initialization. Recording the failed
+    // attempt then waits, past the lock timeout, for another dispatcher's uncommitted initialization of the same
+    // subscription instead of losing the attempt to a lock timeout.
+    [VesselEventPostgresFact]
+    public async Task A_failed_commit_records_its_attempt_after_waiting_past_the_lock_timeout_for_another_initialization()
+    {
+        await using var runtime = await Runtime.CreateAsync(lockTimeout: TimeSpan.FromSeconds(1));
+        var contended = await runtime.RegisterNewAsync("contended-failure");
+        var failing = await runtime.AppendAsync(Draft("commit-fails"));
+        await using var other = new NpgsqlConnection(runtime.Database.ConnectionString);
+        await other.OpenAsync();
+        await using var otherTransaction = await other.BeginTransactionAsync();
+        var otherInitialized = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? otherDispatcher = null;
+        runtime.BeforeCommit = async () =>
+        {
+            // This dispatcher's initialization is uncommitted: the other one's waits for it, then holds its own.
+            otherDispatcher = Task.Run(async () =>
+            {
+                await using (var insert = new NpgsqlCommand("""
+                    INSERT INTO event_subscriptions(owner_id,name,module,filters,filter_fingerprint,responsible_from,
+                        low_water_mark,status,registered_at,updated_at)
+                    SELECT @owner,r.name,r.module,r.filters,r.filter_fingerprint,0,0,'active',now(),now()
+                    FROM event_subscription_registrations r WHERE r.name=@name
+                    ON CONFLICT DO NOTHING
+                    """, other, otherTransaction))
+                {
+                    insert.Parameters.AddWithValue("owner", runtime.Owner);
+                    insert.Parameters.AddWithValue("name", contended.Name);
+                    Assert.Equal(1, await insert.ExecuteNonQueryAsync());
+                }
+                otherInitialized.TrySetResult();
+                await Task.Delay(TimeSpan.FromMilliseconds(1800));
+                await otherTransaction.CommitAsync();
+            });
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (await runtime.ScalarAsync<bool>($"SELECT cardinality(pg_blocking_pids({other.ProcessID}))=0"))
+            {
+                if (otherDispatcher.IsCompleted) await otherDispatcher; // Surfaces its failure instead of polling forever.
+                if (DateTime.UtcNow > deadline) throw new TimeoutException("The other initialization never waited.");
+                await Task.Delay(20);
+            }
+            throw new InvalidOperationException("Synthetic commit failure.");
+        };
+        runtime.AfterRollback = () => otherInitialized.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(DispatchOutcome.RetryScheduled, (await runtime.DispatchAsync(contended, failing.Id)).Outcome);
+        await otherDispatcher!;
+        Assert.Equal(1, runtime.Subscriber.Calls(failing.Id));
+        Assert.Equal(("pending", 1), await runtime.ReceiptAsync(contended, failing.Id));
+    }
+
     // Round 2: the receipt stays locked while a failed attempt is rolled back and recorded, so a concurrent
     // dispatcher cannot run the handler again in between.
     [VesselEventPostgresFact]
@@ -620,7 +697,7 @@ public sealed partial class EventSubscriptionTests
     {
         private readonly ServiceProvider provider;
 
-        private Runtime(CoreDatabase database, VesselEventSettings? settings)
+        private Runtime(CoreDatabase database, VesselEventSettings? settings, TimeSpan? lockTimeout)
         {
             Database = database;
             Reader = database.Context(Owner);
@@ -628,7 +705,8 @@ public sealed partial class EventSubscriptionTests
             {
                 ["ConnectionStrings:Vessel"] = database.ConnectionString,
                 ["Vessel:Auth:OwnerId"] = Owner.ToString(),
-                ["Vessel:Events:RetentionBatch"] = (settings?.RetentionBatch ?? 1000).ToString()
+                ["Vessel:Events:RetentionBatch"] = (settings?.RetentionBatch ?? 1000).ToString(),
+                ["Vessel:Database:LockTimeout"] = lockTimeout?.ToString("c")
             }).Build();
             var services = new ServiceCollection();
             services.AddLogging();
@@ -643,7 +721,26 @@ public sealed partial class EventSubscriptionTests
                 sp.GetRequiredService<VesselDbContext>(), sp.GetRequiredService<IVesselEventSink>(), Owner, () => SavingConflict));
             services.AddKeyedScoped<IVesselEventSubscriber>(StorageSubscription, (sp, _) =>
                 new StorageSubscriber(sp.GetRequiredService<IUnitOfWork>(), StorageActive));
+            services.AddSingleton<IUnitOfWorkParticipant>(new CommitHook(this));
             provider = services.BuildServiceProvider();
+        }
+
+        /// <summary>Runs once before the next unit commits; throwing fails that commit.</summary>
+        public Func<Task>? BeforeCommit { get; set; }
+        /// <summary>Runs once after the next unit's transaction has rolled back.</summary>
+        public Func<Task>? AfterRollback { get; set; }
+
+        private sealed class CommitHook(Runtime runtime) : IUnitOfWorkParticipant
+        {
+            public Task BeforeCommitAsync(CancellationToken cancellationToken) => Take(runtime.BeforeCommit, () => runtime.BeforeCommit = null);
+            public Task AfterCommitAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+            public Task RollbackAsync(CancellationToken cancellationToken) => Take(runtime.AfterRollback, () => runtime.AfterRollback = null);
+
+            private static Task Take(Func<Task>? hook, Action clear)
+            {
+                clear();
+                return hook?.Invoke() ?? Task.CompletedTask;
+            }
         }
 
         public const string SavingSubscription = "saving";
@@ -657,8 +754,8 @@ public sealed partial class EventSubscriptionTests
         public VesselDbContext Reader { get; }
         public IConfiguration Configuration { get; }
 
-        public static async Task<Runtime> CreateAsync(VesselEventSettings? settings = null) =>
-            new(await CoreDatabase.CreateAsync(), settings);
+        public static async Task<Runtime> CreateAsync(VesselEventSettings? settings = null, TimeSpan? lockTimeout = null) =>
+            new(await CoreDatabase.CreateAsync(), settings, lockTimeout);
 
         public AsyncServiceScope Scope() => provider.CreateAsyncScope();
         public IOwnerScopeFactory OwnerScopes => provider.GetRequiredService<IOwnerScopeFactory>();

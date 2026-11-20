@@ -33,7 +33,7 @@ A second pass on the `t3/backend-health` branch, based on `main` at `6d2e55a`. I
 
 Each needs measurement or owner agreement first; none is implemented.
 
-- Session `lock_timeout` with a 55P03 mapping, so lock waits fail fast and clearly.
+- Session `lock_timeout` with a 55P03 mapping, so lock waits fail fast and clearly. Done in issue #106 (November 2026), with `statement_timeout` too; see [deploy/README.md](../../deploy/README.md#database-timeouts).
 - S2: one lock coordinator for the advisory-lock sites and the account-row lock implementations.
 - An `imported_fills (OwnerId, AccountId, OrderId)` index, after `EXPLAIN` on a 100k-fill dataset.
 - A read model for Activity, Overview and Review (P6), after measurement.

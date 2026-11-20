@@ -198,9 +198,21 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
     public async Task<bool> RunAsync(MonitorLease lease, CancellationToken ct)
     {
         if (lease.OwnerId != owner.OwnerId) throw new InvalidOperationException("A monitor lease belongs to another owner.");
-        var capture = await store.CaptureAsync(lease.AccountId, ct);
-        if (capture is null) return false;
-        var before = await store.FindAsync(lease.AccountId, ct);
+        MonitorCapture? capture;
+        MonitorAccount? before;
+        try
+        {
+            capture = await store.CaptureAsync(lease.AccountId, ct);
+            if (capture is null) return false;
+            before = await store.FindAsync(lease.AccountId, ct);
+        }
+        catch (Exception ex) when (DatabaseBusy.Is(ex))
+        {
+            // A busy database before the run started: release the lease as an interrupted run of its kind would (a backfill
+            // or funding read stays due), record no venue failure, and let the caller or the next run retry.
+            await ReleaseUnstartedAsync(lease);
+            throw;
+        }
         if (before is null || !before.Owns(lease.Generation, lease.WorkerId, time.GetUtcNow())) return false;
         if (lease.Trigger == "backfill") return await RunBackfillAsync(lease, capture, ct);
         if (lease.Trigger == "funding") return await RunFundingAsync(lease, capture, ct);
@@ -265,7 +277,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                         .ReadOrdersAsync(capture.Account, ct);
                     if (!orders.Orders.All(VenueFactChecks.Valid)) throw new VenueReadException("Invalid order facts.");
                 }
-                catch (Exception ex) when (refresh && (ex is not OperationCanceledException || !ct.IsCancellationRequested))
+                catch (Exception ex) when (refresh && !DatabaseBusy.Is(ex) && (ex is not OperationCanceledException || !ct.IsCancellationRequested))
                 {
                     // Refresh imports public facts even when private/order coverage is unavailable.
                     // Never expose exception text, which can contain credentials or request URLs.
@@ -297,7 +309,7 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
             await store.DeferVenueAsync(capture.Account.VenueId, limited.RetryAtUtc, time.GetUtcNow(), CancellationToken.None);
             return await FailAsync(lease, capture, false, "The venue rate limit deferred the next account check.", ct, snapshotApplied);
         }
-        catch (Exception ex) when (ex is not MonitorAdmissionException &&
+        catch (Exception ex) when (ex is not MonitorAdmissionException && !DatabaseBusy.Is(ex) &&
             (ex is not OperationCanceledException || !ct.IsCancellationRequested))
         {
             // Do not log exception payloads: HTTP errors may contain credential-bearing request information.
@@ -308,10 +320,12 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
                 "The read-only credential is unavailable or was refused. Update it to resume monitoring." :
                 "The venue check failed. Monitoring will retry.", ct, snapshotApplied);
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is OperationCanceledException || DatabaseBusy.Is(ex))
         {
             // An interrupted run (request abort, shutdown or a lost lease) is not a failure; the next run repeats the
-            // work. A refresh still releases its lease with the cooldown, but records no venue sync failure.
+            // work. A refresh still releases its lease with the cooldown, but records no venue sync failure. A lock or
+            // statement timeout is the database being busy, never the venue: it is handled the same way and rethrown,
+            // so a request answers "try again" and the worker retries on a later run.
             if (refresh) await FailAsync(lease, capture, false, "", CancellationToken.None, snapshotApplied, interrupted: true);
             else await SupersedeAsync(lease, CancellationToken.None);
             throw;
@@ -650,8 +664,9 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             // Never record exception text, which can carry request details. A conflicting settlement rolled its unit back.
+            // A busy database is not a failed read: the funding read stays due.
             log?.Failed(lease, ex.GetType().Name);
-            next = time.GetUtcNow() + settings.Interval;
+            if (!DatabaseBusy.Is(ex)) next = time.GetUtcNow() + settings.Interval;
             return false;
         }
         finally
@@ -854,6 +869,21 @@ public sealed class MonitorCoordinator(IMonitorStore store, IWorkspaceStore work
 
     /// <summary>The account no longer qualifies, or the run was interrupted, before any result: not a failure.</summary>
     /// <param name="attempted">False before any venue read: housekeeping then only ages outstanding work.</param>
+    private Task<bool> ReleaseUnstartedAsync(MonitorLease lease) => lease.Trigger switch
+    {
+        "backfill" => unitOfWork.ExecuteAsync(async () =>
+        {
+            await store.ReleaseBackfillAsync(lease, time.GetUtcNow(), CancellationToken.None);
+            return true;
+        }, CancellationToken.None),
+        "funding" => unitOfWork.ExecuteAsync(async () =>
+        {
+            await store.ReleaseFundingAsync(lease, time.GetUtcNow(), null, CancellationToken.None);
+            return true;
+        }, CancellationToken.None),
+        _ => SupersedeAsync(lease, CancellationToken.None, attempted: false),
+    };
+
     private Task<bool> SupersedeAsync(MonitorLease lease, CancellationToken ct, bool attempted = true) =>
         unitOfWork.ExecuteAsync(() => store.LockedAsync(lease.AccountId, async (account, row) =>
         {

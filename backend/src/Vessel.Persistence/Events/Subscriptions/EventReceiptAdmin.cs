@@ -17,7 +17,7 @@ public sealed class EventReceiptAdmin(VesselDbContext db, UnitOfWork work, TimeP
         {
             // Like dispatch, hold the owner's retention key shared: a floor decision computed before this retry
             // cannot be published over the receipts it reopens, and a published floor excludes them here.
-            await VesselEventSql.ScalarAsync(db, "SELECT pg_advisory_xact_lock_shared(@key)", cancellationToken,
+            await VesselEventSql.BlockingScalarAsync(db, "SELECT pg_advisory_xact_lock_shared(@key)", cancellationToken,
                 ("key", VesselEventSql.RetentionLock(db.CurrentOwnerId)));
             if (await SubscriptionProgress.LockRegistrationAsync(db, subscription, logger, cancellationToken) != SubscriptionRegistration.Compatible)
                 return 0;

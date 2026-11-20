@@ -318,6 +318,59 @@ public sealed class IdentityPersistenceTests
         Assert.False(await database.Sessions().StillValidAsync(issued.Session.Session.Id, default));
     }
 
+    // Issue #106: the sweep takes the identity write lock per batch, so sign-in never waits for more than one batch.
+    [PostgresFact]
+    public async Task Cleanup_releases_the_identity_write_lock_between_batches()
+    {
+        await using var database = await IdentityDatabase.CreateAsync();
+        var key = EthECKey.GenerateKey();
+        await database.SeedAsync(key);
+        await using (var db = database.CreateDbContext())
+        {
+            for (var index = 0; index < 5; index++)
+                db.Challenges.Add(new AuthChallenge { Id = Guid.NewGuid(), Address = key.GetPublicAddress(), ExpiresAt = database.Clock.Now.AddDays(-1) });
+            db.Challenges.Add(new AuthChallenge { Id = Guid.NewGuid(), Address = key.GetPublicAddress(), ExpiresAt = database.Clock.Now.AddMinutes(5) });
+            await db.SaveChangesAsync();
+        }
+        var probe = new IdentityLockProbe(database.Connection, database.Schema.Name + ":identity-write");
+        database.Interceptor = probe;
+        await new IdentityCleanup(database, database.Clock, NullLogger<IdentityCleanup>.Instance) { BatchSize = 2 }.CleanAsync(default);
+        database.Interceptor = null;
+        // Three challenge batches, then registrations, pairings and sessions: the lock was free before each later one.
+        Assert.Equal(5, probe.Free.Count);
+        Assert.All(probe.Free, Assert.True);
+        await using var verify = database.CreateDbContext();
+        Assert.Single(await verify.Challenges.ToListAsync());
+    }
+
+    private sealed class IdentityLockProbe(string connection, string key) : DbCommandInterceptor
+    {
+        private int taken;
+        public List<bool> Free { get; } = [];
+
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(DbCommand command, CommandEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            // Before every lock acquisition after the first, another session must be able to take the lock.
+            if (command.CommandText.Contains("pg_advisory_xact_lock", StringComparison.Ordinal) && ++taken > 1)
+            {
+                await using var other = new NpgsqlConnection(connection);
+                await other.OpenAsync(cancellationToken);
+                await using var trial = new NpgsqlCommand("SELECT pg_try_advisory_lock(hashtextextended(@key,0))", other);
+                trial.Parameters.AddWithValue("key", key);
+                var free = Equals(await trial.ExecuteScalarAsync(cancellationToken), true);
+                Free.Add(free);
+                if (free)
+                {
+                    await using var unlock = new NpgsqlCommand("SELECT pg_advisory_unlock(hashtextextended(@key,0))", other);
+                    unlock.Parameters.AddWithValue("key", key);
+                    await unlock.ExecuteScalarAsync(cancellationToken);
+                }
+            }
+            return result;
+        }
+    }
+
     [PostgresTheory]
     [InlineData(false)]
     [InlineData(true)]

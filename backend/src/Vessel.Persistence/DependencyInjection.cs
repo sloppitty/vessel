@@ -14,16 +14,34 @@ public sealed class MissingDatabaseConfigurationException()
 
 public static class DependencyInjection
 {
-    public static IServiceCollection AddVesselPersistence(this IServiceCollection services, IConfiguration config)
+    /// <summary>Request and worker hosts: every connection carries the <see cref="DatabaseLimits"/> lock and statement timeouts.</summary>
+    public static IServiceCollection AddVesselPersistence(this IServiceCollection services, IConfiguration config) =>
+        services.AddPersistence(config, DatabaseLimits.Read(config));
+
+    /// <summary>
+    /// Offline commands (search projection rebuild, messaging provisioning and receipt retries, identity verification): the
+    /// same stores without the session limits, because their work is long on purpose and runs with the hosts stopped.
+    /// </summary>
+    public static IServiceCollection AddVesselOfflinePersistence(this IServiceCollection services, IConfiguration config) =>
+        services.AddPersistence(config, null);
+
+    private static IServiceCollection AddPersistence(this IServiceCollection services, IConfiguration config, DatabaseLimits? limits)
     {
         services.TryAddScoped<OwnerScopeAssignment>();
         services.TryAddSingleton<IOwnerScopeFactory, OwnerScopeFactory>();
-        services.TryAddSingleton(_ =>
+        NpgsqlDataSource Create(bool pooled)
         {
             var connection = config.GetConnectionString("Vessel");
             if (string.IsNullOrWhiteSpace(connection)) throw new MissingDatabaseConfigurationException();
-            return NpgsqlDataSource.Create(connection);
-        });
+            var builder = new NpgsqlDataSourceBuilder(connection);
+            limits?.Apply(builder.ConnectionStringBuilder);
+            if (!pooled) builder.ConnectionStringBuilder.Pooling = false;
+            return builder.Build();
+        }
+        // See DatabasePools for the order in which these may nest.
+        services.TryAddSingleton(_ => Create(pooled: true));
+        services.TryAddKeyedSingleton(DatabasePools.Journal, (_, _) => Create(pooled: true));
+        services.TryAddKeyedSingleton(DatabasePools.Dedicated, (_, _) => Create(pooled: false));
         services.TryAddSingleton<IJournalOwnerInventory, JournalOwnerInventory>();
         // Every worker registers persistence, including deployments that do not run the monitor module.
         var deployments = config.GetSection("Vessel:Messaging:Deployments").GetChildren().ToArray();
@@ -32,12 +50,10 @@ public static class DependencyInjection
         services.TryAddSingleton<Vessel.Application.Monitoring.IServerStateStore, ServerStateStore>();
         services.TryAddSingleton<Vessel.Application.Monitoring.ISystemMonitorStore, SystemMonitorStore>();
         // Resolve only when persistence is consumed. Metadata and liveness do not open a database.
-        services.AddDbContext<VesselDbContext>(options =>
+        // The context borrows the registered journal pool, never one built from the connection string.
+        services.AddDbContext<VesselDbContext>((provider, options) =>
         {
-            var connection = config.GetConnectionString("Vessel");
-            if (string.IsNullOrWhiteSpace(connection))
-                throw new MissingDatabaseConfigurationException();
-            options.UseNpgsql(connection).ConfigureWarnings(warnings => warnings.Log(
+            options.UseNpgsql(provider.GetRequiredKeyedService<NpgsqlDataSource>(DatabasePools.Journal)).ConfigureWarnings(warnings => warnings.Log(
                 // These Error events embed exception text, the database name and host:port.
                 // The API records request failures with a safe event, so keep them at Debug.
                 (RelationalEventId.ConnectionError, LogLevel.Debug),

@@ -58,6 +58,9 @@ public sealed class ConfigurationCheckCommandTests
         { "Vessel:Identity:Schema", "Bad-Schema", "Vessel:Identity:Schema" },
         { "Vessel:Auth:OwnerId", null, "Vessel:Auth:OwnerId" },
         { "Vessel:Auth:OwnerId", "not-a-guid", "Vessel:Auth:OwnerId" },
+        { "Vessel:Database:LockTimeout", "ten seconds", "Vessel:Database:LockTimeout" },
+        { "Vessel:Database:StatementTimeout", "00:00:05", "Vessel:Database:LockTimeout must not be longer" },
+        { "Vessel:Database:StatementTimeout", "00:01:00", "Vessel:Database:StatementTimeout must be shorter" },
     };
 
     [Theory]

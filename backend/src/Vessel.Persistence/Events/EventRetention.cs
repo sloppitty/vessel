@@ -35,8 +35,10 @@ public sealed class EventRetention(VesselDbContext db, UnitOfWork work, IOptions
     /// <summary>Raises the logical floor. Never takes the owner cursor lock while scanning.</summary>
     public Task<long> PublishFloorAsync(CancellationToken cancellationToken) => work.ExecuteAsync(async () =>
     {
-        // Serializes floor decisions per owner and waits for in-flight dispatches, which hold the key shared.
-        await VesselEventSql.ScalarAsync(db, "SELECT pg_advisory_xact_lock(@key)", cancellationToken,
+        // Serializes floor decisions per owner and waits for in-flight dispatches, which hold the key shared: a wait that
+        // blocks by design, and a sweep whose scans are long on purpose, so neither session limit applies here.
+        await VesselEventSql.LiftStatementLimitAsync(db, cancellationToken);
+        await VesselEventSql.BlockingScalarAsync(db, "SELECT pg_advisory_xact_lock(@key)", cancellationToken,
             ("key", VesselEventSql.RetentionLock(db.CurrentOwnerId)));
         await using var cursor = VesselEventSql.TransactionCommand(db,
             "SELECT retention_floor FROM event_cursors WHERE owner_id=@owner", ("owner", db.CurrentOwnerId));
@@ -78,10 +80,13 @@ public sealed class EventRetention(VesselDbContext db, UnitOfWork work, IOptions
     }, cancellationToken);
 
     /// <summary>Deletes one batch of events below the published floor; receipts follow by cascade. Repeatable.</summary>
-    public Task<int> DeleteBatchAsync(CancellationToken cancellationToken) => work.ExecuteAsync(() =>
-        VesselEventSql.ExecuteAsync(db, """
+    public Task<int> DeleteBatchAsync(CancellationToken cancellationToken) => work.ExecuteAsync(async () =>
+    {
+        await VesselEventSql.LiftStatementLimitAsync(db, cancellationToken);
+        return await VesselEventSql.ExecuteAsync(db, """
             DELETE FROM events WHERE owner_id=@owner AND sequence IN (
                 SELECT e.sequence FROM events e JOIN event_cursors c ON c.owner_id=e.owner_id
                 WHERE e.owner_id=@owner AND e.sequence<=c.retention_floor ORDER BY e.sequence LIMIT @batch)
-            """, cancellationToken, ("owner", db.CurrentOwnerId), ("batch", settings.Value.RetentionBatch)), cancellationToken);
+            """, cancellationToken, ("owner", db.CurrentOwnerId), ("batch", settings.Value.RetentionBatch));
+    }, cancellationToken);
 }

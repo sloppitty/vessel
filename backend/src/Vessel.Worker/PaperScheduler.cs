@@ -11,6 +11,7 @@ using Vessel.Application.Monitoring;
 using Vessel.Application.Ownership;
 using Vessel.Application.Paper;
 using Vessel.Application.Venues;
+using Vessel.Persistence;
 
 namespace Vessel.Worker;
 
@@ -47,7 +48,10 @@ public sealed class PaperWorkerOptions
 /// A broker-free, opt-in worker in the existing binary. Public candles are shared per instrument; decisions and
 /// ledger/checkpoint/lifecycle mutations use owner scopes and the same account transaction as owner commands.
 /// </summary>
-public sealed class PaperScheduler(IOwnerScopeFactory scopes, IJournalOwnerDirectory owners, NpgsqlDataSource data,
+/// <remarks>The tick's lock session holds its connection while it borrows journal and directory connections, so it is a
+/// dedicated, unpooled one (<see cref="DatabasePools"/>): it can never wait for a pool it is holding.</remarks>
+public sealed class PaperScheduler(IOwnerScopeFactory scopes, IJournalOwnerDirectory owners,
+    [FromKeyedServices(DatabasePools.Dedicated)] NpgsqlDataSource data,
     IServerStateStore server, PaperWorkerOptions options, TimeProvider time, ILogger<PaperScheduler> logger,
     WorkerProgress? progress = null) : BackgroundService
 {

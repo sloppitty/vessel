@@ -114,6 +114,7 @@ Secrets go in the process environment or an ignored local file, never in tracked
 | `Vessel__Worker__Modules__<n>`, `Vessel__Worker__Deployment` | `["monitor"]`, first module | Modules a worker runs and its logical deployment. |
 | `Vessel__Monitor__Interval`, `__ManualCooldown`, `__ProtectionGrace`, … | 10 min, 60 s, 10 min | Monitor timing; the full list is in messaging and workers. |
 | `Vessel__Events__RetentionDays` | `90` | Event retention. |
+| `Vessel__Database__LockTimeout`, `Vessel__Database__StatementTimeout` | `00:00:10`, `00:00:25` | PostgreSQL `lock_timeout` and `statement_timeout` for API and worker connections, from 1 s to 1 h; the lock limit may not exceed the statement limit, which must stay below the connection's `Command Timeout` (30 s by default). A request that hits either answers 503 "The database is busy. Try again in a moment." with `Retry-After: 1`; workers retry on a later run. Offline commands and the migration bundles run without them. Each process opens a journal and a directory pool, each up to the connection string's `Maximum Pool Size`; PgBouncer discards the startup options. See [deploy/README.md](../deploy/README.md#database-timeouts). |
 
 Evidence storage (images attached to saved Plays):
 
