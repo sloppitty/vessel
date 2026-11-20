@@ -113,22 +113,44 @@ public sealed class ActivityReadModel(VesselDbContext db, IActivityStore store, 
         var ids = accounts.Select(a => a.Id).ToArray();
         var states = accounts.ToDictionary(a => a.Id, a => parts[a.Id].State);
         var shown = accounts.Where(a => filter.MatchesAccount(a.Id, a.PortfolioId)).Select(a => a.Id).ToArray();
-        var (where, parameters) = Filter(shown, filter);
-        var total = (int)(long)(await ScalarAsync($"SELECT count(*) FROM activity_operations WHERE {where}", parameters, ct))!;
+        var parameters = Filter(shown, filter);
+        // One static statement per read: an absent filter's coalesce reduces to the column itself.
+        var total = (int)(long)(await ScalarAsync("""
+            SELECT count(*) FROM activity_operations
+            WHERE owner_id = @owner AND account_id = ANY(@accounts) AND contract_id = coalesce(@contract, contract_id)
+                AND direction IS NOT DISTINCT FROM coalesce(@direction, direction) AND status = coalesce(@status, status)
+                AND partial >= @partial AND last_occurred_at >= coalesce(@from, '-infinity') AND last_occurred_at < coalesce(@to, 'infinity')
+            """, parameters, ct))!;
         page = ListPaging.Clamp(page, pageSize, total);
-        var rows = new List<ActivityOperationDto>();
-        await using (var command = Command($"""
-            SELECT summary, contract_identity, contract_native, basis_notional, basis_quantity FROM activity_operations WHERE {where}
+        // The page's keys from the narrow rows, then those operations' list rows.
+        var keys = new List<(Guid Account, string Operation)>();
+        await using (var command = Command("""
+            SELECT account_id, operation_id FROM activity_operations
+            WHERE owner_id = @owner AND account_id = ANY(@accounts) AND contract_id = coalesce(@contract, contract_id)
+                AND direction IS NOT DISTINCT FROM coalesce(@direction, direction) AND status = coalesce(@status, status)
+                AND partial >= @partial AND last_occurred_at >= coalesce(@from, '-infinity') AND last_occurred_at < coalesce(@to, 'infinity')
             ORDER BY last_occurred_at DESC, account_id, operation_id LIMIT @take OFFSET @skip
             """, parameters))
         {
             command.Parameters.AddWithValue("take", pageSize);
             command.Parameters.AddWithValue("skip", ListPaging.Skip(page, pageSize));
             await using var reader = await command.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-                rows.Add(ActivityProjection.Operation(reader.GetString(0), reader.GetString(1), reader.GetBoolean(2),
-                    reader.IsDBNull(3) ? null : reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4)));
+            while (await reader.ReadAsync(ct)) keys.Add((reader.GetGuid(0), reader.GetString(1)));
         }
+        var found = new Dictionary<(Guid, string), ActivityOperationDto>();
+        if (keys.Count > 0)
+        {
+            await using var command = Command("""
+                SELECT account_id, operation_id, summary, contract_identity, contract_native, basis_notional, basis_quantity
+                FROM activity_operation_rows WHERE owner_id = @owner AND account_id = ANY(@accounts) AND operation_id = ANY(@operations)
+                """, [new("owner", db.CurrentOwnerId), new("accounts", keys.Select(k => k.Account).Distinct().ToArray()),
+                new("operations", keys.Select(k => k.Operation).Distinct().ToArray())]);
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                found[(reader.GetGuid(0), reader.GetString(1))] = ActivityProjection.Operation(reader.GetString(2), reader.GetString(3),
+                    reader.GetBoolean(4), reader.IsDBNull(5) ? null : reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetString(6));
+        }
+        var rows = keys.Select(k => found[k]).ToList();
         var (forced, forcedCounts) = await ActivityStore.ForcedAsync(db, ids, ct);
         var coverage = ActivityProjection.Coverage(accounts, states, forced, forcedCounts, observed.FundingStates);
         var version = await VersionAsync(observed, states, coverage, ct);
@@ -140,23 +162,16 @@ public sealed class ActivityReadModel(VesselDbContext db, IActivityStore store, 
             new(accounts, [], observed.Snapshots, new Dictionary<Guid, Guid>()));
     }
 
-    private static (string Where, NpgsqlParameter[] Parameters) Filter(Guid[] accounts, ActivityFilter filter)
-    {
-        var where = new StringBuilder("account_id = ANY(@accounts)");
-        var parameters = new List<NpgsqlParameter> { new("accounts", accounts) };
-        void Add(string condition, string name, object value)
-        {
-            where.Append(" AND ").Append(condition);
-            parameters.Add(new(name, value));
-        }
-        if (filter.Contract is { } contract) Add("contract_id = @contract", "contract", contract);
-        if (filter.Direction is { } direction) Add("direction = @direction", "direction", direction);
-        if (filter.Status == "partial") where.Append(" AND status = 'open' AND partial");
-        else if (filter.Status is { } status) Add("status = @status", "status", status);
-        if (filter.From is { } from) Add("last_occurred_at >= @from", "from", from.ToUniversalTime());
-        if (filter.To is { } to) Add("last_occurred_at < @to", "to", to.ToUniversalTime());
-        return (where.ToString(), parameters.ToArray());
-    }
+    // "partial" is an open operation with exited and remaining quantity, stored as its own column.
+    private NpgsqlParameter[] Filter(Guid[] accounts, ActivityFilter filter) =>
+    [
+        new("owner", db.CurrentOwnerId), new("accounts", accounts), Text("contract", filter.Contract), Text("direction", filter.Direction),
+        Text("status", filter.Status == "partial" ? "open" : filter.Status), new("partial", filter.Status == "partial"),
+        Time("from", filter.From), Time("to", filter.To)
+    ];
+
+    private static NpgsqlParameter Text(string name, string? value) =>
+        new(name, NpgsqlDbType.Text) { Value = value is null ? DBNull.Value : value };
 
     /// <summary>
     /// The scope's version, hashed once per exact set of account builds and funding attempt details (which only the version
@@ -184,9 +199,9 @@ public sealed class ActivityReadModel(VesselDbContext db, IActivityStore store, 
     private async IAsyncEnumerable<string> SummariesAsync(Guid[] ids, [EnumeratorCancellation] CancellationToken ct)
     {
         await using var command = Command("""
-            SELECT summary FROM activity_operations WHERE account_id = ANY(@accounts)
+            SELECT summary FROM activity_operation_rows WHERE owner_id = @owner AND account_id = ANY(@accounts)
             ORDER BY last_occurred_at DESC, account_id, operation_id
-            """, [new("accounts", ids)]);
+            """, [new("owner", db.CurrentOwnerId), new("accounts", ids)]);
         await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct);
         while (await reader.ReadAsync(ct)) yield return reader.GetString(0);
     }
@@ -224,32 +239,43 @@ public sealed class ActivityReadModel(VesselDbContext db, IActivityStore store, 
     private async Task<bool> WriteAsync(ActivityProjectedAccount part, long revision, CancellationToken ct)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
-        var id = new NpgsqlParameter("account", part.AccountId);
-        await ExecuteAsync("SELECT pg_advisory_xact_lock(hashtextextended('vessel.activity-projection:' || @account::text, 0))", [id], ct);
-        if (await ScalarAsync("SELECT revision FROM activity_projection_accounts WHERE account_id = @account", [Copy(id)], ct) is long stored &&
-            stored > revision)
+        NpgsqlParameter Account() => new("account", part.AccountId);
+        NpgsqlParameter Owner() => new("owner", db.CurrentOwnerId);
+        await ExecuteAsync("SELECT pg_advisory_xact_lock(hashtextextended('vessel.activity-projection:' || @account::text, 0))", [Account()], ct);
+        // Only an account that still exists for this owner gets a part (the context filters by owner).
+        if (!await db.Accounts.AnyAsync(a => a.Id == part.AccountId, ct)) return false;
+        if (await ScalarAsync("SELECT revision FROM activity_projection_accounts WHERE owner_id = @owner AND account_id = @account",
+                [Owner(), Account()], ct) is long stored && stored > revision)
             return false;
-        await ExecuteAsync("DELETE FROM activity_projection_accounts WHERE account_id = @account", [Copy(id)], ct);
-        // Only an account that still exists for this owner gets a part; operations follow their part's foreign key.
-        var inserted = await ExecuteAsync("""
+        try { await ReplaceAsync(part, revision, Account, Owner, ct); }
+        // The account was deleted after the check above: nothing to store.
+        catch (PostgresException e) when (e.SqlState == PostgresErrorCodes.ForeignKeyViolation) { return false; }
+        await transaction.CommitAsync(ct);
+        return true;
+    }
+
+    private async Task ReplaceAsync(ActivityProjectedAccount part, long revision, Func<NpgsqlParameter> Account, Func<NpgsqlParameter> Owner,
+        CancellationToken ct)
+    {
+        // By account alone: a part another owner left before the account moved is replaced, never read.
+        await ExecuteAsync("DELETE FROM activity_projection_accounts WHERE account_id = @account", [Account()], ct);
+        await ExecuteAsync("""
             INSERT INTO activity_projection_accounts (account_id, owner_id, build_id, revision, observation_key, snapshot_at,
                 snapshot_after, snapshot_before, snapshot_pinned, fill_count, operation_count, contracts, coverage, unassigned_funding, built_at)
-            SELECT a."Id", a."OwnerId", nextval('activity_projection_builds'), @revision, @key, @at, @after, @before, @pinned, @fills,
-                @operations, @contracts, @coverage, @unassigned, now()
-            FROM accounts a WHERE a."Id" = @account AND a."OwnerId" = @owner
+            VALUES (@account, @owner, nextval('activity_projection_builds'), @revision, @key, @at, @after, @before, @pinned, @fills,
+                @operations, @contracts, @coverage, @unassigned, now())
             """,
         [
-            Copy(id), new("owner", db.CurrentOwnerId), new("revision", revision), new("key", part.ObservationKey),
+            Account(), Owner(), new("revision", revision), new("key", part.ObservationKey),
             Time("at", part.SnapshotAtUtc), Time("after", part.SnapshotAfterUtc), Time("before", part.SnapshotBeforeUtc),
             new("pinned", part.SnapshotPinned), new("fills", part.FillCount), new("operations", part.Operations.Count),
             new("contracts", part.Contracts.ToArray()), new("coverage", JsonSerializer.Serialize(part.Coverage)),
             new("unassigned", JsonSerializer.Serialize(part.UnassignedFunding))
         ], ct);
-        if (inserted == 0) return false;
         var connection = (NpgsqlConnection)db.Database.GetDbConnection();
         await using (var copy = await connection.BeginBinaryImportAsync("""
-            COPY activity_operations (account_id, operation_id, owner_id, last_occurred_at, contract_id, direction, status, partial,
-                contract_identity, contract_native, basis_notional, basis_quantity, summary) FROM STDIN (FORMAT BINARY)
+            COPY activity_operations (account_id, operation_id, owner_id, last_occurred_at, contract_id, direction, status, partial)
+            FROM STDIN (FORMAT BINARY)
             """, ct))
         {
             foreach (var o in part.Operations)
@@ -263,6 +289,21 @@ public sealed class ActivityReadModel(VesselDbContext db, IActivityStore store, 
                 await WriteNullableAsync(copy, o.Direction, ct);
                 await copy.WriteAsync(o.Status, NpgsqlDbType.Text, ct);
                 await copy.WriteAsync(o.Partial, NpgsqlDbType.Boolean, ct);
+            }
+            await copy.CompleteAsync(ct);
+        }
+        await using (var copy = await connection.BeginBinaryImportAsync("""
+            COPY activity_operation_rows (account_id, operation_id, owner_id, last_occurred_at, contract_identity, contract_native,
+                basis_notional, basis_quantity, summary) FROM STDIN (FORMAT BINARY)
+            """, ct))
+        {
+            foreach (var o in part.Operations)
+            {
+                await copy.StartRowAsync(ct);
+                await copy.WriteAsync(part.AccountId, NpgsqlDbType.Uuid, ct);
+                await copy.WriteAsync(o.Id, NpgsqlDbType.Text, ct);
+                await copy.WriteAsync(db.CurrentOwnerId, NpgsqlDbType.Uuid, ct);
+                await copy.WriteAsync(o.LastOccurredAtUtc.ToUniversalTime(), NpgsqlDbType.TimestampTz, ct);
                 await copy.WriteAsync(o.ContractIdentity, NpgsqlDbType.Text, ct);
                 await copy.WriteAsync(o.ContractNative, NpgsqlDbType.Boolean, ct);
                 await WriteNullableAsync(copy, o.BasisNotional, ct);
@@ -271,8 +312,6 @@ public sealed class ActivityReadModel(VesselDbContext db, IActivityStore store, 
             }
             await copy.CompleteAsync(ct);
         }
-        await transaction.CommitAsync(ct);
-        return true;
     }
 
     private static async Task WriteNullableAsync(NpgsqlBinaryImporter copy, string? value, CancellationToken ct)
@@ -353,22 +392,37 @@ public sealed class ActivityReadModel(VesselDbContext db, IActivityStore store, 
 
     private async Task<Dictionary<Guid, Dictionary<string, ActivityProjectedOperation>>> OperationsAsync(Guid[] ids, CancellationToken ct)
     {
+        var narrow = new Dictionary<(Guid, string), (DateTimeOffset Last, string Contract, string? Direction, string Status, bool Partial)>();
+        await using (var command = Command("""
+            SELECT account_id, operation_id, last_occurred_at, contract_id, direction, status, partial
+            FROM activity_operations WHERE owner_id = @owner AND account_id = ANY(@accounts)
+            """, [new("owner", db.CurrentOwnerId), new("accounts", ids)]))
+        await using (var reader = await command.ExecuteReaderAsync(ct))
+            while (await reader.ReadAsync(ct))
+                narrow[(reader.GetGuid(0), reader.GetString(1))] = (reader.GetFieldValue<DateTimeOffset>(2), reader.GetString(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(5), reader.GetBoolean(6));
         var result = new Dictionary<Guid, Dictionary<string, ActivityProjectedOperation>>();
-        await using var command = Command("""
-            SELECT account_id, operation_id, last_occurred_at, contract_id, direction, status, partial, contract_identity, contract_native,
-                basis_notional, basis_quantity, summary
-            FROM activity_operations WHERE account_id = ANY(@accounts)
-            """, [new("accounts", ids)]);
-        await using var reader = await command.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
+        await using (var command = Command("""
+            SELECT account_id, operation_id, last_occurred_at, contract_identity, contract_native, basis_notional, basis_quantity, summary
+            FROM activity_operation_rows WHERE owner_id = @owner AND account_id = ANY(@accounts)
+            """, [new("owner", db.CurrentOwnerId), new("accounts", ids)]))
+        await using (var reader = await command.ExecuteReaderAsync(ct))
+            while (await reader.ReadAsync(ct))
+            {
+                var account = reader.GetGuid(0);
+                var id = reader.GetString(1);
+                if (!result.TryGetValue(account, out var rows)) result[account] = rows = new(StringComparer.Ordinal);
+                // A row without its narrow twin (or with another time) never equals the aggregate's operation.
+                var n = narrow.Remove((account, id), out var found) ? found : (reader.GetFieldValue<DateTimeOffset>(2), "", null, "", false);
+                rows[id] = new ActivityProjectedOperation(id, reader.GetFieldValue<DateTimeOffset>(2) == n.Last ? n.Last : DateTimeOffset.MinValue,
+                    n.Contract, n.Direction, n.Status, n.Partial, reader.GetString(3), reader.GetBoolean(4),
+                    reader.IsDBNull(5) ? null : reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetString(7));
+            }
+        // Narrow rows without a list row are extra operations to the comparison.
+        foreach (var ((account, id), n) in narrow)
         {
-            var account = reader.GetGuid(0);
             if (!result.TryGetValue(account, out var rows)) result[account] = rows = new(StringComparer.Ordinal);
-            var row = new ActivityProjectedOperation(reader.GetString(1), reader.GetFieldValue<DateTimeOffset>(2), reader.GetString(3),
-                reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(5), reader.GetBoolean(6), reader.GetString(7),
-                reader.GetBoolean(8), reader.IsDBNull(9) ? null : reader.GetString(9), reader.IsDBNull(10) ? null : reader.GetString(10),
-                reader.GetString(11));
-            rows[row.Id] = row;
+            rows[id] = new ActivityProjectedOperation(id, n.Last, n.Contract, n.Direction, n.Status, n.Partial, "", false, null, null, "");
         }
         return result;
     }
@@ -376,8 +430,9 @@ public sealed class ActivityReadModel(VesselDbContext db, IActivityStore store, 
     private async Task<Dictionary<Guid, long>> RevisionsAsync(Guid[] ids, CancellationToken ct)
     {
         var result = new Dictionary<Guid, long>();
-        await using var command = Command("SELECT account_id, revision FROM activity_account_revisions WHERE account_id = ANY(@accounts)",
-            [new("accounts", ids)]);
+        await using var command = Command(
+            "SELECT account_id, revision FROM activity_account_revisions WHERE owner_id = @owner AND account_id = ANY(@accounts)",
+            [new("owner", db.CurrentOwnerId), new("accounts", ids)]);
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct)) result[reader.GetGuid(0)] = reader.GetInt64(1);
         return result;
@@ -424,8 +479,6 @@ public sealed class ActivityReadModel(VesselDbContext db, IActivityStore store, 
         await using var command = Command(sql, parameters);
         return await command.ExecuteNonQueryAsync(ct);
     }
-
-    private static NpgsqlParameter Copy(NpgsqlParameter parameter) => parameter.Clone();
 
     private static NpgsqlParameter Time(string name, DateTimeOffset? value) =>
         new(name, NpgsqlDbType.TimestampTz) { Value = value is { } at ? at.ToUniversalTime() : DBNull.Value };

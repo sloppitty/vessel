@@ -311,7 +311,8 @@ public sealed class ActivityReadModelPostgresTests
         await connection.OpenAsync();
         await using var command = new NpgsqlCommand("""
             SELECT 'part ' || account_id || ' ' || build_id || ' ' || xmin FROM activity_projection_accounts
-            UNION ALL SELECT 'operation ' || account_id || ' ' || operation_id || ' ' || xmin FROM activity_operations ORDER BY 1
+            UNION ALL SELECT 'operation ' || account_id || ' ' || operation_id || ' ' || xmin FROM activity_operations
+            UNION ALL SELECT 'row ' || account_id || ' ' || operation_id || ' ' || xmin FROM activity_operation_rows ORDER BY 1
             """, connection);
         await using var reader = await command.ExecuteReaderAsync();
         var rows = new List<string>();
@@ -441,7 +442,7 @@ public sealed class ActivityReadModelPostgresTests
         {
             await connection.OpenAsync();
             await using var tamper = new NpgsqlCommand(
-                "UPDATE activity_operations SET summary = replace(summary, '\"Status\":\"', '\"Status\":\"x') WHERE ctid = (SELECT min(ctid) FROM activity_operations)",
+                "UPDATE activity_operation_rows SET summary = replace(summary, '\"Status\":\"', '\"Status\":\"x') WHERE ctid = (SELECT min(ctid) FROM activity_operation_rows)",
                 connection);
             Assert.Equal(1, await tamper.ExecuteNonQueryAsync());
         }

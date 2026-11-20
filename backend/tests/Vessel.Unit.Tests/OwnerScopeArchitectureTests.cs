@@ -258,6 +258,16 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Identity/IdentityCommands.cs|077a1423296023055128d9ed1c94d99ecfbd28849c50709809d3ca8d2d47489b",
             // Not SQL: the "refresh" source of a fill coverage record (Phase 2, item 6).
             "Vessel.Domain/Monitoring/HistoryCoverage.cs|d6cc0a088c07683c65cd266860cab8d94b3a1937b17420d9da30ca299c09fb77",
+            // Issue #108, Activity read model. Writer lock only: a transaction advisory lock keyed by the account, no rows.
+            "Vessel.Persistence/ActivityReadModel.cs|6f34f17be1532a7e86610966b7fbce9739610bccabb3976e172e27d48fcf2aca",
+            // Part replacement by account alone: the account was just checked to be the current owner's through the
+            // owner-filtered context; a part another owner left before the account moved is replaced, never read.
+            "Vessel.Persistence/ActivityReadModel.cs|a146b9131d7b05a14fd76570fa666edf54aff55a7fcb433c0746eb5027063a4b",
+            // Binary COPY of the part's operations and their list rows: every row's owner_id is written as db.CurrentOwnerId.
+            "Vessel.Persistence/ActivityReadModel.cs|a2485e82edaf1bb2c0106bedc6f6d480a95457f5ecf13df6b91ba128d5338250",
+            "Vessel.Persistence/ActivityReadModel.cs|dc3ad801541279c93f98ff3d7afd61a3750f58b2ee461c04578b68aa568235e2",
+            // Not SQL: activity-rebuild/activity-verify usage text ("--apply" and words such as "Reads").
+            "Vessel.Api/ActivityReadModelCommand.cs|cd718b2ecc53f3e3e81e58eee5392eaec8e4d20a67df50c5c643afe64497a729",
         ];
         // One entry per distinct path and statement text: repeating an already reviewed literal needs no new review.
         Assert.Equal(reviewed.Length, reviewed.Distinct().Count());

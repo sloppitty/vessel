@@ -6,8 +6,8 @@ namespace Vessel.Persistence.Migrations;
 /// Issue #108: the Activity read model. <c>activity_account_revisions</c> is a per-account history revision, moved at commit
 /// by the same changes that move the owner's execution revision (issue #107), so a write to one account leaves the other
 /// accounts' stored parts current. <c>activity_projection_accounts</c> holds one part per enabled real account (what it was
-/// built from, its counts, coverage and unattributed funding) and <c>activity_operations</c> its operations, which Activity
-/// pages, filters and counts in SQL. Nothing is backfilled: an account without a revision row is at revision 0, and parts are
+/// built from, its counts, coverage and unattributed funding), <c>activity_operations</c> what Activity pages, filters and
+/// counts its operations by in SQL, and <c>activity_operation_rows</c> the rows a page returns. Nothing is backfilled: an account without a revision row is at revision 0, and parts are
 /// built by the first read or by the offline <c>activity-rebuild --apply</c> command.
 /// </summary>
 public partial class ActivityReadModelTables : Migration
@@ -28,6 +28,7 @@ public partial class ActivityReadModelTables : Migration
         migrationBuilder.Sql("""
             CREATE TABLE activity_account_revisions (
                 account_id uuid PRIMARY KEY REFERENCES accounts ("Id") ON DELETE CASCADE,
+                owner_id uuid NOT NULL,
                 revision bigint NOT NULL
             );
 
@@ -57,9 +58,10 @@ public partial class ActivityReadModelTables : Migration
                 FOR account IN SELECT DISTINCT value::uuid FROM unnest(string_to_array(pending, ',')) value
                     WHERE strpos(',' || bumped || ',', ',' || value || ',') = 0 ORDER BY 1 LOOP
                     -- A deleted account has no row to move; its revision row went with it.
-                    INSERT INTO activity_account_revisions (account_id, revision)
-                    SELECT a."Id", 1 FROM accounts a WHERE a."Id" = account
-                    ON CONFLICT (account_id) DO UPDATE SET revision = activity_account_revisions.revision + 1;
+                    INSERT INTO activity_account_revisions (account_id, owner_id, revision)
+                    SELECT a."Id", a."OwnerId", 1 FROM accounts a WHERE a."Id" = account
+                    ON CONFLICT (account_id) DO UPDATE SET revision = activity_account_revisions.revision + 1,
+                        owner_id = EXCLUDED.owner_id;
                 END LOOP;
                 PERFORM set_config('vessel.activity_accounts_bumped', pending, true);
                 RETURN NULL;
@@ -86,6 +88,7 @@ public partial class ActivityReadModelTables : Migration
             );
             CREATE INDEX ix_activity_projection_accounts_owner ON activity_projection_accounts (owner_id);
 
+            -- What Activity counts, filters and orders by: narrow rows, so scans and sorts stay small.
             CREATE TABLE activity_operations (
                 account_id uuid NOT NULL REFERENCES activity_projection_accounts (account_id) ON DELETE CASCADE,
                 operation_id text COLLATE "C" NOT NULL,
@@ -95,6 +98,19 @@ public partial class ActivityReadModelTables : Migration
                 direction text,
                 status text NOT NULL,
                 partial boolean NOT NULL,
+                PRIMARY KEY (account_id, operation_id)
+            );
+            -- Activity's page order (newest first, then account ID and operation ID, both ordinal), whole scope or one account.
+            CREATE INDEX ix_activity_operations_page ON activity_operations (last_occurred_at DESC, account_id, operation_id);
+            CREATE INDEX ix_activity_operations_account_page ON activity_operations (account_id, last_occurred_at DESC, operation_id);
+
+            -- What a page returns and the version hashes: the list row exactly as hashed (about 1 KB of JSON), and what the
+            -- unrealized marks read beside it.
+            CREATE TABLE activity_operation_rows (
+                account_id uuid NOT NULL REFERENCES activity_projection_accounts (account_id) ON DELETE CASCADE,
+                operation_id text COLLATE "C" NOT NULL,
+                owner_id uuid NOT NULL,
+                last_occurred_at timestamptz NOT NULL,
                 contract_identity text NOT NULL,
                 contract_native boolean NOT NULL,
                 basis_notional text,
@@ -102,9 +118,7 @@ public partial class ActivityReadModelTables : Migration
                 summary text NOT NULL,
                 PRIMARY KEY (account_id, operation_id)
             );
-            -- Activity's page order (newest first, then account and operation ID, both ordinal), whole scope or one account.
-            CREATE INDEX ix_activity_operations_page ON activity_operations (last_occurred_at DESC, account_id, operation_id);
-            CREATE INDEX ix_activity_operations_account_page ON activity_operations (account_id, last_occurred_at DESC, operation_id);
+            CREATE INDEX ix_activity_operation_rows_page ON activity_operation_rows (last_occurred_at DESC, account_id, operation_id);
             """);
         foreach (var table in EveryChange)
             migrationBuilder.Sql($"""
@@ -130,6 +144,7 @@ public partial class ActivityReadModelTables : Migration
         foreach (var (table, _) in Identity)
             migrationBuilder.Sql($"DROP TRIGGER activity_projection_commit ON {table}; DROP TRIGGER activity_projection_update ON {table};");
         migrationBuilder.Sql("""
+            DROP TABLE activity_operation_rows;
             DROP TABLE activity_operations;
             DROP TABLE activity_projection_accounts;
             DROP SEQUENCE activity_projection_builds;

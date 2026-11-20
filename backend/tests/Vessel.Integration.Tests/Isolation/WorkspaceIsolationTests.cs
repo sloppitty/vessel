@@ -326,10 +326,12 @@ public abstract class WorkspaceIsolationCases(IsolationHost api)
             Assert.Equal(responses, await Isolated.State(a, paths));
             await Assert.ThrowsAnyAsync<Xunit.Sdk.XunitException>(state.Unchanged);
             Assert.Equal(1, await Update(a, table, undo));
-            // Undo restores facts but deliberately advances the monotonic cache revision. The isolation
-            // harness still fingerprints that row; only this self-test rebases after checking restored facts.
-            Assert.Equal(originalRows.Where(r => !r.StartsWith("activity_facts_revisions ", StringComparison.Ordinal)),
-                (await Persisted.Of(a.Journal!, a.Id)).Where(r => !r.StartsWith("activity_facts_revisions ", StringComparison.Ordinal)));
+            // Undo restores facts but deliberately advances the monotonic cache revisions (the owner's, and since #108 the
+            // account's). The isolation harness still fingerprints those rows; only this self-test rebases after checking
+            // restored facts.
+            static bool Fact(string row) => !row.StartsWith("activity_facts_revisions ", StringComparison.Ordinal) &&
+                !row.StartsWith("activity_account_revisions ", StringComparison.Ordinal);
+            Assert.Equal(originalRows.Where(Fact), (await Persisted.Of(a.Journal!, a.Id)).Where(Fact));
             state = await Snapshot.Of(a, paths);
             await state.Unchanged();
         }
