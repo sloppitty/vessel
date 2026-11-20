@@ -43,15 +43,17 @@ jobs:
       Vessel_TEST_POSTGRES: Host=127.0.0.1;Port=5432;Database=vessel_tests;Username=vessel;Password=vessel-ci-only
       Vessel_TEST_EVENT_RABBIT: amqp://vessel_ci:vessel-events-ci-only@127.0.0.1:5672
     steps:
-      - uses: useblacksmith/checkout@v1
-      - uses: actions/setup-node@v6
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version-file: .nvmrc
       - name: Enable pinned pnpm
         run: |
           corepack enable
           corepack install
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
         with:
           global-json-file: global.json
       - name: Operator script regressions

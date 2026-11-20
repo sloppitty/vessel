@@ -51,13 +51,27 @@ git push origin v0.4.2
 ```
 
 The workflow checks that the tag, packaged versions and notes agree
-(`python3 scripts/release.py check --tag v0.4.2`), runs the foundation checks and
-`scripts/verify-release.py` for S3 and local storage, then builds and pushes
-`skorcius/vessel:api-0.4.2` and `web-0.4.2`, moves `api-latest` and `web-latest`
-only after both are verified, and creates the GitHub Release from the notes. It
-never overwrites a version published from another commit. It needs the
-`DOCKERHUB_TOKEN` secret on the `docker-hub` environment; see the
-[`vessel-release` skill](../.agents/skills/vessel-release/SKILL.md).
+(`python3 scripts/release.py check --tag v0.4.2`) and runs the foundation checks.
+It builds both images once (`release.py build`) and passes them, saved with
+`docker save`, as the `release-images` workflow artifact; each image's config
+digest travels separately as a job output. Both `scripts/verify-release.py`
+runs (S3 and local storage) and publication load that artifact
+(`release.py load`), refusing an archive whose config digest differs. Publish
+pushes `skorcius/vessel:api-0.4.2` and `web-0.4.2`, fails when a pushed config
+digest is not the verified one, moves `api-latest` and `web-latest` only after
+both are verified (a registry-side copy of each verified versioned manifest), and creates the GitHub Release from the notes plus both
+published digests (`release.py notes`). Nothing run-scoped is pushed to Docker
+Hub. A later attempt of the same run reuses the artifact (`release.py
+identify`) instead of rebuilding; the skill describes recovery after a partial
+publication. It never overwrites a version published from another commit or another
+build. It needs the `DOCKERHUB_TOKEN` secret on the `docker-hub` environment;
+see the [`vessel-release` skill](../.agents/skills/vessel-release/SKILL.md).
+
+Base images in both Dockerfiles are pinned by digest and every action by commit
+SHA (version in a trailing comment), with checkouts that keep no token.
+`.github/dependabot.yml` proposes updates to both; Dependabot pull requests start
+no CI, so run the local checks before merging one. The release check's wallet
+signer installs `@noble` from `scripts/wallet-signer/pnpm-lock.yaml`.
 
 CI runs only for release tags to conserve runner minutes. Branch pushes and
 pull requests do not run foundation checks, packaging verification or a publish

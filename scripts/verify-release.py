@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Local-only release checks. Own temp files/projects/images; never load repository .env.
 
+With --api-image and --web-image it checks the images the release run built once (scripts/release.py build, then
+load) and leaves them in place for publication; without them it builds and removes its own pair.
+
 Sign-in is by wallet only. The check runs over the Caddy TLS overlay, plus one pass of the default plain-HTTP web
 behind an operator's own HTTPS proxy. The synthetic operator EOA is signed by scripts/wallet-test-signer.cjs, whose
 @noble dependencies come from an external NOBLE_MODULE_DIR."""
@@ -71,7 +74,11 @@ class Check:
         self.args = args
         self.temp = Path(tempfile.mkdtemp(prefix='vessel-release-check-'))
         self.name = 'vessel-check-' + secrets.token_hex(5)
-        self.images = {kind: f'{self.name}:{kind}' for kind in ('api', 'web')}
+        # Images the release run built once and loaded are checked as they are and left in place; otherwise the
+        # check builds its own pair and removes it afterwards.
+        self.prebuilt = bool(args.api_image)
+        self.images = ({'api': args.api_image, 'web': args.web_image} if self.prebuilt
+                       else {kind: f'{self.name}:{kind}' for kind in ('api', 'web')})
         self.s3_access, self.s3_secret = secrets.token_hex(16), secrets.token_hex(32)
         self.database_password = secrets.token_hex(24)
         self.broker_password = secrets.token_hex(24)
@@ -961,7 +968,7 @@ for (const host of ['127.0.0.1', '::1']) {{
         if (self.temp / 'secrets').exists():
             run('docker', 'run', '--rm', '--user', '0', '-v', f'{self.temp}:/check', 'node:24-bookworm-slim', 'sh', '-c', 'rm -rf /check/secrets', stdout=subprocess.DEVNULL)
         shutil.rmtree(self.temp)
-        for image in self.images.values():
+        for image in () if self.prebuilt else self.images.values():
             run('docker', 'image', 'rm', image, stdout=subprocess.DEVNULL, check=False)
         if errors:
             raise RuntimeError('Cleanup failed for isolated projects: ' + ', '.join(errors))
@@ -970,9 +977,11 @@ for (const host of ['127.0.0.1', '::1']) {{
         try:
             if self.args.wallet_browser_image:
                 run('docker', 'image', 'inspect', self.args.wallet_browser_image, stdout=subprocess.DEVNULL)
+            if self.prebuilt:
+                run('docker', 'image', 'inspect', *self.images.values(), stdout=subprocess.DEVNULL)
             self.wallet_signature()  # Fail before building if external test dependencies are missing.
             self.prepare()
-            for kind, file in (('api', 'backend/Dockerfile'), ('web', 'frontend/Dockerfile')):
+            for kind, file in () if self.prebuilt else (('api', 'backend/Dockerfile'), ('web', 'frontend/Dockerfile')):
                 run('docker', 'build', '--platform', 'linux/amd64', '-f', str(ROOT / file), '-t', self.images[kind], str(ROOT), stdout=subprocess.DEVNULL)
             result = run('docker', 'run', '--rm', '--entrypoint', 'nginx', self.images['web'], '-V', capture_output=True, text=True)
             self.expect('--with-http_realip_module' in result.stderr, 'unprivileged nginx realip module', 'image')
@@ -1020,7 +1029,11 @@ def parse_args(args=None):
     parser.add_argument('--storage', choices=('s3', 'local'), default='s3', help='Storage/restore path to check (default: private RustFS).')
     parser.add_argument('--wallet-browsers', default='chromium,firefox', help='Wallet browser engines, comma separated (default: chromium,firefox).')
     parser.add_argument('--wallet-browser-image', help='Pre-pulled matching Playwright image for isolated remote Firefox; requires --browser-module.')
+    parser.add_argument('--api-image', help='Check this local API image (from scripts/release.py load) instead of building one; requires --web-image.')
+    parser.add_argument('--web-image', help='Check this local web image (from scripts/release.py load) instead of building one; requires --api-image.')
     parsed = parser.parse_args(args)
+    if bool(parsed.api_image) != bool(parsed.web_image):
+        parser.error('--api-image and --web-image go together')
     if not parsed.wallet_browsers or any(browser not in ('chromium', 'firefox') for browser in parsed.wallet_browsers.split(',')):
         parser.error('--wallet-browsers must be chromium, firefox or chromium,firefox')
     if parsed.wallet_browser_image and not parsed.browser_module:
