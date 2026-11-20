@@ -398,9 +398,14 @@ logic is `scripts/pre_push.py`, covered by `scripts/test_pre_push.py`.
 ### Agent guardrails
 
 `.claude/settings.json` denies Claude Code sessions reading or editing `.env`
-files, `docker push`, forced pushes and tag moves, and runs
-`scripts/agent_guard.py` before every tool call. The guard refuses, with the
-reason:
+files, forced pushes, `git push --tags` and `git tag -f`, and runs
+`scripts/agent_guard.py` before every tool call. A deny rule wins over the
+hook, so it lists only what the guard refuses in every session; Docker pushes,
+which the guard allows to a local registry and to an owner-authorized release,
+are left to the guard. For Codex, `.codex/hooks.json` runs the same guard
+before every tool call (shell commands and `apply_patch` edits), and
+`.codex/rules/vessel.rules` forbids the same force-push and tag-move prefixes
+as execpolicy rules. The guard refuses, with the reason:
 
 - `.env` files other than templates such as `.env.example`, Docker and GitHub
   credential files, and printing the environment or a secret-looking variable
@@ -415,16 +420,39 @@ reason:
   together with `migrate`, `database update` or `psql`, and test runs whose
   `Vessel_TEST_POSTGRES` names that database;
 - in the Compose project `vessel` (the root `compose.yaml`): `down -v`,
-  interpolated `config`, `exec`/`run`/`cp`, and deleting or pruning its volumes
-  or opening its containers.
+  `exec`/`run`/`cp`, and deleting or pruning its volumes or opening its
+  containers;
+- `docker compose config` in any project unless it only lists (`--services`,
+  `--quiet`, ...) or its values are synthetic (`--no-interpolate`, or an
+  explicit `--env-file` such as `deploy/.env.example`), and always with
+  `--environment`: Compose reads the `.env` beside the Compose file whatever
+  `-p` says.
+
+Commands are checked through wrappers (`sudo`, `env`, `timeout`, `xargs`,
+`nice`, `stdbuf`, `time`, `nohup`, `command`, `exec`), `sh -c`/`bash -lc`,
+`eval`, and here-documents, here-strings or `echo ... |` fed to a shell. A
+wrapper option the guard does not know, and anything else piped into a shell,
+is refused. A quoted here-document (`<<'EOF'`) for any other command is inert
+text, so `git commit -F - <<'EOF'` and `gh pr create --body-file - <<'EOF'` may
+mention anything; an unquoted one has its `$(...)` and secret-looking variables
+checked, and one for `python3`, `node` and similar may not name a `.env` file.
 
 Throwaway Compose projects with their own `-p` name, test containers,
 `scripts/test-db.sh`, `--force-with-lease` on feature branches, `gh pr` and
 `gh issue` stay allowed. For a release the owner authorizes, starting the
 session with `VESSEL_AGENT_RELEASE=1` lets it push one new release tag and
 publish; moving or deleting a tag stays refused. The guard stops accidents, not
-a script written to hide a command. Its rules are tested by
-`scripts/test_agent_guard.py`.
+a script written to hide a command. Its rules, and their agreement with the
+deny rules and the Codex files, are tested by `scripts/test_agent_guard.py`.
+
+Codex loads project hooks and rules only from a project the owner has marked
+trusted, and asks the owner to review each new or changed hook before it runs
+(Codex 0.171 lists it as `untrusted` until then). In a Git worktree, Codex 0.171
+reads `.codex/hooks.json` from the main checkout rather than the worktree, so
+the hook applies to worktree sessions once it is on the main checkout; its
+command runs the guard of the worktree it is called from. These were checked
+with `codex app-server` (`hooks/list` on a temporary repository, its worktree
+and this checkout, with an empty `CODEX_HOME`); no Codex session ran a hook.
 
 Only the owner can set the matching GitHub repository settings:
 
