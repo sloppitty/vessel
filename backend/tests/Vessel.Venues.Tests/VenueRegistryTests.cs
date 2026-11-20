@@ -6,6 +6,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Application.Plays.Execution;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -40,7 +41,7 @@ public sealed class VenueRegistryTests : VenueRegistryTestsSupport
 
         var account = await service.CreateAccountAsync(new(null, "Second", "other", address), default);
         Assert.Equal("other", account.VenueId);
-        var catalogue = await service.InstrumentsAsync(account.Id, default);
+        var catalogue = await service.InstrumentsAsync(account.Id, TradingMode.Real, default);
         Assert.Equal("other", catalogue.VenueId);
         Assert.Equal("ABC", Assert.Single(catalogue.Instruments).ContractId);
         var duplicate = await Assert.ThrowsAsync<ProblemException>(() => service.CreateAccountAsync(new(null, "Again", "other", address.ToUpperInvariant().Replace("0X", "0x")), default));
@@ -50,7 +51,7 @@ public sealed class VenueRegistryTests : VenueRegistryTestsSupport
     [Fact]
     public void Order_tracking_follows_the_venue_capability()
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "other", "A");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "other", "A", TradingMode.Real);
         account.Configure(null, "0x0123456789abcdef0123456789abcdef01234567", null);
         var play = Plan(account);
         Assert.Equal("Orders are only tracked at venues that provide them.", PlayExecutionService.UntrackedReason(play, account, Other));

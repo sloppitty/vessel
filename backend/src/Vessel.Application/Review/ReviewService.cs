@@ -80,7 +80,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
     /// <summary>The filters every Review read validates the same way, with the portfolio ID normalized.</summary>
     private static ReviewQuery Validated(ReviewQuery query)
     {
-        query = query with { TradingMode = TradingMode.Validate(query.TradingMode ?? TradingMode.Real) };
+        _ = query.Mode; // A mode other than real or paper is a 400 before anything is read.
         From(query.Period, DateTimeOffset.UnixEpoch);
         if (query.Portfolio is not ("all" or "unassigned") &&
             (!Guid.TryParse(query.Portfolio, out var portfolio) || portfolio == Guid.Empty))
@@ -92,7 +92,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         if (!PositionModes.Contains(query.Positions) || query.MinPlays is < 0 or > ReviewQuery.MaxMinPlays)
             throw new ProblemException(400, "Choose exclude, include or auto positions and a Play threshold from 0 to 1000.");
         // Imported positions are actual Activity facts, never a source or fallback for paper Review.
-        if (query.TradingMode == TradingMode.Paper) query = query with { Positions = "exclude" };
+        if (query.Mode == TradingMode.Paper) query = query with { Positions = "exclude" };
         return query;
     }
 
@@ -107,9 +107,9 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         var (facts, accounts, scoped, evaluated, candidates, accepted, current) =
             (selection.Facts, selection.Accounts, selection.Scoped, selection.Evaluated, selection.Candidates, selection.Accepted, selection.Current);
         var (read, positions, playCount, include) = (selection.Read, selection.Positions, selection.PlayCount, selection.Include);
-        var unresolved = Unresolved(facts, scoped, query.Instrument, query.TradingMode!).Count(u => window.Contains(u.EndedAt));
-        var cancelled = Cancelled(facts, scoped, query.Instrument, query.TradingMode!).Count(c => window.Contains(CancelledAt(c.Play)));
-        var portfolios = facts.Portfolios.Where(p => p.TradingMode == query.TradingMode).ToList();
+        var unresolved = Unresolved(facts, scoped, query.Instrument, query.Mode).Count(u => window.Contains(u.EndedAt));
+        var cancelled = Cancelled(facts, scoped, query.Instrument, query.Mode).Count(c => window.Contains(CancelledAt(c.Play)));
+        var portfolios = facts.Portfolios.Where(p => p.TradingMode == query.Mode).ToList();
         var portfolioNames = portfolios.ToDictionary(p => p.Id.ToString(), p => p.Name);
         var options = new ReviewOptionsDto(
             portfolios.OrderBy(p => p.Name).Select(p => new ReviewPortfolioDto(p.Id.ToString(), p.Name)).ToList(),
@@ -118,7 +118,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             // A scoped read lists the closed Plays' instruments apart; otherwise its closed Plays are all of them.
             (facts.ClosedInstruments is null ? facts.ClosedPlays.Select(f => f.Play) : [])
                 .Concat(facts.UnresolvedPlays.Select(u => u.Play)).Concat(facts.CancelledPlays.Select(c => c.Play))
-                .Where(p => p.TradingMode == query.TradingMode && accounts.ContainsKey(p.AccountId))
+                .Where(p => p.TradingMode == query.Mode && accounts.ContainsKey(p.AccountId))
                 .Select(p => p.ContractId).Concat(facts.ClosedInstruments ?? []).Concat(read.Where(p => p.Outcome is not null).Select(p => p.ContractId))
                 .OfType<string>().Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList());
         var series = Series(current, window, now);
@@ -167,7 +167,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
                     OperationId = e.Position.OperationId, Direction = e.Position.Direction ?? "",
                 })
             .ToList();
-        var cases = ProcessCases(evaluated, facts, scoped, query.Instrument, query.TradingMode!, window);
+        var cases = ProcessCases(evaluated, facts, scoped, query.Instrument, query.Mode, window);
         var omitted = positions.Count(e => e.Result is null && window.Contains(e.ClosedAt));
         return new ReviewDto(now, from ?? current.FirstOrDefault()?.ClosedAt, query.Period, "USD",
             options, Periods.Select(period => {
@@ -181,9 +181,9 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             Metrics(current), series.Points, series.BucketDays, groups,
             new ReviewCoverageDto(candidates.Count, candidates.Count(e => e.Exclusion == "fees"),
                 candidates.Count(e => e.Exclusion == "executions"), facts.OpenPlays, facts.UnassignedFills, facts.FirstFillAtUtc,
-                query.TradingMode == TradingMode.Paper ? PaperNotice : include ? Notice + PositionNotice : Notice)
+                query.Mode == TradingMode.Paper ? PaperNotice : include ? Notice + PositionNotice : Notice)
             { Unresolved = unresolved, Cancelled = cancelled, NotAllocated = candidates.Count(e => e.Exclusion == NotAllocated) },
-            page, query.Offset, query.Offset + page.Count < current.Count ? query.Offset + page.Count : null, query.TradingMode!)
+            page, query.Offset, query.Offset + page.Count < current.Count ? query.Offset + page.Count : null, query.Mode)
         {
             Preflight = Preflight(cases),
             Process = Process(cases),
@@ -206,7 +206,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
     public async Task<IReadOnlyList<ClosedRSum>> ClosedRAsync(IReadOnlyList<(DateTimeOffset From, DateTimeOffset To)> ranges, CancellationToken ct)
     {
         var now = time.GetUtcNow();
-        var query = Validated(new ReviewQuery(Period: "all", Positions: "exclude", TradingMode: TradingMode.Real));
+        var query = Validated(new ReviewQuery(Period: "all", Positions: "exclude", TradingMode: TradingMode.Real.ToValue()));
         var selection = await SelectAsync(query, now, new ReviewWindow(null, now), ct);
         return ranges.Select(range =>
         {
@@ -223,7 +223,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
     /// </summary>
     private static DateTimeOffset? Earliest(ReviewFacts facts, HashSet<Guid> scoped, ReviewQuery query) =>
         facts.ClosedPlays.Select(f => f.Play).Concat(facts.UnresolvedPlays.Select(u => u.Play)).Concat(facts.CancelledPlays.Select(c => c.Play))
-            .Where(p => p.TradingMode == query.TradingMode && scoped.Contains(p.AccountId) && (query.Instrument is null || p.ContractId == query.Instrument))
+            .Where(p => p.TradingMode == query.Mode && scoped.Contains(p.AccountId) && (query.Instrument is null || p.ContractId == query.Instrument))
             .Select(p => (DateTimeOffset?)p.CreatedAtUtc).Append(facts.FirstFillAtUtc).Append(facts.FirstPlayAtUtc).Min();
 
     /// <summary>
@@ -247,12 +247,12 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         for (var attempt = 1; ; attempt++)
         {
             facts = await store.ReadAsync(query, now, window, ct);
-            accounts = facts.Accounts.Where(a => a.IsEnabled && a.TradingMode == query.TradingMode).ToDictionary(a => a.Id);
+            accounts = facts.Accounts.Where(a => a.IsEnabled && a.TradingMode == query.Mode).ToDictionary(a => a.Id);
             scoped = accounts.Values.Where(a =>
                 (query.AccountId is null || a.Id == query.AccountId) &&
                 (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||
                     a.PortfolioId?.ToString() == query.Portfolio)).Select(a => a.Id).ToHashSet();
-            evaluated = facts.ClosedPlays.Where(f => f.Play.TradingMode == query.TradingMode && scoped.Contains(f.Play.AccountId) &&
+            evaluated = facts.ClosedPlays.Where(f => f.Play.TradingMode == query.Mode && scoped.Contains(f.Play.AccountId) &&
                 (query.Instrument is null || f.Play.ContractId == query.Instrument))
                 .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true || f.IncompleteOrders is { Count: > 0 })).ToList();
             accepted = evaluated.Where(e => e.Result is not null).ToList();
@@ -332,7 +332,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
 
     /// <summary>The process population: the period's Closed, Cancelled and Unresolved Plays in scope, each by its own time.</summary>
     private static List<ProcessCase> ProcessCases(IEnumerable<Evaluated> closed, ReviewFacts facts, HashSet<Guid> scope, string? instrument,
-        string mode, ReviewWindow window) =>
+        TradingMode mode, ReviewWindow window) =>
         closed.Select(e => Case(e.Facts!.Play, e.ClosedAt, e.Result, e.Facts.Revisions, PlayReceipts.PlannedAfterExecution(e.Facts)))
             .Concat(Cancelled(facts, scope, instrument, mode).Select(c => Case(c.Play, CancelledAt(c.Play), null, c.Revisions, false)))
             .Concat(Unresolved(facts, scope, instrument, mode).Select(u => Case(u.Play, u.EndedAt, null, u.Revisions,
@@ -406,14 +406,14 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
             request.Rule is { } ruleSelector && !RuleSelectors.Contains(ruleSelector))
             throw new ProblemException(400, "Invalid process selection.");
         var facts = await store.ReadAsync(query, now, window, ct);
-        var accounts = facts.Accounts.Where(a => a.IsEnabled && a.TradingMode == query.TradingMode).ToDictionary(a => a.Id);
+        var accounts = facts.Accounts.Where(a => a.IsEnabled && a.TradingMode == query.Mode).ToDictionary(a => a.Id);
         var scoped = accounts.Values.Where(a => (query.AccountId is null || a.Id == query.AccountId) &&
             (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||
                 a.PortfolioId?.ToString() == query.Portfolio)).Select(a => a.Id).ToHashSet();
-        var evaluated = facts.ClosedPlays.Where(f => f.Play.TradingMode == query.TradingMode && scoped.Contains(f.Play.AccountId) &&
+        var evaluated = facts.ClosedPlays.Where(f => f.Play.TradingMode == query.Mode && scoped.Contains(f.Play.AccountId) &&
                 (query.Instrument is null || f.Play.ContractId == query.Instrument))
             .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true || f.IncompleteOrders is { Count: > 0 }));
-        var cases = ProcessCases(evaluated, facts, scoped, query.Instrument, query.TradingMode!, window);
+        var cases = ProcessCases(evaluated, facts, scoped, query.Instrument, query.Mode, window);
         var selected = (request.Cell is { } c1 ? cases.Where(c => c.Cell == c1)
             : request.Lane is { } l1 ? cases.Where(c => c.Lane == l1)
             : request.MistakeTag is { } t1 ? Tags(cases).Where(t => t.Key == TagKey(t1)).SelectMany(t => t.Cases)
@@ -439,13 +439,13 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         query = Validated(query);
         var window = await WindowAsync(query, now, ct);
         var facts = await store.ReadAsync(query, now, window, ct);
-        var accounts = facts.Accounts.Where(a => a.IsEnabled && a.TradingMode == query.TradingMode && (query.AccountId is null || a.Id == query.AccountId) &&
+        var accounts = facts.Accounts.Where(a => a.IsEnabled && a.TradingMode == query.Mode && (query.AccountId is null || a.Id == query.AccountId) &&
             (query.Portfolio == "all" || query.Portfolio == "unassigned" && a.PortfolioId is null ||
                 a.PortfolioId?.ToString() == query.Portfolio)).ToDictionary(a => a.Id);
         var all = Excluded(facts, accounts, query, window, now);
         var items = all.Skip(query.Offset).Take(PageSize).Select(x => x.Item()).ToList();
         return new(items, all.Count, query.Offset, query.Offset + items.Count < all.Count ? query.Offset + items.Count : null,
-            query.TradingMode == TradingMode.Paper ? PaperNotice : Notice);
+            query.Mode == TradingMode.Paper ? PaperNotice : Notice);
     }
 
     /// <summary>
@@ -455,7 +455,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
     private List<(DateTimeOffset At, Play Play, string Status, Func<ReviewExclusionDto> Item)> Excluded(ReviewFacts facts,
         Dictionary<Guid, Account> accounts, ReviewQuery query, ReviewWindow window, DateTimeOffset now)
     {
-        var excluded = facts.ClosedPlays.Where(f => f.Play.TradingMode == query.TradingMode && accounts.ContainsKey(f.Play.AccountId) &&
+        var excluded = facts.ClosedPlays.Where(f => f.Play.TradingMode == query.Mode && accounts.ContainsKey(f.Play.AccountId) &&
             (query.Instrument is null || f.Play.ContractId == query.Instrument))
             .Select(f => Evaluate(f, now, facts.IncompleteOrderPlayIds?.Contains(f.Play.Id) == true || f.IncompleteOrders is { Count: > 0 }))
             .Where(e => e.Exclusion is not null && window.Contains(e.ClosedAt))
@@ -465,11 +465,11 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
         return excluded.Select(e => (At: e.ClosedAt, e.Facts!.Play, Status: "closed", Item: (Func<ReviewExclusionDto>)(() => new ReviewExclusionDto(e.Facts.Play.Id,
                 e.Facts.Play.Title, e.Facts.Play.AccountId, accounts[e.Facts.Play.AccountId].Name,
                 e.Facts.Play.ContractId ?? "", ExclusionReasons(e.Facts, now, e.Exclusion!)))))
-            .Concat(Unresolved(facts, accounts.Keys.ToHashSet(), query.Instrument, query.TradingMode!).Where(u => window.Contains(u.EndedAt))
+            .Concat(Unresolved(facts, accounts.Keys.ToHashSet(), query.Instrument, query.Mode).Where(u => window.Contains(u.EndedAt))
                 .Select(u => (At: u.EndedAt, u.Play, Status: "unresolved", Item: (Func<ReviewExclusionDto>)(() => new ReviewExclusionDto(u.Play.Id, u.Play.Title,
                     u.Play.AccountId, accounts[u.Play.AccountId].Name, u.Play.ContractId ?? "", [UnresolvedReason(u.Declaration)])
                     { Unresolved = u.Declaration }))))
-            .Concat(Cancelled(facts, accounts.Keys.ToHashSet(), query.Instrument, query.TradingMode!).Where(c => window.Contains(CancelledAt(c.Play)))
+            .Concat(Cancelled(facts, accounts.Keys.ToHashSet(), query.Instrument, query.Mode).Where(c => window.Contains(CancelledAt(c.Play)))
                 .Select(c => (At: CancelledAt(c.Play), c.Play, Status: "cancelled", Item: (Func<ReviewExclusionDto>)(() => new ReviewExclusionDto(c.Play.Id,
                     c.Play.Title, c.Play.AccountId, accounts[c.Play.AccountId].Name, c.Play.ContractId ?? "", [CancelledReason(c.Play)])))))
             .OrderByDescending(x => x.At).ThenBy(x => x.Play.Id).ToList();
@@ -512,7 +512,7 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
                 .Text(reasons).End();
         }
         csv.Text("notice");
-        for (var i = 1; i < ExportColumns.Count; i++) csv.Text(i == 3 ? $"{ExportNotice} {span}, {query.TradingMode} mode, as of " +
+        for (var i = 1; i < ExportColumns.Count; i++) csv.Text(i == 3 ? $"{ExportNotice} {span}, {query.Mode.ToValue()} mode, as of " +
             now.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture) + "." : null);
         csv.End();
         foreach (var e in selection.Current.OrderByDescending(e => e.ClosedAt).ThenBy(e => e.Facts?.Play.Id ?? Guid.Empty)
@@ -550,18 +550,18 @@ public sealed class ReviewService(IReviewStore store, TimeProvider time, IVenueR
                     : $"{e.ContractId} {(e.Position.Direction == "short" ? "Short" : "Long")}", e.AccountId,
                 e.VenueId, e.ContractId, e.Position.Direction, "position", "imported", "closed", e.ClosedAt, null, null, null, null, null, null,
                 null, null, e.Position.Omission ?? "Review cannot score this closed position.");
-        var mode = query.TradingMode == TradingMode.Paper ? "paper-" : "";
+        var mode = query.Mode == TradingMode.Paper ? "paper-" : "";
         return new(window.Week is { } named ? $"vessel-review-{mode}week-{named.Start:yyyyMMdd}.csv"
             : $"vessel-review-{mode}{query.Period}-{now.UtcDateTime:yyyyMMdd}.csv", csv.ToString());
     }
 
     /// <summary>Unresolved Plays in the scope's mode, accounts and instrument; they are excluded with the reason "unresolved".</summary>
-    private static IEnumerable<UnresolvedPlayFacts> Unresolved(ReviewFacts facts, HashSet<Guid> accounts, string? instrument, string mode) =>
+    private static IEnumerable<UnresolvedPlayFacts> Unresolved(ReviewFacts facts, HashSet<Guid> accounts, string? instrument, TradingMode mode) =>
         facts.UnresolvedPlays.Where(u => u.Play.TradingMode == mode && accounts.Contains(u.Play.AccountId) &&
             (instrument is null || u.Play.ContractId == instrument));
 
     /// <summary>Cancelled Plays in the scope's mode, accounts and instrument; they have no fills, so Review never scores them.</summary>
-    private static IEnumerable<EndedPlayFacts> Cancelled(ReviewFacts facts, HashSet<Guid> accounts, string? instrument, string mode) =>
+    private static IEnumerable<EndedPlayFacts> Cancelled(ReviewFacts facts, HashSet<Guid> accounts, string? instrument, TradingMode mode) =>
         facts.CancelledPlays.Where(c => c.Play.TradingMode == mode && accounts.Contains(c.Play.AccountId) &&
             (instrument is null || c.Play.ContractId == instrument));
 

@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -34,7 +35,7 @@ public sealed class PortfolioMembershipApiTests
     public async Task Guarded_requests_return_conflict_without_moving_or_creating()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Account"); store.Accounts.Add(account);
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Account", TradingMode.Real); store.Accounts.Add(account);
         account.UpdateSettings("Current", null, true);
         await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
         var expected = new[] { new AccountSettingsExpectation(account.Id, 1) };
@@ -67,8 +68,8 @@ public sealed class PortfolioMembershipApiTests
     public async Task Move_and_create_endpoints_return_updated_resources()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Account"); store.Accounts.Add(account);
-        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Target"); store.Portfolios.Add(portfolio);
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Account", TradingMode.Real); store.Accounts.Add(account);
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Target", TradingMode.Real); store.Portfolios.Add(portfolio);
         await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
         var moved = await client.PostAsJsonAsync("/api/accounts/portfolio", new MoveAccountsRequest([account.Id], portfolio.Id));
         Assert.Equal(HttpStatusCode.OK, moved.StatusCode); Assert.Equal(portfolio.Id, (await moved.Content.ReadFromJsonAsync<List<AccountDto>>())!.Single().PortfolioId);

@@ -11,6 +11,7 @@ using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
 using Vessel.Persistence.Events;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -198,7 +199,7 @@ public sealed class VesselEventFillCaptureBatchingTests
 
     private static async Task<(Account Account, Play Play, Play Retro)> SeedAsync(CoreDatabase database, Guid owner, DateTimeOffset now)
     {
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
         var retro = Play.Retrospective(Guid.NewGuid(), account, new("hyperliquid", "BTC"),
             PlayDocuments.Serialize(TestPlays.Plan()), now.AddHours(-1), now, "Retrospective");

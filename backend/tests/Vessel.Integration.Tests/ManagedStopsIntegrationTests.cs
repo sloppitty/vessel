@@ -53,7 +53,7 @@ public sealed class ManagedStopPostgresTests
     /// <summary>A long planned at 100 (stop 95, target 110, 3×) whose entry filled 1 at 100, with its stop order resting at 95.</summary>
     private static async Task<PlayDto> OpenPlay(Harness h, Guid account)
     {
-        var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Breakout", TestPlays.Plan()), default);
+        var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Breakout", TestPlays.Plan()), TradingMode.Real, default);
         var play = await h.Plays.ChangeStatusAsync(draft.Summary.Id, new(draft.Summary.Version, "planned"), default);
         h.Orders.Orders.AddRange([Order("entry", "buy", 100m, "filled"), Order("stop", "sell", 94m, trigger: 95m, type: "Stop Market", reduceOnly: true)]);
         h.Reader.Result = h.Reader.Result with { Fills = [Fill("f-entry", "entry", "Open Long", 100m)] };
@@ -76,7 +76,7 @@ public sealed class ManagedStopPostgresTests
     {
         var (database, h, account) = await SetUp();
         await using var _ = database;
-        var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Breakout", TestPlays.Plan()), default);
+        var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Breakout", TestPlays.Plan()), TradingMode.Real, default);
         var play = await h.Plays.ChangeStatusAsync(draft.Summary.Id, new(draft.Summary.Version, "planned"), default);
         h.Orders.Orders.Add(Order("entry", "buy", 100m, "filled"));
         h.Reader.Result = h.Reader.Result with { Fills = [Fill("f-entry", "entry", "Open Long", 100m)] };
@@ -92,7 +92,7 @@ public sealed class ManagedStopPostgresTests
         h.Reader.Result = h.Reader.Result with { Fills = [.. h.Reader.Result.Fills, Fill("f-exit", "exit", "Close Long", 110m, pnl: 10m)] };
         Assert.Equal("closed", (await h.CheckAsync(play.Summary.Id)).Status);
 
-        var facts = Assert.Single(await h.Sizing.ClosedPlaysAsync(default));
+        var facts = Assert.Single(await h.Sizing.ClosedPlaysAsync(TradingMode.Real, default));
         var outcome = PlayOutcomeCalculator.Outcome(facts)!;
         // Revision 1 (stop 95) was in force at the first entry fill: risk 100 notional × 5%, R = 10 ÷ 5.
         Assert.Equal((10m, 5m, 2m), (outcome.NetResult, outcome.PlannedRisk, outcome.RMultiple));
@@ -280,7 +280,7 @@ public sealed class ManagedStopPostgresTests
     {
         var (database, h, account) = await SetUp();
         await using var _ = database;
-        var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Breakout", TestPlays.Plan()), default);
+        var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Breakout", TestPlays.Plan()), TradingMode.Real, default);
         var play = await h.Plays.ChangeStatusAsync(draft.Summary.Id, new(draft.Summary.Version, "planned"), default);
         h.Orders.Orders.AddRange([Order("entry", "buy", 100m, "filled"), Order("target", "sell", 110m, reduceOnly: true)]);
         h.Reader.Result = h.Reader.Result with { Fills = [Fill("f-entry", "entry", "Open Long", 100m)] };
@@ -356,12 +356,12 @@ public sealed class ManagedStopPostgresTests
         var (database, h, account) = await SetUp();
         await using var _ = database;
         var longPlan = TestPlays.Plan() with { Entries = [TestPlays.Plan().Entries[0] with { Targets = [] }] };
-        var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Turning", longPlan), default);
+        var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Turning", longPlan), TradingMode.Real, default);
         var refused = await Assert.ThrowsAsync<ProblemException>(() => h.Plays.UpdateAsync(draft.Summary.Id,
             Revise(draft, longPlan with { Direction = "short" }, null), default));
         Assert.Equal((400, "Entry 1: a short stop goes above the entry price."), (refused.StatusCode, refused.Message));
         Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => h.Plays.CreateAsync(
-            new CreatePlayRequest(account, "BTC", "venue", "New short", longPlan with { Direction = "short" }), default))).StatusCode);
+            new CreatePlayRequest(account, "BTC", "venue", "New short", longPlan with { Direction = "short" }), TradingMode.Real, default))).StatusCode);
         var stored = await h.Plays.GetAsync(draft.Summary.Id, default);
         Assert.Equal(("long", draft.Summary.Version), (stored.Plan.Direction, stored.Summary.Version));
         // Unchanged in the same direction it still saves; planning then keeps the long plan.

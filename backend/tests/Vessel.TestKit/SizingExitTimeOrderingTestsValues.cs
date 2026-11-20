@@ -4,6 +4,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -17,7 +18,7 @@ public partial class SizingExitTimeOrderingTestsValues
     /// <summary>A long of one unit at 100 that exits <paramref name="exitMinutes"/> after planning with <paramref name="pnl"/>.</summary>
     internal ClosedPlayFacts Closed(decimal pnl, int exitMinutes, DateTimeOffset? detected = null)
     {
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue", TradingMode.Real);
         var plan = new PlayPlanDocument("long", "margin", "250", "3", null,
             [new PlanEntry("e", "e", "#b9c9e4", "100", "100", [new PlanExit("s", "price", "95", "100")], [new PlanExit("t", "price", "120", "100")])],
             new PlanNotes("", "", "", ""));

@@ -14,7 +14,7 @@ public sealed class IfThenRuleTests
 {
     private static readonly DateTimeOffset At = DateTimeOffset.Parse("2026-10-22T10:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
 
-    private static PlayRule Rule(int version = 1) => new(Guid.NewGuid(), "real", version, "price tags the stop", "I wait for the close", null, At);
+    private static PlayRule Rule(int version = 1) => new(Guid.NewGuid(), TradingMode.Real, version, "price tags the stop", "I wait for the close", null, At);
 
     [Fact]
     public async Task Review_counts_the_rules_answers_by_outcome_and_drills_into_each_and_a_winning_deviation_stays_one()

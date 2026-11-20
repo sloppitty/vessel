@@ -30,6 +30,8 @@ describe('Review API', () => {
     { periods: [reviewFixture.periods[0]] },
     { bucketDays: 0 }, { nextOffset: 0 }, { currency: 'USDC' },
     { plays: [{ ...reviewFixture.plays[0], id: '../../play' }] },
+    // #113: the API always sends the mode.
+    { tradingMode: undefined }, { tradingMode: 'Real' },
   ])('rejects malformed data %#', change => {
     expect(isReviewDocument({ ...reviewFixture, ...change })).toBe(false)
   })

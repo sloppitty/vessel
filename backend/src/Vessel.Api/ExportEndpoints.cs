@@ -14,7 +14,7 @@ public static class ExportEndpoints
         {
             var export = await service.PrepareAsync(id, kind, from, to, ct);
             return Results.Stream(stream => export.Write(stream, ct), export.ContentType, export.FileName);
-        });
+        }).RealOnly();
         // 5c: one Play as a zip, in its own trading mode; a Play of the other mode or owner is not found.
         api.MapGet("/plays/{id:guid}/bundle", async (Guid id, PlayBundleService service, CancellationToken ct) =>
         {

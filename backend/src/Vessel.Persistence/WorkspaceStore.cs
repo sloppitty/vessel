@@ -12,12 +12,10 @@ namespace Vessel.Persistence;
 
 public sealed partial class WorkspaceStore(VesselDbContext db, UnitOfWork unitOfWork, TimeProvider? time = null) : IWorkspaceStore
 {
-    public Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct) => PortfoliosAsync(ct, TradingMode.Real);
-    public Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct, string tradingMode = TradingMode.Real) =>
-        db.Portfolios.Where(x => x.TradingMode == TradingMode.Validate(tradingMode)).OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
-    public Task<List<Account>> AccountsAsync(CancellationToken ct) => AccountsAsync(ct, TradingMode.Real);
-    public Task<List<Account>> AccountsAsync(CancellationToken ct, string tradingMode = TradingMode.Real) =>
-        db.Accounts.Where(x => x.TradingMode == TradingMode.Validate(tradingMode)).OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
+    public Task<List<Portfolio>> PortfoliosAsync(TradingMode tradingMode, CancellationToken ct) =>
+        db.Portfolios.Where(x => x.TradingMode == TradingModes.Validate(tradingMode)).OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
+    public Task<List<Account>> AccountsAsync(TradingMode tradingMode, CancellationToken ct) =>
+        db.Accounts.Where(x => x.TradingMode == TradingModes.Validate(tradingMode)).OrderBy(x => x.Name).ThenBy(x => x.Id).ToListAsync(ct);
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => db.Accounts.SingleOrDefaultAsync(x => x.Id == id, ct);
     public Task<MarketDataAccount?> MarketDataAccountAsync(Guid id, CancellationToken ct) => db.Accounts.AsNoTracking()
         .Where(x => x.Id == id).Select(x => new MarketDataAccount(x.IsEnabled, x.VenueId, x.TradingMode)).SingleOrDefaultAsync(ct);

@@ -7,6 +7,7 @@ using Npgsql;
 using Vessel.Application.Monitoring;
 using Vessel.Persistence;
 using Xunit.Abstractions;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -63,7 +64,7 @@ public sealed class DatabaseIndexPlanTests(ITestOutputHelper output)
         Assert.NotNull(await monitor.CaptureAsync(account, default));
         var newest = capture.Commands.Single(c => c.Sql.Contains("max(", StringComparison.OrdinalIgnoreCase));
         capture.Commands.Clear();
-        var found = await new PlayStore(db, unit).SearchAsync(Vessel.Application.Plays.JournalSearch.LikePattern("zephyrine"), "real", 0, 20, default);
+        var found = await new PlayStore(db, unit).SearchAsync(Vessel.Application.Plays.JournalSearch.LikePattern("zephyrine"), TradingMode.Real, 0, 20, default);
         Assert.Equal(12, found.Total);
         // The first statement that filters the folded texts: the count of matching Plays.
         var count = capture.Commands.First(c => c.Sql.Contains("\"Folded\" LIKE", StringComparison.Ordinal));

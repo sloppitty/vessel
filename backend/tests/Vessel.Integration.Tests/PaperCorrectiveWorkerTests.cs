@@ -16,6 +16,7 @@ using Vessel.Domain.Workspace;
 using Vessel.Persistence;
 using Vessel.Worker;
 using Vessel.Infrastructure.Venues.Hyperliquid;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -124,8 +125,8 @@ public sealed class PaperCorrectiveWorkerTests
         params (string Contract, PlayPlanDocument Plan, decimal Reserved)[] plays)
     {
         await using var db = database.Context(owner);
-        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper " + owner.ToString("N")[..6], "paper", 4000);
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: TradingMode.Paper);
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper " + owner.ToString("N")[..6], TradingMode.Paper, 4000);
         account.Configure(portfolio.Id, null, null);
         db.AddRange(portfolio, account, PaperLedgerEntry.Seed(owner, account.Id, 4000, FirstOpen.AddHours(-1)));
         if (!await db.PaperSettings.AnyAsync())

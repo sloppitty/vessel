@@ -89,11 +89,9 @@ describe('Venues', () => {
     const listed = new Venues([
       { ...hyperliquid, id: 'history-only', capabilities: { ...hyperliquid.capabilities, currentOrderBook: false } },
       { ...hyperliquid, id: 'book', capabilities: { ...hyperliquid.capabilities, currentOrderBook: true } },
-      // An API that does not state the capability at all.
-      { ...hyperliquid, id: 'unstated', capabilities: { sync: true, instruments: true, orders: true, candles: true, marketContext: true, stream: true, stablecoinWallet: true } },
       { ...hyperliquid, id: 'no-orders', capabilities: { ...hyperliquid.capabilities, orders: false, currentOrderBook: false } },
     ])
-    expect(['history-only', 'book', 'unstated', 'no-orders', 'unknown'].map(id => listed.readsCurrentBook(id))).toEqual([false, true, true, true, true])
+    expect(['history-only', 'book', 'no-orders', 'unknown'].map(id => listed.readsCurrentBook(id))).toEqual([false, true, true, true])
   })
 
   it('is provided by the application and empty without a provider', () => {

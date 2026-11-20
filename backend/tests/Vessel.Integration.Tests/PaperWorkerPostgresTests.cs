@@ -18,6 +18,7 @@ using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
 using Vessel.Worker;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -244,7 +245,7 @@ public sealed class PaperWorkerPostgresTests
         {
             for (var i = 0; i < 4; i++)
             {
-                var account = new Account(Guid.NewGuid(), f.Owners[0], "hyperliquid", "Running real monitor");
+                var account = new Account(Guid.NewGuid(), f.Owners[0], "hyperliquid", "Running real monitor", TradingMode.Real);
                 db.AddRange(account, new MonitorAccount
                 {
                     OwnerId = account.OwnerId, AccountId = account.Id, ManualState = "running",
@@ -378,8 +379,8 @@ public sealed class PaperWorkerPostgresTests
             foreach (var owner in owners)
             {
                 await using var db = database.Context(owner);
-                var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
-                var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper", "paper", 4000);
+                var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: TradingMode.Paper);
+                var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper", TradingMode.Paper, 4000);
                 account.Configure(portfolio.Id, null, null);
                 db.AddRange(portfolio, account, PaperLedgerEntry.Seed(owner, account.Id, 4000, Open.AddHours(-1)),
                     new PaperSettings { OwnerId = owner, Enabled = true, CheckIntervalMinutes = 1 });

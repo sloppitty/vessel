@@ -6,6 +6,7 @@ using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -48,7 +49,7 @@ public sealed class FundingPostgresTests
         MonitorTestPaths.RefreshAsync(db, owner, TestVenues.With(reader), id, ct: ct);
     private static async Task<Guid> Account(VesselDbContext db, Guid owner)
     {
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic funding");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic funding", TradingMode.Real);
         account.Configure(null, "0x1111111111111111111111111111111111111111", null);
         db.Accounts.Add(account); await db.SaveChangesAsync();
         return account.Id;
@@ -86,7 +87,7 @@ public sealed class FundingPostgresTests
         }
         await using (var db = database.Context(owner))
         {
-            await Service(db, owner, reader).DeleteAccountAsync(id, default);
+            await Service(db, owner, reader).DeleteAccountAsync(id, TradingMode.Real, default);
             Assert.Empty(await db.FundingPayments.ToListAsync()); Assert.Empty(await db.FundingStates.ToListAsync());
             Assert.Empty(await db.Accounts.ToListAsync());
         }
@@ -209,7 +210,7 @@ public sealed class FundingPostgresTests
         var venues = TestVenues.With(reader, orders);
         await using var db = database.Context(owner);
         var id = await Account(db, owner);
-        var other = new Account(Guid.NewGuid(), owner, "hyperliquid", "Other synthetic account");
+        var other = new Account(Guid.NewGuid(), owner, "hyperliquid", "Other synthetic account", TradingMode.Real);
         other.Configure(null, "0x2222222222222222222222222222222222222222", null);
         db.Accounts.Add(other); await db.SaveChangesAsync();
         var clock = new Clock();

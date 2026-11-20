@@ -7,6 +7,7 @@ using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Domain.Accounts;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -23,15 +24,15 @@ public sealed class DraftMovePostgresTests
     private static async Task<(PlayDto First, PlayDto Second)> Seed(CoreDatabase database, Guid owner)
     {
         await using var db = database.Context(owner);
-        var first = new Account(Guid.NewGuid(), owner, "manual", "First");
-        var second = new Account(Guid.NewGuid(), owner, "manual", "Second");
+        var first = new Account(Guid.NewGuid(), owner, "manual", "First", TradingMode.Real);
+        var second = new Account(Guid.NewGuid(), owner, "manual", "Second", TradingMode.Real);
         db.Accounts.AddRange(first, second);
         await db.SaveChangesAsync();
         var service = Service(db);
         return (await service.CreateAsync(new(first.Id, "BTC", "manual", "First draft", TestPlays.Plan(),
-                Review: "First review"), default),
+                Review: "First review"), TradingMode.Real, default),
             await service.CreateAsync(new(second.Id, "ETH", "manual", "Second draft", TestPlays.Plan(),
-                Review: "Second review"), default));
+                Review: "Second review"), TradingMode.Real, default));
     }
 
     [PostgresFact]
@@ -81,7 +82,7 @@ public sealed class DraftMovePostgresTests
         var owner = Guid.NewGuid();
         var (first, _) = await Seed(database, owner);
         var other = Guid.NewGuid();
-        var foreign = new Account(Guid.NewGuid(), other, "manual", "Foreign");
+        var foreign = new Account(Guid.NewGuid(), other, "manual", "Foreign", TradingMode.Real);
         await using (var db = database.Context(other))
         {
             db.Accounts.Add(foreign);

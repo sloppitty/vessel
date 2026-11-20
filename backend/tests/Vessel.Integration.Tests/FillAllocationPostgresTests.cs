@@ -8,6 +8,7 @@ using Vessel.Application.Sizing;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -27,7 +28,7 @@ public sealed partial class ExecutionPostgresTests
         var plan = TestPlays.Plan() with { Direction = "short" };
         plan = plan with { Entries = [plan.Entries[0] with { Stops = [new PlanExit("stop-1", "price", "105", "100")],
             Targets = [new PlanExit("target-1", "price", "90", "100")] }] };
-        var play = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", title, plan), default);
+        var play = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", title, plan), TradingMode.Real, default);
         return await h.Plays.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "planned"), default);
     }
 
@@ -127,7 +128,7 @@ public sealed partial class ExecutionPostgresTests
         var exclusions = (await Review(h).ExclusionsAsync(new(Period: "all"), default)).Items;
         Assert.Equal(new[] { a, b }.Order(), exclusions.Select(e => e.PlayId).Order());
         Assert.All(exclusions, e => Assert.Equal([FillAllocations.NotAllocatedReason], e.Reasons));
-        var sizing = await h.Sizing.GetAsync(default);
+        var sizing = await h.Sizing.GetAsync(TradingMode.Real, default);
         Assert.Equal((2, 0), (sizing.Record.NotAllocated, sizing.Record.ClosedPlays));
 
         // A Closed Play keeps its part: moving quantity off it, or removing the allocation, is refused and changes nothing.
@@ -369,7 +370,7 @@ public sealed partial class ExecutionPostgresTests
         Assert.Empty(report.Plays);
         // No decided Play, and no Activity operation holding a split fill: the sizing record has no source.
         var sizing = new SizingService(store, new CoreOwner(h.Owner), TimeProvider.System, TestUnitOfWork.For(h.Db), activity);
-        var record = (await sizing.GetAsync(default)).Record;
+        var record = (await sizing.GetAsync(TradingMode.Real, default)).Record;
         Assert.Equal((SizingService.SourceNone, 0), (record.Source, record.ClosedPlays));
     }
 
@@ -450,7 +451,7 @@ public sealed class FillAllocationEventTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Vessel.Domain.Accounts.Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var account = new Vessel.Domain.Accounts.Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
         var other = TestPlays.Create(account, new("hyperliquid", "BTC"));
         var now = DateTimeOffset.UtcNow;

@@ -256,8 +256,6 @@ public sealed class OwnerScopeArchitectureTests
             "Vessel.Identity/IdentityAdministration.cs|05bcbd54e5313ea9342913bae8c9ca458edd7ac36a0dfdcf0493ff7afc0aab60",
             // Not SQL: identity command usage text ("--user", "--address" … and words such as "revoke").
             "Vessel.Identity/IdentityCommands.cs|077a1423296023055128d9ed1c94d99ecfbd28849c50709809d3ca8d2d47489b",
-            // Not SQL: the "import-conflicts" route segment of the actual-only boundary (Phase 2, item 14c).
-            "Vessel.Api/TradingModeBoundary.cs|d9ea752b24a4ee2088e6578a7606d8a3cbb73206c981e9343f33b244ea4ea174",
             // Not SQL: the "refresh" source of a fill coverage record (Phase 2, item 6).
             "Vessel.Domain/Monitoring/HistoryCoverage.cs|d6cc0a088c07683c65cd266860cab8d94b3a1937b17420d9da30ca299c09fb77",
         ];

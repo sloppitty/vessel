@@ -13,6 +13,7 @@ using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -56,7 +57,7 @@ public sealed partial class ExecutionPostgresTests
 
     private static async Task<PlayDto> PlannedPlay(Harness h, Guid account, string title = "Breakout")
     {
-        var play = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", title, TestPlays.Plan()), default);
+        var play = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", title, TestPlays.Plan()), TradingMode.Real, default);
         return await h.Plays.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "planned"), default);
     }
 
@@ -84,7 +85,7 @@ public sealed partial class ExecutionPostgresTests
                 Targets = [new PlanExit("target-1", "percent", "10000000000000000000000000000", "100")]
             }]
         };
-        var play = await h.Plays.CreateAsync(new(account, "BTC", "venue", "Extreme target", plan), default);
+        var play = await h.Plays.CreateAsync(new(account, "BTC", "venue", "Extreme target", plan), TradingMode.Real, default);
         play = await h.Plays.ChangeStatusAsync(play.Summary.Id, new(play.Summary.Version, "planned"), default);
 
         var execution = await h.Execution.GetAsync(play.Summary.Id, default);
@@ -111,7 +112,7 @@ public sealed partial class ExecutionPostgresTests
         {
             Entries = [TestPlays.Plan("0.0000000000000000000000001").Entries[0] with { Stops = [], Targets = [] }]
         };
-        var tiny = await h.Plays.CreateAsync(new(account, "BTC", "venue", "Tiny entry", plan), default);
+        var tiny = await h.Plays.CreateAsync(new(account, "BTC", "venue", "Tiny entry", plan), TradingMode.Real, default);
         tiny = await h.Plays.ChangeStatusAsync(tiny.Summary.Id, new(tiny.Summary.Version, "planned"), default);
         h.Orders.Orders.AddRange([Order("ordinary", "buy", 100m), Order("tiny", "buy", 0.0000000000000000000000001m)]);
 
@@ -227,7 +228,7 @@ public sealed partial class ExecutionPostgresTests
         {
             Entries = [TestPlays.Plan().Entries[0] with { Stops = [new PlanExit("stop-1", "price", "95", "50"), new PlanExit("stop-2", "price", "90", "50")] }],
         };
-        var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Two stops", plan), default);
+        var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Two stops", plan), TradingMode.Real, default);
         var play = await h.Plays.ChangeStatusAsync(draft.Summary.Id, new(draft.Summary.Version, "planned"), default);
         h.Orders.Orders.AddRange([Order("41", "sell", 89m, trigger: 90m, type: "Stop Market", reduceOnly: true), Order("42", "sell", 80m, trigger: 85m, type: "Stop Market", reduceOnly: true)]);
         var execution = await h.CheckAsync(play.Summary.Id);
@@ -290,7 +291,7 @@ public sealed partial class ExecutionPostgresTests
         AddFills(h, Fill("g1", "51", "Open Long", 100m, 1m, at.AddMinutes(2)), Fill("g2", "52", "Close Long", 110m, 1m, at.AddMinutes(4)));
         var execution = await h.CheckAsync(play.Summary.Id);
         Assert.Equal(("open", "1", "1"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.ExitedQuantity));
-        Assert.Equal(0, (await h.Sizing.GetAsync(default)).Record.ClosedPlays);
+        Assert.Equal(0, (await h.Sizing.GetAsync(TradingMode.Real, default)).Record.ClosedPlays);
 
         // The missing execution arrives later under its own fill ID: one unit is still open.
         AddFills(h, Fill("g3", "51", "Open Long", 100m, 1m, at.AddMinutes(2)));
@@ -302,7 +303,7 @@ public sealed partial class ExecutionPostgresTests
         h.Orders.Orders.Add(Order("53", "sell", 110m, "filled", reduceOnly: true, placed: at.AddMinutes(5)));
         AddFills(h, Fill("g4", "53", "Close Long", 110m, 1m, at.AddMinutes(6)));
         Assert.Equal("closed", (await h.CheckAsync(play.Summary.Id)).Status);
-        var sizing = await h.Sizing.GetAsync(default);
+        var sizing = await h.Sizing.GetAsync(TradingMode.Real, default);
         Assert.Equal((1, 1), (sizing.Record.ClosedPlays, sizing.Record.Wins));
     }
 
@@ -322,7 +323,7 @@ public sealed partial class ExecutionPostgresTests
         var execution = await h.CheckAsync(play.Summary.Id);
         Assert.Equal(("open", "1", "0"), (execution.Status, execution.Totals.EnteredQuantity, execution.Totals.ExitedQuantity));
         Assert.Equal(["63"], execution.Links.Select(l => l.Order!.OrderId));
-        Assert.Equal(0, (await h.Sizing.GetAsync(default)).Record.ClosedPlays);
+        Assert.Equal(0, (await h.Sizing.GetAsync(TradingMode.Real, default)).Record.ClosedPlays);
 
         // A target placed before the entry filled but executed after it is this play's exit.
         h.Orders.Orders.Add(Order("64", "sell", 110m, "filled", reduceOnly: true, placed: at.AddMinutes(2)));
@@ -395,7 +396,7 @@ public sealed partial class ExecutionPostgresTests
             stale.Execution.LinkAsync(play.Summary.Id, new("83", "entry", "entry-1"), default))).StatusCode);
         var after = await h.Execution.GetAsync(play.Summary.Id, default);
         Assert.Equal(("closed", 2, "0"), (after.Status, after.Links.Count, after.Totals.OpenQuantity));
-        Assert.Equal(1, (await h.Sizing.GetAsync(default)).Record.Wins);
+        Assert.Equal(1, (await h.Sizing.GetAsync(TradingMode.Real, default)).Record.Wins);
     }
 
     [PostgresFact]
@@ -599,7 +600,7 @@ public sealed partial class ExecutionPostgresTests
             Entries = [first, new PlanEntry("entry-2", "Entry 2", "#c9b9e4", "50", "98", [new PlanExit("stop-2", "price", "95", "100")],
                 [new PlanExit("target-2", "price", "110", "100")])],
         };
-        var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Scaling", plan), default);
+        var draft = await h.Plays.CreateAsync(new CreatePlayRequest(account, "BTC", "venue", "Scaling", plan), TradingMode.Real, default);
         var play = await h.Plays.ChangeStatusAsync(draft.Summary.Id, new(draft.Summary.Version, "planned"), default);
         h.Orders.Orders.Add(Order("110", "buy", 100m, "filled", placed: at.AddMinutes(1)));
         AddFills(h, Fill("p1", "110", "Open Long", 100m, 1m, at.AddMinutes(2)));
@@ -640,7 +641,7 @@ public sealed partial class ExecutionPostgresTests
     {
         var (database, h, account) = await SetUp();
         await using var _ = database;
-        var manual = await h.Plays.CreateAsync(new CreatePlayRequest(account, "My label", "manual", "Manual", TestPlays.Plan()), default);
+        var manual = await h.Plays.CreateAsync(new CreatePlayRequest(account, "My label", "manual", "Manual", TestPlays.Plan()), TradingMode.Real, default);
         Assert.Equal("Plan the play to start tracking venue orders.", (await h.Execution.GetAsync(manual.Summary.Id, default)).Reason);
         manual = await h.Plays.ChangeStatusAsync(manual.Summary.Id, new(manual.Summary.Version, "planned"), default);
         var execution = await h.Execution.GetAsync(manual.Summary.Id, default);

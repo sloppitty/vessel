@@ -20,7 +20,7 @@ public sealed class SizingServiceUseCasesTests : SizingServiceTestsValues
             new(OrderLinkRole.Stop, Fill(95, 1, pnl: -5, fee: 0, minutes: 60, side: ExecutionFacts.Sell))], closedDay: 2));
         store.Closed.Add(Closed(Plan(), [new(OrderLinkRole.Entry, Fill(100, 1, fee: 0)),
             new(OrderLinkRole.Target, Fill(110, 1, pnl: 10, fee: 0, minutes: 120, side: ExecutionFacts.Sell))], closedDay: 3));
-        var sizing = await Service.GetAsync(default);
+        var sizing = await Service.GetAsync(TradingMode.Real, default);
         Assert.Equal("1.25", sizing.Settings.RiskPercent);
         Assert.Equal(("full", "1", "1.25", "10", "2"), (sizing.Exposure.Level, sizing.Exposure.Multiplier, sizing.Limits.EffectiveRiskPercent,
             sizing.Limits.MaxStopPercent, sizing.Limits.MinRewardRisk));
@@ -43,20 +43,20 @@ public sealed class SizingServiceUseCasesTests : SizingServiceTestsValues
         store.Closed.Add(Closed(Plan(), [In(), Out(quantity: 2)]));
         // The entry order filled 2 at the venue, but only this one execution is retained.
         store.Closed.Add(Closed(Plan(), [In(), Out()]) with { IncompleteOrders = ["o"] });
-        var sizing = await Service.GetAsync(default);
+        var sizing = await Service.GetAsync(TradingMode.Real, default);
         Assert.Equal((1, 1), (sizing.Record.ClosedPlays, sizing.Record.Wins));
     }
 
     [Fact]
     public async Task Update_saves_the_owners_risk_and_rejects_bad_values()
     {
-        var sizing = await Service.UpdateSettingsAsync(new("2"), default);
+        var sizing = await Service.UpdateSettingsAsync(new("2"), TradingMode.Real, default);
         Assert.Equal(("2", owner, 1), (sizing.Settings.RiskPercent, store.Settings!.OwnerId, store.Saves));
-        Assert.Equal("1.5", (await Service.UpdateSettingsAsync(new("1.50"), default)).Settings.RiskPercent);
+        Assert.Equal("1.5", (await Service.UpdateSettingsAsync(new("1.50"), TradingMode.Real, default)).Settings.RiskPercent);
         foreach (var bad in new[] { "", "abc", "1e2", "-1", " 1" })
-            Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Service.UpdateSettingsAsync(new(bad), default))).StatusCode);
+            Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Service.UpdateSettingsAsync(new(bad), TradingMode.Real, default))).StatusCode);
         foreach (var outside in new[] { "0.05", "6", "1.333" })
-            await Assert.ThrowsAsync<DomainValidationException>(() => Service.UpdateSettingsAsync(new(outside), default));
+            await Assert.ThrowsAsync<DomainValidationException>(() => Service.UpdateSettingsAsync(new(outside), TradingMode.Real, default));
         Assert.Equal(1.5m, store.Settings.RiskPercent);
     }
 }

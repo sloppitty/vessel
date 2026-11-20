@@ -9,6 +9,7 @@ using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Infrastructure.Venues.Hyperliquid;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -119,7 +120,7 @@ public sealed partial class HyperliquidAdapterTests : HyperliquidAdapterTestsSup
         Assert.Equal(VenueOrderStatus.Open, result.Orders.Single(o => o.OrderId == "124").Status);
 
         var now = DateTimeOffset.FromUnixTimeMilliseconds(StateTime - 1000);
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Test");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Test", TradingMode.Real);
         var plan = new PlayPlanDocument("long", "margin", "1", "10", null,
             [new("entry", "Entry", "#ffffff", "100", "0.0012345", [], [])], new("", "", "", ""));
         var play = new Play(Guid.NewGuid(), account, new("hyperliquid", "1000PEPE"),

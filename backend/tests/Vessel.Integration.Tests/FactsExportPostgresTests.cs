@@ -7,6 +7,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -32,8 +33,8 @@ public sealed class FactsExportPostgresTests
     public async Task The_store_reads_one_accounts_half_open_days_in_time_order()
     {
         await using var database = await CoreDatabase.CreateAsync();
-        var account = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Main");
-        var other = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Other");
+        var account = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Main", TradingMode.Real);
+        var other = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Other", TradingMode.Real);
         await using (var db = database.Context(Owner))
         {
             db.Accounts.AddRange(account, other);
@@ -65,8 +66,8 @@ public sealed class FactsExportPostgresTests
     {
         // Sol round 1 on #39: the manual instrument was empty, and two settlements within one microsecond could swap.
         await using var database = await CoreDatabase.CreateAsync();
-        var account = new Account(Guid.NewGuid(), Owner, "risex", "Rise");
-        var manual = new Account(Guid.NewGuid(), Owner, "manual", "Broker");
+        var account = new Account(Guid.NewGuid(), Owner, "risex", "Rise", TradingMode.Real);
+        var manual = new Account(Guid.NewGuid(), Owner, "manual", "Broker", TradingMode.Real);
         await using (var db = database.Context(Owner))
         {
             db.Accounts.AddRange(account, manual);

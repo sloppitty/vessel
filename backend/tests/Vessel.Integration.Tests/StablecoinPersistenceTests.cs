@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Common;
 using Vessel.Application.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -34,7 +35,7 @@ public sealed class StablecoinPersistenceTests
         standard = await MonitorTestPaths.RefreshAsync(db, owner, TestVenues.With(reader), standard.Id);
         Assert.Equal("1151.77", standard.BalanceUsd);
 
-        var summary = Assert.Single(await service.PortfoliosAsync(default));
+        var summary = Assert.Single(await service.PortfoliosAsync(TradingMode.Real, default));
         Assert.Equal(("1303.54", "complete"), (summary.BalanceUsd, summary.BalanceCoverage));
         // The perps-only total keeps its meaning.
         Assert.Equal("1000", summary.TotalValueUsd);
@@ -63,22 +64,22 @@ public sealed class StablecoinPersistenceTests
         var synced = await MonitorTestPaths.RefreshAsync(db, owner, TestVenues.With(reader), account.Id);
         Assert.Equal("14.00000000000000000000000001", synced.AvailableStablecoinNominalUsd);
         Assert.Equal("unifiedAccount", synced.AccountMode);
-        var snapshot = (await service.SnapshotAsync(account.Id, default))!;
+        var snapshot = (await service.SnapshotAsync(account.Id, TradingMode.Real, default))!;
         Assert.Equal(reader.Result.Snapshot.AccountValueUsd.ToString(System.Globalization.CultureInfo.InvariantCulture), snapshot.AccountValueUsd);
         Assert.Equal("16.00000000000000000000000001", snapshot.StablecoinWallet!.TotalNominalUsd);
         Assert.Equal(2, snapshot.StablecoinWallet.Balances.Count);
-        Assert.Equal("14.00000000000000000000000001", (await service.OverviewAsync(default)).Totals.AvailableStablecoinNominalUsd);
-        Assert.Equal(1, (await service.OverviewAsync(default)).Totals.StablecoinAccountCount);
-        await service.UpdateAccountAsync(account.Id, new("Wallet", null, false, 1), default);
-        Assert.Null(await service.SnapshotAsync(account.Id, default));
-        Assert.Null((await service.OverviewAsync(default)).Totals.AvailableStablecoinNominalUsd);
+        Assert.Equal("14.00000000000000000000000001", (await service.OverviewAsync(TradingMode.Real, default)).Totals.AvailableStablecoinNominalUsd);
+        Assert.Equal(1, (await service.OverviewAsync(TradingMode.Real, default)).Totals.StablecoinAccountCount);
+        await service.UpdateAccountAsync(account.Id, new("Wallet", null, false, 1), TradingMode.Real, default);
+        Assert.Null(await service.SnapshotAsync(account.Id, TradingMode.Real, default));
+        Assert.Null((await service.OverviewAsync(TradingMode.Real, default)).Totals.AvailableStablecoinNominalUsd);
         Assert.Equal(2, await db.Stablecoins.CountAsync());
-        await service.UpdateAccountAsync(account.Id, new("Wallet", null, true, 2), default);
-        Assert.Equal("14.00000000000000000000000001", (await service.AccountAsync(account.Id, default)).AvailableStablecoinNominalUsd);
+        await service.UpdateAccountAsync(account.Id, new("Wallet", null, true, 2), TradingMode.Real, default);
+        Assert.Equal("14.00000000000000000000000001", (await service.AccountAsync(account.Id, TradingMode.Real, default)).AvailableStablecoinNominalUsd);
         reader.Fail = true;
         await Assert.ThrowsAsync<ProblemException>(() => MonitorTestPaths.RefreshAsync(db, owner, TestVenues.With(reader), account.Id));
-        Assert.Equal("14.00000000000000000000000001", (await service.SnapshotAsync(account.Id, default))!.StablecoinWallet!.AvailableNominalUsd);
-        await service.DeleteAccountAsync(account.Id, default);
+        Assert.Equal("14.00000000000000000000000001", (await service.SnapshotAsync(account.Id, TradingMode.Real, default))!.StablecoinWallet!.AvailableNominalUsd);
+        await service.DeleteAccountAsync(account.Id, TradingMode.Real, default);
         Assert.Empty(await db.Stablecoins.ToListAsync());
     }
 
@@ -106,7 +107,7 @@ public sealed class StablecoinPersistenceTests
         {
             Assert.Empty(await foreign.Stablecoins.ToListAsync());
             var foreignService = new WorkspaceService(new Vessel.Persistence.WorkspaceStore(foreign, TestUnitOfWork.For(foreign)), new CoreOwner(foreign.CurrentOwnerId), TestVenues.With(reader), TestUnitOfWork.For(foreign));
-            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => foreignService.SnapshotAsync(account.Id, default))).StatusCode);
+            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => foreignService.SnapshotAsync(account.Id, TradingMode.Real, default))).StatusCode);
         }
         reader.Result = reader.Result with
         {
@@ -116,7 +117,7 @@ public sealed class StablecoinPersistenceTests
             }
         };
         await MonitorTestPaths.RefreshAsync(db, owner, TestVenues.With(reader), account.Id);
-        Assert.Equal("0", (await service.AccountAsync(account.Id, default)).AvailableStablecoinNominalUsd);
+        Assert.Equal("0", (await service.AccountAsync(account.Id, TradingMode.Real, default)).AvailableStablecoinNominalUsd);
         Assert.Empty(await db.Stablecoins.ToListAsync());
     }
 
@@ -131,7 +132,7 @@ public sealed class StablecoinPersistenceTests
         var service = new WorkspaceService(new Vessel.Persistence.WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(reader), TestUnitOfWork.For(db));
         var account = await service.CreateAccountAsync(new(null, "Legacy reader", "hyperliquid", "0x" + new string('3', 40)), default);
         await MonitorTestPaths.RefreshAsync(db, owner, TestVenues.With(reader), account.Id);
-        Assert.Null((await service.AccountAsync(account.Id, default)).AvailableStablecoinNominalUsd);
-        Assert.Null((await service.SnapshotAsync(account.Id, default))!.StablecoinWallet);
+        Assert.Null((await service.AccountAsync(account.Id, TradingMode.Real, default)).AvailableStablecoinNominalUsd);
+        Assert.Null((await service.SnapshotAsync(account.Id, TradingMode.Real, default))!.StablecoinWallet);
     }
 }

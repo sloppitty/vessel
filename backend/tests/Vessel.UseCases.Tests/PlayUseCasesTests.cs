@@ -93,16 +93,16 @@ public sealed class PlayServiceTests
     public PlayServiceTests()
     {
         store = new MemoryPlayStore(owner);
-        venue = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue");
-        manual = new Account(Guid.NewGuid(), owner, "manual", "Manual");
+        venue = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue", TradingMode.Real);
+        manual = new Account(Guid.NewGuid(), owner, "manual", "Manual", TradingMode.Real);
         store.Accounts.AddRange(venue, manual);
         service = new PlayService(store, objects, TimeProvider.System, TestUnitOfWork.Saving(store.SaveAsync));
     }
 
     private Task<PlayDto> Create(Account? account = null, string? instrument = "BTC", string source = "venue", PlayPlanDocument? plan = null) =>
-        service.CreateAsync(new CreatePlayRequest((account ?? venue).Id, instrument, source, " Breakout ", plan ?? TestPlays.Plan()), default);
+        service.CreateAsync(new CreatePlayRequest((account ?? venue).Id, instrument, source, " Breakout ", plan ?? TestPlays.Plan()), TradingMode.Real, default);
 
-    private async Task<IReadOnlyList<PlaySummaryDto>> List() => (await service.ListAsync(null, null, null, null, null, default)).Plays;
+    private async Task<IReadOnlyList<PlaySummaryDto>> List() => (await service.ListAsync(null, null, null, null, null, TradingMode.Real, default)).Plays;
 
     private UpdatePlayRequest Update(PlayDto play, PlayPlanDocument? plan = null, string? reason = null, string? instrument = null) =>
         new(play.Summary.Version, play.Summary.AccountId, instrument ?? play.Summary.Instrument, play.Summary.InstrumentSource,
@@ -117,31 +117,31 @@ public sealed class PlayServiceTests
     [InlineData(null, null, "portfolio:x", null, null)]
     [InlineData(null, null, "account", null, null)]
     public async Task Invalid_list_queries_are_400(string? view, string? q, string? scope, string? page, string? size) =>
-        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.ListAsync(view, q, scope, page, size, default))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.ListAsync(view, q, scope, page, size, TradingMode.Real, default))).StatusCode);
 
     [Fact]
     public async Task List_validates_search_and_scope_and_caps_unpaged_views()
     {
-        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.CountsAsync(new string('q', 101), null, default))).StatusCode);
-        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.CountsAsync(null, $"account:{Guid.NewGuid()}", default))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.CountsAsync(new string('q', 101), null, TradingMode.Real, default))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.CountsAsync(null, $"account:{Guid.NewGuid()}", TradingMode.Real, default))).StatusCode);
         for (var i = 0; i < 201; i++) store.Plays.Add(TestPlays.Create(venue, new PerpetualInstrument("hyperliquid", "BTC")));
-        var drafts = await service.ListAsync("drafts", "  ", null, "4", null, default);
+        var drafts = await service.ListAsync("drafts", "  ", null, "4", null, TradingMode.Real, default);
         Assert.Equal(("drafts", 1, 200, 201, 200), (drafts.View, drafts.Page, drafts.PageSize, drafts.TotalCount, drafts.Plays.Count));
-        var sized = await service.ListAsync("drafts", null, null, "4", "10", default);
+        var sized = await service.ListAsync("drafts", null, null, "4", "10", TradingMode.Real, default);
         Assert.Equal((1, 10, 10), (sized.Page, sized.PageSize, sized.Plays.Count));
-        var all = await service.ListAsync(null, null, null, "99", "100", default);
+        var all = await service.ListAsync(null, null, null, "99", "100", TradingMode.Real, default);
         Assert.Equal(("all", 3, 1), (all.View, all.Page, all.Plays.Count));
-        Assert.Equal(201, (await service.CountsAsync(" btc ", $"account:{venue.Id}", default)).Drafts);
+        Assert.Equal(201, (await service.CountsAsync(" btc ", $"account:{venue.Id}", TradingMode.Real, default)).Drafts);
         venue.UpdateSettings(venue.Name, null, false);
-        Assert.Equal(0, (await service.CountsAsync(null, "all", default)).All);
-        Assert.Equal(201, (await service.CountsAsync(null, null, default)).All);
+        Assert.Equal(0, (await service.CountsAsync(null, "all", TradingMode.Real, default)).All);
+        Assert.Equal(201, (await service.CountsAsync(null, null, TradingMode.Real, default)).All);
     }
 
     [Fact]
     public async Task Drawings_live_in_their_own_row_and_the_version_check_covers_them()
     {
         var drawings = JsonSerializer.SerializeToElement(new Dictionary<string, object[]> { ["hyperliquid:BTC"] = [new { id = "d1" }] });
-        var play = await service.CreateAsync(new CreatePlayRequest(venue.Id, "BTC", "venue", "Breakout", TestPlays.Plan(), drawings), default);
+        var play = await service.CreateAsync(new CreatePlayRequest(venue.Id, "BTC", "venue", "Breakout", TestPlays.Plan(), drawings), TradingMode.Real, default);
         var row = Assert.Single(store.Drawings);
         Assert.Equal((owner, play.Summary.Id), (row.OwnerId, row.PlayId));
         Assert.Equal("d1", play.Drawings.GetProperty("hyperliquid:BTC")[0].GetProperty("id").GetString());
@@ -198,7 +198,7 @@ public sealed class PlayServiceTests
     [Fact]
     public async Task Validates_accounts_and_instruments()
     {
-        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => Create(new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Foreign")))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => Create(new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Foreign", TradingMode.Real)))).StatusCode);
         Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Create(manual, "BTC", "venue"))).StatusCode);
         Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Create(instrument: "dex:a:BTC"))).StatusCode);
         Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => Create(manual, " BTC", "manual"))).StatusCode);

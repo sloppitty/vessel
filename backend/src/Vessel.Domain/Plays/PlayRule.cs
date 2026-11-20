@@ -13,7 +13,7 @@ public sealed class PlayRule : IOwned
 
     public Guid Id { get; private set; }
     public Guid OwnerId { get; private set; }
-    public string TradingMode { get; private set; } = null!;
+    public TradingMode TradingMode { get; private set; }
     /// <summary>1 for the owner's first rule in this mode, then one more per change.</summary>
     public int Version { get; private set; }
     public string If { get; private set; } = null!;
@@ -25,13 +25,13 @@ public sealed class PlayRule : IOwned
     public DateTimeOffset? ArchivedAtUtc { get; private set; }
     private PlayRule() { }
 
-    public PlayRule(Guid ownerId, string tradingMode, int version, string @if, string then, Guid? sourcePlayId, DateTimeOffset now)
+    public PlayRule(Guid ownerId, TradingMode tradingMode, int version, string @if, string then, Guid? sourcePlayId, DateTimeOffset now)
     {
         if (ownerId == Guid.Empty) throw new ArgumentException("Owner ID must be nonempty.");
         if (version < 1) throw new ArgumentOutOfRangeException(nameof(version));
         Id = Guid.NewGuid();
         OwnerId = ownerId;
-        TradingMode = tradingMode;
+        TradingMode = TradingModes.Validate(tradingMode);
         Version = version;
         If = Part(@if);
         Then = Part(then);

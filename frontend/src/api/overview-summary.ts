@@ -14,7 +14,7 @@ export interface SummaryAmount { amountUsd: string | null; coverage: SummaryCove
 export interface SummaryTotals {
   /** Null when an account's latest position read was incomplete; the unrealized coverage states why. */
   accountCount: number; balance: SummaryAmount; available: SummaryAmount; openPositionCount: number | null
-  unrealizedPnl: SummaryAmount; realizedResult: SummaryAmount; importedFillCount: number; paperExecutionCount?: number
+  unrealizedPnl: SummaryAmount; realizedResult: SummaryAmount; importedFillCount: number; paperExecutionCount: number
   /** The oldest latest-refresh time behind the unrealized sum (#93); null when no account contributes and in paper mode. */
   unrealizedPnlAsOfUtc: string | null
 }
@@ -23,7 +23,7 @@ export interface SummaryRow {
   shareOfBalance: { numerator: string; denominator: string } | null
 }
 export interface OverviewSummaryDocument extends OverviewQuery {
-  tradingMode?: TradingMode
+  tradingMode: TradingMode
   asOfUtc: string; fromUtc: string | null; totals: SummaryTotals; rows: SummaryRow[]
   totalGroupCount: number; omittedGroupCount: number; scopeNote: string
 }
@@ -42,7 +42,7 @@ function summaryAmount(v: unknown, accounts: number): v is SummaryAmount {
     Array.isArray(c.reasons) && (c.contributingAccountCount === accounts && c.excludedOperationCount === 0 || c.reasons.length > 0) && c.reasons.length <= 10 && c.reasons.every(r => isRecord(r) && isFilledText(r.reason, 2000) && isCount(r.count) && r.count > 0)
 }
 function totals(v: unknown): v is SummaryTotals {
-  if (!(isRecord(v) && isCount(v.accountCount) && (v.openPositionCount === null || isCount(v.openPositionCount)) && (v.paperExecutionCount === undefined || isCount(v.paperExecutionCount)) && isCount(v.importedFillCount) &&
+  if (!(isRecord(v) && isCount(v.accountCount) && (v.openPositionCount === null || isCount(v.openPositionCount)) && isCount(v.paperExecutionCount) && isCount(v.importedFillCount) &&
     (v.unrealizedPnlAsOfUtc === null || isIsoTimestamp(v.unrealizedPnlAsOfUtc)) &&
     ['balance', 'available', 'unrealizedPnl', 'realizedResult'].every(k => summaryAmount(v[k], v.accountCount as number)))) return false
   const checked = v as unknown as SummaryTotals
@@ -52,12 +52,12 @@ function totals(v: unknown): v is SummaryTotals {
   }) && checked.realizedResult.coverage.contributingOperationCount >= checked.realizedResult.coverage.contributingAccountCount
 }
 export function isOverviewSummary(v: unknown, query: OverviewQuery): v is OverviewSummaryDocument {
-  if (!isRecord(v) || v.tradingMode !== undefined && !isTradingMode(v.tradingMode) || v.groupBy !== query.groupBy || v.period !== query.period || v.scope !== query.scope || !isIsoTimestamp(v.asOfUtc) ||
+  if (!isRecord(v) || !isTradingMode(v.tradingMode) || v.groupBy !== query.groupBy || v.period !== query.period || v.scope !== query.scope || !isIsoTimestamp(v.asOfUtc) ||
     !(query.period === 'all' ? v.fromUtc === null : isIsoTimestamp(v.fromUtc) && Date.parse(v.fromUtc) === Date.parse(v.asOfUtc) - Number(query.period) * 86_400_000) ||
     !totals(v.totals) || !Array.isArray(v.rows) || v.rows.length > 200 || !isCount(v.totalGroupCount) || !isCount(v.omittedGroupCount) ||
     v.totalGroupCount !== v.rows.length + v.omittedGroupCount || v.totalGroupCount > v.totals.accountCount || !isFilledText(v.scopeNote, 4000)) return false
   const total = v.totals
-  if (v.tradingMode === 'paper' ? total.importedFillCount !== 0 : (total.paperExecutionCount ?? 0) !== 0) return false
+  if (v.tradingMode === 'paper' ? total.importedFillCount !== 0 : total.paperExecutionCount !== 0) return false
   if (query.scope.startsWith('account:') && (total.accountCount > 1 || v.totalGroupCount > 1)) return false
   if (query.groupBy === 'account' && v.totalGroupCount !== total.accountCount) return false
   return new Set(v.rows.map(r => isRecord(r) ? r.id : null)).size === v.rows.length && v.rows.every(r => {

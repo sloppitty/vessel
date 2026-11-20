@@ -126,7 +126,7 @@ export interface ReviewAccount {
   lastSyncedAtUtc: string | null; syncStatus: string; historyNotice: string | null
 }
 export interface ReviewDocument {
-  tradingMode?: TradingMode
+  tradingMode: TradingMode
   asOfUtc: string; fromUtc: string | null; period: ReviewPeriod; currency: 'USD'
   options: { portfolios: Array<{ id: string; name: string }>; accounts: ReviewAccount[]; instruments: string[] }
   periods: Array<{ id: ReviewPeriod; count: number; net: string | null; positions: number }>
@@ -211,7 +211,7 @@ const account = (v: unknown) => isRecord(v) && isGuid(v.id) && isText(v.name, 20
   isText(v.venueId, 64) && isNullOr(v.lastSyncedAtUtc, x => isTimestamp(x, 64)) && isText(v.syncStatus, 32) &&
   isNullOr(v.historyNotice, x => isText(x, 1000))
 export const isReviewDocument = (v: unknown): v is ReviewDocument => isRecord(v) &&
-  (v.tradingMode === undefined || isTradingMode(v.tradingMode)) &&
+  isTradingMode(v.tradingMode) &&
   isTimestamp(v.asOfUtc, 64) && isNullOr(v.fromUtc, x => isTimestamp(x, 64)) && period(v.period) && v.currency === 'USD' &&
   isRecord(v.options) && isListOf(v.options.portfolios, p => isRecord(p) && isGuid(p.id) && isText(p.name, 200), listLimit) &&
   isListOf(v.options.accounts, account, listLimit) && isListOf(v.options.instruments, i => isText(i, 128), listLimit) &&

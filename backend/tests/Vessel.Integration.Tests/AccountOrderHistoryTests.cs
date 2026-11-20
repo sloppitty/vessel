@@ -5,6 +5,7 @@ using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -38,7 +39,7 @@ public sealed class AccountOrderHistoryTests
         var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var accountOwner = foreign ? Guid.NewGuid() : owner;
-        var account = new Account(Guid.NewGuid(), accountOwner, orders.VenueId, "History");
+        var account = new Account(Guid.NewGuid(), accountOwner, orders.VenueId, "History", TradingMode.Real);
         account.Configure(null, null, null, hasSource ? "42" : null);
         if (!enabled) account.UpdateSettings(account.Name, null, false);
         seed?.Invoke(account);

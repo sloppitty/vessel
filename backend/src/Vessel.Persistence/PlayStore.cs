@@ -4,13 +4,13 @@ using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Common;
 
 namespace Vessel.Persistence;
 
 public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork, TimeProvider? time = null) : IPlayStore
 {
-    public Task<bool> ScopeExistsAsync(ListScope scope, CancellationToken ct) => ScopeExistsAsync(scope, "real", ct);
-    public Task<bool> ScopeExistsAsync(ListScope scope, string tradingMode, CancellationToken ct) => scope.Kind switch
+    public Task<bool> ScopeExistsAsync(ListScope scope, TradingMode tradingMode, CancellationToken ct) => scope.Kind switch
     {
         "portfolio" => db.Portfolios.AnyAsync(p => p.Id == scope.Id && p.TradingMode == tradingMode, ct),
         "account" => db.Accounts.AnyAsync(a => a.Id == scope.Id && a.TradingMode == tradingMode, ct),
@@ -50,7 +50,7 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork, TimePro
         return rows.Select(r => outcomes.TryGetValue(r.Id, out var outcome) ? r with { Outcome = outcome } : r).ToList();
     }
 
-    public async Task<PlaySearchResult> SearchAsync(string pattern, string tradingMode, int offset, int limit, CancellationToken ct)
+    public async Task<PlaySearchResult> SearchAsync(string pattern, TradingMode tradingMode, int offset, int limit, CancellationToken ct)
     {
         // Total, the not-indexed count, the page and its excerpts share one snapshot.
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
@@ -140,10 +140,10 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork, TimePro
         db.PlanRevisions.Where(x => x.PlayId == playId).OrderBy(x => x.Number).AsNoTracking().ToListAsync(ct);
     public Task<List<PlayStatusChange>> StatusChangesAsync(Guid playId, CancellationToken ct) =>
         db.StatusChanges.Where(x => x.PlayId == playId).OrderBy(x => x.OccurredAtUtc).ThenBy(x => x.Id).AsNoTracking().ToListAsync(ct);
-    public Task<PlayRule?> ActiveRuleAsync(string tradingMode, CancellationToken ct) =>
+    public Task<PlayRule?> ActiveRuleAsync(TradingMode tradingMode, CancellationToken ct) =>
         db.PlayRules.Where(r => r.TradingMode == tradingMode && r.ArchivedAtUtc == null).SingleOrDefaultAsync(ct);
 
-    public async Task<PlayRule> AddRuleAsync(string tradingMode, string @if, string then, Guid? sourcePlayId, DateTimeOffset now, CancellationToken ct)
+    public async Task<PlayRule> AddRuleAsync(TradingMode tradingMode, string @if, string then, Guid? sourcePlayId, DateTimeOffset now, CancellationToken ct)
     {
         unitOfWork.RequireActive();
         // Two concurrent changes compute the same next version; the unique index turns the second into a 409.
@@ -153,10 +153,10 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork, TimePro
         return rule;
     }
 
-    public Task<string?> TitleAsync(Guid playId, string tradingMode, CancellationToken ct) =>
+    public Task<string?> TitleAsync(Guid playId, TradingMode tradingMode, CancellationToken ct) =>
         db.Plays.Where(p => p.Id == playId && p.TradingMode == tradingMode).Select(p => p.Title).SingleOrDefaultAsync(ct);
 
-    public Task<List<NextActionDto>> NextActionsAsync(int limit, string tradingMode, CancellationToken ct) =>
+    public Task<List<NextActionDto>> NextActionsAsync(int limit, TradingMode tradingMode, CancellationToken ct) =>
         // Every ended Play's review can carry a lesson, an Unresolved one's too.
         db.Plays.Where(p => p.TradingMode == tradingMode &&
                 (p.Status == PlayStatus.Closed || p.Status == PlayStatus.Cancelled || p.Status == PlayStatus.Unresolved) &&

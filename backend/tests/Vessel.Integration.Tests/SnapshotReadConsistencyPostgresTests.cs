@@ -6,6 +6,7 @@ using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -38,7 +39,7 @@ public sealed class SnapshotReadConsistencyPostgresTests
 
     private static async Task<Account> SeedAsync(CoreDatabase database, Guid owner)
     {
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Separate ledgers");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Separate ledgers", TradingMode.Real);
         account.Configure(null, "0x" + new string('d', 40), null);
         await using var db = database.Context(owner);
         db.Accounts.Add(account);
@@ -74,7 +75,7 @@ public sealed class SnapshotReadConsistencyPostgresTests
         var view = (snapshot.ObservedAtUtc, snapshot.Positions.Count, snapshot.Stablecoins.Sum(s => s.Total));
         Assert.Contains(view, new[] { (Start.AddMinutes(1), 1, 0m), (Start.AddMinutes(2), 0, 100m) });
         var balance = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(), TestUnitOfWork.For(reader));
-        Assert.Equal("100", (await balance.AccountAsync(account.Id, default)).BalanceUsd);
+        Assert.Equal("100", (await balance.AccountAsync(account.Id, TradingMode.Real, default)).BalanceUsd);
     }
 
     [PostgresFact]
@@ -88,13 +89,13 @@ public sealed class SnapshotReadConsistencyPostgresTests
         await using (var db = database.Context(owner))
         {
             var service = new WorkspaceService(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(), TestUnitOfWork.For(db));
-            var unread = await service.AccountAsync(account.Id, default);
+            var unread = await service.AccountAsync(account.Id, TradingMode.Real, default);
             Assert.Null(unread.BalanceUsd);
             Assert.Equal(("40", "withdrawable"), (unread.AvailableBalanceUsd, unread.AvailableBalanceSource));
-            Assert.Equal((0, "unavailable"), ((await service.OverviewAsync(default)).Totals.BalanceAccountCount,
-                (await service.OverviewAsync(default)).Totals.BalanceCoverage));
+            Assert.Equal((0, "unavailable"), ((await service.OverviewAsync(TradingMode.Real, default)).Totals.BalanceAccountCount,
+                (await service.OverviewAsync(TradingMode.Real, default)).Totals.BalanceCoverage));
             var summary = await new Vessel.Application.Overview.OverviewSummaryService(new WorkspaceStore(db, TestUnitOfWork.For(db)), service,
-                ActivityTestSupport.Activity(db), new SizingStore(db, TestUnitOfWork.For(db)), TimeProvider.System).GetAsync("account", "all", "all", default);
+                ActivityTestSupport.Activity(db), new SizingStore(db, TestUnitOfWork.For(db)), TimeProvider.System).GetAsync("account", "all", "all", TradingMode.Real, default);
             Assert.Null(summary.Totals.Balance.AmountUsd);
             Assert.Contains(summary.Totals.Balance.Coverage.Reasons, r => r is { Reason: WorkspaceService.WalletNotReadReason, Count: 1 });
         }
@@ -104,8 +105,8 @@ public sealed class SnapshotReadConsistencyPostgresTests
         await using (var db = database.Context(owner))
         {
             var service = new WorkspaceService(new WorkspaceStore(db, TestUnitOfWork.For(db)), new CoreOwner(owner), TestVenues.With(), TestUnitOfWork.For(db));
-            Assert.Equal("40", (await service.AccountAsync(account.Id, default)).BalanceUsd);
-            Assert.Equal("0", (await service.SnapshotAsync(account.Id, default))!.StablecoinWallet!.TotalNominalUsd);
+            Assert.Equal("40", (await service.AccountAsync(account.Id, TradingMode.Real, default)).BalanceUsd);
+            Assert.Equal("0", (await service.SnapshotAsync(account.Id, TradingMode.Real, default))!.StablecoinWallet!.TotalNominalUsd);
         }
     }
 

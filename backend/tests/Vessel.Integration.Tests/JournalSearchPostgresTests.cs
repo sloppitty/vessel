@@ -18,6 +18,7 @@ using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
 using Vessel.Persistence.Search;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -69,7 +70,7 @@ public sealed class JournalSearchPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Manual");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Manual", TradingMode.Real);
         await using (var db = database.Context(owner)) { db.Accounts.Add(account); await db.SaveChangesAsync(); }
         await using var factory = new CoreApiFactory(owner, connection: database.ConnectionString,
             configure: services => services.AddSingleton<IEvidenceObjectStore>(new MemoryObjectStore()));
@@ -171,12 +172,12 @@ public sealed class JournalSearchPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Manual");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Manual", TradingMode.Real);
         await using var db = database.Context(owner);
         db.Accounts.Add(account); await db.SaveChangesAsync();
         var unit = Projected(db);
-        var created = await Service(db, unit).CreateAsync(new(account.Id, "BTC", "manual", "Kiwi start", TestPlays.Plan()), default);
-        Assert.Equal(1, (await Service(db, unit).SearchAsync("kiwi", null, default)).Total);
+        var created = await Service(db, unit).CreateAsync(new(account.Id, "BTC", "manual", "Kiwi start", TestPlays.Plan()), TradingMode.Real, default);
+        Assert.Equal(1, (await Service(db, unit).SearchAsync("kiwi", null, TradingMode.Real, default)).Total);
 
         // The projection was written in the failing unit, after the change, and both roll back together.
         await using var failing = database.Context(owner);
@@ -184,12 +185,12 @@ public sealed class JournalSearchPostgresTests
         var service = Service(failing, broken);
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.UpdateAsync(created.Summary.Id, new UpdatePlayRequest(created.Summary.Version,
             account.Id, "BTC", "manual", "Takahe rename", TestPlays.Plan(), JsonDocument.Parse("{}").RootElement, ""), default));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(new(account.Id, "BTC", "manual", "Weka draft", TestPlays.Plan()), default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(new(account.Id, "BTC", "manual", "Weka draft", TestPlays.Plan()), TradingMode.Real, default));
         await using var check = database.Context(owner);
         var reader = Service(check, Projected(check));
-        Assert.Equal(0, (await reader.SearchAsync("takahe", null, default)).Total);
-        Assert.Equal(0, (await reader.SearchAsync("weka", null, default)).Total);
-        Assert.Equal(["title"], (await reader.SearchAsync("kiwi", null, default)).Items.Select(i => i.Field));
+        Assert.Equal(0, (await reader.SearchAsync("takahe", null, TradingMode.Real, default)).Total);
+        Assert.Equal(0, (await reader.SearchAsync("weka", null, TradingMode.Real, default)).Total);
+        Assert.Equal(["title"], (await reader.SearchAsync("kiwi", null, TradingMode.Real, default)).Items.Select(i => i.Field));
         Assert.Equal(1, await check.PlaySearch.CountAsync());
     }
 
@@ -201,7 +202,7 @@ public sealed class JournalSearchPostgresTests
     private static async Task<Account> SeedVenuePlayAsync(CoreDatabase database, Guid owner, string exitStatus,
         params (string Id, string Order, string Side, string Effect, decimal Price, decimal Pnl, DateTimeOffset At)[] fills)
     {
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue", TradingMode.Real);
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
         play.Annotate("Linked trade", "", T);
         var (plannedChange, revision) = play.MarkPlanned(T);
@@ -248,7 +249,7 @@ public sealed class JournalSearchPostgresTests
         async Task<PlayOutcomeSummaryDto> Outcome()
         {
             await using var read = database.Context(owner);
-            return Assert.Single((await Service(read, Projected(read)).ListAsync("closed", null, null, null, null, default)).Plays).Outcome!;
+            return Assert.Single((await Service(read, Projected(read)).ListAsync("closed", null, null, null, null, TradingMode.Real, default)).Plays).Outcome!;
         }
         // Without its exit the closed Play is excluded: no exit time, no result, no R, never zero.
         Assert.Equal(new PlayOutcomeSummaryDto("executions", null, null, null, PlayReceipts.ExecutionsReason), await Outcome());
@@ -286,7 +287,7 @@ public sealed class JournalSearchPostgresTests
             await using var read = database.Context(owner);
             var none = TestUnitOfWork.For(read);
             var list = await new PlayService(new PlayStore(read, none, clock), new MemoryObjectStore(), clock, none)
-                .ListAsync("closed", null, null, null, null, default);
+                .ListAsync("closed", null, null, null, null, TradingMode.Real, default);
             var review = await new Vessel.Application.Review.ReviewService(new ReviewStore(read, new SizingStore(read, none)), clock)
                 .GetAsync(new(Period: "all"), default);
             return (Assert.Single(list.Plays).Outcome!, review);
@@ -324,7 +325,7 @@ public sealed class JournalSearchPostgresTests
         // projection's key-share lock, so the batch commits and the Draft's rows cascade with it afterwards.
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Manual");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Manual", TradingMode.Real);
         var doomed = TestPlays.Create(account, new("manual", "BTC"));
         doomed.Annotate("Doomed draft", "", T);
         var kept = TestPlays.Create(account, new("manual", "BTC"));
@@ -350,7 +351,7 @@ public sealed class JournalSearchPostgresTests
         await using var check = database.Context(owner);
         Assert.Equal([kept.Id], await check.PlaySearch.Select(s => s.PlayId).ToListAsync());
         Assert.False(await check.PlaySearchTexts.AnyAsync(t => t.PlayId == doomed.Id));
-        Assert.Equal([kept.Id], (await Service(check, Projected(check)).SearchAsync("draft", null, default)).Items.Select(i => i.Play.Id));
+        Assert.Equal([kept.Id], (await Service(check, Projected(check)).SearchAsync("draft", null, TradingMode.Real, default)).Items.Select(i => i.Play.Id));
     }
 
     /// <summary>Holds the first command containing <paramref name="sql"/> until released.</summary>
@@ -377,10 +378,10 @@ public sealed class JournalSearchPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
-        var paperAccount = new Account(Guid.NewGuid(), owner, "hyperliquid", "Hypotheses", "paper", 4000);
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: TradingMode.Paper);
+        var paperAccount = new Account(Guid.NewGuid(), owner, "hyperliquid", "Hypotheses", TradingMode.Paper, 4000);
         paperAccount.Configure(portfolio.Id, null, null);
-        var realAccount = new Account(Guid.NewGuid(), owner, "manual", "Real");
+        var realAccount = new Account(Guid.NewGuid(), owner, "manual", "Real", TradingMode.Real);
         var paper = TestPlays.Create(paperAccount, new("hyperliquid", "BTC"));
         paper.Annotate("Shared marker paper", "", T);
         var (planned, revision) = paper.MarkPlanned(T);
@@ -400,9 +401,9 @@ public sealed class JournalSearchPostgresTests
         Assert.Equal(2, await RebuildAsync(db));
         var service = Service(db, Projected(db));
         // A mode's search holds only its own Plays.
-        var realHit = Assert.Single((await service.SearchAsync("shared marker", null, default)).Items);
-        var paperHit = Assert.Single((await service.SearchAsync("shared marker", null, default, "paper")).Items);
-        Assert.Equal((real.Id, "real", paper.Id, "paper"), (realHit.Play.Id, realHit.Play.TradingMode, paperHit.Play.Id, paperHit.Play.TradingMode));
+        var realHit = Assert.Single((await service.SearchAsync("shared marker", null, TradingMode.Real, default)).Items);
+        var paperHit = Assert.Single((await service.SearchAsync("shared marker", null, TradingMode.Paper, default)).Items);
+        Assert.Equal((real.Id, TradingMode.Real, paper.Id, TradingMode.Paper), (realHit.Play.Id, realHit.Play.TradingMode, paperHit.Play.Id, paperHit.Play.TradingMode));
         // Without simulated executions the closed paper Play is not scored.
         Assert.Equal("executions", paperHit.Play.Outcome!.State);
 
@@ -419,9 +420,9 @@ public sealed class JournalSearchPostgresTests
                     CandleOpenAtUtc = minute.AddMinutes(5), CandleCloseAtUtc = minute.AddMinutes(6), OccurredAtUtc = minute.AddMinutes(6) });
             return true;
         }, default);
-        var scored = Assert.Single((await service.ListAsync("closed", null, null, null, null, default, "paper")).Plays).Outcome!;
+        var scored = Assert.Single((await service.ListAsync("closed", null, null, null, null, TradingMode.Paper, default)).Plays).Outcome!;
         Assert.Equal(("scored", T.AddMinutes(8), "10", "2"), (scored.State, scored.ExitAtUtc, scored.ResultUsd, scored.EstimatedR));
-        Assert.Equal("active", Assert.Single((await service.ListAsync("drafts", null, null, null, null, default)).Plays).Outcome!.State);
+        Assert.Equal("active", Assert.Single((await service.ListAsync("drafts", null, null, null, null, TradingMode.Real, default)).Plays).Outcome!.State);
     }
 
     [PostgresFact]
@@ -429,7 +430,7 @@ public sealed class JournalSearchPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Manual");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Manual", TradingMode.Real);
         var play = TestPlays.Create(account, new("manual", "BTC"));
         play.Annotate("Obsolete searchable phrase", "", T);
         await using (var seed = database.Context(owner))
@@ -446,7 +447,7 @@ public sealed class JournalSearchPostgresTests
         }
         await using (var read = database.Context(owner))
         {
-            var result = await Service(read, Projected(read)).SearchAsync("obsolete", null, default);
+            var result = await Service(read, Projected(read)).SearchAsync("obsolete", null, TradingMode.Real, default);
             Assert.Equal((0, 1), (result.Total, result.NotIndexed));
             Assert.Empty(result.Items);
         }
@@ -457,7 +458,7 @@ public sealed class JournalSearchPostgresTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Manual");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Manual", TradingMode.Real);
         var plays = Enumerable.Range(0, 60).Select(i =>
         {
             var play = TestPlays.Create(account, new("manual", "BTC"));
@@ -474,20 +475,20 @@ public sealed class JournalSearchPostgresTests
         await using var db = database.Context(owner);
         var service = Service(db, Projected(db));
         // Until it is initialized, search finds nothing and says how many Plays it cannot see.
-        var before = await service.SearchAsync("50%_", null, default);
+        var before = await service.SearchAsync("50%_", null, TradingMode.Real, default);
         Assert.Equal((0, 61), (before.Total, before.NotIndexed));
         await RebuildAsync(db);
-        var page = await service.SearchAsync("50%_", null, default);
+        var page = await service.SearchAsync("50%_", null, TradingMode.Real, default);
         Assert.Equal((60, 50, 50, 0), (page.Total, page.Items.Count, page.NextOffset, page.NotIndexed));
         Assert.Equal(plays.AsEnumerable().Reverse().Take(50).Select(p => p.Id), page.Items.Select(i => i.Play.Id));
         Assert.All(page.Items, item => Assert.Equal("50%_", item.Excerpt.Substring(item.MatchStart, item.MatchLength)));
-        var last = await service.SearchAsync("50%_", 50, default);
+        var last = await service.SearchAsync("50%_", 50, TradingMode.Real, default);
         Assert.Equal((10, (int?)null, 50), (last.Items.Count, last.NextOffset, last.Offset));
-        Assert.Empty((await service.SearchAsync("0%", 100, default)).Items);
-        Assert.Equal(61, (await service.SearchAsync("take", null, default)).Total);
-        Assert.Equal(0, (await service.SearchAsync(@"_\", null, default)).Total);
-        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.SearchAsync("50%_", -1, default))).StatusCode);
-        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.SearchAsync("50%_", null, default, "both"))).StatusCode);
+        Assert.Empty((await service.SearchAsync("0%", 100, TradingMode.Real, default)).Items);
+        Assert.Equal(61, (await service.SearchAsync("take", null, TradingMode.Real, default)).Total);
+        Assert.Equal(0, (await service.SearchAsync(@"_\", null, TradingMode.Real, default)).Total);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.SearchAsync("50%_", -1, TradingMode.Real, default))).StatusCode);
+        Assert.Throws<DomainValidationException>(() => TradingModes.Parse("both"));
     }
 
     [PostgresFact]
@@ -497,7 +498,7 @@ public sealed class JournalSearchPostgresTests
         var owners = new[] { Guid.NewGuid(), Guid.NewGuid() };
         foreach (var owner in owners)
         {
-            var account = new Account(Guid.NewGuid(), owner, "manual", "Manual");
+            var account = new Account(Guid.NewGuid(), owner, "manual", "Manual", TradingMode.Real);
             await using var seed = database.Context(owner);
             seed.Accounts.Add(account);
             seed.Plays.AddRange(Enumerable.Range(0, 3).Select(i => TestPlays.Create(account, new("manual", "BTC"))));
@@ -534,7 +535,7 @@ public sealed class JournalSearchPostgresTests
         foreach (var owner in owners)
         {
             await using var db = database.Context(owner);
-            Assert.Equal(0, (await Service(db, Projected(db)).SearchAsync("breakout", null, default)).NotIndexed);
+            Assert.Equal(0, (await Service(db, Projected(db)).SearchAsync("breakout", null, TradingMode.Real, default)).NotIndexed);
         }
     }
 }

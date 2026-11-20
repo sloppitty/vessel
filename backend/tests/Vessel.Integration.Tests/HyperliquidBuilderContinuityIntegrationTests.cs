@@ -5,6 +5,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Monitoring;
 using Vessel.Infrastructure.Venues.Hyperliquid;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -162,7 +163,7 @@ public sealed class HyperliquidBuilderContinuityIntegrationTests : HyperliquidAd
 
     private static async Task<(Account, MonitorAccount)> SeedAsync(VesselDbContext db, Guid owner)
     {
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Builder history");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Builder history", TradingMode.Real);
         account.Configure(null, Address, null);
         account.UpdateSettings(account.Name, null, true, keepExecutionHistory: true);
         var monitor = new MonitorAccount

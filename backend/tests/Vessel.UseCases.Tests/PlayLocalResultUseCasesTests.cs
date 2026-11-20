@@ -5,6 +5,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -87,7 +88,7 @@ public sealed class ResultBasisReviewTests
         var store = new MemorySizingStore();
         store.Closed.Add(facts);
         var record = (await new SizingService(store, new CoreOwner(f.Owner), TimeProvider.System, TestUnitOfWork.None, null, TestVenues.With())
-            .GetAsync(default)).Record;
+            .GetAsync(TradingMode.Real, default)).Record;
         Assert.Equal((1, 1, 0), (record.Losses, record.FeeOnlyLosses, record.UnknownGrossLosses));
     }
 
@@ -114,7 +115,7 @@ public sealed class ResultBasisReviewTests
     [Fact]
     public async Task A_manual_ledger_row_reports_its_ledger_as_the_play_local_result()
     {
-        var account = new Account(Guid.NewGuid(), f.Owner, "manual", "Paper");
+        var account = new Account(Guid.NewGuid(), f.Owner, "manual", "Paper", TradingMode.Real);
         f.Accounts.Add(account);
         var at = ReviewClock.Now.AddHours(-6);
         var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("manual", "BTC"), InstrumentSource.Manual,
@@ -148,7 +149,7 @@ public sealed class ResultBasisSizingTests
     /// <summary>A long that enters at <paramref name="entry"/> and exits <paramref name="minutes"/> after planning.</summary>
     private ClosedPlayFacts Closed(decimal entry, decimal exit, decimal pnl, int minutes, decimal fee = 0, string token = "USDC")
     {
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue", TradingMode.Real);
         var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
             PlayDocuments.Serialize(TestPlays.Plan()), Planned);
         var revision = play.MarkPlanned(Planned).Revision;
@@ -174,7 +175,7 @@ public sealed class ResultBasisSizingTests
         Closed(100, 95, -5, 30, fee: 0.01m, token: "HYPE"); // fee token unverified: no local figure
         Closed(100, 100, 0, 40, fee: 0.05m);               // gross 0, net -0.1: a fee-only loss
 
-        var sizing = await Service.GetAsync(default);
+        var sizing = await Service.GetAsync(TradingMode.Real, default);
         Assert.Equal((SizingService.SourcePlays, 2, 2), (sizing.Record.Source, sizing.Record.Wins, sizing.Record.Losses));
         Assert.Equal((1, 1, 1, 0), (sizing.Record.LocalSignChanges, sizing.Record.LocalUnknown, sizing.Record.FeeOnlyLosses, sizing.Record.UnknownGrossLosses));
         // Exposure, ladder and limits are unchanged by the local basis.
@@ -186,7 +187,7 @@ public sealed class ResultBasisSizingTests
     {
         Closed(110, 108, 3, 10); // the sign change, then twenty later ordinary wins push it out of the window
         for (var i = 0; i < 20; i++) Closed(100, 105, 5, 100 + 10 * i);
-        var record = (await Service.GetAsync(default)).Record;
+        var record = (await Service.GetAsync(TradingMode.Real, default)).Record;
         Assert.Equal((21, 20), (record.DecidedPlays, record.Wins));
         Assert.Equal((0, 0), (record.LocalSignChanges, record.LocalUnknown));
     }
@@ -204,7 +205,7 @@ public sealed class ResultBasisExecutionTests
     {
         var owner = Guid.NewGuid();
         plays = new MemoryPlayStore(owner);
-        account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Trading");
+        account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Trading", TradingMode.Real);
         plays.Accounts.Add(account);
         store = new MemoryExecutionStore(plays);
     }
@@ -299,7 +300,7 @@ public sealed class ResultBasisUnknownEffectTests
 
         // Sizing: a venue win whose own fills lost 2.
         var record = (await new SizingService(sizing, new CoreOwner(review.Owner), TimeProvider.System, TestUnitOfWork.None, null, TestVenues.With())
-            .GetAsync(default)).Record;
+            .GetAsync(TradingMode.Real, default)).Record;
         Assert.Equal((SizingService.SourcePlays, 1, 0), (record.Source, record.Wins, record.Losses));
         Assert.Equal((1, 0), (record.LocalSignChanges, record.LocalUnknown));
         Assert.Equal("-2", PlayLocalResult.From(facts, "USDC").Net.ToString());

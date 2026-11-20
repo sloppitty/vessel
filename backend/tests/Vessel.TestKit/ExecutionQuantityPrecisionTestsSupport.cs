@@ -5,6 +5,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -25,7 +26,7 @@ public partial class ExecutionQuantityPrecisionTestsSupport
 
         public Fixture(string direction = "long")
         {
-            Account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Precision");
+            Account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Precision", TradingMode.Real);
             Plays = new(Account.OwnerId);
             Plays.Accounts.Add(Account);
             Play = new(Guid.NewGuid(), Account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,

@@ -12,6 +12,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Application.Plays.Execution;
 
@@ -35,7 +36,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     public Task RetainAsync(Account account, VenueOrderReadResult orders, CancellationToken ct) =>
         store.WithAccountLockAsync(account.Id, async () =>
         {
-            if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts cannot import actual orders.");
+            account.RequireReal("Paper accounts cannot import actual orders.");
             await store.UpsertOrdersAsync(account, orders.Orders, orders.ObservedAtUtc, ct);
             return true;
         }, ct);
@@ -45,7 +46,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         IReadOnlyList<VenueInstrument> instruments, CancellationToken ct) =>
         store.WithAccountLockAsync(account.Id, async () =>
         {
-            if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts cannot reconcile actual orders.");
+            account.RequireReal("Paper accounts cannot reconcile actual orders.");
             // A tick-size venue's tick, or a significant-figure venue's decimal cap (Phase 2, item 14b, F-11).
             var tickVenue = venues.Descriptor(account.VenueId)?.PriceRule == PriceRules.TickSize;
             var ticks = instruments.Select(i => (i.ContractId, Step: tickVenue ? i.PriceStep : PriceRules.DecimalStep(i.MaxPriceDecimals)))
@@ -62,7 +63,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     public async Task<PlayExecutionDto> GetAsync(Guid playId, CancellationToken ct)
     {
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
-        if (play.TradingMode != "real") throw new ProblemException(409, "Paper Plays use explicit simulated executions, not actual order linking.");
+        play.RequireReal("Paper Plays use explicit simulated executions, not actual order linking.");
         var account = await store.AccountAsync(play.AccountId, ct);
         var mine = (await store.PlayLinksAsync(play.AccountId, play.Id, ct)).Where(l => l.State is not (OrderLinkState.Dismissed or OrderLinkState.Rejected)).ToList();
         // Linked to any Play of the account, also closed ones: such an order is never offered again.
@@ -191,7 +192,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         // once more, then reads as changing.
         for (var attempt = 0; attempt < 2; attempt++)
         {
-            var summaries = await activity.ReadSummariesAsync(account.Id, ct);
+            var summaries = await activity.ReadSummariesAsync(account.Id, TradingMode.Real, ct);
             if (PlayFunding.Request(play, summaries) is not { } request) continue;
             if (await store.FundingEvidenceAsync(request, ct) is not { } evidence) return PlayFunding.NoLedger;
             if (PlayFunding.Evaluate(play, plan, summaries, evidence) is var result && result != PlayFunding.Changing) return result;
@@ -203,7 +204,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     public async Task<PlayExecutionDto> LinkAsync(Guid playId, LinkOrderRequest request, CancellationToken ct)
     {
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
-        if (play.TradingMode != "real") throw new ProblemException(409, "Paper Plays use explicit simulated executions, not actual order linking.");
+        play.RequireReal("Paper Plays use explicit simulated executions, not actual order linking.");
         if (play.Status == PlayStatus.Unresolved) throw new ProblemException(409, "Return this Play to Open before linking another order.");
         if (!ExecutionMatcher.IsActive(play)) throw new ProblemException(409, NotLinkable);
         var role = request.Role switch
@@ -257,7 +258,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     {
         if (string.IsNullOrWhiteSpace(request.OrderId)) throw new ProblemException(400, "Choose an order.");
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
-        if (play.TradingMode != "real") throw new ProblemException(409, "Paper Plays use explicit simulated executions, not actual order linking.");
+        play.RequireReal("Paper Plays use explicit simulated executions, not actual order linking.");
         await unitOfWork.ExecuteAsync(() => store.WithAccountLockAsync(play.AccountId, async () =>
         {
             // A Play's instrument is fixed once planned; the rejection does not read its plan, so a revision cannot escape it.
@@ -283,7 +284,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     public async Task<PlayExecutionDto> UnlinkAsync(Guid playId, Guid linkId, CancellationToken ct)
     {
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
-        if (play.TradingMode != "real") throw new ProblemException(409, "Paper Plays use explicit simulated executions, not actual order linking.");
+        play.RequireReal("Paper Plays use explicit simulated executions, not actual order linking.");
         await unitOfWork.ExecuteAsync(() => store.WithAccountLockAsync(play.AccountId, async () =>
         {
             var link = await store.LinkAsync(play.AccountId, play.Id, linkId, ct) is { State: not (OrderLinkState.Dismissed or OrderLinkState.Rejected) } found
@@ -312,7 +313,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         return unitOfWork.ExecuteAsync(() => plays.WithPlayLockAsync(playId, async () =>
         {
             var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
-            if (play.TradingMode != "real") throw new ProblemException(409, "Paper Plays use explicit simulated executions, not actual order linking.");
+            play.RequireReal("Paper Plays use explicit simulated executions, not actual order linking.");
             if (play.Version != request.ExpectedVersion) throw new ProblemException(409, StalePlay);
             if (!ExecutionMatcher.IsActive(play) || play.Origin == PlayOrigin.Retrospective || play.ContractId is null)
                 throw new ProblemException(409, "Only planned, paused or open plays rebind their levels.");
@@ -402,7 +403,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         return unitOfWork.ExecuteAsync(() => plays.WithPlayLockAsync(playId, async () =>
         {
             var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
-            if (play.TradingMode != "real")
+            if (play.TradingMode != TradingMode.Real)
                 throw new ProblemException(409, "A paper Play's simulation holds what it cannot settle; it is never declared unresolved.");
             if (play.Version != request.ExpectedVersion) throw new ProblemException(409, StalePlay);
             if (play.Status != PlayStatus.Open) throw new ProblemException(409, "Only an open Play can be declared unresolved.");
@@ -556,7 +557,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     {
         if (offset < 0) throw new ProblemException(400, "The offset is a whole number from 0.");
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
-        if (play.TradingMode != "real") throw new ProblemException(409, "Paper Plays use explicit simulated executions, not actual fills.");
+        play.RequireReal("Paper Plays use explicit simulated executions, not actual fills.");
         var links = (await store.PlayLinksAsync(play.AccountId, play.Id, ct)).Where(l => l.State == OrderLinkState.Linked).ToList();
         var orders = (await store.OrdersAsync(play.AccountId, links.Select(l => l.ImportedOrderId).ToHashSet(), NoContracts, ct)).ToDictionary(o => o.Id);
         var fills = FillsByOrder(orders.Values, await store.FillsAsync(play.AccountId, orders.Values.Select(OrderKey.Of).ToList(), ct));
@@ -618,7 +619,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             return (l.PlayId, Role: role, EntryId: string.IsNullOrWhiteSpace(l.EntryId) ? null : l.EntryId.Trim(), Quantity: quantity);
         }).ToList();
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
-        if (play.TradingMode != "real") throw new ProblemException(409, "Paper Plays use explicit simulated executions, not actual fills.");
+        play.RequireReal("Paper Plays use explicit simulated executions, not actual fills.");
         var requests = diary ?? throw new InvalidOperationException("Allocation requests need the diary request store.");
         await unitOfWork.ExecuteAsync(() => requests.WithRequestLockAsync(request.RequestId, async () =>
         {
@@ -645,7 +646,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     {
         var accountId = routePlay.AccountId;
         var account = await store.AccountAsync(accountId, ct) ?? throw new ProblemException(404, "Account not found.");
-        if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts use simulated executions, not actual fills.");
+        account.RequireReal("Paper accounts use simulated executions, not actual fills.");
         if (!account.IsEnabled) throw new ProblemException(409, "Enable the account before allocating its fills.");
         var fill = await store.FillAsync(accountId, request.FillId, ct) ?? throw new ProblemException(404, "Fill not found.");
         // Every active Play of the account is held until the commit, so no status or plan change lands in between.
@@ -665,7 +666,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
         foreach (var line in lines)
         {
             var target = found[line.PlayId];
-            if (target.TradingMode != "real" || target.InstrumentSource != InstrumentSource.Venue || target.Origin != PlayOrigin.Planned ||
+            if (target.TradingMode != TradingMode.Real || target.InstrumentSource != InstrumentSource.Venue || target.Origin != PlayOrigin.Planned ||
                 target.ContractId != fill.ContractId || target.AccountId != fill.AccountId)
                 throw new ProblemException(409, "Only planned venue Plays on the fill's account and instrument take a part of it.");
             if (line.Role == AllocationRole.Entry && !PlayDocuments.Read(target.Plan).Entries.Any(e => e.Id == line.EntryId))
@@ -1032,7 +1033,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
     public async Task<IReadOnlyList<LinkRecordDto>> LinkRecordAsync(Guid playId, CancellationToken ct)
     {
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
-        if (play.TradingMode != "real") throw new ProblemException(404, "Play not found.");
+        if (play.TradingMode != TradingMode.Real) throw new ProblemException(404, "Play not found.");
         var links = await store.PlayLinksAsync(play.AccountId, play.Id, ct);
         var orders = (await store.OrdersAsync(play.AccountId, links.Select(l => l.ImportedOrderId).ToHashSet(),
             new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal), ct)).ToDictionary(o => o.Id);

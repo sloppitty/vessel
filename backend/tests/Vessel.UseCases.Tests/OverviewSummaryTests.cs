@@ -5,6 +5,7 @@ using Vessel.Application.Overview;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -12,11 +13,11 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
 {
     private Portfolio Portfolio(string name = "Swing")
     {
-        var p = new Portfolio(Guid.NewGuid(), owner, name, "wallet"); store.Portfolios.Add(p); return p;
+        var p = new Portfolio(Guid.NewGuid(), owner, name, TradingMode.Real, "wallet"); store.Portfolios.Add(p); return p;
     }
     private Account Account(Guid? portfolio = null, decimal? balance = null, bool enabled = true, string venue = "manual")
     {
-        var a = new Account(Guid.NewGuid(), owner, venue, "Account " + store.Accounts.Count);
+        var a = new Account(Guid.NewGuid(), owner, venue, "Account " + store.Accounts.Count, TradingMode.Real);
         a.Configure(portfolio, null, balance); if (!enabled) a.UpdateSettings(a.Name, portfolio, false);
         store.Accounts.Add(a); return a;
     }
@@ -44,7 +45,7 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
     {
         var p = Portfolio(); var low = Portfolio("Unknown");
         Account(p.Id, 10); Account(p.Id, 20); Account(null, 50); Account(low.Id); Account(null, 999, false);
-        var result = await service.GetAsync(null, null, null, default);
+        var result = await service.GetAsync(null, null, null, TradingMode.Real, default);
         Assert.Equal("portfolio", result.GroupBy); Assert.Equal("30", result.Period); Assert.Equal("all", result.Scope);
         Assert.Equal(4, result.Totals.AccountCount); Assert.Equal("80", result.Totals.Balance.AmountUsd);
         Assert.Equal(["unassigned", $"portfolio:{p.Id}", $"portfolio:{low.Id}"], result.Rows.Select(r => r.Id));
@@ -52,7 +53,7 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
         Assert.Equal(new BalanceShare("30", "80"), result.Rows[1].ShareOfBalance); Assert.Null(result.Rows[2].ShareOfBalance);
         Assert.Equal((3, 4), (result.Totals.Balance.Coverage.ContributingAccountCount, result.Totals.Balance.Coverage.TotalAccountCount));
         Assert.Single(result.Totals.Balance.Coverage.Reasons);
-        var byAccount = await service.GetAsync("account", "all", "all", default);
+        var byAccount = await service.GetAsync("account", "all", "all", TradingMode.Real, default);
         Assert.Equal(4, byAccount.Rows.Count); Assert.All(byAccount.Rows, r => { Assert.Null(r.Icon); Assert.Equal("manual", r.VenueId); });
     }
 
@@ -60,7 +61,7 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
     public async Task Reported_zero_balance_and_zero_realized_result_are_known_but_zero_denominator_has_no_share()
     {
         var a = Account(balance: 0); Operation(a, Now.AddHours(-1), 0);
-        var result = await service.GetAsync("account", "30", "all", default);
+        var result = await service.GetAsync("account", "30", "all", TradingMode.Real, default);
         Assert.Equal("0", result.Totals.Balance.AmountUsd); Assert.Equal("0", result.Totals.RealizedResult.AmountUsd);
         Assert.Equal(1, result.Totals.RealizedResult.Coverage.ContributingAccountCount);
         Assert.Null(result.Rows.Single().ShareOfBalance);
@@ -70,7 +71,7 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
     public async Task Empty_groups_and_disabled_unassigned_are_not_rows_and_no_values_are_invented()
     {
         Portfolio(); Account(null, 100, false);
-        var result = await service.GetAsync("portfolio", "7", "all", default);
+        var result = await service.GetAsync("portfolio", "7", "all", TradingMode.Real, default);
         Assert.Empty(result.Rows); Assert.Equal(0, result.Totals.AccountCount); Assert.Null(result.Totals.Balance.AmountUsd);
         Assert.Null(result.Totals.RealizedResult.AmountUsd); Assert.Null(result.Totals.UnrealizedPnl.AmountUsd);
     }
@@ -79,10 +80,10 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
     public async Task Scope_filters_portfolio_unassigned_account_and_disabled_account()
     {
         var p = Portfolio(); var a = Account(p.Id, 10); Account(p.Id, 20); Account(null, 50); var disabled = Account(null, 999, false);
-        Assert.Equal("30", (await service.GetAsync("account", "30", $"portfolio:{p.Id}", default)).Totals.Balance.AmountUsd);
-        Assert.Equal("50", (await service.GetAsync("portfolio", "30", "unassigned", default)).Totals.Balance.AmountUsd);
-        Assert.Equal("10", (await service.GetAsync("portfolio", "30", $"account:{a.Id}", default)).Totals.Balance.AmountUsd);
-        Assert.Equal(0, (await service.GetAsync("portfolio", "30", $"account:{disabled.Id}", default)).Totals.AccountCount);
+        Assert.Equal("30", (await service.GetAsync("account", "30", $"portfolio:{p.Id}", TradingMode.Real, default)).Totals.Balance.AmountUsd);
+        Assert.Equal("50", (await service.GetAsync("portfolio", "30", "unassigned", TradingMode.Real, default)).Totals.Balance.AmountUsd);
+        Assert.Equal("10", (await service.GetAsync("portfolio", "30", $"account:{a.Id}", TradingMode.Real, default)).Totals.Balance.AmountUsd);
+        Assert.Equal(0, (await service.GetAsync("portfolio", "30", $"account:{disabled.Id}", TradingMode.Real, default)).Totals.AccountCount);
     }
 
     [Fact]
@@ -90,18 +91,18 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
     {
         var p = Portfolio(); var empty = Portfolio("Empty");
         var a = Account(p.Id); var b = Account(p.Id); var disabled = Account(p.Id, enabled: false); var unassigned = Account();
-        await service.GetAsync("portfolio", "30", $"portfolio:{p.Id}", default);
+        await service.GetAsync("portfolio", "30", $"portfolio:{p.Id}", TradingMode.Real, default);
         Assert.True(new HashSet<Guid> { a.Id, b.Id }.SetEquals(Assert.Single(activityStore.Reads)!));
-        await service.GetAsync("account", "7", "unassigned", default);
+        await service.GetAsync("account", "7", "unassigned", TradingMode.Real, default);
         Assert.True(new HashSet<Guid> { unassigned.Id }.SetEquals(activityStore.Reads[1]!));
-        await service.GetAsync("portfolio", "90", $"account:{a.Id}", default);
+        await service.GetAsync("portfolio", "90", $"account:{a.Id}", TradingMode.Real, default);
         Assert.True(new HashSet<Guid> { a.Id }.SetEquals(activityStore.Reads[2]!));
-        await service.GetAsync("account", "all", "all", default);
+        await service.GetAsync("account", "all", "all", TradingMode.Real, default);
         Assert.True(new HashSet<Guid> { a.Id, b.Id, unassigned.Id }.SetEquals(activityStore.Reads[3]!));
-        await service.GetAsync("portfolio", "30", $"portfolio:{empty.Id}", default);
-        await service.GetAsync("account", "30", $"account:{disabled.Id}", default);
+        await service.GetAsync("portfolio", "30", $"portfolio:{empty.Id}", TradingMode.Real, default);
+        await service.GetAsync("account", "30", $"account:{disabled.Id}", TradingMode.Real, default);
         unassigned.UpdateSettings(unassigned.Name, null, false);
-        await service.GetAsync("portfolio", "30", "unassigned", default);
+        await service.GetAsync("portfolio", "30", "unassigned", TradingMode.Real, default);
         Assert.Equal(4, activityStore.Reads.Count);
     }
 
@@ -114,8 +115,8 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
         for (var i = 0; i < 510; i++) Operation(a, Now.AddMinutes(-i), 1);
         Operation(b, Now.AddHours(-1), 5, 1);
         Operation(other, Now.AddHours(-1), 100);
-        var all = await service.GetAsync("account", "all", "all", default);
-        var restricted = await service.GetAsync("account", "all", $"portfolio:{p.Id}", default);
+        var all = await service.GetAsync("account", "all", "all", TradingMode.Real, default);
+        var restricted = await service.GetAsync("account", "all", $"portfolio:{p.Id}", TradingMode.Real, default);
         foreach (var row in restricted.Rows)
             Assert.Equal(JsonSerializer.Serialize(all.Rows.Single(r => r.Id == row.Id).Totals), JsonSerializer.Serialize(row.Totals));
         Assert.Equal(1022, restricted.Totals.ImportedFillCount);
@@ -133,7 +134,7 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
     [InlineData("portfolio", "30", "All")]
     [InlineData("portfolio", "30", "")]
     public async Task Invalid_parameters_are_400(string group, string period, string scope) =>
-        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.GetAsync(group, period, scope, default))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ProblemException>(() => service.GetAsync(group, period, scope, TradingMode.Real, default))).StatusCode);
 
     [Theory]
     [InlineData("portfolio")]
@@ -141,10 +142,10 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
     public async Task Missing_and_foreign_scopes_are_404(string kind)
     {
         var foreign = Guid.NewGuid();
-        store.Portfolios.Add(new Portfolio(foreign, Guid.NewGuid(), "Foreign"));
-        store.Accounts.Add(new Account(foreign, Guid.NewGuid(), "manual", "Foreign"));
+        store.Portfolios.Add(new Portfolio(foreign, Guid.NewGuid(), "Foreign", TradingMode.Real));
+        store.Accounts.Add(new Account(foreign, Guid.NewGuid(), "manual", "Foreign", TradingMode.Real));
         foreach (var id in new[] { foreign, Guid.NewGuid() })
-            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.GetAsync("account", "all", $"{kind}:{id}", default))).StatusCode);
+            Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.GetAsync("account", "all", $"{kind}:{id}", TradingMode.Real, default))).StatusCode);
     }
 
     [Theory]
@@ -156,10 +157,10 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
         var a = Account(balance: 10);
         Operation(a, Now.AddDays(-days), 1); Operation(a, Now, 2);
         Operation(a, Now.AddDays(-days).AddTicks(-1), 50); Operation(a, Now.AddTicks(1), 100);
-        var result = await service.GetAsync("account", period, "all", default);
+        var result = await service.GetAsync("account", period, "all", TradingMode.Real, default);
         Assert.Equal(Now.AddDays(-days), result.FromUtc); Assert.Equal(Now, result.AsOfUtc);
         Assert.Equal("3", result.Totals.RealizedResult.AmountUsd); Assert.Equal(2, result.Totals.RealizedResult.Coverage.ContributingOperationCount);
-        Assert.Equal("53", (await service.GetAsync("account", "all", "all", default)).Totals.RealizedResult.AmountUsd);
+        Assert.Equal("53", (await service.GetAsync("account", "all", "all", TradingMode.Real, default)).Totals.RealizedResult.AmountUsd);
     }
 
     [Fact]
@@ -168,7 +169,7 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
         var a = Account(balance: 10); var unknown = Account(); var incomplete = Account(); Account();
         Operation(a, Now.AddHours(-1), 10, 1); Operation(a, Now.AddHours(-2), 5, 1, "ETH", basis: "net-of-fee");
         Operation(unknown, Now.AddHours(-1), 100, 1, "ETH"); Operation(incomplete, Now.AddHours(-1), 100, incomplete: true);
-        var realized = (await service.GetAsync("account", "30", "all", default)).Totals.RealizedResult;
+        var realized = (await service.GetAsync("account", "30", "all", TradingMode.Real, default)).Totals.RealizedResult;
         Assert.Equal("14", realized.AmountUsd); Assert.Equal((1, 4, 2, 2), (realized.Coverage.ContributingAccountCount,
             realized.Coverage.TotalAccountCount, realized.Coverage.ContributingOperationCount, realized.Coverage.ExcludedOperationCount));
         Assert.Contains(realized.Coverage.Reasons, r => r.Reason.Contains("Incomplete") && r.Count == 1);
@@ -188,7 +189,7 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
             Side = "buy", OrderType = "Limit", OriginalSize = 2, Status = "filled", VenueStatus = "filled", PlacedAtUtc = entry.OccurredAtUtc,
             StatusAtUtc = entry.OccurredAtUtc, ObservedAtUtc = entry.OccurredAtUtc, LimitPrice = 100,
         });
-        var realized = (await service.GetAsync("account", "30", "all", default)).Totals.RealizedResult;
+        var realized = (await service.GetAsync("account", "30", "all", TradingMode.Real, default)).Totals.RealizedResult;
         Assert.Equal(("10", 1, 1), (realized.AmountUsd, realized.Coverage.ContributingOperationCount, realized.Coverage.ExcludedOperationCount));
         Assert.Contains(new SummaryReason(OverviewSummaryService.MissingExecutionsReason, 1), realized.Coverage.Reasons);
     }
@@ -200,12 +201,12 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
         var a = Account(venue: "hyperliquid"); Snapshot(a, 100);
         Operation(a, Now.AddHours(-1), 10);
         fundingStates.Add(new() { OwnerId = owner, AccountId = a.Id, LastReadComplete = true, Notice = "Funding settlements covered for the last 30 days." });
-        var realized = (await service.GetAsync("account", "30", "all", default)).Totals.RealizedResult;
+        var realized = (await service.GetAsync("account", "30", "all", TradingMode.Real, default)).Totals.RealizedResult;
         Assert.Equal("10", realized.AmountUsd);
         Assert.Empty(realized.Coverage.Reasons);
         // A real history notice still counts.
         a.RecordSync(Now, "Retained history begins after the venue's first fill.");
-        Assert.Contains((await service.GetAsync("account", "30", "all", default)).Totals.RealizedResult.Coverage.Reasons,
+        Assert.Contains((await service.GetAsync("account", "30", "all", TradingMode.Real, default)).Totals.RealizedResult.Coverage.Reasons,
             r => r.Reason.Contains("retained-history") && r.Count == 1);
     }
 
@@ -217,7 +218,7 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
         var b = Account(venue: "hyperliquid"); Snapshot(b, 100, pnl: 2, quantity: 1);
         store.Snapshots.Single(s => s.AccountId == b.Id).ObservedAtUtc = Now.AddHours(-3);
         Account(balance: 10);
-        var result = await service.GetAsync("account", "30", "all", default);
+        var result = await service.GetAsync("account", "30", "all", TradingMode.Real, default);
         Assert.Equal(("3", Now.AddHours(-3)), (result.Totals.UnrealizedPnl.AmountUsd, result.Totals.UnrealizedPnlAsOfUtc));
         Assert.Equal([Now, Now.AddHours(-3), null], result.Rows.Select(r => r.Totals.UnrealizedPnlAsOfUtc).OrderByDescending(t => t).ToArray());
     }
@@ -228,7 +229,7 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
         var usdc = Account(); var usdg = Account(); var lower = Account();
         Operation(usdc, Now.AddHours(-1), 10, 1); Operation(usdg, Now.AddHours(-1), 5, 0.5m, "USDG");
         Operation(lower, Now.AddHours(-1), 100, 1, "usdg");
-        var result = await service.GetAsync("account", "30", "all", default);
+        var result = await service.GetAsync("account", "30", "all", TradingMode.Real, default);
         Assert.Equal("13.5", result.Totals.RealizedResult.AmountUsd);
         Assert.Equal((2, 1), (result.Totals.RealizedResult.Coverage.ContributingOperationCount, result.Totals.RealizedResult.Coverage.ExcludedOperationCount));
         Assert.Contains(NominalStablecoins.Caveat, result.ScopeNote);
@@ -239,7 +240,7 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
     {
         var a = Account(venue: "hyperliquid"); Snapshot(a, 100, -2, -1.0000000000000000000000000001m, 2);
         var b = Account(venue: "hyperliquid"); Snapshot(b, 200, 150); Account(balance: 10);
-        var result = await service.GetAsync("account", "30", "all", default);
+        var result = await service.GetAsync("account", "30", "all", TradingMode.Real, default);
         Assert.Equal(1, result.Totals.OpenPositionCount); Assert.Equal("-1.0000000000000000000000000001", result.Totals.UnrealizedPnl.AmountUsd);
         Assert.Equal(2, result.Totals.UnrealizedPnl.Coverage.ContributingAccountCount);
         Assert.Equal("148", result.Totals.Available.AmountUsd); Assert.Equal(2, result.Totals.Available.Coverage.ContributingAccountCount);
@@ -251,7 +252,7 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
         var a = Account(balance: decimal.MaxValue); Account(balance: 0.0000000000000000000000000001m);
         Operation(a, Now.AddHours(-1), decimal.MaxValue); Operation(a, Now.AddHours(-2), 0.0000000000000000000000000001m);
         const string exact = "79228162514264337593543950335.0000000000000000000000000001";
-        var result = await service.GetAsync("account", "all", "all", default);
+        var result = await service.GetAsync("account", "all", "all", TradingMode.Real, default);
         Assert.Equal(exact, result.Totals.Balance.AmountUsd); Assert.Equal(exact, result.Totals.RealizedResult.AmountUsd);
         Assert.Equal(exact, result.Rows[0].ShareOfBalance!.Denominator);
     }
@@ -262,7 +263,7 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
         var a = Account(venue: "hyperliquid"); Snapshot(a, 1000, 800);
         var s = store.Snapshots.Single(); s.AccountMode = "unifiedAccount"; s.StablecoinsObservedAtUtc = Now;
         s.Stablecoins.Add(new() { OwnerId = owner, AccountId = a.Id, Total = 10, Available = 8 });
-        var result = await service.GetAsync("account", "30", "all", default);
+        var result = await service.GetAsync("account", "30", "all", TradingMode.Real, default);
         Assert.Equal("10", result.Totals.Balance.AmountUsd); Assert.Equal("8", result.Totals.Available.AmountUsd);
     }
 
@@ -272,7 +273,7 @@ public sealed class OverviewSummaryTests : OverviewSummaryTestsSupport
         var a = Account(balance: 10);
         for (var i = 0; i < 510; i++) Operation(a, Now.AddMinutes(-i), 1);
         for (var i = 0; i < 205; i++) Account(balance: 1);
-        var result = await service.GetAsync("account", "30", "all", default);
+        var result = await service.GetAsync("account", "30", "all", TradingMode.Real, default);
         Assert.Equal("510", result.Totals.RealizedResult.AmountUsd); Assert.Equal(1020, result.Totals.ImportedFillCount);
         Assert.Equal(200, result.Rows.Count); Assert.Equal(206, result.TotalGroupCount); Assert.Equal(6, result.OmittedGroupCount);
         Assert.Equal("215", result.Totals.Balance.AmountUsd);

@@ -3,7 +3,7 @@ import type { BrokerAccount, Portfolio } from '@/api/workspace'
 import { accountFixture } from '@/test/workspace-fixture'
 import { portfolioAllocations, sumDecimals, totalAllocation } from './overview-allocation'
 
-const portfolio = (id: string, name: string): Portfolio => ({ id, name, accountCount: 0, totalValueUsd: null, valueCoverage: 'unavailable', icon: 'folder',
+const portfolio = (id: string, name: string): Portfolio => ({ tradingMode: 'real', id, name, accountCount: 0, totalValueUsd: null, valueCoverage: 'unavailable', icon: 'folder',
   balanceUsd: null, balanceCoverage: 'unavailable', availableBalanceUsd: null, availableBalanceAccountCount: 0, availableBalanceCoverage: 'unavailable', enabledAccountCount: 0 })
 const account = (id: string, portfolioId: string | null, balanceUsd: string | null, isEnabled = true): BrokerAccount => ({
   ...accountFixture, id, portfolioId, name: id, accountValueUsd: balanceUsd, isEnabled, balanceUsd,

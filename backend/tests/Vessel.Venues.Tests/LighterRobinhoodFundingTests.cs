@@ -7,6 +7,7 @@ using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
 using Vessel.Infrastructure.Venues.Lighter;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -26,7 +27,7 @@ public sealed class LighterRobinhoodFundingTests
 
     private static Account Account(string venue = "lighter-rh")
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), venue, "Synthetic funding account");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), venue, "Synthetic funding account", TradingMode.Real);
         account.Configure(null, null, null, Source);
         return account;
     }

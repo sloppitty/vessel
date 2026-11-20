@@ -1,4 +1,5 @@
 using Vessel.Application.Sizing;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -28,7 +29,7 @@ public sealed class SizingExitTimeOrderingUseCasesTests : SizingExitTimeOrdering
             store.Closed.Clear();
             // Fresh random Play IDs every round.
             for (var i = 0; i < results.Length; i++) store.Closed.Add(Closed(results[i], 60 * (i + 1)));
-            var sizing = await Service.GetAsync(default);
+            var sizing = await Service.GetAsync(TradingMode.Real, default);
             Assert.Equal((level, wins, reason), (sizing.Exposure.Level, sizing.Exposure.WinsSinceStepDown, sizing.Exposure.Reason));
             // The record lists the newest exit first, at the exit time, not at the shared detection time.
             Assert.Equal(Enumerable.Range(1, results.Length).Reverse().Select(i => Planned.AddMinutes(60 * i)),
@@ -48,7 +49,7 @@ public sealed class SizingExitTimeOrderingUseCasesTests : SizingExitTimeOrdering
         store.Closed.Add(Closed(-5, exitMinutes: 60));
         store.Closed.Add(Closed(10, exitMinutes: 120));
         store.Closed.Add(Closed(-5, exitMinutes: 120));
-        var sizing = await Service.GetAsync(default);
+        var sizing = await Service.GetAsync(TradingMode.Real, default);
         Assert.Equal("Full size: no losing streak. 2 results share an exit time; their order is not known.", sizing.Exposure.Reason);
         Assert.Equal(2, sizing.Exposure.TiedOutcomes);
         // The tied pair keeps the stable Play-ID order; nothing economic is invented.
@@ -61,7 +62,7 @@ public sealed class SizingExitTimeOrderingUseCasesTests : SizingExitTimeOrdering
     {
         store.Closed.Add(Closed(-5, exitMinutes: 60));
         store.Closed.Add(Closed(10, exitMinutes: 120));
-        var sizing = await Service.GetAsync(default);
+        var sizing = await Service.GetAsync(TradingMode.Real, default);
         Assert.Equal(("Full size: no losing streak.", 0), (sizing.Exposure.Reason, sizing.Exposure.TiedOutcomes));
     }
 }

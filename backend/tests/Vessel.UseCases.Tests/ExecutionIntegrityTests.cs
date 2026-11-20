@@ -5,6 +5,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -20,7 +21,7 @@ public sealed class ExecutionIntegrityTests
     {
         var owner = Guid.NewGuid();
         plays = new MemoryPlayStore(owner);
-        account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Trading");
+        account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Trading", TradingMode.Real);
         plays.Accounts.Add(account);
         play = Planned();
         store = new MemoryExecutionStore(plays);

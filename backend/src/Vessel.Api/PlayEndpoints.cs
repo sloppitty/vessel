@@ -2,6 +2,7 @@ using Vessel.Application.Monitoring;
 using Vessel.Application.Plays;
 using Vessel.Application.Plays.Execution;
 using static Vessel.Api.EndpointTransport;
+using Vessel.Domain.Common;
 
 namespace Vessel.Api;
 
@@ -21,20 +22,20 @@ public static class PlayEndpoints
     {
         var api = app.MapGroup("/api/plays").RequireAuthorization().WithTradingModeBoundary();
         api.MapGet("", async (string? view, string? q, string? scope, string? page, string? pageSize, string? tradingMode, PlayService service, CancellationToken ct) =>
-            Results.Ok(await service.ListAsync(view, q, scope, page, pageSize, ct, tradingMode)));
+            Results.Ok(await service.ListAsync(view, q, scope, page, pageSize, TradingModes.FromRequest(tradingMode), ct)));
         api.MapGet("/counts", async (string? q, string? scope, string? tradingMode, PlayService service, CancellationToken ct) =>
-            Results.Ok(await service.CountsAsync(q, scope, ct, tradingMode)));
+            Results.Ok(await service.CountsAsync(q, scope, TradingModes.FromRequest(tradingMode), ct)));
         // Phase 2, item 13: journal-wide search over the search projection, in the requested mode, paged by offset.
         api.MapGet("/search", async (string? q, int? offset, string? tradingMode, PlayService service, CancellationToken ct) =>
-            Results.Ok(await service.SearchAsync(q, offset, ct, tradingMode)));
+            Results.Ok(await service.SearchAsync(q, offset, TradingModes.FromRequest(tradingMode), ct)));
         api.MapPost("", async (CreatePlayRequest request, string? tradingMode, PlayService service, CancellationToken ct) =>
         {
-            var result = await service.CreateAsync(request, ct, tradingMode);
+            var result = await service.CreateAsync(request, TradingModes.FromRequest(tradingMode), ct);
             return Results.Created($"/api/plays/{result.Summary.Id}", result);
         }).WithBodyLimit(PlayBodyBytes, PlayTooLarge);
         api.MapPost("/retrospective", async (CreateRetrospectiveRequest request, DiaryService service, CancellationToken ct) =>
             Results.Ok(await service.CreateRetrospectiveAsync(request, ct)))
-            .WithBodyLimit(RetrospectiveBodyBytes, DiaryTooLarge);
+            .WithBodyLimit(RetrospectiveBodyBytes, DiaryTooLarge).RealOnly();
         api.MapGet("/{id:guid}/manual-executions", async (Guid id, DiaryService service, CancellationToken ct) =>
             Results.Ok(await service.ManualAsync(id, ct)));
         api.MapPost("/{id:guid}/manual-executions", async (Guid id, ManualExecutionRequest request, DiaryService service, CancellationToken ct) =>
@@ -50,21 +51,21 @@ public static class PlayEndpoints
         // Previewing a retrospective Play starts from an Activity operation, so it lives under /api/activity.
         var activity = app.MapGroup("/api/activity").RequireAuthorization();
         activity.MapGet("/retrospective", async (Guid accountId, string operationId, DiaryService service, CancellationToken ct) =>
-            Results.Ok(await service.PreviewAsync(accountId, operationId, ct)));
+            Results.Ok(await service.PreviewAsync(accountId, operationId, ct))).RealOnly();
         api.MapGet("/{id:guid}", async (Guid id, PlayService service, CancellationToken ct) => Results.Ok(await service.GetAsync(id, ct)));
         api.MapPut("/{id:guid}", async (Guid id, UpdatePlayRequest request, PlayService service, CancellationToken ct) =>
             Results.Ok(await service.UpdateAsync(id, request, ct))).WithBodyLimit(PlayBodyBytes, PlayTooLarge);
         api.MapPost("/{id:guid}/status", async (Guid id, ChangePlayStatusRequest request, PlayService service, CancellationToken ct) =>
             Results.Ok(await service.ChangeStatusAsync(id, request, ct)));
         api.MapGet("/next-actions", async (string? tradingMode, PlayService service, CancellationToken ct) =>
-            Results.Ok(await service.NextActionsAsync(ct, tradingMode)));
+            Results.Ok(await service.NextActionsAsync(TradingModes.FromRequest(tradingMode), ct)));
         // Phase 2, item 3: the one active if-then rule in the requested mode.
         api.MapGet("/rule", async (string? tradingMode, PlayService service, CancellationToken ct) =>
-            Results.Ok(await service.RuleAsync(tradingMode, ct)));
+            Results.Ok(await service.RuleAsync(TradingModes.FromRequest(tradingMode), ct)));
         api.MapPut("/rule", async (string? tradingMode, SetPlayRuleRequest request, PlayService service, CancellationToken ct) =>
-            Results.Ok(await service.SetRuleAsync(tradingMode, request, ct))).WithBodyLimit(RuleBodyBytes, DiaryTooLarge);
+            Results.Ok(await service.SetRuleAsync(TradingModes.FromRequest(tradingMode), request, ct))).WithBodyLimit(RuleBodyBytes, DiaryTooLarge);
         api.MapDelete("/rule", async (string? tradingMode, int expectedVersion, PlayService service, CancellationToken ct) =>
-            Results.Ok(await service.ArchiveRuleAsync(tradingMode, expectedVersion, ct)));
+            Results.Ok(await service.ArchiveRuleAsync(TradingModes.FromRequest(tradingMode), expectedVersion, ct)));
         // Review completion and the in-trade log (phase 1, 1.2).
         api.MapPost("/{id:guid}/review/complete", async (Guid id, ReviewCompletionRequest request, PlayService service, CancellationToken ct) =>
             Results.Ok(await service.CompleteReviewAsync(id, request, ct)));
@@ -99,10 +100,10 @@ public static class PlayEndpoints
         // Phase 2, item 11: the owner splits one fill between Plays (a shared exit or a flip), replaces or removes the split.
         api.MapPost("/{id:guid}/execution/allocations", async (Guid id, AllocateFillRequest request, PlayExecutionService service,
             MonitorExecutionView monitor, CancellationToken ct) =>
-            Results.Ok(await monitor.ComposeAsync(await service.AllocateAsync(id, request, ct), ct)));
+            Results.Ok(await monitor.ComposeAsync(await service.AllocateAsync(id, request, ct), ct))).RealOnly();
         // Sol round 1 on item 11: a further page of the Play's allocated fills, so every one stays reachable for editing.
         api.MapGet("/{id:guid}/execution/allocations", async (Guid id, int? offset, PlayExecutionService service, CancellationToken ct) =>
-            Results.Ok(await service.SharedFillsAsync(id, offset ?? 0, ct)));
+            Results.Ok(await service.SharedFillsAsync(id, offset ?? 0, ct))).RealOnly();
         // Answers level.drift: one plan revision moves the linked level to the observed order's price. Returns the Play.
         api.MapPost("/{id:guid}/execution/links/{linkId:guid}/rebind", async (Guid id, Guid linkId, RebindLevelRequest request,
             PlayExecutionService service, CancellationToken ct) => Results.Ok(await service.RebindAsync(id, linkId, request, ct)));

@@ -49,6 +49,12 @@ describe('Core workspace API', () => {
     response([{ ...portfolioFixture, ...fields }])
     await expect(createWorkspaceApi(credentialsFixture).portfolios()).rejects.toMatchObject({ kind: 'invalid-response' })
   })
+  it.each([undefined, 'Real', ''])('rejects an account or portfolio whose trading mode is %j, which the API always sends (#113)', async tradingMode => {
+    response({ ...accountFixture, tradingMode })
+    await expect(createWorkspaceApi(credentialsFixture).account(accountFixture.id)).rejects.toMatchObject({ kind: 'invalid-response' })
+    response([{ ...portfolioFixture, tradingMode }])
+    await expect(createWorkspaceApi(credentialsFixture).portfolios()).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
   it('keeps exact combined balance strings and coverage and never caches overview responses', async () => {
     const fixture = { ...emptyOverview, totals: { ...emptyOverview.totals,
       totalBalanceUsd: '79228162514264337593543950335.0000000000000000000000000001',

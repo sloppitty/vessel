@@ -9,6 +9,7 @@ using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -170,7 +171,7 @@ public sealed class ManualLedgerPrecisionUseCasesTests : ManualLedgerPrecisionTe
 
     private sealed class PrecisionFixture : IDiaryStoreDefaults, IPlayExecutionStoreDefaults, IReviewStoreDefaults
     {
-        public Account Account { get; } = new(Guid.NewGuid(), Guid.NewGuid(), "manual", "Precision");
+        public Account Account { get; } = new(Guid.NewGuid(), Guid.NewGuid(), "manual", "Precision", TradingMode.Real);
         public MemoryPlayStore Plays { get; }
         public Play Play { get; }
         public List<ManualExecution> Rows { get; } = [];

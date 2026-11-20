@@ -11,12 +11,9 @@ namespace Vessel.Persistence;
 public sealed class CachedActivitySummaryReader(IJournalOwnerContext owner, IOwnerScopeFactory scopes,
     ActivitySummaryCache cache, IVenueRegistry? venues = null) : IActivitySummaryReader
 {
-    public Task<ActivitySummaries> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) =>
-        ReadAsync(accountId, TradingMode.Real, ct, accountIds);
-
-    public async Task<ActivitySummaries> ReadAsync(Guid? accountId, string tradingMode, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
+    public async Task<ActivitySummaries> ReadAsync(Guid? accountId, TradingMode tradingMode, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
     {
-        tradingMode = TradingMode.Validate(tradingMode);
+        tradingMode = TradingModes.Validate(tradingMode);
         // Copy mutable caller input before crossing a request lifetime.
         var ids = accountIds?.ToHashSet();
         var scope = scopes.Create(owner.OwnerId);
@@ -31,7 +28,7 @@ public sealed class CachedActivitySummaryReader(IJournalOwnerContext owner, IOwn
             {
                 var facts = await scope.Services.GetRequiredService<IActivityStore>().ReadAsync(accountId, tradingMode, ct, ids);
                 await db.Database.CurrentTransaction!.CommitAsync(ct);
-                return ActivityService.Aggregate(facts, accountId, ids, tradingMode: tradingMode);
+                return ActivityService.Aggregate(facts, tradingMode, accountId, ids);
             }
             // Issue #107: the cache is keyed by the execution revision. Observations (snapshots, funding coverage, sync state)
             // are read here every time, in the same snapshot, and the cached aggregate is rebased onto them.
@@ -54,7 +51,7 @@ public sealed class CachedActivitySummaryReader(IJournalOwnerContext owner, IOwn
                     await transaction.DisposeAsync();
                     await db.Database.CloseConnectionAsync();
                     token.ThrowIfCancellationRequested();
-                    var result = ActivityService.Aggregate(facts, accountId, ids, scope.Services.GetService<IVenueRegistry>(), tradingMode);
+                    var result = ActivityService.Aggregate(facts, tradingMode, accountId, ids, scope.Services.GetService<IVenueRegistry>());
                     token.ThrowIfCancellationRequested();
                     return result;
                 }

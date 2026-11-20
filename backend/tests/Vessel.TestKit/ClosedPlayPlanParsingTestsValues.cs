@@ -6,6 +6,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -28,7 +29,7 @@ public partial class ClosedPlayPlanParsingTestsValues
     /// <summary>Revision 1 stops at 95; revision 2, two hours after planning, at 90; the current plan then moves to 85.</summary>
     internal static ClosedPlayFacts Facts(int entryMinutes, bool retrospective = false)
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Venue");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Venue", TradingMode.Real);
         var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
             PlayDocuments.Serialize(Plan("95")), Planned);
         List<PlayPlanRevision> revisions = [play.MarkPlanned(Planned).Revision];

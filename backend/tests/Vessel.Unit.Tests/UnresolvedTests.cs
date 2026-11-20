@@ -10,7 +10,7 @@ namespace Vessel.Tests;
 public sealed class UnresolvedDomainTests
 {
     private static readonly DateTimeOffset At = DateTimeOffset.Parse("2026-10-20T10:00:00Z");
-    private readonly Account account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Trading");
+    private readonly Account account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Trading", TradingMode.Real);
 
     private Play Open()
     {
@@ -45,7 +45,7 @@ public sealed class UnresolvedDomainTests
     public void A_paper_Play_is_never_declared_unresolved()
     {
         // Main's paper trading: a simulation holds what it cannot settle as ambiguous or a gap, never as Unresolved.
-        var paper = new Account(Guid.NewGuid(), account.OwnerId, "hyperliquid", "Hypotheses", "paper", 4000);
+        var paper = new Account(Guid.NewGuid(), account.OwnerId, "hyperliquid", "Hypotheses", TradingMode.Paper, 4000);
         paper.Configure(Guid.NewGuid(), null, null);
         var play = new Play(Guid.NewGuid(), paper, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
             PlayDocuments.Serialize(TestPlays.Plan()), At);

@@ -5,6 +5,7 @@ using Vessel.Domain.Markets;
 using Vessel.Domain.Paper;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -16,8 +17,8 @@ public partial class PaperReportingTestsValues
     internal static (Account Account, Portfolio Portfolio, ClosedPlayFacts Facts) Paper(Guid owner, decimal net = 20,
         string state = "ready", string instrument = "BTC", string[]? issues = null, decimal quantity = 1, bool revise = false)
     {
-        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper account", "paper", 4000);
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: TradingMode.Paper);
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper account", TradingMode.Paper, 4000);
         account.Configure(portfolio.Id, null, null);
         var plan = new PlayPlanDocument("long", "margin", "100", "1", null,
             [new("e", "Entry", "#ffffff", "100", "100", [new("s", "price", "95", "100")], [])], new("", "", "", ""));

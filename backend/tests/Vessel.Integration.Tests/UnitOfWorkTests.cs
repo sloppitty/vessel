@@ -13,6 +13,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Evidence;
 using Vessel.Domain.Plays;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -96,7 +97,7 @@ public sealed class UnitOfWorkTests : UnitOfWorkTestsSupport
         var play = await work.ExecuteAsync(async () =>
         {
             var account = await accounts.CreateAccountAsync(new(null, "Account", "hyperliquid", "0x" + new string('a', 40)), default);
-            var draft = await plays.CreateAsync(new(account.Id, "BTC", "venue", "Idea", TestPlays.Plan()), default);
+            var draft = await plays.CreateAsync(new(account.Id, "BTC", "venue", "Idea", TestPlays.Plan()), TradingMode.Real, default);
             await work.SaveChangesAsync(default);
             var planned = await plays.ChangeStatusAsync(draft.Summary.Id, new(draft.Summary.Version, "planned"), default);
             await executions.WithAccountLockAsync(account.Id, async () =>
@@ -164,7 +165,7 @@ public sealed class UnitOfWorkTests : UnitOfWorkTestsSupport
         Assert.Null(db.Database.CurrentTransaction);
         await work.ExecuteAsync(async () =>
         {
-            await accounts.AddPortfolioAsync(new(Guid.NewGuid(), owner, "Later operation"), default);
+            await accounts.AddPortfolioAsync(new(Guid.NewGuid(), owner, "Later operation", TradingMode.Real), default);
             return true;
         }, default);
         await using var verify = database.Context(owner);
@@ -529,14 +530,14 @@ public sealed class UnitOfWorkTests : UnitOfWorkTestsSupport
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic", TradingMode.Real);
         db.Accounts.Add(account);
         await db.SaveChangesAsync();
         var work = TestUnitOfWork.For(db);
         var plays = new PlayService(new PlayStore(db, work), new MemoryObjectStore(), TimeProvider.System, work);
         var read = await work.ExecuteAsync(async () =>
         {
-            var created = await plays.CreateAsync(new CreatePlayRequest(account.Id, "BTC", "manual", "Nested", TestPlays.Plan()), default);
+            var created = await plays.CreateAsync(new CreatePlayRequest(account.Id, "BTC", "manual", "Nested", TestPlays.Plan()), TradingMode.Real, default);
             return await plays.GetAsync(created.Summary.Id, default);
         }, default);
         Assert.Equal("Nested", read.Summary.Title);
@@ -673,7 +674,7 @@ public sealed class UnitOfWorkTests : UnitOfWorkTestsSupport
         await Assert.ThrowsAsync<InvalidOperationException>(() => work.ExecuteAsync<bool>(async () =>
         {
             Assert.True(await evidence.AddAsync(Image(), 3, default));
-            await sizing.UpdateSettingsAsync(new("2"), default);
+            await sizing.UpdateSettingsAsync(new("2"), TradingMode.Real, default);
             Assert.Equal(1, await db.Evidence.CountAsync());
             throw new InvalidOperationException("Roll back the outer operation.");
         }, default));
@@ -840,7 +841,7 @@ public sealed class UnitOfWorkTests : UnitOfWorkTestsSupport
 
     private static Account Account(Guid owner)
     {
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account", TradingMode.Real);
         account.Configure(null, "0x" + new string('a', 40), null);
         return account;
     }

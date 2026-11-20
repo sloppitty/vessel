@@ -13,6 +13,7 @@ using Vessel.Application.Ownership;
 using Vessel.Domain.Numerics;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Application.Plays;
 
@@ -165,7 +166,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
     public async Task<ManualExecutionsDto> ManualRecordAsync(Guid playId, CancellationToken ct)
     {
         var play = await plays.FindAsync(playId, ct) ?? throw new ProblemException(404, "Play not found.");
-        if (play.TradingMode != "real") throw new ProblemException(404, "Play not found.");
+        if (play.TradingMode != TradingMode.Real) throw new ProblemException(404, "Play not found.");
         return await ManualResult(play, await diary.ManualAsync(playId, ct), ct);
     }
 
@@ -173,7 +174,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
     {
         var play = await plays.FindAsync(id, ct) ?? throw new ProblemException(404, "Play not found.");
         var account = await plays.AccountAsync(play.AccountId, ct) ?? throw new ProblemException(404, "Account not found.");
-        if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts use simulated executions, not actual execution facts.");
+        account.RequireReal("Paper accounts use simulated executions, not actual execution facts.");
         if (!account.IsEnabled) throw new ProblemException(409, "Enable the account before using manual execution facts.");
         if (venues.Descriptor(account.VenueId)?.Capabilities.ManualExecutions != true || play.Origin != PlayOrigin.Planned)
             throw new ProblemException(409, "This account does not support owner-entered manual execution facts.");
@@ -250,7 +251,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
         if (accountId == Guid.Empty || string.IsNullOrWhiteSpace(operationId) || operationId.Length > 200)
             throw new ProblemException(400, "Choose a valid account and retained operation.");
         var account = await plays.AccountAsync(accountId, ct) ?? throw new ProblemException(404, "Account not found.");
-        if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts use simulated executions, not actual execution facts.");
+        account.RequireReal("Paper accounts use simulated executions, not actual execution facts.");
         if (!account.IsEnabled) throw new ProblemException(409, "Enable the account before reviewing imported operations.");
         var facts = await diary.ActivityAsync(accountId, ct);
         // The same inputs as Activity, omission markers included (Phase 2, item 7b, Sol round 1): the fingerprint and
@@ -370,7 +371,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
                 return await executions.WithAccountLockAsync(accountId, async () =>
                 {
                     var account = await plays.AccountAsync(accountId, ct) ?? throw new ProblemException(404, "Account not found.");
-                    if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts use simulated executions, not actual execution facts.");
+                    account.RequireReal("Paper accounts use simulated executions, not actual execution facts.");
                     if (!account.IsEnabled) throw new ProblemException(409, "Enable the account before accessing diary execution facts.");
                     return cached;
                 }, ct);

@@ -53,7 +53,7 @@ public sealed class OwnershipModelTests
     public async Task Save_guard_rejects_records_of_another_owner()
     {
         using var db = Context(Owner);
-        db.Portfolios.Add(new Portfolio(Guid.NewGuid(), Foreign, "Foreign"));
+        db.Portfolios.Add(new Portfolio(Guid.NewGuid(), Foreign, "Foreign", TradingMode.Real));
         Assert.Throws<UnauthorizedAccessException>(() => db.SaveChanges());
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => db.SaveChangesAsync());
     }

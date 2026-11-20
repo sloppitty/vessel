@@ -14,7 +14,7 @@ public sealed class StructuredReviewTests
 
     public StructuredReviewTests()
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Manual");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Manual", TradingMode.Real);
         store = new(account.OwnerId);
         store.Accounts.Add(account);
         play = TestPlays.Create(account, new("manual", "BTC"));

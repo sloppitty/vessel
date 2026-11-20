@@ -13,6 +13,7 @@ using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
 using Vessel.Persistence.Events;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -31,7 +32,7 @@ public sealed class OrderIdentityAttributionTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
         var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
             PlayDocuments.Serialize(TestPlays.Plan()), Now.AddHours(-6));
         var btcEntry = Order(account, "BTC", "7", "buy", 100, 1);
@@ -98,7 +99,7 @@ public sealed class OrderIdentityAttributionTests
         Assert.DoesNotContain((await EventReads.ReadAsync(db, 0, 200, default)).Events, e => e.Subject.ContractId == "ETH");
 
         // Activity's per-fill Play map labels only the BTC fills; the ETH operation stays unassigned.
-        var facts = await new ActivityStore(db).ReadAsync(account.Id, default);
+        var facts = await new ActivityStore(db).ReadAsync(account.Id, TradingMode.Real, default);
         Assert.Equal(btcFills.Order(), facts.FillPlayIds.Keys.Order());
         Assert.All(facts.FillPlayIds.Values, id => Assert.Equal(play.Id, id));
         var operations = (await ActivityTestSupport.Activity(db).PageAsync(account.Id)).Operations;
@@ -109,7 +110,7 @@ public sealed class OrderIdentityAttributionTests
         Assert.Equal("unassigned", ethOperation.PlayAssociation);
 
         // Sizing facts and the Review outcome contain only the BTC fills, with the exact P&L.
-        var sizing = Assert.Single(await new SizingStore(db, TestUnitOfWork.For(db)).ClosedPlaysAsync(default));
+        var sizing = Assert.Single(await new SizingStore(db, TestUnitOfWork.For(db)).ClosedPlaysAsync(TradingMode.Real, default));
         Assert.Equal(btcFills.Order(), sizing.Fills.Select(f => f.Fill.Id).Order());
         Assert.Empty(sizing.IncompleteOrders ?? []);
         var review = await new ReviewService(new ReviewStore(db, new SizingStore(db, TestUnitOfWork.For(db))), TimeProvider.System)
@@ -140,7 +141,7 @@ public sealed class OrderIdentityAttributionTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
         var open = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
             PlayDocuments.Serialize(TestPlays.Plan()), Now.AddHours(-6));
         var closed = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
@@ -178,7 +179,7 @@ public sealed class OrderIdentityAttributionTests
         Assert.Equal("1", execution.Totals.EnteredQuantity);
         Assert.Contains("Order 7 is filled at the venue, but not all of its executions are retained yet.", execution.Issues);
 
-        var facts = Assert.Single(await new SizingStore(db, TestUnitOfWork.For(db)).ClosedPlaysAsync(default));
+        var facts = Assert.Single(await new SizingStore(db, TestUnitOfWork.For(db)).ClosedPlaysAsync(TradingMode.Real, default));
         Assert.Equal(["17"], facts.IncompleteOrders);
         Assert.Equal(["c", "e"], facts.Fills.Select(f => f.Fill.SourceFillId).Order());
         Assert.False(ExecutionIntegrity.Settled(facts));
@@ -190,7 +191,7 @@ public sealed class OrderIdentityAttributionTests
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var at = Now.AddMinutes(10);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
         var btc = TestPlays.Create(account, new("hyperliquid", "BTC"));
         var eth = TestPlays.Create(account, new("hyperliquid", "ETH"));
         var btcOrder = Order(account, "BTC", "7", "buy", 100, 1, "open");
@@ -235,7 +236,7 @@ public sealed class OrderIdentityAttributionTests
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var at = Now.AddMinutes(10);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
         await using (var seed = database.Context(owner))
         {
@@ -296,7 +297,7 @@ public sealed class OrderIdentityAttributionTests
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var at = Now.AddMinutes(10);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Synthetic", TradingMode.Real);
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
         var linked = Order(account, "BTC", "linked", "buy", 100, 2);
         var unlinked = Order(account, "BTC", "unlinked", "buy", 100, 1);

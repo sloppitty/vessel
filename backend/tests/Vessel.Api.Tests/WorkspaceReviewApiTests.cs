@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using Vessel.Application.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -73,7 +74,7 @@ public sealed class WorkspaceReviewApiTests
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var service = new WorkspaceService(store, new CoreOwner(owner), TestVenues.With(new FixtureReader()), TestUnitOfWork.None);
         var account = await service.CreateAccountAsync(new(null, "Private name", "hyperliquid", "0x" + new string('a', 40)), default);
-        await service.UpdateAccountAsync(account.Id, new("Private name", null, false, 1), default);
+        await service.UpdateAccountAsync(account.Id, new("Private name", null, false, 1), TradingMode.Real, default);
         await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
         var response = await client.PostAsJsonAsync("/api/accounts", new CreateAccountRequest(null, "Alias", "hyperliquid", "0x" + new string('A', 40)));
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode); Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);

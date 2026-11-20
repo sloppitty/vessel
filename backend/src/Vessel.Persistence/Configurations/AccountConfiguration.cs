@@ -26,7 +26,7 @@ internal sealed class AccountConfiguration : IEntityTypeConfiguration<Account>
         builder.HasKey(x => x.Id);
         builder.HasAlternateKey(x => new { x.OwnerId, x.Id });
         builder.HasAlternateKey(x => new { x.OwnerId, x.Id, x.TradingMode });
-        builder.Property(x => x.TradingMode).HasMaxLength(8).HasDefaultValue("real");
+        builder.Property(x => x.TradingMode).HasMaxLength(8).HasDefaultValue(Vessel.Domain.Common.TradingMode.Real);
         builder.Property(x => x.StartingCapitalUsd).Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Throw);
         builder.Property(x => x.VenueId).HasMaxLength(64);
         builder.Property(x => x.Name).HasMaxLength(200);

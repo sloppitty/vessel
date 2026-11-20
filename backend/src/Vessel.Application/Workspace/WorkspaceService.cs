@@ -10,13 +10,12 @@ namespace Vessel.Application.Workspace;
 
 public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext owner, IVenueRegistry venues, IUnitOfWork unitOfWork)
 {
-    public static string ValidateTradingMode(string? tradingMode)
-    {
-        var mode = tradingMode ?? TradingMode.Real;
-        return TradingMode.IsKnown(mode) ? mode : throw new ProblemException(400, "Trading mode must be real or paper.");
-    }
+    /// <summary>A request body's mode, where an absent field has always meant the real journal.</summary>
+    public static TradingMode ValidateTradingMode(string? tradingMode) =>
+        tradingMode is null ? TradingMode.Real
+            : TradingModes.TryParse(tradingMode, out var mode) ? mode : throw new ProblemException(400, TradingModes.Invalid);
 
-    private static void RequireMode(Account account, string mode)
+    private static void RequireMode(Account account, TradingMode mode)
     {
         if (account.TradingMode != mode) throw new ProblemException(404, "Account not found.");
     }
@@ -45,11 +44,11 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             var accounts = await LockAccounts(request.AccountIds ?? [], ct);
             foreach (var account in accounts) RequireMode(account, mode);
             CheckExpected(accounts, request.Expected);
-            var portfolio = new Portfolio(Guid.NewGuid(), owner.OwnerId, request.Name, request.Icon ?? PortfolioIcons.Default, mode);
+            var portfolio = new Portfolio(Guid.NewGuid(), owner.OwnerId, request.Name, mode, request.Icon ?? PortfolioIcons.Default);
             await store.AddPortfolioAsync(portfolio, ct);
             MoveAccounts(accounts, portfolio.Id);
             await store.SaveAsync(ct);
-            return await PortfolioAsync(portfolio.Id, ct, mode);
+            return await PortfolioAsync(portfolio.Id, mode, ct);
         }, ct), ct);
     }
 
@@ -92,14 +91,14 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
                 account.UpdateSettings(account.Name, portfolioId, account.IsEnabled);
     }
 
-    public async Task<IReadOnlyList<AccountDto>> MoveAccountsAsync(MoveAccountsRequest request, CancellationToken ct, string? tradingMode = TradingMode.Real)
+    public async Task<IReadOnlyList<AccountDto>> MoveAccountsAsync(MoveAccountsRequest request, TradingMode tradingMode, CancellationToken ct)
     {
-        var mode = ValidateTradingMode(tradingMode);
+        var mode = TradingModes.Validate(tradingMode);
         ValidateAccountIds(request.AccountIds);
         ValidateExpected(request.AccountIds, request.Expected);
         return await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(async () =>
         {
-            await ValidatePortfolio(request.PortfolioId, ct, mode);
+            await ValidatePortfolio(request.PortfolioId, mode, ct);
             var accounts = await LockAccounts(request.AccountIds!, ct);
             foreach (var account in accounts) RequireMode(account, mode);
             CheckExpected(accounts, request.Expected);
@@ -107,7 +106,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             await store.SaveAsync(ct);
             var result = new List<AccountDto>();
             foreach (var account in accounts)
-                result.Add(await AccountAsync(account.Id, ct, mode));
+                result.Add(await AccountAsync(account.Id, mode, ct));
             return result;
         }, ct), ct);
     }
@@ -170,57 +169,57 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         account.Configure(request.PortfolioId, address, value, sourceId);
         await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(async () =>
         {
-            await ValidatePortfolio(request.PortfolioId, ct, mode);
+            await ValidatePortfolio(request.PortfolioId, mode, ct);
             if (account.SourceId is { } source && await store.SourceExistsAsync(account.VenueId, source, ct))
                 throw new ProblemException(409, "An account for this venue and source already exists. Manage or re-enable that account.");
             await store.AddAccountAsync(account, ct);
             return true;
         }, ct), ct);
-        return await AccountAsync(account.Id, ct, mode);
+        return await AccountAsync(account.Id, mode, ct);
     }
 
-    private async Task ValidatePortfolio(Guid? id, CancellationToken ct, string mode = TradingMode.Real)
+    private async Task ValidatePortfolio(Guid? id, TradingMode mode, CancellationToken ct)
     {
         if (mode == TradingMode.Paper && id is null)
             throw new ProblemException(400, "Paper accounts require a paper portfolio.");
-        if (id.HasValue && !(await store.PortfoliosAsync(ct, mode)).Any(p => p.Id == id))
+        if (id.HasValue && !(await store.PortfoliosAsync(mode, ct)).Any(p => p.Id == id))
             throw new ProblemException(404, "Portfolio not found.");
     }
 
-    public async Task<PortfolioDto> UpdatePortfolioAsync(Guid id, UpdatePortfolioRequest request, CancellationToken ct, string? tradingMode = TradingMode.Real)
+    public async Task<PortfolioDto> UpdatePortfolioAsync(Guid id, UpdatePortfolioRequest request, TradingMode tradingMode, CancellationToken ct)
     {
-        var mode = ValidateTradingMode(tradingMode);
+        var mode = TradingModes.Validate(tradingMode);
         if (request.TradingMode is not null) throw new ProblemException(400, "Trading mode is immutable.");
         ValidateName(request.Name);
         ValidateIcon(request.Icon);
         await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(async () =>
         {
-            var portfolio = (await store.PortfoliosAsync(ct, mode)).SingleOrDefault(p => p.Id == id)
+            var portfolio = (await store.PortfoliosAsync(mode, ct)).SingleOrDefault(p => p.Id == id)
                 ?? throw new ProblemException(404, "Portfolio not found.");
             portfolio.Rename(request.Name);
             if (request.Icon is not null) portfolio.ChangeIcon(request.Icon);
             await store.SaveAsync(ct);
             return true;
         }, ct), ct);
-        return await PortfolioAsync(id, ct, mode);
+        return await PortfolioAsync(id, mode, ct);
     }
 
-    public async Task DeletePortfolioAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
+    public async Task DeletePortfolioAsync(Guid id, TradingMode tradingMode, CancellationToken ct)
     {
-        var mode = ValidateTradingMode(tradingMode);
+        var mode = TradingModes.Validate(tradingMode);
         await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(async () =>
         {
-            await PortfolioAsync(id, ct, mode);
-            if (mode == TradingMode.Paper && (await store.AccountsAsync(ct, mode)).Any(a => a.PortfolioId == id))
+            await PortfolioAsync(id, mode, ct);
+            if (mode == TradingMode.Paper && (await store.AccountsAsync(mode, ct)).Any(a => a.PortfolioId == id))
                 throw new ProblemException(409, "Move all accounts to another paper portfolio before deleting this portfolio.");
             await store.DeletePortfolioAsync(id, ct);
             return true;
         }, ct), ct);
     }
 
-    public async Task<AccountDto> UpdateAccountAsync(Guid id, UpdateAccountRequest request, CancellationToken ct, string? tradingMode = TradingMode.Real)
+    public async Task<AccountDto> UpdateAccountAsync(Guid id, UpdateAccountRequest request, TradingMode tradingMode, CancellationToken ct)
     {
-        var mode = ValidateTradingMode(tradingMode);
+        var mode = TradingModes.Validate(tradingMode);
         if (request.StartingCapitalUsd is not null || request.TradingMode is not null)
             throw new ProblemException(400, "Trading mode and paper starting capital are creation-only.");
         ValidateName(request.Name);
@@ -229,24 +228,24 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             RequireMode(account, mode);
             if (request.ExpectedRevision != account.SettingsRevision)
                 throw new ProblemException(409, "Account settings changed. Reload the current settings before saving.");
-            await ValidatePortfolio(request.PortfolioId, ct, mode);
+            await ValidatePortfolio(request.PortfolioId, mode, ct);
             var wasEnabled = account.IsEnabled;
             // Phase 2, item 6: the opt-in reads venue facts, so it is real-only and needs a venue the monitor checks.
             if (request.KeepExecutionHistory == true && !account.KeepExecutionHistory)
             {
-                if (account.TradingMode == TradingMode.Paper) throw new ProblemException(409, "Paper accounts have no venue history to keep.");
+                account.RequireReal("Paper accounts have no venue history to keep.");
                 if (!KeepsHistory(account)) throw new ProblemException(400, "This account's venue history cannot be kept.");
             }
             account.UpdateSettings(request.Name, request.PortfolioId, request.IsEnabled, request.KeepExecutionHistory);
             await store.SaveAsync(ct);
             if (wasEnabled != account.IsEnabled) await store.AccountVisibilityChangedAsync(id, account.IsEnabled, ct);
-            return await AccountAsync(id, ct, mode);
+            return await AccountAsync(id, mode, ct);
         }, ct), ct), ct);
     }
 
-    public async Task DeleteAccountAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
+    public async Task DeleteAccountAsync(Guid id, TradingMode tradingMode, CancellationToken ct)
     {
-        var mode = ValidateTradingMode(tradingMode);
+        var mode = TradingModes.Validate(tradingMode);
         await unitOfWork.ExecuteAsync(() => store.WithManagementLockAsync(() => store.WithAccountLockAsync(id, async account =>
         {
             RequireMode(account, mode);
@@ -255,21 +254,21 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         }, ct), ct), ct);
     }
 
-    public async Task<IReadOnlyList<AccountDto>> AccountsAsync(CancellationToken ct, string? tradingMode = TradingMode.Real)
+    public async Task<IReadOnlyList<AccountDto>> AccountsAsync(TradingMode tradingMode, CancellationToken ct)
     {
-        var mode = ValidateTradingMode(tradingMode);
-        var accounts = await store.AccountsAsync(ct, mode);
+        var mode = TradingModes.Validate(tradingMode);
+        var accounts = await store.AccountsAsync(mode, ct);
         var snapshots = mode == TradingMode.Real
             ? (await store.SnapshotsAsync(ct)).ToDictionary(s => s.AccountId) : new Dictionary<Guid, AccountSnapshot>();
         var paper = await PaperBalances(accounts, ct);
         return accounts.Select(a => ToDto(a, snapshots.GetValueOrDefault(a.Id), paper.GetValueOrDefault(a.Id))).ToList();
     }
 
-    public async Task<IReadOnlyList<PortfolioDto>> PortfoliosAsync(CancellationToken ct, string? tradingMode = TradingMode.Real)
+    public async Task<IReadOnlyList<PortfolioDto>> PortfoliosAsync(TradingMode tradingMode, CancellationToken ct)
     {
-        var mode = ValidateTradingMode(tradingMode);
-        var accounts = await store.AccountsAsync(ct, mode);
-        return MapPortfolios(await store.PortfoliosAsync(ct, mode), accounts,
+        var mode = TradingModes.Validate(tradingMode);
+        var accounts = await store.AccountsAsync(mode, ct);
+        return MapPortfolios(await store.PortfoliosAsync(mode, ct), accounts,
             mode == TradingMode.Real ? (await store.SnapshotsAsync(ct)).ToDictionary(s => s.AccountId) : new Dictionary<Guid, AccountSnapshot>(),
             await PaperBalances(accounts, ct));
     }
@@ -303,15 +302,15 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         return known.Count == 0 ? null : known.Aggregate(ExactAmount.From(0), (total, value) => total + ExactAmount.Parse(value)).ToString();
     }
 
-    public async Task<OverviewDto> OverviewAsync(CancellationToken ct, string? tradingMode = TradingMode.Real)
+    public async Task<OverviewDto> OverviewAsync(TradingMode tradingMode, CancellationToken ct)
     {
-        var mode = ValidateTradingMode(tradingMode);
-        var accounts = await store.AccountsAsync(ct, mode);
+        var mode = TradingModes.Validate(tradingMode);
+        var accounts = await store.AccountsAsync(mode, ct);
         var snapshots = mode == TradingMode.Real
             ? (await store.SnapshotsAsync(ct)).ToDictionary(s => s.AccountId) : new Dictionary<Guid, AccountSnapshot>();
         var paper = await PaperBalances(accounts, ct);
         var dtos = accounts.Select(a => ToDto(a, snapshots.GetValueOrDefault(a.Id), paper.GetValueOrDefault(a.Id))).ToList();
-        var portfolios = MapPortfolios(await store.PortfoliosAsync(ct, mode), accounts, snapshots, paper);
+        var portfolios = MapPortfolios(await store.PortfoliosAsync(mode, ct), accounts, snapshots, paper);
         var enabled = dtos.Where(a => a.IsEnabled).ToList();
         var known = enabled.Where(a => a.AccountValueUsd is not null).ToList();
         var wallets = enabled.Where(a => a.TotalStablecoinNominalUsd is not null).ToList();
@@ -328,9 +327,9 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
                 : "Enabled real accounts across all real portfolios and unassigned only. Total balance sums known perps/manual values and supported stablecoin wallet totals; unified and portfolio-margin accounts use the wallet alone. Available balance uses wallet total minus held in unified/portfolio-margin modes, otherwise reported available margin first, then withdrawable funds. Manual value, collateral and equity do not imply availability. Coverage counts accounts with a known amount, not full venue valuation. Nominal USD only: no FX, depeg, lending, EVM or risk adjustment. Availability is not guaranteed free trading margin or withdrawal. Imported fills are recent, not complete lifetime history.");
     }
 
-    public async Task<SnapshotDto?> SnapshotAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
+    public async Task<SnapshotDto?> SnapshotAsync(Guid id, TradingMode tradingMode, CancellationToken ct)
     {
-        var account = await RequireAccount(id, ValidateTradingMode(tradingMode), ct);
+        var account = await RequireAccount(id, TradingModes.Validate(tradingMode), ct);
         if (!account.IsEnabled || account.TradingMode == TradingMode.Paper) return null;
         var s = await store.SnapshotAsync(id, ct);
         return s is null ? null : new(s.ObservedAtUtc, s.ValueScope, ExactDecimal.Format(s.AccountValueUsd),
@@ -341,13 +340,13 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             WalletDto(s), ExactDecimal.Format(s.AvailableMarginUsd), s.PositionsComplete);
     }
 
-    public async Task<PortfolioDto> PortfolioAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real) =>
-        (await PortfoliosAsync(ct, tradingMode)).SingleOrDefault(p => p.Id == id) ??
+    public async Task<PortfolioDto> PortfolioAsync(Guid id, TradingMode tradingMode, CancellationToken ct) =>
+        (await PortfoliosAsync(tradingMode, ct)).SingleOrDefault(p => p.Id == id) ??
         throw new ProblemException(404, "Portfolio not found.");
 
-    public async Task<AccountDto> AccountAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
+    public async Task<AccountDto> AccountAsync(Guid id, TradingMode tradingMode, CancellationToken ct)
     {
-        var account = await RequireAccount(id, ValidateTradingMode(tradingMode), ct);
+        var account = await RequireAccount(id, TradingModes.Validate(tradingMode), ct);
         if (account.TradingMode == TradingMode.Paper)
             return ToDto(account, null, (await store.PaperBalancesAsync([id], ct)).GetValueOrDefault(id));
         return ToDto(account, await store.SnapshotAsync(id, ct));
@@ -367,10 +366,10 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     /// Phase 2, item 6: the opt-in and the coverage ledger, newest first, at most 50 of each list. A disabled account
     /// hides its imports, so it shows none.
     /// </summary>
-    public async Task<HistoryCoverageDto> HistoryCoverageAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
+    public async Task<HistoryCoverageDto> HistoryCoverageAsync(Guid id, TradingMode tradingMode, CancellationToken ct)
     {
-        var account = await RequireAccount(id, ValidateTradingMode(tradingMode), ct);
-        if (account.TradingMode == TradingMode.Paper) throw new ProblemException(409, "Paper accounts have no venue history.");
+        var account = await RequireAccount(id, TradingModes.Validate(tradingMode), ct);
+        account.RequireReal("Paper accounts have no venue history.");
         if (!account.IsEnabled) return new(account.KeepExecutionHistory, KeepsHistory(account), 0, [], [], 0, [], HistoryCoverageNotice)
             { BackfillAvailable = false };
         var facts = await store.HistoryCoverageAsync(id, 50, ct);
@@ -387,10 +386,10 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
     }
 
     /// <summary>Phase 2, item 14c: retained fills reported again with different venue facts, newest first, at most 50.</summary>
-    public async Task<FillConflictsDto> FillConflictsAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
+    public async Task<FillConflictsDto> FillConflictsAsync(Guid id, TradingMode tradingMode, CancellationToken ct)
     {
-        var account = await RequireAccount(id, ValidateTradingMode(tradingMode), ct);
-        if (account.TradingMode == TradingMode.Paper) throw new ProblemException(409, "Paper accounts have simulated executions, not imported fills.");
+        var account = await RequireAccount(id, TradingModes.Validate(tradingMode), ct);
+        account.RequireReal("Paper accounts have simulated executions, not imported fills.");
         // Disabled accounts hide their imported activity, so their conflicts too (Sol round 1 on 14c).
         if (!account.IsEnabled) return new(0, [], FillConflictsNotice);
         var (total, recent) = await store.FillConflictsAsync(id, 50, ct);
@@ -398,18 +397,18 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             c.LastSeenAtUtc, c.Reports)).ToList(), FillConflictsNotice);
     }
 
-    public async Task<IReadOnlyList<FillDto>> FillsAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
+    public async Task<IReadOnlyList<FillDto>> FillsAsync(Guid id, TradingMode tradingMode, CancellationToken ct)
     {
-        var account = await RequireAccount(id, ValidateTradingMode(tradingMode), ct);
-        if (account.TradingMode == TradingMode.Paper) throw new ProblemException(409, "Paper accounts have simulated executions, not imported fills.");
+        var account = await RequireAccount(id, TradingModes.Validate(tradingMode), ct);
+        account.RequireReal("Paper accounts have simulated executions, not imported fills.");
         if (!account.IsEnabled) return [];
         return (await store.FillsAsync(id, 100, ct)).Select(ToDto).ToList();
     }
 
-    public async Task<AccountInstrumentsDto> InstrumentsAsync(Guid id, CancellationToken ct, string? tradingMode = TradingMode.Real)
+    public async Task<AccountInstrumentsDto> InstrumentsAsync(Guid id, TradingMode tradingMode, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var mode = ValidateTradingMode(tradingMode);
+        var mode = TradingModes.Validate(tradingMode);
         var account = await store.MarketDataAccountAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
         if (account.TradingMode != mode) throw new ProblemException(404, "Account not found.");
         if (!account.IsEnabled)
@@ -441,7 +440,7 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
         return list.Count <= 1 ? string.Concat(list) : $"{string.Join(", ", list[..^1])} or {list[^1]}";
     }
 
-    private async Task<Account> RequireAccount(Guid id, string mode, CancellationToken ct)
+    private async Task<Account> RequireAccount(Guid id, TradingMode mode, CancellationToken ct)
     {
         var account = await store.AccountAsync(id, ct) ?? throw new ProblemException(404, "Account not found.");
         RequireMode(account, mode);
@@ -453,7 +452,8 @@ public sealed class WorkspaceService(IWorkspaceStore store, IJournalOwnerContext
             return new(a.Id, a.PortfolioId, a.Name, a.VenueId, null, paper?.EquityUsd, null,
                 "paper", null, a.IsEnabled ? paper?.OpenPositionCount ?? 0 : 0,
                 "Simulated execution; nominal virtual USD, zero fees and slippage. Open equity is unknown without fresh marks.",
-                a.IsEnabled, a.SettingsRevision, BalanceUsd: paper?.CashUsd,
+                a.IsEnabled, a.SettingsRevision, AvailableStablecoinNominalUsd: null, StablecoinScope: null, AccountMode: null,
+                TotalStablecoinNominalUsd: null, BalanceUsd: paper?.CashUsd, SourceId: null,
                 AvailableBalanceUsd: a.IsEnabled ? paper?.AvailableMarginUsd : null,
                 AvailableBalanceSource: "paper", TradingMode: a.TradingMode, StartingCapitalUsd: ExactDecimal.Format(a.StartingCapitalUsd));
         return new(a.Id, a.PortfolioId, a.Name, a.VenueId, a.Address,

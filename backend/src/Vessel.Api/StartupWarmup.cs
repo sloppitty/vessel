@@ -8,6 +8,7 @@ using Vessel.Application.Plays;
 using Vessel.Application.Workspace;
 using Vessel.Identity;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Api;
 
@@ -125,7 +126,7 @@ public sealed class StartupWarmup : BackgroundService
             _ = owned.GetRequiredService<VesselDbContext>().Model;
             return Task.CompletedTask;
         });
-        await step("overview", () => owned.GetRequiredService<WorkspaceService>().OverviewAsync(ct));
+        await step("overview", () => owned.GetRequiredService<WorkspaceService>().OverviewAsync(TradingMode.Real, ct));
         await step("event-head", () => owned.GetRequiredService<IVesselEventReader>().ReadAsync(long.MaxValue.ToString(
             System.Globalization.CultureInfo.InvariantCulture), 1, ct));
         await step("notifications", async () =>
@@ -139,17 +140,17 @@ public sealed class StartupWarmup : BackgroundService
         await step("plays", async () =>
         {
             var plays = owned.GetRequiredService<PlayService>();
-            await plays.ListAsync("progress", null, "all", null, "5", ct);
-            await plays.CountsAsync(null, "all", ct);
-            await plays.ListAsync("progress", null, null, null, null, ct);
-            await plays.CountsAsync(null, null, ct);
+            await plays.ListAsync("progress", null, "all", null, "5", TradingMode.Real, ct);
+            await plays.CountsAsync(null, "all", TradingMode.Real, ct);
+            await plays.ListAsync("progress", null, null, null, null, TradingMode.Real, ct);
+            await plays.CountsAsync(null, null, TradingMode.Real, ct);
         });
         await step("activity", async () =>
         {
-            await owned.GetRequiredService<ActivityService>().PageAsync(new(Page: "1", PageSize: "5"), ct);
-            await owned.GetRequiredService<Vessel.Application.Overview.OverviewSummaryService>().GetAsync("portfolio", "30", "all", ct);
+            await owned.GetRequiredService<ActivityService>().PageAsync(new(Page: "1", PageSize: "5", TradingMode: TradingMode.Real.ToValue()), ct);
+            await owned.GetRequiredService<Vessel.Application.Overview.OverviewSummaryService>().GetAsync("portfolio", "30", "all", TradingMode.Real, ct);
             // With no accounts the services above skip the fact reads, so run those shapes for one unknown account.
-            await owned.GetRequiredService<IActivityStore>().ReadAsync(null, ct, new HashSet<Guid> { Guid.NewGuid() });
+            await owned.GetRequiredService<IActivityStore>().ReadAsync(null, TradingMode.Real, ct, new HashSet<Guid> { Guid.NewGuid() });
         });
     }
 }

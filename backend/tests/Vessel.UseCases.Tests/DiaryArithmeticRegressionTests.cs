@@ -10,6 +10,7 @@ using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -48,7 +49,7 @@ public sealed class DiaryArithmeticRegressionTests
         f.Closed.Add(new(f.Play, f.Plays.Revisions, ledger.Projection, ManualSource: true));
         Assert.Equal(ledger.Net, PlayOutcomeCalculator.Outcome(f.Closed.Single())!.NetResult);
         Assert.Equal(ManualLedger.Text(ledger.Gross), (await f.Review.GetAsync(new("all"), default)).Metrics.Net);
-        Assert.Equal(1, (await f.Sizing.GetAsync(default)).Record.ClosedPlays);
+        Assert.Equal(1, (await f.Sizing.GetAsync(TradingMode.Real, default)).Record.ClosedPlays);
     }
 
     [Fact]
@@ -129,7 +130,7 @@ public sealed class DiaryArithmeticRegressionTests
         var excluded = await f.Review.ExclusionsAsync(new("all"), default);
         Assert.Equal(1, excluded.Total);
         Assert.Contains(excluded.Items.Single().Reasons, r => r.Contains("supported decimal range", StringComparison.Ordinal));
-        Assert.Equal(0, (await f.Sizing.GetAsync(default)).Record.ClosedPlays);
+        Assert.Equal(0, (await f.Sizing.GetAsync(TradingMode.Real, default)).Record.ClosedPlays);
         Assert.Equal(before, f.Snapshot());
     }
 
@@ -151,7 +152,7 @@ public sealed class DiaryArithmeticRegressionTests
         Assert.False(ExecutionIntegrity.Settled(facts));
         var before = f.Snapshot();
         Assert.Equal(0, (await f.Review.GetAsync(new("all"), default)).Metrics.Count);
-        Assert.Equal(0, (await f.Sizing.GetAsync(default)).Record.ClosedPlays);
+        Assert.Equal(0, (await f.Sizing.GetAsync(TradingMode.Real, default)).Record.ClosedPlays);
         var exclusions = await f.Review.ExclusionsAsync(new("all"), default);
         Assert.Equal(1, exclusions.Total);
         Assert.Contains(exclusions.Items.Single().Reasons, r => r.Contains("in", StringComparison.Ordinal) &&
@@ -413,7 +414,7 @@ public sealed class DiaryArithmeticRegressionTests
 
         public DiaryArithmeticFixture(string venue = "manual", string direction = "long", PlayPlanDocument? plan = null)
         {
-            Account = new(Guid.NewGuid(), Guid.NewGuid(), venue, "Regression");
+            Account = new(Guid.NewGuid(), Guid.NewGuid(), venue, "Regression", TradingMode.Real);
             Plays = new(Account.OwnerId);
             Plays.Accounts.Add(Account);
             Play = new(Guid.NewGuid(), Account, new(venue, "BTC"),

@@ -2,6 +2,7 @@ using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -61,7 +62,7 @@ public sealed class JournalSearchTests
     [Fact]
     public void Plays_without_a_closed_result_have_no_figures_and_unindexed_ones_say_so()
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Manual");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Manual", TradingMode.Real);
         var play = TestPlays.Create(account, new("manual", "BTC"));
         var now = DateTimeOffset.UnixEpoch.AddDays(2);
         Assert.Equal(new PlayOutcomeFacts("active", null, null, null, null), JournalSearch.Outcome(play, null, now));

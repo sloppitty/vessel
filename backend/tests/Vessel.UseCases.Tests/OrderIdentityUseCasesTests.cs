@@ -15,8 +15,8 @@ public sealed class OrderIdentityUseCasesTests : OrderIdentityTestsSupport
     public void A_link_refuses_an_order_of_another_contract_or_account()
     {
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Main");
-        var other = new Account(Guid.NewGuid(), owner, "hyperliquid", "Other");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Main", TradingMode.Real);
+        var other = new Account(Guid.NewGuid(), owner, "hyperliquid", "Other", TradingMode.Real);
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
         PlayOrderLink Link(Vessel.Domain.Workspace.ImportedOrder order) =>
             new(play, order, OrderLinkRole.Entry, "entry-1", null, OrderLinkState.Linked, OrderLinkSource.Owner, At);

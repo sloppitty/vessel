@@ -4,6 +4,7 @@ using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -35,7 +36,7 @@ internal sealed class DiscrepancyFixture
     public List<VenueIncompleteBook>? IncompleteContracts;
     public DiscrepancyFixture()
     {
-        Account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Synthetic"); Store.Account = Account;
+        Account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Synthetic", TradingMode.Real); Store.Account = Account;
         Play = AddPlay("long", 1, "entry");
         AddOrder("stop", OrderLinkRole.Stop, 1, 90);
         Service = new(Store, TestUnitOfWork.None, new CoreOwner(Account.OwnerId), Events, new(), Clock);

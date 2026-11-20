@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using Vessel.Application.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -53,8 +54,8 @@ public sealed class CoreApiTests(CoreApiRejectionHosts hosts) : IClassFixture<Co
         var owner = Guid.NewGuid();
         var foreignOwner = Guid.NewGuid();
         var store = new MemoryWorkspaceStore(owner);
-        var portfolio = new Vessel.Domain.Workspace.Portfolio(Guid.NewGuid(), foreignOwner, "Private foreign portfolio");
-        var account = new Vessel.Domain.Accounts.Account(Guid.NewGuid(), foreignOwner, "manual", "Private foreign account");
+        var portfolio = new Vessel.Domain.Workspace.Portfolio(Guid.NewGuid(), foreignOwner, "Private foreign portfolio", TradingMode.Real);
+        var account = new Vessel.Domain.Accounts.Account(Guid.NewGuid(), foreignOwner, "manual", "Private foreign account", TradingMode.Real);
         store.Portfolios.Add(portfolio);
         store.Accounts.Add(account);
         await using var factory = new CoreApiFactory(owner, store);
@@ -90,7 +91,7 @@ public sealed class CoreApiTests(CoreApiRejectionHosts hosts) : IClassFixture<Co
     public async Task Valid_public_address_normalizes_without_inventing_balance()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var portfolio = new Vessel.Domain.Workspace.Portfolio(Guid.NewGuid(), owner, "Trading"); store.Portfolios.Add(portfolio);
+        var portfolio = new Vessel.Domain.Workspace.Portfolio(Guid.NewGuid(), owner, "Trading", TradingMode.Real); store.Portfolios.Add(portfolio);
         await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
         var response = await client.PostAsJsonAsync("/api/accounts", new CreateAccountRequest(portfolio.Id, "HL", "hyperliquid", "0xABCDEF1111111111111111111111111111111111"));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);

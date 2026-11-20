@@ -4,6 +4,7 @@ using System.Text;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -33,8 +34,8 @@ public sealed class AccountManagementApiTests
     [InlineData("{broken")]
     public async Task Full_PUT_rejects_missing_or_invalid_fields_without_mutation(string body)
     {
-        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var portfolio = new Portfolio(Guid.NewGuid(), owner, "Portfolio"); store.Portfolios.Add(portfolio);
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Original"); account.Configure(portfolio.Id, null, 123); store.Accounts.Add(account);
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var portfolio = new Portfolio(Guid.NewGuid(), owner, "Portfolio", TradingMode.Real); store.Portfolios.Add(portfolio);
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Original", TradingMode.Real); account.Configure(portfolio.Id, null, 123); store.Accounts.Add(account);
         await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
         var response = await client.PutAsync($"/api/accounts/{account.Id}", new StringContent(body, Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode); Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
@@ -48,7 +49,7 @@ public sealed class AccountManagementApiTests
     [InlineData("{\"name\":\" \"}")]
     public async Task PATCH_requires_valid_name_without_mutation(string body)
     {
-        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var portfolio = new Portfolio(Guid.NewGuid(), owner, "Original"); store.Portfolios.Add(portfolio);
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var portfolio = new Portfolio(Guid.NewGuid(), owner, "Original", TradingMode.Real); store.Portfolios.Add(portfolio);
         await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
         var response = await client.PatchAsync($"/api/portfolios/{portfolio.Id}", new StringContent(body, Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode); Assert.Equal("Original", portfolio.Name);
@@ -82,7 +83,7 @@ public sealed class AccountManagementApiTests
     [InlineData("{\"name\":\" \",\"icon\":\"rocket\"}")]
     public async Task Unknown_portfolio_icons_are_rejected_without_mutation(string body)
     {
-        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var portfolio = new Portfolio(Guid.NewGuid(), owner, "Original", "gem"); store.Portfolios.Add(portfolio);
+        var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner); var portfolio = new Portfolio(Guid.NewGuid(), owner, "Original", TradingMode.Real, "gem"); store.Portfolios.Add(portfolio);
         await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
         var patch = await client.PatchAsync($"/api/portfolios/{portfolio.Id}", new StringContent(body, Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.BadRequest, patch.StatusCode); Assert.Equal("Original", portfolio.Name); Assert.Equal("gem", portfolio.Icon);
@@ -109,7 +110,7 @@ public sealed class AccountManagementApiTests
     public async Task Unknown_and_foreign_management_targets_are_safe_404(bool exists)
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var portfolio = new Portfolio(Guid.NewGuid(), Guid.NewGuid(), "Foreign"); var account = new Account(Guid.NewGuid(), portfolio.OwnerId, "manual", "Foreign");
+        var portfolio = new Portfolio(Guid.NewGuid(), Guid.NewGuid(), "Foreign", TradingMode.Real); var account = new Account(Guid.NewGuid(), portfolio.OwnerId, "manual", "Foreign", TradingMode.Real);
         if (exists) { store.Portfolios.Add(portfolio); store.Accounts.Add(account); }
         await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
         var responses = new[] {
@@ -129,8 +130,8 @@ public sealed class AccountManagementApiTests
     public async Task Foreign_destination_PUT_is_404_and_does_not_apply_other_settings()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var foreign = new Portfolio(Guid.NewGuid(), Guid.NewGuid(), "Foreign"); store.Portfolios.Add(foreign);
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Original"); store.Accounts.Add(account);
+        var foreign = new Portfolio(Guid.NewGuid(), Guid.NewGuid(), "Foreign", TradingMode.Real); store.Portfolios.Add(foreign);
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Original", TradingMode.Real); store.Accounts.Add(account);
         await using var factory = new CoreApiFactory(owner, store); using var client = factory.AuthorizedClient();
         var response = await client.PutAsJsonAsync($"/api/accounts/{account.Id}", new UpdateAccountRequest("New", foreign.Id, false, 1));
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode); Assert.Null(account.PortfolioId); Assert.True(account.IsEnabled); Assert.Equal("Original", account.Name);

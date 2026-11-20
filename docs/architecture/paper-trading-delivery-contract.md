@@ -76,7 +76,10 @@ reported to the parent before a dependent implementation is changed.
   Actual retrospective preview and Play creation are likewise real-only;
   paper-mode requests must not read actual eligibility or create real links.
   The paper shell/Overview must not invoke those hooks/routes; paper-state is
-  its execution-health source. Owner-global events/notifications retain their
+  its execution-health source. Since #113 a real-only endpoint is marked with
+  `.RealOnly()` endpoint metadata rather than matched by path, and
+  `TradingModeBoundaryApiTests` classifies every API endpoint as real-only or
+  mode-aware, so a new endpoint fails until it is classified. Owner-global events/notifications retain their
   existing scope and must not be interpreted as paper monitor health.
 - `GET /api/paper/settings` and `PUT /api/paper/settings` use
   `{ enabled: boolean, checkIntervalMinutes: number }`. Default false/60;

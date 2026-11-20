@@ -10,6 +10,7 @@ using Vessel.Domain.Monitoring;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -52,10 +53,10 @@ public sealed class PlayFundingPostgresTests
 
     private static PlayFundingDto Not(string state, string reason) => new(state, reason, null, null, null, null, null);
 
-    private static Account AddAccount(VesselDbContext db, Guid owner, string mode = "real")
+    private static Account AddAccount(VesselDbContext db, Guid owner, TradingMode mode = TradingMode.Real)
     {
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Funding", mode);
-        if (mode == "real") account.Configure(null, "0x" + new string('b', 40), null);
+        if (mode == TradingMode.Real) account.Configure(null, "0x" + new string('b', 40), null);
         else
         {
             // A paper account lives in a paper portfolio.
@@ -406,7 +407,7 @@ public sealed class PlayFundingPostgresTests
         var (accountId, playId) = await SeedAsync(database, owner, "open-gap");
         ActivitySummaries before;
         await using (var db = database.Context(owner))
-            before = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(accountId, default));
+            before = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(accountId, TradingMode.Real, default), TradingMode.Real);
         await using (var db = database.Context(owner))
         {
             var account = await db.Accounts.SingleAsync(a => a.Id == accountId);
@@ -441,7 +442,7 @@ public sealed class PlayFundingPostgresTests
         var (accountId, playId) = await SeedAsync(database, owner, "open-gap");
         ActivitySummaries before;
         await using (var db = database.Context(owner))
-            before = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(accountId, default));
+            before = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(accountId, TradingMode.Real, default), TradingMode.Real);
         Assert.Equal(Not("incomplete", "history-gap"), await FundingWithAsync(database, owner, playId, before));
         await using (var db = database.Context(owner))
         {
@@ -557,7 +558,7 @@ public sealed class PlayFundingPostgresTests
         Guid paperPlay, plannedPlay;
         await using (var db = database.Context(owner))
         {
-            var paper = AddAccount(db, owner, "paper");
+            var paper = AddAccount(db, owner, TradingMode.Paper);
             var play = new Play(Guid.NewGuid(), paper, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
                 PlayDocuments.Serialize(TestPlays.Plan()), T);
             var (change, revision) = play.MarkPlanned(T);
@@ -574,7 +575,8 @@ public sealed class PlayFundingPostgresTests
         await using (var db = database.Context(owner))
         {
             // Venue-fact features are real-only: a paper Play's execution view, funding included, is refused.
-            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => Service(db).GetAsync(paperPlay, default))).StatusCode);
+            // #113: Play.RequireReal refuses it, a 409 at the API.
+            await Assert.ThrowsAsync<DomainRuleException>(() => Service(db).GetAsync(paperPlay, default));
             // Nothing held yet, so there is no holding window and no line.
             Assert.Null((await Service(db).GetAsync(plannedPlay, default)).Funding);
         }

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Vessel.Application.Activity;
 using Vessel.Application.Plays;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -14,7 +15,7 @@ public sealed class PaperRetrospectiveTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Actual");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Actual", TradingMode.Real);
         await using (var seed = database.Context(owner))
         {
             seed.Accounts.Add(account);
@@ -50,7 +51,7 @@ public sealed class PaperRetrospectiveTests
             new CreateRetrospectiveRequest(Guid.NewGuid(), account.Id, operation.Id, actualPreview.Fingerprint, "Actual history"));
         Assert.Equal(HttpStatusCode.OK, real.StatusCode);
         await using var verify = database.Context(owner);
-        Assert.Equal("real", (await verify.Plays.SingleAsync()).TradingMode);
+        Assert.Equal(TradingMode.Real, (await verify.Plays.SingleAsync()).TradingMode);
         Assert.Equal(2, await verify.OrderLinks.CountAsync());
     }
 }

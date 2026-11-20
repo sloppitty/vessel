@@ -18,7 +18,7 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
 
     public async Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, ReviewWindow window, CancellationToken ct)
     {
-        var mode = TradingMode.Validate(query.TradingMode ?? TradingMode.Real);
+        var mode = query.Mode;
         // One database snapshot for links, outcomes, membership and coverage during concurrent sync/management.
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
         var portfolios = await db.Portfolios.Where(p => p.TradingMode == mode).AsNoTracking().ToListAsync(ct);
@@ -101,7 +101,7 @@ public sealed class ReviewStore(VesselDbContext db, ISizingStore sizing) : IRevi
     }
 
     /// <summary>The first Play created in scope, in any status, Drafts included (Phase 2, item 2, Sol round 1).</summary>
-    private Task<DateTimeOffset?> FirstPlayAsync(string mode, List<Guid> ids, string? instrument, CancellationToken ct) =>
+    private Task<DateTimeOffset?> FirstPlayAsync(TradingMode mode, List<Guid> ids, string? instrument, CancellationToken ct) =>
         db.Plays.Where(p => p.TradingMode == mode && ids.Contains(p.AccountId) && (instrument == null || p.ContractId == instrument))
             .Select(p => (DateTimeOffset?)p.CreatedAtUtc).MinAsync(ct);
 

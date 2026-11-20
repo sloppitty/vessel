@@ -3,6 +3,7 @@ using Vessel.Application.Common;
 using Vessel.Application.Paper;
 using Vessel.Application.Plays;
 using Vessel.Domain.Paper;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -279,7 +280,7 @@ public sealed class PaperEngineEvaluatorTests
         Assert.Equal(Owner, entry.OwnerId);
         Assert.Equal(Account, entry.AccountId);
         Assert.Equal(Play, entry.PlayId);
-        Assert.Equal("paper", entry.TradingMode);
+        Assert.Equal(TradingMode.Paper, entry.TradingMode);
         Assert.Equal(At, entry.CandleOpenAtUtc);
         Assert.Equal(At.AddMinutes(1), entry.CandleCloseAtUtc);
         Assert.Equal(entry.CandleCloseAtUtc, entry.OccurredAtUtc);

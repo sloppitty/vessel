@@ -16,6 +16,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Lighter;
 using Vessel.Infrastructure.Monitoring;
 using Vessel.Worker;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -341,7 +342,7 @@ public sealed class AccountOrderHistoryApiTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid(); var reader = AccountHistoryOrders.PublicReader("lighter"); var orders = new AccountHistoryOrders("lighter");
-        var account = new Account(Guid.NewGuid(), owner, "lighter", "Imported account");
+        var account = new Account(Guid.NewGuid(), owner, "lighter", "Imported account", TradingMode.Real);
         account.Configure(null, null, null, "42");
         await using (var db = database.Context(owner)) { db.Accounts.Add(account); await db.SaveChangesAsync(); }
         // Use the production credential reader and unconfigured vault, not a fabricated retained order/token.
@@ -509,7 +510,7 @@ public sealed class AccountOrderHistoryApiTests
             Guid accountId;
             if (venue == "lighter")
             {
-                var imported = new Account(Guid.NewGuid(), owner, venue, "Imported account");
+                var imported = new Account(Guid.NewGuid(), owner, venue, "Imported account", TradingMode.Real);
                 imported.Configure(null, null, null, "42");
                 await using var db = database.Context(owner);
                 db.Accounts.Add(imported); await db.SaveChangesAsync();
@@ -600,7 +601,7 @@ public sealed class AccountOrderHistoryApiTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid(); var reader = AccountHistoryOrders.PublicReader("lighter"); var orders = new AccountHistoryOrders("lighter");
-        var account = new Account(Guid.NewGuid(), owner, "lighter", "Coverage");
+        var account = new Account(Guid.NewGuid(), owner, "lighter", "Coverage", TradingMode.Real);
         account.Configure(null, null, null, "42");
         await using (var db = database.Context(owner)) { db.Accounts.Add(account); await db.SaveChangesAsync(); }
         reader.Result = reader.Result with { HistoryNotice = LighterReader.HistoryNotice };
@@ -650,7 +651,7 @@ public sealed class AccountOrderHistoryApiTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid(); var reader = AccountHistoryOrders.PublicReader("lighter"); var orders = new AccountHistoryOrders("lighter");
-        var account = new Account(Guid.NewGuid(), owner, "lighter", "Coverage");
+        var account = new Account(Guid.NewGuid(), owner, "lighter", "Coverage", TradingMode.Real);
         account.Configure(null, null, null, "42");
         await using (var db = database.Context(owner)) { db.Accounts.Add(account); await db.SaveChangesAsync(); }
         orders.Result = orders.Result with { Notice = AccountHistoryNoticeBudget.LighterCappedOrders };

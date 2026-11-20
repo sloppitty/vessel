@@ -7,7 +7,7 @@ public sealed class Account : IOwned
     private const string OrderHistorySection = "\nOrder history: ";
     public Guid Id { get; private set; }
     public Guid OwnerId { get; private set; }
-    public string TradingMode { get; private set; } = Common.TradingMode.Real;
+    public TradingMode TradingMode { get; private set; }
     public decimal? StartingCapitalUsd { get; private set; }
     public string VenueId { get; private set; } = null!;
     public string Name { get; private set; } = null!;
@@ -32,21 +32,21 @@ public sealed class Account : IOwned
     {
         if (portfolioId == Guid.Empty || manualAccountValueUsd < 0)
             throw new DomainValidationException("Invalid account configuration.");
-        if (TradingMode == Common.TradingMode.Paper &&
+        if (TradingMode == TradingMode.Paper &&
             (portfolioId is null || address is not null || sourceId is not null || manualAccountValueUsd is not null))
             throw new DomainValidationException("Paper accounts require a paper portfolio and cannot use real identities or manual balances.");
         PortfolioId = portfolioId; Address = address?.ToLowerInvariant(); ManualAccountValueUsd = manualAccountValueUsd;
         SourceId = sourceId ?? Address;
-        SyncStatus = TradingMode == Common.TradingMode.Paper ? "paper" : VenueId == ManualVenue.Id ? "manual" : "not-synced";
+        SyncStatus = TradingMode == TradingMode.Paper ? "paper" : VenueId == ManualVenue.Id ? "manual" : "not-synced";
     }
 
     /// <param name="keepExecutionHistory">The retention opt-in; null keeps it. Only a real venue account can keep history.</param>
     public void UpdateSettings(string name, Guid? portfolioId, bool isEnabled, bool? keepExecutionHistory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        if (name.Length > 200 || portfolioId == Guid.Empty || TradingMode == Common.TradingMode.Paper && portfolioId is null)
+        if (name.Length > 200 || portfolioId == Guid.Empty || TradingMode == TradingMode.Paper && portfolioId is null)
             throw new DomainValidationException("Invalid account settings.");
-        if (keepExecutionHistory == true && (TradingMode != Common.TradingMode.Real || VenueId == ManualVenue.Id || SourceId is null))
+        if (keepExecutionHistory == true && (TradingMode != TradingMode.Real || VenueId == ManualVenue.Id || SourceId is null))
             throw new DomainValidationException("Only a real venue account can keep its execution history.");
         var nextRevision = checked(SettingsRevision + 1);
         Name = name.Trim(); PortfolioId = portfolioId; IsEnabled = isEnabled;
@@ -80,7 +80,7 @@ public sealed class Account : IOwned
     }
 
     public Account(Guid id, Guid ownerId, string venueId, string name,
-        string tradingMode = Common.TradingMode.Real, decimal? startingCapitalUsd = null)
+        TradingMode tradingMode, decimal? startingCapitalUsd = null)
     {
         if (id == Guid.Empty || ownerId == Guid.Empty)
             throw new ArgumentException("Account and owner IDs must be nonempty.");
@@ -90,18 +90,24 @@ public sealed class Account : IOwned
             throw new DomainValidationException("Account text exceeds storage limits.");
         Id = id;
         OwnerId = ownerId;
-        TradingMode = Common.TradingMode.Validate(tradingMode);
-        if (startingCapitalUsd < 0 || tradingMode == Common.TradingMode.Real && startingCapitalUsd is not null)
+        TradingMode = TradingModes.Validate(tradingMode);
+        if (startingCapitalUsd < 0 || tradingMode == TradingMode.Real && startingCapitalUsd is not null)
             throw new DomainValidationException("Starting capital is a nonnegative paper-account creation value only.");
-        StartingCapitalUsd = tradingMode == Common.TradingMode.Paper ? startingCapitalUsd ?? 4000m : null;
+        StartingCapitalUsd = tradingMode == TradingMode.Paper ? startingCapitalUsd ?? 4000m : null;
         VenueId = venueId;
         Name = name.Trim();
-        SyncStatus = tradingMode == Common.TradingMode.Paper ? "paper" : venueId == ManualVenue.Id ? "manual" : "not-synced";
+        SyncStatus = tradingMode == TradingMode.Paper ? "paper" : venueId == ManualVenue.Id ? "manual" : "not-synced";
     }
 
     private void RequireReal()
     {
-        if (TradingMode != Common.TradingMode.Real)
+        if (TradingMode != TradingMode.Real)
             throw new DomainValidationException("Paper accounts cannot import real venue facts.");
+    }
+
+    /// <summary>Refuses a paper account with a 409 that names what it cannot do.</summary>
+    public void RequireReal(string refusal)
+    {
+        if (TradingMode != TradingMode.Real) throw new DomainRuleException(refusal);
     }
 }

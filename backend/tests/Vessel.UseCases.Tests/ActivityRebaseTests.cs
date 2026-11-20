@@ -2,6 +2,7 @@ using System.Collections;
 using System.Text.Json;
 using Vessel.Application.Activity;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 using Vessel.Domain.Workspace;
 
 namespace Vessel.Tests;
@@ -14,7 +15,7 @@ namespace Vessel.Tests;
 public sealed class ActivityRebaseTests
 {
     private static readonly Guid Owner = Guid.NewGuid();
-    private static readonly Account First = new(Guid.NewGuid(), Owner, "manual", "First"), Second = new(Guid.NewGuid(), Owner, "manual", "Second");
+    private static readonly Account First = new(Guid.NewGuid(), Owner, "manual", "First", TradingMode.Real), Second = new(Guid.NewGuid(), Owner, "manual", "Second", TradingMode.Real);
     private static readonly DateTimeOffset Start = new(2026, 10, 12, 0, 0, 0, TimeSpan.Zero);
 
     private static ImportedFill Fill(Account account, int minute, string side, string effect) => new()
@@ -54,7 +55,7 @@ public sealed class ActivityRebaseTests
     private static (ActivitySummaries Cached, ActivityFacts Facts) Cached(int snapshotAt = 60, int coveredTo = 40, int attemptTo = 40)
     {
         var facts = Facts(Snapshot(First, snapshotAt), Funding(First, coveredTo, attemptTo), 1);
-        return (ActivityService.Aggregate(facts), facts);
+        return (ActivityService.Aggregate(facts, TradingMode.Real), facts);
     }
 
     // The same retained history with the observations a later check wrote, and the aggregate a fresh read would compute.
@@ -62,7 +63,7 @@ public sealed class ActivityRebaseTests
         AccountSnapshot snapshot, AccountFundingState funding)
     {
         var rebased = ActivityService.Rebase(cached, new([First], [snapshot], [funding]), 2);
-        var fresh = ActivityService.Aggregate(facts with { Snapshots = [snapshot], FundingStates = [funding], Revision = 2 });
+        var fresh = ActivityService.Aggregate(facts with { Snapshots = [snapshot], FundingStates = [funding], Revision = 2 }, TradingMode.Real);
         Assert.Equal(Json(fresh), Json(rebased));
         Assert.Equal(fresh.Version, rebased.Version);
         Assert.Equal(Json(fresh.Ordered), Json(rebased.Ordered));
@@ -103,7 +104,7 @@ public sealed class ActivityRebaseTests
         var funding = Funding(First, change switch { "passes-funding-coverage" => 70, "funding-coverage" => 50, _ => 40 }, 40);
         if (change == "history-notice")
         {
-            var account = new Account(First.Id, Owner, "manual", "First");
+            var account = new Account(First.Id, Owner, "manual", "First", TradingMode.Real);
             account.RecordSync(Start, "Changed history coverage.");
             var rebased = ActivityService.Rebase(cached, new([account], [snapshot], [funding]), 2);
             Assert.NotSame(cached.Operations, rebased.Operations);
@@ -143,12 +144,12 @@ public sealed class ActivityRebaseTests
     public void One_account_is_narrowed_from_a_wider_aggregate_with_its_own_observations()
     {
         var facts = Both([Forced(First, 1), Forced(Second, 2)]);
-        var wide = ActivityService.Aggregate(facts, accountIds: new HashSet<Guid> { First.Id, Second.Id });
+        var wide = ActivityService.Aggregate(facts, TradingMode.Real, accountIds: new HashSet<Guid> { First.Id, Second.Id });
         var direct = Only(facts, First);
         var narrowed = ActivityService.Narrow(wide, First.Id, new(direct.Accounts, direct.Snapshots, []), 3);
         Assert.NotNull(narrowed);
-        var expected = ActivityService.Aggregate(direct, First.Id);
-        var actual = ActivityService.Aggregate(narrowed, First.Id);
+        var expected = ActivityService.Aggregate(direct, TradingMode.Real, First.Id);
+        var actual = ActivityService.Aggregate(narrowed, TradingMode.Real, First.Id);
         Assert.Equal(expected.Version, actual.Version);
         Assert.Equal(Json(expected.Ordered), Json(actual.Ordered));
         Assert.Equal(Json(expected.Coverage), Json(actual.Coverage));
@@ -160,11 +161,11 @@ public sealed class ActivityRebaseTests
     {
         // The wider aggregate keeps the newest 50 forced events across its accounts: all of the second's, none of the first's.
         var facts = Both([.. Enumerable.Range(1, 3).Select(m => Forced(First, m)), .. Enumerable.Range(100, 50).Select(m => Forced(Second, m))]);
-        var wide = ActivityService.Aggregate(facts, accountIds: new HashSet<Guid> { First.Id, Second.Id });
+        var wide = ActivityService.Aggregate(facts, TradingMode.Real, accountIds: new HashSet<Guid> { First.Id, Second.Id });
         Assert.Null(ActivityService.Narrow(wide, First.Id, new([First], [], []), 3));
         var second = Only(facts, Second);
         var narrowed = ActivityService.Narrow(wide, Second.Id, new([Second], second.Snapshots, []), 3);
-        Assert.Equal(Json(ActivityService.Aggregate(second, Second.Id).Coverage), Json(ActivityService.Aggregate(narrowed!, Second.Id).Coverage));
+        Assert.Equal(Json(ActivityService.Aggregate(second, TradingMode.Real, Second.Id).Coverage), Json(ActivityService.Aggregate(narrowed!, TradingMode.Real, Second.Id).Coverage));
     }
 
     private sealed class Unsortable(IReadOnlyList<ActivityOperationDto> inner) : IReadOnlyList<ActivityOperationDto>
@@ -195,7 +196,7 @@ public sealed class ActivityRebaseTests
         var facts = Both([]);
         var workspace = new MemoryWorkspaceStore(Owner);
         workspace.Accounts.AddRange([First, Second]);
-        var computed = ActivityService.Aggregate(facts);
+        var computed = ActivityService.Aggregate(facts, TradingMode.Real);
         var cached = new ActivitySummaries(new Unsortable(computed.Operations), computed.Coverage, computed.Facts)
         {
             Version = computed.Version, Ordered = computed.Ordered

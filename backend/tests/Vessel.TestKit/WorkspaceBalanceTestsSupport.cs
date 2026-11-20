@@ -2,6 +2,7 @@ using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -23,7 +24,7 @@ public partial class WorkspaceBalanceTestsSupport
     internal Account Add(Guid? portfolio, string venue, decimal? equity, decimal? withdrawable = null,
         string? mode = null, decimal? walletTotal = null, decimal? walletAvailable = null, bool enabled = true, decimal? availableMargin = null)
     {
-        var account = new Account(Guid.NewGuid(), owner, venue, "Fixture account");
+        var account = new Account(Guid.NewGuid(), owner, venue, "Fixture account", TradingMode.Real);
         account.Configure(portfolio, null, venue == "manual" ? equity : null);
         if (!enabled) account.UpdateSettings(account.Name, portfolio, false);
         store.Accounts.Add(account);

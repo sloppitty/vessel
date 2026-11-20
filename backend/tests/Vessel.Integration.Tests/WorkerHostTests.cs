@@ -19,6 +19,7 @@ using Wolverine;
 using Wolverine.Configuration;
 using Wolverine.Runtime;
 using Wolverine.Runtime.Routing;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -292,7 +293,7 @@ public sealed class WorkerHostTests
     private static async Task<MonitorAccountCommand> PendingCommandAsync(CoreDatabase database, Guid owner)
     {
         await using var db = database.Context(owner);
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic pending command");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic pending command", TradingMode.Real);
         var command = new MonitorAccountCommand(Guid.CreateVersion7(), account.Id, owner, "manual");
         var row = new MonitorAccount { OwnerId = owner, AccountId = account.Id };
         row.Admit(command.RequestId, command.Trigger, DateTimeOffset.UtcNow);

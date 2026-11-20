@@ -27,7 +27,7 @@ public sealed class ManagedStopTests
     public ManagedStopTests()
     {
         store = new MemoryPlayStore(owner);
-        venue = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue");
+        venue = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue", TradingMode.Real);
         store.Accounts.Add(venue);
         service = new PlayService(store, new MemoryObjectStore(), TimeProvider.System, TestUnitOfWork.Saving(store.SaveAsync));
     }

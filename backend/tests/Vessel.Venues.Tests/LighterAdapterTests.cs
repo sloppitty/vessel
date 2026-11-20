@@ -7,6 +7,7 @@ using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
 using Vessel.Infrastructure.Venues.Lighter;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -118,7 +119,7 @@ public sealed partial class LighterAdapterTests
             { BaseAddress = new Uri("https://mainnet.zklighter.elliot.ai") }, clock ?? new Clock(), credentials ?? new(null));
     private static Account Account(string source = Source)
     {
-        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "lighter", "Test");
+        var account = new Account(Guid.NewGuid(), Guid.NewGuid(), "lighter", "Test", TradingMode.Real);
         account.Configure(null, null, null, source);
         return account;
     }

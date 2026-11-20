@@ -5,6 +5,7 @@ using Vessel.Application.Sizing;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Paper;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -26,7 +27,7 @@ public sealed class PaperReportingTests : PaperReportingTestsSupport
         Assert.Equal((real.Metrics.Count, real.Metrics.Wins, real.Metrics.Losses, real.Metrics.Net, real.Metrics.Payoff),
             (paperResult.Metrics.Count, paperResult.Metrics.Wins, paperResult.Metrics.Losses, paperResult.Metrics.Net, paperResult.Metrics.Payoff));
         Assert.All(paperResult.Plays, p => { Assert.Equal("paper", p.ExecutionSource); Assert.Equal("paper-simulation", p.Local!.Basis); });
-        Assert.Equal("paper", paperResult.TradingMode);
+        Assert.Equal(TradingMode.Paper, paperResult.TradingMode);
         Assert.All(paperResult.Options.Accounts, a => Assert.Contains("Paper", a.Name));
         Assert.All((await fixture.Service.GetAsync(new(Period: "all"), default)).Plays, p => Assert.Equal("imported", p.ExecutionSource));
     }
@@ -35,7 +36,7 @@ public sealed class PaperReportingTests : PaperReportingTestsSupport
     public async Task Paper_wins_never_suppress_real_activity_fallback_or_change_its_ladder()
     {
         var paper = Paper(owner, -50);
-        var real = new Account(Guid.NewGuid(), owner, "hyperliquid", "Real");
+        var real = new Account(Guid.NewGuid(), owner, "hyperliquid", "Real", TradingMode.Real);
         var workspace = new MemoryWorkspaceStore(owner);
         workspace.Accounts.AddRange([real, paper.Account]);
         ImportedFill Fill(bool entry) => new()
@@ -49,13 +50,13 @@ public sealed class PaperReportingTests : PaperReportingTestsSupport
         var activity = new ActivityService(new ActivityRows(facts), workspace, new Clock());
         var store = new MemorySizingStore();
         var service = new SizingService(store, new CoreOwner(owner), new Clock(), TestUnitOfWork.None, activity);
-        var before = await service.GetAsync(default);
+        var before = await service.GetAsync(TradingMode.Real, default);
         store.Closed.Add(paper.Facts);
-        var after = await service.GetAsync(default);
+        var after = await service.GetAsync(TradingMode.Real, default);
         Assert.Equal("activity", before.Record.Source);
         Assert.Equal(System.Text.Json.JsonSerializer.Serialize(before), System.Text.Json.JsonSerializer.Serialize(after));
-        var simulated = await service.GetAsync(default, "paper");
-        Assert.Equal(("paper", "paper", 1, 0, 1),
+        var simulated = await service.GetAsync(TradingMode.Paper, default);
+        Assert.Equal((TradingMode.Paper, "paper", 1, 0, 1),
             (simulated.TradingMode, simulated.Record.Source, simulated.Record.ClosedPlays, simulated.Record.Wins, simulated.Record.Losses));
         Assert.Equal("-50", simulated.Record.Recent.Single().NetResultUsd);
         Assert.Null(simulated.Record.Recent.Single().OperationId);
@@ -65,12 +66,12 @@ public sealed class PaperReportingTests : PaperReportingTestsSupport
     public void Activity_uses_typed_simulation_rows_without_fake_imports_or_manual_actuals()
     {
         var paper = Paper(owner);
-        var result = ActivityService.Aggregate(Facts(paper), tradingMode: "paper");
+        var result = ActivityService.Aggregate(Facts(paper), TradingMode.Paper);
         var row = Assert.Single(result.Operations);
-        Assert.Equal(("paper", "paper", "20", 0, 2), (row.TradingMode, row.ExecutionSource, row.NetResultUsd, row.FillCount, row.PaperExecutionCount));
+        Assert.Equal(((TradingMode?)TradingMode.Paper, "paper", "20", 0, 2), (row.TradingMode, row.ExecutionSource, row.NetResultUsd, row.FillCount, row.PaperExecutionCount));
         Assert.Empty(row.Fills); Assert.Empty(result.Facts.Fills); Assert.Empty(result.Facts.Snapshots);
         Assert.Equal(2, row.PaperExecutions.Count);
-        Assert.Empty(ActivityService.Aggregate(Facts(paper)).Operations);
+        Assert.Empty(ActivityService.Aggregate(Facts(paper), TradingMode.Real).Operations);
     }
 
     [Fact]
@@ -79,7 +80,7 @@ public sealed class PaperReportingTests : PaperReportingTestsSupport
         var papers = Enumerable.Range(0, 30).Select(i => Paper(owner, instrument: "PAPER-" + i)).ToArray();
         var workspace = new MemoryWorkspaceStore(owner);
         workspace.Accounts.AddRange(papers.Select(p => p.Account)); workspace.Portfolios.AddRange(papers.Select(p => p.Portfolio));
-        var realAccount = new Account(Guid.NewGuid(), owner, "hyperliquid", "Real empty account");
+        var realAccount = new Account(Guid.NewGuid(), owner, "hyperliquid", "Real empty account", TradingMode.Real);
         workspace.Accounts.Add(realAccount);
         var facts = Facts(papers) with { Accounts = workspace.Accounts };
         var service = new ActivityService(new ActivityRows(facts), workspace, new Clock());
@@ -113,10 +114,10 @@ public sealed class PaperReportingTests : PaperReportingTestsSupport
         };
         var executions = first.Executions.Concat([Copy(first.Executions[0], At.AddMinutes(1)), Copy(first.Executions[1], At.AddMinutes(2))]).ToList();
         var facts = Facts(paper) with { PaperPlays = [first with { Executions = executions }] };
-        var known = Assert.Single(ActivityService.Aggregate(facts, tradingMode: "paper").Operations);
+        var known = Assert.Single(ActivityService.Aggregate(facts, TradingMode.Paper).Operations);
         Assert.Equal(("1", "2", "2", "0"), (known.Quantity, known.TotalEnteredQuantity, known.TotalExitedQuantity, known.OpenQuantity));
         executions[2].OccurredAtUtc = At; executions[2].CandleOpenAtUtc = At.AddMinutes(-1); executions[2].CandleCloseAtUtc = At;
-        var unordered = Assert.Single(ActivityService.Aggregate(facts, tradingMode: "paper").Operations);
+        var unordered = Assert.Single(ActivityService.Aggregate(facts, TradingMode.Paper).Operations);
         Assert.Null(unordered.Quantity);
         Assert.Contains(unordered.Coverage, c => c.Contains("minute-bucketed"));
     }
@@ -128,7 +129,7 @@ public sealed class PaperReportingTests : PaperReportingTestsSupport
     {
         var paper = Paper(owner, 20, state, issues: ["Synthetic source window unresolved."]);
         var store = new MemorySizingStore(); store.Closed.Add(paper.Facts);
-        var sizing = await new SizingService(store, new CoreOwner(owner), new Clock(), TestUnitOfWork.None).GetAsync(default, "paper");
+        var sizing = await new SizingService(store, new CoreOwner(owner), new Clock(), TestUnitOfWork.None).GetAsync(TradingMode.Paper, default);
         Assert.Equal(0, sizing.Record.ClosedPlays);
         var fixture = new ReviewFixture(); fixture.Accounts.Add(paper.Account); fixture.Portfolios.Add(paper.Portfolio); fixture.Closed.Add(paper.Facts);
         var review = new ReviewService(fixture, new Clock());
@@ -137,7 +138,7 @@ public sealed class PaperReportingTests : PaperReportingTestsSupport
         Assert.Equal(1, result.Coverage.IncompleteExecutions);
         var exclusions = await review.ExclusionsAsync(new(Period: "all", TradingMode: "paper"), default);
         Assert.Contains(Assert.Single(exclusions.Items).Reasons, r => r.Contains("Synthetic source"));
-        var operation = Assert.Single(ActivityService.Aggregate(Facts(paper), tradingMode: "paper").Operations);
+        var operation = Assert.Single(ActivityService.Aggregate(Facts(paper), TradingMode.Paper).Operations);
         Assert.Equal("incomplete", operation.Status); Assert.Null(operation.NetResultUsd);
     }
 
@@ -146,7 +147,7 @@ public sealed class PaperReportingTests : PaperReportingTestsSupport
     {
         var store = new MemorySizingStore();
         var service = new SizingService(store, new CoreOwner(owner), new Clock(), TestUnitOfWork.None);
-        var problem = await Assert.ThrowsAsync<ProblemException>(() => service.UpdateSettingsAsync(new("2"), default, "paper"));
+        var problem = await Assert.ThrowsAsync<ProblemException>(() => service.UpdateSettingsAsync(new("2"), TradingMode.Paper, default));
         Assert.Equal(409, problem.StatusCode); Assert.Equal(0, store.Saves); Assert.Null(store.Settings);
     }
 }

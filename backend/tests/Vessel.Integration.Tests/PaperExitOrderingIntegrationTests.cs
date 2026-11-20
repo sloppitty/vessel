@@ -6,6 +6,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Paper;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -24,8 +25,8 @@ public sealed class PaperExitOrderingIntegrationTests : PaperExitOrderingTestsVa
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
         var clock = new Clock();
-        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Exit ordering", tradingMode: "paper");
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Exit ordering", "paper", 4000);
+        var portfolio = new Portfolio(Guid.NewGuid(), owner, "Exit ordering", tradingMode: TradingMode.Paper);
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Exit ordering", TradingMode.Paper, 4000);
         account.Configure(portfolio.Id, null, null);
         await using var db = database.Context(owner);
         db.AddRange(portfolio, account, PaperLedgerEntry.Seed(owner, account.Id, 4000, At),
@@ -34,7 +35,7 @@ public sealed class PaperExitOrderingIntegrationTests : PaperExitOrderingTestsVa
         var work = TestUnitOfWork.For(db);
         var paper = new PaperTradingService(new PaperStore(db, work), work, new ConfiguredOwnerDirectory(owner), TestVenues.With(), clock);
         var plays = new PlayService(new PlayStore(db, work), new MemoryObjectStore(), clock, work, paper);
-        var saved = await plays.CreateAsync(new(account.Id, "BTC", "venue", "Exit ordering", plan), default, "paper");
+        var saved = await plays.CreateAsync(new(account.Id, "BTC", "venue", "Exit ordering", plan), TradingMode.Paper, default);
         await plays.ChangeStatusAsync(saved.Summary.Id, new(saved.Summary.Version, "planned"), default);
         clock.Now = First.AddMinutes(3).AddSeconds(10);
         var candidate = await paper.PrepareAccountAsync(account.Id, default);
@@ -46,7 +47,7 @@ public sealed class PaperExitOrderingIntegrationTests : PaperExitOrderingTestsVa
         Assert.Equal("near", Assert.Single(state.Executions, e => e.Role == role).LevelId);
         Assert.Equal("closed", (await plays.GetAsync(saved.Summary.Id, default)).Summary.Status);
         var workspace = new WorkspaceService(new WorkspaceStore(db, work), new CoreOwner(owner), TestVenues.With(), work);
-        var balance = Assert.Single(await workspace.AccountsAsync(default, "paper"));
+        var balance = Assert.Single(await workspace.AccountsAsync(TradingMode.Paper, default));
         var expected = (4000 + pnl).ToString(System.Globalization.CultureInfo.InvariantCulture);
         Assert.Equal(expected, balance.BalanceUsd);
         Assert.Equal(expected, balance.AvailableBalanceUsd);

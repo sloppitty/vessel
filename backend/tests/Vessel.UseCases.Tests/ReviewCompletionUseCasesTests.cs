@@ -3,6 +3,7 @@ using Vessel.Application.Plays;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -16,7 +17,7 @@ public sealed class ReviewCompletionServiceTests
     public ReviewCompletionServiceTests()
     {
         store = new MemoryPlayStore(owner);
-        account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue");
+        account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue", TradingMode.Real);
         store.Accounts.Add(account);
         service = new PlayService(store, new MemoryObjectStore(), TimeProvider.System, TestUnitOfWork.Saving(store.SaveAsync));
     }

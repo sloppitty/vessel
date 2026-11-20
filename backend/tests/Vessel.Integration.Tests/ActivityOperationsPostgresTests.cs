@@ -6,6 +6,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -24,7 +25,7 @@ public sealed class ActivityOperationsPostgresTests
     public async Task Legacy_fill_and_snapshot_ids_resolve_after_database_readback_without_rewriting_facts()
     {
         await using var database = await CoreDatabase.CreateAsync();
-        var owner = Guid.NewGuid(); var account = new Account(Guid.NewGuid(), owner, "risex", "Legacy fixture");
+        var owner = Guid.NewGuid(); var account = new Account(Guid.NewGuid(), owner, "risex", "Legacy fixture", TradingMode.Real);
         var legacy = Fill(account, 0); legacy.ContractId = "DOGE";
         var native = Fill(account, 2); native.ContractId = "DOGE"; native.VenueContractId = "14";
         await using (var db = database.Context(owner))
@@ -41,7 +42,7 @@ public sealed class ActivityOperationsPostgresTests
             var op = Assert.Single(result.Operations);
             Assert.Equal("long", op.Direction); Assert.Equal("open", op.Status);
             Assert.Equal("2", op.OpenQuantity); Assert.Equal("2", op.TotalEnteredQuantity);
-            Assert.Equal(new[] { legacy.Id, native.Id }, (await ActivityTestSupport.Activity(db).FillsAsync(account.Id, op.Id, default)).Fills.Select(f => f.Fill.Id));
+            Assert.Equal(new[] { legacy.Id, native.Id }, (await ActivityTestSupport.Activity(db).FillsAsync(account.Id, op.Id, TradingMode.Real, default)).Fills.Select(f => f.Fill.Id));
             Assert.Empty(op.Coverage); Assert.Empty(result.Coverage);
             Assert.Null((await db.Fills.SingleAsync(f => f.Id == legacy.Id)).VenueContractId);
             Assert.Equal("14", (await db.Fills.SingleAsync(f => f.Id == native.Id)).VenueContractId);
@@ -53,7 +54,7 @@ public sealed class ActivityOperationsPostgresTests
     public async Task Retained_native_contract_ids_partition_activity_after_database_readback()
     {
         await using var database = await CoreDatabase.CreateAsync();
-        var owner = Guid.NewGuid(); var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture");
+        var owner = Guid.NewGuid(); var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture", TradingMode.Real);
         var retiredOpen = Fill(account, 0); retiredOpen.VenueContractId = "13";
         var retiredClose = Fill(account, 1); retiredClose.VenueContractId = "13"; retiredClose.ClosedPnlUsd = 10;
         var activeClose = Fill(account, 3); activeClose.VenueContractId = "14"; activeClose.ClosedPnlUsd = 20;
@@ -82,9 +83,9 @@ public sealed class ActivityOperationsPostgresTests
     public async Task Activity_reads_all_retained_facts_owner_scoped_enabled_only_and_actual_play_links()
     {
         await using var database = await CoreDatabase.CreateAsync();
-        var owner = Guid.NewGuid(); var account = new Account(Guid.NewGuid(), owner, "manual", "Enabled");
-        var disabled = new Account(Guid.NewGuid(), owner, "manual", "Disabled"); disabled.UpdateSettings("Disabled", null, false);
-        var otherOwner = Guid.NewGuid(); var foreign = new Account(Guid.NewGuid(), otherOwner, "manual", "Foreign");
+        var owner = Guid.NewGuid(); var account = new Account(Guid.NewGuid(), owner, "manual", "Enabled", TradingMode.Real);
+        var disabled = new Account(Guid.NewGuid(), owner, "manual", "Disabled", TradingMode.Real); disabled.UpdateSettings("Disabled", null, false);
+        var otherOwner = Guid.NewGuid(); var foreign = new Account(Guid.NewGuid(), otherOwner, "manual", "Foreign", TradingMode.Real);
         Guid playId;
         await using (var db = database.Context(owner))
         {
@@ -104,7 +105,7 @@ public sealed class ActivityOperationsPostgresTests
         await using (var db = database.Context(otherOwner)) { db.Accounts.Add(foreign); db.Fills.Add(Fill(foreign, 0)); await db.SaveChangesAsync(); }
         await using (var db = database.Context(owner))
         {
-            var facts = await new ActivityStore(db).ReadAsync(null, default);
+            var facts = await new ActivityStore(db).ReadAsync(null, TradingMode.Real, default);
             Assert.Single(facts.Accounts); Assert.Equal(120, facts.Fills.Count); Assert.Equal(2, facts.FillPlayIds.Count);
             Assert.All(facts.FillPlayIds.Values, id => Assert.Equal(playId, id));
             Assert.Equal("BTC breakout", (await new ActivityStore(db).PlayTitlesAsync([playId, Guid.NewGuid()], default)).Single(t => t.Key == playId).Value);
@@ -150,7 +151,7 @@ public sealed class ActivityOperationsPostgresTests
     public async Task Retained_snapshot_anchors_missing_entries_without_mutation()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Fixture", TradingMode.Real);
         await using (var db = database.Context(owner))
         {
             db.Accounts.Add(account); db.Fills.Add(Fill(account, 0));

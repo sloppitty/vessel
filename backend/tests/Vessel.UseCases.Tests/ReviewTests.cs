@@ -4,6 +4,7 @@ using Vessel.Application.Common;
 using Vessel.Application.Plays;
 using Vessel.Application.Review;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -149,7 +150,7 @@ public sealed class ReviewTests : ReviewTestsSupport
     [Fact]
     public async Task Current_membership_unassigned_disabled_and_exact_asset_keys_are_respected()
     {
-        var portfolio = new Portfolio(Guid.NewGuid(), f.Owner, "Swing");
+        var portfolio = new Portfolio(Guid.NewGuid(), f.Owner, "Swing", TradingMode.Real);
         f.Portfolios.Add(portfolio);
         var first = f.Account("First", portfolio.Id);
         var second = f.Account("Second");

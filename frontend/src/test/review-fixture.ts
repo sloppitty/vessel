@@ -9,7 +9,7 @@ export const emptyReviewMetrics: ReviewMetrics = {
 const noCases = { wins: 0, losses: 0, scratches: 0 }
 const noRuleCases = { ...noCases, unscored: 0 }
 export const emptyReview: ReviewDocument = {
-  asOfUtc: '2026-10-09T12:00:00Z', fromUtc: '2026-09-09T12:00:00Z', period: 'month', currency: 'USD',
+  tradingMode: 'real', asOfUtc: '2026-10-09T12:00:00Z', fromUtc: '2026-09-09T12:00:00Z', period: 'month', currency: 'USD',
   options: { portfolios: [], accounts: [], instruments: [] },
   periods: reviewPeriods.map(p => ({ id: p.id, net: null, count: 0, positions: 0 })), metrics: emptyReviewMetrics,
   series: [], bucketDays: 1, groups: { portfolios: [], accounts: [], assets: [], origins: [], directions: [] },

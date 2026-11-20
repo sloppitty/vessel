@@ -11,6 +11,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Persistence;
 using Vessel.Persistence.Events;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -32,7 +33,7 @@ public sealed class VesselEventParticipationTests
                 await gate.Task;
                 return await Record.ExceptionAsync(() => work.ExecuteAsync(async () =>
                 {
-                    db.Accounts.Add(new Account(Guid.NewGuid(), owner, "manual", "Unawaited hook mutation"));
+                    db.Accounts.Add(new Account(Guid.NewGuid(), owner, "manual", "Unawaited hook mutation", TradingMode.Real));
                     await work.SaveChangesAsync(default);
                     return true;
                 }, default));
@@ -92,7 +93,7 @@ public sealed class VesselEventParticipationTests
         var outbox = new Outbox { OnStage = async () => { gate.TrySetResult(); admissionError = await late!; } };
         var store = new VesselEventStore(db, capture, outbox, Options.Create(new VesselEventSettings()), NullLogger<VesselEventStore>.Instance);
         var work = new UnitOfWork(db, [store]);
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Original");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Original", TradingMode.Real);
         var play = TestPlays.Create(account, new("manual", "BTC"));
         // The unawaited callback still holds the root participation, so its overlap poisons the live unit.
         var outer = await Record.ExceptionAsync(() => work.ExecuteAsync(async () =>
@@ -170,7 +171,7 @@ public sealed class VesselEventParticipationTests
         await using var db = Context(database, owner, capture);
         var store = Store(db, capture);
         var work = new UnitOfWork(db, [store]);
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic", TradingMode.Real);
         var play = TestPlays.Create(account, new("manual", "BTC"));
         await work.ExecuteAsync(() =>
         {
@@ -195,7 +196,7 @@ public sealed class VesselEventParticipationTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic", TradingMode.Real);
         var play = TestPlays.Create(account, new("manual", "BTC"));
         await using (var seed = database.Context(owner))
         {
@@ -270,7 +271,7 @@ public sealed class VesselEventParticipationTests
             if (origin == "rolled-back") await Assert.ThrowsAsync<InvalidOperationException>(() => earlier);
             else await earlier;
         }
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Synthetic", TradingMode.Real);
         var play = TestPlays.Create(account, new("manual", "BTC"));
         await work.ExecuteAsync(async () =>
         {
@@ -314,7 +315,7 @@ public sealed class VesselEventParticipationTests
         await using var db = Context(database, owner, gate);
         var store = Store(db);
         var work = new UnitOfWork(db, [store]);
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Must roll back");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Must roll back", TradingMode.Real);
         Task<Exception>? late = null;
         await Assert.ThrowsAsync<InvalidOperationException>(() => work.ExecuteAsync(() =>
         {
@@ -370,7 +371,7 @@ public sealed class VesselEventParticipationTests
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Existing");
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Existing", TradingMode.Real);
         await using (var seed = database.Context(owner))
         {
             seed.Accounts.Add(account);

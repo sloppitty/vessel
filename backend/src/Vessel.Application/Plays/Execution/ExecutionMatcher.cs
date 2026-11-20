@@ -2,6 +2,7 @@ using System.Globalization;
 using Vessel.Application.Venues;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Application.Plays.Execution;
 
@@ -20,7 +21,7 @@ public sealed record MatchCandidate(Play Play, PlanLevelTarget Level);
 public static class ExecutionMatcher
 {
 
-    public static bool IsActive(Play play) => play.TradingMode == "real" && play.Status is PlayStatus.Planned or PlayStatus.Paused or PlayStatus.Open;
+    public static bool IsActive(Play play) => play.TradingMode == TradingMode.Real && play.Status is PlayStatus.Planned or PlayStatus.Paused or PlayStatus.Open;
 
     /// <summary>
     /// Entries, stops and targets with prices resolved. A percent level is a return on margin, so its price

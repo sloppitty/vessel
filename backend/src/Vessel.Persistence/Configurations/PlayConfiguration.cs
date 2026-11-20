@@ -11,7 +11,7 @@ internal sealed class PlayConfiguration : IEntityTypeConfiguration<Play>
     {
         builder.ToTable("plays", t => t.HasCheckConstraint("CK_plays_trading_mode", "\"TradingMode\" IN ('real', 'paper')"));
         builder.HasKey(x => x.Id);
-        builder.Property(x => x.TradingMode).HasMaxLength(8).HasDefaultValue("real");
+        builder.Property(x => x.TradingMode).HasMaxLength(8).HasDefaultValue(Vessel.Domain.Common.TradingMode.Real);
         builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
         builder.Property(x => x.InstrumentSource).HasConversion<string>().HasMaxLength(16);
         builder.Property(x => x.CancelReason).HasConversion<string>().HasMaxLength(16);

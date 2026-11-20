@@ -5,6 +5,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Sizing;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -47,7 +48,7 @@ public sealed class SizingExitTimeOrderingTests : SizingExitTimeOrderingTestsVal
         // A manual ledger's EndedAtUtc is the owner-entered exit; nothing was detected.
         var manual = facts with { ManualSource = true };
         Assert.Equal((Detected, (DateTimeOffset?)null), (PlayOutcomeCalculator.CloseTime(manual), PlayOutcomeCalculator.DetectedAt(manual)));
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue", TradingMode.Real);
         var retrospective = Play.Retrospective(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), facts.Play.Plan,
             Planned.AddMinutes(90), Detected, "Retro");
         Assert.Equal(Planned.AddMinutes(90), PlayOutcomeCalculator.CloseTime(new ClosedPlayFacts(retrospective, [], facts.Fills)));

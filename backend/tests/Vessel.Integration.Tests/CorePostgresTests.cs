@@ -9,6 +9,7 @@ using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -52,7 +53,7 @@ public sealed class CorePostgresTests
         await using (var db = database.Context(owner))
         {
             Assert.Equal(exact, (await db.Snapshots.SingleAsync(s => s.AccountId == synced)).AvailableMarginUsd);
-            Assert.Equal("-0.1234567890123456789012345678", (await Service(db, owner, reader).SnapshotAsync(synced, default))!.AvailableMarginUsd);
+            Assert.Equal("-0.1234567890123456789012345678", (await Service(db, owner, reader).SnapshotAsync(synced, TradingMode.Real, default))!.AvailableMarginUsd);
             reader.Fail = true;
             await Assert.ThrowsAsync<ProblemException>(() => Refresh(db, owner, reader, synced));
             Assert.Equal(exact, (await db.Snapshots.SingleAsync(s => s.AccountId == synced)).AvailableMarginUsd);
@@ -82,7 +83,7 @@ public sealed class CorePostgresTests
         Assert.Null(account.PortfolioId); Assert.Null(account.ManualAccountValueUsd); Assert.Equal("manual", account.SyncStatus);
         Assert.Equal(2, await db.Plays.CountAsync()); Assert.All(await db.Plays.ToListAsync(), p => Assert.Equal(PlayStatus.Planned, p.Status));
         Assert.Empty(await db.Snapshots.ToListAsync()); Assert.False(db.Database.HasPendingModelChanges());
-        var overview = await Service(db, owner, new FixtureReader()).OverviewAsync(default);
+        var overview = await Service(db, owner, new FixtureReader()).OverviewAsync(TradingMode.Real, default);
         Assert.Null(overview.Totals.TotalAccountValueUsd); Assert.Empty(overview.Portfolios); Assert.Single(overview.Accounts);
     }
 
@@ -95,9 +96,9 @@ public sealed class CorePostgresTests
         {
             var service = Service(db, owner, reader); var dto = await Refresh(db, owner, reader, id);
             Assert.Equal("1234.1234567890123456789012345", dto.AccountValueUsd); Assert.Equal("synced", dto.SyncStatus);
-            var snapshot = (await service.SnapshotAsync(id, default))!;
+            var snapshot = (await service.SnapshotAsync(id, TradingMode.Real, default))!;
             Assert.Equal("-0.0123456789012345678901234567", snapshot.Positions.Single().SignedQuantity);
-            var fill = (await service.FillsAsync(id, default)).Single(); Assert.Null(fill.PlayId);
+            var fill = (await service.FillsAsync(id, TradingMode.Real, default)).Single(); Assert.Null(fill.PlayId);
             Assert.Equal("0.0000000000000000000000000001", fill.Quantity); Assert.Equal("USDC", fill.FeeToken);
         }
         reader.Result = reader.Result with { Snapshot = reader.Result.Snapshot with { ObservedAtUtc = reader.Result.Snapshot.ObservedAtUtc.AddHours(1), AccountValueUsd = 7.000000000000000000000000001m, Positions = [] } };
@@ -239,10 +240,10 @@ public sealed class CorePostgresTests
         };
         await using var db = database.Context(owner); var service = Service(db, owner, reader);
         var id = await CreateVenueAccount(service); await Refresh(db, owner, reader, id);
-        var fills = await service.FillsAsync(id, default);
+        var fills = await service.FillsAsync(id, TradingMode.Real, default);
         Assert.Equal(100, fills.Count); Assert.Equal("124", fills[0].SourceFillId); Assert.Equal("25", fills[^1].SourceFillId);
         Assert.All(fills, f => Assert.Null(f.PlayId));
-        var overview = await service.OverviewAsync(default);
+        var overview = await service.OverviewAsync(TradingMode.Real, default);
         Assert.Equal(125, overview.Totals.ImportedFillCount); Assert.Equal(100, overview.RecentActivity.Count);
         Assert.Empty(await db.Plays.ToListAsync());
     }
@@ -282,10 +283,10 @@ public sealed class CorePostgresTests
         var venue = await service.CreateAccountAsync(new(second.Id, "Venue", "hyperliquid", "0x1111111111111111111111111111111111111111"), default);
         db.Snapshots.Add(new AccountSnapshot { OwnerId = owner, AccountId = venue.Id, ValueScope = "partial", ObservedAtUtc = DateTimeOffset.UtcNow, AccountValueUsd = null, WithdrawableUsd = null, MarginUsedUsd = 0.0000000000000000000000000001m });
         await db.SaveChangesAsync(); db.ChangeTracker.Clear();
-        var overview = await service.OverviewAsync(default); Assert.Equal("partial", overview.Portfolios.Single(p => p.Id == first.Id).ValueCoverage);
+        var overview = await service.OverviewAsync(TradingMode.Real, default); Assert.Equal("partial", overview.Portfolios.Single(p => p.Id == first.Id).ValueCoverage);
         Assert.Equal("unavailable", overview.Portfolios.Single(p => p.Id == second.Id).ValueCoverage);
         Assert.Equal(1, overview.Totals.ValuedAccountCount); Assert.Equal("12.00000000000000000000000001", overview.Totals.TotalAccountValueUsd);
-        var snapshot = (await service.SnapshotAsync(venue.Id, default))!; Assert.Null(snapshot.AccountValueUsd); Assert.Null(snapshot.WithdrawableUsd);
+        var snapshot = (await service.SnapshotAsync(venue.Id, TradingMode.Real, default))!; Assert.Null(snapshot.AccountValueUsd); Assert.Null(snapshot.WithdrawableUsd);
         Assert.Equal("0.0000000000000000000000000001", snapshot.MarginUsedUsd);
     }
 }

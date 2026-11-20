@@ -3,6 +3,7 @@ using Npgsql;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -18,7 +19,7 @@ public sealed class OrderIdentityTests : OrderIdentityTestsSupport
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Main");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Main", TradingMode.Real);
         await using (var seed = database.Context(owner))
         {
             seed.Accounts.Add(account);
@@ -39,7 +40,7 @@ public sealed class OrderIdentityTests : OrderIdentityTestsSupport
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "lighter", "Main");
+        var account = new Account(Guid.NewGuid(), owner, "lighter", "Main", TradingMode.Real);
         await using (var seed = database.Context(owner))
         {
             seed.Accounts.Add(account);
@@ -63,7 +64,7 @@ public sealed class OrderIdentityTests : OrderIdentityTestsSupport
     {
         await using var database = await CoreDatabase.CreateAsync();
         var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "lighter", "Main");
+        var account = new Account(Guid.NewGuid(), owner, "lighter", "Main", TradingMode.Real);
         await using (var seed = database.Context(owner))
         {
             seed.Accounts.Add(account);
@@ -103,7 +104,7 @@ public sealed class OrderIdentityTests : OrderIdentityTestsSupport
         await using var database = await CoreDatabase.CreateAsync(TestOrders.BeforeOrderIdentity);
         var owner = Guid.NewGuid();
         await using var db = database.Context(owner);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Main");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Main", TradingMode.Real);
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
         // The intentionally historical schema has no paper-mode columns; keep its fixture historical too.
         await db.Database.ExecuteSqlInterpolatedAsync($"""

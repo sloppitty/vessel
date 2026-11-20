@@ -5,6 +5,7 @@ using System.Text.Json;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Infrastructure.Venues.Hyperliquid;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -16,7 +17,7 @@ public sealed class InstrumentCatalogueApiTests
     public async Task Instrument_catalogue_requires_a_session_before_venue_read(string? token)
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "HL"); store.Accounts.Add(account);
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "HL", TradingMode.Real); store.Accounts.Add(account);
         var reader = new FixtureReader();
         await using var factory = new CoreApiFactory(owner, store, reader: reader);
         using var client = factory.CreateClient();
@@ -38,7 +39,7 @@ public sealed class InstrumentCatalogueApiTests
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
         var account = new Account(Guid.NewGuid(), scenario.StartsWith("foreign", StringComparison.Ordinal) ? Guid.NewGuid() : owner,
-            scenario == "disabled-manual" ? "manual" : "hyperliquid", "Private foreign account");
+            scenario == "disabled-manual" ? "manual" : "hyperliquid", "Private foreign account", TradingMode.Real);
         if (scenario.Contains("disabled", StringComparison.Ordinal)) account.UpdateSettings(account.Name, null, false);
         if (scenario != "missing") store.Accounts.Add(account);
         var reader = new FixtureReader { Fail = true };
@@ -57,7 +58,7 @@ public sealed class InstrumentCatalogueApiTests
     public async Task Manual_instrument_catalogue_uses_shared_shape_and_never_reads_a_venue()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var account = new Account(Guid.NewGuid(), owner, "manual", "Manual"); store.Accounts.Add(account);
+        var account = new Account(Guid.NewGuid(), owner, "manual", "Manual", TradingMode.Real); store.Accounts.Add(account);
         var reader = new FixtureReader { Fail = true };
         await using var factory = new CoreApiFactory(owner, store, reader: reader);
         using var client = factory.AuthorizedClient();
@@ -89,7 +90,7 @@ public sealed class InstrumentCatalogueApiTests
             """;
         var owner = Guid.NewGuid();
         var store = new MemoryWorkspaceStore(owner) { RejectOwnerWideReads = true, RejectActivityReads = true };
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "HL");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "HL", TradingMode.Real);
         account.Configure(null, "0x1111111111111111111111111111111111111111", null);
         store.Accounts.Add(account);
         using var handler = new CatalogueHandler(meta);
@@ -146,7 +147,7 @@ public sealed class InstrumentCatalogueApiTests
     public async Task Instrument_provider_failure_returns_safe_generic_502_without_recording_sync_failure(string failure)
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "HL"); store.Accounts.Add(account);
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "HL", TradingMode.Real); store.Accounts.Add(account);
         using var handler = new CatalogueHandler("{\"private-secret\":",
             failure == "http" ? HttpStatusCode.TooManyRequests : HttpStatusCode.OK);
         using var venueClient = new HttpClient(handler) { BaseAddress = new Uri("https://api.hyperliquid.xyz/") };
@@ -173,7 +174,7 @@ public sealed class InstrumentCatalogueApiTests
     public async Task Aborted_catalogue_waiter_does_not_cancel_shared_read_or_record_sync_failure_or_write()
     {
         var owner = Guid.NewGuid(); var store = new MemoryWorkspaceStore(owner);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "HL"); store.Accounts.Add(account);
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "HL", TradingMode.Real); store.Accounts.Add(account);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         CancellationToken shared = default;

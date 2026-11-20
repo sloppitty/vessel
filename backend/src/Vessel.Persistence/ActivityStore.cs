@@ -10,12 +10,9 @@ namespace Vessel.Persistence;
 
 public sealed class ActivityStore(VesselDbContext db) : IActivityStore
 {
-    public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) =>
-        ReadAsync(accountId, TradingMode.Real, ct, accountIds);
-
-    public async Task<ActivityFacts> ReadAsync(Guid? accountId, string tradingMode, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
+    public async Task<ActivityFacts> ReadAsync(Guid? accountId, TradingMode tradingMode, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
     {
-        tradingMode = TradingMode.Validate(tradingMode);
+        tradingMode = TradingModes.Validate(tradingMode);
         if (accountIds is { Count: 0 }) return new([], [], [], new Dictionary<Guid, Guid>());
         // A shared aggregate reader supplies its own repeatable-read snapshot.
         await using var transaction = db.Database.CurrentTransaction is null
@@ -83,10 +80,10 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
     }
 
     /// <summary>
-    /// Issue #107: the scoped enabled accounts with their latest snapshots and funding coverage, as <see cref="ReadAsync(Guid?, string, CancellationToken, IReadOnlySet{Guid}?)"/>
+    /// Issue #107: the scoped enabled accounts with their latest snapshots and funding coverage, as <see cref="ReadAsync(Guid?, TradingMode, CancellationToken, IReadOnlySet{Guid}?)"/>
     /// reads them; a missing or foreign account is 404. Paper accounts have no snapshots or funding here.
     /// </summary>
-    internal static async Task<ActivityObservations> ObservationsAsync(VesselDbContext db, Guid? accountId, string tradingMode,
+    internal static async Task<ActivityObservations> ObservationsAsync(VesselDbContext db, Guid? accountId, TradingMode tradingMode,
         CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
     {
         if (accountIds is { Count: 0 }) return new([], [], []);

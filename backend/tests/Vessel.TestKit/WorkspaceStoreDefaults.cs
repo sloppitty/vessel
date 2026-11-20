@@ -2,6 +2,7 @@ using Vessel.Application.Venues;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -12,12 +13,17 @@ namespace Vessel.Tests;
 /// </summary>
 public interface IWorkspaceStoreDefaults : IWorkspaceStore
 {
+    /// <summary>Every portfolio the fake holds, of either mode; production ports take the mode (issue #113).</summary>
+    Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct);
+    /// <summary>Every account the fake holds, of either mode; production ports take the mode (issue #113).</summary>
+    Task<List<Account>> AccountsAsync(CancellationToken ct);
+
     Task IWorkspaceStore.AccountVisibilityChangedAsync(Guid accountId, bool enabled, CancellationToken ct) => Task.CompletedTask;
 
-    async Task<List<Portfolio>> IWorkspaceStore.PortfoliosAsync(CancellationToken ct, string tradingMode) =>
+    async Task<List<Portfolio>> IWorkspaceStore.PortfoliosAsync(TradingMode tradingMode, CancellationToken ct) =>
         (await PortfoliosAsync(ct)).Where(p => p.TradingMode == tradingMode).ToList();
 
-    async Task<List<Account>> IWorkspaceStore.AccountsAsync(CancellationToken ct, string tradingMode) =>
+    async Task<List<Account>> IWorkspaceStore.AccountsAsync(TradingMode tradingMode, CancellationToken ct) =>
         (await AccountsAsync(ct)).Where(a => a.TradingMode == tradingMode).ToList();
 
     Task<IReadOnlyDictionary<Guid, PaperAccountBalance>> IWorkspaceStore.PaperBalancesAsync(IReadOnlyList<Guid> accountIds, CancellationToken ct) =>

@@ -146,7 +146,7 @@ public sealed class ExecutionStore(VesselDbContext db, UnitOfWork unitOfWork) : 
 
     public Task UpsertOrdersAsync(Account account, IReadOnlyList<VenueOrder> orders, DateTimeOffset observedAt, CancellationToken ct) => unitOfWork.ParticipateAsync(async () =>
     {
-        if (account.TradingMode != "real") throw new ProblemException(409, "Paper accounts cannot import venue orders.");
+        account.RequireReal("Paper accounts cannot import venue orders.");
         // External identity is (contract, venue order ID): the same venue ID on another contract is another order.
         var ids = orders.Select(o => o.OrderId).Distinct(StringComparer.Ordinal).ToList();
         var known = (await db.Orders.Where(o => o.AccountId == account.Id && ids.Contains(o.ExternalOrderId)).ToListAsync(ct))

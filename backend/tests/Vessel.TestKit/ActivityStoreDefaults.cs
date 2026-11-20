@@ -1,11 +1,15 @@
 using Vessel.Application.Activity;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
 /// <summary>Test-only default for <see cref="IActivityStore"/> (issue #114): the mode-aware read ignores the mode.</summary>
 public interface IActivityStoreDefaults : IActivityStore
 {
-    Task<ActivityFacts> IActivityStore.ReadAsync(Guid? accountId, string tradingMode, CancellationToken ct, IReadOnlySet<Guid>? accountIds) =>
+    /// <summary>The fake's facts; production ports take the mode (issue #113).</summary>
+    Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null);
+
+    Task<ActivityFacts> IActivityStore.ReadAsync(Guid? accountId, TradingMode tradingMode, CancellationToken ct, IReadOnlySet<Guid>? accountIds) =>
         ReadAsync(accountId, ct, accountIds);
 }
 
@@ -15,10 +19,13 @@ public interface IActivityStoreDefaults : IActivityStore
 /// </summary>
 public interface IActivitySummaryReaderDefaults : IActivitySummaryReader
 {
-    async Task<ActivitySummaries> IActivitySummaryReader.ReadAsync(Guid? accountId, string tradingMode, CancellationToken ct,
+    /// <summary>The fake's real-mode summaries; production ports take the mode (issue #113).</summary>
+    Task<ActivitySummaries> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null);
+
+    async Task<ActivitySummaries> IActivitySummaryReader.ReadAsync(Guid? accountId, TradingMode tradingMode, CancellationToken ct,
         IReadOnlySet<Guid>? accountIds)
     {
         var value = await ReadAsync(accountId, ct, accountIds);
-        return tradingMode == "real" ? value : ActivityService.Aggregate(value.Facts, accountId, accountIds, tradingMode: tradingMode);
+        return tradingMode == TradingMode.Real ? value : ActivityService.Aggregate(value.Facts, tradingMode, accountId, accountIds);
     }
 }

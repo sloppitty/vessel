@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using Vessel.Application.Workspace;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -13,8 +14,8 @@ public sealed class AccountManagementApiIntegrationTests
     public async Task Full_PUT_preserves_venue_address_and_value_and_portfolio_delete_unlinks_disabled_account()
     {
         await using var database = await CoreDatabase.CreateAsync();
-        var owner = Guid.NewGuid(); var portfolio = new Portfolio(Guid.NewGuid(), owner, "Original");
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Original"); account.Configure(portfolio.Id, "0x1111111111111111111111111111111111111111", null);
+        var owner = Guid.NewGuid(); var portfolio = new Portfolio(Guid.NewGuid(), owner, "Original", TradingMode.Real);
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Original", TradingMode.Real); account.Configure(portfolio.Id, "0x1111111111111111111111111111111111111111", null);
         await using (var db = database.Context(owner))
         {
             db.Portfolios.Add(portfolio); db.Accounts.Add(account);

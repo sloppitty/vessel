@@ -1,6 +1,7 @@
 using Vessel.Application.Activity;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -9,7 +10,7 @@ public partial class ActivityOperationsTestsSupport : ActivityOperationsTestsVal
 
     internal static Account Account(Guid id, bool enabled = true, Guid? portfolio = null)
     {
-        var account = new Account(id, Owner, "manual", "Fixture");
+        var account = new Account(id, Owner, "manual", "Fixture", TradingMode.Real);
         account.UpdateSettings(account.Name, portfolio, enabled);
         return account;
     }

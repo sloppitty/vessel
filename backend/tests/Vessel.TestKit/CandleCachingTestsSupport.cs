@@ -1,5 +1,6 @@
 using Vessel.Application.MarketData;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -33,7 +34,7 @@ public partial class CandleCachingTestsSupport
     {
         var owner = Guid.NewGuid();
         var store = new MemoryWorkspaceStore(owner);
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Test");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Test", TradingMode.Real);
         store.Accounts.Add(account);
         return (owner, store, account);
     }

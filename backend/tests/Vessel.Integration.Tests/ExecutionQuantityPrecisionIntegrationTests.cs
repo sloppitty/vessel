@@ -4,6 +4,7 @@ using Vessel.Application.Review;
 using Vessel.Application.Sizing;
 using Vessel.Domain.Plays;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -27,7 +28,7 @@ public sealed class ExecutionQuantityPrecisionIntegrationTests : ExecutionQuanti
             Assert.NotNull(PlayOutcomeCalculator.Outcome(f.Facts));
 
             var store = new SizingStore(db, TestUnitOfWork.For(db));
-            var facts = Assert.Single(await store.ClosedPlaysAsync(default));
+            var facts = Assert.Single(await store.ClosedPlaysAsync(TradingMode.Real, default));
             Assert.Equal(new[] { "in", "out" }, facts.IncompleteOrders!.Order(StringComparer.Ordinal));
             Assert.False(ExecutionIntegrity.Settled(facts));
             Assert.Equal(f.Store.Fills.Select(fill => (fill.Quantity, fill.Price, fill.Fee, fill.ClosedPnlUsd)),
@@ -38,7 +39,7 @@ public sealed class ExecutionQuantityPrecisionIntegrationTests : ExecutionQuanti
             Assert.Contains(f.Play.Id, coverage.IncompleteOrderPlayIds!);
             var review = new ReviewService(reviewStore, new ReviewClock());
             var report = await review.GetAsync(new("all"), default);
-            var record = await new SizingService(store, new CoreOwner(f.Account.OwnerId), new ReviewClock(), TestUnitOfWork.For(db)).GetAsync(default);
+            var record = await new SizingService(store, new CoreOwner(f.Account.OwnerId), new ReviewClock(), TestUnitOfWork.For(db)).GetAsync(TradingMode.Real, default);
             var exclusions = await review.ExclusionsAsync(new("all"), default);
 
             Assert.Equal((0, 1), (report.Metrics.Count, report.Coverage.IncompleteExecutions));
@@ -72,13 +73,13 @@ public sealed class ExecutionQuantityPrecisionIntegrationTests : ExecutionQuanti
             Assert.NotNull(PlayOutcomeCalculator.Outcome(f.Facts));
 
             var store = new SizingStore(db, TestUnitOfWork.For(db));
-            var facts = Assert.Single(await store.ClosedPlaysAsync(default));
+            var facts = Assert.Single(await store.ClosedPlaysAsync(TradingMode.Real, default));
             Assert.Empty(facts.IncompleteOrders!);
             Assert.False(ExecutionIntegrity.Settled(facts));
             var review = new ReviewService(new ReviewStore(db, store), new ReviewClock());
             var report = await review.GetAsync(new("all"), default);
             var exclusions = await review.ExclusionsAsync(new("all"), default);
-            var record = await new SizingService(store, new CoreOwner(f.Account.OwnerId), new ReviewClock(), TestUnitOfWork.For(db)).GetAsync(default);
+            var record = await new SizingService(store, new CoreOwner(f.Account.OwnerId), new ReviewClock(), TestUnitOfWork.For(db)).GetAsync(TradingMode.Real, default);
 
             Assert.Equal((0, 1), (report.Metrics.Count, report.Coverage.IncompleteExecutions));
             Assert.Equal(0, record.Record.ClosedPlays);

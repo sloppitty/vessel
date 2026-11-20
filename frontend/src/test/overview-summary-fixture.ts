@@ -8,12 +8,12 @@ export const summaryAmount = (amountUsd: string | null, total = 1): SummaryAmoun
 export const summaryTotals = (balance = '1250.123456', accounts = 1): SummaryTotals => ({ accountCount: accounts,
   balance: summaryAmount(balance, accounts), available: summaryAmount(null, accounts), openPositionCount: 0,
   unrealizedPnl: summaryAmount(null, accounts), realizedResult: summaryAmount(null, accounts), importedFillCount: 0,
-  unrealizedPnlAsOfUtc: null,
+  paperExecutionCount: 0, unrealizedPnlAsOfUtc: null,
 })
 export function overviewSummaryFixture(query: OverviewQuery = { groupBy: 'portfolio', period: '30', scope: 'all' }): OverviewSummaryDocument {
   const asOfUtc = '2026-10-13T12:00:00.000Z'
   const totals = summaryTotals()
-  return { ...query, asOfUtc, fromUtc: query.period === 'all' ? null : new Date(Date.parse(asOfUtc) - Number(query.period) * 86_400_000).toISOString(), totals,
+  return { ...query, tradingMode: 'real', asOfUtc, fromUtc: query.period === 'all' ? null : new Date(Date.parse(asOfUtc) - Number(query.period) * 86_400_000).toISOString(), totals,
     rows: [{ id: query.groupBy === 'portfolio' ? `portfolio:${portfolioFixture.id}` : `account:${accountFixture.id}`,
       name: query.groupBy === 'portfolio' ? portfolioFixture.name : accountFixture.name, icon: query.groupBy === 'portfolio' ? 'folder' : null,
       venueId: query.groupBy === 'account' ? 'manual' : null, totals, shareOfBalance: { numerator: totals.balance.amountUsd!, denominator: totals.balance.amountUsd! } }],

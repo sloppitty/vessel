@@ -31,8 +31,8 @@ public sealed class OpenRiskService(IOpenRiskStore store, IWorkspaceStore worksp
     public async Task<OpenRiskDto> GetAsync(string? scope, CancellationToken ct)
     {
         var listScope = ListScope.Parse(scope);
-        var portfolios = await workspaceStore.PortfoliosAsync(ct, TradingMode.Real);
-        var accounts = await workspace.AccountsAsync(ct, TradingMode.Real);
+        var portfolios = await workspaceStore.PortfoliosAsync(TradingMode.Real, ct);
+        var accounts = await workspace.AccountsAsync(TradingMode.Real, ct);
         listScope.RequireKnown(id => portfolios.Any(p => p.Id == id), id => accounts.Any(a => a.Id == id));
         var members = accounts.Where(a => listScope.Includes(a.Id, a.PortfolioId, a.IsEnabled)).ToList();
         var memberIds = members.Select(a => a.Id).ToHashSet();

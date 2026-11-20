@@ -60,8 +60,8 @@ public sealed class PaperCorrectivePostgresTests
             var db = await CoreDatabase.CreateAsync();
             var owner = Guid.NewGuid();
             await using var context = db.Context(owner);
-            var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
-            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper", "paper", capital);
+            var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: TradingMode.Paper);
+            var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper", TradingMode.Paper, capital);
             account.Configure(portfolio.Id, null, null);
             context.AddRange(portfolio, account, PaperLedgerEntry.Seed(owner, account.Id, capital, At),
                 new PaperSettings { OwnerId = owner, Enabled = true, CheckIntervalMinutes = interval });
@@ -74,8 +74,8 @@ public sealed class PaperCorrectivePostgresTests
         {
             Guid id;
             await using (var db = Db.Context(Owner))
-                id = (await Plays(db).CreateAsync(new CreatePlayRequest(AccountId, instrument, "venue", "Probe " + instrument, plan),
-                    default, "paper")).Summary.Id;
+                id = (await Plays(db).CreateAsync(new CreatePlayRequest(AccountId, instrument, "venue", "Probe " + instrument, plan), TradingMode.Paper,
+                    default)).Summary.Id;
             await StatusAsync(id, "planned");
             return id;
         }
@@ -123,7 +123,7 @@ public sealed class PaperCorrectivePostgresTests
             await using var db = Db.Context(Owner);
             var unit = TestUnitOfWork.For(db);
             var workspace = new WorkspaceService(new WorkspaceStore(db, unit), new CoreOwner(Owner), TestVenues.With(), unit);
-            return Assert.Single(await workspace.AccountsAsync(default, "paper"));
+            return Assert.Single(await workspace.AccountsAsync(TradingMode.Paper, default));
         }
 
         public ValueTask DisposeAsync() => Db.DisposeAsync();
@@ -197,7 +197,7 @@ public sealed class PaperCorrectivePostgresTests
         await using var db = f.Db.Context(f.Owner);
         var unit = TestUnitOfWork.For(db);
         var sizingStore = new SizingStore(db, unit);
-        var sizing = await new SizingService(sizingStore, new CoreOwner(f.Owner), f.Clock, unit).GetAsync(default, "paper");
+        var sizing = await new SizingService(sizingStore, new CoreOwner(f.Owner), f.Clock, unit).GetAsync(TradingMode.Paper, default);
         Assert.Equal(0, sizing.Record.ClosedPlays);
         Assert.Equal("paper", sizing.Record.Source);
         var review = new ReviewService(new ReviewStore(db, sizingStore), f.Clock);
@@ -405,7 +405,7 @@ public sealed class PaperCorrectivePostgresTests
             Assert.Equal(0, report.Coverage.IncompleteExecutions);
             Assert.Equal(0, report.Metrics.Count);
             Assert.Empty((await review.ExclusionsAsync(query, default)).Items);
-            var sizing = await new SizingService(store, new CoreOwner(f.Owner), f.Clock, unit).GetAsync(default, "paper");
+            var sizing = await new SizingService(store, new CoreOwner(f.Owner), f.Clock, unit).GetAsync(TradingMode.Paper, default);
             Assert.Equal(("paper", 0), (sizing.Record.Source, sizing.Record.ClosedPlays));
         }
         f.Clock.Now = FirstOpen.AddMinutes(4).AddSeconds(15);
@@ -446,7 +446,7 @@ public sealed class PaperCorrectivePostgresTests
         var report = await review.GetAsync(query, default);
         Assert.Equal((1, 1, 0), (report.Coverage.ClosedCandidates, report.Coverage.IncompleteExecutions, report.Metrics.Count));
         Assert.Equal(paper.Facts.Play.Id, Assert.Single((await review.ExclusionsAsync(query, default)).Items).PlayId);
-        Assert.Equal(0, (await new SizingService(store, new CoreOwner(owner), clock, unit).GetAsync(default, "paper")).Record.ClosedPlays);
+        Assert.Equal(0, (await new SizingService(store, new CoreOwner(owner), clock, unit).GetAsync(TradingMode.Paper, default)).Record.ClosedPlays);
     }
 
     [PostgresTheory]
@@ -492,7 +492,7 @@ public sealed class PaperCorrectivePostgresTests
         {
             var sizingStore = new SizingStore(db, TestUnitOfWork.For(db));
             var sizing = await new SizingService(sizingStore, new CoreOwner(f.Owner), f.Clock, TestUnitOfWork.For(db))
-                .GetAsync(default, "paper");
+                .GetAsync(TradingMode.Paper, default);
             Assert.Equal(1, sizing.Record.ClosedPlays);
             var review = new ReviewService(new ReviewStore(db, sizingStore), f.Clock);
             var query = new ReviewQuery(Period: "all", TradingMode: "paper");
@@ -553,7 +553,7 @@ public sealed class PaperCorrectivePostgresTests
         var exclusions = (await review.ExclusionsAsync(query, default)).Items;
         if (closedCandidates == 0) Assert.Empty(exclusions);
         else Assert.Equal(id, Assert.Single(exclusions).PlayId);
-        var sized = await new SizingService(store, new CoreOwner(f.Owner), f.Clock, unit).GetAsync(default, "paper");
+        var sized = await new SizingService(store, new CoreOwner(f.Owner), f.Clock, unit).GetAsync(TradingMode.Paper, default);
         Assert.Equal(("paper", 0), (sized.Record.Source, sized.Record.ClosedPlays));
         Assert.Empty(sized.Record.Recent);
         var retained = await f.StateAsync(id);
@@ -694,7 +694,7 @@ public sealed class PaperCorrectivePostgresTests
         var report = await retainedReview.GetAsync(query, default);
         Assert.Equal((1, 0), (report.Coverage.ClosedCandidates, report.Metrics.Count));
         Assert.Equal(id, Assert.Single((await retainedReview.ExclusionsAsync(query, default)).Items).PlayId);
-        var sized = await new SizingService(store, new CoreOwner(f.Owner), f.Clock, TestUnitOfWork.For(check)).GetAsync(default, "paper");
+        var sized = await new SizingService(store, new CoreOwner(f.Owner), f.Clock, TestUnitOfWork.For(check)).GetAsync(TradingMode.Paper, default);
         Assert.Equal(0, sized.Record.ClosedPlays);
     }
 

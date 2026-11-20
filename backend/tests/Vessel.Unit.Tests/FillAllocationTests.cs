@@ -179,7 +179,7 @@ public sealed class FillAllocationDomainTests
     [Fact]
     public void An_allocation_moves_a_real_active_Play_to_its_next_version_only()
     {
-        var account = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Trading");
+        var account = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Trading", TradingMode.Real);
         var play = new Play(Guid.NewGuid(), account, new PerpetualInstrument("hyperliquid", "BTC"), InstrumentSource.Venue,
             PlayDocuments.Serialize(TestPlays.Plan()), At);
         play.MarkPlanned(At);
@@ -196,7 +196,7 @@ public sealed class FillAllocationDomainTests
 public sealed class FillAllocationReadRuleTests
 {
     private static readonly DateTimeOffset At = DateTimeOffset.Parse("2026-10-23T10:00:00Z");
-    private readonly Account account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Trading");
+    private readonly Account account = new(Guid.NewGuid(), Guid.NewGuid(), "hyperliquid", "Trading", TradingMode.Real);
 
     private Play Open(string direction = "long")
     {

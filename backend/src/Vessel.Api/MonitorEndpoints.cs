@@ -8,7 +8,7 @@ public static class MonitorEndpoints
     {
         var api = app.MapGroup("/api").RequireAuthorization().WithTradingModeBoundary();
         api.MapGet("/monitor", async (MonitorCoordinator monitor, CancellationToken ct) =>
-            Results.Ok(await monitor.SummaryAsync(ct)));
+            Results.Ok(await monitor.SummaryAsync(ct))).RealOnly();
         api.MapGet("/accounts/{id:guid}/monitor", async (Guid id, MonitorCoordinator monitor, CancellationToken ct) =>
             Results.Ok(await monitor.AccountAsync(id, ct)));
         api.MapPost("/accounts/{id:guid}/monitor/run", async (Guid id, HttpContext context, MonitorCoordinator monitor, CancellationToken ct) =>

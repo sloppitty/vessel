@@ -7,16 +7,16 @@ import { isVenueLogoKey, type VenueLogoKey } from './venue-logos'
 export const manualVenueId = 'manual'
 
 export interface VenueCapabilities {
-  paperExecution?: boolean
+  paperExecution: boolean
   sync: boolean; instruments: boolean; orders: boolean; candles: boolean
   marketContext: boolean; stream: boolean; stablecoinWallet: boolean
-  accountDiscovery?: boolean; readOnlyCredential?: boolean; manualExecutions?: boolean
+  accountDiscovery: boolean; readOnlyCredential: boolean; manualExecutions: boolean
   /** The order reader returns the current open book. Without it stop coverage reads "current book not read". */
-  currentOrderBook?: boolean
+  currentOrderBook: boolean
   /** The venue serves executions by time window, so a history gap can be backfilled (Phase 2, item 6b). */
-  fillHistory?: boolean
+  fillHistory: boolean
   /** The catalogue lists several market sources, which the owner can hide from the selector. */
-  marketSources?: boolean
+  marketSources: boolean
 }
 
 /** One venue and what Vessel can do there. The browser checks capabilities, never venue names. */
@@ -51,7 +51,8 @@ export interface SystemInfo {
   version: string
 }
 
-const capabilityNames = ['sync', 'instruments', 'orders', 'candles', 'marketContext', 'stream', 'stablecoinWallet']
+const capabilityNames = ['sync', 'instruments', 'orders', 'candles', 'marketContext', 'stream', 'stablecoinWallet',
+  'accountDiscovery', 'readOnlyCredential', 'manualExecutions', 'currentOrderBook', 'paperExecution', 'fillHistory', 'marketSources']
 
 export function isHttpsUrl(value: unknown): value is string {
   if (typeof value !== 'string' || !value.startsWith('https://') || value.length > 2048) return false
@@ -73,10 +74,6 @@ function isVenue(value: unknown): value is VenueInfo {
     ['planned', 'candidate', 'manual', 'read-only'].includes(String(value.status)) &&
     ['none', 'evm-address', 'account-index'].includes(String(value.source)) &&
     isRecord(value.capabilities) && capabilityNames.every(name => typeof (value.capabilities as Record<string, unknown>)[name] === 'boolean') &&
-    ['accountDiscovery', 'readOnlyCredential', 'manualExecutions', 'currentOrderBook', 'paperExecution', 'fillHistory', 'marketSources'].every(name => {
-      const flag = (value.capabilities as Record<string, unknown>)[name]
-      return flag === undefined || typeof flag === 'boolean'
-    }) &&
     (value.quoteAsset === null || typeof value.quoteAsset === 'string') &&
     (value.tradeUrlTemplate === null || isTradeUrlTemplate(value.tradeUrlTemplate)) &&
     (value.credentialSetupUrl == null || isHttpsUrl(value.credentialSetupUrl)) &&

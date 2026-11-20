@@ -18,6 +18,7 @@ using Vessel.Persistence;
 using Vessel.Persistence.Events;
 using Vessel.Persistence.Events.Subscriptions;
 using Wolverine;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -368,7 +369,7 @@ public sealed class MultiOwnerEventTests
         await using var runtime = await OwnerEventRuntime.CreateAsync();
         await using (var db = runtime.Database.Context(runtime.First))
         {
-            db.Accounts.Add(new Account(Guid.NewGuid(), runtime.First, "manual", "No event cursor"));
+            db.Accounts.Add(new Account(Guid.NewGuid(), runtime.First, "manual", "No event cursor", TradingMode.Real));
             await db.SaveChangesAsync();
         }
         await runtime.AppendAsync(runtime.Second, "cursor");

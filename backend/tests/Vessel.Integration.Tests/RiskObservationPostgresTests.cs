@@ -7,6 +7,7 @@ using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -42,7 +43,7 @@ public sealed class RiskObservationPostgresTests
 
     private static async Task<Account> AddAccountAsync(VesselDbContext db, Guid owner)
     {
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Account", TradingMode.Real);
         account.Configure(null, "0x" + new string('a', 40), null);
         db.Accounts.Add(account);
         await db.SaveChangesAsync();

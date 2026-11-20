@@ -45,20 +45,20 @@ public sealed class IfThenRulePostgresTests
         await using var first = database.Context(owner);
         var work = TestUnitOfWork.For(first);
         var service = new PlayService(new Vessel.Persistence.PlayStore(first, work), null!, TimeProvider.System, work);
-        await service.SetRuleAsync("real", new("the stop is hit", "I wait a day"), default);
+        await service.SetRuleAsync(TradingMode.Real, new("the stop is hit", "I wait a day"), default);
         var pause = new PauseActiveRead();
         await using var second = new Vessel.Persistence.VesselDbContext(new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<Vessel.Persistence.VesselDbContext>()
             .UseNpgsql(database.ConnectionString).AddInterceptors(pause).Options, new CoreOwner(owner));
         var secondWork = TestUnitOfWork.For(second);
         var stale = new PlayService(new Vessel.Persistence.PlayStore(second, secondWork), null!, TimeProvider.System, secondWork);
-        var late = staleIsArchive ? stale.ArchiveRuleAsync("real", 1, default)
-            : stale.SetRuleAsync("real", new("the stop is hit twice", "I stop for the week", ExpectedVersion: 1), default);
+        var late = staleIsArchive ? stale.ArchiveRuleAsync(TradingMode.Real, 1, default)
+            : stale.SetRuleAsync(TradingMode.Real, new("the stop is hit twice", "I stop for the week", ExpectedVersion: 1), default);
         await pause.Selected.Task.WaitAsync(TimeSpan.FromSeconds(15));
-        if (staleIsArchive) await service.SetRuleAsync("real", new("a new setup", "I size down", ExpectedVersion: 1), default);
-        else await service.ArchiveRuleAsync("real", 1, default);
+        if (staleIsArchive) await service.SetRuleAsync(TradingMode.Real, new("a new setup", "I size down", ExpectedVersion: 1), default);
+        else await service.ArchiveRuleAsync(TradingMode.Real, 1, default);
         pause.Resume.TrySetResult();
         Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => late)).StatusCode);
-        var state = await service.RuleAsync("real", default);
+        var state = await service.RuleAsync(TradingMode.Real, default);
         Assert.Equal(staleIsArchive ? 2 : null, state.Active?.Version);
     }
 }

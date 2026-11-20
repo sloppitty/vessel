@@ -5,6 +5,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Markets;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -20,7 +21,7 @@ public sealed class SizingActivityFallbackTests
     private readonly List<ImportedFill> fills = [];
     private readonly List<Account> accounts = [];
 
-    public SizingActivityFallbackTests() => accounts.Add(new Account(accountId, owner, "risex", "Venue"));
+    public SizingActivityFallbackTests() => accounts.Add(new Account(accountId, owner, "risex", "Venue", TradingMode.Real));
 
     private ImportedFill Fill(int minute, string side, string effect, decimal price, decimal pnl = 0, decimal fee = 0, string basis = "gross",
         string token = "USDC", decimal quantity = 1, Guid? account = null) => new()
@@ -53,7 +54,7 @@ public sealed class SizingActivityFallbackTests
         RoundTrip(0, 10, fee: 0.5m);   // win: 10 − 1 fee = 9 on 100 notional
         RoundTrip(100, -4, fee: 0.5m); // loss: −4 − 1 = −5
         fills.Add(Fill(300, "buy", "open", 100)); // open: never scored
-        var result = await Service().GetAsync(default);
+        var result = await Service().GetAsync(TradingMode.Real, default);
 
         Assert.Equal(SizingService.SourceActivity, result.Record.Source);
         Assert.Equal((2, 2, 1, 1), (result.Record.ClosedPlays, result.Record.DecidedPlays, result.Record.Wins, result.Record.Losses));
@@ -76,7 +77,7 @@ public sealed class SizingActivityFallbackTests
         RoundTrip(0, 0, fee: 0.05m);  // flat before fees, -0.1 after: a fee-only loss
         RoundTrip(100, -1, fee: 0.05m); // a loss before fees too
         RoundTrip(200, 10);
-        var record = (await Service().GetAsync(default)).Record;
+        var record = (await Service().GetAsync(TradingMode.Real, default)).Record;
         Assert.Equal((SizingService.SourceActivity, 2, 1), (record.Source, record.Losses, record.FeeOnlyLosses));
         Assert.Equal(((int?)null, (int?)null, 0), (record.LocalSignChanges, record.LocalUnknown, record.UnknownGrossLosses));
     }
@@ -85,7 +86,7 @@ public sealed class SizingActivityFallbackTests
     public async Task Net_of_fee_results_are_not_charged_their_fee_twice()
     {
         RoundTrip(0, 10, fee: 0.5m, basis: "net-of-fee"); // entry −0.5, exit 10 already net
-        var result = await Service().GetAsync(default);
+        var result = await Service().GetAsync(TradingMode.Real, default);
         Assert.Equal("9.5", Assert.Single(result.Record.Recent).NetResultUsd);
     }
 
@@ -94,7 +95,7 @@ public sealed class SizingActivityFallbackTests
     {
         RoundTrip(0, 10, fee: 0.5m, token: "HYPE"); // gross fee in an unlisted token: net unknown
         fills.Add(Fill(100, "sell", "close", 110, 5)); // a close without its opening: incomplete
-        var result = await Service().GetAsync(default);
+        var result = await Service().GetAsync(TradingMode.Real, default);
         Assert.Equal(SizingService.SourceNone, result.Record.Source);
         Assert.Equal(0, result.Record.ClosedPlays);
         Assert.Empty(result.Record.Recent);
@@ -107,13 +108,13 @@ public sealed class SizingActivityFallbackTests
         // Balanced retained fills look closed, but both orders filled size 2 and only one execution of each is retained.
         RoundTrip(0, 10);
         store.Orders.AddRange([Order("0", "buy", 2), Order("10", "sell", 2)]);
-        var result = await Service().GetAsync(default);
+        var result = await Service().GetAsync(TradingMode.Real, default);
         Assert.Equal((SizingService.SourceNone, 0), (result.Record.Source, result.Record.ClosedPlays));
 
         // A fully retained order, an order on another contract with the same venue ID and an unfilled one prove nothing missing.
         store.Orders.Clear();
         store.Orders.AddRange([Order("0", "buy", 1), Order("10", "sell", 2, contract: "ETH"), Order("10", "sell", 2, status: "canceled")]);
-        result = await Service().GetAsync(default);
+        result = await Service().GetAsync(TradingMode.Real, default);
         Assert.Equal((SizingService.SourceActivity, 1, 1), (result.Record.Source, result.Record.ClosedPlays, result.Record.Wins));
     }
 
@@ -128,7 +129,7 @@ public sealed class SizingActivityFallbackTests
         fills.Add(reopen);
         fills.Add(Fill(30, "buy", "close", 100, 10));
         store.Orders.Add(Order("10", "sell", 2));
-        var result = await Service().GetAsync(default);
+        var result = await Service().GetAsync(TradingMode.Real, default);
         Assert.Equal((SizingService.SourceActivity, 2), (result.Record.Source, result.Record.Wins));
     }
 
@@ -139,12 +140,12 @@ public sealed class SizingActivityFallbackTests
         fills.Add(Fill(0, "buy", "open", 0.00000001m, quantity: 0.00000001m));
         fills.Add(Fill(10, "sell", "close", 0.00000002m, 1_000_000_000_000_000_000m, quantity: 0.00000001m));
         RoundTrip(100, 5);
-        var result = await Service().GetAsync(default);
+        var result = await Service().GetAsync(TradingMode.Real, default);
         Assert.Equal((SizingService.SourceActivity, 1, 1), (result.Record.Source, result.Record.ClosedPlays, result.Record.Wins));
         Assert.Equal("5", Assert.Single(result.Record.Recent).ReturnPercent);
 
         fills.RemoveRange(2, 2);
-        result = await Service().GetAsync(default);
+        result = await Service().GetAsync(TradingMode.Real, default);
         Assert.Equal((SizingService.SourceNone, 0), (result.Record.Source, result.Record.ClosedPlays));
     }
 
@@ -154,14 +155,14 @@ public sealed class SizingActivityFallbackTests
         // 1e-14 × 1.5e-14 = 1.5e-28 exactly; rounded to 28 places it would be 2e-28 and score 50% instead of 66.67%.
         fills.Add(Fill(0, "buy", "open", 0.000000000000015m, quantity: 0.00000000000001m));
         fills.Add(Fill(10, "sell", "close", 0.00000000000002m, 0.0000000000000000000000000001m, quantity: 0.00000000000001m));
-        var result = await Service().GetAsync(default);
+        var result = await Service().GetAsync(TradingMode.Real, default);
         Assert.Equal((SizingService.SourceNone, 0), (result.Record.Source, result.Record.ClosedPlays));
 
         // The same tiny scale is scored when the exact product is representable: 1e-28 over 2e-28 is 50%.
         fills.Clear();
         fills.Add(Fill(0, "buy", "open", 0.00000000000002m, quantity: 0.00000000000001m));
         fills.Add(Fill(10, "sell", "close", 0.00000000000003m, 0.0000000000000000000000000001m, quantity: 0.00000000000001m));
-        result = await Service().GetAsync(default);
+        result = await Service().GetAsync(TradingMode.Real, default);
         Assert.Equal((SizingService.SourceActivity, 1), (result.Record.Source, result.Record.Wins));
         Assert.Equal("50", Assert.Single(result.Record.Recent).ReturnPercent);
     }
@@ -176,11 +177,11 @@ public sealed class SizingActivityFallbackTests
     [Fact]
     public async Task Disabled_accounts_do_not_contribute()
     {
-        var disabled = new Account(Guid.NewGuid(), owner, "risex", "Disabled");
+        var disabled = new Account(Guid.NewGuid(), owner, "risex", "Disabled", TradingMode.Real);
         disabled.UpdateSettings(disabled.Name, null, false);
         accounts.Add(disabled);
         RoundTrip(0, 10, account: disabled.Id);
-        var result = await Service().GetAsync(default);
+        var result = await Service().GetAsync(TradingMode.Real, default);
         Assert.Equal((SizingService.SourceNone, 0), (result.Record.Source, result.Record.ClosedPlays));
     }
 
@@ -189,7 +190,7 @@ public sealed class SizingActivityFallbackTests
     {
         for (var i = 0; i < 22; i++) RoundTrip(i * 100, 5);
         for (var i = 22; i < 25; i++) RoundTrip(i * 100, -2);
-        var result = await Service().GetAsync(default);
+        var result = await Service().GetAsync(TradingMode.Real, default);
         Assert.Equal((25, 20, 17, 3), (result.Record.ClosedPlays, result.Record.Recent.Count, result.Record.Wins, result.Record.Losses));
         Assert.Equal(("half", "0.5"), (result.Exposure.Level, result.Exposure.Multiplier));
         Assert.Equal("0.625", result.Limits.EffectiveRiskPercent);
@@ -200,12 +201,12 @@ public sealed class SizingActivityFallbackTests
     public async Task Positions_closing_at_the_same_time_are_disclosed_like_plays()
     {
         // Two accounts close at the same fill time; a third result closes later. Their order is not known, only disclosed.
-        var other = new Account(Guid.NewGuid(), owner, "risex", "Other");
+        var other = new Account(Guid.NewGuid(), owner, "risex", "Other", TradingMode.Real);
         accounts.Add(other);
         RoundTrip(0, 10);
         RoundTrip(0, -4, account: other.Id);
         RoundTrip(100, -4);
-        var result = await Service().GetAsync(default);
+        var result = await Service().GetAsync(TradingMode.Real, default);
         Assert.Equal((SizingService.SourceActivity, 3), (result.Record.Source, result.Record.DecidedPlays));
         Assert.Equal("Full size: no losing streak. 2 results share an exit time; their order is not known." +
             " Counted from closed Activity positions until a play closes with a win or loss.", result.Exposure.Reason);
@@ -219,7 +220,7 @@ public sealed class SizingActivityFallbackTests
     {
         RoundTrip(0, -4); RoundTrip(100, -4); RoundTrip(200, -4);
         store.Closed.Add(ClosedPlay(win: true));
-        var result = await Service().GetAsync(default);
+        var result = await Service().GetAsync(TradingMode.Real, default);
         Assert.Equal(SizingService.SourcePlays, result.Record.Source);
         Assert.Equal((1, 1, 0), (result.Record.ClosedPlays, result.Record.Wins, result.Record.Losses));
         Assert.Equal("full", result.Exposure.Level);
@@ -232,7 +233,7 @@ public sealed class SizingActivityFallbackTests
     {
         RoundTrip(0, 3);
         store.Closed.Add(ClosedPlay(win: true, retrospective: true));
-        var result = await Service().GetAsync(default);
+        var result = await Service().GetAsync(TradingMode.Real, default);
         Assert.Equal(SizingService.SourceActivity, result.Record.Source);
         Assert.Equal(1, result.Record.Wins);
     }
@@ -240,7 +241,7 @@ public sealed class SizingActivityFallbackTests
     [Fact]
     public async Task Without_activity_the_existing_play_record_is_unchanged()
     {
-        var result = await new SizingService(store, new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.None).GetAsync(default);
+        var result = await new SizingService(store, new CoreOwner(owner), TimeProvider.System, TestUnitOfWork.None).GetAsync(TradingMode.Real, default);
         Assert.Equal((SizingService.SourcePlays, 0), (result.Record.Source, result.Record.ClosedPlays));
     }
 

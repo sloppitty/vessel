@@ -1,6 +1,7 @@
 using Vessel.Application.Plays;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -13,7 +14,7 @@ public partial class ManualLedgerPrecisionTestsValues
 
     internal static Play CreatePlay(string direction, Account? account = null)
     {
-        account ??= new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Precision");
+        account ??= new Account(Guid.NewGuid(), Guid.NewGuid(), "manual", "Precision", TradingMode.Real);
         return new(Guid.NewGuid(), account, new("manual", "BTC"), InstrumentSource.Manual,
             PlayDocuments.Serialize(TestPlays.Plan() with { Direction = direction }), At.AddSeconds(-1));
     }

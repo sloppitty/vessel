@@ -3,6 +3,7 @@ using Vessel.Domain.Accounts;
 using Vessel.Domain.Workspace;
 using Vessel.Infrastructure.Venues.Lighter;
 using Vessel.Persistence;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -24,7 +25,7 @@ public sealed class LighterAdapterPersistenceTests
         Assert.True(notice.Length <= limit, $"{notice.Length} characters exceed the {limit}-character HistoryNotice column.");
         foreach (var coverage in AccountHistoryNoticeBudget.CombinedCases())
         {
-            var account = new Account(Guid.NewGuid(), Guid.NewGuid(), coverage.Venue, "Coverage");
+            var account = new Account(Guid.NewGuid(), Guid.NewGuid(), coverage.Venue, "Coverage", TradingMode.Real);
             account.RecordSync(DateTimeOffset.UnixEpoch, "Prior public coverage.");
             account.RecordOrderHistoryNotice(coverage.Orders);
             account.RecordSync(DateTimeOffset.UnixEpoch.AddSeconds(1), coverage.Public);

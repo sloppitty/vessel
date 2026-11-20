@@ -32,7 +32,7 @@ public sealed class FactsExportService(IFactsExportStore store, IVenueRegistry v
         DateTimeOffset? until = end is null ? null : end.Value.Date == DateTime.MaxValue.Date
             ? throw new ProblemException(400, "The end date is out of range.") : end.Value.AddDays(1);
         var account = await store.AccountAsync(accountId, ct) ?? throw new ProblemException(404, "Account not found.");
-        if (account.TradingMode != TradingMode.Real) throw new ProblemException(409, "Paper accounts have no retained venue facts to export.");
+        account.RequireReal("Paper accounts have no retained venue facts to export.");
         if (!account.IsEnabled) throw new ProblemException(409, "Enable the account to export its facts.");
         var venue = venues.Descriptor(account.VenueId)?.Name ?? account.VenueId;
         var source = account.SourceId ?? account.Address;

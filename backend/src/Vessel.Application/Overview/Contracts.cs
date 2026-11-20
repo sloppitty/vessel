@@ -1,3 +1,4 @@
+using Vessel.Domain.Common;
 namespace Vessel.Application.Overview;
 
 public sealed record SummaryReason(string Reason, int Count);
@@ -14,4 +15,4 @@ public sealed record OverviewSummaryRow(string Id, string Name, string? Icon, st
     OverviewSummaryTotals Totals, BalanceShare? ShareOfBalance);
 public sealed record OverviewSummaryDto(string GroupBy, string Period, string Scope, DateTimeOffset AsOfUtc,
     DateTimeOffset? FromUtc, OverviewSummaryTotals Totals, IReadOnlyList<OverviewSummaryRow> Rows,
-    int TotalGroupCount, int OmittedGroupCount, string ScopeNote, string TradingMode = "real");
+    int TotalGroupCount, int OmittedGroupCount, string ScopeNote, TradingMode TradingMode);

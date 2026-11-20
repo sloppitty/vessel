@@ -6,6 +6,7 @@ using Vessel.Application.Plays;
 using Vessel.Domain.Accounts;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Workspace;
+using Vessel.Domain.Common;
 
 namespace Vessel.Tests;
 
@@ -56,7 +57,7 @@ public sealed class FactsExportTests
     [Fact]
     public async Task Executions_keep_native_ids_exact_decimals_and_their_fee_apart()
     {
-        var account = new Account(Guid.NewGuid(), Owner, "hyperliquid", "=Main");
+        var account = new Account(Guid.NewGuid(), Owner, "hyperliquid", "=Main", TradingMode.Real);
         var store = new Store(account);
         store.Fills.Add(Fill(account, "f1", 100.123456789m, -3.5m, 5));
         var file = await new FactsExportService(store, TestVenues.With(), TimeProvider.System).PrepareAsync(account.Id, "executions", null, null, default);
@@ -72,7 +73,7 @@ public sealed class FactsExportTests
     [Fact]
     public async Task Manual_executions_follow_with_their_play_role_and_source_label()
     {
-        var account = new Account(Guid.NewGuid(), Owner, "manual", "Broker");
+        var account = new Account(Guid.NewGuid(), Owner, "manual", "Broker", TradingMode.Real);
         var store = new Store(account);
         var play = Guid.NewGuid();
         store.Manual.Add(new ManualExecution
@@ -90,7 +91,7 @@ public sealed class FactsExportTests
     [Fact]
     public async Task Funding_is_its_own_file_with_native_nanoseconds()
     {
-        var account = new Account(Guid.NewGuid(), Owner, "risex", "Rise");
+        var account = new Account(Guid.NewGuid(), Owner, "risex", "Rise", TradingMode.Real);
         var store = new Store(account);
         store.Funding.Add(new FundingPayment
         {
@@ -111,7 +112,7 @@ public sealed class FactsExportTests
     [InlineData("executions", null, "9999-12-31", 400)] // Sol round 1 on #39: no next day to end on, so not a 500.
     public async Task Requests_are_checked_before_anything_is_read(string kind, string? from, string? to, int status)
     {
-        var account = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Main");
+        var account = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Main", TradingMode.Real);
         var error = await Assert.ThrowsAsync<ProblemException>(() =>
             new FactsExportService(new Store(account), TestVenues.With(), TimeProvider.System).PrepareAsync(account.Id, kind, from, to, default));
         Assert.Equal(status, error.StatusCode);
@@ -120,13 +121,14 @@ public sealed class FactsExportTests
     [Fact]
     public async Task Unknown_disabled_and_paper_accounts_are_refused()
     {
-        var disabled = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Off");
+        var disabled = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Off", TradingMode.Real);
         disabled.UpdateSettings("Off", null, false);
         var service = new FactsExportService(new Store(disabled), TestVenues.With(), TimeProvider.System);
         Assert.Equal(404, (await Assert.ThrowsAsync<ProblemException>(() => service.PrepareAsync(Guid.NewGuid(), "executions", null, null, default))).StatusCode);
         Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => service.PrepareAsync(disabled.Id, "executions", null, null, default))).StatusCode);
-        var paper = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Paper", "paper");
-        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
-            new FactsExportService(new Store(paper), TestVenues.With(), TimeProvider.System).PrepareAsync(paper.Id, "funding", null, null, default))).StatusCode);
+        var paper = new Account(Guid.NewGuid(), Owner, "hyperliquid", "Paper", TradingMode.Paper);
+        // #113: Account.RequireReal refuses it, a 409 with this message at the API.
+        Assert.Equal("Paper accounts have no retained venue facts to export.", (await Assert.ThrowsAsync<DomainRuleException>(() =>
+            new FactsExportService(new Store(paper), TestVenues.With(), TimeProvider.System).PrepareAsync(paper.Id, "funding", null, null, default))).Message);
     }
 }
