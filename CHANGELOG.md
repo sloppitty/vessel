@@ -78,6 +78,10 @@
 - Review loads much faster (about 1.8 s to 0.2 s on the benchmark journal): unassigned fills
   are counted by order key, and only the closed Plays in the selected scope are read. An
   excluded Play now lists its reasons in a stable order, by fill time.
+- An API or worker image older than the database schema now refuses to become ready or to
+  start, and logs the unknown migration IDs.
+- A worker whose loop makes no progress for `Vessel:Worker:StaleExitAfter` (default 10
+  minutes) exits with code 3, so Compose restarts it.
 
 ### Changed
 
@@ -105,6 +109,9 @@
   filled in defaults for older API versions.
 - Store ports no longer have default members: every production store implements each member
   explicitly, and an architecture test rejects new defaults.
+- Every Compose service has capped logs, `no-new-privileges`, no capabilities beyond those
+  listed and a read-only root, and every long-running service has a health check (new for
+  web and the TLS proxy).
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and
@@ -125,7 +132,12 @@ which skips rows that already hold the current projection version.
 
     docker compose run --rm --no-deps --entrypoint dotnet migrate /app/Vessel.Api.dll play-search-rebuild --apply --all
 
-No configuration changes.
+Compose: `docker compose up -d` recreates every container and creates the `api-tmp` volume.
+Restore commands that run as root now need `--cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add
+FOWNER`. With `tls internal`, Caddy logs that it cannot install its root certificate, because
+its root filesystem is read-only; see `deploy/README.md`.
+
+Configuration: `Vessel:Worker:StaleExitAfter` (optional, 2 minutes to 2 hours, default 10 minutes).
 
 ## 0.4.2 - November 7, 2026
 
