@@ -48,6 +48,8 @@ COPY --from=build /out/worker/ /app/worker-host/
 COPY --from=build --chmod=755 /out/migrate-ef /app/migrate-ef
 COPY --from=build --chmod=755 /out/migrate-identity-ef /app/migrate-identity-ef
 COPY --chmod=755 deploy/migrate deploy/worker deploy/worker-health /app/
+# Every release's upgrade manifest; deploy/vessel upgrade reads the target image's (issue #101).
+COPY docs/releases/*.upgrade.json /app/upgrade/
 ENV ASPNETCORE_HTTP_PORTS=8080 \
     ASPNETCORE_ENVIRONMENT=Production \
     Vessel__Evidence__Storage__Local__RootPath=/var/lib/vessel/evidence

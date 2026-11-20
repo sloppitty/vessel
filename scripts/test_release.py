@@ -21,6 +21,14 @@ spec.loader.exec_module(verify_release)
 REVISION = 'a' * 40
 
 
+MIGRATION = '20261201000000_Next'
+
+
+def upgrade_manifest(version, journal=(), identity=(), post_steps=(), configuration=(), **extra):
+    return json.dumps({'version': version, 'migrations': {'journal': list(journal), 'identity': list(identity)},
+                       'postSteps': [list(step) for step in post_steps], 'configuration': list(configuration), **extra})
+
+
 def write_release(root, version='1.2.3', **overrides):
     files = {
         'frontend/package.json': json.dumps({'name': 'vessel-frontend', 'version': version}),
@@ -32,6 +40,11 @@ def write_release(root, version='1.2.3', **overrides):
         'deploy/.env.example': f'VESSEL_VERSION={version}\n',
         'CHANGELOG.md': f'# Changelog\n\n## Unreleased\n\n## {version} - October 15, 2026\n',
         f'docs/releases/v{version}.md': 'Notes.\n',
+        f'docs/releases/v{version}.upgrade.json': upgrade_manifest(version, journal=[MIGRATION]),
+        'backend/src/Vessel.Persistence/Migrations/20261201000000_Next.Designer.cs':
+            f'[DbContext(typeof(VesselDbContext))]\n[Migration("{MIGRATION}")]\npartial class Next {{}}\n',
+        'backend/src/Vessel.Identity/Migrations/20261017155708_InitialIdentity.Designer.cs':
+            '[Migration("20261017155708_InitialIdentity")]\n',
     }
     files.update(overrides)
     for path, text in files.items():
@@ -83,6 +96,46 @@ class ReleaseCheckTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, 'v1.2.3.md are missing or empty'):
             self.check(**{'docs/releases/v1.2.3.md': '\n'})
 
+    def test_an_upgrade_manifest_is_required_from_0_4_3(self):
+        with self.assertRaisesRegex(release.ReleaseError, r'v1.2.3.upgrade.json is missing'):
+            self.check(**{'docs/releases/v1.2.3.upgrade.json': None})
+        self.assertEqual('0.4.2', self.check(version='0.4.2', **{'docs/releases/v0.4.2.upgrade.json': None}))
+        with self.assertRaisesRegex(release.ReleaseError, r'v0.4.3.upgrade.json is missing'):
+            self.check(version='0.4.3', **{'docs/releases/v0.4.3.upgrade.json': None})
+
+    def test_upgrade_manifest_migrations_must_exist_in_the_source(self):
+        self.assertEqual('1.2.3', self.check(**{'docs/releases/v1.2.3.upgrade.json': upgrade_manifest(
+            '1.2.3', journal=[MIGRATION], identity=['20261017155708_InitialIdentity'],
+            post_steps=[['play-search-rebuild', '--apply', '--all']], configuration=['A new setting.'])}))
+        with self.assertRaisesRegex(release.ReleaseError, 'journal migration 20261202000000_Typo is not in'):
+            self.check(**{'docs/releases/v1.2.3.upgrade.json': upgrade_manifest('1.2.3', journal=['20261202000000_Typo'])})
+        # An identity migration listed as a journal one is not in the journal assembly.
+        with self.assertRaisesRegex(release.ReleaseError, 'journal migration 20261017155708_InitialIdentity'):
+            self.check(**{'docs/releases/v1.2.3.upgrade.json': upgrade_manifest(
+                '1.2.3', journal=['20261017155708_InitialIdentity'])})
+
+    def test_every_upgrade_manifest_is_checked_and_lists_a_migration_once(self):
+        with self.assertRaisesRegex(release.ReleaseError, f'{MIGRATION} is already listed by 1.2.2'):
+            self.check(**{'docs/releases/v1.2.2.upgrade.json': upgrade_manifest('1.2.2', journal=[MIGRATION])})
+        for manifest, message in (
+                ('{', 'is not JSON'),
+                (upgrade_manifest('1.2.4'), '"version" is 1.2.3'),
+                (json.dumps({'version': '1.2.3', 'migrations': {'journal': [], 'identity': []}}), 'exactly version'),
+                (upgrade_manifest('1.2.3', extra=1), 'exactly version'),
+                (json.dumps({'version': '1.2.3', 'migrations': {'journal': []}, 'postSteps': [], 'configuration': []}),
+                 'must list journal and identity'),
+                (upgrade_manifest('1.2.3', journal=[MIGRATION, MIGRATION]), 'distinct IDs'),
+                (upgrade_manifest('1.2.3', post_steps=[['sh', '-c', 'x'], ['Bad Command']]), 'postSteps must be'),
+                (upgrade_manifest('1.2.3', post_steps=[[]]), 'postSteps must be'),
+                (upgrade_manifest('1.2.3', configuration=['']), 'configuration must be')):
+            with self.subTest(message=message), self.assertRaisesRegex(release.ReleaseError, message):
+                self.check(**{'docs/releases/v1.2.3.upgrade.json': manifest})
+
+    def test_the_repository_manifests_are_valid(self):
+        manifests = release.upgrade_manifests(release.ROOT)
+        self.assertIn('0.4.3', manifests)
+        self.assertEqual(['play-search-rebuild', '--apply', '--all'], manifests['0.4.3']['postSteps'][0])
+
     def test_non_semantic_versions_are_rejected(self):
         with self.assertRaisesRegex(release.ReleaseError, 'is not MAJOR.MINOR.PATCH'):
             self.check(version='1.2')
@@ -106,6 +159,28 @@ def write_archive(path, config, tags, name=None):
             info = tarfile.TarInfo(name)
             info.size = len(data)
             archive.addfile(info, io.BytesIO(data))
+
+
+class UpgradeCheckTests(unittest.TestCase):
+    def versions(self, **overrides):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_release(root, **{'docs/releases/v1.2.2.md': 'Notes.\n', 'docs/releases/v1.1.9.md': 'Notes.\n',
+                                   **overrides})
+            return verify_release.upgrade_versions(root)
+
+    def test_a_release_upgrades_from_the_newest_release_before_it(self):
+        self.assertEqual(('1.2.3', '1.2.2'), self.versions())
+        self.assertEqual(('1.2.3', '1.1.9'), self.versions(**{'docs/releases/v1.2.2.md': None}))
+
+    def test_an_unbumped_tree_is_the_candidate_of_its_newest_upgrade_manifest(self):
+        self.assertEqual(('1.2.10', '1.2.3'), self.versions(**{
+            'docs/releases/v1.2.10.upgrade.json': upgrade_manifest('1.2.10'),
+            'docs/releases/v1.2.9.upgrade.json': upgrade_manifest('1.2.9')}))
+
+    def test_post_steps_run_once_in_release_order(self):
+        manifests = [{'postSteps': [['a'], ['b', '--x']]}, {'postSteps': [['b', '--x'], ['c']]}]
+        self.assertEqual([['a'], ['b', '--x'], ['c']], verify_release.release_steps(manifests))
 
 
 class ImageArchiveTests(unittest.TestCase):
@@ -756,9 +831,14 @@ class PrebuiltImageVerificationTests(unittest.TestCase):
         check.expect = Mock()
         check.cleanup = Mock()
         with patch.object(verify_release, 'run', return_value=Mock(stderr='--with-http_realip_module')) as run, \
-                patch.object(verify_release.subprocess, 'run', return_value=Mock(returncode=1)):
+                patch.object(verify_release.subprocess, 'run', return_value=Mock(returncode=1)), \
+                patch.object(verify_release, 'Upgrade') as upgrade:
             with self.assertRaisesRegex(RuntimeError, 'stop after the image checks'):
                 check.main()
+        # The upgrade from the previous release checks the same loaded images, and is removed before the rest.
+        upgrade.assert_called_once_with(check)
+        upgrade.return_value.check.assert_called_once()
+        upgrade.return_value.cleanup.assert_called_once()
         commands = [call.args[:2] for call in run.call_args_list]
         self.assertEqual(('docker', 'image'), commands[0])
         self.assertEqual(('example/vessel:api-1.2.3', 'example/vessel:web-1.2.3'), run.call_args_list[0].args[3:])

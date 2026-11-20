@@ -64,6 +64,25 @@ def inspect(service, state='running', oneoff=False, image='skorcius/vessel:api-1
             'State': {'Status': state}}
 
 
+def release_archive(files):
+    """What `tar -C /app/upgrade -cf - .` writes for these {file name: manifest}."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w') as archive:
+        archive.addfile(_directory('.'))
+        for name, manifest in files.items():
+            data = json.dumps(manifest).encode()
+            info = tarfile.TarInfo('./' + name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+def _directory(name):
+    info = tarfile.TarInfo(name)
+    info.type = tarfile.DIRTYPE
+    return info
+
+
 class Result:
     def __init__(self, returncode=0, stdout=''):
         self.returncode, self.stdout = returncode, stdout
@@ -89,6 +108,10 @@ class FakeStack(vessel.Stack):
         self.images = set(images if images is not None else {f'skorcius/vessel:api-{version}',
                                                              f'skorcius/vessel:web-{version}', 'postgres:18-alpine'})
         self.known_ids = known or {}
+        # Upgrade manifests each API image carries, by image: {file name: manifest}. An image not listed carries an
+        # empty manifest for its own version; None means no manifest directory (releases before 0.4.3), and a
+        # number is the exit code of a failing read.
+        self.upgrade_files = {}
         self.volumes = {'p_postgres', 'p_objects', 'p_evidence'}
 
     def run(self, args, *, stdin=None, stdout=None, capture=False, binary=False, check=True, env=None):
@@ -126,6 +149,13 @@ class FakeStack(vessel.Stack):
             return Result(stdout=assembly(*ids))
         if args[:2] == ['docker', 'run'] and 'du' in args:
             return Result(stdout='2048\t/v\n')
+        if args[:2] == ['docker', 'run'] and args[args.index('--entrypoint') + 1] == 'tar' and vessel.UPGRADE_DIR in args:
+            image = args[args.index('--entrypoint') + 2]
+            version = image.rsplit(':api-', 1)[1]
+            files = self.upgrade_files.get(image, {f'v{version}.upgrade.json': {'version': version}})
+            if files is None or isinstance(files, int):
+                return Result(files or 2, b'')
+            return Result(stdout=release_archive(files))
         return self.other(args)
 
     def other(self, args):
@@ -172,7 +202,8 @@ def read_only(call):
     if call[:2] == ['docker', 'compose']:
         return 'config' in call or ('exec' in call and 'psql' in call and 'SELECT' in call[-1])
     if call[:2] == ['docker', 'run']:
-        return '--rm' in call and call[call.index('--network') + 1] == 'none' and ('cat' in call or 'du' in call)
+        return '--rm' in call and call[call.index('--network') + 1] == 'none' and (
+            'cat' in call or 'du' in call or (vessel.UPGRADE_DIR in call and '-cf' in call))
     return call[:3] in (['docker', 'ps', '-aq'], ['docker', 'image', 'inspect'], ['docker', 'volume', 'inspect'],
                         ['docker', 'volume', 'ls']) or call[:2] in (['docker', 'inspect'], ['docker', 'info'])
 
@@ -487,6 +518,102 @@ class ChangingCommandTests(ReadOnlyCommandTests):
         Path(self.directory.name, '.env').write_text('VESSEL_VERSION=1.0.0\n')
         with self.assertRaisesRegex(vessel.Failure, '--no-pull'):
             quietly(vessel.upgrade, self.stack(), Args(to='1.2.0', yes=True, pull=False))
+
+    def test_upgrade_runs_the_post_steps_of_every_release_it_crosses_from_the_target_image(self):
+        stack = self.stack()
+        stack.images.update({'skorcius/vessel:api-1.1.0', 'skorcius/vessel:web-1.1.0'})
+        rebuild = ['play-search-rebuild', '--apply', '--all']
+        stack.upgrade_files['skorcius/vessel:api-1.1.0'] = {
+            'v1.0.0.upgrade.json': {'version': '1.0.0', 'postSteps': [['already-applied']]},
+            'v1.0.10.upgrade.json': {'version': '1.0.10', 'postSteps': [rebuild, ['second']],
+                                     'configuration': ['New optional setting.']},
+            'v1.0.9.upgrade.json': {'version': '1.0.9', 'postSteps': [['first']]},
+            'v1.1.0.upgrade.json': {'version': '1.1.0', 'migrations': {'journal': [NEW]}, 'postSteps': [rebuild]},
+            'v1.2.0.upgrade.json': {'version': '1.2.0', 'postSteps': [['not-yet']]},
+        }
+        code, out = quietly(vessel.upgrade, stack, Args(to='1.1.0', yes=True))
+        self.assertEqual(0, code, out)
+        steps = [e[1:] for e in stack.events if e[0] == 'dotnet']
+        self.assertEqual([('first',), tuple(rebuild), ('second',)], steps)
+        kinds = [e[0] for e in stack.events]
+        self.assertLess(kinds.index('migrate'), kinds.index('dotnet'))
+        self.assertLess(len(kinds) - 1 - kinds[::-1].index('dotnet'), kinds.index('up'))
+        self.assertIn('Release upgrade manifests: 1.0.9, 1.0.10, 1.1.0', out)
+        self.assertIn('1.0.10 configuration: New optional setting.', out)
+        self.assertIn(f'1.1.0 journal migrations: {NEW}', out)
+
+    def test_upgrade_reads_the_manifests_of_a_pulled_image_before_stopping_anything(self):
+        stack = self.stack()
+        stack.upgrade_files['skorcius/vessel:api-1.1.0'] = {
+            'v1.1.0.upgrade.json': {'version': '1.1.0', 'postSteps': [['play-search-rebuild', '--apply']]}}
+        code, out = quietly(vessel.upgrade, stack, Args(to='1.1.0'))
+        self.assertEqual(2, code, out)
+        self.assertIn('Run the post-steps of the release upgrade manifests in the pulled 1.1.0 image.', out)
+        code, out = quietly(vessel.upgrade, stack, Args(to='1.1.0', yes=True))
+        self.assertEqual(0, code, out)
+        self.assertLess(out.index('Release upgrade manifests: 1.1.0'), out.index('Stopping web'))
+        self.assertIn(('dotnet', 'play-search-rebuild', '--apply'), stack.events)
+
+    def test_upgrade_to_a_release_before_manifests_runs_no_post_step(self):
+        Path(self.directory.name, '.env').write_text('VESSEL_VERSION=0.4.1\n')
+        stack = self.stack(version='0.4.1')
+        stack.state = [inspect(s, image='skorcius/vessel:api-0.4.1') for s in ('postgres', 'api', 'worker', 'web')]
+        stack.images.update({'skorcius/vessel:api-0.4.2', 'skorcius/vessel:web-0.4.2'})
+        stack.upgrade_files['skorcius/vessel:api-0.4.2'] = None
+        code, out = quietly(vessel.upgrade, stack, Args(to='0.4.2', yes=True))
+        self.assertEqual(0, code, out)
+        self.assertIn('carries no upgrade manifest', out)
+        self.assertNotIn('dotnet', [e[0] for e in stack.events])
+        self.assertIn(('migrate', '0.4.2'), stack.events)
+
+    def test_upgrade_to_0_4_3_or_later_stops_before_anything_when_its_manifest_is_missing(self):
+        image = 'skorcius/vessel:api-0.4.3'
+        cases = {'no manifest directory': (None, 'cannot be read'),
+                 'a failing read': (125, 'cannot be read'),
+                 'no manifest for the target': ({'v0.4.2.upgrade.json': {'version': '0.4.2'}}, 'no upgrade manifest '
+                                                                                                'for 0.4.3 itself')}
+        for case, (files, message) in cases.items():
+            with self.subTest(case):
+                Path(self.directory.name, '.env').write_text('VESSEL_VERSION=0.4.2\n')
+                stack = self.stack(version='0.4.2')
+                stack.state = [inspect(s, image='skorcius/vessel:api-0.4.2') for s in ('postgres', 'api', 'worker', 'web')]
+                stack.images.update({image, 'skorcius/vessel:web-0.4.3'})
+                stack.upgrade_files[image] = files
+                with self.assertRaisesRegex(vessel.Failure, message):
+                    quietly(vessel.upgrade, stack, Args(to='0.4.3', yes=True))
+                self.assertEqual([], stack.events)
+                # Read once pulled: still stops before any writer.
+                stack = self.stack(version='0.4.2')
+                stack.state = [inspect(s, image='skorcius/vessel:api-0.4.2') for s in ('postgres', 'api', 'worker', 'web')]
+                stack.upgrade_files[image] = files
+                with self.assertRaisesRegex(vessel.Failure, message):
+                    quietly(vessel.upgrade, stack, Args(to='0.4.3', yes=True))
+                self.assertEqual({'pull'}, {e[0] for e in stack.events})
+                self.assertEqual('VESSEL_VERSION=0.4.2\n', self.env_text())
+                self.assertEqual([], list(stack.backup_root.iterdir()) if stack.backup_root.exists() else [])
+
+    def test_an_invalid_manifest_or_one_for_another_version_stops_before_anything_changes(self):
+        stack = self.stack()
+        stack.images.update({'skorcius/vessel:api-1.1.0', 'skorcius/vessel:web-1.1.0'})
+        stack.upgrade_files['skorcius/vessel:api-1.1.0'] = {
+            'v1.1.0.upgrade.json': {'version': '1.1.0', 'postSteps': [['rm -rf /']]}}
+        with self.assertRaisesRegex(vessel.Failure, 'Invalid post-step'):
+            quietly(vessel.upgrade, stack, Args(to='1.1.0', yes=True))
+        path = Path(self.directory.name, 'other.json')
+        path.write_text(json.dumps({'version': '1.0.5'}))
+        with self.assertRaisesRegex(vessel.Failure, 'is for 1.0.5, not 1.1.0'):
+            quietly(vessel.upgrade, stack, Args(to='1.1.0', yes=True, manifest=str(path)))
+        self.assertEqual([], stack.events)
+        self.assertEqual('VESSEL_VERSION=1.0.0\n', self.env_text())
+
+    def test_a_manifest_file_replaces_the_images_own(self):
+        stack = self.stack()
+        stack.images.update({'skorcius/vessel:api-1.1.0', 'skorcius/vessel:web-1.1.0'})
+        stack.upgrade_files['skorcius/vessel:api-1.1.0'] = {
+            'v1.1.0.upgrade.json': {'version': '1.1.0', 'postSteps': [['from-image']]}}
+        code, out = quietly(vessel.upgrade, stack, Args(to='1.1.0', yes=True, manifest=self.upgrade_manifest()))
+        self.assertEqual(0, code, out)
+        self.assertEqual([('dotnet', 'play-search-rebuild', '--apply')], [e for e in stack.events if e[0] == 'dotnet'])
 
     def test_upgrade_refuses_a_running_service_the_configuration_does_not_define(self):
         stack = self.stack()

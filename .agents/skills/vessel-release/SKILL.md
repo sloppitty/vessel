@@ -39,7 +39,15 @@ section of `docs/development.md` first.
    repository files with absolute `https://github.com/<owner>/<repo>/blob/vX.Y.Z/...`
    URLs for the active release repository (currently `sloppitty/vessel`), not
    relative paths or links to a tag that exists only in another repository.
-4. Keep the version in step across:
+4. Write `docs/releases/vX.Y.Z.upgrade.json` from the changelog section:
+   `version`, `migrations` (`journal` and `identity` lists, empty when none),
+   `postSteps` (API command argument lists, such as
+   `["play-search-rebuild", "--apply"]`, that `deploy/vessel upgrade` runs after
+   `migrate`) and `configuration` notes. The API image carries it.
+   `release.py check` requires it and checks the migration IDs against the
+   source; `verify-release.py` upgrades the previous published release with it
+   and requires exactly its migrations.
+5. Keep the version in step across:
    - `frontend/package.json`
    - `backend/Directory.Build.props`
    - all `ARG VERSION` defaults in both Dockerfiles
@@ -48,8 +56,9 @@ section of `docs/development.md` first.
      `docs/development.md`
 
    `python3 scripts/release.py check --tag vX.Y.Z` checks the packaged files,
-   the changelog section and the notes; the docs examples are yours to check.
-5. Do not change dependencies, regenerate lockfiles unnecessarily or expand
+   the changelog section, the notes and the upgrade manifest; the docs examples
+   are yours to check.
+6. Do not change dependencies, regenerate lockfiles unnecessarily or expand
    product scope. Use the root-pinned pnpm through Corepack if needed.
 
 ## Verify locally
@@ -166,4 +175,5 @@ If authentication is missing, report publication as blocked, not completed.
 
 Report the source commit, Git tag and remote status, workflow run, tests and
 skips, image tags and digests, and the operator's next step. Release
-publication never means a live installation was upgraded.
+publication never means a live installation was upgraded; upgrading one is the
+`vessel-upgrade` skill, only on the owner's explicit request.
