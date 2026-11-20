@@ -19,7 +19,8 @@ The top-level [`AGENTS.md`](../AGENTS.md) applies first. The operator guide is
 ## Installations
 
 - Never bake secrets into images or expose plain HTTP to the internet.
-- The API never migrates at startup; `migrate` is an explicit one-shot step.
+- The API never migrates at startup. An upgrade the owner authorizes runs
+  `migrate` as an explicit one-shot step.
 - Upgrades stop every API and worker host and replica (including
   `worker-notifications`) and back up both schemas first. There is no rolling
   upgrade; rollback restores the pre-upgrade backup. A restore resets identity,
@@ -27,6 +28,8 @@ The top-level [`AGENTS.md`](../AGENTS.md) applies first. The operator guide is
 - Proxy trust: the default API trusts only the pinned web peer with one hop, and
   nginx overwrites forwarded claims. The Caddy TLS overlay unpublishes web and
   trusts only Caddy's pinned IP. Host-gateway trust is a weaker, documented opt-in.
+- PostgreSQL, evidence and credential-key mounts stay private (key files mode
+  600); the RabbitMQ management page binds to loopback.
 - A reverse proxy in front of Vessel must not replace its
   `Permissions-Policy: camera=(self)` header.
 - Registration stays `Closed` until the wallet acceptance checks pass and are
@@ -38,8 +41,14 @@ The top-level [`AGENTS.md`](../AGENTS.md) applies first. The operator guide is
 
 - With no storage settings the API uses `Local` at its original root; only
   `Provider=S3` opts in, and invalid S3 settings or outages never fall back.
+- Evidence writes use generated keys and conditional no-overwrite writes; reads
+  are private and proxied by the API; storage credentials stay server-only.
 - Files are never moved automatically. `evidence-copy-to-s3` and
-  `evidence-copy-to-local` dry-run by default and never delete originals; keep
-  writers stopped through the copy and cutover.
+  `evidence-copy-to-local` dry-run by default, verify size and SHA-256, refuse
+  conflicts and symlinks, and never delete originals or change metadata, the
+  provider or configuration. Keep writers stopped through the copies and cutover.
+  An export is not a complete database or bucket backup
+  ([evidence storage](../docs/architecture/evidence-storage.md)).
+- Do not apply the S3 Compose file to an API image without the S3 adapter.
 - RustFS backups include its entire stopped data volume.
 - Credential key-ring files are separate secret mounts, not S3 objects.

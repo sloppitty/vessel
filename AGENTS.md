@@ -13,14 +13,17 @@ Never:
 1. Read, print or expose `.env` files, secrets (tokens, passwords, credential
    keys) or the owner's database values, and never put secrets or keys in Vite,
    request URLs, logs, browser storage, images or chat.
-2. Apply migrations to the owner's database or a live one. Tests use only the
-   throwaway test database; migrations are explicit one-shot steps, never run at
-   API or worker startup.
+2. Apply a migration to the owner's or any live database during tests, or
+   without the owner authorizing that upgrade. Tests use only a throwaway
+   database; an authorized upgrade runs `migrate` as an explicit one-shot step,
+   never at API or worker startup.
 3. Push a tag, publish images, create a GitHub Release or deploy unless the owner
    asks. A release does not authorize deployment or changes to the owner's database.
 4. Use npm or yarn. pnpm is the only JavaScript package manager.
 5. Add CI triggers on branches or pull requests. CI runs only on release tags.
-6. Treat a price touch or market observation as a fill.
+6. Treat a price touch or market observation as an actual fill. Only the opt-in
+   Paper simulation counts touches, as simulated executions kept apart from
+   actual facts.
 7. Invent a thesis, intent, initial risk or leverage for imported history, or
    turn imported operations into Plays or links without the owner. Unknown values
    stay null (never zero or guessed) and exact decimal strings stay intact.
@@ -97,6 +100,10 @@ reach the database that `scripts/test-db.sh` publishes on loopback.
 - Record a new owner decision at the top of `docs/decisions.md`, and add
   "Superseded by" to any entry it replaces. Change this file only for rules that
   hold now.
+- Draft plans (such as `docs/architecture/strategies-plan.md`) do not authorize
+  implementation. Do not carry the separate Trading Diary project's architecture,
+  requirements or task states into Vessel.
+- Screenshots and captures use an isolated synthetic database, never the owner's.
 - Install the pre-push hook once per clone: `git config core.hooksPath scripts/hooks`.
 - Releases follow the [`vessel-release` skill](.agents/skills/vessel-release/SKILL.md):
   a release pull request, then an annotated `vX.Y.Z` tag on `main` that CI publishes.
