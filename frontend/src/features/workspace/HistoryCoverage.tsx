@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { errorMessage } from '@/api/errors'
-import type { FillCoverage, HistoryBackfill, HistoryCoverage as Coverage, HistoryGap, WorkspaceApi } from '@/api/workspace'
+import type { FillCoverage, HistoryBackfill, HistoryGap, WorkspaceApi } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { InfoTip } from '@/components/ui/info-tip'
 import { Time } from '@/components/ui/time'
+import { useApiRead } from '@/lib/use-api-read'
 
 /** How often the panel reads again while a backfill is reading (Phase 2, item 6b). */
 export const backfillPollMs = 15_000
@@ -32,32 +33,22 @@ const gapSpan = (gap: HistoryGap) => <Span from={gap.fromUtc} to={gap.toUtc} unk
 export function HistoryCoverage({ api, accountId, reloadKey }: {
   api: Pick<WorkspaceApi, 'historyCoverage'> & Partial<Pick<WorkspaceApi, 'startBackfill'>>; accountId: string; reloadKey: string
 }) {
-  const [generation, setGeneration] = useState(0)
-  const request = useMemo(() => ({ api, accountId, reloadKey, generation }), [api, accountId, reloadKey, generation])
-  const [loaded, setLoaded] = useState<{ request: typeof request; coverage: Coverage } | null>(null)
-  const [failed, setFailed] = useState<typeof request | null>(null)
-  const [starting, setStarting] = useState<{ gapId: string; error: string | null } | null>(null)
-  // Reads that finished, failed ones included, so one failed read does not stop the polling.
-  const [settled, setSettled] = useState(0)
-  useEffect(() => {
+  // Each answer names its account, so the last good one is kept for that account only.
+  const read = useApiRead(api, accountId, (client, signal) => client.historyCoverage(accountId, signal).then(coverage => ({ accountId, coverage })),
     // Clients without the read (older test doubles) show nothing.
-    if (typeof request.api.historyCoverage !== 'function') return
-    const controller = new AbortController()
-    request.api.historyCoverage(request.accountId, controller.signal)
-      .then(coverage => { if (!controller.signal.aborted) setLoaded({ request, coverage }) })
-      .catch(() => { if (!controller.signal.aborted) setFailed(request) })
-      .finally(() => { if (!controller.signal.aborted) setSettled(value => value + 1) })
-    return () => controller.abort()
-  }, [request])
-  const coverage = loaded?.request.api === api && loaded.request.accountId === accountId ? loaded.coverage : null
-  const stale = coverage !== null && loaded?.request !== request
+    { fallback: '', reloadKey, enabled: typeof api.historyCoverage === 'function' })
+  const [starting, setStarting] = useState<{ gapId: string; error: string | null } | null>(null)
+  const coverage = read.latest?.accountId === accountId ? read.latest.coverage : null
+  // Shown while the current read runs or after it failed: the last good read.
+  const stale = coverage !== null && read.data === null
   const active = coverage?.backfills?.find(b => b.state === 'queued') ?? null
   // While a backfill reads, the panel reads again now and then, after a failed read too; it stops with the backfill or the page.
+  const { loading, reload } = read
   useEffect(() => {
-    if (!active) return
-    const timer = setTimeout(() => setGeneration(value => value + 1), backfillPollMs)
+    if (!active || loading) return
+    const timer = setTimeout(reload, backfillPollMs)
     return () => clearTimeout(timer)
-  }, [active, settled])
+  }, [active, loading, reload])
   async function start(gapId: string) {
     if (!api.startBackfill || starting && !starting.error) return
     setStarting({ gapId, error: null })
@@ -67,7 +58,7 @@ export function HistoryCoverage({ api, accountId, reloadKey }: {
     } catch (cause) {
       setStarting({ gapId, error: errorMessage(cause, 'The backfill could not be started.') })
     }
-    setGeneration(value => value + 1)
+    reload()
   }
   const canBackfill = coverage?.backfillAvailable === true && !!api.startBackfill && !active && !stale
   if (!coverage || !coverage.available && coverage.recordCount === 0) return null
@@ -78,9 +69,9 @@ export function HistoryCoverage({ api, accountId, reloadKey }: {
       <InfoTip label="About history coverage">{coverage.notice}</InfoTip>
     </div><span className="workspace-badge">
       {coverage.keepExecutionHistory ? 'Keeping execution history' : 'History not kept'}</span></header>
-    {stale && <p role="status">{failed === request
+    {stale && <p role="status">{read.error !== null
       ? <>History coverage could not be refreshed. Showing the previous read. <Button type="button" size="sm" variant="outline"
-          onClick={() => setGeneration(value => value + 1)}>Retry history coverage</Button></>
+          onClick={reload}>Retry history coverage</Button></>
       : 'Refreshing history coverage…'}</p>}
     {coverage.keepExecutionHistory && <p className="muted">Read on the monitor&apos;s schedule even without a Play, after protection checks.</p>}
     {coverage.openGapCount > 0 ? <div role="group" aria-label="Possible gaps">

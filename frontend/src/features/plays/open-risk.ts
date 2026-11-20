@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import type { OpenRisk, OpenRiskPreview, OpenRiskPreviewRequest, RiskPlan } from '@/api/risk'
 import type { WorkspaceApi } from '@/api/workspace'
 import { useApiRead } from '@/lib/use-api-read'
@@ -37,17 +36,9 @@ export function useOpenRisk(api: WorkspaceApi, scope: string | null, reloadKey: 
  */
 export function useOpenRiskPreview(api: WorkspaceApi, request: OpenRiskPreviewRequest | null, reloadKey: unknown) {
   const key = JSON.stringify([request, reloadKey])
-  const [state, setState] = useState<Load<OpenRiskPreview> & { api: WorkspaceApi } | null>(null)
-  useEffect(() => {
-    if (request === null) return
-    const controller = new AbortController()
-    const timer = setTimeout(() => {
-      api.openRiskPreview(request, controller.signal).then(value => { if (!controller.signal.aborted) setState({ api, key, value }) })
-        .catch(() => { if (!controller.signal.aborted) setState({ api, key, failed: true }) })
-    }, 300)
-    return () => { clearTimeout(timer); controller.abort() }
-  }, [api, key, request])
-  return state?.api === api && state.key === key ? state : null
+  const read = useApiRead(api, key, (client, signal) => client.openRiskPreview(request!, signal),
+    { fallback: 'Open risk could not be read.', enabled: request !== null, delay: 300 })
+  return read.data ? { key, value: read.data } satisfies Load<OpenRiskPreview> : read.error !== null ? { key, failed: true } satisfies Load<OpenRiskPreview> : null
 }
 
 export const exact = (value: string | null) => value === null ? null : exactDecimal(value)

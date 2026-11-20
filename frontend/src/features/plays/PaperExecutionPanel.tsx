@@ -1,8 +1,8 @@
 import { price } from '@/lib/format'
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
-import { errorMessage } from '@/api/errors'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { isPaperPlayState, type PaperPlayState } from '@/api/paper'
 import type { WorkspaceApi } from '@/api/workspace'
+import { useApiRead } from '@/lib/use-api-read'
 import { Button } from '@/components/ui/button'
 import { Time } from '@/components/ui/time'
 
@@ -22,7 +22,6 @@ function ZonedText({ text }: { text: string }) {
   parts.push(text.slice(last))
   return <>{parts}</>
 }
-type PaperStateRequest = { api: PaperExecutionApi; playId: string; attempt: number; reloadGeneration: number }
 export interface PaperExecutionPanelProps {
   api: PaperExecutionApi
   playId: string
@@ -42,37 +41,18 @@ const roleLabels: Record<PaperPlayState['executions'][number]['role'], string> =
 /** Reads local paper facts only; timed observation never calls a venue, refreshes candles or starts a check. */
 export function PaperExecutionPanel({ api, playId, onState, reloadGeneration = 0, tick }: PaperExecutionPanelProps) {
   const id = useId()
-  const [attempt, setAttempt] = useState(0)
-  const request = useMemo(() => ({ api, playId, attempt, reloadGeneration }), [api, playId, attempt, reloadGeneration])
-  const [loaded, setLoaded] = useState<{
-    request: PaperStateRequest; state: PaperPlayState | null; error: string | null
-  } | null>(null)
+  const read = useApiRead(api, playId, (client, signal) => {
+    if (typeof client.paperState !== 'function') throw new Error('Paper execution unavailable')
+    return client.paperState(playId, signal).then(state => {
+      if (!isPaperPlayState(state) || state.playId.toLowerCase() !== playId.toLowerCase()) throw new Error('Invalid paper execution state')
+      return state
+    })
+  }, { fallback: 'Paper execution could not be loaded. No simulated result is available.', reloadKey: reloadGeneration })
+  const { data: state, loading, reload } = read
   const changed = useRef(onState)
   useEffect(() => { changed.current = onState }, [onState])
-  useEffect(() => {
-    const controller = new AbortController()
-    changed.current?.(null)
-    void (async () => {
-      try {
-        if (typeof request.api.paperState !== 'function') throw new Error('Paper execution unavailable')
-        const state = await request.api.paperState(request.playId, controller.signal)
-        if (controller.signal.aborted) return
-        if (!isPaperPlayState(state) || state.playId.toLowerCase() !== request.playId.toLowerCase()) throw new Error('Invalid paper execution state')
-        setLoaded({ request, state, error: null })
-        changed.current?.(state)
-      } catch (cause) {
-        if (!controller.signal.aborted) {
-          setLoaded({ request, state: null,
-            error: errorMessage(cause, 'Paper execution could not be loaded. No simulated result is available.') })
-          changed.current?.(null)
-        }
-      }
-    })()
-    return () => controller.abort()
-  }, [request])
-  const current = loaded?.request === request ? loaded : null
-  const state = current?.state
-  const loading = current === null
+  // The parent sees the current read's state, and none while a read runs or after it failed.
+  useEffect(() => { changed.current?.(state) }, [state])
 
   useEffect(() => {
     if (!state || state.nextCheckAtUtc === null || ['not-armed', 'disabled', 'suspended'].includes(state.status)) return
@@ -83,12 +63,12 @@ export function PaperExecutionPanel({ api, playId, onState, reloadGeneration = 0
       const now = Date.now()
       const next = Date.parse(state.nextCheckAtUtc ?? '')
       const delay = Number.isFinite(next) && next > now ? Math.min(300_000, Math.max(5000, next + 2000 - now)) : 60_000
-      timer = setTimeout(() => setAttempt(value => value + 1), delay)
+      timer = setTimeout(reload, delay)
     }
     schedule()
     document.addEventListener('visibilitychange', schedule)
     return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', schedule) }
-  }, [state])
+  }, [state, reload])
 
   return <section className="execution-panel" aria-labelledby={`${id}-heading`} aria-busy={loading}>
     <div className="execution-header">
@@ -97,10 +77,10 @@ export function PaperExecutionPanel({ api, playId, onState, reloadGeneration = 0
           This panel observes recorded paper state while visible. Reload does not run a paper check.</p>
         <p className="muted">Model v1 uses 12 decimal places: quantity rounds down, USD margin rounds up, and P&amp;L rounds toward negative infinity.
           Defined plan prices are unchanged.</p></div>
-      <Button type="button" variant="outline" size="sm" disabled={loading} onClick={() => setAttempt(value => value + 1)}>Reload paper execution</Button>
+      <Button type="button" variant="outline" size="sm" disabled={loading} onClick={reload}>Reload paper execution</Button>
     </div>
     {loading && <p className="muted" role="status">Loading paper execution…</p>}
-    {current?.error && <p className="error" role="alert">{current.error}</p>}
+    {read.error && <p className="error" role="alert">{read.error}</p>}
     {state && <>
       <p role="status"><span className={`workspace-badge${['ambiguous', 'gap', 'blocked', 'suspended'].includes(state.status) ? ' warning-badge' : ''}`}>
         {statusLabels[state.status]}</span></p>

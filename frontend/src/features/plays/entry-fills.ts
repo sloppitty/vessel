@@ -1,8 +1,9 @@
 import type { PaperPlayState } from '@/api/paper'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import type { ManualExecutionRecord, ManualExecutions } from '@/api/diary'
 import type { PlayExecution } from '@/api/plays'
 import type { WorkspaceApi } from '@/api/workspace'
+import { useApiRead } from '@/lib/use-api-read'
 import { exactAdd, exactCompare, exactDecimal, exactDiv, exactMul, exactScientific, exactSignOf, exactZero, type Exact } from '@/lib/decimal'
 import type { EntryFills } from './position-risk-summary'
 
@@ -80,20 +81,13 @@ export function ledgerFills(records: readonly ManualExecutionRecord[]): EntryFil
  * version). Null without a Play to read.
  */
 export function useManualLedger(api: WorkspaceApi, playId: string | null, version: number): ManualExecutions | 'unknown' | null {
-  const [state, setState] = useState<{ api: WorkspaceApi; playId: string; version: number; ledger: ManualExecutions } | null>(null)
-  useEffect(() => {
-    if (!playId) return
-    const controller = new AbortController()
-    api.manualExecutions(playId, controller.signal).then(ledger => {
-      // An answer older than the version that asked for it does not describe that version.
-      if (!controller.signal.aborted && ledger.play.summary.id === playId && ledger.play.summary.version >= version)
-        setState({ api, playId, version, ledger })
-    }).catch(() => { /* Unknown stays unknown; the Execution tab shows the ledger's own error. */ })
-    // The next attempt, for any version, starts from unknown: this answer is not reused.
-    return () => { controller.abort(); setState(null) }
-  }, [api, playId, version])
+  const read = useApiRead(api, JSON.stringify([playId, version]), (client, signal) => client.manualExecutions(playId!, signal)
+    // An answer older than the version that asked for it does not describe that version.
+    .then(ledger => ledger.play.summary.id === playId && ledger.play.summary.version >= version ? ledger : null),
+  // Unknown stays unknown on a failure; the Execution tab shows the ledger's own error.
+  { fallback: '', enabled: !!playId })
   if (!playId) return null
-  return state?.api === api && state.playId === playId && state.version === version ? state.ledger : 'unknown'
+  return read.data ?? 'unknown'
 }
 
 /** The manual ledger's entry fills for a saved Play, as `useManualLedger` reads it. */

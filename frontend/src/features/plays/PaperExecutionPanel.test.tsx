@@ -206,7 +206,9 @@ describe('PaperExecutionPanel', () => {
     const oldSignal = api.paperState.mock.calls[0]?.[1]
     view.rerender(<PaperExecutionPanel api={api} playId={playId} reloadGeneration={2} onState={onState} />)
     expect(oldSignal?.aborted).toBe(true)
-    expect(onState).toHaveBeenCalledTimes(2)
+    // The parent is told once that no state is known; a second read starting does not repeat it.
+    expect(onState).toHaveBeenCalledTimes(1)
+    expect(onState).toHaveBeenLastCalledWith(null)
     await act(async () => first.resolve(state))
     expect(screen.getByText('Loading paper execution…')).toBeInTheDocument()
     expect(onState).toHaveBeenLastCalledWith(null)
