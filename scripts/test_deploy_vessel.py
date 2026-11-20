@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shlex
 import stat
 import tarfile
 import tempfile
@@ -29,7 +30,7 @@ def assembly(*ids):
     return b'\x00MZ\x90' + b''.join(b'\x1b' + i.encode() + b'\x00' for i in ids) + b'x20261001071844_NotAnId\x00'
 
 
-def model(version='1.0.0', storage='rustfs', paper=True):
+def model(version='1.0.0', storage='rustfs', paper=True, pins=None):
     api_image, web_image = f'skorcius/vessel:api-{version}', f'skorcius/vessel:web-{version}'
     services = {
         'postgres': {'image': 'postgres:18-alpine', 'environment': {'POSTGRES_USER': 'vessel', 'POSTGRES_DB': 'vessel'}},
@@ -51,6 +52,8 @@ def model(version='1.0.0', storage='rustfs', paper=True):
         volumes['evidence'] = {'name': 'p_evidence'}
     if paper:
         services['worker-paper'] = {'image': api_image}
+    for service, image in (pins or {}).items():
+        services[service]['image'] = image
     return {'name': 'p', 'services': services, 'volumes': volumes}
 
 
@@ -70,8 +73,9 @@ class FakeStack(vessel.Stack):
     """Answers docker calls from in-memory state and records every call."""
 
     def __init__(self, directory, version='1.0.0', storage='rustfs', containers=None, applied=None, images=None,
-                 known=None):
-        super().__init__(directory)
+                 known=None, pins=None, **selectors):
+        super().__init__(directory, **selectors)
+        self.pins = pins or {}
         self.calls = []
         self.version = version
         self.storage_kind = storage
@@ -134,7 +138,7 @@ class FakeStack(vessel.Stack):
             lines = env_file.read_text().splitlines() if env_file.exists() else []
             from_file = [line.split('=', 1)[1] for line in lines if line.startswith('VESSEL_VERSION=')]
             version = env.get('VESSEL_VERSION') or (from_file[-1] if from_file else self.version)
-            return Result(stdout=json.dumps(model(version, self.storage_kind)))
+            return Result(stdout=json.dumps(model(version, self.storage_kind, pins=self.pins)))
         if rest[:4] == ['exec', '-T', 'postgres', 'psql'] and 'SELECT' in rest[-1]:
             query = rest[-1]
             if 'to_regclass' in query:
@@ -288,6 +292,8 @@ class ChangingStack(FakeStack):
         super().__init__(directory, **kwargs)
         self.events = []
         self.fail = set(fail)
+        # Services whose docker stop/start fails while the rest of the same call goes through, as Docker does.
+        self.stuck = {'stop': set(), 'start': set()}
 
     def service_of(self, container_id):
         return next(i for i in self.state if i['Id'] == container_id)
@@ -295,10 +301,11 @@ class ChangingStack(FakeStack):
     def other(self, args):
         if args[:2] in (['docker', 'stop'], ['docker', 'start']):
             items = [self.service_of(i) for i in args[2:]]
-            for item in items:
+            done = [i for i in items if i['Config']['Labels']['com.docker.compose.service'] not in self.stuck[args[1]]]
+            for item in done:
                 item['State']['Status'] = 'exited' if args[1] == 'stop' else 'running'
-            self.events.append((args[1], sorted(i['Config']['Labels']['com.docker.compose.service'] for i in items)))
-            return Result()
+            self.events.append((args[1], sorted(i['Config']['Labels']['com.docker.compose.service'] for i in done)))
+            return Result(1 if len(done) < len(items) else 0)
         if args[:2] == ['docker', 'pull']:
             self.events.append(('pull', args[2]))
             self.images.add(args[2])
@@ -576,6 +583,82 @@ class ChangingCommandTests(ReadOnlyCommandTests):
         code, out = quietly(vessel.rollback, stack, Args(yes=True, start=True))
         self.assertEqual(0, code, out)
         self.assertEqual(('up', 'api', 'postgres', 'rabbitmq', 'rustfs', 'worker', 'worker-paper'), stack.events[-1])
+
+    def test_a_digest_pinned_service_is_refused_before_anything_changes(self):
+        # S1: a pinned worker-paper or migrate would stay on the old image while the others upgrade.
+        for service, pin in (('worker-paper', 'skorcius/vessel@sha256:' + 'a' * 64),
+                             ('migrate', 'mirror.local/vessel@sha256:' + 'b' * 64),
+                             ('worker', 'skorcius/vessel:custom-build')):
+            with self.subTest(service=service):
+                stack = self.stack(pins={service: pin})
+                stack.images.update({'skorcius/vessel:api-1.1.0', 'skorcius/vessel:web-1.1.0', pin})
+                code, out = quietly(vessel.preflight, stack, Args(to='1.1.0'))
+                self.assertEqual(1, code, out)
+                self.assertIn('not all release tags of one version', out)
+                self.assertIn(service, quietly(vessel.status, stack, Args())[1])
+                with self.assertRaisesRegex(vessel.Failure, 'Preflight failed'):
+                    quietly(vessel.upgrade, stack, Args(to='1.1.0', yes=True))
+                self.assertEqual([], stack.events)
+                self.assertEqual('VESSEL_VERSION=1.0.0\n', self.env_text())
+
+    def test_upgrade_checks_a_pulled_target_before_stopping_anything(self):
+        # S2: the target's migrations are only readable after the pull; a downgrade must still be refused.
+        applied = {'journal': JOURNAL + [NEW], 'identity': IDENTITY}
+        stack = self.stack(applied=applied, known={'skorcius/vessel:api-1.0.0': applied,
+                                                   'skorcius/vessel:api-1.1.0': {'journal': JOURNAL, 'identity': IDENTITY}})
+        with self.assertRaisesRegex(vessel.Failure, 'does not know migrations the database has applied'):
+            quietly(vessel.upgrade, stack, Args(to='1.1.0', yes=True))
+        self.assertEqual([('pull', 'skorcius/vessel:api-1.1.0'), ('pull', 'skorcius/vessel:web-1.1.0')], stack.events)
+        self.assertEqual('VESSEL_VERSION=1.0.0\n', self.env_text())
+        self.assertFalse(stack.backup_root.exists() and list(stack.backup_root.iterdir()))
+
+    def test_a_partly_failed_stop_starts_again_what_it_stopped(self):
+        # S3: web and some hosts stop, worker-paper does not; every caller must get back a running installation.
+        hosts = ['api', 'worker', 'worker-notifications']
+        for command, args in ((vessel.backup, Args(yes=True)), (vessel.upgrade, Args(to='1.1.0', yes=True))):
+            with self.subTest(command=command.__name__):
+                stack = self.stack()
+                stack.images.update({'skorcius/vessel:api-1.1.0', 'skorcius/vessel:web-1.1.0'})
+                stack.stuck['stop'] = {'worker-paper'}
+                with self.assertRaisesRegex(vessel.Failure, 'Started again what had stopped: api, web, worker'):
+                    quietly(command, stack, args)
+                self.assertEqual([('stop', ['web']), ('stop', hosts), ('start', hosts), ('start', ['web'])],
+                                 stack.events)
+                self.assertTrue(all(i['State']['Status'] == 'running' for i in stack.state
+                                    if i['Config']['Labels']['com.docker.compose.service'] != 'migrate'))
+                self.assertEqual('VESSEL_VERSION=1.0.0\n', self.env_text())
+        stack = self.stack()
+        stack.stuck = {'stop': {'worker-paper'}, 'start': {'web'}}
+        with self.assertRaises(vessel.Failure) as raised:
+            quietly(vessel.backup, stack, Args(yes=True))
+        self.assertIn('possibly still stopped: web. Nothing else was changed. Start them with: docker start p-web-1',
+                      str(raised.exception))
+
+    def test_printed_recovery_commands_keep_every_selector(self):
+        # S4: the project directory, name, files and profiles a command ran with.
+        selectors = {'project': 'vessel blue', 'files': ['compose.yaml', 'compose.paper.yaml'], 'profiles': ['paper']}
+        files = [os.path.abspath(f) for f in selectors['files']]
+        compose = ['docker', 'compose', '--project-directory', str(Path(self.directory.name).resolve()),
+                   '-p', 'vessel blue', '-f', files[0], '-f', files[1], '--profile', 'paper']
+        source = self.stack()
+        quietly(vessel.backup, source, Args(yes=True))
+        [backup] = list(source.backup_root.iterdir())
+        stack = self.stack(containers=[], **selectors)
+        stack.volumes = set()
+        code, out = quietly(vessel.restore, stack, Args(source=str(backup), yes=True))
+        self.assertEqual(0, code, out)
+        self.assertIn('  ' + shlex.join(compose + ['run', '--rm', 'migrate']) + '\n', out)
+        self.assertIn('  ' + shlex.join(compose + ['up', '-d', 'api', 'postgres', 'rabbitmq', 'rustfs', 'web', 'worker',
+                                                  'worker-notifications', 'worker-paper']) + '\n', out)
+        stack = self.stack(fail={'migrate'}, backup_dir=str(Path(self.directory.name, 'elsewhere')), **selectors)
+        stack.images.update({'skorcius/vessel:api-1.1.0', 'skorcius/vessel:web-1.1.0'})
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), self.assertRaises(vessel.Failure):
+            vessel.upgrade(stack, Args(to='1.1.0', yes=True))
+        [directory] = list(stack.backup_root.iterdir())
+        expected = shlex.join([str(ROOT / 'deploy' / 'vessel'), 'rollback'] + compose[2:] + [
+            '--backup-dir', str(stack.backup_root), '--from', str(directory), '--yes'])
+        self.assertIn(expected, output.getvalue())
 
 
 if __name__ == '__main__':

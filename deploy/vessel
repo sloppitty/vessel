@@ -35,6 +35,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -52,6 +53,8 @@ SCHEMA_ASSEMBLIES = {'journal': '/app/Vessel.Persistence.dll', 'identity': '/app
 MIGRATION_ID = re.compile(rb'(?<![0-9A-Za-z_])(\d{14}_[A-Za-z][A-Za-z0-9_]*)')
 VERSION = re.compile(r'^\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?$')
 IMAGE_TAG = re.compile(r':(api|web)-([^:@/]+)$')
+# The services Vessel's Compose files define with its API or web image, whatever reference pins them.
+APP_SERVICES = re.compile(r'^(?:api|migrate|web|worker(?:-[a-z0-9-]+)?)$')
 MANIFEST = 'manifest.json'
 # Owners of the evidence volumes (deploy/README.md "Backups").
 RUSTFS_OWNER = '10001:10001'
@@ -81,6 +84,12 @@ def image_version(reference):
     """The release in an API/web image reference such as skorcius/vessel:api-0.4.2, or None (e.g. a digest pin)."""
     match = IMAGE_TAG.search(reference or '')
     return match.group(2) if match else None
+
+
+def repository(reference):
+    """An image reference without its tag or digest: registry.local:5000/vessel@sha256:… -> registry.local:5000/vessel."""
+    name = (reference or '').split('@', 1)[0]
+    return name[:name.rfind(':')] if name.rfind(':') > name.rfind('/') else name
 
 
 def migration_ids(assembly):
@@ -141,9 +150,11 @@ class Stack:
     def __init__(self, directory, project=None, files=(), profiles=(), backup_dir=None):
         self.directory = Path(directory).resolve()
         self.project = project
-        self.files = list(files)
+        # Absolute, so that printed recovery commands select the same files from any directory.
+        self.files = [os.path.abspath(file) for file in files]
         self.profiles = list(profiles)
-        self.backup_root = Path(backup_dir).resolve() if backup_dir else self.directory / 'backups'
+        self.backup_dir = Path(backup_dir).resolve() if backup_dir else None
+        self.backup_root = self.backup_dir or self.directory / 'backups'
         self._config = {}
         self._known = {}
 
@@ -167,6 +178,23 @@ class Stack:
 
     def compose(self, *args, **kwargs):
         return self.run(self.compose_args(*args), **kwargs)
+
+    def compose_command(self, *args):
+        """A shell-quoted Compose command with this project's directory, name, files and profiles, for printing."""
+        return shlex.join(self.compose_args(*args))
+
+    def vessel_command(self, command, *args):
+        """A shell-quoted command of this script with the same selectors, for printing."""
+        line = [str(Path(__file__).resolve()), command, '--project-directory', str(self.directory)]
+        if self.project:
+            line += ['-p', self.project]
+        for file in self.files:
+            line += ['-f', file]
+        for profile in self.profiles:
+            line += ['--profile', profile]
+        if self.backup_dir:
+            line += ['--backup-dir', str(self.backup_dir)]
+        return shlex.join(line + list(args))
 
     # --- the Compose model --------------------------------------------------------------------------------------
     def config(self, version=None):
@@ -196,9 +224,14 @@ class Stack:
         return self.services(version).get(service, {}).get('image')
 
     def app_images(self, version=None):
-        """Every service image that is a Vessel API or web image, by service."""
-        return {name: service['image'] for name, service in self.services(version).items()
-                if IMAGE_TAG.search(service.get('image') or '')}
+        """Every Vessel API or web service's image, by service, whatever pins it: a release tag, a digest or another
+        tag of a Vessel repository, or a service Vessel's Compose files define. configured_version() and the target
+        checks then see a pinned service instead of skipping it."""
+        services = self.services(version)
+        repositories = {repository(s.get('image')) for s in services.values() if IMAGE_TAG.search(s.get('image') or '')}
+        return {name: service.get('image') or '' for name, service in services.items()
+                if IMAGE_TAG.search(service.get('image') or '') or APP_SERVICES.match(name)
+                or (service.get('image') and repository(service['image']) in repositories)}
 
     def configured_version(self, version=None):
         versions = {image_version(image) for image in self.app_images(version).values()}
@@ -282,10 +315,10 @@ class Stack:
 
     def known_migrations(self, image):
         """Migration IDs compiled into an API image, read from its assemblies without a network, or None when the
-        image is not present locally."""
+        image is not present locally. Only a present image's answer is kept: a pull makes it known."""
         if image not in self._known:
             if not image or not self.image_present(image):
-                self._known[image] = None
+                return None
             else:
                 self._known[image] = {
                     schema: migration_ids(self.run(['docker', 'run', '--rm', '--network', 'none', '--entrypoint', 'cat',
@@ -418,7 +451,7 @@ def preflight_checks(stack, target, report):
     stopped = ', '.join(sorted({c.service for c in front + hosts})) or 'none running'
     report.ok(f'Writers a changing command stops first: {stopped}')
     if not stack.postgres_running():
-        report.fail('PostgreSQL is not running; start it with `docker compose up -d --wait postgres`')
+        report.fail(f'PostgreSQL is not running; start it with `{stack.compose_command("up", "-d", "--wait", "postgres")}`')
     image = stack.image('migrate')
     known, applied = stack.known_migrations(image), stack.applied_migrations()
     if known is None:
@@ -538,18 +571,46 @@ def check_services_configured(stack, containers, version=None):
 
 
 def stop_writers(stack, containers):
-    """Stops web/TLS, then every other running container except the data stores, and checks that none still runs."""
+    """Stops web/TLS, then every other running container except the data stores, and checks that none still runs.
+    When that fails part-way, starts again what it stopped before raising, so that no caller is left with a partly
+    stopped installation."""
     front, hosts = writers(containers)
-    for group in (front, hosts):
-        if group:
-            say(f'Stopping {names(group)}')
-            stack.run(['docker', 'stop', *[c.id for c in group]], stdout=subprocess.DEVNULL)
-    still = [c for c in stack.containers() if c.running and c.service not in DATA_SERVICES]
-    if still:
-        raise Failure(f'Still running after stop: {names(still)}. Nothing else was changed.')
+    try:
+        for group in (front, hosts):
+            if group:
+                say(f'Stopping {names(group)}')
+                stack.run(['docker', 'stop', *[c.id for c in group]], stdout=subprocess.DEVNULL)
+        still = [c for c in stack.containers() if c.running and c.service not in DATA_SERVICES]
+        if still:
+            raise Failure(f'Still running after stop: {names(still)}.')
+    except BaseException as error:
+        raise Failure(f'Stopping the writers failed ({error}). {recover_stopped(stack, front + hosts)}') from error
     if not front and not hosts:
         say('No writer was running.')
     return front + hosts
+
+
+def recover_stopped(stack, wanted):
+    """After a failed stop: starts again those of the wanted containers that no longer run and says what remains."""
+    try:
+        current = {c.id: c for c in stack.containers()}
+    except BaseException:
+        current = None
+    again = [c for c in wanted if not c.oneoff and (current is None or (c.id in current and not current[c.id].running))]
+    if current is not None and not again:
+        return 'None of them had stopped; nothing was changed.'
+    try:
+        start_containers(stack, again)
+        return f'Started again what had stopped: {names(again)}. Nothing else was changed.'
+    except BaseException:
+        pass
+    try:
+        current = {c.id: c for c in stack.containers()}
+        remaining = [c for c in again if c.id in current and not current[c.id].running]
+    except BaseException:
+        remaining = again
+    return (f'Starting them again failed; possibly still stopped: {names(remaining)}. Nothing else was changed. '
+            f'Start them with: {shlex.join(["docker", "start", *[c.name for c in remaining]])}')
 
 
 def start_containers(stack, stopped):
@@ -783,11 +844,13 @@ def backup(stack, args):
         return 2
     check_space(stack)
     started = ensure_postgres(stack)
-    stopped = stop_writers(stack, containers)
     try:
-        take_backup(stack, 'manual', restart_services(containers), running_version(stack, containers))
+        stopped = stop_writers(stack, containers)
+        try:
+            take_backup(stack, 'manual', restart_services(containers), running_version(stack, containers))
+        finally:
+            start_containers(stack, stopped)
     finally:
-        start_containers(stack, stopped)
         if started:
             stack.compose('stop', 'postgres')
     return 0
@@ -809,6 +872,19 @@ def load_upgrade_manifest(path, target):
                 and re.match(r'^[a-z][a-z-]*$', step[0])):
             raise Failure(f'Invalid post-step in the upgrade manifest: {step!r}')
     return manifest
+
+
+def check_target_migrations(stack, target):
+    """Before anything stops: the target API image is present and knows every migration the database has applied. After
+    a pull this is the first time it can be read."""
+    image = stack.image('migrate', target)
+    known, applied = stack.known_migrations(image), stack.applied_migrations()
+    if known is None or applied is None:
+        raise Failure(f'The migrations of {image} or of the database cannot be read; nothing was changed.')
+    unknown = {s: row['unknown'] for s, row in compare_migrations(known, applied).items() if row['unknown']}
+    if unknown:
+        raise Failure(f'{target} does not know migrations the database has applied ({json.dumps(unknown)}); a '
+                      'downgrade needs `rollback` to the pre-upgrade backup, not `upgrade`. Nothing was changed.')
 
 
 def upgrade(stack, args):
@@ -840,6 +916,7 @@ def upgrade(stack, args):
     if not confirm(args, f'Upgrade project {stack.name} from {current} to {target}:', plan):
         return 2
     pull(stack, missing, args.pull)
+    check_target_migrations(stack, target)
     stopped = stop_writers(stack, containers)
     try:
         directory = take_backup(stack, 'pre-upgrade', services, current, {'upgradeTo': target})
@@ -847,7 +924,8 @@ def upgrade(stack, args):
         say('The backup failed: nothing was migrated. Starting again what was running.')
         start_containers(stack, stopped)
         raise Failure(f'Backup failed ({error}); {current} is running again and nothing was migrated.')
-    rollback_hint = (f'Writers stay stopped. To return to {current}: ./vessel rollback --from {directory} --yes, '
+    rollback_command = stack.vessel_command('rollback', '--from', str(directory), '--yes')
+    rollback_hint = (f'Writers stay stopped. To return to {current}: {rollback_command}, '
                      'with --keep-active and --start as deploy/README.md "Isolated restore" allows.')
     try:
         switch_version(stack, env_file, target)
@@ -864,7 +942,7 @@ def upgrade(stack, args):
         result = stack.compose('up', '-d', '--wait', '--wait-timeout', str(args.wait_timeout), *services, check=False)
         if result.returncode:
             raise Failure(f'Not every service became healthy on {target}; inspect `docker compose ps -a` and the logs. '
-                          f'To return to {current}: ./vessel rollback --from {directory} --yes')
+                          f'To return to {current}: {rollback_command}')
     say(f'Upgraded {stack.name} to {target}. Pre-upgrade backup: {directory}')
     return 0
 
@@ -915,8 +993,8 @@ def finish_restore(stack, services, start):
         say('Hosts stay stopped. Compare the reset table above with trusted post-backup records and reapply '
             'unbind-wallet, suspend, demote, then `identity restore --user` only for confirmed users '
             '(deploy/README.md "Isolated restore"). Then start with:')
-        say('  docker compose run --rm migrate')
-        say('  docker compose up -d ' + ' '.join(services))
+        say('  ' + stack.compose_command('run', '--rm', 'migrate'))
+        say('  ' + stack.compose_command('up', '-d', *services))
         return
     say('Running migrate')
     stack.compose('run', '--rm', 'migrate')
@@ -978,7 +1056,7 @@ def rollback(stack, args):
     if storage != manifest['storage']['kind']:
         raise Failure(f'The backup holds {manifest["storage"]["kind"]} evidence but this configuration uses {storage}.')
     if not stack.postgres_running():
-        raise Failure('PostgreSQL is not running; start it with `docker compose up -d --wait postgres`.')
+        raise Failure(f'PostgreSQL is not running; start it with `{stack.compose_command("up", "-d", "--wait", "postgres")}`.')
     check_space(stack)
     missing = missing_images(stack, previous)
     # A failed upgrade leaves the writers stopped: bring back what ran before it too.
