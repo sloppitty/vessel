@@ -60,7 +60,7 @@ public sealed class OverviewSummaryPostgresTests
         var ids = (await context.Accounts.Where(a => a.IsEnabled && a.PortfolioId == portfolio.Id).Select(a => a.Id).ToListAsync()).ToHashSet();
         commands.Clear();
         var store = new ActivityStore(context);
-        var facts = await store.ReadAsync(null, default, ids);
+        var facts = await store.ReadAsync(null, TradingMode.Real, default, ids);
         Assert.Equal(selected.Id, Assert.Single(facts.Accounts).Id);
         Assert.Equal(120, facts.Fills.Count); Assert.All(facts.Fills, f => Assert.Equal(selected.Id, f.AccountId));
         Assert.Equal(selected.Id, Assert.Single(facts.Snapshots).AccountId);
@@ -72,11 +72,11 @@ public sealed class OverviewSummaryPostgresTests
         // events (Phase 2, item 7b), the facts revision in the same snapshot (item 9b) and linked orders.
         Assert.Equal(10, commands.Count);
         // Even caller-supplied disabled/foreign IDs cannot bypass the SQL account restrictions.
-        var guarded = await store.ReadAsync(null, default, new HashSet<Guid> { selected.Id, disabled.Id, foreign.Id });
+        var guarded = await store.ReadAsync(null, TradingMode.Real, default, new HashSet<Guid> { selected.Id, disabled.Id, foreign.Id });
         Assert.Equal(selected.Id, Assert.Single(guarded.Accounts).Id);
         Assert.Equal(120, guarded.Fills.Count); Assert.Single(guarded.Snapshots); Assert.Equal(120, guarded.FillPlayIds.Count);
         commands.Clear();
-        var empty = await store.ReadAsync(null, default, new HashSet<Guid>());
+        var empty = await store.ReadAsync(null, TradingMode.Real, default, new HashSet<Guid>());
         Assert.Empty(empty.Accounts); Assert.Empty(empty.Fills); Assert.Empty(empty.Snapshots); Assert.Empty(empty.FillPlayIds);
         Assert.Empty(empty.FundingPayments); Assert.Empty(empty.FundingStates); Assert.Empty(empty.LeverageObservations);
         Assert.Empty(commands);

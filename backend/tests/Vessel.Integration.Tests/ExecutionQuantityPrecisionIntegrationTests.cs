@@ -28,7 +28,7 @@ public sealed class ExecutionQuantityPrecisionIntegrationTests : ExecutionQuanti
             Assert.NotNull(PlayOutcomeCalculator.Outcome(f.Facts));
 
             var store = new SizingStore(db, TestUnitOfWork.For(db));
-            var facts = Assert.Single(await store.ClosedPlaysAsync(default));
+            var facts = Assert.Single(await store.ClosedPlaysAsync(TradingMode.Real, default));
             Assert.Equal(new[] { "in", "out" }, facts.IncompleteOrders!.Order(StringComparer.Ordinal));
             Assert.False(ExecutionIntegrity.Settled(facts));
             Assert.Equal(f.Store.Fills.Select(fill => (fill.Quantity, fill.Price, fill.Fee, fill.ClosedPnlUsd)),
@@ -73,7 +73,7 @@ public sealed class ExecutionQuantityPrecisionIntegrationTests : ExecutionQuanti
             Assert.NotNull(PlayOutcomeCalculator.Outcome(f.Facts));
 
             var store = new SizingStore(db, TestUnitOfWork.For(db));
-            var facts = Assert.Single(await store.ClosedPlaysAsync(default));
+            var facts = Assert.Single(await store.ClosedPlaysAsync(TradingMode.Real, default));
             Assert.Empty(facts.IncompleteOrders!);
             Assert.False(ExecutionIntegrity.Settled(facts));
             var review = new ReviewService(new ReviewStore(db, store), new ReviewClock());

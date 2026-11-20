@@ -99,7 +99,7 @@ public sealed class OrderIdentityAttributionTests
         Assert.DoesNotContain((await EventReads.ReadAsync(db, 0, 200, default)).Events, e => e.Subject.ContractId == "ETH");
 
         // Activity's per-fill Play map labels only the BTC fills; the ETH operation stays unassigned.
-        var facts = await new ActivityStore(db).ReadAsync(account.Id, default);
+        var facts = await new ActivityStore(db).ReadAsync(account.Id, TradingMode.Real, default);
         Assert.Equal(btcFills.Order(), facts.FillPlayIds.Keys.Order());
         Assert.All(facts.FillPlayIds.Values, id => Assert.Equal(play.Id, id));
         var operations = (await ActivityTestSupport.Activity(db).PageAsync(account.Id)).Operations;
@@ -110,7 +110,7 @@ public sealed class OrderIdentityAttributionTests
         Assert.Equal("unassigned", ethOperation.PlayAssociation);
 
         // Sizing facts and the Review outcome contain only the BTC fills, with the exact P&L.
-        var sizing = Assert.Single(await new SizingStore(db, TestUnitOfWork.For(db)).ClosedPlaysAsync(default));
+        var sizing = Assert.Single(await new SizingStore(db, TestUnitOfWork.For(db)).ClosedPlaysAsync(TradingMode.Real, default));
         Assert.Equal(btcFills.Order(), sizing.Fills.Select(f => f.Fill.Id).Order());
         Assert.Empty(sizing.IncompleteOrders ?? []);
         var review = await new ReviewService(new ReviewStore(db, new SizingStore(db, TestUnitOfWork.For(db))), TimeProvider.System)
@@ -179,7 +179,7 @@ public sealed class OrderIdentityAttributionTests
         Assert.Equal("1", execution.Totals.EnteredQuantity);
         Assert.Contains("Order 7 is filled at the venue, but not all of its executions are retained yet.", execution.Issues);
 
-        var facts = Assert.Single(await new SizingStore(db, TestUnitOfWork.For(db)).ClosedPlaysAsync(default));
+        var facts = Assert.Single(await new SizingStore(db, TestUnitOfWork.For(db)).ClosedPlaysAsync(TradingMode.Real, default));
         Assert.Equal(["17"], facts.IncompleteOrders);
         Assert.Equal(["c", "e"], facts.Fills.Select(f => f.Fill.SourceFillId).Order());
         Assert.False(ExecutionIntegrity.Settled(facts));

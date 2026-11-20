@@ -133,7 +133,7 @@ public sealed class OmissionMarkerPostgresTests
         }, default);
         Assert.True(await Revision() > before);
         db.ChangeTracker.Clear();
-        var facts = await new ActivityStore(db).ReadAsync(null, default);
+        var facts = await new ActivityStore(db).ReadAsync(null, TradingMode.Real, default);
         // Only what the walk reads: the market and the time (Sol round 1 on 7b).
         var marker = Assert.Single(facts.Omissions);
         Assert.Equal(("BTC", (string?)null, (DateTimeOffset?)At.AddMinutes(-5)), (marker.ContractId, marker.VenueContractId, marker.OccurredAtUtc));
@@ -164,7 +164,7 @@ public sealed class OmissionMarkerPostgresTests
         var workspace = new WorkspaceStore(db, work, new ManualTime(At));
         var executions = new ExecutionStore(db, work);
         async Task Unit(Func<Task> step) => await work.ExecuteAsync(async () => { await step(); return true; }, default);
-        var baseline = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(null, default), TradingMode.Real).Operations;
+        var baseline = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(null, TradingMode.Real, default), TradingMode.Real).Operations;
         Assert.Equal(("long", "closed"), (Assert.Single(baseline).Direction, baseline[0].Status));
 
         await Unit(() => executions.UpsertOrdersAsync(account, [VenueOrder("o2")], At, default));
@@ -177,7 +177,7 @@ public sealed class OmissionMarkerPostgresTests
         var order = await db.Orders.AsNoTracking().SingleAsync(o => o.ExternalOrderId == "o2");
         Assert.True(order.ExecutionsOmitted);
         Assert.True(ExecutionIntegrity.MissingExecutions(order, await db.Fills.AsNoTracking().Where(f => f.ExternalOrderId == "o2").ToListAsync()));
-        var operations = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(null, default), TradingMode.Real).Operations;
+        var operations = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(null, TradingMode.Real, default), TradingMode.Real).Operations;
         Assert.Contains(operations, o => o.Status == "incomplete" && o.Coverage.Contains(OperationAggregator.OmittedNotice));
         Assert.DoesNotContain(operations, o => o.Direction == "long" && o.Status == "closed");
     }

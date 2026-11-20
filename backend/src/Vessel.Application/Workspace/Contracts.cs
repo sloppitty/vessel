@@ -132,8 +132,6 @@ public interface IWorkspaceStore
     /// hides them, enabling shows them again.
     /// </summary>
     Task AccountVisibilityChangedAsync(Guid accountId, bool enabled, CancellationToken ct);
-    Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct);
-    Task<List<Account>> AccountsAsync(CancellationToken ct);
     Task<List<Portfolio>> PortfoliosAsync(TradingMode tradingMode, CancellationToken ct);
     Task<List<Account>> AccountsAsync(TradingMode tradingMode, CancellationToken ct);
     Task<IReadOnlyDictionary<Guid, PaperAccountBalance>> PaperBalancesAsync(IReadOnlyList<Guid> accountIds, CancellationToken ct);

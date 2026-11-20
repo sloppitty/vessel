@@ -11,9 +11,6 @@ namespace Vessel.Persistence;
 public sealed class CachedActivitySummaryReader(IJournalOwnerContext owner, IOwnerScopeFactory scopes,
     ActivitySummaryCache cache, IVenueRegistry? venues = null) : IActivitySummaryReader
 {
-    public Task<ActivitySummaries> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) =>
-        ReadAsync(accountId, TradingMode.Real, ct, accountIds);
-
     public async Task<ActivitySummaries> ReadAsync(Guid? accountId, TradingMode tradingMode, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
     {
         tradingMode = TradingModes.Validate(tradingMode);

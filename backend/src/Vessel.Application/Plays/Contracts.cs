@@ -178,7 +178,6 @@ public sealed record PlayHistoryDto(IReadOnlyList<PlanRevisionDto> Revisions, IR
 public interface IPlayStore
 {
     /// <summary>Whether the scope's portfolio or account exists for this owner; <c>all</c> and <c>unassigned</c> always do.</summary>
-    Task<bool> ScopeExistsAsync(ListScope scope, CancellationToken ct);
     Task<bool> ScopeExistsAsync(ListScope scope, TradingMode tradingMode, CancellationToken ct);
     /// <summary>
     /// One consistent page of a view: the exact total, the requested page clamped to it and its ordered summary rows

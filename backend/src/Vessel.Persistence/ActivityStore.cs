@@ -10,9 +10,6 @@ namespace Vessel.Persistence;
 
 public sealed class ActivityStore(VesselDbContext db) : IActivityStore
 {
-    public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) =>
-        ReadAsync(accountId, TradingMode.Real, ct, accountIds);
-
     public async Task<ActivityFacts> ReadAsync(Guid? accountId, TradingMode tradingMode, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
     {
         tradingMode = TradingModes.Validate(tradingMode);

@@ -3,6 +3,7 @@ using Vessel.Application.Common;
 using Vessel.Application.Ownership;
 using Vessel.Application.Venues;
 using Vessel.Domain.Accounts;
+using Vessel.Domain.Common;
 using Vessel.Domain.Numerics;
 
 namespace Vessel.Application.Workspace;
@@ -60,8 +61,9 @@ public sealed class AccountDiscoveryService(IWorkspaceStore accounts, IJournalOw
         catch (Exception) { throw new ProblemException(502, token is null
             ? "Venue accounts could not be discovered. Try again later."
             : "Venue names could not be loaded. Check the read-only token's wallet, scope and expiry."); }
-        // Include disabled accounts so discovery cannot suggest importing the same source again.
-        var existing = (await accounts.AccountsAsync(ct)).Where(a => a.OwnerId == owner.OwnerId && a.VenueId == venueId && a.SourceId is not null)
+        // Include disabled accounts so discovery cannot suggest importing the same source again. Discovery reads a real
+        // venue, so it matches real accounts only.
+        var existing = (await accounts.AccountsAsync(TradingMode.Real, ct)).Where(a => a.OwnerId == owner.OwnerId && a.VenueId == venueId && a.SourceId is not null)
             .ToDictionary(a => a.SourceId!);
         return new(venueId, address!.ToLowerInvariant(), found.Select(c =>
         {

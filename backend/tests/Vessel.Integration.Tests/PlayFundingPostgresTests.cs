@@ -407,7 +407,7 @@ public sealed class PlayFundingPostgresTests
         var (accountId, playId) = await SeedAsync(database, owner, "open-gap");
         ActivitySummaries before;
         await using (var db = database.Context(owner))
-            before = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(accountId, default), TradingMode.Real);
+            before = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(accountId, TradingMode.Real, default), TradingMode.Real);
         await using (var db = database.Context(owner))
         {
             var account = await db.Accounts.SingleAsync(a => a.Id == accountId);
@@ -442,7 +442,7 @@ public sealed class PlayFundingPostgresTests
         var (accountId, playId) = await SeedAsync(database, owner, "open-gap");
         ActivitySummaries before;
         await using (var db = database.Context(owner))
-            before = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(accountId, default), TradingMode.Real);
+            before = ActivityService.Aggregate(await new ActivityStore(db).ReadAsync(accountId, TradingMode.Real, default), TradingMode.Real);
         Assert.Equal(Not("incomplete", "history-gap"), await FundingWithAsync(database, owner, playId, before));
         await using (var db = database.Context(owner))
         {

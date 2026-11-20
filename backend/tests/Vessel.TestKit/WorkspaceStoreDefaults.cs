@@ -13,6 +13,11 @@ namespace Vessel.Tests;
 /// </summary>
 public interface IWorkspaceStoreDefaults : IWorkspaceStore
 {
+    /// <summary>Every portfolio the fake holds, of either mode; production ports take the mode (issue #113).</summary>
+    Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct);
+    /// <summary>Every account the fake holds, of either mode; production ports take the mode (issue #113).</summary>
+    Task<List<Account>> AccountsAsync(CancellationToken ct);
+
     Task IWorkspaceStore.AccountVisibilityChangedAsync(Guid accountId, bool enabled, CancellationToken ct) => Task.CompletedTask;
 
     async Task<List<Portfolio>> IWorkspaceStore.PortfoliosAsync(TradingMode tradingMode, CancellationToken ct) =>

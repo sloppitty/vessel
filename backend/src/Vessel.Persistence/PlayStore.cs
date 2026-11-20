@@ -10,7 +10,6 @@ namespace Vessel.Persistence;
 
 public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork, TimeProvider? time = null) : IPlayStore
 {
-    public Task<bool> ScopeExistsAsync(ListScope scope, CancellationToken ct) => ScopeExistsAsync(scope, TradingMode.Real, ct);
     public Task<bool> ScopeExistsAsync(ListScope scope, TradingMode tradingMode, CancellationToken ct) => scope.Kind switch
     {
         "portfolio" => db.Portfolios.AnyAsync(p => p.Id == scope.Id && p.TradingMode == tradingMode, ct),

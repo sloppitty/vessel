@@ -71,7 +71,7 @@ public sealed class ActivityOmissionPostgresTests
             await seed.SaveChangesAsync();
         }
         await using var db = database.Context(owner);
-        var facts = await new ActivityStore(db).ReadAsync(null, default);
+        var facts = await new ActivityStore(db).ReadAsync(null, TradingMode.Real, default);
         Assert.Equal(ActivityService.MaxForcedEventRows, facts.ForcedEvents.Count);
         Assert.DoesNotContain(facts.ForcedEvents, e => e.SourceId is "f0" or "f1");
         Assert.Equal(ActivityService.MaxForcedEventRows + 2, facts.ForcedEventCounts![account.Id]);
@@ -80,7 +80,7 @@ public sealed class ActivityOmissionPostgresTests
         Assert.Contains(coverage, c => c.AccountId == account.Id && c.Notice == "2 more venue-forced executions are retained and excluded.");
         // At or below the cap, nothing is counted separately.
         await db.ForcedEvents.Where(e => e.SourceId == "f0" || e.SourceId == "f1").ExecuteDeleteAsync();
-        var fewer = await new ActivityStore(db).ReadAsync(null, default);
+        var fewer = await new ActivityStore(db).ReadAsync(null, TradingMode.Real, default);
         Assert.Equal((ActivityService.MaxForcedEventRows, (IReadOnlyDictionary<Guid, int>?)null), (fewer.ForcedEvents.Count, fewer.ForcedEventCounts));
         Assert.DoesNotContain(ActivityService.Aggregate(fewer, TradingMode.Real).Coverage, c => c.Notice.Contains("more venue-forced", StringComparison.Ordinal));
     }

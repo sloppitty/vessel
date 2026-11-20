@@ -147,10 +147,10 @@ public sealed class StartupWarmup : BackgroundService
         });
         await step("activity", async () =>
         {
-            await owned.GetRequiredService<ActivityService>().PageAsync(new(Page: "1", PageSize: "5"), ct);
+            await owned.GetRequiredService<ActivityService>().PageAsync(new(Page: "1", PageSize: "5", TradingMode: TradingMode.Real.ToValue()), ct);
             await owned.GetRequiredService<Vessel.Application.Overview.OverviewSummaryService>().GetAsync("portfolio", "30", "all", TradingMode.Real, ct);
             // With no accounts the services above skip the fact reads, so run those shapes for one unknown account.
-            await owned.GetRequiredService<IActivityStore>().ReadAsync(null, ct, new HashSet<Guid> { Guid.NewGuid() });
+            await owned.GetRequiredService<IActivityStore>().ReadAsync(null, TradingMode.Real, ct, new HashSet<Guid> { Guid.NewGuid() });
         });
     }
 }

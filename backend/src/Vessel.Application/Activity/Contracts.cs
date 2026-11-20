@@ -56,7 +56,6 @@ public sealed record ActivityOmission(Guid Id, Guid AccountId, string? ContractI
 }
 public interface IActivitySummaryReader
 {
-    Task<ActivitySummaries> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null);
     Task<ActivitySummaries> ReadAsync(Guid? accountId, TradingMode tradingMode, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null);
 }
 
@@ -64,7 +63,6 @@ public interface IActivityStore
 {
     // All retained facts, not the overview's most recent 100; owner-scoped and enabled accounts only.
     // An optional account set restricts every fact query; an empty set reads no facts.
-    Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null);
     Task<ActivityFacts> ReadAsync(Guid? accountId, TradingMode tradingMode, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null);
     /// <summary>
     /// The titles of the owner's Plays among <paramref name="playIds"/>, read for the rows of one Activity page. Other

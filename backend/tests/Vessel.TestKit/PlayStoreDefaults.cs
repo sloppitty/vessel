@@ -11,6 +11,9 @@ namespace Vessel.Tests;
 /// </summary>
 public interface IPlayStoreDefaults : IPlayStore
 {
+    /// <summary>The fake's scope check, whatever the mode; production ports take the mode (issue #113).</summary>
+    Task<bool> ScopeExistsAsync(ListScope scope, CancellationToken ct);
+
     Task<bool> IPlayStore.ScopeExistsAsync(ListScope scope, TradingMode tradingMode, CancellationToken ct) => ScopeExistsAsync(scope, ct);
 
     Task<PlaySearchResult> IPlayStore.SearchAsync(string pattern, TradingMode tradingMode, int offset, int limit, CancellationToken ct) =>

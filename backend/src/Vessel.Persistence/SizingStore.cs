@@ -16,8 +16,6 @@ public sealed class SizingStore(VesselDbContext db, UnitOfWork unitOfWork) : ISi
 {
     public Task<SizingSettings?> SettingsAsync(CancellationToken ct) => db.SizingSettings.SingleOrDefaultAsync(ct);
 
-    public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct) => ClosedPlaysAsync(TradingMode.Real, ct);
-
     public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(TradingMode tradingMode, CancellationToken ct) => ReadClosedAsync(tradingMode, null, null, ct);
 
     public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(TradingMode tradingMode, IReadOnlyCollection<Guid> accountIds, string? instrument,

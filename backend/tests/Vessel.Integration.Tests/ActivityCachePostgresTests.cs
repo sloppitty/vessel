@@ -45,7 +45,7 @@ public sealed class ActivityCachePostgresTests
         {
             Interlocked.Increment(ref reads.Count);
             if (reads.BeforeRead is { } before) await before();
-            return await new ActivityStore(db).ReadAsync(accountId, ct, accountIds);
+            return await new ActivityStore(db).ReadAsync(accountId, TradingMode.Real, ct, accountIds);
         }
         public Task<IReadOnlyDictionary<Guid, string>> PlayTitlesAsync(IReadOnlyCollection<Guid> playIds, CancellationToken ct) =>
             new ActivityStore(db).PlayTitlesAsync(playIds, ct);
@@ -64,7 +64,7 @@ public sealed class ActivityCachePostgresTests
     private static async Task<ActivitySummaries> Read(ServiceProvider provider, Guid owner, Guid? account = null, IReadOnlySet<Guid>? ids = null)
     {
         await using var scope = provider.GetRequiredService<IOwnerScopeFactory>().Create(owner);
-        return await scope.Services.GetRequiredService<IActivitySummaryReader>().ReadAsync(account, default, ids);
+        return await scope.Services.GetRequiredService<IActivitySummaryReader>().ReadAsync(account, TradingMode.Real, default, ids);
     }
 
     private sealed class ReleasedConnectionRegistry(VesselDbContext db) : IVenueRegistry
@@ -157,7 +157,7 @@ public sealed class ActivityCachePostgresTests
                 break;
         }
         await using var fresh = database.Context(owner);
-        Assert.Equal(Json(ActivityService.Aggregate(await new ActivityStore(fresh).ReadAsync(null, default), TradingMode.Real)), Json(after));
+        Assert.Equal(Json(ActivityService.Aggregate(await new ActivityStore(fresh).ReadAsync(null, TradingMode.Real, default), TradingMode.Real)), Json(after));
         Assert.Same(after, await Read(provider, owner));
         // #107: snapshot and sync-state writes are observations; the cached history is rebased onto them, not read again.
         Assert.Equal(change is "snapshot-coverage" or "history-coverage" ? 1 : 2, reads.Count);
@@ -236,7 +236,7 @@ public sealed class ActivityCachePostgresTests
             var next = await Read(provider, owner);
             Assert.NotSame(previous, next);
             await using var fresh = database.Context(owner);
-            Assert.Equal(Json(ActivityService.Aggregate(await new ActivityStore(fresh).ReadAsync(null, default), TradingMode.Real)), Json(next));
+            Assert.Equal(Json(ActivityService.Aggregate(await new ActivityStore(fresh).ReadAsync(null, TradingMode.Real, default), TradingMode.Real)), Json(next));
             Assert.Same(next, await Read(provider, owner)); previous = next;
         }
         await Change(db => { db.Fills.Add(Fill(account, 2)); return Task.CompletedTask; });

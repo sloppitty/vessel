@@ -105,7 +105,7 @@ public sealed class ActivityOperationsPostgresTests
         await using (var db = database.Context(otherOwner)) { db.Accounts.Add(foreign); db.Fills.Add(Fill(foreign, 0)); await db.SaveChangesAsync(); }
         await using (var db = database.Context(owner))
         {
-            var facts = await new ActivityStore(db).ReadAsync(null, default);
+            var facts = await new ActivityStore(db).ReadAsync(null, TradingMode.Real, default);
             Assert.Single(facts.Accounts); Assert.Equal(120, facts.Fills.Count); Assert.Equal(2, facts.FillPlayIds.Count);
             Assert.All(facts.FillPlayIds.Values, id => Assert.Equal(playId, id));
             Assert.Equal("BTC breakout", (await new ActivityStore(db).PlayTitlesAsync([playId, Guid.NewGuid()], default)).Single(t => t.Key == playId).Value);

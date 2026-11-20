@@ -10,6 +10,9 @@ namespace Vessel.Tests;
 /// </summary>
 public interface ISizingStoreDefaults : ISizingStore
 {
+    /// <summary>Every closed Play the fake holds, of either mode; production ports take the mode (issue #113).</summary>
+    Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct);
+
     async Task<List<ClosedPlayFacts>> ISizingStore.ClosedPlaysAsync(TradingMode tradingMode, CancellationToken ct) =>
         (await ClosedPlaysAsync(ct)).Where(f => f.Play.TradingMode == tradingMode).ToList();
 

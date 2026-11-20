@@ -92,7 +92,7 @@ public sealed class ManagedStopPostgresTests
         h.Reader.Result = h.Reader.Result with { Fills = [.. h.Reader.Result.Fills, Fill("f-exit", "exit", "Close Long", 110m, pnl: 10m)] };
         Assert.Equal("closed", (await h.CheckAsync(play.Summary.Id)).Status);
 
-        var facts = Assert.Single(await h.Sizing.ClosedPlaysAsync(default));
+        var facts = Assert.Single(await h.Sizing.ClosedPlaysAsync(TradingMode.Real, default));
         var outcome = PlayOutcomeCalculator.Outcome(facts)!;
         // Revision 1 (stop 95) was in force at the first entry fill: risk 100 notional × 5%, R = 10 ÷ 5.
         Assert.Equal((10m, 5m, 2m), (outcome.NetResult, outcome.PlannedRisk, outcome.RMultiple));

@@ -134,7 +134,6 @@ public interface ISizingStore
 {
     Task<SizingSettings?> SettingsAsync(CancellationToken ct);
     /// <summary>Closed Plays on enabled accounts with their revisions, linked fills and incompletely retained orders.</summary>
-    Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct);
     Task<List<ClosedPlayFacts>> ClosedPlaysAsync(TradingMode tradingMode, CancellationToken ct);
     /// <summary>
     /// The closed Plays of <paramref name="tradingMode"/> on these accounts and, when given, this instrument (ordinal equality):

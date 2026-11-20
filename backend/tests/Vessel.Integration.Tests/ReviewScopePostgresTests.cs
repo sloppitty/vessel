@@ -22,7 +22,7 @@ public sealed class ReviewScopePostgresTests
     private sealed class InMemoryScope(SizingStore inner) : ISizingStoreDefaults
     {
         public Task<SizingSettings?> SettingsAsync(CancellationToken ct) => inner.SettingsAsync(ct);
-        public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct) => inner.ClosedPlaysAsync(ct);
+        public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct) => inner.ClosedPlaysAsync(TradingMode.Real, ct);
         public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(TradingMode tradingMode, CancellationToken ct) => inner.ClosedPlaysAsync(tradingMode, ct);
         public Task<int> UnresolvedPlaysAsync(CancellationToken ct) => inner.UnresolvedPlaysAsync(ct);
         public Task<List<ImportedOrder>> OrdersAsync(IReadOnlyCollection<OrderKey> orders, CancellationToken ct) => inner.OrdersAsync(orders, ct);
@@ -34,7 +34,7 @@ public sealed class ReviewScopePostgresTests
     private sealed class Unscoped(SizingStore inner) : ISizingStoreDefaults
     {
         public Task<SizingSettings?> SettingsAsync(CancellationToken ct) => inner.SettingsAsync(ct);
-        public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct) => inner.ClosedPlaysAsync(ct);
+        public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct) => inner.ClosedPlaysAsync(TradingMode.Real, ct);
         public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(TradingMode tradingMode, CancellationToken ct) => inner.ClosedPlaysAsync(tradingMode, ct);
         public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(TradingMode tradingMode, IReadOnlyCollection<Guid> accountIds, string? instrument,
             CancellationToken ct) => inner.ClosedPlaysAsync(tradingMode, ct);
