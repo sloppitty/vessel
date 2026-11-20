@@ -82,6 +82,12 @@
   start, and logs the unknown migration IDs.
 - A worker whose loop makes no progress for `Vessel:Worker:StaleExitAfter` (default 10
   minutes) exits with code 3, so Compose restarts it.
+- Requests and workers no longer hang on a blocked database: lock waits time out after 10
+  seconds and statements after 25, and the API answers 503 "The database is busy. Try again
+  in a moment." with `Retry-After: 1`.
+- A busy database no longer leaves a monitor lease held, fails same-owner monitor admission
+  or live event delivery, loses a failed event attempt, or blocks sign-in during the
+  identity cleanup, which now deletes in batches.
 
 ### Changed
 
@@ -117,6 +123,9 @@
   lists both image digests.
 - Base images are pinned by digest and workflow actions by commit SHA with token-free
   checkouts; Dependabot proposes the updates.
+- Each API and worker process uses one connection pool for journal reads and one for
+  identity and server-wide reads, so a nested borrow can never wait for a pool it holds; the
+  paper worker's lock session has its own connection.
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and
@@ -143,6 +152,11 @@ FOWNER`. With `tls internal`, Caddy logs that it cannot install its root certifi
 its root filesystem is read-only; see `deploy/README.md`.
 
 Configuration: `Vessel:Worker:StaleExitAfter` (optional, 2 minutes to 2 hours, default 10 minutes).
+Optional `Vessel:Database:LockTimeout` (default 10 seconds) and `Vessel:Database:StatementTimeout`
+(default 25 seconds, below the connection's `Command Timeout`); `check-config` validates them.
+Size PostgreSQL `max_connections` for two pools of `Maximum Pool Size` per API and worker
+process, plus Wolverine's pool and one paper-worker connection. PgBouncer drops or refuses the
+`options` startup parameter, so the limits do not apply behind it; see `deploy/README.md`.
 
 ## 0.4.2 - November 7, 2026
 
