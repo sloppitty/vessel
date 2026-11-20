@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/api/errors'
@@ -56,7 +56,7 @@ describe('PaperExecutionPanel', () => {
     const candleTimes = rows[0]!.querySelectorAll('time')
     expect(Array.from(candleTimes, element => element.dateTime)).toEqual([entry.occurredAtUtc, entry.candleOpenAtUtc, entry.candleCloseAtUtc])
     expect(rows[0]).toHaveTextContent(`Candle ${formatTime(entry.candleOpenAtUtc, 'local')} – ${formatTime(entry.candleCloseAtUtc, 'local')}`)
-    expect(onState.mock.calls).toEqual([[null], [state]])
+    await waitFor(() => expect(onState.mock.calls).toEqual([[null], [state]]))
     expect(api.paperState).toHaveBeenCalledWith(playId, expect.any(AbortSignal))
     expect(screen.queryByRole('button', { name: /Link|Check|Record|Refresh/ })).not.toBeInTheDocument()
   })
