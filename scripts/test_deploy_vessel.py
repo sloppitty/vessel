@@ -108,7 +108,9 @@ class FakeStack(vessel.Stack):
         self.images = set(images if images is not None else {f'skorcius/vessel:api-{version}',
                                                              f'skorcius/vessel:web-{version}', 'postgres:18-alpine'})
         self.known_ids = known or {}
-        # Upgrade manifests each API image carries, by image: {file name: manifest}.
+        # Upgrade manifests each API image carries, by image: {file name: manifest}. An image not listed carries an
+        # empty manifest for its own version; None means no manifest directory (releases before 0.4.3), and a
+        # number is the exit code of a failing read.
         self.upgrade_files = {}
         self.volumes = {'p_postgres', 'p_objects', 'p_evidence'}
 
@@ -149,9 +151,11 @@ class FakeStack(vessel.Stack):
             return Result(stdout='2048\t/v\n')
         if args[:2] == ['docker', 'run'] and args[args.index('--entrypoint') + 1] == 'tar' and vessel.UPGRADE_DIR in args:
             image = args[args.index('--entrypoint') + 2]
-            if image not in self.upgrade_files:
-                return Result(2, b'')
-            return Result(stdout=release_archive(self.upgrade_files[image]))
+            version = image.rsplit(':api-', 1)[1]
+            files = self.upgrade_files.get(image, {f'v{version}.upgrade.json': {'version': version}})
+            if files is None or isinstance(files, int):
+                return Result(files or 2, b'')
+            return Result(stdout=release_archive(files))
         return self.other(args)
 
     def other(self, args):
@@ -550,13 +554,43 @@ class ChangingCommandTests(ReadOnlyCommandTests):
         self.assertLess(out.index('Release upgrade manifests: 1.1.0'), out.index('Stopping web'))
         self.assertIn(('dotnet', 'play-search-rebuild', '--apply'), stack.events)
 
-    def test_upgrade_to_an_image_without_manifests_runs_no_post_step(self):
-        stack = self.stack()
-        stack.images.update({'skorcius/vessel:api-1.1.0', 'skorcius/vessel:web-1.1.0'})
-        code, out = quietly(vessel.upgrade, stack, Args(to='1.1.0', yes=True))
+    def test_upgrade_to_a_release_before_manifests_runs_no_post_step(self):
+        Path(self.directory.name, '.env').write_text('VESSEL_VERSION=0.4.1\n')
+        stack = self.stack(version='0.4.1')
+        stack.state = [inspect(s, image='skorcius/vessel:api-0.4.1') for s in ('postgres', 'api', 'worker', 'web')]
+        stack.images.update({'skorcius/vessel:api-0.4.2', 'skorcius/vessel:web-0.4.2'})
+        stack.upgrade_files['skorcius/vessel:api-0.4.2'] = None
+        code, out = quietly(vessel.upgrade, stack, Args(to='0.4.2', yes=True))
         self.assertEqual(0, code, out)
         self.assertIn('carries no upgrade manifest', out)
         self.assertNotIn('dotnet', [e[0] for e in stack.events])
+        self.assertIn(('migrate', '0.4.2'), stack.events)
+
+    def test_upgrade_to_0_4_3_or_later_stops_before_anything_when_its_manifest_is_missing(self):
+        image = 'skorcius/vessel:api-0.4.3'
+        cases = {'no manifest directory': (None, 'cannot be read'),
+                 'a failing read': (125, 'cannot be read'),
+                 'no manifest for the target': ({'v0.4.2.upgrade.json': {'version': '0.4.2'}}, 'no upgrade manifest '
+                                                                                                'for 0.4.3 itself')}
+        for case, (files, message) in cases.items():
+            with self.subTest(case):
+                Path(self.directory.name, '.env').write_text('VESSEL_VERSION=0.4.2\n')
+                stack = self.stack(version='0.4.2')
+                stack.state = [inspect(s, image='skorcius/vessel:api-0.4.2') for s in ('postgres', 'api', 'worker', 'web')]
+                stack.images.update({image, 'skorcius/vessel:web-0.4.3'})
+                stack.upgrade_files[image] = files
+                with self.assertRaisesRegex(vessel.Failure, message):
+                    quietly(vessel.upgrade, stack, Args(to='0.4.3', yes=True))
+                self.assertEqual([], stack.events)
+                # Read once pulled: still stops before any writer.
+                stack = self.stack(version='0.4.2')
+                stack.state = [inspect(s, image='skorcius/vessel:api-0.4.2') for s in ('postgres', 'api', 'worker', 'web')]
+                stack.upgrade_files[image] = files
+                with self.assertRaisesRegex(vessel.Failure, message):
+                    quietly(vessel.upgrade, stack, Args(to='0.4.3', yes=True))
+                self.assertEqual({'pull'}, {e[0] for e in stack.events})
+                self.assertEqual('VESSEL_VERSION=0.4.2\n', self.env_text())
+                self.assertEqual([], list(stack.backup_root.iterdir()) if stack.backup_root.exists() else [])
 
     def test_an_invalid_manifest_or_one_for_another_version_stops_before_anything_changes(self):
         stack = self.stack()

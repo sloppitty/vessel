@@ -1216,7 +1216,12 @@ migrated since v0.3.0.
    bundled Caddy overlay and your own HTTPS proxy (see
    [HTTPS and proxy trust](#https-and-proxy-trust)). Sign-in cannot work over
    plain HTTP.
-2. Take a backup with `./vessel backup --yes`, which stops every writer first.
+2. Stop every writer and keep it stopped until the final `up` of step 5:
+   `docker compose stop web tls api worker worker-notifications worker-paper`
+   (name only the services you run), plus every API and worker replica on
+   other hosts. Then back up with `./vessel backup --yes`; it restarts only
+   what it stopped itself, so the writers stay stopped through the
+   configuration change, `migrate` and the wallet binding below.
 3. Replace the deploy files with this release's versions, and delete any
    `compose.wallet.yaml`: its settings are now part of `compose.yaml`.
 4. In the private `.env`, delete `Vessel__Auth__Token` and `VESSEL_AUTH_MODE`.
@@ -1228,7 +1233,8 @@ migrated since v0.3.0.
    `VESSEL_ALLOW_LEGACY_DEFAULT_OWNER=true` instead of changing it.
 5. Set `VESSEL_VERSION` and run the [start sequence](#start-and-connect):
    `docker compose config --quiet`, `migrate`, then `identity bind-wallet` for
-   the owner GUID and the public address of the operator's wallet, then `up`.
+   the owner GUID and the public address of the operator's wallet, then `up`,
+   the first command that starts a writer again.
 6. Sign in with that wallet and check that portfolios, accounts and Plays are
    all there. The browser's existing appearance and chart preferences move to
    the operator on first sign-in.
@@ -1456,9 +1462,11 @@ other Docker hosts; stop those yourself. This is never a rolling upgrade.
 stops, restarting the old version, if that fails. It changes only the
 `VESSEL_VERSION` line of `.env`, runs the `migrate` service and the release
 manifests' post-steps, then starts what was running and waits for health.
-`--manifest FILE` uses that manifest instead of the image's; a target image
-without manifests (before v0.4.3) runs none, so run that release's steps from
-its section above. If a step fails, the hosts stay stopped and the command
+`--manifest FILE` uses that manifest instead of the image's. From v0.4.3 on,
+a target image whose manifests cannot be read, or that has none for the target
+itself, stops the upgrade before any writer stops. A target before v0.4.3 has
+no manifests and runs none, so run that release's steps from its section
+above. If a step fails, the hosts stay stopped and the command
 prints the `rollback` to run. `rollback` first backs up the current state,
 then restores the pre-upgrade backup and the previous `VESSEL_VERSION` as in
 [Isolated restore](#isolated-restore), including identity reset and

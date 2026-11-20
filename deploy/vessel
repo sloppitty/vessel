@@ -61,6 +61,8 @@ APP_SERVICES = re.compile(r'^(?:api|migrate|web|worker(?:-[a-z0-9-]+)?)$')
 MANIFEST = 'manifest.json'
 # Every release's docs/releases/vX.Y.Z.upgrade.json, copied into the API image (backend/Dockerfile).
 UPGRADE_DIR = '/app/upgrade'
+# The first release whose API image carries its upgrade manifest: from it on, a missing manifest stops the upgrade.
+MANIFESTS_SINCE = (0, 4, 3)
 # Owners of the evidence volumes (deploy/README.md "Backups").
 RUSTFS_OWNER = '10001:10001'
 API_OWNER = '1654:1654'
@@ -930,9 +932,16 @@ def upgrade_manifests(stack, args, current, target):
     if not stack.image_present(image):
         return None
     found = image_manifests(stack, image)
+    required = release_key(target) >= MANIFESTS_SINCE
+    if found is None and required:
+        raise Failure(f'The upgrade manifests of {image} cannot be read; {target} requires them. Nothing was stopped '
+                      'or changed; check the image, or pass --manifest docs/releases/'
+                      f'v{target}.upgrade.json from the release.')
     if found is None:
         say(f'The {target} image carries no upgrade manifest: read its post-upgrade steps in deploy/README.md.')
         return []
+    if target not in found and required:
+        raise Failure(f'{image} has no upgrade manifest for {target} itself; nothing was stopped or changed.')
     if target not in found:
         say(f'The {target} image has no upgrade manifest for {target} itself.')
     low = release_key(current) if current and VERSION.match(current) else (-1,)
