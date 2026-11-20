@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """PreToolUse guard for coding agents in this repository.
 
-`.claude/settings.json` runs it before every tool call with the call as JSON on
-stdin. It exits 2 with the reason on stderr to refuse the call, and 0 to let it
-through. It refuses what the repository rules forbid and an accident would make
-irreversible:
+`.claude/settings.json` (Claude Code) and `.codex/hooks.json` (Codex) run it
+before every tool call with the call as JSON on stdin. It exits 2 with the
+reason on stderr to refuse the call, and 0 to let it through. It refuses what
+the repository rules forbid and an accident would make irreversible:
 
 - reading or writing `.env` files (templates such as `.env.example` excepted)
   and other credential files, or printing the environment or a secret variable;
@@ -15,8 +15,13 @@ irreversible:
 - migrations, `psql` and test runs aimed at the development database (port
   55432 or database `vessel`), `pnpm db:migrate`, and `dotnet ef database
   update` without an explicit throwaway `--connection`;
-- deleting the volumes of the owner's Compose project (`vessel`), printing its
-  interpolated configuration, or opening a shell in its containers.
+- deleting the volumes of the owner's Compose project (`vessel`) or opening a
+  shell in its containers, and printing any Compose configuration interpolated
+  from a real `.env` file or the environment.
+
+Commands run by wrappers (`sudo`, `env`, `xargs`, ...), by `sh -c`, or fed to a
+shell as a here-document, here-string or `echo ... |` are checked as commands. A
+wrapper option the guard does not know is refused rather than guessed.
 
 Starting the session with `VESSEL_AGENT_RELEASE=1` in the environment lets an
 owner-authorized release push one new release tag and publish. Moving or
@@ -48,8 +53,35 @@ OPERATORS = set(';&|()<>\n')
 # Commands that only read or print their arguments: a port or a database name in them is text, not a target.
 READERS = {'rg', 'grep', 'egrep', 'cat', 'head', 'tail', 'less', 'sed', 'awk', 'wc', 'ls', 'find', 'fzf', 'jq',
            'echo', 'printf', 'git', 'gh', 'diff', 'sort', 'uniq', 'cut', 'tr'}
-WRAPPERS = {'sudo', 'command', 'exec', 'nohup', 'time', 'nice', 'timeout', 'xargs', 'env', 'stdbuf'}
-SHELLS = {'sh', 'bash', 'zsh', 'dash'}
+COMMON_FLAGS = {'--help', '--version'}
+# Commands that run the command after them: (short flags, short options taking a value, short options whose
+# value can only be attached, long flags, long options taking a value, operands before the command).
+WRAPPERS = {
+    'sudo': ('AbBEeHiKklnPSsVv', 'ugpChDRrtTU', '',
+             {'--askpass', '--background', '--bell', '--preserve-env', '--edit', '--set-home', '--login',
+              '--remove-timestamp', '--reset-timestamp', '--non-interactive', '--preserve-groups', '--stdin',
+              '--shell', '--validate', '--list'},
+             {'--user', '--group', '--prompt', '--close-from', '--chdir', '--chroot', '--role', '--type',
+              '--command-timeout', '--other-user', '--host'}, 0),
+    'command': ('pvV', '', '', set(), set(), 0),
+    'exec': ('cl', 'a', '', set(), set(), 0),
+    'nohup': ('', '', '', set(), set(), 0),
+    'time': ('apqv', 'fo', '', {'--append', '--portability', '--quiet', '--verbose'}, {'--format', '--output'}, 0),
+    'nice': ('', 'n', '', set(), {'--adjustment'}, 0),
+    'timeout': ('v', 'sk', '', {'--preserve-status', '--foreground', '--verbose'}, {'--signal', '--kill-after'}, 1),
+    'xargs': ('0prtx', 'aIdELnPs', 'iel',
+              {'--null', '--interactive', '--no-run-if-empty', '--verbose', '--exit', '--open-tty', '--show-limits'},
+              {'--arg-file', '--delimiter', '--eof', '--replace', '--max-lines', '--max-args', '--max-procs',
+               '--max-chars', '--process-slot-var'}, 0),
+    'env': ('i0v', 'uCS', '', {'--ignore-environment', '--null', '--debug'}, {'--unset', '--chdir', '--split-string'},
+            0),
+    'stdbuf': ('', 'ioe', '', set(), {'--input', '--output', '--error'}, 0),
+}
+SHELLS = {'sh', 'bash', 'zsh', 'dash', 'ksh'}
+INTERPRETERS = {'node', 'perl', 'ruby', 'php', 'deno', 'bun', 'lua'}
+ASSIGNMENT = re.compile(r'^[A-Za-z_]\w*=')
+HEREDOC_OPERATOR = re.compile(r"<<(-?)[ \t]*(?:'([^'\n]+)'|\"([^\"\n]+)\"|\\(\w+)|([A-Za-z_]\w*))")
+MARKER = re.compile(r'__agent_guard_document_(\d+)__')
 COMPOSE_FILES = ('compose.yaml', 'compose.yml', 'docker-compose.yaml', 'docker-compose.yml')
 
 
@@ -85,9 +117,61 @@ def check_path(path):
 
 # Shell parsing
 
-def strip_heredocs(command):
-    """Remove here-document bodies: they are data for the command, usually text that only mentions things."""
-    return re.sub(r"<<-?\s*(['\"]?)(\w+)\1([^\n]*)\n.*?\n\s*\2[ \t]*(?=\n|$)", r'<<\2\3', command, flags=re.S)
+def extract_documents(command, documents):
+    """Replace each here-document with a marker word naming its entry in `documents`, an (expands, body) pair.
+
+    Quotes, escapes and comments are followed so that `<<` inside a string is not taken for a here-document.
+    A body runs to its delimiter line, or to the end when there is none, as in the shell."""
+    out, pending, quote, index, size = [], [], None, 0, len(command)
+    while index < size:
+        char = command[index]
+        if quote == "'":
+            quote = None if char == "'" else quote
+        elif char == '\\':
+            out.append(command[index:index + 2])
+            index += 2
+            continue
+        elif quote == '"':
+            quote = None if char == '"' else quote
+        elif char in '\'"':
+            quote = char
+        elif char == '#' and (index == 0 or command[index - 1] in ' \t\n;&|()'):
+            end = command.find('\n', index)
+            end = size if end < 0 else end
+            out.append(command[index:end])
+            index = end
+            continue
+        elif command.startswith('<<<', index):
+            out.append('<<<')
+            index += 3
+            continue
+        elif command.startswith('<<', index) and (found := HEREDOC_OPERATOR.match(command, index)):
+            delimiter = found[2] or found[3] or found[4] or found[5]
+            pending.append((len(documents), delimiter, found[1] == '-'))
+            documents.append((found[5] is not None, ''))
+            out.append(f' __agent_guard_document_{len(documents) - 1}__ ')
+            index = found.end()
+            continue
+        elif char == '\n' and pending:
+            index += 1
+            out.append('\n')
+            for number, delimiter, tabs in pending:
+                start = index
+                while index < size:
+                    line_start, end = index, command.find('\n', index)
+                    end = size if end < 0 else end
+                    line = command[line_start:end]
+                    index = min(end + 1, size)
+                    if (line.lstrip('\t') if tabs else line) == delimiter:
+                        documents[number] = (documents[number][0], command[start:max(start, line_start - 1)])
+                        break
+                else:
+                    documents[number] = (documents[number][0], command[start:])
+            pending = []
+            continue
+        out.append(char)
+        index += 1
+    return ''.join(out)
 
 
 def tokens(command):
@@ -101,9 +185,15 @@ def tokens(command):
         return [part for part in re.split(r"([;&|()<>\n])|[\s'\"]+", command) if part]
 
 
-def segments(command):
-    """Each simple command as a list of words, comments removed, operators dropped."""
-    current, found, comment = [], [], False
+class Words(list):
+    """The words of one simple command, and the words of the command piped into it."""
+    piped_from = None
+
+
+def segments(command, documents):
+    """Each simple command as a list of words, comments removed, operators dropped. A here-string becomes a
+    document marker in the command it feeds."""
+    current, found, comment, herestring, previous = Words(), [], False, False, None
     for token in tokens(command):
         if token == '\n':
             comment = False
@@ -112,10 +202,21 @@ def segments(command):
         if token.startswith('#'):
             comment = True
             continue
+        if herestring and not set(token) <= OPERATORS:
+            documents.append((True, token))
+            current.append(f'__agent_guard_document_{len(documents) - 1}__')
+            herestring = False
+            continue
+        if token == '<<<':
+            herestring = True
+            continue
         if set(token) <= OPERATORS:
             if current:
                 found.append(current)
-            current = []
+            pipe = token in ('|', '|&')
+            previous = current if pipe and current else None if not pipe else previous
+            current = Words()
+            current.piped_from = previous
         else:
             current.append(token)
     if current:
@@ -127,21 +228,126 @@ def substitutions(word):
     return re.findall(r'\$\(([^()]*)\)', word) + re.findall(r'`([^`]*)`', word)
 
 
+def wrapper_parts(name, args):
+    """A wrapper's options as (option, value) pairs and the words of the command it runs. Refuses options the
+    guard does not know, since it cannot tell whether they take a value."""
+    flags, valued, attached, long_flags, long_valued, operands = WRAPPERS[name]
+    options, index = [], 0
+    while index < len(args):
+        arg = args[index]
+        if arg == '--':
+            index += 1
+            break
+        if name == 'env' and arg == '-' or name == 'nice' and re.fullmatch(r'-\d+', arg):
+            options.append((arg, None))
+        elif arg.startswith('--'):
+            option, equals, value = arg.partition('=')
+            if option in long_valued and not equals:
+                value = args[index + 1] if index + 1 < len(args) else ''
+                index += 1
+            elif option not in long_valued | long_flags | COMMON_FLAGS:
+                raise Refused(f'{name} {option} is a wrapper option the guard does not know. Run the command '
+                              'without it, or spell the command out directly.')
+            options.append((option, value))
+        elif arg.startswith('-') and len(arg) > 1:
+            letters = arg[1:]
+            for at, letter in enumerate(letters):
+                if letter in valued or letter in attached:
+                    value = letters[at + 1:]
+                    if not value and letter in valued:
+                        value = args[index + 1] if index + 1 < len(args) else ''
+                        index += 1
+                    options.append(('-' + letter, value))
+                    break
+                if letter not in flags:
+                    raise Refused(f'{name} -{letter} is a wrapper option the guard does not know. Run the command '
+                                  'without it, or spell the command out directly.')
+                options.append(('-' + letter, None))
+        else:
+            break
+        index += 1
+    return options, args[index + operands:]
+
+
 def unwrap(words):
-    """Leading VAR=value assignments and the command after wrappers such as sudo, env or timeout."""
+    """Leading VAR=value assignments and the command after wrappers such as sudo, env or xargs."""
     assignments = []
     while words:
-        word = words[0]
-        if re.match(r'^[A-Za-z_]\w*=', word):
+        word, name = words[0], PurePosixPath(words[0]).name
+        if ASSIGNMENT.match(word):
             assignments.append(word)
             words = words[1:]
-        elif PurePosixPath(word).name in WRAPPERS and len(words) > 1:
-            words = words[1:]
-            while words and (words[0].startswith('-') or re.fullmatch(r'\d+[smhd]?', words[0])):
-                words = words[1:]
+        elif name in WRAPPERS:
+            options, words = wrapper_parts(name, words[1:])
+            if name == 'command' and {'-v', '-V'} & {option for option, _ in options}:
+                return assignments, []  # command -v only looks the command up.
+            if name == 'env':
+                split = [value for option, value in options if option in ('-S', '--split-string')]
+                words = [word for value in split for word in tokens(value)] + list(words)
+                while words and ASSIGNMENT.match(words[0]):
+                    assignments.append(words[0])
+                    words = words[1:]
+                if not words:
+                    raise Refused('env without a command prints the whole environment, which can hold secrets. '
+                                  'Print the variable you need by name.')
         else:
             break
     return assignments, words
+
+
+def shell_input(args):
+    """Where a shell reads its commands: ('command', text) for -c, ('stdin', None), or ('script', path)."""
+    index, command, stdin = 0, False, False
+    while index < len(args):
+        arg = args[index]
+        if arg in ('--', '-'):
+            index += 1
+            break
+        if arg.startswith('--'):
+            index += 2 if arg in ('--rcfile', '--init-file') else 1
+        elif re.fullmatch(r'[-+][A-Za-z]+', arg):
+            letters = arg[1:]
+            command |= arg[0] == '-' and 'c' in letters
+            stdin |= arg[0] == '-' and 's' in letters
+            index += 1 + letters.count('o') + letters.count('O')
+        else:
+            break
+    rest = args[index:]
+    if command:
+        return 'command', rest[0] if rest else ''
+    return ('stdin', None) if stdin or not rest else ('script', rest[0])
+
+
+def check_expansions(text, cwd, depth, documents):
+    """Command substitutions and secret-looking variables expanded inside a here-document or here-string."""
+    for inner in substitutions(text):
+        check_command(inner, cwd, depth + 1, documents)
+    if any(SECRET_NAME.search(name) for name in re.findall(r'\$\{?(\w+)', text)):
+        raise Refused('That expands a variable that looks like a secret. Never print secrets.')
+
+
+def check_program(text):
+    """Code for another interpreter: refuse when it names a .env or credential file."""
+    for word in re.findall(r"[^\s'\"`()\[\]{};]+", text):
+        check_path(word)
+
+
+def check_documents(name, args, documents_here, piped_from, cwd, depth, documents):
+    """Here-documents and here-strings, and what is piped into a shell: inert text, shell input or code."""
+    reads_stdin = name in SHELLS and shell_input(args)[0] == 'stdin'
+    for expands, body in documents_here:
+        if reads_stdin:
+            check_command(body, cwd, depth + 1, documents)
+        elif name.startswith('python') or name in INTERPRETERS:
+            check_program(body)
+        if expands:
+            check_expansions(body, cwd, depth, documents)
+    if reads_stdin and piped_from and not documents_here:
+        producer_assignments, producer = unwrap(piped_from)
+        if producer[:1] in (['echo'], ['printf']):
+            check_command(' '.join(producer[1:]), cwd, depth + 1, documents)
+        else:
+            raise Refused('Commands piped into a shell cannot be checked. Run them directly.')
 
 
 def option_value(args, *names):
@@ -265,6 +471,17 @@ def check_docker(args, assignments, cwd):
         check_compose(rest, assignments, cwd)
 
 
+def compose_files(files, cwd):
+    """The Compose files a command reads: its -f files, else the first compose.yaml found upwards."""
+    base = Path(cwd or os.getcwd())
+    named = [base / file for file in files if file not in (None, '-')]
+    if named:
+        return named
+    found = next((folder / name for folder in (base, *base.parents) for name in COMPOSE_FILES
+                  if (folder / name).is_file()), None)
+    return [found] if found else []
+
+
 def compose_project(files, directory, assignments, cwd):
     """The project name Compose would use: COMPOSE_PROJECT_NAME, the file's `name:`, else its directory's name."""
     for assignment in assignments:
@@ -272,12 +489,7 @@ def compose_project(files, directory, assignments, cwd):
             return assignment.partition('=')[2]
     if os.environ.get('COMPOSE_PROJECT_NAME'):
         return os.environ['COMPOSE_PROJECT_NAME']
-    base = Path(cwd or os.getcwd())
-    if files and files[0] not in (None, '-'):
-        found = base / files[0]
-    else:
-        found = next((folder / name for folder in (base, *base.parents) for name in COMPOSE_FILES
-                      if (folder / name).is_file()), None)
+    found = next(iter(compose_files(files, cwd)), None)
     try:
         named = re.search(r'^name:\s*["\']?([\w.-]+)', found.read_text(), re.MULTILINE) if found else None
     except OSError:
@@ -291,7 +503,7 @@ def compose_project(files, directory, assignments, cwd):
 def check_compose(args, assignments, cwd):
     valued = ('-f', '--file', '-p', '--project-name', '--project-directory', '--env-file', '--profile', '--ansi',
               '--progress', '--parallel')
-    files, project, index = [], None, 0
+    files, env_files, project, index = [], [], None, 0
     while index < len(args) and args[index].startswith('-'):
         arg = args[index]
         name, _, inline = arg.partition('=')
@@ -300,7 +512,11 @@ def check_compose(args, assignments, cwd):
             files.append(value)
         elif name in ('-p', '--project-name'):
             project = value
+        elif name == '--env-file':
+            env_files.append(value)
         index += 1 if inline or name not in valued else 2
+    if index < len(args) and args[index] in ('config', 'convert'):
+        check_compose_config(args[index + 1:], files, env_files, cwd)
     if project is None:
         project = compose_project(files, option_value(args[:index], '--project-directory'), assignments, cwd)
     if project != OWNER_PROJECT or index >= len(args):
@@ -309,15 +525,34 @@ def check_compose(args, assignments, cwd):
     if command == 'down' and ('--volumes' in rest or has_short(rest, 'v')):
         raise Refused("docker compose down -v deletes the owner's development database. Use -p <throwaway> for "
                       'your own project.')
-    if command == 'config' and not {'--services', '--volumes', '--profiles', '--images', '-q', '--quiet',
-                                    '--no-interpolate'} & set(rest):
-        raise Refused("docker compose config prints the owner's .env secrets. Use --services or --no-interpolate, "
-                      'or synthetic values with a throwaway -p name.')
     if command in ('exec', 'run', 'cp'):
         raise Refused("That runs inside the owner's development services. Use a throwaway test database "
                       '(scripts/test-db.sh) or your own -p project.')
     if command in ('run', 'up', 'create') and 'migrate' in rest:
         raise Refused('Migrations run only against throwaway test databases.')
+
+
+def check_compose_config(rest, files, env_files, cwd):
+    """`docker compose config` prints values from the project's .env file, the environment and service env_file
+    files, whatever the project name. Allow listings, and output whose values come only from a synthetic source."""
+    if '--environment' in rest:
+        raise Refused('docker compose config --environment prints the environment used for interpolation, which '
+                      'can hold secrets. Use --services, --quiet or --no-interpolate instead.')
+    if {'--services', '--volumes', '--profiles', '--images', '--networks', '--models', '-q', '--quiet'} & set(rest):
+        return
+    synthetic = '--no-interpolate' in rest or env_files and all(env_files)
+    if not synthetic:
+        raise Refused('docker compose config interpolates the .env file next to the Compose file (the owner\'s '
+                      'secrets), whatever -p says. Use --services or --quiet, --no-interpolate, or an explicit '
+                      '--env-file with synthetic values such as deploy/.env.example.')
+    if '--no-env-resolution' not in rest:
+        for file in compose_files(files, cwd):
+            try:
+                if re.search(r'^\s*env_file\s*:', file.read_text(), re.MULTILINE):
+                    raise Refused(f'{file.name} reads env_file files, which docker compose config prints. Add '
+                                  '--no-env-resolution.')
+            except OSError:
+                pass
 
 
 def check_secret_printing(name, args):
@@ -369,14 +604,19 @@ def check_database(words, assignments):
                           'throwaway database from scripts/test-db.sh.')
 
 
-def check_words(words, cwd, depth):
-    assignments, words = unwrap(words)
+def check_words(words, cwd, depth, documents):
+    documents_here = [documents[int(found[1])] for word in words if (found := MARKER.fullmatch(word))]
+    piped_from = words.piped_from if isinstance(words, Words) else None
+    assignments, words = unwrap([word for word in words if not MARKER.fullmatch(word)])
     exported = [word for word in words[1:] if '=' in word] if words[:1] in (['export'], ['declare']) else []
     check_database(words, assignments + exported)
     for word in assignments + words:
         for inner in substitutions(word):
-            check_command(inner, cwd, depth + 1)
+            check_command(inner, cwd, depth + 1, documents)
     if not words:
+        for expands, body in documents_here:
+            if expands:
+                check_expansions(body, cwd, depth, documents)
         return
     name, args = PurePosixPath(words[0]).name, words[1:]
     # The search pattern of rg or grep is text, not a file.
@@ -388,12 +628,13 @@ def check_words(words, cwd, depth):
     for word in assignments + words:
         if word is not pattern:
             check_path(word)
-    if name in SHELLS and '-c' in args:
-        index = args.index('-c')
-        if index + 1 < len(args):
-            check_command(args[index + 1], cwd, depth + 1)
+    check_documents(name, args, documents_here, piped_from, cwd, depth, documents)
+    if name in SHELLS:
+        mode, text = shell_input(args)
+        if mode == 'command':
+            check_command(text, cwd, depth + 1, documents)
     elif name == 'eval':
-        check_command(' '.join(args), cwd, depth + 1)
+        check_command(' '.join(args), cwd, depth + 1, documents)
     elif name == 'git':
         check_git(args, cwd)
     elif name == 'docker':
@@ -408,19 +649,19 @@ def check_words(words, cwd, depth):
 
 
 def command_name(words):
-    command = unwrap(words)[1]
+    command = unwrap([word for word in words if not MARKER.fullmatch(word)])[1]
     return PurePosixPath(command[0]).name if command else ''
 
 
-def check_command(command, cwd=None, depth=0):
+def check_command(command, cwd=None, depth=0, documents=None):
     if depth > 5:
         raise Refused('The command nests too deeply to check.')
-    command = strip_heredocs(command)
-    found = segments(command)
+    documents = [] if documents is None else documents
+    found = segments(extract_documents(command, documents), documents)
     for words in found:
         if words[0] == 'cd' and len(words) > 1:
             cwd = str(Path(cwd or os.getcwd(), os.path.expanduser(words[1])))
-        check_words(words, cwd, depth)
+        check_words(words, cwd, depth, documents)
     # The development database port or name and a database verb, anywhere outside text-only commands.
     acting = ' '.join(word for words in found if command_name(words) not in READERS for word in words)
     if (DEV_PORT.search(acting) or LIVE_DATABASE.search(acting)) and DATABASE_VERBS.search(acting):
@@ -428,15 +669,29 @@ def check_command(command, cwd=None, depth=0):
                       'or psql. Use a throwaway database from scripts/test-db.sh.')
 
 
+def check_patch(patch):
+    """A Codex apply_patch body: only the files it adds, updates, deletes or moves to are checked."""
+    for path in re.findall(r'^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+?)\s*$', patch, re.MULTILINE):
+        check_path(path)
+
+
 def check_call(call):
     tool_input = call.get('tool_input')
     if not isinstance(tool_input, dict):
         return
     command = tool_input.get('command')
+    if isinstance(command, list) and all(isinstance(word, str) for word in command):
+        # Codex can pass an argument vector, and apply_patch as ["apply_patch", "<patch>"].
+        command = command[1] if command[:1] == ['apply_patch'] and len(command) == 2 else shlex.join(command)
     if isinstance(command, str):
-        check_command(command, call.get('cwd'))
+        if call.get('tool_name') == 'apply_patch' or command.lstrip().startswith('*** Begin Patch'):
+            check_patch(command)
+        else:
+            check_command(command, call.get('cwd'))
     for key in ('file_path', 'path', 'notebook_path'):
         check_path(tool_input.get(key))
+    if isinstance(tool_input.get('patch'), str):
+        check_patch(tool_input['patch'])
 
 
 def main(stdin=sys.stdin, stderr=sys.stderr):
