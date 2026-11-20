@@ -3,6 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ActivityPage, ActivityQuery } from '@/api/activity'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
 import { errorMessage } from '@/api/errors'
+import { useApiRead } from '@/lib/use-api-read'
 import { AccountPicker } from '@/components/accounts/AccountPicker'
 import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
@@ -37,9 +38,9 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
   const list = state ?? localState
   const setList = onStateChange ?? setLocalState
   const [retry, setRetry] = useState(0)
-  // `requested` is the request that produced the result; `key` is the request it answers, which differs when the
-  // server clamped the page. `generation` counts accepted pages so expanded rows re-read their executions.
-  const [result, setResult] = useState<{ api: WorkspaceApi; key: string; requested: string; page: ActivityPage | null; error: string | null; generation: number } | null>(null)
+  // The last settled read (null after a failure) for the filters' options; `generation` counts accepted pages so expanded
+  // rows re-read their executions.
+  const [seen, setSeen] = useState<{ api: WorkspaceApi; read: { page: ActivityPage } | null; generation: number } | null>(null)
   // The version of the first page read for these filters; a later page with another version means Activity changed.
   const [baseline, setBaseline] = useState<{ api: WorkspaceApi; key: string; version: string; changed: boolean } | null>(null)
   const [selection, setSelection] = useState<{ accountId: string; operationId: string } | null>(null)
@@ -61,7 +62,7 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
   const top = useRef<HTMLDivElement | null>(null)
   const enabled = accounts.filter(a => a.isEnabled)
   const fieldId = useId()
-  const previous = result?.api === api ? result.page : null
+  const previous = seen?.api === api ? seen.read?.page ?? null : null
   // Options that disappear fall back to All; instruments come from the scoped set the server reports.
   const selected = list.filters
   const knownContracts = previous?.facets.contracts ?? null
@@ -81,33 +82,29 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
   const query = useMemo(() => JSON.parse(queryKey) as ActivityQuery, [queryKey])
   const key = JSON.stringify([queryKey, reloadGeneration, retry])
   const listKey = JSON.stringify([{ ...query, page: undefined }, reloadGeneration, retry])
-  const adopted = useRef<string | null>(null)
+  // A page past the end comes back clamped: the answer also answers the clamped page's key, which the list adopts below
+  // without reading it again. Earlier pages stay on screen while a read runs.
+  // Each read answers with its own wrapper, so an accepted read is told apart from an adopted one even if the pages match.
+  const read = useApiRead(api, key, (client, signal) => client.activity(query, signal).then(page => ({ page })), {
+    fallback: 'Operations could not be loaded.', keepPrevious: 'always',
+    answers: ({ page }, asked) => page.page === query.page ? asked : JSON.stringify([JSON.stringify({ ...query, page: page.page }), reloadGeneration, retry]),
+  })
+  const pending = read.loading
+  const settled = pending ? undefined : read.data
+  if (settled !== undefined && (seen?.api !== api || seen.read !== settled)) {
+    setSeen({ api, read: settled, generation: (seen?.generation ?? 0) + (settled ? 1 : 0) })
+    if (settled) setBaseline(current => current?.api !== api || current.key !== listKey || settled.page.page === 1
+      ? { api, key: listKey, version: settled.page.version, changed: false }
+      : current.version === settled.page.version ? current : { ...current, changed: true })
+  }
+  const answer = settled?.page ?? null
+  // Keep the page actually shown, so later growth does not jump back.
   useEffect(() => {
-    const skip = adopted.current === key
-    adopted.current = null
-    if (skip) return
-    const controller = new AbortController()
-    api.activity(query, controller.signal).then(page => {
-      if (controller.signal.aborted) return
-      // The request a clamped page answers, so adopting it into the list state does not read it again.
-      const answered = page.page === query.page ? key : JSON.stringify([JSON.stringify({ ...query, page: page.page }), reloadGeneration, retry])
-      setResult(current => ({ api, key: answered, requested: key, page, error: null, generation: (current?.generation ?? 0) + 1 }))
-      setBaseline(current => current?.api !== api || current.key !== listKey || page.page === 1 ? { api, key: listKey, version: page.version, changed: false }
-        : current.version === page.version ? current : { ...current, changed: true })
-    }).catch(cause => {
-      if (!controller.signal.aborted) setResult(current => ({ api, key, requested: key, page: null, error: errorMessage(cause, 'Operations could not be loaded.'), generation: current?.generation ?? 0 }))
-    })
-    return () => controller.abort()
-  }, [api, query, key, listKey, reloadGeneration, retry])
-  // A page past the end comes back clamped: keep the page actually shown, so later growth does not jump back.
-  // Only the response to the current request may write, and the adopted page is not requested again.
-  useEffect(() => {
-    if (compact || result === null || result.api !== api || result.requested !== key || result.key === key || result.page === null) return
-    adopted.current = result.key
-    setList({ ...list, page: result.page.page })
-  }, [api, compact, key, list, result, setList])
-  const pending = result === null || result.api !== api || result.key !== key && result.requested !== key
-  const skeleton = useDelayedFlag(pending && previous === null)
+    if (compact || answer === null || answer.page === query.page) return
+    setList({ ...list, page: answer.page })
+  }, [answer, compact, list, query.page, setList])
+  const shown = read.data?.page ?? null
+  const skeleton = useDelayedFlag(pending && shown === null)
   const changed = baseline?.api === api && baseline.key === listKey && baseline.changed
   const update = (field: keyof Filters, value: string) => setList({ ...list, filters: { ...filters, [field]: value }, page: 1 })
   const reloadActivity = () => { setList({ ...list, page: 1 }); setRetry(n => n + 1) }
@@ -117,8 +114,7 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
   }
 
   // A rejected filter combination keeps the filters on screen so it can be changed.
-  const error = pending ? null : result.error
-  const shown = pending ? previous : result.page
+  const error = read.error
   const contracts = shown?.facets.contracts ?? (filters.contract ? [filters.contract] : [])
   // The pager already counts the rows; a note is only needed when filters narrow the scope (or Overview has no pager).
   // Judge the filters actually sent: retained custom dates behind "All retained activity" narrow nothing.
@@ -148,7 +144,7 @@ export function ActivityOperations({ api, accounts, portfolios = [], accountId, 
         : `${count.format(shown.totalCount)} of ${count.format(shown.scopeCount)} operations match the filters.`}</p>}
       <div className={pending ? 'operations-results list-refetching' : 'operations-results'} aria-busy={pending || undefined}>
         {openError && <p className="workspace-alert" role="alert">{openError}</p>}
-        <OperationsTable api={api} operations={shown.operations} accounts={accounts} compact={compact} refreshGeneration={result?.generation ?? 0} onReload={reloadActivity}
+        <OperationsTable api={api} operations={shown.operations} accounts={accounts} compact={compact} refreshGeneration={seen?.generation ?? 0} onReload={reloadActivity}
           {...(onOpenPlay ? { onOpenPlay: (id: string) => { void openPlay(id) } } : {})} opening={opening} onPreview={operation => {
           trigger.current = window.document.activeElement instanceof HTMLElement ? window.document.activeElement : null
           setSelection({ accountId: operation.accountId, operationId: operation.id })
