@@ -42,16 +42,18 @@ The tool was installed locally through Corepack during setup. Use a current Core
 ## Release images
 
 Releases are published by `.github/workflows/release.yml`. Merge a release pull
-request (versions, a dated changelog section and `docs/releases/vX.Y.Z.md`),
-then push an annotated tag on `main`:
+request (versions, a dated changelog section, `docs/releases/vX.Y.Z.md` and
+the upgrade manifest `docs/releases/vX.Y.Z.upgrade.json` that `deploy/vessel
+upgrade` reads from the API image), then push an annotated tag on `main`:
 
 ```sh
 git tag -a v0.4.2 -m "Vessel v0.4.2" origin/main
 git push origin v0.4.2
 ```
 
-The workflow checks that the tag, packaged versions and notes agree
-(`python3 scripts/release.py check --tag v0.4.2`) and runs the foundation checks.
+The workflow checks that the tag, packaged versions and notes agree and that the
+upgrade manifest's migrations exist (`python3 scripts/release.py check --tag
+v0.4.2`), and runs the foundation checks.
 It builds both images once (`release.py build`) and passes them, saved with
 `docker save`, as the `release-images` workflow artifact; each image's config
 digest travels separately as a job output. Both `scripts/verify-release.py`

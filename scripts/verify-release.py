@@ -23,10 +23,12 @@ import shutil
 import socket
 import ssl
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
 from dev import verification_environment
+import release
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -69,6 +71,20 @@ def port():
         return sock.getsockname()[1]
 
 
+def free_network(exclude=()):
+    """An unused 172.29.x /24 prefix, not the development or deployment defaults, nor one in exclude."""
+    import ipaddress
+    networks = [json.loads(line) for line in run('docker', 'network', 'ls', '--format', 'json', capture_output=True, text=True).stdout.splitlines()]
+    occupied = run('docker', 'network', 'inspect', *[n['ID'] for n in networks], capture_output=True, text=True).stdout if networks else ''
+    subnets = [ipaddress.ip_network(c['Subnet']) for n in json.loads(occupied or '[]') for c in (n['IPAM'].get('Config') or []) if c.get('Subnet')]
+    subnets += [ipaddress.ip_network(f'{prefix}.0/24') for prefix in exclude]
+    for octet in range(100, 250):
+        subnet = ipaddress.ip_network(f'172.29.{octet}.0/24')
+        if not any(subnet.version == other.version and subnet.overlaps(other) for other in subnets):
+            return f'172.29.{octet}'
+    raise RuntimeError('No free verification subnet.')
+
+
 class Check:
     def __init__(self, args):
         self.args = args
@@ -92,22 +108,12 @@ class Check:
         self.session_cookie = None
         self.session = None
         self.browser_container = None
+        self.upgrade = None
 
     def prepare(self):
         for file in ('compose.yaml', 'compose.tls.yaml', 'compose.credentials.yaml', 'compose.storage-local.yaml', 'Caddyfile'):
             shutil.copyfile(ROOT / 'deploy' / file, self.temp / file)
-        # Pick an unused subnet, not the development or deployment defaults.
-        networks = [json.loads(line) for line in run('docker', 'network', 'ls', '--format', 'json', capture_output=True, text=True).stdout.splitlines()]
-        occupied = run('docker', 'network', 'inspect', *[n['ID'] for n in networks], capture_output=True, text=True).stdout if networks else ''
-        import ipaddress
-        subnets = [ipaddress.ip_network(c['Subnet']) for n in json.loads(occupied or '[]') for c in (n['IPAM'].get('Config') or []) if c.get('Subnet')]
-        for octet in range(100, 250):
-            subnet = ipaddress.ip_network(f'172.29.{octet}.0/24')
-            if not any(subnet.version == other.version and subnet.overlaps(other) for other in subnets):
-                break
-        else:
-            raise RuntimeError('No free verification subnet.')
-        self.network = f'172.29.{octet}'
+        self.network = free_network()
         self.write_env(self.network)
         (self.temp / 'local.yaml').write_text(f'''services:
   api:
@@ -959,6 +965,11 @@ for (const host of ['127.0.0.1', '::1']) {{
             self.stop_browser_server()
         except RuntimeError:
             errors.append('browser server')
+        try:
+            if self.upgrade:
+                self.upgrade.cleanup()
+        except RuntimeError:
+            errors.append('upgrade check')
         if (self.temp / 'local.yaml').exists():
             for project in self.projects:
                 result = self.compose('down', '-v', '--remove-orphans', project=project, stdout=subprocess.DEVNULL, check=False)
@@ -988,6 +999,10 @@ for (const host of ['127.0.0.1', '::1']) {{
             for proxy in ('0.0.0.0', '172.29.100.0/24', '1.2.3.4; include /evil;', '1.2.3.4\n5.6.7.8'):
                 invalid = subprocess.run(['docker', 'run', '--rm', '-e', 'VESSEL_TRUSTED_PROXY=' + proxy, '--entrypoint', '/docker-entrypoint.d/19-trusted-proxy.sh', self.images['web']], capture_output=True)
                 self.expect(invalid.returncode != 0, 'invalid nginx trusted peer rejected: ' + repr(proxy), 'image')
+            # The upgrade from the previous published release, through deploy/vessel only, removed before the rest.
+            self.upgrade = Upgrade(self)
+            self.upgrade.check()
+            self.upgrade.cleanup()
             self.wallet_bootstrap()
             self.compose('up', '-d', '--wait', stdout=subprocess.DEVNULL)
             self.ready()
@@ -1021,6 +1036,209 @@ for (const host of ['127.0.0.1', '::1']) {{
             print('Matrix counts: ' + json.dumps(self.counts, sort_keys=True), flush=True)
         finally:
             self.cleanup()
+
+
+def upgrade_versions(root=ROOT):
+    """(candidate, previous): the release these images become, the newest of the packaged version and the upgrade
+    manifests (an unbumped tree is the next release's candidate), and the newest release with notes before it."""
+    manifests = release.upgrade_manifests(root)
+    candidate = max([release.check(root), *manifests], key=release.release_key)
+    released = [path.name[1:-3] for path in (root / 'docs' / 'releases').glob('v*.md')]
+    earlier = [v for v in released if release.SEMVER.fullmatch(v) and release.release_key(v) < release.release_key(candidate)]
+    if not earlier:
+        raise RuntimeError(f'No published release before {candidate} to upgrade from.')
+    return candidate, max(earlier, key=release.release_key)
+
+
+class Upgrade(Check):
+    """Issue #101: an installation of the previous published release, with synthetic data, upgraded to the images
+    under check by `deploy/vessel upgrade` alone, in its own operator directory and Compose project.
+
+    The previous release's images are pulled from Docker Hub (public; never a login or a push). Both releases are
+    tagged into a check-local repository that the copied deploy files name instead of skorcius/vessel, so the script
+    selects them through VESSEL_VERSION as on a real installation, and reads the candidate's upgrade manifests from
+    its API image. The paper worker and the TLS proxy run too, so the script must stop and restart every host."""
+
+    HOSTS = ('api', 'worker', 'worker-notifications', 'worker-paper', 'web', 'tls')
+
+    def __init__(self, parent):
+        self.args = parent.args
+        self.parent = parent
+        self.temp = Path(tempfile.mkdtemp(prefix='vessel-upgrade-check-'))
+        self.name = parent.name + '-upgrade'
+        self.repository = parent.name + '-release'
+        self.candidate, self.previous = upgrade_versions()
+        manifests = release.upgrade_manifests(ROOT)
+        self.manifests = [manifests[v] for v in sorted(manifests, key=release.release_key)
+                          if release.release_key(self.previous) < release.release_key(v) <= release.release_key(self.candidate)]
+        self.tags, self.pulled = [], []
+        self.s3_access, self.s3_secret = secrets.token_hex(16), secrets.token_hex(32)
+        self.database_password = secrets.token_hex(24)
+        self.broker_password = secrets.token_hex(24)
+        self.owner = str(uuid.uuid4())
+        self.http_port, self.https_port, self.redirect_port = port(), port(), port()
+        self.broker_port = port()
+        self.projects = [self.name]
+        self.counts = parent.counts
+        self.tls = True
+        self.fixture = False
+        self.session_cookie = None
+        self.session = None
+        self.browser_container = None
+        self.upgrade = None
+
+    def compose(self, *args, project=None, **kwargs):
+        # The operator directory's .env selects the files, profile and version, as for an operator's bare commands.
+        return run('docker', 'compose', '--project-directory', str(self.temp), '-p', self.name, *args,
+                   env=verification_environment(), **kwargs)
+
+    def prepare(self):
+        files = ['compose.yaml', 'compose.tls.yaml', 'compose.paper.yaml']
+        files += ['compose.storage-local.yaml'] if self.args.storage == 'local' else []
+        for file in files + ['Caddyfile']:
+            text = (ROOT / 'deploy' / file).read_text()
+            (self.temp / file).write_text(text.replace('skorcius/vessel:', self.repository + ':'))
+        shutil.copy2(ROOT / 'deploy' / 'vessel', self.temp / 'vessel')
+        (self.temp / 'cpu.yaml').write_text('services:\n  rabbitmq:\n    environment:\n'
+                                            '      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2"\n'
+                                            '      RABBITMQ_CTL_ERL_ARGS: "+S 1:1"\n')
+        network = free_network([self.parent.network])
+        (self.temp / '.env').write_text(f'''COMPOSE_PROJECT_NAME={self.name}
+COMPOSE_FILE={':'.join(files + ['cpu.yaml'])}
+COMPOSE_PROFILES=paper
+VESSEL_VERSION={self.previous}
+POSTGRES_PASSWORD={self.database_password}
+VESSEL_IDENTITY_REGISTRATION=Invitation
+Vessel__Auth__OwnerId={self.owner}
+VESSEL_S3_ACCESS_KEY_ID={self.s3_access}
+VESSEL_S3_SECRET_ACCESS_KEY={self.s3_secret}
+RABBITMQ_USER=vessel
+RABBITMQ_PASSWORD={self.broker_password}
+VESSEL_RABBITMQ_MANAGEMENT_BIND=127.0.0.1:{self.broker_port}
+VESSEL_WEB_BIND=127.0.0.1:{self.http_port}
+VESSEL_NETWORK_SUBNET={network}.0/24
+VESSEL_NETWORK_GATEWAY={network}.1
+VESSEL_WEB_IP={network}.10
+VESSEL_TLS_PROXY_IP={network}.20
+VESSEL_TLS_HOST=localhost
+VESSEL_TLS_HTTP_BIND=127.0.0.1:{self.redirect_port}
+VESSEL_TLS_HTTPS_BIND=127.0.0.1:{self.https_port}
+VESSEL_TLS_DIRECTIVE=tls internal
+VESSEL_IDENTITY_ORIGIN=https://localhost:{self.https_port}
+''')
+        (self.temp / '.env').chmod(0o600)
+
+    def tag_images(self):
+        for kind in ('api', 'web'):
+            published = f'skorcius/vessel:{kind}-{self.previous}'
+            if run('docker', 'image', 'inspect', published, check=False, stdout=subprocess.DEVNULL,
+                   stderr=subprocess.DEVNULL).returncode:
+                print(f'Pulling the published {published}', flush=True)
+                run('docker', 'pull', '--quiet', published, stdout=subprocess.DEVNULL)
+                self.pulled.append(published)
+            for version, source in ((self.previous, published), (self.candidate, self.parent.images[kind])):
+                tag = f'{self.repository}:{kind}-{version}'
+                run('docker', 'tag', source, tag)
+                self.tags.append(tag)
+
+    def applied(self):
+        return {'journal': set(self.sql('SELECT "MigrationId" FROM public."__EFMigrationsHistory"').split()),
+                'identity': set(self.sql('SELECT "MigrationId" FROM identity."__EFMigrationsHistory"').split())}
+
+    def hosts(self):
+        rows = [json.loads(line) for line in self.compose('ps', '--format', 'json', capture_output=True,
+                                                            text=True).stdout.splitlines() if line.strip()]
+        return {row['Service']: row for row in rows if row['Service'] in self.HOSTS}
+
+    def vessel(self, *args):
+        result = run(sys.executable, str(self.temp / 'vessel'), *args, cwd=self.temp, env=verification_environment(),
+                     capture_output=True, text=True, check=False)
+        # The command never prints .env values; its plan and steps are the evidence of what it did.
+        print(result.stdout + result.stderr, end='', flush=True)
+        return result
+
+    def check(self):
+        self.prepare()
+        self.tag_images()
+        group = 'upgrade'
+        self.wallet_bootstrap()
+        self.compose('up', '-d', '--wait', stdout=subprocess.DEVNULL)
+        self.ready()
+        self.wallet_sign_in()
+        self.seed()
+        hosts = self.hosts()
+        self.expect(set(hosts) == set(self.HOSTS) and all(
+            row['Image'].endswith(f'-{self.previous}') for name, row in hosts.items() if name != 'tls'),
+            f'published {self.previous} runs API, web, TLS, monitor, notifications and paper workers', group)
+        before = self.applied()
+
+        plan = self.vessel('upgrade', '--to', self.candidate, '--no-pull')
+        self.expect(plan.returncode == 2 and self.applied() == before and self.hosts().keys() == hosts.keys()
+                    and not (self.temp / 'backups').exists(), 'upgrade without --yes changes nothing', group)
+        result = self.vessel('upgrade', '--to', self.candidate, '--yes', '--no-pull')
+        self.expect(result.returncode == 0, f'deploy/vessel upgrade --to {self.candidate} succeeds', group)
+        out = result.stdout
+        steps = ['Stopping tls, web', 'Stopping api, worker, worker-notifications, worker-paper', 'Backup complete',
+                 f'Setting VESSEL_VERSION={self.candidate}', 'Running migrate',
+                 *[f'Running {" ".join(step)}' for step in release_steps(self.manifests)], f'on {self.candidate}\n']
+        positions = [out.find(step, out.find('Stopping tls, web')) for step in steps]
+        self.expect(all(p >= 0 for p in positions) and positions == sorted(positions),
+                    'every writer, paper and notifications workers included, stops; a backup precedes migrate and the '
+                    'post-steps; then the hosts start', group)
+        env = (self.temp / '.env').read_text().splitlines()
+        self.expect([line for line in env if line.startswith('VESSEL_VERSION=')] == [f'VESSEL_VERSION={self.candidate}'],
+                    f'.env selects {self.candidate}', group)
+        backups = [json.loads(path.read_text()) for path in (self.temp / 'backups').glob('*/manifest.json')]
+        archive = 'objects.tar.gz' if self.args.storage == 's3' else 'evidence.tar.gz'
+        self.expect(len(backups) == 1 and backups[0]['kind'] == 'pre-upgrade' and backups[0]['version'] == self.previous
+                    and backups[0]['upgradeTo'] == self.candidate and set(backups[0]['files']) == {'vessel.dump', archive}
+                    and backups[0]['migrations'] == {k: sorted(v) for k, v in before.items()},
+                    f'a pre-upgrade backup of {self.previous} holds both schemas and {archive}', group)
+
+        after = self.applied()
+        listed = {schema: {m for manifest in self.manifests for m in manifest['migrations'][schema]} for schema in after}
+        self.expect({schema: after[schema] - before[schema] for schema in after} == listed and before['journal'] <= after['journal'],
+                    'the migrations applied are exactly those the upgrade manifests list: ' + json.dumps(
+                        {schema: sorted(ids) for schema, ids in listed.items()}), group)
+        status = self.vessel('status').stdout
+        self.expect('journal: ' + str(len(after['journal'])) + ' applied, 0 pending, 0 unknown' in status
+                    and 'identity: ' + str(len(after['identity'])) + ' applied, 0 pending, 0 unknown' in status,
+                    f'nothing pending or unknown against the {self.candidate} image', group)
+        hosts = self.hosts()
+        self.expect(set(hosts) == set(self.HOSTS) and all(
+            row['Image'] == f'{self.repository}:{"web" if name == "web" else "api"}-{self.candidate}'
+            for name, row in hosts.items() if name != 'tls') and all(row.get('Health') == 'healthy' for row in hosts.values()),
+            f'every host, paper and notifications workers included, runs healthy on {self.candidate}', group)
+
+        self.ready()
+        self.expect(self.request('/api/auth/session')[0] == 200, 'the session from before the upgrade still signs in', group)
+        self.expect(self.json('/api/accounts/' + self.account)['name'] == 'Synthetic manual', 'account survives the upgrade', group)
+        self.expect(self.json('/api/plays/' + self.play)['summary']['title'] == 'Synthetic restore play', 'saved Play survives the upgrade', group)
+        self.expect(self.request('/api/evidence/' + self.evidence + '/content')[2] == self.png, 'evidence bytes survive the upgrade', group)
+        item = self.json('/api/plays/' + self.play + '/evidence')[0]
+        self.expect(item['note'] == 'Synthetic restore evidence' and item['markup'] == self.markup, 'evidence note and markup survive the upgrade', group)
+        self.expect(self.play in json.dumps(self.json('/api/plays/search?q=Synthetic')), 'the rebuilt search index finds the Play', group)
+
+    def cleanup(self):
+        errors = []
+        if self.temp.exists():
+            if (self.temp / '.env').exists() and self.compose('down', '-v', '--remove-orphans', stdout=subprocess.DEVNULL,
+                                                               check=False).returncode:
+                errors.append(self.name)
+            shutil.rmtree(self.temp)
+        for image in self.tags + self.pulled:
+            run('docker', 'image', 'rm', image, stdout=subprocess.DEVNULL, check=False)
+        self.tags, self.pulled = [], []
+        if errors:
+            raise RuntimeError('Cleanup failed for isolated projects: ' + ', '.join(errors))
+
+
+def release_steps(manifests):
+    """deploy/vessel's post-step order: each identical step once, in release order."""
+    steps = []
+    for manifest in manifests:
+        steps += [step for step in manifest['postSteps'] if step not in steps]
+    return steps
 
 
 def parse_args(args=None):

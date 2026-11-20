@@ -2,7 +2,9 @@
 """Release metadata checks and image publication for Vessel.
 
 `check` confirms that every packaged version agrees and that the version has a
-changelog entry and release notes. `build` builds the Linux amd64 API and web
+changelog entry, release notes and, from 0.4.3 on, an upgrade manifest
+(docs/releases/vX.Y.Z.upgrade.json, read by deploy/vessel upgrade from the API
+image) whose migrations exist in the source. `build` builds the Linux amd64 API and web
 images once from one commit and saves them (`docker save`) with their config
 digests. `identify` recomputes those digests from a saved pair without building,
 so a later attempt of the same release run reuses the pair the first attempt
@@ -37,6 +39,13 @@ SEMVER = re.compile(r'\d+\.\d+\.\d+')
 DIGEST = re.compile(r'sha256:[0-9a-f]{64}')
 # docker save names the config blob by its digest: blobs/sha256/<hex> (OCI layout) or <hex>.json (older daemons).
 CONFIG_NAME = re.compile(r'(?:^|/)([0-9a-f]{64})(?:\.json)?$')
+# The first release whose upgrade manifest is required; earlier upgrades are described in deploy/README.md.
+FIRST_UPGRADE_MANIFEST = (0, 4, 3)
+# Where each schema's migrations live, as deploy/vessel names the schemas.
+MIGRATION_SOURCES = {'journal': 'backend/src/Vessel.Persistence', 'identity': 'backend/src/Vessel.Identity'}
+MIGRATION_ATTRIBUTE = re.compile(r'\[Migration\("([^"]+)"\)\]')
+# An API administrator command, as deploy/vessel accepts it.
+COMMAND = re.compile(r'[a-z][a-z-]*')
 
 
 class ReleaseError(Exception):
@@ -76,7 +85,61 @@ def check(root, tag=None):
     notes = root / 'docs' / 'releases' / f'v{version}.md'
     if not notes.is_file() or not notes.read_text().strip():
         raise ReleaseError(f'Release notes {notes.relative_to(root)} are missing or empty')
+    manifests = upgrade_manifests(root)
+    if release_key(version) >= FIRST_UPGRADE_MANIFEST and version not in manifests:
+        raise ReleaseError(f'Upgrade manifest docs/releases/v{version}.upgrade.json is missing')
     return version
+
+
+def release_key(version):
+    return tuple(int(part) for part in version.split('.'))
+
+
+def source_migrations(root):
+    """Migration IDs per schema, from the [Migration] attributes compiled into each assembly."""
+    return {schema: {match for file in sorted((root / path).rglob('*.cs'))
+                     for match in MIGRATION_ATTRIBUTE.findall(file.read_text())}
+            for schema, path in MIGRATION_SOURCES.items()}
+
+
+def upgrade_manifests(root):
+    """Every docs/releases/vX.Y.Z.upgrade.json by version, each checked: the fields deploy/vessel reads, migrations
+    the source defines, and no migration listed by two releases."""
+    manifests, listed, known = {}, {}, None
+    for path in sorted((root / 'docs' / 'releases').glob('v*.upgrade.json')):
+        name = path.relative_to(root)
+        version = path.name[1:-len('.upgrade.json')]
+        try:
+            manifest = json.loads(path.read_text())
+        except ValueError as error:
+            raise ReleaseError(f'{name} is not JSON: {error}') from error
+        if not SEMVER.fullmatch(version) or not isinstance(manifest, dict) or manifest.get('version') != version:
+            raise ReleaseError(f'{name} must be a JSON object whose "version" is {version}')
+        if set(manifest) != {'version', 'migrations', 'postSteps', 'configuration'}:
+            raise ReleaseError(f'{name} must have exactly version, migrations, postSteps and configuration')
+        migrations = manifest['migrations']
+        if not isinstance(migrations, dict) or set(migrations) != set(MIGRATION_SOURCES):
+            raise ReleaseError(f'{name}: migrations must list {" and ".join(MIGRATION_SOURCES)}, empty when none')
+        known = known if known is not None else source_migrations(root)
+        for schema, ids in migrations.items():
+            if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids) or len(set(ids)) != len(ids):
+                raise ReleaseError(f'{name}: {schema} migrations must be a list of distinct IDs')
+            for migration in ids:
+                if migration not in known[schema]:
+                    raise ReleaseError(f'{name}: {schema} migration {migration} is not in {MIGRATION_SOURCES[schema]}')
+                if migration in listed:
+                    raise ReleaseError(f'{name}: {migration} is already listed by {listed[migration]}')
+                listed[migration] = version
+        steps = manifest['postSteps']
+        if not isinstance(steps, list) or not all(
+                isinstance(step, list) and step and all(isinstance(a, str) for a in step) and COMMAND.fullmatch(step[0])
+                for step in steps):
+            raise ReleaseError(f'{name}: postSteps must be API command argument lists such as ["play-search-rebuild"]')
+        notes = manifest['configuration']
+        if not isinstance(notes, list) or not all(isinstance(note, str) and note.strip() for note in notes):
+            raise ReleaseError(f'{name}: configuration must be a list of notes')
+        manifests[version] = manifest
+    return manifests
 
 
 def docker(*args, capture=False):
