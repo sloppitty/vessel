@@ -1389,10 +1389,6 @@ namespace Vessel.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("Drawings")
-                        .IsRequired()
-                        .HasColumnType("jsonb");
-
                     b.Property<DateTimeOffset?>("EndedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -1517,6 +1513,23 @@ namespace Vessel.Persistence.Migrations
                         {
                             t.HasCheckConstraint("CK_plays_trading_mode", "\"TradingMode\" IN ('real', 'paper')");
                         });
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.PlayDrawings", b =>
+                {
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PlayId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Document")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("OwnerId", "PlayId");
+
+                    b.ToTable("play_drawings", (string)null);
                 });
 
             modelBuilder.Entity("Vessel.Domain.Plays.PlayNote", b =>
@@ -3030,6 +3043,16 @@ namespace Vessel.Persistence.Migrations
                         .HasForeignKey("OwnerId", "AccountId", "TradingMode")
                         .HasPrincipalKey("OwnerId", "Id", "TradingMode")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Vessel.Domain.Plays.PlayDrawings", b =>
+                {
+                    b.HasOne("Vessel.Domain.Plays.Play", null)
+                        .WithOne()
+                        .HasForeignKey("Vessel.Domain.Plays.PlayDrawings", "OwnerId", "PlayId")
+                        .HasPrincipalKey("Vessel.Domain.Plays.Play", "OwnerId", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

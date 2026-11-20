@@ -60,7 +60,6 @@ public sealed class Play : IOwned
     public string Plan { get; private set; } = null!;
     /// <summary>The plan's direction, kept in step with <see cref="Plan"/> so lists never parse the plan; empty if it has none.</summary>
     public string Direction { get; private set; } = "";
-    public string Drawings { get; private set; } = "{}";
     public string Review { get; private set; } = "";
     public PlayOrigin Origin { get; private set; }
     public string? ReviewAdherence { get; private set; }
@@ -131,11 +130,27 @@ public sealed class Play : IOwned
         Touch(now);
     }
 
-    public PlayReviewRevision? Annotate(string title, string drawings, string review, DateTimeOffset now, ReviewAnswers? answers = null)
+    /// <summary>
+    /// Replaces the chart drawings held in <paramref name="stored"/>, this Play's row (issue #110). A change advances the
+    /// Play's version, so a concurrent plan save still conflicts with it; an equal document changes nothing. Returns whether
+    /// the drawings changed.
+    /// </summary>
+    public bool ReplaceDrawings(PlayDrawings stored, string drawings, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(stored);
+        ArgumentException.ThrowIfNullOrWhiteSpace(drawings);
+        if (stored.OwnerId != OwnerId || stored.PlayId != Id) throw new ArgumentException("The drawings belong to another Play.");
+        if (SameDocument(drawings, stored.Document)) return false;
+        if (!IsEditable) throw new DomainRuleException("Closed, cancelled and unresolved Plays keep their plan; only the review can change.");
+        stored.Document = drawings;
+        Touch(now);
+        return true;
+    }
+
+    public PlayReviewRevision? Annotate(string title, string review, DateTimeOffset now, ReviewAnswers? answers = null)
     {
         ArgumentNullException.ThrowIfNull(title);
         ArgumentNullException.ThrowIfNull(review);
-        ArgumentException.ThrowIfNullOrWhiteSpace(drawings);
         title = title.Trim();
         if (title.Length > MaxTitleLength) throw new DomainValidationException($"Titles are limited to {MaxTitleLength} characters.");
         if (review.Length > MaxReviewLength) throw new DomainValidationException($"Reviews are limited to {MaxReviewLength} characters.");
@@ -157,12 +172,10 @@ public sealed class Play : IOwned
             throw new DomainRuleException("This Play was planned without an if-then rule, so there is none to answer.");
         var previousAnswers = Answers;
         var changedReview = review != Review || answers != previousAnswers;
-        var sameDrawings = SameDocument(drawings, Drawings);
-        if (title == Title && sameDrawings && !changedReview) return null;
-        if (!IsEditable && (title != Title || !sameDrawings))
+        if (title == Title && !changedReview) return null;
+        if (!IsEditable && title != Title)
             throw new DomainRuleException("Closed, cancelled and unresolved Plays keep their plan; only the review can change.");
         Title = title;
-        Drawings = drawings;
         Review = review;
         ReviewAdherence = answers.Adherence;
         ReviewMistakeTag = answers.MistakeTag;

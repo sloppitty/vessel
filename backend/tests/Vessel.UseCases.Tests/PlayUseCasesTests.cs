@@ -138,6 +138,34 @@ public sealed class PlayServiceTests
     }
 
     [Fact]
+    public async Task Drawings_live_in_their_own_row_and_the_version_check_covers_them()
+    {
+        var drawings = JsonSerializer.SerializeToElement(new Dictionary<string, object[]> { ["hyperliquid:BTC"] = [new { id = "d1" }] });
+        var play = await service.CreateAsync(new CreatePlayRequest(venue.Id, "BTC", "venue", "Breakout", TestPlays.Plan(), drawings), default);
+        var row = Assert.Single(store.Drawings);
+        Assert.Equal((owner, play.Summary.Id), (row.OwnerId, row.PlayId));
+        Assert.Equal("d1", play.Drawings.GetProperty("hyperliquid:BTC")[0].GetProperty("id").GetString());
+
+        // A drawings-only save moves the version, so a plan save from the version it started on is stale.
+        var moved = JsonSerializer.SerializeToElement(new Dictionary<string, object[]> { ["hyperliquid:BTC"] = [new { id = "d2" }] });
+        var drawn = await service.UpdateAsync(play.Summary.Id, Update(play) with { Drawings = moved }, default);
+        Assert.True(drawn.Summary.Version > play.Summary.Version);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() =>
+            service.UpdateAsync(play.Summary.Id, Update(play, TestPlays.Plan(stop: "97")), default))).StatusCode);
+        Assert.Equal("d2", (await service.GetAsync(play.Summary.Id, default)).Drawings.GetProperty("hyperliquid:BTC")[0].GetProperty("id").GetString());
+
+        // A Play without a row (a retrospective, or one saved before this table) has none, and gets one on its first drawing.
+        var bare = TestPlays.Create(venue, new PerpetualInstrument("hyperliquid", "BTC"));
+        store.Plays.Add(bare);
+        var empty = await service.GetAsync(bare.Id, default);
+        Assert.Equal("{}", empty.Drawings.GetRawText());
+        Assert.Equal(empty.Summary.Version, (await service.UpdateAsync(bare.Id, Update(empty), default)).Summary.Version);
+        Assert.DoesNotContain(store.Drawings, d => d.PlayId == bare.Id);
+        await service.UpdateAsync(bare.Id, Update(empty) with { Drawings = moved }, default);
+        Assert.Equal(moved.GetRawText(), Assert.Single(store.Drawings, d => d.PlayId == bare.Id).Document);
+    }
+
+    [Fact]
     public async Task Creates_a_draft_with_exact_plan_text()
     {
         var play = await Create(plan: TestPlays.Plan("0.00001230", "0.00001"));

@@ -17,7 +17,6 @@ internal sealed class PlayConfiguration : IEntityTypeConfiguration<Play>
         builder.Property(x => x.CancelReason).HasConversion<string>().HasMaxLength(16);
         builder.Property(x => x.Title).HasMaxLength(Play.MaxTitleLength);
         builder.Property(x => x.Plan).HasColumnType("jsonb");
-        builder.Property(x => x.Drawings).HasColumnType("jsonb");
         builder.Property(x => x.Review).HasMaxLength(Play.MaxReviewLength);
         builder.Property(x => x.Origin).HasConversion<string>().HasMaxLength(16);
         builder.Property(x => x.ReviewCompletion).HasConversion<string>().HasMaxLength(16);
@@ -46,6 +45,24 @@ internal sealed class PlayConfiguration : IEntityTypeConfiguration<Play>
         builder.HasAlternateKey(x => new { x.OwnerId, x.Id });
         builder.HasAlternateKey(x => new { x.OwnerId, x.Id, x.TradingMode });
         // AccountId stays mutable for saved Draft moves; migration guards enforce paper fact/account compatibility.
+    }
+}
+
+/// <summary>
+/// Chart drawings in their own owner-scoped table (issue #110), so reading a Play never loads them. The legacy
+/// <c>plays."Drawings"</c> column is no longer mapped; migration <c>PlayDrawingsTable</c> copied it here and keeps it, and a
+/// later migration drops it.
+/// </summary>
+internal sealed class PlayDrawingsConfiguration : IEntityTypeConfiguration<PlayDrawings>
+{
+    public void Configure(EntityTypeBuilder<PlayDrawings> builder)
+    {
+        builder.ToTable("play_drawings");
+        builder.HasKey(x => new { x.OwnerId, x.PlayId });
+        builder.Property(x => x.Document).HasColumnType("jsonb");
+        // The drawings are part of the Play: they go with it, as the column did.
+        builder.HasOne<Play>().WithOne().HasForeignKey<PlayDrawings>(x => new { x.OwnerId, x.PlayId })
+            .HasPrincipalKey<Play>(x => new { x.OwnerId, x.Id }).OnDelete(DeleteBehavior.Cascade);
     }
 }
 

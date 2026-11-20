@@ -63,7 +63,7 @@ public sealed class UnresolvedDomainTests
         play.DeclareUnresolved(UnresolvedReason.ForcedExitNotRetained, "Liquidated; the exit is not in history.", "{}", At.AddHours(1));
         var answers = new ReviewAnswers("deviated", "sizing", "Smaller size.", "Check margin first.");
         // Changed answers on an ended Play complete its review, an Unresolved one's too.
-        Assert.Equal(ReviewActions.Completed, play.Annotate(play.Title, "{}", "Too large.", At.AddHours(2), answers)!.Action);
+        Assert.Equal(ReviewActions.Completed, play.Annotate(play.Title, "Too large.", At.AddHours(2), answers)!.Action);
         Assert.Equal(ReviewCompletionKind.Completed, play.ReviewCompletion);
 
         Assert.Throws<DomainValidationException>(() => play.ReturnToOpen("  ", At.AddHours(3)));
@@ -73,8 +73,8 @@ public sealed class UnresolvedDomainTests
         Assert.Equal(((ReviewCompletionKind?)null, (DateTimeOffset?)null, (DateTimeOffset?)null), (play.ReviewCompletion, play.ReviewCompletedAtUtc, play.EndedAtUtc));
         Assert.Equal(("Too large.", answers), (play.Review, play.Answers));
         // While Open again, the stored answers save unchanged but cannot change.
-        Assert.Null(play.Annotate(play.Title, "{}", "Too large.", At.AddHours(4), answers));
-        Assert.Throws<DomainRuleException>(() => play.Annotate(play.Title, "{}", "Too large.", At.AddHours(4), answers with { Lesson = "Other." }));
+        Assert.Null(play.Annotate(play.Title, "Too large.", At.AddHours(4), answers));
+        Assert.Throws<DomainRuleException>(() => play.Annotate(play.Title, "Too large.", At.AddHours(4), answers with { Lesson = "Other." }));
         Assert.Throws<DomainRuleException>(() => play.ReturnToOpen("Again.", At.AddHours(4)));
 
         play.DeclareUnresolved(UnresolvedReason.Other, "Still stuck.", "{}", At.AddHours(5));

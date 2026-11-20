@@ -224,7 +224,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
                 PlannedPrice = planned.Price, PlannedQuantity = planned.Quantity, PlanRevision = planned.Revision,
             };
         }).ToList();
-        return new(PlayService.ToDto(play), rows.OrderBy(r => r.OccurredAtUtc).ThenBy(r => r.Id).Select(Dto).ToList(),
+        return new(await PlayService.ToDtoAsync(plays, play, ct), rows.OrderBy(r => r.OccurredAtUtc).ThenBy(r => r.Id).Select(Dto).ToList(),
             history.Select(h => new ManualHistoryDto(h.Id, h.ExecutionId, h.Reason, h.OccurredAtUtc,
                 h.Before is null ? null : JsonSerializer.Deserialize<ManualExecutionDto>(h.Before, Json),
                 JsonSerializer.Deserialize<ManualExecutionDto>(h.After, Json)!) { BatchId = h.BatchId }).ToList(),
@@ -341,7 +341,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
                 new PlanNotes("", "", "", ""));
             var play = Play.Retrospective(Guid.NewGuid(), account, new(account.VenueId, preview.Operation.ContractId),
                 PlayDocuments.Serialize(emptyPlan), preview.Operation.ClosedAtUtc!.Value, now, request.Title);
-            var review = play.Annotate(request.Title ?? "", "{}", request.Review ?? "", now);
+            var review = play.Annotate(request.Title ?? "", request.Review ?? "", now);
             plays.Add(play);
             if (review is not null) plays.Add(review);
             // Eligibility proved every order is retained; links reference their internal IDs.
@@ -353,7 +353,7 @@ public sealed class DiaryService(IPlayStore plays, IDiaryStore diary, IPlayExecu
                     order.First().Role == "entry" ? OrderLinkRole.Entry : OrderLinkRole.Exit,
                     order.First().Role == "entry" ? "retrospective" : null, null, OrderLinkState.Linked, OrderLinkSource.Owner, now));
             await plays.SaveAsync(ct);
-            return PlayService.ToDto(play);
+            return PlayService.ToDto(play, PlayDrawings.Empty);
         }, ct), ct);
 
     private Task<T> Idempotent<T>(Guid requestId, object payload, Func<Task<T>> action, CancellationToken ct) =>

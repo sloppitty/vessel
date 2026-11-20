@@ -91,7 +91,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
     };
     private static string ViewName(PlayListView view) => view.ToString().ToLowerInvariant();
 
-    public async Task<PlayDto> GetAsync(Guid id, CancellationToken ct) => ToDto(await Find(id, ct));
+    public async Task<PlayDto> GetAsync(Guid id, CancellationToken ct) => await ToDtoAsync(store, await Find(id, ct), ct);
 
     public Task<PlayDto> CreateAsync(CreatePlayRequest request, CancellationToken ct, string? tradingMode = "real") => unitOfWork.ExecuteAsync(async () =>
     {
@@ -101,11 +101,13 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         var plan = PlayDocuments.Serialize(PlayDocuments.Normalize(request.Plan));
         var now = time.GetUtcNow();
         var play = new Play(Guid.NewGuid(), account, instrument, source, plan, now);
-        var review = play.Annotate(request.Title ?? "", PlayDocuments.NormalizeDrawings(request.Drawings),
-            request.Review ?? "", now, request.StructuredReview);
+        var drawings = new PlayDrawings(play);
+        play.ReplaceDrawings(drawings, PlayDocuments.NormalizeDrawings(request.Drawings), now);
+        var review = play.Annotate(request.Title ?? "", request.Review ?? "", now, request.StructuredReview);
         store.Add(play);
+        store.Add(drawings);
         if (review is not null) store.Add(review);
-        return ToDto(play);
+        return ToDto(play, drawings.Document);
     }, ct);
 
     /// <summary>Holds the Play while it checks entry fills and saves, so no order links to an entry this revision changes in between.</summary>
@@ -133,12 +135,16 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         }
         if (play.Status != PlayStatus.Draft && plan != play.Plan) await RequireFilledEntriesKept(play, request.Plan, ct);
         var revision = play.ChangePlan(plan, request.RevisionReason, now);
-        var review = play.Annotate(request.Title ?? "", drawings, request.Review ?? "", now, request.StructuredReview);
+        // Drawings live in their own row (issue #110); a change advances the Play's version like any other edit.
+        var stored = await store.DrawingsAsync(play.Id, ct);
+        var current = stored ?? new PlayDrawings(play);
+        if (play.ReplaceDrawings(current, drawings, now) && stored is null) store.Add(current);
+        var review = play.Annotate(request.Title ?? "", request.Review ?? "", now, request.StructuredReview);
         if (revision is not null) store.Add(revision);
         if (revision is not null && play.TradingMode == "paper")
             await RequirePaper().ActivateRevisionAsync(play, ct);
         if (review is not null) store.Add(review);
-        return ToDto(play);
+        return ToDto(play, current.Document);
     }, ct, destinationAccountId: request.AccountId), ct);
 
     public Task<PlayDto> ChangeStatusAsync(Guid id, ChangePlayStatusRequest request, CancellationToken ct) =>
@@ -187,7 +193,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
             if (play.Status == PlayStatus.Planned) await RequirePaper().ArmAsync(play, ct);
             else if (play.Status is PlayStatus.Paused or PlayStatus.Cancelled) await RequirePaper().SuspendAsync(play, ct);
         }
-        return ToDto(play);
+        return await ToDtoAsync(store, play, ct);
     }, ct), ct);
 
     /// <summary>At most this many log entries are kept per Play.</summary>
@@ -216,7 +222,7 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         var play = await Find(id, ct);
         RequireVersion(play, request.ExpectedVersion);
         store.Add(await action(play));
-        return ToDto(play);
+        return await ToDtoAsync(store, play, ct);
     }, ct), ct);
 
     public async Task<IReadOnlyList<PlayNoteDto>> NotesAsync(Guid id, CancellationToken ct)
@@ -411,10 +417,14 @@ public sealed partial class PlayService(IPlayStore store, IEvidenceObjectStore o
         _ => null,
     };
 
-    public static PlayDto ToDto(Play play)
+    /// <summary>The Play for the editor, with its drawings read from their own row (issue #110).</summary>
+    public static async Task<PlayDto> ToDtoAsync(IPlayStore store, Play play, CancellationToken ct) =>
+        ToDto(play, (await store.DrawingsAsync(play.Id, ct))?.Document ?? PlayDrawings.Empty);
+
+    public static PlayDto ToDto(Play play, string drawings)
     {
         var plan = PlayDocuments.Read(play.Plan);
-        return new(Summary(play, plan.Direction), plan, PlayDocuments.ReadDrawings(play.Drawings), play.Review, play.Answers)
+        return new(Summary(play, plan.Direction), plan, PlayDocuments.ReadDrawings(drawings), play.Review, play.Answers)
         {
             Rule = play.RuleVersion is { } version ? new PlayRuleSeenDto(version, play.RuleIf!, play.RuleThen!) : null,
         };

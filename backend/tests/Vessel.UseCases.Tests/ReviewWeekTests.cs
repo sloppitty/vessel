@@ -91,9 +91,9 @@ public sealed class ReviewWeekTests
     {
         Madrid();
         var inside = f.Add(20, Utc("2026-10-05T09:00:00Z"));
-        inside.Play.Annotate(inside.Play.Title, inside.Play.Drawings, "", ReviewClock.Now, new("deviated", "Late entry"));
+        inside.Play.Annotate(inside.Play.Title, "", ReviewClock.Now, new("deviated", "Late entry"));
         var outside = f.Add(10, Utc("2026-09-30T09:00:00Z"));
-        outside.Play.Annotate(outside.Play.Title, outside.Play.Drawings, "", ReviewClock.Now, new("deviated", "Late entry"));
+        outside.Play.Annotate(outside.Play.Title, "", ReviewClock.Now, new("deviated", "Late entry"));
         var week = new ReviewQuery(Week: "2026-10-07");
         var tags = (await f.Service.GetAsync(week, default)).Process!.MistakeTags;
         Assert.Equal(1, Assert.Single(tags).Wins);

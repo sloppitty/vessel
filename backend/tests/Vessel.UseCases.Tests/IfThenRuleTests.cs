@@ -22,12 +22,12 @@ public sealed class IfThenRuleTests
         var f = new ReviewFixture();
         var seen = PlayRules.Seen(Rule(), new(1, "acknowledged"));
         var won = f.Add(10, rule: seen);
-        won.Play.Annotate(won.Play.Title, won.Play.Drawings, "", ReviewClock.Now, new(Rule: "deviated"));
+        won.Play.Annotate(won.Play.Title, "", ReviewClock.Now, new(Rule: "deviated"));
         var lost = f.Add(-5, rule: PlayRules.Seen(Rule(), new(1, "exception", "Earnings week.")));
-        lost.Play.Annotate(lost.Play.Title, lost.Play.Drawings, "", ReviewClock.Now, new(Rule: "followed"));
+        lost.Play.Annotate(lost.Play.Title, "", ReviewClock.Now, new(Rule: "followed"));
         f.Add(3, rule: PlayRules.Seen(Rule(), new(1))); // Shown, unanswered at Plan it and in the review.
         var without = f.Add(7); // Planned before any rule: not carried, and nothing to answer.
-        Assert.Throws<DomainRuleException>(() => without.Play.Annotate(without.Play.Title, without.Play.Drawings, "", ReviewClock.Now, new(Rule: "followed")));
+        Assert.Throws<DomainRuleException>(() => without.Play.Annotate(without.Play.Title, "", ReviewClock.Now, new(Rule: "followed")));
         var rule = (await f.Service.GetAsync(new(Period: "all"), default)).Rule!;
         Assert.Equal((3, 1, 1, 1), (rule.Carried, rule.Acknowledged, rule.Exceptions, rule.NotAcknowledged));
         Assert.Equal(new ReviewRuleRowDto(1, 0, 0, 0), rule.Deviated);

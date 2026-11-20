@@ -146,7 +146,9 @@ public sealed class PlayPostgresTests
         await using (var db = database.Context(owner))
         {
             var play = await db.Plays.SingleAsync();
-            Assert.Equal((PlayStatus.Planned, InstrumentSource.Manual, 1L, "{}"), (play.Status, play.InstrumentSource, play.Version, play.Drawings));
+            // The legacy row's drawings reach their own table (issue #110).
+            var drawings = (await db.PlayDrawings.SingleAsync(d => d.PlayId == play.Id)).Document;
+            Assert.Equal((PlayStatus.Planned, InstrumentSource.Manual, 1L, "{}"), (play.Status, play.InstrumentSource, play.Version, drawings));
             Assert.Equal("1", PlayDocuments.Read(play.Plan).Leverage);
         }
     }

@@ -203,7 +203,7 @@ public sealed class JournalSearchPostgresTests
     {
         var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Venue");
         var play = TestPlays.Create(account, new("hyperliquid", "BTC"));
-        play.Annotate("Linked trade", "{}", "", T);
+        play.Annotate("Linked trade", "", T);
         var (plannedChange, revision) = play.MarkPlanned(T);
         var opened = play.MarkOpen("Filled", T.AddMinutes(2));
         var closedChange = play.MarkClosed("Flat", T.AddMinutes(20));
@@ -326,9 +326,9 @@ public sealed class JournalSearchPostgresTests
         var owner = Guid.NewGuid();
         var account = new Account(Guid.NewGuid(), owner, "manual", "Manual");
         var doomed = TestPlays.Create(account, new("manual", "BTC"));
-        doomed.Annotate("Doomed draft", "{}", "", T);
+        doomed.Annotate("Doomed draft", "", T);
         var kept = TestPlays.Create(account, new("manual", "BTC"));
-        kept.Annotate("Kept draft", "{}", "", T);
+        kept.Annotate("Kept draft", "", T);
         await using (var seed = database.Context(owner))
         {
             seed.Accounts.Add(account); seed.Plays.AddRange(doomed, kept);
@@ -382,12 +382,12 @@ public sealed class JournalSearchPostgresTests
         paperAccount.Configure(portfolio.Id, null, null);
         var realAccount = new Account(Guid.NewGuid(), owner, "manual", "Real");
         var paper = TestPlays.Create(paperAccount, new("hyperliquid", "BTC"));
-        paper.Annotate("Shared marker paper", "{}", "", T);
+        paper.Annotate("Shared marker paper", "", T);
         var (planned, revision) = paper.MarkPlanned(T);
         var open = paper.ApplyPaperExecutionState(true, false, T.AddMinutes(3))!;
         var closed = paper.ApplyPaperExecutionState(true, true, T.AddMinutes(9))!;
         var real = TestPlays.Create(realAccount, new("manual", "BTC"));
-        real.Annotate("Shared marker real", "{}", "", T);
+        real.Annotate("Shared marker real", "", T);
         await using (var seed = database.Context(owner))
         {
             seed.Portfolios.Add(portfolio); seed.Accounts.AddRange(paperAccount, realAccount); seed.Plays.AddRange(paper, real);
@@ -431,7 +431,7 @@ public sealed class JournalSearchPostgresTests
         var owner = Guid.NewGuid();
         var account = new Account(Guid.NewGuid(), owner, "manual", "Manual");
         var play = TestPlays.Create(account, new("manual", "BTC"));
-        play.Annotate("Obsolete searchable phrase", "{}", "", T);
+        play.Annotate("Obsolete searchable phrase", "", T);
         await using (var seed = database.Context(owner))
         {
             seed.Accounts.Add(account); seed.Plays.Add(play);
@@ -461,11 +461,11 @@ public sealed class JournalSearchPostgresTests
         var plays = Enumerable.Range(0, 60).Select(i =>
         {
             var play = TestPlays.Create(account, new("manual", "BTC"));
-            play.Annotate($"Take 50%_off number {i}", "{}", "", T.AddMinutes(i));
+            play.Annotate($"Take 50%_off number {i}", "", T.AddMinutes(i));
             return play;
         }).ToList();
         var decoy = TestPlays.Create(account, new("manual", "BTC"));
-        decoy.Annotate("Take 500 off", "{}", "", T);
+        decoy.Annotate("Take 500 off", "", T);
         await using (var seed = database.Context(owner))
         {
             seed.Accounts.Add(account); seed.Plays.AddRange(plays); seed.Plays.Add(decoy);

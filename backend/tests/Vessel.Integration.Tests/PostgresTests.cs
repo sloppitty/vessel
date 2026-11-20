@@ -91,7 +91,7 @@ public sealed class PostgresTests
             await db.SaveChangesAsync();
         }
         await using var foreign = database.Context(Guid.NewGuid());
-        (await foreign.Plays.IgnoreQueryFilters().SingleAsync()).Annotate("Foreign", "{}", "", DateTimeOffset.UnixEpoch);
+        (await foreign.Plays.IgnoreQueryFilters().SingleAsync()).Annotate("Foreign", "", DateTimeOffset.UnixEpoch);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => foreign.SaveChangesAsync());
     }
 

@@ -1,3 +1,4 @@
+using Vessel.Domain.Plays;
 using Vessel.Application.Plays;
 
 namespace Vessel.Tests;
@@ -10,8 +11,8 @@ public sealed class ClosedPlayPlanParsingUseCasesTests : ClosedPlayPlanParsingTe
     public void Play_dto_parses_once_and_serializes_exactly_as_before()
     {
         var play = Facts(30).Play;
-        var dto = PlayService.ToDto(play);
-        var previous = new PlayDto(PlayService.Summary(play), PlayDocuments.Read(play.Plan), PlayDocuments.ReadDrawings(play.Drawings),
+        var dto = PlayService.ToDto(play, PlayDrawings.Empty);
+        var previous = new PlayDto(PlayService.Summary(play), PlayDocuments.Read(play.Plan), PlayDocuments.ReadDrawings(PlayDrawings.Empty),
             play.Review, play.Answers);
         Assert.Equal(Json(previous), Json(dto));
         Assert.Equal("long", dto.Summary.Direction);

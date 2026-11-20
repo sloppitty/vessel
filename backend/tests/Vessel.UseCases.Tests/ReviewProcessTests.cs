@@ -16,7 +16,7 @@ public sealed class ReviewProcessTests
     private static readonly string EmptyPlan = PlayDocuments.Serialize(new PlayPlanDocument("long", "margin", "", "0", null, [], new PlanNotes("", "", "", "")));
 
     private static void Answer(Play play, string? adherence, string? tag = null, DateTimeOffset? at = null) =>
-        play.Annotate(play.Title, "{}", play.Review, at ?? ReviewClock.Now, new ReviewAnswers(adherence, tag, "Lesson.", ""));
+        play.Annotate(play.Title, play.Review, at ?? ReviewClock.Now, new ReviewAnswers(adherence, tag, "Lesson.", ""));
 
     private ClosedPlayFacts Scored(decimal net, string? adherence, string? tag = null, DateTimeOffset? reviewed = null)
     {

@@ -54,7 +54,7 @@ public sealed class ManagedStopTests
     }
 
     private UpdatePlayRequest Revise(Play play, PlayPlanDocument plan, string? reason = "Move stop after entry") =>
-        new(play.Version, play.AccountId, play.ContractId, "venue", play.Title, plan, JsonDocument.Parse(play.Drawings).RootElement.Clone(),
+        new(play.Version, play.AccountId, play.ContractId, "venue", play.Title, plan, JsonDocument.Parse(PlayDrawings.Empty).RootElement.Clone(),
             play.Review, reason);
 
     /// <summary>
