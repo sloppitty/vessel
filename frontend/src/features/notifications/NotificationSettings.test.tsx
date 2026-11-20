@@ -92,6 +92,32 @@ describe('Notification settings', () => {
     expect(api.notificationPreferences).toHaveBeenCalledTimes(2)
   })
 
+  // #115: a feed-reset reread that started before a save used to replace the saved preferences with its older answer.
+  it.each(['reread first', 'save first'])('keeps a save over an older reread that answers around it: %s', async order => {
+    let reread!: (value: typeof notificationPreferencesFixture) => void
+    let saved!: (value: typeof notificationPreferencesFixture) => void
+    const api = {
+      notificationPreferences: vi.fn().mockResolvedValueOnce(notificationPreferencesFixture)
+        .mockImplementationOnce(() => new Promise(resolve => { reread = resolve })),
+      saveNotificationPreferences: vi.fn().mockImplementationOnce(() => new Promise(resolve => { saved = resolve }))
+        .mockResolvedValueOnce({ ...notificationPreferencesFixture, minimumSeverity: 'critical', revision: 5 }),
+    } as unknown as WorkspaceApi
+    const { inApp, emit } = hub()
+    show(api, inApp)
+    await screen.findByText('Delivering')
+    emit({ type: 'reset' })
+    expect(api.notificationPreferences).toHaveBeenCalledTimes(2)
+    await userEvent.selectOptions(screen.getByLabelText('Minimum severity'), 'warning')
+    await userEvent.click(screen.getByRole('button', { name: 'Save notifications' }))
+    const answers = [() => reread({ ...notificationPreferencesFixture }), () => saved({ ...notificationPreferencesFixture, minimumSeverity: 'warning', revision: 4 })]
+    for (const answer of order === 'reread first' ? answers : answers.reverse()) await act(async () => answer())
+    expect(await screen.findByText('Notification preferences saved.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Minimum severity')).toHaveValue('warning')
+    await userEvent.selectOptions(screen.getByLabelText('Minimum severity'), 'critical')
+    await userEvent.click(screen.getByRole('button', { name: 'Save notifications' }))
+    expect(api.saveNotificationPreferences).toHaveBeenLastCalledWith(expect.objectContaining({ minimumSeverity: 'critical', expectedRevision: 4 }))
+  })
+
   it('shows the worker offline time from the stream head', async () => {
     const api = { notificationPreferences: vi.fn().mockResolvedValue(notificationPreferencesFixture) } as unknown as WorkspaceApi
     show(api, hub({ known: true, workerOnline: false, heartbeatAtUtc: '2026-10-17T14:02:00Z' }).inApp)

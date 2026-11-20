@@ -18,8 +18,11 @@ import { useDisplayZone } from '@/lib/display-zone'
 const fieldsOf = (preferences: NotificationPreferences): NotificationPreferenceFields =>
   ({ enabled: preferences.enabled, minimumSeverity: preferences.minimumSeverity, categories: preferences.categories })
 
-/** The form over one read: edits and saves belong to it, and a new read starts a new form. */
-interface Form { read: NotificationPreferences; preferences: NotificationPreferences; draft: NotificationPreferenceFields }
+/**
+ * The form over one read: edits and saves belong to it, and a new read starts a new form, unless the form holds a save
+ * (`savedFor` its API) at a newer revision than the read: a reread that started before the save never undoes it.
+ */
+interface Form { read: NotificationPreferences; preferences: NotificationPreferences; draft: NotificationPreferenceFields; savedFor?: WorkspaceApi }
 
 const sameFields = (a: NotificationPreferenceFields, b: NotificationPreferenceFields) => a.enabled === b.enabled &&
   a.minimumSeverity === b.minimumSeverity && a.categories.length === b.categories.length && a.categories.every(item => b.categories.includes(item))
@@ -63,7 +66,9 @@ export function NotificationSettings({ api, inApp }: { api: WorkspaceApi; inApp:
     return () => clearInterval(timer)
   }, [cooldownUntil])
 
-  const current = read.data === null ? null : form?.read === read.data ? form : { read: read.data, preferences: read.data, draft: fieldsOf(read.data) }
+  const current = read.data === null ? null : form?.read === read.data ? form
+    : form?.savedFor === api && form.preferences.revision > read.data.revision ? { ...form, read: read.data }
+    : { read: read.data, preferences: read.data, draft: fieldsOf(read.data) }
   const preferences = current?.preferences ?? null
   const draft = current?.draft ?? null
   const setDraft = (next: NotificationPreferenceFields) => { if (current) setForm({ ...current, draft: next }) }
@@ -80,7 +85,7 @@ export function NotificationSettings({ api, inApp }: { api: WorkspaceApi; inApp:
     try {
       const saved = await api.saveNotificationPreferences({ ...current.draft, expectedRevision: current.preferences.revision })
       if (liveApi.current !== api) return
-      setForm({ read: current.read, preferences: saved, draft: fieldsOf(saved) })
+      setForm({ read: current.read, preferences: saved, draft: fieldsOf(saved), savedFor: api })
       notify({ tone: 'success', message: 'Notification preferences saved.' })
     } catch (cause) {
       if (liveApi.current !== api) return
