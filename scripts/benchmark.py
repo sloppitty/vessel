@@ -135,6 +135,10 @@ LOG_TEXTS = ['Filled on the retest, stop resting below the level.', 'First targe
 EVIDENCE_NOTES = ['Hourly chart at the entry with the reclaimed level marked.', 'Funding and open interest before entry.',
                   'The retest candle and the volume spike.', 'Exit screenshot after the target filled.',
                   'Daily structure: higher lows since the range low.', '']
+DRAWING_KINDS = ['trend-line', 'horizontal-line', 'zone', 'fibonacci', 'long-position', 'text']
+DRAWING_COLORS = ['#8fb8ff', '#e9edf2', '#edd49e', '#f5a97f', '#a9d6b6']
+# The chart keeps note text up to 500 characters; the server keeps 200 drawings per instrument and 1,000,000 characters.
+DRAWING_LIMITS = {'text': 500, 'per_instrument': 200, 'instruments': 100, 'document': 1_000_000}
 RULES = [('the first target fills', 'move the stop to break-even and trail the rest'),
          ('two losses in a row', 'halve the next position size'),
          ('funding is above 0.05 % per hour', 'skip breakout longs until it resets')]
@@ -269,10 +273,11 @@ TABLES = {
     'play_rules': ['Id', 'OwnerId', 'TradingMode', 'Version', 'If', 'Then', 'SourcePlayId', 'CreatedAtUtc',
                    'ArchivedAtUtc'],
     'plays': ['Id', 'OwnerId', 'AccountId', 'TradingMode', 'VenueId', 'ContractId', 'InstrumentSource', 'Status', 'Title',
-              'Plan', 'Direction', 'Drawings', 'Review', 'Origin', 'ReviewAdherence', 'ReviewMistakeTag', 'ReviewLesson',
+              'Plan', 'Direction', 'Review', 'Origin', 'ReviewAdherence', 'ReviewMistakeTag', 'ReviewLesson',
               'ReviewNextAction', 'ReviewRule', 'RuleVersion', 'RuleIf', 'RuleThen', 'ReviewRevision', 'ReviewedAtUtc',
               'ReviewCompletion', 'ReviewCompletedAtUtc', 'PlanRevision', 'Version', 'CancelReason', 'CreatedAtUtc',
               'UpdatedAtUtc', 'PlannedAtUtc', 'EndedAtUtc'],
+    'play_drawings': ['OwnerId', 'PlayId', 'Document'],
     'play_plan_revisions': ['Id', 'OwnerId', 'PlayId', 'Number', 'Status', 'Plan', 'Reason', 'CreatedAtUtc', 'Preflight',
                             'Rule'],
     'play_status_changes': ['Id', 'OwnerId', 'PlayId', 'From', 'To', 'Reason', 'Note', 'Source', 'UnresolvedReason',
@@ -340,6 +345,7 @@ class Generator:
         self.start = self.anchor - timedelta(days=round(365.25 * years))
         self.rows = Rows()
         self.counts, self.statuses = Counter(), Counter()
+        self.drawing_sizes = {}
         self.round_trips, self.orders = [], []
         self.first_closed = None
         self.owner = self.uuid()
@@ -996,19 +1002,19 @@ class Generator:
     def emit_play(self, play):
         a, review, rule = play['account'], play['review'], play['rule']
         answers = review.get('answers') or {}
-        drawings = {}
-        if play['contract'] and self.rng.random() < 0.3:
-            drawings[f'{a.venue}:{play["contract"]}'] = [
-                {'id': 'd1', 'type': 'horizontal', 'price': play['plan']['entries'][0]['price'] or '1'},
-                {'id': 'd2', 'type': 'trendline', 'points': [[1, 2], [3, 4]]}]
+        drawn = play['contract'] and self.rng.random() < 0.3
         self.rows.add(
             'plays', play['id'], self.owner, a.id, play['mode'], a.venue, play['contract'], 'Venue', play['status'],
-            play['title'], play['plan'], play['plan']['direction'], drawings, review.get('text', ''), 'Planned',
+            play['title'], play['plan'], play['plan']['direction'], review.get('text', ''), 'Planned',
             answers.get('Adherence'), answers.get('MistakeTag'), answers.get('Lesson', ''), answers.get('NextAction', ''),
             answers.get('Rule'), rule['version'] if rule else None, rule['rule_if'] if rule else None,
             rule['rule_then'] if rule else None, len(play['review_revisions']), review.get('reviewed'),
             review.get('completion'), review.get('completed'), play['plan_revision'], play['version'], play['cancel'],
             play['created'], play['updated'], play['planned'], play['ended'])
+        # Every Play has a drawings row, as after the PlayDrawingsTable migration (issue #110).
+        document = drawings(play, a.venue) if drawn else {}
+        self.drawing_sizes[play['id']] = len(json.dumps(document, separators=(',', ':')))
+        self.rows.add('play_drawings', self.owner, play['id'], document)
         for number, status, plan, reason, at, preflight, snapshot in play['revisions']:
             self.rows.add('play_plan_revisions', self.uuid(), self.owner, play['id'], number, status, plan, reason, at,
                           preflight, snapshot)
@@ -1248,6 +1254,51 @@ def generate(seed, years, scale, anchor):
     return Generator(seed, years, scale, anchor).generate()
 
 
+def drawings(play, venue):
+    """Chart drawings at realistic sizes (issue #110): most drawn Plays keep a few lines on their instrument, some a busy
+    chart on two, a few approach the 1 MB limit with full charts on every market. Shapes pass the chart's isChartDrawing
+    (frontend/src/components/chart/drawings.ts) and stay within the server's bounds, so the editor keeps all of them.
+    A Play-local generator keeps the rest of the seed unchanged."""
+    rng = random.Random(play['id'])
+    roll = rng.random()
+    keys = [f'{venue}:{play["contract"]}'] + [f'{v}:{c}' for v, markets in MARKETS.items() for c in markets
+                                               if (v, c) != (venue, play['contract'])]
+    instruments, count, text = ((1, rng.choice((2, 4, 8, 16)), 40) if roll < 0.8 else
+                                (2, rng.randrange(40, 120), 80) if roll < 0.97 else
+                                (len(keys), DRAWING_LIMITS['per_instrument'], DRAWING_LIMITS['text']))
+    price = float(play['plan']['entries'][0]['price'] or ASSETS.get(play['contract'], (D(1),))[0])
+    start = 1_700_000_000_000 + rng.randrange(0, 900) * 86_400_000
+
+    def point(time=None, low=0.85, high=1.15):
+        return {'time': time or start + rng.randrange(0, 60 * 86_400_000), 'price': round(price * rng.uniform(low, high), 6)}
+
+    def drawing():
+        kind = rng.choice(DRAWING_KINDS)
+        if kind == 'long-position':
+            # Entry, target corner and stop corner; the corners share the box's end time (sidedPositionPoints).
+            entry = point()
+            distance = entry['price'] * rng.uniform(0.01, 0.1)
+            end = entry['time'] + rng.randrange(1, 14 * 86_400_000)
+            points = [entry, {'time': end, 'price': round(entry['price'] + distance, 6)},
+                      {'time': end, 'price': round(entry['price'] - distance, 6)}]
+        else:
+            points = [point() for _ in range(1 if kind in ('horizontal-line', 'text') else 2)]
+        shape = {'id': str(uuid.UUID(int=rng.getrandbits(128), version=4)), 'schemaVersion': 1, 'kind': kind,
+                 'points': points, 'style': {'color': rng.choice(DRAWING_COLORS), 'line': 'dashed', 'width': 2}}
+        if kind == 'text':
+            shape['text'] = ('Level held twice; watch the reaction. ' * 20)[:rng.randrange(text // 2, text + 1)]
+        return shape
+
+    result = {key: [drawing() for _ in range(count)] for key in keys[:instruments]}
+    # Trim from the last instrument until the document fits under the server's character limit.
+    while len(json.dumps(result, separators=(',', ':'))) > DRAWING_LIMITS['document'] - 10_000:
+        last = next(reversed(result))
+        result[last].pop()
+        if not result[last]:
+            del result[last]
+    return result
+
+
 def quoted(name):
     return '"' + name + '"'
 
@@ -1317,7 +1368,12 @@ def deep_page(total, size):
     return pages // 2 + 1 if pages >= 2 else None
 
 
-def plan_endpoints(account, operation, operations, closed, matches):
+def drawn_plays(sizes):
+    """The Plays whose editor load is measured: the largest drawings document and one without drawings."""
+    return [('largest drawings', max(sizes, key=sizes.get)), ('no drawings', min(sizes, key=sizes.get))]
+
+
+def plan_endpoints(account, operation, operations, closed, matches, plays=()):
     """The measured reads as (name, path, cache scope or None, check, expectation), and the skipped scenarios.
     Deep pages come from the counts the API reported; a scenario the dataset cannot populate is skipped, never faked.
     The cache scope names the Activity facts aggregate a read goes through: every enabled account, or one account."""
@@ -1349,6 +1405,11 @@ def plan_endpoints(account, operation, operations, closed, matches):
         skipped.append(f'Plays Closed tab deep page: {closed} Closed Plays fit on one page of {PLAYS_PAGE}')
     add('Plays, tab counts', '/api/plays/counts', None, positive('all'))
     add('Plays, title and instrument search', '/api/plays?view=all&q=BTC', None, nonempty('plays'))
+    for label, play in plays:
+        add(f'Play editor load, {label}', f'/api/plays/{play}', None,
+            (lambda body, play=play: body.get('summary', {}).get('id') == play, 'the requested Play'))
+    add('Sizing', '/api/sizing', None,
+        (lambda body: isinstance(body.get('record'), dict) and isinstance(body.get('limits'), dict), 'a sizing record'))
     add('Overview', '/api/overview', None, nonempty('accounts'))
     add('Overview summary by portfolio, all', '/api/overview/summary?groupBy=portfolio&period=all', 'all', nonempty('rows'))
     add('Overview summary by account, 30 days', '/api/overview/summary?groupBy=account&period=30', 'all', nonempty('rows'))
@@ -2013,7 +2074,8 @@ def main(argv=None):
             raise RuntimeError(f'The Plays counts show {closed} Closed Plays; the dataset has {generator.statuses["Closed"]}.')
         status, _, _, _, body = client.get(f'/api/plays/search?q={COMMON_WORD}')
         matches = json.loads(body)['total'] if status == 200 else 0
-        planned, skipped = plan_endpoints(operation['accountId'], operation['id'], activity['operations'], closed, matches)
+        planned, skipped = plan_endpoints(operation['accountId'], operation['id'], activity['operations'], closed, matches,
+                                          drawn_plays(generator.drawing_sizes))
         endpoints = [Endpoint(*spec) for spec in planned]
         enabled = [a.id for a in generator.accounts if a.enabled]
         charges = {'all': generator.cache_charge(enabled), 'account': generator.cache_charge([operation['accountId']])}

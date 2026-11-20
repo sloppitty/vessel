@@ -4,7 +4,10 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import importlib.util
+import json
+import math
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -22,6 +25,23 @@ ANCHOR = datetime(2026, 10, 23, 12, tzinfo=timezone.utc)
 
 def small(seed=7, years=2, scale=0.05):
     return benchmark.generate(seed, years, scale, ANCHOR)
+
+
+# Mirrors isChartDrawing in frontend/src/components/chart/drawings.ts: the chart drops anything that fails it.
+POINT_COUNT = {'trend-line': 2, 'horizontal-line': 1, 'vertical-line': 1, 'zone': 2, 'date-range': 2, 'price-range': 2,
+               'fibonacci': 2, 'long-position': 3, 'short-position': 3, 'position': 3, 'text': 1}
+
+
+def chart_drawing(d):
+    style = d.get('style', {})
+    return (isinstance(d.get('id'), str) and d.get('schemaVersion') == 1 and d.get('kind') in POINT_COUNT and
+            isinstance(d.get('points'), list) and len(d['points']) == POINT_COUNT[d['kind']] and
+            all(isinstance(p.get('time'), (int, float)) and isinstance(p.get('price'), (int, float)) and p['price'] > 0
+                and math.isfinite(p['time']) and math.isfinite(p['price']) for p in d['points']) and
+            ('text' not in d or isinstance(d['text'], str) and len(d['text']) <= 500) and
+            ('locked' not in d or isinstance(d['locked'], bool)) and isinstance(style, dict) and
+            ('color' not in style or re.fullmatch(r'#[\da-fA-F]{6}', style['color']) is not None) and
+            style.get('line', 'solid') in ('solid', 'dashed', 'dotted') and style.get('width', 1) in (1, 2, 3))
 
 
 class DatasetTests(unittest.TestCase):
@@ -144,6 +164,42 @@ class DatasetTests(unittest.TestCase):
         self.assertEqual({True, False}, {g['ClosedAtUtc'] is None for g in gaps})
         self.assertEqual({'forced', 'fee', 'missing-pnl'}, {o['Kind'] for o in self.gen.records('execution_omissions')})
 
+    def test_every_play_has_drawings_at_realistic_sizes(self):
+        plays = {p['Id'] for p in self.gen.records('plays')}
+        rows = self.gen.records('play_drawings')
+        self.assertEqual(plays, {r['PlayId'] for r in rows})
+        self.assertEqual('{}', min((r['Document'] for r in rows), key=len))
+        self.assertGreater(max(len(r['Document']) for r in rows), 2_000)
+        # Deterministic per Play, and a few Plays approach the server's 1,000,000-character limit.
+        plays = [{'id': str(i), 'contract': 'BTC', 'plan': {'entries': [{'price': ''}]}} for i in range(300)]
+        sizes = [len(benchmark.copy_value(benchmark.drawings(play, 'hyperliquid'))) for play in plays]
+        self.assertEqual(sizes[:20], [len(benchmark.copy_value(benchmark.drawings(play, 'hyperliquid'))) for play in plays[:20]])
+        self.assertTrue(any(size > 500_000 for size in sizes))
+        self.assertLess(max(sizes), 1_000_000)
+
+    def test_drawings_pass_the_chart_and_server_checks(self):
+        plays = [{'id': str(i), 'contract': 'ETH', 'plan': {'entries': [{'price': '3100'}]}} for i in range(120)]
+        documents = [benchmark.drawings(play, 'lighter') for play in plays]
+        kinds = Counter()
+        for document in documents:
+            self.assertLessEqual(len(document), 100)
+            self.assertLessEqual(len(json.dumps(document, separators=(',', ':'))), 1_000_000)
+            for key, items in document.items():
+                self.assertTrue(0 < len(key) <= 200, key)
+                self.assertLessEqual(len(items), 200)
+                for drawing in items:
+                    self.assertTrue(chart_drawing(drawing), drawing)
+                    kinds[drawing['kind']] += 1
+        self.assertEqual(set(benchmark.DRAWING_KINDS), set(kinds))
+        long = next(d for doc in documents for items in doc.values() for d in items if d['kind'] == 'long-position')
+        entry, target, stop = long['points']
+        self.assertEqual(target['time'], stop['time'])
+        self.assertGreater(target['price'], entry['price'])
+        self.assertLess(stop['price'], entry['price'])
+        # The mirror rejects what the chart drops: two-point positions and notes over 500 characters.
+        self.assertFalse(chart_drawing({**long, 'points': long['points'][:2]}))
+        self.assertFalse(chart_drawing({**long, 'kind': 'text', 'points': [entry], 'text': 'x' * 501}))
+
     def test_search_terms_exist(self):
         rare = [line for lines in self.gen.rows.lines.values() for line in lines if benchmark.RARE_WORD in line]
         self.assertEqual(1, len(rare))
@@ -200,6 +256,20 @@ class EndpointTests(unittest.TestCase):
         self.assertIn('/api/plays?view=closed&page=12&pageSize=25', paths)
         self.assertIn(f'/api/plays/search?q={benchmark.COMMON_WORD}&offset=50', paths)
         self.assertIn('/api/activity?page=61&pageSize=100', paths)
+        self.assertIn('/api/sizing', paths)
+
+    def test_editor_loads_cover_the_largest_drawings_and_a_play_without(self):
+        sizes = DatasetTests.gen.drawing_sizes
+        self.assertEqual(set(sizes), {p['Id'] for p in DatasetTests.gen.records('plays')})
+        plays = benchmark.drawn_plays(sizes)
+        self.assertEqual([('largest drawings', max(sizes, key=sizes.get)), ('no drawings', min(sizes, key=sizes.get))], plays)
+        self.assertEqual(2, sizes[plays[1][1]])
+        planned, _ = benchmark.plan_endpoints('a', 'o', operations=12000, closed=570, matches=120, plays=plays)
+        editor = [spec for spec in planned if spec[0].startswith('Play editor load')]
+        self.assertEqual([f'/api/plays/{plays[0][1]}', f'/api/plays/{plays[1][1]}'], [spec[1] for spec in editor])
+        check = editor[0][3]
+        self.assertTrue(check({'summary': {'id': plays[0][1]}}))
+        self.assertFalse(check({'summary': {'id': plays[1][1]}}))
 
     def test_deep_page_checks_reject_empty_and_clamped_pages(self):
         check, _ = benchmark.page_of('plays', 3)

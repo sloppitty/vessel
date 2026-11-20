@@ -28,7 +28,7 @@ public sealed class StructuredReviewTests
 
     private Task<PlayDto> Save(ReviewAnswers answers, string review = "Updated review") =>
         service.UpdateAsync(play.Id, new(play.Version, play.AccountId, play.ContractId, "manual", play.Title,
-            PlayDocuments.Read(play.Plan), JsonSerializer.Deserialize<JsonElement>(play.Drawings), review,
+            PlayDocuments.Read(play.Plan), JsonSerializer.Deserialize<JsonElement>(PlayDrawings.Empty), review,
             StructuredReview: answers), default);
 
     private static ReviewAnswers WithValue(string field, string value) => field switch

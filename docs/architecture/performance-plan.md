@@ -515,7 +515,8 @@ What it does:
   - orders and fills as signed-position round trips with partial fills, flips and still-open positions that match
     the latest snapshot; hourly funding, leverage and risk observations, import conflicts;
   - Plays in every status with plan revisions, if-then rules and pre-flight checks, linked orders, structured
-    reviews, log entries and image notes;
+    reviews, log entries and image notes; chart drawings the chart accepts (a few lines on most drawn Plays, a busy
+    chart on two instruments for some, about 820 KB across every market for 3%);
   - Lighter forced events with their markers, fee-bearing and missing-P&L omission markers, coverage records,
     history gaps and backfills; paper drafts.
 
@@ -528,8 +529,9 @@ What it does:
   and times authenticated reads with the resulting session cookie and owner header. Cookies are kept in memory
   and redacted from failures; cleanup removes the certificate and key.
 - **Timing.** Activity (first and a deep page, a filter, one expanded operation), Review (all, year, with
-  imported positions), the Plays list (tabs, a deep Closed page, counts, title and instrument search), Overview
-  and its summary, open risk and journal search (common word, a deep offset, rare word). Each round visits every
+  imported positions), the Plays list (tabs, a deep Closed page, counts, title and instrument search), a Play's
+  editor load (the Play with the largest drawings and one without), Sizing, Overview and its summary, open risk
+  and journal search (common word, a deep offset, rare word). Each round visits every
   endpoint, in an order rotated by one per round. It reports p50 and p95 after the warm-up rounds, and the wire
   and JSON sizes (gzip is accepted; the API's restricted compression leaves these JSON reads uncompressed).
 - **Deep pages.** The deep page or offset is the middle one of the list, chosen from the counts the API reports
@@ -559,3 +561,34 @@ Safety:
   `docker ps -a --filter label=vessel-bench.run` and `docker rm -f -v`.
 - On a shared host, serialize it with other heavy jobs (for example under `flock`). `--min-available-mb` waits
   for free memory before the build, the migrations, the seed and the API start.
+
+## Drawings in their own table (issue #110, November 20, 2026)
+
+Chart drawings moved from the `plays` row to `play_drawings` (migration `PlayDrawingsTable`). Measured with
+`scripts/benchmark.py` at seed 1, 3 years, scale 1, anchor `2026-11-20T12:00Z`, 5 warm-up and 20 measured rounds,
+one after the other on the same shared 8-CPU QEMU host. Both sides seed the same Plays and drawings (774 Plays; the
+largest drawings document is 807 KiB on the wire): head `c6d8e4aa` into `play_drawings`, base `0f184dd3` with the
+same generator writing them into the old `plays."Drawings"` column (a local copy of the script, not committed).
+
+| Read | Base p50 / p95 ms | Head p50 / p95 ms |
+| --- | --- | --- |
+| Plays, All tab | 4.1 / 7.2 | 4.3 / 8.7 |
+| Plays, In progress tab | 3.2 / 6.4 | 2.8 / 4.2 |
+| Plays, Closed tab page 12 | 4.0 / 9.6 | 3.6 / 5.0 |
+| Plays, title and instrument search | 4.0 / 9.9 | 3.7 / 5.6 |
+| Review, all | 132.7 / 194.2 | 99.2 / 136.8 |
+| Review, year | 128.0 / 168.8 | 89.9 / 104.8 |
+| Sizing | 76.0 / 126.6 | 59.5 / 76.1 |
+| Play editor load, largest drawings (807 KiB) | 19.1 / 29.5 | 14.2 / 17.8 |
+| Play editor load, no drawings | 3.1 / 4.3 | 3.5 / 4.3 |
+| Activity, page 1 (not affected; control) | 11.4 / 21.3 | 10.0 / 12.8 |
+
+Response sizes are unchanged. The host was busier during the base run (load 8.2–8.9 against 4.7–7.9), and reads
+that #110 does not touch, such as Activity, were also faster on head, so part of the difference is load. Review
+and Sizing, which read closed Plays without needing their drawings, gained 25–30% at p50, more than the control;
+the Plays list was already fast at this size and stays within noise. The editor load still returns the whole
+drawings document, as before.
+
+Not measured: one list row with large drawings against an otherwise identical row without. The list rows were
+already projections that never selected drawings, and full Play loads no longer map them, so that comparison is
+guaranteed by the query shape rather than timed here.

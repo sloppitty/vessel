@@ -134,6 +134,7 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork, TimePro
     }
 
     public Task<Play?> FindAsync(Guid id, CancellationToken ct) => db.Plays.SingleOrDefaultAsync(x => x.Id == id, ct);
+    public Task<PlayDrawings?> DrawingsAsync(Guid playId, CancellationToken ct) => db.PlayDrawings.SingleOrDefaultAsync(x => x.PlayId == playId, ct);
     public Task<Account?> AccountAsync(Guid id, CancellationToken ct) => db.Accounts.SingleOrDefaultAsync(x => x.Id == id, ct);
     public Task<List<PlayPlanRevision>> RevisionsAsync(Guid playId, CancellationToken ct) =>
         db.PlanRevisions.Where(x => x.PlayId == playId).OrderBy(x => x.Number).AsNoTracking().ToListAsync(ct);
@@ -202,6 +203,7 @@ public sealed class PlayStore(VesselDbContext db, UnitOfWork unitOfWork, TimePro
             .. allocated.Select(id => new EntryExecution(id, null))];
     }
     public void Add(Play play) { unitOfWork.RequireActive(); db.Plays.Add(play); }
+    public void Add(PlayDrawings drawings) { unitOfWork.RequireActive(); db.PlayDrawings.Add(drawings); }
     public async Task<List<LinkedPlanReference>> LinkedPlanReferencesAsync(Guid playId, CancellationToken ct) =>
         (await db.OrderLinks.Where(l => l.PlayId == playId && l.State == OrderLinkState.Linked)
             .Join(db.Orders, l => new { l.OwnerId, l.AccountId, Id = l.ImportedOrderId }, o => new { o.OwnerId, o.AccountId, o.Id },

@@ -37,7 +37,7 @@ public sealed class PlayDomainTests
         var revision = play.ChangePlan(moved, "  Tightened the stop under the new low ", Now)!;
         Assert.Equal((2, "Tightened the stop under the new low"), (revision.Number, revision.Reason));
         Assert.Null(play.ChangePlan(moved, null, Now));
-        play.Annotate("Renamed", "{}", "", Now);
+        play.Annotate("Renamed", "", Now);
         Assert.Equal(2, play.PlanRevision);
     }
 
@@ -66,8 +66,8 @@ public sealed class PlayDomainTests
         Assert.Equal(Now, play.EndedAtUtc);
         Assert.Throws<DomainRuleException>(() => play.Resume(Now));
         Assert.Throws<DomainRuleException>(() => play.ChangePlan(PlayDocuments.Serialize(TestPlays.Plan("1")), "late", Now));
-        Assert.Throws<DomainRuleException>(() => play.Annotate("New title", "{}", "", Now));
-        play.Annotate(play.Title, play.Drawings, "Should have waited for the retest.", Now);
+        Assert.Throws<DomainRuleException>(() => play.Annotate("New title", "", Now));
+        play.Annotate(play.Title, "Should have waited for the retest.", Now);
         Assert.Equal("Should have waited for the retest.", play.Review);
     }
 
@@ -76,10 +76,30 @@ public sealed class PlayDomainTests
     {
         var play = TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC"));
         var versions = new List<long> { play.Version };
-        play.Annotate("Title", "{}", "", Now); versions.Add(play.Version);
-        play.Annotate("Title", "{}", "", Now); versions.Add(play.Version);
+        play.Annotate("Title", "", Now); versions.Add(play.Version);
+        play.Annotate("Title", "", Now); versions.Add(play.Version);
         play.MarkPlanned(Now); versions.Add(play.Version);
         Assert.Equal([1, 2, 2, 3], versions);
+    }
+
+    [Fact]
+    public void Drawings_changes_move_the_version_and_stop_once_the_play_ends()
+    {
+        var play = TestPlays.Create(account, new PerpetualInstrument("hyperliquid", "BTC"));
+        var drawings = new PlayDrawings(play);
+        Assert.Equal((play.OwnerId, play.Id, "{}"), (drawings.OwnerId, drawings.PlayId, drawings.Document));
+        const string line = """{"hyperliquid:BTC":[{"id":"d1"}]}""";
+        Assert.True(play.ReplaceDrawings(drawings, line, Now));
+        Assert.Equal((2L, line), (play.Version, drawings.Document));
+        // The same document, however spelled, changes nothing and keeps the stored text.
+        Assert.False(play.ReplaceDrawings(drawings, """{ "hyperliquid:BTC": [ { "id": "d1" } ] }""", Now));
+        Assert.Equal((2L, line), (play.Version, drawings.Document));
+        Assert.Throws<ArgumentException>(() => play.ReplaceDrawings(new PlayDrawings(TestPlays.Create(account, null)), "{}", Now));
+        play.MarkPlanned(Now);
+        play.Cancel(CancelReason.Missed, null, Now);
+        Assert.Throws<DomainRuleException>(() => play.ReplaceDrawings(drawings, "{}", Now));
+        Assert.False(play.ReplaceDrawings(drawings, line, Now));
+        Assert.Equal(line, drawings.Document);
     }
 }
 

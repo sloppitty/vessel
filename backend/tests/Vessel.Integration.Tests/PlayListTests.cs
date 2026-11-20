@@ -28,7 +28,7 @@ public sealed class PlayListPostgresTests
         var plan = PlayDocuments.Serialize(TestPlays.Plan() with { Direction = direction });
         var play = new Play(Guid.NewGuid(), account, contract is null ? null : new PerpetualInstrument(account.VenueId, contract),
             account.VenueId == "manual" ? InstrumentSource.Manual : InstrumentSource.Venue, plan, T0.AddMinutes(minute));
-        play.Annotate(title, "{}", "", T0.AddMinutes(minute));
+        play.Annotate(title, "", T0.AddMinutes(minute));
         return play;
     }
 
@@ -44,7 +44,7 @@ public sealed class PlayListPostgresTests
         var play = Planned(account, contract, minute, title: title);
         play.MarkOpen("Filled", T0.AddMinutes(minute));
         play.MarkClosed("Flat", T0.AddMinutes(minute));
-        if (review != "" || answers is not null) play.Annotate(title, "{}", review, T0.AddMinutes(minute), answers);
+        if (review != "" || answers is not null) play.Annotate(title, review, T0.AddMinutes(minute), answers);
         return play;
     }
 
@@ -58,7 +58,7 @@ public sealed class PlayListPostgresTests
     {
         var play = Planned(account, contract, minute, title: title);
         play.Cancel(CancelReason.Missed, null, T0.AddMinutes(minute));
-        if (answers is not null) play.Annotate(title, "{}", "", T0.AddMinutes(minute), answers);
+        if (answers is not null) play.Annotate(title, "", T0.AddMinutes(minute), answers);
         return play;
     }
 

@@ -92,7 +92,7 @@ public sealed class ActivityOperationsPostgresTests
             db.Fills.AddRange(Enumerable.Range(0, 120).Select(n => Fill(account, n)));
             db.Fills.Add(Fill(disabled, 0));
             var play = new Play(Guid.NewGuid(), account, new Vessel.Domain.Markets.PerpetualInstrument("manual", "BTC"), InstrumentSource.Manual, "{}", At);
-            play.Annotate("BTC breakout", "{}", "", At);
+            play.Annotate("BTC breakout", "", At);
             playId = play.Id;
             db.Plays.Add(play);
             var (entry, exit) = (TestOrders.For(play, "0"), TestOrders.For(play, "1", "sell"));
@@ -119,7 +119,7 @@ public sealed class ActivityOperationsPostgresTests
         // A rename shows through the warm Activity cache at once, without flagging Activity as changed.
         await using (var db = database.Context(owner))
         {
-            (await db.Plays.SingleAsync(p => p.Id == playId)).Annotate("Renamed breakout", "{}", "", At.AddHours(1));
+            (await db.Plays.SingleAsync(p => p.Id == playId)).Annotate("Renamed breakout", "", At.AddHours(1));
             await db.SaveChangesAsync();
         }
         var renamed = (await client.GetFromJsonAsync<ActivityPageDto>("/api/activity?pageSize=100"))!;

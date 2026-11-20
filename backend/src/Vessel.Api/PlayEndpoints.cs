@@ -9,6 +9,13 @@ public static class PlayEndpoints
 {
     /// <summary>A rule is two parts of at most 500 characters and a source Play.</summary>
     internal const long RuleBodyBytes = 8_192;
+    /// <summary>
+    /// A saved Play's create or update body (issue #110), refused before it is parsed: the drawings' 1 MB
+    /// (<see cref="PlayDocuments.MaxDrawingsLength"/>, measured escaped) plus room for the largest plan notes, review,
+    /// answers and reason even when every character is escaped.
+    /// </summary>
+    internal const long PlayBodyBytes = 2_097_152;
+    internal const string PlayTooLarge = "Play request is too large.";
 
     public static void MapPlays(this WebApplication app)
     {
@@ -24,7 +31,7 @@ public static class PlayEndpoints
         {
             var result = await service.CreateAsync(request, ct, tradingMode);
             return Results.Created($"/api/plays/{result.Summary.Id}", result);
-        });
+        }).WithBodyLimit(PlayBodyBytes, PlayTooLarge);
         api.MapPost("/retrospective", async (CreateRetrospectiveRequest request, DiaryService service, CancellationToken ct) =>
             Results.Ok(await service.CreateRetrospectiveAsync(request, ct)))
             .WithBodyLimit(RetrospectiveBodyBytes, DiaryTooLarge);
@@ -46,7 +53,7 @@ public static class PlayEndpoints
             Results.Ok(await service.PreviewAsync(accountId, operationId, ct)));
         api.MapGet("/{id:guid}", async (Guid id, PlayService service, CancellationToken ct) => Results.Ok(await service.GetAsync(id, ct)));
         api.MapPut("/{id:guid}", async (Guid id, UpdatePlayRequest request, PlayService service, CancellationToken ct) =>
-            Results.Ok(await service.UpdateAsync(id, request, ct)));
+            Results.Ok(await service.UpdateAsync(id, request, ct))).WithBodyLimit(PlayBodyBytes, PlayTooLarge);
         api.MapPost("/{id:guid}/status", async (Guid id, ChangePlayStatusRequest request, PlayService service, CancellationToken ct) =>
             Results.Ok(await service.ChangeStatusAsync(id, request, ct)));
         api.MapGet("/next-actions", async (string? tradingMode, PlayService service, CancellationToken ct) =>

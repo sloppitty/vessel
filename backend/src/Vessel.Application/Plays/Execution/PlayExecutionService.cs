@@ -364,7 +364,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
                 await store.SaveAsync(ct);
                 await ApplyTransitionsAsync(play.AccountId, [play], ct);
             }
-            return PlayService.ToDto(play);
+            return await PlayService.ToDtoAsync(plays, play, ct);
         }, ct), ct);
     }
 
@@ -409,7 +409,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             var evidence = await EvidenceAsync(play, ct)
                 ?? throw new ProblemException(409, "Only a Play with imported executions can be declared unresolved.");
             plays.Add(play.DeclareUnresolved(reason, request.Note, PlayUnresolved.Serialize(evidence), time.GetUtcNow()));
-            return PlayService.ToDto(play);
+            return await PlayService.ToDtoAsync(plays, play, ct);
         }, ct), ct);
     }
 
@@ -432,7 +432,7 @@ public sealed class PlayExecutionService(IPlayStore plays, IPlayExecutionStore s
             if (cleared is not null) plays.Add(cleared);
             // Its linked orders are watched again from its next end, never under the declaration it leaves.
             await store.ForgetWatchesAsync(play.Id, ct);
-            return PlayService.ToDto(play);
+            return await PlayService.ToDtoAsync(plays, play, ct);
         }, ct), ct);
     }
 

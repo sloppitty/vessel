@@ -1121,6 +1121,31 @@ An existing `pg_trgm` installed in another schema makes the migration fail; move
 it with `ALTER EXTENSION pg_trgm SET SCHEMA public` first. Rolling the
 migration back drops both new indexes and leaves the extension in place.
 
+## Chart drawings table
+
+Issue #110. A Play's chart drawings (up to 1 MB each) move from the `plays`
+row into their own owner-scoped table, `play_drawings`, so the Plays list,
+Review, Sizing and exports no longer read them. The journal migration
+`PlayDrawingsTable` creates the table and copies every Play's drawings into it
+unchanged, with the Play's owner, in the same transaction:
+
+- Stop web, every API and every worker, including `worker-notifications` and
+  any optional Paper worker, and back up both schemas before `migrate`, as for
+  any journal migration. The copy reads every `plays` row once, so on a large
+  journal it takes as long as reading the drawings it holds.
+- Nothing else changes for the owner: the Play editor and the chart read and
+  save drawings as before. A save larger than 2 MiB (the 1 MB of drawings plus
+  plan notes, review and answers) is now refused before it is parsed, with
+  "Play request is too large."
+- The old `plays."Drawings"` column stays in place, with its `{}` default. The
+  application no longer reads or writes it, so after the upgrade it keeps the
+  drawings as they were at the upgrade. A later release drops it in a separate
+  migration.
+- Rolling back: restore the pre-upgrade backup with the previous images, as
+  for any upgrade. The down migration is also safe until that later release:
+  it writes each Play's current drawings back into `plays."Drawings"` and then
+  drops `play_drawings`, so edits made after the upgrade are kept.
+
 ## Upgrade
 
 ### From v0.4.1 to v0.4.2

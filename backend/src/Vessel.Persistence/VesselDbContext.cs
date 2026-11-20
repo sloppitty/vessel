@@ -20,6 +20,7 @@ public sealed class VesselDbContext(DbContextOptions<VesselDbContext> options, I
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<AccountCredential> AccountCredentials => Set<AccountCredential>();
     public DbSet<Play> Plays => Set<Play>();
+    public DbSet<PlayDrawings> PlayDrawings => Set<PlayDrawings>();
     public DbSet<Portfolio> Portfolios => Set<Portfolio>();
     public DbSet<PaperSettings> PaperSettings => Set<PaperSettings>();
     public DbSet<PaperLedgerEntry> PaperLedgerEntries => Set<PaperLedgerEntry>();

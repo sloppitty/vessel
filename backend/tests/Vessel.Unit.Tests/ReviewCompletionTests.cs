@@ -32,7 +32,7 @@ public sealed class ReviewCompletionTests
         // verify-sol-dotnet/Verify2.cs F8 and verify-opus-dotnet/More4.cs EarlyReview: before this, the note made the
         // closed Play "Reviewed" through HasReview || ReviewedAtUtc. Now only an explicit completion does.
         var play = Open();
-        var revision = play.Annotate("", "{}", "TP1 taken; reassess tomorrow", At.AddMinutes(5));
+        var revision = play.Annotate("", "TP1 taken; reassess tomorrow", At.AddMinutes(5));
         Assert.Equal(ReviewActions.Edited, revision!.Action);
         play.MarkClosed("Exited.", At.AddHours(1));
         Assert.True(play.HasReview);
@@ -44,7 +44,7 @@ public sealed class ReviewCompletionTests
     public void Complete_review_works_with_unchanged_text_and_Review_again_reopens_it()
     {
         var play = Closed();
-        play.Annotate("", "{}", "Followed the plan", At.AddHours(2));
+        play.Annotate("", "Followed the plan", At.AddHours(2));
         var version = play.Version;
         var completed = play.CompleteReview(At.AddHours(3));
         Assert.Equal((ReviewCompletionKind.Completed, At.AddHours(3), ReviewActions.Completed, "Followed the plan"),
@@ -65,15 +65,15 @@ public sealed class ReviewCompletionTests
     public void Saving_changed_answers_on_an_ended_Play_completes_it_and_text_alone_never_does()
     {
         var play = Closed();
-        Assert.Equal(ReviewActions.Edited, play.Annotate("", "{}", "Text only", At.AddHours(2))!.Action);
+        Assert.Equal(ReviewActions.Edited, play.Annotate("", "Text only", At.AddHours(2))!.Action);
         Assert.Null(play.ReviewCompletion);
-        var answered = play.Annotate("", "{}", "Text only", At.AddHours(3), new ReviewAnswers("followed"));
+        var answered = play.Annotate("", "Text only", At.AddHours(3), new ReviewAnswers("followed"));
         Assert.Equal((ReviewCompletionKind.Completed, ReviewActions.Completed), (play.ReviewCompletion, answered!.Action));
         // Once complete, edits keep it complete; clearing answers on a reopened review does not complete it.
-        play.Annotate("", "{}", "More text", At.AddHours(4));
+        play.Annotate("", "More text", At.AddHours(4));
         Assert.Equal(ReviewCompletionKind.Completed, play.ReviewCompletion);
         play.ReopenReview(At.AddHours(5));
-        play.Annotate("", "{}", "More text", At.AddHours(6), new ReviewAnswers());
+        play.Annotate("", "More text", At.AddHours(6), new ReviewAnswers());
         Assert.Null(play.ReviewCompletion);
     }
 

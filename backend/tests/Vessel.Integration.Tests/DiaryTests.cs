@@ -266,10 +266,10 @@ public sealed partial class DiaryPostgresTests
             for (var n = 0; n < 12; n++)
             {
                 var play = TestPlays.Create(account, new PerpetualInstrument("manual", "BTC"));
-                play.Annotate($"Play {n}", "{}", "", At);
+                play.Annotate($"Play {n}", "", At);
                 play.MarkPlanned(At);
                 play.Cancel(CancelReason.Missed, null, At);
-                play.Annotate($"Play {n}", "{}", "", At.AddHours(n), new ReviewAnswers(NextAction: n switch
+                play.Annotate($"Play {n}", "", At.AddHours(n), new ReviewAnswers(NextAction: n switch
                 {
                     3 => "  ",
                     // Blank to the browser too: SQL's plain trim keeps a no-break space and a byte order mark.
@@ -292,10 +292,10 @@ public sealed partial class DiaryPostgresTests
             var portfolio = await workspace.CreatePortfolioAsync(new("Paper", TradingMode: "paper"), default);
             var created = await workspace.CreateAccountAsync(new(portfolio.Id, "Paper", "hyperliquid", TradingMode: "paper"), default);
             var play = TestPlays.Create(await db.Accounts.SingleAsync(a => a.Id == created.Id), new PerpetualInstrument("hyperliquid", "BTC"));
-            play.Annotate("Paper idea", "{}", "", At);
+            play.Annotate("Paper idea", "", At);
             play.MarkPlanned(At);
             play.Cancel(CancelReason.Missed, null, At);
-            play.Annotate("Paper idea", "{}", "", At.AddHours(20), new ReviewAnswers(NextAction: "Test the paper retest"));
+            play.Annotate("Paper idea", "", At.AddHours(20), new ReviewAnswers(NextAction: "Test the paper retest"));
             db.Plays.Add(play); paperPlay = play.Id;
             await db.SaveChangesAsync();
         }
@@ -440,7 +440,7 @@ public sealed partial class DiaryPostgresTests
         Play Planned(string title)
         {
             var play = TestPlays.Create(account, new PerpetualInstrument("manual", "BTC"));
-            play.Annotate(title, "{}", "", at);
+            play.Annotate(title, "", at);
             play.MarkPlanned(at);
             return play;
         }
@@ -451,12 +451,12 @@ public sealed partial class DiaryPostgresTests
             play.MarkClosed("Exited.", at.AddHours(1));
             return play;
         }
-        var text = Closed("text"); text.Annotate("text", "{}", "Followed the plan", at.AddHours(2));
+        var text = Closed("text"); text.Annotate("text", "Followed the plan", at.AddHours(2));
         var answers = Planned("answers"); answers.Cancel(CancelReason.Missed, null, at.AddMinutes(5));
-        answers.Annotate("answers", "{}", "", at.AddHours(3), new ReviewAnswers(NextAction: "Wait for the retest"));
+        answers.Annotate("answers", "", at.AddHours(3), new ReviewAnswers(NextAction: "Wait for the retest"));
         var blank = Closed("blank");
-        var space = Closed("space"); space.Annotate("space", "{}", "\u00A0 \t", at.AddHours(2));
-        var open = Planned("open"); open.MarkOpen("Filled.", at.AddMinutes(1)); open.Annotate("open", "{}", "TP1 taken", at.AddMinutes(30));
+        var space = Closed("space"); space.Annotate("space", "\u00A0 \t", at.AddHours(2));
+        var open = Planned("open"); open.MarkOpen("Filled.", at.AddMinutes(1)); open.Annotate("open", "TP1 taken", at.AddMinutes(30));
         await using (var db = database.Context(owner))
         {
             db.Plays.AddRange(text, answers, blank, space, open);

@@ -331,7 +331,8 @@ Journal-owned entities carry `OwnerId` and use owner-scoped relationships. The s
 | `account_snapshots`, `account_positions`, `account_stablecoins` | `AccountSnapshot`, … | Latest observation only. Perpetual state and wallet have independent observation times. |
 | `imported_fills` | `ImportedFill` | Normalized execution facts. Unique `(OwnerId, AccountId, ContractId, SourceFillId)`. Check constraints mirror `ExecutionFacts`. |
 | `imported_orders` | `ImportedOrder` | Latest known state of each venue order. Unique per owner, account, canonical contract and `ExternalOrderId`; Play order links reference its internal `Id` (`ImportedOrderId`) through a composite owner/account foreign key, and fills belong to it by the same external key (see [order identity](order-identity.md)). |
-| `plays` | `Play` | Plan and drawings as `jsonb`, `Direction` kept in step with the plan for lists, status, origin (planned or retrospective), structured review, `Version`. |
+| `plays` | `Play` | Plan as `jsonb`, `Direction` kept in step with the plan for lists, status, origin (planned or retrospective), structured review, `Version`. The legacy `Drawings` column is unmapped and kept only until a later migration drops it. |
+| `play_drawings` | `PlayDrawings` | A Play's chart drawings (`jsonb`, at most 1 MB), keyed by owner and Play, cascading with it. Only the Play editor reads them (issue #110); a change advances the Play's `Version`. No row means no drawings. |
 | `play_plan_revisions`, `play_status_changes`, `play_review_revisions` | | Append-only history. |
 | `play_order_links` | `PlayOrderLink` | Order ↔ plan level, state Linked/Suggested/Dismissed. A partial unique index allows one Linked row per order. |
 | `manual_executions`, `manual_execution_history` | | Owner-entered facts and their corrections. |

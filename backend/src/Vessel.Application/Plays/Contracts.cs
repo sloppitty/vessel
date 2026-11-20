@@ -192,6 +192,11 @@ public interface IPlayStore
     /// </summary>
     Task<PlaySearchResult> SearchAsync(string pattern, string tradingMode, int offset, int limit, CancellationToken ct);
     Task<Play?> FindAsync(Guid id, CancellationToken ct);
+    /// <summary>
+    /// The Play's drawings row, tracked so a change saves with the Play; null when it has none, which means no drawings
+    /// (issue #110). Only the Play editor reads drawings: lists, Review, Sizing and exports never do.
+    /// </summary>
+    Task<PlayDrawings?> DrawingsAsync(Guid playId, CancellationToken ct);
     Task<Account?> AccountAsync(Guid id, CancellationToken ct);
     Task<List<PlayPlanRevision>> RevisionsAsync(Guid playId, CancellationToken ct);
     Task<List<PlayStatusChange>> StatusChangesAsync(Guid playId, CancellationToken ct);
@@ -218,6 +223,7 @@ public interface IPlayStore
     /// <summary>Linked orders of the Play with the venue's order ID, for the owner's messages.</summary>
     Task<List<LinkedPlanReference>> LinkedPlanReferencesAsync(Guid playId, CancellationToken ct);
     void Add(Play play);
+    void Add(PlayDrawings drawings);
     void Add(PlayPlanRevision revision);
     void Add(PlayStatusChange change);
     void Add(PlayReviewRevision revision);

@@ -45,12 +45,15 @@ public sealed class EndpointTransportTests
             .ToDictionary(Name, e => e.Metadata.GetMetadata<RequestBodyLimit>()!);
 
         Assert.Equal(
-            ["POST /api/plays/retrospective", "POST /api/plays/{id:guid}/manual-executions",
+            ["POST /api/plays", "POST /api/plays/retrospective", "POST /api/plays/{id:guid}/manual-executions",
              "POST /api/plays/{id:guid}/manual-executions/corrections", "POST /api/risk/open/preview",
-             "PUT /api/plays/rule", "PUT /api/plays/{id:guid}/manual-executions/{executionId:guid}", "PUT /api/risk/settings", "PUT /api/settings/market-sources/{venueId}/{sourceId}", "PUT /api/settings/reporting"],
+             "PUT /api/plays/rule", "PUT /api/plays/{id:guid}", "PUT /api/plays/{id:guid}/manual-executions/{executionId:guid}", "PUT /api/risk/settings", "PUT /api/settings/market-sources/{venueId}/{sourceId}", "PUT /api/settings/reporting"],
             limits.Keys.Order(StringComparer.Ordinal));
-        Assert.All(limits.Where(pair => pair.Key.Contains("/api/plays/", StringComparison.Ordinal)),
+        Assert.All(limits.Where(pair => pair.Key.Contains("/api/plays/", StringComparison.Ordinal) && pair.Key != "PUT /api/plays/{id:guid}"),
             pair => Assert.Equal("Diary request is too large.", pair.Value.TooLargeMessage));
+        // Issue #110: a Play's create and update carry up to 1 MB of drawings, bounded before the body is parsed.
+        Assert.All(new[] { "POST /api/plays", "PUT /api/plays/{id:guid}" },
+            name => Assert.Equal((2_097_152L, "Play request is too large."), (limits[name].MaxBytes, limits[name].TooLargeMessage)));
         // Phase 2, item 1: a preview holds at most 20 entries of 10 stops; the settings body is one limit.
         Assert.Equal((131_072L, "Open-risk preview is too large."),
             (limits["POST /api/risk/open/preview"].MaxBytes, limits["POST /api/risk/open/preview"].TooLargeMessage));

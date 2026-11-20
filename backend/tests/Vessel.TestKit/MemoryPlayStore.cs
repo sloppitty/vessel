@@ -74,6 +74,10 @@ internal sealed class MemoryPlayStore(Guid owner) : IPlayStoreDefaults
         .Where(l => l.PlayId == playId && l.State == OrderLinkState.Linked)
         .Select(l => new LinkedPlanReference(l, ExternalOrderIds.GetValueOrDefault(l.ImportedOrderId) ?? l.ImportedOrderId.ToString())).ToList());
     public void Add(Play play) => Plays.Add(play);
+    public List<PlayDrawings> Drawings { get; } = [];
+    public Task<PlayDrawings?> DrawingsAsync(Guid playId, CancellationToken ct) =>
+        Task.FromResult(Drawings.SingleOrDefault(d => d.PlayId == playId && d.OwnerId == owner));
+    public void Add(PlayDrawings drawings) => Drawings.Add(drawings);
     public void Add(PlayPlanRevision revision) => Revisions.Add(revision);
     public void Add(PlayStatusChange change) => Changes.Add(change);
     public void Add(PlayReviewRevision revision) => Reviews.Add(revision);
@@ -88,6 +92,7 @@ internal sealed class MemoryPlayStore(Guid owner) : IPlayStoreDefaults
     public Task<IReadOnlyList<string>> DeleteAsync(Play play, CancellationToken ct)
     {
         Plays.Remove(play);
+        Drawings.RemoveAll(d => d.PlayId == play.Id);
         return Task.FromResult<IReadOnlyList<string>>(EvidenceKeys);
     }
 }
