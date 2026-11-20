@@ -182,6 +182,41 @@ public sealed class ActivitySummaryCacheTests
     }
 
     [Fact]
+    public async Task A_grown_replacement_at_the_lru_tail_evicts_the_others_to_capacity()
+    {
+        static ActivitySummaries Sized(long revision, int rows) => Value with
+        {
+            Facts = Value.Facts with
+            {
+                Revision = revision,
+                LeverageObservations = Enumerable.Range(0, rows).Select(_ => new LeverageObservation
+                {
+                    Id = Guid.NewGuid(), OwnerId = Guid.Empty, AccountId = Guid.NewGuid(), ContractId = "BTC",
+                    ObservedAtUtc = DateTimeOffset.UnixEpoch, SignedQuantity = 1, EntryPrice = 100, Leverage = 5
+                }).ToList()
+            }
+        };
+        var oldest = Key(); var newer = Key(); var calls = 0;
+        var tail = Sized(1, 1); var other = Sized(1, 1);
+        var grown = new ActivitySummaries(new List<ActivityOperationDto>(), [], Sized(2, 60).Facts);
+        var charge = typeof(ActivitySummaryCache).GetMethod("Charge",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        long ChargeOf(ActivitySummaryKey key, ActivitySummaries value) => (long)charge.Invoke(null, [key, value])!;
+        // Room for the grown entry alone, or for both small ones, but not for the grown one beside another.
+        var cache = new ActivitySummaryCache(capacity: ChargeOf(oldest, grown) + ChargeOf(newer, other) - 1);
+        Task<ActivitySummaries> Of(ActivitySummaries value) { calls++; return Task.FromResult(value); }
+        await cache.ReadAsync(oldest, _ => Of(tail), Unused, default);
+        await cache.ReadAsync(newer, _ => Of(other), Unused, default);
+        Assert.Equal(2, calls);
+
+        // The tail entry grows to fit the cache only alone: the other entry leaves, the grown one stays.
+        cache.Replace(oldest, tail, grown);
+        Assert.Same(grown, await cache.ReadAsync(oldest, _ => Of(tail), Unused, default));
+        await cache.ReadAsync(newer, _ => Of(other), Unused, default);
+        Assert.Equal(3, calls);
+    }
+
+    [Fact]
     public async Task Owner_revision_and_inputs_are_separate_and_LRU_is_bounded()
     {
         var cache = new ActivitySummaryCache(entryLimit: 2); var owner = Guid.NewGuid();

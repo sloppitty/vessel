@@ -134,6 +134,9 @@ public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int 
             {
                 node.Value = node.Value with { Value = to, Size = measured };
                 size += measured;
+                // The entry was just read: it is the most recent, and eviction never reaches it before the others.
+                lru.Remove(node);
+                lru.AddFirst(node);
                 while (size > capacity && lru.Last is { } last && last != node)
                 {
                     entries.Remove(last.Value.Key);
