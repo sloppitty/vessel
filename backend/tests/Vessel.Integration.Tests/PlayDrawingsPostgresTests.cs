@@ -47,8 +47,9 @@ public sealed class PlayDrawingsPostgresTests
                 plays.Add((play.Id, owner, document));
             }
             // A paper Play is a Play too.
-            var paper = new Account(Guid.NewGuid(), owner, "hyperliquid", "Paper", "paper", 4000);
-            db.Accounts.Add(paper);
+            var portfolio = new Portfolio(Guid.NewGuid(), owner, "Paper", tradingMode: "paper");
+            var paper = PaperPlayTestsValues.PaperAccount(owner, portfolio.Id);
+            db.AddRange(portfolio, paper, PaperLedgerEntry.Seed(owner, paper.Id, 4000, DateTimeOffset.UtcNow));
             var simulated = TestPlays.Create(paper, new PerpetualInstrument("hyperliquid", "BTC"));
             db.Plays.Add(simulated);
             plays.Add((simulated.Id, owner, documents[0]));
@@ -58,7 +59,9 @@ public sealed class PlayDrawingsPostgresTests
         }
         Dictionary<Guid, string> before;
         await using (var db = database.Context(first))
-            before = (await Rows(db)).ToDictionary(r => r.Id, r => r.Drawings);
+            before = (await db.Database.SqlQueryRaw<Row>("""
+                SELECT "Id", "OwnerId", "Drawings"::text AS "Drawings", NULL::uuid AS "DrawingsOwnerId", NULL AS "Document" FROM plays
+                """).ToListAsync()).ToDictionary(r => r.Id, r => r.Drawings);
         Assert.Equal(plays.Count, before.Count);
 
         // As an upgrade runs it.
@@ -144,7 +147,7 @@ public sealed class PlayDrawingsPostgresTests
         var responses = await Task.WhenAll(
             client.PutAsJsonAsync(path, Save(current.Summary.Version, current.Plan, Drawings("fourth"))),
             client.PutAsJsonAsync(path, Save(current.Summary.Version, TestPlays.Plan(stop: "96"), current.Drawings)));
-        Assert.Equal([HttpStatusCode.Conflict, HttpStatusCode.OK], responses.Select(r => r.StatusCode).Order());
+        Assert.Equal([HttpStatusCode.OK, HttpStatusCode.Conflict], responses.Select(r => r.StatusCode).Order());
         var final = (await client.GetFromJsonAsync<PlayDto>(path))!;
         Assert.True(responses[0].IsSuccessStatusCode
             ? (Id(final.Drawings), final.Plan.Entries[0].Stops[0].Value) == ("fourth", "97")
