@@ -7,6 +7,10 @@
 - An opt-in pre-push hook (`git config core.hooksPath scripts/hooks`) runs the quick checks
   the pushed files need and refuses a `v*` tag that fails `scripts/release.py check --tag`.
   See `docs/development.md`.
+- `deploy/vessel` operator command: `status`, `preflight`, `backup`, `upgrade --to X`,
+  `restore --from DIR` and `rollback`. Changing commands print their plan and need `--yes`,
+  stop every writer (paper and notification workers included) and restart what was running;
+  a backup is timestamped, never overwritten and always taken before a migration.
 
 ### Fixed
 
