@@ -7,6 +7,8 @@ import io
 import json
 import os
 from pathlib import Path
+import stat
+import tarfile
 import tempfile
 import unittest
 from unittest import mock
@@ -127,8 +129,13 @@ class FakeStack(vessel.Stack):
 
     def compose_answer(self, rest, env):
         if rest[:1] == ['config']:
-            return Result(stdout=json.dumps(model(env.get('VESSEL_VERSION') or self.version, self.storage_kind)))
-        if rest[:4] == ['exec', '-T', 'postgres', 'psql']:
+            # As Compose: the shell overrides .env, which overrides the compose.yaml default.
+            env_file = Path(self.directory, '.env')
+            lines = env_file.read_text().splitlines() if env_file.exists() else []
+            from_file = [line.split('=', 1)[1] for line in lines if line.startswith('VESSEL_VERSION=')]
+            version = env.get('VESSEL_VERSION') or (from_file[-1] if from_file else self.version)
+            return Result(stdout=json.dumps(model(version, self.storage_kind)))
+        if rest[:4] == ['exec', '-T', 'postgres', 'psql'] and 'SELECT' in rest[-1]:
             query = rest[-1]
             if 'to_regclass' in query:
                 return Result(stdout='t\n')
@@ -259,6 +266,316 @@ class ReadOnlyCommandTests(unittest.TestCase):
         code, out = quietly(vessel.preflight, self.stack(storage='external'), Args())
         self.assertEqual(0, code, out)
         self.assertIn('external S3 bucket, which backups do not include', out)
+
+
+def evidence_archive():
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w:gz') as archive:
+        data = b'image bytes'
+        info = tarfile.TarInfo('./owner/play/image.png')
+        info.size = len(data)
+        archive.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+TOC = ';\n215; 1259 16385 TABLE public __EFMigrationsHistory vessel\n216; 1259 16390 TABLE identity __EFMigrationsHistory vessel\n'
+
+
+class ChangingStack(FakeStack):
+    """Also performs the changing calls in memory and records them as events."""
+
+    def __init__(self, directory, fail=(), **kwargs):
+        super().__init__(directory, **kwargs)
+        self.events = []
+        self.fail = set(fail)
+
+    def service_of(self, container_id):
+        return next(i for i in self.state if i['Id'] == container_id)
+
+    def other(self, args):
+        if args[:2] in (['docker', 'stop'], ['docker', 'start']):
+            items = [self.service_of(i) for i in args[2:]]
+            for item in items:
+                item['State']['Status'] = 'exited' if args[1] == 'stop' else 'running'
+            self.events.append((args[1], sorted(i['Config']['Labels']['com.docker.compose.service'] for i in items)))
+            return Result()
+        if args[:2] == ['docker', 'pull']:
+            self.events.append(('pull', args[2]))
+            self.images.add(args[2])
+            return Result()
+        return super().other(args)
+
+    def version_in_env(self):
+        lines = Path(self.directory, '.env').read_text().splitlines()
+        return [line.split('=', 1)[1] for line in lines if line.startswith('VESSEL_VERSION=')][-1]
+
+    def compose_other(self, rest, env):
+        def event(*item):
+            if item[0] in self.fail:
+                self.events.append(('failed',) + item)
+                return Result(1)
+            self.events.append(item)
+            return Result()
+        if rest[:4] == ['exec', '-T', 'postgres', 'pg_dump']:
+            result = event('dump')
+            return Result(result.returncode, b'PGDMP fake dump' if not result.returncode else b'')
+        if rest[:4] == ['exec', '-T', 'postgres', 'pg_restore'] and '-l' in rest:
+            return Result(stdout=TOC)
+        if rest[:4] == ['exec', '-T', 'postgres', 'pg_restore']:
+            return event('restore-database')
+        if rest[:4] == ['exec', '-T', 'postgres', 'psql'] and 'DROP DATABASE' in ' '.join(rest):
+            return event('drop-database')
+        if rest[:1] == ['run'] and '--entrypoint' in rest:
+            entrypoint = rest[rest.index('--entrypoint') + 1]
+            service = rest[rest.index('--entrypoint') + 2]
+            if entrypoint == 'tar':
+                result = event('archive', service)
+                return Result(result.returncode, evidence_archive() if not result.returncode else b'')
+            if entrypoint == 'sh':
+                return event('restore-evidence', service, rest[-1])
+            if entrypoint == 'dotnet':
+                return event('dotnet', *rest[rest.index(vessel.API_DLL) + 1:])
+        if rest == ['run', '--rm', 'migrate']:
+            return event('migrate', self.version_in_env())
+        if rest[:1] == ['up']:
+            return event('up', *[a for a in rest[1:] if not a.startswith('-') and not a.isdigit()])
+        if rest[:1] == ['stop']:
+            return event('compose-stop', *rest[1:])
+        return super().compose_other(rest, env)
+
+
+class ChangingCommandTests(ReadOnlyCommandTests):
+    def stack(self, **kwargs):
+        return ChangingStack(self.directory.name, **kwargs)
+
+    def env_text(self):
+        return Path(self.directory.name, '.env').read_text()
+
+    def pre_upgrade(self, stack, version='0.9.0'):
+        """A backup as upgrade from version would have left it."""
+        env_file = Path(self.directory.name, '.env')
+        env_file.write_text(f'VESSEL_VERSION={version}\n')
+        stack.images.update({f'skorcius/vessel:api-{version}', f'skorcius/vessel:web-{version}'})
+        with contextlib.redirect_stdout(io.StringIO()):
+            path = vessel.take_backup(stack, 'pre-upgrade', ['api', 'worker', 'worker-paper'], version,
+                                      {'upgradeTo': '1.0.0'})
+        env_file.write_text('VESSEL_VERSION=1.0.0\n')
+        stack.forget()
+        stack.events.clear()
+        return path
+
+    def test_changing_commands_without_yes_change_nothing(self):
+        for command, args in ((vessel.backup, Args()), (vessel.upgrade, Args(to='1.1.0')),
+                              (vessel.rollback, Args())):
+            with self.subTest(command=command.__name__):
+                stack = self.stack()
+                stack.images.update({'skorcius/vessel:api-1.1.0', 'skorcius/vessel:web-1.1.0'})
+                if command is vessel.rollback:
+                    self.pre_upgrade(stack)
+                    stack.calls.clear()
+                code, out = quietly(command, stack, args)
+                self.assertEqual(2, code, out)
+                self.assertIn('Run the same command with --yes', out)
+                self.assertEqual([], stack.events)
+                self.assertTrue(all(read_only(call) for call in stack.calls),
+                                [c for c in stack.calls if not read_only(c)])
+                self.assertEqual('VESSEL_VERSION=1.0.0\n', self.env_text())
+
+    def test_backup_stops_every_writer_first_and_restarts_what_ran(self):
+        stack = self.stack()
+        code, out = quietly(vessel.backup, stack, Args(yes=True))
+        self.assertEqual(0, code, out)
+        hosts = ['api', 'worker', 'worker-notifications', 'worker-paper']
+        self.assertEqual([('stop', ['web']), ('stop', hosts), ('dump',), ('stop', ['rustfs']), ('archive', 'rustfs'),
+                          ('start', ['rustfs']), ('start', hosts), ('start', ['web'])], stack.events)
+        [directory] = list(stack.backup_root.iterdir())
+        _, manifest = vessel.load_backup(directory)
+        self.assertEqual(('manual', '1.0.0', 'rustfs', 1), (manifest['kind'], manifest['version'],
+                                                           manifest['storage']['kind'], manifest['storage']['entries']))
+        self.assertEqual({'journal': JOURNAL, 'identity': IDENTITY}, manifest['migrations'])
+        self.assertEqual(sorted(hosts + ['postgres', 'rabbitmq', 'rustfs', 'web']), manifest['services'])
+        self.assertEqual(0o700, stat.S_IMODE(directory.stat().st_mode))
+        self.assertEqual(0o600, stat.S_IMODE((directory / 'vessel.dump').stat().st_mode))
+
+    def test_a_backup_never_reuses_a_directory_or_a_file(self):
+        root = Path(self.directory.name, 'backups')
+        now = vessel.datetime.datetime(2026, 11, 20, 10, 0, 0, tzinfo=vessel.datetime.timezone.utc)
+        first = vessel.new_backup_dir(root, now)
+        (first / 'vessel.dump').write_bytes(b'first')
+        second = vessel.new_backup_dir(root, now)
+        self.assertEqual(('vessel-20261120T100000Z', 'vessel-20261120T100000Z-1'), (first.name, second.name))
+        with self.assertRaises(FileExistsError):
+            vessel.create(first / 'vessel.dump')
+        self.assertEqual(b'first', (first / 'vessel.dump').read_bytes())
+
+    def test_a_failed_backup_leaves_no_directory_and_restarts_the_writers(self):
+        stack = self.stack(fail={'archive'})
+        with self.assertRaises(vessel.Failure):
+            quietly(vessel.backup, stack, Args(yes=True))
+        self.assertEqual([], list(stack.backup_root.iterdir()))
+        self.assertEqual(('start', ['web']), stack.events[-1])
+        self.assertIn(('start', ['rustfs']), stack.events)
+
+    def test_an_external_bucket_is_named_as_not_included(self):
+        stack = self.stack(storage='external')
+        code, out = quietly(vessel.backup, stack, Args(yes=True))
+        self.assertEqual(0, code, out)
+        self.assertNotIn('archive', [e[0] for e in stack.events])
+        self.assertIn('external S3 bucket is NOT in this backup', out)
+        [directory] = list(stack.backup_root.iterdir())
+        _, manifest = vessel.load_backup(directory)
+        self.assertIn("the external S3 bucket (use the provider's backup)", manifest['notIncluded'])
+
+    def test_a_tampered_backup_is_refused(self):
+        stack = self.stack()
+        quietly(vessel.backup, stack, Args(yes=True))
+        [directory] = list(stack.backup_root.iterdir())
+        with open(directory / 'objects.tar.gz', 'ab') as archive:
+            archive.write(b'x')
+        with self.assertRaisesRegex(vessel.Failure, 'objects.tar.gz does not match'):
+            vessel.load_backup(directory)
+
+    def upgrade_manifest(self):
+        path = Path(self.directory.name, 'v1.1.0.upgrade.json')
+        path.write_text(json.dumps({'version': '1.1.0', 'migrations': {'journal': [NEW]},
+                                    'postSteps': [['play-search-rebuild', '--apply']],
+                                    'configuration': ['No new settings.']}))
+        return str(path)
+
+    def test_upgrade_backs_up_before_migrating_and_restarts_every_worker_on_the_target(self):
+        stack = self.stack()
+        stack.images.update({'skorcius/vessel:api-1.1.0', 'skorcius/vessel:web-1.1.0'})
+        Path(self.directory.name, '.env').write_text('POSTGRES_PASSWORD=secret\nVESSEL_VERSION=1.0.0\nOTHER=x\n')
+        code, out = quietly(vessel.upgrade, stack, Args(to='1.1.0', yes=True, manifest=self.upgrade_manifest()))
+        self.assertEqual(0, code, out)
+        kinds = [e[0] for e in stack.events]
+        self.assertLess(kinds.index('dump'), kinds.index('migrate'))
+        self.assertLess(kinds.index('archive'), kinds.index('migrate'))
+        self.assertEqual(('migrate', '1.1.0'), stack.events[kinds.index('migrate')])
+        self.assertEqual(('dotnet', 'play-search-rebuild', '--apply'), stack.events[kinds.index('migrate') + 1])
+        self.assertEqual(('up', 'api', 'postgres', 'rabbitmq', 'rustfs', 'web', 'worker', 'worker-notifications',
+                          'worker-paper'), stack.events[-1])
+        self.assertEqual('POSTGRES_PASSWORD=secret\nVESSEL_VERSION=1.1.0\nOTHER=x\n', self.env_text())
+        self.assertNotIn('secret', out)
+        [directory] = list(stack.backup_root.iterdir())
+        _, manifest = vessel.load_backup(directory)
+        self.assertEqual(('pre-upgrade', '1.0.0', '1.1.0'), (manifest['kind'], manifest['version'], manifest['upgradeTo']))
+
+    def test_upgrade_never_migrates_when_the_backup_fails(self):
+        stack = self.stack(fail={'dump'})
+        stack.images.update({'skorcius/vessel:api-1.1.0', 'skorcius/vessel:web-1.1.0'})
+        with self.assertRaisesRegex(vessel.Failure, 'nothing was migrated'):
+            quietly(vessel.upgrade, stack, Args(to='1.1.0', yes=True))
+        self.assertNotIn('migrate', [e[0] for e in stack.events])
+        self.assertEqual(('start', ['web']), stack.events[-1])
+        self.assertEqual('VESSEL_VERSION=1.0.0\n', self.env_text())
+        self.assertEqual([], list(stack.backup_root.iterdir()))
+
+    def test_upgrade_pulls_missing_images_before_stopping_anything(self):
+        stack = self.stack()
+        code, out = quietly(vessel.upgrade, stack, Args(to='1.1.0', yes=True))
+        self.assertEqual(0, code, out)
+        self.assertEqual([('pull', 'skorcius/vessel:api-1.1.0'), ('pull', 'skorcius/vessel:web-1.1.0'),
+                          ('stop', ['web'])], stack.events[:3])
+        Path(self.directory.name, '.env').write_text('VESSEL_VERSION=1.0.0\n')
+        with self.assertRaisesRegex(vessel.Failure, '--no-pull'):
+            quietly(vessel.upgrade, self.stack(), Args(to='1.2.0', yes=True, pull=False))
+
+    def test_upgrade_refuses_a_running_service_the_configuration_does_not_define(self):
+        stack = self.stack()
+        stack.state.append(inspect('verifier'))
+        stack.images.update({'skorcius/vessel:api-1.1.0', 'skorcius/vessel:web-1.1.0'})
+        with self.assertRaisesRegex(vessel.Failure, 'verifier'):
+            quietly(vessel.upgrade, stack, Args(to='1.1.0', yes=True))
+        self.assertEqual([], stack.events)
+
+    def test_set_env_version_changes_only_that_line(self):
+        path = Path(self.directory.name, '.env')
+        path.write_bytes(b'# VESSEL_VERSION=0.1.0 stays a comment\r\nA=1\r\nVESSEL_VERSION=1.0.0\r\nB=2')
+        path.chmod(0o600)
+        vessel.set_env_version(path, '1.1.0')
+        self.assertEqual(b'# VESSEL_VERSION=0.1.0 stays a comment\r\nA=1\r\nVESSEL_VERSION=1.1.0\r\nB=2', path.read_bytes())
+        self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
+        path.write_bytes(b'A=1')
+        vessel.set_env_version(path, '1.2.0')
+        self.assertEqual(b'A=1\nVESSEL_VERSION=1.2.0\n', path.read_bytes())
+        with self.assertRaises(vessel.Failure):
+            vessel.set_env_version(path, '1.2.0\nX=1')
+        self.assertEqual([path.name], [p.name for p in path.parent.iterdir() if p.is_file()])
+
+    def test_restore_resets_identity_and_rotates_the_epoch_before_any_host_starts(self):
+        source = self.stack()
+        quietly(vessel.backup, source, Args(yes=True))
+        [backup] = list(source.backup_root.iterdir())
+        for start in (False, True):
+            with self.subTest(start=start):
+                stack = self.stack(containers=[])
+                stack.volumes = set()
+                code, out = quietly(vessel.restore, stack, Args(source=str(backup), yes=True, start=start,
+                                                                keep_active=['11111111-1111-1111-1111-111111111111']))
+                self.assertEqual(0, code, out)
+                expected = [('up', 'postgres'), ('restore-database',),
+                            ('restore-evidence', 'rustfs', 'tar -xzf - -C /data && chown -R 10001:10001 /data'),
+                            ('dotnet', 'identity', 'reset-after-restore', '--keep-active',
+                             '11111111-1111-1111-1111-111111111111'),
+                            ('dotnet', 'rotate-event-epoch')]
+                if start:
+                    expected += [('migrate', '1.0.0'), ('up', 'api', 'postgres', 'rabbitmq', 'rustfs', 'web', 'worker',
+                                                        'worker-notifications', 'worker-paper')]
+                self.assertEqual(expected, stack.events)
+                if not start:
+                    self.assertIn('Hosts stay stopped', out)
+
+    def test_restore_refuses_a_project_that_is_not_fresh_or_another_version(self):
+        source = self.stack()
+        quietly(vessel.backup, source, Args(yes=True))
+        [backup] = list(source.backup_root.iterdir())
+        with self.assertRaisesRegex(vessel.Failure, 'already has containers or volumes'):
+            quietly(vessel.restore, self.stack(), Args(source=str(backup), yes=True))
+        Path(self.directory.name, '.env').write_text('VESSEL_VERSION=1.1.0\n')
+        other = self.stack(containers=[])
+        other.volumes = set()
+        with self.assertRaisesRegex(vessel.Failure, 'set VESSEL_VERSION=1.0.0'):
+            quietly(vessel.restore, other, Args(source=str(backup), yes=True))
+        self.assertEqual([], other.events)
+
+    def test_rollback_saves_the_current_state_then_restores_the_pre_upgrade_backup_and_version(self):
+        stack = self.stack()
+        pre = self.pre_upgrade(stack, '0.9.0')
+        code, out = quietly(vessel.rollback, stack, Args(yes=True, start=True))
+        self.assertEqual(0, code, out)
+        kinds = [e[0] for e in stack.events]
+        order = [kinds.index(k) for k in ('dump', 'drop-database', 'restore-database', 'restore-evidence', 'dotnet',
+                                          'migrate', 'up')]
+        self.assertEqual(sorted(order), order)
+        self.assertEqual(('stop', ['web']), stack.events[0])
+        self.assertEqual(('migrate', '0.9.0'), stack.events[kinds.index('migrate')])
+        self.assertIn('find /data -mindepth 1 -delete && tar -xzf', stack.events[kinds.index('restore-evidence')][2])
+        self.assertEqual([('dotnet', 'identity', 'reset-after-restore'), ('dotnet', 'rotate-event-epoch')],
+                         [e for e in stack.events if e[0] == 'dotnet'])
+        self.assertEqual('VESSEL_VERSION=0.9.0\n', self.env_text())
+        safety = [p for p in stack.backup_root.iterdir() if p != pre]
+        self.assertEqual(1, len(safety))
+        self.assertEqual(('pre-rollback', '1.0.0'), tuple(vessel.load_backup(safety[0])[1][k] for k in ('kind', 'version')))
+
+    def test_rollback_restores_nothing_when_the_safety_backup_fails(self):
+        stack = self.stack()
+        self.pre_upgrade(stack, '0.9.0')
+        stack.fail = {'dump'}
+        with self.assertRaisesRegex(vessel.Failure, 'nothing was restored'):
+            quietly(vessel.rollback, stack, Args(yes=True))
+        self.assertFalse({'drop-database', 'restore-database'} & {e[0] for e in stack.events})
+        self.assertEqual('VESSEL_VERSION=1.0.0\n', self.env_text())
+
+    def test_rollback_after_a_failed_upgrade_starts_what_ran_before_the_upgrade(self):
+        stack = self.stack()
+        self.pre_upgrade(stack, '0.9.0')
+        for item in stack.state:
+            if item['Config']['Labels']['com.docker.compose.service'] not in vessel.DATA_SERVICES:
+                item['State']['Status'] = 'exited'
+        code, out = quietly(vessel.rollback, stack, Args(yes=True, start=True))
+        self.assertEqual(0, code, out)
+        self.assertEqual(('up', 'api', 'postgres', 'rabbitmq', 'rustfs', 'worker', 'worker-paper'), stack.events[-1])
 
 
 if __name__ == '__main__':

@@ -1477,7 +1477,29 @@ nothing and print no `.env` values:
 ./vessel preflight --to 0.4.3   # checks for a backup and an upgrade; exits non-zero when one fails
 ```
 
-Back up first, read the changelog, and set `VESSEL_VERSION` to the chosen release.
+Its changing commands print their plan and change nothing without `--yes`.
+Each first stops every writer, which is every running container of the project
+except PostgreSQL, RabbitMQ and RustFS: API, `worker`, `worker-notifications`,
+`worker-paper`, any other worker service, web and TLS. It cannot see replicas on
+other Docker hosts; stop those yourself.
+
+```sh
+./vessel upgrade --to 0.4.3 --yes   # backup, VESSEL_VERSION in .env, explicit migrate, start what ran
+./vessel rollback --yes --keep-active <operator-guid>   # pre-upgrade backup and previous version, in place
+```
+
+`upgrade` always takes a new pre-upgrade backup (see [Backups](#backups)) and
+stops, restarting the old version, if that fails. It changes only the
+`VESSEL_VERSION` line of `.env`, runs the `migrate` service and then starts
+what was running and waits for health. Run the release's post-upgrade steps
+from its section below, or pass its upgrade manifest with `--manifest`. If a
+step fails, the hosts stay stopped and the command prints the `rollback` to
+run. `rollback` first backs up the current state, then restores the
+pre-upgrade backup and the previous `VESSEL_VERSION` as in
+[Isolated restore](#isolated-restore), including identity reset and
+`rotate-event-epoch`. Images a digest pins, not `VESSEL_VERSION`, are refused.
+
+The manual equivalent follows. Back up first, read the changelog, and set `VESSEL_VERSION` to the chosen release.
 Retain the complete `COMPOSE_FILE` in the private `.env`. This applies to every
 bare command below; explicit `-f` lists must include all those overlays.
 
@@ -1503,6 +1525,13 @@ exits at start, both logging the unknown migration IDs (see
 [Logs and troubleshooting](#logs-and-troubleshooting)).
 
 ## Backups
+
+`./vessel backup --yes` does this: it stops every writer, writes a new
+`backups/vessel-<UTC time>/` directory (mode 700, never overwritten) with
+`vessel.dump` (both schemas), the RustFS or local evidence archive, SHA-256
+sums in `manifest.json`, and starts again what was running. It does not include
+an external S3 bucket, the credential ring, `.env` or the RabbitMQ volume.
+The manual commands follow.
 
 Keep backups private and test restores in an isolated installation. Stop web, API
 and both workers to keep database references and evidence consistent, then (the RabbitMQ
@@ -1553,6 +1582,15 @@ version that produced the backup first. Bind web to an unused loopback port and
 choose an unused subnet and pinned service IPs. Do not start web, API or worker yet. The
 broker volume is not restored; RabbitMQ starts empty and subscribers recover
 unsettled retained events from PostgreSQL.
+
+With a backup made by `./vessel backup` or `upgrade`, run
+`./vessel restore --from /private/backups/vessel-<time> --yes [--keep-active <guid>]`
+in that new directory. It refuses a project that has any container or volume,
+another image version or another storage mode, then restores the database and
+evidence, runs `identity reset-after-restore` and `rotate-event-epoch`, and
+leaves every host stopped for the reconciliation below. `--start` also runs
+`migrate` and starts the hosts, for when nothing needs reconciling. The manual
+steps follow.
 
 The examples use the default mode; add every applicable `-f` overlay to each
 command. `-p vessel-restore-check` must never name the live project.

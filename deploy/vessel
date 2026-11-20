@@ -4,22 +4,42 @@
 Run it in the operator directory that holds compose.yaml and the private .env, with the same overlays as every other
 Compose command: COMPOSE_FILE in .env, or the same -f and --profile options repeated here.
 
+Read-only; they never start, stop or migrate anything:
   status      What runs, which version, migrations applied/pending/unknown, disk space and the last backup.
   preflight   The checks an upgrade or backup needs, with a non-zero exit when one fails. Add --to X for an upgrade.
 
-Both are read-only: they read the Compose model, container state, the migration history and the images. They never
-print .env values and never start, stop or migrate anything.
+Changing; each prints its plan and does nothing without --yes. Each first stops every writer: every running container
+of the project except PostgreSQL, RabbitMQ and RustFS (API, all workers including notifications and paper, web, TLS
+and one-off runs), with no exceptions by name:
+  backup      A new timestamped directory under backups/, never overwritten: both schemas (one pg_dump) and the
+              evidence store (the whole stopped RustFS volume, or the local evidence volume). An external S3 bucket,
+              the credential key ring, .env and the RabbitMQ volume are not included. Restarts what was running.
+  upgrade     --to X: back up (refusing to continue if that fails), set VESSEL_VERSION=X in .env, run the explicit
+              migrate service (and a release manifest's post-steps), then start what was running on X.
+  restore     --from DIR: into a fresh project (no containers or volumes): restore the database and evidence, then
+              identity reset-after-restore and rotate-event-epoch before any host starts.
+  rollback    Restore the last pre-upgrade backup in place with its image version, after a safety backup of the
+              current state, with the same identity reset and epoch rotation.
+
+restore and rollback leave the hosts stopped for the trusted-record reconciliation of deploy/README.md "Isolated
+restore", then print the remaining commands; --start runs migrate and starts the hosts at once, for when the reset
+table needs no reconciliation. The script never prints .env values; it edits only the VESSEL_VERSION line of
+<project directory>/.env. Migrations run only through the migrate service; the API never migrates at startup.
 
 Python and only its standard library: the commands parse Docker's JSON, hash and check archives and are unit tested
 with the other operator scripts (scripts/test_deploy_vessel.py)."""
 import argparse
+import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
+import tarfile
 
 # The stores themselves; never treated as writers. RustFS is stopped separately while its volume is archived.
 DATA_SERVICES = ('postgres', 'rabbitmq', 'rustfs')
@@ -30,10 +50,14 @@ API_DLL = '/app/Vessel.Api.dll'
 SCHEMA_ASSEMBLIES = {'journal': '/app/Vessel.Persistence.dll', 'identity': '/app/Vessel.Identity.dll'}
 # An EF migration ID as stored in its [Migration("...")] attribute (UTF-8 in the assembly's blob heap).
 MIGRATION_ID = re.compile(rb'(?<![0-9A-Za-z_])(\d{14}_[A-Za-z][A-Za-z0-9_]*)')
-VERSION = re.compile(r'^\d+\.\d+\.\d+(?:[-.+][0-9A-Za-z.-]+)?$')
+VERSION = re.compile(r'^\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?$')
 IMAGE_TAG = re.compile(r':(api|web)-([^:@/]+)$')
 MANIFEST = 'manifest.json'
-GIB = 1024 ** 3
+# Owners of the evidence volumes (deploy/README.md "Backups").
+RUSTFS_OWNER = '10001:10001'
+API_OWNER = '1654:1654'
+# What a root restore command adds back to extract an archive into a volume another user owns.
+RESTORE_CAPABILITIES = ('--user', '0', '--cap-add', 'CHOWN', '--cap-add', 'DAC_OVERRIDE', '--cap-add', 'FOWNER')
 
 
 class Failure(Exception):
@@ -156,6 +180,10 @@ class Stack:
                               'with the same overlays to see why.')
             self._config[version] = json.loads(result.stdout)
         return self._config[version]
+
+    def forget(self):
+        """Read the Compose model again, for example after VESSEL_VERSION changed in .env."""
+        self._config.clear()
 
     @property
     def name(self):
@@ -479,6 +507,515 @@ def preflight(stack, args):
     return 1 if report.failed else 0
 
 
+# --- changing commands ------------------------------------------------------------------------------------------
+
+def confirm(args, title, plan):
+    say(title)
+    for number, step in enumerate(plan, 1):
+        say(f'  {number}. {step}')
+    if not args.yes:
+        say('Nothing was changed. Run the same command with --yes to do this.')
+        return False
+    return True
+
+
+def names(containers):
+    return ', '.join(sorted({c.service + (' (one-off)' if c.oneoff else '') for c in containers})) or 'none'
+
+
+def restart_services(containers):
+    """The services to bring back: every running, non-one-off container's service."""
+    return sorted({c.service for c in containers if c.running and not c.oneoff})
+
+
+def check_services_configured(stack, containers, version=None):
+    """A running service the passed configuration does not define could be stopped but never started again."""
+    missing = sorted({c.service for c in containers if c.running and not c.oneoff} - set(stack.services(version)))
+    if missing:
+        raise Failure('Running services are not in the Compose configuration given to this command: ' +
+                      ', '.join(missing) + '. Pass the same overlays and profiles (for example -f compose.paper.yaml '
+                      '--profile paper, or COMPOSE_FILE/COMPOSE_PROFILES in .env) as for every other Compose command.')
+
+
+def stop_writers(stack, containers):
+    """Stops web/TLS, then every other running container except the data stores, and checks that none still runs."""
+    front, hosts = writers(containers)
+    for group in (front, hosts):
+        if group:
+            say(f'Stopping {names(group)}')
+            stack.run(['docker', 'stop', *[c.id for c in group]], stdout=subprocess.DEVNULL)
+    still = [c for c in stack.containers() if c.running and c.service not in DATA_SERVICES]
+    if still:
+        raise Failure(f'Still running after stop: {names(still)}. Nothing else was changed.')
+    if not front and not hosts:
+        say('No writer was running.')
+    return front + hosts
+
+
+def start_containers(stack, stopped):
+    """Starts the containers stop_writers stopped, hosts before web/TLS. One-off runs are not restarted."""
+    again = [c for c in stopped if not c.oneoff]
+    for group in ([c for c in again if c.service not in FRONT_SERVICES], [c for c in again if c.service in FRONT_SERVICES]):
+        if group:
+            say(f'Starting {names(group)}')
+            stack.run(['docker', 'start', *[c.id for c in group]], stdout=subprocess.DEVNULL)
+
+
+def ensure_postgres(stack):
+    """Starts PostgreSQL when it is not running; returns whether it did."""
+    if stack.postgres_running():
+        return False
+    say('Starting postgres')
+    stack.compose('up', '-d', '--wait', 'postgres')
+    return True
+
+
+def offline(stack, *args, check=True):
+    """An administrator command in the API image, with no host started (deploy/README.md)."""
+    return stack.compose('run', '--rm', '--no-deps', '--entrypoint', 'dotnet', 'migrate', API_DLL, *args, check=check)
+
+
+def create(path):
+    """A new file, mode 600; refuses to replace anything."""
+    return os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb')
+
+
+def digest(path):
+    sha = hashlib.sha256()
+    with open(path, 'rb') as stream:
+        for block in iter(lambda: stream.read(1 << 20), b''):
+            sha.update(block)
+    return sha.hexdigest()
+
+
+def new_backup_dir(root, now):
+    """A new directory named after the UTC time; an existing name gets a suffix, never reused."""
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    base = 'vessel-' + now.strftime('%Y%m%dT%H%M%SZ')
+    for attempt in range(100):
+        path = root / (base if attempt == 0 else f'{base}-{attempt}')
+        try:
+            path.mkdir(mode=0o700)
+            return path
+        except FileExistsError:
+            continue
+    raise Failure(f'Could not create a new backup directory in {root}.')
+
+
+def check_dump(stack, path, applied):
+    """The dump lists both schemas' migration history tables."""
+    with open(path, 'rb') as stream:
+        toc = stack.compose('exec', '-T', 'postgres', 'pg_restore', '-l', stdin=stream, capture=True).stdout
+    expected = ['public'] + ([stack.identity_schema()] if applied.get('identity') else [])
+    for schema in expected:
+        if not re.search(rf'TABLE {re.escape(schema)} __EFMigrationsHistory\b', toc):
+            raise Failure(f'The database dump has no {schema} migration history; the backup is incomplete.')
+
+
+def check_archive(path):
+    try:
+        with tarfile.open(path, 'r:gz') as archive:
+            return sum(1 for _ in archive)
+    except (tarfile.TarError, OSError, EOFError) as error:
+        raise Failure(f'The evidence archive {path.name} cannot be read back ({type(error).__name__}).')
+
+
+def running_version(stack, containers):
+    api = next((c.image for c in containers if c.service == 'api' and c.running and not c.oneoff), None)
+    return image_version(api) or stack.configured_version()
+
+
+def take_backup(stack, kind, services, version, extra=None):
+    """Writes a complete backup into a new directory, with writers already stopped. The manifest is written last: a
+    directory without one is not a backup and is removed on failure."""
+    applied = stack.applied_migrations()
+    if applied is None:
+        raise Failure('PostgreSQL is not running.')
+    storage, path, volume = stack.storage()
+    now = datetime.datetime.now(datetime.timezone.utc)
+    directory = new_backup_dir(stack.backup_root, now)
+    say(f'Backing up to {directory}')
+    try:
+        user, database = stack.database()
+        with create(directory / 'vessel.dump') as out:
+            stack.compose('exec', '-T', 'postgres', 'pg_dump', '-U', user, '-d', database, '-Fc', stdout=out)
+        check_dump(stack, directory / 'vessel.dump', applied)
+        archive = {'rustfs': 'objects.tar.gz', 'local': 'evidence.tar.gz'}.get(storage)
+        if storage == 'rustfs':
+            rustfs = [c for c in stack.containers() if c.service == 'rustfs' and c.running and not c.oneoff]
+            if rustfs:
+                say('Stopping rustfs to archive its whole volume')
+                stack.run(['docker', 'stop', *[c.id for c in rustfs]], stdout=subprocess.DEVNULL)
+            try:
+                with create(directory / archive) as out:
+                    stack.compose('run', '--rm', '--no-deps', '-T', '--entrypoint', 'tar', 'rustfs',
+                                  '-C', path, '-czf', '-', '.', stdout=out)
+            finally:
+                if rustfs:
+                    stack.run(['docker', 'start', *[c.id for c in rustfs]], stdout=subprocess.DEVNULL)
+        elif storage == 'local':
+            with create(directory / archive) as out:
+                stack.compose('run', '--rm', '--no-deps', '-T', '--entrypoint', 'tar', 'api',
+                              '-C', path, '-czf', '-', '.', stdout=out)
+        entries = check_archive(directory / archive) if archive else None
+        files = {name: {'sha256': digest(directory / name), 'bytes': (directory / name).stat().st_size}
+                 for name in ('vessel.dump', archive) if name}
+        manifest = {
+            'format': 1, 'kind': kind, 'createdAt': now.strftime('%Y-%m-%dT%H:%M:%SZ'), 'project': stack.name,
+            'version': version, 'images': stack.app_images(), 'services': services,
+            'storage': {'kind': storage, 'archive': archive, 'entries': entries, 'volume': volume},
+            'credentialRing': bool(stack.credential_ring()), 'migrations': applied, 'files': files,
+            'notIncluded': ['RabbitMQ volume (subscribers recover unsettled events from PostgreSQL)',
+                            'credential key ring (back it up separately)', '.env and operator settings'] +
+                           (['the external S3 bucket (use the provider\'s backup)'] if storage == 'external' else []),
+            **(extra or {})}
+        with create(directory / MANIFEST) as out:
+            out.write(json.dumps(manifest, indent=2).encode() + b'\n')
+    except BaseException:
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
+    say(f'Backup complete: {directory} ({", ".join(f"{n} {size(f["bytes"])}" for n, f in files.items())})')
+    if storage == 'external':
+        say('The external S3 bucket is NOT in this backup; back it up with the provider.')
+    return directory
+
+
+def load_backup(directory):
+    """A backup's manifest after checking every listed file's size and SHA-256."""
+    directory = Path(directory).resolve()
+    try:
+        manifest = json.loads((directory / MANIFEST).read_text())
+    except (OSError, ValueError):
+        raise Failure(f'{directory} is not a backup made by this script (no readable {MANIFEST}).')
+    if manifest.get('format') != 1 or 'vessel.dump' not in manifest.get('files', {}):
+        raise Failure(f'{directory}/{MANIFEST} is not a supported backup manifest.')
+    for name, expected in manifest['files'].items():
+        path = directory / name
+        if Path(name).name != name or not path.is_file() or path.is_symlink():
+            raise Failure(f'Backup file {name} is missing or not a regular file.')
+        if path.stat().st_size != expected['bytes'] or digest(path) != expected['sha256']:
+            raise Failure(f'Backup file {name} does not match its recorded size and SHA-256.')
+    if not VERSION.match(str(manifest.get('version'))):
+        raise Failure('The backup does not record a release version.')
+    return directory, manifest
+
+
+def set_env_version(path, version):
+    """Sets VESSEL_VERSION in .env, replacing only that line (or appending it), atomically and with the same mode.
+    Other lines are kept byte for byte and never printed."""
+    if not VERSION.match(version):
+        raise Failure(f'{version!r} is not a release version.')
+    data = path.read_bytes()
+    pattern = re.compile(rb'^[ \t]*(?:export[ \t]+)?VESSEL_VERSION[ \t]*=')
+    lines, found = [], False
+    for line in data.splitlines(keepends=True):
+        if pattern.match(line):
+            ending = b'\r\n' if line.endswith(b'\r\n') else b'\n'
+            line, found = b'VESSEL_VERSION=' + version.encode() + ending, True
+        lines.append(line)
+    if not found:
+        if lines and not lines[-1].endswith(b'\n'):
+            lines[-1] += b'\n'
+        lines.append(b'VESSEL_VERSION=' + version.encode() + b'\n')
+    temporary = path.with_name(f'{path.name}.vessel-{os.getpid()}')
+    with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IMODE(path.stat().st_mode)), 'wb') as out:
+        out.write(b''.join(lines))
+        out.flush()
+        os.fsync(out.fileno())
+    os.replace(temporary, path)
+
+
+def require_env_file(stack):
+    if 'VESSEL_VERSION' in os.environ:
+        raise Failure('VESSEL_VERSION is set in this shell and would override .env; unset it first.')
+    env_file = stack.directory / '.env'
+    if not env_file.is_file() or not os.access(env_file, os.R_OK | os.W_OK):
+        raise Failure(f'{env_file} must exist and be writable: the version is recorded in its VESSEL_VERSION line.')
+    return env_file
+
+
+def switch_version(stack, env_file, version):
+    say(f'Setting VESSEL_VERSION={version} in {env_file}')
+    set_env_version(env_file, version)
+    stack.forget()
+    if stack.configured_version() != version:
+        raise Failure(f'After setting VESSEL_VERSION={version}, Compose still selects other images.')
+
+
+def missing_images(stack, version):
+    return sorted({image for image in stack.app_images(version).values() if not stack.image_present(image)})
+
+
+def pull(stack, images, allowed):
+    if images and not allowed:
+        raise Failure('Not present locally and --no-pull was given: ' + ', '.join(images))
+    for image in images:
+        say(f'Pulling {image}')
+        stack.run(['docker', 'pull', image], stdout=subprocess.DEVNULL)
+
+
+def check_space(stack):
+    root = stack.backup_root
+    parent = root if root.exists() else root.parent
+    if not os.access(parent, os.W_OK | os.X_OK):
+        raise Failure(f'Backups cannot be written to {root}.')
+    kind, _, volume = stack.storage()
+    needed = sum(value or 0 for value in (stack.database_size(), stack.volume_size(volume) if kind != 'external' else 0))
+    free = free_space(root)
+    if free is not None and free < needed * 1.2 + 256 * 1024 ** 2:
+        raise Failure(f'Backups need about {size(needed)} in {root}; {size(free)} is free.')
+
+
+def storage_text(stack):
+    kind, _, volume = stack.storage()
+    return {'rustfs': f'the whole stopped RustFS volume {volume}', 'local': f'the local evidence volume {volume}',
+            'external': 'NOT the external S3 bucket (back it up with the provider)'}[kind]
+
+
+def backup(stack, args):
+    containers = stack.containers()
+    front, hosts = writers(containers)
+    plan = [f'Stop every writer: {names(front + hosts)} (stop API/worker replicas on other hosts yourself).',
+            f'Dump both schemas (journal and identity) and archive {storage_text(stack)} into a new directory '
+            f'under {stack.backup_root}; nothing is overwritten.',
+            f'Start again what was running: {names(front + hosts)}.']
+    if not confirm(args, f'Back up project {stack.name}:', plan):
+        return 2
+    check_space(stack)
+    started = ensure_postgres(stack)
+    stopped = stop_writers(stack, containers)
+    try:
+        take_backup(stack, 'manual', restart_services(containers), running_version(stack, containers))
+    finally:
+        start_containers(stack, stopped)
+        if started:
+            stack.compose('stop', 'postgres')
+    return 0
+
+
+def load_upgrade_manifest(path, target):
+    """A release's upgrade manifest (issue #101 part 3): its migrations and configuration notes are shown, and its
+    post-steps (API administrator commands, e.g. ["play-search-rebuild", "--apply"]) run after migrate."""
+    if not path:
+        return {}
+    try:
+        manifest = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        raise Failure(f'The upgrade manifest {path} cannot be read.')
+    if manifest.get('version') != target:
+        raise Failure(f'The upgrade manifest is for {manifest.get("version")}, not {target}.')
+    for step in manifest.get('postSteps', []):
+        if not (isinstance(step, list) and step and all(isinstance(a, str) for a in step)
+                and re.match(r'^[a-z][a-z-]*$', step[0])):
+            raise Failure(f'Invalid post-step in the upgrade manifest: {step!r}')
+    return manifest
+
+
+def upgrade(stack, args):
+    target = args.to
+    env_file = require_env_file(stack)
+    report = Report()
+    containers = preflight_checks(stack, target, report)
+    if report.failed:
+        raise Failure('Preflight failed; nothing was changed.')
+    check_services_configured(stack, containers, target)
+    manifest = load_upgrade_manifest(args.manifest, target)
+    current = running_version(stack, containers)
+    services = restart_services(containers)
+    missing = missing_images(stack, target)
+    front, hosts = writers(containers)
+    pending = compare_migrations(stack.known_migrations(stack.image('migrate', target)), stack.applied_migrations())
+    plan = ([f'Pull {", ".join(missing)}.'] if missing else []) + [
+        f'Stop every writer: {names(front + hosts)} (stop API/worker replicas on other hosts yourself).',
+        f'Back up both schemas and {storage_text(stack)} into a new directory under {stack.backup_root}; '
+        'stop here, restarting what ran, if the backup fails.',
+        f'Set VESSEL_VERSION={target} in {env_file} (was {current}).',
+        'Run the explicit migrate service: ' + '; '.join(
+            f'{schema} {", ".join(row["pending"]) or "nothing pending"}' if row['pending'] is not None
+            else f'{schema} pending unknown until the image is pulled' for schema, row in pending.items()) + '.']
+    plan += [f'Run {" ".join(step)}.' for step in manifest.get('postSteps', [])]
+    plan += [f'Start on {target} and wait until healthy: {", ".join(services) or "nothing was running"}.']
+    for note in manifest.get('configuration', []):
+        say(f'Configuration note for {target}: {note}')
+    if not confirm(args, f'Upgrade project {stack.name} from {current} to {target}:', plan):
+        return 2
+    pull(stack, missing, args.pull)
+    stopped = stop_writers(stack, containers)
+    try:
+        directory = take_backup(stack, 'pre-upgrade', services, current, {'upgradeTo': target})
+    except BaseException as error:
+        say('The backup failed: nothing was migrated. Starting again what was running.')
+        start_containers(stack, stopped)
+        raise Failure(f'Backup failed ({error}); {current} is running again and nothing was migrated.')
+    rollback_hint = (f'Writers stay stopped. To return to {current}: ./vessel rollback --from {directory} --yes, '
+                     'with --keep-active and --start as deploy/README.md "Isolated restore" allows.')
+    try:
+        switch_version(stack, env_file, target)
+        say('Running migrate')
+        stack.compose('run', '--rm', 'migrate')
+        for step in manifest.get('postSteps', []):
+            say(f'Running {" ".join(step)}')
+            offline(stack, *step)
+    except BaseException:
+        say('The upgrade stopped before any host started on the new version. ' + rollback_hint)
+        raise
+    if services:
+        say(f'Starting {", ".join(services)} on {target}')
+        result = stack.compose('up', '-d', '--wait', '--wait-timeout', str(args.wait_timeout), *services, check=False)
+        if result.returncode:
+            raise Failure(f'Not every service became healthy on {target}; inspect `docker compose ps -a` and the logs. '
+                          f'To return to {current}: ./vessel rollback --from {directory} --yes')
+    say(f'Upgraded {stack.name} to {target}. Pre-upgrade backup: {directory}')
+    return 0
+
+
+def restore_data(stack, directory, manifest, wipe):
+    """Database and evidence from a checked backup, with every host stopped. wipe replaces the existing database and
+    evidence (rollback); otherwise the project is fresh."""
+    user, database = stack.database()
+    storage, path, _ = stack.storage()
+    if wipe:
+        say(f'Replacing database {database}')
+        stack.compose('exec', '-T', 'postgres', 'psql', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-U', user, '-d', 'postgres',
+                      '-c', f'DROP DATABASE "{database}" WITH (FORCE)', '-c', f'CREATE DATABASE "{database}"')
+    say('Restoring the database (both schemas)')
+    with open(directory / 'vessel.dump', 'rb') as dump:
+        stack.compose('exec', '-T', 'postgres', 'pg_restore', '-U', user, '-d', database, '--no-owner',
+                      '--no-privileges', '--exit-on-error', stdin=dump)
+    archive = manifest['storage'].get('archive')
+    if storage == 'external':
+        say('Evidence is in the external S3 bucket: restore it with the provider if needed; this backup has none.')
+        return
+    service, owner = ('rustfs', RUSTFS_OWNER) if storage == 'rustfs' else ('api', API_OWNER)
+    if storage == 'rustfs':
+        rustfs = [c for c in stack.containers() if c.service == 'rustfs' and c.running and not c.oneoff]
+        if rustfs:
+            stack.run(['docker', 'stop', *[c.id for c in rustfs]], stdout=subprocess.DEVNULL)
+    clear = f'find {path} -mindepth 1 -delete && ' if wipe else ''
+    say(f'Restoring evidence into {service}:{path}')
+    with open(directory / archive, 'rb') as stream:
+        stack.compose('run', '--rm', '--no-deps', '-T', *RESTORE_CAPABILITIES, '--entrypoint', 'sh', service, '-c',
+                      f'{clear}tar -xzf - -C {path} && chown -R {owner} {path}', stdin=stream)
+
+
+def reset_identity(stack, keep_active):
+    """Mandatory after every restore and before any host starts (deploy/README.md "Isolated restore")."""
+    say('Running identity reset-after-restore' + (f' (keeping {", ".join(keep_active)} active)' if keep_active else
+                                                  ' (every user is suspended)'))
+    result = offline(stack, 'identity', 'reset-after-restore',
+                     *[part for guid in keep_active for part in ('--keep-active', guid)], check=False)
+    if result.returncode:
+        raise Failure(f'identity reset-after-restore failed (exit {result.returncode}); no host was started.')
+    say('Running rotate-event-epoch')
+    offline(stack, 'rotate-event-epoch')
+
+
+def finish_restore(stack, services, start):
+    if not start:
+        say('Hosts stay stopped. Compare the reset table above with trusted post-backup records and reapply '
+            'unbind-wallet, suspend, demote, then `identity restore --user` only for confirmed users '
+            '(deploy/README.md "Isolated restore"). Then start with:')
+        say('  docker compose run --rm migrate')
+        say('  docker compose up -d ' + ' '.join(services))
+        return
+    say('Running migrate')
+    stack.compose('run', '--rm', 'migrate')
+    if services:
+        say(f'Starting {", ".join(services)}')
+        stack.compose('up', '-d', *services)
+
+
+def restore(stack, args):
+    directory, manifest = load_backup(args.source)
+    if 'VESSEL_VERSION' in os.environ:
+        raise Failure('VESSEL_VERSION is set in this shell and overrides .env; unset it first.')
+    if stack.containers() or stack.project_volumes():
+        raise Failure(f'Project {stack.name} already has containers or volumes. Restore only into a fresh project with '
+                      'a unique name (-p or COMPOSE_PROJECT_NAME); use rollback to go back in place.')
+    if stack.configured_version() != manifest['version']:
+        raise Failure(f'The backup was made by {manifest["version"]}; set VESSEL_VERSION={manifest["version"]} in .env '
+                      'first so the same image version restores it.')
+    storage = stack.storage()[0]
+    if storage != manifest['storage']['kind']:
+        raise Failure(f'The backup holds {manifest["storage"]["kind"]} evidence but this configuration uses {storage}; '
+                      'use the same storage overlay as the backed-up installation.')
+    if manifest.get('credentialRing') and not stack.credential_ring():
+        raise Failure('The backed-up installation mounted a credential key ring; include compose.credentials.yaml '
+                      'with the original ring, or stored venue tokens cannot be decrypted.')
+    services = manifest.get('services') or []
+    plan = [f'Start postgres in the fresh project {stack.name}.',
+            f'Restore both schemas from {directory}/vessel.dump.',
+            f'Restore {manifest["storage"]["kind"]} evidence from {manifest["storage"].get("archive") or "nothing"}.',
+            'Run identity reset-after-restore' + (f' --keep-active {" ".join(args.keep_active)}' if args.keep_active
+                                                  else ' (suspends every user)') + ', then rotate-event-epoch.',
+            ('Run migrate and start: ' + ', '.join(services)) if args.start else
+            'Leave the hosts stopped for the trusted-record reconciliation.']
+    if not confirm(args, f'Restore version {manifest["version"]} from {manifest["createdAt"]} into {stack.name}:', plan):
+        return 2
+    stack.compose('up', '-d', '--wait', 'postgres')
+    restore_data(stack, directory, manifest, wipe=False)
+    reset_identity(stack, args.keep_active)
+    finish_restore(stack, services, args.start)
+    say(f'Restored {directory} into {stack.name}.')
+    return 0
+
+
+def latest_pre_upgrade(stack):
+    for manifest, path in stack.backups():
+        if manifest.get('kind') == 'pre-upgrade':
+            return path
+    raise Failure(f'No pre-upgrade backup in {stack.backup_root}; pass --from DIR.')
+
+
+def rollback(stack, args):
+    directory, manifest = load_backup(args.source or latest_pre_upgrade(stack))
+    env_file = require_env_file(stack)
+    previous = manifest['version']
+    containers = stack.containers()
+    current = running_version(stack, containers)
+    check_services_configured(stack, containers, previous)
+    storage = stack.storage()[0]
+    if storage != manifest['storage']['kind']:
+        raise Failure(f'The backup holds {manifest["storage"]["kind"]} evidence but this configuration uses {storage}.')
+    if not stack.postgres_running():
+        raise Failure('PostgreSQL is not running; start it with `docker compose up -d --wait postgres`.')
+    check_space(stack)
+    missing = missing_images(stack, previous)
+    # A failed upgrade leaves the writers stopped: bring back what ran before it too.
+    services = sorted(set(restart_services(containers)) | set(manifest.get('services') or []))
+    front, hosts = writers(containers)
+    plan = ([f'Pull {", ".join(missing)}.'] if missing else []) + [
+        f'Stop every writer: {names(front + hosts)} (stop API/worker replicas on other hosts yourself).',
+        f'Back up the current state ({current}) into a new directory under {stack.backup_root} first.',
+        f'Set VESSEL_VERSION={previous} in {env_file}.',
+        f'Replace the database and {storage_text(stack)} with {directory} '
+        f'({manifest["kind"]}, {manifest["createdAt"]}). Changes made since then are only in the safety backup.',
+        'Run identity reset-after-restore' + (f' --keep-active {" ".join(args.keep_active)}' if args.keep_active
+                                              else ' (suspends every user)') + ', then rotate-event-epoch.',
+        ('Run migrate and start: ' + ', '.join(services)) if args.start else
+        'Leave the hosts stopped for the trusted-record reconciliation.']
+    if not confirm(args, f'Roll back project {stack.name} from {current} to {previous}:', plan):
+        return 2
+    pull(stack, missing, args.pull)
+    stopped = stop_writers(stack, containers)
+    try:
+        safety = take_backup(stack, 'pre-rollback', services, current)
+    except BaseException as error:
+        say('The safety backup failed: nothing was restored. Starting again what was running.')
+        start_containers(stack, stopped)
+        raise Failure(f'Safety backup failed ({error}); nothing was restored.')
+    try:
+        switch_version(stack, env_file, previous)
+        restore_data(stack, directory, manifest, wipe=True)
+        reset_identity(stack, args.keep_active)
+    except BaseException:
+        say(f'The rollback stopped part-way with every host stopped. The state before it is in {safety}.')
+        raise
+    finish_restore(stack, services, args.start)
+    say(f'Rolled back {stack.name} to {previous}. The state before the rollback is in {safety}.')
+    return 0
+
+
 def parse_args(argv=None):
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument('--project-directory', default='.', help='Operator directory with compose.yaml and .env (default: .)')
@@ -491,10 +1028,28 @@ def parse_args(argv=None):
     commands.add_parser('status', parents=[common], help='Show versions, services, migrations, disk and last backup')
     check = commands.add_parser('preflight', parents=[common], help='Check that a backup or upgrade can run')
     check.add_argument('--to', help='Also check an upgrade to this version')
+    changing = argparse.ArgumentParser(add_help=False, parents=[common])
+    changing.add_argument('--yes', action='store_true', help='Do it; without --yes the plan is printed and nothing changes')
+    commands.add_parser('backup', parents=[changing], help='Stop writers, back up into a new directory, restart them')
+    up = commands.add_parser('upgrade', parents=[changing], help='Back up, set VESSEL_VERSION, migrate, start')
+    up.add_argument('--to', required=True, help='Target release version, e.g. 0.4.3')
+    up.add_argument('--manifest', help='The release\'s upgrade manifest (docs/releases/vX.Y.Z.upgrade.json), if any')
+    up.add_argument('--wait-timeout', type=int, default=600, help='Seconds to wait for healthy services (default 600)')
+    for name, text in (('restore', 'Restore a backup into a fresh project'),
+                       ('rollback', 'Restore the last pre-upgrade backup in place, with its image version')):
+        command = commands.add_parser(name, parents=[changing], help=text)
+        command.add_argument('--from', dest='source', required=name == 'restore', help='Backup directory')
+        command.add_argument('--keep-active', action='append', default=[], metavar='GUID',
+                             help='identity reset-after-restore: keep this independently confirmed operator active')
+        command.add_argument('--start', action='store_true',
+                             help='Run migrate and start the hosts right after the reset (no reconciliation needed)')
+    for command in (up, commands.choices['rollback']):
+        command.add_argument('--no-pull', dest='pull', action='store_false', help='Never pull a missing image')
     return parser.parse_args(argv)
 
 
-COMMANDS = {'status': status, 'preflight': preflight}
+COMMANDS = {'status': status, 'preflight': preflight, 'backup': backup, 'upgrade': upgrade, 'restore': restore,
+            'rollback': rollback}
 
 
 def main(argv=None):
