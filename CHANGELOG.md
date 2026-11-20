@@ -98,6 +98,8 @@
 - Tests and documentation record how the API and the monitor worker behave when RabbitMQ is
   unreachable at start, returns, or goes away while they run. Neither host starts without
   the broker; `docs/architecture/messaging-and-workers.md` has the table.
+- Activity's per-account fill reads and the Plays search use new indexes (about 3.9 ms to
+  0.06 ms and 5.8 ms to 0.4 ms on the benchmark journal).
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and
@@ -107,6 +109,10 @@ workers need these columns, so they must not start against an unmigrated databas
   It is additive and existing snapshots stay complete.
 - `20261117102251_UnrecognizedRowOmissions` adds the `unrecognized-row` omission kind and
   widens `accounts.HistoryNotice` to 1,200 characters. Roll it back only from a backup.
+- `20261118010457_DatabaseHygieneIndexes` adds an index on fill times per account and a
+  trigram index for Plays search. It creates the `pg_trgm` extension in `public`, which the
+  database owner may do; otherwise a superuser runs
+  `CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public;` first (see `deploy/README.md`).
 
 After upgrading: once every updated host is running, rebuild the Plays list projection in
 full, once. Rows that went stale before this release are not repaired by a plain rebuild,
