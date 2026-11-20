@@ -7,13 +7,13 @@ import { pagedPlayViews, playInView, playViews, unpagedPlayLimit, type PlayCount
 import type { BrokerAccount, CandleSeries, InstrumentCatalog, MarketContext, Overview, Portfolio, WorkspaceApi } from '@/api/workspace'
 
 export const portfolioFixture: Portfolio = {
-  id: '11111111-2222-3333-4444-555555555555', name: 'Swing trading', accountCount: 1,
+  tradingMode: 'real', id: '11111111-2222-3333-4444-555555555555', name: 'Swing trading', accountCount: 1,
   totalValueUsd: '1250.123456', valueCoverage: 'complete',
   balanceUsd: '1250.123456', balanceCoverage: 'complete', availableBalanceUsd: null, availableBalanceAccountCount: 0,
   availableBalanceCoverage: 'unavailable', enabledAccountCount: 1, icon: 'folder',
 }
 export const accountFixture: BrokerAccount = {
-  id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', portfolioId: portfolioFixture.id,
+  tradingMode: 'real', id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', portfolioId: portfolioFixture.id,
   name: 'Main account', venueId: 'manual', address: null, accountValueUsd: '1250.123456',
   lastSyncedAtUtc: null, syncStatus: 'manual', lastSyncError: null, positionCount: 0, historyNotice: null, isEnabled: true, settingsRevision: 1,
   sourceId: null, availableStablecoinNominalUsd: null, stablecoinScope: null, accountMode: null, totalStablecoinNominalUsd: null,

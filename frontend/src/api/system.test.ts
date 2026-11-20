@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from './errors'
-import { getSystem } from './system'
+import { getSystem, type VenueCapabilities } from './system'
 import { systemFixture } from '@/test/system-fixture'
 import { indexVenue } from '@/test/account-access-fixture'
 import { credentialsFixture } from '@/test/identity-fixture'
@@ -16,6 +16,12 @@ describe('GET /api/system', () => {
     const body = { ...systemFixture, venues: [indexVenue, ...systemFixture.venues.filter(v => v.id !== indexVenue.id)] }
     mockResponse(body)
     await expect(getSystem(credentialsFixture)).resolves.toEqual(body)
+  })
+  it.each(['accountDiscovery', 'readOnlyCredential', 'manualExecutions', 'currentOrderBook', 'paperExecution', 'fillHistory', 'marketSources'])('rejects a missing %s capability, which the API always sends (#113)', async name => {
+    const capabilities: Partial<VenueCapabilities> = { ...indexVenue.capabilities }
+    delete capabilities[name as keyof VenueCapabilities]
+    mockResponse({ ...systemFixture, venues: [{ ...indexVenue, capabilities }, ...systemFixture.venues.filter(v => v.id !== indexVenue.id)] })
+    await expect(getSystem(credentialsFixture)).rejects.toMatchObject({ kind: 'invalid-response' })
   })
   it.each(['accountDiscovery', 'readOnlyCredential', 'manualExecutions', 'currentOrderBook', 'fillHistory'])('rejects a non-boolean %s capability', async name => {
     mockResponse({ ...systemFixture, venues: [
@@ -142,7 +148,7 @@ describe('GET /api/system', () => {
   it('accepts any number of venues with their own capabilities', async () => {
     const other = { id: 'other-venue', name: 'Other', status: 'read-only', source: 'evm-address', quoteAsset: 'USDC', tradeUrlTemplate: null,
       intervals: ['1m', '1h', '1d'], priceRule: 'tick-size',
-      capabilities: { sync: true, instruments: true, orders: false, candles: false, marketContext: false, stream: false, stablecoinWallet: false } }
+      capabilities: { sync: true, instruments: true, orders: false, candles: false, marketContext: false, stream: false, stablecoinWallet: false, paperExecution: false, accountDiscovery: false, readOnlyCredential: false, manualExecutions: false, currentOrderBook: false, fillHistory: false, marketSources: false } }
     const body = { ...systemFixture, venues: [...systemFixture.venues, other] }
     mockResponse(body)
     await expect(getSystem(credentialsFixture)).resolves.toEqual(body)

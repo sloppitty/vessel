@@ -46,7 +46,7 @@ import {
 import type { ImageMarkup } from './markup'
 
 export interface Portfolio {
-  tradingMode?: TradingMode
+  tradingMode: TradingMode
   id: string
   name: string
   accountCount: number
@@ -262,7 +262,7 @@ export interface MarketStreamQuery {
   interval: CandleInterval
 }
 export interface BrokerAccount {
-  tradingMode?: TradingMode
+  tradingMode: TradingMode
   startingCapitalUsd?: string | null
   id: string
   portfolioId: string | null
@@ -522,7 +522,7 @@ export interface WorkspaceApi {
   updateReportingSettings(settings: { timeZone: string; weekStart: WeekStart }): Promise<ReportingSettings>
 }
 
-const optionalTradingMode = (v: Record<string, unknown>) => v.tradingMode === undefined || v.tradingMode === 'real' || v.tradingMode === 'paper'
+const hasTradingMode = (v: Record<string, unknown>) => v.tradingMode === 'real' || v.tradingMode === 'paper'
 const coverages = ['complete', 'partial', 'unavailable']
 const validExpected = (ids: string[] | undefined, expected: AccountSettingsExpectation[] | undefined) =>
   expected === undefined || Array.isArray(expected) && !!ids?.length && expected.length === ids.length &&
@@ -564,13 +564,13 @@ const streamStatus = (v: unknown): v is MarketStreamStatus => isRecord(v) &&
   ['live', 'reconnecting', 'stale'].includes(String(v.state)) && isTimestamp(v.observedAt, 40)
 const streamLimit = 1024 * 1024
 const instrumentPattern = /^(?=.{1,32}$)[A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?$/
-const portfolio = (v: unknown): v is Portfolio => isRecord(v) && optionalTradingMode(v) && isGuid(v.id) && isText(v.name) &&
+const portfolio = (v: unknown): v is Portfolio => isRecord(v) && hasTradingMode(v) && isGuid(v.id) && isText(v.name) &&
   isCount(v.accountCount) && isNullOr(v.totalValueUsd, isPlainDecimal) &&
   coverages.includes(String(v.valueCoverage)) &&
   isNullOr(v.balanceUsd, isPlainDecimal) && coverages.includes(String(v.balanceCoverage)) &&
   isNullOr(v.availableBalanceUsd, isPlainDecimal) && isCount(v.availableBalanceAccountCount) && isCount(v.enabledAccountCount) &&
   isText(v.availableBalanceCoverage) && coverages.includes(v.availableBalanceCoverage) && isText(v.icon, 40)
-const account = (v: unknown): v is BrokerAccount => isRecord(v) && optionalTradingMode(v) &&
+const account = (v: unknown): v is BrokerAccount => isRecord(v) && hasTradingMode(v) &&
   // Real: the API omits a null starting capital (`WhenWritingNull`), so absence is the normal real answer.
   (v.startingCapitalUsd === undefined || isNullOr(v.startingCapitalUsd, isNonNegativeDecimal)) && isGuid(v.id) &&
   isNullOr(v.portfolioId, isGuid) && isText(v.name) && isText(v.venueId) &&

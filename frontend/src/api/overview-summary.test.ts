@@ -18,6 +18,13 @@ describe('Overview summary API', () => {
     expect(fetch.mock.calls[0]![1].headers['X-Vessel-User']).toBe(credentialsFixture.userId)
     controller.abort(); expect(fetch.mock.calls[0]![1].signal.aborted).toBe(true)
   })
+  it.each([{ tradingMode: undefined }, { tradingMode: 'Paper' }])('rejects a summary without a known trading mode %j (#113)', fields => {
+    expect(isOverviewSummary({ ...overviewSummaryFixture(), ...fields }, query)).toBe(false)
+  })
+  it.each([undefined, -1, 0.5])('rejects summary totals whose paper execution count is %j (#113)', paperExecutionCount => {
+    const document = overviewSummaryFixture()
+    expect(isOverviewSummary({ ...document, totals: { ...document.totals, paperExecutionCount } }, query)).toBe(false)
+  })
   it.each(['7', '30', '90', 'all'] as const)('accepts the %s window', period => {
     const q = { ...query, period }; expect(isOverviewSummary(overviewSummaryFixture(q), q)).toBe(true)
   })
