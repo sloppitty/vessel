@@ -48,7 +48,8 @@ public sealed class PaperWorkerOptions
 /// ledger/checkpoint/lifecycle mutations use owner scopes and the same account transaction as owner commands.
 /// </summary>
 public sealed class PaperScheduler(IOwnerScopeFactory scopes, IJournalOwnerDirectory owners, NpgsqlDataSource data,
-    IServerStateStore server, PaperWorkerOptions options, TimeProvider time, ILogger<PaperScheduler> logger) : BackgroundService
+    IServerStateStore server, PaperWorkerOptions options, TimeProvider time, ILogger<PaperScheduler> logger,
+    WorkerProgress? progress = null) : BackgroundService
 {
     private Guid? afterOwner;
 
@@ -165,6 +166,9 @@ public sealed class PaperScheduler(IOwnerScopeFactory scopes, IJournalOwnerDirec
                             logger.LogWarning("Paper public candle read failed with {ErrorType}; account checkpoints were retained.", error.GetType().Name);
                         }
                         cache.Add(key, window);
+                        // A tick reads one bounded window after another (each within the 20-second venue read deadline):
+                        // a finished read, failed or not, is progress for the stale-worker watchdog, not for health.
+                        progress?.Advance("paper");
                     }
                     if (window.Candles is { } candles) shared.Add(key.Contract, candles);
                     else
@@ -272,6 +276,7 @@ public sealed class PaperScheduler(IOwnerScopeFactory scopes, IJournalOwnerDirec
         {
             await File.WriteAllTextAsync(temporary, value, ct);
             File.Move(temporary, options.HeartbeatFile, true);
+            progress?.Advance("paper");
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }

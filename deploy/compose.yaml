@@ -13,14 +13,40 @@ x-identity-environment: &identity-environment
   Vessel__Auth__Mode: ${VESSEL_AUTH_MODE:-Wallet}
   Vessel__Auth__Token: ${Vessel__Auth__Token:-}
 
+# Every service (issue #105): capped json-file logs, no privilege gain and no Linux capabilities except those a
+# service adds back. Anchors do not cross files, so compose.tls.yaml and compose.paper.yaml repeat this block.
+x-hardening: &hardening
+  logging:
+    driver: json-file
+    options:
+      max-size: ${VESSEL_LOG_MAX_SIZE:-10m}
+      max-file: ${VESSEL_LOG_MAX_FILE:-5}
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+# PostgreSQL and RabbitMQ start as root, fix their data volume's ownership and switch to their own user.
+x-root-entrypoint-capabilities: &root-entrypoint-capabilities
+  - CHOWN
+  - DAC_OVERRIDE
+  - SETUID
+  - SETGID
+
 services:
   rustfs:
+    <<: *hardening
     image: rustfs/rustfs:1.0.1
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
     environment:
       RUSTFS_ACCESS_KEY: ${VESSEL_S3_ACCESS_KEY_ID:-}
       RUSTFS_SECRET_KEY: ${VESSEL_S3_SECRET_ACCESS_KEY:-}
       RUSTFS_VOLUMES: /data
       RUSTFS_CONSOLE_ENABLE: "false"
+      # Log to stdout, where the capped Docker log keeps it, not to a file in the read-only image.
+      RUSTFS_OBS_LOG_DIRECTORY: ""
     # No built-in/default credentials, even if the operator forgot to configure them.
     entrypoint: ["/bin/sh", "-ec"]
     command:
@@ -36,7 +62,11 @@ services:
     restart: unless-stopped
 
   storage-init:
+    <<: *hardening
     image: amazon/aws-cli:2.38.1
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
     environment:
       AWS_ACCESS_KEY_ID: ${VESSEL_S3_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${VESSEL_S3_SECRET_ACCESS_KEY:-}
@@ -54,7 +84,13 @@ services:
     restart: "no"
 
   postgres:
+    <<: *hardening
     image: postgres:18-alpine
+    cap_add: *root-entrypoint-capabilities
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+      - /var/run/postgresql:size=1m
     environment:
       POSTGRES_DB: vessel
       POSTGRES_USER: vessel
@@ -71,7 +107,12 @@ services:
     restart: unless-stopped
 
   rabbitmq:
+    <<: *hardening
     image: rabbitmq:4.3.6-management
+    cap_add: *root-entrypoint-capabilities
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
     hostname: vessel-rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env}
@@ -89,7 +130,11 @@ services:
     restart: unless-stopped
 
   migrate:
+    <<: *hardening
     image: skorcius/vessel:api-${VESSEL_VERSION:-0.4.2}
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
     # EF migrations, then explicit messaging provisioning with the broker administrator.
     # Nothing is migrated or provisioned at API or worker startup.
     entrypoint: ["/app/migrate"]
@@ -107,7 +152,12 @@ services:
     restart: "no"
 
   api:
+    <<: *hardening
     image: skorcius/vessel:api-${VESSEL_VERSION:-0.4.2}
+    read_only: true
+    volumes:
+      # On disk, not in memory: a Play export (up to 50 images) and an upload are staged here.
+      - api-tmp:/tmp
     environment:
       <<: *identity-environment
       ConnectionStrings__Vessel: "Host=postgres;Database=vessel;Username=vessel;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
@@ -137,8 +187,13 @@ services:
   # The monitor module and the replica-safe event maintenance. worker-notifications runs the same
   # image with the notifications module (deploy/README.md).
   worker:
+    <<: *hardening
     image: skorcius/vessel:api-${VESSEL_VERSION:-0.4.2}
     entrypoint: ["/app/worker"]
+    read_only: true
+    tmpfs:
+      # The heartbeat file lives here.
+      - /tmp:size=16m
     environment:
       <<: *identity-environment
       DOTNET_ENVIRONMENT: Production
@@ -165,8 +220,12 @@ services:
   # The Notification Hub: the notifications subscription, in-app notifications and their retention.
   # It never opens venue tokens, so it needs no credential key ring.
   worker-notifications:
+    <<: *hardening
     image: skorcius/vessel:api-${VESSEL_VERSION:-0.4.2}
     entrypoint: ["/app/worker"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
     environment:
       <<: *identity-environment
       DOTNET_ENVIRONMENT: Production
@@ -189,7 +248,14 @@ services:
     restart: unless-stopped
 
   web:
+    <<: *hardening
     image: skorcius/vessel:web-${VESSEL_VERSION:-0.4.2}
+    read_only: true
+    tmpfs:
+      # nginx's pid, request body and proxy buffers, and the trusted-proxy file written at start.
+      - /tmp:size=64m
+      # The start script renders the site configuration here; nginx (UID 101) must own it.
+      - /etc/nginx/conf.d:size=1m,uid=101,gid=101,mode=0755
     environment:
       VESSEL_API_UPSTREAM: ${VESSEL_API_UPSTREAM:-http://api:8080}
       VESSEL_TRUSTED_PROXY: ${VESSEL_TRUSTED_PROXY:-}
@@ -201,6 +267,12 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/index.html"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 6
     restart: unless-stopped
 
 networks:
@@ -214,3 +286,4 @@ volumes:
   postgres:
   objects:
   rabbitmq:
+  api-tmp:

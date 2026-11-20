@@ -1235,7 +1235,9 @@ for f in ca.crt venue.crt venue.key; do echo "==> $f"; cat "$f"; done'''
             self.compose('exec', '-T', 'postgres', 'pg_restore', '-U', 'vessel', '-d', 'vessel', '--no-owner', '--no-privileges',
                          '--exit-on-error', stdin=source)
         with (self.temp / 'objects.tar.gz').open('rb') as source:
-            self.compose('run', '--rm', '--no-deps', '-T', '--user', '0', '--entrypoint', 'sh', 'rustfs', '-c',
+            # Every service drops all capabilities; a root restore adds back only these (deploy/README.md, issue #105).
+            self.compose('run', '--rm', '--no-deps', '-T', '--user', '0', '--cap-add', 'CHOWN', '--cap-add', 'DAC_OVERRIDE',
+                         '--cap-add', 'FOWNER', '--entrypoint', 'sh', 'rustfs', '-c',
                          'tar -xzf - -C /data && chown -R 10001:10001 /data', stdin=source, stdout=subprocess.DEVNULL)
         # Mandatory before any host starts: the backup's sessions are revoked and only the confirmed operator stays active.
         reset = self.compose('run', '--rm', '--no-deps', '--entrypoint', 'dotnet', 'migrate', '/app/Vessel.Api.dll', 'identity',

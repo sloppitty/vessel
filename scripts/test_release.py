@@ -266,6 +266,49 @@ assert.equal(unexpectedConsoleError(message('Informational message', 'log'), tru
         self.assertEqual(60, sum(call.args[:3] == ('exec', '-T', 'api')
                                  for call in check.compose.call_args_list))
 
+    def hardened(self, service, **host):
+        config = {'LogConfig': {'Type': 'json-file', 'Config': {'max-size': '10m', 'max-file': '5'}},
+                  'SecurityOpt': ['no-new-privileges:true'], 'CapDrop': ['ALL'],
+                  'CapAdd': [cap[4:] for cap in verify_release.CAPABILITIES.get(service, [])], 'ReadonlyRootfs': True, **host}
+        return {'Id': service, 'Config': {'Labels': {'com.docker.compose.service': service}}, 'HostConfig': config,
+                'State': {'Health': {'Status': 'healthy'}}}
+
+    def run_hardening(self, containers):
+        check = self.check()
+        check.compose = Mock(return_value=Mock(stdout='\n'.join(c['Id'] for c in containers)))
+        by_id = {c['Id']: c for c in containers}
+
+        def inspect(*args, **kwargs):
+            return Mock(stdout=json.dumps([by_id[name] for name in args[2:]]))
+        with patch.object(verify_release, 'run', side_effect=inspect), patch('builtins.print'), \
+                patch.object(verify_release.time, 'sleep'):
+            check.hardening()
+        return check
+
+    def test_hardening_accepts_every_service_hardened_and_healthy(self):
+        services = ['postgres', 'rabbitmq', 'rustfs', 'api', 'worker', 'worker-notifications', 'web', 'verifier', 'tls']
+        check = self.run_hardening([self.hardened(service) for service in services])
+        self.assertGreater(check.counts['hardening'], len(services) * 5)
+
+    def test_hardening_rejects_uncapped_logs_privileges_capabilities_writable_roots_and_missing_services(self):
+        services = ['postgres', 'rabbitmq', 'rustfs', 'api', 'worker', 'worker-notifications', 'web', 'verifier', 'tls']
+        for broken in ({'LogConfig': {'Type': 'json-file', 'Config': {}}}, {'SecurityOpt': []}, {'CapDrop': []},
+                       {'CapAdd': ['NET_ADMIN']}, {'ReadonlyRootfs': False}):
+            with self.subTest(broken=broken), self.assertRaises(AssertionError):
+                self.run_hardening([self.hardened(service, **(broken if service == 'web' else {})) for service in services])
+        with self.assertRaisesRegex(AssertionError, 'every long-running service'):
+            self.run_hardening([self.hardened(service) for service in services if service != 'tls'])
+        unhealthy = [self.hardened(service) for service in services]
+        unhealthy[6]['State']['Health']['Status'] = 'unhealthy'
+        with self.assertRaisesRegex(AssertionError, 'web passes its health check'):
+            self.run_hardening(unhealthy)
+
+    def test_restore_extracts_with_only_the_capabilities_it_needs(self):
+        self.assertEqual(('--cap-add', 'CHOWN', '--cap-add', 'DAC_OVERRIDE', '--cap-add', 'FOWNER'),
+                         verify_release.RESTORE_CAPABILITIES)
+        source = Path(verify_release.__file__).read_text()
+        self.assertNotIn("'--user', '0', '--entrypoint', 'sh', 'api', '-c', 'cat", source)
+
     def test_browser_image_requires_a_browser_module(self):
         for args in (['--wallet-browser-image', 'image'],
                      ['--wallet-browsers', 'chromium', '--wallet-browser-image', 'image']):

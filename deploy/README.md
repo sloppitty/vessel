@@ -239,6 +239,44 @@ troubleshooting. PostgreSQL, API, worker, AMQP and RustFS have no host ports; th
 RustFS console is disabled. **Existing folder installations must select the local
 overlay or complete the storage cutover below before switching to the new default.**
 
+### Container hardening, logs and restarts
+
+Every service in `compose.yaml` and its overlays (TLS, paper, storage, credentials)
+runs with:
+
+- **Capped logs**: the `json-file` driver with `max-size` `VESSEL_LOG_MAX_SIZE`
+  (default `10m`) and `max-file` `VESSEL_LOG_MAX_FILE` (default `5`), so each
+  container keeps at most about 50 MB of logs. This overrides the daemon's default
+  log driver for these services. RustFS writes its log to standard output, so the
+  same cap applies; it no longer writes a log file inside its container.
+- **No privilege gain and no capabilities**: `no-new-privileges` and `cap_drop: ALL`.
+  Only PostgreSQL and RabbitMQ add back `CHOWN`, `DAC_OVERRIDE`, `SETUID` and
+  `SETGID`: their entrypoints start as root, fix the ownership of their data volume
+  and switch to their own user, and RabbitMQ's health check runs its CLI as root,
+  which must read the server's Erlang cookie. Caddy, nginx, RustFS, the AWS CLI and the API image
+  need none.
+- **A read-only root file system**: writes go only to the named volumes, to small
+  in-memory `/tmp` mounts (also `/var/run/postgresql` for PostgreSQL and
+  `/etc/nginx/conf.d`, owned by nginx's UID 101, for web), and for the API to the
+  `api-tmp` volume at `/tmp`, on disk because Play exports and uploads are staged
+  there. `api-tmp` holds only temporary files and needs no backup. With
+  `VESSEL_TLS_DIRECTIVE=tls internal`, Caddy logs `failed to install root
+  certificate`: it cannot add its local CA to the read-only container's own trust
+  store, which nothing in that container uses.
+- **Health checks** on every long-running service. New: web fetches its own
+  `index.html`, and the TLS proxy asks Caddy's local admin endpoint.
+
+Compose's `restart: unless-stopped` restarts a container whose process **exits**; it
+never restarts one that is only unhealthy. So the workers exit by themselves when
+their loop stalls (see [Start and connect](#start-and-connect)), and the API and
+workers exit at start when they cannot start. An unhealthy web, API or proxy is
+reported by `docker compose ps` but not restarted; check its logs.
+
+One-off maintenance commands inherit these settings. A command that runs as root
+(`--user 0`) to restore an archive into a volume another user owns must add back
+`--cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER`, as the restore examples
+below do. Commands that run as the image's own user need nothing extra.
+
 ## Configure an installation
 
 From the operator directory:
@@ -633,6 +671,21 @@ writes its **deployment** database heartbeat and a local heartbeat file holding 
 configured timeout; `/app/worker-health` rejects a missing, malformed or older
 file. If the file cannot be written, the database heartbeat is not recorded
 either, so API monitor responses report the worker offline.
+
+Compose never restarts a container only because it is unhealthy. Each worker
+(`worker`, `worker-notifications`, `worker-paper`) therefore watches its own
+heartbeat: when its module has made no progress for
+`Vessel__Worker__StaleExitAfter` (default `00:10:00`, at least the module's
+heartbeat timeout), it logs `The monitor loop made no progress for … Stopping the
+worker with exit code 3 so that its restart policy starts a new one.` (or
+`notifications`/`paper`) and exits with code 3, and `restart: unless-stopped`
+starts it again. This also happens while the database is unreachable; the new
+process then exits at start (code 1) until the database answers, and Compose keeps
+restarting it with a growing delay. Ten minutes is far above any legitimate pause:
+the loops beat every 30 seconds, a venue read ends within 20 seconds, and monitor
+runs, history backfills and funding reads run outside the scheduler's loop. See
+[stale worker exit](../docs/architecture/messaging-and-workers.md#stale-worker-exit-issue-105)
+for the arithmetic.
 
 The Notification Hub runs as `worker-notifications`: the same image and entrypoint
 with `Vessel__Worker__Modules__0: notifications` in its own deployment
@@ -1345,7 +1398,10 @@ Do not use `docker compose restart` to upgrade or apply migrations. Failed
 migrations block API startup; inspect the migration logs before proceeding.
 Use both `-f` options above when credential storage is configured.
 An application downgrade does not roll back the database. Restore backups if a
-new schema is incompatible with the old image.
+new schema is incompatible with the old image. An older API or worker image refuses
+a schema that has migrations it does not know: the API stays unready and each worker
+exits at start, both logging the unknown migration IDs (see
+[Logs and troubleshooting](#logs-and-troubleshooting)).
 
 ## Backups
 
@@ -1417,14 +1473,16 @@ docker compose -p vessel-restore-check exec -T postgres \
 
 # Extract only your trusted RustFS archive before RustFS/API start.
 docker compose -p vessel-restore-check run --rm --no-deps -T \
-  --user 0 --entrypoint sh rustfs -c \
+  --user 0 --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER \
+  --entrypoint sh rustfs -c \
   'tar -xzf - -C /data && chown -R 10001:10001 /data' \
   < /private/backups/objects.tar.gz
 ```
 
 For a local-folder backup, include `compose.storage-local.yaml`, restore
 `evidence.tar.gz` using service `api`, path `/var/lib/vessel/evidence` and UID/GID
-`1654:1654` instead. Never extract a RustFS archive into the API's evidence root.
+`1654:1654` instead, with the same `--user 0` and `--cap-add` options. Never extract a
+RustFS archive into the API's evidence root.
 
 Place the original credential ring in a separate mode-700 secret directory,
 not the operator directory, database or evidence archive. Preserve every original
@@ -1525,7 +1583,13 @@ cookies, guarded writes and that no bearer value authenticates. It checks the
 internal-CA TLS mode and the default plain-HTTP web (behind an operator's own
 HTTPS proxy, with the same public origin and session), spoofed scheme/address handling,
 compression, headers, unbuffered SSE via a local fixture, upload limits, unpublished
-web in TLS mode and a fresh-volume restore. For delivery it sets
+web in TLS mode and a fresh-volume restore. It checks that every running service has
+capped logs, `no-new-privileges`, no capabilities beyond those listed above and a
+read-only root, and that web and the TLS proxy are healthy; that a journal schema
+with a migration the image does not know makes the API unready (with the reason in
+its log only) and a worker refuse to start; and that a worker whose heartbeat cannot
+advance exits with code 3 after its two-minute test limit (about three minutes of
+the run). For delivery it sets
 `Vessel__Messaging__Verification=true` on `migrate` and runs the `verification`
 subscription in a separate `verifier` worker (deployment `verification`), leaving
 the monitor worker's configuration as shipped: receipts prove live delivery, an
@@ -1659,13 +1723,29 @@ docker compose logs --tail=100 migrate api web
 curl --fail http://127.0.0.1:8080/health/ready
 ```
 
+- A worker that `docker compose ps` shows restarting, with exit code 3 and the log
+  line `The monitor loop made no progress for …` (or `notifications`/`paper`), was
+  stopped by its own watchdog and restarted. Look at the lines before it, and at
+  database reachability. Exit code 1 with `Vessel worker refused to start.` is the
+  schema check below; exit code 1 with `could not start (…)` is configuration,
+  migrations or the broker.
+
 Do not publish operator `.env`, `docker inspect`, `docker compose config`, request
 bodies or full environment dumps; they can contain secrets. The API logs safe
 failure categories, not raw dependency details.
 
 - `/health/live` only proves the API process responds.
-- `/health/ready` returns 200 when PostgreSQL is reachable and there are no pending
-  migrations. A 503 reveals no database details. It does not verify venue or object-store access.
+- `/health/ready` returns 200 when PostgreSQL is reachable and the journal and
+  identity schemas hold exactly the migrations of this image: none pending and none
+  unknown to it. A 503 reveals no database details; the API log says why, once per
+  change: `Not ready: The journal schema is behind this image: … Run the explicit
+  migrate step.` (warning) or `Not ready: The journal schema is newer than this
+  image: it has applied migration(s) this image does not know (…)` (error). The
+  second means an older image was started on a database that a newer image
+  migrated, such as an image rollback without a restore: start the newer image
+  again or restore the pre-upgrade backup. Every worker runs the same check once
+  at start and refuses to start with `Vessel worker refused to start. …` and the
+  same reason, exit code 1. It does not verify venue or object-store access.
   Right after start it answers 503 `warming-up` while a read-only warm-up prepares the
   sign-in and first-page reads, for at most `Vessel__Startup__Warmup__Timeout`
   (default `00:00:30`, at most `00:01:00` so it ends inside the healthcheck

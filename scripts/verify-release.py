@@ -47,6 +47,15 @@ http.createServer((req, res) => {
 """
 
 
+# Issue #105. Capabilities that compose.yaml adds back after dropping all; every other service has none.
+CAPABILITIES = {'postgres': ['CAP_CHOWN', 'CAP_DAC_OVERRIDE', 'CAP_SETGID', 'CAP_SETUID'],
+                'rabbitmq': ['CAP_CHOWN', 'CAP_DAC_OVERRIDE', 'CAP_SETGID', 'CAP_SETUID']}
+# What a root restore command adds back to extract an archive into a volume another user owns (deploy/README.md).
+RESTORE_CAPABILITIES = ('--cap-add', 'CHOWN', '--cap-add', 'DAC_OVERRIDE', '--cap-add', 'FOWNER')
+# Inserted by the newer-schema check only, then removed.
+FUTURE_MIGRATION = '29990101000000_FromANewerImage'
+
+
 def run(*args, **kwargs):
     return subprocess.run(args, check=kwargs.pop('check', True), **kwargs)
 
@@ -127,6 +136,14 @@ class Check:
     depends_on:
       migrate:
         condition: service_completed_successfully
+    # The same hardening as every compose.yaml service (issue #105).
+    logging:
+      driver: json-file
+      options: {{max-size: 10m, max-file: "5"}}
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: ["/tmp:size=16m"]
     # The heartbeat file belongs to the monitor module, so this host reports only that its process is alive.
     # `compose up --wait` rejects a service without a healthcheck, so it cannot simply be disabled.
     healthcheck:
@@ -647,6 +664,70 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         self.expect(self.sql("SELECT COUNT(*) FROM server_notification_heartbeats WHERE deployment='notifications'") == '1',
                     'notification health is stored per deployment, not per owner', 'notifications')
 
+    def hardening(self):
+        """Issue #105: every running service has capped logs, no privilege gain, only its listed capabilities and a
+        read-only root, and the web and TLS proxy pass their health checks."""
+        containers = self.compose('ps', '-a', '-q', capture_output=True, text=True).stdout.split()
+        inspected = json.loads(run('docker', 'inspect', *containers, capture_output=True, text=True).stdout)
+        services = {}
+        for container in inspected:
+            service = container['Config']['Labels']['com.docker.compose.service']
+            if service == 'fixture':
+                continue
+            services[service] = container
+            host = container['HostConfig']
+            log = host['LogConfig']
+            self.expect(log['Type'] == 'json-file' and log['Config'].get('max-size') == '10m' and log['Config'].get('max-file') == '5',
+                        service + ' logs are capped', 'hardening')
+            self.expect('no-new-privileges:true' in (host.get('SecurityOpt') or []), service + ' cannot gain privileges', 'hardening')
+            self.expect([cap.upper() for cap in host.get('CapDrop') or []] in (['ALL'], ['CAP_ALL']), service + ' drops all capabilities', 'hardening')
+            added = sorted(cap.upper() if cap.upper().startswith('CAP_') else 'CAP_' + cap.upper() for cap in host.get('CapAdd') or [])
+            self.expect(added == CAPABILITIES.get(service, []), service + ' adds back only its listed capabilities', 'hardening')
+            self.expect(host.get('ReadonlyRootfs') is True, service + ' has a read-only root', 'hardening')
+        expected = {'postgres', 'rabbitmq', 'api', 'worker', 'worker-notifications', 'web', 'verifier'}
+        expected |= {'rustfs'} if self.args.storage == 's3' else set()
+        expected |= {'tls'} if self.tls else set()
+        self.expect(expected <= set(services), 'hardening covered every long-running service', 'hardening')
+        for service in ('web', 'tls') if self.tls else ('web',):
+            for _ in range(60):
+                status = json.loads(run('docker', 'inspect', services[service]['Id'], capture_output=True, text=True).stdout)[0]['State']
+                if status.get('Health', {}).get('Status') == 'healthy':
+                    break
+                time.sleep(1)
+            self.expect(status.get('Health', {}).get('Status') == 'healthy', service + ' passes its health check', 'hardening')
+
+    def newer_schema(self):
+        """Issue #105: an image on a schema with a migration it does not know is not ready, says why only in its log,
+        and its worker refuses to start; removing the row makes it ready again."""
+        self.sql(f'INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion") VALUES (\'{FUTURE_MIGRATION}\', \'10.0.0\')')
+        try:
+            status, _, body = self.request('/health/ready')
+            self.expect(status == 503 and json.loads(body) == {'status': 'unavailable'},
+                        'API is not ready on a newer schema and says so publicly without details', 'schema')
+            logs = self.compose('logs', '--no-color', 'api', capture_output=True, text=True).stdout
+            self.expect('Not ready: The journal schema is newer than this image' in logs and FUTURE_MIGRATION in logs,
+                        'API log names the unknown migration', 'schema')
+            refused = self.compose('run', '--rm', '--no-deps', 'worker', check=False, capture_output=True, text=True)
+            self.expect(refused.returncode == 1 and 'Vessel worker refused to start.' in refused.stderr and
+                        FUTURE_MIGRATION in refused.stderr and 'Password' not in refused.stderr + refused.stdout,
+                        'worker refuses to start on a newer schema and says why', 'schema')
+        finally:
+            self.sql(f"DELETE FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '{FUTURE_MIGRATION}'")
+        self.ready()
+        self.expect(True, 'API is ready again once the schema matches the image', 'schema')
+
+    def stale_worker(self):
+        """Issue #105: a worker whose loop makes no progress exits with code 3 within its limit plus one check, so
+        the restart policy applies. An unwritable heartbeat file stops every productive pass from counting."""
+        started = time.monotonic()
+        stale = self.compose('run', '--rm', '--no-deps', '-e', 'Vessel__Monitor__HeartbeatFile=/nonexistent/heartbeat',
+                             '-e', 'Vessel__Worker__StaleExitAfter=00:02:00', 'worker',
+                             check=False, capture_output=True, text=True, timeout=600)
+        elapsed = time.monotonic() - started
+        self.expect(stale.returncode == 3, f'a stalled worker exits with code 3 (got {stale.returncode})', 'worker')
+        self.expect(120 <= elapsed < 300, f'it exits after its 2-minute limit, not before ({elapsed:.0f} s)', 'worker')
+        self.expect('made no progress' in stale.stdout + stale.stderr, 'its log says the loop made no progress', 'worker')
+
     def transport_fixture(self):
         self.fixture = True
         self.compose('up', '-d', '--wait', 'fixture', 'web', stdout=subprocess.DEVNULL)
@@ -731,7 +812,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
             self.compose('run', '--rm', '--no-deps', '-T', '--entrypoint', 'tar', service, '-C', directory, '-czf', '-', '.', stdout=out)
         # Copy the same ring bytes to a separate restoration location and mount it.
         with (self.temp / 'ring.backup').open('wb') as out:
-            self.compose('run', '--rm', '--no-deps', '-T', '--user', '0', '--entrypoint', 'sh', 'api', '-c', 'cat /run/secrets/vessel-credential-keys.json', stdout=out)
+            # As the API's own user: without capabilities, root cannot read the mode-600 ring that UID 1654 owns.
+            self.compose('run', '--rm', '--no-deps', '-T', '--entrypoint', 'sh', 'api', '-c', 'cat /run/secrets/vessel-credential-keys.json', stdout=out)
         # Original network must be removed before restore, not merely stopped.
         self.compose('down', '-v', '--remove-orphans', stdout=subprocess.DEVNULL)
         project = self.projects[1]
@@ -743,7 +825,8 @@ VESSEL_CREDENTIAL_KEYS_FILE={self.temp}/secrets/ring.json
         with (self.temp / 'vessel.dump').open('rb') as source:
             self.compose('exec', '-T', 'postgres', 'pg_restore', '-U', 'vessel', '-d', 'vessel', '--no-owner', '--no-privileges', '--exit-on-error', project=project, stdin=source)
         with (self.temp / 'evidence.tar.gz').open('rb') as source:
-            self.compose('run', '--rm', '--no-deps', '-T', '--user', '0', '--entrypoint', 'sh', service, '-c',
+            # Every service drops all capabilities; extracting and re-owning the archive needs these back (README).
+            self.compose('run', '--rm', '--no-deps', '-T', '--user', '0', *RESTORE_CAPABILITIES, '--entrypoint', 'sh', service, '-c',
                          f'tar -xzf - -C {directory} && chown -R {uid}:{uid} {directory}', project=project, stdin=source, stdout=subprocess.DEVNULL)
         # Reset restored identities before any host starts, then rotate the event epoch.
         self.expect(self.sql(f"SELECT count(*) FROM identity.sessions WHERE id = '{self.session['session']['id']}' AND revoked_at IS NULL", project) == '1',
@@ -902,6 +985,9 @@ for (const host of ['127.0.0.1', '::1']) {{
             self.wallet_sign_in()
             self.seed()
             self.worker()
+            self.hardening()
+            self.newer_schema()
+            self.stale_worker()
             self.monitor()
             self.notifications()
             self.matrix()
@@ -911,6 +997,7 @@ for (const host of ['127.0.0.1', '::1']) {{
             self.tls = False
             self.compose('up', '-d', '--wait', stdout=subprocess.DEVNULL)
             self.ready()
+            self.hardening()
             self.matrix()
             self.transport_fixture()
             self.tls = True
