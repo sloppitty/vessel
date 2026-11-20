@@ -1473,7 +1473,7 @@ CACHE_SHARED = {
 }
 # An ActivityOperationDto row: 768 bytes plus about 250 characters of identity, quantity, price and P&L strings.
 OPERATION_ROW = 1300
-# The cache's default capacity (Vessel:Activity:CacheCapacityBytes); the run never changes it.
+# The cache's default capacity (Vessel:Activity:CacheCapacityBytes); --cache-capacity-mib overrides it for a run.
 CACHE_CAPACITY = 256 * 1024 * 1024
 
 
@@ -1583,6 +1583,8 @@ def check_arguments(args, environ=None):
         raise Refused('Refusing to run under CI: the benchmark is a manual measurement on a chosen host.')
     if not 0 < args.years <= 10 or not 0 < args.scale <= 20:
         raise Refused('Use --years in (0, 10] and --scale in (0, 20].')
+    if getattr(args, 'cache_capacity_mib', None) is not None and not 0 <= args.cache_capacity_mib <= 16384:
+        raise Refused('Use --cache-capacity-mib in [0, 16384].')
     if args.rounds < 1 or args.warmup < 0:
         raise Refused('Use at least one measured round and a non-negative number of warm-up rounds.')
 
@@ -1699,6 +1701,9 @@ class Run:
             'DOTNET_CLI_TELEMETRY_OPTOUT': '1',
             'DOTNET_NOLOGO': '1',
             'Logging__LogLevel__Default': 'Warning',
+            # Issue #107: a chosen Activity cache capacity, as an operator with memory to spare would set it.
+            **({'Vessel__Activity__CacheCapacityBytes': str(self.args.cache_capacity_mib * 2 ** 20)}
+               if self.args.cache_capacity_mib else {}),
         }
 
     def build(self):
@@ -1982,7 +1987,8 @@ def report(meta, counts, endpoints):
         'fill, which moves the facts revision so the aggregate is computed again ("After fill write"), then right after '
         'a write that only moves one snapshot\'s observation time, as a monitor check that finds nothing new does '
         '("After observation"), then repeated at once ("p50", "p95"). The API exposes no cache diagnostics, so the Cache '
-        'column infers whether that repeat is a hit: the cache refuses an aggregate whose charge exceeds its 256 MiB '
+        'column infers whether that repeat is a hit: the cache refuses an aggregate whose charge exceeds its '
+        f'{meta.get("cache_capacity_mib", CACHE_CAPACITY // 2 ** 20)} MiB '
         'default capacity, and the charge is estimated from the generated rows by the cache\'s own rule. Above or near '
         'the capacity the repeat is recomputed or unconfirmed, never called a hit. Other reads are not cached; their '
         'p50 and p95 are of every measured read.',
@@ -2022,6 +2028,8 @@ def arguments(argv=None):
     parser.add_argument('--min-available-mb', type=int, default=0,
                         help='wait until this much memory is available before building, migrating, seeding and '
                              'starting the API (default 0: no check)')
+    parser.add_argument('--cache-capacity-mib', type=int,
+                        help='the API\'s Activity cache capacity in MiB (default: its own default, 256)')
     parser.add_argument('--out', help='also write the timings (no journal data) as JSON to this file')
     return parser.parse_args(argv)
 
@@ -2123,6 +2131,7 @@ def main(argv=None):
                                           drawn_plays(generator.drawing_sizes), generator.execution_play())
         endpoints = [Endpoint(*spec) for spec in planned]
         enabled = [a.id for a in generator.accounts if a.enabled]
+        capacity = args.cache_capacity_mib * 2 ** 20 if args.cache_capacity_mib else CACHE_CAPACITY
         charges = {'all': generator.cache_charge(enabled), 'account': generator.cache_charge([operation['accountId']])}
         clock = time.monotonic()
         print(f'Measuring {len(endpoints)} endpoints: {args.warmup} warm-up and {args.rounds} measured rounds…', flush=True)
@@ -2138,7 +2147,8 @@ def main(argv=None):
                 'warmup': args.warmup, 'rounds': args.rounds, 'host': host, 'postgres': f'PostgreSQL {postgres}',
                 'dotnet': subprocess.run(['dotnet', '--version'], capture_output=True, text=True).stdout.strip(),
                 'api_rss_mb': run.api_peak_rss(), 'postgres_memory': stats, 'phases': phases, 'activity': activity,
-                'skipped': skipped, 'cache': {scope: {'estimatedBytes': charge, 'status': cache_status(charge)}
+                'cache_capacity_mib': capacity // 2 ** 20,
+                'skipped': skipped, 'cache': {scope: {'estimatedBytes': charge, 'status': cache_status(charge, capacity)}
                                               for scope, charge in charges.items()}}
         print()
         print(report(meta, counts, endpoints))

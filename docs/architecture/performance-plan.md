@@ -530,8 +530,8 @@ What it does:
   and redacted from failures; cleanup removes the certificate and key.
 - **Timing.** Activity (first and a deep page, a filter, one expanded operation), Review (all, year, with
   imported positions), the Plays list (tabs, a deep Closed page, counts, title and instrument search), a Play's
-  editor load (the Play with the largest drawings and one without), Sizing, Overview and its summary, open risk
-  and journal search (common word, a deep offset, rare word). Each round visits every
+  editor load (the Play with the largest drawings and one without), Sizing, a Closed Play's execution view, Overview
+  and its summary, open risk and journal search (common word, a deep offset, rare word). Each round visits every
   endpoint, in an order rotated by one per round. It reports p50 and p95 after the warm-up rounds, and the wire
   and JSON sizes (gzip is accepted; the API's restricted compression leaves these JSON reads uncompressed).
 - **Deep pages.** The deep page or offset is the middle one of the list, chosen from the counts the API reports
@@ -539,8 +539,9 @@ What it does:
   with rows, so a clamped or empty page fails. A deep-page scenario the dataset cannot populate (everything on
   one page, as in small smoke runs) is skipped and named in the report. Any other response that is not 200, or
   not the expected non-empty JSON, fails the run.
-- **Cache.** Reads through the Activity facts cache are made right after a committed no-op account update, which
-  advances the revision so the aggregate is computed again, then repeated at once. The API exposes no cache
+- **Cache.** Reads through the Activity facts cache are made right after a committed no-op write to a retained fill,
+  which advances the execution revision so the aggregate is computed again, then right after a write that only moves
+  one snapshot's observation time (issue #107), then repeated at once. The API exposes no cache
   diagnostics, and the cache refuses an aggregate whose charge exceeds its capacity (256 MiB by default), so
   the repeat is not always a hit. The report's Cache column estimates the charge from the generated rows by the
   cache's own rule and calls the repeat a hit only well under the capacity; near or above it the repeat is
@@ -592,3 +593,122 @@ drawings document, as before.
 Not measured: one list row with large drawings against an otherwise identical row without. The list rows were
 already projections that never selected drawings, and full Play loads no longer map them, so that comparison is
 guaranteed by the query shape rather than timed here.
+
+## 2026-11-20 — Activity cache at four times today's size (issue #107)
+
+Activity, the Overview summary, row expansion, Sizing's Activity fallback and a Play's funding proof read one cached
+aggregate of every retained fill. Before this change it was keyed by the facts revision, which every monitor check
+moved by saving a newer snapshot, so with several monitored accounts most reads recomputed it; every hit also re-sorted
+all operations and rebuilt the facets, and an account's row expansion read and walked that account again although the
+owner-wide entry held it.
+
+**Execution revision.** Migration `20261120143000_ActivityExecutionRevision` adds `execution_revision` to
+`activity_facts_revisions`. Deferred constraint triggers (`activity_execution_commit`, `activity_execution_update`)
+move it at commit, once per transaction per owner in sorted owner order, with the facts revision's own owner
+collection, for every change to `imported_fills`, `funding_payments`, `account_leverage_observations`,
+`execution_omissions` and `imported_forced_events`, for inserts and deletes of `accounts`, `imported_orders` and
+`play_order_links`, and for updates of the columns that decide what the aggregate reads from them (account owner,
+enabled and trading mode; order owner, account, contract and external ID; link owner, account, Play, order and
+state). Snapshots, positions, wallet balances, funding coverage and account sync state move only the facts revision,
+which still fences the funding proof. The lock-order invariant above is unchanged: both counters lock the same rows,
+only at commit and in the same order. Apply the migration explicitly; existing owners start at execution revision 1.
+
+**Observations are rebased, not ignored.** The cache key is the execution revision. Each read takes, in one
+RepeatableRead snapshot, both revisions and the scoped accounts, latest snapshots with positions and funding coverage
+(`ActivityObservations`), then `ActivityService.Rebase` moves the cached aggregate onto them. It reuses the walk only
+when everything the walk, coverage, funding attribution and leverage read is the same: the account set and each
+account's venue, history notice, enabled state and trading mode; each snapshot's completeness and positions
+(contract, native market, exact quantity and leverage); each funding state's covered window, P&L basis and notice;
+and each snapshot time, unless it moved past a retained instant of its account (a fill, funding settlement, leverage
+observation, omission bound or funding coverage bound, widened by a millisecond for the funding window's rounding).
+Anything else walks the cached history again in memory, without another database read. Either way the result carries
+the new snapshots and facts revision, so freshness still reaches the anchoring and comparison proofs, unrealized marks
+and the funding fence; a changed funding attempt time alone rehashes the version. The cache keeps the newest rebased
+value. A monitor check that changes nothing but the observation time therefore costs one small observation read and
+no aggregate work (a check whose snapshot passes the leverage observation the previous change recorded walks once).
+
+**Hits sort nothing.** The aggregate keeps its operations in page order and its facets; an Activity page filters and
+pages that list.
+
+**One copy per account read.** An account-scoped read (row expansion, a Play's funding proof) that misses narrows a
+cached aggregate over several accounts at the same execution revision, when that holds all of the account's facts
+(it keeps only the newest forced events across its accounts), instead of reading the account again.
+
+**Memory.** The cached fills, funding payments and leverage observations share one copy of each market, side,
+venue-wording and fee string, and the cache charges each distinct value once. An aggregate whose charge exceeds the
+capacity is still not retained; the cache now logs a warning about it, at most hourly, naming the fill and operation
+counts, the estimate and `Vessel:Activity:CacheCapacityBytes`.
+
+**Benchmark.** `scripts/benchmark.py` now also times `/api/sizing` and a Closed Play's execution view (its funding
+proof reads the account's Activity aggregate), seeds chart drawings of realistic size (the frontend's persisted
+`ChartDrawing` shape: usually a few to a few dozen per instrument, sometimes hundreds, from their own random stream so
+the rest of the dataset is unchanged), and times cached reads after a no-op fill write ("After fill write", a
+recomputation) and after a write that only moves one snapshot's observation time ("After observation", what a quiet
+monitor check writes). `--cache-capacity-mib` runs the API with a chosen `Vessel:Activity:CacheCapacityBytes`.
+
+### Figures
+
+Measured on `602905f8518d` (benchmark changes, current code) and base `b41b2608` (the same
+benchmark script against the base API), seed 1, 3 years, anchored 2026-11-20T00:00Z, 3 warm-up and 10 measured rounds,
+on the shared 8-CPU, 20 GB development VM while other agents' jobs were queued behind it (host load 2–4.5). The host has
+only the .NET 10.0.13 runtime, so the Release API and the EF migration bundles were built with SDK 10.0.302 in a
+container and the bundles stood in for `dotnet ef database update`; everything else is `scripts/benchmark.py` with its
+own throwaway PostgreSQL 18.6 and RabbitMQ containers. Scale 1 aggregates 45,928 fills into
+15,532 operations; scale 4 aggregates 181,741 into 61,672.
+Medians (p50) in milliseconds, base → current; "steady" is the repeat, "fill write" the first read after a no-op fill
+write, "observation" the first read after only a snapshot's observation time moved.
+
+| Read | Scale 1 steady | Scale 1 fill write | Scale 1 observation | Scale 4 steady | Scale 4 fill write | Scale 4 observation |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Activity, page 1 | 9.3 → 7.3 | 2,517.3 → 2,389.3 | 737.6 → 21.2 | 2,691.8 → 2,605.3 | 5,323.9 → 5,042.9 | 2,713.8 → 2,641.9 |
+| Activity, page 79 of 100 rows / page 309 of 100 rows | 8.9 → 7.0 | 767.9 → 768.3 | 736.3 → 21.3 | 2,676.2 → 2,640.7 | 2,584.4 → 2,661.7 | 2,605.9 → 2,647.0 |
+| Activity, closed longs in 90 days | 9.4 → 7.0 | 731.7 → 756.4 | 749.5 → 20.6 | 2,666.9 → 2,666.5 | 2,640.9 → 2,660.2 | 2,692.6 → 2,641.4 |
+| Activity, executions of one operation | 2.7 → 3.5 | 109.2 → 110.1 | 97.8 → 4.4 | 3.0 → 4.2 | 475.2 → 491.0 | 520.9 → 4.9 |
+| Review, all | 133.2 → 124.3 | – | – | 472.3 → 469.6 | – | – |
+| Review, year | 121.3 → 110.4 | – | – | 415.9 → 406.3 | – | – |
+| Review, all with imported positions | 625.1 → 608.1 | 1,369.7 → 1,336.8 | 1,340.6 → 624.1 | 5,088.7 → 5,099.8 | 5,340.3 → 5,114.9 | 5,160.1 → 5,094.6 |
+| Plays, All tab | 4.4 → 4.3 | – | – | 4.7 → 4.4 | – | – |
+| Plays, In progress tab | 3.3 → 3.4 | – | – | 3.8 → 3.6 | – | – |
+| Plays, Closed tab page 12 / Closed tab page 47 | 3.8 → 3.8 | – | – | 5.5 → 5.5 | – | – |
+| Plays, tab counts | 2.1 → 2.3 | – | – | 3.5 → 3.2 | – | – |
+| Plays, title and instrument search | 4.0 → 3.8 | – | – | 5.7 → 5.7 | – | – |
+| Sizing | 77.9 → 75.0 | – | – | 274.2 → 257.4 | – | – |
+| A Play's execution view | 27.2 → 27.7 | 193.1 → 190.5 | 206.4 → 32.4 | 37.6 → 37.7 | 438.3 → 412.1 | 433.0 → 38.1 |
+| Overview | 13.0 → 13.2 | – | – | 31.0 → 31.7 | – | – |
+| Overview summary by portfolio, all | 190.2 → 173.8 | 904.7 → 926.3 | 884.8 → 195.0 | 3,485.6 → 3,402.4 | 3,397.6 → 3,418.0 | 3,507.2 → 3,382.2 |
+| Overview summary by account, 30 days | 24.0 → 22.2 | 753.6 → 776.8 | 747.6 → 36.5 | 2,688.6 → 2,750.3 | 2,683.6 → 2,712.5 | 2,706.7 → 2,681.6 |
+| Open risk | 9.8 → 9.9 | – | – | 16.7 → 17.7 | – | – |
+| Journal search, common word | 27.8 → 28.3 | – | – | 132.0 → 127.5 | – | – |
+| Journal search, offset 300 / offset 1150 | 30.9 → 31.2 | – | – | 138.2 → 136.2 | – | – |
+| Journal search, rare word | 8.1 → 8.8 | – | – | 23.1 → 23.3 | – | – |
+
+API peak RSS: scale 1 1,059 → 985 MB; scale 4 2,298 →
+1,964 MB.
+
+The cache estimate for every enabled account is 123 MiB at scale 1 (a hit) and
+425 MiB at scale 4, above the default 256 MiB capacity: at scale 4 the owner-wide aggregate
+is still never retained, so Activity, the Overview summary and Review with imported positions recompute it on every
+read, before and after this change (and the API now logs the warning). Account-scoped reads (one operation's
+executions, a Play's execution view) fit (est. 78 MiB) and no longer recompute after an
+observation. With `--cache-capacity-mib 1024` (`Vessel:Activity:CacheCapacityBytes` = 1 GiB) at scale 4, current code
+(peak RSS 2,644 MB):
+
+| Read | Steady | Fill write | Observation |
+| --- | ---: | ---: | ---: |
+| Activity, page 1 | 10.6 | 4,838.5 | 49.5 |
+| Activity, page 309 of 100 rows | 10.8 | 2,673.8 | 54.0 |
+| Activity, closed longs in 90 days | 11.2 | 2,688.6 | 50.8 |
+| Activity, executions of one operation | 3.5 | 468.0 | 4.7 |
+| Review, all with imported positions | 2,461.6 | 5,113.6 | 2,492.4 |
+| A Play's execution view | 37.5 | 411.9 | 37.9 |
+| Overview summary by portfolio, all | 724.2 | 3,359.6 | 840.9 |
+| Overview summary by account, 30 days | 71.8 | 2,733.9 | 111.6 |
+
+**What it shows.** A monitor check that moves nothing but the observation time no longer recomputes the aggregate:
+the first Activity read after it fell from about 740 ms to about 21 ms at scale 1, and from about 2.7 s to about 50 ms
+at scale 4 when the aggregate fits the cache. Cache hits sort nothing (about 9 → 7 ms per Activity page at scale 1).
+A recomputation after a real history change costs what it did. At four times today's size the default capacity is the
+limit: the owner-wide aggregate needs about 425 MiB by the cache's conservative charge, so an installation of that
+size needs `Vessel:Activity:CacheCapacityBytes` raised (here 1 GiB, at about 2.6 GB peak RSS) or a smaller retained
+representation. The charge's 768-byte per-row base, about twice the retained size measured on October 18, is
+unchanged here.

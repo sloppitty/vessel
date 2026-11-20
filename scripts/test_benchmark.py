@@ -343,7 +343,7 @@ class PercentileTests(unittest.TestCase):
 
 
 def arguments(**overrides):
-    values = dict(disposable=True, years=3, scale=1, rounds=20, warmup=5, out=None)
+    values = dict(disposable=True, years=3, scale=1, rounds=20, warmup=5, out=None, cache_capacity_mib=None)
     values.update(overrides)
     return argparse.Namespace(**values)
 
@@ -403,6 +403,17 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(run.origin, settings['Vessel__Identity__Origins__0'])
         self.assertTrue(run.origin.startswith('https://127.0.0.1:'))
         self.assertFalse(any('Token' in key or 'Bearer' in key for key in settings))
+        self.assertNotIn('Vessel__Activity__CacheCapacityBytes', settings)
+
+    def test_a_chosen_cache_capacity_reaches_the_api_and_is_bounded(self):
+        run = benchmark.Run(arguments(cache_capacity_mib=1024), log=lambda *_: None)
+        run.owner, run.pg_port, run.mq_port = '00000000-0000-4000-8000-000000000001', 1234, 5678
+        run.temp = Path('/tmp/isolated-benchmark-test')
+        self.assertEqual(str(2 ** 30), run.settings()['Vessel__Activity__CacheCapacityBytes'])
+        benchmark.check_arguments(arguments(cache_capacity_mib=1024), environ={})
+        with self.assertRaises(benchmark.Refused):
+            benchmark.check_arguments(arguments(cache_capacity_mib=-1), environ={})
+        self.assertTrue(benchmark.cache_status(445_521_718, 2 ** 30).startswith('hit'))
 
     def test_cookie_requires_secure_host_only_binding(self):
         good = [('Set-Cookie', '__Host-vessel-session=private; Path=/; Secure; HttpOnly; SameSite=Strict')]
