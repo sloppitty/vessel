@@ -99,10 +99,12 @@ contract that holds the detail.
   rejecting known missing executions and incomplete fees; R and reviews cover
   Plays only, and RISEx P&L is never promised funding-free
   ([portfolio review][review]).
-- A review completes only by an explicit post-close Complete review, Review again
-  or No review needed; structured answers count, append-only in-trade log entries
-  never do. A manual correction batch is atomic, reasoned and version-checked, and
-  validates only the final closed ledger ([Phase 1][p1]).
+- A review completes only by Complete review or by saving changed structured
+  answers on a Closed, Cancelled or Unresolved Play, or by No review needed on a
+  Cancelled Play without linked fills; Review again clears the completion, and
+  append-only in-trade log entries never complete it. A manual correction batch
+  is atomic, reasoned and version-checked, and validates only the final closed
+  ledger ([Phase 1][p1]).
 - With imported positions included, a Play weighs 2 positions in batting, average
   gain/loss, payoff and expectancy only; dollar totals, drawdown, streaks and
   counts are never weighted ([portfolio review][review]).
