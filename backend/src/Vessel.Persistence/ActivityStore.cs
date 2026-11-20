@@ -4,6 +4,7 @@ using Vessel.Application.Activity;
 using Vessel.Application.Common;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Common;
+using Vessel.Domain.Workspace;
 
 namespace Vessel.Persistence;
 
@@ -33,6 +34,7 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         var fills = await db.Fills.Where(f => ids.Contains(f.AccountId)).AsNoTracking().ToListAsync(ct);
         var funding = await db.FundingPayments.Where(p => ids.Contains(p.AccountId)).AsNoTracking().ToListAsync(ct);
         var leverage = await db.LeverageObservations.Where(o => ids.Contains(o.AccountId)).AsNoTracking().ToListAsync(ct);
+        Share(fills, funding, leverage);
         // Phase 2, item 7b: what imports left out, so Activity never anchors or walks across it.
         var omissions = await OmissionsAsync(db, ids, ct);
         // Only the forced events Activity shows are read; the rest are counted in SQL when there are more (Sol round 1).
@@ -60,6 +62,24 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
             FundingPayments = funding, FundingStates = observed.FundingStates, LeverageObservations = leverage, Omissions = omissions,
             ForcedEvents = forced, ForcedEventCounts = forcedCounts, Revision = revision
         };
+    }
+
+    /// <summary>
+    /// Issue #107: the cached facts hold one copy of each low-cardinality string (markets, sides, venue wording, fee tokens
+    /// and bases) instead of one per row; <see cref="ActivitySummaryCache"/> charges these once. Values are unchanged.
+    /// </summary>
+    internal static void Share(List<ImportedFill> fills, List<FundingPayment> funding, List<LeverageObservation> leverage)
+    {
+        var pool = new Dictionary<string, string>(StringComparer.Ordinal);
+        string? One(string? text) => text is null ? null : pool.TryGetValue(text, out var shared) ? shared : pool[text] = text;
+        foreach (var f in fills)
+        {
+            f.ContractId = One(f.ContractId)!; f.VenueContractId = One(f.VenueContractId); f.Side = One(f.Side)!;
+            f.Direction = One(f.Direction)!; f.PositionEffect = One(f.PositionEffect)!; f.FeeToken = One(f.FeeToken)!;
+            f.FeeBasis = One(f.FeeBasis)!; f.PnlBasis = One(f.PnlBasis)!;
+        }
+        foreach (var p in funding) { p.ContractId = One(p.ContractId)!; p.VenueContractId = One(p.VenueContractId); p.Asset = One(p.Asset)!; }
+        foreach (var o in leverage) { o.ContractId = One(o.ContractId)!; o.VenueContractId = One(o.VenueContractId); }
     }
 
     /// <summary>

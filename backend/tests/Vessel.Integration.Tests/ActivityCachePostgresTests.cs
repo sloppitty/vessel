@@ -354,6 +354,9 @@ public sealed class ActivityCachePostgresTests
         Assert.Equal(Json(expected.Ordered), Json(narrowed.Ordered));
         Assert.Equal(Json(expected.Coverage), Json(narrowed.Coverage));
         Assert.All(narrowed.Facts.Fills, f => Assert.Equal(first.Id, f.AccountId));
+        // The cached facts keep one copy of each repeated market, side and fee string.
+        Assert.Same(narrowed.Facts.Fills[0].ContractId, narrowed.Facts.Fills[1].ContractId);
+        Assert.Same(narrowed.Facts.Fills[0].FeeToken, narrowed.Facts.Fills[^1].FeeToken);
         Assert.Equal(expected.Facts.Revision, narrowed.Facts.Revision);
     }
 

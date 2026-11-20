@@ -183,15 +183,26 @@ public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int 
         }
     }
 
+    // Issue #107: the strings ActivityStore.Share keeps one copy of, charged once per distinct value.
+    private static readonly HashSet<(Type, string)> SharedStrings =
+    [
+        .. new[] { "ContractId", "VenueContractId", "Side", "Direction", "PositionEffect", "FeeToken", "FeeBasis", "PnlBasis" }
+            .Select(name => (typeof(ImportedFill), name)),
+        (typeof(FundingPayment), "ContractId"), (typeof(FundingPayment), "VenueContractId"), (typeof(FundingPayment), "Asset"),
+        (typeof(LeverageObservation), "ContractId"), (typeof(LeverageObservation), "VenueContractId")
+    ];
+
     private static long Charge(ActivitySummaryKey key, ActivitySummaries value)
     {
         // Conservative retained-graph charge: entities, allocation rows, list/dictionary slots and every
         // variable-length string. Lazy constituent DTOs are not materialized just to measure the cache.
-        static long Row(object row)
+        var shared = new HashSet<string>(StringComparer.Ordinal);
+        long Row(object row)
         {
             var bytes = 768L;
             foreach (var property in StringProperties[row.GetType()])
-                if (property.GetValue(row) is string text) bytes += 2L * text.Length;
+                if (property.GetValue(row) is string text && (!SharedStrings.Contains((row.GetType(), property.Name)) || shared.Add(text)))
+                    bytes += 2L * text.Length;
             return bytes;
         }
         var facts = value.Facts;
