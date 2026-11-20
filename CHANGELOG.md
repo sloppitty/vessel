@@ -88,6 +88,8 @@
 - A busy database no longer leaves a monitor lease held, fails same-owner monitor admission
   or live event delivery, loses a failed event attempt, or blocks sign-in during the
   identity cleanup, which now deletes in batches.
+- Saving a Play request larger than 2 MiB is refused before it is parsed ("Play request is
+  too large.").
 
 ### Changed
 
@@ -126,6 +128,8 @@
 - Each API and worker process uses one connection pool for journal reads and one for
   identity and server-wide reads, so a nested borrow can never wait for a pool it holds; the
   paper worker's lock session has its own connection.
+- Chart drawings are stored in their own table, so the Plays list, Review, Sizing and
+  exports no longer load them.
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and
@@ -139,6 +143,9 @@ workers need these columns, so they must not start against an unmigrated databas
   trigram index for Plays search. It creates the `pg_trgm` extension in `public`, which the
   database owner may do; otherwise a superuser runs
   `CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public;` first (see `deploy/README.md`).
+- `20261120115353_PlayDrawingsTable` creates `play_drawings` and copies every Play's drawings
+  unchanged. The old `plays."Drawings"` column stays, unread, until a later release drops it;
+  rolling back copies the current drawings back into it.
 
 After upgrading: once every updated host is running, rebuild the Plays list projection in
 full, once. Rows that went stale before this release are not repaired by a plain rebuild,
