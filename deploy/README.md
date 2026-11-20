@@ -1465,6 +1465,18 @@ totals use nominal 1:1 values, with no FX or depeg valuation.
 
 ### Upgrade procedure
 
+The operator command `deploy/vessel` (copy it into the operator directory with
+the other deploy files; Python 3, standard library only) reads the same Compose
+configuration as bare `docker compose` commands, including `COMPOSE_FILE` and
+`COMPOSE_PROFILES` from `.env`; repeat `-f`/`--profile` options after the
+subcommand only if you pass them to Compose too. Its read-only commands change
+nothing and print no `.env` values:
+
+```sh
+./vessel status                 # versions, every service incl. paper/notifications workers, migrations, disk, last backup
+./vessel preflight --to 0.4.3   # checks for a backup and an upgrade; exits non-zero when one fails
+```
+
 Back up first, read the changelog, and set `VESSEL_VERSION` to the chosen release.
 Retain the complete `COMPOSE_FILE` in the private `.env`. This applies to every
 bare command below; explicit `-f` lists must include all those overlays.
