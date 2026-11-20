@@ -52,12 +52,13 @@ internal static class WorkerProgram
     /// </summary>
     internal static async Task<int> RunAsync(IHost host, TimeSpan? margin = null, Action<string>? hung = null)
     {
+        // Resolve everything before RunAsync: it disposes the host's services when it finishes.
         var exit = host.Services.GetRequiredService<WorkerExit>();
+        var grace = host.Services.GetRequiredService<IOptions<HostOptions>>().Value.ShutdownTimeout
+            + (margin ?? TimeSpan.FromSeconds(10));
         var run = host.RunAsync();
         if (await Task.WhenAny(run, exit.Requested) != run)
         {
-            var grace = host.Services.GetRequiredService<IOptions<HostOptions>>().Value.ShutdownTimeout
-                + (margin ?? TimeSpan.FromSeconds(10));
             if (await Task.WhenAny(run, Task.Delay(grace)) != run)
             {
                 (hung ?? Environment.FailFast)("Vessel worker did not stop after a stale loop; ending the process.");
