@@ -1,8 +1,9 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useId, useState } from 'react'
 import { Gauge } from 'lucide-react'
 import { errorMessage } from '@/api/errors'
 import type { RiskSettings as Settings } from '@/api/risk'
 import type { WorkspaceApi } from '@/api/workspace'
+import { useApiRead } from '@/lib/use-api-read'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { riskLimitText } from './risk-limit'
@@ -13,11 +14,13 @@ type RiskSettingsApi = Pick<WorkspaceApi, 'riskSettings' | 'updateRiskSettings'>
 
 /** The three limits as typed: the open-risk percentage and the daily and weekly loss limits in R (Phase 2, items 1 and 10b). */
 interface Texts { open: string; daily: string; weekly: string }
-interface Loaded { api: RiskSettingsApi; attempt: number; saved: Settings | null; text: Texts; error: string | null; message: string | null }
+/** The form over one read: edits and saves belong to it, and a new read starts a new form. */
+interface Form { read: Settings; saved: Settings; text: Texts; error: string | null; message: string | null }
 
 const texts = (settings: Settings): Texts => ({
   open: settings.openRiskLimitPercent ?? '', daily: settings.dailyLossLimitR ?? '', weekly: settings.weeklyLossLimitR ?? '',
 })
+const formOf = (read: Settings): Form => ({ read, saved: read, text: texts(read), error: null, message: null })
 
 /**
  * Soft risk limits: the open-risk limit as a percentage of the scope's balance (Phase 2, item 1), and daily and weekly loss
@@ -26,43 +29,29 @@ const texts = (settings: Settings): Texts => ({
  */
 export function RiskSettings({ api }: { api: RiskSettingsApi }) {
   const id = useId()
-  const [attempt, setAttempt] = useState(0)
-  const request = useMemo(() => ({ api, attempt }), [api, attempt])
-  const [loaded, setLoaded] = useState<Loaded | null>(null)
+  const settings = useApiRead(api, null, (client, signal) => client.riskSettings(signal), { fallback: 'Risk limits could not be loaded.' })
+  const [form, setForm] = useState<Form | null>(null)
   const [saving, setSaving] = useState(false)
-  const scope = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    const controller = new AbortController()
-    scope.current = controller
-    request.api.riskSettings(controller.signal).then(settings => {
-      if (!controller.signal.aborted) setLoaded({ ...request, saved: settings, text: texts(settings), error: null, message: null })
-    }).catch(cause => {
-      if (!controller.signal.aborted) setLoaded({ ...request, saved: null, text: { open: '', daily: '', weekly: '' },
-        error: errorMessage(cause, 'Risk limits could not be loaded.'), message: null })
-    })
-    return () => controller.abort()
-  }, [request])
-
-  const current = loaded?.api === request.api && loaded.attempt === request.attempt ? loaded : null
+  const current = settings.data === null ? null : form?.read === settings.data ? form : formOf(settings.data)
   const parsed = current ? { open: riskLimitText(current.text.open), daily: riskLimitText(current.text.daily), weekly: riskLimitText(current.text.weekly) } : null
   const valid = !!parsed && parsed.open !== undefined && parsed.daily !== undefined && parsed.weekly !== undefined
   const dirty = !!current?.saved && valid && (parsed.open !== current.saved.openRiskLimitPercent ||
     parsed.daily !== current.saved.dailyLossLimitR || parsed.weekly !== current.saved.weeklyLossLimitR)
 
   async function save() {
-    const controller = scope.current
-    if (!current?.saved || !controller || controller.signal.aborted || saving || !dirty || !parsed) return
+    if (!current || saving || !dirty || !parsed) return
     setSaving(true)
     try {
       const settings = await api.updateRiskSettings({ openRiskLimitPercent: parsed.open ?? null, dailyLossLimitR: parsed.daily ?? null,
         weeklyLossLimitR: parsed.weekly ?? null })
       lossLimitsChanged()
-      if (!controller.signal.aborted) setLoaded({ ...current, saved: settings, text: texts(settings), error: null, message: 'Risk limits saved.' })
+      // A form replaced by another read or API meanwhile ignores this answer.
+      setForm({ ...current, saved: settings, text: texts(settings), error: null, message: 'Risk limits saved.' })
     } catch (cause) {
-      if (!controller.signal.aborted) setLoaded({ ...current, error: errorMessage(cause, 'The limits could not be saved. Reload to see the saved values.'), message: null })
+      setForm({ ...current, error: errorMessage(cause, 'The limits could not be saved. Reload to see the saved values.'), message: null })
     } finally {
-      if (!controller.signal.aborted) setSaving(false)
+      setSaving(false)
     }
   }
 
@@ -72,7 +61,7 @@ export function RiskSettings({ api }: { api: RiskSettingsApi }) {
       <label htmlFor={`${id}-${key}`}>{label}</label>
       <Input id={`${id}-${key}`} inputMode="decimal" autoComplete="off" placeholder="Not set" value={current?.text[key] ?? ''}
         aria-describedby={`${id}-${key}-help`} aria-invalid={current?.saved ? !ok : undefined}
-        onChange={event => current && setLoaded({ ...current, text: { ...current.text, [key]: event.target.value }, message: null })} />
+        onChange={event => current && setForm({ ...current, text: { ...current.text, [key]: event.target.value }, message: null })} />
       <p id={`${id}-${key}-help`} className={ok ? 'muted' : 'risk-settings-error'}>{ok ? help : invalid}</p>
     </>
   }
@@ -80,9 +69,9 @@ export function RiskSettings({ api }: { api: RiskSettingsApi }) {
     <Gauge size={23} aria-hidden="true" /><h2 id={`${id}-heading`}>Risk limits</h2>
     <p>Soft limits are shown beside open risk and the day&apos;s and week&apos;s losses, and flagged when reached. They never block
       planning or trading.</p>
-    {!current && <p role="status">Loading risk limits…</p>}
-    {current?.error && <div className="workspace-alert" role="alert"><span>{current.error}</span>
-      <Button variant="ghost" size="sm" disabled={saving} onClick={() => setAttempt(value => value + 1)}>Reload risk limits</Button></div>}
+    {settings.loading && <p role="status">Loading risk limits…</p>}
+    {(settings.error ?? current?.error) && <div className="workspace-alert" role="alert"><span>{settings.error ?? current?.error}</span>
+      <Button variant="ghost" size="sm" disabled={saving} onClick={settings.reload}>Reload risk limits</Button></div>}
     <form onSubmit={event => { event.preventDefault(); void save() }} noValidate>
       <fieldset disabled={!current?.saved || saving}>
         <legend className="sr-only">Soft risk limits</legend>

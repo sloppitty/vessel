@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { Bell, Save, Send } from 'lucide-react'
 import type { WorkspaceApi } from '@/api/workspace'
 import { ApiError, errorMessage } from '@/api/errors'
+import { useApiRead } from '@/lib/use-api-read'
 import {
   notificationPreferenceCategories, notificationSeverities, type NotificationPreferenceFields, type NotificationPreferences,
 } from '@/api/notifications'
@@ -14,6 +15,12 @@ import { workerStatus } from './unread'
 import './notification-settings.css'
 import { useDisplayZone } from '@/lib/display-zone'
 
+const fieldsOf = (preferences: NotificationPreferences): NotificationPreferenceFields =>
+  ({ enabled: preferences.enabled, minimumSeverity: preferences.minimumSeverity, categories: preferences.categories })
+
+/** The form over one read: edits and saves belong to it, and a new read starts a new form. */
+interface Form { read: NotificationPreferences; preferences: NotificationPreferences; draft: NotificationPreferenceFields }
+
 const sameFields = (a: NotificationPreferenceFields, b: NotificationPreferenceFields) => a.enabled === b.enabled &&
   a.minimumSeverity === b.minimumSeverity && a.categories.length === b.categories.length && a.categories.every(item => b.categories.includes(item))
 
@@ -24,9 +31,10 @@ const sameFields = (a: NotificationPreferenceFields, b: NotificationPreferenceFi
 export function NotificationSettings({ api, inApp }: { api: WorkspaceApi; inApp: InAppNotifications }) {
   const { notify } = useNotifications()
   const zone = useDisplayZone()
-  const [loaded, setLoaded] = useState<{ api: WorkspaceApi; preferences: NotificationPreferences | null; error: string | null } | null>(null)
-  const [draft, setDraft] = useState<NotificationPreferenceFields | null>(null)
-  const [reload, setReload] = useState(0)
+  // A reread keeps the shown preferences until it answers.
+  const read = useApiRead(api, null, (client, signal) => client.notificationPreferences(signal),
+    { fallback: 'Notification preferences could not be loaded.', keepPrevious: 'always' })
+  const [form, setForm] = useState<Form | null>(null)
   // Commands belong to the API that started them: a replaced API's answer never reaches the new one's section.
   const [savingFor, setSavingFor] = useState<WorkspaceApi | null>(null)
   const [conflict, setConflict] = useState<{ api: WorkspaceApi; message: string } | null>(null)
@@ -40,20 +48,10 @@ export function NotificationSettings({ api, inApp }: { api: WorkspaceApi; inApp:
   const saving = savingFor === api
   const testing = testingFor === api
 
-  useEffect(() => {
-    const controller = new AbortController()
-    api.notificationPreferences(controller.signal).then(preferences => {
-      if (controller.signal.aborted) return
-      setLoaded({ api, preferences, error: null })
-      setDraft({ enabled: preferences.enabled, minimumSeverity: preferences.minimumSeverity, categories: preferences.categories })
-    }).catch(cause => {
-      if (!controller.signal.aborted) setLoaded({ api, preferences: null, error: errorMessage(cause, 'Notification preferences could not be loaded.') })
-    })
-    return () => controller.abort()
-  }, [api, reload])
   // Saving anywhere resets the notification feed; reread (unless edits are pending) so a save carries the current revision.
   const quiet = useRef(true)
-  useEffect(() => subscribe(change => { if (change.type === 'reset' && quiet.current) setReload(n => n + 1) }), [subscribe])
+  const reload = read.reload
+  useEffect(() => subscribe(change => { if (change.type === 'reset' && quiet.current) reload() }), [subscribe, reload])
   const cooldownUntil = cooldown?.api === api ? cooldown.until : null
   useEffect(() => {
     if (cooldownUntil === null) return
@@ -65,8 +63,10 @@ export function NotificationSettings({ api, inApp }: { api: WorkspaceApi; inApp:
     return () => clearInterval(timer)
   }, [cooldownUntil])
 
-  const current = loaded?.api === api ? loaded : null
+  const current = read.data === null ? null : form?.read === read.data ? form : { read: read.data, preferences: read.data, draft: fieldsOf(read.data) }
   const preferences = current?.preferences ?? null
+  const draft = current?.draft ?? null
+  const setDraft = (next: NotificationPreferenceFields) => { if (current) setForm({ ...current, draft: next }) }
   const dirty = preferences !== null && draft !== null && !sameFields(draft, preferences)
   const online = inApp.status.known ? inApp.status.workerOnline : preferences?.workerOnline ?? true
   const heartbeat = inApp.status.known ? inApp.status.heartbeatAtUtc : preferences?.heartbeatAtUtc ?? null
@@ -75,17 +75,16 @@ export function NotificationSettings({ api, inApp }: { api: WorkspaceApi; inApp:
 
   async function save(event: FormEvent) {
     event.preventDefault()
-    if (!preferences || !draft) return
+    if (!current) return
     setSavingFor(api); setConflict(null)
     try {
-      const saved = await api.saveNotificationPreferences({ ...draft, expectedRevision: preferences.revision })
+      const saved = await api.saveNotificationPreferences({ ...current.draft, expectedRevision: current.preferences.revision })
       if (liveApi.current !== api) return
-      setLoaded({ api, preferences: saved, error: null })
-      setDraft({ enabled: saved.enabled, minimumSeverity: saved.minimumSeverity, categories: saved.categories })
+      setForm({ read: current.read, preferences: saved, draft: fieldsOf(saved) })
       notify({ tone: 'success', message: 'Notification preferences saved.' })
     } catch (cause) {
       if (liveApi.current !== api) return
-      if (cause instanceof ApiError && cause.status === 409) { setConflict({ api, message: cause.message }); setReload(n => n + 1) }
+      if (cause instanceof ApiError && cause.status === 409) { setConflict({ api, message: cause.message }); reload() }
       else notify({ tone: 'error', message: errorMessage(cause, 'Notification preferences could not be saved.') })
     } finally {
       setSavingFor(current => current === api ? null : current)
@@ -114,7 +113,7 @@ export function NotificationSettings({ api, inApp }: { api: WorkspaceApi; inApp:
 
   return <section className="shell-panel settings-panel notification-settings" aria-labelledby={`${id}-heading`}>
     <Bell size={23} aria-hidden="true" /><h2 id={`${id}-heading`}>Notifications</h2>
-    {current?.error ? <div className="workspace-alert" role="alert"><span>{current.error}</span><Button variant="ghost" size="sm" onClick={() => setReload(n => n + 1)}>Retry</Button></div>
+    {read.error ? <div className="workspace-alert" role="alert"><span>{read.error}</span><Button variant="ghost" size="sm" onClick={reload}>Retry</Button></div>
       : !preferences || !draft ? <p role="status">Loading notification preferences…</p>
       : <form onSubmit={event => { void save(event) }}>
         {conflict?.api === api && <div className="workspace-alert" role="alert"><span>{conflict.message}</span></div>}
