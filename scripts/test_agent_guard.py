@@ -69,6 +69,17 @@ REFUSED = {
         'cat <<< "$(cat .env)"',
         "python3 - <<'EOF'\nprint(open('.env').read())\nEOF",
         "node <<'EOF'\nrequire('fs').readFileSync('deploy/.env')\nEOF",
+        # Values that wrapper options consume are arguments too.
+        'xargs -a .env echo',
+        'xargs --arg-file=.env echo',
+        'time -o .env true',
+        'sudo -p "$(cat .env)" true',
+        # Text echo or printf would render differently from how it is written.
+        "printf 'cat .env\\n' | bash",
+        "printf '%s' 'cat .env' | sh",
+        "echo -e 'cat \\x2eenv' | bash",
+        "bash <<'EOF'\nprintf 'cat .env\\n' | bash\nEOF",
+        'echo "print(open(\'.env\').read())" | python3',
     ],
     'force pushes and tags': [
         'git push --force',
@@ -118,6 +129,7 @@ REFUSED = {
         'bash <<< "git push --force"',
         'echo "git push --force" | bash',
         'echo "<<X"\ngit push --force\nX',
+        "printf 'git push --force\\n' | bash",
     ],
     'publishing': [
         'docker push skorcius/vessel:api-0.4.3',
@@ -161,6 +173,8 @@ REFUSED = {
         'env -u HOME FOO=bar pnpm db:migrate',
         'bash <<EOF\npnpm db:migrate\nEOF',
         "zsh <<'EOF'\npnpm db:migrate\nEOF",
+        "printf 'pnpm db:migrate\\n' | bash",
+        "sh <<'EOF'\nprintf 'pnpm db:migrate\\n' | bash\nEOF",
     ],
     "owner's compose project": [
         'docker compose down -v',
@@ -189,6 +203,8 @@ REFUSED = {
         'docker compose config --environment --no-interpolate',
         'docker compose --env-file deploy/.env.example config --environment',
         'docker compose config --variables',
+        # An explicit --env-file does not stop interpolation from the session environment.
+        'docker compose --env-file deploy/.env.example config',
     ],
     'wrapper options the guard does not know': [
         'xargs --frobnicate pnpm install',
@@ -225,7 +241,9 @@ ALLOWED = [
     'docker compose up --detach --wait postgres',
     'docker compose ps',
     'docker compose config --services',
-    'docker compose -f deploy/compose.yaml --env-file deploy/.env.example config',
+    'docker compose -f deploy/compose.yaml --env-file deploy/.env.example config --no-interpolate '
+    '--no-env-resolution',
+    'docker compose -f deploy/compose.yaml --env-file deploy/.env.example config --quiet',
     'docker compose config --no-interpolate',
     'docker compose -p throwaway config --quiet',
     'docker compose config --images',
@@ -265,12 +283,17 @@ ALLOWED = [
     "bash -lc 'pnpm --filter vessel-frontend test'",
     'bash scripts/test-db.sh --keep',
     'echo "git status" | bash',
+    "printf 'git status' | bash",
+    'echo "print(1)" | python3',
+    'printf "%s\\n" a | python3 x.py',
     'set -euo pipefail',
     'export FOO=bar',
     'echo $HOME',
     'echo "port 55432 is the dev database; never migrate it"',
     'gh issue view #103',
     'python3 - <<\'EOF\'\nprint("docker push, 55432 psql")\nEOF',
+    'xargs -a files.txt rg TODO',
+    'time -o /tmp/timing true',
     # Quoted here-documents for anything but a shell are inert text, whatever they mention.
     "cat > notes.md <<'EOF'\n$(cat .env), $GITHUB_TOKEN, pnpm db:migrate and git push --force\nEOF",
     "git commit -F - <<'EOF'\nfix: never cat .env or git push --force\n\nCo-Authored-By: A <a@example.invalid>\nEOF",
@@ -358,6 +381,17 @@ class BashCommandTests(unittest.TestCase):
         # The repository's own compose.yaml says name: vessel, from any folder below it.
         self.assertEqual(2, run('docker compose down -v', ROOT / 'scripts')[0])
 
+
+    def test_compose_config_with_a_synthetic_env_file_still_interpolates_the_session_environment(self):
+        os.environ['DOCKERHUB_TOKEN'] = 'inherited-secret'
+        command = 'docker compose -f deploy/compose.yaml --env-file deploy/.env.example config'
+        self.assertEqual(2, run(command)[0])
+        self.assertEqual(0, run(command + ' --no-interpolate --no-env-resolution')[0])
+
+    def test_code_that_only_mentions_an_env_file_is_pointed_at_the_edit_tools(self):
+        code, stderr = run("python3 - <<'EOF'\nPath('docs/x.md').write_text('never cat .env')\nEOF")
+        self.assertEqual(2, code)
+        self.assertIn('apply_patch', stderr)
 
     def test_compose_config_of_services_with_env_files_needs_no_env_resolution(self):
         folder = Path(tempfile.mkdtemp())

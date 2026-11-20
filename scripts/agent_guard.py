@@ -20,8 +20,10 @@ the repository rules forbid and an accident would make irreversible:
   from a real `.env` file or the environment.
 
 Commands run by wrappers (`sudo`, `env`, `xargs`, ...), by `sh -c`, or fed to a
-shell as a here-document, here-string or `echo ... |` are checked as commands. A
-wrapper option the guard does not know is refused rather than guessed.
+shell as a here-document, here-string or `echo ... |` are checked as commands,
+and the values wrapper options take as arguments. A wrapper option the guard does
+not know, and `echo`/`printf` text with escapes or directives piped into a shell
+or interpreter, are refused rather than guessed.
 
 Starting the session with `VESSEL_AGENT_RELEASE=1` in the environment lets an
 owner-authorized release push one new release tag and publish. Moving or
@@ -269,16 +271,20 @@ def wrapper_parts(name, args):
     return options, args[index + operands:]
 
 
-def unwrap(words):
-    """Leading VAR=value assignments and the command after wrappers such as sudo, env or xargs."""
-    assignments = []
+def unwrap(words, consumed=None):
+    """Leading VAR=value assignments and the command after wrappers such as sudo, env or xargs. The values and
+    operands the wrappers consume are added to `consumed`, to be checked like any other argument."""
+    assignments, consumed = [], [] if consumed is None else consumed
     while words:
         word, name = words[0], PurePosixPath(words[0]).name
         if ASSIGNMENT.match(word):
             assignments.append(word)
             words = words[1:]
         elif name in WRAPPERS:
-            options, words = wrapper_parts(name, words[1:])
+            options, rest = wrapper_parts(name, words[1:])
+            consumed.extend(value for _, value in options if value)
+            consumed.extend(words[1:len(words) - len(rest)])
+            words = rest
             if name == 'command' and {'-v', '-V'} & {option for option, _ in options}:
                 return assignments, []  # command -v only looks the command up.
             if name == 'env':
@@ -329,7 +335,10 @@ def check_expansions(text, cwd, depth, documents):
 def check_program(text):
     """Code for another interpreter: refuse when it names a .env or credential file."""
     for word in re.findall(r"[^\s'\"`()\[\]{};]+", text):
-        check_path(word)
+        if is_secret_path(word):
+            raise Refused(f'That code names {word}, which holds secrets. Agents never read or write .env or '
+                          'credential files. If the code only edits text that mentions it, use the Edit tool or '
+                          'apply_patch instead.')
 
 
 def check_documents(name, args, documents_here, piped_from, cwd, depth, documents):
@@ -342,12 +351,27 @@ def check_documents(name, args, documents_here, piped_from, cwd, depth, document
             check_program(body)
         if expands:
             check_expansions(body, cwd, depth, documents)
-    if reads_stdin and piped_from and not documents_here:
-        producer_assignments, producer = unwrap(piped_from)
-        if producer[:1] in (['echo'], ['printf']):
-            check_command(' '.join(producer[1:]), cwd, depth + 1, documents)
+    if piped_from and not documents_here and (reads_stdin or reads_program(name, args)):
+        producer = unwrap(piped_from)[1]
+        if producer[:1] not in (['echo'], ['printf']):
+            if reads_stdin:
+                raise Refused('Commands piped into a shell cannot be checked. Run them directly.')
+            return
+        text = ' '.join(producer[1:])
+        if '\\' in text or producer[0] == 'printf' and '%' in text:
+            raise Refused(f'{producer[0]} with escapes or format directives piped into {name} runs text the guard '
+                          'cannot read as written. Run the commands directly.')
+        if reads_stdin:
+            check_command(text, cwd, depth + 1, documents)
         else:
-            raise Refused('Commands piped into a shell cannot be checked. Run them directly.')
+            check_program(text)
+
+
+def reads_program(name, args):
+    """True when an interpreter takes its program from standard input: no script, no inline code."""
+    if not (name.startswith('python') or name in INTERPRETERS):
+        return False
+    return all(arg.startswith('-') for arg in args) and not {'-c', '-e', '-m', '-p', '-E'} & set(args)
 
 
 def option_value(args, *names):
@@ -503,7 +527,7 @@ def compose_project(files, directory, assignments, cwd):
 def check_compose(args, assignments, cwd):
     valued = ('-f', '--file', '-p', '--project-name', '--project-directory', '--env-file', '--profile', '--ansi',
               '--progress', '--parallel')
-    files, env_files, project, index = [], [], None, 0
+    files, project, index = [], None, 0
     while index < len(args) and args[index].startswith('-'):
         arg = args[index]
         name, _, inline = arg.partition('=')
@@ -512,11 +536,9 @@ def check_compose(args, assignments, cwd):
             files.append(value)
         elif name in ('-p', '--project-name'):
             project = value
-        elif name == '--env-file':
-            env_files.append(value)
         index += 1 if inline or name not in valued else 2
     if index < len(args) and args[index] in ('config', 'convert'):
-        check_compose_config(args[index + 1:], files, env_files, cwd)
+        check_compose_config(args[index + 1:], files, cwd)
     if project is None:
         project = compose_project(files, option_value(args[:index], '--project-directory'), assignments, cwd)
     if project != OWNER_PROJECT or index >= len(args):
@@ -532,19 +554,18 @@ def check_compose(args, assignments, cwd):
         raise Refused('Migrations run only against throwaway test databases.')
 
 
-def check_compose_config(rest, files, env_files, cwd):
+def check_compose_config(rest, files, cwd):
     """`docker compose config` prints values from the project's .env file, the environment and service env_file
-    files, whatever the project name. Allow listings, and output whose values come only from a synthetic source."""
+    files, whatever the project name and --env-file. Allow listings and uninterpolated output only."""
     if '--environment' in rest:
         raise Refused('docker compose config --environment prints the environment used for interpolation, which '
                       'can hold secrets. Use --services, --quiet or --no-interpolate instead.')
     if {'--services', '--volumes', '--profiles', '--images', '--networks', '--models', '-q', '--quiet'} & set(rest):
         return
-    synthetic = '--no-interpolate' in rest or env_files and all(env_files)
-    if not synthetic:
+    if '--no-interpolate' not in rest:
         raise Refused('docker compose config interpolates the .env file next to the Compose file (the owner\'s '
-                      'secrets), whatever -p says. Use --services or --quiet, --no-interpolate, or an explicit '
-                      '--env-file with synthetic values such as deploy/.env.example.')
+                      'secrets) and the session environment, whatever -p or --env-file say. Use --services or '
+                      '--quiet, or --no-interpolate.')
     if '--no-env-resolution' not in rest:
         for file in compose_files(files, cwd):
             try:
@@ -607,12 +628,15 @@ def check_database(words, assignments):
 def check_words(words, cwd, depth, documents):
     documents_here = [documents[int(found[1])] for word in words if (found := MARKER.fullmatch(word))]
     piped_from = words.piped_from if isinstance(words, Words) else None
-    assignments, words = unwrap([word for word in words if not MARKER.fullmatch(word)])
+    consumed = []
+    assignments, words = unwrap([word for word in words if not MARKER.fullmatch(word)], consumed)
     exported = [word for word in words[1:] if '=' in word] if words[:1] in (['export'], ['declare']) else []
     check_database(words, assignments + exported)
-    for word in assignments + words:
+    for word in consumed + assignments + words:
         for inner in substitutions(word):
             check_command(inner, cwd, depth + 1, documents)
+    for word in consumed:
+        check_path(word)
     if not words:
         for expands, body in documents_here:
             if expands:

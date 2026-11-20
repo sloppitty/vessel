@@ -423,19 +423,22 @@ as execpolicy rules. The guard refuses, with the reason:
   `exec`/`run`/`cp`, and deleting or pruning its volumes or opening its
   containers;
 - `docker compose config` in any project unless it only lists (`--services`,
-  `--quiet`, ...) or its values are synthetic (`--no-interpolate`, or an
-  explicit `--env-file` such as `deploy/.env.example`), and always with
-  `--environment`: Compose reads the `.env` beside the Compose file whatever
-  `-p` says.
+  `--quiet`, ...) or adds `--no-interpolate`, and always with `--environment`:
+  Compose interpolates the `.env` beside the Compose file and the session
+  environment whatever `-p` or `--env-file` say.
 
 Commands are checked through wrappers (`sudo`, `env`, `timeout`, `xargs`,
 `nice`, `stdbuf`, `time`, `nohup`, `command`, `exec`), `sh -c`/`bash -lc`,
-`eval`, and here-documents, here-strings or `echo ... |` fed to a shell. A
-wrapper option the guard does not know, and anything else piped into a shell,
-is refused. A quoted here-document (`<<'EOF'`) for any other command is inert
-text, so `git commit -F - <<'EOF'` and `gh pr create --body-file - <<'EOF'` may
-mention anything; an unquoted one has its `$(...)` and secret-looking variables
-checked, and one for `python3`, `node` and similar may not name a `.env` file.
+`eval`, and here-documents, here-strings or `echo ...`/`printf ...` piped into a
+shell. Values that wrapper options take (`xargs -a`, `time -o`, `sudo -p`) are
+checked like any argument. A wrapper option the guard does not know, anything
+else piped into a shell, and `echo`/`printf` text with backslash escapes or
+`%` directives piped into a shell or interpreter are refused. A quoted
+here-document (`<<'EOF'`) for any other command is inert text, so
+`git commit -F - <<'EOF'` and `gh pr create --body-file - <<'EOF'` may mention
+anything; an unquoted one has its `$(...)` and secret-looking variables checked,
+and one for `python3`, `node` and similar may not name a `.env` file even in a
+string. To edit text that mentions one, use the Edit tool or `apply_patch`.
 
 Throwaway Compose projects with their own `-p` name, test containers,
 `scripts/test-db.sh`, `--force-with-lease` on feature branches, `gh pr` and
