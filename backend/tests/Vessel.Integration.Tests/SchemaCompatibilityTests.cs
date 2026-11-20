@@ -52,7 +52,13 @@ public sealed class SchemaCompatibilityTests
         var check = await CheckAsync(journal, identity);
         Assert.Equal(SchemaState.Behind, check.State);
         Assert.Equal("journal", check.Schema);
-        Assert.Equal(["20261117102251_UnrecognizedRowOmissions"], check.Migrations);
+        // Every migration this image knows after the one applied; later migrations join the list on their own.
+        await using (var db = journal.Context(Guid.NewGuid()))
+        {
+            var later = db.Database.GetMigrations().Where(id => string.CompareOrdinal(id, EarlierJournal) > 0).ToList();
+            Assert.Equal("20261117102251_UnrecognizedRowOmissions", later[0]);
+            Assert.Equal(later, check.Migrations);
+        }
         var (status, body, logs) = await ReadinessAsync(journal, identity);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, status);
         Assert.Equal("""{"status":"unavailable"}""", body);
