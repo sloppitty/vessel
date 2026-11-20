@@ -256,6 +256,20 @@ class EndpointTests(unittest.TestCase):
         self.assertIn('/api/plays?view=closed&page=12&pageSize=25', paths)
         self.assertIn(f'/api/plays/search?q={benchmark.COMMON_WORD}&offset=50', paths)
         self.assertIn('/api/activity?page=61&pageSize=100', paths)
+        self.assertIn('/api/sizing', paths)
+
+    def test_editor_loads_cover_the_largest_drawings_and_a_play_without(self):
+        sizes = DatasetTests.gen.drawing_sizes
+        self.assertEqual(set(sizes), {p['Id'] for p in DatasetTests.gen.records('plays')})
+        plays = benchmark.drawn_plays(sizes)
+        self.assertEqual([('largest drawings', max(sizes, key=sizes.get)), ('no drawings', min(sizes, key=sizes.get))], plays)
+        self.assertEqual(2, sizes[plays[1][1]])
+        planned, _ = benchmark.plan_endpoints('a', 'o', operations=12000, closed=570, matches=120, plays=plays)
+        editor = [spec for spec in planned if spec[0].startswith('Play editor load')]
+        self.assertEqual([f'/api/plays/{plays[0][1]}', f'/api/plays/{plays[1][1]}'], [spec[1] for spec in editor])
+        check = editor[0][3]
+        self.assertTrue(check({'summary': {'id': plays[0][1]}}))
+        self.assertFalse(check({'summary': {'id': plays[1][1]}}))
 
     def test_deep_page_checks_reject_empty_and_clamped_pages(self):
         check, _ = benchmark.page_of('plays', 3)

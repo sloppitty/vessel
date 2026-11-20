@@ -345,6 +345,7 @@ class Generator:
         self.start = self.anchor - timedelta(days=round(365.25 * years))
         self.rows = Rows()
         self.counts, self.statuses = Counter(), Counter()
+        self.drawing_sizes = {}
         self.round_trips, self.orders = [], []
         self.first_closed = None
         self.owner = self.uuid()
@@ -1011,7 +1012,9 @@ class Generator:
             review.get('completion'), review.get('completed'), play['plan_revision'], play['version'], play['cancel'],
             play['created'], play['updated'], play['planned'], play['ended'])
         # Every Play has a drawings row, as after the PlayDrawingsTable migration (issue #110).
-        self.rows.add('play_drawings', self.owner, play['id'], drawings(play, a.venue) if drawn else {})
+        document = drawings(play, a.venue) if drawn else {}
+        self.drawing_sizes[play['id']] = len(json.dumps(document, separators=(',', ':')))
+        self.rows.add('play_drawings', self.owner, play['id'], document)
         for number, status, plan, reason, at, preflight, snapshot in play['revisions']:
             self.rows.add('play_plan_revisions', self.uuid(), self.owner, play['id'], number, status, plan, reason, at,
                           preflight, snapshot)
@@ -1365,7 +1368,12 @@ def deep_page(total, size):
     return pages // 2 + 1 if pages >= 2 else None
 
 
-def plan_endpoints(account, operation, operations, closed, matches):
+def drawn_plays(sizes):
+    """The Plays whose editor load is measured: the largest drawings document and one without drawings."""
+    return [('largest drawings', max(sizes, key=sizes.get)), ('no drawings', min(sizes, key=sizes.get))]
+
+
+def plan_endpoints(account, operation, operations, closed, matches, plays=()):
     """The measured reads as (name, path, cache scope or None, check, expectation), and the skipped scenarios.
     Deep pages come from the counts the API reported; a scenario the dataset cannot populate is skipped, never faked.
     The cache scope names the Activity facts aggregate a read goes through: every enabled account, or one account."""
@@ -1397,6 +1405,11 @@ def plan_endpoints(account, operation, operations, closed, matches):
         skipped.append(f'Plays Closed tab deep page: {closed} Closed Plays fit on one page of {PLAYS_PAGE}')
     add('Plays, tab counts', '/api/plays/counts', None, positive('all'))
     add('Plays, title and instrument search', '/api/plays?view=all&q=BTC', None, nonempty('plays'))
+    for label, play in plays:
+        add(f'Play editor load, {label}', f'/api/plays/{play}', None,
+            (lambda body, play=play: body.get('summary', {}).get('id') == play, 'the requested Play'))
+    add('Sizing', '/api/sizing', None,
+        (lambda body: isinstance(body.get('record'), dict) and isinstance(body.get('limits'), dict), 'a sizing record'))
     add('Overview', '/api/overview', None, nonempty('accounts'))
     add('Overview summary by portfolio, all', '/api/overview/summary?groupBy=portfolio&period=all', 'all', nonempty('rows'))
     add('Overview summary by account, 30 days', '/api/overview/summary?groupBy=account&period=30', 'all', nonempty('rows'))
@@ -2061,7 +2074,8 @@ def main(argv=None):
             raise RuntimeError(f'The Plays counts show {closed} Closed Plays; the dataset has {generator.statuses["Closed"]}.')
         status, _, _, _, body = client.get(f'/api/plays/search?q={COMMON_WORD}')
         matches = json.loads(body)['total'] if status == 200 else 0
-        planned, skipped = plan_endpoints(operation['accountId'], operation['id'], activity['operations'], closed, matches)
+        planned, skipped = plan_endpoints(operation['accountId'], operation['id'], activity['operations'], closed, matches,
+                                          drawn_plays(generator.drawing_sizes))
         endpoints = [Endpoint(*spec) for spec in planned]
         enabled = [a.id for a in generator.accounts if a.enabled]
         charges = {'all': generator.cache_charge(enabled), 'account': generator.cache_charge([operation['accountId']])}
