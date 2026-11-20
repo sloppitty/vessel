@@ -137,6 +137,8 @@ EVIDENCE_NOTES = ['Hourly chart at the entry with the reclaimed level marked.', 
                   'Daily structure: higher lows since the range low.', '']
 DRAWING_KINDS = ['trend-line', 'horizontal-line', 'zone', 'fibonacci', 'long-position', 'text']
 DRAWING_COLORS = ['#8fb8ff', '#e9edf2', '#edd49e', '#f5a97f', '#a9d6b6']
+# The chart keeps note text up to 500 characters; the server keeps 200 drawings per instrument and 1,000,000 characters.
+DRAWING_LIMITS = {'text': 500, 'per_instrument': 200, 'instruments': 100, 'document': 1_000_000}
 RULES = [('the first target fills', 'move the stop to break-even and trail the rest'),
          ('two losses in a row', 'halve the next position size'),
          ('funding is above 0.05 % per hour', 'skip breakout longs until it resets')]
@@ -1251,31 +1253,46 @@ def generate(seed, years, scale, anchor):
 
 def drawings(play, venue):
     """Chart drawings at realistic sizes (issue #110): most drawn Plays keep a few lines on their instrument, some a busy
-    chart on two, a few approach the 1 MB limit. Shapes follow the chart's persisted drawing. A Play-local generator
-    keeps the rest of the seed unchanged."""
+    chart on two, a few approach the 1 MB limit with full charts on every market. Shapes pass the chart's isChartDrawing
+    (frontend/src/components/chart/drawings.ts) and stay within the server's bounds, so the editor keeps all of them.
+    A Play-local generator keeps the rest of the seed unchanged."""
     rng = random.Random(play['id'])
     roll = rng.random()
-    instruments, count, text = ((1, rng.choice((2, 4, 8, 16)), 40) if roll < 0.8 else
-                                (2, rng.randrange(40, 120), 80) if roll < 0.97 else (5, 200, 4500))
     keys = [f'{venue}:{play["contract"]}'] + [f'{v}:{c}' for v, markets in MARKETS.items() for c in markets
                                                if (v, c) != (venue, play['contract'])]
+    instruments, count, text = ((1, rng.choice((2, 4, 8, 16)), 40) if roll < 0.8 else
+                                (2, rng.randrange(40, 120), 80) if roll < 0.97 else
+                                (len(keys), DRAWING_LIMITS['per_instrument'], DRAWING_LIMITS['text']))
     price = float(play['plan']['entries'][0]['price'] or ASSETS.get(play['contract'], (D(1),))[0])
     start = 1_700_000_000_000 + rng.randrange(0, 900) * 86_400_000
 
+    def point(time=None, low=0.85, high=1.15):
+        return {'time': time or start + rng.randrange(0, 60 * 86_400_000), 'price': round(price * rng.uniform(low, high), 6)}
+
     def drawing():
         kind = rng.choice(DRAWING_KINDS)
-        points = [{'time': start + rng.randrange(0, 60 * 86_400_000), 'price': round(price * rng.uniform(0.85, 1.15), 6)}
-                  for _ in range(1 if kind in ('horizontal-line', 'text') else 2)]
+        if kind == 'long-position':
+            # Entry, target corner and stop corner; the corners share the box's end time (sidedPositionPoints).
+            entry = point()
+            distance = entry['price'] * rng.uniform(0.01, 0.1)
+            end = entry['time'] + rng.randrange(1, 14 * 86_400_000)
+            points = [entry, {'time': end, 'price': round(entry['price'] + distance, 6)},
+                      {'time': end, 'price': round(entry['price'] - distance, 6)}]
+        else:
+            points = [point() for _ in range(1 if kind in ('horizontal-line', 'text') else 2)]
         shape = {'id': str(uuid.UUID(int=rng.getrandbits(128), version=4)), 'schemaVersion': 1, 'kind': kind,
                  'points': points, 'style': {'color': rng.choice(DRAWING_COLORS), 'line': 'dashed', 'width': 2}}
         if kind == 'text':
-            shape['text'] = ('Level held twice; watch the reaction. ' * 120)[:rng.randrange(text // 2, text + 1)]
+            shape['text'] = ('Level held twice; watch the reaction. ' * 20)[:rng.randrange(text // 2, text + 1)]
         return shape
 
     result = {key: [drawing() for _ in range(count)] for key in keys[:instruments]}
-    # The server refuses drawings over 1,000,000 characters.
-    while len(json.dumps(result, separators=(',', ':'))) > 990_000:
-        result[keys[0]].pop()
+    # Trim from the last instrument until the document fits under the server's character limit.
+    while len(json.dumps(result, separators=(',', ':'))) > DRAWING_LIMITS['document'] - 10_000:
+        last = next(reversed(result))
+        result[last].pop()
+        if not result[last]:
+            del result[last]
     return result
 
 

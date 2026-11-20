@@ -4,7 +4,10 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import importlib.util
+import json
+import math
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -22,6 +25,23 @@ ANCHOR = datetime(2026, 10, 23, 12, tzinfo=timezone.utc)
 
 def small(seed=7, years=2, scale=0.05):
     return benchmark.generate(seed, years, scale, ANCHOR)
+
+
+# Mirrors isChartDrawing in frontend/src/components/chart/drawings.ts: the chart drops anything that fails it.
+POINT_COUNT = {'trend-line': 2, 'horizontal-line': 1, 'vertical-line': 1, 'zone': 2, 'date-range': 2, 'price-range': 2,
+               'fibonacci': 2, 'long-position': 3, 'short-position': 3, 'position': 3, 'text': 1}
+
+
+def chart_drawing(d):
+    style = d.get('style', {})
+    return (isinstance(d.get('id'), str) and d.get('schemaVersion') == 1 and d.get('kind') in POINT_COUNT and
+            isinstance(d.get('points'), list) and len(d['points']) == POINT_COUNT[d['kind']] and
+            all(isinstance(p.get('time'), (int, float)) and isinstance(p.get('price'), (int, float)) and p['price'] > 0
+                and math.isfinite(p['time']) and math.isfinite(p['price']) for p in d['points']) and
+            ('text' not in d or isinstance(d['text'], str) and len(d['text']) <= 500) and
+            ('locked' not in d or isinstance(d['locked'], bool)) and isinstance(style, dict) and
+            ('color' not in style or re.fullmatch(r'#[\da-fA-F]{6}', style['color']) is not None) and
+            style.get('line', 'solid') in ('solid', 'dashed', 'dotted') and style.get('width', 1) in (1, 2, 3))
 
 
 class DatasetTests(unittest.TestCase):
@@ -156,6 +176,29 @@ class DatasetTests(unittest.TestCase):
         self.assertEqual(sizes[:20], [len(benchmark.copy_value(benchmark.drawings(play, 'hyperliquid'))) for play in plays[:20]])
         self.assertTrue(any(size > 500_000 for size in sizes))
         self.assertLess(max(sizes), 1_000_000)
+
+    def test_drawings_pass_the_chart_and_server_checks(self):
+        plays = [{'id': str(i), 'contract': 'ETH', 'plan': {'entries': [{'price': '3100'}]}} for i in range(120)]
+        documents = [benchmark.drawings(play, 'lighter') for play in plays]
+        kinds = Counter()
+        for document in documents:
+            self.assertLessEqual(len(document), 100)
+            self.assertLessEqual(len(json.dumps(document, separators=(',', ':'))), 1_000_000)
+            for key, items in document.items():
+                self.assertTrue(0 < len(key) <= 200, key)
+                self.assertLessEqual(len(items), 200)
+                for drawing in items:
+                    self.assertTrue(chart_drawing(drawing), drawing)
+                    kinds[drawing['kind']] += 1
+        self.assertEqual(set(benchmark.DRAWING_KINDS), set(kinds))
+        long = next(d for doc in documents for items in doc.values() for d in items if d['kind'] == 'long-position')
+        entry, target, stop = long['points']
+        self.assertEqual(target['time'], stop['time'])
+        self.assertGreater(target['price'], entry['price'])
+        self.assertLess(stop['price'], entry['price'])
+        # The mirror rejects what the chart drops: two-point positions and notes over 500 characters.
+        self.assertFalse(chart_drawing({**long, 'points': long['points'][:2]}))
+        self.assertFalse(chart_drawing({**long, 'kind': 'text', 'points': [entry], 'text': 'x' * 501}))
 
     def test_search_terms_exist(self):
         rare = [line for lines in self.gen.rows.lines.values() for line in lines if benchmark.RARE_WORD in line]
