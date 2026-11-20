@@ -133,6 +133,9 @@ public sealed class EventDispatcher(VesselDbContext db, UnitOfWork work, IServic
         Exception error, CancellationToken ct)
     {
         await LockRetentionSharedAsync(ct);
+        // The same designed waits as live delivery: the failed unit's rollback may have undone this owner's first-time
+        // initialization, which another dispatcher may now hold uncommitted. LockReceiptAsync restores the limit.
+        await VesselEventSql.ExecuteAsync(db, DatabaseLimits.LiftLockLimit, ct);
         if (await SubscriptionProgress.LockRegistrationAsync(db, subscription, logger, ct) != SubscriptionRegistration.Compatible)
             return DispatchOutcome.NotResponsible;
         if (await RetainedAsync(eventId, ct) is not { } retained || retained.Sequence <= retained.Floor)

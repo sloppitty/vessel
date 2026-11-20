@@ -184,6 +184,52 @@ public sealed partial class EventSubscriptionTests
         Assert.Equal(1, runtime.Subscriber.Calls(slow.Id));
     }
 
+    // Issue #106: a unit that fails to commit rolls back the owner's first-time initialization. Recording the failed
+    // attempt then waits, past the lock timeout, for another dispatcher's uncommitted initialization of the same
+    // subscription instead of losing the attempt to a lock timeout.
+    [VesselEventPostgresFact]
+    public async Task A_failed_commit_records_its_attempt_after_waiting_past_the_lock_timeout_for_another_initialization()
+    {
+        await using var runtime = await Runtime.CreateAsync(lockTimeout: TimeSpan.FromSeconds(1));
+        var contended = await runtime.RegisterNewAsync("contended-failure");
+        var failing = await runtime.AppendAsync(Draft("commit-fails"));
+        await using var other = new NpgsqlConnection(runtime.Database.ConnectionString);
+        await other.OpenAsync();
+        await using var otherTransaction = await other.BeginTransactionAsync();
+        var otherInitialized = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? otherDispatcher = null;
+        runtime.BeforeCommit = async () =>
+        {
+            // This dispatcher's initialization is uncommitted: the other one's waits for it, then holds its own.
+            otherDispatcher = Task.Run(async () =>
+            {
+                await using (var insert = new NpgsqlCommand("""
+                    INSERT INTO event_subscriptions(owner_id,name,module,filters,filter_fingerprint,responsible_from,
+                        low_water_mark,status,registered_at,updated_at)
+                    SELECT @owner,r.name,r.module,r.filters,r.filter_fingerprint,0,0,'active',now(),now()
+                    FROM event_subscription_registrations r WHERE r.name=@name
+                    ON CONFLICT DO NOTHING
+                    """, other, otherTransaction))
+                {
+                    insert.Parameters.AddWithValue("owner", runtime.Owner);
+                    insert.Parameters.AddWithValue("name", contended.Name);
+                    Assert.Equal(1, await insert.ExecuteNonQueryAsync());
+                }
+                otherInitialized.TrySetResult();
+                await Task.Delay(TimeSpan.FromMilliseconds(1800));
+                await otherTransaction.CommitAsync();
+            });
+            while (await runtime.ScalarAsync<bool>($"SELECT cardinality(pg_blocking_pids({other.ProcessID}))=0"))
+                await Task.Delay(20);
+            throw new InvalidOperationException("Synthetic commit failure.");
+        };
+        runtime.AfterRollback = () => otherInitialized.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(DispatchOutcome.RetryScheduled, (await runtime.DispatchAsync(contended, failing.Id)).Outcome);
+        await otherDispatcher!;
+        Assert.Equal(1, runtime.Subscriber.Calls(failing.Id));
+        Assert.Equal(("pending", 1), await runtime.ReceiptAsync(contended, failing.Id));
+    }
+
     // Round 2: the receipt stays locked while a failed attempt is rolled back and recorded, so a concurrent
     // dispatcher cannot run the handler again in between.
     [VesselEventPostgresFact]
@@ -670,7 +716,26 @@ public sealed partial class EventSubscriptionTests
                 sp.GetRequiredService<VesselDbContext>(), sp.GetRequiredService<IVesselEventSink>(), Owner, () => SavingConflict));
             services.AddKeyedScoped<IVesselEventSubscriber>(StorageSubscription, (sp, _) =>
                 new StorageSubscriber(sp.GetRequiredService<IUnitOfWork>(), StorageActive));
+            services.AddSingleton<IUnitOfWorkParticipant>(new CommitHook(this));
             provider = services.BuildServiceProvider();
+        }
+
+        /// <summary>Runs once before the next unit commits; throwing fails that commit.</summary>
+        public Func<Task>? BeforeCommit { get; set; }
+        /// <summary>Runs once after the next unit's transaction has rolled back.</summary>
+        public Func<Task>? AfterRollback { get; set; }
+
+        private sealed class CommitHook(Runtime runtime) : IUnitOfWorkParticipant
+        {
+            public Task BeforeCommitAsync(CancellationToken cancellationToken) => Take(runtime.BeforeCommit, () => runtime.BeforeCommit = null);
+            public Task AfterCommitAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+            public Task RollbackAsync(CancellationToken cancellationToken) => Take(runtime.AfterRollback, () => runtime.AfterRollback = null);
+
+            private static Task Take(Func<Task>? hook, Action clear)
+            {
+                clear();
+                return hook?.Invoke() ?? Task.CompletedTask;
+            }
         }
 
         public const string SavingSubscription = "saving";
