@@ -134,6 +134,10 @@
   exports no longer load them.
 - The shared read hook also covers Activity, the Plays list rows, the settings forms,
   history coverage, account snapshots and the paper, ledger and open-risk reads.
+- Activity's cache survives monitor checks that only refresh observations, cached pages are
+  not sorted again, account reads reuse the owner-wide aggregate, repeated strings are
+  stored once, and an aggregate too large to cache logs a warning. The benchmark also times
+  a Play's execution view.
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and
@@ -150,6 +154,8 @@ workers need these columns, so they must not start against an unmigrated databas
 - `20261120115353_PlayDrawingsTable` creates `play_drawings` and copies every Play's drawings
   unchanged. The old `plays."Drawings"` column stays, unread, until a later release drops it;
   rolling back copies the current drawings back into it.
+- `20261120143000_ActivityExecutionRevision` adds an execution revision that moves only when
+  retained history changes, so observation-only refreshes keep Activity's cache. It is additive.
 
 After upgrading: once every updated host is running, rebuild the Plays list projection in
 full, once. Rows that went stale before this release are not repaired by a plain rebuild,
