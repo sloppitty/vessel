@@ -200,6 +200,14 @@ class DatasetTests(unittest.TestCase):
         self.assertFalse(chart_drawing({**long, 'points': long['points'][:2]}))
         self.assertFalse(chart_drawing({**long, 'kind': 'text', 'points': [entry], 'text': 'x' * 501}))
 
+    def test_the_execution_play_is_a_closed_real_play_with_links_on_an_enabled_account(self):
+        play = self.gen.execution_play()
+        record = next(r for r in self.gen.records('plays') if r['Id'] == play)
+        self.assertEqual(('Closed', 'real'), (record['Status'], record['TradingMode']))
+        self.assertIn(record['AccountId'], {a.id for a in self.gen.accounts if a.enabled})
+        self.assertGreaterEqual(sum(1 for r in self.gen.records('play_order_links')
+                                    if r['PlayId'] == play and r['State'] == 'Linked'), 2)
+
     def test_search_terms_exist(self):
         rare = [line for lines in self.gen.rows.lines.values() for line in lines if benchmark.RARE_WORD in line]
         self.assertEqual(1, len(rare))
@@ -244,19 +252,22 @@ class EndpointTests(unittest.TestCase):
         self.assertIsNone(benchmark.deep_page(25, 25))
         self.assertEqual(2, benchmark.deep_page(26, 25))
         self.assertEqual(12, benchmark.deep_page(570, 25))
-        planned, skipped = benchmark.plan_endpoints('a', 'o', operations=267, closed=10, matches=7)
+        planned, skipped = benchmark.plan_endpoints('a', 'o', operations=267, closed=10, matches=7, execution='p')
         paths = [spec[1] for spec in planned]
         self.assertIn('/api/activity?page=2&pageSize=100', paths)
         self.assertFalse(any('view=closed' in p or 'offset=' in p for p in paths))
         self.assertEqual(2, len(skipped))
         self.assertTrue(any('10 Closed Plays' in s for s in skipped) and any('7 matches' in s for s in skipped))
-        planned, skipped = benchmark.plan_endpoints('a', 'o', operations=12000, closed=570, matches=120)
+        planned, skipped = benchmark.plan_endpoints('a', 'o', operations=12000, closed=570, matches=120, execution='p')
         paths = [spec[1] for spec in planned]
         self.assertEqual([], skipped)
+        self.assertIn('/api/sizing', paths)
+        self.assertIn(('/api/plays/p/execution', 'account'), [(spec[1], spec[2]) for spec in planned])
+        _, skipped = benchmark.plan_endpoints('a', 'o', operations=12000, closed=570, matches=120)
+        self.assertEqual(["A Play's execution view: no Closed Play with linked orders on an enabled account"], skipped)
         self.assertIn('/api/plays?view=closed&page=12&pageSize=25', paths)
         self.assertIn(f'/api/plays/search?q={benchmark.COMMON_WORD}&offset=50', paths)
         self.assertIn('/api/activity?page=61&pageSize=100', paths)
-        self.assertIn('/api/sizing', paths)
 
     def test_editor_loads_cover_the_largest_drawings_and_a_play_without(self):
         sizes = DatasetTests.gen.drawing_sizes
@@ -289,6 +300,21 @@ class EndpointTests(unittest.TestCase):
         self.assertTrue(benchmark.cache_status(capacity).startswith('unconfirmed'))
         self.assertTrue(benchmark.cache_status(capacity * 2).startswith('not cached'))
 
+    def test_cached_reads_are_timed_after_a_fill_write_and_after_an_observation_write(self):
+        calls = []
+
+        class Client:
+            def get(self, path):
+                calls.append(('get', path))
+                return 200, float(len(calls)), 2, 2, b'{"rows": [1]}'
+        cached = benchmark.Endpoint('cached', '/c', 'all', *benchmark.nonempty('rows'))
+        plain = benchmark.Endpoint('plain', '/p', None, *benchmark.nonempty('rows'))
+        benchmark.measure(Client(), [cached, plain], 0, 1, lambda: calls.append('write'), lambda _: None,
+                          lambda: calls.append('observe'))
+        self.assertEqual(['write', ('get', '/c'), 'observe', ('get', '/c'), ('get', '/c'), ('get', '/p')], calls)
+        self.assertEqual(([2.0], [4.0], [5.0]), (cached.miss, cached.observed, cached.steady))
+        self.assertEqual(([], [], [6.0]), (plain.miss, plain.observed, plain.steady))
+
     def test_failed_reads_are_recorded_and_never_timed(self):
         endpoint = benchmark.Endpoint('x', '/x', 'all', *benchmark.page_of('rows', 2))
         endpoint.record(200, 5.0, 10, 10, b'{"page": 1, "rows": [1]}', endpoint.steady, True)
@@ -317,7 +343,7 @@ class PercentileTests(unittest.TestCase):
 
 
 def arguments(**overrides):
-    values = dict(disposable=True, years=3, scale=1, rounds=20, warmup=5, out=None)
+    values = dict(disposable=True, years=3, scale=1, rounds=20, warmup=5, out=None, cache_capacity_mib=None)
     values.update(overrides)
     return argparse.Namespace(**values)
 
@@ -377,6 +403,17 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(run.origin, settings['Vessel__Identity__Origins__0'])
         self.assertTrue(run.origin.startswith('https://127.0.0.1:'))
         self.assertFalse(any('Token' in key or 'Bearer' in key for key in settings))
+        self.assertNotIn('Vessel__Activity__CacheCapacityBytes', settings)
+
+    def test_a_chosen_cache_capacity_reaches_the_api_and_is_bounded(self):
+        run = benchmark.Run(arguments(cache_capacity_mib=1024), log=lambda *_: None)
+        run.owner, run.pg_port, run.mq_port = '00000000-0000-4000-8000-000000000001', 1234, 5678
+        run.temp = Path('/tmp/isolated-benchmark-test')
+        self.assertEqual(str(2 ** 30), run.settings()['Vessel__Activity__CacheCapacityBytes'])
+        benchmark.check_arguments(arguments(cache_capacity_mib=1024), environ={})
+        with self.assertRaises(benchmark.Refused):
+            benchmark.check_arguments(arguments(cache_capacity_mib=-1), environ={})
+        self.assertTrue(benchmark.cache_status(445_521_718, 2 ** 30).startswith('hit'))
 
     def test_cookie_requires_secure_host_only_binding(self):
         good = [('Set-Cookie', '__Host-vessel-session=private; Path=/; Secure; HttpOnly; SameSite=Strict')]

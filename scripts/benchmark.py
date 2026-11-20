@@ -5,10 +5,11 @@ Starts its own throwaway PostgreSQL 18 and RabbitMQ containers, applies the migr
 journal, ensure-owner, provision-messaging, as deploy/migrate does), seeds one owner's deterministic synthetic journal with
 COPY, rebuilds the journal search projection with its offline command and starts the built API DLL in Release
 (Production, Wallet mode over loopback HTTPS, a synthetic operator session, no worker modules). It then times Activity, Review, the Plays
-list, Overview, open risk and journal search: warm-up rounds, then measured rounds interleaved across endpoints. A read
-through the Activity facts cache is made after a committed no-op revision write and repeated; the report infers whether
-the repeat can be a hit from the cache's capacity. Deep pages come from the counts, and scenarios the dataset cannot
-populate are skipped and named. Prints a Markdown report, then stops the API and removes every container carrying the
+list, Sizing, a Play's execution view, Overview, open risk and journal search: warm-up rounds, then measured rounds
+interleaved across endpoints. A read through the Activity facts cache is made after a committed no-op write to a
+retained fill, then after a write that only moves a snapshot's observation time (as a monitor check does), and
+repeated; the report infers whether the repeat can be a hit from the cache's capacity. Deep pages come from the
+counts, and scenarios the dataset cannot populate are skipped and named. Prints a Markdown report, then stops the API and removes every container carrying the
 run's label and its temporary directory, after errors, Ctrl+C and SIGTERM too.
 
 Never reads .env, never uses a default connection string, never touches the owner's database and never runs in CI.
@@ -799,6 +800,14 @@ class Generator:
         play['revisions'].append((play['plan_revision'], status, plan, 'Moved the stop to break-even after the first push.',
                                   at, None, None))
 
+    def execution_play(self):
+        """A Closed real Play with linked orders on an enabled account, for its execution view (funding proof included)."""
+        enabled = {a.id for a in self.accounts if a.enabled}
+        linked = Counter(r['PlayId'] for r in self.records('play_order_links') if r['State'] == 'Linked')
+        plays = [p for p in self.records('plays') if p['Status'] == 'Closed' and p['TradingMode'] == 'real'
+                 and p['AccountId'] in enabled and linked[p['Id']] >= 2]
+        return max(plays, key=lambda p: (linked[p['Id']], p['Id']))['Id'] if plays else None
+
     def link(self, play, order, role, entry_id, level_id, at, state='Linked'):
         source = 'Automatic' if state == 'Suggested' or self.rng.random() < 0.8 else 'Owner'
         self.rows.add('play_order_links', self.uuid(), self.owner, play['id'], play['account'].id, order.id, role,
@@ -1239,10 +1248,19 @@ class Generator:
         288 bytes per execution and 16 per funding payment. Operation rows are approximated (OPERATION_ROW)."""
         ids = set(account_ids)
         charge = 4096 + 2 * 37 * len(ids)
+        shared = set()
         for table, columns in CACHE_STRINGS.items():
             for record in self.records(table):
                 if record['Id' if table == 'accounts' else 'AccountId'] in ids:
-                    charge += 768 + 2 * sum(len(record[c] or '') for c in columns)
+                    charge += 768
+                    for c in columns:
+                        text = record[c] or ''
+                        # Issue #107: strings the store shares are charged once per distinct value.
+                        if c in CACHE_SHARED.get(table, ()):
+                            if text in shared:
+                                continue
+                            shared.add(text)
+                        charge += 2 * len(text)
                     charge += {'imported_fills': 288, 'funding_payments': 16}.get(table, 0)
         linked = {r['ImportedOrderId'] for r in self.records('play_order_links') if r['State'] == 'Linked'}
         trips = [rt for rt in self.round_trips if rt.account.id in ids and not rt.omitted]
@@ -1373,10 +1391,11 @@ def drawn_plays(sizes):
     return [('largest drawings', max(sizes, key=sizes.get)), ('no drawings', min(sizes, key=sizes.get))]
 
 
-def plan_endpoints(account, operation, operations, closed, matches, plays=()):
+def plan_endpoints(account, operation, operations, closed, matches, plays=(), execution=None):
     """The measured reads as (name, path, cache scope or None, check, expectation), and the skipped scenarios.
     Deep pages come from the counts the API reported; a scenario the dataset cannot populate is skipped, never faked.
-    The cache scope names the Activity facts aggregate a read goes through: every enabled account, or one account."""
+    The cache scope names the Activity facts aggregate a read goes through: every enabled account, or one account.
+    `execution` is a Closed Play with linked orders whose execution view (with its funding proof) is timed."""
     planned, skipped = [], []
 
     def add(name, path, cache, check):
@@ -1410,6 +1429,10 @@ def plan_endpoints(account, operation, operations, closed, matches, plays=()):
             (lambda body, play=play: body.get('summary', {}).get('id') == play, 'the requested Play'))
     add('Sizing', '/api/sizing', None,
         (lambda body: isinstance(body.get('record'), dict) and isinstance(body.get('limits'), dict), 'a sizing record'))
+    if execution:
+        add("A Play's execution view", f'/api/plays/{execution}/execution', 'account', nonempty('links'))
+    else:
+        skipped.append("A Play's execution view: no Closed Play with linked orders on an enabled account")
     add('Overview', '/api/overview', None, nonempty('accounts'))
     add('Overview summary by portfolio, all', '/api/overview/summary?groupBy=portfolio&period=all', 'all', nonempty('rows'))
     add('Overview summary by account, 30 days', '/api/overview/summary?groupBy=account&period=30', 'all', nonempty('rows'))
@@ -1441,9 +1464,16 @@ CACHE_STRINGS = {
     'execution_omissions': ['ContractId', 'VenueContractId'],
     'imported_forced_events': ['SourceId', 'Kind', 'ContractId', 'VenueContractId', 'Side', 'OrderId', 'Exclusion'],
 }
+# The low-cardinality strings ActivityStore.Share keeps one copy of; the cache charges each distinct value once.
+CACHE_SHARED = {
+    'imported_fills': {'ContractId', 'VenueContractId', 'Side', 'Direction', 'PositionEffect', 'FeeToken', 'FeeBasis',
+                       'PnlBasis'},
+    'funding_payments': {'ContractId', 'VenueContractId', 'Asset'},
+    'account_leverage_observations': {'ContractId', 'VenueContractId'},
+}
 # An ActivityOperationDto row: 768 bytes plus about 250 characters of identity, quantity, price and P&L strings.
 OPERATION_ROW = 1300
-# The cache's default capacity (Vessel:Activity:CacheCapacityBytes); the run never changes it.
+# The cache's default capacity (Vessel:Activity:CacheCapacityBytes); --cache-capacity-mib overrides it for a run.
 CACHE_CAPACITY = 256 * 1024 * 1024
 
 
@@ -1495,7 +1525,7 @@ class Endpoint:
     def __init__(self, name, path, cache, check, expectation):
         self.name, self.path, self.cache, self.check, self.expectation = name, path, cache, check, expectation
         self.cached = cache is not None
-        self.steady, self.miss = [], []
+        self.steady, self.miss, self.observed = [], [], []
         self.wire = self.size = 0
         self.failures = []
 
@@ -1516,10 +1546,11 @@ class Endpoint:
             bucket.append(elapsed)
 
 
-def measure(client, endpoints, warmup, rounds, write, progress=print):
+def measure(client, endpoints, warmup, rounds, write, progress=print, observe=None):
     """Interleaved rounds: every round visits every endpoint, in an order rotated by one per round. A read through the
-    Activity facts cache is made after a committed no-op revision write (always a miss) and repeated at once; the repeat
-    is a hit only when the aggregate fits the cache (see cache_status)."""
+    Activity facts cache is made after a committed no-op write to a retained fill (always a recomputation), then, when
+    `observe` is given, after a write that only moves a snapshot's observation time, as a monitor check does (issue
+    #107), and repeated at once; the repeat is a hit only when the aggregate fits the cache (see cache_status)."""
     for number in range(warmup + rounds):
         measured = number >= warmup
         shift = number % len(endpoints)
@@ -1527,6 +1558,9 @@ def measure(client, endpoints, warmup, rounds, write, progress=print):
             if endpoint.cached:
                 write()
                 endpoint.record(*client.get(endpoint.path), endpoint.miss, measured)
+                if observe:
+                    observe()
+                    endpoint.record(*client.get(endpoint.path), endpoint.observed, measured)
             endpoint.record(*client.get(endpoint.path), endpoint.steady, measured)
         progress(f'  round {number + 1}/{warmup + rounds} ({"measured" if measured else "warm-up"})')
 
@@ -1549,6 +1583,8 @@ def check_arguments(args, environ=None):
         raise Refused('Refusing to run under CI: the benchmark is a manual measurement on a chosen host.')
     if not 0 < args.years <= 10 or not 0 < args.scale <= 20:
         raise Refused('Use --years in (0, 10] and --scale in (0, 20].')
+    if getattr(args, 'cache_capacity_mib', None) is not None and not 0 <= args.cache_capacity_mib <= 16384:
+        raise Refused('Use --cache-capacity-mib in [0, 16384].')
     if args.rounds < 1 or args.warmup < 0:
         raise Refused('Use at least one measured round and a non-negative number of warm-up rounds.')
 
@@ -1665,6 +1701,9 @@ class Run:
             'DOTNET_CLI_TELEMETRY_OPTOUT': '1',
             'DOTNET_NOLOGO': '1',
             'Logging__LogLevel__Default': 'Warning',
+            # Issue #107: a chosen Activity cache capacity, as an operator with memory to spare would set it.
+            **({'Vessel__Activity__CacheCapacityBytes': str(self.args.cache_capacity_mib * 2 ** 20)}
+               if self.args.cache_capacity_mib else {}),
         }
 
     def build(self):
@@ -1944,22 +1983,28 @@ def report(meta, counts, endpoints):
         f'{meta["activity"]["operations"]:,} operations, {meta["activity"]["closed"]:,} of them closed.',
         '',
         'Times are milliseconds from request to the last body byte on one keep-alive connection, gzip accepted. '
-        'Reads through the Activity facts cache are made once right after a committed no-op account update, which '
-        'advances the facts revision so the aggregate is computed again ("After write"), then repeated at once ("p50", '
-        '"p95"). The API exposes no cache diagnostics, so the Cache column infers whether that repeat is a hit: the '
-        'cache refuses an aggregate whose charge exceeds its 256 MiB default capacity, and the charge is estimated '
-        'from the generated rows by the cache\'s own rule. Above or near the capacity the repeat is recomputed or '
-        'unconfirmed, never called a hit. Other reads are not cached; their p50 and p95 are of every measured read.',
+        'Reads through the Activity facts cache are made once right after a committed no-op write to one retained '
+        'fill, which moves the facts revision so the aggregate is computed again ("After fill write"), then right after '
+        'a write that only moves one snapshot\'s observation time, as a monitor check that finds nothing new does '
+        '("After observation"), then repeated at once ("p50", "p95"). The API exposes no cache diagnostics, so the Cache '
+        'column infers whether that repeat is a hit: the cache refuses an aggregate whose charge exceeds its '
+        f'{meta.get("cache_capacity_mib", CACHE_CAPACITY // 2 ** 20)} MiB '
+        'default capacity, and the charge is estimated from the generated rows by the cache\'s own rule. Above or near '
+        'the capacity the repeat is recomputed or unconfirmed, never called a hit. Other reads are not cached; their '
+        'p50 and p95 are of every measured read.',
         '',
-        '| Endpoint | Request | p50 | p95 | After write p50 | After write p95 | Cache | Wire KiB | JSON KiB |',
-        '| --- | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: |',
+        '| Endpoint | Request | p50 | p95 | After fill write p50 | After fill write p95 | After observation p50 | '
+        'After observation p95 | Cache | Wire KiB | JSON KiB |',
+        '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: |',
     ]
     for e in endpoints:
-        steady, miss = summarize(e.steady), summarize(e.miss)
+        steady, miss, observed = summarize(e.steady), summarize(e.miss), summarize(e.observed)
         path = re.sub(r'accountId=[^&]+&operationId=[^&]+', 'accountId=…&operationId=…', e.path)
+        path = re.sub(r'/api/plays/[0-9a-f-]{36}/', '/api/plays/…/', path)
         cache = meta['cache'][e.cache]['status'] if e.cache else '–'
         lines.append(f'| {e.name} | `{path}` | {ms(steady and steady["p50"])} | {ms(steady and steady["p95"])} | '
-                     f'{ms(miss and miss["p50"])} | {ms(miss and miss["p95"])} | {cache} | {kib(e.wire)} | {kib(e.size)} |')
+                     f'{ms(miss and miss["p50"])} | {ms(miss and miss["p95"])} | {ms(observed and observed["p50"])} | '
+                     f'{ms(observed and observed["p95"])} | {cache} | {kib(e.wire)} | {kib(e.size)} |')
     if meta['skipped']:
         lines += ['', 'Skipped, because this dataset cannot populate them: ' + '; '.join(meta['skipped']) + '.']
     return '\n'.join(lines)
@@ -1983,6 +2028,8 @@ def arguments(argv=None):
     parser.add_argument('--min-available-mb', type=int, default=0,
                         help='wait until this much memory is available before building, migrating, seeding and '
                              'starting the API (default 0: no check)')
+    parser.add_argument('--cache-capacity-mib', type=int,
+                        help='the API\'s Activity cache capacity in MiB (default: its own default, 256)')
     parser.add_argument('--out', help='also write the timings (no journal data) as JSON to this file')
     return parser.parse_args(argv)
 
@@ -2056,11 +2103,17 @@ def main(argv=None):
         client = Client(port, run.tls_context, run.owner, run.sign_in(address))
         account = next(a for a in generator.accounts if a.enabled)
         revision_sql = f"SELECT revision FROM activity_facts_revisions WHERE owner_id = '{generator.owner}'"
-        noop = f'UPDATE accounts SET "Name" = "Name" WHERE "OwnerId" = \'{generator.owner}\' AND "Id" = \'{account.id}\''
-        before = run.psql(revision_sql, query=True).strip()
-        run.psql(noop)
-        if run.psql(revision_sql, query=True).strip() == before:
-            raise RuntimeError('The no-op account update did not advance the Activity facts revision.')
+        # Issue #107: a no-op write to one retained fill recomputes the aggregate; moving one snapshot's observation time
+        # is what a monitor check that finds nothing new writes.
+        fill = next(r['Id'] for r in generator.records('imported_fills') if r['AccountId'] == account.id)
+        noop = f'UPDATE imported_fills SET "Price" = "Price" WHERE "OwnerId" = \'{generator.owner}\' AND "Id" = \'{fill}\''
+        observe = (f'UPDATE account_snapshots SET "ObservedAtUtc" = "ObservedAtUtc" + interval \'1 second\' '
+                   f'WHERE "OwnerId" = \'{generator.owner}\' AND "AccountId" = \'{account.id}\'')
+        for name, write in (('no-op fill write', noop), ('snapshot observation write', observe)):
+            before = run.psql(revision_sql, query=True).strip()
+            run.psql(write)
+            if run.psql(revision_sql, query=True).strip() == before:
+                raise RuntimeError(f'The {name} did not advance the Activity facts revision.')
         status, _, _, _, body = client.get('/api/activity?status=closed&pageSize=100')
         page = json.loads(body) if status == 200 else {}
         operation = next((o for o in page.get('operations', []) if o['fillCount'] >= 3), None)
@@ -2075,13 +2128,15 @@ def main(argv=None):
         status, _, _, _, body = client.get(f'/api/plays/search?q={COMMON_WORD}')
         matches = json.loads(body)['total'] if status == 200 else 0
         planned, skipped = plan_endpoints(operation['accountId'], operation['id'], activity['operations'], closed, matches,
-                                          drawn_plays(generator.drawing_sizes))
+                                          drawn_plays(generator.drawing_sizes), generator.execution_play())
         endpoints = [Endpoint(*spec) for spec in planned]
         enabled = [a.id for a in generator.accounts if a.enabled]
+        capacity = args.cache_capacity_mib * 2 ** 20 if args.cache_capacity_mib else CACHE_CAPACITY
         charges = {'all': generator.cache_charge(enabled), 'account': generator.cache_charge([operation['accountId']])}
         clock = time.monotonic()
         print(f'Measuring {len(endpoints)} endpoints: {args.warmup} warm-up and {args.rounds} measured rounds…', flush=True)
-        measure(client, endpoints, args.warmup, args.rounds, lambda: run.psql(noop), lambda text: print(text, flush=True))
+        measure(client, endpoints, args.warmup, args.rounds, lambda: run.psql(noop), lambda text: print(text, flush=True),
+                lambda: run.psql(observe))
         phases['measure'] = time.monotonic() - clock
         client.close()
         failures = [f'{e.name}: {", ".join(sorted(set(e.failures)))}' for e in endpoints if e.failures]
@@ -2092,7 +2147,8 @@ def main(argv=None):
                 'warmup': args.warmup, 'rounds': args.rounds, 'host': host, 'postgres': f'PostgreSQL {postgres}',
                 'dotnet': subprocess.run(['dotnet', '--version'], capture_output=True, text=True).stdout.strip(),
                 'api_rss_mb': run.api_peak_rss(), 'postgres_memory': stats, 'phases': phases, 'activity': activity,
-                'skipped': skipped, 'cache': {scope: {'estimatedBytes': charge, 'status': cache_status(charge)}
+                'cache_capacity_mib': capacity // 2 ** 20,
+                'skipped': skipped, 'cache': {scope: {'estimatedBytes': charge, 'status': cache_status(charge, capacity)}
                                               for scope, charge in charges.items()}}
         print()
         print(report(meta, counts, endpoints))
@@ -2100,8 +2156,9 @@ def main(argv=None):
             Path(args.out).write_text(json.dumps({
                 'meta': meta, 'counts': counts,
                 'endpoints': [{'name': e.name, 'path': e.path, 'cacheScope': e.cache, 'wireBytes': e.wire, 'jsonBytes': e.size,
-                               'steady': summarize(e.steady), 'miss': summarize(e.miss), 'steadyMs': e.steady,
-                               'missMs': e.miss, 'failures': e.failures} for e in endpoints]}, indent=2) + '\n')
+                               'steady': summarize(e.steady), 'miss': summarize(e.miss), 'observed': summarize(e.observed),
+                               'steadyMs': e.steady, 'missMs': e.miss, 'observedMs': e.observed,
+                               'failures': e.failures} for e in endpoints]}, indent=2) + '\n')
     except KeyboardInterrupt:
         failures.append('interrupted')
     except Exception as error:  # noqa: BLE001  (reported, then everything is cleaned up)

@@ -31,6 +31,15 @@ internal sealed class ActivityProofIndex
             if (!key.IsNative && Positions.HasNativeIdentity(key.AccountId, key.Identity)) unresolved.Add((key.AccountId, key.Identity));
     }
 
+    private ActivityProofIndex(ActivityProofIndex source, ActivityPositions positions)
+    {
+        (partitions, operations, byOrder, byPlay, unresolved) = (source.partitions, source.operations, source.byOrder, source.byPlay, source.unresolved);
+        Positions = positions;
+    }
+
+    /// <summary>Issue #107: the same indexes for an aggregate rebased onto newer snapshots, which only the positions read.</summary>
+    public ActivityProofIndex WithPositions(ActivityPositions positions) => new(this, positions);
+
     /// <summary>The partition's retained fills, by time; null when it holds none.</summary>
     public PartitionFills? Partition(ActivityContractKey key) => partitions.GetValueOrDefault(key);
     public IEnumerable<ActivityOperationDto> Operations(ActivityContractKey key) => operations[key];

@@ -158,7 +158,8 @@ public sealed class ActivityCachePostgresTests
         await using var fresh = database.Context(owner);
         Assert.Equal(Json(ActivityService.Aggregate(await new ActivityStore(fresh).ReadAsync(null, default))), Json(after));
         Assert.Same(after, await Read(provider, owner));
-        Assert.Equal(2, reads.Count);
+        // #107: snapshot and sync-state writes are observations; the cached history is rebased onto them, not read again.
+        Assert.Equal(change is "snapshot-coverage" or "history-coverage" ? 1 : 2, reads.Count);
     }
 
     [PostgresFact]
@@ -267,7 +268,96 @@ public sealed class ActivityCachePostgresTests
         await Change(async db => (await db.Accounts.SingleAsync()).UpdateSettings("Renamed", null, true));
         await Change(async db => { db.Fills.RemoveRange(await db.Fills.ToListAsync()); db.FundingPayments.RemoveRange(await db.FundingPayments.ToListAsync()); db.FundingStates.RemoveRange(await db.FundingStates.ToListAsync()); db.Snapshots.RemoveRange(await db.Snapshots.ToListAsync()); db.Orders.RemoveRange(await db.Orders.ToListAsync()); db.Plays.RemoveRange(await db.Plays.ToListAsync()); });
         await Change(async db => db.Accounts.Remove(await db.Accounts.SingleAsync()));
-        Assert.Equal(23, reads.Count);
+        // #107: the seven observation writes (funding coverage, snapshot, position, wallet, sync state, rename and portfolio
+        // move) leave the execution revision alone: they are rebased onto the cached history, never read again.
+        Assert.Equal(16, reads.Count);
+    }
+
+    private static async Task Refresh(CoreDatabase database, Account account, int minutes, decimal? quantity = null, bool leverage = true)
+    {
+        var result = new FixtureReader().Result;
+        var snapshot = result.Snapshot with
+        {
+            ObservedAtUtc = result.Snapshot.ObservedAtUtc.AddMinutes(minutes),
+            // Values the journal stores exactly, so an unchanged position records no new leverage observation.
+            Positions = [result.Snapshot.Positions[0] with { SignedQuantity = quantity ?? -0.5m, EntryPrice = 60000m, Leverage = leverage ? 5 : null }]
+        };
+        await using var worker = database.Context(account.OwnerId);
+        var unit = TestUnitOfWork.For(worker); var store = new WorkspaceStore(worker, unit);
+        await unit.ExecuteAsync(() => store.WithAccountLockAsync(account.Id, async locked =>
+        { await store.SaveRefreshAsync(locked, result with { Snapshot = snapshot }, default); return true; }, default), default);
+    }
+
+    [PostgresFact]
+    public async Task A_monitor_check_that_only_moves_the_observation_time_neither_reads_nor_walks_the_history_again()
+    {
+        await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Fixture");
+        account.Configure(null, "0x" + new string('1', 40), null);
+        await using (var db = database.Context(owner)) { db.Accounts.Add(account); await db.SaveChangesAsync(); }
+        var reads = new Reads(); await using var provider = Provider(database, reads);
+        async Task<ActivitySummaries> Uncached()
+        {
+            await using var fresh = database.Context(owner);
+            return ActivityService.Aggregate(await new ActivityStore(fresh).ReadAsync(null, default));
+        }
+        // The first check imports the fill and records the position's leverage at its observation time.
+        await Refresh(database, account, 0);
+        await Read(provider, owner);
+        // The next check's snapshot passes that leverage observation, so it walks the cached history again, without a read.
+        await Refresh(database, account, 1);
+        var settled = await Read(provider, owner);
+        await Refresh(database, account, 2);
+        var next = await Read(provider, owner);
+        Assert.Equal(1, reads.Count);
+        Assert.Same(settled.Operations, next.Operations);
+        Assert.Same(settled.Coverage, next.Coverage);
+        Assert.Same(settled.Ordered, next.Ordered);
+        Assert.Equal(settled.Version, next.Version);
+        // Freshness is still an input: the newer snapshot and facts revision are the ones served.
+        Assert.True(next.Facts.Revision > settled.Facts.Revision);
+        await using (var observer = database.Context(owner)) Assert.Equal(await Revision(observer, owner), next.Facts.Revision);
+        Assert.Equal(new FixtureReader().Result.Snapshot.ObservedAtUtc.AddMinutes(2), Assert.Single(next.Facts.Snapshots).ObservedAtUtc);
+        Assert.Equal(Json(await Uncached()), Json(next));
+        Assert.Same(next, await Read(provider, owner));
+
+        // A check whose position changed walks the cached history again, still without reading it. (Its leverage is not
+        // reported, so it records no leverage observation, which is retained history and would be read.)
+        await Refresh(database, account, 3, quantity: -0.25m, leverage: false);
+        var changed = await Read(provider, owner);
+        Assert.Equal(1, reads.Count);
+        Assert.NotSame(next.Operations, changed.Operations);
+        Assert.Equal(Json(await Uncached()), Json(changed));
+    }
+
+    [PostgresFact]
+    public async Task An_account_read_is_narrowed_from_the_cached_owner_wide_aggregate()
+    {
+        await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
+        var first = new Account(Guid.NewGuid(), owner, "manual", "First");
+        var second = new Account(Guid.NewGuid(), owner, "manual", "Second");
+        await using (var db = database.Context(owner))
+        {
+            db.Accounts.AddRange(first, second);
+            db.Fills.AddRange(Enumerable.Range(0, 6).Select(n => Fill(first, n)).Concat(Enumerable.Range(0, 3).Select(n => Fill(second, n))));
+            db.Snapshots.Add(new() { OwnerId = owner, AccountId = first.Id, ObservedAtUtc = At.AddDays(1), ValueScope = "fixture" });
+            await db.SaveChangesAsync();
+        }
+        var reads = new Reads(); await using var provider = Provider(database, reads);
+        await Read(provider, owner, ids: new HashSet<Guid> { first.Id, second.Id });
+        var narrowed = await Read(provider, owner, first.Id);
+        Assert.Equal(1, reads.Count);
+        Assert.Same(narrowed, await Read(provider, owner, first.Id));
+        await using var fresh = database.Context(owner);
+        var expected = ActivityService.Aggregate(await new ActivityStore(fresh).ReadAsync(first.Id, default), first.Id);
+        Assert.Equal(expected.Version, narrowed.Version);
+        Assert.Equal(Json(expected.Ordered), Json(narrowed.Ordered));
+        Assert.Equal(Json(expected.Coverage), Json(narrowed.Coverage));
+        Assert.All(narrowed.Facts.Fills, f => Assert.Equal(first.Id, f.AccountId));
+        // The cached facts keep one copy of each repeated market, side and fee string.
+        Assert.Same(narrowed.Facts.Fills[0].ContractId, narrowed.Facts.Fills[1].ContractId);
+        Assert.Same(narrowed.Facts.Fills[0].FeeToken, narrowed.Facts.Fills[^1].FeeToken);
+        Assert.Equal(expected.Facts.Revision, narrowed.Facts.Revision);
     }
 
     [PostgresFact]

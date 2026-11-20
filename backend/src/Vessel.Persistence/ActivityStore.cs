@@ -4,6 +4,7 @@ using Vessel.Application.Activity;
 using Vessel.Application.Common;
 using Vessel.Domain.Plays;
 using Vessel.Domain.Common;
+using Vessel.Domain.Workspace;
 
 namespace Vessel.Persistence;
 
@@ -19,15 +20,8 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         // A shared aggregate reader supplies its own repeatable-read snapshot.
         await using var transaction = db.Database.CurrentTransaction is null
             ? await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct) : null;
-        if (accountId is { } id && !await db.Accounts.AnyAsync(a => a.Id == id && a.TradingMode == tradingMode, ct))
-            throw new ProblemException(404, "Account not found.");
-        var query = db.Accounts.Where(a => a.TradingMode == tradingMode && a.IsEnabled && (accountId == null || a.Id == accountId));
-        if (accountIds is not null)
-        {
-            var selectedIds = accountIds.ToArray();
-            query = query.Where(a => selectedIds.Contains(a.Id));
-        }
-        var accounts = await query.AsNoTracking().ToListAsync(ct);
+        var observed = await ObservationsAsync(db, accountId, tradingMode, ct, accountIds);
+        var accounts = observed.Accounts;
         var ids = accounts.Select(a => a.Id).ToArray();
         if (tradingMode == TradingMode.Paper)
         {
@@ -38,10 +32,9 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
             return new(accounts, [], [], new Dictionary<Guid, Guid>()) { PaperPlays = paper };
         }
         var fills = await db.Fills.Where(f => ids.Contains(f.AccountId)).AsNoTracking().ToListAsync(ct);
-        var snapshots = await db.Snapshots.Where(s => ids.Contains(s.AccountId)).Include(s => s.Positions).AsNoTracking().ToListAsync(ct);
         var funding = await db.FundingPayments.Where(p => ids.Contains(p.AccountId)).AsNoTracking().ToListAsync(ct);
-        var fundingStates = await db.FundingStates.Where(s => ids.Contains(s.AccountId)).AsNoTracking().ToListAsync(ct);
         var leverage = await db.LeverageObservations.Where(o => ids.Contains(o.AccountId)).AsNoTracking().ToListAsync(ct);
+        Share(fills, funding, leverage);
         // Phase 2, item 7b: what imports left out, so Activity never anchors or walks across it.
         var omissions = await OmissionsAsync(db, ids, ct);
         // Only the forced events Activity shows are read; the rest are counted in SQL when there are more (Sol round 1).
@@ -64,12 +57,64 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         var playIds = fills.Where(f => byOrder.ContainsKey(OrderKey.Of(f)))
             .ToDictionary(f => f.Id, f => byOrder[OrderKey.Of(f)]);
         if (transaction is not null) await transaction.CommitAsync(ct);
-        return new(accounts, fills, snapshots, playIds)
+        return new(accounts, fills, observed.Snapshots, playIds)
         {
-            FundingPayments = funding, FundingStates = fundingStates, LeverageObservations = leverage, Omissions = omissions,
+            FundingPayments = funding, FundingStates = observed.FundingStates, LeverageObservations = leverage, Omissions = omissions,
             ForcedEvents = forced, ForcedEventCounts = forcedCounts, Revision = revision
         };
     }
+
+    /// <summary>
+    /// Issue #107: the cached facts hold one copy of each low-cardinality string (markets, sides, venue wording, fee tokens
+    /// and bases) instead of one per row; <see cref="ActivitySummaryCache"/> charges these once. Values are unchanged.
+    /// </summary>
+    internal static void Share(List<ImportedFill> fills, List<FundingPayment> funding, List<LeverageObservation> leverage)
+    {
+        var pool = new Dictionary<string, string>(StringComparer.Ordinal);
+        string? One(string? text) => text is null ? null : pool.TryGetValue(text, out var shared) ? shared : pool[text] = text;
+        foreach (var f in fills)
+        {
+            f.ContractId = One(f.ContractId)!; f.VenueContractId = One(f.VenueContractId); f.Side = One(f.Side)!;
+            f.Direction = One(f.Direction)!; f.PositionEffect = One(f.PositionEffect)!; f.FeeToken = One(f.FeeToken)!;
+            f.FeeBasis = One(f.FeeBasis)!; f.PnlBasis = One(f.PnlBasis)!;
+        }
+        foreach (var p in funding) { p.ContractId = One(p.ContractId)!; p.VenueContractId = One(p.VenueContractId); p.Asset = One(p.Asset)!; }
+        foreach (var o in leverage) { o.ContractId = One(o.ContractId)!; o.VenueContractId = One(o.VenueContractId); }
+    }
+
+    /// <summary>
+    /// Issue #107: the scoped enabled accounts with their latest snapshots and funding coverage, as <see cref="ReadAsync(Guid?, string, CancellationToken, IReadOnlySet{Guid}?)"/>
+    /// reads them; a missing or foreign account is 404. Paper accounts have no snapshots or funding here.
+    /// </summary>
+    internal static async Task<ActivityObservations> ObservationsAsync(VesselDbContext db, Guid? accountId, string tradingMode,
+        CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
+    {
+        if (accountIds is { Count: 0 }) return new([], [], []);
+        if (accountId is { } id && !await db.Accounts.AnyAsync(a => a.Id == id && a.TradingMode == tradingMode, ct))
+            throw new ProblemException(404, "Account not found.");
+        var query = db.Accounts.Where(a => a.TradingMode == tradingMode && a.IsEnabled && (accountId == null || a.Id == accountId));
+        if (accountIds is not null)
+        {
+            var selectedIds = accountIds.ToArray();
+            query = query.Where(a => selectedIds.Contains(a.Id));
+        }
+        var accounts = await query.AsNoTracking().ToListAsync(ct);
+        if (tradingMode == TradingMode.Paper) return new(accounts, [], []);
+        var ids = accounts.Select(a => a.Id).ToArray();
+        var snapshots = await db.Snapshots.Where(s => ids.Contains(s.AccountId)).Include(s => s.Positions).AsNoTracking().ToListAsync(ct);
+        var fundingStates = await db.FundingStates.Where(s => ids.Contains(s.AccountId)).AsNoTracking().ToListAsync(ct);
+        return new(accounts, snapshots, fundingStates);
+    }
+
+    /// <summary>
+    /// Issue #107: the owner's facts revision and execution revision, read together (0 before any fact). Equal execution
+    /// revisions mean equal retained history, account scope and links; only observations can differ between them.
+    /// </summary>
+    internal static Task<ActivityRevisions> RevisionsAsync(VesselDbContext db, Guid ownerId, CancellationToken ct) =>
+        db.Database.SqlQuery<ActivityRevisions>($"""
+            SELECT COALESCE(r.revision, 0) AS "Revision", COALESCE(r.execution_revision, 0) AS "ExecutionRevision"
+            FROM (SELECT 1) one LEFT JOIN activity_facts_revisions r ON r.owner_id = {ownerId}
+            """).SingleAsync(ct);
 
     /// <summary>
     /// The owner's Activity facts revision (0 before any fact): the cached aggregate's key, and since Phase 2, item 9b the
@@ -96,4 +141,10 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         return await db.Plays.Where(p => ids.Contains(p.Id)).Select(p => new { p.Id, p.Title })
             .ToDictionaryAsync(p => p.Id, p => p.Title, ct);
     }
+}
+
+internal sealed class ActivityRevisions
+{
+    public long Revision { get; set; }
+    public long ExecutionRevision { get; set; }
 }
