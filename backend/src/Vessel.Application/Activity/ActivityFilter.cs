@@ -9,12 +9,12 @@ namespace Vessel.Application.Activity;
 /// count back from the response's <c>asOfUtc</c>; custom days are inclusive UTC calendar days. <c>partial</c> is an
 /// open operation that has already exited some quantity, and <c>open</c> still includes it.
 /// </summary>
-internal sealed record ActivityFilter(Guid? Account, string? Portfolio, string? Contract, string? Direction, string? Status,
+public sealed record ActivityFilter(Guid? Account, string? Portfolio, string? Contract, string? Direction, string? Status,
     DateTimeOffset? From, DateTimeOffset? To)
 {
     public const int MaxContractLength = 128;
 
-    public static ActivityFilter Parse(ActivityQuery query, DateTimeOffset asOf)
+    internal static ActivityFilter Parse(ActivityQuery query, DateTimeOffset asOf)
     {
         var account = Value(query.Account) is { } accountText ? Id(accountText, "Choose a valid account filter.") : (Guid?)null;
         var portfolio = Value(query.Portfolio) is { } portfolioText
@@ -45,7 +45,12 @@ internal sealed record ActivityFilter(Guid? Account, string? Portfolio, string? 
         return new(account, portfolio, contract, direction, status, from, to);
     }
 
-    public bool Matches(ActivityOperationDto operation, Guid? portfolioId) =>
+    /// <summary>Issue #108: whether an account passes the account and portfolio filters, which the read model applies as an account set.</summary>
+    public bool MatchesAccount(Guid accountId, Guid? portfolioId) =>
+        (Account is null || accountId == Account) &&
+        (Portfolio is null || (Portfolio == "unassigned" ? portfolioId is null : portfolioId?.ToString("D") == Portfolio));
+
+    internal bool Matches(ActivityOperationDto operation, Guid? portfolioId) =>
         (Account is null || operation.AccountId == Account) &&
         (Portfolio is null || (Portfolio == "unassigned" ? portfolioId is null : portfolioId?.ToString("D") == Portfolio)) &&
         (Contract is null || operation.ContractId == Contract) &&
@@ -54,7 +59,7 @@ internal sealed record ActivityFilter(Guid? Account, string? Portfolio, string? 
         (From is null || operation.LastOccurredAtUtc >= From) && (To is null || operation.LastOccurredAtUtc < To);
 
     /// <summary>An open operation with positive exited and remaining quantities: display progress, not an API status.</summary>
-    public static bool IsPartial(ActivityOperationDto operation) => operation.Status == "open" &&
+    internal static bool IsPartial(ActivityOperationDto operation) => operation.Status == "open" &&
         Positive(operation.TotalExitedQuantity) && Positive(operation.OpenQuantity);
 
     private static bool Positive(string? value) => value is not null && ExactAmount.Parse(value).Units.Sign > 0;

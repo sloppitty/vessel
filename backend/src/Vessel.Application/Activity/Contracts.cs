@@ -59,6 +59,25 @@ public interface IActivitySummaryReader
     Task<ActivitySummaries> ReadAsync(Guid? accountId, TradingMode tradingMode, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null);
 }
 
+/// <summary>
+/// Issue #108: the Activity read model. It serves a real page from per-account operation rows built by the same aggregate,
+/// refreshing the accounts whose retained history or observations changed first. Null means it could not settle on current
+/// rows (writes kept racing), and the caller falls back to the in-memory aggregate.
+/// </summary>
+public interface IActivityPageReader
+{
+    Task<ActivityProjectedPage?> PageAsync(IReadOnlySet<Guid> accountIds, ActivityFilter filter, int page, int pageSize, CancellationToken ct);
+}
+
+/// <summary>
+/// Issue #108: one read model page, as <see cref="ActivityService.PageAsync"/> builds it from the aggregate: the clamped page,
+/// counts, version, facets and coverage, every unattributed funding payment, and the observed accounts and snapshots the
+/// unrealized marks read. <see cref="Rows"/> carry only what the list and the marks read, never constituent executions.
+/// </summary>
+public sealed record ActivityProjectedPage(IReadOnlyList<ActivityOperationDto> Rows, int Page, int TotalCount, int ScopeCount,
+    int RetainedFillCount, string Version, ActivityFacetsDto Facets, IReadOnlyList<ActivityCoverageDto> Coverage,
+    IReadOnlyList<OperationFundingDto> UnassignedFunding, ActivityFacts Observed);
+
 public interface IActivityStore
 {
     // All retained facts, not the overview's most recent 100; owner-scoped and enabled accounts only.

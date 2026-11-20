@@ -34,16 +34,7 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
         Share(fills, funding, leverage);
         // Phase 2, item 7b: what imports left out, so Activity never anchors or walks across it.
         var omissions = await OmissionsAsync(db, ids, ct);
-        // Only the forced events Activity shows are read; the rest are counted in SQL when there are more (Sol round 1).
-        var forced = await db.ForcedEvents.Where(e => ids.Contains(e.AccountId)).OrderByDescending(e => e.OccurredAtUtc).ThenBy(e => e.Id)
-            .Take(ActivityService.MaxForcedEventRows + 1).AsNoTracking().ToListAsync(ct);
-        Dictionary<Guid, int>? forcedCounts = null;
-        if (forced.Count > ActivityService.MaxForcedEventRows)
-        {
-            forced.RemoveAt(forced.Count - 1);
-            forcedCounts = await db.ForcedEvents.Where(e => ids.Contains(e.AccountId)).GroupBy(e => e.AccountId)
-                .Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(g => g.Key, g => g.Count, ct);
-        }
+        var (forced, forcedCounts) = await ForcedAsync(db, ids, ct);
         // Phase 2, item 9b: the revision these facts belong to, read in their snapshot, so a later read can be fenced to it.
         var revision = await RevisionAsync(db, db.CurrentOwnerId, ct);
         var links = await db.LinkedOrders(db.OrderLinks.Where(l => ids.Contains(l.AccountId) && l.State == OrderLinkState.Linked &&
@@ -59,6 +50,25 @@ public sealed class ActivityStore(VesselDbContext db) : IActivityStore
             FundingPayments = funding, FundingStates = observed.FundingStates, LeverageObservations = leverage, Omissions = omissions,
             ForcedEvents = forced, ForcedEventCounts = forcedCounts, Revision = revision
         };
+    }
+
+    /// <summary>
+    /// Only the forced events Activity shows are read; the rest are counted in SQL when there are more (Sol round 1 on 7b).
+    /// The counts are null when every retained one was read.
+    /// </summary>
+    internal static async Task<(List<ForcedEvent> Rows, Dictionary<Guid, int>? Counts)> ForcedAsync(VesselDbContext db, Guid[] ids,
+        CancellationToken ct)
+    {
+        var forced = await db.ForcedEvents.Where(e => ids.Contains(e.AccountId)).OrderByDescending(e => e.OccurredAtUtc).ThenBy(e => e.Id)
+            .Take(ActivityService.MaxForcedEventRows + 1).AsNoTracking().ToListAsync(ct);
+        Dictionary<Guid, int>? forcedCounts = null;
+        if (forced.Count > ActivityService.MaxForcedEventRows)
+        {
+            forced.RemoveAt(forced.Count - 1);
+            forcedCounts = await db.ForcedEvents.Where(e => ids.Contains(e.AccountId)).GroupBy(e => e.AccountId)
+                .Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(g => g.Key, g => g.Count, ct);
+        }
+        return (forced, forcedCounts);
     }
 
     /// <summary>

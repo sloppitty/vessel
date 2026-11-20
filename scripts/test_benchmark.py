@@ -404,6 +404,16 @@ class SafetyTests(unittest.TestCase):
         self.assertTrue(run.origin.startswith('https://127.0.0.1:'))
         self.assertFalse(any('Token' in key or 'Bearer' in key for key in settings))
         self.assertNotIn('Vessel__Activity__CacheCapacityBytes', settings)
+        self.assertEqual('Projection', settings['Vessel__Activity__ReadModel'])
+
+    def test_the_in_memory_activity_path_can_be_chosen(self):
+        run = benchmark.Run(arguments(activity_read_model='memory'), log=lambda *_: None)
+        run.owner, run.pg_port, run.mq_port = '00000000-0000-4000-8000-000000000001', 1234, 5678
+        run.temp = Path('/tmp/isolated-benchmark-test')
+        self.assertEqual('Memory', run.settings()['Vessel__Activity__ReadModel'])
+        self.assertEqual('memory', benchmark.arguments(['--disposable', '--activity-read-model', 'memory']).activity_read_model)
+        with mock.patch('sys.stderr'), self.assertRaises(SystemExit):
+            benchmark.arguments(['--disposable', '--activity-read-model', 'other'])
 
     def test_a_chosen_cache_capacity_reaches_the_api_and_is_bounded(self):
         run = benchmark.Run(arguments(cache_capacity_mib=1024), log=lambda *_: None)

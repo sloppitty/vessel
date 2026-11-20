@@ -15,7 +15,7 @@ using Vessel.Domain.Numerics;
 namespace Vessel.Application.Activity;
 
 public sealed class ActivityService(IActivityStore store, IWorkspaceStore workspace, TimeProvider time, IVenueRegistry? venues = null,
-    IActivitySummaryReader? summaries = null, MarketContextCache? marks = null)
+    IActivitySummaryReader? summaries = null, MarketContextCache? marks = null, IActivityPageReader? pages = null)
 {
     /// <summary>Retrospective preview limit; whole-order attribution beyond it is refused.</summary>
     public const int MaxFillsPerOperation = 200;
@@ -50,6 +50,18 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
         if (query.AccountId is { } detail && !accounts.Any(a => a.Id == detail)) throw new ProblemException(404, "Account not found.");
         var members = accounts.Where(a => scope.Includes(a.Id, a.PortfolioId, a.IsEnabled) && (query.AccountId is null || a.Id == query.AccountId))
             .Select(a => a.Id).ToHashSet();
+        // Issue #108: real Activity pages, filters and counts come from the per-account read model in SQL when it is enabled.
+        if (pages is not null && mode == TradingMode.Real && members.Count > 0 &&
+            await pages.PageAsync(members, filter, page, pageSize, ct) is { } projected)
+        {
+            var shown = await OperationUnrealized.ApplyAsync(projected.Rows, projected.Observed, venues, marks, ct);
+            return new(await TitledAsync(shown, ct), projected.Page, pageSize, projected.TotalCount, projected.ScopeCount,
+                projected.RetainedFillCount, asOf, projected.Version, projected.Facets, projected.Coverage, ScopeNote)
+            {
+                UnassignedFundingPayments = UnassignedPage(projected.UnassignedFunding),
+                OmittedUnassignedFundingPaymentCount = Math.Max(0, projected.UnassignedFunding.Count - 100)
+            };
+        }
         var summary = await ReadSummariesAsync(null, mode, ct, members);
         var portfolioOf = summary.Facts.Accounts.ToDictionary(a => a.Id, a => a.PortfolioId);
         // #107: the cached aggregate keeps its operations in page order and its facets, so a hit sorts nothing.
@@ -57,24 +69,28 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
         var filtered = scoped.Where(o => filter.Matches(o, portfolioOf.GetValueOrDefault(o.AccountId))).ToList();
         page = ListPaging.Clamp(page, pageSize, filtered.Count);
         // Marks are read for the shown open rows only, after the cached aggregate, so they never change the version.
-        var rows = await OperationUnrealized.ApplyAsync(filtered.Skip(ListPaging.Skip(page, pageSize)).Take(pageSize).ToList(),
-            summary.Facts, venues, marks, ct);
-        // Titles are read for the shown rows only, after the cached aggregate, so a renamed Play shows its current title.
-        var linked = rows.Where(r => r.PlayId is not null).Select(r => r.PlayId!.Value).Distinct().ToList();
-        if (linked.Count > 0)
-        {
-            var titles = await store.PlayTitlesAsync(linked, ct);
-            rows = rows.Select(r => r.PlayId is { } id && titles.TryGetValue(id, out var title) ? r with { PlayTitle = title } : r).ToList();
-        }
+        var rows = await TitledAsync(await OperationUnrealized.ApplyAsync(filtered.Skip(ListPaging.Skip(page, pageSize)).Take(pageSize).ToList(),
+            summary.Facts, venues, marks, ct), ct);
         return new(rows,
             page, pageSize, filtered.Count, scoped.Count, summary.Facts.Fills.Count, asOf, summary.Version, summary.Facets,
             summary.Coverage, mode == TradingMode.Paper ? PaperActivity.Notice : ScopeNote)
         {
             TradingMode = mode == TradingMode.Paper ? mode : null, PaperExecutionCount = scoped.Sum(o => o.PaperExecutionCount),
-            UnassignedFundingPayments = summary.UnassignedFunding.OrderByDescending(p => p.OccurredAtUtc)
-                .ThenBy(p => p.SourceId, StringComparer.Ordinal).Take(100).Select(OperationFunding.ToDto).ToList(),
+            UnassignedFundingPayments = UnassignedPage(summary.UnassignedFunding.Select(OperationFunding.ToDto)),
             OmittedUnassignedFundingPaymentCount = Math.Max(0, summary.UnassignedFunding.Count - 100)
         };
+    }
+
+    private static List<OperationFundingDto> UnassignedPage(IEnumerable<OperationFundingDto> payments) =>
+        payments.OrderByDescending(p => p.OccurredAtUtc).ThenBy(p => p.SourceId, StringComparer.Ordinal).ThenBy(p => p.Id).Take(100).ToList();
+
+    // Titles are read for the shown rows only, after the aggregate, so a renamed Play shows its current title.
+    private async Task<List<ActivityOperationSummaryDto>> TitledAsync(List<ActivityOperationSummaryDto> rows, CancellationToken ct)
+    {
+        var linked = rows.Where(r => r.PlayId is not null).Select(r => r.PlayId!.Value).Distinct().ToList();
+        if (linked.Count == 0) return rows;
+        var titles = await store.PlayTitlesAsync(linked, ct);
+        return rows.Select(r => r.PlayId is { } id && titles.TryGetValue(id, out var title) ? r with { PlayTitle = title } : r).ToList();
     }
 
     /// <summary>One operation's constituent rows, from that account only. Changed history is 404.</summary>
@@ -103,22 +119,44 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
     private static string Version(IEnumerable<ActivityOperationDto> operations, ActivityFacts facts, IEnumerable<ActivityCoverageDto> coverage)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        void Append<T>(string section, IEnumerable<T> rows)
-        {
-            hash.AppendData(Encoding.UTF8.GetBytes(section));
-            foreach (var row in rows) hash.AppendData(JsonSerializer.SerializeToUtf8Bytes(row));
-        }
-        Append("operations", operations.Select(ActivityOperationSummaryDto.From));
-        Append("paper-executions", operations.Where(o => o.TradingMode == TradingMode.Paper).SelectMany(o => o.PaperExecutions));
-        Append("coverage", coverage.OrderBy(c => c.AccountId).ThenBy(c => c.ContractId, StringComparer.Ordinal)
+        Append(hash, "operations", operations.Select(ActivityOperationSummaryDto.From));
+        Append(hash, "paper-executions", operations.Where(o => o.TradingMode == TradingMode.Paper).SelectMany(o => o.PaperExecutions));
+        return VersionTail(hash, coverage, facts.FundingPayments, facts.FundingStates, facts.Omissions);
+    }
+
+    private static void Append<T>(IncrementalHash hash, string section, IEnumerable<T> rows)
+    {
+        hash.AppendData(Encoding.UTF8.GetBytes(section));
+        foreach (var row in rows) hash.AppendData(JsonSerializer.SerializeToUtf8Bytes(row));
+    }
+
+    /// <summary>
+    /// Issue #108: the same version from operation list rows already serialized as <see cref="ActivityOperationSummaryDto"/>
+    /// JSON, in page order, as the read model stores them. Real operations only, so the paper section is empty.
+    /// </summary>
+    internal static async Task<string> VersionAsync(IAsyncEnumerable<string> operationJson, IEnumerable<ActivityCoverageDto> coverage,
+        IEnumerable<FundingPayment> funding, IEnumerable<AccountFundingState> states, IEnumerable<ActivityOmission> omissions,
+        CancellationToken ct)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hash.AppendData(Encoding.UTF8.GetBytes("operations"));
+        await foreach (var json in operationJson.WithCancellation(ct)) hash.AppendData(Encoding.UTF8.GetBytes(json));
+        hash.AppendData(Encoding.UTF8.GetBytes("paper-executions"));
+        return VersionTail(hash, coverage, funding, states, omissions);
+    }
+
+    private static string VersionTail(IncrementalHash hash, IEnumerable<ActivityCoverageDto> coverage, IEnumerable<FundingPayment> funding,
+        IEnumerable<AccountFundingState> states, IEnumerable<ActivityOmission> omissions)
+    {
+        Append(hash, "coverage", coverage.OrderBy(c => c.AccountId).ThenBy(c => c.ContractId, StringComparer.Ordinal)
             .ThenBy(c => c.Notice, StringComparer.Ordinal));
-        Append("funding-payments", facts.FundingPayments.OrderBy(p => p.Id).Select(OperationFunding.ToDto));
-        Append("funding-states", facts.FundingStates.OrderBy(s => s.AccountId).Select(s => new
+        Append(hash, "funding-payments", funding.OrderBy(p => p.Id).Select(OperationFunding.ToDto));
+        Append(hash, "funding-states", states.OrderBy(s => s.AccountId).Select(s => new
         {
             s.AccountId, s.LastAttemptToUtc, s.LastReadComplete, s.PnlBasis, s.Notice
         }));
         // Phase 2, item 7b: markers change the operations they break, and a newly seen one changes the page.
-        Append("omissions", facts.Omissions.OrderBy(m => m.Id).Select(m => new
+        Append(hash, "omissions", omissions.OrderBy(m => m.Id).Select(m => new
         {
             m.Id, m.ContractId, m.VenueContractId, m.OccurredAtUtc, m.UncertainFromUtc, m.UncertainToUtc
         }));
@@ -168,12 +206,7 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
         }
         var fills = facts.Fills.Where(f => accounts.ContainsKey(f.AccountId)).ToList();
         var omissions = facts.Omissions.Where(m => accounts.ContainsKey(m.AccountId)).ToList();
-        // Sol round 1 on 7b: the store reads only the newest rows and counts the rest; in-memory facts may hold them all.
-        var forced = facts.ForcedEvents.Where(e => accounts.ContainsKey(e.AccountId)).OrderByDescending(e => e.OccurredAtUtc)
-            .ThenBy(e => e.Id).Take(MaxForcedEventRows).ToList();
-        var forcedCounts = (facts.ForcedEventCounts?.Select(c => (Account: c.Key, Count: c.Value))
-                ?? facts.ForcedEvents.GroupBy(e => e.AccountId).Select(g => (Account: g.Key, Count: g.Count())))
-            .Where(c => accounts.ContainsKey(c.Account)).ToDictionary(c => c.Account, c => c.Count);
+        var (forced, forcedCounts) = Forced(facts.ForcedEvents, facts.ForcedEventCounts, accounts.ContainsKey);
         var positions = new ActivityPositions(fills, facts.Snapshots, facts.FundingPayments.Where(p => accounts.ContainsKey(p.AccountId)).ToList(),
             omissions);
         var operations = OperationLeverage.Apply(OperationAggregator.AggregateSummaries(fills, facts.FillPlayIds, positions),
@@ -188,7 +221,10 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
                 operation.LastOccurredAtUtc == operations[previous].LastOccurredAtUtc && operations[previous].OpenQuantity == "0" && operation.OpenQuantity != "0")
                 lastByContract[operation.ContractKey] = i;
         }
-        var contractsByAccount = positions.Contracts.GroupBy(p => p.Key.AccountId).ToDictionary(g => g.Key, g => g.ToList());
+        // Issue #108: each account's partitions in a fixed order, not the unordered fill read's, so one account's own aggregate
+        // lists its notices as the aggregate over several accounts does. The version sorts coverage and is unaffected.
+        var contractsByAccount = positions.Contracts.GroupBy(p => p.Key.AccountId).ToDictionary(g => g.Key,
+            g => g.OrderBy(p => p.Key.Identity, StringComparer.Ordinal).ThenBy(p => p.Key.IsNative).ToList());
         var coverage = new List<ActivityCoverageDto>();
         foreach (var account in accounts.Values)
         {
@@ -225,12 +261,7 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
                 }
             }
         }
-        // Phase 2, item 7b: each venue-forced execution is a visible row with its exclusion, at most 50 with a count.
-        foreach (var e in forced)
-            coverage.Add(new(e.AccountId, e.ContractId, ForcedText(e)));
-        foreach (var (account, count) in forcedCounts.OrderBy(c => c.Key.ToString("D"), StringComparer.Ordinal))
-            if (count - forced.Count(e => e.AccountId == account) is > 0 and var more)
-                coverage.Add(new(account, null, $"{more} more venue-forced executions are retained and excluded."));
+        var accountCoverage = coverage.Count;
         facts = facts with
         {
             Accounts = accounts.Values.ToList(), Fills = fills,
@@ -243,15 +274,49 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
             .Concat(facts.FundingPayments.Select(p => p.AccountId))
             .Concat(accounts.Values.Where(a => venues?.Funding(a.VenueId) is not null).Select(a => a.Id)).ToHashSet();
         var funding = OperationFunding.Apply(operations, facts, positions, fundingAccounts);
-        foreach (var state in facts.FundingStates)
-            coverage.Add(new(state.AccountId, null, state.Notice));
-        foreach (var group in funding.Unassigned.GroupBy(p => p.AccountId))
-            coverage.Add(new(group.Key, null, $"{group.Count()} retained funding settlements could not be attributed safely to an operation. They are not added to operation results."));
+        var unassigned = funding.Unassigned.GroupBy(p => p.AccountId).ToDictionary(g => g.Key, g => g.Count());
+        coverage.AddRange(CoverageTail(forced, forcedCounts, facts.FundingStates,
+            accounts.Keys.Where(unassigned.ContainsKey).Select(id => (id, unassigned[id]))));
         var ordered = ActivitySummaries.PageOrder(funding.Operations);
         return new(funding.Operations, coverage, facts)
         {
-            UnassignedFunding = funding.Unassigned, Version = Version(ordered, facts, coverage), Positions = positions, Ordered = ordered
+            UnassignedFunding = funding.Unassigned, Version = Version(ordered, facts, coverage), Positions = positions, Ordered = ordered,
+            AccountCoverageCount = accountCoverage
         };
+    }
+
+    /// <summary>
+    /// Phase 2, item 7b: the newest forced events shown as rows, and each scoped account's retained count. Sol round 1 on 7b:
+    /// the store reads only the newest rows and counts the rest; in-memory facts may hold them all.
+    /// </summary>
+    internal static (List<ForcedEvent> Rows, Dictionary<Guid, int> Counts) Forced(IReadOnlyList<ForcedEvent> events,
+        IReadOnlyDictionary<Guid, int>? counts, Func<Guid, bool> scoped)
+    {
+        var rows = events.Where(e => scoped(e.AccountId)).OrderByDescending(e => e.OccurredAtUtc).ThenBy(e => e.Id).Take(MaxForcedEventRows).ToList();
+        var all = (counts?.Select(c => (Account: c.Key, Count: c.Value))
+                ?? events.GroupBy(e => e.AccountId).Select(g => (Account: g.Key, Count: g.Count())))
+            .Where(c => scoped(c.Account)).ToDictionary(c => c.Account, c => c.Count);
+        return (rows, all);
+    }
+
+    /// <summary>
+    /// The coverage that follows each account's own notices: forced events, funding coverage and unattributed funding.
+    /// Issue #108: unattributed funding is listed in account order (it followed the funding read's order before), so the
+    /// read model assembles the same list from per-account parts. The version sorts coverage, so it is unaffected.
+    /// </summary>
+    internal static IEnumerable<ActivityCoverageDto> CoverageTail(IReadOnlyList<ForcedEvent> forced, IReadOnlyDictionary<Guid, int> forcedCounts,
+        IEnumerable<AccountFundingState> states, IEnumerable<(Guid AccountId, int Count)> unassigned)
+    {
+        // Phase 2, item 7b: each venue-forced execution is a visible row with its exclusion, at most 50 with a count.
+        foreach (var e in forced)
+            yield return new(e.AccountId, e.ContractId, ForcedText(e));
+        foreach (var (account, count) in forcedCounts.OrderBy(c => c.Key.ToString("D"), StringComparer.Ordinal))
+            if (count - forced.Count(e => e.AccountId == account) is > 0 and var more)
+                yield return new(account, null, $"{more} more venue-forced executions are retained and excluded.");
+        foreach (var state in states)
+            yield return new(state.AccountId, null, state.Notice);
+        foreach (var (account, count) in unassigned)
+            yield return new(account, null, $"{count} retained funding settlements could not be attributed safely to an operation. They are not added to operation results.");
     }
 
     /// <summary>
@@ -357,6 +422,8 @@ public sealed record ActivitySummaries(IReadOnlyList<ActivityOperationDto> Opera
     public IReadOnlyList<Vessel.Domain.Workspace.FundingPayment> UnassignedFunding { get; init; } = [];
     // The partitions, anchors and omissions this aggregate was walked with, kept for Phase 2, item 9b.
     internal ActivityPositions? Positions { get; init; }
+    /// <summary>Issue #108: how many leading <see cref="Coverage"/> entries are the accounts' own notices, in account order.</summary>
+    internal int AccountCoverageCount { get; init; }
     private ActivityProofIndex? proof;
     private IReadOnlyList<ActivityOperationDto>? ordered;
     private ActivityFacetsDto? facets;
@@ -394,7 +461,46 @@ public sealed record ActivitySummaries(IReadOnlyList<ActivityOperationDto> Opera
     /// </summary>
     internal bool Passes(Guid accountId, DateTimeOffset from, DateTimeOffset to)
     {
-        var index = LazyInitializer.EnsureInitialized(ref instants, () =>
+        if (!Instants().TryGetValue(accountId, out var sorted)) return false;
+        var (low, high) = from < to ? (from, to) : (to, from);
+        low = low > DateTimeOffset.MinValue.AddMilliseconds(1) ? low.AddMilliseconds(-1) : DateTimeOffset.MinValue;
+        high = high < DateTimeOffset.MaxValue.AddMilliseconds(-1) ? high.AddMilliseconds(1) : DateTimeOffset.MaxValue;
+        var first = LowerBound(sorted, low);
+        return first < sorted.Length && sorted[first] <= high;
+    }
+
+    /// <summary>
+    /// Issue #108: the snapshot times <see cref="Passes"/> lets an account's snapshot move to from <paramref name="at"/>,
+    /// as an open interval (null bounds are unbounded). Pinned when a retained instant lies within a millisecond of it, so
+    /// only <paramref name="at"/> itself keeps this aggregate.
+    /// </summary>
+    internal (DateTimeOffset? After, DateTimeOffset? Before, bool Pinned) SnapshotWindow(Guid accountId, DateTimeOffset at)
+    {
+        if (!Instants().TryGetValue(accountId, out var sorted)) return (null, null, false);
+        var low = at > DateTimeOffset.MinValue.AddMilliseconds(1) ? at.AddMilliseconds(-1) : DateTimeOffset.MinValue;
+        var high = at < DateTimeOffset.MaxValue.AddMilliseconds(-1) ? at.AddMilliseconds(1) : DateTimeOffset.MaxValue;
+        var first = LowerBound(sorted, low);
+        if (first < sorted.Length && sorted[first] <= high) return (at, at, true);
+        // Every instant before `first` is earlier than low; the one at `first` is later than high.
+        DateTimeOffset? after = first > 0 ? sorted[first - 1].AddMilliseconds(1) : null;
+        DateTimeOffset? before = first < sorted.Length ? sorted[first].AddMilliseconds(-1) : null;
+        return (after, before, false);
+    }
+
+    private static int LowerBound(DateTimeOffset[] sorted, DateTimeOffset value)
+    {
+        int first = 0, last = sorted.Length;
+        while (first < last)
+        {
+            var middle = (first + last) / 2;
+            if (sorted[middle] < value) first = middle + 1; else last = middle;
+        }
+        return first;
+    }
+
+    private Dictionary<Guid, DateTimeOffset[]> Instants()
+    {
+        return LazyInitializer.EnsureInitialized(ref instants, () =>
         {
             var facts = Facts;
             return facts.Fills.Select(f => (f.AccountId, At: f.OccurredAtUtc))
@@ -406,17 +512,6 @@ public sealed record ActivitySummaries(IReadOnlyList<ActivityOperationDto> Opera
                     .OfType<DateTimeOffset>().Select(at => (s.AccountId, At: at))))
                 .GroupBy(i => i.AccountId).ToDictionary(g => g.Key, g => g.Select(i => i.At).Order().ToArray());
         });
-        if (!index.TryGetValue(accountId, out var sorted)) return false;
-        var (low, high) = from < to ? (from, to) : (to, from);
-        low = low > DateTimeOffset.MinValue.AddMilliseconds(1) ? low.AddMilliseconds(-1) : DateTimeOffset.MinValue;
-        high = high < DateTimeOffset.MaxValue.AddMilliseconds(-1) ? high.AddMilliseconds(1) : DateTimeOffset.MaxValue;
-        int first = 0, last = sorted.Length;
-        while (first < last)
-        {
-            var middle = (first + last) / 2;
-            if (sorted[middle] < low) first = middle + 1; else last = middle;
-        }
-        return first < sorted.Length && sorted[first] <= high;
     }
 
     /// <summary>Issue #107: this aggregate over newer observations, sharing its operations, order, facets and indexes.</summary>
@@ -424,7 +519,8 @@ public sealed record ActivitySummaries(IReadOnlyList<ActivityOperationDto> Opera
     {
         var next = new ActivitySummaries(Operations, Coverage, facts)
         {
-            Version = version, UnassignedFunding = UnassignedFunding, Positions = positions, Ordered = Ordered
+            Version = version, UnassignedFunding = UnassignedFunding, Positions = positions, Ordered = Ordered,
+            AccountCoverageCount = AccountCoverageCount
         };
         next.facets = facets;
         // Funding coverage bounds are instants too, and Rebase only shares the index while they are unchanged.

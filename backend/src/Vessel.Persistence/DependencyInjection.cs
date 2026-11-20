@@ -74,6 +74,18 @@ public static class DependencyInjection
         services.AddSingleton(sp => new ActivitySummaryCache(activityCacheBytes,
             logger: sp.GetService<Microsoft.Extensions.Logging.ILogger<ActivitySummaryCache>>()));
         services.AddScoped<Vessel.Application.Activity.IActivitySummaryReader, CachedActivitySummaryReader>();
+        // Issue #108: Activity pages come from the per-account read model unless Vessel:Activity:ReadModel is Memory, which keeps
+        // the in-memory aggregate until activity-verify has passed on an installation's own data.
+        services.TryAddSingleton<ActivityReadModelState>();
+        services.AddScoped<ActivityReadModel>();
+        switch (config["Vessel:Activity:ReadModel"] ?? "Projection")
+        {
+            case "Projection":
+                services.AddScoped<Vessel.Application.Activity.IActivityPageReader>(sp => sp.GetRequiredService<ActivityReadModel>());
+                break;
+            case "Memory": break;
+            default: throw new InvalidOperationException("Vessel:Activity:ReadModel must be Projection or Memory.");
+        }
         services.AddScoped<Vessel.Application.Credentials.IAccountCredentialStore, AccountCredentialStore>();
         services.AddScoped<Vessel.Application.Evidence.IEvidenceMetadataStore, EvidenceStore>();
         services.AddScoped<Vessel.Application.Plays.IPlayStore, PlayStore>();

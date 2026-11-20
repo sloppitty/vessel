@@ -1473,6 +1473,9 @@ CACHE_SHARED = {
 }
 # An ActivityOperationDto row: 768 bytes plus about 250 characters of identity, quantity, price and P&L strings.
 OPERATION_ROW = 1300
+# Issue #108: the values of Vessel:Activity:ReadModel that --activity-read-model chooses.
+READ_MODELS = {'projection': 'Projection', 'memory': 'Memory'}
+
 # The cache's default capacity (Vessel:Activity:CacheCapacityBytes); --cache-capacity-mib overrides it for a run.
 CACHE_CAPACITY = 256 * 1024 * 1024
 
@@ -1704,6 +1707,8 @@ class Run:
             # Issue #107: a chosen Activity cache capacity, as an operator with memory to spare would set it.
             **({'Vessel__Activity__CacheCapacityBytes': str(self.args.cache_capacity_mib * 2 ** 20)}
                if self.args.cache_capacity_mib else {}),
+            # Issue #108: Activity pages from the read model (the default) or from the in-memory aggregate.
+            'Vessel__Activity__ReadModel': READ_MODELS[getattr(self.args, 'activity_read_model', None) or 'projection'],
         }
 
     def build(self):
@@ -1807,6 +1812,19 @@ class Run:
         match = re.search(r'Indexed (\d+) of (\d+) Plays', output)
         if not match or match.group(1) != match.group(2):
             raise RuntimeError('The search projection rebuild did not index every Play: ' + self.redact(output))
+        return int(match.group(1))
+
+    def rebuild_activity(self):
+        """Issue #108: builds every Activity read model part, then checks each stored operation against the aggregate."""
+        env = child_environment(self.settings())
+        dll = str(API_BIN / 'Vessel.Api.dll')
+        output = self.run(['dotnet', dll, 'activity-rebuild', '--apply'], cwd=API_BIN, env=env).stdout
+        if not re.search(r'Rebuilt \d+ of \d+ accounts', output):
+            raise RuntimeError('The Activity read model rebuild failed: ' + self.redact(output))
+        verify = subprocess.run(['dotnet', dll, 'activity-verify'], cwd=API_BIN, env=env, capture_output=True, text=True)
+        match = re.search(r'Verified (\d+) operations on (\d+) accounts .*: no difference\.', verify.stdout)
+        if verify.returncode or not match:
+            raise RuntimeError('activity-verify found differences: ' + self.redact(verify.stdout + verify.stderr)[-4000:])
         return int(match.group(1))
 
     def start_api(self):
@@ -1971,7 +1989,12 @@ def report(meta, counts, endpoints):
         '',
         f'Phases: generate {meta["phases"]["generate"]:.1f} s, migrate {meta["phases"]["migrate"]:.1f} s, '
         f'seed {meta["phases"]["seed"]:.1f} s, search rebuild {meta["phases"]["rebuild"]:.1f} s, '
+        f'Activity read model rebuild and verify {meta["phases"].get("activity", 0):.1f} s, '
         f'measure {meta["phases"]["measure"]:.1f} s.',
+        '',
+        f'Activity pages are served by the {meta.get("read_model", "projection")} read model '
+        f'(`Vessel:Activity:ReadModel`); `activity-verify` found no difference on '
+        f'{meta.get("verified_operations", 0):,} stored operations before the API started.',
         '',
         '| Table | Rows |',
         '| --- | ---: |',
@@ -2030,6 +2053,8 @@ def arguments(argv=None):
                              'starting the API (default 0: no check)')
     parser.add_argument('--cache-capacity-mib', type=int,
                         help='the API\'s Activity cache capacity in MiB (default: its own default, 256)')
+    parser.add_argument('--activity-read-model', choices=sorted(READ_MODELS), default='projection',
+                        help='serve Activity pages from the read model (default) or the in-memory aggregate')
     parser.add_argument('--out', help='also write the timings (no journal data) as JSON to this file')
     return parser.parse_args(argv)
 
@@ -2092,6 +2117,10 @@ def main(argv=None):
         print('Rebuilding the journal search projection…', flush=True)
         run.rebuild_search()
         phases['rebuild'] = time.monotonic() - clock
+        clock = time.monotonic()
+        print('Rebuilding and verifying the Activity read model…', flush=True)
+        verified = run.rebuild_activity()
+        phases['activity'] = time.monotonic() - clock
         counts = {}
         for line in run.psql(' UNION ALL '.join(f"SELECT '{t}', count(*) FROM {t}" for t in COUNTED), query=True).splitlines():
             table, count = line.split('\t')
@@ -2148,6 +2177,7 @@ def main(argv=None):
                 'dotnet': subprocess.run(['dotnet', '--version'], capture_output=True, text=True).stdout.strip(),
                 'api_rss_mb': run.api_peak_rss(), 'postgres_memory': stats, 'phases': phases, 'activity': activity,
                 'cache_capacity_mib': capacity // 2 ** 20,
+                'read_model': args.activity_read_model, 'verified_operations': verified,
                 'skipped': skipped, 'cache': {scope: {'estimatedBytes': charge, 'status': cache_status(charge, capacity)}
                                               for scope, charge in charges.items()}}
         print()
