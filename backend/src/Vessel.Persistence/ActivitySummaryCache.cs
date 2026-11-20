@@ -107,17 +107,54 @@ public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int 
 
     /// <summary>
     /// Issue #107: keeps an entry's aggregate rebased onto newer observations, so later reads compare with the latest. Only
-    /// replaces the value it was rebased from, and never with an older revision. The charge is kept: execution facts, which
-    /// dominate it, are shared, and observations are one row per account.
+    /// replaces the value it was rebased from, and never with an older revision. A rebase that shares the operations keeps
+    /// the charge: execution facts, which dominate it, are shared, and observations are one row per account. A rebase that
+    /// walked the history again is measured again, since newer snapshots can split it into more operations.
     /// </summary>
     public void Replace(ActivitySummaryKey key, ActivitySummaries from, ActivitySummaries to)
     {
+        long? charge = ReferenceEquals(from.Operations, to.Operations) ? null : Charge(key, to);
         lock (gate)
         {
-            if (entries.TryGetValue(key, out var node) && ReferenceEquals(node.Value.Value, from) &&
-                (to.Facts.Revision ?? 0) > (from.Facts.Revision ?? 0))
+            if (!entries.TryGetValue(key, out var node) || !ReferenceEquals(node.Value.Value, from) ||
+                (to.Facts.Revision ?? 0) <= (from.Facts.Revision ?? 0))
+                return;
+            if (charge is not { } measured)
+            {
                 node.Value = node.Value with { Value = to };
+                return;
+            }
+            size -= node.Value.Size;
+            if (measured > capacity)
+            {
+                entries.Remove(key);
+                lru.Remove(node);
+            }
+            else
+            {
+                node.Value = node.Value with { Value = to, Size = measured };
+                size += measured;
+                while (size > capacity && lru.Last is { } last && last != node)
+                {
+                    entries.Remove(last.Value.Key);
+                    size -= last.Value.Size;
+                    lru.RemoveLast();
+                }
+            }
         }
+        if (charge > capacity) WarnOversized(to, charge.Value);
+    }
+
+    // An aggregate larger than the whole cache is computed again on every read; say so, at most hourly.
+    private void WarnOversized(ActivitySummaries value, long charge)
+    {
+        if (Environment.TickCount64 is var now &&
+            (Interlocked.Read(ref warnedAt) is var warned && (warned == 0 || now - warned >= 3_600_000)) &&
+            Interlocked.CompareExchange(ref warnedAt, now, warned) == warned)
+            logger?.LogWarning("An Activity aggregate of {FillCount} fills and {OperationCount} operations (estimated {ChargeBytes} bytes) " +
+                "exceeds the Activity cache capacity of {CapacityBytes} bytes and is not cached; every read recomputes it. " +
+                "Raise Vessel:Activity:CacheCapacityBytes if the host has memory to spare.",
+                value.Facts.Fills.Count, value.Operations.Count, charge, capacity);
     }
 
     private async Task RunAsync(ActivitySummaryKey key, Flight flight, Func<CancellationToken, Task<ActivitySummaries>> compute)
@@ -146,14 +183,7 @@ public sealed class ActivitySummaryCache(long capacity = 256 * 1024 * 1024, int 
                 if (flights.GetValueOrDefault(key) == flight) flights.Remove(key);
                 flight.Completion.TrySetResult(value);
             }
-            // Issue #107: an aggregate larger than the whole cache is computed again on every read; say so, at most hourly.
-            if (charge > capacity && Environment.TickCount64 is var now &&
-                (Interlocked.Read(ref warnedAt) is var warned && (warned == 0 || now - warned >= 3_600_000)) &&
-                Interlocked.CompareExchange(ref warnedAt, now, warned) == warned)
-                logger?.LogWarning("An Activity aggregate of {FillCount} fills and {OperationCount} operations (estimated {ChargeBytes} bytes) " +
-                    "exceeds the Activity cache capacity of {CapacityBytes} bytes and is not cached; every read recomputes it. " +
-                    "Raise Vessel:Activity:CacheCapacityBytes if the host has memory to spare.",
-                    value.Facts.Fills.Count, value.Operations.Count, charge, capacity);
+            if (charge > capacity) WarnOversized(value, charge);
         }
         catch (OperationCanceledException)
         {

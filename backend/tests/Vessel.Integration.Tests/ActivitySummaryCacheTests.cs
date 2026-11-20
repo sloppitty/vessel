@@ -152,6 +152,36 @@ public sealed class ActivitySummaryCacheTests
     }
 
     [Fact]
+    public async Task A_rebase_that_walks_the_history_again_is_measured_again_and_leaves_when_it_outgrows_the_cache()
+    {
+        var cache = new ActivitySummaryCache(capacity: 16 * 1024); var key = Key(); var calls = 0;
+        var small = Value with { Facts = Value.Facts with { Revision = 1 } };
+        Task<ActivitySummaries> Compute(CancellationToken _) { calls++; return Task.FromResult(small); }
+        var cached = await cache.ReadAsync(key, Compute, Unused, default);
+        Assert.Same(cached, await cache.ReadAsync(key, Compute, Unused, default));
+        Assert.Equal(1, calls);
+
+        // Newer observations sharing the operations keep the entry and its charge.
+        var shared = cached with { Facts = cached.Facts with { Revision = 2 } };
+        cache.Replace(key, cached, shared);
+        Assert.Same(shared, await cache.ReadAsync(key, Compute, Unused, default));
+
+        // A rebuilt aggregate far larger than the cache leaves it, so it is never kept over capacity.
+        var rebuilt = new ActivitySummaries(new List<ActivityOperationDto>(), [], shared.Facts with
+        {
+            Revision = 3,
+            LeverageObservations = Enumerable.Range(0, 200).Select(_ => new LeverageObservation
+            {
+                Id = Guid.NewGuid(), OwnerId = key.OwnerId, AccountId = Guid.NewGuid(), ContractId = "BTC",
+                ObservedAtUtc = DateTimeOffset.UnixEpoch, SignedQuantity = 1, EntryPrice = 100, Leverage = 5
+            }).ToList()
+        });
+        cache.Replace(key, shared, rebuilt);
+        Assert.Same(small, await cache.ReadAsync(key, Compute, Unused, default));
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
     public async Task Owner_revision_and_inputs_are_separate_and_LRU_is_bounded()
     {
         var cache = new ActivitySummaryCache(entryLimit: 2); var owner = Guid.NewGuid();
