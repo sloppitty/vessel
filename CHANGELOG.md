@@ -96,6 +96,9 @@
   too large.").
 - Notification settings no longer keep an old load error on screen while Retry reads, and a
   save is no longer undone by a background reread that started before it.
+- The web app rejects Review, Overview summary, account and portfolio responses without
+  `tradingMode`, Overview summaries without `paperExecutionCount`, and venues missing a
+  capability flag.
 
 ### Changed
 
@@ -142,6 +145,9 @@
   not sorted again, account reads reuse the owner-wide aggregate, repeated strings are
   stored once, and an aggregate too large to cache logs a warning. The benchmark also times
   a Play's execution view.
+- Trading mode is a required type in the backend: no call reads the real journal because the
+  mode was left out, real-only endpoints are declared with `.RealOnly()` metadata, and every
+  API endpoint must be classified as real-only or mode-aware.
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and
