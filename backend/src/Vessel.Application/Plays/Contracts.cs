@@ -178,7 +178,7 @@ public interface IPlayStore
 {
     /// <summary>Whether the scope's portfolio or account exists for this owner; <c>all</c> and <c>unassigned</c> always do.</summary>
     Task<bool> ScopeExistsAsync(ListScope scope, CancellationToken ct);
-    Task<bool> ScopeExistsAsync(ListScope scope, string tradingMode, CancellationToken ct) => ScopeExistsAsync(scope, ct);
+    Task<bool> ScopeExistsAsync(ListScope scope, string tradingMode, CancellationToken ct);
     /// <summary>
     /// One consistent page of a view: the exact total, the requested page clamped to it and its ordered summary rows
     /// (updated desc for Drafts, In progress and All; ended desc, updated desc otherwise; then ID), read from one snapshot.
@@ -190,8 +190,7 @@ public interface IPlayStore
     /// every Play of theirs as the unscoped list keeps them: the exact total, the count not indexed yet and one page, newest
     /// updated first, each with its first matching text. One snapshot.
     /// </summary>
-    Task<PlaySearchResult> SearchAsync(string pattern, string tradingMode, int offset, int limit, CancellationToken ct) =>
-        throw new NotSupportedException();
+    Task<PlaySearchResult> SearchAsync(string pattern, string tradingMode, int offset, int limit, CancellationToken ct);
     Task<Play?> FindAsync(Guid id, CancellationToken ct);
     Task<Account?> AccountAsync(Guid id, CancellationToken ct);
     Task<List<PlayPlanRevision>> RevisionsAsync(Guid playId, CancellationToken ct);
@@ -223,17 +222,16 @@ public interface IPlayStore
     void Add(PlayStatusChange change);
     void Add(PlayReviewRevision revision);
     /// <summary>The owner's active if-then rule in the mode (Phase 2, item 3), tracked for archiving; null without one.</summary>
-    Task<PlayRule?> ActiveRuleAsync(string tradingMode, CancellationToken ct) => Task.FromResult<PlayRule?>(null);
+    Task<PlayRule?> ActiveRuleAsync(string tradingMode, CancellationToken ct);
     /// <summary>
     /// Adds the owner's next rule version in the mode. Archive and save the active one first: one rule is active per mode, and
     /// a concurrent change of the same rule is a 409.
     /// </summary>
-    Task<PlayRule> AddRuleAsync(string tradingMode, string @if, string then, Guid? sourcePlayId, DateTimeOffset now, CancellationToken ct) =>
-        throw new NotSupportedException();
+    Task<PlayRule> AddRuleAsync(string tradingMode, string @if, string then, Guid? sourcePlayId, DateTimeOffset now, CancellationToken ct);
     /// <summary>The title of the owner's Play in the mode, or null when there is none.</summary>
-    Task<string?> TitleAsync(Guid playId, string tradingMode, CancellationToken ct) => Task.FromResult<string?>(null);
+    Task<string?> TitleAsync(Guid playId, string tradingMode, CancellationToken ct);
     /// <summary>Flushes a rule change; a version another change archived first is a 409 about the rule.</summary>
-    Task SaveRuleAsync(CancellationToken ct) => SaveAsync(ct);
+    Task SaveRuleAsync(CancellationToken ct);
     /// <summary>Persists pending changes through the active unit of work without committing; a concurrent Play write is a 409.</summary>
     Task SaveAsync(CancellationToken ct);
     /// <summary>

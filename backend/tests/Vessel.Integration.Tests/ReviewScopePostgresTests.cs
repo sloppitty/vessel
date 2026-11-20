@@ -17,8 +17,8 @@ namespace Vessel.Tests;
 /// </summary>
 public sealed class ReviewScopePostgresTests
 {
-    /// <summary>Forwards everything except the scoped read, which falls back to the interface's in-memory filter.</summary>
-    private sealed class InMemoryScope(SizingStore inner) : ISizingStore
+    /// <summary>Forwards everything except the scoped read, which falls back to the TestKit in-memory filter.</summary>
+    private sealed class InMemoryScope(SizingStore inner) : ISizingStoreDefaults
     {
         public Task<SizingSettings?> SettingsAsync(CancellationToken ct) => inner.SettingsAsync(ct);
         public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct) => inner.ClosedPlaysAsync(ct);
@@ -30,7 +30,7 @@ public sealed class ReviewScopePostgresTests
     }
 
     /// <summary>Every closed Play whatever the scope, as Review read them before issue #109.</summary>
-    private sealed class Unscoped(SizingStore inner) : ISizingStore
+    private sealed class Unscoped(SizingStore inner) : ISizingStoreDefaults
     {
         public Task<SizingSettings?> SettingsAsync(CancellationToken ct) => inner.SettingsAsync(ct);
         public Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct) => inner.ClosedPlaysAsync(ct);

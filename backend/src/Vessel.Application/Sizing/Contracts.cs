@@ -134,16 +134,13 @@ public interface ISizingStore
     Task<SizingSettings?> SettingsAsync(CancellationToken ct);
     /// <summary>Closed Plays on enabled accounts with their revisions, linked fills and incompletely retained orders.</summary>
     Task<List<ClosedPlayFacts>> ClosedPlaysAsync(CancellationToken ct);
-    async Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, CancellationToken ct) =>
-        (await ClosedPlaysAsync(ct)).Where(f => f.Play.TradingMode == tradingMode).ToList();
+    Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, CancellationToken ct);
     /// <summary>
     /// The closed Plays of <paramref name="tradingMode"/> on these accounts and, when given, this instrument (ordinal equality):
     /// the subset of <see cref="ClosedPlaysAsync(string, CancellationToken)"/> Review filters to. Persistence reads only these.
     /// </summary>
-    async Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, IReadOnlyCollection<Guid> accountIds, string? instrument,
-        CancellationToken ct) =>
-        (await ClosedPlaysAsync(tradingMode, ct)).Where(f => accountIds.Contains(f.Play.AccountId) &&
-            (instrument is null || string.Equals(f.Play.ContractId, instrument, StringComparison.Ordinal))).ToList();
+    Task<List<ClosedPlayFacts>> ClosedPlaysAsync(string tradingMode, IReadOnlyCollection<Guid> accountIds, string? instrument,
+        CancellationToken ct);
     /// <summary>How many real Unresolved Plays the owner has on enabled accounts; they are never counted in the record.</summary>
     Task<int> UnresolvedPlaysAsync(CancellationToken ct);
     /// <summary>
@@ -153,20 +150,15 @@ public interface ISizingStore
     Task<List<ImportedOrder>> OrdersAsync(IReadOnlyCollection<OrderKey> orders, CancellationToken ct);
     /// <summary>
     /// The owner's real fills with a current allocation between Plays (Phase 2, item 11, Sol round 1). An Activity operation
-    /// holding one is those Plays' trade, so it is never an imported position or a fallback outcome. None by default.
+    /// holding one is those Plays' trade, so it is never an imported position or a fallback outcome.
     /// </summary>
-    Task<IReadOnlySet<Guid>> AllocatedFillIdsAsync(CancellationToken ct) => Task.FromResult<IReadOnlySet<Guid>>(new HashSet<Guid>());
+    Task<IReadOnlySet<Guid>> AllocatedFillIdsAsync(CancellationToken ct);
     void Add(SizingSettings settings);
 
     /// <summary>
     /// Inside a unit of work: the owner's settings row, created from <paramref name="initial"/> when absent, locked for
-    /// update. Concurrent first writes must not conflict. This default suits single-flow stores; Persistence overrides it atomically.
+    /// update. Concurrent first writes must not conflict.
     /// </summary>
-    async Task<SizingSettings> SettingsForUpdateAsync(SizingSettings initial, CancellationToken ct)
-    {
-        if (await SettingsAsync(ct) is { } settings) return settings;
-        Add(initial);
-        return initial;
-    }
+    Task<SizingSettings> SettingsForUpdateAsync(SizingSettings initial, CancellationToken ct);
     Task SaveAsync(CancellationToken ct);
 }

@@ -129,17 +129,14 @@ public interface IWorkspaceStore
 {
     /// <summary>
     /// An account was disabled or enabled under the account locks: disabling withdraws its unread notifications and
-    /// hides them, enabling shows them again. Stores without notifications ignore it.
+    /// hides them, enabling shows them again.
     /// </summary>
-    Task AccountVisibilityChangedAsync(Guid accountId, bool enabled, CancellationToken ct) => Task.CompletedTask;
+    Task AccountVisibilityChangedAsync(Guid accountId, bool enabled, CancellationToken ct);
     Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct);
     Task<List<Account>> AccountsAsync(CancellationToken ct);
-    async Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct, string tradingMode = "real") =>
-        (await PortfoliosAsync(ct)).Where(p => p.TradingMode == tradingMode).ToList();
-    async Task<List<Account>> AccountsAsync(CancellationToken ct, string tradingMode = "real") =>
-        (await AccountsAsync(ct)).Where(a => a.TradingMode == tradingMode).ToList();
-    Task<IReadOnlyDictionary<Guid, PaperAccountBalance>> PaperBalancesAsync(IReadOnlyList<Guid> accountIds, CancellationToken ct) =>
-        Task.FromResult<IReadOnlyDictionary<Guid, PaperAccountBalance>>(new Dictionary<Guid, PaperAccountBalance>());
+    Task<List<Portfolio>> PortfoliosAsync(CancellationToken ct, string tradingMode = "real");
+    Task<List<Account>> AccountsAsync(CancellationToken ct, string tradingMode = "real");
+    Task<IReadOnlyDictionary<Guid, PaperAccountBalance>> PaperBalancesAsync(IReadOnlyList<Guid> accountIds, CancellationToken ct);
     Task<Account?> AccountAsync(Guid id, CancellationToken ct);
     Task<MarketDataAccount?> MarketDataAccountAsync(Guid id, CancellationToken ct);
     Task<AccountSnapshot?> SnapshotAsync(Guid id, CancellationToken ct);
@@ -147,11 +144,9 @@ public interface IWorkspaceStore
     Task<List<AccountSnapshot>> SnapshotsAsync(CancellationToken ct);
     Task<List<ImportedFill>> FillsAsync(Guid? accountId, int limit, CancellationToken ct);
     /// <summary>Retained fills the venue later reported differently (Phase 2, item 14c): the count and the latest ones.</summary>
-    Task<(int Total, IReadOnlyList<FillImportConflict> Recent)> FillConflictsAsync(Guid accountId, int limit, CancellationToken ct) =>
-        Task.FromResult<(int, IReadOnlyList<FillImportConflict>)>((0, []));
+    Task<(int Total, IReadOnlyList<FillImportConflict> Recent)> FillConflictsAsync(Guid accountId, int limit, CancellationToken ct);
     /// <summary>Phase 2, item 6: the account's history gaps and coverage records, bounded.</summary>
-    Task<HistoryCoverageFacts> HistoryCoverageAsync(Guid accountId, int limit, CancellationToken ct) =>
-        Task.FromResult(new HistoryCoverageFacts(0, [], [], 0, []));
+    Task<HistoryCoverageFacts> HistoryCoverageAsync(Guid accountId, int limit, CancellationToken ct);
     Task<int> FillCountAsync(CancellationToken ct);
     Task AddPortfolioAsync(Portfolio portfolio, CancellationToken ct);
     Task AddAccountAsync(Account account, CancellationToken ct);
@@ -163,14 +158,12 @@ public interface IWorkspaceStore
     /// the fills it added.
     /// </summary>
     Task<IReadOnlyList<ImportedFill>> SaveHistoricalFillsAsync(Account account, IReadOnlyList<VenueFill> fills, DateTimeOffset observedAt,
-        CancellationToken ct, IReadOnlyList<VenueOmission>? omissions = null) =>
-        throw new NotSupportedException("This store cannot import backfilled fills.");
+        CancellationToken ct, IReadOnlyList<VenueOmission>? omissions = null);
     /// <summary>
     /// Phase 2, item 9c: a scheduled funding read's settlements and coverage, deduplicated and merged like a Refresh's,
     /// without the snapshot, fills or sync state. The caller holds the account lock and unit of work.
     /// </summary>
-    Task SaveFundingAsync(Account account, VenueFundingReadResult result, CancellationToken ct) =>
-        throw new NotSupportedException("This store cannot import funding on its own.");
+    Task SaveFundingAsync(Account account, VenueFundingReadResult result, CancellationToken ct);
     // Management serializes owner grouping changes before acquiring account row locks.
     // Sync takes only the account lock, so independent venue reads can still run concurrently.
     Task<T> WithManagementLockAsync<T>(Func<Task<T>> action, CancellationToken ct);

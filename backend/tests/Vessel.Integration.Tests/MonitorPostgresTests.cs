@@ -1233,7 +1233,7 @@ public sealed partial class MonitorPostgresTests
     {
         public Task EnqueueAsync(MonitorAccountCommand command, CancellationToken ct) => Task.CompletedTask;
     }
-    private sealed class EventSink : IVesselEventSink
+    private sealed class EventSink : IVesselEventSinkDefaults
     {
         public bool Baseline;
         public List<string> RunTriggers { get; } = [];

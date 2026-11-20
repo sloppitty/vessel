@@ -1,7 +1,7 @@
 using Vessel.Application.Events;
 
 namespace Vessel.Tests;
-internal sealed class DiscrepancyEvents : IVesselEventSink
+internal sealed class DiscrepancyEvents : IVesselEventSinkDefaults
 {
     public List<VesselEventDraft> Items { get; } = [];
     public Task AppendAsync(VesselEventDraft draft, CancellationToken ct) { Items.Add(draft); return Task.CompletedTask; }

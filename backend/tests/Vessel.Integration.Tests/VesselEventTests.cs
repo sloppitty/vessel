@@ -580,7 +580,7 @@ public sealed class VesselEventTests : VesselEventTestsValues
         public void Reset() => Staged.Clear();
     }
 
-    private sealed class EventScope : IUnitOfWork, IAsyncDisposable
+    private sealed class EventScope : IUnitOfWorkDefaults, IAsyncDisposable
     {
         public VesselDbContext Db { get; }
         public FakeOutbox Outbox { get; } = new();

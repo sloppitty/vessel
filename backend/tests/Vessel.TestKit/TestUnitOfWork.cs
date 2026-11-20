@@ -18,7 +18,7 @@ internal static class TestUnitOfWork
     /// cancellation) still fails the outer unit before it saves.
     /// State is per async flow, so the shared <see cref="None"/> instance is safe across parallel tests.
     /// </summary>
-    private sealed class MemoryUnitOfWork(Func<CancellationToken, Task>? save = null) : IUnitOfWork
+    private sealed class MemoryUnitOfWork(Func<CancellationToken, Task>? save = null) : IUnitOfWorkDefaults
     {
         private readonly AsyncLocal<Unit?> current = new();
 

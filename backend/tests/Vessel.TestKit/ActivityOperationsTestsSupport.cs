@@ -13,7 +13,7 @@ public partial class ActivityOperationsTestsSupport : ActivityOperationsTestsVal
         account.UpdateSettings(account.Name, portfolio, enabled);
         return account;
     }
-    internal sealed class Store(ActivityFacts facts, IReadOnlyDictionary<Guid, string>? titles = null) : IActivityStore
+    internal sealed class Store(ActivityFacts facts, IReadOnlyDictionary<Guid, string>? titles = null) : IActivityStoreDefaults
     {
         public ActivityFacts Facts => facts;
         public List<Guid> RequestedTitles { get; } = [];

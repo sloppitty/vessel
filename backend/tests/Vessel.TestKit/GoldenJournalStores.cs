@@ -71,7 +71,7 @@ internal sealed class GoldenJournalStores(GoldenJournal journal)
                     .Select(o => o.ExternalOrderId).Distinct(StringComparer.Ordinal).ToList());
         }).ToList();
 
-    private sealed class ActivityReader(GoldenJournal journal) : IActivityStore
+    private sealed class ActivityReader(GoldenJournal journal) : IActivityStoreDefaults
     {
         public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
         {
@@ -89,7 +89,7 @@ internal sealed class GoldenJournalStores(GoldenJournal journal)
             Task.FromResult<IReadOnlyDictionary<Guid, string>>(journal.Plays.Where(p => playIds.Contains(p.Id)).ToDictionary(p => p.Id, p => p.Title));
     }
 
-    private sealed class ReviewReader(GoldenJournal journal) : IReviewStore
+    private sealed class ReviewReader(GoldenJournal journal) : IReviewStoreDefaults
     {
         public Task<ReviewFacts> ReadAsync(ReviewQuery query, DateTimeOffset asOf, CancellationToken ct) =>
             Task.FromResult(new ReviewFacts([journal.Swing], journal.Accounts.ToList(), Closed(journal),
@@ -99,7 +99,7 @@ internal sealed class GoldenJournalStores(GoldenJournal journal)
         public Task<IReadOnlyList<string>> MistakeTagsAsync(int limit, CancellationToken ct) => Task.FromResult<IReadOnlyList<string>>([]);
     }
 
-    private sealed class SizingReader(GoldenJournal journal) : ISizingStore
+    private sealed class SizingReader(GoldenJournal journal) : ISizingStoreDefaults
     {
         private SizingSettings? settings;
         public Task<SizingSettings?> SettingsAsync(CancellationToken ct) => Task.FromResult(settings);

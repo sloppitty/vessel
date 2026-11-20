@@ -45,8 +45,7 @@ public interface IVesselEventSink
     /// Phase 2, item 6b: fills a backfill added, in the active unit, are history and never a fresh execution. They are
     /// claimed now, so no execution event is drafted for them, in this unit or when their order is linked later.
     /// </summary>
-    Task ClaimHistoricalFillsAsync(IReadOnlyCollection<Vessel.Domain.Workspace.ImportedFill> fills, CancellationToken cancellationToken) =>
-        Task.CompletedTask;
+    Task ClaimHistoricalFillsAsync(IReadOnlyCollection<Vessel.Domain.Workspace.ImportedFill> fills, CancellationToken cancellationToken);
 }
 
 public interface IVesselEventReader

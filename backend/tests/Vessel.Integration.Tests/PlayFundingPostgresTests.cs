@@ -380,7 +380,7 @@ public sealed class PlayFundingPostgresTests
     }
 
     /// <summary>An Activity aggregate captured earlier, as a cache entry or a racing read can serve it.</summary>
-    private sealed class EarlierSummaries(ActivitySummaries value) : IActivitySummaryReader
+    private sealed class EarlierSummaries(ActivitySummaries value) : IActivitySummaryReaderDefaults
     {
         public Task<ActivitySummaries> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) =>
             Task.FromResult(value);

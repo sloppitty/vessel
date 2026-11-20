@@ -103,6 +103,8 @@
 - The web app also requires every field the API always sends in Play execution, Play list
   and history, sizing, risk settings, manual ledger and account snapshot reads, where it
   filled in defaults for older API versions.
+- Store ports no longer have default members: every production store implements each member
+  explicitly, and an architecture test rejects new defaults.
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and

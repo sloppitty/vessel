@@ -20,7 +20,7 @@ public partial class OverviewSummaryTestsSupport
     }
     internal sealed class Clock : TimeProvider { public override DateTimeOffset GetUtcNow() => Now; }
     internal sealed class SummaryActivityStore(MemoryWorkspaceStore store, Guid owner, List<Vessel.Domain.Workspace.AccountFundingState>? funding = null)
-        : IActivityStore
+        : IActivityStoreDefaults
     {
         public List<IReadOnlySet<Guid>?> Reads { get; } = [];
         public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)

@@ -272,7 +272,7 @@ public sealed class SizingActivityFallbackTests
             new(OrderLinkRole.Target, Linked("sell", "close", win ? 110 : 90, win ? 10 : -10, 60))]);
     }
 
-    private sealed class Store(ActivityFacts facts) : IActivityStore
+    private sealed class Store(ActivityFacts facts) : IActivityStoreDefaults
     {
         public Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null) => Task.FromResult(facts);
         public Task<IReadOnlyDictionary<Guid, string>> PlayTitlesAsync(IReadOnlyCollection<Guid> playIds, CancellationToken ct) =>

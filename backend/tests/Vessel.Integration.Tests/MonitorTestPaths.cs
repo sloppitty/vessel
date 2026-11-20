@@ -113,7 +113,7 @@ internal static class MonitorTestPaths
         public Task EnqueueAsync(MonitorAccountCommand command, CancellationToken ct) => Task.CompletedTask;
     }
 
-    private sealed class NoEvents : IVesselEventSink
+    private sealed class NoEvents : IVesselEventSinkDefaults
     {
         public Task AppendAsync(VesselEventDraft draft, CancellationToken ct) => Task.CompletedTask;
         public Task SetRunAsync(Guid runId, string trigger, CancellationToken ct) => Task.CompletedTask;

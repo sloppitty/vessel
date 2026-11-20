@@ -168,7 +168,7 @@ public sealed class ManualLedgerPrecisionUseCasesTests : ManualLedgerPrecisionTe
         Assert.Equal(expectedNet, (await f.Review.GetAsync(new("all"), default)).Metrics.Net);
     }
 
-    private sealed class PrecisionFixture : IDiaryStore, IPlayExecutionStore, IReviewStore
+    private sealed class PrecisionFixture : IDiaryStoreDefaults, IPlayExecutionStoreDefaults, IReviewStoreDefaults
     {
         public Account Account { get; } = new(Guid.NewGuid(), Guid.NewGuid(), "manual", "Precision");
         public MemoryPlayStore Plays { get; }

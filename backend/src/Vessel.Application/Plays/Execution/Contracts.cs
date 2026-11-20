@@ -214,17 +214,15 @@ public interface IPlayExecutionStore
     /// Read-only orders with one of the internal <paramref name="orderIds"/>, plus orders on a contract of <paramref name="placedSince"/>
     /// placed at or after its time, in the order <see cref="OrdersAsync(Guid, CancellationToken)"/> returns them.
     /// </summary>
-    async Task<List<ImportedOrder>> OrdersAsync(Guid accountId, IReadOnlyCollection<Guid> orderIds,
-        IReadOnlyDictionary<string, DateTimeOffset> placedSince, CancellationToken ct) =>
-        (await OrdersAsync(accountId, ct)).Where(o => IncludesOrder(o, orderIds, placedSince)).ToList();
+    Task<List<ImportedOrder>> OrdersAsync(Guid accountId, IReadOnlyCollection<Guid> orderIds,
+        IReadOnlyDictionary<string, DateTimeOffset> placedSince, CancellationToken ct);
 
     /// <summary>The selection rule of the targeted order read; persistence may narrow in SQL first but must end here.</summary>
     static bool IncludesOrder(ImportedOrder order, IReadOnlyCollection<Guid> orderIds, IReadOnlyDictionary<string, DateTimeOffset> placedSince) =>
         orderIds.Contains(order.Id) || placedSince.TryGetValue(order.ContractId, out var since) && order.PlacedAtUtc >= since;
 
     /// <summary>The read-only order with the venue's <paramref name="externalOrderId"/> on one contract of the account, or null.</summary>
-    async Task<ImportedOrder?> OrderAsync(Guid accountId, string contractId, string externalOrderId, CancellationToken ct) =>
-        (await OrdersAsync(accountId, ct)).FirstOrDefault(o => o.ContractId == contractId && o.ExternalOrderId == externalOrderId);
+    Task<ImportedOrder?> OrderAsync(Guid accountId, string contractId, string externalOrderId, CancellationToken ct);
 
     /// <summary>
     /// Inserts new orders and updates the status of known ones, keyed by contract and external order ID. A known order
@@ -238,81 +236,66 @@ public interface IPlayExecutionStore
     /// Links in any state, tracked for changes, on one of the internal <paramref name="orderIds"/> (for any Play) or belonging
     /// to one of <paramref name="playIds"/>, in the order <see cref="LinksAsync(Guid, CancellationToken)"/> returns them.
     /// </summary>
-    async Task<List<PlayOrderLink>> LinksAsync(Guid accountId, IReadOnlyCollection<Guid> orderIds, IReadOnlyCollection<Guid> playIds,
-        CancellationToken ct) =>
-        (await LinksAsync(accountId, ct)).Where(l => orderIds.Contains(l.ImportedOrderId) || playIds.Contains(l.PlayId)).ToList();
+    Task<List<PlayOrderLink>> LinksAsync(Guid accountId, IReadOnlyCollection<Guid> orderIds, IReadOnlyCollection<Guid> playIds,
+        CancellationToken ct);
 
     /// <summary>Links of one Play in any state, read-only, in creation order.</summary>
-    async Task<List<PlayOrderLink>> PlayLinksAsync(Guid accountId, Guid playId, CancellationToken ct) =>
-        (await LinksAsync(accountId, ct)).Where(l => l.PlayId == playId).ToList();
+    Task<List<PlayOrderLink>> PlayLinksAsync(Guid accountId, Guid playId, CancellationToken ct);
 
     /// <summary>One link of a Play in any state, tracked for changes, or null.</summary>
-    async Task<PlayOrderLink?> LinkAsync(Guid accountId, Guid playId, Guid linkId, CancellationToken ct) =>
-        (await LinksAsync(accountId, ct)).FirstOrDefault(l => l.Id == linkId && l.PlayId == playId);
+    Task<PlayOrderLink?> LinkAsync(Guid accountId, Guid playId, Guid linkId, CancellationToken ct);
 
     /// <summary>
     /// Of <paramref name="orderIds"/>, those also suggested to another Planned, Paused or Open Play of the account than
     /// <paramref name="playId"/> (phase 1, 1.6d).
     /// </summary>
-    async Task<HashSet<Guid>> SuggestedElsewhereAsync(Guid accountId, Guid playId, IReadOnlyCollection<Guid> orderIds, CancellationToken ct)
-    {
-        if (orderIds.Count == 0) return [];
-        var others = (await ActivePlaysAsync(accountId, ct)).Where(p => p.Id != playId).Select(p => p.Id).ToHashSet();
-        if (others.Count == 0) return [];
-        return (await LinksAsync(accountId, orderIds, [], ct)).Where(l => l.State == OrderLinkState.Suggested && others.Contains(l.PlayId))
-            .Select(l => l.ImportedOrderId).ToHashSet();
-    }
+    Task<HashSet<Guid>> SuggestedElsewhereAsync(Guid accountId, Guid playId, IReadOnlyCollection<Guid> orderIds, CancellationToken ct);
 
     /// <summary>Internal IDs of orders linked to any Play of the account, in any status.</summary>
-    async Task<HashSet<Guid>> LinkedOrderIdsAsync(Guid accountId, CancellationToken ct) =>
-        (await LinksAsync(accountId, ct)).Where(l => l.State == OrderLinkState.Linked).Select(l => l.ImportedOrderId).ToHashSet();
+    Task<HashSet<Guid>> LinkedOrderIdsAsync(Guid accountId, CancellationToken ct);
     /// <summary>Read-only fills of the account belonging to one of <paramref name="orders"/>, by time then ID.</summary>
     Task<List<ImportedFill>> FillsAsync(Guid accountId, IReadOnlyCollection<OrderKey> orders, CancellationToken ct);
     /// <summary>
     /// The enabled account's current snapshot position in the Play's <paramref name="direction"/> (1 long, −1 short) on its
     /// native market, with the snapshot's time; null when flat, opposite, ambiguous or unknown.
     /// </summary>
-    Task<VenueRiskDto?> PositionAsync(Guid accountId, string contractId, string? venueContractId, int direction, CancellationToken ct) =>
-        Task.FromResult<VenueRiskDto?>(null);
+    Task<VenueRiskDto?> PositionAsync(Guid accountId, string contractId, string? venueContractId, int direction, CancellationToken ct);
     /// <summary>
     /// The first kept risk observation of the Play's own position: its direction and native market, from its first entry
     /// fill to its last exit when it has closed; null when none or when the market cannot be told apart.
     /// </summary>
     Task<VenueRiskDto?> RiskSinceAsync(Guid accountId, string contractId, string? venueContractId, int direction, DateTimeOffset since,
-        DateTimeOffset? until, CancellationToken ct) =>
-        Task.FromResult<VenueRiskDto?>(null);
+        DateTimeOffset? until, CancellationToken ct);
     /// <summary>
     /// Phase 2, item 9b: the funding proof's evidence, read-only, in one snapshot (<see cref="FundingEvidence"/>). Null when
     /// the store keeps no ledger, which proves nothing.
     /// </summary>
-    Task<FundingEvidence?> FundingEvidenceAsync(FundingEvidenceRequest request, CancellationToken ct) => Task.FromResult<FundingEvidence?>(null);
+    Task<FundingEvidence?> FundingEvidenceAsync(FundingEvidenceRequest request, CancellationToken ct);
     /// <summary>
     /// Allocations (Phase 2, item 11) with a line naming one of <paramref name="playIds"/>, and those on one of
     /// <paramref name="fillIds"/> in any state (a removed one has no lines), each with its fill and the fill's retained order,
     /// read-only. None in stores without them.
     /// </summary>
     Task<List<AllocatedFill>> AllocationsAsync(Guid accountId, IReadOnlyCollection<Guid> playIds, IReadOnlyCollection<Guid> fillIds,
-        CancellationToken ct) => Task.FromResult(new List<AllocatedFill>());
+        CancellationToken ct);
     /// <summary>A fill's allocation with its lines, tracked for changes, or null; a removed one has no lines.</summary>
-    Task<FillAllocation?> AllocationForUpdateAsync(Guid accountId, Guid fillId, CancellationToken ct) => Task.FromResult<FillAllocation?>(null);
+    Task<FillAllocation?> AllocationForUpdateAsync(Guid accountId, Guid fillId, CancellationToken ct);
     /// <summary>One retained fill of the account by its internal ID, read-only, or null.</summary>
-    Task<ImportedFill?> FillAsync(Guid accountId, Guid fillId, CancellationToken ct) => Task.FromResult<ImportedFill?>(null);
+    Task<ImportedFill?> FillAsync(Guid accountId, Guid fillId, CancellationToken ct);
     /// <summary>
     /// Retained fills the venue reports as flips on one contract of the account, of <paramref name="side"/>, at or after
     /// <paramref name="since"/> and without a current allocation: newest first, at most <paramref name="limit"/>.
     /// </summary>
-    Task<List<ImportedFill>> FlipFillsAsync(Guid accountId, string contractId, string side, DateTimeOffset since, int limit, CancellationToken ct) =>
-        Task.FromResult(new List<ImportedFill>());
+    Task<List<ImportedFill>> FlipFillsAsync(Guid accountId, string contractId, string side, DateTimeOffset since, int limit, CancellationToken ct);
     /// <summary>
     /// The account's real, planned-origin venue Plays on <paramref name="contractId"/> that can take a part of a fill (Planned,
     /// Paused, Open or Unresolved), and its Plays in <paramref name="named"/> in any status; read-only.
     /// </summary>
-    Task<List<Play>> AllocationCandidatesAsync(Guid accountId, string contractId, IReadOnlyCollection<Guid> named, CancellationToken ct) =>
-        Task.FromResult(new List<Play>());
+    Task<List<Play>> AllocationCandidatesAsync(Guid accountId, string contractId, IReadOnlyCollection<Guid> named, CancellationToken ct);
     /// <summary>Plays of the account with these IDs, in any status, tracked for changes; owner status writes wait on the account lock.</summary>
-    Task<List<Play>> PlaysAsync(Guid accountId, IReadOnlyCollection<Guid> ids, CancellationToken ct) => Task.FromResult(new List<Play>());
-    void Add(FillAllocation allocation) => throw new NotSupportedException("This store keeps no allocations.");
-    void Add(FillAllocationRevision revision) => throw new NotSupportedException("This store keeps no allocations.");
+    Task<List<Play>> PlaysAsync(Guid accountId, IReadOnlyCollection<Guid> ids, CancellationToken ct);
+    void Add(FillAllocation allocation);
+    void Add(FillAllocationRevision revision);
     void Add(PlayOrderLink link);
     void Add(PlayStatusChange change);
     /// <summary>

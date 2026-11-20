@@ -38,7 +38,7 @@ public sealed class ActivityCachePostgresTests
         public int Count;
         public Func<Task>? BeforeRead;
     }
-    private sealed class CountingStore(VesselDbContext db, Reads reads) : IActivityStore
+    private sealed class CountingStore(VesselDbContext db, Reads reads) : IActivityStoreDefaults
     {
         public async Task<ActivityFacts> ReadAsync(Guid? accountId, CancellationToken ct, IReadOnlySet<Guid>? accountIds = null)
         {
