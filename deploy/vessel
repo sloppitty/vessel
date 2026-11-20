@@ -15,7 +15,9 @@ and one-off runs), with no exceptions by name:
               evidence store (the whole stopped RustFS volume, or the local evidence volume). An external S3 bucket,
               the credential key ring, .env and the RabbitMQ volume are not included. Restarts what was running.
   upgrade     --to X: back up (refusing to continue if that fails), set VESSEL_VERSION=X in .env, run the explicit
-              migrate service (and a release manifest's post-steps), then start what was running on X.
+              migrate service and the post-steps of every release's upgrade manifest after the current version up
+              to X (docs/releases/vX.Y.Z.upgrade.json, read from X's API image, or --manifest), then start what was
+              running on X.
   restore     --from DIR: into a fresh project (no containers or volumes): restore the database and evidence, then
               identity reset-after-restore and rotate-event-epoch before any host starts.
   rollback    Restore the last pre-upgrade backup in place with its image version, after a safety backup of the
@@ -31,6 +33,7 @@ with the other operator scripts (scripts/test_deploy_vessel.py)."""
 import argparse
 import datetime
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -56,6 +59,8 @@ IMAGE_TAG = re.compile(r':(api|web)-([^:@/]+)$')
 # The services Vessel's Compose files define with its API or web image, whatever reference pins them.
 APP_SERVICES = re.compile(r'^(?:api|migrate|web|worker(?:-[a-z0-9-]+)?)$')
 MANIFEST = 'manifest.json'
+# Every release's docs/releases/vX.Y.Z.upgrade.json, copied into the API image (backend/Dockerfile).
+UPGRADE_DIR = '/app/upgrade'
 # Owners of the evidence volumes (deploy/README.md "Backups").
 RUSTFS_OWNER = '10001:10001'
 API_OWNER = '1654:1654'
@@ -856,21 +861,25 @@ def backup(stack, args):
     return 0
 
 
-def load_upgrade_manifest(path, target):
-    """A release's upgrade manifest (issue #101 part 3): its migrations and configuration notes are shown, and its
-    post-steps (API administrator commands, e.g. ["play-search-rebuild", "--apply"]) run after migrate."""
-    if not path:
-        return {}
-    try:
-        manifest = json.loads(Path(path).read_text())
-    except (OSError, ValueError):
-        raise Failure(f'The upgrade manifest {path} cannot be read.')
-    if manifest.get('version') != target:
-        raise Failure(f'The upgrade manifest is for {manifest.get("version")}, not {target}.')
+def release_key(version):
+    """Orders release versions numerically: 0.4.10 after 0.4.9."""
+    return tuple(int(part) for part in re.match(r'\d+\.\d+\.\d+', version).group().split('.'))
+
+
+def check_upgrade_manifest(manifest, source, version=None):
+    """A release's upgrade manifest (docs/releases/vX.Y.Z.upgrade.json, issue #101): its migrations and configuration
+    notes are shown, and its post-steps (API administrator commands, e.g. ["play-search-rebuild", "--apply"]) run
+    after migrate, before any host starts."""
+    if not isinstance(manifest, dict) or not VERSION.match(str(manifest.get('version'))):
+        raise Failure(f'The upgrade manifest {source} names no release version.')
+    if version and manifest['version'] != version:
+        raise Failure(f'The upgrade manifest {source} is for {manifest["version"]}, not {version}.')
     for step in manifest.get('postSteps', []):
         if not (isinstance(step, list) and step and all(isinstance(a, str) for a in step)
                 and re.match(r'^[a-z][a-z-]*$', step[0])):
-            raise Failure(f'Invalid post-step in the upgrade manifest: {step!r}')
+            raise Failure(f'Invalid post-step in the upgrade manifest {source}: {step!r}')
+    if not all(isinstance(note, str) for note in manifest.get('configuration', [])):
+        raise Failure(f'The upgrade manifest {source} has a configuration note that is not text.')
     return manifest
 
 
@@ -887,6 +896,71 @@ def check_target_migrations(stack, target):
                       'downgrade needs `rollback` to the pre-upgrade backup, not `upgrade`. Nothing was changed.')
 
 
+def image_manifests(stack, image):
+    """The upgrade manifests the API image carries in UPGRADE_DIR, by version, read from a network-less throwaway
+    container; None when the image has none (releases before 0.4.3)."""
+    result = stack.run(['docker', 'run', '--rm', '--network', 'none', '--entrypoint', 'tar', image,
+                        '-C', UPGRADE_DIR, '-cf', '-', '.'], capture=True, binary=True, check=False)
+    if result.returncode:
+        return None
+    manifests = {}
+    with tarfile.open(fileobj=io.BytesIO(result.stdout)) as archive:
+        for member in archive:
+            name = re.fullmatch(r'(?:\./)?v([^/]+)\.upgrade\.json', member.name)
+            if name and member.isfile():
+                source = f'{image}:{UPGRADE_DIR}/{member.name.lstrip("./")}'
+                try:
+                    manifest = json.loads(archive.extractfile(member).read())
+                except ValueError:
+                    raise Failure(f'The upgrade manifest {source} is not JSON.')
+                manifests[name.group(1)] = check_upgrade_manifest(manifest, source, name.group(1))
+    return manifests
+
+
+def upgrade_manifests(stack, args, current, target):
+    """The manifests of every release after current up to target, oldest first: --manifest, or the target API image's
+    own. None while the target image is not present (it is read once pulled)."""
+    if args.manifest:
+        try:
+            manifest = json.loads(Path(args.manifest).read_text())
+        except (OSError, ValueError):
+            raise Failure(f'The upgrade manifest {args.manifest} cannot be read.')
+        return [check_upgrade_manifest(manifest, args.manifest, target)]
+    image = stack.image('migrate', target)
+    if not stack.image_present(image):
+        return None
+    found = image_manifests(stack, image)
+    if found is None:
+        say(f'The {target} image carries no upgrade manifest: read its post-upgrade steps in deploy/README.md.')
+        return []
+    if target not in found:
+        say(f'The {target} image has no upgrade manifest for {target} itself.')
+    low = release_key(current) if current and VERSION.match(current) else (-1,)
+    return [found[v] for v in sorted(found, key=release_key) if low < release_key(v) <= release_key(target)]
+
+
+def post_steps(manifests):
+    """Every post-step of the manifests in release order, each identical step once."""
+    steps = []
+    for manifest in manifests or ():
+        for step in manifest.get('postSteps', []):
+            if step not in steps:
+                steps.append(step)
+    return steps
+
+
+def show_manifests(manifests, target):
+    if manifests is None:
+        return
+    say('Release upgrade manifests: ' + (', '.join(m['version'] for m in manifests) or 'none'))
+    for manifest in manifests:
+        for schema, ids in sorted((manifest.get('migrations') or {}).items()):
+            if ids:
+                say(f'  {manifest["version"]} {schema} migrations: {", ".join(ids)}')
+        for note in manifest.get('configuration', []):
+            say(f'  {manifest["version"]} configuration: {note}')
+
+
 def upgrade(stack, args):
     target = args.to
     env_file = require_env_file(stack)
@@ -895,8 +969,8 @@ def upgrade(stack, args):
     if report.failed:
         raise Failure('Preflight failed; nothing was changed.')
     check_services_configured(stack, containers, target)
-    manifest = load_upgrade_manifest(args.manifest, target)
     current = running_version(stack, containers)
+    manifests = upgrade_manifests(stack, args, current, target)
     services = restart_services(containers)
     missing = missing_images(stack, target)
     front, hosts = writers(containers)
@@ -909,14 +983,18 @@ def upgrade(stack, args):
         'Run the explicit migrate service: ' + '; '.join(
             f'{schema} {", ".join(row["pending"]) or "nothing pending"}' if row['pending'] is not None
             else f'{schema} pending unknown until the image is pulled' for schema, row in pending.items()) + '.']
-    plan += [f'Run {" ".join(step)}.' for step in manifest.get('postSteps', [])]
+    if manifests is None:
+        plan += [f'Run the post-steps of the release upgrade manifests in the pulled {target} image.']
+    plan += [f'Run {" ".join(step)}.' for step in post_steps(manifests)]
     plan += [f'Start on {target} and wait until healthy: {", ".join(services) or "nothing was running"}.']
-    for note in manifest.get('configuration', []):
-        say(f'Configuration note for {target}: {note}')
+    show_manifests(manifests, target)
     if not confirm(args, f'Upgrade project {stack.name} from {current} to {target}:', plan):
         return 2
     pull(stack, missing, args.pull)
     check_target_migrations(stack, target)
+    if manifests is None:
+        manifests = upgrade_manifests(stack, args, current, target) or []
+        show_manifests(manifests, target)
     stopped = stop_writers(stack, containers)
     try:
         directory = take_backup(stack, 'pre-upgrade', services, current, {'upgradeTo': target})
@@ -931,7 +1009,7 @@ def upgrade(stack, args):
         switch_version(stack, env_file, target)
         say('Running migrate')
         stack.compose('run', '--rm', 'migrate')
-        for step in manifest.get('postSteps', []):
+        for step in post_steps(manifests):
             say(f'Running {" ".join(step)}')
             offline(stack, *step)
     except BaseException:
@@ -1111,7 +1189,8 @@ def parse_args(argv=None):
     commands.add_parser('backup', parents=[changing], help='Stop writers, back up into a new directory, restart them')
     up = commands.add_parser('upgrade', parents=[changing], help='Back up, set VESSEL_VERSION, migrate, start')
     up.add_argument('--to', required=True, help='Target release version, e.g. 0.4.3')
-    up.add_argument('--manifest', help='The release\'s upgrade manifest (docs/releases/vX.Y.Z.upgrade.json), if any')
+    up.add_argument('--manifest', help='Use this upgrade manifest (docs/releases/vX.Y.Z.upgrade.json) instead of the '
+                    'ones the target API image carries')
     up.add_argument('--wait-timeout', type=int, default=600, help='Seconds to wait for healthy services (default 600)')
     for name, text in (('restore', 'Restore a backup into a fresh project'),
                        ('rollback', 'Restore the last pre-upgrade backup in place, with its image version')):

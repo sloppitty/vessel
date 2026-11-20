@@ -1,0 +1,20 @@
+{
+  "version": "0.4.3",
+  "migrations": {
+    "journal": [
+      "20261117090000_SnapshotPositionsComplete",
+      "20261117102251_UnrecognizedRowOmissions",
+      "20261118010457_DatabaseHygieneIndexes"
+    ],
+    "identity": []
+  },
+  "postSteps": [
+    ["play-search-rebuild", "--apply", "--all"]
+  ],
+  "configuration": [
+    "DatabaseHygieneIndexes creates the pg_trgm extension in public: the database owner may (the Compose example's POSTGRES_USER is); otherwise a superuser runs CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public; before the upgrade (deploy/README.md, Journal search index).",
+    "Roll UnrecognizedRowOmissions back only from the pre-upgrade backup.",
+    "New optional setting Vessel:Worker:StaleExitAfter (2 minutes to 2 hours, default 10 minutes).",
+    "Compose: use this release's deploy files; up recreates every container and creates the api-tmp volume. Root restore commands need --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER, and with tls internal Caddy logs that it cannot install its root certificate."
+  ]
+}

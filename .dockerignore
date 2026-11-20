@@ -8,6 +8,8 @@
 prototype
 # Neither image copies these; keep them out of the build context (docs alone is about 166 MB).
 docs
+# Except the upgrade manifests the API image carries for deploy/vessel upgrade.
+!docs/releases/*.upgrade.json
 spikes
 **/TestResults
 **/coverage
