@@ -144,6 +144,19 @@ class DatasetTests(unittest.TestCase):
         self.assertEqual({True, False}, {g['ClosedAtUtc'] is None for g in gaps})
         self.assertEqual({'forced', 'fee', 'missing-pnl'}, {o['Kind'] for o in self.gen.records('execution_omissions')})
 
+    def test_every_play_has_drawings_at_realistic_sizes(self):
+        plays = {p['Id'] for p in self.gen.records('plays')}
+        rows = self.gen.records('play_drawings')
+        self.assertEqual(plays, {r['PlayId'] for r in rows})
+        self.assertEqual('{}', min((r['Document'] for r in rows), key=len))
+        self.assertGreater(max(len(r['Document']) for r in rows), 2_000)
+        # Deterministic per Play, and a few Plays approach the server's 1,000,000-character limit.
+        plays = [{'id': str(i), 'contract': 'BTC', 'plan': {'entries': [{'price': ''}]}} for i in range(300)]
+        sizes = [len(benchmark.copy_value(benchmark.drawings(play, 'hyperliquid'))) for play in plays]
+        self.assertEqual(sizes[:20], [len(benchmark.copy_value(benchmark.drawings(play, 'hyperliquid'))) for play in plays[:20]])
+        self.assertTrue(any(size > 500_000 for size in sizes))
+        self.assertLess(max(sizes), 1_000_000)
+
     def test_search_terms_exist(self):
         rare = [line for lines in self.gen.rows.lines.values() for line in lines if benchmark.RARE_WORD in line]
         self.assertEqual(1, len(rare))

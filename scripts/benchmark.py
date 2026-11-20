@@ -135,6 +135,8 @@ LOG_TEXTS = ['Filled on the retest, stop resting below the level.', 'First targe
 EVIDENCE_NOTES = ['Hourly chart at the entry with the reclaimed level marked.', 'Funding and open interest before entry.',
                   'The retest candle and the volume spike.', 'Exit screenshot after the target filled.',
                   'Daily structure: higher lows since the range low.', '']
+DRAWING_KINDS = ['trend-line', 'horizontal-line', 'zone', 'fibonacci', 'long-position', 'text']
+DRAWING_COLORS = ['#8fb8ff', '#e9edf2', '#edd49e', '#f5a97f', '#a9d6b6']
 RULES = [('the first target fills', 'move the stop to break-even and trail the rest'),
          ('two losses in a row', 'halve the next position size'),
          ('funding is above 0.05 % per hour', 'skip breakout longs until it resets')]
@@ -269,10 +271,11 @@ TABLES = {
     'play_rules': ['Id', 'OwnerId', 'TradingMode', 'Version', 'If', 'Then', 'SourcePlayId', 'CreatedAtUtc',
                    'ArchivedAtUtc'],
     'plays': ['Id', 'OwnerId', 'AccountId', 'TradingMode', 'VenueId', 'ContractId', 'InstrumentSource', 'Status', 'Title',
-              'Plan', 'Direction', 'Drawings', 'Review', 'Origin', 'ReviewAdherence', 'ReviewMistakeTag', 'ReviewLesson',
+              'Plan', 'Direction', 'Review', 'Origin', 'ReviewAdherence', 'ReviewMistakeTag', 'ReviewLesson',
               'ReviewNextAction', 'ReviewRule', 'RuleVersion', 'RuleIf', 'RuleThen', 'ReviewRevision', 'ReviewedAtUtc',
               'ReviewCompletion', 'ReviewCompletedAtUtc', 'PlanRevision', 'Version', 'CancelReason', 'CreatedAtUtc',
               'UpdatedAtUtc', 'PlannedAtUtc', 'EndedAtUtc'],
+    'play_drawings': ['OwnerId', 'PlayId', 'Document'],
     'play_plan_revisions': ['Id', 'OwnerId', 'PlayId', 'Number', 'Status', 'Plan', 'Reason', 'CreatedAtUtc', 'Preflight',
                             'Rule'],
     'play_status_changes': ['Id', 'OwnerId', 'PlayId', 'From', 'To', 'Reason', 'Note', 'Source', 'UnresolvedReason',
@@ -996,19 +999,17 @@ class Generator:
     def emit_play(self, play):
         a, review, rule = play['account'], play['review'], play['rule']
         answers = review.get('answers') or {}
-        drawings = {}
-        if play['contract'] and self.rng.random() < 0.3:
-            drawings[f'{a.venue}:{play["contract"]}'] = [
-                {'id': 'd1', 'type': 'horizontal', 'price': play['plan']['entries'][0]['price'] or '1'},
-                {'id': 'd2', 'type': 'trendline', 'points': [[1, 2], [3, 4]]}]
+        drawn = play['contract'] and self.rng.random() < 0.3
         self.rows.add(
             'plays', play['id'], self.owner, a.id, play['mode'], a.venue, play['contract'], 'Venue', play['status'],
-            play['title'], play['plan'], play['plan']['direction'], drawings, review.get('text', ''), 'Planned',
+            play['title'], play['plan'], play['plan']['direction'], review.get('text', ''), 'Planned',
             answers.get('Adherence'), answers.get('MistakeTag'), answers.get('Lesson', ''), answers.get('NextAction', ''),
             answers.get('Rule'), rule['version'] if rule else None, rule['rule_if'] if rule else None,
             rule['rule_then'] if rule else None, len(play['review_revisions']), review.get('reviewed'),
             review.get('completion'), review.get('completed'), play['plan_revision'], play['version'], play['cancel'],
             play['created'], play['updated'], play['planned'], play['ended'])
+        # Every Play has a drawings row, as after the PlayDrawingsTable migration (issue #110).
+        self.rows.add('play_drawings', self.owner, play['id'], drawings(play, a.venue) if drawn else {})
         for number, status, plan, reason, at, preflight, snapshot in play['revisions']:
             self.rows.add('play_plan_revisions', self.uuid(), self.owner, play['id'], number, status, plan, reason, at,
                           preflight, snapshot)
@@ -1246,6 +1247,36 @@ class Generator:
 
 def generate(seed, years, scale, anchor):
     return Generator(seed, years, scale, anchor).generate()
+
+
+def drawings(play, venue):
+    """Chart drawings at realistic sizes (issue #110): most drawn Plays keep a few lines on their instrument, some a busy
+    chart on two, a few approach the 1 MB limit. Shapes follow the chart's persisted drawing. A Play-local generator
+    keeps the rest of the seed unchanged."""
+    rng = random.Random(play['id'])
+    roll = rng.random()
+    instruments, count, text = ((1, rng.choice((2, 4, 8, 16)), 40) if roll < 0.8 else
+                                (2, rng.randrange(40, 120), 80) if roll < 0.97 else (5, 200, 4500))
+    keys = [f'{venue}:{play["contract"]}'] + [f'{v}:{c}' for v, markets in MARKETS.items() for c in markets
+                                               if (v, c) != (venue, play['contract'])]
+    price = float(play['plan']['entries'][0]['price'] or ASSETS.get(play['contract'], (D(1),))[0])
+    start = 1_700_000_000_000 + rng.randrange(0, 900) * 86_400_000
+
+    def drawing():
+        kind = rng.choice(DRAWING_KINDS)
+        points = [{'time': start + rng.randrange(0, 60 * 86_400_000), 'price': round(price * rng.uniform(0.85, 1.15), 6)}
+                  for _ in range(1 if kind in ('horizontal-line', 'text') else 2)]
+        shape = {'id': str(uuid.UUID(int=rng.getrandbits(128), version=4)), 'schemaVersion': 1, 'kind': kind,
+                 'points': points, 'style': {'color': rng.choice(DRAWING_COLORS), 'line': 'dashed', 'width': 2}}
+        if kind == 'text':
+            shape['text'] = ('Level held twice; watch the reaction. ' * 120)[:rng.randrange(text // 2, text + 1)]
+        return shape
+
+    result = {key: [drawing() for _ in range(count)] for key in keys[:instruments]}
+    # The server refuses drawings over 1,000,000 characters.
+    while len(json.dumps(result, separators=(',', ':'))) > 990_000:
+        result[keys[0]].pop()
+    return result
 
 
 def quoted(name):
