@@ -575,7 +575,8 @@ public sealed class PlayFundingPostgresTests
         await using (var db = database.Context(owner))
         {
             // Venue-fact features are real-only: a paper Play's execution view, funding included, is refused.
-            Assert.Equal(409, (await Assert.ThrowsAsync<ProblemException>(() => Service(db).GetAsync(paperPlay, default))).StatusCode);
+            // #113: Play.RequireReal refuses it, a 409 at the API.
+            await Assert.ThrowsAsync<DomainRuleException>(() => Service(db).GetAsync(paperPlay, default));
             // Nothing held yet, so there is no holding window and no line.
             Assert.Null((await Service(db).GetAsync(plannedPlay, default)).Funding);
         }

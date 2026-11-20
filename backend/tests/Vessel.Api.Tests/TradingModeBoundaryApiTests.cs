@@ -210,9 +210,13 @@ public sealed class TradingModeBoundaryApiTests
     {
         await using var factory = new CoreApiFactory(Guid.NewGuid());
         using var client = factory.AuthorizedClient();
-        // Discovery without an address fails its own validation, past the boundary, in both real spellings.
+        // Past the boundary the handler runs (this host has no database, so it fails there), never the paper refusal.
         foreach (var query in new[] { "", "?tradingMode=real" })
-            Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/venues/lighter/accounts" + query)).StatusCode);
+        {
+            var response = await client.GetAsync("/api/monitor" + query);
+            Assert.NotEqual(HttpStatusCode.Conflict, response.StatusCode);
+            Assert.DoesNotContain(TradingModeBoundary.RealOnlyRefusal, await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        }
         foreach (var query in new[] { "?tradingMode=Paper", "?tradingMode=", "?tradingMode=paper&tradingMode=paper" })
         {
             var response = await client.GetAsync("/api/monitor" + query);
