@@ -39,6 +39,7 @@ export function useSizing(api: WorkspaceApi, generation = 0, enabled = true) {
   const changes = useRef(0)
   // A hidden page neither reads nor rereads; it catches up once with the latest generation when shown.
   const loaded = useRef<{ api: WorkspaceApi; key: string } | null>(null)
+  // Not useApiRead (#115): a shown-again page keeps its read for the same key, a risk change outranks reads started before it, and a failure stays stale across later reads.
   useEffect(() => {
     if (!enabled || loaded.current?.api === api && loaded.current.key === key) return
     const controller = new AbortController()

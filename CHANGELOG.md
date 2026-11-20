@@ -90,6 +90,8 @@
   identity cleanup, which now deletes in batches.
 - Saving a Play request larger than 2 MiB is refused before it is parsed ("Play request is
   too large.").
+- Notification settings no longer keep an old load error on screen while Retry reads, and a
+  save is no longer undone by a background reread that started before it.
 
 ### Changed
 
@@ -130,6 +132,8 @@
   paper worker's lock session has its own connection.
 - Chart drawings are stored in their own table, so the Plays list, Review, Sizing and
   exports no longer load them.
+- The shared read hook also covers Activity, the Plays list rows, the settings forms,
+  history coverage, account snapshots and the paper, ledger and open-risk reads.
 
 Migrations: stop the API and every worker, back up, then apply the journal migrations with
 the explicit migration service before starting the updated images. The updated API and

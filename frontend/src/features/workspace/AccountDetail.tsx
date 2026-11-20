@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import type { AccountMonitor } from '@/api/monitor'
 import { MonitorBadge, MonitorDiscrepancies, MonitorPanel } from '@/features/monitor/MonitorPanel'
 import { useMonitorRun } from '@/features/monitor/useMonitorRun'
-import type { AccountSnapshot, BrokerAccount, WorkspaceApi } from '@/api/workspace'
-import { errorMessage } from '@/api/errors'
+import type { BrokerAccount, WorkspaceApi } from '@/api/workspace'
+import { useApiRead } from '@/lib/use-api-read'
 import { Button } from '@/components/ui/button'
 import { ActivityOperations } from './ActivityOperations'
 import { ImportConflicts } from './ImportConflicts'
@@ -42,29 +42,17 @@ export function AccountDetail({ account, api, refreshing, busy = refreshing, onS
   const venues = useVenues()
   const synced = !paper && venues.can(account.venueId, 'sync')
   const wallet = !paper && venues.can(account.venueId, 'stablecoinWallet')
-  const [snapshot, setSnapshot] = useState<AccountSnapshot | null>(null)
+  // A refresh ends with a shell reload, so an in-flight refresh does not start a racing read.
+  const requestKey = JSON.stringify([account.id, account.lastSyncedAtUtc, account.isEnabled, reloadGeneration])
+  const read = useApiRead(api, requestKey, (client, signal) => client.snapshot(account.id, signal),
+    { fallback: 'Unable to read the account.', enabled: !paper })
+  // The last snapshot read stays on screen through later reads, failed ones included.
+  const snapshot = read.latest
   // A wallet older than the perps was not read with them (Phase 2, item 14b): its balances are kept but not current.
   const walletStale = wallet && !!snapshot?.stablecoinWallet &&
     Date.parse(snapshot.stablecoinWallet.observedAtUtc) < Date.parse(snapshot.observedAtUtc)
-  const [completed, setCompleted] = useState<{ api: WorkspaceApi; key: string } | null>(null)
-  const [detailError, setDetailError] = useState<string | null>(null)
-  // A refresh ends with a shell reload, so an in-flight refresh does not start a racing read.
-  const requestKey = JSON.stringify([account.id, account.lastSyncedAtUtc, account.isEnabled, reloadGeneration])
-  const pending = !paper && (completed === null || completed.api !== api || completed.key !== requestKey)
-  const error = pending ? null : detailError
-  useEffect(() => {
-    if (paper) return
-    const controller = new AbortController()
-    let active = true
-    // Loading/error visibility derives from the request generation, avoiding a
-    // synchronous effect render while keeping prior observations during retries.
-    api.snapshot(account.id, controller.signal).then(nextSnapshot => {
-      if (active) { setSnapshot(nextSnapshot); setDetailError(null); setCompleted({ api, key: requestKey }) }
-    }).catch(cause => {
-      if (active) { setDetailError(errorMessage(cause, 'Unable to read the account.')); setCompleted({ api, key: requestKey }) }
-    })
-    return () => { active = false; controller.abort() }
-  }, [api, account.id, requestKey, paper])
+  const pending = read.loading
+  const error = read.error
   return <div className="workspace-page-content">
     <div className="detail-actions"><Button variant="ghost" size="sm" onClick={onBack}><ArrowLeft size={15} />All accounts</Button><div className="detail-management"><Button variant="outline" onClick={onManage}
       title={venues.can(account.venueId, 'readOnlyCredential') ? 'Rename, move or disable; inspect or replace the read-only token if order access is unavailable or expired' : undefined}>Manage account</Button>{synced && <Button variant="outline" onClick={() => onSync(account.id)} disabled={busy || !account.isEnabled}

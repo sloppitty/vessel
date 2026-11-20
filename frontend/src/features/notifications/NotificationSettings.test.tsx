@@ -65,6 +65,20 @@ describe('Notification settings', () => {
     expect(api.notificationPreferences).toHaveBeenCalledTimes(2)
   })
 
+  // #115: Retry used to leave the old load error on screen until the new read answered.
+  it('drops the load error while Retry reads', async () => {
+    let answer!: (value: typeof notificationPreferencesFixture) => void
+    const api = { notificationPreferences: vi.fn().mockRejectedValueOnce(new Error('down'))
+      .mockImplementationOnce(() => new Promise(resolve => { answer = resolve })) } as unknown as WorkspaceApi
+    show(api)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Notification preferences could not be loaded.')
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Loading notification preferences…')
+    await act(async () => answer(notificationPreferencesFixture))
+    expect(await screen.findByText('Delivering')).toBeInTheDocument()
+  })
+
   it('rereads after a feed reset unless edits are pending', async () => {
     const api = { notificationPreferences: vi.fn().mockResolvedValue(notificationPreferencesFixture) } as unknown as WorkspaceApi
     const { inApp, emit } = hub()
@@ -76,6 +90,32 @@ describe('Notification settings', () => {
     emit({ type: 'reset' })
     await act(async () => { await Promise.resolve() })
     expect(api.notificationPreferences).toHaveBeenCalledTimes(2)
+  })
+
+  // #115: a feed-reset reread that started before a save used to replace the saved preferences with its older answer.
+  it.each(['reread first', 'save first'])('keeps a save over an older reread that answers around it: %s', async order => {
+    let reread!: (value: typeof notificationPreferencesFixture) => void
+    let saved!: (value: typeof notificationPreferencesFixture) => void
+    const api = {
+      notificationPreferences: vi.fn().mockResolvedValueOnce(notificationPreferencesFixture)
+        .mockImplementationOnce(() => new Promise(resolve => { reread = resolve })),
+      saveNotificationPreferences: vi.fn().mockImplementationOnce(() => new Promise(resolve => { saved = resolve }))
+        .mockResolvedValueOnce({ ...notificationPreferencesFixture, minimumSeverity: 'critical', revision: 5 }),
+    } as unknown as WorkspaceApi
+    const { inApp, emit } = hub()
+    show(api, inApp)
+    await screen.findByText('Delivering')
+    emit({ type: 'reset' })
+    expect(api.notificationPreferences).toHaveBeenCalledTimes(2)
+    await userEvent.selectOptions(screen.getByLabelText('Minimum severity'), 'warning')
+    await userEvent.click(screen.getByRole('button', { name: 'Save notifications' }))
+    const answers = [() => reread({ ...notificationPreferencesFixture }), () => saved({ ...notificationPreferencesFixture, minimumSeverity: 'warning', revision: 4 })]
+    for (const answer of order === 'reread first' ? answers : answers.reverse()) await act(async () => answer())
+    expect(await screen.findByText('Notification preferences saved.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Minimum severity')).toHaveValue('warning')
+    await userEvent.selectOptions(screen.getByLabelText('Minimum severity'), 'critical')
+    await userEvent.click(screen.getByRole('button', { name: 'Save notifications' }))
+    expect(api.saveNotificationPreferences).toHaveBeenLastCalledWith(expect.objectContaining({ minimumSeverity: 'critical', expectedRevision: 4 }))
   })
 
   it('shows the worker offline time from the stream head', async () => {

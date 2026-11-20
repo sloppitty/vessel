@@ -14,7 +14,7 @@ function deferredApi() {
   return { api, calls }
 }
 type Api = ReturnType<typeof deferredApi>['api']
-type Props = { api: Api; keyValue: string; options?: Partial<ApiReadOptions> }
+type Props = { api: Api; keyValue: string; options?: Partial<ApiReadOptions<string>> }
 
 function setup(initial: Props) {
   return renderHook(({ api, keyValue, options }: Props) =>
@@ -194,6 +194,71 @@ describe('useApiRead', () => {
     await flush()
     expect(api.read).not.toHaveBeenCalled()
     expect(result.current).toMatchObject({ data: null, error: null, loading: false })
+  })
+
+  describe('answers (a clamped page)', () => {
+    // A read of "page5" answers "page3", as a server clamps a page past the end.
+    const answers = (data: string, key: unknown) => data === 'P3' ? 'page3' : key
+
+    it('is current for the key asked, and adopting the key it answers reads nothing', async () => {
+      const { api, calls } = deferredApi()
+      const { result, rerender } = setup({ api, keyValue: 'page5', options: { answers } })
+      await flush()
+      await act(async () => calls[0]!.resolve('P3'))
+      expect(result.current).toMatchObject({ data: 'P3', loading: false })
+      rerender({ api, keyValue: 'page3', options: { answers } })
+      await flush()
+      expect(calls).toHaveLength(1)
+      expect(result.current).toMatchObject({ data: 'P3', loading: false })
+      act(() => result.current.reload())
+      await flush()
+      expect(calls).toHaveLength(2)
+      expect(result.current).toMatchObject({ data: null, loading: true })
+    })
+
+    it('reads the answered key again once another key was read in between', async () => {
+      const { api, calls } = deferredApi()
+      const { result, rerender } = setup({ api, keyValue: 'page5', options: { answers } })
+      await flush()
+      await act(async () => calls[0]!.resolve('P3'))
+      rerender({ api, keyValue: 'page1', options: { answers } })
+      await flush()
+      expect(result.current).toMatchObject({ data: null, loading: true })
+      rerender({ api, keyValue: 'page3', options: { answers } })
+      await flush()
+      expect(calls.map(call => call.key)).toEqual(['page5', 'page1', 'page3'])
+      expect(result.current).toMatchObject({ data: null, loading: true })
+    })
+
+    it('reads again when the answered key comes back after being disabled', async () => {
+      const { api, calls } = deferredApi()
+      const { result, rerender } = setup({ api, keyValue: 'page5', options: { answers } })
+      await flush()
+      await act(async () => calls[0]!.resolve('P3'))
+      rerender({ api, keyValue: 'page5', options: { answers, enabled: false } })
+      await flush()
+      rerender({ api, keyValue: 'page3', options: { answers } })
+      await flush()
+      expect(calls).toHaveLength(2)
+      expect(result.current).toMatchObject({ data: null, loading: true })
+    })
+  })
+
+  it('waits for delay before reading, and a key that changes meanwhile reads only once', async () => {
+    vi.useFakeTimers()
+    try {
+      const { api, calls } = deferredApi()
+      const { result, rerender } = setup({ api, keyValue: 'a', options: { delay: 300 } })
+      expect(result.current).toMatchObject({ data: null, loading: true })
+      act(() => { vi.advanceTimersByTime(200) })
+      rerender({ api, keyValue: 'b', options: { delay: 300 } })
+      act(() => { vi.advanceTimersByTime(299) })
+      expect(calls).toHaveLength(0)
+      act(() => { vi.advanceTimersByTime(1) })
+      expect(calls.map(call => call.key)).toEqual(['b'])
+      await act(async () => calls[0]!.resolve('B'))
+      expect(result.current).toMatchObject({ data: 'B', loading: false })
+    } finally { vi.useRealTimers() }
   })
 
   it('uses the read of the render that started it, without reading again when only the function changes', async () => {

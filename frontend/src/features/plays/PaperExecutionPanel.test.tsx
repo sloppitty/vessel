@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/api/errors'
@@ -56,7 +56,7 @@ describe('PaperExecutionPanel', () => {
     const candleTimes = rows[0]!.querySelectorAll('time')
     expect(Array.from(candleTimes, element => element.dateTime)).toEqual([entry.occurredAtUtc, entry.candleOpenAtUtc, entry.candleCloseAtUtc])
     expect(rows[0]).toHaveTextContent(`Candle ${formatTime(entry.candleOpenAtUtc, 'local')} – ${formatTime(entry.candleCloseAtUtc, 'local')}`)
-    expect(onState.mock.calls).toEqual([[null], [state]])
+    await waitFor(() => expect(onState.mock.calls).toEqual([[null], [state]]))
     expect(api.paperState).toHaveBeenCalledWith(playId, expect.any(AbortSignal))
     expect(screen.queryByRole('button', { name: /Link|Check|Record|Refresh/ })).not.toBeInTheDocument()
   })
@@ -206,7 +206,9 @@ describe('PaperExecutionPanel', () => {
     const oldSignal = api.paperState.mock.calls[0]?.[1]
     view.rerender(<PaperExecutionPanel api={api} playId={playId} reloadGeneration={2} onState={onState} />)
     expect(oldSignal?.aborted).toBe(true)
-    expect(onState).toHaveBeenCalledTimes(2)
+    // The parent is told once that no state is known; a second read starting does not repeat it.
+    expect(onState).toHaveBeenCalledTimes(1)
+    expect(onState).toHaveBeenLastCalledWith(null)
     await act(async () => first.resolve(state))
     expect(screen.getByText('Loading paper execution…')).toBeInTheDocument()
     expect(onState).toHaveBeenLastCalledWith(null)

@@ -38,6 +38,7 @@ import {
   Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings2, Wallet, BookOpen, X,
 } from 'lucide-react'
 import { PageErrorBoundary } from '@/components/PageErrorBoundary'
+import { useApiRead } from '@/lib/use-api-read'
 import { OverviewPage } from './OverviewPage'
 import { PortfoliosPage } from './PortfoliosPage'
 import { useHashPage, type Page } from './useHashPage'
@@ -129,20 +130,16 @@ function useWideNavigation() {
 
 function TradingWorkspace(props: ShellProps) {
   const [mode, setMode] = useState<TradingMode>('real')
-  const [paperApi, setPaperApi] = useState<WorkspaceApi | null>(null)
   const [settingsGeneration, setSettingsGeneration] = useState(0)
-  useEffect(() => {
-    if (!props.api.paperSettings || !props.api.forTradingMode) return
-    const controller = new AbortController()
-    props.api.paperSettings(controller.signal).then(() => { if (!controller.signal.aborted) setPaperApi(props.api) })
-      .catch(() => { /* Old/unsupported APIs stay real-only. Settings shows its own actionable error. */ })
-    return () => controller.abort()
-  }, [props.api, settingsGeneration])
+  // Once this API has answered, Paper stays available through later failed checks. Old/unsupported APIs stay real-only;
+  // Settings shows its own actionable error.
+  const paperCheck = useApiRead(props.api, null, (client, signal) => client.paperSettings(signal).then(() => true),
+    { fallback: '', reloadKey: settingsGeneration, enabled: !!props.api.paperSettings && !!props.api.forTradingMode })
   const paperClient = useMemo(() => {
     try { const client = props.api.forTradingMode?.('paper'); return client?.tradingMode === 'paper' ? client : null }
     catch { return null }
   }, [props.api])
-  const paperAvailable = paperApi === props.api && paperClient !== null && props.system.venues.some(venue => venue.capabilities.paperExecution)
+  const paperAvailable = paperCheck.latest === true && paperClient !== null && props.system.venues.some(venue => venue.capabilities.paperExecution)
   const tradingMode = paperAvailable ? mode : 'real'
   const api = tradingMode === 'paper' ? paperClient! : props.api
   const [navigationCollapsed, setNavigationCollapsed] = useState(false)

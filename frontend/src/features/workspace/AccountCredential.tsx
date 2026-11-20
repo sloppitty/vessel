@@ -1,9 +1,10 @@
-import { useEffect, useId, useState, type FormEvent } from 'react'
+import { useId, useState, type FormEvent } from 'react'
 import {
   credentialDevelopmentTransportMessage, credentialFailureMessage, credentialStorageMessage, credentialTransportAllowed, credentialTransportMessage,
   type AccountCredential as CredentialMetadata,
 } from '@/api/account-access'
 import type { WorkspaceApi } from '@/api/workspace'
+import { useApiRead } from '@/lib/use-api-read'
 import { isHttpsUrl } from '@/api/system'
 import { useVenues } from '@/api/venues'
 import { Button } from '@/components/ui/button'
@@ -38,43 +39,39 @@ export function ReadOnlyTokenInput({ venueId, value, onChange, disabled = false 
 export function AccountCredential({ accountId, venueId, enabled, api, onBusy }: {
   accountId: string; venueId: string; enabled: boolean; api: WorkspaceApi; onBusy: (busy: boolean) => void
 }) {
-  const [metadata, setMetadata] = useState<CredentialMetadata | null>(null)
+  const read = useApiRead(api, accountId, (client, signal) => client.accountCredential(accountId, signal), { fallback: '' })
+  // What a save or removal changed over the read it started from; a new read shows its own answer.
+  const [changed, setChanged] = useState<{ read: CredentialMetadata; metadata: CredentialMetadata } | null>(null)
+  const metadata = read.data === null ? null : changed?.read === read.data ? changed.metadata : read.data
+  const loaded = !read.loading
   const [token, setToken] = useState('')
-  const [loaded, setLoaded] = useState(false)
   const [pending, setPending] = useState(false)
   const [removing, setRemoving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [actionError, setError] = useState<string | null>(null)
+  const error = actionError ?? (read.error !== null ? 'Credential status is unavailable. Retry to check it.' : null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [retry, setRetry] = useState(0)
   const secure = credentialTransportAllowed()
-  useEffect(() => {
-    const controller = new AbortController()
-    api.accountCredential(accountId, controller.signal).then(value => {
-      if (!controller.signal.aborted) { setMetadata(value); setError(null); setLoaded(true) }
-    }).catch(() => {
-      if (!controller.signal.aborted) { setError('Credential status is unavailable. Retry to check it.'); setLoaded(true) }
-    })
-    return () => controller.abort()
-  }, [api, accountId, retry])
 
   async function save(event: FormEvent) {
     event.preventDefault()
     const submitted = token
     setToken(''); setError(null); setNotice(null)
     if (!secure) { setError(credentialTransportMessage); return }
-    if (!enabled || !metadata?.storageConfigured || !submitted.trim()) return
+    const basis = read.data
+    if (!enabled || !basis || !metadata?.storageConfigured || !submitted.trim()) return
     setPending(true); onBusy(true)
     try {
-      setMetadata(await api.saveAccountCredential(accountId, submitted))
+      setChanged({ read: basis, metadata: await api.saveAccountCredential(accountId, submitted) })
       setNotice('Read-only token verified and saved.')
     } catch (cause) { setError(credentialFailureMessage(cause)) }
     finally { setToken(''); setPending(false); onBusy(false) }
   }
   async function remove() {
+    const basis = read.data, shown = metadata
     setToken(''); setPending(true); onBusy(true); setError(null); setNotice(null)
     try {
       await api.deleteAccountCredential(accountId)
-      setMetadata(previous => previous && { ...previous, credential: null })
+      if (basis && shown) setChanged({ read: basis, metadata: { ...shown, credential: null } })
       setRemoving(false); setNotice('Credential removed. Public account reads remain available.')
     } catch { setError('Could not remove the credential. Refresh its status before trying again.') }
     finally { setPending(false); onBusy(false) }
@@ -115,7 +112,7 @@ export function AccountCredential({ accountId, venueId, enabled, api, onBusy }: 
     {error && <p className="error" role="alert">{error}</p>}
     {notice && <p className="credential-notice" role="status">{notice}</p>}
     <Button type="button" variant="ghost" size="sm" disabled={pending || !loaded} onClick={() => {
-      setToken(''); setMetadata(null); setLoaded(false); setError(null); setNotice(null); setRetry(value => value + 1)
+      setToken(''); setError(null); setNotice(null); read.reload()
     }}>Refresh credential status</Button>
   </section>
 }

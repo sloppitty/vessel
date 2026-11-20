@@ -5,7 +5,7 @@ import { PaperExecutionPanel } from './PaperExecutionPanel'
 import { ApiError, errorMessage } from '@/api/errors'
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { BrokerAccount, Portfolio, WorkspaceApi } from '@/api/workspace'
-import { isEndedStatus, isJournalQuery, isReviewed, journalSearchMax, pagedPlayViews, playSearchLength, statusLabels, type NextAction, type PlayCounts, type PlayHistory, type PlayList as PlayListPage, type PreflightCheck, type PlayListQuery, type PlayStatus, type UnresolvedReason, type PlayView, type SavedPlay, type StatusRequest, type PlayRule, type PlayRuleState, type PlanRuleAnswer } from '@/api/plays'
+import { isEndedStatus, isJournalQuery, isReviewed, journalSearchMax, pagedPlayViews, playSearchLength, statusLabels, type NextAction, type PlayCounts, type PlayHistory, type PreflightCheck, type PlayListQuery, type PlayStatus, type UnresolvedReason, type PlayView, type SavedPlay, type StatusRequest, type PlayRule, type PlayRuleState, type PlanRuleAnswer } from '@/api/plays'
 import type { AccountMonitor } from '@/api/monitor'
 import { Button } from '@/components/ui/button'
 import { Pager } from '@/components/ui/pager'
@@ -894,39 +894,28 @@ function PlayList({ api, accounts, busy, reloadGeneration, unsaved, list, onList
   const query: PlayListQuery = { view: list.view, ...(list.q ? { q: list.q } : {}), ...(paged ? { page: list.page, pageSize: list.pageSize } : {}) }
   // Accepted stored-state reloads (owner events) reread the page like a finished owner action.
   const rowsKey = JSON.stringify([query, generation, reloadGeneration])
-  // `requested` produced the rows; `key` is the request they answer, which differs when the server clamped the page.
-  const [rows, setRows] = useState<{ api: WorkspaceApi; key: string; requested: string; page?: PlayListPage; error?: string } | null>(null)
-  const adopted = useRef<string | null>(null)
+  // A page past the end comes back clamped: the answer also answers the clamped page's key, which the list adopts below
+  // without reading it again. Earlier rows stay on screen while a read runs.
+  const rows = useApiRead(api, rowsKey, (client, signal) => client.plays(query, signal), {
+    fallback: 'The change could not be completed. Try again.', keepPrevious: 'always',
+    answers: (page, asked) => query.page === undefined || page.page === query.page ? asked
+      : JSON.stringify([{ ...query, page: page.page }, generation, reloadGeneration]),
+  })
+  // Keep the page actually shown, so later growth does not jump back.
+  const answer = rows.loading ? null : rows.data
   useEffect(() => {
-    const skip = adopted.current === rowsKey
-    adopted.current = null
-    if (skip) return
-    const controller = new AbortController()
-    const [request, at, reloaded] = JSON.parse(rowsKey) as [PlayListQuery, number, number]
-    api.plays(request, controller.signal).then(page => {
-      if (controller.signal.aborted) return
-      const answered = request.page === undefined || page.page === request.page ? rowsKey : JSON.stringify([{ ...request, page: page.page }, at, reloaded])
-      setRows({ api, key: answered, requested: rowsKey, page })
-    }).catch(cause => { if (!controller.signal.aborted) setRows({ api, key: rowsKey, requested: rowsKey, error: errorMessage(cause, 'The change could not be completed. Try again.') }) })
-    return () => controller.abort()
-  }, [api, rowsKey])
-  // A page past the end comes back clamped: keep the page actually shown, so later growth does not jump back.
-  // Only the response to the current request may write, and the adopted page is not requested again.
-  useEffect(() => {
-    if (rows === null || rows.api !== api || rows.requested !== rowsKey || rows.key === rowsKey || !rows.page) return
-    adopted.current = rows.key
-    onList({ ...list, page: rows.page.page })
-  }, [api, list, onList, rows, rowsKey])
+    if (answer === null || query.page === undefined || answer.page === query.page) return
+    onList({ ...list, page: answer.page })
+  }, [answer, list, onList, query.page])
   // Tab counts follow the search text and every finished owner action or accepted reload; a failed read shows none.
   const q = list.q
   const counts = useApiRead(api, q, (client, signal) => client.playCounts(q ? { q } : {}, signal),
     { fallback: '', reloadKey: JSON.stringify([generation, reloadGeneration]) })
 
-  const pending = rows === null || rows.api !== api || rows.key !== rowsKey && rows.requested !== rowsKey
-  const previous = rows?.api === api ? rows.page ?? null : null
-  const shown = pending ? previous : rows.page ?? null
-  const error = pending ? null : rows.error ?? null
-  const skeleton = useDelayedFlag(pending && previous === null)
+  const pending = rows.loading
+  const shown = rows.data
+  const error = rows.error
+  const skeleton = useDelayedFlag(pending && shown === null)
   const tabCounts: PlayCounts | null = counts.data
   const top = useRef<HTMLDivElement | null>(null)
   const accountName = (id: string) => accounts.find(account => account.id === id)?.name ?? 'Unknown account'
@@ -961,7 +950,7 @@ function PlayList({ api, accounts, busy, reloadGeneration, unsaved, list, onList
       </div>
       <TabsContent value={list.view} ref={top}>
         {error && <div className="workspace-alert" role="alert"><span>{error}</span>
-          <Button variant="ghost" size="sm" onClick={() => { setRows(null); setGeneration(current => current + 1) }}>Try again</Button></div>}
+          <Button variant="ghost" size="sm" onClick={() => setGeneration(current => current + 1)}>Try again</Button></div>}
         {!error && shown === null && (skeleton ? <SkeletonStatus label="Loading plays…"><ul className="plays-list">
           {[0, 1, 2, 3].map(row => <li key={row}><span className="plays-list-item plays-list-skeleton">
             <span className="plays-list-title"><Skeleton className="skeleton-title" /><Skeleton className="skeleton-identity" /></span>

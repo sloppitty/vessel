@@ -1,8 +1,9 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useId, useState } from 'react'
 import { CalendarRange } from 'lucide-react'
 import { errorMessage } from '@/api/errors'
 import type { ReportingSettings as Settings, WeekStart } from '@/api/reporting'
 import type { WorkspaceApi } from '@/api/workspace'
+import { useApiRead } from '@/lib/use-api-read'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
@@ -12,7 +13,11 @@ import './reporting-settings.css'
 type ReportingSettingsApi = Pick<WorkspaceApi, 'reportingSettings' | 'updateReportingSettings'>
 
 interface Draft { timeZone: string; weekStart: WeekStart }
-interface Loaded { api: ReportingSettingsApi; attempt: number; saved: Settings | null; draft: Draft; error: string | null; message: string | null }
+/** The form over one read: edits and saves belong to it, and a new read starts a new form. */
+interface Form { read: Settings; saved: Settings; draft: Draft; error: string | null; message: string | null }
+
+const formOf = (read: Settings): Form =>
+  ({ read, saved: read, draft: { timeZone: read.timeZone, weekStart: read.weekStart }, error: null, message: null })
 
 /** The browser's IANA zones for suggestions, UTC first; the server decides which it accepts. */
 const zones = (() => {
@@ -26,26 +31,12 @@ const zones = (() => {
  */
 export function ReportingSettings({ api }: { api: ReportingSettingsApi }) {
   const id = useId()
-  const [attempt, setAttempt] = useState(0)
-  const request = useMemo(() => ({ api, attempt }), [api, attempt])
-  const [loaded, setLoaded] = useState<Loaded | null>(null)
+  const settings = useApiRead(api, null, (client, signal) => client.reportingSettings(signal),
+    { fallback: 'The reporting setting could not be loaded.' })
+  const [form, setForm] = useState<Form | null>(null)
   const [saving, setSaving] = useState(false)
-  const scope = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    const controller = new AbortController()
-    scope.current = controller
-    request.api.reportingSettings(controller.signal).then(settings => {
-      if (!controller.signal.aborted) setLoaded({ ...request, saved: settings, draft: { timeZone: settings.timeZone, weekStart: settings.weekStart },
-        error: null, message: null })
-    }).catch(cause => {
-      if (!controller.signal.aborted) setLoaded({ ...request, saved: null, draft: { timeZone: '', weekStart: 'monday' },
-        error: errorMessage(cause, 'The reporting setting could not be loaded.'), message: null })
-    })
-    return () => controller.abort()
-  }, [request])
-
-  const current = loaded?.api === request.api && loaded.attempt === request.attempt ? loaded : null
+  const current = settings.data === null ? null : form?.read === settings.data ? form : formOf(settings.data)
   const zone = current?.draft.timeZone.trim() ?? ''
   const dirty = !!current?.saved && zone !== '' &&
     (zone !== current.saved.timeZone || current.draft.weekStart !== current.saved.weekStart || current.saved.isDefault)
@@ -53,30 +44,31 @@ export function ReportingSettings({ api }: { api: ReportingSettingsApi }) {
   const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone || null
 
   async function save() {
-    const controller = scope.current
-    if (!current?.saved || !controller || controller.signal.aborted || saving || !dirty) return
+    if (!current || saving || !dirty) return
     setSaving(true)
     try {
       const settings = await api.updateReportingSettings({ timeZone: zone, weekStart: current.draft.weekStart })
       // The loss limits' days and weeks follow this setting.
       lossLimitsChanged()
-      if (!controller.signal.aborted) setLoaded({ ...current, saved: settings, draft: { timeZone: settings.timeZone, weekStart: settings.weekStart },
+      // A form replaced by another read or API meanwhile ignores this answer.
+      setForm({ ...current, saved: settings, draft: { timeZone: settings.timeZone, weekStart: settings.weekStart },
         error: null, message: 'Reporting setting saved.' })
     } catch (cause) {
-      if (!controller.signal.aborted) setLoaded({ ...current, error: errorMessage(cause, 'The setting could not be saved.'), message: null })
+      setForm({ ...current, error: errorMessage(cause, 'The setting could not be saved.'), message: null })
     } finally {
-      if (!controller.signal.aborted) setSaving(false)
+      setSaving(false)
     }
   }
 
-  const edit = (draft: Partial<Draft>) => current && setLoaded({ ...current, draft: { ...current.draft, ...draft }, message: null, error: null })
+  const edit = (draft: Partial<Draft>) => current && setForm({ ...current, draft: { ...current.draft, ...draft }, message: null, error: null })
   return <section className="shell-panel settings-panel reporting-settings" aria-labelledby={`${id}-heading`}>
     <CalendarRange size={23} aria-hidden="true" /><h2 id={`${id}-heading`}>Reporting week</h2>
     <p>The time zone and first day of the week page and of the daily and weekly loss limits. It is saved for your account, not
       this browser, and does not change how times are displayed. Activity and Review&apos;s rolling periods keep UTC days.</p>
-    {!current && <p role="status">Loading the reporting setting…</p>}
-    {current?.error && <div className="workspace-alert" role="alert"><span>{current.error}</span>
-      {!current.saved && <Button variant="ghost" size="sm" disabled={saving} onClick={() => setAttempt(value => value + 1)}>Reload the reporting setting</Button>}</div>}
+    {settings.loading && <p role="status">Loading the reporting setting…</p>}
+    {settings.error && <div className="workspace-alert" role="alert"><span>{settings.error}</span>
+      <Button variant="ghost" size="sm" disabled={saving} onClick={settings.reload}>Reload the reporting setting</Button></div>}
+    {current?.error && <div className="workspace-alert" role="alert"><span>{current.error}</span></div>}
     <form onSubmit={event => { event.preventDefault(); void save() }} noValidate>
       <fieldset disabled={!current?.saved || saving}>
         <legend className="sr-only">Reporting zone and week start</legend>
