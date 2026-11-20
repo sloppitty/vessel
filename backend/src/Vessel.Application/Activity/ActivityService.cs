@@ -275,7 +275,7 @@ public sealed class ActivityService(IActivityStore store, IWorkspaceStore worksp
             Accounts = accounts, Snapshots = observed.Snapshots, Revision = revision,
             FundingStates = observed.FundingStates.Where(s => ids.Contains(s.AccountId)).ToList()
         };
-        if (cached.Positions is null || !SameObservations(cached, facts)) return Aggregate(facts, accountId, accountIds, venues);
+        if (cached.Positions is null || !SameObservations(cached, facts)) return Aggregate(facts, TradingMode.Real, accountId, accountIds, venues);
         var version = SameVersionInputs(cached.Facts.FundingStates, facts.FundingStates) ? cached.Version
             : Version(cached.Ordered, facts, cached.Coverage);
         return cached.Rebased(facts, version, cached.Positions.WithSnapshots(facts.Snapshots));

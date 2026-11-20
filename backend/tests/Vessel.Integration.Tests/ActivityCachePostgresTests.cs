@@ -293,14 +293,14 @@ public sealed class ActivityCachePostgresTests
     public async Task A_monitor_check_that_only_moves_the_observation_time_neither_reads_nor_walks_the_history_again()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
-        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Fixture");
+        var account = new Account(Guid.NewGuid(), owner, "hyperliquid", "Fixture", TradingMode.Real);
         account.Configure(null, "0x" + new string('1', 40), null);
         await using (var db = database.Context(owner)) { db.Accounts.Add(account); await db.SaveChangesAsync(); }
         var reads = new Reads(); await using var provider = Provider(database, reads);
         async Task<ActivitySummaries> Uncached()
         {
             await using var fresh = database.Context(owner);
-            return ActivityService.Aggregate(await new ActivityStore(fresh).ReadAsync(null, default));
+            return ActivityService.Aggregate(await new ActivityStore(fresh).ReadAsync(null, TradingMode.Real, default), TradingMode.Real);
         }
         // The first check imports the fill and records the position's leverage at its observation time.
         await Refresh(database, account, 0);
@@ -335,8 +335,8 @@ public sealed class ActivityCachePostgresTests
     public async Task An_account_read_is_narrowed_from_the_cached_owner_wide_aggregate()
     {
         await using var database = await CoreDatabase.CreateAsync(); var owner = Guid.NewGuid();
-        var first = new Account(Guid.NewGuid(), owner, "manual", "First");
-        var second = new Account(Guid.NewGuid(), owner, "manual", "Second");
+        var first = new Account(Guid.NewGuid(), owner, "manual", "First", TradingMode.Real);
+        var second = new Account(Guid.NewGuid(), owner, "manual", "Second", TradingMode.Real);
         await using (var db = database.Context(owner))
         {
             db.Accounts.AddRange(first, second);
@@ -350,7 +350,7 @@ public sealed class ActivityCachePostgresTests
         Assert.Equal(1, reads.Count);
         Assert.Same(narrowed, await Read(provider, owner, first.Id));
         await using var fresh = database.Context(owner);
-        var expected = ActivityService.Aggregate(await new ActivityStore(fresh).ReadAsync(first.Id, default), first.Id);
+        var expected = ActivityService.Aggregate(await new ActivityStore(fresh).ReadAsync(first.Id, TradingMode.Real, default), TradingMode.Real, first.Id);
         Assert.Equal(expected.Version, narrowed.Version);
         Assert.Equal(Json(expected.Ordered), Json(narrowed.Ordered));
         Assert.Equal(Json(expected.Coverage), Json(narrowed.Coverage));
