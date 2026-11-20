@@ -219,8 +219,13 @@ public sealed partial class EventSubscriptionTests
                 await Task.Delay(TimeSpan.FromMilliseconds(1800));
                 await otherTransaction.CommitAsync();
             });
+            var deadline = DateTime.UtcNow.AddSeconds(10);
             while (await runtime.ScalarAsync<bool>($"SELECT cardinality(pg_blocking_pids({other.ProcessID}))=0"))
+            {
+                if (otherDispatcher.IsCompleted) await otherDispatcher; // Surfaces its failure instead of polling forever.
+                if (DateTime.UtcNow > deadline) throw new TimeoutException("The other initialization never waited.");
                 await Task.Delay(20);
+            }
             throw new InvalidOperationException("Synthetic commit failure.");
         };
         runtime.AfterRollback = () => otherInitialized.Task.WaitAsync(TimeSpan.FromSeconds(10));
